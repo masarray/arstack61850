@@ -12,6 +12,7 @@
 #include "ariec61850/sampled_values/stream_supervisor.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cstdint>
 #include <exception>
@@ -68,8 +69,8 @@ ar::iec61850::sampled_values::SampledValueAsdu make_reference_asdu() {
             std::chrono::system_clock::time_point{std::chrono::seconds{1'781'260'260}},
             0U},
         2U,
-        4000U,
-        1U,
+        std::uint16_t{4000U},
+        std::uint16_t{1U},
         from_hex("0000006400000001000000C800000003")};
 }
 
@@ -188,26 +189,27 @@ void sample_counter_tracker_distinguishes_wrap_gap_duplicate_and_order() {
     using namespace ar::iec61850::sampled_values;
 
     SampleCounterTracker tracker;
-    CHECK(tracker.observe(3998U, 4000U).kind == SampleCounterTransitionKind::initial);
-    CHECK(tracker.observe(3999U, 4000U).kind == SampleCounterTransitionKind::continuous);
-    CHECK(tracker.observe(0U, 4000U).kind == SampleCounterTransitionKind::normal_wrap);
+    const auto wrap = std::optional<std::uint16_t>{std::uint16_t{4000U}};
+    CHECK(tracker.observe(3998U, wrap).kind == SampleCounterTransitionKind::initial);
+    CHECK(tracker.observe(3999U, wrap).kind == SampleCounterTransitionKind::continuous);
+    CHECK(tracker.observe(0U, wrap).kind == SampleCounterTransitionKind::normal_wrap);
 
-    const auto gap = tracker.observe(3U, 4000U);
+    const auto gap = tracker.observe(3U, wrap);
     CHECK(gap.kind == SampleCounterTransitionKind::gap);
     CHECK(gap.missing_samples == 2U);
     CHECK(gap.is_anomaly());
 
-    CHECK(tracker.observe(3U, 4000U).kind == SampleCounterTransitionKind::duplicate);
-    CHECK(tracker.observe(2U, 4000U).kind == SampleCounterTransitionKind::out_of_order);
-    CHECK(tracker.observe(100U, 4000U, true).kind == SampleCounterTransitionKind::restart);
+    CHECK(tracker.observe(3U, wrap).kind == SampleCounterTransitionKind::duplicate);
+    CHECK(tracker.observe(2U, wrap).kind == SampleCounterTransitionKind::out_of_order);
+    CHECK(tracker.observe(100U, wrap, true).kind == SampleCounterTransitionKind::restart);
 
     const auto timestamp = std::chrono::system_clock::time_point{
         std::chrono::seconds{100}} + std::chrono::milliseconds{250};
     CHECK(SampleCounterPolicy::initial_sample_count(
-              timestamp, 4000.0, 4000U, SampleCounterMode::second_aligned) == 1000U);
+              timestamp, 4000.0, wrap, SampleCounterMode::second_aligned) == 1000U);
     CHECK(SampleCounterPolicy::initial_sample_count(
-              timestamp, 4000.0, 4000U, SampleCounterMode::free_run) == 0U);
-    CHECK(SampleCounterPolicy::increment(3999U, 4000U) == 0U);
+              timestamp, 4000.0, wrap, SampleCounterMode::free_run) == 0U);
+    CHECK(SampleCounterPolicy::increment(3999U, wrap) == 0U);
     CHECK(SampleCounterPolicy::increment(65'535U, std::nullopt) == 0U);
 }
 
@@ -218,7 +220,7 @@ void stream_supervisor_tracks_identity_configuration_and_statistics() {
         std::string{"MU01"},
         std::string{"MU01/LLN0$Dataset1"},
         3U,
-        4000U});
+        std::uint16_t{4000U}});
 
     SampledValueAsdu asdu;
     asdu.sv_id = "MU01";
