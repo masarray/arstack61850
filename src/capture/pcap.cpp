@@ -83,13 +83,13 @@ std::chrono::system_clock::time_point to_timestamp(
     const std::uint32_t seconds,
     const std::uint32_t fractional,
     const TimestampResolution resolution) {
-    auto timestamp = std::chrono::system_clock::time_point{std::chrono::seconds{seconds}};
-    if (resolution == TimestampResolution::nanoseconds) {
-        timestamp += std::chrono::nanoseconds{fractional};
-    } else {
-        timestamp += std::chrono::microseconds{fractional};
-    }
-    return timestamp;
+    const auto fractional_duration = resolution == TimestampResolution::nanoseconds
+        ? std::chrono::duration_cast<std::chrono::system_clock::duration>(
+              std::chrono::nanoseconds{fractional})
+        : std::chrono::duration_cast<std::chrono::system_clock::duration>(
+              std::chrono::microseconds{fractional});
+    return std::chrono::system_clock::time_point{std::chrono::seconds{seconds}} +
+           fractional_duration;
 }
 
 } // namespace
