@@ -1,11 +1,14 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(ARIEC61850Cpp
-    VERSION 0.5.0
+    VERSION 0.6.0
     DESCRIPTION "Incremental C++20 port of the ARIEC61850 protocol stack"
     LANGUAGES CXX)
 
 option(ARIEC61850_BUILD_TESTS "Build ARIEC61850 C++ regression tests" ON)
+option(ARIEC61850_BUILD_TOOLS "Build read-only evidence tools" ON)
+option(ARIEC61850_BUILD_FUZZERS "Build LLVM libFuzzer targets" OFF)
+option(ARIEC61850_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(ARIEC61850_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 
 add_library(ariec61850_core
@@ -25,7 +28,8 @@ add_library(ariec61850_core
     src/sampled_values/quality.cpp
     src/sampled_values/payload_inspector.cpp
     src/sampled_values/sample_counter.cpp
-    src/sampled_values/stream_supervisor.cpp)
+    src/sampled_values/stream_supervisor.cpp
+    src/evidence/pcap_equivalence.cpp)
 
 add_library(ARIEC61850::core ALIAS ariec61850_core)
 
@@ -42,14 +46,37 @@ function(ariec61850_apply_warnings target)
             target_compile_options(${target} PRIVATE /WX)
         endif()
     else()
-        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion)
+        target_compile_options(${target} PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion)
         if(ARIEC61850_WARNINGS_AS_ERRORS)
             target_compile_options(${target} PRIVATE -Werror)
         endif()
     endif()
 endfunction()
 
+function(ariec61850_apply_sanitizers target)
+    if(NOT ARIEC61850_ENABLE_SANITIZERS)
+        return()
+    endif()
+    if(MSVC)
+        message(FATAL_ERROR "ARIEC61850_ENABLE_SANITIZERS currently requires GCC or Clang.")
+    endif()
+    target_compile_options(${target} PRIVATE
+        -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(${target} PRIVATE
+        -fsanitize=address,undefined -fno-omit-frame-pointer)
+endfunction()
+
 ariec61850_apply_warnings(ariec61850_core)
+ariec61850_apply_sanitizers(ariec61850_core)
+
+if(ARIEC61850_BUILD_TOOLS)
+    add_executable(ariec61850_pcap_interop_check tools/pcap_interop_check.cpp)
+    target_link_libraries(ariec61850_pcap_interop_check PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_pcap_interop_check PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_pcap_interop_check)
+    ariec61850_apply_sanitizers(ariec61850_pcap_interop_check)
+endif()
 
 if(ARIEC61850_BUILD_TESTS)
     include(CTest)
@@ -59,6 +86,7 @@ if(ARIEC61850_BUILD_TESTS)
     target_link_libraries(ariec61850_core_tests PRIVATE ARIEC61850::core)
     target_compile_features(ariec61850_core_tests PRIVATE cxx_std_20)
     ariec61850_apply_warnings(ariec61850_core_tests)
+    ariec61850_apply_sanitizers(ariec61850_core_tests)
     add_test(NAME ariec61850_core_tests COMMAND ariec61850_core_tests)
 
     foreach(test_name IN ITEMS mms goose sampled_values)
@@ -66,6 +94,7 @@ if(ARIEC61850_BUILD_TESTS)
         target_link_libraries(ariec61850_${test_name}_tests PRIVATE ARIEC61850::core)
         target_compile_features(ariec61850_${test_name}_tests PRIVATE cxx_std_20)
         ariec61850_apply_warnings(ariec61850_${test_name}_tests)
+        ariec61850_apply_sanitizers(ariec61850_${test_name}_tests)
         add_test(NAME ariec61850_${test_name}_tests COMMAND ariec61850_${test_name}_tests)
     endforeach()
 
@@ -73,5 +102,57 @@ if(ARIEC61850_BUILD_TESTS)
     target_link_libraries(ariec61850_goose_runtime_tests PRIVATE ARIEC61850::core)
     target_compile_features(ariec61850_goose_runtime_tests PRIVATE cxx_std_20)
     ariec61850_apply_warnings(ariec61850_goose_runtime_tests)
+    ariec61850_apply_sanitizers(ariec61850_goose_runtime_tests)
     add_test(NAME ariec61850_goose_runtime_tests COMMAND ariec61850_goose_runtime_tests)
+
+    add_executable(ariec61850_evidence_tests tests/test_evidence.cpp)
+    target_link_libraries(ariec61850_evidence_tests PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_evidence_tests PRIVATE cxx_std_20)
+    target_compile_definitions(ariec61850_evidence_tests PRIVATE
+        ARIEC61850_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    ariec61850_apply_warnings(ariec61850_evidence_tests)
+    ariec61850_apply_sanitizers(ariec61850_evidence_tests)
+    add_test(NAME ariec61850_evidence_tests COMMAND ariec61850_evidence_tests)
+
+    add_executable(ariec61850_fuzz_smoke_tests tests/test_fuzz_smoke.cpp)
+    target_link_libraries(ariec61850_fuzz_smoke_tests PRIVATE ARIEC61850::core)
+    target_include_directories(ariec61850_fuzz_smoke_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz)
+    target_compile_definitions(ariec61850_fuzz_smoke_tests PRIVATE
+        ARIEC61850_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_features(ariec61850_fuzz_smoke_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_fuzz_smoke_tests)
+    ariec61850_apply_sanitizers(ariec61850_fuzz_smoke_tests)
+    add_test(NAME ariec61850_fuzz_smoke_tests COMMAND ariec61850_fuzz_smoke_tests)
+
+    if(ARIEC61850_BUILD_TOOLS)
+        add_test(
+            NAME ariec61850_pcap_interop_smoke
+            COMMAND ariec61850_pcap_interop_check
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/process_bus_csharp_vectors.pcap
+                --json)
+    endif()
+endif()
+
+if(ARIEC61850_BUILD_FUZZERS)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "ARIEC61850_BUILD_FUZZERS requires Clang/libFuzzer.")
+    endif()
+
+    function(ariec61850_add_fuzzer name source)
+        add_executable(${name} ${source})
+        target_link_libraries(${name} PRIVATE ARIEC61850::core)
+        target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/fuzz)
+        target_compile_features(${name} PRIVATE cxx_std_20)
+        target_compile_options(${name} PRIVATE
+            -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
+        target_link_options(${name} PRIVATE
+            -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
+        ariec61850_apply_warnings(${name})
+    endfunction()
+
+    ariec61850_add_fuzzer(ariec61850_fuzz_ber fuzz/fuzz_ber.cpp)
+    ariec61850_add_fuzzer(ariec61850_fuzz_goose fuzz/fuzz_goose.cpp)
+    ariec61850_add_fuzzer(ariec61850_fuzz_sampled_values fuzz/fuzz_sampled_values.cpp)
+    ariec61850_add_fuzzer(ariec61850_fuzz_pcap fuzz/fuzz_pcap.cpp)
 endif()
