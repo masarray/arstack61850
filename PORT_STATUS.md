@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**Phase 1D — Sampled Values core codec and supervision is implemented.**
+**Phase 1D — Sampled Values core codec and supervision is implemented and CI-validated.**
 
 The C++ stack now covers deterministic MMS data, GOOSE wire/runtime behavior, and the
 core Sampled Values path from ASDU/APDU encoding through Ethernet framing and `smpCnt`
@@ -37,8 +37,8 @@ Sampled Values wire support includes:
 - multi-ASDU sequence handling and exact `noASDU` consistency checks;
 - optional dataset reference, reference time, sample rate, and sample mode fields;
 - complete Ethernet/VLAN/process-bus frame handling for EtherType `0x88BA`;
-- strict rejection of malformed BER, invalid UTC time, wrong EtherType, and impossible
-  process-bus length declarations; and
+- strict rejection of malformed BER, invalid UTC time, wrong EtherType, trailing APDU
+  data, and impossible process-bus length declarations; and
 - C#-derived byte-for-byte APDU and complete Ethernet-frame vectors.
 
 Runtime diagnostics include:
@@ -51,10 +51,21 @@ Runtime diagnostics include:
 
 ## Validation
 
-- GNU C++ 14.2, Release, warnings as errors: passed locally.
-- Clang 17, Release, warnings as errors: passed locally.
-- Existing core plus six Sampled Values regression groups: passed locally.
-- Windows MSVC verification is performed by GitHub Actions for this stacked PR.
+The final Phase 1D branch passed the complete GitHub Actions matrix:
+
+- GNU C++ / Release / warnings as errors: passed;
+- Clang / Release / warnings as errors: passed;
+- Windows MSVC / Release / `/W4 /WX`: passed; and
+- five CTest executables passed on every platform:
+  - core foundation;
+  - MMS values;
+  - GOOSE wire codec;
+  - GOOSE subscriber/publisher runtime; and
+  - Sampled Values codec and supervision.
+
+The initial MSVC run identified narrowing construction of `optional<uint16_t>` inside
+test fixtures. Explicit `uint16_t` values fixed the portability issue without changing
+the library API or wire behavior.
 
 ## Safety boundary
 

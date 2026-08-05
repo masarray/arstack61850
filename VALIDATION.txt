@@ -1,27 +1,38 @@
 ARIEC61850 C++ Phase 1D validation
 Date: 2026-08-06
 
-GNU C++ 14.2 / Release / warnings-as-errors:
+GNU C++ / Release / warnings-as-errors / GitHub Actions:
   Configure: PASS
   Build:     PASS
-  CTest:     PASS (core and Sampled Values local subset)
+  CTest:     PASS (5/5 test executables)
 
-Clang 17 / Release / warnings-as-errors:
+Clang / Release / warnings-as-errors / GitHub Actions:
   Configure: PASS
   Build:     PASS
-  CTest:     PASS (core and Sampled Values local subset)
+  CTest:     PASS (5/5 test executables)
 
-Windows MSVC / Release / warnings-as-errors / GitHub Actions:
-  Configure: PENDING
-  Build:     PENDING
-  CTest:     PENDING
+Windows MSVC / Release / W4/WX / GitHub Actions:
+  Configure: PASS
+  Build:     PASS
+  CTest:     PASS (5/5 test executables)
+
+Test executables:
+  1. ariec61850_core_tests
+  2. ariec61850_mms_tests
+  3. ariec61850_goose_tests
+  4. ariec61850_goose_runtime_tests
+  5. ariec61850_sampled_values_tests
 
 Phase 1D Sampled Values checks:
   - C#-derived SAV PDU byte-for-byte golden vector
   - complete VLAN/process-bus Ethernet frame golden vector
   - multi-ASDU encode/decode and exact noASDU validation
-  - malformed outer tag, sequence, UTC time, EtherType, and length rejection
+  - malformed outer tag, sequence, UTC time, trailing bytes, EtherType, and length rejection
   - smpCnt continuity, wrap, gap, duplicate, out-of-order, and restart tracking
   - stream identity/configuration supervision and aggregate statistics
   - quality-word round trip
   - generic seqOfData word inspection and trailing-byte preservation
+
+MSVC portability correction:
+  - explicit uint16_t construction for optional sample-rate, sample-mode, and wrap fixtures
+  - library API and encoded wire bytes unchanged

@@ -113,7 +113,8 @@ evidence hardening and active-transport validation remain.**
 
 - [x] GCC C++20 build with warnings as errors through Phase 1D.
 - [x] Clang C++20 build with warnings as errors through Phase 1D.
-- [~] Windows MSVC build and CTest for Phase 1D; verified after this branch is pushed.
+- [x] Windows MSVC build and CTest through Phase 1D.
+- [x] Full GitHub Actions matrix passed with 5/5 CTest executables.
 - [x] MMS C#-derived golden vector.
 - [x] GOOSE PDU and Ethernet-frame golden vectors.
 - [x] Deterministic GOOSE subscriber/publisher runtime suite.
