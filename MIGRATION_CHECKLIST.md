@@ -107,7 +107,7 @@ capture/fuzz evidence remain.**
 - [x] GCC C++20 build with warnings as errors.
 - [x] Clang C++20 build with warnings as errors.
 - [x] Windows MSVC build and CTest through Phase 1B.
-- [~] Windows MSVC build and CTest for Phase 1C pending GitHub Actions.
+- [x] Windows MSVC build and CTest for Phase 1C.
 - [x] MMS C#-derived golden vector.
 - [x] GOOSE PDU C#-derived golden vector.
 - [x] GOOSE complete Ethernet frame golden vector with VLAN and process-bus header.
