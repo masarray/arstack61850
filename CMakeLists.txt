@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(ARIEC61850Cpp
-    VERSION 0.2.0
+    VERSION 0.3.0
     DESCRIPTION "Incremental C++20 port of the ARIEC61850 protocol stack"
     LANGUAGES CXX)
 
@@ -13,6 +13,8 @@ add_library(ariec61850_core
     src/ethernet/ethernet.cpp
     src/capture/pcap.cpp
     src/goose/retransmission_schedule.cpp
+    src/goose/pdu_codec.cpp
+    src/goose/frame_codec.cpp
     src/mms/utc_time.cpp
     src/mms/data_value.cpp
     src/mms/data_codec.cpp)
@@ -25,17 +27,21 @@ target_include_directories(ariec61850_core
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)
 
-if(MSVC)
-    target_compile_options(ariec61850_core PRIVATE /W4 /permissive-)
-    if(ARIEC61850_WARNINGS_AS_ERRORS)
-        target_compile_options(ariec61850_core PRIVATE /WX)
+function(ariec61850_apply_warnings target)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /permissive-)
+        if(ARIEC61850_WARNINGS_AS_ERRORS)
+            target_compile_options(${target} PRIVATE /WX)
+        endif()
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion)
+        if(ARIEC61850_WARNINGS_AS_ERRORS)
+            target_compile_options(${target} PRIVATE -Werror)
+        endif()
     endif()
-else()
-    target_compile_options(ariec61850_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion)
-    if(ARIEC61850_WARNINGS_AS_ERRORS)
-        target_compile_options(ariec61850_core PRIVATE -Werror)
-    endif()
-endif()
+endfunction()
+
+ariec61850_apply_warnings(ariec61850_core)
 
 if(ARIEC61850_BUILD_TESTS)
     include(CTest)
@@ -44,36 +50,14 @@ if(ARIEC61850_BUILD_TESTS)
     add_executable(ariec61850_core_tests tests/test_main.cpp)
     target_link_libraries(ariec61850_core_tests PRIVATE ARIEC61850::core)
     target_compile_features(ariec61850_core_tests PRIVATE cxx_std_20)
-
-    if(MSVC)
-        target_compile_options(ariec61850_core_tests PRIVATE /W4 /permissive-)
-        if(ARIEC61850_WARNINGS_AS_ERRORS)
-            target_compile_options(ariec61850_core_tests PRIVATE /WX)
-        endif()
-    else()
-        target_compile_options(ariec61850_core_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion)
-        if(ARIEC61850_WARNINGS_AS_ERRORS)
-            target_compile_options(ariec61850_core_tests PRIVATE -Werror)
-        endif()
-    endif()
-
+    ariec61850_apply_warnings(ariec61850_core_tests)
     add_test(NAME ariec61850_core_tests COMMAND ariec61850_core_tests)
 
-    add_executable(ariec61850_mms_tests tests/test_mms.cpp)
-    target_link_libraries(ariec61850_mms_tests PRIVATE ARIEC61850::core)
-    target_compile_features(ariec61850_mms_tests PRIVATE cxx_std_20)
-
-    if(MSVC)
-        target_compile_options(ariec61850_mms_tests PRIVATE /W4 /permissive-)
-        if(ARIEC61850_WARNINGS_AS_ERRORS)
-            target_compile_options(ariec61850_mms_tests PRIVATE /WX)
-        endif()
-    else()
-        target_compile_options(ariec61850_mms_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion)
-        if(ARIEC61850_WARNINGS_AS_ERRORS)
-            target_compile_options(ariec61850_mms_tests PRIVATE -Werror)
-        endif()
-    endif()
-
-    add_test(NAME ariec61850_mms_tests COMMAND ariec61850_mms_tests)
+    foreach(test_name IN ITEMS mms goose)
+        add_executable(ariec61850_${test_name}_tests tests/test_${test_name}.cpp)
+        target_link_libraries(ariec61850_${test_name}_tests PRIVATE ARIEC61850::core)
+        target_compile_features(ariec61850_${test_name}_tests PRIVATE cxx_std_20)
+        ariec61850_apply_warnings(ariec61850_${test_name}_tests)
+        add_test(NAME ariec61850_${test_name}_tests COMMAND ariec61850_${test_name}_tests)
+    endforeach()
 endif()
