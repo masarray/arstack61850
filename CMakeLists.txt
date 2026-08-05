@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(ARIEC61850Cpp
-    VERSION 0.3.0
+    VERSION 0.4.0
     DESCRIPTION "Incremental C++20 port of the ARIEC61850 protocol stack"
     LANGUAGES CXX)
 
@@ -15,6 +15,8 @@ add_library(ariec61850_core
     src/goose/retransmission_schedule.cpp
     src/goose/pdu_codec.cpp
     src/goose/frame_codec.cpp
+    src/goose/subscriber_supervisor.cpp
+    src/goose/publisher_runtime.cpp
     src/mms/utc_time.cpp
     src/mms/data_value.cpp
     src/mms/data_codec.cpp)
@@ -60,4 +62,10 @@ if(ARIEC61850_BUILD_TESTS)
         ariec61850_apply_warnings(ariec61850_${test_name}_tests)
         add_test(NAME ariec61850_${test_name}_tests COMMAND ariec61850_${test_name}_tests)
     endforeach()
+
+    add_executable(ariec61850_goose_runtime_tests tests/test_goose_runtime.cpp)
+    target_link_libraries(ariec61850_goose_runtime_tests PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_goose_runtime_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_goose_runtime_tests)
+    add_test(NAME ariec61850_goose_runtime_tests COMMAND ariec61850_goose_runtime_tests)
 endif()
