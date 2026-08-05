@@ -85,7 +85,7 @@ Sampled Values remain.**
 - [x] GCC C++20 build with warnings as errors.
 - [x] Clang C++20 build with warnings as errors.
 - [x] Windows MSVC build for Phase 1A.
-- [~] Windows MSVC build for Phase 1B; verified by GitHub Actions after this branch is pushed.
+- [x] Windows MSVC build and CTest for Phase 1B.
 - [x] MMS C#-derived golden vector.
 - [x] GOOSE PDU C#-derived golden vector.
 - [x] GOOSE complete Ethernet frame golden vector with VLAN and process-bus header.
