@@ -1,23 +1,33 @@
-ARIEC61850 C++ Phase 1A validation
+ARIEC61850 C++ Phase 1C validation
+Date: 2026-08-06
 
-Local toolchains:
-- GNU C++ 14.2.0, C++20, -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Werror: PASS
-- Clang 17.0.0, C++20, same strict warning policy: PASS
+GNU C++ 14.2 / Release / warnings-as-errors:
+  Configure: PASS
+  Build:     PASS
+  CTest:     PASS (4/4 test executables)
 
-CTest:
-- ariec61850_core_tests: PASS
-- ariec61850_mms_tests: PASS
-- Internal checks: 12/12 PASS
+Clang 17 / Release / warnings-as-errors:
+  Configure: PASS
+  Build:     PASS
+  CTest:     PASS (4/4 test executables)
 
-New parity evidence:
-- IEC 61850 UTC time vector: 6A2B77254000000A
-- MMS AllData vector: byte-for-byte match with the C# MmsDataCodec behavior
-- Recursive Structure, BitString, Unknown high-tag, and malformed nested TLV coverage: PASS
+Windows MSVC / Release / warnings-as-errors / GitHub Actions:
+  Configure: PASS
+  Build:     PASS
+  CTest:     PASS (4/4 test executables)
 
-CI added:
-- Ubuntu GCC
-- Ubuntu Clang
-- Windows MSVC
+Test executables:
+  1. ariec61850_core_tests
+  2. ariec61850_mms_tests
+  3. ariec61850_goose_tests
+  4. ariec61850_goose_runtime_tests
 
-Safety boundary:
-No active IED control or raw-Ethernet publisher session is enabled by this phase.
+Phase 1C runtime checks:
+  - subscriber sequence and state classification
+  - TTL expiry and one-shot timeout reporting
+  - expected stream identity rejection
+  - state and sequence counter wraparound
+  - publisher C# sequence semantics
+  - retransmission schedule and state-change reset
+  - stable state timestamp across retransmissions
+  - publisher state and sequence wraparound
