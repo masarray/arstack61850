@@ -1,0 +1,14 @@
+{
+  "format_version": 1,
+  "origin": "C#-derived deterministic golden vectors assembled into a synthetic Ethernet PCAP",
+  "captures": [
+    {
+      "file": "tests/fixtures/process_bus_csharp_vectors.pcap",
+      "packet_count": 2,
+      "goose_packets": 1,
+      "sampled_values_packets": 1,
+      "expected_exact_reencode_matches": 2,
+      "hardware_interoperability": false
+    }
+  ]
+}

@@ -1,38 +1,41 @@
-ARIEC61850 C++ Phase 1D validation
+ARIEC61850 C++ Phase 1E validation
 Date: 2026-08-06
 
-GNU C++ / Release / warnings-as-errors / GitHub Actions:
+GNU C++ 14.2 / Release / warnings-as-errors:
   Configure: PASS
   Build:     PASS
-  CTest:     PASS (5/5 test executables)
+  CTest:     PASS
 
-Clang / Release / warnings-as-errors / GitHub Actions:
+Clang 17 / Release / warnings-as-errors:
   Configure: PASS
   Build:     PASS
-  CTest:     PASS (5/5 test executables)
+  CTest:     PASS
 
-Windows MSVC / Release / W4/WX / GitHub Actions:
+Clang 17 / RelWithDebInfo / ASan + UBSan:
   Configure: PASS
   Build:     PASS
-  CTest:     PASS (5/5 test executables)
+  CTest:     PASS
 
-Test executables:
-  1. ariec61850_core_tests
-  2. ariec61850_mms_tests
-  3. ariec61850_goose_tests
-  4. ariec61850_goose_runtime_tests
-  5. ariec61850_sampled_values_tests
+Local Phase 1E checks:
+  - C#-derived synthetic PCAP with one GOOSE and one Sampled Values packet
+  - exact process-bus decode/re-encode equivalence
+  - canonical PCAP packet/timestamp round trip
+  - read-only JSON interoperability checker
+  - deterministic BER, GOOSE, SV, and PCAP mutation smoke (>500 cases)
+  - malicious snaplen/included-length allocation regression
 
-Phase 1D Sampled Values checks:
-  - C#-derived SAV PDU byte-for-byte golden vector
-  - complete VLAN/process-bus Ethernet frame golden vector
-  - multi-ASDU encode/decode and exact noASDU validation
-  - malformed outer tag, sequence, UTC time, trailing bytes, EtherType, and length rejection
-  - smpCnt continuity, wrap, gap, duplicate, out-of-order, and restart tracking
-  - stream identity/configuration supervision and aggregate statistics
-  - quality-word round trip
-  - generic seqOfData word inspection and trailing-byte preservation
+Local libFuzzer note:
+  The container's Swift-bundled Clang 17 libFuzzer runtime is ABI-incompatible with the
+  system C++ runtime. The actual libFuzzer corpus smoke is delegated to the standard
+  Ubuntu GitHub Actions Clang toolchain.
 
-MSVC portability correction:
-  - explicit uint16_t construction for optional sample-rate, sample-mode, and wrap fixtures
-  - library API and encoded wire bytes unchanged
+GitHub Actions:
+  GCC / Clang / Windows MSVC matrix: PASS (8/8 CTest each)
+  Clang ASan + UBSan:                PASS
+  Clang libFuzzer corpus smoke:      PASS (1,000 runs each target)
+
+Physical isolated-lab interoperability:
+  Tooling/checklist: READY
+  Real GOOSE capture: PENDING
+  Real Sampled Values capture: PENDING
+  Active transmission: DISABLED

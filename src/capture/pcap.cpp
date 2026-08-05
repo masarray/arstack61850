@@ -15,6 +15,7 @@ constexpr std::uint32_t magic_number_nanoseconds = 0xA1B23C4DU;
 constexpr std::uint32_t link_type_ethernet = 1U;
 constexpr std::size_t global_header_length = 24U;
 constexpr std::size_t packet_header_length = 16U;
+constexpr std::uint32_t maximum_supported_snap_length = 16U * 1024U * 1024U;
 
 enum class ByteOrder { little_endian, big_endian };
 enum class TimestampResolution { microseconds, nanoseconds };
@@ -83,13 +84,17 @@ std::chrono::system_clock::time_point to_timestamp(
     const std::uint32_t seconds,
     const std::uint32_t fractional,
     const TimestampResolution resolution) {
-    const auto fractional_duration = resolution == TimestampResolution::nanoseconds
-        ? std::chrono::duration_cast<std::chrono::system_clock::duration>(
-              std::chrono::nanoseconds{fractional})
-        : std::chrono::duration_cast<std::chrono::system_clock::duration>(
-              std::chrono::microseconds{fractional});
-    return std::chrono::system_clock::time_point{std::chrono::seconds{seconds}} +
-           fractional_duration;
+    auto timestamp = std::chrono::system_clock::time_point{std::chrono::seconds{seconds}};
+    if (resolution == TimestampResolution::nanoseconds) {
+        const auto duration = std::chrono::duration_cast<std::chrono::system_clock::duration>(
+            std::chrono::nanoseconds{fractional});
+        timestamp += duration;
+    } else {
+        const auto duration = std::chrono::duration_cast<std::chrono::system_clock::duration>(
+            std::chrono::microseconds{fractional});
+        timestamp += duration;
+    }
+    return timestamp;
 }
 
 } // namespace
@@ -112,7 +117,10 @@ std::vector<PcapPacket> PcapReader::read_all(std::istream& stream) {
     const auto [byte_order, resolution] = resolve_byte_order(magic_span);
     const auto version_major = read_u16(std::span<const std::uint8_t>{global_header}.subspan(4U, 2U), byte_order);
     const auto version_minor = read_u16(std::span<const std::uint8_t>{global_header}.subspan(6U, 2U), byte_order);
-    const auto link_type = read_u32(std::span<const std::uint8_t>{global_header}.subspan(20U, 4U), byte_order);
+    const auto snap_length = read_u32(
+        std::span<const std::uint8_t>{global_header}.subspan(16U, 4U), byte_order);
+    const auto link_type = read_u32(
+        std::span<const std::uint8_t>{global_header}.subspan(20U, 4U), byte_order);
 
     if (version_major != 2U || version_minor != 4U) {
         throw PcapFormatError("Unsupported PCAP version " + std::to_string(version_major) + "." +
@@ -121,6 +129,10 @@ std::vector<PcapPacket> PcapReader::read_all(std::istream& stream) {
     if (link_type != link_type_ethernet) {
         throw PcapFormatError("Unsupported PCAP link type " + std::to_string(link_type) +
                               "; only Ethernet is supported.");
+    }
+    if (snap_length == 0U || snap_length > maximum_supported_snap_length) {
+        throw PcapFormatError("Unsupported PCAP snap length " +
+                              std::to_string(snap_length) + ".");
     }
 
     std::vector<PcapPacket> packets;
@@ -140,8 +152,16 @@ std::vector<PcapPacket> PcapReader::read_all(std::istream& stream) {
         const auto seconds = read_u32(header_span.subspan(0U, 4U), byte_order);
         const auto fractional = read_u32(header_span.subspan(4U, 4U), byte_order);
         const auto included_length = read_u32(header_span.subspan(8U, 4U), byte_order);
-        if (included_length > static_cast<std::uint32_t>(std::numeric_limits<std::streamsize>::max())) {
-            throw PcapFormatError("PCAP packet is too large: " + std::to_string(included_length) + " bytes.");
+        const auto original_length = read_u32(header_span.subspan(12U, 4U), byte_order);
+        if (included_length > snap_length ||
+            included_length > maximum_supported_snap_length ||
+            original_length < included_length ||
+            included_length > static_cast<std::uint32_t>(
+                std::numeric_limits<std::streamsize>::max())) {
+            throw PcapFormatError("Invalid PCAP packet lengths: included=" +
+                                  std::to_string(included_length) +
+                                  ", original=" + std::to_string(original_length) +
+                                  ", snaplen=" + std::to_string(snap_length) + ".");
         }
 
         std::vector<std::uint8_t> frame(included_length);

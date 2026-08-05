@@ -1,0 +1,75 @@
+name: Security and Evidence
+
+on:
+  push:
+    branches: [main, "agent/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sanitizers:
+    name: Clang / ASan + UBSan
+    runs-on: ubuntu-latest
+    env:
+      CC: clang
+      CXX: clang++
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:strict_string_checks=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: >-
+          cmake -S . -B build-sanitizers
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DARIEC61850_ENABLE_SANITIZERS=ON
+          -DARIEC61850_WARNINGS_AS_ERRORS=ON
+      - name: Build
+        run: cmake --build build-sanitizers --parallel
+      - name: Test
+        run: ctest --test-dir build-sanitizers --output-on-failure
+
+  fuzz-smoke:
+    name: Clang / libFuzzer corpus smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CC: clang
+      CXX: clang++
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure fuzzers
+        run: >-
+          cmake -S . -B build-fuzz
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DARIEC61850_BUILD_TESTS=OFF
+          -DARIEC61850_BUILD_TOOLS=OFF
+          -DARIEC61850_BUILD_FUZZERS=ON
+          -DARIEC61850_ENABLE_SANITIZERS=ON
+          -DARIEC61850_WARNINGS_AS_ERRORS=ON
+      - name: Build fuzzers
+        run: cmake --build build-fuzz --parallel
+      - name: Run BER corpus
+        run: ./build-fuzz/ariec61850_fuzz_ber fuzz/corpus/ber -runs=1000 -timeout=5
+      - name: Run GOOSE corpus
+        run: ./build-fuzz/ariec61850_fuzz_goose fuzz/corpus/goose -runs=1000 -timeout=5
+      - name: Run Sampled Values corpus
+        run: ./build-fuzz/ariec61850_fuzz_sampled_values fuzz/corpus/sampled_values -runs=1000 -timeout=5
+      - name: Run PCAP corpus
+        run: ./build-fuzz/ariec61850_fuzz_pcap fuzz/corpus/pcap -runs=1000 -timeout=5
+      - name: Upload crash evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-evidence
+          if-no-files-found: ignore
+          path: |
+            crash-*
+            leak-*
+            timeout-*
+            oom-*
+            slow-unit-*
