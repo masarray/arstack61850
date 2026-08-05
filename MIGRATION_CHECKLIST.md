@@ -27,39 +27,46 @@ interoperability is complete.
 
 ### Phase 1B — GOOSE wire codec
 
-- [x] GOOSE PDU model.
-- [x] GOOSE PDU BER encoder/decoder.
-- [x] GOOSE `numDatSetEntries` consistency validation.
-- [x] GOOSE Ethernet/VLAN/process-bus frame encoder/decoder.
-- [x] GOOSE C#-compatible byte-for-byte golden vectors.
-- [x] GOOSE malformed/truncated-input regression tests.
+- [x] GOOSE PDU model and BER codec.
+- [x] GOOSE Ethernet/VLAN/process-bus frame codec.
+- [x] Dataset-count and malformed-input validation.
+- [x] C#-compatible byte-for-byte golden vectors.
 
 ### Phase 1C — GOOSE supervision and publisher runtime
 
-- [x] Subscriber TimeAllowedToLive deadline supervision.
-- [x] One-shot expiry events and expiration statistics.
-- [x] First/retransmission/duplicate classification.
-- [x] Sequence gap and sequence regression detection.
-- [x] State change, state jump, and state regression detection.
-- [x] `stNum` and `sqNum` 32-bit wraparound behavior.
-- [x] Expected control-block, dataset, and configuration-revision checks.
-- [x] Changed AllData without `stNum` increment detection.
-- [x] Publisher session with C#-compatible state/sequence behavior.
-- [x] Publisher retransmission runtime with exponential scheduling.
-- [x] Schedule reset and `sqNum = 0` on state changes.
-- [x] Stable state timestamp across retransmissions.
-- [x] Offline encoded-frame output with no raw-network activation.
+- [x] Subscriber TTL, sequence, state, identity, and wraparound supervision.
+- [x] Publisher session and exponential retransmission state machine.
+- [x] Stable state timestamps and offline encoded-frame output.
 
-### Phase 1D — Sampled Values and evidence hardening
+### Phase 1D — Sampled Values
 
-- [ ] Sampled Values ASDU model.
-- [ ] Sampled Values APDU and Ethernet frame codec.
-- [ ] Sampled Values sequence supervision and stream diagnostics.
-- [ ] Captured PCAP equivalence tests from real or simulated IED traffic.
-- [ ] Decoder fuzzing corpus for BER, GOOSE, and SV.
+- [x] Sampled Values ASDU model.
+- [x] Multi-ASDU SAV PDU model.
+- [x] Application-tag-0 BER encoder/decoder.
+- [x] Exact `noASDU` consistency validation.
+- [x] Optional `datSet`, `refrTm`, `smpRate`, and `smpMod` support.
+- [x] Sampled Values Ethernet/VLAN/process-bus frame codec (`0x88BA`).
+- [x] `smpCnt` policy and configurable-wrap tracker.
+- [x] Continuous, normal-wrap, gap, duplicate, out-of-order, and restart classification.
+- [x] Stream identity and configuration-revision supervision.
+- [x] Aggregate sequence and missing-sample statistics.
+- [x] IEC 61850 Sampled Values quality-word helper.
+- [x] Vendor-neutral generic `seqOfData` word inspection.
+- [x] Trailing-byte preservation for unknown payload shapes.
+- [x] C#-derived PDU and complete Ethernet-frame golden vectors.
+- [x] Malformed BER, UTC-time, EtherType, and length rejection tests.
 
-**Phase 1 status: MMS and GOOSE wire/runtime layers complete; Sampled Values and
-capture/fuzz evidence remain.**
+### Phase 1E — evidence hardening
+
+- [ ] Captured GOOSE and SV PCAP equivalence tests from real or simulated IED traffic.
+- [ ] C# and C++ executable-oracle comparison in one CI job.
+- [ ] Sanitizer jobs.
+- [ ] BER, GOOSE, and SV decoder fuzzing corpus.
+- [ ] Isolated-laboratory GOOSE and SV interoperability.
+- [ ] Real-time SV publisher timing-health validation.
+
+**Phase 1 status: MMS, GOOSE, and Sampled Values deterministic core layers complete;
+evidence hardening and active-transport validation remain.**
 
 ## Phase 2 — engineering file formats
 
@@ -104,22 +111,22 @@ capture/fuzz evidence remain.**
 
 ## Current acceptance evidence
 
-- [x] GCC C++20 build with warnings as errors.
-- [x] Clang C++20 build with warnings as errors.
-- [x] Windows MSVC build and CTest through Phase 1B.
-- [x] Windows MSVC build and CTest for Phase 1C.
+- [x] GCC C++20 build with warnings as errors through Phase 1D.
+- [x] Clang C++20 build with warnings as errors through Phase 1D.
+- [x] Windows MSVC build and CTest through Phase 1D.
+- [x] Full GitHub Actions matrix passed with 5/5 CTest executables.
 - [x] MMS C#-derived golden vector.
-- [x] GOOSE PDU C#-derived golden vector.
-- [x] GOOSE complete Ethernet frame golden vector with VLAN and process-bus header.
-- [x] Malformed BER and GOOSE count-mismatch rejection.
-- [x] Deterministic subscriber and publisher runtime regression suite.
-- [ ] C# and C++ executable oracle comparison in one CI job.
-- [ ] Sanitizer jobs and fuzzing.
+- [x] GOOSE PDU and Ethernet-frame golden vectors.
+- [x] Deterministic GOOSE subscriber/publisher runtime suite.
+- [x] Sampled Values PDU and Ethernet-frame golden vectors.
+- [x] Sampled Values counter, supervisor, quality, and payload-diagnostics suite.
+- [ ] Captured process-bus PCAP equivalence.
+- [ ] Fuzzing and sanitizers.
 - [ ] Isolated-lab IED interoperability.
 
 ## Safety gate
 
-The Phase 1C publisher is an offline state machine that returns encoded bytes. Active
-Npcap transmission, MMS write/control, and IED operation remain outside the enabled
-runtime surface until timeout, cancellation, disconnect cleanup, PCAP equivalence, and
-isolated-lab tests pass.
+GOOSE and Sampled Values publisher components return encoded bytes only. Active Npcap
+transmission, real-time SV scheduling, MMS write/control, and IED operation remain
+outside the enabled runtime surface until PCAP equivalence, timeout/cancellation,
+timing, fuzzing, and isolated-laboratory tests pass.

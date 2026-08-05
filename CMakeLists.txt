@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(ARIEC61850Cpp
-    VERSION 0.4.0
+    VERSION 0.5.0
     DESCRIPTION "Incremental C++20 port of the ARIEC61850 protocol stack"
     LANGUAGES CXX)
 
@@ -19,7 +19,13 @@ add_library(ariec61850_core
     src/goose/publisher_runtime.cpp
     src/mms/utc_time.cpp
     src/mms/data_value.cpp
-    src/mms/data_codec.cpp)
+    src/mms/data_codec.cpp
+    src/sampled_values/pdu_codec.cpp
+    src/sampled_values/frame_codec.cpp
+    src/sampled_values/quality.cpp
+    src/sampled_values/payload_inspector.cpp
+    src/sampled_values/sample_counter.cpp
+    src/sampled_values/stream_supervisor.cpp)
 
 add_library(ARIEC61850::core ALIAS ariec61850_core)
 
@@ -55,7 +61,7 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_warnings(ariec61850_core_tests)
     add_test(NAME ariec61850_core_tests COMMAND ariec61850_core_tests)
 
-    foreach(test_name IN ITEMS mms goose)
+    foreach(test_name IN ITEMS mms goose sampled_values)
         add_executable(ariec61850_${test_name}_tests tests/test_${test_name}.cpp)
         target_link_libraries(ariec61850_${test_name}_tests PRIVATE ARIEC61850::core)
         target_compile_features(ariec61850_${test_name}_tests PRIVATE cxx_std_20)
