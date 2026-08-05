@@ -1,22 +1,23 @@
-ARIEC61850 C++ Phase 0 validation
-Date: 2026-08-05
+ARIEC61850 C++ Phase 1A validation
 
-GNU C++ 14.2 / Ninja / Release / warnings-as-errors:
-  Configure: PASS
-  Build:     PASS
-  CTest:     PASS (1/1 executable; 8 internal regression checks)
+Local toolchains:
+- GNU C++ 14.2.0, C++20, -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Werror: PASS
+- Clang 17.0.0, C++20, same strict warning policy: PASS
 
-Clang 17 / Ninja / Release / warnings-as-errors:
-  Configure: PASS
-  Build:     PASS
-  CTest:     PASS (1/1 executable; 8 internal regression checks)
+CTest:
+- ariec61850_core_tests: PASS
+- ariec61850_mms_tests: PASS
+- Internal checks: 12/12 PASS
 
-Regression checks:
-  1. BER long-form length round trip
-  2. BER minimal signed integer encoding
-  3. BER context-specific ASCII string round trip
-  4. BER high-tag round trip and malformed input rejection
-  5. MAC address value semantics
-  6. Ethernet, VLAN, and IEC 61850 process-bus header round trip
-  7. Classic Ethernet PCAP writer/reader round trip
-  8. GOOSE retransmission schedule parity
+New parity evidence:
+- IEC 61850 UTC time vector: 6A2B77254000000A
+- MMS AllData vector: byte-for-byte match with the C# MmsDataCodec behavior
+- Recursive Structure, BitString, Unknown high-tag, and malformed nested TLV coverage: PASS
+
+CI added:
+- Ubuntu GCC
+- Ubuntu Clang
+- Windows MSVC
+
+Safety boundary:
+No active IED control or raw-Ethernet publisher session is enabled by this phase.

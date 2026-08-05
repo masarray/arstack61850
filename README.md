@@ -4,7 +4,7 @@ This directory is the incremental C++20 migration of the existing ARIEC61850 C# 
 The C# implementation remains the behavioral reference until every migrated module has
 cross-language golden-vector coverage.
 
-## Implemented in Phase 0
+## Implemented
 
 - CMake-based C++20 static library.
 - BER TLV reader/writer and primitive encoders.
@@ -12,13 +12,16 @@ cross-language golden-vector coverage.
 - Classic PCAP Ethernet reader/writer.
 - GOOSE retransmission schedule.
 - Standalone regression tests derived from the C# test suite.
+- IEC 61850 8-byte UTC time value with quality byte.
+- Recursive MMS Data value model and BER codec for Array, Structure, Boolean, BitString, Integer, Unsigned, FloatingPoint, OctetString, VisibleString, BinaryTime, MmsString, UTC time, and unknown context-specific tags.
+- GitHub Actions matrix for GCC, Clang, and Windows MSVC.
 
 ## Build
 
 ### Windows: Visual Studio 2022
 
 ```powershell
-cd cpp
+cd arstack61850
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
@@ -27,7 +30,7 @@ ctest --test-dir build -C Release --output-on-failure
 ### Windows/Linux: Ninja
 
 ```bash
-cd cpp
+cd arstack61850
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build --output-on-failure
