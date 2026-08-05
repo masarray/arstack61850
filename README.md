@@ -27,18 +27,24 @@ interoperability are complete.
 
 ### Phase 1C — GOOSE runtime state machines
 
-- Subscriber TTL supervision and one-shot expiry events.
-- `stNum`/`sqNum` classification: first, retransmission, duplicate, gap, regression,
-  state change, state jump, and state regression.
-- 32-bit sequence and state wraparound handling.
-- Expected control-block, dataset, and configuration-revision identity checks.
-- Detection of data changes without a matching `stNum` increment.
-- Publisher session matching the C# counter semantics.
+- Subscriber TTL and `stNum`/`sqNum` supervision.
+- Duplicate, gap, regression, state-change, and wraparound classification.
 - Deterministic publisher runtime with exponential retransmission scheduling.
-- State timestamps remain stable during retransmission and change only on a state event.
+- Offline encoded-frame output without raw-network activation.
 
-The publisher runtime returns encoded frames to its caller. It does not open Npcap,
-raw sockets, or a network interface.
+### Phase 1D — Sampled Values core
+
+- Sampled Values ASDU and multi-ASDU APDU models.
+- Application-tag-0 BER encoder/decoder with strict `noASDU` validation.
+- Ethernet/VLAN/process-bus frame codec for EtherType `0x88BA`.
+- Optional `datSet`, `refrTm`, `smpRate`, and `smpMod` field handling.
+- `smpCnt` continuity, normal-wrap, gap, duplicate, out-of-order, and restart tracking.
+- Stream identity and configuration-revision supervision with aggregate statistics.
+- IEC 61850 quality-word helper.
+- Vendor-neutral raw `seqOfData` 32-bit word inspection with trailing-byte preservation.
+- C#-derived byte-for-byte PDU and complete Ethernet-frame golden vectors.
+
+No Phase 1 runtime opens Npcap, raw sockets, or a network interface.
 
 ## Build
 
