@@ -9,10 +9,9 @@
 - Existing C# tests: 90 files / approximately 12,003 lines.
 - Desktop UI: WPF/XAML and therefore requires a UI rewrite rather than direct translation.
 
-## Phase 0 conversion delivered
+## Conversion delivered through Phase 1A
 
-The first port covers 17 C# source files representing approximately 934 lines of the
-original deterministic foundation:
+The port now covers the deterministic Phase 0 foundation plus the C# MMS data-value and UTC-time modules:
 
 | Original area | C++ target | Status |
 |---|---|---|
@@ -20,7 +19,8 @@ original deterministic foundation:
 | `Ethernet/*` | `include/ariec61850/ethernet`, `src/ethernet` | Ported |
 | `Capture/Pcap*` | `include/ariec61850/capture`, `src/capture` | Ported |
 | `Goose/GooseRetransmissionSchedule` | `include/ariec61850/goose` | Ported |
-| GOOSE PDU and MMS Data values | Phase 1 | Pending |
+| IEC 61850 UTC time and MMS Data values | `include/ariec61850/mms`, `src/mms` | Ported |
+| GOOSE PDU | Phase 1B | Pending |
 | Sampled Values codec and publisher core | Phase 1 | Pending |
 | SCL and COMTRADE | Phase 2 | Pending |
 | TPKT/COTP/ACSE/MMS client | Phase 3 | Pending |
@@ -31,8 +31,10 @@ original deterministic foundation:
 
 - GNU C++ 14.2, C++20, warnings as errors: passed.
 - Clang 17, C++20, warnings as errors: passed.
-- CTest regression executable: 8/8 checks passed under both compilers.
-- No external C++ runtime dependency is required for Phase 0.
+- CTest regression executable: 12/12 checks passed under both compilers.
+- C#-derived MMS golden vector: byte-for-byte match.
+- GitHub Actions workflow added for GCC, Clang, and Windows MSVC.
+- No external C++ runtime dependency is required through Phase 1A.
 
 The sandbox did not contain the .NET SDK, so the original C# solution could not be rebuilt
 inside this environment. The ported regression vectors were derived directly from the

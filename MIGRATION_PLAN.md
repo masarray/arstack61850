@@ -44,7 +44,7 @@ ariec61850_desktop    new native UI; do not attempt a line-for-line WPF translat
 
 ### Phase 1 — deterministic process-bus codecs
 
-- IEC 61850 UTC time and MMS Data values used by GOOSE/SV.
+- IEC 61850 UTC time and MMS Data values used by GOOSE/SV. **Completed in Phase 1A.**
 - GOOSE PDU parser/builder.
 - Sampled Values ASDU, payload, frame parser/builder.
 - Process-bus stream diagnostics and sequence supervision.
