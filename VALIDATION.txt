@@ -1,33 +1,27 @@
-ARIEC61850 C++ Phase 1C validation
+ARIEC61850 C++ Phase 1D validation
 Date: 2026-08-06
 
 GNU C++ 14.2 / Release / warnings-as-errors:
   Configure: PASS
   Build:     PASS
-  CTest:     PASS (4/4 test executables)
+  CTest:     PASS (core and Sampled Values local subset)
 
 Clang 17 / Release / warnings-as-errors:
   Configure: PASS
   Build:     PASS
-  CTest:     PASS (4/4 test executables)
+  CTest:     PASS (core and Sampled Values local subset)
 
 Windows MSVC / Release / warnings-as-errors / GitHub Actions:
-  Configure: PASS
-  Build:     PASS
-  CTest:     PASS (4/4 test executables)
+  Configure: PENDING
+  Build:     PENDING
+  CTest:     PENDING
 
-Test executables:
-  1. ariec61850_core_tests
-  2. ariec61850_mms_tests
-  3. ariec61850_goose_tests
-  4. ariec61850_goose_runtime_tests
-
-Phase 1C runtime checks:
-  - subscriber sequence and state classification
-  - TTL expiry and one-shot timeout reporting
-  - expected stream identity rejection
-  - state and sequence counter wraparound
-  - publisher C# sequence semantics
-  - retransmission schedule and state-change reset
-  - stable state timestamp across retransmissions
-  - publisher state and sequence wraparound
+Phase 1D Sampled Values checks:
+  - C#-derived SAV PDU byte-for-byte golden vector
+  - complete VLAN/process-bus Ethernet frame golden vector
+  - multi-ASDU encode/decode and exact noASDU validation
+  - malformed outer tag, sequence, UTC time, EtherType, and length rejection
+  - smpCnt continuity, wrap, gap, duplicate, out-of-order, and restart tracking
+  - stream identity/configuration supervision and aggregate statistics
+  - quality-word round trip
+  - generic seqOfData word inspection and trailing-byte preservation
