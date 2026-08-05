@@ -13,38 +13,34 @@ interoperability are complete.
 - MAC, VLAN, Ethernet, IEC 61850 process-bus, and classic PCAP codecs.
 - GOOSE retransmission schedule.
 
-### Phase 1A — MMS data foundation
+### Phase 1A–1C — MMS and GOOSE
 
-- IEC 61850 8-byte UTC time and quality byte.
-- Recursive MMS Data values and AllData BER codec.
-- C#-derived byte-for-byte golden vectors.
+- IEC 61850 UTC time and recursive MMS Data/AllData codec.
+- Complete GOOSE PDU and Ethernet frame codecs.
+- Subscriber TTL, state, sequence, identity, and wraparound supervision.
+- Deterministic offline publisher runtime with exponential retransmission scheduling.
 
-### Phase 1B — GOOSE wire codec
+### Phase 1D — Sampled Values
 
-- Complete GOOSE PDU encode/decode.
-- Ethernet/VLAN/process-bus GOOSE frame encode/decode.
-- Dataset count and malformed-frame validation.
-
-### Phase 1C — GOOSE runtime state machines
-
-- Subscriber TTL and `stNum`/`sqNum` supervision.
-- Duplicate, gap, regression, state-change, and wraparound classification.
-- Deterministic publisher runtime with exponential retransmission scheduling.
-- Offline encoded-frame output without raw-network activation.
-
-### Phase 1D — Sampled Values core
-
-- Sampled Values ASDU and multi-ASDU APDU models.
-- Application-tag-0 BER encoder/decoder with strict `noASDU` validation.
+- Sampled Values ASDU and multi-ASDU SAV PDU codec.
 - Ethernet/VLAN/process-bus frame codec for EtherType `0x88BA`.
-- Optional `datSet`, `refrTm`, `smpRate`, and `smpMod` field handling.
-- `smpCnt` continuity, normal-wrap, gap, duplicate, out-of-order, and restart tracking.
-- Stream identity and configuration-revision supervision with aggregate statistics.
-- IEC 61850 quality-word helper.
-- Vendor-neutral raw `seqOfData` 32-bit word inspection with trailing-byte preservation.
-- C#-derived byte-for-byte PDU and complete Ethernet-frame golden vectors.
+- `smpCnt` continuity, wrap, gap, duplicate, out-of-order, and restart tracking.
+- Stream identity/configuration supervision, quality-word support, and generic
+  `seqOfData` inspection.
 
-No Phase 1 runtime opens Npcap, raw sockets, or a network interface.
+### Phase 1E — evidence hardening
+
+- C#-derived synthetic PCAP containing one GOOSE and one Sampled Values frame.
+- Read-only `ariec61850_pcap_interop_check` tool with JSON output.
+- Exact captured-frame decode/re-encode comparison and canonical PCAP round-trip checks.
+- PCAP allocation hardening using validated `snaplen`, included length, and original length.
+- Clang AddressSanitizer and UndefinedBehaviorSanitizer workflow.
+- LLVM libFuzzer targets and seed corpora for BER, GOOSE, Sampled Values, and PCAP.
+- Deterministic mutation smoke tests that run on every compiler, including MSVC.
+- Isolated-laboratory checklist, report template, and Windows/Linux runner scripts.
+
+No Phase 1 runtime opens Npcap, raw sockets, or a network interface. Physical IED
+interoperability remains pending until real captures are collected and accepted.
 
 ## Build
 
@@ -64,12 +60,21 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-## Migration rule
+### Sanitizers
 
-1. Capture deterministic C# behavior and byte vectors.
-2. Port the same behavior to C++.
-3. Run strict multi-compiler builds and semantic state-machine tests.
-4. Compare real or simulated PCAP/SCL evidence.
-5. Enable active transport only after safety and interoperability gates pass.
+```bash
+CC=clang CXX=clang++ cmake -S . -B build-sanitizers \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DARIEC61850_ENABLE_SANITIZERS=ON
+cmake --build build-sanitizers --parallel
+ctest --test-dir build-sanitizers --output-on-failure
+```
 
-See `MIGRATION_CHECKLIST.md` for the detailed progress ledger.
+### Read-only PCAP interoperability check
+
+```powershell
+./scripts/run-lab-check.ps1 -Pcap ./captures/device-session.pcap
+```
+
+See `LAB_INTEROP_CHECKLIST.md` before using a physical IED and
+`MIGRATION_CHECKLIST.md` for the detailed progress ledger.

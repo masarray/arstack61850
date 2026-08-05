@@ -2,74 +2,65 @@
 
 ## Current milestone
 
-**Phase 1D — Sampled Values core codec and supervision is implemented and CI-validated.**
+**Phase 1E — automated process-bus evidence and security hardening is implemented.**
 
-The C++ stack now covers deterministic MMS data, GOOSE wire/runtime behavior, and the
-core Sampled Values path from ASDU/APDU encoding through Ethernet framing and `smpCnt`
-supervision.
+The deterministic MMS, GOOSE, and Sampled Values layers now have synthetic PCAP
+comparison, sanitizer coverage, mutation smoke tests, libFuzzer harnesses, and a
+receive-only lab evidence workflow.
 
 ## Delivered modules
 
 | Area | Status |
 |---|---|
-| BER primitives | Complete |
-| Ethernet, VLAN, process-bus header | Complete |
-| Classic PCAP reader/writer | Complete |
-| IEC 61850 UTC time | Complete |
+| BER, Ethernet, VLAN, process-bus, PCAP | Complete |
 | MMS Data / AllData codec | Complete |
-| GOOSE PDU and Ethernet frame codecs | Complete |
-| GOOSE subscriber and publisher runtime | Complete, offline frame output only |
-| Sampled Values ASDU/APDU/frame codec | Complete |
-| Sampled Values counter and stream supervision | Complete |
-| Sampled Values quality and generic payload inspection | Complete |
-| Captured SV PCAP equivalence | Pending |
-| Decoder fuzzing | Pending |
-| SCL and COMTRADE | Not started |
-| TPKT/COTP/ACSE/MMS association | Not started |
-| Reporting and control | Not started |
-| Simulator and native UI | Not started |
+| GOOSE wire codec and offline runtime | Complete |
+| Sampled Values codec and supervision | Complete |
+| Synthetic GOOSE/SV PCAP equivalence | Complete |
+| Read-only PCAP interoperability checker | Complete |
+| PCAP allocation-length hardening | Complete |
+| ASan/UBSan build and regression suite | Complete locally; CI verification pending |
+| Deterministic mutation smoke suite | Complete |
+| LLVM libFuzzer targets and seed corpus | Implemented; CI verification pending |
+| Isolated-lab runner/checklist/report | Complete |
+| Real IED receive-only interoperability | Pending physical capture |
+| C# executable-oracle CI comparison | Pending original C# executable/project integration |
+| Active GOOSE/SV transmission | Disabled |
 
-## Phase 1D behavior
+## Phase 1E behavior
 
-Sampled Values wire support includes:
+The PCAP evidence analyzer:
 
-- application-tag-0 SAV PDU encoding and decoding;
-- multi-ASDU sequence handling and exact `noASDU` consistency checks;
-- optional dataset reference, reference time, sample rate, and sample mode fields;
-- complete Ethernet/VLAN/process-bus frame handling for EtherType `0x88BA`;
-- strict rejection of malformed BER, invalid UTC time, wrong EtherType, trailing APDU
-  data, and impossible process-bus length declarations; and
-- C#-derived byte-for-byte APDU and complete Ethernet-frame vectors.
+- reads classic Ethernet PCAP without opening a network adapter;
+- identifies GOOSE and Sampled Values frames;
+- decodes and re-encodes each process-bus frame;
+- requires exact byte-for-byte equivalence;
+- verifies packet order, frame bytes, and microsecond-normalized timestamps through a
+  canonical PCAP write/read cycle; and
+- produces human-readable or JSON evidence suitable for a controlled lab report.
 
-Runtime diagnostics include:
+Security hardening includes:
 
-- sample-counter initialization, increment, configurable wrap, continuity, gaps,
-  duplicates, out-of-order traffic, and trusted restart classification;
-- stream identity and configuration-revision checks with statistics;
-- IEC 61850 quality-word encoding/decoding; and
-- vendor-neutral big-endian 32-bit payload views without inventing channel semantics.
+- rejection of zero or excessive PCAP `snaplen`;
+- validation that included packet length does not exceed `snaplen` or the original
+  packet length before allocation;
+- ASan/UBSan instrumentation;
+- deterministic decoder mutation tests on all compilers; and
+- libFuzzer entry points for BER, GOOSE, Sampled Values, and PCAP.
 
-## Validation
+## Local validation
 
-The final Phase 1D branch passed the complete GitHub Actions matrix:
+- GNU C++ 14.2, Release, warnings as errors: passed.
+- Clang 17, Release, warnings as errors: passed.
+- Clang 17, ASan + UBSan: passed.
+- Synthetic PCAP exact equivalence: passed.
+- Deterministic mutation smoke: passed and found the PCAP allocation issue now covered
+  by an explicit regression test.
 
-- GNU C++ / Release / warnings as errors: passed;
-- Clang / Release / warnings as errors: passed;
-- Windows MSVC / Release / `/W4 /WX`: passed; and
-- five CTest executables passed on every platform:
-  - core foundation;
-  - MMS values;
-  - GOOSE wire codec;
-  - GOOSE subscriber/publisher runtime; and
-  - Sampled Values codec and supervision.
+## Remaining acceptance gates
 
-The initial MSVC run identified narrowing construction of `optional<uint16_t>` inside
-test fixtures. Explicit `uint16_t` values fixed the portability issue without changing
-the library API or wire behavior.
-
-## Safety boundary
-
-Sampled Values support currently parses and returns encoded bytes only. No adapter is
-opened, and no real-time publisher thread or raw Ethernet transmission is enabled.
-PCAP equivalence, sanitizer/fuzz coverage, timing validation, and isolated-laboratory
-interoperability remain required before active process-bus transmission.
+- GitHub sanitizer and libFuzzer jobs must pass on the published branch.
+- At least one controlled capture from a real or vendor-simulated IED must pass the
+  checker and be documented using `LAB_INTEROP_REPORT_TEMPLATE.md`.
+- Real-time Sampled Values timing health and active transmission require a separate,
+  approved laboratory plan.
