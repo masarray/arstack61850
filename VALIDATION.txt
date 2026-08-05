@@ -1,0 +1,22 @@
+ARIEC61850 C++ Phase 0 validation
+Date: 2026-08-05
+
+GNU C++ 14.2 / Ninja / Release / warnings-as-errors:
+  Configure: PASS
+  Build:     PASS
+  CTest:     PASS (1/1 executable; 8 internal regression checks)
+
+Clang 17 / Ninja / Release / warnings-as-errors:
+  Configure: PASS
+  Build:     PASS
+  CTest:     PASS (1/1 executable; 8 internal regression checks)
+
+Regression checks:
+  1. BER long-form length round trip
+  2. BER minimal signed integer encoding
+  3. BER context-specific ASCII string round trip
+  4. BER high-tag round trip and malformed input rejection
+  5. MAC address value semantics
+  6. Ethernet, VLAN, and IEC 61850 process-bus header round trip
+  7. Classic Ethernet PCAP writer/reader round trip
+  8. GOOSE retransmission schedule parity
