@@ -59,12 +59,15 @@ void parser_extracts_minimal_station_semantics() {
     CHECK(sampled_values.control_block_reference == "MU01LD0/LLN0$SV$MSVCB01");
     CHECK(sampled_values.sv_id == "MU01LD0/LLN0$MSVCB01");
     CHECK(sampled_values.data_set_reference == "MU01LD0/LLN0$dsSV");
-    CHECK(sampled_values.address.app_id == std::optional<std::uint16_t>{0x4001U});
+    CHECK(sampled_values.address.app_id == std::optional<std::uint16_t>{
+        static_cast<std::uint16_t>(0x4001U)});
     CHECK(sampled_values.address.app_id_text == "0x4001");
     CHECK(sampled_values.address.destination_mac_text == "01:0C:CD:04:00:01");
     CHECK(sampled_values.address.destination_mac.has_value());
-    CHECK(sampled_values.address.vlan_id == std::optional<std::uint16_t>{200U});
-    CHECK(sampled_values.address.vlan_priority == std::optional<std::uint8_t>{4U});
+    CHECK(sampled_values.address.vlan_id == std::optional<std::uint16_t>{
+        static_cast<std::uint16_t>(200U)});
+    CHECK(sampled_values.address.vlan_priority == std::optional<std::uint8_t>{
+        static_cast<std::uint8_t>(4U)});
     CHECK(sampled_values.configuration_revision == 3U);
     CHECK(sampled_values.sample_rate == 4000U);
     CHECK(sampled_values.sample_mode == "SmpPerSec");
@@ -79,7 +82,8 @@ void parser_extracts_minimal_station_semantics() {
     CHECK(goose.control_block_reference == "MU01LD0/LLN0$GO$GCB01");
     CHECK(goose.go_id == "trip-goose");
     CHECK(goose.data_set_reference == "MU01LD0/LLN0$dsGO");
-    CHECK(goose.address.app_id == std::optional<std::uint16_t>{0x1001U});
+    CHECK(goose.address.app_id == std::optional<std::uint16_t>{
+        static_cast<std::uint16_t>(0x1001U)});
     CHECK(goose.address.destination_mac_text == "01:0C:CD:01:00:01");
     CHECK(goose.min_time_milliseconds == 4U);
     CHECK(goose.max_time_milliseconds == 1000U);
@@ -116,9 +120,12 @@ void parser_extracts_multiple_sampled_values_streams_and_conflicts() {
         CHECK(stream.entries[0].cdc == "SAV");
         CHECK(stream.entries[0].basic_type == "INT32");
         CHECK(stream.entries[1].is_quality);
-        CHECK(stream.address.app_id == std::optional<std::uint16_t>{0x4000U});
-        CHECK(stream.address.vlan_id == std::optional<std::uint16_t>{0U});
-        CHECK(stream.address.vlan_priority == std::optional<std::uint8_t>{4U});
+        CHECK(stream.address.app_id == std::optional<std::uint16_t>{
+            static_cast<std::uint16_t>(0x4000U)});
+        CHECK(stream.address.vlan_id == std::optional<std::uint16_t>{
+            static_cast<std::uint16_t>(0U)});
+        CHECK(stream.address.vlan_priority == std::optional<std::uint8_t>{
+            static_cast<std::uint8_t>(4U)});
         CHECK(stream.sv_id == "MU01_SV" + std::to_string(index + 1U));
     }
 
