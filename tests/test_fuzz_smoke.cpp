@@ -88,6 +88,9 @@ void deterministic_decoder_mutation_smoke() {
     const auto pcap = read_file(
         std::filesystem::path{ARIEC61850_SOURCE_DIR} /
         "tests/fixtures/process_bus_csharp_vectors.pcap");
+    const auto scl = read_file(
+        std::filesystem::path{ARIEC61850_SOURCE_DIR} /
+        "tests/fixtures/scl/minimal-station.scd");
 
     std::size_t cases = 0U;
     cases += exercise_mutations(ber, [](const ByteVector& bytes) {
@@ -102,8 +105,11 @@ void deterministic_decoder_mutation_smoke() {
     cases += exercise_mutations(pcap, [](const ByteVector& bytes) {
         ar::iec61850::fuzzing::exercise_pcap(bytes);
     });
+    cases += exercise_mutations(scl, [](const ByteVector& bytes) {
+        ar::iec61850::fuzzing::exercise_scl(bytes);
+    });
 
-    if (cases < 500U) {
+    if (cases < 900U) {
         throw std::runtime_error("Mutation smoke corpus was unexpectedly small.");
     }
     std::cout << "Exercised " << cases
