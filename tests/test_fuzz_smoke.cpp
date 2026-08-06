@@ -47,6 +47,10 @@ ByteVector read_file(const std::filesystem::path& path) {
     return result;
 }
 
+std::size_t mutation_case_count(const ByteVector& seed) {
+    return 2U + (3U * std::min<std::size_t>(seed.size(), 64U));
+}
+
 std::size_t exercise_mutations(const ByteVector& seed, const Exercise& exercise) {
     std::size_t cases = 0U;
     exercise(seed);
@@ -92,6 +96,13 @@ void deterministic_decoder_mutation_smoke() {
         std::filesystem::path{ARIEC61850_SOURCE_DIR} /
         "tests/fixtures/scl/minimal-station.scd");
 
+    const auto expected_cases =
+        mutation_case_count(ber) +
+        mutation_case_count(goose) +
+        mutation_case_count(sampled_values) +
+        mutation_case_count(pcap) +
+        mutation_case_count(scl);
+
     std::size_t cases = 0U;
     cases += exercise_mutations(ber, [](const ByteVector& bytes) {
         ar::iec61850::fuzzing::exercise_ber(bytes);
@@ -109,8 +120,10 @@ void deterministic_decoder_mutation_smoke() {
         ar::iec61850::fuzzing::exercise_scl(bytes);
     });
 
-    if (cases < 900U) {
-        throw std::runtime_error("Mutation smoke corpus was unexpectedly small.");
+    if (cases != expected_cases) {
+        throw std::runtime_error(
+            "Mutation smoke case-count mismatch: expected " +
+            std::to_string(expected_cases) + ", got " + std::to_string(cases) + ".");
     }
     std::cout << "Exercised " << cases
               << " deterministic decoder mutation cases.\n";
