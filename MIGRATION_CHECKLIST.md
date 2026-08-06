@@ -96,7 +96,7 @@ until laboratory interoperability is complete.
 - [x] RCB attribute read-plan and typed state/availability mapping.
 - [x] Sequence, configuration, DataSet, overflow, and segmentation continuity tracking.
 - [x] Bounded offline report stream/frame retention.
-- [~] MMS-reporting mutation smoke and LLVM libFuzzer corpus awaiting GitHub CI.
+- [x] MMS-reporting mutation smoke and LLVM libFuzzer corpus.
 
 ### Later Phase 4 work
 
@@ -120,7 +120,7 @@ until laboratory interoperability is complete.
 - [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 3B.
 - [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 3C.
 - [x] PR #6 through PR #10 squash-merged sequentially to `main`.
-- [~] Phase 4A GCC/Clang/MSVC and security workflows pending publication.
+- [x] Full main-based branch GCC/Clang/MSVC and security workflows through Phase 4A.
 - [ ] Controlled physical-lab process-bus capture evidence.
 - [ ] C# and C++ executable-oracle comparison in one CI job.
 
