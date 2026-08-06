@@ -41,7 +41,17 @@ interoperability are complete.
 - Read-only `ariec61850_comtrade_inspect` human/JSON CLI.
 - C#-derived ASCII and binary fixtures, mutation smoke, sanitizer, and libFuzzer corpus.
 
-No enabled runtime opens Npcap, raw sockets, or a network interface. Physical IED
+### Phase 3A — MMS transport foundation
+
+- RFC 1006 TPKT frame encode/decode with strict version, reserved-octet, and length validation.
+- Incremental TPKT stream framing for fragmented and coalesced TCP byte streams.
+- COTP Connection Request, Connection Confirm, Data, Disconnect Request, and Error TPDU decoding.
+- Default C#-compatible CR vector, TPDU-size negotiation, and TSAP selector mirroring.
+- COTP Data segmentation by negotiated TPDU size and bounded EOT reassembly.
+- Fragment-count, byte-count, and empty non-final fragment abuse guards.
+- C#-derived golden vectors, deterministic mutation smoke, sanitizer, and libFuzzer coverage.
+
+No enabled runtime opens TCP sockets, Npcap, raw sockets, or a network interface. Physical IED
 interoperability and all active transmission remain gated.
 
 ## Build

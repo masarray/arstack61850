@@ -7,6 +7,8 @@
 #include "ariec61850/evidence/pcap_equivalence.hpp"
 #include "ariec61850/goose/frame_codec.hpp"
 #include "ariec61850/goose/pdu_codec.hpp"
+#include "ariec61850/osi/cotp.hpp"
+#include "ariec61850/osi/tpkt.hpp"
 #include "ariec61850/sampled_values/frame_codec.hpp"
 #include "ariec61850/sampled_values/pdu_codec.hpp"
 #include "ariec61850/scl/parser.hpp"
@@ -118,6 +120,85 @@ inline void exercise_comtrade(const std::span<const std::uint8_t> bytes) {
             static_cast<void>(comtrade::Reader{}.read_ascii_data(input, configuration));
         } else if (configuration.data_file_type != comtrade::DataFileType::unknown) {
             static_cast<void>(comtrade::Reader{}.read_binary_data(bytes, configuration));
+        }
+    } catch (...) {
+    }
+}
+
+inline void exercise_transport(const std::span<const std::uint8_t> bytes) {
+    try {
+        osi::TpktFrame frame;
+        std::string error;
+        if (osi::TpktFrameCodec::try_decode(bytes, frame, &error)) {
+            const auto encoded = osi::TpktFrameCodec::encode(frame.payload);
+            osi::TpktFrame second;
+            static_cast<void>(osi::TpktFrameCodec::try_decode(encoded, second, nullptr));
+
+            osi::CotpTpdu nested;
+            if (osi::CotpFrameCodec::try_decode(frame.payload, nested, nullptr) &&
+                nested.kind == osi::CotpTpduKind::data) {
+                const auto data = osi::CotpFrameCodec::encode_data(
+                    nested.user_data,
+                    nested.end_of_transmission,
+                    nested.tpdu_number);
+                osi::CotpTpdu decoded;
+                static_cast<void>(osi::CotpFrameCodec::try_decode(data, decoded, nullptr));
+            }
+        }
+    } catch (...) {
+    }
+
+    try {
+        osi::CotpTpdu tpdu;
+        if (osi::CotpFrameCodec::try_decode(bytes, tpdu, nullptr)) {
+            switch (tpdu.kind) {
+            case osi::CotpTpduKind::connection_request:
+                static_cast<void>(osi::CotpFrameCodec::encode_connection_request(
+                    tpdu.source_reference,
+                    tpdu.parameters,
+                    tpdu.destination_reference,
+                    tpdu.class_or_reason));
+                break;
+            case osi::CotpTpduKind::connection_confirm:
+                static_cast<void>(osi::CotpFrameCodec::encode_connection_confirm(
+                    tpdu.destination_reference,
+                    tpdu.source_reference));
+                break;
+            case osi::CotpTpduKind::data: {
+                const auto encoded = osi::CotpFrameCodec::encode_data(
+                    tpdu.user_data,
+                    tpdu.end_of_transmission,
+                    tpdu.tpdu_number);
+                osi::CotpDataReassembler reassembler{1U << 20U, 4096U, 32U};
+                reassembler.append_encoded(encoded);
+                if (reassembler.is_complete()) {
+                    static_cast<void>(reassembler.complete());
+                }
+                break;
+            }
+            case osi::CotpTpduKind::disconnect_request:
+                static_cast<void>(osi::CotpFrameCodec::encode_disconnect_request(
+                    tpdu.destination_reference,
+                    tpdu.source_reference,
+                    tpdu.class_or_reason,
+                    tpdu.parameters));
+                break;
+            case osi::CotpTpduKind::error:
+            case osi::CotpTpduKind::unknown:
+                break;
+            }
+        }
+    } catch (...) {
+    }
+
+    try {
+        osi::TpktStreamDecoder decoder{1U << 20U};
+        const auto midpoint = bytes.size() / 2U;
+        decoder.append(bytes.first(midpoint));
+        decoder.append(bytes.subspan(midpoint));
+        osi::TpktFrame frame;
+        while (decoder.try_pop(frame)) {
+            static_cast<void>(frame.payload.size());
         }
     } catch (...) {
     }

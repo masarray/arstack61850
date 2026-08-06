@@ -46,9 +46,28 @@ until laboratory interoperability is complete.
 
 ## Phase 3 — MMS transport and association
 
-- [ ] TPKT and COTP.
-- [ ] Presentation and ACSE.
-- [ ] MMS envelopes, invoke routing, name lists, attributes, read, and write.
+### Phase 3A — TPKT and COTP foundation
+
+- [x] RFC 1006 TPKT encode/decode with exact length validation.
+- [x] Incremental TPKT stream decoder for fragmented/coalesced byte streams.
+- [x] COTP CR, CC, DT, DR, and ER TPDU decoding.
+- [x] C#-compatible default Connection Request vector.
+- [x] TPDU-size negotiation and C1/C2 TSAP selector mirroring.
+- [x] Data TPDU segmentation with EOT and TPDU-number handling.
+- [x] Bounded COTP reassembly by bytes, fragments, and empty non-final fragments.
+- [x] Deterministic golden-vector and abuse-path regression tests.
+- [x] OSI transport mutation smoke and LLVM libFuzzer corpus.
+
+### Phase 3B — session, presentation, and ACSE
+
+- [ ] ISO session SPDU codec.
+- [ ] Presentation context negotiation.
+- [ ] ACSE AARQ/AARE association envelopes.
+
+### Phase 3C — MMS envelopes and services
+
+- [ ] MMS initiate request/response.
+- [ ] Invoke routing, name lists, attributes, read, and write.
 
 ## Phase 4 — reporting, control, and file service
 
@@ -69,6 +88,7 @@ until laboratory interoperability is complete.
 - [x] Clang ASan/UBSan local COMTRADE regression pass.
 - [x] C#-derived COMTRADE ASCII and binary fixtures.
 - [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 2B.
+- [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 3A.
 - [ ] Controlled physical-lab process-bus capture evidence.
 - [ ] C# and C++ executable-oracle comparison in one CI job.
 

@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**Phase 2B — COMTRADE CFG/DAT parsing and SCL signal mapping is implemented and validated on the published stacked branch.**
+**Phase 3A — offline RFC 1006 TPKT and COTP transport framing is implemented and validated on the published stacked branch.**
 
 ## Delivered modules
 
@@ -12,49 +12,50 @@
 | MMS Data / AllData codec | Complete |
 | GOOSE wire codec and offline runtime | Complete |
 | Sampled Values codec and supervision | Complete |
-| Synthetic GOOSE/SV PCAP equivalence | Complete |
-| ASan/UBSan, mutation smoke, and libFuzzer | Complete through COMTRADE |
 | SCL secure parser and semantic model | Complete; PR #6 CI passed |
-| COMTRADE CFG model/parser | Implemented |
-| COMTRADE ASCII DAT | Implemented |
-| COMTRADE BINARY/BINARY32/FLOAT32 DAT | Implemented |
-| Analog scaling and digital status words | Implemented |
-| Multi-rate timestamp fallback | Implemented |
-| Default electrical channel mapping | Implemented |
-| SCL Sampled Values to COMTRADE binding | Implemented |
-| Read-only COMTRADE inspection CLI | Implemented |
-| Real IED receive-only interoperability | Pending physical capture |
-| Active GOOSE/SV transmission | Disabled |
+| COMTRADE reader and SCL mapping | Complete; PR #7 CI passed |
+| TPKT frame codec | Implemented |
+| Incremental TPKT stream decoder | Implemented |
+| COTP CR/CC/DT/DR/ER codec | Implemented |
+| TPDU-size and TSAP negotiation | Implemented |
+| COTP segmentation and bounded reassembly | Implemented |
+| OSI transport mutation smoke/libFuzzer | Complete |
+| Session, Presentation, and ACSE | Not started |
+| Active TCP connection runtime | Disabled |
 
-## Phase 2B behavior
+## Phase 3A behavior
 
-The COMTRADE reader:
+The offline transport layer:
 
-- parses station/device/revision metadata and analog/digital channel definitions;
-- validates bounded configuration, channel, sample-rate, and data sizes;
-- decodes ASCII, 16-bit BINARY, BINARY32, and FLOAT32 records;
-- applies engineering scaling as `a * raw + b`;
-- decodes digital channels from ASCII fields or packed 16-bit binary words;
-- applies the COMTRADE time multiplier and falls back to a piecewise multi-rate schedule
-  when timestamps are missing or non-monotonic;
-- creates default voltage/current phase mappings; and
-- maps non-quality/non-timestamp SCL Sampled Values entries to COMTRADE analog channels
-  using semantic quantity/phase matching followed by deterministic ordered fallback.
+- encodes and strictly decodes RFC 1006 TPKT frames;
+- rejects unsupported versions, non-zero reserved octets, undersized lengths, and exact-length mismatches;
+- incrementally extracts complete TPKT frames from fragmented or coalesced TCP-style byte streams;
+- decodes COTP Connection Request, Connection Confirm, Data, Disconnect Request, and Error TPDUs;
+- validates the COTP length indicator and complete variable-parameter TLVs;
+- preserves the C# default Connection Request wire vector;
+- mirrors C1/C2 TSAP selectors in Connection Confirm and never selects a TPDU size larger than the peer proposal;
+- segments Data TPDUs according to the negotiated TPDU capacity; and
+- reassembles EOT sequences under explicit byte, fragment, and empty-fragment limits.
 
 ## Validation
 
 - GNU C++ 14.2, Release, warnings as errors: passed.
 - Clang 17, Release, warnings as errors: passed.
 - Clang 17, ASan + UBSan: passed.
-- Nine COMTRADE regression groups: passed.
-- C#-derived ASCII 40-sample fixture: passed.
-- C#-derived BINARY 80-sample fixture: passed.
-- Read-only COMTRADE JSON CLI smoke: passed.
+- Nine deterministic TPKT/COTP regression groups: passed.
+- C#-derived TPKT, CR, CC, and Data golden vectors: passed.
+- Incremental stream fragmentation/coalescing matrix: passed.
+- Bounded segmentation/reassembly and abuse guards: passed.
+- Local transport libFuzzer: 5,000 runs, passed with no crash artifact.
 - GitHub GCC, Clang, and Windows MSVC matrix: passed.
 - GitHub ASan/UBSan: passed.
-- Six-corpus libFuzzer workflow including COMTRADE: passed with no crash artifact.
+- Seven-corpus libFuzzer workflow including OSI transport: passed with no crash artifact.
 
 ## Remaining acceptance gates
 
-- Cross-language executable-oracle comparison remains pending.
-- Active replay/transmission remains outside this phase.
+- Phase 3B ISO session, Presentation, and ACSE association codecs.
+- Socket connection, cancellation, timeout, and live IED interoperability remain outside this phase.
+
+## Safety boundary
+
+Phase 3A is an offline deterministic codec and byte-stream reassembly layer. It does not open a TCP socket, connect to an IED, send MMS traffic, perform writes or controls, or enable any active network transmission.
