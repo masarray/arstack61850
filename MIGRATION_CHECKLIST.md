@@ -84,7 +84,7 @@ until laboratory interoperability is complete.
 - [x] Multi-variable Write with per-variable success/failure results.
 - [x] MMS-services mutation smoke and LLVM libFuzzer corpus.
 
-## Phase 4 — reporting, control, and file service
+## Phase 4 — reporting, live discovery, control, and file service
 
 ### Phase 4A — offline reporting foundation
 
@@ -109,8 +109,21 @@ until laboratory interoperability is complete.
 - [x] URCB reservation, RptEna enable/disable, optional GI, and touched-state cleanup.
 - [x] Persistent report polling and Phase 4A monitor ingestion.
 - [x] Cleanup-required evidence and retry path after association loss.
-- [ ] Built-in TCP socket transport and physical IED association validation.
 - [ ] BRCB EntryID resume, purge decisioning, and buffer-overflow recovery.
+
+### Phase 4C — built-in TCP and live read-only discovery
+
+- [~] Non-blocking Windows Winsock and POSIX TCP `MmsByteTransport` implementation.
+- [~] IPv4/IPv6 resolution, TCP_NODELAY, keepalive, partial-send, and peer-close handling.
+- [~] Deadline and cancellation-aware connect/send/receive readiness waits.
+- [~] Bounded live GetNameList pagination for domains, variables, and DataSets.
+- [~] Optional GetVariableAccessAttributes type probes.
+- [~] Optional GetNamedVariableListAttributes DataSet directory reads.
+- [~] Optional read-only RCB attribute inventory/state probes.
+- [~] Read-only `ariec61850_live_discover` human/JSON CLI.
+- [~] Discovery service allowlist regression proving no MMS Write request is emitted.
+- [ ] Controlled physical IED association/discovery validation.
+- [ ] Multi-vendor pagination, timeout, reconnect, and soak evidence.
 
 ### Later Phase 4 work
 
@@ -136,12 +149,14 @@ until laboratory interoperability is complete.
 - [x] PR #6 through PR #10 squash-merged sequentially to `main`.
 - [x] Full main-based branch GCC/Clang/MSVC and security workflows through Phase 4A.
 - [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 4B.
+- [~] Phase 4C loopback TCP and scripted read-only discovery regression added.
+- [ ] Phase 4C GitHub GCC/Clang/MSVC and security workflows accepted.
 - [ ] Controlled physical-lab process-bus capture evidence.
 - [ ] C# and C++ executable-oracle comparison in one CI job.
 
 ## Safety gate
 
-SCL and COMTRADE tooling is read-only. Process-bus interoperability tooling operates on
-saved PCAP files. Active Npcap transmission, real-time SV scheduling, MMS write/control,
-and IED operation remain outside the enabled runtime surface until separate physical-lab,
-timing, cancellation, and explicit transmit authorization gates are complete.
+SCL, COMTRADE, PCAP, and the Phase 4C live discovery tool are read-only. The generic TCP
+transport performs no operation by itself. Active RCB mutation, control, dynamic DataSet
+mutation, file transfer, Npcap transmission, and real-time SV scheduling require separate
+explicit APIs, authorization, and physical-laboratory acceptance.

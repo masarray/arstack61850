@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(ARIEC61850Cpp
-    VERSION 0.13.0
+    VERSION 0.14.0
     DESCRIPTION "Incremental C++20 port of the ARIEC61850 protocol stack"
     LANGUAGES CXX)
 
@@ -29,6 +29,8 @@ add_library(ariec61850_core
     src/mms/reporting.cpp
     src/mms/association_runtime.cpp
     src/mms/report_subscription_runtime.cpp
+    src/mms/tcp_transport.cpp
+    src/mms/live_discovery.cpp
     src/sampled_values/pdu_codec.cpp
     src/sampled_values/frame_codec.cpp
     src/sampled_values/quality.cpp
@@ -55,6 +57,10 @@ target_include_directories(ariec61850_core
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)
+
+if(WIN32)
+    target_link_libraries(ariec61850_core PRIVATE ws2_32)
+endif()
 
 function(ariec61850_apply_warnings target)
     if(MSVC)
@@ -99,6 +105,12 @@ if(ARIEC61850_BUILD_TOOLS)
     target_compile_features(ariec61850_comtrade_inspect PRIVATE cxx_std_20)
     ariec61850_apply_warnings(ariec61850_comtrade_inspect)
     ariec61850_apply_sanitizers(ariec61850_comtrade_inspect)
+
+    add_executable(ariec61850_live_discover tools/live_discover.cpp)
+    target_link_libraries(ariec61850_live_discover PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_live_discover PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_live_discover)
+    ariec61850_apply_sanitizers(ariec61850_live_discover)
 endif()
 
 if(ARIEC61850_BUILD_TESTS)
@@ -189,6 +201,20 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_warnings(ariec61850_mms_runtime_tests)
     ariec61850_apply_sanitizers(ariec61850_mms_runtime_tests)
     add_test(NAME ariec61850_mms_runtime_tests COMMAND ariec61850_mms_runtime_tests)
+
+    add_executable(ariec61850_tcp_transport_tests tests/test_tcp_transport.cpp)
+    target_link_libraries(ariec61850_tcp_transport_tests PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_tcp_transport_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_tcp_transport_tests)
+    ariec61850_apply_sanitizers(ariec61850_tcp_transport_tests)
+    add_test(NAME ariec61850_tcp_transport_tests COMMAND ariec61850_tcp_transport_tests)
+
+    add_executable(ariec61850_live_discovery_tests tests/test_live_discovery.cpp)
+    target_link_libraries(ariec61850_live_discovery_tests PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_live_discovery_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_live_discovery_tests)
+    ariec61850_apply_sanitizers(ariec61850_live_discovery_tests)
+    add_test(NAME ariec61850_live_discovery_tests COMMAND ariec61850_live_discovery_tests)
 
     add_executable(ariec61850_fuzz_smoke_tests tests/test_fuzz_smoke.cpp)
     target_link_libraries(ariec61850_fuzz_smoke_tests PRIVATE ARIEC61850::core)

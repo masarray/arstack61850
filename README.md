@@ -77,19 +77,28 @@ interoperability are complete.
 - Sequence, configuration, DataSet, overflow, and segmentation continuity tracking.
 - Bounded offline report monitor and dedicated MMS-reporting fuzz corpus.
 
-No enabled runtime opens TCP sockets, Npcap, raw sockets, or a network interface. Physical IED
-interoperability and all active transmission remain gated.
+### Phase 4B — association and report-subscription runtime
 
-## Phase 4B: association and report-subscription runtime
+- Transport-injected COTP, Session, Presentation, ACSE/MMS Initiate lifecycle.
+- Confirmed-service routing, timeout/cancellation handling, and explicit reconnect.
+- Persistent RCB re-probe, reservation, `RptEna`, optional GI, report delivery, and
+  ownership-aware cleanup. See `ASSOCIATION_RUNTIME_PROFILE.md`.
 
-The C++ core now includes a transport-injected MMS association runtime and persistent RCB
-subscription state machine. It performs COTP, Session, Presentation, ACSE/MMS Initiate,
-confirmed-service routing, timeout/cancellation handling, RCB re-probe, URCB reservation,
-`RptEna`, optional GI, InformationReport delivery, and ownership-aware cleanup. See
-`ASSOCIATION_RUNTIME_PROFILE.md`.
+### Phase 4C — built-in TCP and live read-only discovery
 
-The core deliberately does not ship a default socket transport in this phase. Applications
-that intentionally enable live IED access must provide an `MmsByteTransport` implementation.
+- Cross-platform non-blocking Winsock/POSIX `TcpMmsByteTransport`.
+- IPv4/IPv6 resolution, deadline/cancellation-aware readiness waits, TCP_NODELAY,
+  keepalive, partial sends, arbitrary receive chunking, and peer-close detection.
+- Bounded live GetNameList discovery for domains, variables, and named-variable lists.
+- Optional variable type, DataSet directory, and read-only RCB state probes.
+- `MmsTcpLiveDiscoverySession` ready-to-use association/discovery composition.
+- Read-only `ariec61850_live_discover` human/JSON CLI.
+- Scripted service-allowlist regression that rejects MMS Write. See
+  `LIVE_DISCOVERY_PROFILE.md`.
+
+The TCP transport performs no operation on its own. The live discovery API and CLI emit only
+GetNameList, GetVariableAccessAttributes, GetNamedVariableListAttributes, and Read requests.
+Physical IED interoperability remains a separate laboratory acceptance gate.
 
 ## Build
 
@@ -120,6 +129,15 @@ ctest --test-dir build-sanitizers --output-on-failure
 ```
 
 ## Read-only tools
+
+### Discover a live MMS endpoint
+
+```powershell
+.\build\Release\ariec61850_live_discover.exe 192.168.1.10 102 --json
+```
+
+Use `--no-types`, `--no-datasets`, or `--no-rcb` to reduce probe scope. All discovery counts
+and request timeouts are bounded through CLI options or `MmsLiveDiscoveryOptions`.
 
 ### Inspect a COMTRADE record
 

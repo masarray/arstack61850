@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**Phase 4B — transport-injected association lifecycle and persistent report-subscription runtime are implemented and validated on the published stacked branch.**
+**Phase 4C — built-in non-blocking TCP transport and bounded live read-only discovery are implemented for review and CI validation.**
 
 ## Delivered modules
 
@@ -21,7 +21,9 @@
 | MMS reporting mutation smoke/libFuzzer | Complete |
 | Transport-injected MMS association/client runtime | Implemented |
 | Persistent RCB subscription runtime | Implemented |
-| Built-in TCP socket transport | Not included |
+| Built-in Windows/Linux TCP socket transport | Implemented in Phase 4C |
+| Live read-only name/type/DataSet/RCB discovery | Implemented in Phase 4C |
+| Physical IED interoperability acceptance | Pending |
 
 ## Phase 4A behavior
 
@@ -45,27 +47,34 @@ The offline reporting layer:
 - URCB reservation, optional DatSet/TrgOps/OptFlds writes, RptEna, GI, polling, stop, and cleanup retry are stateful.
 - Lost associations preserve cleanup-required evidence instead of pretending the RCB was disabled.
 
+## Phase 4C behavior
+
+- `TcpMmsByteTransport` uses non-blocking Winsock/POSIX sockets with bounded readiness polling.
+- Connect, send, and receive honor absolute deadlines and `std::stop_token` cancellation.
+- IPv4/IPv6 resolution, TCP_NODELAY, keepalive, partial sends, arbitrary receive chunking, and peer-close detection are built in.
+- Live discovery performs bounded GetNameList pagination for domains, variables, and named-variable lists.
+- Optional type, DataSet-directory, and RCB-state probes use only GetVariableAccessAttributes, GetNamedVariableListAttributes, and Read.
+- The live discovery result retains partial evidence and diagnostics when optional probes fail.
+- `ariec61850_live_discover` provides human and JSON summaries.
+
 ## Validation
 
-- GNU C++ 14.2, Release, warnings as errors: passed.
-- Clang 17, Release, warnings as errors: passed.
-- Clang 17, ASan + UBSan: passed.
-- Eleven deterministic Phase 4A reporting groups: passed.
-- Full repository CTest: 16/16 passed through Phase 4B.
-- C# exact OptFlds/report-item shape: passed.
-- Local MMS-reporting libFuzzer: 5,000 runs, no crash artifact.
-- GitHub GCC, Clang, and Windows MSVC matrix: passed.
-- GitHub ASan/UBSan: passed.
-- Ten-corpus libFuzzer workflow including MMS reporting: passed with no crash artifact.
+- Phase 4B baseline: GCC, Clang, MSVC, ASan/UBSan, 16/16 CTest, and reporting fuzz evidence passed.
+- Phase 4C adds a POSIX loopback TCP round-trip and cross-platform cancellation smoke test.
+- Phase 4C scripted discovery covers domain/variable/DataSet inventory, type evidence, DataSet directory, RCB state, and pagination abuse rejection.
+- Every scripted discovery request is decoded and checked against the read-only service allowlist; MMS Write is rejected.
+- Full GitHub GCC/Clang/MSVC and security workflow evidence is required before Phase 4C is accepted.
 
 ## Remaining acceptance gates
 
-- Built-in platform TCP transport and physical IED interoperability remain separate acceptance work.
-- BRCB EntryID resume, purge/buffer-overflow recovery, dynamic DataSet lifecycle, Direct/SBO control, and file services remain later work.
+- Controlled physical IED association and discovery evidence across multiple vendors.
+- Long-model pagination, slow-response, disconnect, reconnect, and soak testing.
+- BRCB EntryID resume, purge/buffer-overflow recovery, and dynamic DataSet lifecycle.
+- Direct/SBO control, enhanced-security termination, and MMS file/fault-record transfer.
 
 ## Safety boundary
 
-Phase 4B can perform association and RCB Read/Write operations only through an explicitly
-injected `MmsByteTransport`. The core does not provide or auto-enable a socket backend. It
-never takes over an occupied RCB and only cleans up state touched by the current runtime.
-Control operations, dynamic DataSet mutation, and file services are not exposed.
+The live discovery API and CLI are read-only and do not construct MMS Write requests. The TCP
+transport is general-purpose but performs no operation by itself; applications must explicitly
+select and authorize any state-changing runtime. Control services, dynamic DataSet mutation,
+and file services remain outside the Phase 4C live discovery surface.
