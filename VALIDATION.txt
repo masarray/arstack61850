@@ -32,9 +32,9 @@ Local libFuzzer:
   MMS-reporting corpus: PASS (5,000 runs, no crash artifact)
 
 GitHub Actions:
-  GCC / Clang / Windows MSVC matrix: PENDING Phase 4A publication
-  Clang ASan + UBSan:                PENDING Phase 4A publication
-  Ten-corpus libFuzzer smoke:        PENDING Phase 4A publication
+  GCC / Clang / Windows MSVC matrix: PASS (15/15 tests on each compiler)
+  Clang ASan + UBSan:                PASS (15/15 tests)
+  Ten-corpus libFuzzer smoke:        PASS (including MMS reporting; no crash artifact)
 
 Physical interoperability:
   Active TCP association: DISABLED
