@@ -103,6 +103,9 @@ void deterministic_decoder_mutation_smoke() {
     const auto association = read_file(
         std::filesystem::path{ARIEC61850_SOURCE_DIR} /
         "fuzz/corpus/association/balanced_aarq");
+    const auto mms_services = read_file(
+        std::filesystem::path{ARIEC61850_SOURCE_DIR} /
+        "fuzz/corpus/mms_services/initiate_request");
 
     const auto expected_cases =
         mutation_case_count(ber) +
@@ -112,7 +115,8 @@ void deterministic_decoder_mutation_smoke() {
         mutation_case_count(scl) +
         mutation_case_count(comtrade) +
         mutation_case_count(transport) +
-        mutation_case_count(association);
+        mutation_case_count(association) +
+        mutation_case_count(mms_services);
 
     std::size_t cases = 0U;
     cases += exercise_mutations(ber, [](const ByteVector& bytes) {
@@ -138,6 +142,9 @@ void deterministic_decoder_mutation_smoke() {
     });
     cases += exercise_mutations(association, [](const ByteVector& bytes) {
         ar::iec61850::fuzzing::exercise_association(bytes);
+    });
+    cases += exercise_mutations(mms_services, [](const ByteVector& bytes) {
+        ar::iec61850::fuzzing::exercise_mms_services(bytes);
     });
 
     if (cases != expected_cases) {

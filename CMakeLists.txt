@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(ARIEC61850Cpp
-    VERSION 0.10.0
+    VERSION 0.11.0
     DESCRIPTION "Incremental C++20 port of the ARIEC61850 protocol stack"
     LANGUAGES CXX)
 
@@ -23,6 +23,9 @@ add_library(ariec61850_core
     src/mms/utc_time.cpp
     src/mms/data_value.cpp
     src/mms/data_codec.cpp
+    src/mms/pdu.cpp
+    src/mms/services.cpp
+    src/mms/invoke_router.cpp
     src/sampled_values/pdu_codec.cpp
     src/sampled_values/frame_codec.cpp
     src/sampled_values/quality.cpp
@@ -163,6 +166,13 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_sanitizers(ariec61850_osi_association_tests)
     add_test(NAME ariec61850_osi_association_tests COMMAND ariec61850_osi_association_tests)
 
+    add_executable(ariec61850_mms_services_tests tests/test_mms_services.cpp)
+    target_link_libraries(ariec61850_mms_services_tests PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_mms_services_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_mms_services_tests)
+    ariec61850_apply_sanitizers(ariec61850_mms_services_tests)
+    add_test(NAME ariec61850_mms_services_tests COMMAND ariec61850_mms_services_tests)
+
     add_executable(ariec61850_fuzz_smoke_tests tests/test_fuzz_smoke.cpp)
     target_link_libraries(ariec61850_fuzz_smoke_tests PRIVATE ARIEC61850::core)
     target_include_directories(ariec61850_fuzz_smoke_tests PRIVATE
@@ -213,4 +223,5 @@ if(ARIEC61850_BUILD_FUZZERS)
     ariec61850_add_fuzzer(ariec61850_fuzz_comtrade fuzz/fuzz_comtrade.cpp)
     ariec61850_add_fuzzer(ariec61850_fuzz_transport fuzz/fuzz_transport.cpp)
     ariec61850_add_fuzzer(ariec61850_fuzz_association fuzz/fuzz_association.cpp)
+    ariec61850_add_fuzzer(ariec61850_fuzz_mms_services fuzz/fuzz_mms_services.cpp)
 endif()

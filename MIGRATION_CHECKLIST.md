@@ -73,8 +73,16 @@ until laboratory interoperability is complete.
 
 ### Phase 3C — MMS envelopes and services
 
-- [ ] MMS initiate request/response.
-- [ ] Invoke routing, name lists, attributes, read, and write.
+- [x] MMS Initiate request/response with C# byte-exact request parity.
+- [x] Confirmed request, response, and structured error envelopes.
+- [x] Top-level PDU classification and invoke-ID extraction from MMS or P-DATA.
+- [x] Bounded per-invoke and unmatched-result routing.
+- [x] VMD, domain, and association-specific ObjectName codecs.
+- [x] GetNameList request/response and continuation handling.
+- [x] GetVariableAccessAttributes and bounded recursive TypeSpecification codecs.
+- [x] Multi-variable Read with direct data and per-result access failures.
+- [x] Multi-variable Write with per-variable success/failure results.
+- [x] MMS-services mutation smoke and LLVM libFuzzer corpus.
 
 ## Phase 4 — reporting, control, and file service
 
@@ -97,6 +105,7 @@ until laboratory interoperability is complete.
 - [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 2B.
 - [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 3A.
 - [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 3B.
+- [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 3C.
 - [ ] Controlled physical-lab process-bus capture evidence.
 - [ ] C# and C++ executable-oracle comparison in one CI job.
 

@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**Phase 3B — offline ISO Session, Presentation, and ACSE association codecs are implemented and validated on the published stacked branch.**
+**Phase 3C — offline MMS Initiate, confirmed-service envelopes, invoke routing, and core service codecs are implemented and validated on the published stacked branch.**
 
 ## Delivered modules
 
@@ -15,49 +15,52 @@
 | SCL secure parser and semantic model | Complete; PR #6 CI passed |
 | COMTRADE reader and SCL mapping | Complete; PR #7 CI passed |
 | TPKT and COTP transport foundation | Complete; PR #8 CI passed |
-| ISO Session CN/AC and data-transfer profile | Implemented |
-| Presentation CP/CPA context negotiation | Implemented |
-| Presentation P-DATA and PDV context routing | Implemented |
-| ACSE AARQ/AARE association envelopes | Implemented |
-| C# association golden-vector parity | Implemented |
-| OSI association mutation smoke/libFuzzer | Complete |
-| MMS Initiate and confirmed-service envelopes | Phase 3C, not started |
-| Active TCP connection runtime | Disabled |
+| ISO Session, Presentation, and ACSE | Complete; PR #9 CI passed |
+| MMS Initiate request/response | Implemented |
+| Confirmed request/response/error envelopes | Implemented |
+| Bounded invoke-ID result routing | Implemented |
+| GetNameList | Implemented |
+| GetVariableAccessAttributes and recursive type specifications | Implemented |
+| Read and Write service codecs | Implemented |
+| MMS services mutation smoke/libFuzzer | Complete |
+| Active MMS association/client runtime | Disabled |
 
-## Phase 3B behavior
+## Phase 3C behavior
 
-The offline association layer:
+The offline MMS service layer:
 
-- strictly encodes and decodes bounded ISO Session Connect and Accept SPDUs;
-- preserves and mirrors the C# session requirements, calling selector, called selector, and context identifiers;
-- encodes and decodes Presentation CP and CPA PPDUs with explicit context definitions and negotiation results;
-- supports ACSE and MMS presentation contexts with BER transfer syntax;
-- encodes and decodes fully-encoded-data PDV lists and the IEC 61850 P-DATA transfer profile;
-- structurally encodes and decodes ACSE AARQ and AARE envelopes;
-- extracts application context, AP titles, AE qualifiers, association result, diagnostic, and EXTERNAL user information;
-- preserves the MMS Initiate request or response as an opaque Phase 3C payload while validating its ACSE and Presentation routing; and
-- builds deterministic association responses by mirroring the request session parameters and presentation context ordering.
+- encodes and strictly decodes byte-compatible MMS Initiate request and response PDUs;
+- encodes and decodes confirmed request, confirmed response, and confirmed error envelopes;
+- classifies top-level MMS PDUs and extracts invoke IDs from raw MMS or Presentation P-DATA;
+- routes confirmed results into bounded per-invoke queues while isolating unmatched traffic;
+- encodes and decodes VMD-specific, domain-specific, and association-specific object names;
+- supports GetNameList request/response paging fields;
+- supports GetVariableAccessAttributes with bounded recursive array and structure type specifications;
+- supports multi-variable Read requests and mixed success/failure access results;
+- supports multi-variable Write requests and per-variable success/failure results; and
+- preserves deterministic Presentation context routing without opening an association or network connection.
 
 ## Validation
 
 - GNU C++ 14.2, Release, warnings as errors: passed.
 - Clang 17, Release, warnings as errors: passed.
 - Clang 17, ASan + UBSan: passed.
-- Nine deterministic Session/Presentation/ACSE regression groups: passed.
-- C#-derived 184-byte association request vector: byte-exact pass.
-- Deterministic 138-byte association response vector: byte-exact pass.
-- Presentation context negotiation and context-ID mirroring: passed.
-- P-DATA encode/decode matrix and malformed-envelope rejection: passed.
-- Local association libFuzzer: 5,000 runs, passed with no crash artifact.
+- Eleven deterministic Phase 3C regression groups: passed.
+- Full repository CTest: 14/14 passed.
+- C#-derived 40-byte MMS Initiate request vector: byte-exact pass.
+- Initiate response, confirmed envelopes, and confirmed-error round trips: passed.
+- ObjectName, GetNameList, attributes/type, Read, Write, and invoke-router matrices: passed.
+- Recursive array/structure depth and component limits: passed.
+- Local MMS-services libFuzzer: 5,000 runs, passed with no crash artifact.
 - GitHub GCC, Clang, and Windows MSVC matrix: passed.
 - GitHub ASan/UBSan: passed.
-- Eight-corpus libFuzzer workflow including OSI association: passed with no crash artifact.
+- Nine-corpus libFuzzer workflow including MMS services: passed with no crash artifact.
 
 ## Remaining acceptance gates
 
-- Phase 3C MMS Initiate, invoke routing, and confirmed-service envelopes.
-- Socket connection, cancellation, timeout, and live IED interoperability remain outside this phase.
+- Active association lifecycle, timeout, cancellation, and live IED interoperability remain outside this phase.
+- Reporting, control, and file services remain Phase 4 work.
 
 ## Safety boundary
 
-Phase 3B is an offline deterministic codec and association-envelope layer. It does not open a TCP socket, connect to an IED, send MMS traffic, perform writes or controls, or enable active network transmission.
+Phase 3C is an offline deterministic codec and invoke-routing layer. It does not open a TCP socket, connect to an IED, transmit MMS traffic, execute reads or writes against equipment, or enable control operations.

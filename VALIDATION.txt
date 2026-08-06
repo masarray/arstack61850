@@ -1,41 +1,39 @@
-ARIEC61850 C++ Phase 1E validation
+ARIEC61850 C++ Phase 3C local validation
 Date: 2026-08-06
 
 GNU C++ 14.2 / Release / warnings-as-errors:
   Configure: PASS
   Build:     PASS
-  CTest:     PASS
+  CTest:     PASS (14/14)
 
 Clang 17 / Release / warnings-as-errors:
   Configure: PASS
   Build:     PASS
-  CTest:     PASS
+  CTest:     PASS (14/14)
 
 Clang 17 / RelWithDebInfo / ASan + UBSan:
   Configure: PASS
   Build:     PASS
-  CTest:     PASS
+  CTest:     PASS (14/14)
 
-Local Phase 1E checks:
-  - C#-derived synthetic PCAP with one GOOSE and one Sampled Values packet
-  - exact process-bus decode/re-encode equivalence
-  - canonical PCAP packet/timestamp round trip
-  - read-only JSON interoperability checker
-  - deterministic BER, GOOSE, SV, and PCAP mutation smoke (>500 cases)
-  - malicious snaplen/included-length allocation regression
+Phase 3C deterministic evidence:
+  - C#-derived MMS Initiate request byte-exact vector
+  - Initiate response and confirmed request/response/error round trips
+  - ObjectName and GetNameList request/response matrices
+  - GetVariableAccessAttributes recursive type specifications
+  - multi-variable Read/Write with partial failures
+  - bounded invoke-ID and unmatched-result routing
+  - malformed BER, depth, component, identifier, variable, and queue limits
+  - deterministic mutation smoke
 
-Local libFuzzer note:
-  The container's Swift-bundled Clang 17 libFuzzer runtime is ABI-incompatible with the
-  system C++ runtime. The actual libFuzzer corpus smoke is delegated to the standard
-  Ubuntu GitHub Actions Clang toolchain.
+Local libFuzzer:
+  MMS-services corpus: PASS (5,000 runs, no crash artifact)
 
 GitHub Actions:
-  GCC / Clang / Windows MSVC matrix: PASS (8/8 CTest each)
-  Clang ASan + UBSan:                PASS
-  Clang libFuzzer corpus smoke:      PASS (1,000 runs each target)
+  GCC / Clang / Windows MSVC matrix: PASS (14/14 tests on each compiler)
+  Clang ASan + UBSan:                PASS (14/14 tests)
+  Nine-corpus libFuzzer smoke:       PASS (including MMS services; no crash artifact)
 
-Physical isolated-lab interoperability:
-  Tooling/checklist: READY
-  Real GOOSE capture: PENDING
-  Real Sampled Values capture: PENDING
-  Active transmission: DISABLED
+Physical interoperability:
+  Active TCP association: DISABLED
+  Live IED read/write/control: DISABLED
