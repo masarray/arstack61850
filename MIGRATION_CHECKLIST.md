@@ -98,6 +98,20 @@ until laboratory interoperability is complete.
 - [x] Bounded offline report stream/frame retention.
 - [x] MMS-reporting mutation smoke and LLVM libFuzzer corpus.
 
+### Phase 4B — association and subscription runtime
+
+- [x] Transport-injected TPKT/COTP/Session/Presentation/ACSE/MMS lifecycle.
+- [x] Negotiated TPDU and MMS association limits.
+- [x] Deadline and `std::stop_token` cancellation paths.
+- [x] Bounded invoke-ID allocation and confirmed-result routing.
+- [x] InformationReport delivery while confirmed requests are pending.
+- [x] RCB re-probe and occupied-control takeover protection.
+- [x] URCB reservation, RptEna enable/disable, optional GI, and touched-state cleanup.
+- [x] Persistent report polling and Phase 4A monitor ingestion.
+- [x] Cleanup-required evidence and retry path after association loss.
+- [ ] Built-in TCP socket transport and physical IED association validation.
+- [ ] BRCB EntryID resume, purge decisioning, and buffer-overflow recovery.
+
 ### Later Phase 4 work
 
 - [ ] Direct and SBO control state machines.
@@ -121,6 +135,7 @@ until laboratory interoperability is complete.
 - [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 3C.
 - [x] PR #6 through PR #10 squash-merged sequentially to `main`.
 - [x] Full main-based branch GCC/Clang/MSVC and security workflows through Phase 4A.
+- [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 4B.
 - [ ] Controlled physical-lab process-bus capture evidence.
 - [ ] C# and C++ executable-oracle comparison in one CI job.
 

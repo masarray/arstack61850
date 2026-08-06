@@ -1,42 +1,39 @@
-ARIEC61850 C++ Phase 4A local validation
+ARIEC61850 C++ Phase 4B validation
 Date: 2026-08-06
 
 GNU C++ 14.2 / Release / warnings-as-errors:
   Configure: PASS
   Build:     PASS
-  CTest:     PASS (15/15)
+  CTest:     PASS (16/16)
 
 Clang 17 / Release / warnings-as-errors:
   Configure: PASS
   Build:     PASS
-  CTest:     PASS (15/15)
+  CTest:     PASS (16/16)
 
 Clang 17 / RelWithDebInfo / ASan + UBSan:
   Configure: PASS
   Build:     PASS
-  CTest:     PASS (15/15)
+  CTest:     PASS (16/16)
 
-Phase 4A deterministic evidence:
-  - DataSet and BRCB/URCB inventory grouping
-  - GetNamedVariableListAttributes request/response round trips
-  - InformationReport raw MMS and P-DATA round trips
-  - exact C# OptFlds/report-item semantic vector
-  - included values, partial failures, data references, and reasons
-  - RCB attribute state and availability confidence mapping
-  - sequence gap/duplicate/wrap/reset and configuration/DataSet changes
-  - buffer-overflow and segmented-report continuity
-  - bounded stream and frame retention
-  - malformed/trailing/limit rejection and deterministic mutation smoke
-
-Local libFuzzer:
-  MMS-reporting corpus: PASS (5,000 runs, no crash artifact)
+Phase 4B deterministic evidence:
+  - COTP/ACSE/MMS association success and negotiated limits
+  - cancelled connect followed by explicit reconnect
+  - confirmed response routing with interleaved InformationReport
+  - confirmed-exchange timeout and association fault transition
+  - RCB live-state re-probe before any write
+  - URCB Resv=true, RptEna=true, optional GI, report delivery, and cleanup
+  - occupied/enabled RCB takeover protection
+  - cleanup-required state after association loss
+  - persistent report mapping into the bounded Phase 4A monitor
 
 GitHub Actions:
-  GCC / Clang / Windows MSVC matrix: PASS (15/15 tests on each compiler)
-  Clang ASan + UBSan:                PASS (15/15 tests)
-  Ten-corpus libFuzzer smoke:        PASS (including MMS reporting; no crash artifact)
+  GCC / Clang / Windows MSVC matrix: PASS
+  Clang ASan + UBSan:                PASS
+  Existing ten-corpus libFuzzer:     PASS (no crash artifact)
 
-Physical interoperability:
-  Active TCP association: DISABLED
-  Live RCB enable/reservation/GI: DISABLED
-  Live IED read/write/control: DISABLED
+Runtime boundary:
+  Byte transport interface: IMPLEMENTED
+  Built-in TCP socket backend: NOT INCLUDED
+  Physical IED association: NOT VALIDATED
+  Direct/SBO control and file service: DISABLED

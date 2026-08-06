@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**Phase 4A — offline DataSet/RCB inventory, InformationReport parsing, and bounded report monitoring are implemented and validated on the published branch.**
+**Phase 4B — transport-injected association lifecycle and persistent report-subscription runtime are implemented and validated on the published stacked branch.**
 
 ## Delivered modules
 
@@ -19,7 +19,9 @@
 | Sequence and segmentation continuity tracker | Implemented |
 | Bounded offline report monitor | Implemented |
 | MMS reporting mutation smoke/libFuzzer | Complete |
-| Active MMS association/client runtime | Disabled |
+| Transport-injected MMS association/client runtime | Implemented |
+| Persistent RCB subscription runtime | Implemented |
+| Built-in TCP socket transport | Not included |
 
 ## Phase 4A behavior
 
@@ -34,13 +36,22 @@ The offline reporting layer:
 - detects sequence gaps, duplicates, wraps, resets, configuration/DataSet changes, buffer overflow, and segmentation discontinuity; and
 - retains only configured numbers of streams and recent frames.
 
+## Phase 4B behavior
+
+- TPKT/COTP, Session, Presentation, ACSE, and MMS Initiate are orchestrated as one bounded lifecycle.
+- Confirmed service responses are routed by invoke ID while InformationReports remain deliverable.
+- Deadline and cancellation failures produce explicit fault/cancel events.
+- A selected RCB is re-probed before writes and occupied RCBs are not taken over.
+- URCB reservation, optional DatSet/TrgOps/OptFlds writes, RptEna, GI, polling, stop, and cleanup retry are stateful.
+- Lost associations preserve cleanup-required evidence instead of pretending the RCB was disabled.
+
 ## Validation
 
 - GNU C++ 14.2, Release, warnings as errors: passed.
 - Clang 17, Release, warnings as errors: passed.
 - Clang 17, ASan + UBSan: passed.
 - Eleven deterministic Phase 4A reporting groups: passed.
-- Full repository CTest: 15/15 passed.
+- Full repository CTest: 16/16 passed through Phase 4B.
 - C# exact OptFlds/report-item shape: passed.
 - Local MMS-reporting libFuzzer: 5,000 runs, no crash artifact.
 - GitHub GCC, Clang, and Windows MSVC matrix: passed.
@@ -49,11 +60,12 @@ The offline reporting layer:
 
 ## Remaining acceptance gates
 
-- Live association lifecycle, timeout, cancellation, RCB enable/reservation, GI, and IED interoperability remain outside this phase.
-- Direct/SBO control and file services remain later Phase 4 work.
+- Built-in platform TCP transport and physical IED interoperability remain separate acceptance work.
+- BRCB EntryID resume, purge/buffer-overflow recovery, dynamic DataSet lifecycle, Direct/SBO control, and file services remain later work.
 
 ## Safety boundary
 
-Phase 4A consumes saved bytes and supplied discovery/read evidence only. It does not open
-a socket, connect to an IED, enable or reserve an RCB, trigger GI, execute a live read or
-write, or perform a control operation.
+Phase 4B can perform association and RCB Read/Write operations only through an explicitly
+injected `MmsByteTransport`. The core does not provide or auto-enable a socket backend. It
+never takes over an occupied RCB and only cleans up state touched by the current runtime.
+Control operations, dynamic DataSet mutation, and file services are not exposed.
