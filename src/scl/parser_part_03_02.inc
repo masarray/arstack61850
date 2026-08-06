@@ -1,1 +1,75 @@
-ICAgICAgICBzdGQ6OnVub3JkZXJlZF9tYXA8c3RkOjpzdHJpbmcsIGNvbnN0IFhtbE5vZGUqPiYgaW5kZXgsCiAgICAgICAgY29uc3Qgc3RkOjpzdHJpbmcmIGtleSwKICAgICAgICBjb25zdCBYbWxOb2RlKiB2YWx1ZSkgewogICAgICAgIGlmICgha2V5LmVtcHR5KCkpIHsKICAgICAgICAgICAgaW5kZXgudHJ5X2VtcGxhY2Uobm9ybWFsaXplZF9rZXkoa2V5KSwgdmFsdWUpOwogICAgICAgIH0KICAgIH0KCiAgICBzdGF0aWMgY29uc3QgWG1sTm9kZSogZmluZCgKICAgICAgICBjb25zdCBzdGQ6OnVub3JkZXJlZF9tYXA8c3RkOjpzdHJpbmcsIGNvbnN0IFhtbE5vZGUqPiYgaW5kZXgsCiAgICAgICAgY29uc3Qgc3RkOjpzdHJpbmcmIGtleSkgewogICAgICAgIGNvbnN0IGF1dG8gbWF0Y2ggPSBpbmRleC5maW5kKG5vcm1hbGl6ZWRfa2V5KGtleSkpOwogICAgICAgIHJldHVybiBtYXRjaCA9PSBpbmRleC5lbmQoKSA/IG51bGxwdHIgOiBtYXRjaC0+c2Vjb25kOwogICAgfQoKICAgIHN0YXRpYyBSZXNvbHV0aW9uIHVucmVzb2x2ZWQoY29uc3Qgc3RkOjpzdHJpbmcmIGZ1bmN0aW9uYWxfY29uc3RyYWludCkgewogICAgICAgIHJldHVybiB7ZmFsc2UsIGZ1bmN0aW9uYWxfY29uc3RyYWludCwge30sIHt9LCB7fSwge319OwogICAgfQoKICAgIGNvbnN0IFhtbE5vZGUqIGZpbmRfbG9naWNhbF9ub2RlKAogICAgICAgIGNvbnN0IHN0ZDo6c3RyaW5nJiBpZWRfbmFtZSwKICAgICAgICBjb25zdCBzdGQ6OnN0cmluZyYgbGRfaW5zdCwKICAgICAgICBjb25zdCBzdGQ6OnN0cmluZyYgcHJlZml4LAogICAgICAgIGNvbnN0IHN0ZDo6c3RyaW5nJiBsbl9jbGFzcywKICAgICAgICBjb25zdCBzdGQ6OnN0cmluZyYgbG5faW5zdCkgY29uc3QgewogICAgICAgIGNvbnN0IGF1dG8qIGllZCA9IGZpbmQoaWVkc18sIGllZF9uYW1lKTsKICAgICAgICBpZiAoaWVkID09IG51bGxwdHIpIHsKICAgICAgICAgICAgcmV0dXJuIG51bGxwdHI7CiAgICAgICAgfQoKICAgICAgICBjb25zdCBYbWxOb2RlKiBsb2dpY2FsX2RldmljZXt9OwogICAgICAgIGZvciAoY29uc3QgYXV0byogY2FuZGlkYXRlIDogZGVzY2VuZGFudHMoKmllZCwgIkxEZXZpY2UiKSkgewogICAgICAgICAgICBpZiAoc2FtZShhdHRyaWJ1dGUoY2FuZGlkYXRlLCAiaW5zdCIpLCBsZF9pbnN0KSkgewogICAgICAgICAgICAgICAgbG9naWNhbF9kZXZpY2UgPSBjYW5kaWRhdGU7CiAgICAgICAgICAgICAgICBicmVhazsKICAgICAgICAgICAgfQogICAgICAgIH0KICAgICAgICBpZiAobG9naWNhbF9kZXZpY2UgPT0gbnVsbHB0cikgewogICAgICAgICAgICByZXR1cm4gbnVsbHB0cjsKICAgICAgICB9CgogICAgICAgIGlmIChzYW1lKGxuX2NsYXNzLCAiTExOMCIpKSB7CiAgICAgICAgICAgIHJldHVybiBmaXJzdF9jaGlsZCgqbG9naWNhbF9kZXZpY2UsICJMTjAiKTsKICAgICAgICB9CgogICAgICAgIGZvciAoY29uc3QgYXV0byogbG9naWNhbF9ub2RlIDogZGlyZWN0X2NoaWxkcmVuKCpsb2dpY2FsX2RldmljZSwgIkxOIikpIHsKICAgICAgICAgICAgaWYgKHNhbWUoYXR0cmlidXRlKGxvZ2ljYWxfbm9kZSwgInByZWZpeCIpLCBwcmVmaXgpICYmCiAgICAgICAgICAgICAgICBzYW1lKGF0dHJpYnV0ZShsb2dpY2FsX25vZGUsICJsbkNsYXNzIiksIGxuX2NsYXNzKSAmJgogICAgICAgICAgICAgICAgc2FtZShhdHRyaWJ1dGUobG9naWNhbF9ub2RlLCAiaW5zdCIpLCBsbl9pbnN0KSkgewogICAgICAgICAgICAgICAgcmV0dXJuIGxvZ2ljYWxfbm9kZTsKICAgICAgICAgICAgfQogICAgICAgIH0KICAgICAgICByZXR1cm4gbnVsbHB0cjsKICAgIH0KfTsKClNjbERhdGFTZXRFbnRyeSBidWlsZF9kYXRhX3NldF9lbnRyeSgKICAgIGNvbnN0IHN0ZDo6c3RyaW5nJiBmYWxsYmFja19pZWRfbmFtZSwKICAgIGNvbnN0IFhtbE5vZGUmIGZjZGEsCiAgICBjb25zdCBzdGQ6OnNpemVfdCBpbmRleCwKICAgIGNvbnN0IFNjbFR5cGVJbmRleCYgdHlwZV9pbmRleCwKICAgIHN0ZDo6dmVjdG9yPHN0ZDo6c3RyaW5nPiYgd2FybmluZ3MpIHsKICAgIGF1dG8gaWVkX25hbWUgPSBhdHRyaWJ1dGUoJmZjZGEsICJpZWROYW1lIik7CiAgICBpZiAoaWVkX25hbWUuZW1wdHkoKSkgewogICAgICAgIGllZF9uYW1lID0gZmFsbGJhY2tfaWVkX25hbWU7CiAgICB9CiAgICBjb25zdCBhdXRvIGxkX2luc3QgPSBhdHRyaWJ1dGUoJmZjZGEsICJsZEluc3QiKTsKICAgIGNvbnN0IGF1dG8gcHJlZml4ID0gYXR0cmlidXRlKCZmY2RhLCAicHJlZml4Iik7CiAgICBjb25zdCBhdXRvIGxuX2NsYXNzID0gYXR0cmlidXRlKCZmY2RhLCAibG5DbGFzcyIpOwogICAgY29uc3QgYXV0byBsbl9pbnN0ID0gYXR0cmlidXRlKCZmY2RhLCAibG5JbnN0Iik7CiAgICBjb25zdCBhdXRvIGRvX25hbWUgPSBhdHRyaWJ1dGUoJmZjZGEsICJkb05hbWUiKTsKICAgIGNvbnN0IGF1dG8gZGFfbmFtZSA9IGF0dHJpYnV0ZSgmZmNkYSwgImRhTmFtZSIpOwogICAgY29uc3QgYXV0byBmdW5jdGlvbmFsX2NvbnN0cmFpbnQgPSBhdHRyaWJ1dGUoJmZjZGEsICJmYyIpOwogICAgY29uc3QgYXV0byB0eXBlID0gdHlwZV9pbmRleC5yZXNvbHZlKAogICAgICAgIGllZF9uYW1lLAo="encoding":"base64
+        std::unordered_map<std::string, const XmlNode*>& index,
+        const std::string& key,
+        const XmlNode* value) {
+        if (!key.empty()) {
+            index.try_emplace(normalized_key(key), value);
+        }
+    }
+
+    static const XmlNode* find(
+        const std::unordered_map<std::string, const XmlNode*>& index,
+        const std::string& key) {
+        const auto match = index.find(normalized_key(key));
+        return match == index.end() ? nullptr : match->second;
+    }
+
+    static Resolution unresolved(const std::string& functional_constraint) {
+        return {false, functional_constraint, {}, {}, {}, {}};
+    }
+
+    const XmlNode* find_logical_node(
+        const std::string& ied_name,
+        const std::string& ld_inst,
+        const std::string& prefix,
+        const std::string& ln_class,
+        const std::string& ln_inst) const {
+        const auto* ied = find(ieds_, ied_name);
+        if (ied == nullptr) {
+            return nullptr;
+        }
+
+        const XmlNode* logical_device{};
+        for (const auto* candidate : descendants(*ied, "LDevice")) {
+            if (same(attribute(candidate, "inst"), ld_inst)) {
+                logical_device = candidate;
+                break;
+            }
+        }
+        if (logical_device == nullptr) {
+            return nullptr;
+        }
+
+        if (same(ln_class, "LLN0")) {
+            return first_child(*logical_device, "LN0");
+        }
+
+        for (const auto* logical_node : direct_children(*logical_device, "LN")) {
+            if (same(attribute(logical_node, "prefix"), prefix) &&
+                same(attribute(logical_node, "lnClass"), ln_class) &&
+                same(attribute(logical_node, "inst"), ln_inst)) {
+                return logical_node;
+            }
+        }
+        return nullptr;
+    }
+};
+
+SclDataSetEntry build_data_set_entry(
+    const std::string& fallback_ied_name,
+    const XmlNode& fcda,
+    const std::size_t index,
+    const SclTypeIndex& type_index,
+    std::vector<std::string>& warnings) {
+    auto ied_name = attribute(&fcda, "iedName");
+    if (ied_name.empty()) {
+        ied_name = fallback_ied_name;
+    }
+    const auto ld_inst = attribute(&fcda, "ldInst");
+    const auto prefix = attribute(&fcda, "prefix");
+    const auto ln_class = attribute(&fcda, "lnClass");
+    const auto ln_inst = attribute(&fcda, "lnInst");
+    const auto do_name = attribute(&fcda, "doName");
+    const auto da_name = attribute(&fcda, "daName");
+    const auto functional_constraint = attribute(&fcda, "fc");
+    const auto type = type_index.resolve(
+        ied_name,
