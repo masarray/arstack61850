@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(ARIEC61850Cpp
-    VERSION 0.8.0
+    VERSION 0.9.0
     DESCRIPTION "Incremental C++20 port of the ARIEC61850 protocol stack"
     LANGUAGES CXX)
 
@@ -35,7 +35,9 @@ add_library(ariec61850_core
     src/comtrade/model.cpp
     src/comtrade/reader.cpp
     src/comtrade/channel_mapper.cpp
-    src/comtrade/scl_mapper.cpp)
+    src/comtrade/scl_mapper.cpp
+    src/osi/tpkt.cpp
+    src/osi/cotp.cpp)
 
 add_library(ARIEC61850::core ALIAS ariec61850_core)
 
@@ -144,6 +146,13 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_sanitizers(ariec61850_comtrade_tests)
     add_test(NAME ariec61850_comtrade_tests COMMAND ariec61850_comtrade_tests)
 
+    add_executable(ariec61850_osi_transport_tests tests/test_osi_transport.cpp)
+    target_link_libraries(ariec61850_osi_transport_tests PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_osi_transport_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_osi_transport_tests)
+    ariec61850_apply_sanitizers(ariec61850_osi_transport_tests)
+    add_test(NAME ariec61850_osi_transport_tests COMMAND ariec61850_osi_transport_tests)
+
     add_executable(ariec61850_fuzz_smoke_tests tests/test_fuzz_smoke.cpp)
     target_link_libraries(ariec61850_fuzz_smoke_tests PRIVATE ARIEC61850::core)
     target_include_directories(ariec61850_fuzz_smoke_tests PRIVATE
@@ -192,4 +201,5 @@ if(ARIEC61850_BUILD_FUZZERS)
     ariec61850_add_fuzzer(ariec61850_fuzz_pcap fuzz/fuzz_pcap.cpp)
     ariec61850_add_fuzzer(ariec61850_fuzz_scl fuzz/fuzz_scl.cpp)
     ariec61850_add_fuzzer(ariec61850_fuzz_comtrade fuzz/fuzz_comtrade.cpp)
+    ariec61850_add_fuzzer(ariec61850_fuzz_transport fuzz/fuzz_transport.cpp)
 endif()

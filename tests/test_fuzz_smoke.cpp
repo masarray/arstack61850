@@ -98,6 +98,8 @@ void deterministic_decoder_mutation_smoke() {
     const auto comtrade = read_file(
         std::filesystem::path{ARIEC61850_SOURCE_DIR} /
         "tests/fixtures/comtrade/simple_fault.cfg");
+    const auto transport = from_hex(
+        "03000015011E0000000100C0010AC1020001C2020001");
 
     const auto expected_cases =
         mutation_case_count(ber) +
@@ -105,7 +107,8 @@ void deterministic_decoder_mutation_smoke() {
         mutation_case_count(sampled_values) +
         mutation_case_count(pcap) +
         mutation_case_count(scl) +
-        mutation_case_count(comtrade);
+        mutation_case_count(comtrade) +
+        mutation_case_count(transport);
 
     std::size_t cases = 0U;
     cases += exercise_mutations(ber, [](const ByteVector& bytes) {
@@ -125,6 +128,9 @@ void deterministic_decoder_mutation_smoke() {
     });
     cases += exercise_mutations(comtrade, [](const ByteVector& bytes) {
         ar::iec61850::fuzzing::exercise_comtrade(bytes);
+    });
+    cases += exercise_mutations(transport, [](const ByteVector& bytes) {
+        ar::iec61850::fuzzing::exercise_transport(bytes);
     });
 
     if (cases != expected_cases) {
