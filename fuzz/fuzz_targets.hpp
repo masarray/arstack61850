@@ -10,6 +10,7 @@
 #include "ariec61850/goose/pdu_codec.hpp"
 #include "ariec61850/mms/invoke_router.hpp"
 #include "ariec61850/mms/pdu.hpp"
+#include "ariec61850/mms/reporting.hpp"
 #include "ariec61850/mms/services.hpp"
 #include "ariec61850/osi/cotp.hpp"
 #include "ariec61850/osi/presentation.hpp"
@@ -343,6 +344,36 @@ inline void exercise_mms_services(const std::span<const std::uint8_t> bytes) {
     try {
         const auto type = mms::MmsServiceCodec::decode_type_specification(bytes);
         static_cast<void>(mms::MmsServiceCodec::encode_type_specification(type));
+    } catch (...) {
+    }
+}
+
+
+inline void exercise_reporting(const std::span<const std::uint8_t> bytes) {
+    try {
+        mms::MmsInformationReport report;
+        if (mms::MmsInformationReportCodec::try_decode(bytes, report, nullptr)) {
+            const auto encoded = mms::MmsInformationReportCodec::encode_pdu(report);
+            const auto decoded = mms::MmsInformationReportCodec::decode(encoded);
+            try {
+                const auto frame = mms::MmsReportFrameMapper::map(decoded, {});
+                mms::MmsOfflineReportMonitor monitor{{8U, 16U}};
+                static_cast<void>(monitor.ingest(frame));
+            } catch (...) {
+            }
+        }
+    } catch (...) {
+    }
+
+    try {
+        const auto envelope = mms::MmsPduCodec::decode_envelope(bytes);
+        if (envelope.kind == mms::MmsPduKind::confirmed_request && envelope.service_tag == 12) {
+            const auto request = mms::MmsDataSetDirectoryCodec::decode_request(bytes);
+            static_cast<void>(mms::MmsDataSetDirectoryCodec::encode_request_pdu(request));
+        } else if (envelope.kind == mms::MmsPduKind::confirmed_response && envelope.service_tag == 12) {
+            const auto response = mms::MmsDataSetDirectoryCodec::decode_response(bytes);
+            static_cast<void>(mms::MmsDataSetDirectoryCodec::encode_response_pdu(response));
+        }
     } catch (...) {
     }
 }

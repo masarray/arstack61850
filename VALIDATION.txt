@@ -1,39 +1,42 @@
-ARIEC61850 C++ Phase 3C local validation
+ARIEC61850 C++ Phase 4A local validation
 Date: 2026-08-06
 
 GNU C++ 14.2 / Release / warnings-as-errors:
   Configure: PASS
   Build:     PASS
-  CTest:     PASS (14/14)
+  CTest:     PASS (15/15)
 
 Clang 17 / Release / warnings-as-errors:
   Configure: PASS
   Build:     PASS
-  CTest:     PASS (14/14)
+  CTest:     PASS (15/15)
 
 Clang 17 / RelWithDebInfo / ASan + UBSan:
   Configure: PASS
   Build:     PASS
-  CTest:     PASS (14/14)
+  CTest:     PASS (15/15)
 
-Phase 3C deterministic evidence:
-  - C#-derived MMS Initiate request byte-exact vector
-  - Initiate response and confirmed request/response/error round trips
-  - ObjectName and GetNameList request/response matrices
-  - GetVariableAccessAttributes recursive type specifications
-  - multi-variable Read/Write with partial failures
-  - bounded invoke-ID and unmatched-result routing
-  - malformed BER, depth, component, identifier, variable, and queue limits
-  - deterministic mutation smoke
+Phase 4A deterministic evidence:
+  - DataSet and BRCB/URCB inventory grouping
+  - GetNamedVariableListAttributes request/response round trips
+  - InformationReport raw MMS and P-DATA round trips
+  - exact C# OptFlds/report-item semantic vector
+  - included values, partial failures, data references, and reasons
+  - RCB attribute state and availability confidence mapping
+  - sequence gap/duplicate/wrap/reset and configuration/DataSet changes
+  - buffer-overflow and segmented-report continuity
+  - bounded stream and frame retention
+  - malformed/trailing/limit rejection and deterministic mutation smoke
 
 Local libFuzzer:
-  MMS-services corpus: PASS (5,000 runs, no crash artifact)
+  MMS-reporting corpus: PASS (5,000 runs, no crash artifact)
 
 GitHub Actions:
-  GCC / Clang / Windows MSVC matrix: PASS (14/14 tests on each compiler)
-  Clang ASan + UBSan:                PASS (14/14 tests)
-  Nine-corpus libFuzzer smoke:       PASS (including MMS services; no crash artifact)
+  GCC / Clang / Windows MSVC matrix: PASS (15/15 tests on each compiler)
+  Clang ASan + UBSan:                PASS (15/15 tests)
+  Ten-corpus libFuzzer smoke:        PASS (including MMS reporting; no crash artifact)
 
 Physical interoperability:
   Active TCP association: DISABLED
+  Live RCB enable/reservation/GI: DISABLED
   Live IED read/write/control: DISABLED

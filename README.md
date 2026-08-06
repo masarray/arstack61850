@@ -61,16 +61,21 @@ interoperability are complete.
 - Deterministic association-response construction with session and context mirroring.
 - Byte-exact C# request/response golden vectors, mutation smoke, sanitizer, and libFuzzer coverage.
 
-### Phase 3C — MMS Initiate and core confirmed services
+### Phase 3C — MMS service codecs
 
-- Byte-compatible MMS Initiate request/response codecs.
-- Confirmed request, response, and structured error envelopes with invoke-ID extraction.
-- Bounded per-invoke result routing for offline client/session orchestration.
-- VMD, domain, and association-specific object-name codecs.
-- GetNameList and GetVariableAccessAttributes with recursive type specifications.
-- Multi-variable Read and Write codecs with per-access success/failure results.
-- Raw MMS and Presentation P-DATA input/output paths.
-- Golden vectors, deterministic mutation smoke, sanitizer, and dedicated libFuzzer coverage.
+- MMS Initiate request/response and confirmed request/response/error envelopes.
+- Invoke-ID routing, ObjectName, GetNameList, GetVariableAccessAttributes, Read, and Write.
+- Recursive bounded TypeSpecification and mixed success/failure access results.
+- C#-derived vectors, sanitizer, deterministic mutation smoke, and libFuzzer coverage.
+
+### Phase 4A — offline DataSet and report monitoring
+
+- DataSet and buffered/unbuffered RCB inventory from supplied GetNameList evidence.
+- GetNamedVariableListAttributes request/response and IEC reference normalization.
+- Strict InformationReport and OptFlds-driven report-frame decoding.
+- RCB attribute read-plan/state mapping with cautious availability confidence.
+- Sequence, configuration, DataSet, overflow, and segmentation continuity tracking.
+- Bounded offline report monitor and dedicated MMS-reporting fuzz corpus.
 
 No enabled runtime opens TCP sockets, Npcap, raw sockets, or a network interface. Physical IED
 interoperability and all active transmission remain gated.
@@ -117,5 +122,6 @@ ctest --test-dir build-sanitizers --output-on-failure
 .\scripts\run-lab-check.ps1 -Pcap .\captures\device-session.pcap
 ```
 
-See `LAB_INTEROP_CHECKLIST.md` before using a physical IED and
+See `REPORTING_PROFILE.md` for the offline report decoder profile,
+`LAB_INTEROP_CHECKLIST.md` before using a physical IED, and
 `MIGRATION_CHECKLIST.md` for the detailed progress ledger.
