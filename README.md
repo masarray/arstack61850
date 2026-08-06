@@ -80,6 +80,17 @@ interoperability are complete.
 No enabled runtime opens TCP sockets, Npcap, raw sockets, or a network interface. Physical IED
 interoperability and all active transmission remain gated.
 
+## Phase 4B: association and report-subscription runtime
+
+The C++ core now includes a transport-injected MMS association runtime and persistent RCB
+subscription state machine. It performs COTP, Session, Presentation, ACSE/MMS Initiate,
+confirmed-service routing, timeout/cancellation handling, RCB re-probe, URCB reservation,
+`RptEna`, optional GI, InformationReport delivery, and ownership-aware cleanup. See
+`ASSOCIATION_RUNTIME_PROFILE.md`.
+
+The core deliberately does not ship a default socket transport in this phase. Applications
+that intentionally enable live IED access must provide an `MmsByteTransport` implementation.
+
 ## Build
 
 ### Windows — Visual Studio
