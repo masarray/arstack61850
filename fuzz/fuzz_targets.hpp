@@ -8,6 +8,9 @@
 #include "ariec61850/evidence/pcap_equivalence.hpp"
 #include "ariec61850/goose/frame_codec.hpp"
 #include "ariec61850/goose/pdu_codec.hpp"
+#include "ariec61850/mms/invoke_router.hpp"
+#include "ariec61850/mms/pdu.hpp"
+#include "ariec61850/mms/services.hpp"
 #include "ariec61850/osi/cotp.hpp"
 #include "ariec61850/osi/presentation.hpp"
 #include "ariec61850/osi/session.hpp"
@@ -265,6 +268,81 @@ inline void exercise_association(const std::span<const std::uint8_t> bytes) {
             static_cast<void>(osi::PresentationCodec::encode_p_data(
                 pdv.single_asn1_type, pdv.context_id));
         }
+    } catch (...) {
+    }
+}
+
+
+inline void exercise_mms_services(const std::span<const std::uint8_t> bytes) {
+    try {
+        mms::MmsPduEnvelope envelope;
+        if (mms::MmsPduCodec::try_decode_envelope(bytes, envelope, nullptr)) {
+            switch (envelope.kind) {
+            case mms::MmsPduKind::initiate_request: {
+                const auto request = mms::MmsPduCodec::decode_initiate_request(
+                    envelope.mms_payload);
+                static_cast<void>(mms::MmsPduCodec::encode_initiate_request(request));
+                break;
+            }
+            case mms::MmsPduKind::initiate_response: {
+                const auto response = mms::MmsPduCodec::decode_initiate_response(
+                    envelope.mms_payload);
+                static_cast<void>(mms::MmsPduCodec::encode_initiate_response(response));
+                break;
+            }
+            case mms::MmsPduKind::confirmed_request:
+                if (envelope.service_tag == 1) {
+                    const auto request = mms::MmsServiceCodec::decode_get_name_list_request(bytes);
+                    static_cast<void>(mms::MmsServiceCodec::encode_get_name_list_request_pdu(request));
+                } else if (envelope.service_tag == 4) {
+                    const auto request = mms::MmsServiceCodec::decode_read_request(bytes);
+                    static_cast<void>(mms::MmsServiceCodec::encode_read_request_pdu(request));
+                } else if (envelope.service_tag == 5) {
+                    const auto request = mms::MmsServiceCodec::decode_write_request(bytes);
+                    static_cast<void>(mms::MmsServiceCodec::encode_write_request_pdu(request));
+                } else if (envelope.service_tag == 6) {
+                    const auto request =
+                        mms::MmsServiceCodec::decode_variable_access_attributes_request(bytes);
+                    static_cast<void>(
+                        mms::MmsServiceCodec::encode_variable_access_attributes_request_pdu(request));
+                }
+                break;
+            case mms::MmsPduKind::confirmed_response:
+                if (envelope.service_tag == 1) {
+                    const auto response = mms::MmsServiceCodec::decode_get_name_list_response(bytes);
+                    static_cast<void>(mms::MmsServiceCodec::encode_get_name_list_response_pdu(response));
+                } else if (envelope.service_tag == 4) {
+                    const auto response = mms::MmsServiceCodec::decode_read_response(bytes);
+                    static_cast<void>(mms::MmsServiceCodec::encode_read_response_pdu(response));
+                } else if (envelope.service_tag == 5) {
+                    const auto response = mms::MmsServiceCodec::decode_write_response(bytes);
+                    static_cast<void>(mms::MmsServiceCodec::encode_write_response_pdu(response));
+                } else if (envelope.service_tag == 6) {
+                    const auto response =
+                        mms::MmsServiceCodec::decode_variable_access_attributes_response(bytes);
+                    static_cast<void>(
+                        mms::MmsServiceCodec::encode_variable_access_attributes_response_pdu(response));
+                }
+                break;
+            case mms::MmsPduKind::confirmed_error: {
+                const auto error = mms::MmsPduCodec::decode_confirmed_error(
+                    envelope.mms_payload);
+                static_cast<void>(mms::MmsPduCodec::encode_confirmed_error(error));
+                break;
+            }
+            default:
+                break;
+            }
+
+            mms::MmsInvokeRouter router{16U, 4U};
+            static_cast<void>(router.route(bytes));
+        }
+    } catch (...) {
+    }
+
+    try {
+        const auto type = mms::MmsServiceCodec::decode_type_specification(bytes);
+        static_cast<void>(mms::MmsServiceCodec::encode_type_specification(type));
     } catch (...) {
     }
 }

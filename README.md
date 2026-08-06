@@ -61,6 +61,17 @@ interoperability are complete.
 - Deterministic association-response construction with session and context mirroring.
 - Byte-exact C# request/response golden vectors, mutation smoke, sanitizer, and libFuzzer coverage.
 
+### Phase 3C — MMS Initiate and core confirmed services
+
+- Byte-compatible MMS Initiate request/response codecs.
+- Confirmed request, response, and structured error envelopes with invoke-ID extraction.
+- Bounded per-invoke result routing for offline client/session orchestration.
+- VMD, domain, and association-specific object-name codecs.
+- GetNameList and GetVariableAccessAttributes with recursive type specifications.
+- Multi-variable Read and Write codecs with per-access success/failure results.
+- Raw MMS and Presentation P-DATA input/output paths.
+- Golden vectors, deterministic mutation smoke, sanitizer, and dedicated libFuzzer coverage.
+
 No enabled runtime opens TCP sockets, Npcap, raw sockets, or a network interface. Physical IED
 interoperability and all active transmission remain gated.
 
