@@ -61,6 +61,8 @@ jobs:
         run: ./build-fuzz/ariec61850_fuzz_sampled_values fuzz/corpus/sampled_values -runs=1000 -timeout=5
       - name: Run PCAP corpus
         run: ./build-fuzz/ariec61850_fuzz_pcap fuzz/corpus/pcap -runs=1000 -timeout=5
+      - name: Run SCL corpus
+        run: ./build-fuzz/ariec61850_fuzz_scl fuzz/corpus/scl -runs=1000 -timeout=5
       - name: Upload crash evidence
         if: failure()
         uses: actions/upload-artifact@v4

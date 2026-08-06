@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(ARIEC61850Cpp
-    VERSION 0.6.0
+    VERSION 0.7.0
     DESCRIPTION "Incremental C++20 port of the ARIEC61850 protocol stack"
     LANGUAGES CXX)
 
@@ -29,7 +29,9 @@ add_library(ariec61850_core
     src/sampled_values/payload_inspector.cpp
     src/sampled_values/sample_counter.cpp
     src/sampled_values/stream_supervisor.cpp
-    src/evidence/pcap_equivalence.cpp)
+    src/evidence/pcap_equivalence.cpp
+    src/scl/dataset_reference.cpp
+    src/scl/parser.cpp)
 
 add_library(ARIEC61850::core ALIAS ariec61850_core)
 
@@ -107,12 +109,21 @@ if(ARIEC61850_BUILD_TESTS)
 
     add_executable(ariec61850_evidence_tests tests/test_evidence.cpp)
     target_link_libraries(ariec61850_evidence_tests PRIVATE ARIEC61850::core)
-    target_compile_features(ariec61850_evidence_tests PRIVATE cxx_std_20)
     target_compile_definitions(ariec61850_evidence_tests PRIVATE
         ARIEC61850_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_features(ariec61850_evidence_tests PRIVATE cxx_std_20)
     ariec61850_apply_warnings(ariec61850_evidence_tests)
     ariec61850_apply_sanitizers(ariec61850_evidence_tests)
     add_test(NAME ariec61850_evidence_tests COMMAND ariec61850_evidence_tests)
+
+    add_executable(ariec61850_scl_tests tests/test_scl.cpp)
+    target_link_libraries(ariec61850_scl_tests PRIVATE ARIEC61850::core)
+    target_compile_definitions(ariec61850_scl_tests PRIVATE
+        ARIEC61850_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_features(ariec61850_scl_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_scl_tests)
+    ariec61850_apply_sanitizers(ariec61850_scl_tests)
+    add_test(NAME ariec61850_scl_tests COMMAND ariec61850_scl_tests)
 
     add_executable(ariec61850_fuzz_smoke_tests tests/test_fuzz_smoke.cpp)
     target_link_libraries(ariec61850_fuzz_smoke_tests PRIVATE ARIEC61850::core)
@@ -155,4 +166,5 @@ if(ARIEC61850_BUILD_FUZZERS)
     ariec61850_add_fuzzer(ariec61850_fuzz_goose fuzz/fuzz_goose.cpp)
     ariec61850_add_fuzzer(ariec61850_fuzz_sampled_values fuzz/fuzz_sampled_values.cpp)
     ariec61850_add_fuzzer(ariec61850_fuzz_pcap fuzz/fuzz_pcap.cpp)
+    ariec61850_add_fuzzer(ariec61850_fuzz_scl fuzz/fuzz_scl.cpp)
 endif()

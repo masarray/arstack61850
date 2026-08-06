@@ -8,6 +8,7 @@
 #include "ariec61850/goose/pdu_codec.hpp"
 #include "ariec61850/sampled_values/frame_codec.hpp"
 #include "ariec61850/sampled_values/pdu_codec.hpp"
+#include "ariec61850/scl/parser.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -84,6 +85,22 @@ inline void exercise_pcap(const std::span<const std::uint8_t> bytes) {
         const auto packets = capture::PcapReader::read_all(stream);
         const auto report = evidence::PcapEquivalenceAnalyzer::analyze(packets);
         static_cast<void>(evidence::PcapEquivalenceAnalyzer::to_json(report));
+    } catch (...) {
+    }
+}
+
+inline void exercise_scl(const std::span<const std::uint8_t> bytes) {
+    std::string input;
+    if (!bytes.empty()) {
+        input.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    }
+    try {
+        const auto document = scl::SclParser{}.parse(input, "fuzz-input.scl");
+        static_cast<void>(document.ieds.size());
+        static_cast<void>(document.data_sets.size());
+        static_cast<void>(document.goose_streams.size());
+        static_cast<void>(document.sampled_values_streams.size());
+        static_cast<void>(document.report_controls.size());
     } catch (...) {
     }
 }
