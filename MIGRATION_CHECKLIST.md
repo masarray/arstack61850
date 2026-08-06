@@ -86,7 +86,20 @@ until laboratory interoperability is complete.
 
 ## Phase 4 — reporting, control, and file service
 
-- [ ] DataSet/RCB inventory and report monitoring.
+### Phase 4A — offline reporting foundation
+
+- [x] DataSet and BRCB/URCB inventory from supplied discovery evidence.
+- [x] GetNamedVariableListAttributes request/response and member normalization.
+- [x] InformationReport unconfirmed-PDU codec with per-item failures.
+- [x] OptFlds-driven report header, inclusion, value, data-reference, and reason mapping.
+- [x] C# exact report-shape compatibility regression.
+- [x] RCB attribute read-plan and typed state/availability mapping.
+- [x] Sequence, configuration, DataSet, overflow, and segmentation continuity tracking.
+- [x] Bounded offline report stream/frame retention.
+- [~] MMS-reporting mutation smoke and LLVM libFuzzer corpus awaiting GitHub CI.
+
+### Later Phase 4 work
+
 - [ ] Direct and SBO control state machines.
 - [ ] Enhanced-security termination/error handling.
 - [ ] MMS file and fault-record transfer.
@@ -106,6 +119,8 @@ until laboratory interoperability is complete.
 - [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 3A.
 - [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 3B.
 - [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 3C.
+- [x] PR #6 through PR #10 squash-merged sequentially to `main`.
+- [~] Phase 4A GCC/Clang/MSVC and security workflows pending publication.
 - [ ] Controlled physical-lab process-bus capture evidence.
 - [ ] C# and C++ executable-oracle comparison in one CI job.
 

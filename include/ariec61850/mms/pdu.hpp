@@ -41,6 +41,7 @@ enum class MmsConfirmedService : std::int32_t {
     read = 4,
     write = 5,
     get_variable_access_attributes = 6,
+    get_named_variable_list_attributes = 12,
 };
 
 struct MmsInitiateDetail final {

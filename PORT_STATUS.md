@@ -2,65 +2,57 @@
 
 ## Current milestone
 
-**Phase 3C — offline MMS Initiate, confirmed-service envelopes, invoke routing, and core service codecs are implemented and validated on the published stacked branch.**
+**Phase 4A — offline DataSet/RCB inventory, InformationReport parsing, and bounded report monitoring are implemented and locally validated.**
 
 ## Delivered modules
 
 | Area | Status |
 |---|---|
-| BER, Ethernet, VLAN, process-bus, PCAP | Complete |
-| MMS Data / AllData codec | Complete |
-| GOOSE wire codec and offline runtime | Complete |
-| Sampled Values codec and supervision | Complete |
-| SCL secure parser and semantic model | Complete; PR #6 CI passed |
-| COMTRADE reader and SCL mapping | Complete; PR #7 CI passed |
-| TPKT and COTP transport foundation | Complete; PR #8 CI passed |
-| ISO Session, Presentation, and ACSE | Complete; PR #9 CI passed |
-| MMS Initiate request/response | Implemented |
-| Confirmed request/response/error envelopes | Implemented |
-| Bounded invoke-ID result routing | Implemented |
-| GetNameList | Implemented |
-| GetVariableAccessAttributes and recursive type specifications | Implemented |
-| Read and Write service codecs | Implemented |
-| MMS services mutation smoke/libFuzzer | Complete |
+| Phase 0 and Phase 1 process-bus foundation | Merged to `main` |
+| SCL and COMTRADE engineering formats | Merged to `main` |
+| TPKT/COTP and Session/Presentation/ACSE | Merged to `main` |
+| MMS Initiate and confirmed services | Merged to `main` |
+| DataSet and RCB discovery inventory | Implemented |
+| GetNamedVariableListAttributes directory codec | Implemented |
+| InformationReport codec and exact frame mapper | Implemented |
+| RCB state and availability evidence mapper | Implemented |
+| Sequence and segmentation continuity tracker | Implemented |
+| Bounded offline report monitor | Implemented |
+| MMS reporting mutation smoke/libFuzzer | Implemented; GitHub CI pending |
 | Active MMS association/client runtime | Disabled |
 
-## Phase 3C behavior
+## Phase 4A behavior
 
-The offline MMS service layer:
+The offline reporting layer:
 
-- encodes and strictly decodes byte-compatible MMS Initiate request and response PDUs;
-- encodes and decodes confirmed request, confirmed response, and confirmed error envelopes;
-- classifies top-level MMS PDUs and extracts invoke IDs from raw MMS or Presentation P-DATA;
-- routes confirmed results into bounded per-invoke queues while isolating unmatched traffic;
-- encodes and decodes VMD-specific, domain-specific, and association-specific object names;
-- supports GetNameList request/response paging fields;
-- supports GetVariableAccessAttributes with bounded recursive array and structure type specifications;
-- supports multi-variable Read requests and mixed success/failure access results;
-- supports multi-variable Write requests and per-variable success/failure results; and
-- preserves deterministic Presentation context routing without opening an association or network connection.
+- groups supplied named-variable and named-variable-list discovery evidence into DataSet, BRCB, and URCB inventory;
+- encodes and decodes GetNamedVariableListAttributes service tag 12 and normalizes DataSet member references;
+- strictly decodes Unconfirmed-PDU InformationReport access results;
+- follows IEC 61850 OptFlds ordering for report headers, inclusion bits, values, data references, and reasons;
+- preserves per-value DataAccessError results;
+- maps supplied RCB Read responses into typed state with conservative availability confidence;
+- detects sequence gaps, duplicates, wraps, resets, configuration/DataSet changes, buffer overflow, and segmentation discontinuity; and
+- retains only configured numbers of streams and recent frames.
 
-## Validation
+## Local validation
 
 - GNU C++ 14.2, Release, warnings as errors: passed.
 - Clang 17, Release, warnings as errors: passed.
 - Clang 17, ASan + UBSan: passed.
-- Eleven deterministic Phase 3C regression groups: passed.
-- Full repository CTest: 14/14 passed.
-- C#-derived 40-byte MMS Initiate request vector: byte-exact pass.
-- Initiate response, confirmed envelopes, and confirmed-error round trips: passed.
-- ObjectName, GetNameList, attributes/type, Read, Write, and invoke-router matrices: passed.
-- Recursive array/structure depth and component limits: passed.
-- Local MMS-services libFuzzer: 5,000 runs, passed with no crash artifact.
-- GitHub GCC, Clang, and Windows MSVC matrix: passed.
-- GitHub ASan/UBSan: passed.
-- Nine-corpus libFuzzer workflow including MMS services: passed with no crash artifact.
+- Eleven deterministic Phase 4A reporting groups: passed.
+- Full repository CTest: 15/15 passed.
+- C# exact OptFlds/report-item shape: passed.
+- Local MMS-reporting libFuzzer: 5,000 runs, no crash artifact.
 
 ## Remaining acceptance gates
 
-- Active association lifecycle, timeout, cancellation, and live IED interoperability remain outside this phase.
-- Reporting, control, and file services remain Phase 4 work.
+- GitHub GCC, Clang, and Windows MSVC matrix for Phase 4A.
+- GitHub ASan/UBSan and ten-corpus libFuzzer workflow.
+- Live association lifecycle, timeout, cancellation, RCB enable/reservation, GI, and IED interoperability remain outside this phase.
+- Direct/SBO control and file services remain later Phase 4 work.
 
 ## Safety boundary
 
-Phase 3C is an offline deterministic codec and invoke-routing layer. It does not open a TCP socket, connect to an IED, transmit MMS traffic, execute reads or writes against equipment, or enable control operations.
+Phase 4A consumes saved bytes and supplied discovery/read evidence only. It does not open
+a socket, connect to an IED, enable or reserve an RCB, trigger GI, execute a live read or
+write, or perform a control operation.
