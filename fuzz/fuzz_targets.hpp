@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "ariec61850/acse/association.hpp"
 #include "ariec61850/asn1/ber.hpp"
 #include "ariec61850/capture/pcap.hpp"
 #include "ariec61850/comtrade/reader.hpp"
@@ -8,6 +9,8 @@
 #include "ariec61850/goose/frame_codec.hpp"
 #include "ariec61850/goose/pdu_codec.hpp"
 #include "ariec61850/osi/cotp.hpp"
+#include "ariec61850/osi/presentation.hpp"
+#include "ariec61850/osi/session.hpp"
 #include "ariec61850/osi/tpkt.hpp"
 #include "ariec61850/sampled_values/frame_codec.hpp"
 #include "ariec61850/sampled_values/pdu_codec.hpp"
@@ -199,6 +202,68 @@ inline void exercise_transport(const std::span<const std::uint8_t> bytes) {
         osi::TpktFrame frame;
         while (decoder.try_pop(frame)) {
             static_cast<void>(frame.payload.size());
+        }
+    } catch (...) {
+    }
+}
+
+
+inline void exercise_association(const std::span<const std::uint8_t> bytes) {
+    try {
+        osi::SessionSpdu spdu;
+        std::size_t consumed = 0U;
+        if (osi::SessionCodec::try_decode_prefix(bytes, spdu, consumed, nullptr)) {
+            if ((spdu.kind == osi::SessionSpduKind::connect ||
+                 spdu.kind == osi::SessionSpduKind::accept) &&
+                !spdu.user_data.empty()) {
+                if (spdu.kind == osi::SessionSpduKind::connect) {
+                    osi::PresentationCp cp;
+                    if (osi::PresentationCodec::try_decode_cp(spdu.user_data, cp, nullptr)) {
+                        acse::AcseAarq aarq;
+                        if (acse::AcseAssociationCodec::try_decode_aarq(
+                                cp.user_data.single_asn1_type, aarq, nullptr)) {
+                            static_cast<void>(acse::AcseAssociationCodec::encode_aarq(aarq));
+                        }
+                    }
+                } else {
+                    osi::PresentationCpa cpa;
+                    if (osi::PresentationCodec::try_decode_cpa(spdu.user_data, cpa, nullptr)) {
+                        acse::AcseAare aare;
+                        if (acse::AcseAssociationCodec::try_decode_aare(
+                                cpa.user_data.single_asn1_type, aare, nullptr)) {
+                            static_cast<void>(acse::AcseAssociationCodec::encode_aare(aare));
+                        }
+                    }
+                }
+            }
+        }
+    } catch (...) {
+    }
+
+    try {
+        acse::AssociationRequestEnvelope request;
+        if (acse::AcseAssociationCodec::try_decode_association_request(
+                bytes, request, nullptr)) {
+            const auto response = acse::AcseAssociationCodec::build_accept_response(request);
+            acse::AssociationResponseEnvelope decoded;
+            static_cast<void>(acse::AcseAssociationCodec::try_decode_association_response(
+                response.payload, decoded, nullptr));
+        }
+    } catch (...) {
+    }
+
+    try {
+        acse::AssociationResponseEnvelope response;
+        static_cast<void>(acse::AcseAssociationCodec::try_decode_association_response(
+            bytes, response, nullptr));
+    } catch (...) {
+    }
+
+    try {
+        osi::PresentationPdv pdv;
+        if (osi::PresentationCodec::try_decode_p_data(bytes, pdv, nullptr)) {
+            static_cast<void>(osi::PresentationCodec::encode_p_data(
+                pdv.single_asn1_type, pdv.context_id));
         }
     } catch (...) {
     }

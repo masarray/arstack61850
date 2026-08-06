@@ -60,9 +60,16 @@ until laboratory interoperability is complete.
 
 ### Phase 3B — session, presentation, and ACSE
 
-- [ ] ISO session SPDU codec.
-- [ ] Presentation context negotiation.
-- [ ] ACSE AARQ/AARE association envelopes.
+- [x] ISO Session Connect/Accept SPDU codec with bounded parameter parsing.
+- [x] Session data-transfer profile with optional Give Tokens prefix.
+- [x] Presentation CP/CPA mode, selector, context-definition, and result codecs.
+- [x] ACSE and MMS presentation-context negotiation with BER transfer syntax.
+- [x] Fully-encoded-data PDV and P-DATA context routing.
+- [x] Structured ACSE AARQ/AARE application-context and identity envelopes.
+- [x] EXTERNAL user-information handling with opaque MMS Initiate payload boundary.
+- [x] C#-compatible 184-byte request and deterministic 138-byte response vectors.
+- [x] Session-parameter and presentation-context mirroring in association responses.
+- [x] OSI association mutation smoke and LLVM libFuzzer corpus.
 
 ### Phase 3C — MMS envelopes and services
 
@@ -89,6 +96,7 @@ until laboratory interoperability is complete.
 - [x] C#-derived COMTRADE ASCII and binary fixtures.
 - [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 2B.
 - [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 3A.
+- [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 3B.
 - [ ] Controlled physical-lab process-bus capture evidence.
 - [ ] C# and C++ executable-oracle comparison in one CI job.
 
