@@ -256,11 +256,11 @@ int main() {
     const std::vector<std::pair<std::string, std::function<void()>>> tests{
         {"SCL minimal station", parser_extracts_minimal_station_semantics},
         {"SCL multi-stream", parser_extracts_multiple_sampled_values_streams_and_conflicts},
-        {"SCL dataset references", dataset_referenceResolver_accepts_canonical_and_local_forms},
-       {"SCL conflicts and warnings", parser_detects_duplicate_ieds_and_missing_dataset_references},
+        {"SCL dataset references", dataset_reference_resolver_accepts_canonical_and_local_forms},
+        {"SCL conflicts and warnings", parser_detects_duplicate_ieds_and_missing_dataset_references},
         {"SCL edition detection", parser_detects_editions_from_root_metadata},
-       {"SCL prefixed namespace", parser_supports_prefixed_namespaces_and_predefined_entities},
-       {"SCL secure XML", secure_xml_reader_rejects_dtd_entities_and_malformed_documents},
+        {"SCL prefixed namespace", parser_supports_prefixed_namespaces_and_predefined_entities},
+        {"SCL secure XML", secure_xml_reader_rejects_dtd_entities_and_malformed_documents},
     };
 
     std::size_t passed{};
