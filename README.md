@@ -51,6 +51,16 @@ interoperability are complete.
 - Fragment-count, byte-count, and empty non-final fragment abuse guards.
 - C#-derived golden vectors, deterministic mutation smoke, sanitizer, and libFuzzer coverage.
 
+### Phase 3B — MMS association codecs
+
+- Bounded ISO Session Connect/Accept SPDU and data-transfer profile codecs.
+- Presentation CP/CPA context definitions, negotiation results, selectors, and PDV routing.
+- ACSE and MMS context negotiation using BER transfer syntax.
+- Structured ACSE AARQ/AARE application context, AP-title, AE-qualifier, result, and diagnostic parsing.
+- EXTERNAL user-information handling with MMS Initiate retained as an opaque Phase 3C payload.
+- Deterministic association-response construction with session and context mirroring.
+- Byte-exact C# request/response golden vectors, mutation smoke, sanitizer, and libFuzzer coverage.
+
 No enabled runtime opens TCP sockets, Npcap, raw sockets, or a network interface. Physical IED
 interoperability and all active transmission remain gated.
 

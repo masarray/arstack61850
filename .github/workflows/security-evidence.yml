@@ -67,6 +67,8 @@ jobs:
         run: ./build-fuzz/ariec61850_fuzz_comtrade fuzz/corpus/comtrade -runs=1000 -timeout=5
       - name: Run OSI transport corpus
         run: ./build-fuzz/ariec61850_fuzz_transport fuzz/corpus/transport -runs=1000 -timeout=5
+      - name: Run OSI association corpus
+        run: ./build-fuzz/ariec61850_fuzz_association fuzz/corpus/association -runs=1000 -timeout=5
       - name: Upload crash evidence
         if: failure()
         uses: actions/upload-artifact@v4

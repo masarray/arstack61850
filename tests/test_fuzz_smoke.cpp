@@ -100,6 +100,9 @@ void deterministic_decoder_mutation_smoke() {
         "tests/fixtures/comtrade/simple_fault.cfg");
     const auto transport = from_hex(
         "03000015011E0000000100C0010AC1020001C2020001");
+    const auto association = read_file(
+        std::filesystem::path{ARIEC61850_SOURCE_DIR} /
+        "fuzz/corpus/association/balanced_aarq");
 
     const auto expected_cases =
         mutation_case_count(ber) +
@@ -108,7 +111,8 @@ void deterministic_decoder_mutation_smoke() {
         mutation_case_count(pcap) +
         mutation_case_count(scl) +
         mutation_case_count(comtrade) +
-        mutation_case_count(transport);
+        mutation_case_count(transport) +
+        mutation_case_count(association);
 
     std::size_t cases = 0U;
     cases += exercise_mutations(ber, [](const ByteVector& bytes) {
@@ -131,6 +135,9 @@ void deterministic_decoder_mutation_smoke() {
     });
     cases += exercise_mutations(transport, [](const ByteVector& bytes) {
         ar::iec61850::fuzzing::exercise_transport(bytes);
+    });
+    cases += exercise_mutations(association, [](const ByteVector& bytes) {
+        ar::iec61850::fuzzing::exercise_association(bytes);
     });
 
     if (cases != expected_cases) {

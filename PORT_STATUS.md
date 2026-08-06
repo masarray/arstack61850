@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**Phase 3A — offline RFC 1006 TPKT and COTP transport framing is implemented and validated on the published stacked branch.**
+**Phase 3B — offline ISO Session, Presentation, and ACSE association codecs are implemented and validated on the published stacked branch.**
 
 ## Delivered modules
 
@@ -14,48 +14,50 @@
 | Sampled Values codec and supervision | Complete |
 | SCL secure parser and semantic model | Complete; PR #6 CI passed |
 | COMTRADE reader and SCL mapping | Complete; PR #7 CI passed |
-| TPKT frame codec | Implemented |
-| Incremental TPKT stream decoder | Implemented |
-| COTP CR/CC/DT/DR/ER codec | Implemented |
-| TPDU-size and TSAP negotiation | Implemented |
-| COTP segmentation and bounded reassembly | Implemented |
-| OSI transport mutation smoke/libFuzzer | Complete |
-| Session, Presentation, and ACSE | Not started |
+| TPKT and COTP transport foundation | Complete; PR #8 CI passed |
+| ISO Session CN/AC and data-transfer profile | Implemented |
+| Presentation CP/CPA context negotiation | Implemented |
+| Presentation P-DATA and PDV context routing | Implemented |
+| ACSE AARQ/AARE association envelopes | Implemented |
+| C# association golden-vector parity | Implemented |
+| OSI association mutation smoke/libFuzzer | Complete |
+| MMS Initiate and confirmed-service envelopes | Phase 3C, not started |
 | Active TCP connection runtime | Disabled |
 
-## Phase 3A behavior
+## Phase 3B behavior
 
-The offline transport layer:
+The offline association layer:
 
-- encodes and strictly decodes RFC 1006 TPKT frames;
-- rejects unsupported versions, non-zero reserved octets, undersized lengths, and exact-length mismatches;
-- incrementally extracts complete TPKT frames from fragmented or coalesced TCP-style byte streams;
-- decodes COTP Connection Request, Connection Confirm, Data, Disconnect Request, and Error TPDUs;
-- validates the COTP length indicator and complete variable-parameter TLVs;
-- preserves the C# default Connection Request wire vector;
-- mirrors C1/C2 TSAP selectors in Connection Confirm and never selects a TPDU size larger than the peer proposal;
-- segments Data TPDUs according to the negotiated TPDU capacity; and
-- reassembles EOT sequences under explicit byte, fragment, and empty-fragment limits.
+- strictly encodes and decodes bounded ISO Session Connect and Accept SPDUs;
+- preserves and mirrors the C# session requirements, calling selector, called selector, and context identifiers;
+- encodes and decodes Presentation CP and CPA PPDUs with explicit context definitions and negotiation results;
+- supports ACSE and MMS presentation contexts with BER transfer syntax;
+- encodes and decodes fully-encoded-data PDV lists and the IEC 61850 P-DATA transfer profile;
+- structurally encodes and decodes ACSE AARQ and AARE envelopes;
+- extracts application context, AP titles, AE qualifiers, association result, diagnostic, and EXTERNAL user information;
+- preserves the MMS Initiate request or response as an opaque Phase 3C payload while validating its ACSE and Presentation routing; and
+- builds deterministic association responses by mirroring the request session parameters and presentation context ordering.
 
 ## Validation
 
 - GNU C++ 14.2, Release, warnings as errors: passed.
 - Clang 17, Release, warnings as errors: passed.
 - Clang 17, ASan + UBSan: passed.
-- Nine deterministic TPKT/COTP regression groups: passed.
-- C#-derived TPKT, CR, CC, and Data golden vectors: passed.
-- Incremental stream fragmentation/coalescing matrix: passed.
-- Bounded segmentation/reassembly and abuse guards: passed.
-- Local transport libFuzzer: 5,000 runs, passed with no crash artifact.
+- Nine deterministic Session/Presentation/ACSE regression groups: passed.
+- C#-derived 184-byte association request vector: byte-exact pass.
+- Deterministic 138-byte association response vector: byte-exact pass.
+- Presentation context negotiation and context-ID mirroring: passed.
+- P-DATA encode/decode matrix and malformed-envelope rejection: passed.
+- Local association libFuzzer: 5,000 runs, passed with no crash artifact.
 - GitHub GCC, Clang, and Windows MSVC matrix: passed.
 - GitHub ASan/UBSan: passed.
-- Seven-corpus libFuzzer workflow including OSI transport: passed with no crash artifact.
+- Eight-corpus libFuzzer workflow including OSI association: passed with no crash artifact.
 
 ## Remaining acceptance gates
 
-- Phase 3B ISO session, Presentation, and ACSE association codecs.
+- Phase 3C MMS Initiate, invoke routing, and confirmed-service envelopes.
 - Socket connection, cancellation, timeout, and live IED interoperability remain outside this phase.
 
 ## Safety boundary
 
-Phase 3A is an offline deterministic codec and byte-stream reassembly layer. It does not open a TCP socket, connect to an IED, send MMS traffic, perform writes or controls, or enable any active network transmission.
+Phase 3B is an offline deterministic codec and association-envelope layer. It does not open a TCP socket, connect to an IED, send MMS traffic, perform writes or controls, or enable active network transmission.
