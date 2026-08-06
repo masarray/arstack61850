@@ -13,54 +13,36 @@ until laboratory interoperability is complete.
 
 ## Phase 1 — deterministic process-bus core
 
-### Phase 1A — MMS data foundation
-
-- [x] IEC 61850 UTC time.
-- [x] Recursive MMS Data model and AllData BER codec.
-
-### Phase 1B — GOOSE wire codec
-
-- [x] GOOSE PDU and Ethernet/VLAN/process-bus frame codecs.
-- [x] Dataset-count validation and C#-derived golden vectors.
-
-### Phase 1C — GOOSE runtime
-
-- [x] Subscriber TTL/state/sequence/identity supervision.
-- [x] Offline publisher session and retransmission runtime.
-
-### Phase 1D — Sampled Values
-
-- [x] ASDU and multi-ASDU SAV PDU codec.
-- [x] Ethernet frame codec for `0x88BA`.
-- [x] Counter, stream, quality, and generic payload diagnostics.
-- [x] C#-derived PDU and complete Ethernet-frame golden vectors.
-
-### Phase 1E — evidence hardening
-
-- [x] Synthetic C#-derived GOOSE and SV PCAP corpus.
-- [x] Read-only PCAP equivalence analyzer and JSON CLI.
-- [x] Exact process-bus decode/re-encode comparison.
-- [x] Canonical PCAP packet/timestamp round-trip comparison.
-- [x] PCAP `snaplen` and packet-length allocation bounds.
-- [x] Explicit regression test for malicious PCAP allocation lengths.
-- [x] CMake sanitizer option and local ASan/UBSan pass.
-- [x] Deterministic BER/GOOSE/SV/PCAP mutation smoke suite.
-- [x] LLVM libFuzzer targets and seed corpora.
-- [x] BER, GOOSE, Sampled Values, and PCAP corpus smoke: 1,000 runs each.
-- [x] GitHub ASan/UBSan workflow passed.
-- [x] Isolated-lab checklist, report template, and read-only runner scripts.
-- [ ] Real IED or vendor-simulator GOOSE capture accepted.
-- [ ] Real IED or vendor-simulator Sampled Values capture accepted.
-- [ ] C# and C++ executable-oracle comparison in one CI job.
+- [x] MMS UTC time and recursive Data/AllData codec.
+- [x] GOOSE wire codec and offline runtime supervision.
+- [x] Sampled Values PDU/frame codec, quality, payload, counter, and stream diagnostics.
+- [x] Synthetic PCAP equivalence, sanitizer, mutation, and libFuzzer hardening.
+- [ ] Real IED or vendor-simulator GOOSE/SV capture accepted.
 - [ ] Real-time SV publisher timing-health validation.
-
-**Phase 1 status: deterministic core and automated synthetic evidence are complete;
-physical interoperability and active-transport validation remain.**
 
 ## Phase 2 — engineering file formats
 
-- [ ] SCL object model, parser, validation, workspace, and export.
-- [ ] COMTRADE CFG/DAT reader, scaling, and mapping.
+### Phase 2A — SCL foundation
+
+- [x] Bounded XML/SCL parser with DTD/entity rejection.
+- [x] IED, DataSet, FCDA, GOOSE, SV, report-control, and Communication models.
+- [x] Edition detection and DataTypeTemplates resolution.
+- [x] DataSet binding, APPID/MAC/VLAN normalization, conflict diagnostics.
+- [x] SCL deterministic mutation smoke and libFuzzer corpus.
+- [ ] Mutable SCL workspace and standards-aware export.
+
+### Phase 2B — COMTRADE foundation
+
+- [x] CFG identity, channel, frequency, sample-rate, timestamp, file-type, and time-multiplier parsing.
+- [x] ASCII DAT analog/digital decoding.
+- [x] BINARY, BINARY32, and FLOAT32 DAT decoding.
+- [x] Analog `a * raw + b` scaling and packed digital status words.
+- [x] Multi-rate timestamp fallback and bounded record layout arithmetic.
+- [x] Default voltage/current phase channel mapping.
+- [x] SCL Sampled Values to COMTRADE channel mapping with confidence diagnostics.
+- [x] C#-derived ASCII and binary fixtures.
+- [x] Read-only COMTRADE human/JSON inspection CLI.
+- [x] COMTRADE mutation smoke and LLVM libFuzzer corpus.
 
 ## Phase 3 — MMS transport and association
 
@@ -83,18 +65,16 @@ physical interoperability and active-transport validation remain.**
 
 ## Current acceptance evidence
 
-- [x] GCC C++20 warnings-as-errors build through Phase 1E local subset.
-- [x] Clang C++20 warnings-as-errors build through Phase 1E local subset.
-- [x] Clang ASan/UBSan local regression pass.
-- [x] Synthetic GOOSE/SV PCAP exact equivalence.
-- [x] Deterministic mutation smoke across more than 500 mutated inputs.
-- [x] Full GCC/Clang/MSVC workflow passed with 8/8 CTest executables.
-- [x] GitHub ASan/UBSan and libFuzzer security workflow passed.
-- [ ] Controlled physical-lab capture evidence.
+- [x] GCC and Clang C++20 warnings-as-errors local validation through Phase 2B.
+- [x] Clang ASan/UBSan local COMTRADE regression pass.
+- [x] C#-derived COMTRADE ASCII and binary fixtures.
+- [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 2B.
+- [ ] Controlled physical-lab process-bus capture evidence.
+- [ ] C# and C++ executable-oracle comparison in one CI job.
 
 ## Safety gate
 
-All interoperability tooling is receive-only and operates on saved PCAP files. Active
-Npcap transmission, real-time SV scheduling, MMS write/control, and IED operation
-remain outside the enabled runtime surface until physical-lab evidence, timing,
-cancellation, and explicit transmit authorization are complete.
+SCL and COMTRADE tooling is read-only. Process-bus interoperability tooling operates on
+saved PCAP files. Active Npcap transmission, real-time SV scheduling, MMS write/control,
+and IED operation remain outside the enabled runtime surface until separate physical-lab,
+timing, cancellation, and explicit transmit authorization gates are complete.

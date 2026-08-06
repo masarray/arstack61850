@@ -3,6 +3,7 @@
 
 #include "ariec61850/asn1/ber.hpp"
 #include "ariec61850/capture/pcap.hpp"
+#include "ariec61850/comtrade/reader.hpp"
 #include "ariec61850/evidence/pcap_equivalence.hpp"
 #include "ariec61850/goose/frame_codec.hpp"
 #include "ariec61850/goose/pdu_codec.hpp"
@@ -101,6 +102,23 @@ inline void exercise_scl(const std::span<const std::uint8_t> bytes) {
         static_cast<void>(document.goose_streams.size());
         static_cast<void>(document.sampled_values_streams.size());
         static_cast<void>(document.report_controls.size());
+    } catch (...) {
+    }
+}
+
+inline void exercise_comtrade(const std::span<const std::uint8_t> bytes) {
+    std::string input;
+    if (!bytes.empty()) {
+        input.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    }
+    try {
+        const auto configuration = comtrade::Reader{}.parse_configuration(
+            input, "fuzz-input.cfg");
+        if (configuration.data_file_type == comtrade::DataFileType::ascii) {
+            static_cast<void>(comtrade::Reader{}.read_ascii_data(input, configuration));
+        } else if (configuration.data_file_type != comtrade::DataFileType::unknown) {
+            static_cast<void>(comtrade::Reader{}.read_binary_data(bytes, configuration));
+        }
     } catch (...) {
     }
 }

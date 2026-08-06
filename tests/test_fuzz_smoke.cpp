@@ -95,13 +95,17 @@ void deterministic_decoder_mutation_smoke() {
     const auto scl = read_file(
         std::filesystem::path{ARIEC61850_SOURCE_DIR} /
         "tests/fixtures/scl/minimal-station.scd");
+    const auto comtrade = read_file(
+        std::filesystem::path{ARIEC61850_SOURCE_DIR} /
+        "tests/fixtures/comtrade/simple_fault.cfg");
 
     const auto expected_cases =
         mutation_case_count(ber) +
         mutation_case_count(goose) +
         mutation_case_count(sampled_values) +
         mutation_case_count(pcap) +
-        mutation_case_count(scl);
+        mutation_case_count(scl) +
+        mutation_case_count(comtrade);
 
     std::size_t cases = 0U;
     cases += exercise_mutations(ber, [](const ByteVector& bytes) {
@@ -118,6 +122,9 @@ void deterministic_decoder_mutation_smoke() {
     });
     cases += exercise_mutations(scl, [](const ByteVector& bytes) {
         ar::iec61850::fuzzing::exercise_scl(bytes);
+    });
+    cases += exercise_mutations(comtrade, [](const ByteVector& bytes) {
+        ar::iec61850::fuzzing::exercise_comtrade(bytes);
     });
 
     if (cases != expected_cases) {

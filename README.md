@@ -13,34 +13,36 @@ interoperability are complete.
 - MAC, VLAN, Ethernet, IEC 61850 process-bus, and classic PCAP codecs.
 - GOOSE retransmission schedule.
 
-### Phase 1A–1C — MMS and GOOSE
+### Phase 1A–1E — deterministic process-bus core
 
 - IEC 61850 UTC time and recursive MMS Data/AllData codec.
-- Complete GOOSE PDU and Ethernet frame codecs.
-- Subscriber TTL, state, sequence, identity, and wraparound supervision.
-- Deterministic offline publisher runtime with exponential retransmission scheduling.
+- Complete GOOSE PDU/frame codecs and offline publisher/subscriber supervision.
+- Sampled Values ASDU, multi-ASDU PDU, Ethernet frame, payload, quality, counter, and
+  stream supervision.
+- C#-derived synthetic PCAP equivalence evidence.
+- Sanitizer, deterministic mutation-smoke, and LLVM libFuzzer coverage.
+- Receive-only isolated-laboratory tooling.
 
-### Phase 1D — Sampled Values
+### Phase 2A — SCL foundation
 
-- Sampled Values ASDU and multi-ASDU SAV PDU codec.
-- Ethernet/VLAN/process-bus frame codec for EtherType `0x88BA`.
-- `smpCnt` continuity, wrap, gap, duplicate, out-of-order, and restart tracking.
-- Stream identity/configuration supervision, quality-word support, and generic
-  `seqOfData` inspection.
+- Bounded, dependency-free XML/SCL reader.
+- IED, DataSet, FCDA, GOOSE, Sampled Values, report-control, and communication mapping.
+- SCL edition detection, type-template resolution, DataSet binding, diagnostics, and
+  SCL/XML fuzzing.
 
-### Phase 1E — evidence hardening
+### Phase 2B — COMTRADE foundation
 
-- C#-derived synthetic PCAP containing one GOOSE and one Sampled Values frame.
-- Read-only `ariec61850_pcap_interop_check` tool with JSON output.
-- Exact captured-frame decode/re-encode comparison and canonical PCAP round-trip checks.
-- PCAP allocation hardening using validated `snaplen`, included length, and original length.
-- Clang AddressSanitizer and UndefinedBehaviorSanitizer workflow.
-- LLVM libFuzzer targets and seed corpora for BER, GOOSE, Sampled Values, and PCAP.
-- Deterministic mutation smoke tests that run on every compiler, including MSVC.
-- Isolated-laboratory checklist, report template, and Windows/Linux runner scripts.
+- CFG parsing for IEEE C37.111-style 1991/1999/2013 records.
+- ASCII, BINARY, BINARY32, and FLOAT32 DAT readers.
+- Analog engineering scaling (`a * raw + b`) and packed digital status decoding.
+- Timestamp multiplier and multi-rate fallback scheduling.
+- Default `Va/Vb/Vc/Vn/Ia/Ib/Ic/In` channel mapping.
+- Deterministic SCL Sampled Values to COMTRADE channel binding.
+- Read-only `ariec61850_comtrade_inspect` human/JSON CLI.
+- C#-derived ASCII and binary fixtures, mutation smoke, sanitizer, and libFuzzer corpus.
 
-No Phase 1 runtime opens Npcap, raw sockets, or a network interface. Physical IED
-interoperability remains pending until real captures are collected and accepted.
+No enabled runtime opens Npcap, raw sockets, or a network interface. Physical IED
+interoperability and all active transmission remain gated.
 
 ## Build
 
@@ -70,10 +72,18 @@ cmake --build build-sanitizers --parallel
 ctest --test-dir build-sanitizers --output-on-failure
 ```
 
-### Read-only PCAP interoperability check
+## Read-only tools
+
+### Inspect a COMTRADE record
 
 ```powershell
-./scripts/run-lab-check.ps1 -Pcap ./captures/device-session.pcap
+.\build\Release\ariec61850_comtrade_inspect.exe .\record.cfg --json
+```
+
+### Analyze a saved process-bus PCAP
+
+```powershell
+.\scripts\run-lab-check.ps1 -Pcap .\captures\device-session.pcap
 ```
 
 See `LAB_INTEROP_CHECKLIST.md` before using a physical IED and

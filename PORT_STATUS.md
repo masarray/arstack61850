@@ -2,11 +2,7 @@
 
 ## Current milestone
 
-**Phase 1E — automated process-bus evidence and security hardening is implemented.**
-
-The deterministic MMS, GOOSE, and Sampled Values layers now have synthetic PCAP
-comparison, sanitizer coverage, mutation smoke tests, libFuzzer harnesses, and a
-receive-only lab evidence workflow.
+**Phase 2B — COMTRADE CFG/DAT parsing and SCL signal mapping is implemented and validated on the published stacked branch.**
 
 ## Delivered modules
 
@@ -17,58 +13,48 @@ receive-only lab evidence workflow.
 | GOOSE wire codec and offline runtime | Complete |
 | Sampled Values codec and supervision | Complete |
 | Synthetic GOOSE/SV PCAP equivalence | Complete |
-| Read-only PCAP interoperability checker | Complete |
-| PCAP allocation-length hardening | Complete |
-| ASan/UBSan build and regression suite | Complete; GitHub CI passed |
-| Deterministic mutation smoke suite | Complete |
-| LLVM libFuzzer targets and seed corpus | Complete; 1,000 runs per target passed |
-| Isolated-lab runner/checklist/report | Complete |
+| ASan/UBSan, mutation smoke, and libFuzzer | Complete through COMTRADE |
+| SCL secure parser and semantic model | Complete; PR #6 CI passed |
+| COMTRADE CFG model/parser | Implemented |
+| COMTRADE ASCII DAT | Implemented |
+| COMTRADE BINARY/BINARY32/FLOAT32 DAT | Implemented |
+| Analog scaling and digital status words | Implemented |
+| Multi-rate timestamp fallback | Implemented |
+| Default electrical channel mapping | Implemented |
+| SCL Sampled Values to COMTRADE binding | Implemented |
+| Read-only COMTRADE inspection CLI | Implemented |
 | Real IED receive-only interoperability | Pending physical capture |
-| C# executable-oracle CI comparison | Pending original C# executable/project integration |
 | Active GOOSE/SV transmission | Disabled |
 
-## Phase 1E behavior
+## Phase 2B behavior
 
-The PCAP evidence analyzer:
+The COMTRADE reader:
 
-- reads classic Ethernet PCAP without opening a network adapter;
-- identifies GOOSE and Sampled Values frames;
-- decodes and re-encodes each process-bus frame;
-- requires exact byte-for-byte equivalence;
-- verifies packet order, frame bytes, and microsecond-normalized timestamps through a
-  canonical PCAP write/read cycle; and
-- produces human-readable or JSON evidence suitable for a controlled lab report.
+- parses station/device/revision metadata and analog/digital channel definitions;
+- validates bounded configuration, channel, sample-rate, and data sizes;
+- decodes ASCII, 16-bit BINARY, BINARY32, and FLOAT32 records;
+- applies engineering scaling as `a * raw + b`;
+- decodes digital channels from ASCII fields or packed 16-bit binary words;
+- applies the COMTRADE time multiplier and falls back to a piecewise multi-rate schedule
+  when timestamps are missing or non-monotonic;
+- creates default voltage/current phase mappings; and
+- maps non-quality/non-timestamp SCL Sampled Values entries to COMTRADE analog channels
+  using semantic quantity/phase matching followed by deterministic ordered fallback.
 
-Security hardening includes:
-
-- rejection of zero or excessive PCAP `snaplen`;
-- validation that included packet length does not exceed `snaplen` or the original
-  packet length before allocation;
-- ASan/UBSan instrumentation;
-- deterministic decoder mutation tests on all compilers; and
-- libFuzzer entry points for BER, GOOSE, Sampled Values, and PCAP.
-
-## Local validation
+## Validation
 
 - GNU C++ 14.2, Release, warnings as errors: passed.
 - Clang 17, Release, warnings as errors: passed.
 - Clang 17, ASan + UBSan: passed.
-- Synthetic PCAP exact equivalence: passed.
-- Deterministic mutation smoke: passed and found the PCAP allocation issue now covered
-  by an explicit regression test.
+- Nine COMTRADE regression groups: passed.
+- C#-derived ASCII 40-sample fixture: passed.
+- C#-derived BINARY 80-sample fixture: passed.
+- Read-only COMTRADE JSON CLI smoke: passed.
+- GitHub GCC, Clang, and Windows MSVC matrix: passed.
+- GitHub ASan/UBSan: passed.
+- Six-corpus libFuzzer workflow including COMTRADE: passed with no crash artifact.
 
 ## Remaining acceptance gates
 
-- GitHub sanitizer and libFuzzer jobs passed on the published branch.
-- At least one controlled capture from a real or vendor-simulated IED must pass the
-  checker and be documented using `LAB_INTEROP_REPORT_TEMPLATE.md`.
-- Real-time Sampled Values timing health and active transmission require a separate,
-  approved laboratory plan.
-
-## GitHub validation
-
-- GCC, Clang, and Windows MSVC: passed.
-- Full regression matrix: 8/8 CTest executables passed on each platform.
-- Clang ASan + UBSan: passed.
-- libFuzzer BER, GOOSE, Sampled Values, and PCAP corpora: 1,000 runs each, passed.
-- Physical isolated-lab GOOSE/SV capture evidence: pending.
+- Cross-language executable-oracle comparison remains pending.
+- Active replay/transmission remains outside this phase.

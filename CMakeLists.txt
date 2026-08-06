@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(ARIEC61850Cpp
-    VERSION 0.7.0
+    VERSION 0.8.0
     DESCRIPTION "Incremental C++20 port of the ARIEC61850 protocol stack"
     LANGUAGES CXX)
 
@@ -31,7 +31,11 @@ add_library(ariec61850_core
     src/sampled_values/stream_supervisor.cpp
     src/evidence/pcap_equivalence.cpp
     src/scl/dataset_reference.cpp
-    src/scl/parser.cpp)
+    src/scl/parser.cpp
+    src/comtrade/model.cpp
+    src/comtrade/reader.cpp
+    src/comtrade/channel_mapper.cpp
+    src/comtrade/scl_mapper.cpp)
 
 add_library(ARIEC61850::core ALIAS ariec61850_core)
 
@@ -78,6 +82,12 @@ if(ARIEC61850_BUILD_TOOLS)
     target_compile_features(ariec61850_pcap_interop_check PRIVATE cxx_std_20)
     ariec61850_apply_warnings(ariec61850_pcap_interop_check)
     ariec61850_apply_sanitizers(ariec61850_pcap_interop_check)
+
+    add_executable(ariec61850_comtrade_inspect tools/comtrade_inspect.cpp)
+    target_link_libraries(ariec61850_comtrade_inspect PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_comtrade_inspect PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_comtrade_inspect)
+    ariec61850_apply_sanitizers(ariec61850_comtrade_inspect)
 endif()
 
 if(ARIEC61850_BUILD_TESTS)
@@ -125,6 +135,15 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_sanitizers(ariec61850_scl_tests)
     add_test(NAME ariec61850_scl_tests COMMAND ariec61850_scl_tests)
 
+    add_executable(ariec61850_comtrade_tests tests/test_comtrade.cpp)
+    target_link_libraries(ariec61850_comtrade_tests PRIVATE ARIEC61850::core)
+    target_compile_definitions(ariec61850_comtrade_tests PRIVATE
+        ARIEC61850_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_features(ariec61850_comtrade_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_comtrade_tests)
+    ariec61850_apply_sanitizers(ariec61850_comtrade_tests)
+    add_test(NAME ariec61850_comtrade_tests COMMAND ariec61850_comtrade_tests)
+
     add_executable(ariec61850_fuzz_smoke_tests tests/test_fuzz_smoke.cpp)
     target_link_libraries(ariec61850_fuzz_smoke_tests PRIVATE ARIEC61850::core)
     target_include_directories(ariec61850_fuzz_smoke_tests PRIVATE
@@ -141,6 +160,11 @@ if(ARIEC61850_BUILD_TESTS)
             NAME ariec61850_pcap_interop_smoke
             COMMAND ariec61850_pcap_interop_check
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/process_bus_csharp_vectors.pcap
+                --json)
+        add_test(
+            NAME ariec61850_comtrade_inspect_smoke
+            COMMAND ariec61850_comtrade_inspect
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/comtrade/simple_fault.cfg
                 --json)
     endif()
 endif()
@@ -167,4 +191,5 @@ if(ARIEC61850_BUILD_FUZZERS)
     ariec61850_add_fuzzer(ariec61850_fuzz_sampled_values fuzz/fuzz_sampled_values.cpp)
     ariec61850_add_fuzzer(ariec61850_fuzz_pcap fuzz/fuzz_pcap.cpp)
     ariec61850_add_fuzzer(ariec61850_fuzz_scl fuzz/fuzz_scl.cpp)
+    ariec61850_add_fuzzer(ariec61850_fuzz_comtrade fuzz/fuzz_comtrade.cpp)
 endif()
