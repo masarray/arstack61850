@@ -134,7 +134,7 @@ public:
         const auto written = ::send(
             client, response.data(), response.size(), 0);
         ::close(client);
-        if (written != static_cast<decltype(written)>(response.size())) {
+        if (written < 0 || static_cast<std::size_t>(written) != response.size()) {
             throw std::runtime_error("Loopback server send failed.");
         }
     }
