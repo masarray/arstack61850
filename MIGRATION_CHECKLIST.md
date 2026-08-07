@@ -1,8 +1,8 @@
 # ARIEC61850 C++ Migration Checklist
 
 Status legend: `[x]` implemented and regression-tested, `[~]` implemented but awaiting
-external/CI evidence, `[ ]` not started. The C# repository remains the behavioral oracle
-until laboratory interoperability is complete.
+external/CI or physical-lab evidence, `[ ]` not started. The C# repository remains the
+behavioral oracle until laboratory interoperability is complete.
 
 ## Phase 0 — portable deterministic foundation
 
@@ -122,8 +122,25 @@ until laboratory interoperability is complete.
 - [~] Optional read-only RCB attribute inventory/state probes.
 - [~] Read-only `ariec61850_live_discover` human/JSON CLI.
 - [~] Discovery service allowlist regression proving no MMS Write request is emitted.
-- [ ] Controlled physical IED association/discovery validation.
-- [ ] Multi-vendor pagination, timeout, reconnect, and soak evidence.
+
+### Phase 4C.1 — live-model parity and physical read-only interoperability
+
+- [x] C#-compatible `live-ied-model-v1` output schema.
+- [x] Logical Device / Logical Node / Data Object / Data Attribute hierarchy.
+- [x] IEC 61850 reference and functional-constraint normalization.
+- [x] Direct and nested TypeSpecification mapping to discovered attributes.
+- [x] Conservative IED identity and logical-device alias inference.
+- [x] CDC inference with explicit confidence.
+- [x] DataSet and BRCB/URCB evidence in the live model.
+- [x] Deterministic canonical manifest and fingerprint.
+- [x] C#↔C++ parity comparison script.
+- [x] Reconnect-cycle physical read-only evidence runner for Windows/Linux.
+- [x] Automated stability, warning-policy, coverage, and optional parity gates.
+- [~] GCC/Clang strict local validation and sanitizer smoke.
+- [ ] GitHub GCC/Clang/MSVC and Security/Evidence workflows accepted.
+- [ ] Controlled physical IED or vendor-simulator evidence accepted.
+- [ ] Primary-vendor ten-cycle, timeout/reconnect, and pagination evidence accepted.
+- [ ] C# and C++ same-IED parity evidence accepted.
 
 ### Later Phase 4 work
 
@@ -137,26 +154,8 @@ until laboratory interoperability is complete.
 - [ ] CLI parity and Windows Npcap abstraction.
 - [ ] Native Engineering Workbench, simulator, discovery, and SV publisher UI.
 
-## Current acceptance evidence
-
-- [x] GCC and Clang C++20 warnings-as-errors local validation through Phase 2B.
-- [x] Clang ASan/UBSan local COMTRADE regression pass.
-- [x] C#-derived COMTRADE ASCII and binary fixtures.
-- [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 2B.
-- [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 3A.
-- [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 3B.
-- [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 3C.
-- [x] PR #6 through PR #10 squash-merged sequentially to `main`.
-- [x] Full main-based branch GCC/Clang/MSVC and security workflows through Phase 4A.
-- [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 4B.
-- [~] Phase 4C loopback TCP and scripted read-only discovery regression added.
-- [ ] Phase 4C GitHub GCC/Clang/MSVC and security workflows accepted.
-- [ ] Controlled physical-lab process-bus capture evidence.
-- [ ] C# and C++ executable-oracle comparison in one CI job.
-
 ## Safety gate
 
-SCL, COMTRADE, PCAP, and the Phase 4C live discovery tool are read-only. The generic TCP
-transport performs no operation by itself. Active RCB mutation, control, dynamic DataSet
-mutation, file transfer, Npcap transmission, and real-time SV scheduling require separate
-explicit APIs, authorization, and physical-laboratory acceptance.
+SCL, COMTRADE, PCAP, and the Phase 4C/4C.1 live discovery surface are read-only. Active RCB
+mutation, control, dynamic DataSet mutation, file transfer, Npcap transmission, and real-time SV
+scheduling require separate explicit APIs, authorization, and physical-laboratory acceptance.
