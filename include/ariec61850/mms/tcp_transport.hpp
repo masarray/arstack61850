@@ -1,6 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+// Prevent the Windows SDK from defining the legacy min/max function-like
+// macros. They otherwise corrupt std::min and numeric_limits<T>::max calls in
+// the built-in TCP transport when compiling with MSVC.
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#endif
+
 #include "ariec61850/mms/association_runtime.hpp"
 
 #include <chrono>
