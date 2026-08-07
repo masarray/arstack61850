@@ -25,8 +25,10 @@ Board: Waveshare ESP32-S3-POE-ETH-8DI-8DO, SKU 32108.
 - DI1..DI8: GPIO4..GPIO11.
 - Digital outputs are exposed through TCA9554PWR, I2C address 0x20.
 - Isolated RS485 and CAN are available for future gateway use.
-- W5500 MACRAW is available on Socket 0 and is the reference raw Layer-2
-  transport for GOOSE/SV. TCP/MMS uses other W5500 sockets.
+- W5500 supports MACRAW at chip level. The preferred ESP-IDF W5500 driver
+  operates the device in MAC RAW mode and feeds the ESP software TCP/IP stack.
+  Raw SV/GOOSE and lwIP TCP/MMS therefore share one Ethernet interface instead
+  of arstack independently allocating W5500 hardware sockets.
 
 Raw Layer-2 SV/GOOSE is an Ethernet feature. Wi-Fi is not a substitute for the
 reference process-bus path.
@@ -178,30 +180,42 @@ Acceptance:
 - timestamp serialization has a no-allocation path;
 - sanitizer/fuzzer/host regression remains green.
 
-### E2. W5500 MACRAW transport adapter
+### E2. ESP-IDF W5500 Ethernet adapter
 
-Goal: map `embedded::RawEthernetPort` to W5500 Socket 0 MACRAW without leaking
-W5500 APIs into protocol code.
+Goal: map `embedded::RawEthernetPort` to the official ESP-IDF W5500 Ethernet
+MACRAW path without leaking ESP-IDF/W5500 APIs into protocol code.
+
+Preferred architecture:
+
+```text
+arstack raw SV/GOOSE ----> esp_eth raw Ethernet transmit ----+
+                                                            |
+MMS TCP <---- lwIP / BSD socket API <---- esp_netif --------+--> ESP-IDF W5500 MACRAW
+```
+
+The ESP-IDF W5500 driver owns the chip-level MACRAW operation. arstack should
+not independently program W5500 hardware sockets when using that driver.
 
 Responsibilities:
 
-- initialize W5500 SPI transport;
-- reserve Socket 0 for MACRAW;
-- expose raw-frame transmit and receive callbacks;
+- initialize the official ESP-IDF W5500 SPI Ethernet driver with board pins;
+- attach the driver to `esp_netif`/lwIP for TCP/MMS;
+- expose raw-frame transmit callback for GOOSE/SV;
 - preserve destination/source MAC, VLAN tag and EtherType exactly;
 - expose PHY/link state;
 - instrument TX errors, would-block and frame counts.
 
 Acceptance on host/mock first:
 
-- driver adapter can be unit-tested with fake register/SPI backend;
+- adapter-facing policy can be unit-tested with fake transmit backend;
 - protocol core does not include ESP-IDF/W5500 headers.
 
 Acceptance on board:
 
+- Ethernet obtains link and normal IP traffic works through lwIP;
 - raw custom EtherType frame visible in Wireshark;
 - VLAN-tagged frame visible without mutation;
-- SV EtherType 0x88BA frame visible.
+- SV EtherType 0x88BA frame visible while normal TCP/IP remains usable.
 
 ### E3. ESP32-S3 SV Publisher hardware proof
 
@@ -345,7 +359,7 @@ Industrialization work:
 Until Public Alpha is tagged:
 
 - approximately **70% effort** goes to public-useful host protocol parity,
-  documentation and real-Ied evidence;
+  documentation and real-IED evidence;
 - approximately **30% effort** goes to embedded architecture and the SV hardware
   path.
 
@@ -364,7 +378,8 @@ The project succeeds when the same protocol implementation can demonstrate all
 of these without forks of the wire core:
 
 1. Windows/Linux engineering client can browse a real IED.
-2. ESP32-S3 can publish standards-shaped SV frames over W5500 MACRAW.
+2. ESP32-S3 can publish standards-shaped SV frames over the ESP-IDF W5500
+   MACRAW Ethernet interface.
 3. ESP32-S3 can expose eight isolated inputs/outputs as a small IEC 61850 IED.
 4. A later STM32/NXP port changes platform adapters and capacities, not protocol
    semantics.
