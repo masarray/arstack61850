@@ -241,6 +241,64 @@ void csharp_identity_resolver_cases_are_preserved() {
     }
 }
 
+void csharp_control_block_inventory_cases_are_preserved() {
+    {
+        mms::MmsLiveDiscoveryResult result;
+        result.endpoint = {"192.0.2.10", 102U};
+        result.names.domain_variables.emplace(
+            "LD0",
+            std::vector<std::string>{
+                "LLN0$GO$gcbA01$GoEna",
+                "LLN0$GO$gcbA01$DatSet",
+                "LLN0$MS$msvcb01$SvEna",
+                "LLN0$SG$SGCB$ActSG",
+                "LLN0$LG$lcbA01$LogEna"});
+
+        const auto model = mms::MmsLiveModelBuilder::build(result);
+        CHECK(model.goose_control_blocks.size() == 1U);
+        CHECK(model.sampled_value_control_blocks.size() == 1U);
+        CHECK(model.setting_group_controls.size() == 1U);
+        CHECK(model.log_controls.size() == 1U);
+        CHECK(model.goose_control_blocks.front().name == "gcbA01");
+        CHECK(std::find(
+                  model.goose_control_blocks.front().attributes.begin(),
+                  model.goose_control_blocks.front().attributes.end(),
+                  "DatSet") != model.goose_control_blocks.front().attributes.end());
+        CHECK(model.goose_control_blocks.front().data_set_reference_status ==
+              "AttributePresentValueNotRead");
+        CHECK(model.goose_control_blocks.front().discovery_status ==
+              "AttributeInventoryOnly");
+        CHECK(model.coverage.goose_control_block_count == 1U);
+        CHECK(model.coverage.sampled_value_control_block_count == 1U);
+        CHECK(model.coverage.setting_group_control_count == 1U);
+        CHECK(model.coverage.log_control_count == 1U);
+        CHECK(model.summary.find("GoCB=1, SVCB=1, SGCB=1, LCB=1") !=
+              std::string::npos);
+        const auto json = model.to_json();
+        CHECK(json.find("\"gooseControlBlocks\":[") != std::string::npos);
+        CHECK(json.find("\"sampledValueControlBlocks\":[") != std::string::npos);
+        CHECK(json.find("\"CONTROL_BLOCK_VALUE_READ_PENDING\"") !=
+              std::string::npos);
+    }
+
+    {
+        mms::MmsLiveDiscoveryResult result;
+        result.endpoint = {"192.0.2.10", 102U};
+        result.names.domain_variables.emplace(
+            "LD0",
+            std::vector<std::string>{
+                "LLN0$SP$SGCB$ActSG",
+                "LLN0$SP$SGCB$NumOfSG",
+                "LLN0$SP$NotSettingGroup$setVal"});
+
+        const auto model = mms::MmsLiveModelBuilder::build(result);
+        CHECK(model.setting_group_controls.size() == 1U);
+        CHECK(model.setting_group_controls.front().name == "SGCB");
+        CHECK(model.setting_group_controls.front().functional_constraint == "SP");
+        CHECK(model.coverage.setting_group_control_count == 1U);
+    }
+}
+
 void live_discovery_builds_csharp_compatible_read_only_model() {
     ScriptedTransport transport;
     queue_handshake(transport);
@@ -334,6 +392,7 @@ void pagination_without_forward_progress_is_rejected() {
 int main() {
     try {
         csharp_identity_resolver_cases_are_preserved();
+        csharp_control_block_inventory_cases_are_preserved();
         live_discovery_builds_csharp_compatible_read_only_model();
         pagination_without_forward_progress_is_rejected();
         std::cout << "Live MMS discovery and model parity tests passed.\n";
