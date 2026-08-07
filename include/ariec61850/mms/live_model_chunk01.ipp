@@ -96,6 +96,25 @@ namespace live_model_detail {
     }
     return best;
 }
+
+// Mirrors ARIEC61850 LiveIedModelDiscoveryBuilder.GuessSclBType.  This does
+// not pretend to be exact MMS type evidence; it only supplies a conservative
+// SCL-oriented hint when GetVariableAccessAttributes was skipped or could not
+// resolve the leaf from a returned type tree.
+[[nodiscard]] inline std::string guess_scl_basic_type(
+    const std::string_view attribute_path,
+    const std::string_view functional_constraint) {
+    const auto parts = split(attribute_path, '.');
+    const auto name = parts.empty() ? std::string{} : lower(parts.back());
+    if (name == "q") return "Quality";
+    if (name == "t" || name.ends_with("tm")) return "Timestamp";
+    if (name == "stval") return "BOOLEAN";
+    if (name == "f") return "FLOAT32";
+    if (name == "i") return "INT32";
+    if (same(functional_constraint, "CO")) return "Struct";
+    return "Unknown";
+}
+
 [[nodiscard]] inline std::pair<std::string, double> infer_cdc(
     std::string_view ln_class,
     std::string_view name,
