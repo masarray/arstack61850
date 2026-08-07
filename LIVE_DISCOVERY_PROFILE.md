@@ -1,62 +1,49 @@
-# Built-in TCP and Live Read-Only Discovery Profile
+# Built-in TCP, Live Read-Only Discovery, and Live-Model Parity Profile
 
 ## Scope
 
-Phase 4C provides a cross-platform TCP implementation of `MmsByteTransport` and a bounded
-live discovery workflow above the Phase 4B association runtime. It makes the C++ stack usable
-against an explicitly selected MMS endpoint without requiring an application-specific socket
-adapter.
+Phase 4C provides a cross-platform TCP implementation of `MmsByteTransport` and bounded live
+MMS discovery. Phase 4C.1 maps that evidence into the same `live-ied-model-v1` engineering
+shape exported by the C# behavioral oracle and adds repeatable physical-lab evidence tooling.
 
 ## TCP transport
 
-`TcpMmsByteTransport`:
+`TcpMmsByteTransport` resolves IPv4/IPv6 endpoints, uses non-blocking Winsock/POSIX sockets,
+handles partial sends and arbitrary receive chunks, and observes absolute deadlines plus
+`std::stop_token` cancellation. It performs no operation until explicitly used by an
+application runtime.
 
-- resolves IPv4 and IPv6 endpoints with `getaddrinfo`;
-- uses non-blocking Winsock or POSIX sockets;
-- awaits connect, send, and receive readiness in bounded slices;
-- observes the caller's absolute deadline and `std::stop_token` during every wait;
-- enables TCP_NODELAY and keepalive by default;
-- handles partial sends and arbitrary receive chunking;
-- reports timeout, cancellation, peer close, and socket failures as typed runtime errors; and
-- owns no worker thread and performs no automatic reconnect.
+## Read-only discovery
 
-The transport is intentionally serialized: one association operation may use it at a time.
-`MmsAssociationRuntime` remains responsible for TPKT/COTP framing, association state, invoke
-routing, and reconnect policy.
-
-## Live discovery
-
-`MmsLiveDiscoveryClient` performs only these confirmed MMS services:
+`MmsLiveDiscoveryClient` performs only:
 
 1. GetNameList for VMD domains;
-2. GetNameList for domain-specific named variables;
-3. GetNameList for domain-specific named-variable lists;
-4. optional GetVariableAccessAttributes probes;
-5. optional GetNamedVariableListAttributes DataSet directory reads; and
-6. optional multi-variable Read requests for discovered RCB attributes.
+2. GetNameList for domain variables;
+3. GetNameList for named-variable lists;
+4. optional GetVariableAccessAttributes;
+5. optional GetNamedVariableListAttributes; and
+6. optional Read of discovered RCB attributes.
 
-The result contains bounded domain/name evidence, DataSet and BRCB/URCB inventory, variable
-TypeSpecification evidence, DataSet members, read-only RCB state, and explicit diagnostics for
-optional probes that failed. Pagination must make forward progress and all domain, page, name,
-type, DataSet, and RCB counts are caller-bounded.
+It does not construct Write, RCB enable/reservation, GI, control, dynamic DataSet mutation, or
+file-service requests. Regression tests decode every discovery request and reject service tag 5.
 
-`MmsTcpLiveDiscoverySession` combines the built-in TCP transport, Phase 4B association runtime,
-and the discovery client. The `ariec61850_live_discover` tool exposes this workflow with human
-or JSON summaries.
+## Live-model parity
 
-## Read-only boundary
+The C++ mapper normalizes `LN$FC$DO$DA...` into LD/LN/DO/DA hierarchy, preserves FC and MMS
+references, resolves direct or nested TypeSpecification evidence, infers CDC with explicit
+confidence, includes DataSet and RCB evidence, and produces a deterministic manifest and
+fingerprint. `ariec61850_live_discover --model-json` emits `live-ied-model-v1` JSON.
 
-The discovery client never constructs an MMS Write request. It does not enable or reserve an
-RCB, issue GI, create/delete a DataSet, operate a control object, or access MMS file services.
-Regression tests decode every discovery request and reject service tag 5 (Write).
+`scripts/compare-live-model-parity.py` compares C# and C++ documents for identity, attributes,
+FC/type, DataSets, and report controls.
 
-`TcpMmsByteTransport` itself is a general byte transport. An application that deliberately
-combines it with another runtime surface remains responsible for that surface's authorization
-and safety policy.
+## Physical interoperability evidence
 
-## Acceptance boundary
+`scripts/run-live-readonly-interop.py` reconnects and performs fresh discovery for each cycle,
+retains per-cycle JSON, verifies stable fingerprints and warning policy, optionally runs C#
+parity, and writes `interop-summary.json`. PowerShell and Bash wrappers are included.
 
-Automated loopback transport tests and scripted discovery tests do not replace physical IED
-interoperability. Controlled laboratory evidence is still required for vendor-specific
-association parameters, large model pagination, slow IED timing, disconnect behavior, and
-long-running network stability.
+Automated loopback and scripted tests do not replace physical IED evidence. Merge acceptance
+still requires controlled runs against a reachable IED or vendor simulator, Windows/MSVC CI,
+large-model pagination when available, timeout/reconnect evidence, and a reviewed C# parity
+capture against the same IED configuration.
