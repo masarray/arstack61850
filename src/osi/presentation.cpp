@@ -587,8 +587,22 @@ bool PresentationCodec::try_decode_cpa(
                 }
                 bool saw_results = false;
                 bool saw_user_data = false;
+                bool saw_responding_selector = false;
                 for (const auto& normal : BerReader::read_children(item.value)) {
-                    if (normal.encoded_tag == 0xA5U) {
+                    if (normal.encoded_tag == 0x83U) {
+                        // responding-presentation-selector is optional in a CPA.
+                        // Vendor tools such as IEDScout may echo it before the
+                        // presentation-context-definition-result-list.
+                        if (saw_responding_selector) {
+                            throw PresentationFormatError(
+                                "Presentation CPA contains duplicate responding selectors.");
+                        }
+                        if (normal.value.size() > maximum_selector_bytes) {
+                            throw PresentationFormatError(
+                                "Presentation responding selector exceeds the limit.");
+                        }
+                        saw_responding_selector = true;
+                    } else if (normal.encoded_tag == 0xA5U) {
                         if (saw_results) {
                             throw PresentationFormatError("Presentation CPA contains duplicate context results.");
                         }
