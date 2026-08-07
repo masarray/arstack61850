@@ -58,6 +58,124 @@
         document.logical_devices.push_back(std::move(ld));
     }
 
+    // Port of ARIEC61850 BuildControlBlockInventory.  This is deliberately
+    // inventory-only: FC attribute names are enough to prove the control block
+    // exists, but no enable/value/address attribute is read in this phase.
+    for (const auto& ld : document.logical_devices) {
+        for (const auto& ln : ld.logical_nodes) {
+            for (const auto& object : ln.data_objects) {
+                std::set<std::string, std::less<>> functional_constraints;
+                for (const auto& attribute : object.attributes) {
+                    functional_constraints.insert(attribute.functional_constraint);
+                }
+
+                for (const auto& functional_constraint : functional_constraints) {
+                    std::string kind;
+                    if (same(functional_constraint, "GO")) {
+                        kind = "GSEControl";
+                    } else if (same(functional_constraint, "MS") ||
+                               same(functional_constraint, "US")) {
+                        kind = "SampledValueControl";
+                    } else if (same(functional_constraint, "SG") ||
+                               same(functional_constraint, "SE") ||
+                               (same(functional_constraint, "SP") &&
+                                same(object.name, "SGCB"))) {
+                        kind = "SettingGroupControl";
+                    } else if (same(functional_constraint, "LG")) {
+                        kind = "LogControl";
+                    } else {
+                        continue;
+                    }
+
+                    MmsLiveControlBlock control;
+                    control.kind = kind;
+                    control.reference = ld.mms_domain + "/" + ln.name + "." +
+                        functional_constraint + "." + object.name;
+                    control.domain = ld.mms_domain;
+                    control.logical_node = ln.name;
+                    control.name = object.name;
+                    control.functional_constraint = functional_constraint;
+
+                    for (const auto& attribute : object.attributes) {
+                        if (same(attribute.functional_constraint, functional_constraint) &&
+                            !attribute.attribute_path.empty()) {
+                            if (std::none_of(
+                                    control.attributes.begin(),
+                                    control.attributes.end(),
+                                    [&attribute](const auto& existing) {
+                                        return same(existing, attribute.attribute_path);
+                                    })) {
+                                control.attributes.push_back(attribute.attribute_path);
+                            }
+                        }
+                    }
+                    std::sort(
+                        control.attributes.begin(),
+                        control.attributes.end(),
+                        [](const auto& left, const auto& right) {
+                            return lower(left) < lower(right);
+                        });
+
+                    const auto has_attribute_name = [&](const std::string_view name) {
+                        return std::any_of(
+                            control.attributes.begin(),
+                            control.attributes.end(),
+                            [name](const auto& attribute) {
+                                return same(attribute, name);
+                            });
+                    };
+                    const auto has_any_address_attribute =
+                        has_attribute_name("DstAddress") ||
+                        has_attribute_name("Addr") ||
+                        has_attribute_name("APPID") ||
+                        has_attribute_name("MAC-Address");
+                    const auto has_enable_attribute = std::any_of(
+                        control.attributes.begin(),
+                        control.attributes.end(),
+                        [](const auto& attribute) {
+                            return ends_with_ci(attribute, "Ena");
+                        });
+                    const auto has_data_set_attribute = has_attribute_name("DatSet");
+                    const auto has_conf_rev_attribute = has_attribute_name("ConfRev");
+
+                    control.data_set_reference_status = has_data_set_attribute
+                        ? "AttributePresentValueNotRead"
+                        : "AttributeNotPresentInNameList";
+                    control.address_status = has_any_address_attribute
+                        ? "AddressAttributesPresentValueNotRead"
+                        : "NotDiscovered";
+                    control.discovery_status = "AttributeInventoryOnly";
+                    control.message =
+                        kind +
+                        " discovered from live FC attribute names. Attribute values are not read in this phase. DatSetAttr=" +
+                        (has_data_set_attribute ? "yes" : "no") +
+                        ", ConfRevAttr=" + (has_conf_rev_attribute ? "yes" : "no") +
+                        ", enableAttr=" + (has_enable_attribute ? "yes" : "no") + ".";
+
+                    if (same(kind, "GSEControl")) {
+                        document.goose_control_blocks.push_back(std::move(control));
+                    } else if (same(kind, "SampledValueControl")) {
+                        document.sampled_value_control_blocks.push_back(std::move(control));
+                    } else if (same(kind, "SettingGroupControl")) {
+                        document.setting_group_controls.push_back(std::move(control));
+                    } else if (same(kind, "LogControl")) {
+                        document.log_controls.push_back(std::move(control));
+                    }
+                }
+            }
+        }
+    }
+
+    const auto sort_controls = [](auto& controls) {
+        std::sort(controls.begin(), controls.end(), [](const auto& left, const auto& right) {
+            return lower(left.reference) < lower(right.reference);
+        });
+    };
+    sort_controls(document.goose_control_blocks);
+    sort_controls(document.sampled_value_control_blocks);
+    sort_controls(document.setting_group_controls);
+    sort_controls(document.log_controls);
+
     // Match the C# builder: the inventory itself is valuable evidence.  A DataSet
     // remains present in the model even when GetNamedVariableListAttributes was
     // intentionally skipped or failed; only its member list remains unavailable.
@@ -141,10 +259,24 @@
                 data_set.used_by_report_controls.push_back(control.reference);
             }
         }
-        std::sort(
-            data_set.used_by_report_controls.begin(),
-            data_set.used_by_report_controls.end(),
-            [](const auto& left, const auto& right) {
+        for (const auto& control : document.goose_control_blocks) {
+            if (!control.data_set_reference.empty() &&
+                same(control.data_set_reference, data_set.reference)) {
+                data_set.used_by_goose_controls.push_back(control.reference);
+            }
+        }
+        for (const auto& control : document.sampled_value_control_blocks) {
+            if (!control.data_set_reference.empty() &&
+                same(control.data_set_reference, data_set.reference)) {
+                data_set.used_by_sampled_value_controls.push_back(control.reference);
+            }
+        }
+        const auto sort_references = [](auto& references) {
+            std::sort(references.begin(), references.end(), [](const auto& left, const auto& right) {
                 return lower(left) < lower(right);
             });
+        };
+        sort_references(data_set.used_by_report_controls);
+        sort_references(data_set.used_by_goose_controls);
+        sort_references(data_set.used_by_sampled_value_controls);
     }
