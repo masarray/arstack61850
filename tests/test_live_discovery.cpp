@@ -299,6 +299,118 @@ void csharp_control_block_inventory_cases_are_preserved() {
     }
 }
 
+[[nodiscard]] mms::MmsReportControlCandidate make_rcb_candidate(
+    const std::string& name) {
+    mms::MmsReportControlCandidate candidate;
+    candidate.domain = "IEDLD0";
+    candidate.logical_node = "LLN0";
+    candidate.functional_constraint = "BR";
+    candidate.name = name;
+    candidate.reference = "IEDLD0/LLN0.BR." + name;
+    candidate.buffered = true;
+    candidate.attributes = {"DatSet", "RptEna"};
+    return candidate;
+}
+
+void dynamic_rcb_binding_states_are_preserved() {
+    mms::MmsLiveDiscoveryResult result;
+    result.endpoint = {"192.0.2.10", 102U};
+    result.names.domain_variables.emplace(
+        "IEDLD0", std::vector<std::string>{"LLN0$ST$Mod$stVal"});
+
+    const auto bound = make_rcb_candidate("brcbBound");
+    const auto unbound = make_rcb_candidate("brcbUnbound");
+    const auto attribute_failed = make_rcb_candidate("brcbDatSetFailed");
+    const auto read_failed = make_rcb_candidate("brcbReadFailed");
+    const auto not_read = make_rcb_candidate("brcbNotRead");
+    result.report_inventory.report_controls = {
+        bound, unbound, attribute_failed, read_failed, not_read};
+
+    mms::MmsReportControlEvidence bound_evidence;
+    bound_evidence.candidate = bound;
+    bound_evidence.requested_attributes = {"DatSet", "RptEna"};
+    mms::MmsReportControlState bound_state;
+    bound_state.candidate = bound;
+    bound_state.data_set_reference = "IEDLD0/LLN0$DataSetA";
+    bound_state.report_enabled = false;
+    bound_evidence.state = bound_state;
+
+    mms::MmsReportControlEvidence unbound_evidence;
+    unbound_evidence.candidate = unbound;
+    unbound_evidence.requested_attributes = {"DatSet", "RptEna"};
+    mms::MmsReportControlState unbound_state;
+    unbound_state.candidate = unbound;
+    unbound_state.data_set_reference.clear();
+    unbound_state.report_enabled = false;
+    unbound_evidence.state = unbound_state;
+
+    mms::MmsReportControlEvidence attribute_failed_evidence;
+    attribute_failed_evidence.candidate = attribute_failed;
+    attribute_failed_evidence.requested_attributes = {"DatSet", "RptEna"};
+    mms::MmsReportControlState attribute_failed_state;
+    attribute_failed_state.candidate = attribute_failed;
+    attribute_failed_state.diagnostics.push_back("DatSet read failed (3)");
+    attribute_failed_evidence.state = attribute_failed_state;
+
+    mms::MmsReportControlEvidence read_failed_evidence;
+    read_failed_evidence.candidate = read_failed;
+    read_failed_evidence.requested_attributes = {"DatSet", "RptEna"};
+    read_failed_evidence.error = "scripted RCB read failure";
+
+    result.report_controls = {
+        bound_evidence,
+        unbound_evidence,
+        attribute_failed_evidence,
+        read_failed_evidence};
+
+    const auto model = mms::MmsLiveModelBuilder::build(result);
+    CHECK(model.coverage.report_control_count == 5U);
+    CHECK(model.coverage.report_control_bound_count == 1U);
+    CHECK(model.coverage.report_control_unbound_count == 1U);
+    CHECK(model.coverage.report_control_binding_read_failed_count == 2U);
+    CHECK(model.coverage.report_control_binding_not_read_count == 1U);
+
+    const auto find_control = [&model](const std::string& name)
+        -> const mms::MmsLiveReportControl& {
+        const auto found = std::find_if(
+            model.report_controls.begin(), model.report_controls.end(),
+            [&name](const auto& control) { return control.name == name; });
+        if (found == model.report_controls.end()) {
+            throw std::runtime_error("Expected scripted RCB was not found in live model.");
+        }
+        return *found;
+    };
+
+    CHECK(find_control("brcbBound").data_set_binding_status == "Bound");
+    CHECK(find_control("brcbBound").data_set_reference ==
+          "IEDLD0/LLN0.DataSetA");
+    CHECK(find_control("brcbUnbound").data_set_binding_status == "Unbound");
+    CHECK(find_control("brcbUnbound").data_set_reference.empty());
+    CHECK(find_control("brcbDatSetFailed").data_set_binding_status ==
+          "ReadFailed");
+    CHECK(find_control("brcbReadFailed").data_set_binding_status ==
+          "ReadFailed");
+    CHECK(find_control("brcbNotRead").data_set_binding_status == "NotRead");
+    CHECK(model.summary.find("RCBBound=1, RCBUnbound=1, RCBNotRead=1, RCBReadFailed=2") !=
+          std::string::npos);
+
+    const auto json = model.to_json();
+    CHECK(json.find("\"dataSetBindingStatus\":\"Bound\"") != std::string::npos);
+    CHECK(json.find("\"dataSetBindingStatus\":\"Unbound\"") != std::string::npos);
+
+    auto rebound_result = result;
+    rebound_result.report_controls.front().state->data_set_reference.clear();
+    const auto rebound_model = mms::MmsLiveModelBuilder::build(rebound_result);
+    CHECK(rebound_model.coverage.report_control_unbound_count == 2U);
+    CHECK(model.canonical_fingerprint() == rebound_model.canonical_fingerprint());
+
+    CHECK(std::none_of(
+        model.warnings.begin(), model.warnings.end(), [](const auto& warning) {
+            return warning.code.find("UNBOUND") != std::string::npos ||
+                   warning.code.find("NO_DATASET") != std::string::npos;
+        }));
+}
+
 void live_discovery_builds_csharp_compatible_read_only_model() {
     ScriptedTransport transport;
     queue_handshake(transport);
@@ -334,6 +446,8 @@ void live_discovery_builds_csharp_compatible_read_only_model() {
     CHECK(model.coverage.data_attribute_count >= 1U);
     CHECK(model.coverage.data_set_count == 1U);
     CHECK(model.coverage.report_control_count == 1U);
+    CHECK(model.coverage.report_control_bound_count == 1U);
+    CHECK(model.coverage.report_control_unbound_count == 0U);
     CHECK(model.canonical_fingerprint() != 0U);
     CHECK(model.to_json().find("\"schemaVersion\":\"live-ied-model-v1\"") !=
           std::string::npos);
@@ -393,6 +507,7 @@ int main() {
     try {
         csharp_identity_resolver_cases_are_preserved();
         csharp_control_block_inventory_cases_are_preserved();
+        dynamic_rcb_binding_states_are_preserved();
         live_discovery_builds_csharp_compatible_read_only_model();
         pagination_without_forward_progress_is_rejected();
         std::cout << "Live MMS discovery and model parity tests passed.\n";
