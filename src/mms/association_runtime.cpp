@@ -4,6 +4,7 @@
 
 #include "ariec61850/acse/association.hpp"
 #include "ariec61850/osi/cotp.hpp"
+#include "ariec61850/osi/session.hpp"
 
 #include <algorithm>
 #include <array>
@@ -25,7 +26,60 @@ namespace {
     return (*value)[0];
 }
 
+[[nodiscard]] bool contains_octet(
+    const std::span<const std::uint8_t> bytes,
+    const std::uint8_t value) noexcept {
+    return std::find(bytes.begin(), bytes.end(), value) != bytes.end();
+}
 
+[[nodiscard]] bool csharp_compatible_association_accept(
+    const std::span<const std::uint8_t> bytes,
+    std::string& message) noexcept {
+    try {
+        osi::SessionSpdu session;
+        std::string session_error;
+        if (!osi::SessionCodec::try_decode(bytes, session, &session_error)) {
+            message = "C# compatibility inspection rejected the ISO Session payload: " +
+                session_error;
+            return false;
+        }
+        if (session.kind != osi::SessionSpduKind::accept) {
+            message = "C# compatibility inspection requires an ISO Session Accept SPDU.";
+            return false;
+        }
+
+        const auto presentation = std::span<const std::uint8_t>{session.user_data};
+        const bool has_presentation_accept =
+            contains_octet(presentation, 0x31U) ||
+            contains_octet(presentation, 0xA0U);
+        const bool has_acse_aare = contains_octet(presentation, 0x61U);
+        const bool has_user_information = contains_octet(presentation, 0xBEU);
+        const bool has_mms_initiate_response = contains_octet(presentation, 0xA9U);
+
+        if (!has_presentation_accept || !has_acse_aare) {
+            message =
+                "C# compatibility inspection did not find Presentation accept and ACSE AARE markers.";
+            return false;
+        }
+
+        message =
+            "C#-compatible association acceptance: ISO Session Accept with Presentation/AARE markers";
+        if (has_user_information) {
+            message += ", ACSE user-information";
+        }
+        if (has_mms_initiate_response) {
+            message += ", MMS Initiate-Response marker";
+        }
+        message += ".";
+        return true;
+    } catch (const std::exception& exception) {
+        message = std::string{"C# compatibility inspection failed: "} + exception.what();
+        return false;
+    } catch (...) {
+        message = "C# compatibility inspection failed unexpectedly.";
+        return false;
+    }
+}
 
 } // namespace
 
@@ -246,32 +300,74 @@ void MmsAssociationRuntime::connect(
         send_application_payload(association_request, deadline, stop_token);
         const auto association_payload =
             receive_application_payload(deadline, stop_token);
-        const auto response =
-            acse::AcseAssociationCodec::decode_association_response(association_payload);
-        if (!response.aare.accepted()) {
-            throw MmsAssociationRuntimeError(
-                "ACSE association was rejected with result=" +
-                std::to_string(response.aare.result) + ".");
-        }
-        if (!response.aare.user_information) {
-            throw MmsAssociationRuntimeError(
-                "Accepted ACSE response did not contain MMS Initiate response data.");
-        }
-        const auto initiate = MmsPduCodec::decode_initiate_response(
-            response.aare.user_information->single_asn1_type);
-        negotiated_.maximum_mms_pdu_size = initiate.negotiated_maximum_mms_pdu_size;
-        negotiated_.maximum_outstanding_calling =
-            initiate.negotiated_maximum_outstanding_calling;
-        negotiated_.maximum_outstanding_called =
-            initiate.negotiated_maximum_outstanding_called;
-        negotiated_.data_structure_nesting_level =
-            initiate.negotiated_data_structure_nesting_level;
-        negotiated_.presentation_context_id = options_.presentation_context_id;
 
+        bool used_csharp_compatibility = false;
+        std::string strict_failure;
+        std::optional<acse::AssociationResponseEnvelope> response;
+        try {
+            response = acse::AcseAssociationCodec::decode_association_response(
+                association_payload);
+        } catch (const acse::AcseFormatError& exception) {
+            strict_failure = exception.what();
+        }
+
+        if (response) {
+            if (!response->aare.accepted()) {
+                throw MmsAssociationRuntimeError(
+                    "ACSE association was rejected with result=" +
+                    std::to_string(response->aare.result) + ".");
+            }
+
+            if (response->aare.user_information) {
+                try {
+                    const auto initiate = MmsPduCodec::decode_initiate_response(
+                        response->aare.user_information->single_asn1_type);
+                    negotiated_.maximum_mms_pdu_size =
+                        initiate.negotiated_maximum_mms_pdu_size;
+                    negotiated_.maximum_outstanding_calling =
+                        initiate.negotiated_maximum_outstanding_calling;
+                    negotiated_.maximum_outstanding_called =
+                        initiate.negotiated_maximum_outstanding_called;
+                    negotiated_.data_structure_nesting_level =
+                        initiate.negotiated_data_structure_nesting_level;
+                } catch (const std::exception& exception) {
+                    strict_failure =
+                        std::string{"Strict MMS Initiate-Response decode failed: "} +
+                        exception.what();
+                }
+            } else {
+                strict_failure =
+                    "Accepted ACSE response did not expose MMS Initiate response data through the strict decoder.";
+            }
+        }
+
+        if (!response || !strict_failure.empty()) {
+            std::string compatibility_message;
+            if (!csharp_compatible_association_accept(
+                    association_payload, compatibility_message)) {
+                if (strict_failure.empty()) {
+                    strict_failure = compatibility_message;
+                } else if (!compatibility_message.empty()) {
+                    strict_failure += " " + compatibility_message;
+                }
+                throw MmsAssociationRuntimeError(strict_failure);
+            }
+            used_csharp_compatibility = true;
+            add_event(
+                MmsAssociationEventKind::association_accepted,
+                compatibility_message +
+                    (strict_failure.empty()
+                         ? std::string{}
+                         : " Strict decoder diagnostic: " + strict_failure));
+        }
+
+        negotiated_.presentation_context_id = options_.presentation_context_id;
         state_ = MmsAssociationRuntimeState::associated;
-        add_event(MmsAssociationEventKind::association_accepted,
-                  "MMS association accepted; maximum PDU=" +
-                      std::to_string(negotiated_.maximum_mms_pdu_size) + ".");
+        if (!used_csharp_compatibility) {
+            add_event(MmsAssociationEventKind::association_accepted,
+                      "MMS association accepted; maximum PDU=" +
+                          std::to_string(negotiated_.maximum_mms_pdu_size) + ".");
+        }
     } catch (const MmsTransportCancelledError& exception) {
         state_ = MmsAssociationRuntimeState::faulted;
         last_fault_ = exception.what();
