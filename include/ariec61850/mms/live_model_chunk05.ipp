@@ -3,6 +3,10 @@
         << ",\"dataAttributeCount\":" << coverage.data_attribute_count
         << ",\"dataSetCount\":" << coverage.data_set_count
         << ",\"reportControlCount\":" << coverage.report_control_count
+        << ",\"reportControlBoundCount\":" << coverage.report_control_bound_count
+        << ",\"reportControlUnboundCount\":" << coverage.report_control_unbound_count
+        << ",\"reportControlBindingNotReadCount\":" << coverage.report_control_binding_not_read_count
+        << ",\"reportControlBindingReadFailedCount\":" << coverage.report_control_binding_read_failed_count
         << ",\"gooseControlBlockCount\":" << coverage.goose_control_block_count
         << ",\"sampledValueControlBlockCount\":" << coverage.sampled_value_control_block_count
         << ",\"settingGroupControlCount\":" << coverage.setting_group_control_count
@@ -78,9 +82,20 @@
     for (std::size_t i = 0; i < report_controls.size(); ++i) {
         if (i) out << ',';
         const auto& r = report_controls[i];
-        out << "{\"reference\":\"" << json(r.reference) << "\",\"buffered\":"
-            << (r.buffered ? "true" : "false") << ",\"dataSetReference\":\""
-            << json(r.data_set_reference) << "\",\"reportId\":\"" << json(r.report_id) << "\"}";
+        out << "{\"reference\":\"" << json(r.reference)
+            << "\",\"domain\":\"" << json(r.domain)
+            << "\",\"logicalNode\":\"" << json(r.logical_node)
+            << "\",\"name\":\"" << json(r.name)
+            << "\",\"buffered\":" << (r.buffered ? "true" : "false")
+            << ",\"dataSetReference\":\"" << json(r.data_set_reference)
+            << "\",\"dataSetBindingStatus\":\"" << json(r.data_set_binding_status)
+            << "\",\"dataSetBindingMessage\":\"" << json(r.data_set_binding_message)
+            << "\",\"reportId\":\"" << json(r.report_id)
+            << "\",\"confRev\":\"" << json(r.configuration_revision)
+            << "\",\"enabledState\":\"" << json(r.enabled_state)
+            << "\",\"reservationState\":\"" << json(r.reservation_state)
+            << "\",\"reservationTimeSeconds\":\"" << json(r.reservation_time_seconds)
+            << "\",\"status\":\"" << json(r.status) << "\"}";
     }
     out << ']';
 
