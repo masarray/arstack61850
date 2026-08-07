@@ -120,7 +120,19 @@
         ", GoCB=" + std::to_string(coverage.goose_control_block_count) +
         ", SVCB=" + std::to_string(coverage.sampled_value_control_block_count) +
         ", SGCB=" + std::to_string(coverage.setting_group_control_count) +
-        ", LCB=" + std::to_string(coverage.log_control_count) + ".";
+        ", LCB=" + std::to_string(coverage.log_control_count);
+    const auto observed_bindings =
+        coverage.report_control_bound_count +
+        coverage.report_control_unbound_count +
+        coverage.report_control_binding_read_failed_count;
+    if (observed_bindings != 0U) {
+        document.summary +=
+            ", RCBBound=" + std::to_string(coverage.report_control_bound_count) +
+            ", RCBUnbound=" + std::to_string(coverage.report_control_unbound_count) +
+            ", RCBNotRead=" + std::to_string(coverage.report_control_binding_not_read_count) +
+            ", RCBReadFailed=" + std::to_string(coverage.report_control_binding_read_failed_count);
+    }
+    document.summary += ".";
     return document;
 }
 
