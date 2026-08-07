@@ -211,8 +211,10 @@
         document.data_sets.push_back(std::move(data_set));
     }
 
-    // Likewise, preserve every BRCB/URCB discovered from the RP/BR name inventory.
-    // A successful read enriches it; an unprobed RCB remains status=Discovered.
+    // Preserve every BRCB/URCB discovered from RP/BR inventory. Runtime DataSet
+    // binding is modelled separately from RCB read success. This is essential for
+    // dynamic-report IEDs: a successful DatSet read that returns an empty string is
+    // a valid Unbound state, not a missing/corrupt DataSet.
     for (const auto& candidate : discovery.report_inventory.report_controls) {
         MmsLiveReportControl control;
         control.reference = candidate.reference;
@@ -221,6 +223,9 @@
         control.name = candidate.name;
         control.buffered = candidate.buffered;
         control.status = "Discovered";
+        control.data_set_binding_status = "NotRead";
+        control.data_set_binding_message =
+            "RCB DatSet binding was not read in this discovery run.";
 
         const auto evidence = std::find_if(
             discovery.report_controls.begin(),
@@ -230,11 +235,47 @@
             });
         if (evidence != discovery.report_controls.end()) {
             control.status = evidence->success() ? "Read" : "Unreadable";
+            if (!evidence->success()) {
+                control.data_set_binding_status = "ReadFailed";
+                control.data_set_binding_message = evidence->error.empty()
+                    ? "RCB read failed before DatSet binding could be established."
+                    : evidence->error;
+            }
             if (evidence->state) {
+                const bool data_set_requested = std::any_of(
+                    evidence->requested_attributes.begin(),
+                    evidence->requested_attributes.end(),
+                    [](const auto& attribute) { return same(attribute, "DatSet"); });
+                const bool data_set_read_failed = std::any_of(
+                    evidence->state->diagnostics.begin(),
+                    evidence->state->diagnostics.end(),
+                    [](const auto& diagnostic) {
+                        return starts_with_ci(diagnostic, "DatSet read failed");
+                    });
+
                 control.data_set_reference = evidence->state->data_set_reference;
                 std::replace(
                     control.data_set_reference.begin(),
                     control.data_set_reference.end(), '$', '.');
+
+                if (!data_set_requested) {
+                    control.data_set_binding_status = "NotRead";
+                    control.data_set_binding_message =
+                        "The RCB was probed, but DatSet was not exposed/requested for this RCB.";
+                } else if (data_set_read_failed) {
+                    control.data_set_binding_status = "ReadFailed";
+                    control.data_set_binding_message =
+                        "The RCB was read, but its DatSet attribute returned an access failure.";
+                } else if (control.data_set_reference.empty()) {
+                    control.data_set_binding_status = "Unbound";
+                    control.data_set_binding_message =
+                        "DatSet was read successfully and is empty. This is a valid unbound runtime state and may represent an available dynamic RCB slot; selection still requires reservation/ownership checks.";
+                } else {
+                    control.data_set_binding_status = "Bound";
+                    control.data_set_binding_message =
+                        "DatSet was read successfully and references a DataSet.";
+                }
+
                 control.report_id = evidence->state->report_id;
                 control.configuration_revision = optional_u64(
                     evidence->state->configuration_revision);
@@ -254,7 +295,8 @@
 
     for (auto& data_set : document.data_sets) {
         for (const auto& control : document.report_controls) {
-            if (!control.data_set_reference.empty() &&
+            if (same(control.data_set_binding_status, "Bound") &&
+                !control.data_set_reference.empty() &&
                 same(control.data_set_reference, data_set.reference)) {
                 data_set.used_by_report_controls.push_back(control.reference);
             }
