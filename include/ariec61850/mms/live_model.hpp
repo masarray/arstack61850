@@ -101,6 +101,8 @@ struct MmsLiveDataSet final {
     std::optional<bool> deletable;
     std::vector<MmsLiveDataSetMember> members;
     std::vector<std::string> used_by_report_controls;
+    std::vector<std::string> used_by_goose_controls;
+    std::vector<std::string> used_by_sampled_value_controls;
 };
 
 struct MmsLiveReportControl final {
@@ -122,6 +124,36 @@ struct MmsLiveReportControl final {
     std::string status;
 };
 
+// Read-only inventory projection matching ARIEC61850 LiveIedControlBlockModel.
+// Values stay empty until a future, explicitly bounded deep value reader exists.
+struct MmsLiveControlBlock final {
+    std::string kind;
+    std::string reference;
+    std::string domain;
+    std::string logical_node;
+    std::string name;
+    std::string functional_constraint;
+    std::vector<std::string> attributes;
+    std::string data_set_reference;
+    std::string data_set_reference_status{"NotRead"};
+    std::string control_id;
+    std::string app_id;
+    std::string smv_id;
+    std::string configuration_revision;
+    std::string minimum_time_ms;
+    std::string maximum_time_ms;
+    std::string sample_rate;
+    std::string sample_mode;
+    std::string number_of_asdu;
+    std::string address_status{"NotDiscovered"};
+    std::string discovery_status{"AttributeInventoryOnly"};
+    std::string message;
+
+    [[nodiscard]] std::size_t attribute_count() const noexcept {
+        return attributes.size();
+    }
+};
+
 struct MmsLiveModelCoverage final {
     std::size_t logical_device_count{};
     std::size_t logical_node_count{};
@@ -136,6 +168,10 @@ struct MmsLiveModelCoverage final {
     std::size_t report_control_count{};
     std::size_t buffered_report_control_count{};
     std::size_t unbuffered_report_control_count{};
+    std::size_t goose_control_block_count{};
+    std::size_t sampled_value_control_block_count{};
+    std::size_t setting_group_control_count{};
+    std::size_t log_control_count{};
     std::size_t variable_type_read_attempt_count{};
     std::size_t variable_type_read_success_count{};
     std::size_t variable_type_read_failure_count{};
@@ -159,6 +195,10 @@ struct MmsLiveModelDocument final {
     std::vector<MmsLiveLogicalDevice> logical_devices;
     std::vector<MmsLiveDataSet> data_sets;
     std::vector<MmsLiveReportControl> report_controls;
+    std::vector<MmsLiveControlBlock> goose_control_blocks;
+    std::vector<MmsLiveControlBlock> sampled_value_control_blocks;
+    std::vector<MmsLiveControlBlock> setting_group_controls;
+    std::vector<MmsLiveControlBlock> log_controls;
     std::vector<MmsLiveModelWarning> warnings;
 
     [[nodiscard]] std::string canonical_manifest() const;
