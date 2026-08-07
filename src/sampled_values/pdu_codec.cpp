@@ -5,6 +5,9 @@
 #include "ariec61850/asn1/ber.hpp"
 #include "ariec61850/mms/utc_time.hpp"
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -17,66 +20,250 @@
 namespace ar::iec61850::sampled_values {
 namespace {
 
-constexpr std::int32_t sav_pdu_application_tag = 0;
-constexpr std::int32_t sequence_tag_number = 16;
+constexpr std::uint8_t sav_pdu_application_tag = 0x60U;
+constexpr std::uint8_t sequence_tag = 0x30U;
+constexpr std::uint8_t context_primitive_base = 0x80U;
+constexpr std::uint8_t context_constructed_base = 0xA0U;
 
-void write_context_primitive(
-    asn1::BerWriter& writer,
-    const std::int32_t tag_number,
-    const std::span<const std::uint8_t> value) {
-    writer.write_tlv(asn1::BerClass::context_specific, false, tag_number, value);
+[[nodiscard]] bool checked_add(
+    std::size_t& total,
+    const std::size_t value) noexcept {
+    if (value > std::numeric_limits<std::size_t>::max() - total) {
+        return false;
+    }
+    total += value;
+    return true;
 }
 
-std::vector<std::uint8_t> encode_asdu(const SampledValueAsdu& asdu) {
-    asn1::BerWriter writer;
-
-    const auto sv_id = asn1::BerWriter::encode_ascii(asdu.sv_id);
-    write_context_primitive(writer, 0, sv_id);
-
-    if (!asdu.data_set_reference.empty()) {
-        const auto data_set = asn1::BerWriter::encode_ascii(asdu.data_set_reference);
-        write_context_primitive(writer, 1, data_set);
+[[nodiscard]] std::optional<std::size_t> ber_length_octets(
+    const std::size_t value_length) noexcept {
+    if (value_length < 0x80U) {
+        return 1U;
+    }
+    if (value_length > std::numeric_limits<std::uint32_t>::max()) {
+        return std::nullopt;
     }
 
-    const auto sample_count = asn1::BerWriter::encode_unsigned_integer(asdu.sample_count);
-    write_context_primitive(writer, 2, sample_count);
+    auto value = static_cast<std::uint32_t>(value_length);
+    std::size_t bytes = 0U;
+    while (value != 0U) {
+        ++bytes;
+        value >>= 8U;
+    }
+    return 1U + bytes;
+}
 
-    const auto configuration_revision =
-        asn1::BerWriter::encode_unsigned_integer(asdu.configuration_revision);
-    write_context_primitive(writer, 3, configuration_revision);
+[[nodiscard]] std::optional<std::size_t> tlv_size(
+    const std::size_t value_length) noexcept {
+    const auto length_size = ber_length_octets(value_length);
+    if (!length_size) {
+        return std::nullopt;
+    }
+    std::size_t total = 1U;
+    if (!checked_add(total, *length_size) ||
+        !checked_add(total, value_length)) {
+        return std::nullopt;
+    }
+    return total;
+}
+
+[[nodiscard]] std::size_t unsigned_integer_size(std::uint64_t value) noexcept {
+    std::size_t size = 1U;
+    while (value > 0xFFU) {
+        ++size;
+        value >>= 8U;
+    }
+    return size;
+}
+
+[[nodiscard]] std::optional<std::size_t> context_bytes_size(
+    const std::size_t value_length) noexcept {
+    return tlv_size(value_length);
+}
+
+[[nodiscard]] std::optional<std::size_t> context_unsigned_size(
+    const std::uint64_t value) noexcept {
+    return tlv_size(unsigned_integer_size(value));
+}
+
+[[nodiscard]] std::optional<std::size_t> asdu_content_size(
+    const SampledValueAsdu& asdu) noexcept {
+    std::size_t total = 0U;
+    const auto add_tlv = [&total](const std::optional<std::size_t> size) noexcept {
+        return size.has_value() && checked_add(total, *size);
+    };
+
+    if (!add_tlv(context_bytes_size(asdu.sv_id.size()))) {
+        return std::nullopt;
+    }
+    if (!asdu.data_set_reference.empty() &&
+        !add_tlv(context_bytes_size(asdu.data_set_reference.size()))) {
+        return std::nullopt;
+    }
+    if (!add_tlv(context_unsigned_size(asdu.sample_count)) ||
+        !add_tlv(context_unsigned_size(asdu.configuration_revision))) {
+        return std::nullopt;
+    }
+    if (asdu.reference_time.has_value()) {
+        std::array<std::uint8_t, 8> timestamp{};
+        if (!asdu.reference_time->try_write_bytes(timestamp) ||
+            !add_tlv(context_bytes_size(timestamp.size()))) {
+            return std::nullopt;
+        }
+    }
+    if (!add_tlv(context_unsigned_size(asdu.sample_synchronization))) {
+        return std::nullopt;
+    }
+    if (asdu.sample_rate.has_value() &&
+        !add_tlv(context_unsigned_size(*asdu.sample_rate))) {
+        return std::nullopt;
+    }
+    if (!add_tlv(context_bytes_size(asdu.sample_payload.size()))) {
+        return std::nullopt;
+    }
+    if (asdu.sample_mode.has_value() &&
+        !add_tlv(context_unsigned_size(*asdu.sample_mode))) {
+        return std::nullopt;
+    }
+    return total;
+}
+
+[[nodiscard]] std::optional<std::size_t> asdu_encoded_size(
+    const SampledValueAsdu& asdu) noexcept {
+    const auto content = asdu_content_size(asdu);
+    return content ? tlv_size(*content) : std::nullopt;
+}
+
+[[nodiscard]] std::optional<std::size_t> sequence_value_size(
+    const SampledValuesPdu& pdu) noexcept {
+    std::size_t total = 0U;
+    for (const auto& asdu : pdu.asdus) {
+        const auto size = asdu_encoded_size(asdu);
+        if (!size || !checked_add(total, *size)) {
+            return std::nullopt;
+        }
+    }
+    return total;
+}
+
+void write_length(
+    const std::span<std::uint8_t> destination,
+    std::size_t& offset,
+    const std::size_t value_length) noexcept {
+    if (value_length < 0x80U) {
+        destination[offset++] = static_cast<std::uint8_t>(value_length);
+        return;
+    }
+
+    auto value = static_cast<std::uint32_t>(value_length);
+    std::array<std::uint8_t, 4> bytes{};
+    std::size_t count = 0U;
+    while (value != 0U) {
+        bytes[bytes.size() - 1U - count] =
+            static_cast<std::uint8_t>(value & 0xFFU);
+        value >>= 8U;
+        ++count;
+    }
+    destination[offset++] = static_cast<std::uint8_t>(0x80U | count);
+    const auto first = bytes.size() - count;
+    for (std::size_t index = first; index < bytes.size(); ++index) {
+        destination[offset++] = bytes[index];
+    }
+}
+
+void write_tlv_header(
+    const std::span<std::uint8_t> destination,
+    std::size_t& offset,
+    const std::uint8_t tag,
+    const std::size_t value_length) noexcept {
+    destination[offset++] = tag;
+    write_length(destination, offset, value_length);
+}
+
+void write_bytes(
+    const std::span<std::uint8_t> destination,
+    std::size_t& offset,
+    const std::span<const std::uint8_t> value) noexcept {
+    std::copy(value.begin(), value.end(), destination.begin() +
+        static_cast<std::ptrdiff_t>(offset));
+    offset += value.size();
+}
+
+void write_string(
+    const std::span<std::uint8_t> destination,
+    std::size_t& offset,
+    const std::uint8_t tag_number,
+    const std::string& value) noexcept {
+    write_tlv_header(
+        destination, offset,
+        static_cast<std::uint8_t>(context_primitive_base | tag_number),
+        value.size());
+    for (const char character : value) {
+        destination[offset++] = static_cast<std::uint8_t>(character);
+    }
+}
+
+void write_unsigned(
+    const std::span<std::uint8_t> destination,
+    std::size_t& offset,
+    const std::uint8_t tag_number,
+    const std::uint64_t value) noexcept {
+    const auto value_size = unsigned_integer_size(value);
+    write_tlv_header(
+        destination, offset,
+        static_cast<std::uint8_t>(context_primitive_base | tag_number),
+        value_size);
+
+    for (std::size_t index = value_size; index-- > 0U;) {
+        const auto shift = static_cast<unsigned>(index * 8U);
+        destination[offset++] = static_cast<std::uint8_t>((value >> shift) & 0xFFU);
+    }
+}
+
+[[nodiscard]] bool write_asdu(
+    const SampledValueAsdu& asdu,
+    const std::span<std::uint8_t> destination,
+    std::size_t& offset) noexcept {
+    const auto content_size = asdu_content_size(asdu);
+    if (!content_size) {
+        return false;
+    }
+    write_tlv_header(destination, offset, sequence_tag, *content_size);
+
+    write_string(destination, offset, 0U, asdu.sv_id);
+    if (!asdu.data_set_reference.empty()) {
+        write_string(destination, offset, 1U, asdu.data_set_reference);
+    }
+    write_unsigned(destination, offset, 2U, asdu.sample_count);
+    write_unsigned(destination, offset, 3U, asdu.configuration_revision);
 
     if (asdu.reference_time.has_value()) {
-        const auto reference_time = asdu.reference_time->to_bytes();
-        write_context_primitive(writer, 4, reference_time);
+        std::array<std::uint8_t, 8> timestamp{};
+        if (!asdu.reference_time->try_write_bytes(timestamp)) {
+            return false;
+        }
+        write_tlv_header(
+            destination, offset,
+            static_cast<std::uint8_t>(context_primitive_base | 4U),
+            timestamp.size());
+        write_bytes(destination, offset, timestamp);
     }
 
-    const auto sample_synchronization =
-        asn1::BerWriter::encode_unsigned_integer(asdu.sample_synchronization);
-    write_context_primitive(writer, 5, sample_synchronization);
-
+    write_unsigned(destination, offset, 5U, asdu.sample_synchronization);
     if (asdu.sample_rate.has_value()) {
-        const auto sample_rate = asn1::BerWriter::encode_unsigned_integer(*asdu.sample_rate);
-        write_context_primitive(writer, 6, sample_rate);
+        write_unsigned(destination, offset, 6U, *asdu.sample_rate);
     }
 
-    write_context_primitive(writer, 7, asdu.sample_payload);
+    write_tlv_header(
+        destination, offset,
+        static_cast<std::uint8_t>(context_primitive_base | 7U),
+        asdu.sample_payload.size());
+    write_bytes(destination, offset, asdu.sample_payload);
 
     if (asdu.sample_mode.has_value()) {
-        const auto sample_mode = asn1::BerWriter::encode_unsigned_integer(*asdu.sample_mode);
-        write_context_primitive(writer, 8, sample_mode);
+        write_unsigned(destination, offset, 8U, *asdu.sample_mode);
     }
-
-    return writer.to_vector();
-}
-
-std::vector<std::uint8_t> encode_asdu_sequence(
-    const std::span<const SampledValueAsdu> asdus) {
-    asn1::BerWriter writer;
-    for (const auto& asdu : asdus) {
-        const auto encoded = encode_asdu(asdu);
-        writer.write_tlv(asn1::BerClass::universal, true, sequence_tag_number, encoded);
-    }
-    return writer.to_vector();
+    return true;
 }
 
 bool read_unsigned_exact(
@@ -160,7 +347,7 @@ bool read_asdu_sequence(
     std::vector<SampledValueAsdu>& asdus) {
     for (const auto& child : asn1::BerReader::read_children(sequence_value)) {
         if (child.tag_class != asn1::BerClass::universal ||
-            child.tag_number != sequence_tag_number ||
+            child.tag_number != 16 ||
             !child.constructed) {
             return false;
         }
@@ -176,24 +363,84 @@ bool read_asdu_sequence(
 
 } // namespace
 
-std::vector<std::uint8_t> SampledValuesPduCodec::encode(const SampledValuesPdu& pdu) {
+std::optional<std::size_t> SampledValuesPduCodec::encoded_size(
+    const SampledValuesPdu& pdu) noexcept {
     if (pdu.asdus.size() > std::numeric_limits<std::uint16_t>::max()) {
-        throw std::out_of_range("A Sampled Values PDU contains too many ASDUs.");
+        return std::nullopt;
     }
 
-    asn1::BerWriter content;
-    const auto no_asdu = asn1::BerWriter::encode_unsigned_integer(
+    const auto sequence_size = sequence_value_size(pdu);
+    if (!sequence_size) {
+        return std::nullopt;
+    }
+
+    const auto count_field_size = context_unsigned_size(
         static_cast<std::uint64_t>(pdu.asdus.size()));
-    write_context_primitive(content, 0, no_asdu);
+    const auto sequence_field_size = tlv_size(*sequence_size);
+    if (!count_field_size || !sequence_field_size) {
+        return std::nullopt;
+    }
 
-    const auto sequence = encode_asdu_sequence(pdu.asdus);
-    content.write_tlv(asn1::BerClass::context_specific, true, 2, sequence);
+    std::size_t content_size = 0U;
+    if (!checked_add(content_size, *count_field_size) ||
+        !checked_add(content_size, *sequence_field_size)) {
+        return std::nullopt;
+    }
+    return tlv_size(content_size);
+}
 
-    return asn1::BerWriter::encode_tlv(
-        asn1::BerClass::application,
-        true,
-        sav_pdu_application_tag,
-        content.bytes());
+wire::EncodeResult SampledValuesPduCodec::encode_into(
+    const SampledValuesPdu& pdu,
+    const std::span<std::uint8_t> destination) noexcept {
+    const auto required = encoded_size(pdu);
+    if (!required) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    if (destination.size() < *required) {
+        return {wire::EncodeStatus::buffer_too_small, 0U, *required};
+    }
+
+    const auto sequence_size = sequence_value_size(pdu);
+    const auto count_field_size = context_unsigned_size(
+        static_cast<std::uint64_t>(pdu.asdus.size()));
+    const auto sequence_field_size = sequence_size ? tlv_size(*sequence_size) : std::nullopt;
+    if (!sequence_size || !count_field_size || !sequence_field_size) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+
+    const auto content_size = *count_field_size + *sequence_field_size;
+    std::size_t offset = 0U;
+    write_tlv_header(destination, offset, sav_pdu_application_tag, content_size);
+    write_unsigned(
+        destination, offset, 0U,
+        static_cast<std::uint64_t>(pdu.asdus.size()));
+    write_tlv_header(
+        destination, offset,
+        static_cast<std::uint8_t>(context_constructed_base | 2U),
+        *sequence_size);
+
+    for (const auto& asdu : pdu.asdus) {
+        if (!write_asdu(asdu, destination, offset)) {
+            return {wire::EncodeStatus::value_out_of_range, 0U, *required};
+        }
+    }
+
+    return {wire::EncodeStatus::ok, offset, *required};
+}
+
+std::vector<std::uint8_t> SampledValuesPduCodec::encode(
+    const SampledValuesPdu& pdu) {
+    const auto required = encoded_size(pdu);
+    if (!required) {
+        throw std::out_of_range("A Sampled Values PDU exceeds the supported BER wire range.");
+    }
+
+    std::vector<std::uint8_t> bytes(*required);
+    const auto result = encode_into(pdu, bytes);
+    if (!result.success() || result.bytes_written != bytes.size()) {
+        throw std::runtime_error("Failed to encode Sampled Values PDU into sized buffer.");
+    }
+    return bytes;
 }
 
 bool SampledValuesPduCodec::try_decode(
@@ -207,7 +454,7 @@ bool SampledValuesPduCodec::try_decode(
         if (!asn1::BerReader::try_read_tlv(apdu, offset, outer) ||
             offset != apdu.size() ||
             outer.tag_class != asn1::BerClass::application ||
-            outer.tag_number != sav_pdu_application_tag ||
+            outer.tag_number != 0 ||
             !outer.constructed) {
             return false;
         }
