@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "ariec61850/mms/rcb_availability.hpp"
 #include "ariec61850/mms/rcb_selection.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
@@ -37,8 +39,8 @@ using namespace ar::iec61850;
         candidate.functional_constraint + "." + candidate.name;
     candidate.buffered = buffered;
     candidate.attributes = buffered
-        ? std::vector<std::string>{"DatSet", "RptID", "ConfRev", "RptEna", "ResvTms"}
-        : std::vector<std::string>{"DatSet", "RptID", "ConfRev", "RptEna", "Resv"};
+        ? std::vector<std::string>{"DatSet", "RptID", "ConfRev", "RptEna", "ResvTms", "Owner"}
+        : std::vector<std::string>{"DatSet", "RptID", "ConfRev", "RptEna", "Resv", "Owner"};
     return candidate;
 }
 
@@ -49,12 +51,13 @@ void add_state(
     const std::optional<bool> report_enabled,
     const std::optional<bool> reserved = std::nullopt,
     const std::optional<std::uint64_t> reservation_time_seconds = std::nullopt,
-    const bool fail_data_set_attribute = false) {
+    const bool fail_data_set_attribute = false,
+    std::vector<std::uint8_t> owner = {}) {
     mms::MmsReportControlEvidence evidence;
     evidence.candidate = candidate;
     evidence.requested_attributes = candidate.buffered
-        ? std::vector<std::string>{"DatSet", "RptID", "ConfRev", "RptEna", "ResvTms"}
-        : std::vector<std::string>{"DatSet", "RptID", "ConfRev", "RptEna", "Resv"};
+        ? std::vector<std::string>{"DatSet", "RptID", "ConfRev", "RptEna", "ResvTms", "Owner"}
+        : std::vector<std::string>{"DatSet", "RptID", "ConfRev", "RptEna", "Resv", "Owner"};
 
     mms::MmsReportControlState state;
     state.candidate = candidate;
@@ -64,6 +67,7 @@ void add_state(
     state.report_enabled = report_enabled;
     state.reserved = reserved;
     state.reservation_time_seconds = reservation_time_seconds;
+    state.owner = std::move(owner);
     if (fail_data_set_attribute) {
         state.diagnostics.push_back("DatSet read failed (3)");
     }
@@ -97,6 +101,28 @@ void add_populated_directory(
     result.data_set_directories.push_back(std::move(evidence));
 }
 
+void add_empty_directory(
+    mms::MmsLiveDiscoveryResult& result,
+    const std::string& reference) {
+    mms::MmsDataSetDirectoryEvidence evidence;
+    evidence.candidate.reference = reference;
+    mms::MmsDataSetDirectoryResponse directory;
+    directory.invoke_id = 1U;
+    directory.deletable = false;
+    evidence.directory = std::move(directory);
+    result.data_set_directories.push_back(std::move(evidence));
+}
+
+void add_failed_directory(
+    mms::MmsLiveDiscoveryResult& result,
+    const std::string& reference,
+    std::string error) {
+    mms::MmsDataSetDirectoryEvidence evidence;
+    evidence.candidate.reference = reference;
+    evidence.error = std::move(error);
+    result.data_set_directories.push_back(std::move(evidence));
+}
+
 [[nodiscard]] const mms::MmsRcbCandidateEvaluation& find_evaluation(
     const mms::MmsRcbSelectionEvidence& selection,
     const std::string_view name) {
@@ -105,6 +131,18 @@ void add_populated_directory(
         [name](const auto& candidate) { return candidate.name == name; });
     if (found == selection.candidates.end()) {
         throw std::runtime_error("Expected RCB evaluation was not found.");
+    }
+    return *found;
+}
+
+[[nodiscard]] const mms::MmsRcbOperationalAvailabilitySnapshot& find_snapshot(
+    const mms::MmsRcbOperationalAvailabilityResult& result,
+    const std::string_view name) {
+    const auto found = std::find_if(
+        result.report_controls.begin(), result.report_controls.end(),
+        [name](const auto& snapshot) { return snapshot.name == name; });
+    if (found == result.report_controls.end()) {
+        throw std::runtime_error("Expected RCB availability snapshot was not found.");
     }
     return *found;
 }
@@ -268,6 +306,145 @@ void requested_logical_device_affects_dynamic_ranking() {
     CHECK(!find_evaluation(selection, "brcbA").same_logical_device);
 }
 
+void operational_brcb_requires_explicit_reservation_evidence() {
+    mms::MmsLiveDiscoveryResult uncertain;
+    const auto brcb = make_rcb("brcbUncertain");
+    uncertain.report_inventory.report_controls = {brcb};
+    add_state(
+        uncertain, brcb, "IEDLD0/LLN0$DataSetA", false,
+        std::nullopt, std::nullopt);
+    add_populated_directory(uncertain, "IEDLD0/LLN0.DataSetA");
+
+    const auto uncertain_result =
+        mms::MmsRcbOperationalAvailabilityEvaluator::evaluate(uncertain);
+    const auto& uncertain_snapshot =
+        find_snapshot(uncertain_result, "brcbUncertain");
+    CHECK(uncertain_snapshot.availability ==
+          mms::MmsRcbOperationalAvailability::unknown);
+    CHECK(uncertain_snapshot.confidence ==
+          mms::MmsRcbOperationalAvailabilityConfidence::reduced);
+
+    mms::MmsLiveDiscoveryResult free;
+    const auto free_brcb = make_rcb("brcbFree");
+    free.report_inventory.report_controls = {free_brcb};
+    add_state(
+        free, free_brcb, "IEDLD0/LLN0$DataSetA", false,
+        std::nullopt, 0U);
+    add_populated_directory(free, "IEDLD0/LLN0.DataSetA");
+
+    const auto free_result =
+        mms::MmsRcbOperationalAvailabilityEvaluator::evaluate(free);
+    const auto& free_snapshot = find_snapshot(free_result, "brcbFree");
+    CHECK(free_snapshot.availability ==
+          mms::MmsRcbOperationalAvailability::available);
+    CHECK(free_snapshot.confidence ==
+          mms::MmsRcbOperationalAvailabilityConfidence::exact);
+}
+
+void operational_busy_and_owner_evidence_are_conservative() {
+    mms::MmsLiveDiscoveryResult result;
+    const auto timed = make_rcb("brcbTimed");
+    const auto owner = make_rcb("brcbOwner");
+    const auto zero_owner = make_rcb("brcbZeroOwner");
+    result.report_inventory.report_controls = {timed, owner, zero_owner};
+    add_state(
+        result, timed, "IEDLD0/LLN0$DataSetA", false,
+        std::nullopt, 30U);
+    add_state(
+        result, owner, "IEDLD0/LLN0$DataSetA", false,
+        std::nullopt, std::nullopt, false, {0U, 0U, 1U});
+    add_state(
+        result, zero_owner, "IEDLD0/LLN0$DataSetA", false,
+        std::nullopt, 0U, false, {0U, 0U, 0U});
+    add_populated_directory(result, "IEDLD0/LLN0.DataSetA");
+
+    const auto availability =
+        mms::MmsRcbOperationalAvailabilityEvaluator::evaluate(result);
+    CHECK(find_snapshot(availability, "brcbTimed").availability ==
+          mms::MmsRcbOperationalAvailability::in_use);
+    CHECK(find_snapshot(availability, "brcbTimed").confidence ==
+          mms::MmsRcbOperationalAvailabilityConfidence::exact);
+    CHECK(find_snapshot(availability, "brcbOwner").availability ==
+          mms::MmsRcbOperationalAvailability::in_use);
+    CHECK(!find_snapshot(availability, "brcbOwner").owner.empty());
+    CHECK(find_snapshot(availability, "brcbZeroOwner").availability ==
+          mms::MmsRcbOperationalAvailability::available);
+    CHECK(find_snapshot(availability, "brcbZeroOwner").owner.empty());
+}
+
+void operational_urcb_and_caller_owned_order_matches_csharp() {
+    mms::MmsLiveDiscoveryResult result;
+    const auto enabled_empty = make_rcb("urcbEnabledEmpty", false);
+    const auto disabled_empty = make_rcb("urcbDisabledEmpty", false);
+    const auto unknown_resv = make_rcb("urcbUnknownResv", false);
+    const auto caller = make_rcb("brcbCaller");
+    result.report_inventory.report_controls = {
+        enabled_empty, disabled_empty, unknown_resv, caller};
+
+    add_state(result, enabled_empty, {}, true, std::nullopt, std::nullopt);
+    add_state(result, disabled_empty, {}, false, false, std::nullopt);
+    add_state(
+        result, unknown_resv, "IEDLD0/LLN0$DataSetA", false,
+        std::nullopt, std::nullopt);
+    add_state(result, caller, {}, true, std::nullopt, 60U);
+    add_populated_directory(result, "IEDLD0/LLN0.DataSetA");
+
+    mms::MmsRcbOperationalAvailabilityOptions options;
+    options.caller_owned_rcb_references = {caller.reference};
+    const auto availability =
+        mms::MmsRcbOperationalAvailabilityEvaluator::evaluate(result, options);
+
+    CHECK(find_snapshot(availability, "urcbEnabledEmpty").availability ==
+          mms::MmsRcbOperationalAvailability::in_use);
+    CHECK(find_snapshot(availability, "urcbDisabledEmpty").availability ==
+          mms::MmsRcbOperationalAvailability::no_data_set);
+    CHECK(find_snapshot(availability, "urcbDisabledEmpty").confidence ==
+          mms::MmsRcbOperationalAvailabilityConfidence::exact);
+    CHECK(find_snapshot(availability, "urcbUnknownResv").availability ==
+          mms::MmsRcbOperationalAvailability::unknown);
+    CHECK(find_snapshot(availability, "urcbUnknownResv").confidence ==
+          mms::MmsRcbOperationalAvailabilityConfidence::reduced);
+    CHECK(find_snapshot(availability, "brcbCaller").availability ==
+          mms::MmsRcbOperationalAvailability::used_by_caller);
+}
+
+void operational_dataset_failure_and_empty_are_preserved() {
+    {
+        mms::MmsLiveDiscoveryResult result;
+        const auto rcb = make_rcb("brcbUnreadable");
+        result.report_inventory.report_controls = {rcb};
+        add_state(
+            result, rcb, "IEDLD0/LLN0$DataSetA", false,
+            std::nullopt, 0U);
+        add_failed_directory(
+            result, "IEDLD0/LLN0.DataSetA", "object-access-denied");
+
+        const auto availability =
+            mms::MmsRcbOperationalAvailabilityEvaluator::evaluate(result);
+        CHECK(find_snapshot(availability, "brcbUnreadable").availability ==
+              mms::MmsRcbOperationalAvailability::data_set_unreadable);
+        CHECK(find_snapshot(availability, "brcbUnreadable").confidence ==
+              mms::MmsRcbOperationalAvailabilityConfidence::exact);
+    }
+
+    {
+        mms::MmsLiveDiscoveryResult result;
+        const auto rcb = make_rcb("brcbEmptyDataSet");
+        result.report_inventory.report_controls = {rcb};
+        add_state(
+            result, rcb, "IEDLD0/LLN0$DataSetA", false,
+            std::nullopt, 0U);
+        add_empty_directory(result, "IEDLD0/LLN0.DataSetA");
+
+        const auto availability =
+            mms::MmsRcbOperationalAvailabilityEvaluator::evaluate(result);
+        CHECK(find_snapshot(availability, "brcbEmptyDataSet").availability ==
+              mms::MmsRcbOperationalAvailability::data_set_empty);
+        CHECK(find_snapshot(availability, "brcbEmptyDataSet").confidence ==
+              mms::MmsRcbOperationalAvailabilityConfidence::exact);
+    }
+}
+
 } // namespace
 
 int main() {
@@ -280,7 +457,11 @@ int main() {
         exclusion_and_urcb_policy_are_preserved();
         static_selection_requires_populated_directory();
         requested_logical_device_affects_dynamic_ranking();
-        std::cout << "Smart RCB selection parity tests passed.\n";
+        operational_brcb_requires_explicit_reservation_evidence();
+        operational_busy_and_owner_evidence_are_conservative();
+        operational_urcb_and_caller_owned_order_matches_csharp();
+        operational_dataset_failure_and_empty_are_preserved();
+        std::cout << "Smart RCB selection and availability parity tests passed.\n";
         return 0;
     } catch (const std::exception& exception) {
         std::cerr << exception.what() << '\n';
