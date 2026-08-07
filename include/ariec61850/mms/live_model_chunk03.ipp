@@ -52,37 +52,93 @@
         document.logical_devices.push_back(std::move(ld));
     }
 
-    for (const auto& evidence : discovery.data_set_directories) {
+    // Match the C# builder: the inventory itself is valuable evidence.  A DataSet
+    // remains present in the model even when GetNamedVariableListAttributes was
+    // intentionally skipped or failed; only its member list remains unavailable.
+    for (const auto& candidate : discovery.report_inventory.data_sets) {
         MmsLiveDataSet data_set;
-        data_set.reference = evidence.candidate.reference;
-        data_set.domain = evidence.candidate.domain;
-        data_set.logical_node = evidence.candidate.logical_node;
-        data_set.name = evidence.candidate.name;
-        if (evidence.success()) {
-            data_set.deletable = evidence.directory->deletable;
-            for (std::size_t i = 0; i < evidence.directory->members.size(); ++i) {
-                const auto& member = evidence.directory->members[i];
-                data_set.members.push_back({i, member.user_reference,
-                    member.functional_constraint, member.mms_reference,
-                    MmsLiveModelConfidence::exact});
+        data_set.reference = candidate.reference;
+        data_set.domain = candidate.domain;
+        data_set.logical_node = candidate.logical_node;
+        data_set.name = candidate.name;
+
+        const auto evidence = std::find_if(
+            discovery.data_set_directories.begin(),
+            discovery.data_set_directories.end(),
+            [&candidate](const auto& item) {
+                return same(item.candidate.reference, candidate.reference);
+            });
+        if (evidence != discovery.data_set_directories.end() && evidence->success()) {
+            data_set.deletable = evidence->directory->deletable;
+            for (std::size_t index = 0U;
+                 index < evidence->directory->members.size();
+                 ++index) {
+                const auto& member = evidence->directory->members[index];
+                data_set.members.push_back({
+                    index,
+                    member.user_reference,
+                    member.functional_constraint,
+                    member.mms_reference,
+                    member.confidence >= 100U
+                        ? MmsLiveModelConfidence::exact
+                        : MmsLiveModelConfidence::medium});
             }
         }
         document.data_sets.push_back(std::move(data_set));
     }
-    for (const auto& evidence : discovery.report_controls) {
+
+    // Likewise, preserve every BRCB/URCB discovered from the RP/BR name inventory.
+    // A successful read enriches it; an unprobed RCB remains status=Discovered.
+    for (const auto& candidate : discovery.report_inventory.report_controls) {
         MmsLiveReportControl control;
-        control.reference = evidence.candidate.reference;
-        control.domain = evidence.candidate.domain;
-        control.logical_node = evidence.candidate.logical_node;
-        control.name = evidence.candidate.name;
-        control.buffered = evidence.candidate.buffered;
-        control.status = evidence.success() ? "Read" : "Unreadable";
-        if (evidence.state) {
-            control.data_set_reference = evidence.state->data_set_reference;
-            control.report_id = evidence.state->report_id;
-            control.configuration_revision = optional_u64(evidence.state->configuration_revision);
-            control.trigger_options = bit_names(evidence.state->trigger_options);
-            control.optional_fields = bit_names(evidence.state->optional_fields);
-            control.buffer_time_ms = optional_u64(evidence.state->buffer_time_ms);
-            control.integrity_period_ms = optional_u64(evidence.state->integrity_period_ms);
-            control.enabled_state = optional_bool(evidence.state->report_enabled);
+        control.reference = candidate.reference;
+        control.domain = candidate.domain;
+        control.logical_node = candidate.logical_node;
+        control.name = candidate.name;
+        control.buffered = candidate.buffered;
+        control.status = "Discovered";
+
+        const auto evidence = std::find_if(
+            discovery.report_controls.begin(),
+            discovery.report_controls.end(),
+            [&candidate](const auto& item) {
+                return same(item.candidate.reference, candidate.reference);
+            });
+        if (evidence != discovery.report_controls.end()) {
+            control.status = evidence->success() ? "Read" : "Unreadable";
+            if (evidence->state) {
+                control.data_set_reference = evidence->state->data_set_reference;
+                std::replace(
+                    control.data_set_reference.begin(),
+                    control.data_set_reference.end(), '$', '.');
+                control.report_id = evidence->state->report_id;
+                control.configuration_revision = optional_u64(
+                    evidence->state->configuration_revision);
+                control.trigger_options = bit_names(evidence->state->trigger_options);
+                control.optional_fields = bit_names(evidence->state->optional_fields);
+                control.buffer_time_ms = optional_u64(evidence->state->buffer_time_ms);
+                control.integrity_period_ms = optional_u64(
+                    evidence->state->integrity_period_ms);
+                control.enabled_state = optional_bool(evidence->state->report_enabled);
+                control.reservation_state = optional_bool(evidence->state->reserved);
+                control.reservation_time_seconds = optional_u64(
+                    evidence->state->reservation_time_seconds);
+            }
+        }
+        document.report_controls.push_back(std::move(control));
+    }
+
+    for (auto& data_set : document.data_sets) {
+        for (const auto& control : document.report_controls) {
+            if (!control.data_set_reference.empty() &&
+                same(control.data_set_reference, data_set.reference)) {
+                data_set.used_by_report_controls.push_back(control.reference);
+            }
+        }
+        std::sort(
+            data_set.used_by_report_controls.begin(),
+            data_set.used_by_report_controls.end(),
+            [](const auto& left, const auto& right) {
+                return lower(left) < lower(right);
+            });
+    }
