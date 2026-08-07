@@ -1,8 +1,3 @@
-    if (magnitude && quality && timestamp) return {"MV", 0.82};
-    if (st_val && quality && timestamp) return {"SPS", 0.78};
-    if (st_val) return {"SPS", 0.60};
-    return {"", 0.0};
-}
 [[nodiscard]] inline bool starts_with_ci(
     const std::string_view value,
     const std::string_view prefix) {
