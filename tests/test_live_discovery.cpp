@@ -193,11 +193,11 @@ void live_discovery_builds_csharp_compatible_read_only_model() {
     CHECK(result.report_controls.size() == 1U);
     CHECK(!result.partial());
 
-    mms::MmsLiveModelBuildOptions model_options;
-    model_options.explicit_ied_name = "OLS501";
-    const auto model = mms::MmsLiveModelBuilder::build(result, model_options);
+    const auto model = mms::MmsLiveModelBuilder::build(result);
     CHECK(model.schema_version == "live-ied-model-v1");
     CHECK(model.identity.ied_name == "OLS501");
+    CHECK(model.identity.source == "MmsDomainInference");
+    CHECK(model.identity.logical_device_aliases.at("OLS501LD0") == "LD0");
     CHECK(model.coverage.logical_device_count == 1U);
     CHECK(model.coverage.logical_node_count == 1U);
     CHECK(model.coverage.data_attribute_count >= 1U);
