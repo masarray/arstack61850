@@ -112,6 +112,11 @@ struct MmsLiveReportControl final {
     std::string name;
     bool buffered{};
     std::string data_set_reference;
+    // Runtime observation only.  "Unbound" is a valid state for an empty
+    // dynamic RCB slot and must not be treated as a missing/corrupt DataSet.
+    // Values: NotRead, Bound, Unbound, ReadFailed.
+    std::string data_set_binding_status{"NotRead"};
+    std::string data_set_binding_message;
     std::string report_id;
     std::string configuration_revision;
     std::string trigger_options;
@@ -168,6 +173,10 @@ struct MmsLiveModelCoverage final {
     std::size_t report_control_count{};
     std::size_t buffered_report_control_count{};
     std::size_t unbuffered_report_control_count{};
+    std::size_t report_control_bound_count{};
+    std::size_t report_control_unbound_count{};
+    std::size_t report_control_binding_not_read_count{};
+    std::size_t report_control_binding_read_failed_count{};
     std::size_t goose_control_block_count{};
     std::size_t sampled_value_control_block_count{};
     std::size_t setting_group_control_count{};
