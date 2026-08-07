@@ -31,6 +31,7 @@ add_library(ariec61850_core
     src/mms/report_subscription_runtime.cpp
     src/mms/tcp_transport.cpp
     src/mms/live_discovery.cpp
+    src/mms/rcb_selection.cpp
     src/sampled_values/pdu_codec.cpp
     src/sampled_values/frame_codec.cpp
     src/sampled_values/quality.cpp
@@ -215,6 +216,13 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_warnings(ariec61850_live_discovery_tests)
     ariec61850_apply_sanitizers(ariec61850_live_discovery_tests)
     add_test(NAME ariec61850_live_discovery_tests COMMAND ariec61850_live_discovery_tests)
+
+    add_executable(ariec61850_rcb_selection_tests tests/test_rcb_selection.cpp)
+    target_link_libraries(ariec61850_rcb_selection_tests PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_rcb_selection_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_rcb_selection_tests)
+    ariec61850_apply_sanitizers(ariec61850_rcb_selection_tests)
+    add_test(NAME ariec61850_rcb_selection_tests COMMAND ariec61850_rcb_selection_tests)
 
     add_executable(ariec61850_fuzz_smoke_tests tests/test_fuzz_smoke.cpp)
     target_link_libraries(ariec61850_fuzz_smoke_tests PRIVATE ARIEC61850::core)
