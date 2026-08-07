@@ -25,3 +25,40 @@ diff --git a/src/osi/presentation.cpp b/src/osi/presentation.cpp
                          if (saw_results) {
                              throw PresentationFormatError("Presentation CPA contains duplicate context results.");
                          }
+                         cpa.context_results = parse_context_result_list(normal.value);
+                         saw_results = true;
+diff --git a/tests/test_osi_association.cpp b/tests/test_osi_association.cpp
+--- a/tests/test_osi_association.cpp
++++ b/tests/test_osi_association.cpp
+@@ -137,6 +137,29 @@ void deterministic_aare_response_matches_csharp_and_decodes() {
+     CHECK(decoded.aare.user_information->single_asn1_type.front() == 0xA9U);
+ }
+ 
++void vendor_cpa_accepts_responding_presentation_selector() {
++    auto response = csharp_deterministic_response();
++    const auto marker = from_hex("A2 69 A5 12");
++    const auto offset = find_sequence(response, marker);
++    CHECK(offset < response.size());
++
++    // Insert the optional responding-presentation-selector and fix the nested
++    // BER lengths: Session user-data, CPA SET, normal-mode parameters.
++    response.insert(
++        response.begin() + static_cast<std::ptrdiff_t>(offset + 3U),
++        {0x83U, 0x04U, 0x00U, 0x00U, 0x00U, 0x01U});
++    response[1] = static_cast<std::uint8_t>(response[1] + 6U);
++    response[23] = static_cast<std::uint8_t>(response[23] + 6U);
++    response[offset + 1U] = static_cast<std::uint8_t>(response[offset + 1U] + 6U);
++
++    const auto decoded = AcseAssociationCodec::decode_association_response(response);
++    CHECK(decoded.session.kind == SessionSpduKind::accept);
++    CHECK(decoded.presentation.context_results.size() == 2U);
++    CHECK(decoded.aare.accepted());
++}
++
+ void response_mirrors_session_parameters_and_negotiated_context_ids() {
+@@ -247,7 +270,8 @@ int main() {
+         {"presentation CP contexts", presentation_cp_decodes_csharp_contexts_and_round_trips},
+         {"balanced AARQ golden vector", balanced_aarq_matches_csharp_and_decodes_structurally},
+         {"deterministic AARE golden vector", deterministic_aare_response_matches_csharp_and_decodes},
++        {"vendor CPA responding selector", vendor_cpa_accepts_responding_presentation_selector},
+         {"session/context mirroring", response_mirrors_session_parameters_and_negotiated_context_ids},
