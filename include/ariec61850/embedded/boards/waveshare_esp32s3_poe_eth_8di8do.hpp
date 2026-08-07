@@ -25,8 +25,11 @@ struct WaveshareEsp32S3PoeEth8Di8Do final {
     static constexpr int w5500_chip_select_gpio = 16;
     static constexpr int w5500_reset_gpio = 39;
 
-    // W5500 MACRAW is valid on Socket 0. arstack reserves that socket for
-    // GOOSE/SV raw Layer-2 traffic in the reference ESP32 integration.
+    // At chip level, W5500 MACRAW mode is valid on Socket 0. In the preferred
+    // ESP-IDF integration the official W5500 Ethernet driver owns MACRAW and
+    // feeds the software TCP/IP stack, so arstack must not independently claim
+    // hardware sockets behind that driver. Raw SV/GOOSE and lwIP TCP/MMS share
+    // the same Ethernet interface through the platform adapter.
     static constexpr std::uint8_t w5500_macraw_socket = 0U;
 
     static constexpr std::array<int, 8> digital_input_gpios{
