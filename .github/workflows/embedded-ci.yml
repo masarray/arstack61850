@@ -42,7 +42,7 @@ jobs:
           import sys
 
           cmake = Path('embedded/CMakeLists.txt').read_text(encoding='utf-8')
-          match = re.search(r'set\(ARIEC61850_EMBEDDED_SOURCES\n(.*?)\n\)', cmake, re.S)
+          match = re.search(r'set\(ARIEC61850_EMBEDDED_SOURCES\s*(.*?)\n\)', cmake, re.S)
           if not match:
               raise SystemExit('embedded source list not found')
 
