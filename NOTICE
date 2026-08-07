@@ -1,17 +1,18 @@
-ARIEC61850
-Copyright (C) 2026 Ari Sulistiono
-GitHub account: masarray
+ARIEC61850 C++ Port
+Copyright (C) 2026 Ari Sulistiono and contributors
 
-Current public license: GNU General Public License v3.0 or later only.
-Commercial licensing may be negotiated separately with the copyright holder.
+This program is free software under the GNU General Public License version 3 or later.
+See LICENSE for the complete license text.
 
-Current branch and current release packages:
-- License: GPL-3.0-or-later only
-- License text: LICENSE
-- Licensing explanation: docs/LICENSING.md
+The C++ stack is an incremental migration of the ARIEC61850 C# implementation. The C# source
+remains the behavioral oracle until deterministic cross-language comparison and isolated
+physical-laboratory interoperability are accepted.
 
-Historical revisions through d61a83f5b04e7bd2b847174eeac7f4f6e81ee8e1 remain available under their original terms on branch archive/apache-2.0-final. The historical license text is retained on that archive branch and is not part of the current source tree or current release packages.
+Phase 4C/4C.1 includes an explicitly invoked TCP transport, a read-only MMS discovery surface,
+a C#-compatible `live-ied-model-v1` mapper, parity tooling, and physical evidence runners. The
+discovery surface does not construct MMS Write, control, GI, RCB reservation/enable, dynamic
+DataSet mutation, or file-service requests.
 
-Third-party components and their notices remain governed by their own licenses; see THIRD_PARTY_NOTICES.md.
-
-ARIEC61850 is independently developed under a documented clean-room and provenance policy. The repository is maintained as source-first public project content and intentionally excludes generated build outputs, local IDE state, runtime evidence, captures, and release artifacts.
+Physical IED compatibility is target-specific and must not be inferred from synthetic,
+loopback, or simulated evidence. Review `PHASE_4C1_LIVE_MODEL_INTEROP.md` and the lab checklist
+before accepting a target.
