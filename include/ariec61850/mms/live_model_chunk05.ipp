@@ -3,6 +3,10 @@
         << ",\"dataAttributeCount\":" << coverage.data_attribute_count
         << ",\"dataSetCount\":" << coverage.data_set_count
         << ",\"reportControlCount\":" << coverage.report_control_count
+        << ",\"gooseControlBlockCount\":" << coverage.goose_control_block_count
+        << ",\"sampledValueControlBlockCount\":" << coverage.sampled_value_control_block_count
+        << ",\"settingGroupControlCount\":" << coverage.setting_group_control_count
+        << ",\"logControlCount\":" << coverage.log_control_count
         << ",\"variableTypeReadAttemptCount\":" << coverage.variable_type_read_attempt_count
         << ",\"variableTypeReadSuccessCount\":" << coverage.variable_type_read_success_count
         << ",\"variableTypeReadFailureCount\":" << coverage.variable_type_read_failure_count
@@ -44,14 +48,30 @@
     out << "],\"dataSets\":[";
     for (std::size_t i = 0; i < data_sets.size(); ++i) {
         if (i) out << ',';
-        out << "{\"reference\":\"" << json(data_sets[i].reference) << "\",\"memberCount\":"
-            << data_sets[i].members.size() << ",\"members\":[";
-        for (std::size_t j = 0; j < data_sets[i].members.size(); ++j) {
+        const auto& data_set = data_sets[i];
+        out << "{\"reference\":\"" << json(data_set.reference)
+            << "\",\"domain\":\"" << json(data_set.domain)
+            << "\",\"logicalNode\":\"" << json(data_set.logical_node)
+            << "\",\"name\":\"" << json(data_set.name)
+            << "\",\"memberCount\":" << data_set.members.size() << ",\"members\":[";
+        for (std::size_t j = 0; j < data_set.members.size(); ++j) {
             if (j) out << ',';
             out << "{\"index\":" << j << ",\"reference\":\""
-                << json(data_sets[i].members[j].reference) << "\",\"functionalConstraint\":\""
-                << json(data_sets[i].members[j].functional_constraint) << "\"}";
+                << json(data_set.members[j].reference) << "\",\"functionalConstraint\":\""
+                << json(data_set.members[j].functional_constraint) << "\"}";
         }
+        const auto write_reference_array = [&out](const auto& references) {
+            for (std::size_t index = 0U; index < references.size(); ++index) {
+                if (index) out << ',';
+                out << '"' << json(references[index]) << '"';
+            }
+        };
+        out << "],\"usedByReportControls\":[";
+        write_reference_array(data_set.used_by_report_controls);
+        out << "],\"usedByGooseControls\":[";
+        write_reference_array(data_set.used_by_goose_controls);
+        out << "],\"usedBySampledValueControls\":[";
+        write_reference_array(data_set.used_by_sampled_value_controls);
         out << "]}";
     }
     out << "],\"reportControls\":[";
@@ -62,7 +82,52 @@
             << (r.buffered ? "true" : "false") << ",\"dataSetReference\":\""
             << json(r.data_set_reference) << "\",\"reportId\":\"" << json(r.report_id) << "\"}";
     }
-    out << "],\"warnings\":[";
+    out << ']';
+
+    const auto write_control_blocks = [&out](
+        const std::string_view property,
+        const auto& controls) {
+        out << ",\"" << property << "\":[";
+        for (std::size_t index = 0U; index < controls.size(); ++index) {
+            if (index) out << ',';
+            const auto& control = controls[index];
+            out << "{\"kind\":\"" << json(control.kind)
+                << "\",\"reference\":\"" << json(control.reference)
+                << "\",\"domain\":\"" << json(control.domain)
+                << "\",\"logicalNode\":\"" << json(control.logical_node)
+                << "\",\"name\":\"" << json(control.name)
+                << "\",\"functionalConstraint\":\"" << json(control.functional_constraint)
+                << "\",\"attributeCount\":" << control.attributes.size()
+                << ",\"attributes\":[";
+            for (std::size_t attribute_index = 0U;
+                 attribute_index < control.attributes.size();
+                 ++attribute_index) {
+                if (attribute_index) out << ',';
+                out << '"' << json(control.attributes[attribute_index]) << '"';
+            }
+            out << "],\"dataSetReference\":\"" << json(control.data_set_reference)
+                << "\",\"dataSetReferenceStatus\":\"" << json(control.data_set_reference_status)
+                << "\",\"controlId\":\"" << json(control.control_id)
+                << "\",\"appId\":\"" << json(control.app_id)
+                << "\",\"smvId\":\"" << json(control.smv_id)
+                << "\",\"confRev\":\"" << json(control.configuration_revision)
+                << "\",\"minimumTimeMs\":\"" << json(control.minimum_time_ms)
+                << "\",\"maximumTimeMs\":\"" << json(control.maximum_time_ms)
+                << "\",\"sampleRate\":\"" << json(control.sample_rate)
+                << "\",\"sampleMode\":\"" << json(control.sample_mode)
+                << "\",\"numberOfAsdu\":\"" << json(control.number_of_asdu)
+                << "\",\"addressStatus\":\"" << json(control.address_status)
+                << "\",\"discoveryStatus\":\"" << json(control.discovery_status)
+                << "\",\"message\":\"" << json(control.message) << "\"}";
+        }
+        out << ']';
+    };
+    write_control_blocks("gooseControlBlocks", goose_control_blocks);
+    write_control_blocks("sampledValueControlBlocks", sampled_value_control_blocks);
+    write_control_blocks("settingGroupControls", setting_group_controls);
+    write_control_blocks("logControls", log_controls);
+
+    out << ",\"warnings\":[";
     for (std::size_t i = 0; i < warnings.size(); ++i) {
         if (i) out << ',';
         out << "{\"code\":\"" << json(warnings[i].code) << "\",\"reference\":\""
