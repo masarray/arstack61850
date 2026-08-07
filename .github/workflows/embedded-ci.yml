@@ -42,7 +42,7 @@ jobs:
           import sys
 
           cmake = Path('embedded/CMakeLists.txt').read_text(encoding='utf-8')
-          match = re.search(r'set\(ARIEC61850_EMBEDDED_SOURCES\s*(.*?)\n\)', cmake, re.S)
+          match = re.search(r'set\(ARIEC61850_EMBEDDED_SOURCES\s*(.*?)\)', cmake, re.S)
           if not match:
               raise SystemExit('embedded source list not found')
 
@@ -72,6 +72,9 @@ jobs:
           failures = []
           throw_count = 0
           for path in paths:
+              if not path.is_file():
+                  failures.append(f'{path}: embedded source does not exist')
+                  continue
               text = path.read_text(encoding='utf-8')
               throw_count += len(re.findall(r'\bthrow\b', text))
               for needle, label in forbidden.items():
