@@ -43,6 +43,26 @@
         [](const auto& report_control) { return report_control.buffered; }));
     coverage.unbuffered_report_control_count =
         coverage.report_control_count - coverage.buffered_report_control_count;
+    coverage.report_control_bound_count = static_cast<std::size_t>(std::count_if(
+        document.report_controls.begin(), document.report_controls.end(),
+        [](const auto& report_control) {
+            return same(report_control.data_set_binding_status, "Bound");
+        }));
+    coverage.report_control_unbound_count = static_cast<std::size_t>(std::count_if(
+        document.report_controls.begin(), document.report_controls.end(),
+        [](const auto& report_control) {
+            return same(report_control.data_set_binding_status, "Unbound");
+        }));
+    coverage.report_control_binding_read_failed_count = static_cast<std::size_t>(std::count_if(
+        document.report_controls.begin(), document.report_controls.end(),
+        [](const auto& report_control) {
+            return same(report_control.data_set_binding_status, "ReadFailed");
+        }));
+    coverage.report_control_binding_not_read_count = static_cast<std::size_t>(std::count_if(
+        document.report_controls.begin(), document.report_controls.end(),
+        [](const auto& report_control) {
+            return same(report_control.data_set_binding_status, "NotRead");
+        }));
     coverage.goose_control_block_count = document.goose_control_blocks.size();
     coverage.sampled_value_control_block_count =
         document.sampled_value_control_blocks.size();
@@ -84,6 +104,11 @@
             "Attribute values such as DatSet, GoID, svID, APPID, and multicast address "
             "are not read yet and remain companion evidence until the deep value reader is implemented."});
     }
+
+    // Do not warn merely because an RCB is Unbound. ARIEC61850 supports a
+    // DynamicDataSet selection mode in which an empty DatSet is an intentional
+    // runtime slot state. Selection/claim safety is evaluated separately from
+    // the structural live model.
 
     document.summary =
         "Live IED model: LD=" + std::to_string(coverage.logical_device_count) +
