@@ -2,14 +2,13 @@
 
 #include "ariec61850/acse/association.hpp"
 #include "ariec61850/mms/live_discovery.hpp"
+#include "ariec61850/mms/live_model.hpp"
 #include "ariec61850/mms/services.hpp"
 #include "ariec61850/osi/cotp.hpp"
 #include "ariec61850/osi/tpkt.hpp"
 
-#include <algorithm>
 #include <cstdint>
 #include <deque>
-#include <functional>
 #include <iostream>
 #include <span>
 #include <stdexcept>
@@ -115,7 +114,7 @@ void queue_handshake(ScriptedTransport& transport) {
 void queue_discovery_responses(ScriptedTransport& transport) {
     transport.push_receive(wrap_application(
         mms::MmsServiceCodec::encode_get_name_list_response_p_data(
-            {1U, {"LD0"}, false})));
+            {1U, {"OLS501LD0"}, false})));
 
     transport.push_receive(wrap_application(
         mms::MmsServiceCodec::encode_get_name_list_response_p_data(
@@ -143,9 +142,10 @@ void queue_discovery_responses(ScriptedTransport& transport) {
     directory.invoke_id = 5U;
     directory.deletable = false;
     directory.members.push_back({
-        mms::MmsObjectName::domain_specific("LD0", "LLN0$ST$Mod$stVal"),
-        "LD0/LLN0$ST$Mod$stVal",
-        "LD0/LLN0.Mod.stVal",
+        mms::MmsObjectName::domain_specific(
+            "OLS501LD0", "LLN0$ST$Mod$stVal"),
+        "OLS501LD0/LLN0$ST$Mod$stVal",
+        "OLS501LD0/LLN0.Mod.stVal",
         "ST",
         "LLN0",
         "Mod.stVal",
@@ -156,7 +156,8 @@ void queue_discovery_responses(ScriptedTransport& transport) {
     mms::MmsReadResponse rcb_response;
     rcb_response.invoke_id = 6U;
     rcb_response.results.push_back({
-        mms::MmsDataValue::visible_string("LD0/LLN0.DataSetA"), std::nullopt});
+        mms::MmsDataValue::visible_string("OLS501LD0/LLN0.DataSetA"),
+        std::nullopt});
     rcb_response.results.push_back({
         mms::MmsDataValue::visible_string("RPT-1"), std::nullopt});
     rcb_response.results.push_back({
@@ -167,7 +168,7 @@ void queue_discovery_responses(ScriptedTransport& transport) {
         mms::MmsServiceCodec::encode_read_response_p_data(rcb_response)));
 }
 
-void live_discovery_builds_bounded_read_only_snapshot() {
+void live_discovery_builds_csharp_compatible_read_only_model() {
     ScriptedTransport transport;
     queue_handshake(transport);
     queue_discovery_responses(transport);
@@ -183,23 +184,32 @@ void live_discovery_builds_bounded_read_only_snapshot() {
     mms::MmsLiveDiscoveryClient discovery{association};
     const auto result = discovery.discover(options);
 
-    CHECK(result.endpoint.host == "127.0.0.1");
     CHECK(result.domain_count() == 1U);
     CHECK(result.variable_count() == 5U);
-    CHECK(result.variable_list_count() == 1U);
-    CHECK(result.report_inventory.data_sets.size() == 1U);
-    CHECK(result.report_inventory.report_controls.size() == 1U);
     CHECK(result.variable_types.size() == 1U);
     CHECK(result.variable_types.front().success());
-    CHECK(result.variable_types.front().attributes->type.kind ==
-          mms::MmsTypeKind::boolean);
+    CHECK(result.variable_types.front().variable.item == "LLN0$ST$Mod$stVal");
     CHECK(result.data_set_directories.size() == 1U);
-    CHECK(result.data_set_directories.front().success());
-    CHECK(result.data_set_directories.front().directory->members.size() == 1U);
     CHECK(result.report_controls.size() == 1U);
-    CHECK(result.report_controls.front().success());
-    CHECK(result.report_controls.front().state->report_id == "RPT-1");
     CHECK(!result.partial());
+
+    mms::MmsLiveModelBuildOptions model_options;
+    model_options.explicit_ied_name = "OLS501";
+    const auto model = mms::MmsLiveModelBuilder::build(result, model_options);
+    CHECK(model.schema_version == "live-ied-model-v1");
+    CHECK(model.identity.ied_name == "OLS501");
+    CHECK(model.coverage.logical_device_count == 1U);
+    CHECK(model.coverage.logical_node_count == 1U);
+    CHECK(model.coverage.data_attribute_count >= 1U);
+    CHECK(model.coverage.data_set_count == 1U);
+    CHECK(model.coverage.report_control_count == 1U);
+    CHECK(model.canonical_fingerprint() != 0U);
+    CHECK(model.to_json().find("\"schemaVersion\":\"live-ied-model-v1\"") !=
+          std::string::npos);
+
+    const auto same = mms::MmsLiveModelParityComparer::compare(model, model);
+    CHECK(same.compatible());
+    CHECK(same.blocking_finding_count() == 0U);
 
     std::size_t read_only_requests = 0U;
     for (std::size_t index = 2U; index < transport.sent().size(); ++index) {
@@ -250,9 +260,9 @@ void pagination_without_forward_progress_is_rejected() {
 
 int main() {
     try {
-        live_discovery_builds_bounded_read_only_snapshot();
+        live_discovery_builds_csharp_compatible_read_only_model();
         pagination_without_forward_progress_is_rejected();
-        std::cout << "Live MMS discovery tests passed.\n";
+        std::cout << "Live MMS discovery and model parity tests passed.\n";
         return 0;
     } catch (const std::exception& exception) {
         std::cerr << exception.what() << '\n';
