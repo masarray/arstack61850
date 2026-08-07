@@ -7,6 +7,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -98,10 +99,10 @@ void add_populated_directory(
 
 [[nodiscard]] const mms::MmsRcbCandidateEvaluation& find_evaluation(
     const mms::MmsRcbSelectionEvidence& selection,
-    const std::string& name) {
+    const std::string_view name) {
     const auto found = std::find_if(
         selection.candidates.begin(), selection.candidates.end(),
-        [&name](const auto& candidate) { return candidate.name == name; });
+        [name](const auto& candidate) { return candidate.name == name; });
     if (found == selection.candidates.end()) {
         throw std::runtime_error("Expected RCB evaluation was not found.");
     }
