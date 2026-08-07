@@ -5,6 +5,7 @@
 #include "ariec61850/mms/services.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <map>
 #include <set>
 #include <sstream>
@@ -105,6 +106,47 @@ void validate_options(const MmsLiveDiscoveryOptions& options) {
     const std::exception& exception) {
     return std::string{category} + " probe failed for " + reference +
            ": " + exception.what();
+}
+
+[[nodiscard]] std::string lower_ascii(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](const char character) {
+        return static_cast<char>(
+            std::tolower(static_cast<unsigned char>(character)));
+    });
+    return value;
+}
+
+// Mirrors ARIEC61850 LiveIedVariableTypeProbePlanner: probe one MMS type tree at
+// each Logical Node root instead of probing every LN$FC$DO$DA leaf.  A normal
+// IEC 61850 server can return the nested FC/DO/DA TypeSpecification from this
+// root, reducing a large model from thousands of type requests to roughly the
+// Logical Node count.
+[[nodiscard]] std::vector<MmsObjectName> build_logical_node_type_probe_candidates(
+    const MmsDiscoverySnapshot& snapshot,
+    const std::size_t maximum_probes) {
+    std::vector<MmsObjectName> candidates;
+    candidates.reserve(std::min<std::size_t>(maximum_probes, 256U));
+    std::set<std::string, std::less<>> seen;
+
+    for (const auto& [domain, variables] : snapshot.domain_variables) {
+        for (const auto& item : variables) {
+            const auto separator = item.find('$');
+            if (separator == std::string::npos || separator == 0U) {
+                continue;
+            }
+            const auto logical_node = item.substr(0U, separator);
+            const auto identity = lower_ascii(domain) + "\n" + lower_ascii(logical_node);
+            if (!seen.insert(identity).second) {
+                continue;
+            }
+            candidates.push_back(
+                MmsObjectName::domain_specific(domain, logical_node));
+            if (candidates.size() >= maximum_probes) {
+                return candidates;
+            }
+        }
+    }
+    return candidates;
 }
 
 } // namespace
@@ -277,44 +319,39 @@ MmsLiveDiscoveryResult MmsLiveDiscoveryClient::discover(
     result.report_inventory = MmsReportInventoryBuilder::build(result.names);
 
     if (options.probe_variable_types) {
-        std::size_t probe_count = 0U;
-        for (const auto& [domain, variables] : result.names.domain_variables) {
-            for (const auto& item : variables) {
-                if (probe_count >= options.maximum_variable_type_probes) {
-                    break;
-                }
-                ++probe_count;
+        const auto candidates = build_logical_node_type_probe_candidates(
+            result.names, options.maximum_variable_type_probes);
+        result.variable_types.reserve(candidates.size());
 
-                MmsVariableTypeEvidence evidence;
-                evidence.variable = MmsObjectName::domain_specific(domain, item);
-                try {
-                    MmsVariableAccessAttributesRequest request;
-                    request.invoke_id = association_.next_invoke_id();
-                    request.name = evidence.variable;
-                    const auto encoded = MmsServiceCodec::
-                        encode_variable_access_attributes_request_p_data(
-                            request,
-                            association_.negotiated().presentation_context_id);
-                    const auto exchange = association_.exchange_confirmed(
-                        encoded, request.invoke_id, stop_token);
-                    const auto payload = response_payload(
-                        exchange, "GetVariableAccessAttributes");
-                    evidence.attributes = MmsServiceCodec::
-                        decode_variable_access_attributes_response(
-                            payload, request.invoke_id);
-                } catch (const std::exception& exception) {
-                    evidence.error = exception.what();
-                    result.diagnostics.push_back(optional_probe_error(
-                        "Variable type", evidence.variable.reference(), exception));
-                    if (!options.continue_on_optional_probe_error) {
-                        throw;
-                    }
+        for (const auto& candidate : candidates) {
+            MmsVariableTypeEvidence evidence;
+            evidence.variable = candidate;
+            try {
+                MmsVariableAccessAttributesRequest request;
+                request.invoke_id = association_.next_invoke_id();
+                request.name = evidence.variable;
+                const auto encoded = MmsServiceCodec::
+                    encode_variable_access_attributes_request_p_data(
+                        request,
+                        association_.negotiated().presentation_context_id);
+                const auto exchange = association_.exchange_confirmed(
+                    encoded, request.invoke_id, stop_token);
+                const auto payload = response_payload(
+                    exchange, "GetVariableAccessAttributes");
+                evidence.attributes = MmsServiceCodec::
+                    decode_variable_access_attributes_response(
+                        payload, request.invoke_id);
+            } catch (const std::exception& exception) {
+                evidence.error = exception.what();
+                result.diagnostics.push_back(optional_probe_error(
+                    "Logical-node variable type",
+                    evidence.variable.reference(),
+                    exception));
+                if (!options.continue_on_optional_probe_error) {
+                    throw;
                 }
-                result.variable_types.push_back(std::move(evidence));
             }
-            if (probe_count >= options.maximum_variable_type_probes) {
-                break;
-            }
+            result.variable_types.push_back(std::move(evidence));
         }
     }
 
