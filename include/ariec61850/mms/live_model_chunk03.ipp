@@ -13,6 +13,12 @@
             attribute.type_discovery_status = "Exact";
             attribute.type_source = type_source;
             attribute.type_confidence = MmsLiveModelConfidence::exact;
+        } else {
+            attribute.scl_basic_type = guess_scl_basic_type(
+                attribute.attribute_path,
+                attribute.functional_constraint);
+            attribute.type_source = "NameListHeuristic";
+            attribute.type_confidence = MmsLiveModelConfidence::low;
         }
         hierarchy[point.domain][point.logical_node][object_name].emplace(
             key(attribute.object_reference), std::move(attribute));
