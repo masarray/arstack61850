@@ -168,6 +168,79 @@ void queue_discovery_responses(ScriptedTransport& transport) {
         mms::MmsServiceCodec::encode_read_response_p_data(rcb_response)));
 }
 
+[[nodiscard]] mms::MmsLiveModelDocument build_identity_model(
+    const std::vector<std::string>& domains,
+    const std::string& host = "192.0.2.10") {
+    mms::MmsLiveDiscoveryResult result;
+    result.endpoint = {host, 102U};
+    for (const auto& domain : domains) {
+        result.names.domain_variables.emplace(domain, std::vector<std::string>{});
+    }
+    return mms::MmsLiveModelBuilder::build(result);
+}
+
+void csharp_identity_resolver_cases_are_preserved() {
+    {
+        const auto model = build_identity_model({"OLSF501LD0"});
+        CHECK(model.identity.ied_name == "OLSF501");
+        CHECK(model.identity.source == "MmsDomainKnownLogicalDeviceSuffix");
+        CHECK(model.identity.confidence == mms::MmsLiveModelConfidence::medium);
+        CHECK(model.identity.logical_device_aliases.at("OLSF501LD0") == "LD0");
+    }
+
+    {
+        const auto model = build_identity_model(
+            {"OLSF501LD0", "OLSF501PROT", "OLSF501CTRL"});
+        CHECK(model.identity.ied_name == "OLSF501");
+        CHECK(model.identity.source == "MmsDomainKnownLogicalDeviceSuffix");
+        CHECK(model.identity.confidence == mms::MmsLiveModelConfidence::high);
+        CHECK(!model.identity.ambiguous);
+        CHECK(model.identity.logical_device_aliases.at("OLSF501PROT") == "PROT");
+    }
+
+    {
+        const auto model = build_identity_model(
+            {"OCR7SJ8Application",
+             "OCR7SJ8CB1",
+             "OCR7SJ8Dc1",
+             "OCR7SJ8Mod2_MU1",
+             "OCR7SJ8V3p1_5051OC3phase1"},
+            "1.110.1.1");
+        CHECK(model.identity.ied_name == "OCR7SJ8");
+        CHECK(model.identity.source == "MmsDomainCommonPrefix");
+        CHECK(model.identity.confidence == mms::MmsLiveModelConfidence::high);
+        CHECK(model.identity.logical_device_aliases.at("OCR7SJ8Mod2_MU1") == "Mod2_MU1");
+        CHECK(std::find(
+                  model.identity.candidate_names.begin(),
+                  model.identity.candidate_names.end(),
+                  "OCR7SJ8Mod2") == model.identity.candidate_names.end());
+    }
+
+    {
+        const auto model = build_identity_model({"ALPHA_LD0", "BETA_LD0"});
+        CHECK(model.identity.ied_name == "192.0.2.10");
+        CHECK(model.identity.source == "MmsDomainAmbiguous");
+        CHECK(model.identity.confidence == mms::MmsLiveModelConfidence::low);
+        CHECK(model.identity.ambiguous);
+        CHECK(model.identity.candidate_names.size() == 2U);
+        CHECK(model.identity.candidate_names[0] == "ALPHA");
+        CHECK(model.identity.candidate_names[1] == "BETA");
+    }
+
+    {
+        mms::MmsLiveDiscoveryResult result;
+        result.endpoint = {"192.0.2.10", 102U};
+        result.names.domain_variables.emplace(
+            "OLSF501LD0", std::vector<std::string>{});
+        mms::MmsLiveModelBuildOptions options;
+        options.explicit_ied_name = "COMMISSIONED_IED";
+        const auto model = mms::MmsLiveModelBuilder::build(result, options);
+        CHECK(model.identity.ied_name == "COMMISSIONED_IED");
+        CHECK(model.identity.source == "ExplicitOverride");
+        CHECK(model.identity.confidence == mms::MmsLiveModelConfidence::exact);
+    }
+}
+
 void live_discovery_builds_csharp_compatible_read_only_model() {
     ScriptedTransport transport;
     queue_handshake(transport);
@@ -196,7 +269,7 @@ void live_discovery_builds_csharp_compatible_read_only_model() {
     const auto model = mms::MmsLiveModelBuilder::build(result);
     CHECK(model.schema_version == "live-ied-model-v1");
     CHECK(model.identity.ied_name == "OLS501");
-    CHECK(model.identity.source == "MmsDomainInference");
+    CHECK(model.identity.source == "MmsDomainKnownLogicalDeviceSuffix");
     CHECK(model.identity.logical_device_aliases.at("OLS501LD0") == "LD0");
     CHECK(model.coverage.logical_device_count == 1U);
     CHECK(model.coverage.logical_node_count == 1U);
@@ -260,6 +333,7 @@ void pagination_without_forward_progress_is_rejected() {
 
 int main() {
     try {
+        csharp_identity_resolver_cases_are_preserved();
         live_discovery_builds_csharp_compatible_read_only_model();
         pagination_without_forward_progress_is_rejected();
         std::cout << "Live MMS discovery and model parity tests passed.\n";
