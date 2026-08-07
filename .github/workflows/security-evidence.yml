@@ -2,7 +2,7 @@ name: Security and Evidence
 
 on:
   push:
-    branches: [main, "agent/**"]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
