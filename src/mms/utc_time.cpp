@@ -2,10 +2,11 @@
 
 #include "ariec61850/mms/utc_time.hpp"
 
-#include "ariec61850/asn1/ber.hpp"
-
+#include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 
 namespace ar::iec61850::mms {
@@ -32,8 +33,43 @@ Iec61850UtcTime Iec61850UtcTime::from_bytes(const std::span<const std::uint8_t> 
     return {timestamp, bytes[7]};
 }
 
+bool Iec61850UtcTime::try_write_bytes(
+    const std::span<std::uint8_t, 8> destination) const noexcept {
+    using seconds_type = std::chrono::seconds;
+    const auto whole_seconds = std::chrono::floor<seconds_type>(value);
+    auto seconds = whole_seconds.time_since_epoch().count();
+    const auto fractional = value - whole_seconds;
+    auto fraction = static_cast<std::uint32_t>(std::llround(
+        std::chrono::duration<double>(fractional).count() * 16'777'216.0));
+
+    if (fraction >= 16'777'216U) {
+        ++seconds;
+        fraction = 0U;
+    }
+    if (seconds < 0 ||
+        static_cast<std::uint64_t>(seconds) >
+            std::numeric_limits<std::uint32_t>::max()) {
+        return false;
+    }
+
+    const auto raw_seconds = static_cast<std::uint32_t>(seconds);
+    destination[0] = static_cast<std::uint8_t>((raw_seconds >> 24U) & 0xFFU);
+    destination[1] = static_cast<std::uint8_t>((raw_seconds >> 16U) & 0xFFU);
+    destination[2] = static_cast<std::uint8_t>((raw_seconds >> 8U) & 0xFFU);
+    destination[3] = static_cast<std::uint8_t>(raw_seconds & 0xFFU);
+    destination[4] = static_cast<std::uint8_t>((fraction >> 16U) & 0xFFU);
+    destination[5] = static_cast<std::uint8_t>((fraction >> 8U) & 0xFFU);
+    destination[6] = static_cast<std::uint8_t>(fraction & 0xFFU);
+    destination[7] = quality;
+    return true;
+}
+
 std::vector<std::uint8_t> Iec61850UtcTime::to_bytes() const {
-    return asn1::BerWriter::encode_utc_time(value, quality);
+    std::array<std::uint8_t, 8> bytes{};
+    if (!try_write_bytes(bytes)) {
+        throw std::out_of_range("UTC time seconds are outside the IEC 61850 32-bit range.");
+    }
+    return {bytes.begin(), bytes.end()};
 }
 
 } // namespace ar::iec61850::mms
