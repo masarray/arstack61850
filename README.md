@@ -1,108 +1,44 @@
 # ARIEC61850 C++ Port
 
-Incremental C++20 migration of the ARIEC61850 C# protocol stack. The C# implementation
-remains the behavioral oracle until cross-language comparison and isolated-laboratory
-interoperability are complete.
+Incremental C++20 migration of the ARIEC61850 C# protocol stack. The C# implementation remains
+the behavioral oracle until cross-language comparison and isolated-laboratory interoperability
+are complete.
 
 ## Implemented
 
-### Phase 0 — portable foundation
+### Portable protocol foundation
 
-- CMake-based C++20 static library.
-- BER TLV and primitive codecs.
-- MAC, VLAN, Ethernet, IEC 61850 process-bus, and classic PCAP codecs.
-- GOOSE retransmission schedule.
+- CMake-based C++20 static library with strict warnings.
+- BER, MMS Data/UTC time, Ethernet/VLAN, classic PCAP.
+- GOOSE and Sampled Values codecs plus offline supervision.
+- SCL read-only parser and COMTRADE CFG/DAT readers.
+- RFC 1006 TPKT, COTP, ISO Session, Presentation, ACSE, and MMS Initiate.
+- Confirmed MMS GetNameList, variable attributes, Read, and Write codecs.
+- DataSet directory, InformationReport, RCB state, offline monitoring, and report subscription.
 
-### Phase 1A–1E — deterministic process-bus core
+### Phase 4C — built-in TCP and read-only discovery
 
-- IEC 61850 UTC time and recursive MMS Data/AllData codec.
-- Complete GOOSE PDU/frame codecs and offline publisher/subscriber supervision.
-- Sampled Values ASDU, multi-ASDU PDU, Ethernet frame, payload, quality, counter, and
-  stream supervision.
-- C#-derived synthetic PCAP equivalence evidence.
-- Sanitizer, deterministic mutation-smoke, and LLVM libFuzzer coverage.
-- Receive-only isolated-laboratory tooling.
+- Non-blocking Windows Winsock and POSIX TCP transport.
+- IPv4/IPv6 resolution, deadlines, cancellation, partial sends, receive chunking, and peer close.
+- Bounded live domain, variable, DataSet, type, and RCB discovery.
+- `ariec61850_live_discover` CLI.
 
-### Phase 2A — SCL foundation
+### Phase 4C.1 — C# live-model parity
 
-- Bounded, dependency-free XML/SCL reader.
-- IED, DataSet, FCDA, GOOSE, Sampled Values, report-control, and communication mapping.
-- SCL edition detection, type-template resolution, DataSet binding, diagnostics, and
-  SCL/XML fuzzing.
+- `live-ied-model-v1` JSON compatible with the C# exporter.
+- Logical Device / Logical Node / Data Object / Data Attribute hierarchy.
+- Functional constraints, MMS/SCL types, DataSets, report controls, identity, and CDC confidence.
+- Deterministic canonical manifest and model fingerprint.
+- C#↔C++ parity script.
+- Windows/Linux repeated reconnect and physical read-only evidence runner.
 
-### Phase 2B — COMTRADE foundation
-
-- CFG parsing for IEEE C37.111-style 1991/1999/2013 records.
-- ASCII, BINARY, BINARY32, and FLOAT32 DAT readers.
-- Analog engineering scaling (`a * raw + b`) and packed digital status decoding.
-- Timestamp multiplier and multi-rate fallback scheduling.
-- Default `Va/Vb/Vc/Vn/Ia/Ib/Ic/In` channel mapping.
-- Deterministic SCL Sampled Values to COMTRADE channel binding.
-- Read-only `ariec61850_comtrade_inspect` human/JSON CLI.
-- C#-derived ASCII and binary fixtures, mutation smoke, sanitizer, and libFuzzer corpus.
-
-### Phase 3A — MMS transport foundation
-
-- RFC 1006 TPKT frame encode/decode with strict version, reserved-octet, and length validation.
-- Incremental TPKT stream framing for fragmented and coalesced TCP byte streams.
-- COTP Connection Request, Connection Confirm, Data, Disconnect Request, and Error TPDU decoding.
-- Default C#-compatible CR vector, TPDU-size negotiation, and TSAP selector mirroring.
-- COTP Data segmentation by negotiated TPDU size and bounded EOT reassembly.
-- Fragment-count, byte-count, and empty non-final fragment abuse guards.
-- C#-derived golden vectors, deterministic mutation smoke, sanitizer, and libFuzzer coverage.
-
-### Phase 3B — MMS association codecs
-
-- Bounded ISO Session Connect/Accept SPDU and data-transfer profile codecs.
-- Presentation CP/CPA context definitions, negotiation results, selectors, and PDV routing.
-- ACSE and MMS context negotiation using BER transfer syntax.
-- Structured ACSE AARQ/AARE application context, AP-title, AE-qualifier, result, and diagnostic parsing.
-- EXTERNAL user-information handling with MMS Initiate retained as an opaque Phase 3C payload.
-- Deterministic association-response construction with session and context mirroring.
-- Byte-exact C# request/response golden vectors, mutation smoke, sanitizer, and libFuzzer coverage.
-
-### Phase 3C — MMS service codecs
-
-- MMS Initiate request/response and confirmed request/response/error envelopes.
-- Invoke-ID routing, ObjectName, GetNameList, GetVariableAccessAttributes, Read, and Write.
-- Recursive bounded TypeSpecification and mixed success/failure access results.
-- C#-derived vectors, sanitizer, deterministic mutation smoke, and libFuzzer coverage.
-
-### Phase 4A — offline DataSet and report monitoring
-
-- DataSet and buffered/unbuffered RCB inventory from supplied GetNameList evidence.
-- GetNamedVariableListAttributes request/response and IEC reference normalization.
-- Strict InformationReport and OptFlds-driven report-frame decoding.
-- RCB attribute read-plan/state mapping with cautious availability confidence.
-- Sequence, configuration, DataSet, overflow, and segmentation continuity tracking.
-- Bounded offline report monitor and dedicated MMS-reporting fuzz corpus.
-
-### Phase 4B — association and report-subscription runtime
-
-- Transport-injected COTP, Session, Presentation, ACSE/MMS Initiate lifecycle.
-- Confirmed-service routing, timeout/cancellation handling, and explicit reconnect.
-- Persistent RCB re-probe, reservation, `RptEna`, optional GI, report delivery, and
-  ownership-aware cleanup. See `ASSOCIATION_RUNTIME_PROFILE.md`.
-
-### Phase 4C — built-in TCP and live read-only discovery
-
-- Cross-platform non-blocking Winsock/POSIX `TcpMmsByteTransport`.
-- IPv4/IPv6 resolution, deadline/cancellation-aware readiness waits, TCP_NODELAY,
-  keepalive, partial sends, arbitrary receive chunking, and peer-close detection.
-- Bounded live GetNameList discovery for domains, variables, and named-variable lists.
-- Optional variable type, DataSet directory, and read-only RCB state probes.
-- `MmsTcpLiveDiscoverySession` ready-to-use association/discovery composition.
-- Read-only `ariec61850_live_discover` human/JSON CLI.
-- Scripted service-allowlist regression that rejects MMS Write. See
-  `LIVE_DISCOVERY_PROFILE.md`.
-
-The TCP transport performs no operation on its own. The live discovery API and CLI emit only
-GetNameList, GetVariableAccessAttributes, GetNamedVariableListAttributes, and Read requests.
-Physical IED interoperability remains a separate laboratory acceptance gate.
+The live discovery surface sends only GetNameList, GetVariableAccessAttributes,
+GetNamedVariableListAttributes, and Read. It does not construct Write, control, GI, RCB
+reservation/enable, dynamic DataSet mutation, or file-service requests.
 
 ## Build
 
-### Windows — Visual Studio
+### Windows
 
 ```powershell
 cmake -S . -B build -A x64 -DARIEC61850_WARNINGS_AS_ERRORS=ON
@@ -110,7 +46,7 @@ cmake --build build --config Release --parallel
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-### Linux — GCC or Clang
+### Linux
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DARIEC61850_WARNINGS_AS_ERRORS=ON
@@ -118,39 +54,50 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-### Sanitizers
+## Live read-only discovery
 
-```bash
-CC=clang CXX=clang++ cmake -S . -B build-sanitizers \
-  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  -DARIEC61850_ENABLE_SANITIZERS=ON
-cmake --build build-sanitizers --parallel
-ctest --test-dir build-sanitizers --output-on-failure
-```
-
-## Read-only tools
-
-### Discover a live MMS endpoint
+Human summary:
 
 ```powershell
-.\build\Release\ariec61850_live_discover.exe 192.168.1.10 102 --json
+.\build\Release\ariec61850_live_discover.exe 192.168.1.10 102
 ```
 
-Use `--no-types`, `--no-datasets`, or `--no-rcb` to reduce probe scope. All discovery counts
-and request timeouts are bounded through CLI options or `MmsLiveDiscoveryOptions`.
+C#-compatible model:
 
-### Inspect a COMTRADE record
+```powershell
+.\build\Release\ariec61850_live_discover.exe 192.168.1.10 102 `
+  --model-json --ied-name IED_A > live-ied-model.json
+```
+
+Cross-language parity:
+
+```bash
+python scripts/compare-live-model-parity.py \
+  csharp-live-ied-model.json cpp-live-ied-model.json \
+  --output csharp-cpp-parity.json
+```
+
+Physical read-only acceptance:
+
+```powershell
+.\scripts\run-live-readonly-interop.ps1 `
+  -HostName 192.168.1.10 -Cycles 10 `
+  -OutputDirectory .\evidence\IED_A `
+  -ExpectedCSharpModel .\csharp-live-ied-model.json
+```
+
+See `PHASE_4C1_LIVE_MODEL_INTEROP.md` for acceptance rules and evidence requirements.
+
+## Other read-only tools
 
 ```powershell
 .\build\Release\ariec61850_comtrade_inspect.exe .\record.cfg --json
-```
-
-### Analyze a saved process-bus PCAP
-
-```powershell
 .\scripts\run-lab-check.ps1 -Pcap .\captures\device-session.pcap
 ```
 
-See `REPORTING_PROFILE.md` for the offline report decoder profile,
-`LAB_INTEROP_CHECKLIST.md` before using a physical IED, and
-`MIGRATION_CHECKLIST.md` for the detailed progress ledger.
+## Acceptance boundary
+
+Source implementation and deterministic/simulated validation do not replace physical IED
+acceptance. Before merging Phase 4C/4C.1, run the repository GCC/Clang/MSVC and security
+workflows, execute the physical evidence runner against a reachable IED or vendor simulator,
+and review C#↔C++ parity against the same configuration.
