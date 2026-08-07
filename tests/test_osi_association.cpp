@@ -197,10 +197,13 @@ void deterministic_aare_response_matches_csharp_and_decodes() {
 
 void vendor_cpa_accepts_responding_presentation_selector() {
     auto response = csharp_deterministic_response();
+    const auto session_user_data_marker = from_hex("C1 72 31 70");
     const auto cpa_marker = from_hex("31 70 A0 03");
     const auto normal_marker = from_hex("A2 69 A5 12");
+    const auto session_user_data_offset = find_sequence(response, session_user_data_marker);
     const auto cpa_offset = find_sequence(response, cpa_marker);
     const auto normal_offset = find_sequence(response, normal_marker);
+    CHECK(session_user_data_offset < response.size());
     CHECK(cpa_offset < response.size());
     CHECK(normal_offset < response.size());
 
@@ -208,6 +211,8 @@ void vendor_cpa_accepts_responding_presentation_selector() {
         response.begin() + static_cast<std::ptrdiff_t>(normal_offset + 2U),
         {0x83U, 0x04U, 0x00U, 0x00U, 0x00U, 0x01U});
     response[1] = static_cast<std::uint8_t>(response[1] + 6U);
+    response[session_user_data_offset + 1U] = static_cast<std::uint8_t>(
+        response[session_user_data_offset + 1U] + 6U);
     response[cpa_offset + 1U] = static_cast<std::uint8_t>(
         response[cpa_offset + 1U] + 6U);
     response[normal_offset + 1U] = static_cast<std::uint8_t>(
