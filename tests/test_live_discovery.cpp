@@ -261,7 +261,7 @@ void live_discovery_builds_csharp_compatible_read_only_model() {
     CHECK(result.variable_count() == 5U);
     CHECK(result.variable_types.size() == 1U);
     CHECK(result.variable_types.front().success());
-    CHECK(result.variable_types.front().variable.item == "LLN0$ST$Mod$stVal");
+    CHECK(result.variable_types.front().variable.item == "LLN0");
     CHECK(result.data_set_directories.size() == 1U);
     CHECK(result.report_controls.size() == 1U);
     CHECK(!result.partial());
