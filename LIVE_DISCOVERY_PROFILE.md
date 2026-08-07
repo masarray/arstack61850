@@ -15,17 +15,10 @@ application runtime.
 
 ## Read-only discovery
 
-`MmsLiveDiscoveryClient` performs only:
-
-1. GetNameList for VMD domains;
-2. GetNameList for domain variables;
-3. GetNameList for named-variable lists;
-4. optional GetVariableAccessAttributes;
-5. optional GetNamedVariableListAttributes; and
-6. optional Read of discovered RCB attributes.
-
-It does not construct Write, RCB enable/reservation, GI, control, dynamic DataSet mutation, or
-file-service requests. Regression tests decode every discovery request and reject service tag 5.
+`MmsLiveDiscoveryClient` performs only GetNameList, GetVariableAccessAttributes,
+GetNamedVariableListAttributes, and Read. It does not construct Write, RCB enable/reservation,
+GI, control, dynamic DataSet mutation, or file-service requests. Regression tests decode every
+discovery request and reject service tag 5.
 
 ## Live-model parity
 
