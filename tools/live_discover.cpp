@@ -2,6 +2,7 @@
 
 #include "ariec61850/mms/live_discovery.hpp"
 #include "ariec61850/mms/live_model.hpp"
+#include "ariec61850/mms/rcb_availability.hpp"
 #include "ariec61850/mms/rcb_selection.hpp"
 
 #include <algorithm>
@@ -49,6 +50,11 @@ struct RcbPlanCliOptions final {
                strict_rcb || !allow_urcb_fallback || !allow_polling_fallback ||
                !excluded_rcb_references.empty() || maximum_candidates_to_print != 10U;
     }
+};
+
+struct RcbAvailabilityCliOptions final {
+    bool requested{};
+    std::size_t maximum_snapshots_to_print{10U};
 };
 
 [[nodiscard]] std::string json_escape(const std::string_view value) {
@@ -141,16 +147,20 @@ void print_usage() {
         << "  --no-polling-fallback  Record polling fallback as disallowed.\n"
         << "  --rcb-exclude REF      Exclude an RCB; may be repeated.\n"
         << "  --max-rcb-candidates N Limit human candidate output (default 10).\n"
+        << "Read-only operational RCB evidence:\n"
+        << "  --rcb-availability     Evaluate C#-parity ownership/availability.\n"
+        << "  --max-rcb-availability N\n"
+        << "                         Limit human availability output (default 10).\n"
         << "\n"
-        << "RCB planning is evidence-only. It never sends Write, Resv, RptEna, GI,\n"
-        << "or dynamic DataSet mutation requests.\n";
+        << "RCB planning/availability are evidence-only. They never send Write, Resv,\n"
+        << "RptEna, GI, or dynamic DataSet mutation requests.\n";
 }
 
 void print_rcb_plan(
     const mms::MmsRcbSelectionEvidence& selection,
     const std::size_t maximum_candidates) {
     std::cout << selection.summary() << '\n'
-              << "RCB availability: static="
+              << "RCB candidate availability: static="
               << availability_count(selection, mms::MmsRcbAvailabilityKind::available_static)
               << ", dynamicEmpty="
               << availability_count(
@@ -207,11 +217,63 @@ void print_rcb_plan(
     }
 }
 
+void print_rcb_operational_availability(
+    const mms::MmsRcbOperationalAvailabilityResult& availability,
+    const std::size_t maximum_snapshots) {
+    std::cout << availability.summary() << '\n'
+              << "RCB operational evidence: usedByCaller="
+              << availability.count(
+                     mms::MmsRcbOperationalAvailability::used_by_caller)
+              << ", noDataSet="
+              << availability.count(
+                     mms::MmsRcbOperationalAvailability::no_data_set)
+              << ", dataSetEmpty="
+              << availability.count(
+                     mms::MmsRcbOperationalAvailability::data_set_empty)
+              << ", dataSetUnreadable="
+              << availability.count(
+                     mms::MmsRcbOperationalAvailability::data_set_unreadable)
+              << ".\n";
+
+    const auto count = std::min(maximum_snapshots, availability.report_controls.size());
+    if (count != 0U) {
+        std::cout << "Operational RCB snapshots (top " << count << " of "
+                  << availability.report_controls.size() << "):\n";
+    }
+    for (std::size_t index = 0U; index < count; ++index) {
+        const auto& snapshot = availability.report_controls[index];
+        std::cout << "  ["
+                  << mms::mms_rcb_operational_availability_name(snapshot.availability)
+                  << '/' << mms::mms_rcb_operational_confidence_name(snapshot.confidence)
+                  << "] " << snapshot.reference
+                  << " mode=" << snapshot.mode
+                  << " DatSet=" << text_or_dash(snapshot.data_set_reference)
+                  << " RptEna=" << text_or_dash(snapshot.enabled_state)
+                  << " Resv=" << text_or_dash(snapshot.reservation_state)
+                  << " ResvTms=" << text_or_dash(snapshot.reservation_time_seconds)
+                  << " Owner=" << text_or_dash(snapshot.owner)
+                  << " members=" << snapshot.data_set_member_count
+                  << " reason=" << snapshot.reason << '\n';
+    }
+
+    if (availability.count(mms::MmsRcbOperationalAvailability::no_data_set) != 0U) {
+        std::cout
+            << "  Note: NoDataSet is a populated/static-report availability result; "
+            << "empty dynamic-slot eligibility is evaluated separately by "
+            << "--rcb-plan dynamic.\n";
+    }
+    for (const auto& warning : availability.warnings) {
+        std::cout << "  - " << warning << '\n';
+    }
+}
+
 void print_human(
     const mms::MmsLiveDiscoveryResult& result,
     const mms::MmsLiveModelDocument& model,
     const std::optional<mms::MmsRcbSelectionEvidence>& rcb_selection,
-    const std::size_t maximum_rcb_candidates) {
+    const std::optional<mms::MmsRcbOperationalAvailabilityResult>& rcb_availability,
+    const std::size_t maximum_rcb_candidates,
+    const std::size_t maximum_rcb_availability) {
     std::cout << result.summary() << '\n'
               << model.summary << '\n'
               << "IED identity: " << model.identity.ied_name
@@ -235,12 +297,17 @@ void print_human(
     if (rcb_selection) {
         print_rcb_plan(*rcb_selection, maximum_rcb_candidates);
     }
+    if (rcb_availability) {
+        print_rcb_operational_availability(
+            *rcb_availability, maximum_rcb_availability);
+    }
 }
 
 void print_summary_json(
     const mms::MmsLiveDiscoveryResult& result,
     const mms::MmsLiveModelDocument& model,
-    const std::optional<mms::MmsRcbSelectionEvidence>& rcb_selection) {
+    const std::optional<mms::MmsRcbSelectionEvidence>& rcb_selection,
+    const std::optional<mms::MmsRcbOperationalAvailabilityResult>& rcb_availability) {
     std::cout << '{'
               << "\"endpoint\":\"" << json_escape(result.endpoint.host) << ':'
               << result.endpoint.port << "\","
@@ -289,6 +356,32 @@ void print_summary_json(
                   << "\"blockerCount\":" << rcb_selection->blockers.size()
                   << '}';
     }
+    if (rcb_availability) {
+        std::cout << ",\"rcbAvailability\":{"
+                  << "\"total\":" << rcb_availability->report_controls.size() << ','
+                  << "\"available\":"
+                  << rcb_availability->count(
+                         mms::MmsRcbOperationalAvailability::available) << ','
+                  << "\"inUse\":"
+                  << rcb_availability->count(
+                         mms::MmsRcbOperationalAvailability::in_use) << ','
+                  << "\"usedByCaller\":"
+                  << rcb_availability->count(
+                         mms::MmsRcbOperationalAvailability::used_by_caller) << ','
+                  << "\"unknown\":"
+                  << rcb_availability->count(
+                         mms::MmsRcbOperationalAvailability::unknown) << ','
+                  << "\"noDataSet\":"
+                  << rcb_availability->count(
+                         mms::MmsRcbOperationalAvailability::no_data_set) << ','
+                  << "\"dataSetEmpty\":"
+                  << rcb_availability->count(
+                         mms::MmsRcbOperationalAvailability::data_set_empty) << ','
+                  << "\"dataSetUnreadable\":"
+                  << rcb_availability->count(
+                         mms::MmsRcbOperationalAvailability::data_set_unreadable)
+                  << '}';
+    }
     std::cout << "}\n";
 }
 
@@ -318,6 +411,17 @@ void print_summary_json(
     options.allow_polling_fallback = cli_options.allow_polling_fallback;
     options.excluded_rcb_references = cli_options.excluded_rcb_references;
     return mms::MmsRcbPoolSelector::build_static_selection(result, options);
+}
+
+[[nodiscard]] std::optional<mms::MmsRcbOperationalAvailabilityResult>
+build_rcb_operational_availability(
+    const mms::MmsLiveDiscoveryResult& result,
+    const RcbAvailabilityCliOptions& cli_options) {
+    if (!cli_options.requested) return std::nullopt;
+    mms::MmsRcbOperationalAvailabilityOptions options;
+    options.maximum_report_controls = std::max<std::size_t>(
+        1U, result.report_inventory.report_controls.size());
+    return mms::MmsRcbOperationalAvailabilityEvaluator::evaluate(result, options);
 }
 
 } // namespace
@@ -351,6 +455,7 @@ int main(int argc, char** argv) {
         mms::MmsLiveDiscoveryOptions discovery_options;
         mms::MmsLiveModelBuildOptions model_options;
         RcbPlanCliOptions rcb_plan_options;
+        RcbAvailabilityCliOptions rcb_availability_options;
 
         while (argument < argc) {
             const std::string option = argv[argument++];
@@ -362,6 +467,8 @@ int main(int argc, char** argv) {
                 discovery_options.read_data_set_directories = false;
             } else if (option == "--no-rcb") {
                 discovery_options.probe_report_controls = false;
+            } else if (option == "--rcb-availability") {
+                rcb_availability_options.requested = true;
             } else if (option == "--strict-rcb") {
                 rcb_plan_options.strict_rcb = true;
             } else if (option == "--no-urcb-fallback") {
@@ -373,7 +480,8 @@ int main(int argc, char** argv) {
                        option == "--timeout-ms" || option == "--rcb-plan" ||
                        option == "--rcb-ld" || option == "--rcb-dataset" ||
                        option == "--preferred-rcb" || option == "--rcb-exclude" ||
-                       option == "--max-rcb-candidates") {
+                       option == "--max-rcb-candidates" ||
+                       option == "--max-rcb-availability") {
                 if (argument >= argc) {
                     throw std::invalid_argument(option + " requires a value.");
                 }
@@ -412,6 +520,8 @@ int main(int argc, char** argv) {
                     discovery_options.maximum_report_control_probes = parsed;
                 } else if (option == "--max-rcb-candidates") {
                     rcb_plan_options.maximum_candidates_to_print = parsed;
+                } else if (option == "--max-rcb-availability") {
+                    rcb_availability_options.maximum_snapshots_to_print = parsed;
                 } else {
                     if (parsed > static_cast<std::size_t>(
                             std::numeric_limits<std::int64_t>::max())) {
@@ -432,9 +542,16 @@ int main(int argc, char** argv) {
             throw std::invalid_argument(
                 "RCB planner policy options require --rcb-plan dynamic|static.");
         }
-        if (rcb_plan_options.requested() && !discovery_options.probe_report_controls) {
+        if (!rcb_availability_options.requested &&
+            rcb_availability_options.maximum_snapshots_to_print != 10U) {
             throw std::invalid_argument(
-                "--rcb-plan requires read-only RCB probes; remove --no-rcb.");
+                "--max-rcb-availability requires --rcb-availability.");
+        }
+        if ((rcb_plan_options.requested() || rcb_availability_options.requested) &&
+            !discovery_options.probe_report_controls) {
+            throw std::invalid_argument(
+                "RCB planning/availability requires read-only RCB probes; "
+                "remove --no-rcb.");
         }
         if (rcb_plan_options.mode == RcbPlanMode::dynamic_data_set &&
             !rcb_plan_options.preferred_data_set_reference.empty()) {
@@ -446,12 +563,12 @@ int main(int argc, char** argv) {
             throw std::invalid_argument(
                 "--rcb-ld applies only to --rcb-plan dynamic.");
         }
-        if (rcb_plan_options.requested() &&
+        if ((rcb_plan_options.requested() || rcb_availability_options.requested) &&
             (output_mode == OutputMode::model_json ||
              output_mode == OutputMode::manifest)) {
             throw std::invalid_argument(
-                "--rcb-plan is runtime evidence and cannot be combined with "
-                "--model-json or --manifest structural parity output.");
+                "RCB runtime evidence cannot be combined with --model-json or "
+                "--manifest structural parity output.");
         }
 
         mms::MmsAssociationOptions association_options;
@@ -464,15 +581,18 @@ int main(int argc, char** argv) {
 
         const auto model = mms::MmsLiveModelBuilder::build(result, model_options);
         const auto rcb_selection = build_rcb_plan(result, rcb_plan_options);
+        const auto rcb_availability = build_rcb_operational_availability(
+            result, rcb_availability_options);
 
         switch (output_mode) {
         case OutputMode::human:
             print_human(
-                result, model, rcb_selection,
-                rcb_plan_options.maximum_candidates_to_print);
+                result, model, rcb_selection, rcb_availability,
+                rcb_plan_options.maximum_candidates_to_print,
+                rcb_availability_options.maximum_snapshots_to_print);
             break;
         case OutputMode::summary_json:
-            print_summary_json(result, model, rcb_selection);
+            print_summary_json(result, model, rcb_selection, rcb_availability);
             break;
         case OutputMode::model_json:
             std::cout << model.to_json() << '\n';
