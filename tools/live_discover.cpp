@@ -2,293 +2,54 @@
 
 #include "ariec61850/mms/live_discovery.hpp"
 #include "ariec61850/mms/live_model.hpp"
+#include "ariec61850/mms/rcb_selection.hpp"
 
 #include <algorithm>
-#include <array>
 #include <chrono>
-#include <cctype>
 #include <cstdint>
 #include <exception>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 
 namespace {
 
 using namespace ar::iec61850;
 
-struct IedIdentityResolution final {
-    std::string name;
-    std::string source;
-    mms::MmsLiveModelConfidence confidence{mms::MmsLiveModelConfidence::unknown};
-    bool ambiguous{};
-    std::vector<std::string> candidates;
-    std::vector<std::string> evidence;
+enum class RcbPlanMode : std::uint8_t {
+    none,
+    dynamic_data_set,
+    static_data_set,
 };
 
-[[nodiscard]] std::string lower(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](const char character) {
-        return static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-    });
-    return value;
-}
+struct RcbPlanCliOptions final {
+    RcbPlanMode mode{RcbPlanMode::none};
+    std::string preferred_rcb_reference;
+    std::string preferred_logical_device;
+    std::string preferred_data_set_reference;
+    bool strict_rcb{};
+    bool allow_urcb_fallback{true};
+    bool allow_polling_fallback{true};
+    std::vector<std::string> excluded_rcb_references;
+    std::size_t maximum_candidates_to_print{10U};
 
-[[nodiscard]] bool same(
-    const std::string_view left,
-    const std::string_view right) {
-    return lower(std::string{left}) == lower(std::string{right});
-}
-
-[[nodiscard]] bool starts_with_ci(
-    const std::string_view value,
-    const std::string_view prefix) {
-    return value.size() >= prefix.size() && same(value.substr(0U, prefix.size()), prefix);
-}
-
-[[nodiscard]] bool ends_with_ci(
-    const std::string_view value,
-    const std::string_view suffix) {
-    return value.size() >= suffix.size() &&
-        same(value.substr(value.size() - suffix.size()), suffix);
-}
-
-[[nodiscard]] std::string trim_boundary(std::string value) {
-    while (!value.empty()) {
-        const char character = value.back();
-        if (character != '_' && character != '-' && character != '.' && character != ' ') {
-            break;
-        }
-        value.pop_back();
-    }
-    return value;
-}
-
-[[nodiscard]] bool viable_ied_name(const std::string_view value) {
-    return std::count_if(value.begin(), value.end(), [](const char character) {
-        return std::isalnum(static_cast<unsigned char>(character)) != 0;
-    }) >= 3;
-}
-
-void append_unique_ci(std::vector<std::string>& values, const std::string& value) {
-    if (std::none_of(values.begin(), values.end(), [&value](const auto& existing) {
-            return same(existing, value);
-        })) {
-        values.push_back(value);
-    }
-}
-
-[[nodiscard]] bool try_extract_known_ld_prefix(
-    const std::string_view domain,
-    std::string& candidate) {
-    static constexpr std::array<std::string_view, 14> stems{
-        "PROT", "CTRL", "MEAS", "PQM", "MET", "ANN", "BCU",
-        "SYS", "COM", "RLY", "BAY", "DR", "LD", "MU"};
-
-    std::string trimmed{domain};
-    std::size_t suffix_start = trimmed.size();
-    while (suffix_start > 0U &&
-           std::isdigit(static_cast<unsigned char>(trimmed[suffix_start - 1U])) != 0) {
-        --suffix_start;
-    }
-    const std::string without_index = trimmed.substr(0U, suffix_start);
-    for (const auto stem : stems) {
-        if (!ends_with_ci(without_index, stem) || without_index.size() <= stem.size()) {
-            continue;
-        }
-        auto prefix = trim_boundary(
-            without_index.substr(0U, without_index.size() - stem.size()));
-        if (!viable_ied_name(prefix)) {
-            continue;
-        }
-        candidate = std::move(prefix);
-        return true;
-    }
-    return false;
-}
-
-[[nodiscard]] std::string infer_common_prefix(
-    const std::vector<std::string>& domains) {
-    if (domains.size() < 2U) {
-        return {};
+    [[nodiscard]] bool requested() const noexcept {
+        return mode != RcbPlanMode::none;
     }
 
-    std::string prefix = domains.front();
-    for (std::size_t index = 1U; index < domains.size(); ++index) {
-        const auto& domain = domains[index];
-        std::size_t length = 0U;
-        while (length < prefix.size() && length < domain.size() &&
-               std::toupper(static_cast<unsigned char>(prefix[length])) ==
-                   std::toupper(static_cast<unsigned char>(domain[length]))) {
-            ++length;
-        }
-        prefix.resize(length);
-        if (prefix.empty()) {
-            return {};
-        }
+    [[nodiscard]] bool has_policy_options() const noexcept {
+        return !preferred_rcb_reference.empty() ||
+               !preferred_logical_device.empty() ||
+               !preferred_data_set_reference.empty() ||
+               strict_rcb || !allow_urcb_fallback || !allow_polling_fallback ||
+               !excluded_rcb_references.empty() || maximum_candidates_to_print != 10U;
     }
-
-    prefix = trim_boundary(std::move(prefix));
-    static constexpr std::array<std::string_view, 14> stems{
-        "PROT", "CTRL", "MEAS", "PQM", "MET", "ANN", "BCU",
-        "SYS", "COM", "RLY", "BAY", "DR", "LD", "MU"};
-    for (const auto stem : stems) {
-        if (ends_with_ci(prefix, stem) && prefix.size() > stem.size()) {
-            auto without_stem = trim_boundary(
-                prefix.substr(0U, prefix.size() - stem.size()));
-            if (viable_ied_name(without_stem)) {
-                prefix = std::move(without_stem);
-            }
-            break;
-        }
-    }
-    return viable_ied_name(prefix) ? prefix : std::string{};
-}
-
-[[nodiscard]] IedIdentityResolution resolve_ied_identity(
-    const mms::MmsLiveDiscoveryResult& discovery) {
-    std::vector<std::string> domains;
-    domains.reserve(discovery.names.domain_variables.size());
-    for (const auto& [domain, _] : discovery.names.domain_variables) {
-        if (!domain.empty()) {
-            append_unique_ci(domains, domain);
-        }
-    }
-    std::sort(domains.begin(), domains.end(), [](const auto& left, const auto& right) {
-        return lower(left) < lower(right);
-    });
-
-    struct SuffixMatch final {
-        std::string domain;
-        std::string candidate;
-    };
-    std::vector<SuffixMatch> suffix_matches;
-    std::vector<std::string> distinct_candidates;
-    for (const auto& domain : domains) {
-        std::string candidate;
-        if (try_extract_known_ld_prefix(domain, candidate)) {
-            suffix_matches.push_back({domain, candidate});
-            append_unique_ci(distinct_candidates, candidate);
-        }
-    }
-    std::sort(
-        distinct_candidates.begin(), distinct_candidates.end(),
-        [](const auto& left, const auto& right) { return lower(left) < lower(right); });
-
-    if (!domains.empty() && suffix_matches.size() == domains.size()) {
-        if (distinct_candidates.size() == 1U) {
-            IedIdentityResolution resolution;
-            resolution.name = distinct_candidates.front();
-            resolution.source = "MmsDomainKnownLogicalDeviceSuffix";
-            resolution.confidence = domains.size() > 1U
-                ? mms::MmsLiveModelConfidence::high
-                : mms::MmsLiveModelConfidence::medium;
-            resolution.candidates = distinct_candidates;
-            for (const auto& match : suffix_matches) {
-                resolution.evidence.push_back(
-                    "MMS domain '" + match.domain +
-                    "' matched the logical-device suffix pattern for IED '" +
-                    resolution.name + "'.");
-            }
-            return resolution;
-        }
-        if (distinct_candidates.size() > 1U) {
-            return {
-                discovery.endpoint.host.empty() ? "DISCOVERED_IED" : discovery.endpoint.host,
-                "MmsDomainAmbiguous",
-                mms::MmsLiveModelConfidence::low,
-                true,
-                distinct_candidates,
-                {"MMS domains produced conflicting IED-name candidates."}};
-        }
-    }
-
-    if (const auto common_prefix = infer_common_prefix(domains); !common_prefix.empty()) {
-        return {
-            common_prefix,
-            "MmsDomainCommonPrefix",
-            domains.size() >= 3U
-                ? mms::MmsLiveModelConfidence::high
-                : mms::MmsLiveModelConfidence::medium,
-            false,
-            {common_prefix},
-            {"IED name was derived from the common prefix of " +
-             std::to_string(domains.size()) + " MMS domain(s)."}};
-    }
-
-    if (distinct_candidates.size() == 1U) {
-        const auto& candidate = distinct_candidates.front();
-        const bool shared_prefix = suffix_matches.size() >= 2U &&
-            std::all_of(domains.begin(), domains.end(), [&candidate](const auto& domain) {
-                return starts_with_ci(domain, candidate);
-            });
-        if (domains.size() == 1U || shared_prefix) {
-            IedIdentityResolution resolution;
-            resolution.name = candidate;
-            resolution.source = "MmsDomainKnownLogicalDeviceSuffix";
-            resolution.confidence = domains.size() == 1U
-                ? mms::MmsLiveModelConfidence::medium
-                : mms::MmsLiveModelConfidence::high;
-            resolution.candidates = distinct_candidates;
-            for (const auto& match : suffix_matches) {
-                resolution.evidence.push_back(
-                    "MMS domain '" + match.domain +
-                    "' matched the logical-device suffix pattern for IED '" +
-                    candidate + "'.");
-            }
-            return resolution;
-        }
-    }
-
-    if (distinct_candidates.size() > 1U) {
-        return {
-            discovery.endpoint.host.empty() ? "DISCOVERED_IED" : discovery.endpoint.host,
-            "MmsDomainAmbiguous",
-            mms::MmsLiveModelConfidence::low,
-            true,
-            distinct_candidates,
-            {"MMS domains produced conflicting IED-name candidates."}};
-    }
-
-    return {
-        discovery.endpoint.host.empty() ? "DISCOVERED_IED" : discovery.endpoint.host,
-        "HostFallback",
-        mms::MmsLiveModelConfidence::low,
-        false,
-        {},
-        {"No safe IED-name candidate could be derived from the live MMS domains."}};
-}
-
-void apply_resolved_identity(
-    mms::MmsLiveModelDocument& model,
-    const mms::MmsLiveDiscoveryResult& discovery) {
-    const auto resolution = resolve_ied_identity(discovery);
-    model.identity.ied_name = resolution.name;
-    model.identity.source = resolution.source;
-    model.identity.confidence = resolution.confidence;
-    model.identity.ambiguous = resolution.ambiguous;
-    model.identity.candidate_names = resolution.candidates;
-    model.identity.evidence = resolution.evidence;
-    model.identity.logical_device_aliases.clear();
-
-    for (auto& logical_device : model.logical_devices) {
-        std::string alias = logical_device.mms_domain;
-        if (starts_with_ci(logical_device.mms_domain, resolution.name) &&
-            logical_device.mms_domain.size() > resolution.name.size()) {
-            alias = logical_device.mms_domain.substr(resolution.name.size());
-        }
-        if (alias.empty()) {
-            alias = logical_device.mms_domain;
-        }
-        logical_device.instance = alias;
-        model.identity.logical_device_aliases.emplace(
-            logical_device.mms_domain, std::move(alias));
-    }
-}
+};
 
 [[nodiscard]] std::string json_escape(const std::string_view value) {
     std::ostringstream output;
@@ -332,6 +93,29 @@ void apply_resolved_identity(
     return static_cast<std::size_t>(parsed);
 }
 
+[[nodiscard]] RcbPlanMode parse_rcb_plan_mode(const std::string& value) {
+    if (value == "dynamic" || value == "dynamic-dataset") {
+        return RcbPlanMode::dynamic_data_set;
+    }
+    if (value == "static" || value == "static-dataset") {
+        return RcbPlanMode::static_data_set;
+    }
+    throw std::invalid_argument(
+        "--rcb-plan requires 'dynamic' or 'static'.");
+}
+
+[[nodiscard]] std::string_view text_or_dash(const std::string& value) noexcept {
+    return value.empty() ? std::string_view{"-"} : std::string_view{value};
+}
+
+[[nodiscard]] std::size_t availability_count(
+    const mms::MmsRcbSelectionEvidence& selection,
+    const mms::MmsRcbAvailabilityKind kind) {
+    return static_cast<std::size_t>(std::count_if(
+        selection.candidates.begin(), selection.candidates.end(),
+        [kind](const auto& candidate) { return candidate.availability == kind; }));
+}
+
 void print_usage() {
     std::cout
         << "Usage: ariec61850_live_discover <host> [port] [options]\n"
@@ -346,12 +130,88 @@ void print_usage() {
         << "  --max-types N          Bound all type probes.\n"
         << "  --max-datasets N       Bound DataSet directory reads.\n"
         << "  --max-rcb N            Bound RCB read probes.\n"
-        << "  --timeout-ms N         Connect/request timeout in milliseconds.\n";
+        << "  --timeout-ms N         Connect/request timeout in milliseconds.\n"
+        << "Read-only Smart RCB planning:\n"
+        << "  --rcb-plan MODE        Analyze RCB evidence as dynamic or static.\n"
+        << "  --rcb-ld LD            Prefer this logical device for dynamic mode.\n"
+        << "  --rcb-dataset REF      Prefer this DataSet for static mode.\n"
+        << "  --preferred-rcb REF    Prefer this RCB reference.\n"
+        << "  --strict-rcb           Do not fall back from the preferred RCB.\n"
+        << "  --no-urcb-fallback     Exclude URCB fallback candidates.\n"
+        << "  --no-polling-fallback  Record polling fallback as disallowed.\n"
+        << "  --rcb-exclude REF      Exclude an RCB; may be repeated.\n"
+        << "  --max-rcb-candidates N Limit human candidate output (default 10).\n"
+        << "\n"
+        << "RCB planning is evidence-only. It never sends Write, Resv, RptEna, GI,\n"
+        << "or dynamic DataSet mutation requests.\n";
+}
+
+void print_rcb_plan(
+    const mms::MmsRcbSelectionEvidence& selection,
+    const std::size_t maximum_candidates) {
+    std::cout << selection.summary() << '\n'
+              << "RCB availability: static="
+              << availability_count(selection, mms::MmsRcbAvailabilityKind::available_static)
+              << ", dynamicEmpty="
+              << availability_count(
+                     selection, mms::MmsRcbAvailabilityKind::available_dynamic_empty)
+              << ", busyEnabled="
+              << availability_count(selection, mms::MmsRcbAvailabilityKind::busy_enabled)
+              << ", busyReserved="
+              << availability_count(selection, mms::MmsRcbAvailabilityKind::busy_reserved)
+              << ", unknown="
+              << availability_count(selection, mms::MmsRcbAvailabilityKind::unknown_needs_probe)
+              << ", notApplicable="
+              << availability_count(selection, mms::MmsRcbAvailabilityKind::not_applicable)
+              << ".\n";
+
+    if (selection.selected()) {
+        std::cout << "Selected RCB candidate: "
+                  << selection.selected_rcb_reference << '\n';
+    } else {
+        std::cout << "Selected RCB candidate: -\n";
+    }
+
+    const auto count = std::min(maximum_candidates, selection.candidates.size());
+    if (count != 0U) {
+        std::cout << "RCB candidates (top " << count << " of "
+                  << selection.candidates.size() << "):\n";
+    }
+    for (std::size_t index = 0U; index < count; ++index) {
+        const auto& candidate = selection.candidates[index];
+        std::cout << "  ["
+                  << mms::mms_rcb_selection_decision_name(candidate.decision)
+                  << "] " << candidate.reference
+                  << " score=" << candidate.score
+                  << " availability="
+                  << mms::mms_rcb_availability_kind_name(candidate.availability)
+                  << " mode=" << candidate.mode
+                  << " DatSet=" << text_or_dash(candidate.data_set_reference)
+                  << " RptEna=" << text_or_dash(candidate.report_enabled)
+                  << " Resv=" << text_or_dash(candidate.reservation_state)
+                  << " ResvTms=" << text_or_dash(candidate.reservation_time_seconds)
+                  << " reason=" << candidate.reason << '\n';
+    }
+
+    if (!selection.warnings.empty()) {
+        std::cout << "RCB planner warnings:\n";
+        for (const auto& warning : selection.warnings) {
+            std::cout << "  - " << warning << '\n';
+        }
+    }
+    if (!selection.blockers.empty()) {
+        std::cout << "RCB planner blockers:\n";
+        for (const auto& blocker : selection.blockers) {
+            std::cout << "  - " << blocker << '\n';
+        }
+    }
 }
 
 void print_human(
     const mms::MmsLiveDiscoveryResult& result,
-    const mms::MmsLiveModelDocument& model) {
+    const mms::MmsLiveModelDocument& model,
+    const std::optional<mms::MmsRcbSelectionEvidence>& rcb_selection,
+    const std::size_t maximum_rcb_candidates) {
     std::cout << result.summary() << '\n'
               << model.summary << '\n'
               << "IED identity: " << model.identity.ied_name
@@ -372,11 +232,15 @@ void print_human(
             std::cout << "  - [" << warning.code << "] " << warning.message << '\n';
         }
     }
+    if (rcb_selection) {
+        print_rcb_plan(*rcb_selection, maximum_rcb_candidates);
+    }
 }
 
 void print_summary_json(
     const mms::MmsLiveDiscoveryResult& result,
-    const mms::MmsLiveModelDocument& model) {
+    const mms::MmsLiveModelDocument& model,
+    const std::optional<mms::MmsRcbSelectionEvidence>& rcb_selection) {
     std::cout << '{'
               << "\"endpoint\":\"" << json_escape(result.endpoint.host) << ':'
               << result.endpoint.port << "\","
@@ -393,13 +257,79 @@ void print_summary_json(
               << "\"exactMmsTypes\":" << model.coverage.exact_mms_type_count << ','
               << "\"fingerprint\":\"" << model.canonical_fingerprint_hex() << "\","
               << "\"partial\":" << (result.partial() ? "true" : "false") << ','
-              << "\"summary\":\"" << json_escape(model.summary) << "\"}\n";
+              << "\"summary\":\"" << json_escape(model.summary) << "\"";
+
+    if (rcb_selection) {
+        std::cout << ",\"rcbPlan\":{"
+                  << "\"mode\":\""
+                  << mms::mms_rcb_selection_mode_name(rcb_selection->mode) << "\","
+                  << "\"selectedRcbReference\":\""
+                  << json_escape(rcb_selection->selected_rcb_reference) << "\","
+                  << "\"fallbackUsed\":"
+                  << (rcb_selection->fallback_used ? "true" : "false") << ','
+                  << "\"candidateCount\":" << rcb_selection->candidates.size() << ','
+                  << "\"availableStatic\":"
+                  << availability_count(
+                         *rcb_selection, mms::MmsRcbAvailabilityKind::available_static) << ','
+                  << "\"availableDynamicEmpty\":"
+                  << availability_count(
+                         *rcb_selection,
+                         mms::MmsRcbAvailabilityKind::available_dynamic_empty) << ','
+                  << "\"busyEnabled\":"
+                  << availability_count(
+                         *rcb_selection, mms::MmsRcbAvailabilityKind::busy_enabled) << ','
+                  << "\"busyReserved\":"
+                  << availability_count(
+                         *rcb_selection, mms::MmsRcbAvailabilityKind::busy_reserved) << ','
+                  << "\"unknownNeedsProbe\":"
+                  << availability_count(
+                         *rcb_selection,
+                         mms::MmsRcbAvailabilityKind::unknown_needs_probe) << ','
+                  << "\"warningCount\":" << rcb_selection->warnings.size() << ','
+                  << "\"blockerCount\":" << rcb_selection->blockers.size()
+                  << '}';
+    }
+    std::cout << "}\n";
+}
+
+[[nodiscard]] std::optional<mms::MmsRcbSelectionEvidence> build_rcb_plan(
+    const mms::MmsLiveDiscoveryResult& result,
+    const RcbPlanCliOptions& cli_options) {
+    if (!cli_options.requested()) {
+        return std::nullopt;
+    }
+
+    if (cli_options.mode == RcbPlanMode::dynamic_data_set) {
+        mms::MmsRcbDynamicSelectionOptions options;
+        options.preferred_logical_device = cli_options.preferred_logical_device;
+        options.preferred_rcb_reference = cli_options.preferred_rcb_reference;
+        options.strict_rcb = cli_options.strict_rcb;
+        options.allow_urcb_fallback = cli_options.allow_urcb_fallback;
+        options.allow_polling_fallback = cli_options.allow_polling_fallback;
+        options.excluded_rcb_references = cli_options.excluded_rcb_references;
+        return mms::MmsRcbPoolSelector::build_dynamic_selection(result, options);
+    }
+
+    mms::MmsRcbStaticSelectionOptions options;
+    options.preferred_rcb_reference = cli_options.preferred_rcb_reference;
+    options.preferred_data_set_reference = cli_options.preferred_data_set_reference;
+    options.strict_rcb = cli_options.strict_rcb;
+    options.allow_urcb_fallback = cli_options.allow_urcb_fallback;
+    options.allow_polling_fallback = cli_options.allow_polling_fallback;
+    options.excluded_rcb_references = cli_options.excluded_rcb_references;
+    return mms::MmsRcbPoolSelector::build_static_selection(result, options);
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
     try {
+        if (argc == 2 &&
+            (std::string_view{argv[1]} == "--help" ||
+             std::string_view{argv[1]} == "-h")) {
+            print_usage();
+            return 0;
+        }
         if (argc < 2) {
             print_usage();
             return 2;
@@ -420,6 +350,7 @@ int main(int argc, char** argv) {
         std::chrono::milliseconds timeout{5'000};
         mms::MmsLiveDiscoveryOptions discovery_options;
         mms::MmsLiveModelBuildOptions model_options;
+        RcbPlanCliOptions rcb_plan_options;
 
         while (argument < argc) {
             const std::string option = argv[argument++];
@@ -431,9 +362,18 @@ int main(int argc, char** argv) {
                 discovery_options.read_data_set_directories = false;
             } else if (option == "--no-rcb") {
                 discovery_options.probe_report_controls = false;
+            } else if (option == "--strict-rcb") {
+                rcb_plan_options.strict_rcb = true;
+            } else if (option == "--no-urcb-fallback") {
+                rcb_plan_options.allow_urcb_fallback = false;
+            } else if (option == "--no-polling-fallback") {
+                rcb_plan_options.allow_polling_fallback = false;
             } else if (option == "--ied-name" || option == "--max-types" ||
                        option == "--max-datasets" || option == "--max-rcb" ||
-                       option == "--timeout-ms") {
+                       option == "--timeout-ms" || option == "--rcb-plan" ||
+                       option == "--rcb-ld" || option == "--rcb-dataset" ||
+                       option == "--preferred-rcb" || option == "--rcb-exclude" ||
+                       option == "--max-rcb-candidates") {
                 if (argument >= argc) {
                     throw std::invalid_argument(option + " requires a value.");
                 }
@@ -442,6 +382,27 @@ int main(int argc, char** argv) {
                     model_options.explicit_ied_name = value;
                     continue;
                 }
+                if (option == "--rcb-plan") {
+                    rcb_plan_options.mode = parse_rcb_plan_mode(value);
+                    continue;
+                }
+                if (option == "--rcb-ld") {
+                    rcb_plan_options.preferred_logical_device = value;
+                    continue;
+                }
+                if (option == "--rcb-dataset") {
+                    rcb_plan_options.preferred_data_set_reference = value;
+                    continue;
+                }
+                if (option == "--preferred-rcb") {
+                    rcb_plan_options.preferred_rcb_reference = value;
+                    continue;
+                }
+                if (option == "--rcb-exclude") {
+                    rcb_plan_options.excluded_rcb_references.push_back(value);
+                    continue;
+                }
+
                 const auto parsed = parse_limit(option, value);
                 if (option == "--max-types") {
                     discovery_options.maximum_variable_type_probes = parsed;
@@ -449,6 +410,8 @@ int main(int argc, char** argv) {
                     discovery_options.maximum_data_set_directories = parsed;
                 } else if (option == "--max-rcb") {
                     discovery_options.maximum_report_control_probes = parsed;
+                } else if (option == "--max-rcb-candidates") {
+                    rcb_plan_options.maximum_candidates_to_print = parsed;
                 } else {
                     if (parsed > static_cast<std::size_t>(
                             std::numeric_limits<std::int64_t>::max())) {
@@ -465,6 +428,32 @@ int main(int argc, char** argv) {
             }
         }
 
+        if (!rcb_plan_options.requested() && rcb_plan_options.has_policy_options()) {
+            throw std::invalid_argument(
+                "RCB planner policy options require --rcb-plan dynamic|static.");
+        }
+        if (rcb_plan_options.requested() && !discovery_options.probe_report_controls) {
+            throw std::invalid_argument(
+                "--rcb-plan requires read-only RCB probes; remove --no-rcb.");
+        }
+        if (rcb_plan_options.mode == RcbPlanMode::dynamic_data_set &&
+            !rcb_plan_options.preferred_data_set_reference.empty()) {
+            throw std::invalid_argument(
+                "--rcb-dataset applies only to --rcb-plan static.");
+        }
+        if (rcb_plan_options.mode == RcbPlanMode::static_data_set &&
+            !rcb_plan_options.preferred_logical_device.empty()) {
+            throw std::invalid_argument(
+                "--rcb-ld applies only to --rcb-plan dynamic.");
+        }
+        if (rcb_plan_options.requested() &&
+            (output_mode == OutputMode::model_json ||
+             output_mode == OutputMode::manifest)) {
+            throw std::invalid_argument(
+                "--rcb-plan is runtime evidence and cannot be combined with "
+                "--model-json or --manifest structural parity output.");
+        }
+
         mms::MmsAssociationOptions association_options;
         association_options.connect_timeout = timeout;
         association_options.request_timeout = timeout;
@@ -472,16 +461,25 @@ int main(int argc, char** argv) {
         session.connect(endpoint);
         const auto result = session.discover(discovery_options);
         session.disconnect();
-        auto model = mms::MmsLiveModelBuilder::build(result, model_options);
-        if (model_options.explicit_ied_name.empty()) {
-            apply_resolved_identity(model, result);
-        }
+
+        const auto model = mms::MmsLiveModelBuilder::build(result, model_options);
+        const auto rcb_selection = build_rcb_plan(result, rcb_plan_options);
 
         switch (output_mode) {
-        case OutputMode::human: print_human(result, model); break;
-        case OutputMode::summary_json: print_summary_json(result, model); break;
-        case OutputMode::model_json: std::cout << model.to_json() << '\n'; break;
-        case OutputMode::manifest: std::cout << model.canonical_manifest(); break;
+        case OutputMode::human:
+            print_human(
+                result, model, rcb_selection,
+                rcb_plan_options.maximum_candidates_to_print);
+            break;
+        case OutputMode::summary_json:
+            print_summary_json(result, model, rcb_selection);
+            break;
+        case OutputMode::model_json:
+            std::cout << model.to_json() << '\n';
+            break;
+        case OutputMode::manifest:
+            std::cout << model.canonical_manifest();
+            break;
         }
         return result.partial() ? 1 : 0;
     } catch (const std::exception& exception) {
