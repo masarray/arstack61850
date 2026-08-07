@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**Phase 4C — built-in non-blocking TCP transport and bounded live read-only discovery are implemented for review and CI validation.**
+**Phase 4C.1 — built-in non-blocking TCP, bounded read-only discovery, C#-compatible live-model parity, and physical interoperability evidence tooling are implemented for review.**
 
 ## Delivered modules
 
@@ -12,69 +12,50 @@
 | SCL and COMTRADE engineering formats | Merged to `main` |
 | TPKT/COTP and Session/Presentation/ACSE | Merged to `main` |
 | MMS Initiate and confirmed services | Merged to `main` |
-| DataSet and RCB discovery inventory | Implemented |
-| GetNamedVariableListAttributes directory codec | Implemented |
-| InformationReport codec and exact frame mapper | Implemented |
-| RCB state and availability evidence mapper | Implemented |
-| Sequence and segmentation continuity tracker | Implemented |
-| Bounded offline report monitor | Implemented |
-| MMS reporting mutation smoke/libFuzzer | Complete |
-| Transport-injected MMS association/client runtime | Implemented |
-| Persistent RCB subscription runtime | Implemented |
-| Built-in Windows/Linux TCP socket transport | Implemented in Phase 4C |
-| Live read-only name/type/DataSet/RCB discovery | Implemented in Phase 4C |
-| Physical IED interoperability acceptance | Pending |
+| Offline DataSet/RCB/report monitoring | Merged to `main` |
+| Transport-injected MMS association/runtime | Merged to `main` |
+| Persistent RCB subscription runtime | Merged to `main` |
+| Built-in Windows/Linux TCP transport | Implemented in PR #14 |
+| Live read-only MMS discovery | Implemented in PR #14 |
+| `live-ied-model-v1` hierarchy/parity mapper | Implemented in PR #14 |
+| Physical read-only evidence runner | Implemented in PR #14 |
+| Physical IED acceptance evidence | Pending lab execution |
 
-## Phase 4A behavior
+## Phase 4C.1 behavior
 
-The offline reporting layer:
+- Non-blocking Winsock/POSIX TCP honors deadlines and cancellation.
+- Discovery is bounded and sends only GetNameList, GetVariableAccessAttributes,
+  GetNamedVariableListAttributes, and Read.
+- MMS references are mapped to Logical Device, Logical Node, Data Object, and Data Attribute.
+- Functional constraints, MMS/SCL type evidence, DataSets, and report controls are retained.
+- Direct leaf and nested TypeSpecification evidence are resolved into the model.
+- IED identity and CDC are inferred conservatively with explicit confidence.
+- Canonical manifests and fingerprints make unchanged-model runs comparable.
+- C# and C++ `live-ied-model-v1` JSON can be compared by the parity script.
+- The lab runner performs repeated reconnect/discovery cycles and records acceptance evidence.
 
-- groups supplied named-variable and named-variable-list discovery evidence into DataSet, BRCB, and URCB inventory;
-- encodes and decodes GetNamedVariableListAttributes service tag 12 and normalizes DataSet member references;
-- strictly decodes Unconfirmed-PDU InformationReport access results;
-- follows IEC 61850 OptFlds ordering for report headers, inclusion bits, values, data references, and reasons;
-- preserves per-value DataAccessError results;
-- maps supplied RCB Read responses into typed state with conservative availability confidence;
-- detects sequence gaps, duplicates, wraps, resets, configuration/DataSet changes, buffer overflow, and segmentation discontinuity; and
-- retains only configured numbers of streams and recent frames.
+## Validation completed without a physical IED
 
-## Phase 4B behavior
-
-- TPKT/COTP, Session, Presentation, ACSE, and MMS Initiate are orchestrated as one bounded lifecycle.
-- Confirmed service responses are routed by invoke ID while InformationReports remain deliverable.
-- Deadline and cancellation failures produce explicit fault/cancel events.
-- A selected RCB is re-probed before writes and occupied RCBs are not taken over.
-- URCB reservation, optional DatSet/TrgOps/OptFlds writes, RptEna, GI, polling, stop, and cleanup retry are stateful.
-- Lost associations preserve cleanup-required evidence instead of pretending the RCB was disabled.
-
-## Phase 4C behavior
-
-- `TcpMmsByteTransport` uses non-blocking Winsock/POSIX sockets with bounded readiness polling.
-- Connect, send, and receive honor absolute deadlines and `std::stop_token` cancellation.
-- IPv4/IPv6 resolution, TCP_NODELAY, keepalive, partial sends, arbitrary receive chunking, and peer-close detection are built in.
-- Live discovery performs bounded GetNameList pagination for domains, variables, and named-variable lists.
-- Optional type, DataSet-directory, and RCB-state probes use only GetVariableAccessAttributes, GetNamedVariableListAttributes, and Read.
-- The live discovery result retains partial evidence and diagnostics when optional probes fail.
-- `ariec61850_live_discover` provides human and JSON summaries.
-
-## Validation
-
-- Phase 4B baseline: GCC, Clang, MSVC, ASan/UBSan, 16/16 CTest, and reporting fuzz evidence passed.
-- Phase 4C adds a POSIX loopback TCP round-trip and cross-platform cancellation smoke test.
-- Phase 4C scripted discovery covers domain/variable/DataSet inventory, type evidence, DataSet directory, RCB state, and pagination abuse rejection.
-- Every scripted discovery request is decoded and checked against the read-only service allowlist; MMS Write is rejected.
-- Full GitHub GCC/Clang/MSVC and security workflow evidence is required before Phase 4C is accepted.
+- Phase 4B baseline GCC, Clang, MSVC, sanitizer, CTest, and fuzz evidence remains valid.
+- Phase 4C TCP loopback, cancellation, strict GCC/Clang warning, and sanitizer checks passed locally.
+- Live-model hierarchy, deterministic fingerprint, parity, and multi-translation-unit header
+  validation passed locally with GCC and Clang; ASan/UBSan smoke passed.
+- Python parity and interoperability scripts pass syntax checks and a deterministic simulated
+  three-cycle acceptance run.
+- The discovery regression decodes all emitted requests and rejects MMS Write.
 
 ## Remaining acceptance gates
 
-- Controlled physical IED association and discovery evidence across multiple vendors.
-- Long-model pagination, slow-response, disconnect, reconnect, and soak testing.
-- BRCB EntryID resume, purge/buffer-overflow recovery, and dynamic DataSet lifecycle.
-- Direct/SBO control, enhanced-security termination, and MMS file/fault-record transfer.
+- Run repository GCC/Clang/MSVC and Security/Evidence workflows through `workflow_dispatch`.
+- Run the physical evidence runner against a reachable IED or vendor simulator.
+- Record a primary-vendor ten-cycle run, timeout/reconnect evidence, and large-model pagination
+  where available.
+- Export the C# oracle model and accept C#↔C++ parity against the same IED configuration.
+- Review warning policy and packet-capture references before merging PR #14.
 
 ## Safety boundary
 
-The live discovery API and CLI are read-only and do not construct MMS Write requests. The TCP
-transport is general-purpose but performs no operation by itself; applications must explicitly
-select and authorize any state-changing runtime. Control services, dynamic DataSet mutation,
-and file services remain outside the Phase 4C live discovery surface.
+The live discovery surface is read-only and does not construct Write, control, GI, RCB
+reservation/enable, dynamic DataSet mutation, or file-service requests. The generic TCP transport
+can be used by other explicit runtime surfaces, but those surfaces retain their own authorization
+and physical-laboratory gates.
