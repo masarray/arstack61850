@@ -13,6 +13,7 @@
 namespace ar::iec61850::osi {
 namespace {
 
+using asn1::BerClass;
 using asn1::BerFormatError;
 using asn1::BerReader;
 using asn1::BerTlv;
@@ -84,6 +85,14 @@ void validate_oid(
     const char* description) {
     if (value.empty() || value.size() > PresentationCodec::maximum_oid_bytes) {
         throw PresentationFormatError(std::string{description} + " has an invalid encoded length.");
+    }
+}
+
+void validate_optional_normal_field(
+    const BerTlv& field,
+    const char* description) {
+    if (field.value.size() > PresentationCodec::maximum_selector_bytes) {
+        throw PresentationFormatError(std::string{description} + " exceeds the bounded limit.");
     }
 }
 
@@ -585,14 +594,25 @@ bool PresentationCodec::try_decode_cpa(
                 if (saw_normal) {
                     throw PresentationFormatError("Presentation CPA contains duplicate normal-mode parameters.");
                 }
+                bool saw_protocol_version = false;
                 bool saw_results = false;
                 bool saw_user_data = false;
                 bool saw_responding_selector = false;
+                bool saw_presentation_requirements = false;
+                bool saw_user_session_requirements = false;
+                bool saw_protocol_options = false;
+                bool saw_nominated_context = false;
                 for (const auto& normal : BerReader::read_children(item.value)) {
-                    if (normal.encoded_tag == 0x83U) {
-                        // responding-presentation-selector is optional in a CPA.
-                        // Vendor tools such as IEDScout may echo it before the
-                        // presentation-context-definition-result-list.
+                    if (normal.tag_class == BerClass::context_specific &&
+                        normal.tag_number == 0) {
+                        if (saw_protocol_version) {
+                            throw PresentationFormatError(
+                                "Presentation CPA contains duplicate protocol versions.");
+                        }
+                        validate_optional_normal_field(
+                            normal, "Presentation protocol-version");
+                        saw_protocol_version = true;
+                    } else if (normal.encoded_tag == 0x83U) {
                         if (saw_responding_selector) {
                             throw PresentationFormatError(
                                 "Presentation CPA contains duplicate responding selectors.");
@@ -608,6 +628,42 @@ bool PresentationCodec::try_decode_cpa(
                         }
                         cpa.context_results = parse_context_result_list(normal.value);
                         saw_results = true;
+                    } else if (normal.tag_class == BerClass::context_specific &&
+                               normal.tag_number == 8) {
+                        if (saw_presentation_requirements) {
+                            throw PresentationFormatError(
+                                "Presentation CPA contains duplicate presentation requirements.");
+                        }
+                        validate_optional_normal_field(
+                            normal, "Presentation requirements");
+                        saw_presentation_requirements = true;
+                    } else if (normal.tag_class == BerClass::context_specific &&
+                               normal.tag_number == 9) {
+                        if (saw_user_session_requirements) {
+                            throw PresentationFormatError(
+                                "Presentation CPA contains duplicate user-session requirements.");
+                        }
+                        validate_optional_normal_field(
+                            normal, "Presentation user-session requirements");
+                        saw_user_session_requirements = true;
+                    } else if (normal.tag_class == BerClass::context_specific &&
+                               normal.tag_number == 11) {
+                        if (saw_protocol_options) {
+                            throw PresentationFormatError(
+                                "Presentation CPA contains duplicate protocol options.");
+                        }
+                        validate_optional_normal_field(
+                            normal, "Presentation protocol options");
+                        saw_protocol_options = true;
+                    } else if (normal.tag_class == BerClass::context_specific &&
+                               normal.tag_number == 13) {
+                        if (saw_nominated_context) {
+                            throw PresentationFormatError(
+                                "Presentation CPA contains duplicate nominated contexts.");
+                        }
+                        validate_optional_normal_field(
+                            normal, "Presentation responders-nominated-context");
+                        saw_nominated_context = true;
                     } else if (normal.encoded_tag == 0x61U) {
                         if (saw_user_data) {
                             throw PresentationFormatError("Presentation CPA contains duplicate user data.");
@@ -616,7 +672,11 @@ bool PresentationCodec::try_decode_cpa(
                         cpa.user_data = decode_fully_encoded_data(encoded);
                         saw_user_data = true;
                     } else {
-                        throw PresentationFormatError("Presentation CPA contains an unsupported normal-mode field.");
+                        throw PresentationFormatError(
+                            "Presentation CPA contains an unsupported normal-mode field tag=" +
+                            std::to_string(normal.encoded_tag) +
+                            ", tagNumber=" + std::to_string(normal.tag_number) +
+                            ", length=" + std::to_string(normal.value.size()) + ".");
                     }
                 }
                 if (!saw_results || !saw_user_data) {
