@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ariec61850/mms/live_discovery.hpp"
+#include "ariec61850/mms/live_model.hpp"
 
 #include <chrono>
 #include <cstdint>
-#include <cstdlib>
 #include <exception>
 #include <iostream>
 #include <limits>
@@ -29,11 +29,8 @@ using namespace ar::iec61850;
         case '\r': output << "\\r"; break;
         case '\t': output << "\\t"; break;
         default:
-            if (static_cast<unsigned char>(character) < 0x20U) {
-                output << "?";
-            } else {
-                output << character;
-            }
+            if (static_cast<unsigned char>(character) < 0x20U) output << '?';
+            else output << character;
             break;
         }
     }
@@ -66,57 +63,61 @@ void print_usage() {
     std::cout
         << "Usage: ariec61850_live_discover <host> [port] [options]\n"
         << "Options:\n"
-        << "  --json                 Emit a compact JSON summary.\n"
+        << "  --json                 Emit compact discovery summary JSON.\n"
+        << "  --model-json           Emit C#-compatible live-ied-model-v1 JSON.\n"
+        << "  --manifest             Emit deterministic parity manifest.\n"
+        << "  --ied-name NAME        Explicit IED identity override.\n"
         << "  --no-types             Skip GetVariableAccessAttributes probes.\n"
         << "  --no-datasets          Skip DataSet directory reads.\n"
         << "  --no-rcb               Skip read-only RCB attribute probes.\n"
-        << "  --max-types N          Bound variable type probes.\n"
+        << "  --max-types N          Bound all type probes.\n"
         << "  --max-datasets N       Bound DataSet directory reads.\n"
         << "  --max-rcb N            Bound RCB read probes.\n"
         << "  --timeout-ms N         Connect/request timeout in milliseconds.\n";
 }
 
-void print_human(const mms::MmsLiveDiscoveryResult& result) {
-    std::cout << result.summary() << '\n';
-    for (const auto& [domain, variables] : result.names.domain_variables) {
-        const auto lists = result.names.domain_variable_lists.find(domain);
-        const std::size_t list_count = lists == result.names.domain_variable_lists.end()
-            ? 0U
-            : lists->second.size();
-        std::cout << "  " << domain << ": variables=" << variables.size()
-                  << ", DataSet names=" << list_count << '\n';
+void print_human(
+    const mms::MmsLiveDiscoveryResult& result,
+    const mms::MmsLiveModelDocument& model) {
+    std::cout << result.summary() << '\n'
+              << model.summary << '\n'
+              << "Model fingerprint: " << model.canonical_fingerprint_hex() << '\n';
+    for (const auto& logical_device : model.logical_devices) {
+        std::cout << "  LD " << logical_device.mms_domain
+                  << " (alias=" << logical_device.instance << ")\n";
+        for (const auto& logical_node : logical_device.logical_nodes) {
+            std::cout << "    LN " << logical_node.name
+                      << " class=" << logical_node.logical_node_class
+                      << " DO=" << logical_node.data_objects.size() << '\n';
+        }
     }
-    if (!result.diagnostics.empty()) {
-        std::cout << "Diagnostics:\n";
-        for (const auto& diagnostic : result.diagnostics) {
-            std::cout << "  - " << diagnostic << '\n';
+    if (!model.warnings.empty()) {
+        std::cout << "Warnings:\n";
+        for (const auto& warning : model.warnings) {
+            std::cout << "  - [" << warning.code << "] " << warning.message << '\n';
         }
     }
 }
 
-void print_json(const mms::MmsLiveDiscoveryResult& result) {
+void print_summary_json(
+    const mms::MmsLiveDiscoveryResult& result,
+    const mms::MmsLiveModelDocument& model) {
     std::cout << '{'
               << "\"endpoint\":\"" << json_escape(result.endpoint.host) << ':'
               << result.endpoint.port << "\","
+              << "\"iedName\":\"" << json_escape(model.identity.ied_name) << "\","
               << "\"domains\":" << result.domain_count() << ','
               << "\"variables\":" << result.variable_count() << ','
-              << "\"dataSets\":" << result.report_inventory.data_sets.size() << ','
-              << "\"reportControls\":"
-              << result.report_inventory.report_controls.size() << ','
-              << "\"typeEvidence\":" << result.variable_types.size() << ','
-              << "\"dataSetDirectories\":"
-              << result.data_set_directories.size() << ','
-              << "\"reportControlReads\":" << result.report_controls.size() << ','
+              << "\"logicalDevices\":" << model.coverage.logical_device_count << ','
+              << "\"logicalNodes\":" << model.coverage.logical_node_count << ','
+              << "\"dataObjects\":" << model.coverage.data_object_count << ','
+              << "\"dataAttributes\":" << model.coverage.data_attribute_count << ','
+              << "\"dataSets\":" << model.coverage.data_set_count << ','
+              << "\"reportControls\":" << model.coverage.report_control_count << ','
+              << "\"exactMmsTypes\":" << model.coverage.exact_mms_type_count << ','
+              << "\"fingerprint\":\"" << model.canonical_fingerprint_hex() << "\","
               << "\"partial\":" << (result.partial() ? "true" : "false") << ','
-              << "\"summary\":\"" << json_escape(result.summary()) << "\","
-              << "\"diagnostics\":[";
-    for (std::size_t index = 0U; index < result.diagnostics.size(); ++index) {
-        if (index != 0U) {
-            std::cout << ',';
-        }
-        std::cout << '"' << json_escape(result.diagnostics[index]) << '"';
-    }
-    std::cout << "]}\n";
+              << "\"summary\":\"" << json_escape(model.summary) << "\"}\n";
 }
 
 } // namespace
@@ -138,28 +139,33 @@ int main(int argc, char** argv) {
             ++argument;
         }
 
-        bool json = false;
+        enum class OutputMode { human, summary_json, model_json, manifest };
+        OutputMode output_mode = OutputMode::human;
         std::chrono::milliseconds timeout{5'000};
         mms::MmsLiveDiscoveryOptions discovery_options;
+        mms::MmsLiveModelBuildOptions model_options;
 
         while (argument < argc) {
             const std::string option = argv[argument++];
-            if (option == "--json") {
-                json = true;
-            } else if (option == "--no-types") {
-                discovery_options.probe_variable_types = false;
-            } else if (option == "--no-datasets") {
+            if (option == "--json") output_mode = OutputMode::summary_json;
+            else if (option == "--model-json") output_mode = OutputMode::model_json;
+            else if (option == "--manifest") output_mode = OutputMode::manifest;
+            else if (option == "--no-types") discovery_options.probe_variable_types = false;
+            else if (option == "--no-datasets") {
                 discovery_options.read_data_set_directories = false;
             } else if (option == "--no-rcb") {
                 discovery_options.probe_report_controls = false;
-            } else if (option == "--max-types" ||
-                       option == "--max-datasets" ||
-                       option == "--max-rcb" ||
+            } else if (option == "--ied-name" || option == "--max-types" ||
+                       option == "--max-datasets" || option == "--max-rcb" ||
                        option == "--timeout-ms") {
                 if (argument >= argc) {
                     throw std::invalid_argument(option + " requires a value.");
                 }
                 const std::string value = argv[argument++];
+                if (option == "--ied-name") {
+                    model_options.explicit_ied_name = value;
+                    continue;
+                }
                 const auto parsed = parse_limit(option, value);
                 if (option == "--max-types") {
                     discovery_options.maximum_variable_type_probes = parsed;
@@ -190,11 +196,13 @@ int main(int argc, char** argv) {
         session.connect(endpoint);
         const auto result = session.discover(discovery_options);
         session.disconnect();
+        const auto model = mms::MmsLiveModelBuilder::build(result, model_options);
 
-        if (json) {
-            print_json(result);
-        } else {
-            print_human(result);
+        switch (output_mode) {
+        case OutputMode::human: print_human(result, model); break;
+        case OutputMode::summary_json: print_summary_json(result, model); break;
+        case OutputMode::model_json: std::cout << model.to_json() << '\n'; break;
+        case OutputMode::manifest: std::cout << model.canonical_manifest(); break;
         }
         return result.partial() ? 1 : 0;
     } catch (const std::exception& exception) {
