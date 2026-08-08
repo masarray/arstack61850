@@ -53,15 +53,58 @@ Control-block read summary: attempted=1, complete=1, partial=0, failed=0.
 
 Accepted conclusion: the physical OCR7SR12 exposes one Setting Group Control Block at `OCR7SR12PROT/LLN0.SP.SGCB`, and all five exposed MMS attributes were read successfully in one bounded read-only run. The observed values were `ActSG=1`, `CnfEdit=false`, `EditSG=0`, `NumOfSG=1`, with `LActTm` decoded as IEC 61850 UTC time.
 
+## Integrated live-discovery control-block values
+
+The integrated `ariec61850_live_discover --control-block-values` path was subsequently run against the same OCR7SR12. The run reported `diagnostics=0`, `CBValueComplete=1`, `CBValuePartial=0`, `CBValueFailed=0`, and `CBValueNotRead=0`. The same SGCB was projected into the live model with all five attributes complete. The prior pending-value warning was no longer emitted; the only warning in the bounded run was the intentional `DATASET_MEMBERS_NOT_READ` warning caused by `--no-datasets`.
+
+Accepted conclusion: deep-read evidence is not limited to the standalone probe. The integrated discovery -> runtime overlay -> human/JSON projection path has been physically observed on the target IED.
+
+## Same-IED C# versus C++ parity
+
+A same-device OCR7SR12 comparison using the C# repository as the behavioral oracle was accepted with zero blocking structural/type/runtime findings for the compared evidence profile. This establishes the accepted parity slice only; it is not a claim of complete C# feature parity.
+
+## Ten-cycle primary-vendor acceptance
+
+The bounded Phase 4C physical acceptance runner was executed for ten full discovery cycles followed by three contention cycles. Discovery used full RCB reading (`--max-rcb 286 --require-rcb-complete`), bounded integrated control-block values (`--require-control-block-complete`), and same-IED C# parity checks. DataSet member directories were intentionally skipped with `--no-datasets`, so one expected warning was allowed per discovery cycle.
+
+Observed discovery result across cycles 1 through 10:
+
+```text
+success=True
+structuralFingerprint=934b555dff76a46f
+runtimeSnapshotFingerprint=48a836ad2d39b72e
+rcbComplete=True
+cbComplete=True
+warnings=1
+```
+
+All ten cycles reported the same structural and runtime fingerprints. Final discovery acceptance:
+
+```text
+Read-only interoperability acceptance: PASS
+(structuralStable=True, runtimeStable=True, rcbComplete=True, controlBlockComplete=True)
+```
+
+The three subsequent contention cycles all used `BalancedApTitle`, required one association attempt, reported `contended=False`, and returned `decision=StableProceed`.
+
+Final Phase 4C result:
+
+```text
+Phase 4C physical read-only acceptance: PASS
+(discovery=True, contention=True, controlBlocks=True, freshAssociations=13/13)
+```
+
+Accepted conclusion: on this OCR7SR12 observation window, arstack61850 completed ten fresh stable discovery associations with full 286/286 RCB read completeness and complete control-block evidence, followed by three successful fresh contention associations. This is evidence for repeated association/discovery stability on this target; it is not timeout-recovery or multi-vendor evidence.
+
 ## Implementation consequence
 
-The C++ live-model path now treats GO/SV/SG/LG deep-read values as runtime evidence rather than structural identity. The optional `--control-block-values` path can project successful, partial, failed, and bounded/not-read states without changing the structural fingerprint. Runtime attributes are exported as machine-readable attribute/value/status entries so applications do not need to parse the human message text.
+The C++ live-model path treats GO/SV/SG/LG deep-read values as runtime evidence rather than structural identity. The optional `--control-block-values` path can project successful, partial, failed, and bounded/not-read states without changing the structural fingerprint. Runtime attributes are exported as machine-readable attribute/value/status entries so applications do not need to parse human message text.
+
+A dedicated controlled timeout/recovery evidence runner is now implemented separately. It establishes a healthy baseline, injects a post-association server-response stall through a local TCP proxy, requires the client-side MMS request deadline to expire, then performs a fresh direct recovery association and compares the recovered structural fingerprint with the baseline. This runner is not counted as physical evidence until it is executed successfully against the IED.
 
 ## Still pending
 
-- Integrated `ariec61850_live_discover --control-block-values` physical run on the same IED.
-- Ten repeated primary-vendor discovery cycles with reconnect evidence.
-- Deliberate timeout/reconnect test.
-- Same-IED C# versus C++ model export comparison.
+- Controlled timeout/recovery physical acceptance on the OCR7SR12.
+- Pagination continuation evidence on a target response that actually requires more than one page.
 - Physical GOOSE/SV capture interoperability evidence.
 - Any active RCB claim, reporting enable, control, or mutation test; these remain outside the read-only Phase 4C acceptance boundary.
