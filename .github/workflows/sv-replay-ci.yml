@@ -32,15 +32,20 @@ jobs:
       - name: Build
         run: cmake --build build-replay --config Release --parallel
 
-      - name: Prepare replay bundle (Windows)
+      - name: Prepare and validate replay bundle (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: .\build-replay\Release\ariec61850_sv_replay_prepare.exe tests\fixtures\comtrade\simple_fault.cfg build-replay\simple_fault.arsvr
+        run: |
+          .\build-replay\Release\ariec61850_sv_replay_prepare.exe tests\fixtures\comtrade\simple_fault.cfg build-replay\simple_fault.arsvr
+          .\build-replay\Release\ariec61850_sv_replay_live.exe --bundle build-replay\simple_fault.arsvr --validate
 
-      - name: Prepare replay bundle (Linux)
+      - name: Prepare and validate replay bundle (Linux)
         if: runner.os == 'Linux'
         shell: bash
-        run: ./build-replay/ariec61850_sv_replay_prepare tests/fixtures/comtrade/simple_fault.cfg build-replay/simple_fault.arsvr
+        run: |
+          set -euo pipefail
+          ./build-replay/ariec61850_sv_replay_prepare tests/fixtures/comtrade/simple_fault.cfg build-replay/simple_fault.arsvr
+          ./build-replay/ariec61850_sv_replay_live --bundle build-replay/simple_fault.arsvr --validate
 
       - name: Independent replay bundle oracle
         shell: python
@@ -68,10 +73,13 @@ jobs:
           assert qualities == [0] * 8, qualities
           print({'status': 'REPLAY-BUNDLE/PASSED', 'frames': frames, 'values0': values})
 
-      - name: Upload replay evidence
+      - name: Upload Windows replay tools and evidence
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: sv-replay-bundle-${{ github.sha }}
-          path: build-replay/simple_fault.arsvr
+          name: windows-sv-replay-${{ github.sha }}
+          path: |
+            build-replay/Release/ariec61850_sv_replay_prepare.exe
+            build-replay/Release/ariec61850_sv_replay_live.exe
+            build-replay/simple_fault.arsvr
           if-no-files-found: error
