@@ -32,20 +32,31 @@ jobs:
           target: esp32p4
           path: ports/esp_idf/sv_trial_app
 
+      - name: Inventory ESP-IDF firmware outputs
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          build=ports/esp_idf/sv_trial_app/build
+          mkdir -p "$build"
+          find "$build" -maxdepth 4 -type f -printf '%P\t%s bytes\n' \
+            | LC_ALL=C sort \
+            | tee "$build/ARSTACK_BUILD_FILE_LIST.txt"
+
       - name: Verify flashable firmware outputs
         shell: bash
         run: |
           set -euo pipefail
           app=ports/esp_idf/sv_trial_app
           build="$app/build"
-          test -f "$build/arstack61850_esp32p4_sv_trial.bin"
-          test -f "$build/arstack61850_esp32p4_sv_trial.elf"
-          test -f "$build/arstack61850_esp32p4_sv_trial.map"
-          test -f "$build/bootloader/bootloader.bin"
-          test -f "$build/partition_table/partition-table.bin"
-          test -f "$build/flash_args"
-          test -f "$build/flasher_args.json"
-          test -f "$app/sdkconfig.defaults"
+          test -s "$build/arstack61850_esp32p4_sv_trial.bin"
+          test -s "$build/arstack61850_esp32p4_sv_trial.elf"
+          test -s "$build/arstack61850_esp32p4_sv_trial.map"
+          test -s "$build/bootloader/bootloader.bin"
+          test -s "$build/partition_table/partition-table.bin"
+          test -s "$build/flash_args"
+          test -s "$build/flasher_args.json"
+          test -s "$app/sdkconfig.defaults"
           python3 -m json.tool "$build/flasher_args.json" >/dev/null
           python3 - <<'PY'
           import json
@@ -53,38 +64,49 @@ jobs:
 
           build = Path('ports/esp_idf/sv_trial_app/build')
           manifest = json.loads((build / 'flasher_args.json').read_text(encoding='utf-8'))
-          extra = manifest.get('extra_esptool_args', {})
-          chip = extra.get('chip')
+          chip = manifest.get('extra_esptool_args', {}).get('chip')
           if chip != 'esp32p4':
               raise SystemExit(f'expected flasher chip esp32p4, got {chip!r}')
 
           expected = {
-              '0x2000': 'bootloader/bootloader.bin',
-              '0x8000': 'partition_table/partition-table.bin',
-              '0x10000': 'arstack61850_esp32p4_sv_trial.bin',
+              0x2000: 'bootloader/bootloader.bin',
+              0x8000: 'partition_table/partition-table.bin',
+              0x10000: 'arstack61850_esp32p4_sv_trial.bin',
           }
-          flash_files = manifest.get('flash_files', {})
+          raw_flash_files = manifest.get('flash_files')
+          if not isinstance(raw_flash_files, dict):
+              raise SystemExit('flasher manifest has no flash_files object')
+
+          try:
+              flash_files = {
+                  int(str(offset), 0): str(relative)
+                  for offset, relative in raw_flash_files.items()
+              }
+          except (TypeError, ValueError) as exc:
+              raise SystemExit(f'invalid flasher offset: {exc}') from exc
+
           if flash_files != expected:
+              pretty_actual = {hex(k): v for k, v in sorted(flash_files.items())}
+              pretty_expected = {hex(k): v for k, v in sorted(expected.items())}
               raise SystemExit(
-                  f'unexpected flash layout: expected {expected!r}, got {flash_files!r}')
-          for offset, relative in expected.items():
+                  f'unexpected flash layout: expected {pretty_expected!r}, got {pretty_actual!r}')
+
+          file_evidence = {}
+          for offset, relative in sorted(expected.items()):
               candidate = build / relative
               if not candidate.is_file():
-                  raise SystemExit(f'flash file {relative!r} at {offset} is missing')
-              if candidate.stat().st_size <= 0:
-                  raise SystemExit(f'flash file {relative!r} at {offset} is empty')
-
-          flash_args = (build / 'flash_args').read_text(encoding='utf-8')
-          for offset, relative in expected.items():
-              if f'{offset} {relative}' not in flash_args:
-                  raise SystemExit(f'flash_args missing {offset} {relative}')
+                  raise SystemExit(f'flash file {relative!r} at {hex(offset)} is missing')
+              size = candidate.stat().st_size
+              if size <= 0:
+                  raise SystemExit(f'flash file {relative!r} at {hex(offset)} is empty')
+              file_evidence[hex(offset)] = {'path': relative, 'bytes': size}
 
           evidence = {
               'status': 'FLASHABLE/READY',
               'target': chip,
-              'flash_files': expected,
-              'flasher_manifest': 'build/flasher_args.json',
-              'flash_args': 'build/flash_args',
+              'flash_files': file_evidence,
+              'authoritative_manifest': 'build/flasher_args.json',
+              'companion_flash_args': 'build/flash_args',
               'sdkconfig_defaults': 'sdkconfig.defaults',
           }
           (build / 'ARSTACK_BUILD_PROFILE.json').write_text(
@@ -102,9 +124,25 @@ jobs:
               build/flash_args \
               build/flasher_args.json \
               build/ARSTACK_BUILD_PROFILE.json \
+              build/ARSTACK_BUILD_FILE_LIST.txt \
               sdkconfig.defaults > build/SHA256SUMS
           )
           echo "FLASHABLE/READY: ESP32-P4 flasher manifest and complete firmware set verified."
+
+      - name: Upload failed Gate-C diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32p4-gate-c-diagnostics-${{ github.event.pull_request.head.sha || github.sha }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            ports/esp_idf/sv_trial_app/build/ARSTACK_BUILD_FILE_LIST.txt
+            ports/esp_idf/sv_trial_app/build/flasher_args.json
+            ports/esp_idf/sv_trial_app/build/flash_args
+            ports/esp_idf/sv_trial_app/build/arstack61850_esp32p4_sv_trial.bin
+            ports/esp_idf/sv_trial_app/build/bootloader/bootloader.bin
+            ports/esp_idf/sv_trial_app/build/partition_table/partition-table.bin
 
       - name: Upload ESP32-P4 flashable firmware
         uses: actions/upload-artifact@v4
@@ -121,6 +159,7 @@ jobs:
             ports/esp_idf/sv_trial_app/build/flash_args
             ports/esp_idf/sv_trial_app/build/flasher_args.json
             ports/esp_idf/sv_trial_app/build/ARSTACK_BUILD_PROFILE.json
+            ports/esp_idf/sv_trial_app/build/ARSTACK_BUILD_FILE_LIST.txt
             ports/esp_idf/sv_trial_app/build/SHA256SUMS
             ports/esp_idf/sv_trial_app/sdkconfig.defaults
             ports/esp_idf/sv_trial_app/README.md
