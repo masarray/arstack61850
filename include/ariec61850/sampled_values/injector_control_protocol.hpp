@@ -22,6 +22,12 @@ enum class InjectorControlCommandKind : std::uint8_t {
     stats,
     set_channel,
     ramp_channel,
+    sequence_begin,
+    sequence_state_begin,
+    sequence_set_channel,
+    sequence_state_commit,
+    sequence_commit,
+    sequence_abort,
 };
 
 enum class InjectorControlParseStatus : std::uint8_t {
@@ -35,12 +41,15 @@ enum class InjectorControlParseStatus : std::uint8_t {
     unsupported_channel,
     missing_value,
     invalid_value,
+    unsupported_transition,
 };
 
 struct InjectorControlCommand final {
     InjectorControlCommandKind kind{InjectorControlCommandKind::status};
     InjectorScenarioKind scenario{InjectorScenarioKind::normal};
     InjectorChannelEdit channel_edit{};
+    std::uint32_t duration_samples{};
+    InjectorSegmentTransition transition{InjectorSegmentTransition::step};
 };
 
 struct InjectorControlParseResult final {
@@ -354,6 +363,35 @@ enum class JsonIntegerStatus : std::uint8_t {
     return InjectorControlParseStatus::ok;
 }
 
+[[nodiscard]] inline InjectorControlParseStatus parse_sequence_state_begin(
+    const std::string_view line,
+    InjectorControlCommand& command) noexcept {
+    std::int64_t duration{};
+    const auto duration_status = json_integer_value(line, "durationSamples", duration);
+    if (duration_status == JsonIntegerStatus::missing) {
+        return InjectorControlParseStatus::missing_value;
+    }
+    if (duration_status != JsonIntegerStatus::ok || duration < 1 ||
+        duration > 100'000'000LL) {
+        return InjectorControlParseStatus::invalid_value;
+    }
+    command.duration_samples = static_cast<std::uint32_t>(duration);
+
+    std::string_view transition;
+    if (!json_string_value(line, "transition", transition)) {
+        command.transition = InjectorSegmentTransition::step;
+        return InjectorControlParseStatus::ok;
+    }
+    if (transition == "step") {
+        command.transition = InjectorSegmentTransition::step;
+    } else if (transition == "linear") {
+        command.transition = InjectorSegmentTransition::linear_from_previous;
+    } else {
+        return InjectorControlParseStatus::unsupported_transition;
+    }
+    return InjectorControlParseStatus::ok;
+}
+
 } // namespace detail
 
 // Parses the intentionally narrow control-plane JSON subset used on MCU serial
@@ -411,6 +449,27 @@ enum class JsonIntegerStatus : std::uint8_t {
         if (status != InjectorControlParseStatus::ok) {
             return {status, {}};
         }
+    } else if (command_name == "sequence-begin") {
+        command.kind = InjectorControlCommandKind::sequence_begin;
+    } else if (command_name == "sequence-state-begin") {
+        command.kind = InjectorControlCommandKind::sequence_state_begin;
+        const auto status = detail::parse_sequence_state_begin(line, command);
+        if (status != InjectorControlParseStatus::ok) {
+            return {status, {}};
+        }
+    } else if (command_name == "sequence-set-channel") {
+        command.kind = InjectorControlCommandKind::sequence_set_channel;
+        const auto status = detail::parse_channel_edit(
+            line, command.channel_edit, false);
+        if (status != InjectorControlParseStatus::ok) {
+            return {status, {}};
+        }
+    } else if (command_name == "sequence-state-commit") {
+        command.kind = InjectorControlCommandKind::sequence_state_commit;
+    } else if (command_name == "sequence-commit") {
+        command.kind = InjectorControlCommandKind::sequence_commit;
+    } else if (command_name == "sequence-abort") {
+        command.kind = InjectorControlCommandKind::sequence_abort;
     } else {
         return {InjectorControlParseStatus::unsupported_command, {}};
     }
