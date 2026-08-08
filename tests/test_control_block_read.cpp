@@ -146,6 +146,19 @@ void runtime_projector_promotes_complete_ocr7sr12_sgcb_evidence() {
     const auto& sgcb = model.setting_group_controls.front();
     CHECK(sgcb.discovery_status == "ValueReadComplete");
     CHECK(sgcb.reference == "OCR7SR12PROT/LLN0.SP.SGCB");
+    CHECK(sgcb.runtime_attributes.size() == 5U);
+    CHECK(sgcb.runtime_attributes[0].attribute_path == "ActSG");
+    CHECK(sgcb.runtime_attributes[0].value == "1");
+    CHECK(sgcb.runtime_attributes[0].status == "ValueRead");
+    CHECK(!sgcb.runtime_attributes[0].failure_code.has_value());
+    CHECK(sgcb.runtime_attributes[1].attribute_path == "CnfEdit");
+    CHECK(sgcb.runtime_attributes[1].value == "false");
+    CHECK(sgcb.runtime_attributes[2].attribute_path == "EditSG");
+    CHECK(sgcb.runtime_attributes[2].value == "0");
+    CHECK(sgcb.runtime_attributes[3].attribute_path == "LActTm");
+    CHECK(sgcb.runtime_attributes[3].value.find("utcMs=") == 0U);
+    CHECK(sgcb.runtime_attributes[4].attribute_path == "NumOfSG");
+    CHECK(sgcb.runtime_attributes[4].value == "1");
     CHECK(sgcb.message.find("deep read 5/5 attributes") != std::string::npos);
     CHECK(sgcb.message.find("ActSG=1") != std::string::npos);
     CHECK(sgcb.message.find("CnfEdit=false") != std::string::npos);
@@ -158,6 +171,12 @@ void runtime_projector_promotes_complete_ocr7sr12_sgcb_evidence() {
         model.warnings.begin(), model.warnings.end(), [](const auto& warning) {
             return warning.code == "CONTROL_BLOCK_VALUE_READ_PENDING";
         }));
+
+    const auto json = model.to_json();
+    CHECK(json.find("\"runtimeAttributes\":[") != std::string::npos);
+    CHECK(json.find("\"attributePath\":\"ActSG\"") != std::string::npos);
+    CHECK(json.find("\"value\":\"1\"") != std::string::npos);
+    CHECK(json.find("\"status\":\"ValueRead\"") != std::string::npos);
 }
 
 void runtime_projector_maps_goose_values_without_inventing_failed_address_data() {
@@ -200,6 +219,16 @@ void runtime_projector_maps_goose_values_without_inventing_failed_address_data()
     CHECK(goose.control_id == "GOOSE-1");
     CHECK(goose.app_id.empty());
     CHECK(goose.address_status == "MmsValueReadFailed");
+    CHECK(goose.runtime_attributes.size() == 3U);
+    const auto failed_address = std::find_if(
+        goose.runtime_attributes.begin(), goose.runtime_attributes.end(),
+        [](const auto& attribute) {
+            return attribute.attribute_path == "DstAddress.APPID";
+        });
+    CHECK(failed_address != goose.runtime_attributes.end());
+    CHECK(failed_address->status == "AccessFailure");
+    CHECK(failed_address->value.empty());
+    CHECK(failed_address->failure_code == 3U);
     CHECK(std::any_of(
         model.warnings.begin(), model.warnings.end(), [](const auto& warning) {
             return warning.code == "CONTROL_BLOCK_VALUE_READ_PARTIAL";
