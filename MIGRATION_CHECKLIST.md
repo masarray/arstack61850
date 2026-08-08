@@ -136,9 +136,11 @@ behavioral oracle until laboratory interoperability is complete.
 - [x] C#↔C++ parity comparison script.
 - [x] Reconnect-cycle physical read-only evidence runner for Windows/Linux.
 - [x] Automated stability, warning-policy, coverage, and optional parity gates.
-- [~] GCC/Clang strict local validation and sanitizer smoke.
-- [ ] GitHub GCC/Clang/MSVC and Security/Evidence workflows accepted.
-- [ ] Controlled physical IED or vendor-simulator evidence accepted.
+- [x] Bounded GO/SV/SG/LG deep reader using exact live MMS NameList variables only.
+- [x] Machine-readable control-block runtime attribute/value/status overlay excluded from structural parity fingerprint.
+- [x] GCC/Clang strict validation, sanitizer/libFuzzer smoke, and Windows MSVC matrix accepted on the feature branch.
+- [x] Controlled physical IED read-only evidence accepted: OCR7SR12 RCB contention probe and SGCB 5/5 deep read.
+- [ ] Integrated `live_discover --control-block-values` physical run accepted.
 - [ ] Primary-vendor ten-cycle, timeout/reconnect, and pagination evidence accepted.
 - [ ] C# and C++ same-IED parity evidence accepted.
 
