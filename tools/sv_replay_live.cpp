@@ -24,22 +24,23 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
 
 using namespace ar::iec61850;
 
-constexpr std::uint16_t kSampleCountWrap = 4'000U;
-constexpr std::size_t kFrameBufferBytes = 1'536U;
 constexpr std::uint64_t kMaximumBundleBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
 
+#ifdef _WIN32
+constexpr std::uint16_t kSampleCountWrap = 4'000U;
+constexpr std::size_t kFrameBufferBytes = 1'536U;
 const ethernet::MacAddress kDestination{
     std::array<std::uint8_t, 6U>{0x01U, 0x0CU, 0xCDU, 0x04U, 0x00U, 0x01U}};
 const ethernet::MacAddress kSource{
     std::array<std::uint8_t, 6U>{0x02U, 0x00U, 0x00U, 0x00U, 0x00U, 0x02U}};
 
-#ifdef _WIN32
 volatile std::sig_atomic_t gStopRequested = 0;
 
 void handle_interrupt(const int signal) noexcept {
@@ -177,6 +178,7 @@ void print_usage() {
     return bundle;
 }
 
+#ifdef _WIN32
 [[nodiscard]] sampled_values::SampledValuesFrame make_frame() {
     sampled_values::SampledValueAsdu asdu;
     asdu.sv_id = "ARSTACK61850_INJECTOR";
@@ -196,6 +198,7 @@ void print_usage() {
         0U,
         sampled_values::SampledValuesPdu{{std::move(asdu)}}};
 }
+#endif
 
 void print_bundle_summary(
     const std::filesystem::path& path,
