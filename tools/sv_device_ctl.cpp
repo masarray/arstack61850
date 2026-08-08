@@ -18,6 +18,7 @@ struct Options final {
     std::string device;
     std::vector<std::string> positional;
     std::uint32_t timeout_ms{3'000U};
+    bool emit_request{};
     bool help{};
 };
 
@@ -46,6 +47,8 @@ struct Options final {
             options.device = require_value("--device");
         } else if (argument == "--timeout-ms") {
             options.timeout_ms = parse_timeout(require_value("--timeout-ms"));
+        } else if (argument == "--emit-request") {
+            options.emit_request = true;
         } else if (argument == "--help" || argument == "-h") {
             options.help = true;
         } else {
@@ -53,11 +56,11 @@ struct Options final {
         }
     }
 
-    if (!options.help && options.device.empty()) {
-        throw std::invalid_argument("--device COMx is required.");
-    }
     if (!options.help && options.positional.empty()) {
         throw std::invalid_argument("A device command is required.");
+    }
+    if (!options.help && !options.emit_request && options.device.empty()) {
+        throw std::invalid_argument("--device COMx is required unless --emit-request is used.");
     }
     return options;
 }
@@ -78,6 +81,13 @@ void print_usage() {
         << "Realtime source commands:\n"
         << "  set-channel <channel> <field> <value>\n"
         << "  ramp-channel <channel> <field> <value> <durationSamples>\n\n"
+        << "Transactional sequence commands:\n"
+        << "  sequence-begin\n"
+        << "  sequence-state-begin <durationSamples> [step|linear]\n"
+        << "  sequence-set-channel <channel> <field> <value>\n"
+        << "  sequence-state-commit\n"
+        << "  sequence-commit\n"
+        << "  sequence-abort\n\n"
         << "Channels: Ia Ib Ic In Va Vb Vc Vn\n"
         << "Fields: enabled rms dc phase frequency harmonic harmonic-order clip quality\n"
         << "  phase      = millidegrees\n"
@@ -87,6 +97,7 @@ void print_usage() {
         << "Options:\n"
         << "  --device COMx       Windows COM port for ESP32-P4 USB Serial/JTAG.\n"
         << "  --timeout-ms N      Response timeout, 100..60000 (default 3000).\n"
+        << "  --emit-request      Print request JSON only; do not open a device.\n"
         << "  --help              Show this help.\n\n"
         << "Examples:\n"
         << "  ariec61850_sv_device_ctl --device COM7 status\n"
@@ -95,6 +106,11 @@ void print_usage() {
         << "  ariec61850_sv_device_ctl --device COM7 set-channel Ia rms 2500\n"
         << "  ariec61850_sv_device_ctl --device COM7 set-channel Va phase 15000\n"
         << "  ariec61850_sv_device_ctl --device COM7 ramp-channel Ia rms 5000 4000\n"
+        << "  ariec61850_sv_device_ctl --device COM7 sequence-begin\n"
+        << "  ariec61850_sv_device_ctl --device COM7 sequence-state-begin 2000 step\n"
+        << "  ariec61850_sv_device_ctl --device COM7 sequence-set-channel Ia rms 4000\n"
+        << "  ariec61850_sv_device_ctl --device COM7 sequence-state-commit\n"
+        << "  ariec61850_sv_device_ctl --device COM7 sequence-commit\n"
         << "  ariec61850_sv_device_ctl --device COM7 stop\n";
 }
 
@@ -151,13 +167,42 @@ void validate_integer_text(const std::string& value, const std::string_view name
     }
 }
 
+[[nodiscard]] std::string channel_edit_request(
+    const std::string& command,
+    const std::vector<std::string>& arguments,
+    const bool include_duration) {
+    const auto expected = include_duration ? 5U : 4U;
+    if (arguments.size() != expected) {
+        throw std::invalid_argument(
+            include_duration
+                ? command + " requires <channel> <field> <value> <durationSamples>."
+                : command + " requires <channel> <field> <value>.");
+    }
+    if (!valid_channel(arguments[1])) {
+        throw std::invalid_argument("Channel must be Ia, Ib, Ic, In, Va, Vb, Vc, or Vn.");
+    }
+    const auto field = protocol_field(arguments[2]);
+    validate_integer_text(arguments[3], "value");
+
+    auto request = "{\"command\":\"" + command + "\",\"channel\":\"" +
+        arguments[1] + "\",\"" + field + "\":" + arguments[3];
+    if (include_duration) {
+        validate_integer_text(arguments[4], "durationSamples");
+        request += ",\"durationSamples\":" + arguments[4];
+    }
+    request += '}';
+    return request;
+}
+
 [[nodiscard]] std::string make_request(const Options& options) {
     const auto& arguments = options.positional;
     const auto& command = arguments.front();
 
     if (command == "capabilities" || command == "status" ||
         command == "arm" || command == "start" ||
-        command == "stop" || command == "stats") {
+        command == "stop" || command == "stats" ||
+        command == "sequence-begin" || command == "sequence-state-commit" ||
+        command == "sequence-commit" || command == "sequence-abort") {
         if (arguments.size() != 1U) {
             throw std::invalid_argument(command + " does not accept positional arguments.");
         }
@@ -174,33 +219,32 @@ void validate_integer_text(const std::string& value, const std::string_view name
             arguments[1] + "\"}";
     }
 
-    if (command == "set-channel" || command == "ramp-channel") {
-        const auto expected = command == "set-channel" ? 4U : 5U;
-        if (arguments.size() != expected) {
-            throw std::invalid_argument(
-                command == "set-channel"
-                    ? "set-channel requires <channel> <field> <value>."
-                    : "ramp-channel requires <channel> <field> <value> <durationSamples>.");
-        }
-        if (!valid_channel(arguments[1])) {
-            throw std::invalid_argument("Channel must be Ia, Ib, Ic, In, Va, Vb, Vc, or Vn.");
-        }
-        const auto field = protocol_field(arguments[2]);
-        validate_integer_text(arguments[3], "value");
+    if (command == "set-channel") {
+        return channel_edit_request(command, arguments, false);
+    }
+    if (command == "ramp-channel") {
+        return channel_edit_request(command, arguments, true);
+    }
+    if (command == "sequence-set-channel") {
+        return channel_edit_request(command, arguments, false);
+    }
 
-        auto request = "{\"command\":\"" + command + "\",\"channel\":\"" +
-            arguments[1] + "\",\"" + field + "\":" + arguments[3];
-        if (command == "ramp-channel") {
-            validate_integer_text(arguments[4], "durationSamples");
-            request += ",\"durationSamples\":" + arguments[4];
+    if (command == "sequence-state-begin") {
+        if (arguments.size() != 2U && arguments.size() != 3U) {
+            throw std::invalid_argument(
+                "sequence-state-begin requires <durationSamples> [step|linear].");
         }
-        request += '}';
-        return request;
+        validate_integer_text(arguments[1], "durationSamples");
+        const auto transition = arguments.size() == 3U ? arguments[2] : "step";
+        if (transition != "step" && transition != "linear") {
+            throw std::invalid_argument("transition must be step or linear.");
+        }
+        return "{\"command\":\"sequence-state-begin\",\"durationSamples\":" +
+            arguments[1] + ",\"transition\":\"" + transition + "\"}";
     }
 
     throw std::invalid_argument(
-        "Unsupported command. Use capabilities, status, configure, arm, start, "
-        "stop, stats, set-channel, or ramp-channel.");
+        "Unsupported command. Use lifecycle, realtime source, or sequence commands from --help.");
 }
 
 } // namespace
@@ -214,6 +258,11 @@ int main(const int argc, char** argv) {
         }
 
         const auto request = make_request(options);
+        if (options.emit_request) {
+            std::cout << request << '\n';
+            return 0;
+        }
+
         WindowsSerialControlPort serial;
         if (!serial.open(options.device)) {
             throw std::runtime_error(serial.error());
