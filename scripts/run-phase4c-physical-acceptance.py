@@ -122,6 +122,17 @@ def build_discovery_command(
         command += ["--max-rcb", "10"]
     if args.require_rcb_complete:
         command.append("--require-rcb-complete")
+    if args.control_block_values:
+        command.append("--control-block-values")
+        if args.max_control_blocks is not None:
+            command += ["--max-control-blocks", str(args.max_control_blocks)]
+        if args.max_control_block_attributes is not None:
+            command += [
+                "--max-control-block-attributes",
+                str(args.max_control_block_attributes),
+            ]
+    if args.require_control_block_complete:
+        command.append("--require-control-block-complete")
     return command
 
 
@@ -205,6 +216,10 @@ def main() -> int:
     parser.add_argument("--no-rcb", action="store_true")
     parser.add_argument("--max-rcb", type=int)
     parser.add_argument("--require-rcb-complete", action="store_true")
+    parser.add_argument("--control-block-values", action="store_true")
+    parser.add_argument("--max-control-blocks", type=int)
+    parser.add_argument("--max-control-block-attributes", type=int)
+    parser.add_argument("--require-control-block-complete", action="store_true")
     parser.add_argument("--contention-binary")
     parser.add_argument("--contention-cycles", type=int, default=3)
     parser.add_argument("--contention-rcb", default="")
@@ -230,6 +245,13 @@ def main() -> int:
         parser.error("--contention-probe-count must be positive")
     if args.contention_probe_delay_ms < 0 or args.contention_cooldown_sec < 0:
         parser.error("contention delay/cooldown must be non-negative")
+    if args.max_control_blocks is not None and args.max_control_blocks <= 0:
+        parser.error("--max-control-blocks must be positive")
+    if (
+        args.max_control_block_attributes is not None
+        and args.max_control_block_attributes <= 0
+    ):
+        parser.error("--max-control-block-attributes must be positive")
     if args.no_types and args.max_types is not None:
         parser.error("--no-types cannot be combined with --max-types")
     if args.no_rcb and args.max_rcb is not None:
@@ -237,6 +259,15 @@ def main() -> int:
     if args.require_rcb_complete and (args.no_rcb or args.fast_readonly):
         parser.error(
             "--require-rcb-complete cannot be combined with --no-rcb/--fast-readonly"
+        )
+    if (
+        args.max_control_blocks is not None
+        or args.max_control_block_attributes is not None
+        or args.require_control_block_complete
+    ) and not args.control_block_values:
+        parser.error(
+            "--max-control-blocks/--max-control-block-attributes/"
+            "--require-control-block-complete require --control-block-values"
         )
     if (args.parity_types or args.parity_runtime) and not args.expected_csharp_model:
         parser.error(
@@ -310,13 +341,19 @@ def main() -> int:
         discovery_process.returncode == 0
         and bool(discovery_summary.get("accepted"))
     )
+    control_block_accepted = bool(
+        discovery_summary.get("controlBlockCompletenessAccepted", True)
+    )
     fresh_association_count = (
         successful_discovery_associations + successful_contention_associations
     )
-    accepted = discovery_accepted and contention_accepted
+    reassociation_accepted = (
+        fresh_association_count == args.cycles + args.contention_cycles
+    )
+    accepted = discovery_accepted and contention_accepted and reassociation_accepted
 
     summary = {
-        "schemaVersion": "ariec61850-phase4c-physical-acceptance-v1",
+        "schemaVersion": "ariec61850-phase4c-physical-acceptance-v2",
         "endpoint": f"{args.host}:{args.port}",
         "readOnly": True,
         "discovery": {
@@ -325,6 +362,9 @@ def main() -> int:
             "cycleCount": args.cycles,
             "successfulFreshAssociations": successful_discovery_associations,
             "summaryFile": str(discovery_summary_path.relative_to(output_root)),
+            "controlBlockValuesRequested": args.control_block_values,
+            "controlBlockCompletenessRequired": args.require_control_block_complete,
+            "controlBlockCompletenessAccepted": control_block_accepted,
         },
         "contention": {
             "accepted": contention_accepted,
@@ -340,9 +380,7 @@ def main() -> int:
             "freshProcessPerContentionCycle": True,
             "successfulFreshAssociationCount": fresh_association_count,
             "expectedFreshAssociationCount": args.cycles + args.contention_cycles,
-            "accepted": (
-                fresh_association_count == args.cycles + args.contention_cycles
-            ),
+            "accepted": reassociation_accepted,
         },
         "accepted": accepted,
     }
@@ -355,6 +393,7 @@ def main() -> int:
         "Phase 4C physical read-only acceptance: "
         + ("PASS" if accepted else "FAIL")
         + f" (discovery={discovery_accepted}, contention={contention_accepted}, "
+        f"controlBlocks={control_block_accepted}, "
         f"freshAssociations={fresh_association_count}/"
         f"{args.cycles + args.contention_cycles})"
     )
