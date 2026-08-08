@@ -62,6 +62,7 @@ struct MmsLiveDataAttribute final {
 struct MmsLiveDataObject final {
     std::string reference;
     std::string name;
+    std::string proposed_do_type_id;
     std::string inferred_cdc;
     double cdc_confidence{};
     MmsLiveModelConfidence confidence{MmsLiveModelConfidence::unknown};
@@ -159,6 +160,31 @@ struct MmsLiveControlBlock final {
     }
 };
 
+// Pure model projections matching ARIEC61850 LiveIedTypeTemplateCandidate and
+// LiveIedVariableTypeDiscoveryModel.  They never trigger additional MMS IO.
+struct MmsLiveTypeTemplateCandidate final {
+    std::string template_kind;
+    std::string id;
+    std::string source_reference;
+    std::string inferred_type;
+    double confidence{};
+    std::vector<std::string> members;
+};
+
+struct MmsLiveVariableTypeDiscovery final {
+    std::string reference;
+    std::string domain;
+    std::string mms_item_name;
+    std::string functional_constraint;
+    bool success{};
+    std::string mms_type;
+    std::string scl_basic_type;
+    std::string type_signature;
+    std::optional<bool> mms_deletable;
+    std::string message;
+    std::string source{"GetVariableAccessAttributes"};
+};
+
 struct MmsLiveModelCoverage final {
     std::size_t logical_device_count{};
     std::size_t logical_node_count{};
@@ -208,6 +234,8 @@ struct MmsLiveModelDocument final {
     std::vector<MmsLiveControlBlock> sampled_value_control_blocks;
     std::vector<MmsLiveControlBlock> setting_group_controls;
     std::vector<MmsLiveControlBlock> log_controls;
+    std::vector<MmsLiveTypeTemplateCandidate> type_templates;
+    std::vector<MmsLiveVariableTypeDiscovery> variable_type_discoveries;
     std::vector<MmsLiveModelWarning> warnings;
 
     [[nodiscard]] std::string canonical_manifest() const;
@@ -220,6 +248,7 @@ struct MmsLiveModelBuildOptions final {
     std::string explicit_ied_name;
     std::string fallback_ied_name;
     std::string access_point_name{"AP1"};
+    bool include_low_confidence_templates{true};
 };
 
 class MmsLiveModelBuilder final {
