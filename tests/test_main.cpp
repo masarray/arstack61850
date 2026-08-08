@@ -4,6 +4,7 @@
 #include "ariec61850/capture/pcap.hpp"
 #include "ariec61850/ethernet/ethernet.hpp"
 #include "ariec61850/goose/retransmission_schedule.hpp"
+#include "ariec61850/mms/live_model.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -194,6 +195,64 @@ void goose_retransmission_schedule_matches_csharp_behavior() {
     CHECK(defaults.next_delay_milliseconds() == 4);
 }
 
+void live_type_templates_and_variable_type_projection_match_csharp_shape() {
+    using namespace ar::iec61850::mms;
+
+    MmsLiveDiscoveryResult discovery;
+    discovery.endpoint = {"127.0.0.1", 102U};
+    discovery.names.domain_variables["TESTIEDLD0"] = {
+        "LLN0$ST$Mod$stVal",
+        "LLN0$ST$Mod$q",
+        "LLN0$ST$Mod$t"};
+    discovery.report_inventory = MmsReportInventoryBuilder::build(discovery.names);
+
+    MmsVariableTypeEvidence type_evidence;
+    type_evidence.variable = MmsObjectName::domain_specific(
+        "TESTIEDLD0", "LLN0$ST$Mod$stVal");
+    MmsVariableAccessAttributesResponse attributes;
+    attributes.mms_deletable = false;
+    attributes.type.kind = MmsTypeKind::boolean;
+    type_evidence.attributes = attributes;
+    discovery.variable_types.push_back(type_evidence);
+
+    const auto model = MmsLiveModelBuilder::build(discovery);
+    CHECK(model.logical_devices.size() == 1U);
+    CHECK(model.logical_devices[0].logical_nodes.size() == 1U);
+    const auto& ln = model.logical_devices[0].logical_nodes[0];
+    CHECK(ln.name == "LLN0");
+    CHECK(ln.proposed_type_id == "LN_LLN0_LLN0");
+    CHECK(ln.data_objects.size() == 1U);
+    const auto& object = ln.data_objects[0];
+    CHECK(object.name == "Mod");
+    CHECK(object.proposed_do_type_id == "DO_INC_LLN0_Mod");
+
+    CHECK(model.type_templates.size() == 2U);
+    CHECK(model.type_templates[0].template_kind == "LNodeType");
+    CHECK(model.type_templates[0].id == "LN_LLN0_LLN0");
+    CHECK(model.type_templates[0].members.size() == 1U);
+    CHECK(model.type_templates[0].members[0] == "Mod");
+    CHECK(model.type_templates[1].template_kind == "DOType");
+    CHECK(model.type_templates[1].id == "DO_INC_LLN0_Mod");
+    CHECK(!model.type_templates[1].members.empty());
+
+    CHECK(model.variable_type_discoveries.size() == 1U);
+    const auto& type = model.variable_type_discoveries[0];
+    CHECK(type.success);
+    CHECK(type.domain == "TESTIEDLD0");
+    CHECK(type.mms_item_name == "LLN0$ST$Mod$stVal");
+    CHECK(type.functional_constraint == "ST");
+    CHECK(!type.mms_type.empty());
+    CHECK(type.scl_basic_type == "BOOLEAN");
+    CHECK(type.mms_deletable.has_value());
+    CHECK(!*type.mms_deletable);
+
+    const auto json = model.to_json();
+    CHECK(json.find("\"proposedLnTypeId\":\"LN_LLN0_LLN0\"") != std::string::npos);
+    CHECK(json.find("\"proposedDoTypeId\":\"DO_INC_LLN0_Mod\"") != std::string::npos);
+    CHECK(json.find("\"typeTemplates\":[") != std::string::npos);
+    CHECK(json.find("\"variableTypeDiscoveries\":[") != std::string::npos);
+}
+
 } // namespace
 
 int main() {
@@ -205,7 +264,8 @@ int main() {
         {"MAC value semantics", mac_address_value_semantics},
         {"Ethernet/VLAN/process bus", ethernet_vlan_and_process_bus_round_trip},
         {"PCAP round trip", pcap_writer_produces_classic_ethernet_pcap_and_round_trips},
-        {"GOOSE retransmission schedule", goose_retransmission_schedule_matches_csharp_behavior}};
+        {"GOOSE retransmission schedule", goose_retransmission_schedule_matches_csharp_behavior},
+        {"C# live type projections", live_type_templates_and_variable_type_projection_match_csharp_shape}};
 
     std::size_t passed = 0;
     for (const auto& [name, test] : tests) {
