@@ -186,7 +186,10 @@ std::string MmsLiveDiscoveryResult::summary() const {
 
     std::ostringstream stream;
     stream << "Live read-only MMS discovery: endpoint=" << endpoint.host << ':'
-           << endpoint.port << ", domains=" << domain_count()
+           << endpoint.port << ", associationProfile="
+           << (association_profile.empty() ? std::string{"unknown"} : association_profile)
+           << ", associationAttempts=" << association_attempts.size()
+           << ", domains=" << domain_count()
            << ", variables=" << variable_count()
            << ", DataSets=" << report_inventory.data_sets.size()
            << ", RCBs=" << report_inventory.report_controls.size()
@@ -271,6 +274,8 @@ MmsLiveDiscoveryResult MmsLiveDiscoveryClient::discover(
 
     MmsLiveDiscoveryResult result;
     result.endpoint = association_.endpoint();
+    result.association_profile = association_.active_association_profile();
+    result.association_attempts = association_.association_attempts();
 
     const auto domains = get_name_list(
         MmsGetNameListObjectClass::domain, {}, options, stop_token);
