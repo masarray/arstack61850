@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 
 namespace ar::iec61850::sampled_values {
@@ -114,7 +115,7 @@ inline void write_be64(
     if (header.payload_bytes != replay_payload_bytes) {
         return 0U;
     }
-    constexpr auto maximum = static_cast<std::uint64_t>(-1);
+    constexpr auto maximum = std::numeric_limits<std::uint64_t>::max();
     const auto payload = static_cast<std::uint64_t>(header.payload_bytes);
     if (header.frame_count >
         (maximum - static_cast<std::uint64_t>(replay_bundle_header_bytes)) / payload) {
