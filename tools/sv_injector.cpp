@@ -102,10 +102,6 @@ struct LoopbackContext final {
     capture::PcapWriter* pcap_writer{};
 };
 
-[[nodiscard]] std::string_view mode_name(const RunMode mode) noexcept {
-    return mode == RunMode::live ? "live" : "loopback";
-}
-
 [[nodiscard]] std::uint64_t parse_bounded_u64(
     const std::string_view option,
     const std::string& value,
