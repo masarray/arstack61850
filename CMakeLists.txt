@@ -112,6 +112,12 @@ if(ARIEC61850_BUILD_TOOLS)
     target_compile_features(ariec61850_live_discover PRIVATE cxx_std_20)
     ariec61850_apply_warnings(ariec61850_live_discover)
     ariec61850_apply_sanitizers(ariec61850_live_discover)
+
+    add_executable(ariec61850_rcb_contention_probe tools/rcb_contention_probe.cpp)
+    target_link_libraries(ariec61850_rcb_contention_probe PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_rcb_contention_probe PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_rcb_contention_probe)
+    ariec61850_apply_sanitizers(ariec61850_rcb_contention_probe)
 endif()
 
 if(ARIEC61850_BUILD_TESTS)
