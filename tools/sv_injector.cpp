@@ -47,6 +47,7 @@ const ethernet::MacAddress kDestination{
 const ethernet::MacAddress kSource{
     std::array<std::uint8_t, 6U>{0x02U, 0x00U, 0x00U, 0x00U, 0x00U, 0x02U}};
 
+#ifdef _WIN32
 volatile std::sig_atomic_t gStopRequested = 0;
 
 void handle_interrupt(const int signal) noexcept {
@@ -54,6 +55,7 @@ void handle_interrupt(const int signal) noexcept {
         gStopRequested = 1;
     }
 }
+#endif
 
 enum class RunMode : std::uint8_t {
     loopback,
@@ -389,6 +391,7 @@ embedded::IoResult loopback_transmit(
     return true;
 }
 
+#ifdef _WIN32
 [[nodiscard]] std::uint64_t monotonic_us() noexcept {
     const auto now = std::chrono::steady_clock::now().time_since_epoch();
     return static_cast<std::uint64_t>(
@@ -410,6 +413,7 @@ void wait_until_monotonic_us(const std::uint64_t deadline_us) {
         }
     }
 }
+#endif
 
 void print_loopback_human(
     const Options& options,
@@ -597,6 +601,7 @@ void print_adapters() {
     }
 }
 
+#ifdef _WIN32
 void print_live_human(
     const Options& options,
     const tools::NpcapLivePort& live,
@@ -684,6 +689,7 @@ void print_live_json(
         << "\"adapter\":\"" << live.opened_name() << "\""
         << "}\n";
 }
+#endif
 
 [[nodiscard]] int run_live(const Options& options) {
 #ifndef _WIN32
