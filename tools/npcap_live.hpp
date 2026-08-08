@@ -38,7 +38,12 @@ public:
 #endif
     }
 
-    ~NpcapLivePort() { close(); unload(); }
+    ~NpcapLivePort() {
+        close();
+#ifdef _WIN32
+        unload();
+#endif
+    }
 
     NpcapLivePort(const NpcapLivePort&) = delete;
     NpcapLivePort& operator=(const NpcapLivePort&) = delete;
