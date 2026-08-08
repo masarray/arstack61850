@@ -43,6 +43,8 @@ jobs:
           python3 scripts/run-live-readonly-interop.py --help > /dev/null
           python3 -m py_compile scripts/run-phase4c-physical-acceptance.py
           python3 scripts/run-phase4c-physical-acceptance.py --help > /dev/null
+          python3 -m py_compile scripts/run-phase4c-timeout-recovery.py
+          python3 scripts/run-phase4c-timeout-recovery.py --help > /dev/null
 
   windows:
     name: Windows / MSVC
@@ -62,3 +64,5 @@ jobs:
           python scripts/run-live-readonly-interop.py --help | Out-Null
           python -m py_compile scripts/run-phase4c-physical-acceptance.py
           python scripts/run-phase4c-physical-acceptance.py --help | Out-Null
+          python -m py_compile scripts/run-phase4c-timeout-recovery.py
+          python scripts/run-phase4c-timeout-recovery.py --help | Out-Null
