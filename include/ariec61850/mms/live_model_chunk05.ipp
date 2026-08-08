@@ -136,7 +136,22 @@
                 << "\",\"numberOfAsdu\":\"" << json(control.number_of_asdu)
                 << "\",\"addressStatus\":\"" << json(control.address_status)
                 << "\",\"discoveryStatus\":\"" << json(control.discovery_status)
-                << "\",\"message\":\"" << json(control.message) << "\"}";
+                << "\",\"runtimeAttributes\":[";
+            for (std::size_t runtime_index = 0U;
+                 runtime_index < control.runtime_attributes.size();
+                 ++runtime_index) {
+                if (runtime_index) out << ',';
+                const auto& runtime = control.runtime_attributes[runtime_index];
+                out << "{\"attributePath\":\"" << json(runtime.attribute_path)
+                    << "\",\"mmsReference\":\"" << json(runtime.mms_reference)
+                    << "\",\"value\":\"" << json(runtime.value)
+                    << "\",\"status\":\"" << json(runtime.status)
+                    << "\",\"failureCode\":";
+                if (runtime.failure_code) out << *runtime.failure_code;
+                else out << "null";
+                out << '}';
+            }
+            out << "],\"message\":\"" << json(control.message) << "\"}";
         }
         out << ']';
     };
