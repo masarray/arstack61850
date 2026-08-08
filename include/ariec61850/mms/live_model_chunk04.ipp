@@ -203,4 +203,6 @@ inline std::string MmsLiveModelDocument::to_json() const {
         << "\"accessPointName\":\"" << json(access_point_name) << "\","
         << "\"summary\":\"" << json(summary) << "\","
         << "\"fingerprint\":\"" << canonical_fingerprint_hex() << "\","
+        << "\"structuralFingerprint\":\"" << structural_fingerprint_hex() << "\","
+        << "\"runtimeSnapshotFingerprint\":\"" << runtime_snapshot_fingerprint_hex() << "\","
         << "\"coverage\":{\"logicalDeviceCount\":" << coverage.logical_device_count
