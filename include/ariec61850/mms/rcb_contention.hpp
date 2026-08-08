@@ -73,7 +73,9 @@ public:
             });
         const auto reservation_states = distinct_normalized(
             observations, [](const auto& observation) {
-                return normalize_probe_value(observation.resv_tms).empty()
+                // C# chooses ResvTms using IsNullOrWhiteSpace before
+                // NormalizeProbeValue converts a literal "-" to empty.
+                return trim(observation.resv_tms).empty()
                     ? observation.resv
                     : observation.resv_tms;
             });
