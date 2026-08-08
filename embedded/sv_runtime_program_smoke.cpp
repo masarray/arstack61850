@@ -3,6 +3,7 @@
 #include "ariec61850/sampled_values/deterministic_injector.hpp"
 #include "ariec61850/sampled_values/injector_presets.hpp"
 #include "ariec61850/sampled_values/injector_runtime_program.hpp"
+#include "ariec61850/sampled_values/injector_sequence_builder.hpp"
 
 #include <array>
 #include <cstdint>
@@ -137,6 +138,58 @@ bool finite_sequence_ends_in_hold() noexcept {
         program.mode() == InjectorRuntimeSourceMode::sequence;
 }
 
+bool sequence_builder_is_transactional() noexcept {
+    const auto base = constant_profile(1'000);
+    InjectorSequenceBuilder builder;
+    builder.begin(base);
+
+    if (!builder.begin_state(2U, InjectorSegmentTransition::step)) {
+        return false;
+    }
+    InjectorChannelEdit first{};
+    first.channel_index = 0U;
+    first.fields = injector_field_rms;
+    first.rms_counts = 2'000;
+    if (!builder.edit_channel(first) || builder.ready() ||
+        !builder.commit_state()) {
+        return false;
+    }
+
+    if (!builder.begin_state(3U, InjectorSegmentTransition::linear_from_previous)) {
+        return false;
+    }
+    InjectorChannelEdit second{};
+    second.channel_index = 0U;
+    second.fields = injector_field_rms;
+    second.rms_counts = 4'000;
+    if (!builder.edit_channel(second) || !builder.commit_state() ||
+        !builder.ready() || builder.state_count() != 2U) {
+        return false;
+    }
+
+    const auto states = builder.states();
+    if (states.size() != 2U ||
+        states[0].channels[0].rms_counts != 2'000 ||
+        states[1].channels[0].rms_counts != 4'000 ||
+        states[1].transition != InjectorSegmentTransition::linear_from_previous) {
+        return false;
+    }
+
+    InjectorRuntimeProgram program(base);
+    DeterministicSvInjector injector(program.segments(), 4'000U, true);
+    InjectorSample sample{};
+    if (!injector.step(sample) ||
+        !program.stage_sequence(injector.segment_index(), states)) {
+        return false;
+    }
+
+    // An abort discards only the builder transaction and cannot affect the
+    // already committed runtime program.
+    builder.abort();
+    return !builder.active() && !builder.ready() &&
+        program.mode() == InjectorRuntimeSourceMode::sequence;
+}
+
 } // namespace
 
 int main() {
@@ -148,6 +201,9 @@ int main() {
     }
     if (!finite_sequence_ends_in_hold()) {
         return 3;
+    }
+    if (!sequence_builder_is_transactional()) {
+        return 4;
     }
     return 0;
 }
