@@ -1,6 +1,17 @@
+        auto& object_attributes =
+            hierarchy[point.domain][point.logical_node][object_name];
+        const auto attribute_path =
+            MmsLiveReferenceParser::data_attribute_path(point.data_object_path);
+        // Match ARIEC61850: a top-level FC point proves the DataObject exists,
+        // but it is not itself a DataAttribute. Keeping the empty ObjectMap entry
+        // preserves DO inventory without synthesizing one DA per DO.
+        if (attribute_path.empty()) {
+            continue;
+        }
+
         MmsLiveDataAttribute attribute;
         attribute.object_reference = point.user_reference();
-        attribute.attribute_path = MmsLiveReferenceParser::data_attribute_path(point.data_object_path);
+        attribute.attribute_path = attribute_path;
         attribute.functional_constraint = point.functional_constraint;
         attribute.mms_reference = point.mms_reference();
         attribute.mms_item_name = point.mms_item_name;
@@ -9,7 +20,14 @@
         if (const auto* type = resolve_type(point, discovery.variable_types, type_source)) {
             attribute.scl_basic_type = type->scl_basic_type();
             attribute.mms_type = type->mms_type_name();
-            attribute.mms_type_signature = type->signature();
+            // A type resolved from an LN-root probe is a child member of the
+            // returned structure, so its internal name is useful while walking
+            // the tree. The C# direct-variable oracle exports the selected type
+            // itself, however, without that top-level member-name prefix. Clear
+            // only the selected node name; nested structure member names remain.
+            auto projected_type = *type;
+            projected_type.name.clear();
+            attribute.mms_type_signature = projected_type.signature();
             attribute.type_discovery_status = "Exact";
             attribute.type_source = type_source;
             attribute.type_confidence = MmsLiveModelConfidence::exact;
@@ -20,7 +38,7 @@
             attribute.type_source = "NameListHeuristic";
             attribute.type_confidence = MmsLiveModelConfidence::low;
         }
-        hierarchy[point.domain][point.logical_node][object_name].emplace(
+        object_attributes.emplace(
             key(attribute.object_reference), std::move(attribute));
     }
     for (auto& [domain, nodes] : hierarchy) {
@@ -217,7 +235,11 @@
     // a valid Unbound state, not a missing/corrupt DataSet.
     for (const auto& candidate : discovery.report_inventory.report_controls) {
         MmsLiveReportControl control;
-        control.reference = candidate.reference;
+        // Match the C# public model reference. The FC segment is part of the RCB
+        // identity (and distinguishes RP from BR); the internal candidate remains
+        // decomposed so wire requests continue to use '$' ObjectName addressing.
+        control.reference = candidate.domain + "/" + candidate.logical_node + "." +
+            candidate.functional_constraint + "." + candidate.name;
         control.domain = candidate.domain;
         control.logical_node = candidate.logical_node;
         control.name = candidate.name;
