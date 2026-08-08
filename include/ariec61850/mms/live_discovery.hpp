@@ -66,6 +66,8 @@ struct MmsReportControlEvidence final {
 
 struct MmsLiveDiscoveryResult final {
     MmsEndpoint endpoint;
+    std::string association_profile;
+    std::vector<MmsAssociationAttemptEvidence> association_attempts;
     MmsDiscoverySnapshot names;
     MmsReportInventory report_inventory;
     std::vector<MmsVariableTypeEvidence> variable_types;
