@@ -9,14 +9,17 @@
 #include "ariec61850/sampled_values/injector_presets.hpp"
 #include "ariec61850/sampled_values/payload_writer.hpp"
 #include "ariec61850/sampled_values/publisher.hpp"
+#include "npcap_live.hpp"
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <csignal>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <optional>
@@ -24,6 +27,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -43,11 +47,28 @@ const ethernet::MacAddress kDestination{
 const ethernet::MacAddress kSource{
     std::array<std::uint8_t, 6U>{0x02U, 0x00U, 0x00U, 0x00U, 0x00U, 0x02U}};
 
+volatile std::sig_atomic_t gStopRequested = 0;
+
+void handle_interrupt(const int signal) noexcept {
+    if (signal == SIGINT) {
+        gStopRequested = 1;
+    }
+}
+
+enum class RunMode : std::uint8_t {
+    loopback,
+    live,
+};
+
 struct Options final {
+    RunMode mode{RunMode::loopback};
     std::string scenario{"normal"};
     std::optional<std::uint64_t> frames;
     std::uint64_t drop_every{};
     std::string pcap_path;
+    std::string interface_selector;
+    bool continuous{};
+    bool list_interfaces{};
     bool json{};
     bool capabilities{};
     bool help{};
@@ -81,6 +102,10 @@ struct LoopbackContext final {
     capture::PcapWriter* pcap_writer{};
 };
 
+[[nodiscard]] std::string_view mode_name(const RunMode mode) noexcept {
+    return mode == RunMode::live ? "live" : "loopback";
+}
+
 [[nodiscard]] std::uint64_t parse_bounded_u64(
     const std::string_view option,
     const std::string& value,
@@ -96,6 +121,16 @@ struct LoopbackContext final {
     return static_cast<std::uint64_t>(parsed);
 }
 
+[[nodiscard]] RunMode parse_mode(const std::string_view value) {
+    if (value == "loopback") {
+        return RunMode::loopback;
+    }
+    if (value == "live") {
+        return RunMode::live;
+    }
+    throw std::invalid_argument("--mode must be loopback or live.");
+}
+
 [[nodiscard]] Options parse_options(const int argc, char** argv) {
     Options options;
     for (int index = 1; index < argc; ++index) {
@@ -108,7 +143,9 @@ struct LoopbackContext final {
             return argv[index];
         };
 
-        if (argument == "--scenario") {
+        if (argument == "--mode") {
+            options.mode = parse_mode(require_value("--mode"));
+        } else if (argument == "--scenario") {
             options.scenario = require_value("--scenario");
         } else if (argument == "--frames") {
             options.frames = parse_bounded_u64(
@@ -122,6 +159,12 @@ struct LoopbackContext final {
             }
         } else if (argument == "--pcap") {
             options.pcap_path = require_value("--pcap");
+        } else if (argument == "--interface") {
+            options.interface_selector = require_value("--interface");
+        } else if (argument == "--continuous") {
+            options.continuous = true;
+        } else if (argument == "--list-interfaces") {
+            options.list_interfaces = true;
         } else if (argument == "--json") {
             options.json = true;
         } else if (argument == "--capabilities") {
@@ -132,22 +175,46 @@ struct LoopbackContext final {
             throw std::invalid_argument("Unknown option: " + argument);
         }
     }
+
+    if (options.continuous && options.frames.has_value()) {
+        throw std::invalid_argument("--continuous and --frames are mutually exclusive.");
+    }
+    if (options.mode == RunMode::loopback && options.continuous) {
+        throw std::invalid_argument(
+            "--continuous is reserved for --mode live; loopback remains finite for regression safety.");
+    }
+    if (options.mode == RunMode::loopback && !options.interface_selector.empty()) {
+        throw std::invalid_argument("--interface requires --mode live.");
+    }
+    if (options.mode == RunMode::live && options.drop_every != 0U) {
+        throw std::invalid_argument(
+            "--drop-every currently applies only to software loopback.");
+    }
     return options;
 }
 
 void print_usage() {
     std::cout
         << "Usage: ariec61850_sv_injector [options]\n"
-        << "\nDeterministic Sampled Values software-loopback injector.\n"
-        << "No ESP32, Npcap, administrator privilege, or physical NIC is required.\n\n"
+        << "\nDeterministic IEC 61850 Sampled Values injector.\n"
+        << "Loopback is the default reference/oracle mode. Windows live mode uses\n"
+        << "Npcap to transmit raw SV Ethernet frames on a selected NIC.\n\n"
         << "Options:\n"
-        << "  --scenario NAME    normal | protection-fault (default normal).\n"
-        << "  --frames N         Override generated frame count.\n"
-        << "  --drop-every N     Simulate one downstream loss every N TX frames (0=off).\n"
-        << "  --pcap PATH        Write received loopback frames to classic PCAP.\n"
-        << "  --json             Emit machine-readable evidence.\n"
-        << "  --capabilities     Emit the app/device control capability contract.\n"
-        << "  --help             Show this help.\n";
+        << "  --mode MODE         loopback | live (default loopback).\n"
+        << "  --scenario NAME     normal | protection-fault (default normal).\n"
+        << "  --frames N          Finite frame count; defaults to scenario length.\n"
+        << "  --continuous        Live mode: transmit until Ctrl+C.\n"
+        << "  --interface NAME    Live mode: exact or unique Npcap adapter selector.\n"
+        << "  --list-interfaces   List Npcap adapters and exit.\n"
+        << "  --drop-every N      Loopback: downstream loss every N TX frames (0=off).\n"
+        << "  --pcap PATH         Save observed loopback or transmitted live frames.\n"
+        << "  --json              Emit machine-readable final evidence.\n"
+        << "  --capabilities      Emit the app/device control capability contract.\n"
+        << "  --help              Show this help.\n\n"
+        << "Live examples:\n"
+        << "  ariec61850_sv_injector --list-interfaces\n"
+        << "  ariec61850_sv_injector --mode live --interface \"Ethernet\" --frames 8000\n"
+        << "  ariec61850_sv_injector --mode live --interface \"Ethernet\" --continuous\n";
 }
 
 void print_capabilities() {
@@ -155,7 +222,12 @@ void print_capabilities() {
         << "{\n"
         << "  \"schemaVersion\": \"arstack-sv-injector-control-v1\",\n"
         << "  \"engine\": \"sample-index-fixed-point\",\n"
+#ifdef _WIN32
+        << "  \"modes\": [\"software-loopback\", \"windows-npcap-live\"],\n"
+#else
         << "  \"modes\": [\"software-loopback\"],\n"
+#endif
+        << "  \"liveTiming\": \"best-effort-no-catch-up\",\n"
         << "  \"scenarios\": [\"normal\", \"protection-fault\"],\n"
         << "  \"commandsPlannedForDeviceTransport\": "
            "[\"capabilities\", \"configure\", \"arm\", \"start\", \"stop\", \"status\", \"stats\"],\n"
@@ -242,8 +314,6 @@ embedded::IoResult loopback_transmit(
     if (loopback->drop_every > 0U &&
         (loopback->evidence.tx_frames % loopback->drop_every) == 0U) {
         ++loopback->evidence.injected_drops;
-        // The producer/TX path succeeded; the loss is injected after TX so the
-        // logical sample timeline continues and the receiver observes a gap.
         return {embedded::IoStatus::ok, bytes.size()};
     }
 
@@ -323,7 +393,29 @@ embedded::IoResult loopback_transmit(
     return true;
 }
 
-void print_human(
+[[nodiscard]] std::uint64_t monotonic_us() noexcept {
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(now).count());
+}
+
+void wait_until_monotonic_us(const std::uint64_t deadline_us) {
+    while (gStopRequested == 0) {
+        const auto now = monotonic_us();
+        if (now >= deadline_us) {
+            return;
+        }
+        const auto remaining = deadline_us - now;
+        if (remaining > 2'000U) {
+            std::this_thread::sleep_for(
+                std::chrono::microseconds{static_cast<std::int64_t>(remaining - 1'000U)});
+        } else if (remaining > 100U) {
+            std::this_thread::yield();
+        }
+    }
+}
+
+void print_loopback_human(
     const Options& options,
     const std::uint64_t frames,
     const LoopbackEvidence& evidence,
@@ -355,7 +447,7 @@ void print_human(
               << (passed ? "LOOPBACK/PASSED" : "LOOPBACK/FAILED") << '\n';
 }
 
-void print_json(
+void print_loopback_json(
     const Options& options,
     const std::uint64_t frames,
     const LoopbackEvidence& evidence,
@@ -386,6 +478,383 @@ void print_json(
         << "}\n";
 }
 
+[[nodiscard]] int run_loopback(const Options& options) {
+    auto scenario = make_scenario(options.scenario);
+    const auto frames = options.frames.value_or(scenario.default_frames);
+    sampled_values::DeterministicSvInjector injector(
+        scenario.segments, kSampleRateHz, scenario.loop);
+    if (!injector.valid()) {
+        throw std::runtime_error("Deterministic injector configuration is invalid.");
+    }
+
+    std::ofstream pcap_output;
+    std::optional<capture::PcapWriter> pcap_writer;
+    if (!options.pcap_path.empty()) {
+        pcap_output.open(options.pcap_path, std::ios::binary | std::ios::trunc);
+        if (!pcap_output) {
+            throw std::runtime_error("Cannot open PCAP output: " + options.pcap_path);
+        }
+        pcap_writer.emplace(pcap_output);
+    }
+
+    LoopbackContext loopback;
+    loopback.drop_every = options.drop_every;
+    loopback.pcap_writer = pcap_writer.has_value() ? &*pcap_writer : nullptr;
+    embedded::RawEthernetPort port{&loopback, &loopback_transmit};
+
+    auto frame = make_frame();
+    std::array<std::uint8_t, 1'536U> frame_buffer{};
+    sampled_values::SampledValuesPublisher publisher(
+        frame,
+        frame_buffer,
+        port,
+        sampled_values::SampledValuesPublisherConfig{
+            kSampleRateHz,
+            std::uint16_t{kSampleCountWrap},
+            0U,
+            true});
+    if (!publisher.valid()) {
+        throw std::runtime_error("SampledValuesPublisher configuration is invalid.");
+    }
+
+    sampled_values::InjectorSample sample{};
+    for (std::uint64_t index = 0U; index < frames; ++index) {
+        if (!injector.step(sample)) {
+            throw std::runtime_error("Scenario finished before requested frame count.");
+        }
+        if (sample.sample_index != index) {
+            throw std::runtime_error("Injector sample-index timeline diverged.");
+        }
+
+        auto& asdu = frame.pdu.asdus.front();
+        if (!write_payload(asdu, sample)) {
+            throw std::runtime_error("Could not build INT32+quality SV payload.");
+        }
+
+        loopback.expected_sample_count = static_cast<std::uint16_t>(
+            sample.sample_index % static_cast<std::uint64_t>(kSampleCountWrap));
+        std::copy(
+            asdu.sample_payload.begin(),
+            asdu.sample_payload.end(),
+            loopback.expected_payload.begin());
+        loopback.virtual_timestamp_us =
+            kVirtualStartUs + sample.sample_index * kIntervalUs;
+
+        const auto result = publisher.poll(loopback.virtual_timestamp_us);
+        if (!result.sent() ||
+            result.sample_count != loopback.expected_sample_count) {
+            throw std::runtime_error("Publisher did not emit the expected virtual sample.");
+        }
+    }
+
+    if (pcap_output.is_open()) {
+        pcap_output.flush();
+        if (!pcap_output) {
+            ++loopback.evidence.pcap_errors;
+        }
+    }
+
+    const auto expected_rx = frames - loopback.evidence.injected_drops;
+    const auto expected_visible_gaps = options.drop_every == 0U
+        ? 0U
+        : (frames - 1U) / options.drop_every;
+    const auto& statistics = publisher.statistics();
+    const auto passed =
+        loopback.evidence.tx_frames == frames &&
+        loopback.evidence.rx_frames == expected_rx &&
+        loopback.evidence.decode_errors == 0U &&
+        loopback.evidence.identity_errors == 0U &&
+        loopback.evidence.payload_errors == 0U &&
+        loopback.evidence.sample_count_errors == 0U &&
+        loopback.evidence.gap_events == expected_visible_gaps &&
+        loopback.evidence.pcap_errors == 0U &&
+        statistics.frames_sent == frames &&
+        statistics.encode_failures == 0U &&
+        statistics.transmit_failures == 0U &&
+        statistics.late_polls == 0U;
+
+    if (options.json) {
+        print_loopback_json(options, frames, loopback.evidence, statistics, passed);
+    } else {
+        print_loopback_human(options, frames, loopback.evidence, statistics, passed);
+    }
+    return passed ? 0 : 2;
+}
+
+void print_adapters() {
+    tools::NpcapLivePort live;
+    std::vector<tools::LiveEthernetAdapter> adapters;
+    if (!live.list_adapters(adapters)) {
+        throw std::runtime_error(live.error());
+    }
+
+    std::cout << "Npcap adapters:\n";
+    for (std::size_t index = 0U; index < adapters.size(); ++index) {
+        const auto& adapter = adapters[index];
+        std::cout << '[' << index << "] "
+                  << (adapter.description.empty() ? "(no description)" : adapter.description)
+                  << '\n'
+                  << "    " << adapter.name << '\n';
+    }
+    if (adapters.empty()) {
+        std::cout << "(none)\n";
+    }
+}
+
+void print_live_human(
+    const Options& options,
+    const tools::NpcapLivePort& live,
+    const std::uint64_t frames_requested,
+    const sampled_values::SampledValuesPublisherStatistics& statistics,
+    const double elapsed_seconds,
+    const bool passed) {
+    const auto rate = elapsed_seconds > 0.0
+        ? static_cast<double>(statistics.frames_sent) / elapsed_seconds
+        : 0.0;
+
+    std::cout
+        << "\nARStack61850 deterministic SV injector\n\n"
+        << "Mode              : LIVE ETHERNET / NPCAP\n"
+        << "Scenario          : " << options.scenario << '\n'
+        << "Engine            : sample-index fixed-point\n"
+        << "Timing            : real-time best-effort, no catch-up bursts\n"
+        << "Sample rate goal  : " << kSampleRateHz << " Hz\n"
+        << "Interval goal     : " << kIntervalUs << " us\n"
+        << "Adapter           : " << live.opened_name() << '\n';
+    if (!live.opened_description().empty()) {
+        std::cout << "Adapter desc      : " << live.opened_description() << '\n';
+    }
+    if (options.continuous) {
+        std::cout << "Run length        : continuous until Ctrl+C\n";
+    } else {
+        std::cout << "Frames requested  : " << frames_requested << '\n';
+    }
+    std::cout
+        << "\nTX frames         : " << statistics.frames_sent << '\n'
+        << "Encode failures   : " << statistics.encode_failures << '\n'
+        << "TX failures       : " << statistics.transmit_failures << '\n'
+        << "Late polls        : " << statistics.late_polls << '\n'
+        << "Max lateness      : " << statistics.maximum_lateness_us << " us\n"
+        << "Elapsed           : " << std::fixed << std::setprecision(3)
+        << elapsed_seconds << " s\n"
+        << "Observed TX rate  : " << std::fixed << std::setprecision(1)
+        << rate << " frames/s\n";
+    if (!options.pcap_path.empty()) {
+        std::cout << "TX PCAP           : " << options.pcap_path << '\n';
+    }
+    std::cout
+        << "External verify   : subscriber/Wireshark (eth.type == 0x88ba)\n"
+        << "\nRESULT            : "
+        << (passed
+            ? (options.continuous ? "LIVE/STOPPED" : "LIVE/PASSED")
+            : "LIVE/FAILED")
+        << '\n';
+}
+
+void print_live_json(
+    const Options& options,
+    const tools::NpcapLivePort& live,
+    const std::uint64_t frames_requested,
+    const sampled_values::SampledValuesPublisherStatistics& statistics,
+    const double elapsed_seconds,
+    const bool passed) {
+    const auto rate = elapsed_seconds > 0.0
+        ? static_cast<double>(statistics.frames_sent) / elapsed_seconds
+        : 0.0;
+    std::cout
+        << '{'
+        << "\"schemaVersion\":\"arstack-sv-injector-live-evidence-v1\","
+        << "\"status\":\""
+        << (passed
+            ? (options.continuous ? "LIVE/STOPPED" : "LIVE/PASSED")
+            : "LIVE/FAILED")
+        << "\","
+        << "\"mode\":\"windows-npcap-live\","
+        << "\"scenario\":\"" << options.scenario << "\","
+        << "\"engine\":\"sample-index-fixed-point\","
+        << "\"timing\":\"best-effort-no-catch-up\","
+        << "\"sampleRateHz\":" << kSampleRateHz << ','
+        << "\"intervalUs\":" << kIntervalUs << ','
+        << "\"continuous\":" << (options.continuous ? "true" : "false") << ','
+        << "\"framesRequested\":" << frames_requested << ','
+        << "\"txFrames\":" << statistics.frames_sent << ','
+        << "\"encodeFailures\":" << statistics.encode_failures << ','
+        << "\"transmitFailures\":" << statistics.transmit_failures << ','
+        << "\"latePolls\":" << statistics.late_polls << ','
+        << "\"maximumLatenessUs\":" << statistics.maximum_lateness_us << ','
+        << "\"elapsedSeconds\":" << std::fixed << std::setprecision(6)
+        << elapsed_seconds << ','
+        << "\"observedTxRate\":" << std::fixed << std::setprecision(3) << rate << ','
+        << "\"adapter\":\"" << live.opened_name() << "\""
+        << "}\n";
+}
+
+[[nodiscard]] int run_live(const Options& options) {
+#ifndef _WIN32
+    (void)options;
+    throw std::runtime_error("Live Npcap mode is available only on Windows.");
+#else
+    if (options.interface_selector.empty()) {
+        throw std::invalid_argument(
+            "--mode live requires --interface NAME. Use --list-interfaces first.");
+    }
+
+    tools::NpcapLivePort live;
+    if (!live.open(options.interface_selector)) {
+        throw std::runtime_error(live.error());
+    }
+
+    auto scenario = make_scenario(options.scenario);
+    const auto frames_requested = options.continuous
+        ? 0U
+        : options.frames.value_or(scenario.default_frames);
+    sampled_values::DeterministicSvInjector injector(
+        scenario.segments, kSampleRateHz, scenario.loop);
+    if (!injector.valid()) {
+        throw std::runtime_error("Deterministic injector configuration is invalid.");
+    }
+
+    std::ofstream pcap_output;
+    std::optional<capture::PcapWriter> pcap_writer;
+    if (!options.pcap_path.empty()) {
+        pcap_output.open(options.pcap_path, std::ios::binary | std::ios::trunc);
+        if (!pcap_output) {
+            throw std::runtime_error("Cannot open PCAP output: " + options.pcap_path);
+        }
+        pcap_writer.emplace(pcap_output);
+    }
+
+    auto frame = make_frame();
+    std::array<std::uint8_t, 1'536U> frame_buffer{};
+    sampled_values::SampledValuesPublisher publisher(
+        frame,
+        frame_buffer,
+        live.raw_port(),
+        sampled_values::SampledValuesPublisherConfig{
+            kSampleRateHz,
+            std::uint16_t{kSampleCountWrap},
+            0U,
+            true});
+    if (!publisher.valid()) {
+        throw std::runtime_error("SampledValuesPublisher configuration is invalid.");
+    }
+
+    if (!options.json) {
+        std::cout
+            << "Starting live SV transmission on:\n  " << live.opened_name() << '\n';
+        if (!live.opened_description().empty()) {
+            std::cout << "  " << live.opened_description() << '\n';
+        }
+        std::cout
+            << "Profile: 50 Hz, 4000 samples/s, APPID 0x4001, dst 01:0C:CD:04:00:01\n";
+        if (options.continuous) {
+            std::cout << "Press Ctrl+C to stop cleanly.\n";
+        }
+    }
+
+    gStopRequested = 0;
+    const auto previous_handler = std::signal(SIGINT, handle_interrupt);
+    const auto started_at = std::chrono::steady_clock::now();
+
+    sampled_values::InjectorSample sample{};
+    std::uint64_t index = 0U;
+    while (gStopRequested == 0 &&
+           (options.continuous || index < frames_requested)) {
+        if (publisher.started()) {
+            wait_until_monotonic_us(publisher.next_due_us());
+            if (gStopRequested != 0) {
+                break;
+            }
+        }
+
+        if (!injector.step(sample)) {
+            std::signal(SIGINT, previous_handler);
+            throw std::runtime_error("Scenario finished before requested frame count.");
+        }
+        if (sample.sample_index != index) {
+            std::signal(SIGINT, previous_handler);
+            throw std::runtime_error("Injector sample-index timeline diverged.");
+        }
+
+        auto& asdu = frame.pdu.asdus.front();
+        if (!write_payload(asdu, sample)) {
+            std::signal(SIGINT, previous_handler);
+            throw std::runtime_error("Could not build INT32+quality SV payload.");
+        }
+
+        sampled_values::SampledValuesPublishResult result{};
+        do {
+            const auto now_us = monotonic_us();
+            result = publisher.poll(now_us);
+            if (result.status == sampled_values::SampledValuesPublishStatus::not_due) {
+                wait_until_monotonic_us(result.next_due_us);
+            }
+        } while (result.status == sampled_values::SampledValuesPublishStatus::not_due &&
+                 gStopRequested == 0);
+
+        if (gStopRequested != 0) {
+            break;
+        }
+        if (!result.sent()) {
+            std::signal(SIGINT, previous_handler);
+            if (result.status == sampled_values::SampledValuesPublishStatus::transmit_failed) {
+                throw std::runtime_error(
+                    "Npcap transmit failed: " +
+                    (live.error().empty() ? std::string{"unknown error"} : live.error()));
+            }
+            throw std::runtime_error("Live publisher failed to encode/transmit a frame.");
+        }
+
+        const auto expected_sample_count = static_cast<std::uint16_t>(
+            sample.sample_index % static_cast<std::uint64_t>(kSampleCountWrap));
+        if (result.sample_count != expected_sample_count) {
+            std::signal(SIGINT, previous_handler);
+            throw std::runtime_error("Live publisher smpCnt diverged from logical sample index.");
+        }
+
+        if (pcap_writer.has_value()) {
+            try {
+                pcap_writer->write_packet(
+                    std::chrono::system_clock::now(),
+                    std::span<const std::uint8_t>{frame_buffer.data(), result.frame_bytes});
+            } catch (...) {
+                std::signal(SIGINT, previous_handler);
+                throw std::runtime_error("Could not write live TX PCAP evidence.");
+            }
+        }
+
+        ++index;
+    }
+
+    const auto stopped_at = std::chrono::steady_clock::now();
+    std::signal(SIGINT, previous_handler);
+
+    if (pcap_output.is_open()) {
+        pcap_output.flush();
+        if (!pcap_output) {
+            throw std::runtime_error("Could not flush live TX PCAP evidence.");
+        }
+    }
+
+    const auto elapsed_seconds =
+        std::chrono::duration<double>(stopped_at - started_at).count();
+    const auto& statistics = publisher.statistics();
+    const auto finite_complete = options.continuous || statistics.frames_sent == frames_requested;
+    const auto passed = finite_complete &&
+        statistics.encode_failures == 0U &&
+        statistics.transmit_failures == 0U;
+
+    if (options.json) {
+        print_live_json(
+            options, live, frames_requested, statistics, elapsed_seconds, passed);
+    } else {
+        print_live_human(
+            options, live, frames_requested, statistics, elapsed_seconds, passed);
+    }
+    return passed ? 0 : 2;
+#endif
+}
+
 } // namespace
 
 int main(const int argc, char** argv) {
@@ -399,107 +868,13 @@ int main(const int argc, char** argv) {
             print_capabilities();
             return 0;
         }
-
-        auto scenario = make_scenario(options.scenario);
-        const auto frames = options.frames.value_or(scenario.default_frames);
-        sampled_values::DeterministicSvInjector injector(
-            scenario.segments, kSampleRateHz, scenario.loop);
-        if (!injector.valid()) {
-            throw std::runtime_error("Deterministic injector configuration is invalid.");
+        if (options.list_interfaces) {
+            print_adapters();
+            return 0;
         }
-
-        std::ofstream pcap_output;
-        std::optional<capture::PcapWriter> pcap_writer;
-        if (!options.pcap_path.empty()) {
-            pcap_output.open(options.pcap_path, std::ios::binary | std::ios::trunc);
-            if (!pcap_output) {
-                throw std::runtime_error("Cannot open PCAP output: " + options.pcap_path);
-            }
-            pcap_writer.emplace(pcap_output);
-        }
-
-        LoopbackContext loopback;
-        loopback.drop_every = options.drop_every;
-        loopback.pcap_writer = pcap_writer.has_value() ? &*pcap_writer : nullptr;
-        embedded::RawEthernetPort port{&loopback, &loopback_transmit};
-
-        auto frame = make_frame();
-        std::array<std::uint8_t, 1'536U> frame_buffer{};
-        sampled_values::SampledValuesPublisher publisher(
-            frame,
-            frame_buffer,
-            port,
-            sampled_values::SampledValuesPublisherConfig{
-                kSampleRateHz,
-                std::uint16_t{kSampleCountWrap},
-                0U,
-                true});
-        if (!publisher.valid()) {
-            throw std::runtime_error("SampledValuesPublisher configuration is invalid.");
-        }
-
-        sampled_values::InjectorSample sample{};
-        for (std::uint64_t index = 0U; index < frames; ++index) {
-            if (!injector.step(sample)) {
-                throw std::runtime_error("Scenario finished before requested frame count.");
-            }
-            if (sample.sample_index != index) {
-                throw std::runtime_error("Injector sample-index timeline diverged.");
-            }
-
-            auto& asdu = frame.pdu.asdus.front();
-            if (!write_payload(asdu, sample)) {
-                throw std::runtime_error("Could not build INT32+quality SV payload.");
-            }
-
-            loopback.expected_sample_count = static_cast<std::uint16_t>(
-                sample.sample_index % static_cast<std::uint64_t>(kSampleCountWrap));
-            std::copy(
-                asdu.sample_payload.begin(),
-                asdu.sample_payload.end(),
-                loopback.expected_payload.begin());
-            loopback.virtual_timestamp_us =
-                kVirtualStartUs + sample.sample_index * kIntervalUs;
-
-            const auto result = publisher.poll(loopback.virtual_timestamp_us);
-            if (!result.sent() ||
-                result.sample_count != loopback.expected_sample_count) {
-                throw std::runtime_error("Publisher did not emit the expected virtual sample.");
-            }
-        }
-
-        if (pcap_output.is_open()) {
-            pcap_output.flush();
-            if (!pcap_output) {
-                ++loopback.evidence.pcap_errors;
-            }
-        }
-
-        const auto expected_rx = frames - loopback.evidence.injected_drops;
-        const auto expected_visible_gaps = options.drop_every == 0U
-            ? 0U
-            : (frames - 1U) / options.drop_every;
-        const auto& statistics = publisher.statistics();
-        const auto passed =
-            loopback.evidence.tx_frames == frames &&
-            loopback.evidence.rx_frames == expected_rx &&
-            loopback.evidence.decode_errors == 0U &&
-            loopback.evidence.identity_errors == 0U &&
-            loopback.evidence.payload_errors == 0U &&
-            loopback.evidence.sample_count_errors == 0U &&
-            loopback.evidence.gap_events == expected_visible_gaps &&
-            loopback.evidence.pcap_errors == 0U &&
-            statistics.frames_sent == frames &&
-            statistics.encode_failures == 0U &&
-            statistics.transmit_failures == 0U &&
-            statistics.late_polls == 0U;
-
-        if (options.json) {
-            print_json(options, frames, loopback.evidence, statistics, passed);
-        } else {
-            print_human(options, frames, loopback.evidence, statistics, passed);
-        }
-        return passed ? 0 : 2;
+        return options.mode == RunMode::live
+            ? run_live(options)
+            : run_loopback(options);
     } catch (const std::exception& error) {
         std::cerr << "ariec61850_sv_injector: " << error.what() << '\n';
         return 1;
