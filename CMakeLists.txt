@@ -124,6 +124,12 @@ if(ARIEC61850_BUILD_TOOLS)
     target_compile_features(ariec61850_control_block_read_probe PRIVATE cxx_std_20)
     ariec61850_apply_warnings(ariec61850_control_block_read_probe)
     ariec61850_apply_sanitizers(ariec61850_control_block_read_probe)
+
+    add_executable(ariec61850_pagination_probe tools/pagination_probe.cpp)
+    target_link_libraries(ariec61850_pagination_probe PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_pagination_probe PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_pagination_probe)
+    ariec61850_apply_sanitizers(ariec61850_pagination_probe)
 endif()
 
 if(ARIEC61850_BUILD_TESTS)
@@ -265,6 +271,9 @@ if(ARIEC61850_BUILD_TESTS)
             COMMAND ariec61850_comtrade_inspect
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/comtrade/simple_fault.cfg
                 --json)
+        add_test(
+            NAME ariec61850_pagination_probe_help
+            COMMAND ariec61850_pagination_probe --help)
     endif()
 endif()
 
