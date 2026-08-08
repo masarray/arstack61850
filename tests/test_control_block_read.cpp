@@ -73,16 +73,18 @@ void inventory_supports_us_sg_and_se_functional_constraints() {
     CHECK(controls[2].kind == MmsControlBlockKind::sampled_value);
 }
 
-void inventory_deduplicates_exact_variables_case_insensitively() {
+void inventory_deduplicates_attribute_paths_case_insensitively() {
     using namespace ar::iec61850::mms;
     MmsDiscoverySnapshot snapshot;
     snapshot.domain_variables["IEDLD0"] = {
         "LLN0$GO$gcb01$DatSet",
-        "lln0$go$GCB01$dataset"};
+        "lln0$go$GCB01$datset"};
 
     const auto controls = MmsControlBlockInventoryBuilder::build(snapshot);
     CHECK(controls.size() == 1U);
     CHECK(controls[0].attributes.size() == 1U);
+    CHECK(controls[0].attributes[0].attribute_path == "DatSet");
+    CHECK(controls[0].attributes[0].variable.item == "LLN0$GO$gcb01$DatSet");
 }
 
 } // namespace
@@ -91,7 +93,7 @@ int main() {
     const std::vector<std::pair<std::string, std::function<void()>>> tests{
         {"group exact live control blocks", inventory_groups_exact_live_name_list_items},
         {"support US SG SE control blocks", inventory_supports_us_sg_and_se_functional_constraints},
-        {"deduplicate control block variables", inventory_deduplicates_exact_variables_case_insensitively}};
+        {"deduplicate control block attributes", inventory_deduplicates_attribute_paths_case_insensitively}};
 
     std::size_t passed{};
     for (const auto& [name, test] : tests) {
