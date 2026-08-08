@@ -96,6 +96,15 @@ struct MmsAssociationEvent final {
     std::string message;
 };
 
+struct MmsAssociationAttemptEvidence final {
+    std::string profile_name;
+    bool accepted{};
+    std::string message;
+
+    friend bool operator==(const MmsAssociationAttemptEvidence&,
+                           const MmsAssociationAttemptEvidence&) = default;
+};
+
 struct MmsAssociationOptions final {
     std::chrono::milliseconds connect_timeout{5'000};
     std::chrono::milliseconds request_timeout{5'000};
@@ -157,6 +166,13 @@ public:
     [[nodiscard]] const std::deque<MmsAssociationEvent>& events() const noexcept {
         return events_;
     }
+    [[nodiscard]] const std::vector<MmsAssociationAttemptEvidence>&
+        association_attempts() const noexcept {
+        return association_attempts_;
+    }
+    [[nodiscard]] const std::string& active_association_profile() const noexcept {
+        return active_association_profile_;
+    }
     [[nodiscard]] std::size_t queued_information_report_count() const noexcept {
         return information_reports_.size();
     }
@@ -200,6 +216,8 @@ private:
     osi::TpktStreamDecoder tpkt_decoder_;
     std::deque<std::vector<std::uint8_t>> information_reports_;
     std::deque<MmsAssociationEvent> events_;
+    std::vector<MmsAssociationAttemptEvidence> association_attempts_;
+    std::string active_association_profile_;
     std::uint32_t next_invoke_id_{};
     std::uint16_t local_cotp_reference_{1U};
     std::uint16_t remote_cotp_reference_{};
