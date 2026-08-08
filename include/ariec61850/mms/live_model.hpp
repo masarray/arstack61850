@@ -238,9 +238,19 @@ struct MmsLiveModelDocument final {
     std::vector<MmsLiveVariableTypeDiscovery> variable_type_discoveries;
     std::vector<MmsLiveModelWarning> warnings;
 
+    // Legacy manifest/fingerprint retained during A1 migration.  Structural
+    // identity and mutable runtime evidence are exposed separately below.
     [[nodiscard]] std::string canonical_manifest() const;
     [[nodiscard]] std::uint64_t canonical_fingerprint() const;
     [[nodiscard]] std::string canonical_fingerprint_hex() const;
+
+    [[nodiscard]] std::string structural_manifest() const;
+    [[nodiscard]] std::uint64_t structural_fingerprint() const;
+    [[nodiscard]] std::string structural_fingerprint_hex() const;
+    [[nodiscard]] std::string runtime_snapshot_manifest() const;
+    [[nodiscard]] std::uint64_t runtime_snapshot_fingerprint() const;
+    [[nodiscard]] std::string runtime_snapshot_fingerprint_hex() const;
+
     [[nodiscard]] std::string to_json() const;
 };
 
