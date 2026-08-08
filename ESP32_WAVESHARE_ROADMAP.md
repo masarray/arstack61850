@@ -1,4 +1,4 @@
-# arstack61850 — Public Alpha + Waveshare ESP32-S3 Roadmap
+# arstack61850 — Embedded / ESP32 Roadmap
 
 ## Product direction
 
@@ -11,9 +11,26 @@ industrial implementation with two supported deployment classes:
 2. **Embedded / runtime** — bounded protocol engine suitable for ESP32-class
    MCUs first and STM32/NXP-class targets later.
 
-The first reference MCU is the **Waveshare ESP32-S3-POE-ETH-8DI-8DO**.
+The **first process-bus transmit reference is now ESP32-P4** using the official
+ESP-IDF Ethernet abstraction and a board-specific EMAC/PHY configuration owned
+by the application. The previously selected **Waveshare ESP32-S3-POE-ETH-8DI-8DO**
+remains a useful secondary I/O reference with W5500 Ethernet, but protocol code
+must not depend on either board.
 
-## Reference hardware facts
+## Reference hardware roles
+
+### ESP32-P4 — first SV timing / raw-Ethernet proof
+
+Use ESP32-P4 for the first active Sampled Values trial because it provides a
+stronger MCU target for deterministic process-bus experimentation while still
+using the same `esp_eth` adapter boundary.
+
+The protocol stack must receive an already-started `esp_eth_handle_t`; board PHY
+selection, RMII pins, clocking and link initialization remain application code.
+The first proof is deliberately **untagged SV**. VLAN/PCP acceptance is a later
+hardware/driver gate rather than a hidden protocol-core assumption.
+
+### Waveshare ESP32-S3-POE-ETH-8DI-8DO — secondary I/O IED reference
 
 Board: Waveshare ESP32-S3-POE-ETH-8DI-8DO, SKU 32108.
 
@@ -25,10 +42,11 @@ Board: Waveshare ESP32-S3-POE-ETH-8DI-8DO, SKU 32108.
 - DI1..DI8: GPIO4..GPIO11.
 - Digital outputs are exposed through TCA9554PWR, I2C address 0x20.
 - Isolated RS485 and CAN are available for future gateway use.
-- W5500 supports MACRAW at chip level. The preferred ESP-IDF W5500 driver
-  operates the device in MAC RAW mode and feeds the ESP software TCP/IP stack.
-  Raw SV/GOOSE and lwIP TCP/MMS therefore share one Ethernet interface instead
-  of arstack independently allocating W5500 hardware sockets.
+
+When this board is used, the official ESP-IDF W5500 driver should own the chip
+MACRAW path. arstack should not independently program W5500 hardware sockets.
+Raw SV/GOOSE and lwIP TCP/MMS must share one Ethernet interface through platform
+adapters.
 
 Raw Layer-2 SV/GOOSE is an Ethernet feature. Wi-Fi is not a substitute for the
 reference process-bus path.
@@ -37,28 +55,30 @@ reference process-bus path.
 
 ### Embedded core
 
-`ARIEC61850::embedded_core` may contain wire codecs and bounded runtime state,
-but must not depend on:
+`ARIEC61850::embedded_core` and platform slices may contain wire codecs and
+bounded runtime state, but must not make the wire protocol depend on:
 
 - WinSock or BSD/POSIX sockets;
 - filesystem, iostream or CLI code;
 - PCAP/evidence tooling;
 - COMTRADE;
 - full SCL parsing;
-- live-discovery host workflows.
+- live-discovery host workflows;
+- ESP-IDF, FreeRTOS, W5500, RMII or a specific PHY type.
 
 Platform ownership is injected through small callback HAL contracts. ESP-IDF,
-lwIP, FreeRTOS and W5500 details stay outside the protocol engine.
+lwIP, FreeRTOS and board details stay outside the protocol engine.
 
 ### Memory discipline
 
-Steady-state publisher/subscriber/runtime paths should move toward:
+Steady-state publisher/subscriber/runtime paths move toward:
 
 - caller-owned buffers;
 - bounded capacities;
 - no per-frame allocation;
 - no RTTI;
-- eventually no C++ exceptions in the MCU core.
+- no exception control flow in real-time paths;
+- eventually a fully `-fno-exceptions` MCU build.
 
 Existing `std::vector`/`std::string` data models may remain as configuration-time
 containers during migration. They must not force allocation on the 4 kHz SV
@@ -66,7 +86,7 @@ steady-state encode/transmit path.
 
 ### Compatibility
 
-Existing host APIs remain source-compatible where practical. Allocation-free
+Existing host APIs remain source-compatible where practical. Allocation-bounded
 APIs are added underneath host convenience wrappers, so Windows/Linux users do
 not lose ergonomics while the same codec becomes MCU-capable.
 
@@ -76,19 +96,22 @@ not lose ergonomics while the same codec becomes MCU-capable.
 
 ## Track A — Public Alpha
 
-### A0. Live read-only MMS foundation — CURRENT
+### A0. Live read-only MMS foundation — ACCEPTED ON CURRENT PRIMARY IED
 
-Acceptance:
+Acceptance achieved on the current OCR7SR12 laboratory target includes:
 
-- TPKT/COTP/Session/Presentation/ACSE association works against live vendor IED.
-- GetNameList domains, variables and DataSets works.
-- GetVariableAccessAttributes works.
-- Read works.
-- DataSet and RCB inventories are preserved.
-- Dynamic/unbound RCB state is represented without false failure.
-- RCB planner/availability evidence is read-only.
-- GCC, Clang and MSVC CI pass.
-- ASan/UBSan and fuzz corpus pass.
+- TPKT/COTP/Session/Presentation/ACSE association;
+- GetNameList domains, variables and DataSets;
+- GetVariableAccessAttributes;
+- Read;
+- DataSet and RCB inventories;
+- dynamic/unbound RCB state without false failure;
+- read-only RCB planner/availability evidence;
+- bounded multi-page `GetNameList` continuation, including a physical 48-page
+  / 4,758-name sequence;
+- GCC, Clang and MSVC regression coverage.
+
+Multi-vendor evidence remains separate from this one-target acceptance.
 
 ### A1. Public discovery/model alpha
 
@@ -106,16 +129,7 @@ Deliverables:
 - README quick-start for Windows/Linux;
 - explicit feature matrix: implemented / partial / host-only / embedded-ready.
 
-Acceptance:
-
-- clean configure/build/test from a fresh clone;
-- at least three repeat live cycles on the current test IED/simulator;
-- no diagnostic regression;
-- reproducible JSON parity report checked into evidence.
-
 ### A2. Public alpha release
-
-Goal: tag a release that is genuinely useful even before full ARIEC61850 parity.
 
 Required public surface:
 
@@ -139,9 +153,9 @@ Not release-blocking:
 
 ## Track E — ESP32 reference product
 
-### E0. Embedded architecture baseline — IN PROGRESS
+### E0. Embedded architecture baseline — IMPLEMENTED
 
-Deliverables:
+Delivered:
 
 - standalone `embedded/CMakeLists.txt`;
 - `ARIEC61850::embedded_core`;
@@ -149,19 +163,16 @@ Deliverables:
 - source-boundary audit;
 - callback HAL for raw Ethernet, connected TCP and clocks;
 - configurable ESP32 small-capacity profile;
-- Waveshare board facts/profile.
+- ESP-IDF raw-Ethernet/clock adapter boundary.
 
-Exit gate:
+Remaining hardening:
 
-- GCC and Clang embedded host-simulation builds link every embedded source;
-- host-only dependency audit is clean;
-- legacy exception debt is measured and cannot silently expand.
+- remove the shared codec's compile-time C++ exception dependency from the
+  MCU-specific build rather than merely avoiding exceptions in the hot path.
 
-### E1. Allocation-bounded SV encoder — IN PROGRESS
+### E1. Allocation-bounded SV encoder — IMPLEMENTED
 
-Goal: the 4 kHz publisher loop does not allocate a new frame buffer per sample.
-
-API direction:
+The first steady-state API direction is now implemented:
 
 ```cpp
 std::optional<std::size_t> SampledValuesFrameCodec::encoded_size(...) noexcept;
@@ -170,78 +181,92 @@ wire::EncodeResult SampledValuesFrameCodec::encode_into(
     std::span<std::uint8_t> destination) noexcept;
 ```
 
-Host `encode()` remains as a convenience wrapper.
+The caller can reuse the same Ethernet buffer continuously. Host `encode()`
+remains a convenience wrapper.
 
-Acceptance:
+### E2. Portable SV publisher runtime — IMPLEMENTED / PHYSICAL EVIDENCE PENDING
 
-- bounded encoder is byte-identical to existing C#/C++ golden vectors;
-- buffer-too-small returns required size and does not partially report success;
-- same caller-owned Ethernet buffer can be reused continuously;
-- timestamp serialization has a no-allocation path;
-- sanitizer/fuzzer/host regression remains green.
+`SampledValuesPublisher` now owns only protocol runtime state. It does not create
+threads or sleep. The application provides the monotonic timestamp and decides
+whether a FreeRTOS task or high-resolution timer drives the stream.
 
-### E2. ESP-IDF W5500 Ethernet adapter
+Implemented behavior:
 
-Goal: map `embedded::RawEthernetPort` to the official ESP-IDF W5500 Ethernet
-MACRAW path without leaking ESP-IDF/W5500 APIs into protocol code.
+- 4,000 samples/s first profile;
+- caller-owned Ethernet frame buffer;
+- sample counter advances after successful full-frame transmit only;
+- configured sample-counter wrap;
+- at most one transmit attempt per `poll()`;
+- late scheduler wake-up does not generate catch-up bursts;
+- TX/encode/lateness statistics;
+- allocation-free payload writer for common INT32 + quality pairs.
 
-Preferred architecture:
+Host smoke acceptance covers due/not-due behavior, 3999→0 wrap, late wake-up,
+TX timeout and encode buffer failure.
 
-```text
-arstack raw SV/GOOSE ----> esp_eth raw Ethernet transmit ----+
-                                                            |
-MMS TCP <---- lwIP / BSD socket API <---- esp_netif --------+--> ESP-IDF W5500 MACRAW
-```
-
-The ESP-IDF W5500 driver owns the chip-level MACRAW operation. arstack should
-not independently program W5500 hardware sockets when using that driver.
-
-Responsibilities:
-
-- initialize the official ESP-IDF W5500 SPI Ethernet driver with board pins;
-- attach the driver to `esp_netif`/lwIP for TCP/MMS;
-- expose raw-frame transmit callback for GOOSE/SV;
-- preserve destination/source MAC, VLAN tag and EtherType exactly;
-- expose PHY/link state;
-- instrument TX errors, would-block and frame counts.
-
-Acceptance on host/mock first:
-
-- adapter-facing policy can be unit-tested with fake transmit backend;
-- protocol core does not include ESP-IDF/W5500 headers.
-
-Acceptance on board:
-
-- Ethernet obtains link and normal IP traffic works through lwIP;
-- raw custom EtherType frame visible in Wireshark;
-- VLAN-tagged frame visible without mutation;
-- SV EtherType 0x88BA frame visible while normal TCP/IP remains usable.
-
-### E3. ESP32-S3 SV Publisher hardware proof
-
-Start with synthetic waveform; do not block on ADC hardware.
+### E3. ESP32-P4 SV Publisher hardware proof — CURRENT
 
 Reference first profile:
 
 - 50 Hz system;
 - 80 samples/cycle = 4,000 sample instants/s;
-- one ASDU initially;
-- fixed APPID and multicast destination;
-- sample counter wraps according to configured rate;
-- configuration revision fixed during a run;
-- timestamp optional for the first throughput proof, then enabled.
+- one ASDU/frame initially;
+- EtherType `0x88BA`;
+- APPID `0x4001`;
+- multicast destination `01:0C:CD:04:00:01`;
+- source MAC from the physical interface;
+- `confRev=1` for the run;
+- `smpSynch=0` until synchronized time is independently proven;
+- no `refrTm` for the first throughput proof;
+- untagged Ethernet first.
+
+Cross-compile gate:
+
+- real ESP32-P4 target;
+- ESP-IDF v6.0.2;
+- firmware component contains the first SV TX dependency slice only;
+- current transition enables `CONFIG_COMPILER_CXX_EXCEPTIONS=y` because shared
+  desktop validation/convenience APIs still contain `throw/catch`; publisher hot
+  path must not use exception control flow.
+
+Physical acceptance:
+
+- raw SV frame visible with `eth.type == 0x88ba`;
+- exact destination/source MAC and APPID;
+- Wireshark decodes one ASDU correctly;
+- sustained 4,000 frames/s target or an explicitly documented alternative;
+- no publisher-generated sample-counter discontinuity;
+- no catch-up burst after scheduler lateness;
+- no steady-state frame-buffer allocation;
+- short capture, 10-minute soak, then 1-hour soak;
+- CPU usage, heap delta/minimum free heap, TX errors and lateness statistics
+  recorded.
+
+See `docs/ESP32_P4_SV_FIRST_TRIAL.md` for the execution checklist.
+
+### E4. Exception-free MCU SV TX slice — NEXT HARDENING GATE
+
+Goal: build the first SV publisher firmware with C++ exceptions disabled again,
+without changing desktop convenience APIs.
+
+Preferred direction:
+
+- separate status-returning/no-throw transmit codec implementation units from
+  throw-based desktop wrappers where necessary;
+- add non-throwing MAC/config construction paths suitable for static firmware
+  configuration;
+- keep decode/diagnostic convenience APIs host-side when they are not required
+  by the first publisher image;
+- CI with ESP32-P4 and `CONFIG_COMPILER_CXX_EXCEPTIONS=n`.
 
 Acceptance:
 
-- sustained 4,000 frames/s target or explicitly documented multi-ASDU packing
-  alternative;
-- no steady-state frame-buffer allocation;
-- no sample-counter discontinuity generated by publisher logic;
-- packet capture decodes as IEC 61850 SV;
-- 10-minute soak first, then 1-hour soak;
-- CPU usage, heap delta, minimum free heap and TX errors recorded.
+- ESP-IDF P4 cross-compile green with exceptions disabled;
+- no `throw`/`catch` reachable or required by the MCU SV TX component;
+- publisher golden bytes remain unchanged;
+- host GCC/Clang/MSVC API/regression suite remains green.
 
-### E4. Board I/O HAL
+### E5. Board I/O HAL — Waveshare ESP32-S3 secondary reference
 
 Goal: make the Waveshare hardware useful as a real substation I/O prototype.
 
@@ -258,21 +283,13 @@ Outputs:
 - safe startup state: outputs off unless application explicitly restores state;
 - command watchdog/failsafe hooks.
 
-Acceptance:
+### E6. Minimal MMS server foundation
 
-- deterministic read of all eight DIs;
-- deterministic set/reset of all eight DOs;
-- power-cycle safe-state test;
-- no IEC 61850 code knows GPIO/I2C details.
+This is required for an embedded board to become an actual IEC 61850 I/O IED.
+Implement a static, bounded server model first. Do not port desktop dynamic model
+discovery into the MCU server.
 
-### E5. Minimal MMS server foundation
-
-This is required for the board to become an actual IEC 61850 I/O IED.
-
-Implement a static, bounded server model first. Do not port desktop dynamic
-model discovery into the MCU server.
-
-Minimum server services:
+Minimum services:
 
 1. association acceptor;
 2. MMS Initiate negotiation;
@@ -283,7 +300,7 @@ Minimum server services:
 Initial static model proposal:
 
 ```text
-ESP32S3IO
+ARSTACKIO
 └── LD0
     ├── LLN0
     ├── LPHD1
@@ -293,57 +310,34 @@ ESP32S3IO
 
 Acceptance:
 
-- IEDScout can associate;
-- IEDScout can browse the static model;
-- eight DI values can be read;
+- an independent IEC 61850 engineering client can associate;
+- the client can browse the static model;
+- configured I/O values can be read;
 - server remains bounded under malformed/fuzzed MMS requests.
 
-### E6. Simple IEC 61850 I/O IED
+### E7. Simple IEC 61850 I/O IED
 
-Add controlled output operation only after read-only server browse/read is
-stable.
+Add controlled output operation only after read-only server browse/read is stable.
+Then add a static DataSet, URCB first, data-change reports and BRCB later.
 
-Sequence:
+### E8. GOOSE I/O extension
 
-- simple Write where standards/model permit;
-- IEC 61850 control model required for the exposed DOs;
-- interlock/check hooks;
-- operation timeout;
-- command audit/result status.
-
-Reporting sequence:
-
-- static DataSet;
-- URCB first;
-- data-change report for DI state;
-- BRCB later, not a first-I/O-IED requirement.
-
-Acceptance:
-
-- IEDScout browse/read/control proof;
-- input change generates expected report;
-- output command changes physical DO and reflected model state;
-- negative tests for invalid control/FC/reference.
-
-### E7. GOOSE I/O extension
-
-After raw MAC transport is proven by SV, GOOSE is a natural extension.
-
-Targets:
+After raw MAC transport is proven by SV:
 
 - DI state as GOOSE publisher;
 - GOOSE subscriber mapped to selected DO only through application safety policy;
 - retransmission schedule and TAL supervision;
-- VLAN priority validation.
+- VLAN priority validation on a hardware/driver path that supports it correctly.
 
-### E8. Industrialization / STM32 migration
+### E9. Industrialization / STM32-NXP migration
 
-ESP32 is the reference accessibility target, not the final certification claim.
-The same embedded core should later move to STM32H7/NXP-class hardware.
+ESP32 is the accessibility/reference target, not a certification claim. The same
+embedded core should later move to STM32H7/NXP-class hardware by replacing
+platform adapters and capacities, not protocol semantics.
 
 Industrialization work:
 
-- `-fno-exceptions` embedded core;
+- fully exception-free MCU core;
 - replace remaining hot-path dynamic containers with bounded storage/views;
 - explicit memory budget report;
 - deterministic scheduler/timing hooks;
@@ -356,30 +350,30 @@ Industrialization work:
 
 # Priority rule
 
-Until Public Alpha is tagged:
+Until Public Alpha is tagged, host parity and embedded architecture progress in
+parallel. Embedded changes that prevent architectural debt — allocation-bounded
+wire encoding, HAL boundaries, real cross-compile gates and real-time pacing
+rules — are performed before adding new protocol surface.
 
-- approximately **70% effort** goes to public-useful host protocol parity,
-  documentation and real-IED evidence;
-- approximately **30% effort** goes to embedded architecture and the SV hardware
-  path.
+The immediate embedded order is:
 
-Exception: embedded changes that prevent architectural debt (allocation-free
-wire encoding, HAL boundaries, compile gates) are performed immediately before
-new protocol features are ported.
-
-After Public Alpha:
-
-- finish E2/E3 hardware SV proof;
-- then shift primary development toward E5/E6 MMS server + I/O IED.
+1. ESP32-P4 SV cross-compile;
+2. physical untagged SV capture and timing evidence;
+3. exception-free P4 SV TX hardening;
+4. VLAN/priority path validation;
+5. GOOSE raw Ethernet;
+6. bounded MMS server / I/O IED.
 
 # Definition of success
 
 The project succeeds when the same protocol implementation can demonstrate all
-of these without forks of the wire core:
+of these without forks of IEC 61850 wire semantics:
 
-1. Windows/Linux engineering client can browse a real IED.
-2. ESP32-S3 can publish standards-shaped SV frames over the ESP-IDF W5500
-   MACRAW Ethernet interface.
-3. ESP32-S3 can expose eight isolated inputs/outputs as a small IEC 61850 IED.
-4. A later STM32/NXP port changes platform adapters and capacities, not protocol
+1. Windows/Linux engineering client can browse real IEDs.
+2. ESP32-P4 can publish standards-shaped SV frames through the ESP-IDF Ethernet
+   abstraction with measured timing/heap evidence.
+3. The MCU SV TX path can build with exceptions disabled.
+4. A small ESP32 I/O reference can expose isolated inputs/outputs through a
+   bounded IEC 61850 server model.
+5. A later STM32/NXP port changes platform adapters and capacities, not protocol
    semantics.
