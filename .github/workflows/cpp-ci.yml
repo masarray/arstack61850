@@ -35,6 +35,8 @@ jobs:
         run: cmake --build build --parallel
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Cross-language model parity tool self-test
+        run: python3 tools/compare_live_model_json.py --self-test
 
   windows:
     name: Windows / MSVC
