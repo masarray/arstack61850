@@ -107,7 +107,9 @@ int main() {
             std::span<const std::uint8_t>{fake.last_frame}.first(fake.last_size),
             decoded) ||
         decoded.pdu.asdus.size() != 1U ||
-        decoded.pdu.asdus.front().sample_count != 3'999U) {
+        decoded.pdu.asdus.front().sample_count != 3'999U ||
+        decoded.app_id != 0x4001U ||
+        decoded.vlan.has_value()) {
         return 3;
     }
 
@@ -163,6 +165,62 @@ int main() {
     if (statistics.frames_sent != 3U || statistics.transmit_failures != 1U ||
         statistics.late_polls != 1U || statistics.maximum_lateness_us != 500U) {
         return 10;
+    }
+
+    // Simulate two full seconds at the first-trial 4 kHz profile. This is not a
+    // wall-clock performance benchmark; it is deterministic protocol/pacing QA.
+    // Every nominal 250 us tick must produce exactly one frame, smpCnt must wrap
+    // at 4000, the resulting wire frame must decode, and the stream must report
+    // no scheduler lateness when the simulated clock is exact.
+    FakeEthernet stream_fake;
+    embedded::RawEthernetPort stream_port{&stream_fake, &capture_frame};
+    auto stream_frame = make_frame();
+    std::array<std::uint8_t, 1'536U> stream_buffer{};
+    sampled_values::SampledValuesPublisher stream_publisher(
+        stream_frame,
+        stream_buffer,
+        stream_port,
+        sampled_values::SampledValuesPublisherConfig{
+            4'000U,
+            std::uint16_t{4'000U},
+            0U,
+            true});
+
+    constexpr std::uint64_t stream_start_us = 1'000'000U;
+    constexpr std::uint64_t simulated_frames = 8'000U;
+    for (std::uint64_t index = 0U; index < simulated_frames; ++index) {
+        const auto now_us = stream_start_us + index * 250U;
+        const auto expected_count = static_cast<std::uint16_t>(index % 4'000U);
+        const auto result = stream_publisher.poll(now_us);
+        if (!result.sent() || result.sample_count != expected_count ||
+            stream_fake.sends != index + 1U) {
+            return 11;
+        }
+
+        sampled_values::SampledValuesFrame stream_decoded;
+        if (!sampled_values::SampledValuesFrameCodec::try_decode(
+                std::span<const std::uint8_t>{stream_fake.last_frame}.first(stream_fake.last_size),
+                stream_decoded) ||
+            stream_decoded.destination != stream_frame.destination ||
+            stream_decoded.source != stream_frame.source ||
+            stream_decoded.app_id != 0x4001U ||
+            stream_decoded.vlan.has_value() ||
+            stream_decoded.pdu.asdus.size() != 1U ||
+            stream_decoded.pdu.asdus.front().sample_count != expected_count ||
+            stream_decoded.pdu.asdus.front().sample_payload !=
+                stream_frame.pdu.asdus.front().sample_payload) {
+            return 12;
+        }
+    }
+
+    const auto& stream_statistics = stream_publisher.statistics();
+    if (stream_statistics.frames_sent != simulated_frames ||
+        stream_statistics.encode_failures != 0U ||
+        stream_statistics.transmit_failures != 0U ||
+        stream_statistics.late_polls != 0U ||
+        stream_statistics.maximum_lateness_us != 0U ||
+        stream_publisher.next_sample_count() != 0U) {
+        return 13;
     }
 
     return 0;
