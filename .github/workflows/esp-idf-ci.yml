@@ -36,7 +36,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          build=ports/esp_idf/sv_trial_app/build
+          app=ports/esp_idf/sv_trial_app
+          build="$app/build"
           test -f "$build/arstack61850_esp32p4_sv_trial.bin"
           test -f "$build/arstack61850_esp32p4_sv_trial.elf"
           test -f "$build/arstack61850_esp32p4_sv_trial.map"
@@ -44,12 +45,26 @@ jobs:
           test -f "$build/partition_table/partition-table.bin"
           test -f "$build/flash_args"
           test -f "$build/flasher_args.json"
-          echo "Flashable ESP32-P4 firmware set is complete."
+          test -f "$app/sdkconfig"
+          grep -q '^CONFIG_IDF_TARGET_ESP32P4=y$' "$app/sdkconfig"
+          python3 -m json.tool "$build/flasher_args.json" >/dev/null
+          (
+            cd "$app"
+            sha256sum \
+              build/arstack61850_esp32p4_sv_trial.bin \
+              build/arstack61850_esp32p4_sv_trial.elf \
+              build/bootloader/bootloader.bin \
+              build/partition_table/partition-table.bin \
+              build/flash_args \
+              build/flasher_args.json \
+              sdkconfig > build/SHA256SUMS
+          )
+          echo "FLASHABLE/READY: complete ESP32-P4 firmware set verified."
 
       - name: Upload ESP32-P4 flashable firmware
         uses: actions/upload-artifact@v4
         with:
-          name: esp32p4-sv-trial-firmware-${{ github.sha }}
+          name: esp32p4-sv-trial-firmware-${{ github.event.pull_request.head.sha || github.sha }}
           if-no-files-found: error
           retention-days: 14
           path: |
@@ -60,5 +75,7 @@ jobs:
             ports/esp_idf/sv_trial_app/build/partition_table/partition-table.bin
             ports/esp_idf/sv_trial_app/build/flash_args
             ports/esp_idf/sv_trial_app/build/flasher_args.json
-            ports/esp_idf/sv_trial_app/build/sdkconfig
+            ports/esp_idf/sv_trial_app/build/SHA256SUMS
+            ports/esp_idf/sv_trial_app/sdkconfig
+            ports/esp_idf/sv_trial_app/sdkconfig.defaults
             ports/esp_idf/sv_trial_app/README.md

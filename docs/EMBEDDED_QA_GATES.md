@@ -13,11 +13,15 @@ Required evidence:
 - full embedded link smoke passes;
 - SV publisher edge-case smoke passes;
 - deterministic 8,000-frame simulation passes at a virtual 4,000 samples/s;
-- every simulated frame can be decoded again with expected MAC identity, APPID, untagged profile, payload, and `smpCnt` sequence/wrap;
+- C++ publisher/encoder emits a two-second classic-PCAP capture;
+- an independent pure-Python reference implementation rebuilds the expected Ethernet + process-bus + BER SV stream and requires the entire PCAP to match byte-for-byte;
+- the independent parser also validates destination/source MAC, EtherType `0x88BA`, APPID `0x4001`, declared length, reserved fields, `noASDU`, `svID`, DataSet reference, `confRev`, `smpCnt`, `smpSynch`, `smpRate`, `smpMod`, 64-byte synthetic payload, and exact 250 us capture cadence;
 - zero simulated lateness is reported when the supplied monotonic clock is exact;
-- JUnit output is retained as a GitHub Actions artifact.
+- JUnit, PCAP, and machine-readable JSON QA evidence are retained as GitHub Actions artifacts for both GCC and Clang.
 
-This gate proves deterministic software behavior. It does not measure wall-clock performance.
+The external verifier intentionally does not import or call the arstack61850 decoder. This prevents a matching encoder/decoder defect from satisfying Gate A merely because both implementations accept the same incorrect wire image.
+
+This gate proves deterministic software behavior and exact first-trial wire construction under a virtual clock. It does not measure wall-clock performance.
 
 ## Gate B — real ESP32-P4 cross-compile
 
@@ -28,13 +32,14 @@ Required evidence:
 - the narrow arstack61850 ESP-IDF component compiles and links;
 - the compile-only integration smoke app builds;
 - the flashable first-trial SV firmware builds and links;
+- generated `sdkconfig` identifies `CONFIG_IDF_TARGET_ESP32P4=y`;
 - no host-only TCP/filesystem/capture services leak into the embedded component boundary.
 
 This gate proves that the code is accepted by the real ESP32-P4 RISC-V compiler/linker and ESP-IDF component system.
 
 ## Gate C — flashable artifact completeness
 
-The ESP-IDF workflow must fail if any required deployment output is missing.
+The ESP-IDF workflow must fail if any required deployment output is missing or malformed.
 
 The retained `esp32p4-sv-trial-firmware-*` artifact contains:
 
@@ -44,11 +49,13 @@ The retained `esp32p4-sv-trial-firmware-*` artifact contains:
 - bootloader image;
 - partition-table image;
 - `flash_args`;
-- `flasher_args.json`;
-- generated `sdkconfig`;
+- valid `flasher_args.json`;
+- generated project-level `sdkconfig`;
+- `sdkconfig.defaults`;
+- `SHA256SUMS` covering the deployment-critical images/configuration;
 - firmware-specific flashing/behavior README.
 
-Passing Gate C means a developer can download a CI-produced firmware set instead of rebuilding it locally.
+Passing Gate C means a developer can download a CI-produced firmware set instead of rebuilding it locally, and can verify the retained files before flashing.
 
 ## Gate D — physical ESP32-P4 Ethernet acceptance
 
@@ -71,7 +78,7 @@ Only Gate D can validate real PHY wiring, EMAC/DMA behavior, scheduler jitter on
 
 Use these terms in issues, PRs, release notes, and test evidence:
 
-- `SIMULATED/PASSED` — Gate A passed.
+- `SIMULATED/PASSED` — Gate A passed, including the independent exact-byte PCAP oracle.
 - `ESP32P4/CROSS-COMPILED` — Gate B passed.
 - `FLASHABLE/READY` — Gate C passed.
 - `HARDWARE/PASSED` — Gate D passed on a recorded physical run.

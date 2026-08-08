@@ -104,9 +104,26 @@ target_compile_definitions(ariec61850_embedded_sv_publisher_smoke PRIVATE
     ARIEC61850_HOST_SERVICES=0)
 ariec61850_apply_embedded_flags(ariec61850_embedded_sv_publisher_smoke)
 
+# Produce a deterministic two-second classic-PCAP capture using only the
+# publisher/encoder path. A separate Python implementation verifies the complete
+# wire image byte-for-byte in CI, so encoder bugs cannot be hidden by the C++
+# decoder accepting the same mistake.
+add_executable(ariec61850_embedded_sv_stream_pcap
+    ${CMAKE_CURRENT_LIST_DIR}/sv_stream_pcap.cpp)
+target_link_libraries(ariec61850_embedded_sv_stream_pcap PRIVATE ARIEC61850::embedded_core)
+target_compile_features(ariec61850_embedded_sv_stream_pcap PRIVATE cxx_std_20)
+target_include_directories(ariec61850_embedded_sv_stream_pcap PRIVATE ${ARIEC61850_ROOT}/include)
+target_compile_definitions(ariec61850_embedded_sv_stream_pcap PRIVATE
+    ARIEC61850_EMBEDDED_PROFILE=1
+    ARIEC61850_HOST_SERVICES=0)
+ariec61850_apply_embedded_flags(ariec61850_embedded_sv_stream_pcap)
+
 enable_testing()
 add_test(NAME ariec61850_embedded_link_smoke COMMAND ariec61850_embedded_link_smoke)
 add_test(NAME ariec61850_embedded_sv_publisher_smoke COMMAND ariec61850_embedded_sv_publisher_smoke)
+add_test(
+    NAME ariec61850_embedded_sv_stream_pcap
+    COMMAND ariec61850_embedded_sv_stream_pcap "${CMAKE_BINARY_DIR}/sv_trial_2s.pcap")
 
 message(STATUS "arstack61850 embedded profile: host services excluded")
 message(STATUS "arstack61850 embedded profile: RTTI disabled=${ARIEC61850_EMBEDDED_NO_RTTI}")
