@@ -129,6 +129,19 @@ target_compile_definitions(ariec61850_embedded_sv_injector_controller_smoke PRIV
     ARIEC61850_HOST_SERVICES=0)
 ariec61850_apply_embedded_flags(ariec61850_embedded_sv_injector_controller_smoke)
 
+# Realtime source-program smoke: hot manual edits, sample-indexed ramps, and
+# finite state sequences must preserve the logical sample timeline and remain
+# inside the allocation-bounded MCU profile.
+add_executable(ariec61850_embedded_sv_runtime_program_smoke
+    ${CMAKE_CURRENT_LIST_DIR}/sv_runtime_program_smoke.cpp)
+target_link_libraries(ariec61850_embedded_sv_runtime_program_smoke PRIVATE ARIEC61850::embedded_core)
+target_compile_features(ariec61850_embedded_sv_runtime_program_smoke PRIVATE cxx_std_20)
+target_include_directories(ariec61850_embedded_sv_runtime_program_smoke PRIVATE ${ARIEC61850_ROOT}/include)
+target_compile_definitions(ariec61850_embedded_sv_runtime_program_smoke PRIVATE
+    ARIEC61850_EMBEDDED_PROFILE=1
+    ARIEC61850_HOST_SERVICES=0)
+ariec61850_apply_embedded_flags(ariec61850_embedded_sv_runtime_program_smoke)
+
 # Produce a deterministic two-second classic-PCAP capture using only the
 # publisher/encoder path. A separate Python implementation verifies the complete
 # wire image byte-for-byte in CI, so encoder bugs cannot be hidden by the C++
@@ -148,6 +161,7 @@ add_test(NAME ariec61850_embedded_link_smoke COMMAND ariec61850_embedded_link_sm
 add_test(NAME ariec61850_embedded_sv_publisher_smoke COMMAND ariec61850_embedded_sv_publisher_smoke)
 add_test(NAME ariec61850_embedded_sv_injector_smoke COMMAND ariec61850_embedded_sv_injector_smoke)
 add_test(NAME ariec61850_embedded_sv_injector_controller_smoke COMMAND ariec61850_embedded_sv_injector_controller_smoke)
+add_test(NAME ariec61850_embedded_sv_runtime_program_smoke COMMAND ariec61850_embedded_sv_runtime_program_smoke)
 add_test(
     NAME ariec61850_embedded_sv_stream_pcap
     COMMAND ariec61850_embedded_sv_stream_pcap "${CMAKE_BINARY_DIR}/sv_trial_2s.pcap")
