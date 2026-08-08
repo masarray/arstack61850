@@ -46,6 +46,45 @@ void check_throws(Callable&& callable) {
     throw std::runtime_error("Expected exception was not thrown.");
 }
 
+ByteVector from_hex(const std::string& text) {
+    ByteVector result;
+    int high = -1;
+    for (const auto ch : text) {
+        int value = -1;
+        if (ch >= '0' && ch <= '9') {
+            value = ch - '0';
+        } else if (ch >= 'A' && ch <= 'F') {
+            value = 10 + ch - 'A';
+        } else if (ch >= 'a' && ch <= 'f') {
+            value = 10 + ch - 'a';
+        } else {
+            continue;
+        }
+        if (high < 0) {
+            high = value;
+        } else {
+            result.push_back(static_cast<std::uint8_t>((high << 4) | value));
+            high = -1;
+        }
+    }
+    if (high >= 0) {
+        throw std::invalid_argument("Odd-length hexadecimal test vector.");
+    }
+    return result;
+}
+
+[[nodiscard]] ByteVector csharp_legacy_minimal_request() {
+    return from_hex(
+        "0D B2 05 06 13 01 00 16 01 02 14 02 00 02 33 02 00 01 34 02 00 01 C1 9C "
+        "31 81 99 A0 03 80 01 01 A2 81 91 81 04 00 00 00 01 82 04 00 00 00 01 "
+        "A4 23 30 0F 02 01 01 06 04 52 01 00 01 30 04 06 02 51 01 30 10 02 01 03 "
+        "06 05 28 CA 22 02 01 30 04 06 02 51 01 61 5E 30 5C 02 01 01 A0 57 60 55 "
+        "A1 07 06 05 28 CA 22 02 03 A2 02 06 00 A3 03 02 01 0C "
+        "A6 07 06 05 29 87 67 01 01 A7 03 02 01 0C BE 33 28 31 06 02 51 01 02 01 03 "
+        "A0 28 A8 26 80 03 00 FD E8 81 01 0A 82 01 0A 83 01 06 A4 16 80 01 01 "
+        "81 03 05 F1 00 82 0C 03 EE 08 00 00 04 00 00 00 01 E7 18");
+}
+
 class ScriptedTransport final : public mms::MmsByteTransport {
 public:
     void connect(
@@ -120,15 +159,37 @@ private:
     return osi::TpktFrameCodec::encode(cotp);
 }
 
-void queue_handshake(ScriptedTransport& transport) {
+[[nodiscard]] ByteVector unwrap_sent_application(const ByteVector& tpkt_bytes) {
+    const auto tpkt = osi::TpktFrameCodec::decode(tpkt_bytes);
+    const auto cotp = osi::CotpFrameCodec::decode(tpkt.payload);
+    CHECK(cotp.kind == osi::CotpTpduKind::data);
+    CHECK(cotp.end_of_transmission);
+    return cotp.user_data;
+}
+
+void queue_association_attempt(
+    ScriptedTransport& transport,
+    const std::span<const std::uint8_t> request_bytes,
+    const bool accepted) {
     const auto confirm = osi::CotpFrameCodec::encode_connection_confirm(
         0x0001U, 0x2345U, 0x0AU);
     transport.push_receive(osi::TpktFrameCodec::encode(confirm));
 
-    const auto request_bytes = acse::AcseAssociationCodec::build_default_association_request();
-    const auto request = acse::AcseAssociationCodec::decode_association_request(request_bytes);
-    const auto response = acse::AcseAssociationCodec::build_accept_response(request);
+    const auto request = acse::AcseAssociationCodec::decode_association_request(
+        request_bytes);
+    auto aare = acse::AcseAssociationCodec::default_accept_aare();
+    if (!accepted) {
+        aare.result = 1U;
+        aare.result_source_diagnostic = 1U;
+    }
+    const auto response = acse::AcseAssociationCodec::build_accept_response(
+        request, aare);
     transport.push_receive(wrap_application(response.payload));
+}
+
+void queue_handshake(ScriptedTransport& transport) {
+    const auto request_bytes = acse::AcseAssociationCodec::build_default_association_request();
+    queue_association_attempt(transport, request_bytes, true);
 }
 
 [[nodiscard]] mms::MmsInformationReport make_report() {
@@ -164,6 +225,9 @@ void association_lifecycle_routes_reports_and_confirmed_results() {
     CHECK(runtime.associated());
     CHECK(runtime.negotiated().maximum_mms_pdu_size == 65'000U);
     CHECK(transport.connect_count() == 1U);
+    CHECK(runtime.active_association_profile() == "BalancedApTitle");
+    CHECK(runtime.association_attempts().size() == 1U);
+    CHECK(runtime.association_attempts().front().accepted);
 
     const auto report = mms::MmsInformationReportCodec::encode_p_data(make_report());
     transport.push_receive(wrap_application(report));
@@ -196,6 +260,30 @@ void association_lifecycle_routes_reports_and_confirmed_results() {
     CHECK(transport.close_count() >= 1U);
 }
 
+void association_retries_legacy_profile_after_balanced_rejection() {
+    ScriptedTransport transport;
+    const auto balanced = acse::AcseAssociationCodec::build_default_association_request();
+    const auto legacy = csharp_legacy_minimal_request();
+
+    queue_association_attempt(transport, balanced, false);
+    queue_association_attempt(transport, legacy, true);
+
+    mms::MmsAssociationRuntime runtime{transport};
+    runtime.connect({"127.0.0.1", 102U});
+
+    CHECK(runtime.associated());
+    CHECK(runtime.active_association_profile() == "LegacyMinimal");
+    CHECK(runtime.association_attempts().size() == 2U);
+    CHECK(runtime.association_attempts()[0].profile_name == "BalancedApTitle");
+    CHECK(!runtime.association_attempts()[0].accepted);
+    CHECK(runtime.association_attempts()[1].profile_name == "LegacyMinimal");
+    CHECK(runtime.association_attempts()[1].accepted);
+    CHECK(transport.connect_count() == 2U);
+    CHECK(transport.sent().size() == 4U);
+    CHECK(unwrap_sent_application(transport.sent()[1]) == balanced);
+    CHECK(unwrap_sent_application(transport.sent()[3]) == legacy);
+}
+
 void association_rejects_cancelled_connect_and_can_reconnect() {
     ScriptedTransport transport;
     mms::MmsAssociationRuntime runtime{transport};
@@ -205,13 +293,13 @@ void association_rejects_cancelled_connect_and_can_reconnect() {
         runtime.connect({"127.0.0.1", 102U}, source.get_token());
     });
     CHECK(runtime.state() == mms::MmsAssociationRuntimeState::faulted);
+    CHECK(runtime.association_attempts().empty());
 
     queue_handshake(transport);
     runtime.connect({"127.0.0.1", 102U});
     CHECK(runtime.associated());
     CHECK(transport.connect_count() == 1U);
 }
-
 
 void confirmed_exchange_timeout_faults_association() {
     ScriptedTransport transport;
@@ -384,6 +472,7 @@ void subscription_does_not_take_over_an_enabled_rcb() {
 int main() {
     const std::vector<std::pair<std::string, std::function<void()>>> tests{
         {"association lifecycle and routing", association_lifecycle_routes_reports_and_confirmed_results},
+        {"association profile fallback", association_retries_legacy_profile_after_balanced_rejection},
         {"association cancellation and reconnect", association_rejects_cancelled_connect_and_can_reconnect},
         {"confirmed exchange timeout", confirmed_exchange_timeout_faults_association},
         {"report subscription lifecycle", subscription_runtime_reserves_enables_receives_and_cleans_up},
