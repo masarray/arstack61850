@@ -178,7 +178,14 @@ bool EthernetFrameCodec::try_decode(const std::span<const std::uint8_t> bytes,
         if (bytes.size() < 18U) {
             return false;
         }
-        vlan = VlanTag::from_tag_control_information(read_u16_be(bytes, 14U));
+        const auto decoded_vlan =
+            VlanTag::from_tag_control_information(read_u16_be(bytes, 14U));
+        // IEEE 802.1Q reserves VID 4095. Keep try_decode closed under encode:
+        // every successfully decoded VlanTag must be valid for re-encoding.
+        if (decoded_vlan.vlan_id > 4094U) {
+            return false;
+        }
+        vlan = decoded_vlan;
         ether_type = read_u16_be(bytes, 16U);
         payload_offset = 18U;
     }
