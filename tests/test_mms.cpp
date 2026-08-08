@@ -122,7 +122,6 @@ void mms_data_codec_preserves_bit_strings_and_unknown_tags() {
     const auto unknown_decoded = MmsDataCodec::decode_all(unknown_encoded);
     CHECK(unknown_decoded.size() == 1U);
     CHECK(unknown_decoded[0].kind() == MmsDataKind::unknown);
-    CHECK(decoded[0].kind() == MmsDataKind::unknown);
     CHECK(unknown_decoded[0].unknown_tag_number().value() == 45);
     CHECK(unknown_decoded[0].raw_value() == ByteVector({0xDEU, 0xADU}));
 }
