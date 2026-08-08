@@ -2,11 +2,13 @@
 """Compare ARIEC61850 C# and arstack61850 live model JSON exports.
 
 The default comparison is deliberately structural. Runtime DataSets and RCB
-bindings are excluded because they can change on IEDs that support dynamic
-DataSet/report-control allocation. Use --runtime to compare that mutable
+state are excluded because they can change on IEDs that support dynamic
+DataSet/report-control allocation. Use --runtime to compare the mutable
 snapshot separately, and --types to compare exact type evidence when both
 exports contain it.
 
+Runtime comparison is semantic and schema-aware: C++-only enrichment such as
+DataSetBindingStatus is not placed in an equality key against the C# document.
 No third-party Python packages are required.
 """
 
@@ -30,6 +32,15 @@ def _get(obj: Any, name: str, default: Any = None) -> Any:
     wanted = _property_key(name)
     for key, value in obj.items():
         if _property_key(str(key)) == wanted:
+            return value
+    return default
+
+
+def _get_any(obj: Any, *names: str, default: Any = None) -> Any:
+    sentinel = object()
+    for name in names:
+        value = _get(obj, name, sentinel)
+        if value is not sentinel:
             return value
     return default
 
@@ -71,6 +82,25 @@ def _control_key(control: dict[str, Any]) -> str:
     )
 
 
+@dataclass(frozen=True)
+class RcbRuntime:
+    reference: str
+    data_set_reference: str = ""
+    enabled_state: str = ""
+    reservation_state: str = ""
+    reservation_time_seconds: str = ""
+    binding_status: str = ""
+
+    @property
+    def has_common_read_evidence(self) -> bool:
+        return bool(
+            self.data_set_reference
+            or self.enabled_state
+            or self.reservation_state
+            or self.reservation_time_seconds
+        )
+
+
 @dataclass
 class ModelProjection:
     ied_name: str = ""
@@ -84,7 +114,28 @@ class ModelProjection:
     type_templates: set[str] = field(default_factory=set)
     data_sets: set[str] = field(default_factory=set)
     data_set_members: set[str] = field(default_factory=set)
-    report_runtime: set[str] = field(default_factory=set)
+    report_runtime: dict[str, RcbRuntime] = field(default_factory=dict)
+
+
+def _project_rcb_runtime(rcb: dict[str, Any]) -> RcbRuntime:
+    reference = _norm(_get(rcb, "Reference"))
+    return RcbRuntime(
+        reference=reference,
+        data_set_reference=_norm(_get(rcb, "DataSetReference")),
+        enabled_state=_norm(_get_any(rcb, "EnabledState", "ReportEnabled")),
+        reservation_state=_norm(
+            _get_any(rcb, "ReservationState", "Reserved")
+        ),
+        reservation_time_seconds=_norm(
+            _get_any(
+                rcb,
+                "ReservationTimeSeconds",
+                "ReservationTime",
+                "ResvTms",
+            )
+        ),
+        binding_status=_norm(_get(rcb, "DataSetBindingStatus")),
+    )
 
 
 def project(document: dict[str, Any]) -> ModelProjection:
@@ -123,19 +174,9 @@ def project(document: dict[str, Any]) -> ModelProjection:
         buffered = _get(rcb, "Buffered", False)
         mode = "b" if bool(buffered) else "u"
         if reference:
-            projected.report_controls.add(f"{_norm(reference)}|{mode}")
-            projected.report_runtime.add(
-                "|".join(
-                    (
-                        _norm(reference),
-                        _norm(_get(rcb, "DataSetReference")),
-                        _norm(_get(rcb, "DataSetBindingStatus")),
-                        _norm(_get(rcb, "EnabledState")),
-                        _norm(_get(rcb, "ReservationState")),
-                        _norm(_get(rcb, "ReservationTimeSeconds")),
-                    )
-                )
-            )
+            normalized_reference = _norm(reference)
+            projected.report_controls.add(f"{normalized_reference}|{mode}")
+            projected.report_runtime[normalized_reference] = _project_rcb_runtime(rcb)
 
     for property_name in (
         "GooseControlBlocks",
@@ -209,6 +250,114 @@ def _compare_set(
         result.differences.append(Difference(category, "cpp-only", value, blocking))
 
 
+def _runtime_difference(
+    result: Comparison,
+    category: str,
+    reference: str,
+    csharp_value: str,
+    cpp_value: str,
+) -> None:
+    result.differences.append(
+        Difference(
+            category,
+            "different",
+            f"{reference}: C#={csharp_value or '<empty>'}, "
+            f"C++={cpp_value or '<empty>'}",
+            blocking=False,
+        )
+    )
+
+
+def _compare_optional_common_field(
+    result: Comparison,
+    category: str,
+    reference: str,
+    csharp_value: str,
+    cpp_value: str,
+) -> None:
+    # Absence is not equality evidence. Compare only when both schemas/runs
+    # actually captured the field.
+    if csharp_value and cpp_value and csharp_value != cpp_value:
+        _runtime_difference(result, category, reference, csharp_value, cpp_value)
+
+
+def _compare_rcb_runtime(
+    result: Comparison,
+    csharp: dict[str, RcbRuntime],
+    cpp: dict[str, RcbRuntime],
+) -> None:
+    csharp_refs = set(csharp)
+    cpp_refs = set(cpp)
+    for reference in sorted(csharp_refs - cpp_refs):
+        result.differences.append(
+            Difference("runtime-rcb", "csharp-only", reference, blocking=False)
+        )
+    for reference in sorted(cpp_refs - csharp_refs):
+        result.differences.append(
+            Difference("runtime-rcb", "cpp-only", reference, blocking=False)
+        )
+
+    for reference in sorted(csharp_refs & cpp_refs):
+        left = csharp[reference]
+        right = cpp[reference]
+
+        if left.data_set_reference != right.data_set_reference:
+            _runtime_difference(
+                result,
+                "runtime-rcb-dataset",
+                reference,
+                left.data_set_reference,
+                right.data_set_reference,
+            )
+
+        _compare_optional_common_field(
+            result,
+            "runtime-rcb-enabled",
+            reference,
+            left.enabled_state,
+            right.enabled_state,
+        )
+        _compare_optional_common_field(
+            result,
+            "runtime-rcb-reservation",
+            reference,
+            left.reservation_state,
+            right.reservation_state,
+        )
+        _compare_optional_common_field(
+            result,
+            "runtime-rcb-reservation-time",
+            reference,
+            left.reservation_time_seconds,
+            right.reservation_time_seconds,
+        )
+
+        # DataSetBindingStatus is C++ enrichment and has no C# schema peer.
+        # We can still validate it against common C# evidence when the C# RCB
+        # was actually read. An empty/non-empty DatSet implies Unbound/Bound.
+        if right.binding_status:
+            if right.binding_status in {"notread", "readfailed"}:
+                if left.has_common_read_evidence:
+                    result.differences.append(
+                        Difference(
+                            "runtime-rcb-read-evidence",
+                            "different",
+                            f"{reference}: C#=read, C++={right.binding_status}",
+                            blocking=False,
+                        )
+                    )
+            elif left.has_common_read_evidence:
+                implied = "bound" if left.data_set_reference else "unbound"
+                if right.binding_status != implied:
+                    _runtime_difference(
+                        result,
+                        "runtime-rcb-binding",
+                        reference,
+                        implied,
+                        right.binding_status,
+                    )
+
+
 def compare(
     csharp: ModelProjection,
     cpp: ModelProjection,
@@ -234,8 +383,6 @@ def compare(
     _compare_set(result, "control-block", csharp.control_blocks, cpp.control_blocks)
 
     if compare_types:
-        # Type-template projection is useful parity evidence but not a wire-level
-        # structural blocker if one side was generated with type reads disabled.
         _compare_set(
             result,
             "type-template",
@@ -257,8 +404,6 @@ def compare(
                 )
 
     if compare_runtime:
-        # Runtime differences are reported, never structural blockers. Dynamic
-        # DataSets and RCB bindings are expected to vary between sessions.
         _compare_set(
             result,
             "runtime-dataset",
@@ -273,13 +418,7 @@ def compare(
             cpp.data_set_members,
             blocking=False,
         )
-        _compare_set(
-            result,
-            "runtime-rcb-state",
-            csharp.report_runtime,
-            cpp.report_runtime,
-            blocking=False,
-        )
+        _compare_rcb_runtime(result, csharp.report_runtime, cpp.report_runtime)
 
     return result
 
@@ -314,7 +453,8 @@ def _emit_human(
     print(
         "Same-IED structural parity: "
         + ("PASS" if comparison.compatible else "FAIL")
-        + f"; blocking={comparison.blocking_count}, totalFindings={len(comparison.differences)}."
+        + f"; blocking={comparison.blocking_count}, "
+        f"totalFindings={len(comparison.differences)}."
     )
     print(f"IED: C#={csharp.ied_name or '-'}, C++={cpp.ied_name or '-'}")
     print(f"C# counts: {_counts(csharp)}")
@@ -322,11 +462,45 @@ def _emit_human(
     for difference in comparison.differences:
         marker = "BLOCK" if difference.blocking else "INFO"
         print(
-            f"[{marker}] {difference.category} {difference.side}: {difference.value}"
+            f"[{marker}] {difference.category} {difference.side}: "
+            f"{difference.value}"
         )
 
 
 def _self_test() -> int:
+    base_csharp_rcbs = [
+        {
+            "Reference": "TESTIEDLD0/LLN0.BR.brcbA01",
+            "Buffered": True,
+            "DataSetReference": "TESTIEDLD0/LLN0.DataSetA",
+            "EnabledState": "false",
+        },
+        {
+            "Reference": "TESTIEDLD0/LLN0.RP.urcbA01",
+            "Buffered": False,
+            "DataSetReference": "",
+            "EnabledState": "false",
+            "ReservationState": "false",
+        },
+    ]
+    base_cpp_rcbs = [
+        {
+            "reference": "TESTIEDLD0/LLN0.BR.brcbA01",
+            "buffered": True,
+            "dataSetReference": "TESTIEDLD0/LLN0.DataSetA",
+            "enabledState": "false",
+            "dataSetBindingStatus": "Bound",
+        },
+        {
+            "reference": "TESTIEDLD0/LLN0.RP.urcbA01",
+            "buffered": False,
+            "dataSetReference": "",
+            "enabledState": "false",
+            "reservationState": "false",
+            "dataSetBindingStatus": "Unbound",
+        },
+    ]
+
     csharp = {
         "IedName": "TESTIED",
         "LogicalDevices": [
@@ -352,10 +526,10 @@ def _self_test() -> int:
                 ],
             }
         ],
-        "ReportControls": [
-            {"Reference": "TESTIEDLD0/LLN0.brcbA01", "Buffered": True}
+        "ReportControls": base_csharp_rcbs,
+        "DataSets": [
+            {"Reference": "TESTIEDLD0/LLN0.Dynamic01", "Members": []}
         ],
-        "DataSets": [{"Reference": "TESTIEDLD0/LLN0.Dynamic01", "Members": []}],
     }
     cpp = {
         "iedName": "TESTIED",
@@ -382,23 +556,63 @@ def _self_test() -> int:
                 ],
             }
         ],
-        "reportControls": [
-            {
-                "reference": "TESTIEDLD0/LLN0.brcbA01",
-                "buffered": True,
-                "dataSetBindingStatus": "Unbound",
-            }
-        ],
-        # Deliberately different runtime DataSet inventory.
+        "reportControls": base_cpp_rcbs,
         "dataSets": [],
     }
-    result = compare(project(csharp), project(cpp), compare_types=True, compare_runtime=True)
+
+    result = compare(
+        project(csharp),
+        project(cpp),
+        compare_types=True,
+        compare_runtime=True,
+    )
     if not result.compatible:
         print("self-test: expected structural parity", file=sys.stderr)
         return 1
     if not any(item.category == "runtime-dataset" for item in result.differences):
-        print("self-test: expected informational runtime difference", file=sys.stderr)
+        print("self-test: expected informational DataSet drift", file=sys.stderr)
         return 1
+    if any(item.category.startswith("runtime-rcb") for item in result.differences):
+        print(
+            "self-test: C++ binding enrichment created false RCB drift",
+            file=sys.stderr,
+        )
+        return 1
+
+    cpp_changed = json.loads(json.dumps(cpp))
+    cpp_changed["reportControls"][1]["dataSetReference"] = (
+        "TESTIEDLD0/LLN0.OtherDataSet"
+    )
+    cpp_changed["reportControls"][1]["dataSetBindingStatus"] = "Bound"
+    mismatch = compare(
+        project(csharp),
+        project(cpp_changed),
+        compare_types=False,
+        compare_runtime=True,
+    )
+    if not any(
+        item.category == "runtime-rcb-dataset" for item in mismatch.differences
+    ):
+        print("self-test: expected actual RCB DataSet drift", file=sys.stderr)
+        return 1
+
+    cpp_not_read = json.loads(json.dumps(cpp))
+    cpp_not_read["reportControls"][1]["enabledState"] = ""
+    cpp_not_read["reportControls"][1]["reservationState"] = ""
+    cpp_not_read["reportControls"][1]["dataSetBindingStatus"] = "NotRead"
+    evidence = compare(
+        project(csharp),
+        project(cpp_not_read),
+        compare_types=False,
+        compare_runtime=True,
+    )
+    if not any(
+        item.category == "runtime-rcb-read-evidence"
+        for item in evidence.differences
+    ):
+        print("self-test: expected read-evidence mismatch", file=sys.stderr)
+        return 1
+
     print("compare_live_model_json self-test: PASS")
     return 0
 
@@ -417,7 +631,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--runtime",
         action="store_true",
-        help="report mutable DataSet/RCB snapshot differences as informational findings",
+        help=(
+            "report mutable DataSet/RCB snapshot differences using common "
+            "cross-schema semantics"
+        ),
     )
     parser.add_argument("--json", action="store_true", dest="json_output")
     parser.add_argument("--self-test", action="store_true")
@@ -426,7 +643,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.self_test:
         return _self_test()
     if args.csharp_json is None or args.cpp_json is None:
-        parser.error("csharp_json and cpp_json are required unless --self-test is used")
+        parser.error(
+            "csharp_json and cpp_json are required unless --self-test is used"
+        )
 
     try:
         csharp = project(_load(args.csharp_json))
