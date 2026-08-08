@@ -38,6 +38,8 @@ jobs:
           set -euo pipefail
           app=ports/esp_idf/sv_trial_app
           build="$app/build"
+          qa="$app/ci-artifacts"
+          mkdir -p "$qa"
           test -s "$build/arstack61850_esp32p4_sv_trial.bin"
           test -s "$build/arstack61850_esp32p4_sv_trial.elf"
           test -s "$build/arstack61850_esp32p4_sv_trial.map"
@@ -54,6 +56,9 @@ jobs:
 
           app = Path('ports/esp_idf/sv_trial_app')
           build = app / 'build'
+          qa = app / 'ci-artifacts'
+          qa.mkdir(parents=True, exist_ok=True)
+
           manifest = json.loads((build / 'flasher_args.json').read_text(encoding='utf-8'))
           chip = manifest.get('extra_esptool_args', {}).get('chip')
           if chip != 'esp32p4':
@@ -108,7 +113,7 @@ jobs:
               if not candidate.is_file() or candidate.stat().st_size <= 0:
                   raise SystemExit(f'required deployment file is missing or empty: {candidate}')
               inventory.append(f'{candidate.relative_to(app)}\t{candidate.stat().st_size} bytes')
-          (build / 'ARSTACK_BUILD_FILE_LIST.txt').write_text(
+          (qa / 'ARSTACK_BUILD_FILE_LIST.txt').write_text(
               '\n'.join(inventory) + '\n', encoding='utf-8')
 
           evidence = {
@@ -119,7 +124,7 @@ jobs:
               'companion_flash_args': 'build/flash_args',
               'sdkconfig_defaults': 'sdkconfig.defaults',
           }
-          (build / 'ARSTACK_BUILD_PROFILE.json').write_text(
+          (qa / 'ARSTACK_BUILD_PROFILE.json').write_text(
               json.dumps(evidence, indent=2, sort_keys=True) + '\n',
               encoding='utf-8')
           print(json.dumps(evidence, indent=2, sort_keys=True))
@@ -133,10 +138,10 @@ jobs:
               build/partition_table/partition-table.bin \
               build/flash_args \
               build/flasher_args.json \
-              build/ARSTACK_BUILD_PROFILE.json \
-              build/ARSTACK_BUILD_FILE_LIST.txt \
+              ci-artifacts/ARSTACK_BUILD_PROFILE.json \
+              ci-artifacts/ARSTACK_BUILD_FILE_LIST.txt \
               sdkconfig.defaults \
-              README.md > build/SHA256SUMS
+              README.md > ci-artifacts/SHA256SUMS
           )
           echo "FLASHABLE/READY: ESP32-P4 flasher manifest and complete firmware set verified."
 
@@ -148,8 +153,9 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
           path: |
-            ports/esp_idf/sv_trial_app/build/ARSTACK_BUILD_FILE_LIST.txt
-            ports/esp_idf/sv_trial_app/build/ARSTACK_BUILD_PROFILE.json
+            ports/esp_idf/sv_trial_app/ci-artifacts/ARSTACK_BUILD_FILE_LIST.txt
+            ports/esp_idf/sv_trial_app/ci-artifacts/ARSTACK_BUILD_PROFILE.json
+            ports/esp_idf/sv_trial_app/ci-artifacts/SHA256SUMS
             ports/esp_idf/sv_trial_app/build/flasher_args.json
             ports/esp_idf/sv_trial_app/build/flash_args
             ports/esp_idf/sv_trial_app/build/arstack61850_esp32p4_sv_trial.bin
@@ -170,8 +176,8 @@ jobs:
             ports/esp_idf/sv_trial_app/build/partition_table/partition-table.bin
             ports/esp_idf/sv_trial_app/build/flash_args
             ports/esp_idf/sv_trial_app/build/flasher_args.json
-            ports/esp_idf/sv_trial_app/build/ARSTACK_BUILD_PROFILE.json
-            ports/esp_idf/sv_trial_app/build/ARSTACK_BUILD_FILE_LIST.txt
-            ports/esp_idf/sv_trial_app/build/SHA256SUMS
+            ports/esp_idf/sv_trial_app/ci-artifacts/ARSTACK_BUILD_PROFILE.json
+            ports/esp_idf/sv_trial_app/ci-artifacts/ARSTACK_BUILD_FILE_LIST.txt
+            ports/esp_idf/sv_trial_app/ci-artifacts/SHA256SUMS
             ports/esp_idf/sv_trial_app/sdkconfig.defaults
             ports/esp_idf/sv_trial_app/README.md
