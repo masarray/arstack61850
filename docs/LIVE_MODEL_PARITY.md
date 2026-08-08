@@ -13,20 +13,28 @@ snapshots between sessions.
 From the ARIEC61850 repository:
 
 ```powershell
+New-Item -ItemType Directory -Force .\.artifacts\parity\csharp | Out-Null
+
 dotnet run --project .\apps\AR.Iec61850.Cli -- `
   mms-model-discover 192.168.1.10 `
   --port 102 `
   --timeout-ms 120000 `
   --read-datasets false `
   --read-types true `
+  --type-read-source model `
   --max-type-reads 256 `
-  --output .artifacts\parity\csharp
+  --output .\.artifacts\parity\csharp
 ```
+
+`--type-read-source model` is required in this read-only parity recipe. If type
+source is left at the `datasets` default while `--read-datasets false` is used,
+ARIEC61850 can legitimately report `0 candidate(s)` and `exactTypes=0/0`, which
+is not useful type-parity evidence.
 
 The canonical C# model file is:
 
 ```text
-.artifacts\parity\csharp\ied-model.json
+.\.artifacts\parity\csharp\ied-model.json
 ```
 
 ARIEC61850's exporter also writes companion DataSet, RCB, control-block and
@@ -38,6 +46,8 @@ variable-access-attribute evidence files. The structural comparator only needs
 From the arstack61850 repository:
 
 ```powershell
+New-Item -ItemType Directory -Force .\.artifacts\parity | Out-Null
+
 .\build\Release\ariec61850_live_discover.exe `
   192.168.1.10 102 `
   --timeout-ms 120000 `
@@ -45,7 +55,7 @@ From the arstack61850 repository:
   --no-rcb `
   --max-types 256 `
   --model-json `
-  | Set-Content -Encoding utf8 .artifacts\parity\cpp-model.json
+  | Set-Content -Encoding utf8 .\.artifacts\parity\cpp-model.json
 ```
 
 `--no-datasets` and `--no-rcb` only skip deep runtime reads. DataSet/RCB name
@@ -55,8 +65,8 @@ inventory still comes from read-only MMS discovery where available.
 
 ```powershell
 python .\tools\compare_live_model_json.py `
-  .artifacts\parity\csharp\ied-model.json `
-  .artifacts\parity\cpp-model.json
+  <path-to-ARIEC61850>\.artifacts\parity\csharp\ied-model.json `
+  .\.artifacts\parity\cpp-model.json
 ```
 
 Exit codes:
@@ -88,8 +98,8 @@ When both runs include successful `GetVariableAccessAttributes` evidence:
 
 ```powershell
 python .\tools\compare_live_model_json.py `
-  .artifacts\parity\csharp\ied-model.json `
-  .artifacts\parity\cpp-model.json `
+  <path-to-ARIEC61850>\.artifacts\parity\csharp\ied-model.json `
+  .\.artifacts\parity\cpp-model.json `
   --types
 ```
 
@@ -101,8 +111,8 @@ one side may have intentionally omitted low-confidence templates or type reads.
 
 ```powershell
 python .\tools\compare_live_model_json.py `
-  .artifacts\parity\csharp\ied-model.json `
-  .artifacts\parity\cpp-model.json `
+  <path-to-ARIEC61850>\.artifacts\parity\csharp\ied-model.json `
+  .\.artifacts\parity\cpp-model.json `
   --types `
   --runtime
 ```
