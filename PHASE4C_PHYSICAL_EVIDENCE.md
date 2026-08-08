@@ -94,17 +94,37 @@ Phase 4C physical read-only acceptance: PASS
 (discovery=True, contention=True, controlBlocks=True, freshAssociations=13/13)
 ```
 
-Accepted conclusion: on this OCR7SR12 observation window, arstack61850 completed ten fresh stable discovery associations with full 286/286 RCB read completeness and complete control-block evidence, followed by three successful fresh contention associations. This is evidence for repeated association/discovery stability on this target; it is not timeout-recovery or multi-vendor evidence.
+Accepted conclusion: on this OCR7SR12 observation window, arstack61850 completed ten fresh stable discovery associations with full 286/286 RCB read completeness and complete control-block evidence, followed by three successful fresh contention associations. This is evidence for repeated association/discovery stability on this target; it is not multi-vendor evidence.
+
+## Controlled timeout and recovery acceptance
+
+The dedicated read-only timeout/recovery runner was executed against the same OCR7SR12 after the ten-cycle acceptance. The runner first completed a healthy direct baseline discovery, then placed a localhost TCP proxy between the client and relay. The proxy forwarded COTP and the complete Session/Presentation/ACSE association response without modification, forwarded the subsequent confirmed MMS request, and withheld the first server TPKT response after association so the client request deadline expired. After the faulted association was closed, the runner performed a fresh direct recovery association and compared its structural fingerprint with the baseline.
+
+Command:
+
+```powershell
+python .\scripts\run-phase4c-timeout-recovery.py 192.168.1.10 102 --output .\.artifacts\interop\ocr7sr12-phase4c-timeout-recovery --fault-timeout-ms 3000 --recovery-timeout-ms 30000 --settle-ms 500 --recovery-max-rcb 50
+```
+
+Observed result:
+
+```text
+Baseline: accepted=True structure=934b555dff76a46f runtime=21be72da011f5c1e warnings=1
+Injected timeout: accepted=True associationForwarded=True responseWithheld=True timeoutObserved=True withheldTpkt=1
+Recovery: accepted=True structure=934b555dff76a46f matchesBaseline=True warnings=1
+Phase 4C controlled timeout/recovery: PASS (baseline=True, fault=True, recovery=True)
+```
+
+Accepted conclusion: the target was healthy immediately before fault injection, the association itself was successfully established before the response stall, a real client-side confirmed-request timeout was observed after one server TPKT was withheld, and a subsequent fresh direct association recovered successfully with the same `934b555dff76a46f` structural fingerprint as the baseline. This closes the controlled timeout/recovery gate for this physical target and observation window. It does not imply network-fault recovery has been validated for every failure mode or vendor.
 
 ## Implementation consequence
 
 The C++ live-model path treats GO/SV/SG/LG deep-read values as runtime evidence rather than structural identity. The optional `--control-block-values` path can project successful, partial, failed, and bounded/not-read states without changing the structural fingerprint. Runtime attributes are exported as machine-readable attribute/value/status entries so applications do not need to parse human message text.
 
-A dedicated controlled timeout/recovery evidence runner is now implemented separately. It establishes a healthy baseline, injects a post-association server-response stall through a local TCP proxy, requires the client-side MMS request deadline to expire, then performs a fresh direct recovery association and compares the recovered structural fingerprint with the baseline. This runner is not counted as physical evidence until it is executed successfully against the IED.
+Confirmed MMS exchange timeout, cancellation, and fault paths now terminate the affected association immediately by closing the transport and clearing invoke-routing, InformationReport, TPKT, and remote-COTP state before a future reconnect. Regression coverage requires that a timed-out runtime can establish a fresh association afterward.
 
 ## Still pending
 
-- Controlled timeout/recovery physical acceptance on the OCR7SR12.
 - Pagination continuation evidence on a target response that actually requires more than one page.
 - Physical GOOSE/SV capture interoperability evidence.
 - Any active RCB claim, reporting enable, control, or mutation test; these remain outside the read-only Phase 4C acceptance boundary.
