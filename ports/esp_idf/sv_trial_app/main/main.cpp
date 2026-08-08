@@ -8,6 +8,7 @@
 #include "ariec61850/sampled_values/injector_controller.hpp"
 #include "ariec61850/sampled_values/injector_presets.hpp"
 #include "ariec61850/sampled_values/injector_runtime_program.hpp"
+#include "ariec61850/sampled_values/injector_sequence_builder.hpp"
 #include "ariec61850/sampled_values/payload_writer.hpp"
 #include "ariec61850/sampled_values/publisher.hpp"
 
@@ -61,9 +62,10 @@ TaskHandle_t g_publisher_task{};
 esp_eth_handle_t g_eth_handle{};
 QueueHandle_t g_control_queue{};
 sampled_values::InjectorController g_injector_controller{};
-// Keep the fixed-capacity source ring out of the publisher task stack. It is
-// mutated only by the publisher task after commands cross the FreeRTOS queue.
+// Keep fixed-capacity source/edit state out of the publisher task stack. Both
+// objects are mutated only by the publisher task after commands cross the queue.
 std::optional<sampled_values::InjectorRuntimeProgram> g_runtime_program{};
+sampled_values::InjectorSequenceBuilder g_sequence_builder{};
 
 [[nodiscard]] const char* state_name(
     const sampled_values::InjectorControlState state) noexcept {
@@ -125,6 +127,18 @@ std::optional<sampled_values::InjectorRuntimeProgram> g_runtime_program{};
         return "set-channel";
     case sampled_values::InjectorControlCommandKind::ramp_channel:
         return "ramp-channel";
+    case sampled_values::InjectorControlCommandKind::sequence_begin:
+        return "sequence-begin";
+    case sampled_values::InjectorControlCommandKind::sequence_state_begin:
+        return "sequence-state-begin";
+    case sampled_values::InjectorControlCommandKind::sequence_set_channel:
+        return "sequence-set-channel";
+    case sampled_values::InjectorControlCommandKind::sequence_state_commit:
+        return "sequence-state-commit";
+    case sampled_values::InjectorControlCommandKind::sequence_commit:
+        return "sequence-commit";
+    case sampled_values::InjectorControlCommandKind::sequence_abort:
+        return "sequence-abort";
     }
     return "unknown";
 }
@@ -160,6 +174,12 @@ void print_control_ack(
             runtime_mode_name(g_runtime_program->mode()),
             static_cast<unsigned>(g_runtime_program->revision()));
     }
+    if (g_sequence_builder.active()) {
+        std::printf(
+            ",\"sequenceDraftStates\":%u,\"sequenceStateOpen\":%s",
+            static_cast<unsigned>(g_sequence_builder.state_count()),
+            g_sequence_builder.state_open() ? "true" : "false");
+    }
     std::printf("}\n");
     std::fflush(stdout);
 }
@@ -171,7 +191,9 @@ void print_capabilities() noexcept {
         "\"transport\":\"usb-serial-jtag-stdio\","
         "\"engine\":\"sample-index-fixed-point\","
         "\"commands\":[\"capabilities\",\"configure\",\"arm\",\"start\","
-        "\"stop\",\"status\",\"stats\",\"set-channel\",\"ramp-channel\"],"
+        "\"stop\",\"status\",\"stats\",\"set-channel\",\"ramp-channel\","
+        "\"sequence-begin\",\"sequence-state-begin\",\"sequence-set-channel\","
+        "\"sequence-state-commit\",\"sequence-commit\",\"sequence-abort\"],"
         "\"sourceModes\":[\"manual\",\"ramp\",\"sequence\"],"
         "\"scenarios\":[\"normal\",\"protection-fault\"],"
         "\"profile\":{\"sampleRateHz\":4000,\"sampleCountWrap\":4000,"
@@ -200,6 +222,12 @@ void print_status() noexcept {
             ",\"sourceMode\":\"%s\",\"sourceRevision\":%u",
             runtime_mode_name(g_runtime_program->mode()),
             static_cast<unsigned>(g_runtime_program->revision()));
+    }
+    if (g_sequence_builder.active()) {
+        std::printf(
+            ",\"sequenceDraftStates\":%u,\"sequenceStateOpen\":%s",
+            static_cast<unsigned>(g_sequence_builder.state_count()),
+            g_sequence_builder.state_open() ? "true" : "false");
     }
     std::printf("}\n");
     std::fflush(stdout);
@@ -547,6 +575,68 @@ void publisher_task(void* argument) {
                 print_control_ack(command.kind);
                 continue;
             }
+            case sampled_values::InjectorControlCommandKind::sequence_begin: {
+                if (!g_injector_controller.running() || !injector.has_value() ||
+                    !g_runtime_program.has_value()) {
+                    print_control_error("sequence-begin", "source-not-editable");
+                    continue;
+                }
+                const auto current_segment = injector->segment_index();
+                if (!g_runtime_program->is_hold_segment(current_segment)) {
+                    print_control_error("sequence-begin", "source-busy");
+                    continue;
+                }
+                g_sequence_builder.begin(
+                    g_runtime_program->profile_at(current_segment));
+                print_control_ack(command.kind);
+                continue;
+            }
+            case sampled_values::InjectorControlCommandKind::sequence_state_begin:
+                if (!g_sequence_builder.begin_state(
+                        command.duration_samples, command.transition)) {
+                    print_control_error("sequence-state-begin", "invalid-sequence-state");
+                    continue;
+                }
+                print_control_ack(command.kind);
+                continue;
+            case sampled_values::InjectorControlCommandKind::sequence_set_channel:
+                if (!g_sequence_builder.edit_channel(command.channel_edit)) {
+                    print_control_error("sequence-set-channel", "no-open-sequence-state");
+                    continue;
+                }
+                print_control_ack(command.kind);
+                continue;
+            case sampled_values::InjectorControlCommandKind::sequence_state_commit:
+                if (!g_sequence_builder.commit_state()) {
+                    print_control_error("sequence-state-commit", "no-open-sequence-state");
+                    continue;
+                }
+                print_control_ack(command.kind);
+                continue;
+            case sampled_values::InjectorControlCommandKind::sequence_commit: {
+                if (!g_injector_controller.running() || !injector.has_value() ||
+                    !g_runtime_program.has_value() || !g_sequence_builder.ready()) {
+                    print_control_error("sequence-commit", "sequence-not-ready");
+                    continue;
+                }
+                const auto current_segment = injector->segment_index();
+                if (!g_runtime_program->is_hold_segment(current_segment)) {
+                    print_control_error("sequence-commit", "source-busy");
+                    continue;
+                }
+                if (!g_runtime_program->stage_sequence(
+                        current_segment, g_sequence_builder.states())) {
+                    print_control_error("sequence-commit", "sequence-stage-failed");
+                    continue;
+                }
+                g_sequence_builder.abort();
+                print_control_ack(command.kind);
+                continue;
+            }
+            case sampled_values::InjectorControlCommandKind::sequence_abort:
+                g_sequence_builder.abort();
+                print_control_ack(command.kind);
+                continue;
             case sampled_values::InjectorControlCommandKind::configure:
                 control_status = g_injector_controller.configure({
                     kSampleRateHz,
@@ -562,6 +652,7 @@ void publisher_task(void* argument) {
                     publisher.reset(0U);
                     pending_sample.reset();
                     g_runtime_program.reset();
+                    g_sequence_builder.abort();
                     if (snapshot.configuration.scenario ==
                         sampled_values::InjectorScenarioKind::protection_fault) {
                         injector.emplace(
@@ -592,6 +683,7 @@ void publisher_task(void* argument) {
                     pending_sample.reset();
                     injector.reset();
                     g_runtime_program.reset();
+                    g_sequence_builder.abort();
                     publisher.reset(0U);
                 }
                 break;
@@ -627,6 +719,7 @@ void publisher_task(void* argument) {
                 g_injector_controller.set_fault();
                 injector.reset();
                 g_runtime_program.reset();
+                g_sequence_builder.abort();
                 print_control_error("runtime", "injector-finished");
                 continue;
             }
@@ -644,6 +737,7 @@ void publisher_task(void* argument) {
                 g_injector_controller.set_fault();
                 injector.reset();
                 g_runtime_program.reset();
+                g_sequence_builder.abort();
                 pending_sample.reset();
                 print_control_error("runtime", "sample-counter-divergence");
                 continue;
@@ -654,6 +748,7 @@ void publisher_task(void* argument) {
                 g_injector_controller.set_fault();
                 injector.reset();
                 g_runtime_program.reset();
+                g_sequence_builder.abort();
                 pending_sample.reset();
                 print_control_error("runtime", "payload-write-failed");
                 continue;
@@ -673,6 +768,7 @@ void publisher_task(void* argument) {
             g_injector_controller.set_fault();
             injector.reset();
             g_runtime_program.reset();
+            g_sequence_builder.abort();
             pending_sample.reset();
             print_control_error("runtime", "publish-failed");
             continue;
