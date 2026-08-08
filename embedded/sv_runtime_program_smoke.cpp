@@ -2,8 +2,10 @@
 
 #include "ariec61850/sampled_values/deterministic_injector.hpp"
 #include "ariec61850/sampled_values/injector_presets.hpp"
+#include "ariec61850/sampled_values/injector_replay_ring.hpp"
 #include "ariec61850/sampled_values/injector_runtime_program.hpp"
 #include "ariec61850/sampled_values/injector_sequence_builder.hpp"
+#include "ariec61850/sampled_values/replay_bundle.hpp"
 
 #include <array>
 #include <cstdint>
@@ -47,8 +49,6 @@ bool hot_manual_update_preserves_timeline() noexcept {
         return false;
     }
 
-    // One final sample completes the active hold slot; the next sample uses the
-    // staged profile without resetting the global sample index.
     if (!injector.step(sample) || sample.sample_index != 10U ||
         !near(sample.values[0], 1'414)) {
         return false;
@@ -58,8 +58,6 @@ bool hot_manual_update_preserves_timeline() noexcept {
         return false;
     }
 
-    // Phase changes are also boundary-applied through the engine's existing
-    // inter-segment phase-offset logic.
     if (!program.stage_manual(injector.segment_index(), constant_profile(2'000, 0))) {
         return false;
     }
@@ -183,11 +181,49 @@ bool sequence_builder_is_transactional() noexcept {
         return false;
     }
 
-    // An abort discards only the builder transaction and cannot affect the
-    // already committed runtime program.
     builder.abort();
     return !builder.active() && !builder.ready() &&
         program.mode() == InjectorRuntimeSourceMode::sequence;
+}
+
+bool replay_bundle_and_ring_are_bounded() noexcept {
+    ReplayBundleHeader header{};
+    header.sample_rate_hz = 4'000U;
+    header.frame_count = 2U;
+
+    std::array<std::uint8_t, replay_bundle_header_bytes> encoded{};
+    if (!encode_replay_bundle_header(header, encoded)) {
+        return false;
+    }
+
+    ReplayBundleHeader decoded{};
+    if (!decode_replay_bundle_header(encoded, decoded) ||
+        decoded.version != 1U || decoded.sample_rate_hz != 4'000U ||
+        decoded.frame_count != 2U ||
+        replay_bundle_expected_bytes(decoded) !=
+            replay_bundle_header_bytes + 2U * replay_payload_bytes) {
+        return false;
+    }
+
+    InjectorReplayRing<2U> ring;
+    ReplayPayloadFrame first{};
+    ReplayPayloadFrame second{};
+    first[0] = 0x11U;
+    second[0] = 0x22U;
+    if (!ring.push(first) || !ring.push(second) || ring.push(first) ||
+        ring.statistics().overflows != 1U) {
+        return false;
+    }
+
+    ReplayPayloadFrame output{};
+    if (!ring.pop(output) || output[0] != 0x11U ||
+        !ring.pop(output) || output[0] != 0x22U ||
+        ring.pop(output) || ring.statistics().underruns != 1U) {
+        return false;
+    }
+
+    return ring.statistics().frames_pushed == 2U &&
+        ring.statistics().frames_popped == 2U && ring.empty();
 }
 
 } // namespace
@@ -204,6 +240,9 @@ int main() {
     }
     if (!sequence_builder_is_transactional()) {
         return 4;
+    }
+    if (!replay_bundle_and_ring_are_bounded()) {
+        return 5;
     }
     return 0;
 }
