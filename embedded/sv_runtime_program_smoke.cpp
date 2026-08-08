@@ -2,6 +2,7 @@
 
 #include "ariec61850/sampled_values/deterministic_injector.hpp"
 #include "ariec61850/sampled_values/injector_presets.hpp"
+#include "ariec61850/sampled_values/injector_profile_builder.hpp"
 #include "ariec61850/sampled_values/injector_replay_ring.hpp"
 #include "ariec61850/sampled_values/injector_runtime_program.hpp"
 #include "ariec61850/sampled_values/injector_sequence_builder.hpp"
@@ -186,6 +187,46 @@ bool sequence_builder_is_transactional() noexcept {
         program.mode() == InjectorRuntimeSourceMode::sequence;
 }
 
+bool profile_builder_is_atomic_and_revisioned() noexcept {
+    const auto base = make_balanced_4i4v_profile();
+    InjectorProfileBuilder builder;
+    builder.begin(base, 17U);
+    if (!builder.active() || builder.ramp() || builder.source_revision() != 17U) {
+        return false;
+    }
+
+    for (std::uint8_t channel = 0U; channel < 3U; ++channel) {
+        InjectorChannelEdit edit{};
+        edit.channel_index = channel;
+        edit.fields = injector_field_rms;
+        edit.rms_counts = 3'000;
+        if (!builder.edit_channel(edit)) {
+            return false;
+        }
+    }
+    if (builder.target()[0].rms_counts != 3'000 ||
+        builder.target()[1].rms_counts != 3'000 ||
+        builder.target()[2].rms_counts != 3'000 ||
+        base[0].rms_counts == 3'000) {
+        return false;
+    }
+
+    builder.abort();
+    if (builder.active()) {
+        return false;
+    }
+
+    builder.begin(base, 18U, 4'000U);
+    if (!builder.active() || !builder.ramp() ||
+        builder.ramp_duration_samples() != 4'000U ||
+        builder.source_revision() != 18U) {
+        return false;
+    }
+
+    builder.begin(base, 19U, 1U);
+    return !builder.active();
+}
+
 bool replay_bundle_and_ring_are_bounded() noexcept {
     ReplayBundleHeader header{};
     header.sample_rate_hz = 4'000U;
@@ -241,8 +282,11 @@ int main() {
     if (!sequence_builder_is_transactional()) {
         return 4;
     }
-    if (!replay_bundle_and_ring_are_bounded()) {
+    if (!profile_builder_is_atomic_and_revisioned()) {
         return 5;
+    }
+    if (!replay_bundle_and_ring_are_bounded()) {
+        return 6;
     }
     return 0;
 }
