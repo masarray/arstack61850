@@ -32,7 +32,7 @@ struct QueryEvidence final {
     mms::MmsGetNameListObjectClass object_class{mms::MmsGetNameListObjectClass::domain};
     std::string domain;
     std::vector<PageEvidence> pages;
-    std::size_t unique_name_count{};
+    std::vector<std::string> names;
 
     [[nodiscard]] bool paginated() const noexcept {
         return pages.size() > 1U || std::any_of(
@@ -125,7 +125,7 @@ struct QueryEvidence final {
     evidence.object_class = object_class;
     evidence.domain = domain;
 
-    std::set<std::string, std::less<>> unique_names;
+    std::set<std::string, std::less<>> seen;
     std::string continue_after;
 
     for (std::size_t page_index = 0U; page_index < maximum_pages; ++page_index) {
@@ -154,21 +154,22 @@ struct QueryEvidence final {
         }
         evidence.pages.push_back(page);
 
-        const auto before = unique_names.size();
+        const auto count_before = evidence.names.size();
         for (const auto& name : response.names) {
-            if (unique_names.size() >= maximum_names &&
-                unique_names.find(name) == unique_names.end()) {
+            if (!seen.insert(name).second) {
+                continue;
+            }
+            if (evidence.names.size() >= maximum_names) {
                 throw std::runtime_error(
                     std::string{class_name(object_class)} + " name bound exceeded.");
             }
-            unique_names.insert(name);
+            evidence.names.push_back(name);
         }
 
         if (!response.more_follows) {
-            evidence.unique_name_count = unique_names.size();
             return evidence;
         }
-        if (response.names.empty() || unique_names.size() == before) {
+        if (response.names.empty() || evidence.names.size() == count_before) {
             throw std::runtime_error(
                 std::string{class_name(object_class)} +
                 " reported moreFollows without forward progress.");
@@ -222,7 +223,7 @@ void print_human(
         std::cout << "Query " << class_name(query.object_class)
                   << " scope=" << (query.domain.empty() ? "VMD" : query.domain)
                   << " pages=" << query.pages.size()
-                  << " names=" << query.unique_name_count
+                  << " names=" << query.names.size()
                   << " continuations=" << query.continuation_request_count()
                   << ".\n";
         for (const auto& page : query.pages) {
@@ -277,7 +278,7 @@ void print_json(
                   << json_escape(query.domain.empty() ? std::string{"VMD"} : query.domain)
                   << "\","
                   << "\"pageCount\":" << query.pages.size() << ','
-                  << "\"uniqueNameCount\":" << query.unique_name_count << ','
+                  << "\"uniqueNameCount\":" << query.names.size() << ','
                   << "\"continuationRequestCount\":"
                   << query.continuation_request_count() << ','
                   << "\"paginated\":" << (query.paginated() ? "true" : "false") << ','
@@ -368,32 +369,12 @@ int main(int argc, char** argv) {
         auto domains_query = run_query(
             session.association(), mms::MmsGetNameListObjectClass::domain, {},
             maximum_pages, maximum_names);
-        std::vector<std::string> domains;
-        for (const auto& page : domains_query.pages) {
-            static_cast<void>(page);
-        }
-
-        // Fetch the domain identifiers once more from the query responses would require
-        // retaining every name in evidence. Instead, use the normal bounded discovery
-        // snapshot for the domain list only; the pagination evidence itself remains the
-        // direct GetNameList trace above and below.
-        mms::MmsLiveDiscoveryOptions domain_options;
-        domain_options.maximum_pages_per_query = maximum_pages;
-        domain_options.maximum_domains = maximum_domains;
-        domain_options.maximum_names_per_domain = maximum_names;
-        domain_options.probe_variable_types = false;
-        domain_options.read_data_set_directories = false;
-        domain_options.probe_report_controls = false;
-        const auto snapshot = session.discover(domain_options);
-        for (const auto& [domain, variables] : snapshot.names.domain_variables) {
-            static_cast<void>(variables);
-            domains.push_back(domain);
-        }
-        if (domains.size() > maximum_domains) {
+        if (domains_query.names.size() > maximum_domains) {
             throw std::runtime_error("domain bound exceeded");
         }
-
+        const auto domains = domains_query.names;
         queries.push_back(std::move(domains_query));
+
         for (const auto& domain : domains) {
             queries.push_back(run_query(
                 session.association(), mms::MmsGetNameListObjectClass::named_variable,
