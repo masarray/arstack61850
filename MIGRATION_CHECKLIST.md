@@ -143,7 +143,7 @@ behavioral oracle until laboratory interoperability is complete.
 - [x] Integrated `live_discover --control-block-values` physical OCR7SR12 run accepted: 1/1 SGCB complete, 5/5 attributes read, diagnostics=0, pending-value warning cleared.
 - [x] C# and C++ same-IED OCR7SR12 structural/type/runtime comparison accepted with zero blocking findings.
 - [x] Primary-vendor OCR7SR12 ten-cycle acceptance: 10/10 stable discovery cycles, full 286/286 RCB and control-block gates, 3/3 StableProceed contention cycles, and 13/13 fresh associations.
-- [ ] Controlled timeout/recovery evidence accepted.
+- [x] Controlled OCR7SR12 timeout/recovery evidence accepted: healthy baseline, post-association response withholding, client request timeout observed, fresh direct recovery, and identical `934b555dff76a46f` structural fingerprint before/after recovery.
 - [ ] Pagination continuation evidence accepted on a target that requires more than one page.
 
 ### Later Phase 4 work
