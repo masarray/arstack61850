@@ -32,14 +32,23 @@ Required evidence:
 - the narrow arstack61850 ESP-IDF component compiles and links;
 - the compile-only integration smoke app builds;
 - the flashable first-trial SV firmware builds and links;
-- generated `sdkconfig` identifies `CONFIG_IDF_TARGET_ESP32P4=y`;
+- the resulting ESP-IDF flasher manifest identifies chip `esp32p4`;
 - no host-only TCP/filesystem/capture services leak into the embedded component boundary.
 
 This gate proves that the code is accepted by the real ESP32-P4 RISC-V compiler/linker and ESP-IDF component system.
 
 ## Gate C — flashable artifact completeness
 
-The ESP-IDF workflow must fail if any required deployment output is missing or malformed.
+The ESP-IDF workflow must fail if any required deployment output is missing, empty, malformed, targets another chip, or disagrees with the expected first-trial flash layout.
+
+The workflow validates the ESP-IDF-generated `flasher_args.json` directly and requires:
+
+- `extra_esptool_args.chip == esp32p4`;
+- bootloader at `0x2000`;
+- partition table at `0x8000`;
+- application at `0x10000`;
+- every file referenced by that manifest exists and is non-empty;
+- the text `flash_args` describes the same three-image layout.
 
 The retained `esp32p4-sv-trial-firmware-*` artifact contains:
 
@@ -49,13 +58,13 @@ The retained `esp32p4-sv-trial-firmware-*` artifact contains:
 - bootloader image;
 - partition-table image;
 - `flash_args`;
-- valid `flasher_args.json`;
-- generated project-level `sdkconfig`;
-- `sdkconfig.defaults`;
-- `SHA256SUMS` covering the deployment-critical images/configuration;
+- validated `flasher_args.json`;
+- `sdkconfig.defaults` used as the repository-controlled configuration baseline;
+- generated `ARSTACK_BUILD_PROFILE.json` recording `FLASHABLE/READY`, target chip, and flash layout;
+- `SHA256SUMS` covering the deployment-critical images, manifests, and configuration baseline;
 - firmware-specific flashing/behavior README.
 
-Passing Gate C means a developer can download a CI-produced firmware set instead of rebuilding it locally, and can verify the retained files before flashing.
+Passing Gate C means a developer can download a CI-produced firmware set instead of rebuilding it locally, verify the retained files, and use the ESP-IDF-generated flash layout for the target board.
 
 ## Gate D — physical ESP32-P4 Ethernet acceptance
 
