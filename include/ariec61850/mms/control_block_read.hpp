@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <stop_token>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -102,8 +103,7 @@ public:
                 const auto duplicate = std::any_of(
                     candidate->attributes.begin(), candidate->attributes.end(),
                     [&](const auto& attribute) {
-                        return same(attribute.variable.domain, domain) &&
-                               same(attribute.variable.item, item);
+                        return same(attribute.attribute_path, attribute_path);
                     });
                 if (!duplicate) {
                     candidate->attributes.push_back({
