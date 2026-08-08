@@ -150,6 +150,8 @@ void print_mapping(const comtrade::Dataset& dataset) {
 } // namespace
 
 int main(const int argc, char** argv) {
+    using namespace ar::iec61850;
+
     if (argc != 3) {
         std::cerr
             << "Usage: ariec61850_sv_replay_prepare <record.cfg> <output.arsvr>\n"
