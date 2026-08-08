@@ -147,6 +147,28 @@ namespace control_block_model_detail {
            path_matches_leaf(path, "MAC-Address");
 }
 
+inline void project_runtime_attributes(
+    MmsLiveControlBlock& control,
+    const MmsControlBlockReadResult& evidence) {
+    control.runtime_attributes.clear();
+    control.runtime_attributes.reserve(evidence.attributes.size());
+    for (const auto& attribute : evidence.attributes) {
+        MmsLiveControlBlockRuntimeAttribute projected;
+        projected.attribute_path = attribute.attribute_path;
+        projected.mms_reference = attribute.variable.reference();
+        projected.failure_code = attribute.failure_code;
+        if (attribute.value) {
+            projected.value = value_text(*attribute.value);
+            projected.status = "ValueRead";
+        } else if (attribute.failure_code) {
+            projected.status = "AccessFailure";
+        } else {
+            projected.status = "NotReturned";
+        }
+        control.runtime_attributes.push_back(std::move(projected));
+    }
+}
+
 inline void project_one(
     MmsLiveControlBlock& control,
     const MmsLiveDiscoveryResult& discovery) {
@@ -170,6 +192,7 @@ inline void project_one(
     }
 
     const auto& evidence = *evidence_it;
+    project_runtime_attributes(control, evidence);
     const auto successful = evidence.successful_attribute_count();
     if (evidence.complete()) {
         control.discovery_status = "ValueReadComplete";
