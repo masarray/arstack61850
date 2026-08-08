@@ -32,17 +32,6 @@ jobs:
           target: esp32p4
           path: ports/esp_idf/sv_trial_app
 
-      - name: Inventory ESP-IDF firmware outputs
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          build=ports/esp_idf/sv_trial_app/build
-          mkdir -p "$build"
-          find "$build" -maxdepth 4 -type f -printf '%P\t%s bytes\n' \
-            | LC_ALL=C sort \
-            | tee "$build/ARSTACK_BUILD_FILE_LIST.txt"
-
       - name: Verify flashable firmware outputs
         shell: bash
         run: |
@@ -57,12 +46,14 @@ jobs:
           test -s "$build/flash_args"
           test -s "$build/flasher_args.json"
           test -s "$app/sdkconfig.defaults"
+          test -s "$app/README.md"
           python3 -m json.tool "$build/flasher_args.json" >/dev/null
           python3 - <<'PY'
           import json
           from pathlib import Path
 
-          build = Path('ports/esp_idf/sv_trial_app/build')
+          app = Path('ports/esp_idf/sv_trial_app')
+          build = app / 'build'
           manifest = json.loads((build / 'flasher_args.json').read_text(encoding='utf-8'))
           chip = manifest.get('extra_esptool_args', {}).get('chip')
           if chip != 'esp32p4':
@@ -91,7 +82,7 @@ jobs:
               raise SystemExit(
                   f'unexpected flash layout: expected {pretty_expected!r}, got {pretty_actual!r}')
 
-          file_evidence = {}
+          flash_evidence = {}
           for offset, relative in sorted(expected.items()):
               candidate = build / relative
               if not candidate.is_file():
@@ -99,12 +90,31 @@ jobs:
               size = candidate.stat().st_size
               if size <= 0:
                   raise SystemExit(f'flash file {relative!r} at {hex(offset)} is empty')
-              file_evidence[hex(offset)] = {'path': relative, 'bytes': size}
+              flash_evidence[hex(offset)] = {'path': relative, 'bytes': size}
+
+          required = [
+              build / 'arstack61850_esp32p4_sv_trial.bin',
+              build / 'arstack61850_esp32p4_sv_trial.elf',
+              build / 'arstack61850_esp32p4_sv_trial.map',
+              build / 'bootloader/bootloader.bin',
+              build / 'partition_table/partition-table.bin',
+              build / 'flash_args',
+              build / 'flasher_args.json',
+              app / 'sdkconfig.defaults',
+              app / 'README.md',
+          ]
+          inventory = []
+          for candidate in required:
+              if not candidate.is_file() or candidate.stat().st_size <= 0:
+                  raise SystemExit(f'required deployment file is missing or empty: {candidate}')
+              inventory.append(f'{candidate.relative_to(app)}\t{candidate.stat().st_size} bytes')
+          (build / 'ARSTACK_BUILD_FILE_LIST.txt').write_text(
+              '\n'.join(inventory) + '\n', encoding='utf-8')
 
           evidence = {
               'status': 'FLASHABLE/READY',
               'target': chip,
-              'flash_files': file_evidence,
+              'flash_files': flash_evidence,
               'authoritative_manifest': 'build/flasher_args.json',
               'companion_flash_args': 'build/flash_args',
               'sdkconfig_defaults': 'sdkconfig.defaults',
@@ -125,7 +135,8 @@ jobs:
               build/flasher_args.json \
               build/ARSTACK_BUILD_PROFILE.json \
               build/ARSTACK_BUILD_FILE_LIST.txt \
-              sdkconfig.defaults > build/SHA256SUMS
+              sdkconfig.defaults \
+              README.md > build/SHA256SUMS
           )
           echo "FLASHABLE/READY: ESP32-P4 flasher manifest and complete firmware set verified."
 
@@ -138,6 +149,7 @@ jobs:
           retention-days: 7
           path: |
             ports/esp_idf/sv_trial_app/build/ARSTACK_BUILD_FILE_LIST.txt
+            ports/esp_idf/sv_trial_app/build/ARSTACK_BUILD_PROFILE.json
             ports/esp_idf/sv_trial_app/build/flasher_args.json
             ports/esp_idf/sv_trial_app/build/flash_args
             ports/esp_idf/sv_trial_app/build/arstack61850_esp32p4_sv_trial.bin
