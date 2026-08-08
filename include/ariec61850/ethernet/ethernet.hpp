@@ -19,6 +19,13 @@ inline constexpr std::uint16_t ptp_ethertype = 0x88F7;
 class MacAddress final {
 public:
     MacAddress() = default;
+
+    // Exact-size construction is the preferred embedded path: the size is
+    // encoded in the type, so there is nothing to validate or throw at runtime.
+    explicit constexpr MacAddress(const std::array<std::uint8_t, 6>& bytes) noexcept
+        : bytes_(bytes) {}
+
+    // Retained for host/source compatibility when the caller only has a span.
     explicit MacAddress(std::span<const std::uint8_t> bytes);
 
     [[nodiscard]] static MacAddress parse(const std::string& text);
