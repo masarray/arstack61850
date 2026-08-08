@@ -17,8 +17,12 @@ behavioral oracle until laboratory interoperability is complete.
 - [x] GOOSE wire codec and offline runtime supervision.
 - [x] Sampled Values PDU/frame codec, quality, payload, counter, and stream diagnostics.
 - [x] Synthetic PCAP equivalence, sanitizer, mutation, and libFuzzer hardening.
+- [x] Allocation-bounded SV publisher runtime with caller-owned Ethernet buffer, successful-TX counter progression, and no-catch-up pacing.
+- [x] Platform-neutral raw-Ethernet/clock HAL plus ESP-IDF `esp_eth_transmit()` adapter.
+- [~] ESP32-P4 ESP-IDF cross-compile acceptance for the first SV transmit slice.
 - [ ] Real IED or vendor-simulator GOOSE/SV capture accepted.
-- [ ] Real-time SV publisher timing-health validation.
+- [~] Real-time SV publisher timing-health validation: deterministic host/CI pacing implemented; physical ESP32-P4 evidence pending.
+- [ ] Exception-free embedded codec build; the first ESP-IDF trial temporarily enables C++ exceptions for shared legacy validation/convenience APIs while the publisher hot path remains `noexcept`.
 
 ## Phase 2 — engineering file formats
 
@@ -144,7 +148,7 @@ behavioral oracle until laboratory interoperability is complete.
 - [x] C# and C++ same-IED OCR7SR12 structural/type/runtime comparison accepted with zero blocking findings.
 - [x] Primary-vendor OCR7SR12 ten-cycle acceptance: 10/10 stable discovery cycles, full 286/286 RCB and control-block gates, 3/3 StableProceed contention cycles, and 13/13 fresh associations.
 - [x] Controlled OCR7SR12 timeout/recovery evidence accepted: healthy baseline, post-association response withholding, client request timeout observed, fresh direct recovery, and identical `934b555dff76a46f` structural fingerprint before/after recovery.
-- [ ] Pagination continuation evidence accepted on a target that requires more than one page.
+- [x] Physical GetNameList pagination accepted on OCR7SR12: 9 queries, 4 paginated queries, 88 continuation requests; largest sequence 48 pages / 4,758 names / 47 continuations with final `moreFollows=false`.
 
 ### Later Phase 4 work
 
