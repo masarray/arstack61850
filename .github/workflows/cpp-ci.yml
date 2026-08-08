@@ -37,6 +37,10 @@ jobs:
         run: ctest --test-dir build --output-on-failure
       - name: Cross-language model parity tool self-test
         run: python3 tools/compare_live_model_json.py --self-test
+      - name: Read-only evidence runner syntax and CLI smoke
+        run: |
+          python3 -m py_compile scripts/run-live-readonly-interop.py
+          python3 scripts/run-live-readonly-interop.py --help > /dev/null
 
   windows:
     name: Windows / MSVC
@@ -49,3 +53,8 @@ jobs:
         run: cmake --build build --config Release --parallel
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Evidence tooling self-tests
+        run: |
+          python tools/compare_live_model_json.py --self-test
+          python -m py_compile scripts/run-live-readonly-interop.py
+          python scripts/run-live-readonly-interop.py --help | Out-Null
