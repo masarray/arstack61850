@@ -130,8 +130,21 @@ struct MmsLiveReportControl final {
     std::string status;
 };
 
+// Generic machine-readable overlay for values returned by the optional
+// read-only GO/SV/SG/LG deep reader. This is intentionally runtime evidence:
+// it is not part of structural C# parity and is excluded from canonical and
+// structural fingerprints.
+struct MmsLiveControlBlockRuntimeAttribute final {
+    std::string attribute_path;
+    std::string mms_reference;
+    std::string value;
+    std::string status{"NotRead"};
+    std::optional<std::uint32_t> failure_code;
+};
+
 // Read-only inventory projection matching ARIEC61850 LiveIedControlBlockModel.
-// Values stay empty until a future, explicitly bounded deep value reader exists.
+// C#-parity fields remain intact; runtime_attributes is a C++ extension filled
+// only when the explicit bounded deep value reader is requested.
 struct MmsLiveControlBlock final {
     std::string kind;
     std::string reference;
@@ -153,6 +166,7 @@ struct MmsLiveControlBlock final {
     std::string number_of_asdu;
     std::string address_status{"NotDiscovered"};
     std::string discovery_status{"AttributeInventoryOnly"};
+    std::vector<MmsLiveControlBlockRuntimeAttribute> runtime_attributes;
     std::string message;
 
     [[nodiscard]] std::size_t attribute_count() const noexcept {
