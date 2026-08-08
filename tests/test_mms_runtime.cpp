@@ -301,7 +301,7 @@ void association_rejects_cancelled_connect_and_can_reconnect() {
     CHECK(transport.connect_count() == 1U);
 }
 
-void confirmed_exchange_timeout_faults_association() {
+void confirmed_exchange_timeout_closes_transport_and_can_reconnect() {
     ScriptedTransport transport;
     queue_handshake(transport);
     mms::MmsAssociationRuntime runtime{transport};
@@ -316,10 +316,18 @@ void confirmed_exchange_timeout_faults_association() {
     check_throws<mms::MmsTransportTimeoutError>([&] {
         static_cast<void>(runtime.exchange_confirmed(request_bytes, invoke_id));
     });
+
     CHECK(runtime.state() == mms::MmsAssociationRuntimeState::faulted);
+    CHECK(!transport.connected());
     CHECK(std::any_of(runtime.events().begin(), runtime.events().end(), [](const auto& event) {
         return event.kind == mms::MmsAssociationEventKind::timed_out;
     }));
+
+    queue_handshake(transport);
+    runtime.connect({"127.0.0.1", 102U});
+    CHECK(runtime.associated());
+    CHECK(transport.connected());
+    CHECK(transport.connect_count() == 2U);
 }
 
 [[nodiscard]] mms::MmsReportControlCandidate make_urcb_candidate() {
@@ -474,7 +482,7 @@ int main() {
         {"association lifecycle and routing", association_lifecycle_routes_reports_and_confirmed_results},
         {"association profile fallback", association_retries_legacy_profile_after_balanced_rejection},
         {"association cancellation and reconnect", association_rejects_cancelled_connect_and_can_reconnect},
-        {"confirmed exchange timeout", confirmed_exchange_timeout_faults_association},
+        {"confirmed exchange timeout closes transport and reconnects", confirmed_exchange_timeout_closes_transport_and_can_reconnect},
         {"report subscription lifecycle", subscription_runtime_reserves_enables_receives_and_cleans_up},
         {"report cleanup after association loss", subscription_marks_cleanup_required_when_association_is_lost},
         {"report takeover protection", subscription_does_not_take_over_an_enabled_rcb},
