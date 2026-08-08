@@ -92,8 +92,21 @@ target_compile_definitions(ariec61850_embedded_link_smoke PRIVATE
     ARIEC61850_HOST_SERVICES=0)
 ariec61850_apply_embedded_flags(ariec61850_embedded_link_smoke)
 
+# Exercise the allocation-bounded SV publisher and its no-catch-up pacing policy
+# against a fake RawEthernetPort using the same embedded core library.
+add_executable(ariec61850_embedded_sv_publisher_smoke
+    ${CMAKE_CURRENT_LIST_DIR}/sv_publisher_smoke.cpp)
+target_link_libraries(ariec61850_embedded_sv_publisher_smoke PRIVATE ARIEC61850::embedded_core)
+target_compile_features(ariec61850_embedded_sv_publisher_smoke PRIVATE cxx_std_20)
+target_include_directories(ariec61850_embedded_sv_publisher_smoke PRIVATE ${ARIEC61850_ROOT}/include)
+target_compile_definitions(ariec61850_embedded_sv_publisher_smoke PRIVATE
+    ARIEC61850_EMBEDDED_PROFILE=1
+    ARIEC61850_HOST_SERVICES=0)
+ariec61850_apply_embedded_flags(ariec61850_embedded_sv_publisher_smoke)
+
 enable_testing()
 add_test(NAME ariec61850_embedded_link_smoke COMMAND ariec61850_embedded_link_smoke)
+add_test(NAME ariec61850_embedded_sv_publisher_smoke COMMAND ariec61850_embedded_sv_publisher_smoke)
 
 message(STATUS "arstack61850 embedded profile: host services excluded")
 message(STATUS "arstack61850 embedded profile: RTTI disabled=${ARIEC61850_EMBEDDED_NO_RTTI}")
