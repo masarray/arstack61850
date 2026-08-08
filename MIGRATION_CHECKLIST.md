@@ -140,9 +140,11 @@ behavioral oracle until laboratory interoperability is complete.
 - [x] Machine-readable control-block runtime attribute/value/status overlay excluded from structural parity fingerprint.
 - [x] GCC/Clang strict validation, sanitizer/libFuzzer smoke, and Windows MSVC matrix accepted on the feature branch.
 - [x] Controlled physical IED read-only evidence accepted: OCR7SR12 RCB contention probe and SGCB 5/5 deep read.
-- [ ] Integrated `live_discover --control-block-values` physical run accepted.
-- [ ] Primary-vendor ten-cycle, timeout/reconnect, and pagination evidence accepted.
-- [ ] C# and C++ same-IED parity evidence accepted.
+- [x] Integrated `live_discover --control-block-values` physical OCR7SR12 run accepted: 1/1 SGCB complete, 5/5 attributes read, diagnostics=0, pending-value warning cleared.
+- [x] C# and C++ same-IED OCR7SR12 structural/type/runtime comparison accepted with zero blocking findings.
+- [ ] Primary-vendor ten-cycle acceptance with full RCB/control-block gates accepted.
+- [ ] Controlled timeout/recovery evidence accepted.
+- [ ] Pagination continuation evidence accepted on a target that requires more than one page.
 
 ### Later Phase 4 work
 
