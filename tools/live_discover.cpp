@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "ariec61850/mms/control_block_model_evidence.hpp"
 #include "ariec61850/mms/live_discovery.hpp"
 #include "ariec61850/mms/live_model.hpp"
 #include "ariec61850/mms/rcb_availability.hpp"
@@ -55,6 +56,16 @@ struct RcbPlanCliOptions final {
 struct RcbAvailabilityCliOptions final {
     bool requested{};
     std::size_t maximum_snapshots_to_print{10U};
+};
+
+struct ControlBlockReadCliOptions final {
+    bool requested{};
+    std::size_t maximum_control_blocks{32U};
+    std::size_t maximum_attributes{64U};
+
+    [[nodiscard]] bool has_bound_options() const noexcept {
+        return maximum_control_blocks != 32U || maximum_attributes != 64U;
+    }
 };
 
 [[nodiscard]] std::string json_escape(const std::string_view value) {
@@ -137,6 +148,11 @@ void print_usage() {
         << "  --max-datasets N       Bound DataSet directory reads.\n"
         << "  --max-rcb N            Bound RCB read probes.\n"
         << "  --timeout-ms N         Connect/request timeout in milliseconds.\n"
+        << "Read-only GO/SV/SG/LG value evidence:\n"
+        << "  --control-block-values Enable bounded deep MMS Read of exact live attributes.\n"
+        << "  --max-control-blocks N Bound deep-read control blocks (default 32).\n"
+        << "  --max-control-block-attributes N\n"
+        << "                         Bound attributes per control block (default 64).\n"
         << "Read-only Smart RCB planning:\n"
         << "  --rcb-plan MODE        Analyze RCB evidence as dynamic or static.\n"
         << "  --rcb-ld LD            Prefer this logical device for dynamic mode.\n"
@@ -152,8 +168,8 @@ void print_usage() {
         << "  --max-rcb-availability N\n"
         << "                         Limit human availability output (default 10).\n"
         << "\n"
-        << "RCB planning/availability are evidence-only. They never send Write, Resv,\n"
-        << "RptEna, GI, or dynamic DataSet mutation requests.\n";
+        << "All control-block value and RCB modes are evidence-only. They never send\n"
+        << "Write, Resv, RptEna, GoEna, SvEna, GI, control, or DataSet mutation requests.\n";
 }
 
 void print_rcb_plan(
@@ -267,6 +283,27 @@ void print_rcb_operational_availability(
     }
 }
 
+void print_control_block_values(const mms::MmsLiveModelDocument& model) {
+    bool printed_header = false;
+    const auto print = [&](const auto& controls) {
+        for (const auto& control : controls) {
+            if (control.discovery_status == "AttributeInventoryOnly") {
+                continue;
+            }
+            if (!printed_header) {
+                std::cout << "Control-block runtime evidence:\n";
+                printed_header = true;
+            }
+            std::cout << "  [" << control.discovery_status << "] "
+                      << control.reference << " - " << control.message << '\n';
+        }
+    };
+    print(model.goose_control_blocks);
+    print(model.sampled_value_control_blocks);
+    print(model.setting_group_controls);
+    print(model.log_controls);
+}
+
 void print_human(
     const mms::MmsLiveDiscoveryResult& result,
     const mms::MmsLiveModelDocument& model,
@@ -287,6 +324,9 @@ void print_human(
                       << " class=" << logical_node.logical_node_class
                       << " DO=" << logical_node.data_objects.size() << '\n';
         }
+    }
+    if (result.control_block_value_reads_requested) {
+        print_control_block_values(model);
     }
     if (!model.warnings.empty()) {
         std::cout << "Warnings:\n";
@@ -325,6 +365,27 @@ void print_summary_json(
               << "\"fingerprint\":\"" << model.canonical_fingerprint_hex() << "\","
               << "\"partial\":" << (result.partial() ? "true" : "false") << ','
               << "\"summary\":\"" << json_escape(model.summary) << "\"";
+
+    if (result.control_block_value_reads_requested) {
+        const auto complete = static_cast<std::size_t>(std::count_if(
+            result.control_block_reads.begin(), result.control_block_reads.end(),
+            [](const auto& evidence) { return evidence.complete(); }));
+        const auto partial = static_cast<std::size_t>(std::count_if(
+            result.control_block_reads.begin(), result.control_block_reads.end(),
+            [](const auto& evidence) {
+                return !evidence.complete() &&
+                       evidence.successful_attribute_count() != 0U;
+            }));
+        std::cout << ",\"controlBlockValues\":{"
+                  << "\"candidateCount\":"
+                  << result.control_block_value_candidate_count << ','
+                  << "\"attempted\":" << result.control_block_reads.size() << ','
+                  << "\"complete\":" << complete << ','
+                  << "\"partial\":" << partial << ','
+                  << "\"failed\":"
+                  << (result.control_block_reads.size() - complete - partial)
+                  << '}';
+    }
 
     if (rcb_selection) {
         std::cout << ",\"rcbPlan\":{"
@@ -424,6 +485,37 @@ build_rcb_operational_availability(
     return mms::MmsRcbOperationalAvailabilityEvaluator::evaluate(result, options);
 }
 
+void read_control_block_values(
+    mms::MmsTcpLiveDiscoverySession& session,
+    mms::MmsLiveDiscoveryResult& result,
+    const ControlBlockReadCliOptions& options) {
+    if (!options.requested) {
+        return;
+    }
+
+    result.control_block_value_reads_requested = true;
+    auto candidates = mms::MmsControlBlockInventoryBuilder::build(result.names);
+    result.control_block_value_candidate_count = candidates.size();
+    const auto count = std::min(options.maximum_control_blocks, candidates.size());
+    result.control_block_reads.reserve(count);
+
+    mms::MmsControlBlockReadClient reader{session.association()};
+    for (std::size_t index = 0U; index < count; ++index) {
+        try {
+            result.control_block_reads.push_back(
+                reader.read(candidates[index], options.maximum_attributes));
+        } catch (const std::exception& exception) {
+            mms::MmsControlBlockReadResult failed;
+            failed.candidate = candidates[index];
+            failed.error = exception.what();
+            result.control_block_reads.push_back(std::move(failed));
+            result.diagnostics.push_back(
+                "Control-block deep read failed for " + candidates[index].reference +
+                ": " + exception.what());
+        }
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -456,6 +548,7 @@ int main(int argc, char** argv) {
         mms::MmsLiveModelBuildOptions model_options;
         RcbPlanCliOptions rcb_plan_options;
         RcbAvailabilityCliOptions rcb_availability_options;
+        ControlBlockReadCliOptions control_block_read_options;
 
         while (argument < argc) {
             const std::string option = argv[argument++];
@@ -467,6 +560,8 @@ int main(int argc, char** argv) {
                 discovery_options.read_data_set_directories = false;
             } else if (option == "--no-rcb") {
                 discovery_options.probe_report_controls = false;
+            } else if (option == "--control-block-values") {
+                control_block_read_options.requested = true;
             } else if (option == "--rcb-availability") {
                 rcb_availability_options.requested = true;
             } else if (option == "--strict-rcb") {
@@ -481,7 +576,9 @@ int main(int argc, char** argv) {
                        option == "--rcb-ld" || option == "--rcb-dataset" ||
                        option == "--preferred-rcb" || option == "--rcb-exclude" ||
                        option == "--max-rcb-candidates" ||
-                       option == "--max-rcb-availability") {
+                       option == "--max-rcb-availability" ||
+                       option == "--max-control-blocks" ||
+                       option == "--max-control-block-attributes") {
                 if (argument >= argc) {
                     throw std::invalid_argument(option + " requires a value.");
                 }
@@ -522,6 +619,10 @@ int main(int argc, char** argv) {
                     rcb_plan_options.maximum_candidates_to_print = parsed;
                 } else if (option == "--max-rcb-availability") {
                     rcb_availability_options.maximum_snapshots_to_print = parsed;
+                } else if (option == "--max-control-blocks") {
+                    control_block_read_options.maximum_control_blocks = parsed;
+                } else if (option == "--max-control-block-attributes") {
+                    control_block_read_options.maximum_attributes = parsed;
                 } else {
                     if (parsed > static_cast<std::size_t>(
                             std::numeric_limits<std::int64_t>::max())) {
@@ -547,6 +648,12 @@ int main(int argc, char** argv) {
             throw std::invalid_argument(
                 "--max-rcb-availability requires --rcb-availability.");
         }
+        if (!control_block_read_options.requested &&
+            control_block_read_options.has_bound_options()) {
+            throw std::invalid_argument(
+                "--max-control-blocks/--max-control-block-attributes require "
+                "--control-block-values.");
+        }
         if ((rcb_plan_options.requested() || rcb_availability_options.requested) &&
             !discovery_options.probe_report_controls) {
             throw std::invalid_argument(
@@ -570,16 +677,24 @@ int main(int argc, char** argv) {
                 "RCB runtime evidence cannot be combined with --model-json or "
                 "--manifest structural parity output.");
         }
+        if (control_block_read_options.requested &&
+            output_mode == OutputMode::manifest) {
+            throw std::invalid_argument(
+                "Control-block runtime values are intentionally excluded from the "
+                "structural manifest; use human, --json, or --model-json output.");
+        }
 
         mms::MmsAssociationOptions association_options;
         association_options.connect_timeout = timeout;
         association_options.request_timeout = timeout;
         mms::MmsTcpLiveDiscoverySession session{{}, association_options};
         session.connect(endpoint);
-        const auto result = session.discover(discovery_options);
+        auto result = session.discover(discovery_options);
+        read_control_block_values(session, result, control_block_read_options);
         session.disconnect();
 
-        const auto model = mms::MmsLiveModelBuilder::build(result, model_options);
+        auto model = mms::MmsLiveModelBuilder::build(result, model_options);
+        mms::MmsControlBlockRuntimeProjector::apply(result, model);
         const auto rcb_selection = build_rcb_plan(result, rcb_plan_options);
         const auto rcb_availability = build_rcb_operational_availability(
             result, rcb_availability_options);
