@@ -82,83 +82,133 @@ int main() {
         return fail(10);
     }
 
-    InjectorController controller;
-    if (controller.state() != InjectorControlState::idle) {
+    const auto sequence_begin = parse_injector_control_command(
+        R"({"command":"sequence-begin"})");
+    if (!sequence_begin.success() ||
+        sequence_begin.command.kind != InjectorControlCommandKind::sequence_begin) {
         return fail(11);
     }
-    if (controller.start() != InjectorControlStatus::invalid_state) {
+
+    const auto state_begin = parse_injector_control_command(
+        R"({"command":"sequence-state-begin","durationSamples":800,"transition":"linear"})");
+    if (!state_begin.success() ||
+        state_begin.command.kind != InjectorControlCommandKind::sequence_state_begin ||
+        state_begin.command.duration_samples != 800U ||
+        state_begin.command.transition != InjectorSegmentTransition::linear_from_previous) {
         return fail(12);
+    }
+
+    const auto sequence_edit = parse_injector_control_command(
+        R"({"command":"sequence-set-channel","channel":"Ic","rms":4200,"phaseMilliDeg":120000})");
+    if (!sequence_edit.success() ||
+        sequence_edit.command.kind != InjectorControlCommandKind::sequence_set_channel ||
+        sequence_edit.command.channel_edit.channel_index != 2U ||
+        sequence_edit.command.channel_edit.rms_counts != 4'200 ||
+        sequence_edit.command.channel_edit.phase_millidegrees != 120'000) {
+        return fail(13);
+    }
+
+    if (parse_injector_control_command(
+            R"({"command":"sequence-state-begin","durationSamples":0})")
+            .status != InjectorControlParseStatus::invalid_value) {
+        return fail(14);
+    }
+    if (parse_injector_control_command(
+            R"({"command":"sequence-state-begin","durationSamples":80,"transition":"curve"})")
+            .status != InjectorControlParseStatus::unsupported_transition) {
+        return fail(15);
+    }
+
+    const auto state_commit = parse_injector_control_command(
+        R"({"command":"sequence-state-commit"})");
+    const auto sequence_commit = parse_injector_control_command(
+        R"({"command":"sequence-commit"})");
+    const auto sequence_abort = parse_injector_control_command(
+        R"({"command":"sequence-abort"})");
+    if (!state_commit.success() || !sequence_commit.success() || !sequence_abort.success() ||
+        state_commit.command.kind != InjectorControlCommandKind::sequence_state_commit ||
+        sequence_commit.command.kind != InjectorControlCommandKind::sequence_commit ||
+        sequence_abort.command.kind != InjectorControlCommandKind::sequence_abort) {
+        return fail(16);
+    }
+
+    InjectorController controller;
+    if (controller.state() != InjectorControlState::idle) {
+        return fail(17);
+    }
+    if (controller.start() != InjectorControlStatus::invalid_state) {
+        return fail(18);
     }
 
     if (controller.configure({0U, InjectorScenarioKind::normal}) !=
         InjectorControlStatus::invalid_configuration) {
-        return fail(13);
+        return fail(19);
     }
     if (controller.configure({4'000U, InjectorScenarioKind::normal}) !=
         InjectorControlStatus::ok) {
-        return fail(14);
+        return fail(20);
     }
 
     const auto configured = controller.snapshot();
     if (configured.state != InjectorControlState::configured ||
         configured.configuration_revision != 1U ||
         configured.armed_revision != 0U) {
-        return fail(15);
+        return fail(21);
     }
 
     if (controller.arm() != InjectorControlStatus::ok) {
-        return fail(16);
+        return fail(22);
     }
     const auto armed = controller.snapshot();
     if (armed.state != InjectorControlState::armed ||
         armed.armed_revision != armed.configuration_revision) {
-        return fail(17);
+        return fail(23);
     }
     if (controller.configure({4'000U, InjectorScenarioKind::protection_fault}) !=
         InjectorControlStatus::invalid_state) {
-        return fail(18);
+        return fail(24);
     }
 
     if (controller.start() != InjectorControlStatus::ok || !controller.running()) {
-        return fail(19);
+        return fail(25);
     }
     const auto first_run = controller.snapshot();
     if (first_run.run_sequence != 1U) {
-        return fail(20);
+        return fail(26);
     }
     if (controller.arm() != InjectorControlStatus::invalid_state) {
-        return fail(21);
+        return fail(27);
     }
 
     if (controller.stop() != InjectorControlStatus::ok ||
         controller.state() != InjectorControlState::stopped) {
-        return fail(22);
+        return fail(28);
     }
     if (controller.arm() != InjectorControlStatus::ok ||
         controller.start() != InjectorControlStatus::ok) {
-        return fail(23);
+        return fail(29);
     }
     if (controller.snapshot().run_sequence != 2U) {
-        return fail(24);
+        return fail(30);
     }
 
     controller.set_fault();
     if (controller.state() != InjectorControlState::fault) {
-        return fail(25);
+        return fail(31);
     }
     if (controller.start() != InjectorControlStatus::invalid_state) {
-        return fail(26);
+        return fail(32);
     }
 
     if (controller.configure({4'000U, InjectorScenarioKind::normal}) !=
         InjectorControlStatus::ok) {
-        return fail(27);
+        return fail(33);
     }
     const auto recovered = controller.snapshot();
     if (recovered.state != InjectorControlState::configured ||
         recovered.configuration_revision != 2U ||
         recovered.armed_revision != 0U) {
-        return fail(28);
+        return fail(34);
     }
 
     return 0;
