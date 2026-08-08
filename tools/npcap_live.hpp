@@ -281,8 +281,7 @@ private:
         }
         return {embedded::IoStatus::ok, bytes.size()};
 #else
-        (void)bytes;
-        return {embedded::IoStatus::not_supported, 0U};
+        return {embedded::IoStatus::io_error, 0U};
 #endif
     }
 
