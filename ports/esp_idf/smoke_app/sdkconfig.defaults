@@ -1,0 +1,6 @@
+# Transitional portability setting for the first ESP32-P4 SV transmit proof.
+# The shared desktop codecs still contain exception-based convenience and
+# validation APIs, while the publisher hot path uses noexcept/status-returning
+# APIs. Removing this compile-time dependency is tracked as a later embedded
+# hardening gate.
+CONFIG_COMPILER_CXX_EXCEPTIONS=y
