@@ -111,6 +111,30 @@ inline std::string MmsLiveModelDocument::runtime_snapshot_manifest() const {
             control.report_id + "|" + control.configuration_revision);
     }
 
+    const auto append_runtime_controls = [&lines](const auto& controls) {
+        for (const auto& control : controls) {
+            if (control.runtime_attributes.empty()) {
+                continue;
+            }
+            std::string line =
+                "CBRUNTIME|" + control.kind + "|" + control.reference + "|" +
+                control.discovery_status;
+            for (const auto& attribute : control.runtime_attributes) {
+                line += "|" + attribute.attribute_path + "=" + attribute.value +
+                        "[" + attribute.status;
+                if (attribute.failure_code) {
+                    line += ":" + std::to_string(*attribute.failure_code);
+                }
+                line += "]";
+            }
+            lines.push_back(std::move(line));
+        }
+    };
+    append_runtime_controls(goose_control_blocks);
+    append_runtime_controls(sampled_value_control_blocks);
+    append_runtime_controls(setting_group_controls);
+    append_runtime_controls(log_controls);
+
     std::sort(lines.begin() + 2, lines.end(), [](const auto& left, const auto& right) {
         return lower(left) < lower(right);
     });
