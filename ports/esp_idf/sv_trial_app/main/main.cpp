@@ -7,6 +7,7 @@
 #include "ariec61850/sampled_values/injector_control_protocol.hpp"
 #include "ariec61850/sampled_values/injector_controller.hpp"
 #include "ariec61850/sampled_values/injector_presets.hpp"
+#include "ariec61850/sampled_values/injector_runtime_program.hpp"
 #include "ariec61850/sampled_values/payload_writer.hpp"
 #include "ariec61850/sampled_values/publisher.hpp"
 
@@ -60,6 +61,9 @@ TaskHandle_t g_publisher_task{};
 esp_eth_handle_t g_eth_handle{};
 QueueHandle_t g_control_queue{};
 sampled_values::InjectorController g_injector_controller{};
+// Keep the fixed-capacity source ring out of the publisher task stack. It is
+// mutated only by the publisher task after commands cross the FreeRTOS queue.
+std::optional<sampled_values::InjectorRuntimeProgram> g_runtime_program{};
 
 [[nodiscard]] const char* state_name(
     const sampled_values::InjectorControlState state) noexcept {
@@ -87,6 +91,19 @@ sampled_values::InjectorController g_injector_controller{};
         : "normal";
 }
 
+[[nodiscard]] const char* runtime_mode_name(
+    const sampled_values::InjectorRuntimeSourceMode mode) noexcept {
+    switch (mode) {
+    case sampled_values::InjectorRuntimeSourceMode::manual:
+        return "manual";
+    case sampled_values::InjectorRuntimeSourceMode::ramp:
+        return "ramp";
+    case sampled_values::InjectorRuntimeSourceMode::sequence:
+        return "sequence";
+    }
+    return "unknown";
+}
+
 [[nodiscard]] const char* command_name(
     const sampled_values::InjectorControlCommandKind command) noexcept {
     switch (command) {
@@ -104,6 +121,10 @@ sampled_values::InjectorController g_injector_controller{};
         return "status";
     case sampled_values::InjectorControlCommandKind::stats:
         return "stats";
+    case sampled_values::InjectorControlCommandKind::set_channel:
+        return "set-channel";
+    case sampled_values::InjectorControlCommandKind::ramp_channel:
+        return "ramp-channel";
     }
     return "unknown";
 }
@@ -126,13 +147,20 @@ void print_control_ack(
         "ARCTRL {\"schemaVersion\":\"arstack-sv-injector-control-v1\","
         "\"command\":\"%s\",\"ok\":true,\"state\":\"%s\","
         "\"scenario\":\"%s\",\"configurationRevision\":%u,"
-        "\"armedRevision\":%u,\"runSequence\":%" PRIu64 "}\n",
+        "\"armedRevision\":%u,\"runSequence\":%" PRIu64,
         command_name(command),
         state_name(snapshot.state),
         scenario_name(snapshot.configuration.scenario),
         static_cast<unsigned>(snapshot.configuration_revision),
         static_cast<unsigned>(snapshot.armed_revision),
         snapshot.run_sequence);
+    if (g_runtime_program.has_value()) {
+        std::printf(
+            ",\"sourceMode\":\"%s\",\"sourceRevision\":%u",
+            runtime_mode_name(g_runtime_program->mode()),
+            static_cast<unsigned>(g_runtime_program->revision()));
+    }
+    std::printf("}\n");
     std::fflush(stdout);
 }
 
@@ -143,7 +171,8 @@ void print_capabilities() noexcept {
         "\"transport\":\"usb-serial-jtag-stdio\","
         "\"engine\":\"sample-index-fixed-point\","
         "\"commands\":[\"capabilities\",\"configure\",\"arm\",\"start\","
-        "\"stop\",\"status\",\"stats\"],"
+        "\"stop\",\"status\",\"stats\",\"set-channel\",\"ramp-channel\"],"
+        "\"sourceModes\":[\"manual\",\"ramp\",\"sequence\"],"
         "\"scenarios\":[\"normal\",\"protection-fault\"],"
         "\"profile\":{\"sampleRateHz\":4000,\"sampleCountWrap\":4000,"
         "\"channels\":8,\"payload\":\"INT32+quality\",\"appid\":16385}}\n");
@@ -159,13 +188,20 @@ void print_status() noexcept {
         "\"command\":\"status\",\"ok\":true,\"state\":\"%s\","
         "\"scenario\":\"%s\",\"configurationRevision\":%u,"
         "\"armedRevision\":%u,\"runSequence\":%" PRIu64 ","
-        "\"ethernetLinkUp\":%s}\n",
+        "\"ethernetLinkUp\":%s",
         state_name(snapshot.state),
         scenario_name(snapshot.configuration.scenario),
         static_cast<unsigned>(snapshot.configuration_revision),
         static_cast<unsigned>(snapshot.armed_revision),
         snapshot.run_sequence,
         link_up ? "true" : "false");
+    if (g_runtime_program.has_value()) {
+        std::printf(
+            ",\"sourceMode\":\"%s\",\"sourceRevision\":%u",
+            runtime_mode_name(g_runtime_program->mode()),
+            static_cast<unsigned>(g_runtime_program->revision()));
+    }
+    std::printf("}\n");
     std::fflush(stdout);
 }
 
@@ -400,9 +436,6 @@ void publisher_task(void* argument) {
             0U,
             true});
 
-    const std::array<sampled_values::InjectorScenarioSegment, 1U> normal_scenario{
-        sampled_values::make_hold_segment(
-            sampled_values::make_balanced_4i4v_profile())};
     const auto protection_fault_scenario = make_protection_fault_scenario();
     std::optional<sampled_values::DeterministicSvInjector> injector;
     std::optional<sampled_values::InjectorSample> pending_sample;
@@ -470,7 +503,7 @@ void publisher_task(void* argument) {
                     "\"framesSent\":%" PRIu64 ",\"encodeFailures\":%" PRIu64 ","
                     "\"transmitFailures\":%" PRIu64 ",\"latePolls\":%" PRIu64 ","
                     "\"maximumLatenessUs\":%" PRIu64 ",\"timerTicks\":%" PRIu64 ","
-                    "\"coalescedTicks\":%" PRIu64 "}\n",
+                    "\"coalescedTicks\":%" PRIu64,
                     state_name(snapshot.state),
                     stats.frames_sent,
                     stats.encode_failures,
@@ -479,7 +512,39 @@ void publisher_task(void* argument) {
                     stats.maximum_lateness_us,
                     timer_notifications,
                     coalesced_notifications);
+                if (g_runtime_program.has_value()) {
+                    std::printf(
+                        ",\"sourceMode\":\"%s\",\"sourceRevision\":%u",
+                        runtime_mode_name(g_runtime_program->mode()),
+                        static_cast<unsigned>(g_runtime_program->revision()));
+                }
+                std::printf("}\n");
                 std::fflush(stdout);
+                continue;
+            }
+            case sampled_values::InjectorControlCommandKind::set_channel:
+            case sampled_values::InjectorControlCommandKind::ramp_channel: {
+                if (!g_injector_controller.running() || !injector.has_value() ||
+                    !g_runtime_program.has_value()) {
+                    print_control_error(command_name(command.kind), "source-not-editable");
+                    continue;
+                }
+                const auto current_segment = injector->segment_index();
+                if (!g_runtime_program->is_hold_segment(current_segment)) {
+                    print_control_error(command_name(command.kind), "source-busy");
+                    continue;
+                }
+                const auto staged = command.kind ==
+                        sampled_values::InjectorControlCommandKind::set_channel
+                    ? g_runtime_program->stage_manual_edit(
+                        current_segment, command.channel_edit)
+                    : g_runtime_program->stage_ramp_edit(
+                        current_segment, command.channel_edit);
+                if (!staged) {
+                    print_control_error(command_name(command.kind), "invalid-runtime-edit");
+                    continue;
+                }
+                print_control_ack(command.kind);
                 continue;
             }
             case sampled_values::InjectorControlCommandKind::configure:
@@ -496,6 +561,7 @@ void publisher_task(void* argument) {
                     const auto snapshot = g_injector_controller.snapshot();
                     publisher.reset(0U);
                     pending_sample.reset();
+                    g_runtime_program.reset();
                     if (snapshot.configuration.scenario ==
                         sampled_values::InjectorScenarioKind::protection_fault) {
                         injector.emplace(
@@ -504,15 +570,17 @@ void publisher_task(void* argument) {
                             kSampleRateHz,
                             true);
                     } else {
+                        g_runtime_program.emplace(
+                            sampled_values::make_balanced_4i4v_profile());
                         injector.emplace(
-                            std::span<const sampled_values::InjectorScenarioSegment>{
-                                normal_scenario},
+                            g_runtime_program->segments(),
                             kSampleRateHz,
                             true);
                     }
                     if (!injector->valid()) {
                         g_injector_controller.set_fault();
                         injector.reset();
+                        g_runtime_program.reset();
                         print_control_error("start", "invalid-injector-scenario");
                         continue;
                     }
@@ -523,6 +591,7 @@ void publisher_task(void* argument) {
                 if (control_status == sampled_values::InjectorControlStatus::ok) {
                     pending_sample.reset();
                     injector.reset();
+                    g_runtime_program.reset();
                     publisher.reset(0U);
                 }
                 break;
@@ -557,6 +626,7 @@ void publisher_task(void* argument) {
                 ESP_LOGE(kTag, "Deterministic injector stopped unexpectedly");
                 g_injector_controller.set_fault();
                 injector.reset();
+                g_runtime_program.reset();
                 print_control_error("runtime", "injector-finished");
                 continue;
             }
@@ -573,6 +643,7 @@ void publisher_task(void* argument) {
                     static_cast<unsigned>(publisher.next_sample_count()));
                 g_injector_controller.set_fault();
                 injector.reset();
+                g_runtime_program.reset();
                 pending_sample.reset();
                 print_control_error("runtime", "sample-counter-divergence");
                 continue;
@@ -582,6 +653,7 @@ void publisher_task(void* argument) {
                 ESP_LOGE(kTag, "Deterministic payload update failed");
                 g_injector_controller.set_fault();
                 injector.reset();
+                g_runtime_program.reset();
                 pending_sample.reset();
                 print_control_error("runtime", "payload-write-failed");
                 continue;
@@ -600,6 +672,7 @@ void publisher_task(void* argument) {
                 static_cast<unsigned>(result.encode_status));
             g_injector_controller.set_fault();
             injector.reset();
+            g_runtime_program.reset();
             pending_sample.reset();
             print_control_error("runtime", "publish-failed");
             continue;
