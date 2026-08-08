@@ -20,6 +20,7 @@ Useful Espressif references:
 
 - ESP32-P4 Ethernet: https://docs.espressif.com/projects/esp-idf/en/stable/esp32p4/api-reference/network/esp_eth.html
 - ESP32-P4 getting started: https://docs.espressif.com/projects/esp-idf/en/stable/esp32p4/get-started/index.html
+- ESP-IDF C++ support: https://docs.espressif.com/projects/esp-idf/en/stable/esp32p4/api-guides/cplusplus.html
 
 ## What this branch provides
 
@@ -32,10 +33,32 @@ Useful Espressif references:
 - `embedded::RawEthernetPort` is the platform-neutral raw Ethernet contract.
 - `ports/esp_idf` maps that contract to `esp_eth_transmit()` and exposes
   `esp_timer_get_time()` as a monotonic microsecond clock.
+- the ESP-IDF component intentionally cross-compiles only the first SV transmit
+  slice rather than pulling the complete desktop MMS/discovery stack into the
+  first firmware image.
 
 The steady-state publisher path is `noexcept` and does not resize the frame,
 ASDU, or payload containers. Allocate and size configuration objects before the
 publisher loop starts.
+
+## Transitional C++ exception requirement
+
+ESP-IDF disables C++ exceptions by default. The shared desktop BER, Ethernet,
+and SV codec source files still contain exception-based convenience/validation
+APIs even though the first publisher hot path uses status-returning
+`encode_into()` and raw-Ethernet operations.
+
+For this first cross-compile/hardware proof, enable:
+
+```text
+CONFIG_COMPILER_CXX_EXCEPTIONS=y
+```
+
+The repository's `ports/esp_idf/smoke_app/sdkconfig.defaults` already does this
+for CI. This is a **transitional portability dependency**, not a claim that
+exceptions belong in the 4 kHz real-time path. Removing the remaining
+compile-time dependency on C++ exceptions is tracked as a separate embedded
+hardening gate. Do not throw exceptions from the publisher task.
 
 ## Reference first profile
 
@@ -71,9 +94,10 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(arstack_sv_trial)
 ```
 
-The component compiles only the embedded protocol boundary plus the ESP-IDF
-adapter. Host TCP discovery, PCAP, COMTRADE, SCL parsing, filesystem and CLI
-sources are intentionally excluded from firmware.
+The component compiles only the dependencies needed for the first SV transmit
+slice plus the ESP-IDF adapter. Host TCP discovery, reporting, GOOSE, PCAP,
+COMTRADE, SCL parsing, filesystem and CLI sources are intentionally excluded
+from this first firmware target.
 
 ## Minimal publisher setup
 
@@ -174,6 +198,8 @@ For the first hardware proof:
 6. If `esp_eth_transmit()` returns timeout/error, retain the same `smpCnt`; the
    next successful transmission will not silently skip a publisher-generated
    counter value.
+7. Do not use C++ exception control flow in the publisher task even while the
+   transitional project-level exception setting is enabled.
 
 ESP-IDF documents that short/frequent Ethernet traffic can require DMA descriptor
 and buffer tuning. If TX cannot sustain the target, inspect Ethernet DMA buffer
