@@ -2,6 +2,7 @@
 #pragma once
 
 #include "ariec61850/mms/association_runtime.hpp"
+#include "ariec61850/mms/control_block_read.hpp"
 #include "ariec61850/mms/reporting.hpp"
 #include "ariec61850/mms/tcp_transport.hpp"
 
@@ -73,6 +74,16 @@ struct MmsLiveDiscoveryResult final {
     std::vector<MmsVariableTypeEvidence> variable_types;
     std::vector<MmsDataSetDirectoryEvidence> data_set_directories;
     std::vector<MmsReportControlEvidence> report_controls;
+
+    // Optional C++ extension beyond the C# inventory-only control-block model.
+    // The live_discover CLI fills this only when the bounded read-only deep
+    // reader is explicitly requested. Keeping the evidence separate from the
+    // structural NameList inventory prevents mutable runtime values from
+    // changing structural parity fingerprints.
+    bool control_block_value_reads_requested{};
+    std::size_t control_block_value_candidate_count{};
+    std::vector<MmsControlBlockReadResult> control_block_reads;
+
     std::vector<std::string> diagnostics;
 
     [[nodiscard]] std::size_t domain_count() const noexcept;
