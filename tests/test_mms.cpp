@@ -122,6 +122,7 @@ void mms_data_codec_preserves_bit_strings_and_unknown_tags() {
     const auto unknown_decoded = MmsDataCodec::decode_all(unknown_encoded);
     CHECK(unknown_decoded.size() == 1U);
     CHECK(unknown_decoded[0].kind() == MmsDataKind::unknown);
+    CHECK(decoded[0].kind() == MmsDataKind::unknown);
     CHECK(unknown_decoded[0].unknown_tag_number().value() == 45);
     CHECK(unknown_decoded[0].raw_value() == ByteVector({0xDEU, 0xADU}));
 }
@@ -234,6 +235,21 @@ void rcb_contention_resvtms_precedes_resv_for_flapping() {
     CHECK(!result.is_flapping);
 }
 
+void rcb_contention_dash_resvtms_does_not_fallback_to_resv() {
+    using namespace ar::iec61850::mms;
+    const std::vector<MmsRcbContentionProbeObservation> observations{
+        contention_observation(1U, "false", "false", "-", "", "7"),
+        contention_observation(2U, "false", "off", "-", "", "7")};
+
+    const auto result = MmsRcbContentionProbeEvaluator::evaluate(
+        "IEDLD0/LLN0.BR.brcb01", observations, 60);
+    CHECK(!result.is_contended);
+    CHECK(!result.is_busy_at_probe);
+    CHECK(!result.is_flapping);
+    CHECK(result.cooldown_seconds == 0);
+    CHECK(result.decision == "StableProceed");
+}
+
 } // namespace
 
 int main() {
@@ -246,7 +262,8 @@ int main() {
         {"RCB contention busy", rcb_contention_busy_matches_csharp},
         {"RCB contention ResvTms busy", rcb_contention_positive_resvtms_is_busy_without_flapping},
         {"RCB contention flapping", rcb_contention_dataset_or_confrev_change_flaps},
-        {"RCB contention ResvTms precedence", rcb_contention_resvtms_precedes_resv_for_flapping}};
+        {"RCB contention ResvTms precedence", rcb_contention_resvtms_precedes_resv_for_flapping},
+        {"RCB contention dash ResvTms", rcb_contention_dash_resvtms_does_not_fallback_to_resv}};
 
     std::size_t passed = 0;
     for (const auto& [name, test] : tests) {
