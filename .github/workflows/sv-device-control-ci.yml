@@ -1,0 +1,50 @@
+name: SV Device Control CI
+
+on:
+  push:
+    branches:
+      - agent/esp32p4-sv-publisher-first-trial
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows / MSVC
+          - os: ubuntu-24.04
+            name: Linux / GCC portability
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S tools/device_ctl -B build-device-ctl
+
+      - name: Build
+        run: cmake --build build-device-ctl --config Release --parallel
+
+      - name: CLI help smoke (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\build-device-ctl\Release\ariec61850_sv_device_ctl.exe --help
+
+      - name: CLI help smoke (Linux)
+        if: runner.os == 'Linux'
+        run: ./build-device-ctl/ariec61850_sv_device_ctl --help
+
+      - name: Upload Windows device controller
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-sv-device-control-${{ github.sha }}
+          path: build-device-ctl/Release/ariec61850_sv_device_ctl.exe
+          if-no-files-found: error
