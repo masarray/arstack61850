@@ -85,6 +85,11 @@ public:
     [[nodiscard]] std::uint32_t revision() const noexcept { return revision_; }
     [[nodiscard]] InjectorRuntimeSourceMode mode() const noexcept { return mode_; }
 
+    [[nodiscard]] bool is_hold_segment(const std::size_t segment_index) const noexcept {
+        return segment_index < segments_.size() &&
+            segments_[segment_index].duration_samples == 0U;
+    }
+
     [[nodiscard]] const ChannelProfiles& profile_at(
         const std::size_t segment_index) const noexcept {
         return segments_[segment_index % segments_.size()].channels;
@@ -131,7 +136,7 @@ public:
     [[nodiscard]] bool stage_manual(
         const std::size_t current_segment,
         const ChannelProfiles& target) noexcept {
-        if (current_segment >= segments_.size()) {
+        if (!is_hold_segment(current_segment)) {
             return false;
         }
 
@@ -146,7 +151,7 @@ public:
     [[nodiscard]] bool stage_manual_edit(
         const std::size_t current_segment,
         const InjectorChannelEdit& edit) noexcept {
-        if (current_segment >= segments_.size()) {
+        if (!is_hold_segment(current_segment)) {
             return false;
         }
         auto target = profile_at(current_segment);
@@ -160,7 +165,7 @@ public:
         const std::size_t current_segment,
         const ChannelProfiles& target,
         const std::uint32_t duration_samples) noexcept {
-        if (current_segment >= segments_.size() || duration_samples < 2U) {
+        if (!is_hold_segment(current_segment) || duration_samples < 2U) {
             return false;
         }
 
@@ -180,7 +185,7 @@ public:
     [[nodiscard]] bool stage_ramp_edit(
         const std::size_t current_segment,
         const InjectorChannelEdit& edit) noexcept {
-        if (current_segment >= segments_.size() || edit.duration_samples < 2U) {
+        if (!is_hold_segment(current_segment) || edit.duration_samples < 2U) {
             return false;
         }
         auto target = profile_at(current_segment);
@@ -193,7 +198,7 @@ public:
     [[nodiscard]] bool stage_sequence(
         const std::size_t current_segment,
         const std::span<const InjectorSequenceState> states) noexcept {
-        if (current_segment >= segments_.size() || states.empty() ||
+        if (!is_hold_segment(current_segment) || states.empty() ||
             states.size() + 1U >= segments_.size()) {
             return false;
         }
