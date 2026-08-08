@@ -2,7 +2,10 @@
 
 #include "ariec61850/ethernet/ethernet.hpp"
 #include "ariec61850/ports/esp_idf/ethernet_port.hpp"
+#include "ariec61850/sampled_values/deterministic_injector.hpp"
 #include "ariec61850/sampled_values/frame.hpp"
+#include "ariec61850/sampled_values/injector_controller.hpp"
+#include "ariec61850/sampled_values/injector_presets.hpp"
 #include "ariec61850/sampled_values/payload_writer.hpp"
 #include "ariec61850/sampled_values/publisher.hpp"
 
@@ -29,9 +32,9 @@ using namespace ar::iec61850;
 constexpr std::uint32_t kSampleRateHz = 4'000U;
 constexpr std::uint64_t kPublishIntervalUs = 250U;
 constexpr std::uint16_t kSampleCountWrap = 4'000U;
-constexpr std::size_t kChannelCount = 8U;
 constexpr std::size_t kPayloadBytes =
-    kChannelCount * sampled_values::SampledValuesPayloadWriter::int32_quality_pair_bytes;
+    sampled_values::injector_channel_count *
+    sampled_values::SampledValuesPayloadWriter::int32_quality_pair_bytes;
 
 // Waveshare ESP32-P4-ETH: IP101 PHY on RMII. ESP32-P4's
 // ETH_ESP32_EMAC_DEFAULT_CONFIG() supplies the matching default RMII data-plane
@@ -47,6 +50,7 @@ const char* kTag = "arstack_sv_trial";
 EventGroupHandle_t g_link_events{};
 TaskHandle_t g_publisher_task{};
 esp_eth_handle_t g_eth_handle{};
+sampled_values::InjectorController g_injector_controller{};
 
 void ethernet_event_handler(
     void* argument,
@@ -128,7 +132,7 @@ sampled_values::SampledValuesFrame make_sv_frame(
         0x01U, 0x0CU, 0xCDU, 0x04U, 0x00U, 0x01U};
 
     sampled_values::SampledValueAsdu asdu;
-    asdu.sv_id = "ARSTACK61850_P4_TRIAL";
+    asdu.sv_id = "ARSTACK61850_INJECTOR";
     asdu.data_set_reference = "ARSTACK61850/LLN0$PhsMeas1";
     asdu.configuration_revision = 1U;
     asdu.sample_synchronization = 0U;
@@ -146,24 +150,23 @@ sampled_values::SampledValuesFrame make_sv_frame(
         sampled_values::SampledValuesPdu{{asdu}}};
 }
 
-bool update_synthetic_payload(
+bool write_injector_payload(
     sampled_values::SampledValueAsdu& asdu,
-    const std::uint16_t sample_count) noexcept {
+    const sampled_values::InjectorSample& sample) noexcept {
     if (asdu.sample_payload.size() != kPayloadBytes) {
         return false;
     }
 
     const auto payload = std::span<std::uint8_t>{
         asdu.sample_payload.data(), asdu.sample_payload.size()};
-    const auto count = static_cast<std::int32_t>(sample_count);
-
-    for (std::size_t channel = 0U; channel < kChannelCount; ++channel) {
-        // Deterministic synthetic values make captures easy to validate without
-        // floating-point work or ADC dependencies in this first transport proof.
-        const auto value =
-            count * 1'000 + static_cast<std::int32_t>(channel) * 100'000;
+    for (std::size_t channel = 0U;
+         channel < sampled_values::injector_channel_count;
+         ++channel) {
         if (!sampled_values::SampledValuesPayloadWriter::write_int32_quality_pair(
-                payload, channel, value, 0U)) {
+                payload,
+                channel,
+                sample.values[channel],
+                sample.qualities[channel])) {
             return false;
         }
     }
@@ -208,8 +211,29 @@ void publisher_task(void* argument) {
             0U,
             true});
 
-    if (!publisher.valid()) {
-        ESP_LOGE(kTag, "SV publisher configuration is invalid");
+    const auto profile = sampled_values::make_balanced_4i4v_profile();
+    const std::array<sampled_values::InjectorScenarioSegment, 1U> scenario{
+        sampled_values::make_hold_segment(profile)};
+    sampled_values::DeterministicSvInjector injector{
+        scenario,
+        kSampleRateHz,
+        true};
+
+    if (!publisher.valid() || !injector.valid()) {
+        ESP_LOGE(kTag, "SV publisher/injector configuration is invalid");
+        g_injector_controller.set_fault();
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    if (g_injector_controller.configure({
+            kSampleRateHz,
+            sampled_values::InjectorScenarioKind::normal}) !=
+            sampled_values::InjectorControlStatus::ok ||
+        g_injector_controller.arm() != sampled_values::InjectorControlStatus::ok ||
+        g_injector_controller.start() != sampled_values::InjectorControlStatus::ok) {
+        ESP_LOGE(kTag, "Injector lifecycle initialization failed");
+        g_injector_controller.set_fault();
         vTaskDelete(nullptr);
         return;
     }
@@ -222,16 +246,19 @@ void publisher_task(void* argument) {
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(timer, kPublishIntervalUs));
 
+    const auto control = g_injector_controller.snapshot();
     ESP_LOGI(
         kTag,
-        "SV publisher active: 4000/s, APPID=0x4001, dst=01:0c:cd:04:00:01, payload=%u bytes",
-        static_cast<unsigned>(kPayloadBytes));
+        "Deterministic SV injector active: 4000/s, 50Hz, 4I+4V, APPID=0x4001, rev=%u run=%" PRIu64,
+        static_cast<unsigned>(control.configuration_revision),
+        control.run_sequence);
 
     std::uint64_t timer_notifications{};
     std::uint64_t coalesced_notifications{};
     std::uint64_t report_notifications{};
+    std::optional<sampled_values::InjectorSample> pending_sample;
 
-    while (true) {
+    while (g_injector_controller.running()) {
         const auto notifications = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         timer_notifications += notifications;
         report_notifications += notifications;
@@ -243,24 +270,63 @@ void publisher_task(void* argument) {
             continue;
         }
 
-        auto& asdu = frame.pdu.asdus.front();
-        if (!update_synthetic_payload(asdu, publisher.next_sample_count())) {
-            ESP_LOGE(kTag, "Synthetic payload update failed");
-            continue;
+        if (!pending_sample.has_value()) {
+            sampled_values::InjectorSample next_sample{};
+            if (!injector.step(next_sample)) {
+                ESP_LOGE(kTag, "Deterministic injector stopped unexpectedly");
+                g_injector_controller.set_fault();
+                break;
+            }
+            pending_sample = next_sample;
+
+            const auto expected_sample_count = static_cast<std::uint16_t>(
+                next_sample.sample_index % static_cast<std::uint64_t>(kSampleCountWrap));
+            if (publisher.next_sample_count() != expected_sample_count) {
+                ESP_LOGE(
+                    kTag,
+                    "Logical sample/smpCnt divergence: sample=%" PRIu64 " expected=%u publisher=%u",
+                    next_sample.sample_index,
+                    static_cast<unsigned>(expected_sample_count),
+                    static_cast<unsigned>(publisher.next_sample_count()));
+                g_injector_controller.set_fault();
+                break;
+            }
+
+            if (!write_injector_payload(frame.pdu.asdus.front(), next_sample)) {
+                ESP_LOGE(kTag, "Deterministic payload update failed");
+                g_injector_controller.set_fault();
+                break;
+            }
         }
 
         const auto result = publisher.poll(clock.monotonic_us());
-        (void)result;
+        if (result.status == sampled_values::SampledValuesPublishStatus::sent) {
+            pending_sample.reset();
+        } else if (result.status != sampled_values::SampledValuesPublishStatus::not_due) {
+            ESP_LOGE(
+                kTag,
+                "SV publish fault: status=%u io=%u encode=%u",
+                static_cast<unsigned>(result.status),
+                static_cast<unsigned>(result.io_status),
+                static_cast<unsigned>(result.encode_status));
+            g_injector_controller.set_fault();
+            break;
+        }
 
         if (report_notifications >= kSampleRateHz) {
             report_notifications -= kSampleRateHz;
             const auto& stats = publisher.statistics();
+            const auto snapshot = g_injector_controller.snapshot();
             ESP_LOGI(
                 kTag,
-                "QA sent=%" PRIu64 " txFail=%" PRIu64 " encFail=%" PRIu64
+                "QA state=%u run=%" PRIu64 " sample=%" PRIu64
+                " sent=%" PRIu64 " txFail=%" PRIu64 " encFail=%" PRIu64
                 " late=%" PRIu64 " maxLateUs=%" PRIu64
                 " timerTicks=%" PRIu64 " coalesced=%" PRIu64
                 " heap=%u minHeap=%u",
+                static_cast<unsigned>(snapshot.state),
+                snapshot.run_sequence,
+                injector.sample_index(),
                 stats.frames_sent,
                 stats.transmit_failures,
                 stats.encode_failures,
@@ -272,6 +338,24 @@ void publisher_task(void* argument) {
                 static_cast<unsigned>(esp_get_minimum_free_heap_size()));
         }
     }
+
+    if (timer != nullptr) {
+        (void)esp_timer_stop(timer);
+        (void)esp_timer_delete(timer);
+    }
+
+    const auto final_state = g_injector_controller.snapshot();
+    const auto& stats = publisher.statistics();
+    ESP_LOGW(
+        kTag,
+        "SV injector stopped: state=%u sent=%" PRIu64 " txFail=%" PRIu64
+        " encFail=%" PRIu64 " sample=%" PRIu64,
+        static_cast<unsigned>(final_state.state),
+        stats.frames_sent,
+        stats.transmit_failures,
+        stats.encode_failures,
+        injector.sample_index());
+    vTaskDelete(nullptr);
 }
 
 } // namespace
