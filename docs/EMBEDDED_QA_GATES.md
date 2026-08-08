@@ -41,14 +41,17 @@ This gate proves that the code is accepted by the real ESP32-P4 RISC-V compiler/
 
 The ESP-IDF workflow must fail if any required deployment output is missing, empty, malformed, targets another chip, or disagrees with the expected first-trial flash layout.
 
-The workflow validates the ESP-IDF-generated `flasher_args.json` directly and requires:
+The authoritative deployment source for this gate is ESP-IDF's generated `flasher_args.json`. Offset strings are normalized to numeric addresses before comparison so equivalent formatting cannot create a false failure. The gate requires:
 
 - `extra_esptool_args.chip == esp32p4`;
 - bootloader at `0x2000`;
 - partition table at `0x8000`;
 - application at `0x10000`;
-- every file referenced by that manifest exists and is non-empty;
-- the text `flash_args` describes the same three-image layout.
+- every file referenced by that three-image manifest exists and is non-empty;
+- the generated `flash_args` companion exists and is non-empty;
+- the repository-controlled `sdkconfig.defaults` baseline exists and is non-empty.
+
+`flash_args` is retained for flashing convenience but is not separately reparsed as a second authority; duplicating ESP-IDF's own manifest interpretation would make the CI brittle without adding independent deployment evidence.
 
 The retained `esp32p4-sv-trial-firmware-*` artifact contains:
 
@@ -60,9 +63,12 @@ The retained `esp32p4-sv-trial-firmware-*` artifact contains:
 - `flash_args`;
 - validated `flasher_args.json`;
 - `sdkconfig.defaults` used as the repository-controlled configuration baseline;
-- generated `ARSTACK_BUILD_PROFILE.json` recording `FLASHABLE/READY`, target chip, and flash layout;
-- `SHA256SUMS` covering the deployment-critical images, manifests, and configuration baseline;
+- generated `ARSTACK_BUILD_PROFILE.json` recording `FLASHABLE/READY`, target chip, image sizes, and flash layout;
+- generated `ARSTACK_BUILD_FILE_LIST.txt` inventory for reproducibility/debugging;
+- `SHA256SUMS` covering the deployment-critical images, manifests, inventory, and configuration baseline;
 - firmware-specific flashing/behavior README.
+
+If Gate C fails, CI uploads a short-lived `esp32p4-gate-c-diagnostics-*` artifact containing the actual generated manifest, flash arguments, inventory, and core images. This keeps failures inspectable without weakening the success criteria.
 
 Passing Gate C means a developer can download a CI-produced firmware set instead of rebuilding it locally, verify the retained files, and use the ESP-IDF-generated flash layout for the target board.
 
