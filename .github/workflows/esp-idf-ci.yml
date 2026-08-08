@@ -45,35 +45,47 @@ jobs:
           test -f "$build/partition_table/partition-table.bin"
           test -f "$build/flash_args"
           test -f "$build/flasher_args.json"
-          test -f "$build/project_description.json"
-          test -f "$build/config/sdkconfig.h"
           test -f "$app/sdkconfig.defaults"
           python3 -m json.tool "$build/flasher_args.json" >/dev/null
           python3 - <<'PY'
           import json
-          import re
           from pathlib import Path
 
           build = Path('ports/esp_idf/sv_trial_app/build')
-          description = json.loads((build / 'project_description.json').read_text(encoding='utf-8'))
-          target = description.get('target')
-          if target != 'esp32p4':
-              raise SystemExit(f'expected ESP-IDF target esp32p4, got {target!r}')
+          manifest = json.loads((build / 'flasher_args.json').read_text(encoding='utf-8'))
+          extra = manifest.get('extra_esptool_args', {})
+          chip = extra.get('chip')
+          if chip != 'esp32p4':
+              raise SystemExit(f'expected flasher chip esp32p4, got {chip!r}')
 
-          config = (build / 'config/sdkconfig.h').read_text(encoding='utf-8')
-          p4_symbol = re.search(r'^#define\s+CONFIG_IDF_TARGET_ESP32P4\s+1\s*$', config, re.MULTILINE)
-          target_string = re.search(r'^#define\s+CONFIG_IDF_TARGET\s+"esp32p4"\s*$', config, re.MULTILINE)
-          if p4_symbol is None and target_string is None:
-              raise SystemExit('resolved ESP-IDF config does not identify ESP32-P4')
+          expected = {
+              '0x2000': 'bootloader/bootloader.bin',
+              '0x8000': 'partition_table/partition-table.bin',
+              '0x10000': 'arstack61850_esp32p4_sv_trial.bin',
+          }
+          flash_files = manifest.get('flash_files', {})
+          if flash_files != expected:
+              raise SystemExit(
+                  f'unexpected flash layout: expected {expected!r}, got {flash_files!r}')
+          for offset, relative in expected.items():
+              candidate = build / relative
+              if not candidate.is_file():
+                  raise SystemExit(f'flash file {relative!r} at {offset} is missing')
+              if candidate.stat().st_size <= 0:
+                  raise SystemExit(f'flash file {relative!r} at {offset} is empty')
+
+          flash_args = (build / 'flash_args').read_text(encoding='utf-8')
+          for offset, relative in expected.items():
+              if f'{offset} {relative}' not in flash_args:
+                  raise SystemExit(f'flash_args missing {offset} {relative}')
 
           evidence = {
               'status': 'FLASHABLE/READY',
-              'target': target,
-              'project_name': description.get('project_name'),
-              'project_version': description.get('project_version'),
-              'elf_file': description.get('app_elf'),
-              'build_dir': str(build),
-              'config_evidence': 'build/config/sdkconfig.h',
+              'target': chip,
+              'flash_files': expected,
+              'flasher_manifest': 'build/flasher_args.json',
+              'flash_args': 'build/flash_args',
+              'sdkconfig_defaults': 'sdkconfig.defaults',
           }
           (build / 'ARSTACK_BUILD_PROFILE.json').write_text(
               json.dumps(evidence, indent=2, sort_keys=True) + '\n',
@@ -89,12 +101,10 @@ jobs:
               build/partition_table/partition-table.bin \
               build/flash_args \
               build/flasher_args.json \
-              build/project_description.json \
-              build/config/sdkconfig.h \
               build/ARSTACK_BUILD_PROFILE.json \
               sdkconfig.defaults > build/SHA256SUMS
           )
-          echo "FLASHABLE/READY: complete ESP32-P4 firmware set verified."
+          echo "FLASHABLE/READY: ESP32-P4 flasher manifest and complete firmware set verified."
 
       - name: Upload ESP32-P4 flashable firmware
         uses: actions/upload-artifact@v4
@@ -110,8 +120,6 @@ jobs:
             ports/esp_idf/sv_trial_app/build/partition_table/partition-table.bin
             ports/esp_idf/sv_trial_app/build/flash_args
             ports/esp_idf/sv_trial_app/build/flasher_args.json
-            ports/esp_idf/sv_trial_app/build/project_description.json
-            ports/esp_idf/sv_trial_app/build/config/sdkconfig.h
             ports/esp_idf/sv_trial_app/build/ARSTACK_BUILD_PROFILE.json
             ports/esp_idf/sv_trial_app/build/SHA256SUMS
             ports/esp_idf/sv_trial_app/sdkconfig.defaults
