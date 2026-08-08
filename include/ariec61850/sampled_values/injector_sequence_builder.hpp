@@ -16,11 +16,14 @@ class InjectorSequenceBuilder final {
 public:
     using ChannelProfiles = InjectorRuntimeProgram::ChannelProfiles;
 
-    void begin(const ChannelProfiles& base) noexcept {
+    void begin(
+        const ChannelProfiles& base,
+        const std::uint32_t source_revision) noexcept {
         base_ = base;
         working_ = base;
+        source_revision_ = source_revision;
         state_count_ = 0U;
-        active_ = true;
+        active_ = source_revision != 0U;
         state_open_ = false;
         pending_duration_samples_ = 0U;
         pending_transition_ = InjectorSegmentTransition::step;
@@ -30,12 +33,20 @@ public:
         active_ = false;
         state_open_ = false;
         state_count_ = 0U;
+        source_revision_ = 0U;
         pending_duration_samples_ = 0U;
     }
 
     [[nodiscard]] bool active() const noexcept { return active_; }
     [[nodiscard]] bool state_open() const noexcept { return state_open_; }
     [[nodiscard]] std::size_t state_count() const noexcept { return state_count_; }
+    [[nodiscard]] std::uint32_t source_revision() const noexcept {
+        return source_revision_;
+    }
+    [[nodiscard]] bool based_on_revision(
+        const std::uint32_t source_revision) const noexcept {
+        return active_ && source_revision_ == source_revision;
+    }
 
     [[nodiscard]] bool begin_state(
         const std::uint32_t duration_samples,
@@ -85,6 +96,7 @@ private:
     ChannelProfiles working_{};
     std::array<InjectorSequenceState, injector_sequence_builder_capacity> states_{};
     std::size_t state_count_{};
+    std::uint32_t source_revision_{};
     std::uint32_t pending_duration_samples_{};
     InjectorSegmentTransition pending_transition_{InjectorSegmentTransition::step};
     bool active_{};
