@@ -97,12 +97,24 @@ jobs:
       - name: Build embedded profile
         run: cmake --build build-embedded --parallel
 
-      - name: Test embedded full-link smoke
-        run: ctest --test-dir build-embedded --output-on-failure
+      - name: Test embedded host simulation
+        run: >-
+          ctest --test-dir build-embedded
+          --output-on-failure
+          --output-junit embedded-ctest.xml
 
       - name: Report host-sim footprint
         shell: bash
         run: |
           if command -v size >/dev/null 2>&1; then
             size build-embedded/ariec61850_embedded_link_smoke || true
+            size build-embedded/ariec61850_embedded_sv_publisher_smoke || true
           fi
+
+      - name: Upload host-simulation QA report
+        uses: actions/upload-artifact@v4
+        with:
+          name: embedded-host-sim-${{ matrix.compiler }}-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: build-embedded/embedded-ctest.xml
