@@ -251,6 +251,44 @@ void live_type_templates_and_variable_type_projection_match_csharp_shape() {
     CHECK(json.find("\"proposedDoTypeId\":\"DO_INC_LLN0_Mod\"") != std::string::npos);
     CHECK(json.find("\"typeTemplates\":[") != std::string::npos);
     CHECK(json.find("\"variableTypeDiscoveries\":[") != std::string::npos);
+
+    auto discovery_without_types = discovery;
+    discovery_without_types.variable_types.clear();
+    const auto model_without_types = MmsLiveModelBuilder::build(discovery_without_types);
+    CHECK(model.structural_fingerprint_hex() ==
+          model_without_types.structural_fingerprint_hex());
+
+    auto dynamic_data_set_snapshot = model;
+    MmsLiveDataSet dynamic_data_set;
+    dynamic_data_set.reference = "TESTIEDLD0/LLN0.DynamicSet01";
+    dynamic_data_set.domain = "TESTIEDLD0";
+    dynamic_data_set.logical_node = "LLN0";
+    dynamic_data_set.name = "DynamicSet01";
+    dynamic_data_set_snapshot.data_sets.push_back(dynamic_data_set);
+    CHECK(model.structural_fingerprint_hex() ==
+          dynamic_data_set_snapshot.structural_fingerprint_hex());
+    CHECK(model.runtime_snapshot_fingerprint_hex() !=
+          dynamic_data_set_snapshot.runtime_snapshot_fingerprint_hex());
+
+    MmsLiveReportControl unbound_rcb;
+    unbound_rcb.reference = "TESTIEDLD0/LLN0.brcbA01";
+    unbound_rcb.domain = "TESTIEDLD0";
+    unbound_rcb.logical_node = "LLN0";
+    unbound_rcb.name = "brcbA01";
+    unbound_rcb.buffered = true;
+    unbound_rcb.data_set_binding_status = "Unbound";
+    unbound_rcb.enabled_state = "false";
+
+    auto unbound_snapshot = model;
+    unbound_snapshot.report_controls.push_back(unbound_rcb);
+    auto bound_snapshot = unbound_snapshot;
+    bound_snapshot.report_controls[0].data_set_binding_status = "Bound";
+    bound_snapshot.report_controls[0].data_set_reference =
+        "TESTIEDLD0/LLN0.DynamicSet01";
+    CHECK(unbound_snapshot.structural_fingerprint_hex() ==
+          bound_snapshot.structural_fingerprint_hex());
+    CHECK(unbound_snapshot.runtime_snapshot_fingerprint_hex() !=
+          bound_snapshot.runtime_snapshot_fingerprint_hex());
 }
 
 } // namespace
