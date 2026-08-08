@@ -7,3 +7,4 @@
 #include "ariec61850/mms/live_model_chunk04.ipp"
 #include "ariec61850/mms/live_model_chunk05.ipp"
 #include "ariec61850/mms/live_model_chunk06.ipp"
+#include "ariec61850/mms/live_model_fingerprint.ipp"
