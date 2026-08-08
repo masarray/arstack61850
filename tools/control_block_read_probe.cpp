@@ -79,10 +79,10 @@ using namespace ar::iec61850;
         return std::to_string(std::get<std::uint64_t>(value.value()));
     case mms::MmsDataKind::floating_point: {
         std::ostringstream output;
-        if (const auto* number = std::get_if<float>(&value.value())) {
-            output << *number;
-        } else if (const auto* number = std::get_if<double>(&value.value())) {
-            output << *number;
+        if (const auto* float_value = std::get_if<float>(&value.value())) {
+            output << *float_value;
+        } else if (const auto* double_value = std::get_if<double>(&value.value())) {
+            output << *double_value;
         }
         return output.str();
     }
