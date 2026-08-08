@@ -62,11 +62,17 @@ def run_cycle(binary: pathlib.Path, args: argparse.Namespace) -> tuple[dict[str,
 
 
 def parity(root: pathlib.Path, expected: pathlib.Path, observed: pathlib.Path, output: pathlib.Path) -> int:
-    script = root / "scripts" / "compare-live-model-parity.py"
+    script = root / "tools" / "compare_live_model_json.py"
     process = subprocess.run(
-        [sys.executable, str(script), str(expected), str(observed), "--output", str(output)],
+        [sys.executable, str(script), str(expected), str(observed), "--json"],
+        capture_output=True,
+        text=True,
         check=False,
     )
+    if process.stdout:
+        output.write_text(process.stdout, encoding="utf-8")
+    if process.stderr:
+        print(process.stderr, end="", file=sys.stderr)
     return process.returncode
 
 
@@ -100,7 +106,9 @@ def main() -> int:
     binary = find_binary(root, args.binary)
 
     cycles: list[dict[str, Any]] = []
-    fingerprints: list[str] = []
+    structural_fingerprints: list[str] = []
+    runtime_fingerprints: list[str] = []
+    legacy_fingerprints: list[str] = []
     parity_codes: list[int] = []
     for index in range(1, args.cycles + 1):
         evidence: dict[str, Any] = {"index": index, "success": False}
@@ -110,13 +118,25 @@ def main() -> int:
             model_path.write_text(json.dumps(model, indent=2) + "\n", encoding="utf-8")
             coverage = model.get("coverage", {})
             warnings = model.get("warnings", [])
-            fingerprint = str(model.get("fingerprint", ""))
-            fingerprints.append(fingerprint)
+            legacy_fingerprint = str(model.get("fingerprint", ""))
+            structural_fingerprint = str(
+                model.get("structuralFingerprint", legacy_fingerprint)
+            )
+            runtime_fingerprint = str(model.get("runtimeSnapshotFingerprint", ""))
+            legacy_fingerprints.append(legacy_fingerprint)
+            structural_fingerprints.append(structural_fingerprint)
+            if runtime_fingerprint:
+                runtime_fingerprints.append(runtime_fingerprint)
             evidence.update({
                 "success": bool(coverage.get("logicalDeviceCount", 0))
                            and bool(coverage.get("dataAttributeCount", 0)),
                 "elapsedMs": elapsed_ms,
-                "fingerprint": fingerprint,
+                # Compatibility field now carries the structural identity used
+                # by acceptance. The original canonical value remains explicit.
+                "fingerprint": structural_fingerprint,
+                "structuralFingerprint": structural_fingerprint,
+                "runtimeSnapshotFingerprint": runtime_fingerprint,
+                "legacyCanonicalFingerprint": legacy_fingerprint,
                 "warningCount": len(warnings),
                 "coverage": coverage,
                 "stderr": stderr,
@@ -138,25 +158,45 @@ def main() -> int:
         cycles.append(evidence)
         print(
             f"Cycle {index}/{args.cycles}: success={evidence['success']} "
-            f"fingerprint={evidence.get('fingerprint', '')} "
+            f"structure={evidence.get('structuralFingerprint', '')} "
+            f"runtime={evidence.get('runtimeSnapshotFingerprint', '')} "
             f"warnings={evidence.get('warningCount', 0)}"
         )
         if index != args.cycles and args.interval_ms:
             time.sleep(args.interval_ms / 1000.0)
 
-    stable = bool(fingerprints) and len(set(fingerprints)) == 1 and len(fingerprints) == args.cycles
+    structural_stable = (
+        bool(structural_fingerprints)
+        and len(structural_fingerprints) == args.cycles
+        and len(set(structural_fingerprints)) == 1
+    )
+    runtime_stable = (
+        bool(runtime_fingerprints)
+        and len(runtime_fingerprints) == args.cycles
+        and len(set(runtime_fingerprints)) == 1
+    )
+    legacy_stable = (
+        bool(legacy_fingerprints)
+        and len(legacy_fingerprints) == args.cycles
+        and len(set(legacy_fingerprints)) == 1
+    )
     all_success = all(bool(cycle.get("success")) for cycle in cycles)
     warnings_ok = args.allow_warnings or all(cycle.get("warningCount", 0) == 0 for cycle in cycles)
     parity_ok = not args.expected_csharp_model or (
         len(parity_codes) == args.cycles and all(code == 0 for code in parity_codes)
     )
-    accepted = all_success and stable and warnings_ok and parity_ok
+    accepted = all_success and structural_stable and warnings_ok and parity_ok
     summary = {
-        "schemaVersion": "ariec61850-live-interop-v1",
+        "schemaVersion": "ariec61850-live-interop-v2",
         "endpoint": f"{args.host}:{args.port}",
         "binary": os.fspath(binary),
         "cycleCount": args.cycles,
-        "stableFingerprint": stable,
+        # Backward-compatible key, now intentionally structural.
+        "stableFingerprint": structural_stable,
+        "fingerprintKind": "structuralFingerprint",
+        "stableStructuralFingerprint": structural_stable,
+        "stableRuntimeSnapshotFingerprint": runtime_stable,
+        "stableLegacyCanonicalFingerprint": legacy_stable,
         "warningsAccepted": warnings_ok,
         "parityAccepted": parity_ok,
         "accepted": accepted,
@@ -165,7 +205,11 @@ def main() -> int:
     (output_dir / "interop-summary.json").write_text(
         json.dumps(summary, indent=2) + "\n", encoding="utf-8"
     )
-    print(f"Read-only interoperability acceptance: {'PASS' if accepted else 'FAIL'}")
+    print(
+        "Read-only interoperability acceptance: "
+        + ("PASS" if accepted else "FAIL")
+        + f" (structuralStable={structural_stable}, runtimeStable={runtime_stable})"
+    )
     return 0 if accepted else 1
 
 
