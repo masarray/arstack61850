@@ -113,8 +113,8 @@ struct AssociationAttemptProfile final {
         0x00U, 0xFDU, 0xE8U, 0x81U, 0x01U, 0x0AU, 0x82U, 0x01U,
         0x0AU, 0x83U, 0x01U, 0x06U, 0xA4U, 0x16U, 0x80U, 0x01U,
         0x01U, 0x81U, 0x03U, 0x05U, 0xF1U, 0x00U, 0x82U, 0x0CU,
-        0x03U, 0xEEU, 0x08U, 0x00U, 0x00U, 0x04U, 0x00U, 0x00U,
-        0x00U, 0x01U, 0xE7U, 0x18U,
+        0x03U, 0xEEU, 0x08U, 0x00U, 0x04U, 0x00U, 0x00U, 0x00U,
+        0x01U, 0xE7U, 0x18U,
     };
 }
 
@@ -594,12 +594,22 @@ MmsConfirmedExchangeResult MmsAssociationRuntime::exchange_confirmed(
         last_fault_ = exception.what();
         add_event(MmsAssociationEventKind::cancelled,
                   exception.what(), expected_invoke_id);
+        transport_.close();
+        invoke_router_.clear();
+        information_reports_.clear();
+        tpkt_decoder_.reset();
+        remote_cotp_reference_ = 0U;
         throw;
     } catch (const MmsTransportTimeoutError& exception) {
         state_ = MmsAssociationRuntimeState::faulted;
         last_fault_ = exception.what();
         add_event(MmsAssociationEventKind::timed_out,
                   exception.what(), expected_invoke_id);
+        transport_.close();
+        invoke_router_.clear();
+        information_reports_.clear();
+        tpkt_decoder_.reset();
+        remote_cotp_reference_ = 0U;
         throw;
     } catch (const std::exception& exception) {
         if (stop_token.stop_requested()) {
@@ -610,6 +620,11 @@ MmsConfirmedExchangeResult MmsAssociationRuntime::exchange_confirmed(
         } else {
             fail(exception.what());
         }
+        transport_.close();
+        invoke_router_.clear();
+        information_reports_.clear();
+        tpkt_decoder_.reset();
+        remote_cotp_reference_ = 0U;
         throw;
     }
 }
@@ -625,11 +640,21 @@ MmsPduEnvelope MmsAssociationRuntime::poll_once(
         state_ = MmsAssociationRuntimeState::faulted;
         last_fault_ = exception.what();
         add_event(MmsAssociationEventKind::cancelled, exception.what());
+        transport_.close();
+        invoke_router_.clear();
+        information_reports_.clear();
+        tpkt_decoder_.reset();
+        remote_cotp_reference_ = 0U;
         throw;
     } catch (const MmsTransportTimeoutError& exception) {
         state_ = MmsAssociationRuntimeState::faulted;
         last_fault_ = exception.what();
         add_event(MmsAssociationEventKind::timed_out, exception.what());
+        transport_.close();
+        invoke_router_.clear();
+        information_reports_.clear();
+        tpkt_decoder_.reset();
+        remote_cotp_reference_ = 0U;
         throw;
     } catch (const std::exception& exception) {
         if (stop_token.stop_requested()) {
@@ -639,6 +664,11 @@ MmsPduEnvelope MmsAssociationRuntime::poll_once(
         } else {
             fail(exception.what());
         }
+        transport_.close();
+        invoke_router_.clear();
+        information_reports_.clear();
+        tpkt_decoder_.reset();
+        remote_cotp_reference_ = 0U;
         throw;
     }
 }
