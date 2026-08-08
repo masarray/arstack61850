@@ -24,3 +24,41 @@ jobs:
           esp_idf_version: v6.0.2
           target: esp32p4
           path: ports/esp_idf/smoke_app
+
+      - name: Build flashable ESP32-P4 SV trial firmware
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.0.2
+          target: esp32p4
+          path: ports/esp_idf/sv_trial_app
+
+      - name: Verify flashable firmware outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          build=ports/esp_idf/sv_trial_app/build
+          test -f "$build/arstack61850_esp32p4_sv_trial.bin"
+          test -f "$build/arstack61850_esp32p4_sv_trial.elf"
+          test -f "$build/arstack61850_esp32p4_sv_trial.map"
+          test -f "$build/bootloader/bootloader.bin"
+          test -f "$build/partition_table/partition-table.bin"
+          test -f "$build/flash_args"
+          test -f "$build/flasher_args.json"
+          echo "Flashable ESP32-P4 firmware set is complete."
+
+      - name: Upload ESP32-P4 flashable firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32p4-sv-trial-firmware-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            ports/esp_idf/sv_trial_app/build/arstack61850_esp32p4_sv_trial.bin
+            ports/esp_idf/sv_trial_app/build/arstack61850_esp32p4_sv_trial.elf
+            ports/esp_idf/sv_trial_app/build/arstack61850_esp32p4_sv_trial.map
+            ports/esp_idf/sv_trial_app/build/bootloader/bootloader.bin
+            ports/esp_idf/sv_trial_app/build/partition_table/partition-table.bin
+            ports/esp_idf/sv_trial_app/build/flash_args
+            ports/esp_idf/sv_trial_app/build/flasher_args.json
+            ports/esp_idf/sv_trial_app/build/sdkconfig
+            ports/esp_idf/sv_trial_app/README.md
