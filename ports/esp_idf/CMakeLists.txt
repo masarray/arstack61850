@@ -44,3 +44,12 @@ target_compile_definitions(${COMPONENT_LIB} PUBLIC
 # hardening gate; do not hide it by weakening the cross-compile CI.
 target_compile_options(${COMPONENT_LIB} PRIVATE
     -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -fno-rtti)
+
+# Keep -Wpedantic on the portable protocol sources. The one ESP-IDF adapter must
+# include vendor C headers which intentionally use GNU extensions such as
+# #include_next and anonymous structs. Suppress only pedantic diagnostics for this
+# translation unit; ESP-IDF's global -Werror and all other arstack warnings remain
+# active. This prevents vendor-header syntax from weakening the core warning gate.
+set_source_files_properties(
+    ${CMAKE_CURRENT_LIST_DIR}/ethernet_port.cpp
+    PROPERTIES COMPILE_OPTIONS "-Wno-pedantic")
