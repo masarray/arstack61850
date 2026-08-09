@@ -11,9 +11,11 @@
 #include <limits>
 #include <optional>
 #include <span>
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
 #include <stdexcept>
 #include <utility>
 #include <vector>
+#endif
 
 namespace ar::iec61850::sampled_values {
 namespace {
@@ -117,6 +119,7 @@ wire::EncodeResult SampledValuesFrameCodec::encode_into(
     return {wire::EncodeStatus::ok, offset, *required};
 }
 
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
 std::vector<std::uint8_t> SampledValuesFrameCodec::encode(
     const SampledValuesFrame& frame) {
     const auto required = encoded_size(frame);
@@ -163,5 +166,6 @@ bool SampledValuesFrameCodec::try_decode(
     frame.pdu = std::move(pdu);
     return true;
 }
+#endif
 
 } // namespace ar::iec61850::sampled_values
