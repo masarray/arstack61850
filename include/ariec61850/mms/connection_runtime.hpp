@@ -3,6 +3,7 @@
 
 #include "ariec61850/mms/static_dispatcher.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -31,9 +32,26 @@ enum class MmsStaticConnectionStatus : std::uint8_t {
 };
 
 struct MmsStaticConnectionPolicy final {
+    static constexpr std::size_t maximum_owner_bytes = 16U;
+
     std::uint16_t cotp_source_reference{0x1001U};
     std::uint8_t maximum_tpdu_size_code{0x0AU};
     bool require_end_of_transmission{true};
+
+    // Optional portable association identity used by contextual MMS writes.
+    // The transport/server adapter assigns association_id and stable Owner.
+    // Leaving these zero/empty preserves legacy non-contextual behavior.
+    std::uint64_t association_id{};
+    std::array<std::uint8_t, maximum_owner_bytes> owner{};
+    std::size_t owner_size{};
+
+    [[nodiscard]] constexpr MmsStaticRequestAccessContext access_context() const noexcept {
+        return {
+            association_id,
+            owner_size > 0U && owner_size <= owner.size()
+                ? std::span<const std::uint8_t>{owner.data(), owner_size}
+                : std::span<const std::uint8_t>{}};
+    }
 };
 
 struct MmsStaticConnectionResult final {
@@ -79,6 +97,10 @@ public:
 
     [[nodiscard]] constexpr std::uint32_t mms_presentation_context_id() const noexcept {
         return mms_presentation_context_id_;
+    }
+
+    [[nodiscard]] constexpr MmsStaticRequestAccessContext access_context() const noexcept {
+        return policy_.access_context();
     }
 
 private:
