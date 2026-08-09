@@ -212,7 +212,8 @@ int main() {
     }
 
     mms::MmsInformationReportView report;
-    if (!decode_report_frame(response.first(poll.bytes_written), report) ||
+    if (!decode_report_frame(
+            std::span<const std::uint8_t>{response}.first(poll.bytes_written), report) ||
         report.item_count != 13U) {
         return 10;
     }
