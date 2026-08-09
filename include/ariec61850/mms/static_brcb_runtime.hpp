@@ -74,6 +74,7 @@ struct MmsStaticBrcbPendingState final {
 
 struct MmsStaticBrcbCapturePlan final {
     std::uint32_t pending_revision{};
+    std::uint32_t queue_revision{};
     std::uint64_t entry_number{};
     std::uint8_t sequence_number{};
     bool buffer_overflow{};
@@ -155,6 +156,7 @@ private:
     std::size_t count_{};
     std::uint64_t next_entry_number_{1U};
     std::uint64_t dropped_reports_{};
+    std::uint32_t queue_revision_{1U};
     std::uint8_t sequence_number_{};
     bool enabled_{};
     bool initialized_{};
