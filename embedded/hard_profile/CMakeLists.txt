@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(ARIEC61850HardEmbeddedProfile
     VERSION 0.1.0
-    DESCRIPTION "No-exception/no-RTTI MCU profiles for bounded process-bus and MMS association paths"
+    DESCRIPTION "No-exception/no-RTTI MCU profiles for bounded process-bus and MMS server paths"
     LANGUAGES CXX)
 
 set(ARIEC61850_ROOT "${CMAKE_CURRENT_LIST_DIR}/../..")
@@ -68,6 +68,14 @@ add_executable(ariec61850_hard_association_smoke
     ${ARIEC61850_ROOT}/src/acse/association_span.cpp)
 ariec61850_configure_hard_target(ariec61850_hard_association_smoke)
 
+add_executable(ariec61850_hard_mms_pdu_smoke
+    ${CMAKE_CURRENT_LIST_DIR}/../mms_pdu_hard_profile_smoke.cpp
+    ${ARIEC61850_ROOT}/src/asn1/ber_span_reader.cpp
+    ${ARIEC61850_ROOT}/src/osi/session_span.cpp
+    ${ARIEC61850_ROOT}/src/osi/presentation_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/pdu_span.cpp)
+ariec61850_configure_hard_target(ariec61850_hard_mms_pdu_smoke)
+
 enable_testing()
 add_test(NAME ariec61850_hard_sv_smoke COMMAND ariec61850_hard_sv_smoke)
 add_test(NAME ariec61850_hard_goose_smoke COMMAND ariec61850_hard_goose_smoke)
@@ -78,8 +86,11 @@ add_test(
 add_test(
     NAME ariec61850_hard_association_smoke
     COMMAND ariec61850_hard_association_smoke)
+add_test(
+    NAME ariec61850_hard_mms_pdu_smoke
+    COMMAND ariec61850_hard_mms_pdu_smoke)
 
 message(STATUS "arstack61850 hard embedded profile: exceptions disabled=ON")
 message(STATUS "arstack61850 hard embedded profile: RTTI disabled=ON")
 message(STATUS "arstack61850 hard embedded profile: host services excluded")
-message(STATUS "arstack61850 hard embedded profile: bounded SV + GOOSE + TPKT/COTP + Session/Presentation + ACSE association gates=ON")
+message(STATUS "arstack61850 hard embedded profile: bounded SV + GOOSE + OSI + ACSE + MMS PDU gates=ON")
