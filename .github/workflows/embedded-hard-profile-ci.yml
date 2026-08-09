@@ -58,7 +58,8 @@ jobs:
             build-hard-embedded/ariec61850_hard_mms_get_name_list_smoke \
             build-hard-embedded/ariec61850_hard_mms_static_model_smoke \
             build-hard-embedded/ariec61850_hard_mms_write_smoke \
-            build-hard-embedded/ariec61850_hard_mms_dispatcher_smoke; do
+            build-hard-embedded/ariec61850_hard_mms_dispatcher_smoke \
+            build-hard-embedded/ariec61850_hard_mms_connection_runtime_smoke; do
             if nm -C "$binary" | grep -E '__cxa_throw|__cxa_begin_catch|__cxa_end_catch|__gxx_personality_v0'; then
               echo "exception runtime symbol found in $binary" >&2
               exit 1
@@ -82,7 +83,8 @@ jobs:
               build-hard-embedded/ariec61850_hard_mms_get_name_list_smoke \
               build-hard-embedded/ariec61850_hard_mms_static_model_smoke \
               build-hard-embedded/ariec61850_hard_mms_write_smoke \
-              build-hard-embedded/ariec61850_hard_mms_dispatcher_smoke
+              build-hard-embedded/ariec61850_hard_mms_dispatcher_smoke \
+              build-hard-embedded/ariec61850_hard_mms_connection_runtime_smoke
           } | tee build-hard-embedded/hard-embedded-footprint.txt
 
       - name: Upload hard-profile evidence
