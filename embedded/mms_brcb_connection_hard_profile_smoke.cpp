@@ -176,13 +176,28 @@ int main() {
     }
     if (!establish(connection, request, response, workspace, scratch)) return 4;
 
+    mms::MmsStaticBrcbEntryView held_entry;
+    if (!reports.front(held_entry) || held_entry.entry_id.size() != 8U ||
+        held_entry.entry_id[7U] != 1U ||
+        reports.set_enabled(false) != mms::MmsStaticBrcbStatus::ok) {
+        return 5;
+    }
+    delivery = mms::MmsStaticBrcbConnection::poll(
+        connection, reports, response, workspace);
+    if (delivery.status != mms::MmsStaticBrcbConnectionStatus::reporting_disabled ||
+        reports.queue_size() != 1U || !reports.front(held_entry) ||
+        held_entry.entry_id[7U] != 1U ||
+        reports.set_enabled(true) != mms::MmsStaticBrcbStatus::ok) {
+        return 6;
+    }
+
     std::array<std::uint8_t, 8U> tiny_response{};
     delivery = mms::MmsStaticBrcbConnection::poll(
         connection, reports, tiny_response, workspace);
     if (delivery.status != mms::MmsStaticBrcbConnectionStatus::response_buffer_too_small ||
         delivery.required_response_bytes <= tiny_response.size() ||
         delivery.entry_id[7] != 1U || reports.queue_size() != 1U) {
-        return 5;
+        return 7;
     }
 
     std::array<std::uint8_t, 2U> tiny_workspace{};
@@ -191,7 +206,7 @@ int main() {
     if (delivery.status != mms::MmsStaticBrcbConnectionStatus::workspace_too_small ||
         delivery.required_workspace_bytes <= tiny_workspace.size() ||
         delivery.entry_id[7] != 1U || reports.queue_size() != 1U) {
-        return 6;
+        return 8;
     }
 
     delivery = mms::MmsStaticBrcbConnection::poll(
@@ -199,20 +214,20 @@ int main() {
     if (!delivery.response_ready() || delivery.bytes_written == 0U ||
         delivery.entry_id[7] != 1U || delivery.sequence_number != 1U ||
         delivery.buffer_overflow || reports.queue_size() != 0U) {
-        return 7;
+        return 9;
     }
 
     mms::MmsInformationReportView decoded;
     if (!decode_report_frame(
             std::span<const std::uint8_t>{response}.first(delivery.bytes_written), decoded) ||
         decoded.item_count != 12U) {
-        return 8;
+        return 10;
     }
     mms::MmsReadAccessResultView item;
     bool historical_value = false;
     if (!decoded.try_item(10U, item) || !decode_boolean(item, historical_value) ||
         !historical_value) {
-        return 9;
+        return 11;
     }
 
     // Queue another historical entry, then drop the association. The queue must survive reset.
@@ -221,16 +236,16 @@ int main() {
         !reports.next_due(200U, plan) ||
         !reports.capture(plan, kReportTime, staging, value_workspace).success() ||
         reports.queue_size() != 1U) {
-        return 10;
+        return 12;
     }
     connection.reset();
     delivery = mms::MmsStaticBrcbConnection::poll(
         connection, reports, response, workspace);
     if (delivery.status != mms::MmsStaticBrcbConnectionStatus::not_established ||
         reports.queue_size() != 1U) {
-        return 11;
+        return 13;
     }
-    if (!establish(connection, request, response, workspace, scratch)) return 12;
+    if (!establish(connection, request, response, workspace, scratch)) return 14;
     delivery = mms::MmsStaticBrcbConnection::poll(
         connection, reports, response, workspace);
     if (!delivery.response_ready() || delivery.entry_id[7] != 2U ||
@@ -238,7 +253,7 @@ int main() {
         mms::MmsStaticBrcbConnection::poll(
             connection, reports, response, workspace).status !=
             mms::MmsStaticBrcbConnectionStatus::no_report_available) {
-        return 13;
+        return 15;
     }
 
     return 0;
