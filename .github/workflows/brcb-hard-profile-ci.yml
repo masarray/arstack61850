@@ -38,7 +38,7 @@ jobs:
       - name: Build BRCB hard profile
         run: cmake --build build-brcb-hard --parallel
 
-      - name: Run BRCB smoke
+      - name: Run BRCB smokes
         run: >-
           ctest --test-dir build-brcb-hard
           --output-on-failure
@@ -48,11 +48,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          binary=build-brcb-hard/ariec61850_hard_mms_brcb_smoke
-          if nm -C "$binary" | grep -E '__cxa_throw|__cxa_begin_catch|__cxa_end_catch|__gxx_personality_v0'; then
-            echo "exception runtime symbol found in $binary" >&2
-            exit 1
-          fi
+          for binary in \
+            build-brcb-hard/ariec61850_hard_mms_brcb_smoke \
+            build-brcb-hard/ariec61850_hard_mms_brcb_connection_smoke; do
+            if nm -C "$binary" | grep -E '__cxa_throw|__cxa_begin_catch|__cxa_end_catch|__gxx_personality_v0'; then
+              echo "exception runtime symbol found in $binary" >&2
+              exit 1
+            fi
+          done
           echo 'NO_EXCEPTION_RUNTIME=PASS'
 
       - name: Report footprint
@@ -61,7 +64,9 @@ jobs:
           set -euo pipefail
           {
             echo "compiler=${{ matrix.compiler }}"
-            size build-brcb-hard/ariec61850_hard_mms_brcb_smoke
+            size \
+              build-brcb-hard/ariec61850_hard_mms_brcb_smoke \
+              build-brcb-hard/ariec61850_hard_mms_brcb_connection_smoke
           } | tee build-brcb-hard/brcb-footprint.txt
 
       - name: Upload BRCB evidence
