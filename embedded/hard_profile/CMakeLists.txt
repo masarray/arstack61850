@@ -160,6 +160,19 @@ add_executable(ariec61850_hard_mms_information_report_smoke
     ${ARIEC61850_ROOT}/src/mms/static_information_report.cpp)
 ariec61850_configure_hard_target(ariec61850_hard_mms_information_report_smoke)
 
+add_executable(ariec61850_hard_mms_urcb_runtime_smoke
+    ${CMAKE_CURRENT_LIST_DIR}/../mms_urcb_runtime_hard_profile_smoke.cpp
+    ${ARIEC61850_ROOT}/src/asn1/ber_span_reader.cpp
+    ${ARIEC61850_ROOT}/src/mms/pdu_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/services_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/data_set_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/information_report_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_object_table.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_data_set_table.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_information_report.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_urcb_runtime.cpp)
+ariec61850_configure_hard_target(ariec61850_hard_mms_urcb_runtime_smoke)
+
 enable_testing()
 add_test(NAME ariec61850_hard_sv_smoke COMMAND ariec61850_hard_sv_smoke)
 add_test(NAME ariec61850_hard_goose_smoke COMMAND ariec61850_hard_goose_smoke)
@@ -194,8 +207,11 @@ add_test(
 add_test(
     NAME ariec61850_hard_mms_information_report_smoke
     COMMAND ariec61850_hard_mms_information_report_smoke)
+add_test(
+    NAME ariec61850_hard_mms_urcb_runtime_smoke
+    COMMAND ariec61850_hard_mms_urcb_runtime_smoke)
 
 message(STATUS "arstack61850 hard embedded profile: exceptions disabled=ON")
 message(STATUS "arstack61850 hard embedded profile: RTTI disabled=ON")
 message(STATUS "arstack61850 hard embedded profile: host services excluded")
-message(STATUS "arstack61850 hard embedded profile: bounded SV + GOOSE + OSI + ACSE + MMS static dispatcher/connection runtime/DataSet/InformationReport gates=ON")
+message(STATUS "arstack61850 hard embedded profile: bounded SV + GOOSE + OSI + ACSE + MMS static dispatcher/connection runtime/DataSet/InformationReport/URCB gates=ON")
