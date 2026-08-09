@@ -16,6 +16,13 @@ class InjectorSequenceBuilder final {
 public:
     using ChannelProfiles = InjectorRuntimeProgram::ChannelProfiles;
 
+    // Compatibility entry point for existing callers. New transactional
+    // control paths should pass the runtime source revision explicitly and
+    // reject a stale commit with based_on_revision().
+    void begin(const ChannelProfiles& base) noexcept {
+        begin(base, 1U);
+    }
+
     void begin(
         const ChannelProfiles& base,
         const std::uint32_t source_revision) noexcept {
