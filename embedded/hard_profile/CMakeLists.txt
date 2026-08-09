@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(ARIEC61850HardProcessBusProfile
+project(ARIEC61850HardEmbeddedProfile
     VERSION 0.1.0
-    DESCRIPTION "No-exception/no-RTTI MCU profiles for bounded process-bus transmit paths"
+    DESCRIPTION "No-exception/no-RTTI MCU profiles for bounded process-bus and OSI transport paths"
     LANGUAGES CXX)
 
 set(ARIEC61850_ROOT "${CMAKE_CURRENT_LIST_DIR}/../..")
@@ -47,11 +47,18 @@ add_executable(ariec61850_hard_goose_smoke
     ${ARIEC61850_ROOT}/src/goose/frame_encode.cpp)
 ariec61850_configure_hard_target(ariec61850_hard_goose_smoke)
 
+add_executable(ariec61850_hard_osi_transport_smoke
+    ${CMAKE_CURRENT_LIST_DIR}/../osi_hard_profile_smoke.cpp
+    ${ARIEC61850_ROOT}/src/osi/tpkt_span.cpp
+    ${ARIEC61850_ROOT}/src/osi/cotp_span.cpp)
+ariec61850_configure_hard_target(ariec61850_hard_osi_transport_smoke)
+
 enable_testing()
 add_test(NAME ariec61850_hard_sv_smoke COMMAND ariec61850_hard_sv_smoke)
 add_test(NAME ariec61850_hard_goose_smoke COMMAND ariec61850_hard_goose_smoke)
+add_test(NAME ariec61850_hard_osi_transport_smoke COMMAND ariec61850_hard_osi_transport_smoke)
 
-message(STATUS "arstack61850 hard process-bus profile: exceptions disabled=ON")
-message(STATUS "arstack61850 hard process-bus profile: RTTI disabled=ON")
-message(STATUS "arstack61850 hard process-bus profile: host services excluded")
-message(STATUS "arstack61850 hard process-bus profile: bounded SV + GOOSE transmit gates=ON")
+message(STATUS "arstack61850 hard embedded profile: exceptions disabled=ON")
+message(STATUS "arstack61850 hard embedded profile: RTTI disabled=ON")
+message(STATUS "arstack61850 hard embedded profile: host services excluded")
+message(STATUS "arstack61850 hard embedded profile: bounded SV + GOOSE + TPKT/COTP gates=ON")

@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  hard-process-bus-profile:
-    name: Hard Process Bus / ${{ matrix.compiler }}
+  hard-embedded-profile:
+    name: Hard Embedded / ${{ matrix.compiler }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -33,24 +33,25 @@ jobs:
           fi
 
       - name: Configure hard profile
-        run: cmake -S embedded/hard_profile -B build-hard-process-bus
+        run: cmake -S embedded/hard_profile -B build-hard-embedded
 
       - name: Build hard profile
-        run: cmake --build build-hard-process-bus --parallel
+        run: cmake --build build-hard-embedded --parallel
 
       - name: Run hard-profile smokes
         run: >-
-          ctest --test-dir build-hard-process-bus
+          ctest --test-dir build-hard-embedded
           --output-on-failure
-          --output-junit hard-process-bus-ctest.xml
+          --output-junit hard-embedded-ctest.xml
 
       - name: Prove exception runtime is absent
         shell: bash
         run: |
           set -euo pipefail
           for binary in \
-            build-hard-process-bus/ariec61850_hard_sv_smoke \
-            build-hard-process-bus/ariec61850_hard_goose_smoke; do
+            build-hard-embedded/ariec61850_hard_sv_smoke \
+            build-hard-embedded/ariec61850_hard_goose_smoke \
+            build-hard-embedded/ariec61850_hard_osi_transport_smoke; do
             if nm -C "$binary" | grep -E '__cxa_throw|__cxa_begin_catch|__cxa_end_catch|__gxx_personality_v0'; then
               echo "exception runtime symbol found in $binary" >&2
               exit 1
@@ -65,16 +66,17 @@ jobs:
           {
             echo "compiler=${{ matrix.compiler }}"
             size \
-              build-hard-process-bus/ariec61850_hard_sv_smoke \
-              build-hard-process-bus/ariec61850_hard_goose_smoke
-          } | tee build-hard-process-bus/hard-process-bus-footprint.txt
+              build-hard-embedded/ariec61850_hard_sv_smoke \
+              build-hard-embedded/ariec61850_hard_goose_smoke \
+              build-hard-embedded/ariec61850_hard_osi_transport_smoke
+          } | tee build-hard-embedded/hard-embedded-footprint.txt
 
       - name: Upload hard-profile evidence
         uses: actions/upload-artifact@v4
         with:
-          name: embedded-hard-process-bus-${{ matrix.compiler }}-${{ github.event.pull_request.head.sha || github.sha }}
+          name: embedded-hard-profile-${{ matrix.compiler }}-${{ github.event.pull_request.head.sha || github.sha }}
           if-no-files-found: error
           retention-days: 14
           path: |
-            build-hard-process-bus/hard-process-bus-ctest.xml
-            build-hard-process-bus/hard-process-bus-footprint.txt
+            build-hard-embedded/hard-embedded-ctest.xml
+            build-hard-embedded/hard-embedded-footprint.txt
