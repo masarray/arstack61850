@@ -1,0 +1,76 @@
+name: Embedded Hard Profile CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  hard-sv-profile:
+    name: Hard SV / ${{ matrix.compiler }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select compiler
+        shell: bash
+        run: |
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            echo "CC=clang" >> "$GITHUB_ENV"
+            echo "CXX=clang++" >> "$GITHUB_ENV"
+          else
+            echo "CC=gcc" >> "$GITHUB_ENV"
+            echo "CXX=g++" >> "$GITHUB_ENV"
+          fi
+
+      - name: Configure hard profile
+        run: cmake -S embedded/hard_profile -B build-hard-sv
+
+      - name: Build hard profile
+        run: cmake --build build-hard-sv --parallel
+
+      - name: Run hard-profile smoke
+        run: >-
+          ctest --test-dir build-hard-sv
+          --output-on-failure
+          --output-junit hard-sv-ctest.xml
+
+      - name: Prove exception runtime is absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary=build-hard-sv/ariec61850_hard_sv_smoke
+          if nm -C "$binary" | grep -E '__cxa_throw|__cxa_begin_catch|__cxa_end_catch|__gxx_personality_v0'; then
+            echo 'exception runtime symbol found in hard-profile binary' >&2
+            exit 1
+          fi
+          echo 'NO_EXCEPTION_RUNTIME=PASS'
+
+      - name: Report hard-profile footprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "compiler=${{ matrix.compiler }}"
+            echo "binary=ariec61850_hard_sv_smoke"
+            size build-hard-sv/ariec61850_hard_sv_smoke
+          } | tee build-hard-sv/hard-sv-footprint.txt
+
+      - name: Upload hard-profile evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: embedded-hard-sv-${{ matrix.compiler }}-${{ github.event.pull_request.head.sha || github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            build-hard-sv/hard-sv-ctest.xml
+            build-hard-sv/hard-sv-footprint.txt
