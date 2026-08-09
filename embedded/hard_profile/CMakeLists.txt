@@ -31,7 +31,7 @@ endfunction()
 
 add_executable(ariec61850_hard_sv_smoke
     ${CMAKE_CURRENT_LIST_DIR}/../sv_hard_profile_smoke.cpp
-    ${ARIEC61850_ROOT}/src/ethernet/ethernet.cpp
+    ${ARIEC61850_ROOT}/src/ethernet/ethernet_encode.cpp
     ${ARIEC61850_ROOT}/src/mms/utc_time.cpp
     ${ARIEC61850_ROOT}/src/sampled_values/pdu_codec.cpp
     ${ARIEC61850_ROOT}/src/sampled_values/frame_codec.cpp
@@ -40,7 +40,7 @@ ariec61850_configure_hard_target(ariec61850_hard_sv_smoke)
 
 add_executable(ariec61850_hard_goose_smoke
     ${CMAKE_CURRENT_LIST_DIR}/../goose_hard_profile_smoke.cpp
-    ${ARIEC61850_ROOT}/src/ethernet/ethernet.cpp
+    ${ARIEC61850_ROOT}/src/ethernet/ethernet_encode.cpp
     ${ARIEC61850_ROOT}/src/mms/utc_time.cpp
     ${ARIEC61850_ROOT}/src/mms/data_value.cpp
     ${ARIEC61850_ROOT}/src/goose/pdu_encode.cpp
