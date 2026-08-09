@@ -2,7 +2,10 @@
 
 #pragma once
 
+#include "ariec61850/wire/encode_result.hpp"
+
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -25,15 +28,26 @@ public:
     explicit constexpr MacAddress(const std::array<std::uint8_t, 6>& bytes) noexcept
         : bytes_(bytes) {}
 
-    // Retained for host/source compatibility when the caller only has a span.
-    explicit MacAddress(std::span<const std::uint8_t> bytes);
+    [[nodiscard]] static bool try_from_bytes(
+        std::span<const std::uint8_t> bytes,
+        MacAddress& address) noexcept;
 
-    [[nodiscard]] static MacAddress parse(const std::string& text);
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
+    // Host/source compatibility wrapper when the caller only has a span.
+    explicit MacAddress(std::span<const std::uint8_t> bytes);
+#endif
+
     [[nodiscard]] static bool try_parse(const std::string& text, MacAddress& address) noexcept;
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
+    [[nodiscard]] static MacAddress parse(const std::string& text);
+#endif
 
     [[nodiscard]] const std::array<std::uint8_t, 6>& bytes() const noexcept { return bytes_; }
+    [[nodiscard]] bool try_copy_to(std::span<std::uint8_t> destination) const noexcept;
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
     void copy_to(std::span<std::uint8_t> destination) const;
     [[nodiscard]] std::string to_string() const;
+#endif
 
     friend bool operator==(const MacAddress&, const MacAddress&) = default;
 
@@ -52,7 +66,10 @@ struct VlanTag final {
     VlanTag(std::uint8_t priority, bool drop, std::uint16_t vlan)
         : priority_code_point(priority), drop_eligible(drop), vlan_id(vlan) {}
 
+    [[nodiscard]] bool try_to_tag_control_information(std::uint16_t& tci) const noexcept;
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
     [[nodiscard]] std::uint16_t to_tag_control_information() const;
+#endif
     [[nodiscard]] static VlanTag from_tag_control_information(std::uint16_t tci) noexcept;
 
     friend bool operator==(const VlanTag&, const VlanTag&) = default;
@@ -68,8 +85,18 @@ struct EthernetFrame final {
 
 class EthernetFrameCodec final {
 public:
+    [[nodiscard]] static std::optional<std::size_t> encoded_size(
+        const EthernetFrame& frame) noexcept;
+    [[nodiscard]] static wire::EncodeResult encode_into(
+        const EthernetFrame& frame,
+        std::span<std::uint8_t> destination) noexcept;
+
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
     [[nodiscard]] static std::vector<std::uint8_t> encode(const EthernetFrame& frame);
-    [[nodiscard]] static bool try_decode(std::span<const std::uint8_t> bytes, EthernetFrame& frame) noexcept;
+    [[nodiscard]] static bool try_decode(
+        std::span<const std::uint8_t> bytes,
+        EthernetFrame& frame) noexcept;
+#endif
 };
 
 struct ProcessBusFrame final {
@@ -85,6 +112,16 @@ class ProcessBusFrameCodec final {
 public:
     static constexpr std::size_t header_length = 8U;
 
+    [[nodiscard]] static std::optional<std::size_t> encoded_payload_size(
+        std::span<const std::uint8_t> apdu) noexcept;
+    [[nodiscard]] static wire::EncodeResult encode_payload_into(
+        std::uint16_t app_id,
+        std::span<const std::uint8_t> apdu,
+        std::span<std::uint8_t> destination,
+        std::uint16_t reserved1 = 0,
+        std::uint16_t reserved2 = 0) noexcept;
+
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
     [[nodiscard]] static std::vector<std::uint8_t> encode_payload(
         std::uint16_t app_id,
         std::span<const std::uint8_t> apdu,
@@ -101,7 +138,10 @@ public:
         std::uint16_t reserved1 = 0,
         std::uint16_t reserved2 = 0);
 
-    [[nodiscard]] static bool try_decode(const EthernetFrame& ethernet, ProcessBusFrame& frame) noexcept;
+    [[nodiscard]] static bool try_decode(
+        const EthernetFrame& ethernet,
+        ProcessBusFrame& frame) noexcept;
+#endif
 };
 
 } // namespace ar::iec61850::ethernet
