@@ -129,7 +129,8 @@ int main() {
     mms::MmsStaticBrcbRuntime runtime{
         definition, pending, slots, object_table, data_set_table};
     if (!runtime.initialize() || !runtime.valid() || runtime.enabled() ||
-        runtime.queue_size() != 0U || runtime.queue_capacity() != 2U) {
+        runtime.queue_size() != 0U || runtime.retained_size() != 0U ||
+        runtime.queue_capacity() != 2U || runtime.replay_gap()) {
         return 1;
     }
     if (runtime.notify(0U, mms::MmsStaticBrcbEventReason::data_change, 0U) !=
@@ -161,7 +162,7 @@ int main() {
     }
 
     capture = runtime.capture(plan, kReportTime, staging, workspace);
-    if (!capture.success() || runtime.queue_size() != 1U ||
+    if (!capture.success() || runtime.queue_size() != 1U || runtime.retained_size() != 1U ||
         capture.included_member_count != 2U || !expected_entry(capture.entry_id, 1U)) {
         return 6;
     }
@@ -191,7 +192,7 @@ int main() {
         return 9;
     }
     capture = runtime.capture(plan, kReportTime, staging, workspace);
-    if (!capture.success() || runtime.queue_size() != 2U ||
+    if (!capture.success() || runtime.queue_size() != 2U || runtime.retained_size() != 2U ||
         !expected_entry(capture.entry_id, 2U)) {
         return 10;
     }
@@ -206,14 +207,16 @@ int main() {
         mms::MmsInformationReportSpanCodec::entry_id_bytes>{
             0U, 0U, 0U, 0U, 0U, 0U, 0U, 1U};
     if (runtime.commit_delivery(first_entry_id) != mms::MmsStaticBrcbStatus::ok ||
+        runtime.queue_size() != 1U || runtime.retained_size() != 2U ||
         runtime.capture(stale_plan, kReportTime, staging, workspace).status !=
             mms::MmsStaticBrcbStatus::stale_plan ||
         !runtime.next_due(320U, plan) || plan.buffer_overflow) {
         return 12;
     }
     capture = runtime.capture(plan, kReportTime, staging, workspace);
-    if (!capture.success() || runtime.queue_size() != 2U ||
-        !expected_entry(capture.entry_id, 3U) || runtime.dropped_reports() != 0U) {
+    if (!capture.success() || runtime.queue_size() != 2U || runtime.retained_size() != 2U ||
+        !expected_entry(capture.entry_id, 3U) || runtime.dropped_reports() != 0U ||
+        runtime.replay_gap()) {
         return 13;
     }
 
@@ -223,12 +226,13 @@ int main() {
         return 14;
     }
     capture = runtime.capture(plan, kReportTime, staging, workspace);
-    if (!capture.success() || runtime.queue_size() != 2U ||
-        !expected_entry(capture.entry_id, 4U) || runtime.dropped_reports() != 1U) {
+    if (!capture.success() || runtime.queue_size() != 2U || runtime.retained_size() != 2U ||
+        !expected_entry(capture.entry_id, 4U) || runtime.dropped_reports() != 1U ||
+        !runtime.replay_gap()) {
         return 15;
     }
 
-    // Entry 2 was the oldest and must have been dropped. Entry 3 is now front.
+    // Entry 2 was the oldest undelivered report and was lost. Entry 3 is now front.
     if (!runtime.front(entry) || entry.entry_id.size() != 8U || entry.entry_id[7] != 3U ||
         runtime.commit_delivery(entry.entry_id) != mms::MmsStaticBrcbStatus::ok ||
         !runtime.front(entry) || entry.entry_id[7] != 4U || !entry.buffer_overflow ||
@@ -238,33 +242,53 @@ int main() {
         !report.try_item(6U, item)) {
         return 16;
     }
+    const std::array<std::uint8_t, 8U> third_id{0U,0U,0U,0U,0U,0U,0U,3U};
     const std::array<std::uint8_t, 8U> fourth_id{0U,0U,0U,0U,0U,0U,0U,4U};
     if (!decode_octet_string(item, fourth_id) ||
         runtime.commit_delivery(fourth_id) != mms::MmsStaticBrcbStatus::ok ||
-        runtime.queue_size() != 0U) {
+        runtime.queue_size() != 0U || runtime.retained_size() != 2U) {
         return 17;
     }
 
-    // Repeated capture/delivery proves bounded steady-state behavior and EntryID progression.
+    // Delivered entries remain replayable until buffer eviction or PurgeBuf.
+    if (runtime.replay_from(fourth_id) != mms::MmsStaticBrcbStatus::ok ||
+        runtime.queue_size() != 1U || !runtime.front(entry) || entry.entry_id[7U] != 4U ||
+        runtime.commit_delivery(fourth_id) != mms::MmsStaticBrcbStatus::ok ||
+        runtime.queue_size() != 0U ||
+        runtime.rewind_to_oldest() != mms::MmsStaticBrcbStatus::ok ||
+        runtime.queue_size() != 2U || !runtime.front(entry) || entry.entry_id[7U] != 3U ||
+        runtime.resume_after(third_id) != mms::MmsStaticBrcbStatus::ok ||
+        runtime.queue_size() != 1U || !runtime.front(entry) || entry.entry_id[7U] != 4U) {
+        return 18;
+    }
+    const std::array<std::uint8_t, 8U> missing_id{0U,0U,0U,0U,0U,0U,0U,2U};
+    if (runtime.resume_after(missing_id) != mms::MmsStaticBrcbStatus::entry_not_found ||
+        runtime.purge_buffer() != mms::MmsStaticBrcbStatus::ok ||
+        runtime.queue_size() != 0U || runtime.retained_size() != 0U || runtime.replay_gap() ||
+        runtime.front(entry)) {
+        return 19;
+    }
+
+    // Repeated capture/delivery proves bounded retained-history behavior and EntryID progression.
     for (std::uint32_t iteration = 0U; iteration < 10'000U; ++iteration) {
         const auto now = static_cast<std::uint64_t>(1'000U + (iteration * 25U));
         if (runtime.notify(0U, mms::MmsStaticBrcbEventReason::data_update, now) !=
                 mms::MmsStaticBrcbStatus::ok ||
             !runtime.next_due(now + 20U, plan)) {
-            return 18;
+            return 20;
         }
         capture = runtime.capture(plan, kReportTime, staging, workspace);
         if (!capture.success() || !runtime.front(entry) ||
             runtime.commit_delivery(entry.entry_id) != mms::MmsStaticBrcbStatus::ok ||
-            runtime.queue_size() != 0U) {
-            return 19;
+            runtime.queue_size() != 0U || runtime.retained_size() > runtime.queue_capacity()) {
+            return 21;
         }
     }
 
     if (runtime.set_enabled(false) != mms::MmsStaticBrcbStatus::ok || runtime.enabled() ||
         runtime.notify(0U, mms::MmsStaticBrcbEventReason::data_change, 999'999U) !=
             mms::MmsStaticBrcbStatus::temporarily_unavailable) {
-        return 20;
+        return 22;
     }
 
     return 0;

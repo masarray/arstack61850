@@ -154,14 +154,25 @@ MmsStaticBrcbStateResult MmsStaticBrcbStateCodec::encode(
     if (!runtime.initialized_ || runtime.definition_ == nullptr ||
         runtime.pending_ == nullptr || runtime.slots_.empty() ||
         runtime.count_ > runtime.slots_.size() ||
-        runtime.count_ > std::numeric_limits<std::uint32_t>::max()) {
+        runtime.delivery_offset_ > runtime.count_) {
+        result.status = MmsStaticBrcbStateStatus::invalid_runtime;
+        return result;
+    }
+
+    // Checkpoint format v1 intentionally persists only reports that are still
+    // selected for delivery. Delivered retained history is a volatile R1 replay
+    // window; persisting its cursor/history requires an explicit future format
+    // revision so reboot behavior cannot silently change.
+    const auto persisted_count = runtime.queue_size();
+    if (persisted_count > std::numeric_limits<std::uint32_t>::max()) {
         result.status = MmsStaticBrcbStateStatus::invalid_runtime;
         return result;
     }
 
     std::size_t required = kHeaderBytes;
-    for (std::size_t logical = 0U; logical < runtime.count_; ++logical) {
-        const auto physical = (runtime.head_ + logical) % runtime.slots_.size();
+    for (std::size_t logical = 0U; logical < persisted_count; ++logical) {
+        const auto physical =
+            (runtime.head_ + runtime.delivery_offset_ + logical) % runtime.slots_.size();
         const auto& slot = runtime.slots_[physical];
         if (!slot.occupied || slot.bytes == 0U || slot.bytes > slot.storage.size() ||
             slot.bytes > std::numeric_limits<std::uint32_t>::max() ||
@@ -183,14 +194,15 @@ MmsStaticBrcbStateResult MmsStaticBrcbStateCodec::encode(
     write_u16(output, 8U, format_version);
     write_u16(output, 10U, static_cast<std::uint16_t>(kHeaderBytes));
     write_u64(output, 12U, definition_fingerprint(*runtime.definition_));
-    write_u32(output, 20U, static_cast<std::uint32_t>(runtime.count_));
+    write_u32(output, 20U, static_cast<std::uint32_t>(persisted_count));
     write_u64(output, 24U, runtime.next_entry_number_);
     write_u64(output, 32U, runtime.dropped_reports_);
     output[40U] = runtime.sequence_number_;
 
     std::size_t offset = kHeaderBytes;
-    for (std::size_t logical = 0U; logical < runtime.count_; ++logical) {
-        const auto physical = (runtime.head_ + logical) % runtime.slots_.size();
+    for (std::size_t logical = 0U; logical < persisted_count; ++logical) {
+        const auto physical =
+            (runtime.head_ + runtime.delivery_offset_ + logical) % runtime.slots_.size();
         const auto& slot = runtime.slots_[physical];
         write_u32(output, offset, static_cast<std::uint32_t>(slot.bytes));
         std::copy(
@@ -319,9 +331,11 @@ MmsStaticBrcbStateResult MmsStaticBrcbStateCodec::restore(
 
     runtime.head_ = 0U;
     runtime.count_ = count;
+    runtime.delivery_offset_ = 0U;
     runtime.next_entry_number_ = restored_next_entry;
     runtime.dropped_reports_ = restored_dropped;
     runtime.sequence_number_ = restored_sequence;
+    runtime.replay_gap_ = false;
     runtime.queue_revision_ = runtime.queue_revision_ ==
             std::numeric_limits<std::uint32_t>::max()
         ? 1U
