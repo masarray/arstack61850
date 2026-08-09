@@ -50,7 +50,8 @@ jobs:
           set -euo pipefail
           for binary in \
             build-brcb-hard/ariec61850_hard_mms_brcb_smoke \
-            build-brcb-hard/ariec61850_hard_mms_brcb_connection_smoke; do
+            build-brcb-hard/ariec61850_hard_mms_brcb_connection_smoke \
+            build-brcb-hard/ariec61850_hard_mms_brcb_persistence_smoke; do
             if nm -C "$binary" | grep -E '__cxa_throw|__cxa_begin_catch|__cxa_end_catch|__gxx_personality_v0'; then
               echo "exception runtime symbol found in $binary" >&2
               exit 1
@@ -66,7 +67,8 @@ jobs:
             echo "compiler=${{ matrix.compiler }}"
             size \
               build-brcb-hard/ariec61850_hard_mms_brcb_smoke \
-              build-brcb-hard/ariec61850_hard_mms_brcb_connection_smoke
+              build-brcb-hard/ariec61850_hard_mms_brcb_connection_smoke \
+              build-brcb-hard/ariec61850_hard_mms_brcb_persistence_smoke
           } | tee build-brcb-hard/brcb-footprint.txt
 
       - name: Upload BRCB evidence
