@@ -170,6 +170,7 @@ int main() {
     read_only_request[22] = 0x4DU;
     if (!mms::MmsServiceSpanCodec::try_decode_write_request(
             read_only_request, request) ||
+        !request.try_variable(0U, name) || !matches(name.item, kM1) ||
         !table.try_resolve_write_request(request, resolved, resolved_count) ||
         resolved_count != 1U || resolved[0] != &objects[1] || resolved[0]->writable()) {
         return 9;
