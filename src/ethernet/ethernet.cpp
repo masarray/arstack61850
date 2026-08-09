@@ -4,24 +4,35 @@
 
 #include <algorithm>
 #include <cctype>
-#include <iomanip>
+#include <cstddef>
 #include <limits>
+#include <optional>
+#include <span>
+#include <string>
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
+#include <iomanip>
 #include <sstream>
 #include <stdexcept>
+#include <vector>
+#endif
 
 namespace ar::iec61850::ethernet {
 namespace {
 
-void write_u16_be(std::span<std::uint8_t> destination, const std::size_t offset,
-                  const std::uint16_t value) {
+void write_u16_be(
+    const std::span<std::uint8_t> destination,
+    const std::size_t offset,
+    const std::uint16_t value) noexcept {
     destination[offset] = static_cast<std::uint8_t>((value >> 8U) & 0xFFU);
     destination[offset + 1U] = static_cast<std::uint8_t>(value & 0xFFU);
 }
 
-std::uint16_t read_u16_be(const std::span<const std::uint8_t> source,
-                          const std::size_t offset) noexcept {
-    return static_cast<std::uint16_t>((static_cast<std::uint16_t>(source[offset]) << 8U) |
-                                      static_cast<std::uint16_t>(source[offset + 1U]));
+std::uint16_t read_u16_be(
+    const std::span<const std::uint8_t> source,
+    const std::size_t offset) noexcept {
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(source[offset]) << 8U) |
+        static_cast<std::uint16_t>(source[offset + 1U]));
 }
 
 int hex_value(const char ch) noexcept {
@@ -39,20 +50,24 @@ int hex_value(const char ch) noexcept {
 
 } // namespace
 
-MacAddress::MacAddress(const std::span<const std::uint8_t> bytes) {
-    if (bytes.size() != bytes_.size()) {
-        throw std::invalid_argument("A MAC address must contain exactly 6 bytes.");
+bool MacAddress::try_from_bytes(
+    const std::span<const std::uint8_t> bytes,
+    MacAddress& address) noexcept {
+    if (bytes.size() != address.bytes_.size()) {
+        address = {};
+        return false;
     }
-    std::copy(bytes.begin(), bytes.end(), bytes_.begin());
+    std::copy(bytes.begin(), bytes.end(), address.bytes_.begin());
+    return true;
 }
 
-MacAddress MacAddress::parse(const std::string& text) {
-    MacAddress address;
-    if (!try_parse(text, address)) {
-        throw std::invalid_argument("Invalid MAC address '" + text + "'.");
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
+MacAddress::MacAddress(const std::span<const std::uint8_t> bytes) {
+    if (!try_from_bytes(bytes, *this)) {
+        throw std::invalid_argument("A MAC address must contain exactly 6 bytes.");
     }
-    return address;
 }
+#endif
 
 bool MacAddress::try_parse(const std::string& text, MacAddress& address) noexcept {
     std::string normalized;
@@ -67,6 +82,7 @@ bool MacAddress::try_parse(const std::string& text, MacAddress& address) noexcep
         --end;
     }
     if (begin == end) {
+        address = {};
         return false;
     }
 
@@ -74,6 +90,7 @@ bool MacAddress::try_parse(const std::string& text, MacAddress& address) noexcep
         normalized.push_back(*it == '-' ? ':' : *it);
     }
     if (normalized.size() != 17U) {
+        address = {};
         return false;
     }
 
@@ -81,11 +98,13 @@ bool MacAddress::try_parse(const std::string& text, MacAddress& address) noexcep
     for (std::size_t index = 0; index < bytes.size(); ++index) {
         const auto offset = index * 3U;
         if (index != bytes.size() - 1U && normalized[offset + 2U] != ':') {
+            address = {};
             return false;
         }
         const auto high = hex_value(normalized[offset]);
         const auto low = hex_value(normalized[offset + 1U]);
         if (high < 0 || low < 0) {
+            address = {};
             return false;
         }
         bytes[index] = static_cast<std::uint8_t>((high << 4) | low);
@@ -95,11 +114,30 @@ bool MacAddress::try_parse(const std::string& text, MacAddress& address) noexcep
     return true;
 }
 
-void MacAddress::copy_to(const std::span<std::uint8_t> destination) const {
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
+MacAddress MacAddress::parse(const std::string& text) {
+    MacAddress address;
+    if (!try_parse(text, address)) {
+        throw std::invalid_argument("Invalid MAC address '" + text + "'.");
+    }
+    return address;
+}
+#endif
+
+bool MacAddress::try_copy_to(
+    const std::span<std::uint8_t> destination) const noexcept {
     if (destination.size() < bytes_.size()) {
-        throw std::invalid_argument("Destination span must be at least 6 bytes.");
+        return false;
     }
     std::copy(bytes_.begin(), bytes_.end(), destination.begin());
+    return true;
+}
+
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
+void MacAddress::copy_to(const std::span<std::uint8_t> destination) const {
+    if (!try_copy_to(destination)) {
+        throw std::invalid_argument("Destination span must be at least 6 bytes.");
+    }
 }
 
 std::string MacAddress::to_string() const {
@@ -113,20 +151,34 @@ std::string MacAddress::to_string() const {
     }
     return stream.str();
 }
+#endif
 
-std::uint16_t VlanTag::to_tag_control_information() const {
-    if (priority_code_point > 7U) {
-        throw std::out_of_range("VLAN priority must be 0..7.");
+bool VlanTag::try_to_tag_control_information(std::uint16_t& tci) const noexcept {
+    if (priority_code_point > 7U || vlan_id > 4094U) {
+        tci = 0U;
+        return false;
     }
-    if (vlan_id > 4094U) {
+
+    const auto value =
+        (static_cast<std::uint32_t>(priority_code_point) << 13U) |
+        (drop_eligible ? 0x1000U : 0U) |
+        static_cast<std::uint32_t>(vlan_id);
+    tci = static_cast<std::uint16_t>(value);
+    return true;
+}
+
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
+std::uint16_t VlanTag::to_tag_control_information() const {
+    std::uint16_t tci{};
+    if (!try_to_tag_control_information(tci)) {
+        if (priority_code_point > 7U) {
+            throw std::out_of_range("VLAN priority must be 0..7.");
+        }
         throw std::out_of_range("VLAN ID must be 0..4094.");
     }
-
-    const auto tci = (static_cast<std::uint32_t>(priority_code_point) << 13U) |
-                     (drop_eligible ? 0x1000U : 0U) |
-                     static_cast<std::uint32_t>(vlan_id);
-    return static_cast<std::uint16_t>(tci);
+    return tci;
 }
+#endif
 
 VlanTag VlanTag::from_tag_control_information(const std::uint16_t tci) noexcept {
     return {
@@ -135,38 +187,81 @@ VlanTag VlanTag::from_tag_control_information(const std::uint16_t tci) noexcept 
         static_cast<std::uint16_t>(tci & 0x0FFFU)};
 }
 
-std::vector<std::uint8_t> EthernetFrameCodec::encode(const EthernetFrame& frame) {
-    const std::size_t header_length = frame.vlan ? 18U : 14U;
-    std::vector<std::uint8_t> bytes(header_length + frame.payload.size());
-    const std::span<std::uint8_t> span{bytes};
+std::optional<std::size_t> EthernetFrameCodec::encoded_size(
+    const EthernetFrame& frame) noexcept {
+    if (frame.vlan.has_value()) {
+        std::uint16_t tci{};
+        if (!frame.vlan->try_to_tag_control_information(tci)) {
+            return std::nullopt;
+        }
+    }
 
-    frame.destination.copy_to(span.first(6U));
-    frame.source.copy_to(span.subspan(6U, 6U));
+    const std::size_t header_length = frame.vlan.has_value() ? 18U : 14U;
+    if (frame.payload.size() > std::numeric_limits<std::size_t>::max() - header_length) {
+        return std::nullopt;
+    }
+    return header_length + frame.payload.size();
+}
+
+wire::EncodeResult EthernetFrameCodec::encode_into(
+    const EthernetFrame& frame,
+    const std::span<std::uint8_t> destination) noexcept {
+    const auto required = encoded_size(frame);
+    if (!required) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    if (destination.size() < *required) {
+        return {wire::EncodeStatus::buffer_too_small, 0U, *required};
+    }
+
+    std::copy(frame.destination.bytes().begin(), frame.destination.bytes().end(), destination.begin());
+    std::copy(
+        frame.source.bytes().begin(),
+        frame.source.bytes().end(),
+        destination.begin() + 6);
 
     std::size_t offset = 12U;
-    if (frame.vlan) {
-        write_u16_be(span, offset, vlan_tag_ethertype);
-        write_u16_be(span, offset + 2U, frame.vlan->to_tag_control_information());
+    if (frame.vlan.has_value()) {
+        std::uint16_t tci{};
+        if (!frame.vlan->try_to_tag_control_information(tci)) {
+            return {wire::EncodeStatus::value_out_of_range, 0U, *required};
+        }
+        write_u16_be(destination, offset, vlan_tag_ethertype);
+        write_u16_be(destination, offset + 2U, tci);
         offset += 4U;
     }
 
-    write_u16_be(span, offset, frame.ether_type);
+    write_u16_be(destination, offset, frame.ether_type);
     offset += 2U;
-    std::copy(frame.payload.begin(), frame.payload.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset));
+    std::copy(
+        frame.payload.begin(),
+        frame.payload.end(),
+        destination.begin() + static_cast<std::ptrdiff_t>(offset));
+    offset += frame.payload.size();
+    return {wire::EncodeStatus::ok, offset, *required};
+}
+
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
+std::vector<std::uint8_t> EthernetFrameCodec::encode(const EthernetFrame& frame) {
+    const auto required = encoded_size(frame);
+    if (!required) {
+        throw std::out_of_range("Ethernet frame exceeds the supported wire range.");
+    }
+    std::vector<std::uint8_t> bytes(*required);
+    const auto result = encode_into(frame, bytes);
+    if (!result.success() || result.bytes_written != bytes.size()) {
+        throw std::runtime_error("Failed to encode Ethernet frame into sized buffer.");
+    }
     return bytes;
 }
 
-bool EthernetFrameCodec::try_decode(const std::span<const std::uint8_t> bytes,
-                                    EthernetFrame& frame) noexcept {
+bool EthernetFrameCodec::try_decode(
+    const std::span<const std::uint8_t> bytes,
+    EthernetFrame& frame) noexcept {
     frame = {};
-    if (bytes.size() < 14U) {
-        return false;
-    }
-
-    try {
-        frame.destination = MacAddress(bytes.first(6U));
-        frame.source = MacAddress(bytes.subspan(6U, 6U));
-    } catch (...) {
+    if (bytes.size() < 14U ||
+        !MacAddress::try_from_bytes(bytes.first(6U), frame.destination) ||
+        !MacAddress::try_from_bytes(bytes.subspan(6U, 6U), frame.source)) {
         return false;
     }
 
@@ -180,8 +275,6 @@ bool EthernetFrameCodec::try_decode(const std::span<const std::uint8_t> bytes,
         }
         const auto decoded_vlan =
             VlanTag::from_tag_control_information(read_u16_be(bytes, 14U));
-        // IEEE 802.1Q reserves VID 4095. Keep try_decode closed under encode:
-        // every successfully decoded VlanTag must be valid for re-encoding.
         if (decoded_vlan.vlan_id > 4094U) {
             return false;
         }
@@ -192,27 +285,65 @@ bool EthernetFrameCodec::try_decode(const std::span<const std::uint8_t> bytes,
 
     frame.ether_type = ether_type;
     frame.vlan = vlan;
-    frame.payload.assign(bytes.begin() + static_cast<std::ptrdiff_t>(payload_offset), bytes.end());
+    frame.payload.assign(
+        bytes.begin() + static_cast<std::ptrdiff_t>(payload_offset),
+        bytes.end());
     return true;
 }
+#endif
 
+std::optional<std::size_t> ProcessBusFrameCodec::encoded_payload_size(
+    const std::span<const std::uint8_t> apdu) noexcept {
+    if (apdu.size() >
+        static_cast<std::size_t>(std::numeric_limits<std::uint16_t>::max()) - header_length) {
+        return std::nullopt;
+    }
+    return header_length + apdu.size();
+}
+
+wire::EncodeResult ProcessBusFrameCodec::encode_payload_into(
+    const std::uint16_t app_id,
+    const std::span<const std::uint8_t> apdu,
+    const std::span<std::uint8_t> destination,
+    const std::uint16_t reserved1,
+    const std::uint16_t reserved2) noexcept {
+    const auto required = encoded_payload_size(apdu);
+    if (!required) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    if (destination.size() < *required) {
+        return {wire::EncodeStatus::buffer_too_small, 0U, *required};
+    }
+
+    const auto declared_length = static_cast<std::uint16_t>(*required);
+    write_u16_be(destination, 0U, app_id);
+    write_u16_be(destination, 2U, declared_length);
+    write_u16_be(destination, 4U, reserved1);
+    write_u16_be(destination, 6U, reserved2);
+    std::copy(
+        apdu.begin(),
+        apdu.end(),
+        destination.begin() + static_cast<std::ptrdiff_t>(header_length));
+    return {wire::EncodeStatus::ok, *required, *required};
+}
+
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
 std::vector<std::uint8_t> ProcessBusFrameCodec::encode_payload(
     const std::uint16_t app_id,
     const std::span<const std::uint8_t> apdu,
     const std::uint16_t reserved1,
     const std::uint16_t reserved2) {
-    if (apdu.size() > std::numeric_limits<std::uint16_t>::max() - header_length) {
+    const auto required = encoded_payload_size(apdu);
+    if (!required) {
         throw std::out_of_range("Process-bus APDU exceeds the 16-bit declared length.");
     }
 
-    const auto declared_length = static_cast<std::uint16_t>(header_length + apdu.size());
-    std::vector<std::uint8_t> bytes(declared_length);
-    const std::span<std::uint8_t> span{bytes};
-    write_u16_be(span, 0U, app_id);
-    write_u16_be(span, 2U, declared_length);
-    write_u16_be(span, 4U, reserved1);
-    write_u16_be(span, 6U, reserved2);
-    std::copy(apdu.begin(), apdu.end(), bytes.begin() + static_cast<std::ptrdiff_t>(header_length));
+    std::vector<std::uint8_t> bytes(*required);
+    const auto result = encode_payload_into(
+        app_id, apdu, bytes, reserved1, reserved2);
+    if (!result.success() || result.bytes_written != bytes.size()) {
+        throw std::runtime_error("Failed to encode process-bus payload into sized buffer.");
+    }
     return bytes;
 }
 
@@ -225,12 +356,17 @@ EthernetFrame ProcessBusFrameCodec::encode_ethernet_frame(
     const std::optional<VlanTag> vlan,
     const std::uint16_t reserved1,
     const std::uint16_t reserved2) {
-    return {destination, source, ether_type, vlan,
-            encode_payload(app_id, apdu, reserved1, reserved2)};
+    return {
+        destination,
+        source,
+        ether_type,
+        vlan,
+        encode_payload(app_id, apdu, reserved1, reserved2)};
 }
 
-bool ProcessBusFrameCodec::try_decode(const EthernetFrame& ethernet,
-                                      ProcessBusFrame& frame) noexcept {
+bool ProcessBusFrameCodec::try_decode(
+    const EthernetFrame& ethernet,
+    ProcessBusFrame& frame) noexcept {
     frame = {};
     if (ethernet.payload.size() < header_length) {
         return false;
@@ -256,9 +392,11 @@ bool ProcessBusFrameCodec::try_decode(const EthernetFrame& ethernet,
     frame.declared_length = declared_length;
     frame.reserved1 = reserved1;
     frame.reserved2 = reserved2;
-    frame.apdu.assign(payload.begin() + static_cast<std::ptrdiff_t>(header_length),
-                      payload.begin() + static_cast<std::ptrdiff_t>(header_length + declared_apdu_length));
+    frame.apdu.assign(
+        payload.begin() + static_cast<std::ptrdiff_t>(header_length),
+        payload.begin() + static_cast<std::ptrdiff_t>(header_length + declared_apdu_length));
     return true;
 }
+#endif
 
 } // namespace ar::iec61850::ethernet
