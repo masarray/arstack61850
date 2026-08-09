@@ -58,12 +58,14 @@ public:
     [[nodiscard]] MmsStaticDispatchResult dispatch(
         std::span<const std::uint8_t> mms_request,
         std::span<std::uint8_t> response,
-        std::span<std::uint8_t> workspace) const noexcept;
+        std::span<std::uint8_t> workspace,
+        const MmsStaticRequestAccessContext& access = {}) const noexcept;
 
     [[nodiscard]] MmsStaticDispatchResult dispatch(
         const MmsConfirmedPduView& request,
         std::span<std::uint8_t> response,
-        std::span<std::uint8_t> workspace) const noexcept;
+        std::span<std::uint8_t> workspace,
+        const MmsStaticRequestAccessContext& access = {}) const noexcept;
 
     [[nodiscard]] constexpr const MmsStaticDispatchPolicy& policy() const noexcept {
         return policy_;
