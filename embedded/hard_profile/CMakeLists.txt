@@ -53,12 +53,22 @@ add_executable(ariec61850_hard_osi_transport_smoke
     ${ARIEC61850_ROOT}/src/osi/cotp_span.cpp)
 ariec61850_configure_hard_target(ariec61850_hard_osi_transport_smoke)
 
+add_executable(ariec61850_hard_session_presentation_smoke
+    ${CMAKE_CURRENT_LIST_DIR}/../session_presentation_hard_profile_smoke.cpp
+    ${ARIEC61850_ROOT}/src/asn1/ber_span_reader.cpp
+    ${ARIEC61850_ROOT}/src/osi/session_span.cpp
+    ${ARIEC61850_ROOT}/src/osi/presentation_span.cpp)
+ariec61850_configure_hard_target(ariec61850_hard_session_presentation_smoke)
+
 enable_testing()
 add_test(NAME ariec61850_hard_sv_smoke COMMAND ariec61850_hard_sv_smoke)
 add_test(NAME ariec61850_hard_goose_smoke COMMAND ariec61850_hard_goose_smoke)
 add_test(NAME ariec61850_hard_osi_transport_smoke COMMAND ariec61850_hard_osi_transport_smoke)
+add_test(
+    NAME ariec61850_hard_session_presentation_smoke
+    COMMAND ariec61850_hard_session_presentation_smoke)
 
 message(STATUS "arstack61850 hard embedded profile: exceptions disabled=ON")
 message(STATUS "arstack61850 hard embedded profile: RTTI disabled=ON")
 message(STATUS "arstack61850 hard embedded profile: host services excluded")
-message(STATUS "arstack61850 hard embedded profile: bounded SV + GOOSE + TPKT/COTP gates=ON")
+message(STATUS "arstack61850 hard embedded profile: bounded SV + GOOSE + TPKT/COTP + Session/Presentation gates=ON")
