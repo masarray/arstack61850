@@ -98,6 +98,43 @@ struct MmsReadAccessResultInput final {
     std::uint32_t failure_code{};
 };
 
+struct MmsWriteRequestView final {
+    std::uint32_t invoke_id{};
+    std::span<const std::uint8_t> variable_list{};
+    std::size_t variable_count{};
+    std::span<const std::uint8_t> data_list{};
+    std::size_t data_count{};
+
+    [[nodiscard]] bool try_variable(
+        std::size_t index,
+        MmsObjectNameView& name) const noexcept;
+
+    [[nodiscard]] bool try_value(
+        std::size_t index,
+        std::span<const std::uint8_t>& encoded_data) const noexcept;
+};
+
+struct MmsWriteAccessResultView final {
+    bool success{};
+    std::uint32_t failure_code{};
+};
+
+struct MmsWriteResponseView final {
+    std::uint32_t invoke_id{};
+    std::span<const std::uint8_t> result_list{};
+    std::size_t result_count{};
+    bool implicit_single_success{};
+
+    [[nodiscard]] bool try_result(
+        std::size_t index,
+        MmsWriteAccessResultView& result) const noexcept;
+};
+
+struct MmsWriteAccessResultInput final {
+    bool success{};
+    std::uint32_t failure_code{};
+};
+
 class MmsServiceSpanCodec final {
 public:
     static constexpr std::size_t maximum_identifier_bytes = 1'024U;
@@ -111,19 +148,15 @@ public:
     [[nodiscard]] static bool try_decode_get_name_list_request(
         const MmsConfirmedPduView& confirmed,
         MmsGetNameListRequestView& request) noexcept;
-
     [[nodiscard]] static bool try_decode_get_name_list_request(
         std::span<const std::uint8_t> mms_pdu,
         MmsGetNameListRequestView& request) noexcept;
-
     [[nodiscard]] static bool try_decode_get_name_list_response(
         const MmsConfirmedPduView& confirmed,
         MmsGetNameListResponseView& response) noexcept;
-
     [[nodiscard]] static bool try_decode_get_name_list_response(
         std::span<const std::uint8_t> mms_pdu,
         MmsGetNameListResponseView& response) noexcept;
-
     [[nodiscard]] static wire::EncodeResult encode_get_name_list_response_into(
         std::uint32_t invoke_id,
         std::span<const std::string_view> names,
@@ -133,45 +166,53 @@ public:
     [[nodiscard]] static bool try_decode_variable_access_attributes_request(
         const MmsConfirmedPduView& confirmed,
         MmsVariableAccessAttributesRequestView& request) noexcept;
-
     [[nodiscard]] static bool try_decode_variable_access_attributes_request(
         std::span<const std::uint8_t> mms_pdu,
         MmsVariableAccessAttributesRequestView& request) noexcept;
-
     [[nodiscard]] static bool try_decode_variable_access_attributes_response(
         const MmsConfirmedPduView& confirmed,
         MmsVariableAccessAttributesResponseView& response) noexcept;
-
     [[nodiscard]] static bool try_decode_variable_access_attributes_response(
         std::span<const std::uint8_t> mms_pdu,
         MmsVariableAccessAttributesResponseView& response) noexcept;
-
-    [[nodiscard]] static wire::EncodeResult
-        encode_variable_access_attributes_response_into(
-            std::uint32_t invoke_id,
-            bool mms_deletable,
-            std::span<const std::uint8_t> encoded_type_specification,
-            std::span<std::uint8_t> destination) noexcept;
+    [[nodiscard]] static wire::EncodeResult encode_variable_access_attributes_response_into(
+        std::uint32_t invoke_id,
+        bool mms_deletable,
+        std::span<const std::uint8_t> encoded_type_specification,
+        std::span<std::uint8_t> destination) noexcept;
 
     [[nodiscard]] static bool try_decode_read_request(
         const MmsConfirmedPduView& confirmed,
         MmsReadRequestView& request) noexcept;
-
     [[nodiscard]] static bool try_decode_read_request(
         std::span<const std::uint8_t> mms_pdu,
         MmsReadRequestView& request) noexcept;
-
     [[nodiscard]] static bool try_decode_read_response(
         const MmsConfirmedPduView& confirmed,
         MmsReadResponseView& response) noexcept;
-
     [[nodiscard]] static bool try_decode_read_response(
         std::span<const std::uint8_t> mms_pdu,
         MmsReadResponseView& response) noexcept;
-
     [[nodiscard]] static wire::EncodeResult encode_read_response_into(
         std::uint32_t invoke_id,
         std::span<const MmsReadAccessResultInput> results,
+        std::span<std::uint8_t> destination) noexcept;
+
+    [[nodiscard]] static bool try_decode_write_request(
+        const MmsConfirmedPduView& confirmed,
+        MmsWriteRequestView& request) noexcept;
+    [[nodiscard]] static bool try_decode_write_request(
+        std::span<const std::uint8_t> mms_pdu,
+        MmsWriteRequestView& request) noexcept;
+    [[nodiscard]] static bool try_decode_write_response(
+        const MmsConfirmedPduView& confirmed,
+        MmsWriteResponseView& response) noexcept;
+    [[nodiscard]] static bool try_decode_write_response(
+        std::span<const std::uint8_t> mms_pdu,
+        MmsWriteResponseView& response) noexcept;
+    [[nodiscard]] static wire::EncodeResult encode_write_response_into(
+        std::uint32_t invoke_id,
+        std::span<const MmsWriteAccessResultInput> results,
         std::span<std::uint8_t> destination) noexcept;
 };
 
