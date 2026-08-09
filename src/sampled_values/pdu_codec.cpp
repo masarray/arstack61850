@@ -2,7 +2,9 @@
 
 #include "ariec61850/sampled_values/pdu_codec.hpp"
 
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
 #include "ariec61850/asn1/ber.hpp"
+#endif
 #include "ariec61850/mms/utc_time.hpp"
 
 #include <algorithm>
@@ -12,10 +14,12 @@
 #include <limits>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string>
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
+#include <stdexcept>
 #include <utility>
 #include <vector>
+#endif
 
 namespace ar::iec61850::sampled_values {
 namespace {
@@ -266,6 +270,7 @@ void write_unsigned(
     return true;
 }
 
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
 bool read_unsigned_exact(
     const asn1::BerTlv& field,
     const std::uint64_t maximum,
@@ -360,6 +365,7 @@ bool read_asdu_sequence(
     }
     return true;
 }
+#endif
 
 } // namespace
 
@@ -428,6 +434,7 @@ wire::EncodeResult SampledValuesPduCodec::encode_into(
     return {wire::EncodeStatus::ok, offset, *required};
 }
 
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
 std::vector<std::uint8_t> SampledValuesPduCodec::encode(
     const SampledValuesPdu& pdu) {
     const auto required = encoded_size(pdu);
@@ -495,5 +502,6 @@ bool SampledValuesPduCodec::try_decode(
         return false;
     }
 }
+#endif
 
 } // namespace ar::iec61850::sampled_values
