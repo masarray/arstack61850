@@ -52,6 +52,7 @@ jobs:
             build-brcb-hard/ariec61850_hard_mms_brcb_smoke \
             build-brcb-hard/ariec61850_hard_mms_brcb_control_smoke \
             build-brcb-hard/ariec61850_hard_mms_brcb_objects_smoke \
+            build-brcb-hard/ariec61850_hard_mms_brcb_lifecycle_smoke \
             build-brcb-hard/ariec61850_hard_mms_brcb_connection_smoke \
             build-brcb-hard/ariec61850_hard_mms_brcb_persistence_smoke; do
             if nm -C "$binary" | grep -E '__cxa_throw|__cxa_begin_catch|__cxa_end_catch|__gxx_personality_v0'; then
@@ -71,6 +72,7 @@ jobs:
               build-brcb-hard/ariec61850_hard_mms_brcb_smoke \
               build-brcb-hard/ariec61850_hard_mms_brcb_control_smoke \
               build-brcb-hard/ariec61850_hard_mms_brcb_objects_smoke \
+              build-brcb-hard/ariec61850_hard_mms_brcb_lifecycle_smoke \
               build-brcb-hard/ariec61850_hard_mms_brcb_connection_smoke \
               build-brcb-hard/ariec61850_hard_mms_brcb_persistence_smoke
           } | tee build-brcb-hard/brcb-footprint.txt
