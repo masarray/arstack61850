@@ -137,8 +137,8 @@ void hash_text(std::uint64_t& hash, const std::string_view text) noexcept {
     return value;
 }
 
-void clear_slots(MmsStaticBrcbRuntime& runtime) noexcept {
-    for (auto& slot : runtime.slots_) {
+void clear_slots(const std::span<MmsStaticBrcbSlot> slots) noexcept {
+    for (auto& slot : slots) {
         const auto storage = slot.storage;
         slot = {};
         slot.storage = storage;
@@ -219,7 +219,7 @@ MmsStaticBrcbStateResult MmsStaticBrcbStateCodec::restore(
     if (source.size() < kHeaderBytes ||
         !std::equal(kMagic.begin(), kMagic.end(), source.begin()) ||
         read_u16(source, 8U) != format_version ||
-        read_u16(source, 10U) != kHeaderBytes) {
+        read_u16(source, 10U) != static_cast<std::uint16_t>(kHeaderBytes)) {
         result.status = MmsStaticBrcbStateStatus::invalid_state;
         return result;
     }
@@ -251,7 +251,7 @@ MmsStaticBrcbStateResult MmsStaticBrcbStateCodec::restore(
     std::uint64_t previous_entry_number = 0U;
     std::uint8_t last_sequence = 0U;
     for (std::size_t logical = 0U; logical < count; ++logical) {
-        if (source.size() - offset < kEntryHeaderBytes) {
+        if (offset > source.size() || source.size() - offset < kEntryHeaderBytes) {
             result.status = MmsStaticBrcbStateStatus::invalid_state;
             return result;
         }
@@ -268,7 +268,7 @@ MmsStaticBrcbStateResult MmsStaticBrcbStateCodec::restore(
             return result;
         }
         offset += kEntryHeaderBytes;
-        if (pdu_bytes > source.size() - offset) {
+        if (offset > source.size() || pdu_bytes > source.size() - offset) {
             result.status = MmsStaticBrcbStateStatus::invalid_state;
             return result;
         }
@@ -290,7 +290,7 @@ MmsStaticBrcbStateResult MmsStaticBrcbStateCodec::restore(
         return result;
     }
 
-    clear_slots(runtime);
+    clear_slots(runtime.slots_);
     offset = kHeaderBytes;
     for (std::size_t logical = 0U; logical < count; ++logical) {
         auto& slot = runtime.slots_[logical];
