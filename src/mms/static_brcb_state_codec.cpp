@@ -15,10 +15,14 @@
 namespace ar::iec61850::mms {
 namespace {
 
-constexpr std::array<std::uint8_t, 8U> kMagic{
+constexpr std::array<std::uint8_t, 8U> kMagicV1{
     'A','R','B','R','C','B','Q','1'};
-constexpr std::size_t kHeaderBytes = 48U;
+constexpr std::array<std::uint8_t, 8U> kMagicV2{
+    'A','R','B','R','C','B','Q','2'};
+constexpr std::size_t kHeaderBytesV1 = 48U;
+constexpr std::size_t kHeaderBytesV2 = 56U;
 constexpr std::size_t kEntryHeaderBytes = 16U;
+constexpr std::uint8_t kReplayGapFlag = 0x01U;
 constexpr std::uint64_t kFnvOffset = 14695981039346656037ULL;
 constexpr std::uint64_t kFnvPrime = 1099511628211ULL;
 
@@ -145,6 +149,13 @@ void clear_slots(const std::span<MmsStaticBrcbSlot> slots) noexcept {
     }
 }
 
+[[nodiscard]] bool magic_matches(
+    const std::span<const std::uint8_t> source,
+    const std::span<const std::uint8_t> magic) noexcept {
+    return source.size() >= magic.size() &&
+        std::equal(magic.begin(), magic.end(), source.begin());
+}
+
 } // namespace
 
 MmsStaticBrcbStateResult MmsStaticBrcbStateCodec::encode(
@@ -153,26 +164,18 @@ MmsStaticBrcbStateResult MmsStaticBrcbStateCodec::encode(
     MmsStaticBrcbStateResult result;
     if (!runtime.initialized_ || runtime.definition_ == nullptr ||
         runtime.pending_ == nullptr || runtime.slots_.empty() ||
+        runtime.head_ >= runtime.slots_.size() ||
         runtime.count_ > runtime.slots_.size() ||
-        runtime.delivery_offset_ > runtime.count_) {
+        runtime.delivery_offset_ > runtime.count_ ||
+        runtime.count_ > std::numeric_limits<std::uint32_t>::max() ||
+        runtime.delivery_offset_ > std::numeric_limits<std::uint32_t>::max()) {
         result.status = MmsStaticBrcbStateStatus::invalid_runtime;
         return result;
     }
 
-    // Checkpoint format v1 intentionally persists only reports that are still
-    // selected for delivery. Delivered retained history is a volatile R1 replay
-    // window; persisting its cursor/history requires an explicit future format
-    // revision so reboot behavior cannot silently change.
-    const auto persisted_count = runtime.queue_size();
-    if (persisted_count > std::numeric_limits<std::uint32_t>::max()) {
-        result.status = MmsStaticBrcbStateStatus::invalid_runtime;
-        return result;
-    }
-
-    std::size_t required = kHeaderBytes;
-    for (std::size_t logical = 0U; logical < persisted_count; ++logical) {
-        const auto physical =
-            (runtime.head_ + runtime.delivery_offset_ + logical) % runtime.slots_.size();
+    std::size_t required = kHeaderBytesV2;
+    for (std::size_t logical = 0U; logical < runtime.count_; ++logical) {
+        const auto physical = (runtime.head_ + logical) % runtime.slots_.size();
         const auto& slot = runtime.slots_[physical];
         if (!slot.occupied || slot.bytes == 0U || slot.bytes > slot.storage.size() ||
             slot.bytes > std::numeric_limits<std::uint32_t>::max() ||
@@ -190,19 +193,20 @@ MmsStaticBrcbStateResult MmsStaticBrcbStateCodec::encode(
 
     auto output = destination.first(required);
     std::fill(output.begin(), output.end(), std::uint8_t{0U});
-    std::copy(kMagic.begin(), kMagic.end(), output.begin());
+    std::copy(kMagicV2.begin(), kMagicV2.end(), output.begin());
     write_u16(output, 8U, format_version);
-    write_u16(output, 10U, static_cast<std::uint16_t>(kHeaderBytes));
+    write_u16(output, 10U, static_cast<std::uint16_t>(kHeaderBytesV2));
     write_u64(output, 12U, definition_fingerprint(*runtime.definition_));
-    write_u32(output, 20U, static_cast<std::uint32_t>(persisted_count));
+    write_u32(output, 20U, static_cast<std::uint32_t>(runtime.count_));
     write_u64(output, 24U, runtime.next_entry_number_);
     write_u64(output, 32U, runtime.dropped_reports_);
     output[40U] = runtime.sequence_number_;
+    output[41U] = runtime.replay_gap_ ? kReplayGapFlag : 0U;
+    write_u32(output, 44U, static_cast<std::uint32_t>(runtime.delivery_offset_));
 
-    std::size_t offset = kHeaderBytes;
-    for (std::size_t logical = 0U; logical < persisted_count; ++logical) {
-        const auto physical =
-            (runtime.head_ + runtime.delivery_offset_ + logical) % runtime.slots_.size();
+    std::size_t offset = kHeaderBytesV2;
+    for (std::size_t logical = 0U; logical < runtime.count_; ++logical) {
+        const auto physical = (runtime.head_ + logical) % runtime.slots_.size();
         const auto& slot = runtime.slots_[physical];
         write_u32(output, offset, static_cast<std::uint32_t>(slot.bytes));
         std::copy(
@@ -234,19 +238,46 @@ MmsStaticBrcbStateResult MmsStaticBrcbStateCodec::restore(
         result.status = MmsStaticBrcbStateStatus::invalid_runtime;
         return result;
     }
-    if (source.size() < kHeaderBytes ||
-        !std::equal(kMagic.begin(), kMagic.end(), source.begin()) ||
-        read_u16(source, 8U) != format_version ||
-        read_u16(source, 10U) != static_cast<std::uint16_t>(kHeaderBytes)) {
+
+    const bool is_v2 = source.size() >= kHeaderBytesV2 &&
+        magic_matches(source, kMagicV2) &&
+        read_u16(source, 8U) == format_version &&
+        read_u16(source, 10U) == static_cast<std::uint16_t>(kHeaderBytesV2);
+    const bool is_v1 = source.size() >= kHeaderBytesV1 &&
+        magic_matches(source, kMagicV1) &&
+        read_u16(source, 8U) == legacy_format_version &&
+        read_u16(source, 10U) == static_cast<std::uint16_t>(kHeaderBytesV1);
+    if (!is_v2 && !is_v1) {
         result.status = MmsStaticBrcbStateStatus::invalid_state;
         return result;
     }
-    for (std::size_t index = 41U; index < kHeaderBytes; ++index) {
-        if (source[index] != 0U) {
+
+    const auto header_bytes = is_v2 ? kHeaderBytesV2 : kHeaderBytesV1;
+    std::size_t delivery_offset = 0U;
+    bool replay_gap = false;
+    if (is_v2) {
+        if ((source[41U] & static_cast<std::uint8_t>(~kReplayGapFlag)) != 0U ||
+            source[42U] != 0U || source[43U] != 0U) {
             result.status = MmsStaticBrcbStateStatus::invalid_state;
             return result;
         }
+        for (std::size_t index = 48U; index < kHeaderBytesV2; ++index) {
+            if (source[index] != 0U) {
+                result.status = MmsStaticBrcbStateStatus::invalid_state;
+                return result;
+            }
+        }
+        replay_gap = (source[41U] & kReplayGapFlag) != 0U;
+        delivery_offset = static_cast<std::size_t>(read_u32(source, 44U));
+    } else {
+        for (std::size_t index = 41U; index < kHeaderBytesV1; ++index) {
+            if (source[index] != 0U) {
+                result.status = MmsStaticBrcbStateStatus::invalid_state;
+                return result;
+            }
+        }
     }
+
     if (read_u64(source, 12U) != definition_fingerprint(*runtime.definition_)) {
         result.status = MmsStaticBrcbStateStatus::definition_mismatch;
         return result;
@@ -260,12 +291,12 @@ MmsStaticBrcbStateResult MmsStaticBrcbStateCodec::restore(
         result.status = MmsStaticBrcbStateStatus::capacity_mismatch;
         return result;
     }
-    if (restored_next_entry == 0U) {
+    if (delivery_offset > count || restored_next_entry == 0U) {
         result.status = MmsStaticBrcbStateStatus::invalid_state;
         return result;
     }
 
-    std::size_t offset = kHeaderBytes;
+    std::size_t offset = header_bytes;
     std::uint64_t previous_entry_number = 0U;
     std::uint8_t last_sequence = 0U;
     for (std::size_t logical = 0U; logical < count; ++logical) {
@@ -309,7 +340,7 @@ MmsStaticBrcbStateResult MmsStaticBrcbStateCodec::restore(
     }
 
     clear_slots(runtime.slots_);
-    offset = kHeaderBytes;
+    offset = header_bytes;
     for (std::size_t logical = 0U; logical < count; ++logical) {
         auto& slot = runtime.slots_[logical];
         const auto pdu_bytes = static_cast<std::size_t>(read_u32(source, offset));
@@ -331,11 +362,11 @@ MmsStaticBrcbStateResult MmsStaticBrcbStateCodec::restore(
 
     runtime.head_ = 0U;
     runtime.count_ = count;
-    runtime.delivery_offset_ = 0U;
+    runtime.delivery_offset_ = delivery_offset;
     runtime.next_entry_number_ = restored_next_entry;
     runtime.dropped_reports_ = restored_dropped;
     runtime.sequence_number_ = restored_sequence;
-    runtime.replay_gap_ = false;
+    runtime.replay_gap_ = replay_gap;
     runtime.queue_revision_ = runtime.queue_revision_ ==
             std::numeric_limits<std::uint32_t>::max()
         ? 1U

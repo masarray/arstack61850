@@ -2,7 +2,9 @@
 
 ## Current milestone
 
-**Phase 4C.1 — built-in non-blocking TCP, bounded read-only discovery, C#-compatible live-model parity, and physical interoperability evidence tooling are implemented for review.**
+**Phase 4D-R3 — bounded BRCB operational semantics, association ownership, MMS replay/purge controls, lifecycle handling, and replay-capable recovery state v2 are implemented for review.**
+
+The active Phase 4D work is intentionally carried as a stacked draft-PR series on top of the ESP32-P4/SV work. `main` does not yet represent this milestone.
 
 ## Delivered modules
 
@@ -15,47 +17,80 @@
 | Offline DataSet/RCB/report monitoring | Merged to `main` |
 | Transport-injected MMS association/runtime | Merged to `main` |
 | Persistent RCB subscription runtime | Merged to `main` |
-| Built-in Windows/Linux TCP transport | Implemented in PR #14 |
-| Live read-only MMS discovery | Implemented in PR #14 |
-| `live-ied-model-v1` hierarchy/parity mapper | Implemented in PR #14 |
-| Physical read-only evidence runner | Implemented in PR #14 |
-| Physical IED acceptance evidence | Pending lab execution |
+| Built-in Windows/Linux TCP transport | Implemented in Phase 4C stack |
+| Live read-only MMS discovery/model parity | Implemented in Phase 4C stack |
+| ESP32-P4 BRCB raw-partition backend + geometry/latency probe firmware | Implemented; physical measurement pending |
+| BRCB retained history + independent delivery cursor | Phase 4D-R1 / PR #16 |
+| Association-aware BRCB reservation/Owner/ResvTms state machine | Phase 4D-R2a / PR #17 |
+| Per-request association identity propagated through MMS writes | Phase 4D-R2b / PR #18 |
+| MMS RptEna/EntryID/PurgeBuf/ResvTms/Owner operational object bank | Phase 4D-R2c / PR #20 |
+| TCP/reset/COTP-DR association-loss lifecycle bridge | Phase 4D-R2d / PR #22 |
+| Replay-capable BRCB recovery image v2 with v1 restore | Phase 4D-R3 / PR #23 |
 
-## Phase 4C.1 behavior
+## Phase 4D behavior
 
-- Non-blocking Winsock/POSIX TCP honors deadlines and cancellation.
-- Discovery is bounded and sends only GetNameList, GetVariableAccessAttributes,
-  GetNamedVariableListAttributes, and Read.
-- MMS references are mapped to Logical Device, Logical Node, Data Object, and Data Attribute.
-- Functional constraints, MMS/SCL type evidence, DataSets, and report controls are retained.
-- Direct leaf and nested TypeSpecification evidence are resolved into the model.
-- IED identity and CDC are inferred conservatively with explicit confidence.
-- Canonical manifests and fingerprints make unchanged-model runs comparable.
-- C# and C++ `live-ied-model-v1` JSON can be compared by the parity script.
-- The lab runner performs repeated reconnect/discovery cycles and records acceptance evidence.
+- BRCB delivery no longer destroys retained report history.
+- The bounded ring has an independent delivery cursor and explicit retained-history size.
+- `EntryID` can resume after a retained report; all-zero `EntryID` rewinds to the oldest retained report.
+- `PurgeBuf` clears retained history and replay-gap state without rolling EntryID backward.
+- Queue overflow remains bounded and records both dropped-report count and a replay-gap condition.
+- Reservation ownership uses an opaque stable Owner identity plus a separate ephemeral MMS association ID; it is not coupled to IP addresses or socket handles.
+- A second live association cannot steal an owned BRCB, including one presenting the same stable Owner identity.
+- `ResvTms=0` releases on association loss; positive `ResvTms` retains the stable Owner until expiry and permits that Owner to reconnect with a new association ID.
+- Association loss always disables `RptEna`.
+- TCP EOF/socket/local close, runtime reset, and incoming COTP Disconnect Request use the same exactly-once lifecycle bridge.
+- MMS static writes carry caller-owned association context without changing legacy non-contextual object callbacks.
+- The operational MMS object bank exposes `RptID`, `RptEna`, `DatSet`, `ConfRev`, `PurgeBuf`, `EntryID`, `ResvTms`, and `Owner`.
+- Recovery image v2 persists the full retained replay window, delivery cursor, replay-gap flag, EntryIDs, report PDUs, sequence state, next EntryID, and dropped-report counter.
+- Recovery image v2 accepts legacy v1 images. A v1 image restores with its original undelivered-only semantics.
+- Reboot recovery deliberately returns reporting disabled and does not restore live association identity or Owner connection state.
 
-## Validation completed without a physical IED
+## Validation completed without physical ESP32-P4 flash evidence
 
-- Phase 4B baseline GCC, Clang, MSVC, sanitizer, CTest, and fuzz evidence remains valid.
-- Phase 4C TCP loopback, cancellation, strict GCC/Clang warning, and sanitizer checks passed locally.
-- Live-model hierarchy, deterministic fingerprint, parity, and multi-translation-unit header
-  validation passed locally with GCC and Clang; ASan/UBSan smoke passed.
-- Python parity and interoperability scripts pass syntax checks and a deterministic simulated
-  three-cycle acceptance run.
-- The discovery regression decodes all emitted requests and rejects MMS Write.
+The BRCB hard profile is compiled with GCC and Clang using `-fno-exceptions -fno-rtti`, and its evidence gate currently covers:
 
-## Remaining acceptance gates
+- bounded BRCB capture, EntryID progression and BufOvfl behavior;
+- retained replay history and independent delivery cursor;
+- multi-client ownership, reservation, reconnect and expiry semantics;
+- encoded MMS writes crossing BER decode -> dispatcher -> association-aware BRCB control;
+- EntryID resume/rewind, invalid EntryID rejection and PurgeBuf;
+- TCP/reset/COTP-DR association-loss lifecycle behavior;
+- A/B checkpoint generation, torn-write fallback and corruption fallback;
+- recovery state v2 preserving delivered history, cursor and replay gap;
+- durable purge with monotonic EntryID after reboot;
+- backward restore of a legacy v1 recovery image;
+- absence of C++ exception runtime symbols in the hard-profile binaries.
 
-- Run repository GCC/Clang/MSVC and Security/Evidence workflows through `workflow_dispatch`.
-- Run the physical evidence runner against a reachable IED or vendor simulator.
-- Record a primary-vendor ten-cycle run, timeout/reconnect evidence, and large-model pagination
-  where available.
-- Export the C# oracle model and accept C#↔C++ parity against the same IED configuration.
-- Review warning policy and packet-capture references before merging PR #14.
+## Physical non-volatile storage gate
 
-## Safety boundary
+The ESP32-P4 non-volatile adapter and probe firmware are implemented, but **physical acceptance is not yet claimed**.
 
-The live discovery surface is read-only and does not construct Write, control, GI, RCB
-reservation/enable, dynamic DataSet mutation, or file-service requests. The generic TCP transport
-can be used by other explicit runtime surfaces, but those surfaces retain their own authorization
-and physical-laboratory gates.
+Current evidence status remains:
+
+`READY_NOT_MEASURED`
+
+The dedicated ESP32-P4 probe can read the actual partition erase geometry and measure erase/write/read latency using the real `brcb_state` raw partition. Hosted CI cannot replace this evidence.
+
+Before changing the status to hardware-measured/passed, capture and retain:
+
+1. actual `esp_partition_t::erase_size` and accepted A/B/probe geometry from the target board;
+2. measured erase/write/read latency records from the destructive isolated probe erase unit;
+3. the actual flash-device endurance/P-E rating used to convert checkpoint frequency into a wear budget;
+4. an accepted checkpoint interval and worst-case lifetime policy based on that rating;
+5. controlled physical power-loss evidence demonstrating committed-bank recovery and torn-write fallback on the real board.
+
+Recovery state v2 can be larger than v1 because delivered replay history is intentionally retained. The checkpoint operation must therefore fail closed if the measured bank geometry cannot hold the configured worst-case retained state; software must not silently discard replay history merely to fit flash.
+
+## Remaining Phase 4D acceptance gates
+
+- Complete the repository-wide CI matrix for the final stacked head and resolve any non-BRCB regression if reported.
+- Run the ESP32-P4 flash probe on physical hardware and archive UART geometry/latency evidence.
+- Bind the actual flash P/E endurance rating into an explicit checkpoint-frequency/wear policy.
+- Run controlled physical power-cut/reboot tests against the A/B journal and recovery-v2 image.
+- Review and merge the stacked Phase 4D PRs in dependency order once their parent branches are accepted.
+
+## Deliberately deferred
+
+Mutable BRCB definition/configuration lifecycle for fields such as `OptFlds`, `BufTm`, `TrgOps`, and `IntgPd` is not mixed into the ownership/recovery work. Those fields require their own configuration/versioning rules.
+
+IEC 61850 control-model parity (`ctlModel`, Direct/SBO, enhanced security, `Oper`, `SBO/SBOw`, `Cancel`, command termination, `LastApplError`/`AddCause`, interlock/synchrocheck, and no automatic command retry) is the next major functional phase after the Phase 4D hardware acceptance gate is closed.
