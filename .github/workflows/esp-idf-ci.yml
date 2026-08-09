@@ -25,12 +25,62 @@ jobs:
           target: esp32p4
           path: ports/esp_idf/smoke_app
 
+      - name: Build ESP32-P4 BRCB flash probe firmware
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.0.2
+          target: esp32p4
+          path: ports/esp_idf/brcb_flash_probe_app
+
       - name: Build flashable ESP32-P4 SV trial firmware
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v6.0.2
           target: esp32p4
           path: ports/esp_idf/sv_trial_app
+
+      - name: Verify BRCB flash probe outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          app=ports/esp_idf/brcb_flash_probe_app
+          build="$app/build"
+          test -s "$build/arstack61850_esp32p4_brcb_flash_probe.bin"
+          test -s "$build/arstack61850_esp32p4_brcb_flash_probe.elf"
+          test -s "$build/arstack61850_esp32p4_brcb_flash_probe.map"
+          test -s "$build/bootloader/bootloader.bin"
+          test -s "$build/partition_table/partition-table.bin"
+          test -s "$build/flasher_args.json"
+          test -s "$app/partitions.csv"
+          test -s "$app/sdkconfig.defaults"
+          test -s "$app/README.md"
+          grep -Eq '^brcb_state,[[:space:]]*0x40,[[:space:]]*0x01,[[:space:]]*,[[:space:]]*0x3000' "$app/partitions.csv"
+          grep -q 'CONFIG_PARTITION_TABLE_CUSTOM 1' "$build/config/sdkconfig.h"
+          python3 -m json.tool "$build/flasher_args.json" >/dev/null
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          app = Path('ports/esp_idf/brcb_flash_probe_app')
+          build = app / 'build'
+          manifest = json.loads((build / 'flasher_args.json').read_text(encoding='utf-8'))
+          chip = manifest.get('extra_esptool_args', {}).get('chip')
+          if chip != 'esp32p4':
+              raise SystemExit(f'expected flasher chip esp32p4, got {chip!r}')
+          raw = manifest.get('flash_files')
+          if not isinstance(raw, dict):
+              raise SystemExit('probe flasher manifest has no flash_files object')
+          flash_files = {int(str(k), 0): str(v) for k, v in raw.items()}
+          expected = {
+              0x2000: 'bootloader/bootloader.bin',
+              0x8000: 'partition_table/partition-table.bin',
+              0x10000: 'arstack61850_esp32p4_brcb_flash_probe.bin',
+          }
+          if flash_files != expected:
+              raise SystemExit(
+                  f'unexpected probe flash layout: expected {expected!r}, got {flash_files!r}')
+          print('ESP32P4/BRCB-FLASH-PROBE/CROSS-COMPILED')
+          PY
 
       - name: Verify flashable firmware outputs
         shell: bash
@@ -48,7 +98,10 @@ jobs:
           test -s "$build/flash_args"
           test -s "$build/flasher_args.json"
           test -s "$app/sdkconfig.defaults"
+          test -s "$app/partitions.csv"
           test -s "$app/README.md"
+          grep -Eq '^brcb_state,[[:space:]]*0x40,[[:space:]]*0x01,[[:space:]]*,[[:space:]]*0x3000' "$app/partitions.csv"
+          grep -q 'CONFIG_PARTITION_TABLE_CUSTOM 1' "$build/config/sdkconfig.h"
           python3 -m json.tool "$build/flasher_args.json" >/dev/null
           python3 - <<'PY'
           import json
@@ -106,6 +159,7 @@ jobs:
               build / 'flash_args',
               build / 'flasher_args.json',
               app / 'sdkconfig.defaults',
+              app / 'partitions.csv',
               app / 'README.md',
           ]
           inventory = []
@@ -123,6 +177,8 @@ jobs:
               'authoritative_manifest': 'build/flasher_args.json',
               'companion_flash_args': 'build/flash_args',
               'sdkconfig_defaults': 'sdkconfig.defaults',
+              'brcb_partition_table': 'partitions.csv',
+              'brcb_flash_measurement': 'READY_NOT_MEASURED',
           }
           (qa / 'ARSTACK_BUILD_PROFILE.json').write_text(
               json.dumps(evidence, indent=2, sort_keys=True) + '\n',
@@ -141,9 +197,10 @@ jobs:
               ci-artifacts/ARSTACK_BUILD_PROFILE.json \
               ci-artifacts/ARSTACK_BUILD_FILE_LIST.txt \
               sdkconfig.defaults \
+              partitions.csv \
               README.md > ci-artifacts/SHA256SUMS
           )
-          echo "FLASHABLE/READY: ESP32-P4 flasher manifest and complete firmware set verified."
+          echo "FLASHABLE/READY: ESP32-P4 flasher manifest, BRCB partition layout and firmware set verified."
 
       - name: Upload failed Gate-C diagnostics
         if: failure()
@@ -161,6 +218,27 @@ jobs:
             ports/esp_idf/sv_trial_app/build/arstack61850_esp32p4_sv_trial.bin
             ports/esp_idf/sv_trial_app/build/bootloader/bootloader.bin
             ports/esp_idf/sv_trial_app/build/partition_table/partition-table.bin
+            ports/esp_idf/brcb_flash_probe_app/build/flasher_args.json
+            ports/esp_idf/brcb_flash_probe_app/build/arstack61850_esp32p4_brcb_flash_probe.bin
+            ports/esp_idf/brcb_flash_probe_app/build/partition_table/partition-table.bin
+
+      - name: Upload ESP32-P4 BRCB flash probe firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32p4-brcb-flash-probe-${{ github.event.pull_request.head.sha || github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            ports/esp_idf/brcb_flash_probe_app/build/arstack61850_esp32p4_brcb_flash_probe.bin
+            ports/esp_idf/brcb_flash_probe_app/build/arstack61850_esp32p4_brcb_flash_probe.elf
+            ports/esp_idf/brcb_flash_probe_app/build/arstack61850_esp32p4_brcb_flash_probe.map
+            ports/esp_idf/brcb_flash_probe_app/build/bootloader/bootloader.bin
+            ports/esp_idf/brcb_flash_probe_app/build/partition_table/partition-table.bin
+            ports/esp_idf/brcb_flash_probe_app/build/flash_args
+            ports/esp_idf/brcb_flash_probe_app/build/flasher_args.json
+            ports/esp_idf/brcb_flash_probe_app/sdkconfig.defaults
+            ports/esp_idf/brcb_flash_probe_app/partitions.csv
+            ports/esp_idf/brcb_flash_probe_app/README.md
 
       - name: Upload ESP32-P4 flashable firmware
         uses: actions/upload-artifact@v4
@@ -180,4 +258,5 @@ jobs:
             ports/esp_idf/sv_trial_app/ci-artifacts/ARSTACK_BUILD_FILE_LIST.txt
             ports/esp_idf/sv_trial_app/ci-artifacts/SHA256SUMS
             ports/esp_idf/sv_trial_app/sdkconfig.defaults
+            ports/esp_idf/sv_trial_app/partitions.csv
             ports/esp_idf/sv_trial_app/README.md

@@ -1,8 +1,12 @@
-# The linked arstack61850 SV transmit component is a hard no-exception profile.
+# The linked arstack61850 component is a hard no-exception profile.
 CONFIG_COMPILER_CXX_EXCEPTIONS=n
 
 # First physical proof uses the ESP32-P4 internal EMAC/RMII path.
 CONFIG_ETH_USE_ESP32_EMAC=y
+
+# Reserve two raw BRCB journal banks plus one destructive latency-probe erase unit.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
 # Board management/control uses the onboard Type-C USB-to-UART bridge wired to
 # ESP32-P4 UART0 (TX GPIO37 / RX GPIO38). Keep UART0 as primary stdio so the
