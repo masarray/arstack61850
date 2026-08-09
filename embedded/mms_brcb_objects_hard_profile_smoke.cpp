@@ -239,7 +239,7 @@ int main() {
 
     std::array<std::uint8_t, 1024U> encode_buffer{};
     std::array<std::uint8_t, 1024U> capture_workspace{};
-    const std::array<std::uint8_t, 8U> report_time{0U,0U,0U,1U,0U,0U,0U,0U};
+    const std::array<std::uint8_t, 6U> report_time{0U,0U,0x12U,0x34U,0U,0x01U};
     if (reports.notify(0U, mms::MmsStaticBrcbEventReason::data_change, now) !=
             mms::MmsStaticBrcbStatus::ok) {
         return 6;
