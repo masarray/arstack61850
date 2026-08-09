@@ -67,7 +67,7 @@ constexpr std::array<std::uint8_t, 3U> kZeroSeconds{0x85U, 0x01U, 0x00U};
     const auto domain_specific_content = 4U + domain.size() + item.size();
 
     std::size_t offset = 0U;
-    const auto put = [&](const std::uint8_t byte) mutable noexcept -> bool {
+    const auto put = [&](const std::uint8_t byte) noexcept -> bool {
         if (offset >= destination.size()) {
             return false;
         }
@@ -221,7 +221,6 @@ int main() {
     const auto b = access(201U, owner_b);
     std::uint8_t invoke = 1U;
 
-    // Enabling an unreserved BRCB implicitly claims it for this association.
     if (!dispatch_write(dispatcher, "B1$RptEna", kTrue, a, true, 0U, invoke) ||
         !reports.enabled()) {
         return 3;
@@ -233,13 +232,11 @@ int main() {
         return 4;
     }
 
-    // A second client cannot mutate the operational BRCB while A owns it.
     if (!dispatch_write(dispatcher, "B1$RptEna", kTrue, b, false, 3U, invoke) ||
         !dispatch_write(dispatcher, "B1$PurgeBuf", kTrue, b, false, 3U, invoke)) {
         return 5;
     }
 
-    // Capture two reports while A owns and enables the BRCB.
     std::array<std::uint8_t, 1024U> encode_buffer{};
     std::array<std::uint8_t, 1024U> capture_workspace{};
     const std::array<std::uint8_t, 8U> report_time{0U,0U,0U,1U,0U,0U,0U,0U};
@@ -274,7 +271,6 @@ int main() {
         return 11;
     }
 
-    // Disabling reporting does not release Owner. ResvTms can be set afterward.
     if (!dispatch_write(dispatcher, "B1$ResvTms", kFiveSeconds, a, true, 0U, invoke)) {
         return 12;
     }
@@ -284,7 +280,6 @@ int main() {
         return 13;
     }
 
-    // EntryID write resumes AFTER the requested retained entry.
     const auto first_entry_data = octet_data(first.entry_id);
     if (!dispatch_write(
             dispatcher, "B1$EntryID", first_entry_data, a, true, 0U, invoke) ||
@@ -297,8 +292,6 @@ int main() {
         return 15;
     }
 
-    // All-zero EntryID rewinds to oldest retained; unavailable EntryID is
-    // object-value-invalid (MMS data-access failure 11).
     const std::array<std::uint8_t, 8U> zero_entry{};
     const auto zero_entry_data = octet_data(zero_entry);
     if (!dispatch_write(
@@ -319,7 +312,6 @@ int main() {
         return 18;
     }
 
-    // Releasing the reservation is only allowed while reporting is disabled.
     if (!dispatch_write(dispatcher, "B1$ResvTms", kZeroSeconds, a, true, 0U, invoke)) {
         return 19;
     }
@@ -328,7 +320,6 @@ int main() {
         return 20;
     }
 
-    // Read callbacks expose command/state values with the expected MMS Data tags.
     std::array<std::uint8_t, 32U> read_buffer{};
     const auto& entry_object = object_storage[1U + 5U];
     const auto entry_read = entry_object.read(entry_object.context, read_buffer);
