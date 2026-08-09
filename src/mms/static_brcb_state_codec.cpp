@@ -193,11 +193,17 @@ MmsStaticBrcbStateResult MmsStaticBrcbStateCodec::encode(
         const auto physical = (runtime.head_ + logical) % runtime.slots_.size();
         const auto& slot = runtime.slots_[physical];
         write_u32(output, offset, static_cast<std::uint32_t>(slot.bytes));
-        std::copy(slot.entry_id.begin(), slot.entry_id.end(), output.begin() + offset + 4U);
+        std::copy(
+            slot.entry_id.begin(),
+            slot.entry_id.end(),
+            output.subspan(offset + 4U).begin());
         output[offset + 12U] = slot.sequence_number;
         output[offset + 13U] = slot.buffer_overflow ? 1U : 0U;
         offset += kEntryHeaderBytes;
-        std::copy_n(slot.storage.begin(), slot.bytes, output.begin() + offset);
+        std::copy_n(
+            slot.storage.begin(),
+            slot.bytes,
+            output.subspan(offset).begin());
         offset += slot.bytes;
     }
 
@@ -295,13 +301,19 @@ MmsStaticBrcbStateResult MmsStaticBrcbStateCodec::restore(
     for (std::size_t logical = 0U; logical < count; ++logical) {
         auto& slot = runtime.slots_[logical];
         const auto pdu_bytes = static_cast<std::size_t>(read_u32(source, offset));
-        std::copy_n(source.begin() + offset + 4U, slot.entry_id.size(), slot.entry_id.begin());
+        std::copy_n(
+            source.subspan(offset + 4U).begin(),
+            slot.entry_id.size(),
+            slot.entry_id.begin());
         slot.sequence_number = source[offset + 12U];
         slot.buffer_overflow = source[offset + 13U] != 0U;
         slot.bytes = pdu_bytes;
         slot.occupied = true;
         offset += kEntryHeaderBytes;
-        std::copy_n(source.begin() + offset, pdu_bytes, slot.storage.begin());
+        std::copy_n(
+            source.subspan(offset).begin(),
+            pdu_bytes,
+            slot.storage.begin());
         offset += pdu_bytes;
     }
 
