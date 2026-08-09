@@ -24,6 +24,23 @@ using MmsStaticWriteCallback = MmsStaticWriteResult (*)(
     void* context,
     std::span<const std::uint8_t> encoded_data) noexcept;
 
+// Per-request identity propagated by a connection/runtime adapter. The core
+// deliberately treats Owner as opaque binary identity and does not bind it to
+// an IP address, socket, TLS implementation, or operating-system handle.
+struct MmsStaticRequestAccessContext final {
+    std::uint64_t association_id{};
+    std::span<const std::uint8_t> owner{};
+
+    [[nodiscard]] constexpr bool valid() const noexcept {
+        return association_id != 0U && !owner.empty();
+    }
+};
+
+using MmsStaticContextualWriteCallback = MmsStaticWriteResult (*)(
+    void* context,
+    std::span<const std::uint8_t> encoded_data,
+    const MmsStaticRequestAccessContext& access) noexcept;
+
 struct MmsStaticObjectEntry final {
     std::string_view domain;
     std::string_view item;
@@ -34,8 +51,12 @@ struct MmsStaticObjectEntry final {
     MmsStaticWriteCallback write{};
     void* write_context{};
 
+    // Appended for source compatibility with existing aggregate initializers.
+    // A contextual callback takes precedence over the legacy write callback.
+    MmsStaticContextualWriteCallback contextual_write{};
+
     [[nodiscard]] constexpr bool writable() const noexcept {
-        return write != nullptr;
+        return write != nullptr || contextual_write != nullptr;
     }
 };
 
