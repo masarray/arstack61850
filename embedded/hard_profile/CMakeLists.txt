@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(ARIEC61850HardSvProfile
     VERSION 0.1.0
-    DESCRIPTION "No-exception/no-RTTI MCU profile for the bounded SV transmit path"
+    DESCRIPTION "No-exception/no-RTTI MCU profile for bounded process-bus and SV transmit paths"
     LANGUAGES CXX)
 
 set(ARIEC61850_ROOT "${CMAKE_CURRENT_LIST_DIR}/../..")
@@ -12,6 +12,7 @@ if(MSVC)
 endif()
 
 set(ARIEC61850_HARD_SV_SOURCES
+    ${ARIEC61850_ROOT}/src/ethernet/ethernet.cpp
     ${ARIEC61850_ROOT}/src/mms/utc_time.cpp
     ${ARIEC61850_ROOT}/src/sampled_values/pdu_codec.cpp
     ${ARIEC61850_ROOT}/src/sampled_values/frame_codec.cpp
@@ -40,6 +41,6 @@ target_compile_options(ariec61850_hard_sv_smoke PRIVATE
 enable_testing()
 add_test(NAME ariec61850_hard_sv_smoke COMMAND ariec61850_hard_sv_smoke)
 
-message(STATUS "arstack61850 hard SV profile: exceptions disabled=ON")
-message(STATUS "arstack61850 hard SV profile: RTTI disabled=ON")
-message(STATUS "arstack61850 hard SV profile: host services excluded")
+message(STATUS "arstack61850 hard process-bus/SV profile: exceptions disabled=ON")
+message(STATUS "arstack61850 hard process-bus/SV profile: RTTI disabled=ON")
+message(STATUS "arstack61850 hard process-bus/SV profile: host services excluded")
