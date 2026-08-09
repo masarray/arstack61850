@@ -3,12 +3,12 @@
 
 #include "ariec61850/mms/static_brcb_checkpoint_store.hpp"
 
+#include "esp_partition.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <span>
-
-struct esp_partition_t;
 
 namespace ar::iec61850::ports::esp_idf {
 
@@ -190,7 +190,7 @@ private:
         std::size_t bytes) noexcept;
     [[nodiscard]] static bool storage_sync(void* context) noexcept;
 
-    const struct esp_partition_t* partition_{};
+    const esp_partition_t* partition_{};
     BrcbFlashStatus status_{BrcbFlashStatus::partition_not_found};
     BrcbFlashGeometry geometry_{};
     BrcbFlashMetrics metrics_{};
