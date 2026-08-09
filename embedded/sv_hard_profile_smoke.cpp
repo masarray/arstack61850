@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <vector>
 
 namespace {
 
@@ -61,9 +62,71 @@ sampled_values::SampledValuesFrame make_frame() {
         sampled_values::SampledValuesPdu{{asdu}}};
 }
 
+bool bounded_ethernet_primitives_work() {
+    const std::array<std::uint8_t, 6U> raw_mac{
+        0x02U, 0x00U, 0x00U, 0x00U, 0x00U, 0x02U};
+    ethernet::MacAddress parsed{};
+    if (!ethernet::MacAddress::try_from_bytes(raw_mac, parsed) ||
+        parsed.bytes() != raw_mac) {
+        return false;
+    }
+
+    std::array<std::uint8_t, 6U> copied{};
+    if (!parsed.try_copy_to(copied) || copied != raw_mac) {
+        return false;
+    }
+
+    ethernet::VlanTag vlan{4U, true, 100U};
+    std::uint16_t tci{};
+    if (!vlan.try_to_tag_control_information(tci) || tci != 0x9064U) {
+        return false;
+    }
+    ethernet::VlanTag invalid_vlan{8U, false, 100U};
+    if (invalid_vlan.try_to_tag_control_information(tci)) {
+        return false;
+    }
+
+    const std::array<std::uint8_t, 3U> apdu{0x61U, 0x01U, 0x00U};
+    std::array<std::uint8_t, 32U> process_bus{};
+    const auto process_result = ethernet::ProcessBusFrameCodec::encode_payload_into(
+        0x1001U,
+        apdu,
+        process_bus,
+        0U,
+        0U);
+    if (!process_result.success() || process_result.bytes_written != 11U ||
+        process_bus[0] != 0x10U || process_bus[1] != 0x01U ||
+        process_bus[2] != 0x00U || process_bus[3] != 0x0BU ||
+        process_bus[8] != 0x61U) {
+        return false;
+    }
+
+    const std::array<std::uint8_t, 6U> destination{
+        0x01U, 0x0CU, 0xCDU, 0x01U, 0x00U, 0x01U};
+    ethernet::EthernetFrame frame{
+        ethernet::MacAddress{destination},
+        parsed,
+        ethernet::goose_ethertype,
+        vlan,
+        std::vector<std::uint8_t>{process_bus.begin(), process_bus.begin() + 11}};
+    std::array<std::uint8_t, 64U> wire{};
+    const auto ethernet_result = ethernet::EthernetFrameCodec::encode_into(frame, wire);
+    if (!ethernet_result.success() || ethernet_result.bytes_written != 29U ||
+        wire[12] != 0x81U || wire[13] != 0x00U ||
+        wire[16] != 0x88U || wire[17] != 0xB8U) {
+        return false;
+    }
+
+    return true;
+}
+
 } // namespace
 
 int main() {
+    if (!bounded_ethernet_primitives_work()) {
+        return 1;
+    }
+
     FakeEthernet fake;
     embedded::RawEthernetPort port{&fake, &capture_frame};
     auto frame = make_frame();
@@ -84,7 +147,7 @@ int main() {
             0U,
             true});
     if (!publisher.valid()) {
-        return 1;
+        return 2;
     }
 
     constexpr std::uint64_t start_us = 1'000'000U;
@@ -94,7 +157,7 @@ int main() {
         const auto expected_count = static_cast<std::uint16_t>(index % 4'000U);
         if (!result.sent() || result.sample_count != expected_count ||
             fake.sends != index + 1U) {
-            return 2;
+            return 3;
         }
     }
 
@@ -102,7 +165,7 @@ int main() {
     if (stats.frames_sent != frame_count || stats.encode_failures != 0U ||
         stats.transmit_failures != 0U || stats.late_polls != 0U ||
         stats.maximum_lateness_us != 0U || publisher.next_sample_count() != 0U) {
-        return 3;
+        return 4;
     }
 
     // The current hard-profile milestone permits setup-time dynamic storage in
@@ -111,13 +174,13 @@ int main() {
         frame.pdu.asdus.front().sample_payload.capacity() != payload_capacity ||
         frame.pdu.asdus.front().sv_id.capacity() != sv_id_capacity ||
         frame.pdu.asdus.front().data_set_reference.capacity() != dataset_capacity) {
-        return 4;
+        return 5;
     }
 
     if (fake.last_size < 22U ||
         fake.last_frame[12] != 0x88U || fake.last_frame[13] != 0xBAU ||
         fake.last_frame[14] != 0x40U || fake.last_frame[15] != 0x01U) {
-        return 5;
+        return 6;
     }
 
     return 0;
