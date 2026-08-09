@@ -14,7 +14,8 @@ endif()
 set(ARIEC61850_HARD_SV_SOURCES
     ${ARIEC61850_ROOT}/src/mms/utc_time.cpp
     ${ARIEC61850_ROOT}/src/sampled_values/pdu_codec.cpp
-    ${ARIEC61850_ROOT}/src/sampled_values/frame_codec.cpp)
+    ${ARIEC61850_ROOT}/src/sampled_values/frame_codec.cpp
+    ${ARIEC61850_ROOT}/src/sampled_values/sample_counter.cpp)
 
 add_executable(ariec61850_hard_sv_smoke
     ${CMAKE_CURRENT_LIST_DIR}/../sv_hard_profile_smoke.cpp
