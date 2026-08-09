@@ -337,7 +337,7 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
     }
 
     const auto application = dispatcher_.dispatch(
-        pdv.single_asn1_type, response, workspace);
+        pdv.single_asn1_type, response, workspace, policy_.access_context());
     if (!application.success()) {
         if (application.status == MmsStaticDispatchStatus::response_buffer_too_small) {
             const auto fully_encoded = osi::PresentationSpanCodec::fully_encoded_data_size(
