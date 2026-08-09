@@ -15,6 +15,15 @@ using MmsStaticReadCallback = wire::EncodeResult (*)(
     const void* context,
     std::span<std::uint8_t> destination) noexcept;
 
+struct MmsStaticWriteResult final {
+    bool success{};
+    std::uint32_t failure_code{};
+};
+
+using MmsStaticWriteCallback = MmsStaticWriteResult (*)(
+    void* context,
+    std::span<const std::uint8_t> encoded_data) noexcept;
+
 struct MmsStaticObjectEntry final {
     std::string_view domain;
     std::string_view item;
@@ -22,6 +31,12 @@ struct MmsStaticObjectEntry final {
     MmsStaticReadCallback read{};
     const void* context{};
     bool mms_deletable{};
+    MmsStaticWriteCallback write{};
+    void* write_context{};
+
+    [[nodiscard]] constexpr bool writable() const noexcept {
+        return write != nullptr;
+    }
 };
 
 class MmsStaticObjectTable final {
@@ -39,6 +54,11 @@ public:
 
     [[nodiscard]] bool try_resolve_read_request(
         const MmsReadRequestView& request,
+        std::span<const MmsStaticObjectEntry*> resolved,
+        std::size_t& resolved_count) const noexcept;
+
+    [[nodiscard]] bool try_resolve_write_request(
+        const MmsWriteRequestView& request,
         std::span<const MmsStaticObjectEntry*> resolved,
         std::size_t& resolved_count) const noexcept;
 
