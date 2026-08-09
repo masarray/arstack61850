@@ -53,6 +53,9 @@ MmsStaticBrcbConnectionResult MmsStaticBrcbConnection::poll(
         connection.mms_presentation_context_id() == 0U) {
         return make_result(MmsStaticBrcbConnectionStatus::not_established);
     }
+    if (!reports.enabled()) {
+        return make_result(MmsStaticBrcbConnectionStatus::reporting_disabled);
+    }
 
     MmsStaticBrcbEntryView entry;
     if (!reports.front(entry)) {
