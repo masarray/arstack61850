@@ -76,29 +76,43 @@ namespace {
 
 [[nodiscard]] bool policy_valid(const MmsStaticDispatchPolicy& policy) noexcept {
     return policy.maximum_names_per_response > 0U &&
-        policy.maximum_names_per_response <= MmsStaticObjectTable::maximum_objects &&
+        policy.maximum_names_per_response <= MmsServiceSpanCodec::maximum_identifiers &&
         policy.maximum_write_variables > 0U &&
         policy.maximum_write_variables <= MmsServiceSpanCodec::maximum_variables;
 }
 
+[[nodiscard]] bool append_unique(
+    std::array<std::string_view, MmsServiceSpanCodec::maximum_identifiers>& names,
+    std::size_t& count,
+    const std::string_view value) noexcept {
+    for (std::size_t index = 0U; index < count; ++index) {
+        if (names[index] == value) {
+            return true;
+        }
+    }
+    if (count >= names.size()) {
+        return false;
+    }
+    names[count++] = value;
+    return true;
+}
+
 [[nodiscard]] std::size_t collect_names(
     const MmsStaticObjectTable& objects,
+    const MmsStaticDataSetTable& data_sets,
     const MmsGetNameListRequestView& request,
-    std::array<std::string_view, MmsStaticObjectTable::maximum_objects>& names) noexcept {
+    std::array<std::string_view, MmsServiceSpanCodec::maximum_identifiers>& names) noexcept {
     std::size_t count = 0U;
     if (request.object_class == MmsNameListObjectClass::domain &&
         request.scope == MmsNameScopeKind::vmd_specific) {
         for (const auto& object : objects.objects()) {
-            bool duplicate = false;
-            for (std::size_t index = 0U; index < count; ++index) {
-                if (names[index] == object.domain) {
-                    duplicate = true;
-                    break;
-                }
+            if (!append_unique(names, count, object.domain)) {
+                return names.size() + 1U;
             }
-            if (!duplicate) {
-                names[count] = object.domain;
-                ++count;
+        }
+        for (const auto& data_set : data_sets.data_sets()) {
+            if (!append_unique(names, count, data_set.domain)) {
+                return names.size() + 1U;
             }
         }
         return count;
@@ -108,17 +122,34 @@ namespace {
         request.scope == MmsNameScopeKind::domain_specific) {
         for (const auto& object : objects.objects()) {
             if (span_equals(request.domain_id, object.domain)) {
-                names[count] = object.item;
-                ++count;
+                if (count >= names.size()) {
+                    return names.size() + 1U;
+                }
+                names[count++] = object.item;
             }
         }
         return count;
     }
-    return MmsStaticObjectTable::maximum_objects + 1U;
+
+    if (request.object_class == MmsNameListObjectClass::named_variable_list &&
+        request.scope == MmsNameScopeKind::domain_specific) {
+        for (const auto& data_set : data_sets.data_sets()) {
+            if (span_equals(request.domain_id, data_set.domain)) {
+                if (count >= names.size()) {
+                    return names.size() + 1U;
+                }
+                names[count++] = data_set.item;
+            }
+        }
+        return count;
+    }
+
+    return names.size() + 1U;
 }
 
 [[nodiscard]] MmsStaticDispatchResult dispatch_get_name_list(
     const MmsStaticObjectTable& objects,
+    const MmsStaticDataSetTable& data_sets,
     const MmsStaticDispatchPolicy& policy,
     const MmsConfirmedPduView& confirmed,
     const std::span<std::uint8_t> response) noexcept {
@@ -127,9 +158,9 @@ namespace {
         return make_status(MmsStaticDispatchStatus::malformed_request, confirmed);
     }
 
-    std::array<std::string_view, MmsStaticObjectTable::maximum_objects> names{};
-    const auto name_count = collect_names(objects, request, names);
-    if (name_count > MmsStaticObjectTable::maximum_objects) {
+    std::array<std::string_view, MmsServiceSpanCodec::maximum_identifiers> names{};
+    const auto name_count = collect_names(objects, data_sets, request, names);
+    if (name_count > names.size()) {
         return make_status(MmsStaticDispatchStatus::unsupported_request, confirmed);
     }
 
@@ -195,6 +226,36 @@ namespace {
             confirmed.invoke_id,
             object->mms_deletable,
             object->type_specification,
+            response));
+}
+
+[[nodiscard]] MmsStaticDispatchResult dispatch_data_set_attributes(
+    const MmsStaticDataSetTable& data_sets,
+    const MmsConfirmedPduView& confirmed,
+    const std::span<std::uint8_t> response) noexcept {
+    MmsNamedVariableListAttributesRequestView request;
+    if (!MmsDataSetSpanCodec::try_decode_get_named_variable_list_attributes_request(
+            confirmed, request)) {
+        return make_status(MmsStaticDispatchStatus::malformed_request, confirmed);
+    }
+    const auto* data_set = data_sets.find(request.name);
+    if (data_set == nullptr) {
+        return make_status(MmsStaticDispatchStatus::object_not_found, confirmed);
+    }
+
+    std::array<MmsNamedVariableListMemberInput, MmsDataSetSpanCodec::maximum_members> members{};
+    for (std::size_t index = 0U; index < data_set->members.size(); ++index) {
+        members[index] = MmsNamedVariableListMemberInput{
+            data_set->members[index].domain,
+            data_set->members[index].item};
+    }
+    return make_encoded(
+        confirmed,
+        MmsDataSetSpanCodec::encode_get_named_variable_list_attributes_response_into(
+            confirmed.invoke_id,
+            data_set->mms_deletable,
+            std::span<const MmsNamedVariableListMemberInput>{members}.first(
+                data_set->members.size()),
             response));
 }
 
@@ -327,7 +388,7 @@ MmsStaticDispatchResult MmsStaticApplicationDispatcher::dispatch(
     const MmsConfirmedPduView& request,
     const std::span<std::uint8_t> response,
     const std::span<std::uint8_t> workspace) const noexcept {
-    if (!objects_.valid() || !policy_valid(policy_)) {
+    if (!objects_.valid() || !data_sets_.valid_against(objects_) || !policy_valid(policy_)) {
         return make_status(MmsStaticDispatchStatus::invalid_object_table, request);
     }
     if (request.kind != MmsWirePduKind::confirmed_request) {
@@ -336,9 +397,11 @@ MmsStaticDispatchResult MmsStaticApplicationDispatcher::dispatch(
 
     switch (request.service()) {
     case MmsWireConfirmedService::get_name_list:
-        return dispatch_get_name_list(objects_, policy_, request, response);
+        return dispatch_get_name_list(objects_, data_sets_, policy_, request, response);
     case MmsWireConfirmedService::get_variable_access_attributes:
         return dispatch_attributes(objects_, request, response);
+    case MmsWireConfirmedService::get_named_variable_list_attributes:
+        return dispatch_data_set_attributes(data_sets_, request, response);
     case MmsWireConfirmedService::read:
         return dispatch_read(objects_, policy_, request, response, workspace);
     case MmsWireConfirmedService::write:

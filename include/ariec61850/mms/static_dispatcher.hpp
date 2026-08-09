@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "ariec61850/mms/static_data_set_table.hpp"
 #include "ariec61850/mms/static_object_table.hpp"
 
 #include <cstddef>
@@ -48,6 +49,12 @@ public:
         const MmsStaticDispatchPolicy policy = {}) noexcept
         : objects_{objects}, policy_{policy} {}
 
+    constexpr MmsStaticApplicationDispatcher(
+        const MmsStaticObjectTable& objects,
+        const MmsStaticDataSetTable& data_sets,
+        const MmsStaticDispatchPolicy policy = {}) noexcept
+        : objects_{objects}, data_sets_{data_sets}, policy_{policy} {}
+
     [[nodiscard]] MmsStaticDispatchResult dispatch(
         std::span<const std::uint8_t> mms_request,
         std::span<std::uint8_t> response,
@@ -62,8 +69,13 @@ public:
         return policy_;
     }
 
+    [[nodiscard]] constexpr const MmsStaticDataSetTable& data_sets() const noexcept {
+        return data_sets_;
+    }
+
 private:
     const MmsStaticObjectTable& objects_;
+    MmsStaticDataSetTable data_sets_{};
     MmsStaticDispatchPolicy policy_{};
 };
 
