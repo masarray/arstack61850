@@ -49,9 +49,10 @@ public:
             0,
             nullptr);
         if (handle_ == INVALID_HANDLE_VALUE) {
+            const auto code = GetLastError();
             handle_ = nullptr;
             error_ = "CreateFile failed for " + std::string{device} +
-                " (Windows error " + std::to_string(GetLastError()) + ").";
+                " (" + describe_windows_error(code) + ").";
             return false;
         }
 
@@ -67,6 +68,13 @@ public:
         dcb.Parity = NOPARITY;
         dcb.StopBits = ONESTOPBIT;
         dcb.fBinary = TRUE;
+        dcb.fOutxCtsFlow = FALSE;
+        dcb.fOutxDsrFlow = FALSE;
+        dcb.fDtrControl = DTR_CONTROL_DISABLE;
+        dcb.fDsrSensitivity = FALSE;
+        dcb.fOutX = FALSE;
+        dcb.fInX = FALSE;
+        dcb.fRtsControl = RTS_CONTROL_DISABLE;
         if (SetCommState(handle_, &dcb) == 0) {
             set_last_error("SetCommState failed");
             close();
@@ -210,7 +218,8 @@ public:
             }
         }
 
-        error_ = "Timed out waiting for ARCTRL response from " + device_ + '.';
+        error_ = "Timed out waiting for ARCTRL response from " + device_ +
+            ". Verify that the injector firmware is running and that this COM port is the board UART control port.";
         return false;
 #else
         (void)timeout_ms;
@@ -221,9 +230,21 @@ public:
 
 private:
 #ifdef _WIN32
+    [[nodiscard]] static std::string describe_windows_error(const DWORD code) {
+        switch (code) {
+        case ERROR_FILE_NOT_FOUND:
+            return "Windows error 2: COM port not found; verify the current port number";
+        case ERROR_ACCESS_DENIED:
+            return "Windows error 5: access denied; close any serial monitor or other process using the port";
+        case ERROR_SEM_TIMEOUT:
+            return "Windows error 121: semaphore timeout; reconnect the USB-to-UART cable/device, verify the driver, and confirm the COM port still enumerates";
+        default:
+            return "Windows error " + std::to_string(code);
+        }
+    }
+
     void set_last_error(const std::string_view prefix) {
-        error_ = std::string{prefix} + " (Windows error " +
-            std::to_string(GetLastError()) + ").";
+        error_ = std::string{prefix} + " (" + describe_windows_error(GetLastError()) + ").";
     }
 
     HANDLE handle_{};
