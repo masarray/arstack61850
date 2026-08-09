@@ -14,6 +14,8 @@
 
 namespace ar::iec61850::mms {
 
+class MmsStaticBrcbStateCodec;
+
 enum class MmsStaticBrcbStatus : std::uint8_t {
     ok,
     invalid_runtime,
@@ -100,8 +102,8 @@ struct MmsStaticBrcbEntryView final {
 };
 
 // First bounded BRCB profile: one runtime instance represents one BRCB. It
-// buffers event snapshots in caller-owned RAM across connection resets. A
-// non-volatile persistence adapter is intentionally a later storage-HAL slice.
+// buffers event snapshots in caller-owned RAM across connection resets. Queue
+// persistence is storage-agnostic and mediated by MmsStaticBrcbStateCodec.
 class MmsStaticBrcbRuntime final {
 public:
     MmsStaticBrcbRuntime(
@@ -147,6 +149,8 @@ public:
     }
 
 private:
+    friend class MmsStaticBrcbStateCodec;
+
     const MmsStaticBrcbDefinition* definition_{};
     MmsStaticBrcbPendingState* pending_{};
     std::span<MmsStaticBrcbSlot> slots_{};
