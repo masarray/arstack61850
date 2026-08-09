@@ -111,13 +111,14 @@ MmsStaticBrcbConnectionResult MmsStaticBrcbConnection::poll(
         return make_result(MmsStaticBrcbConnectionStatus::frame_encode_failed, &entry);
     }
 
+    auto result = make_result(MmsStaticBrcbConnectionStatus::response_ready, &entry);
     const auto committed = reports.commit_delivery(entry.entry_id);
     if (committed != MmsStaticBrcbStatus::ok) {
-        return make_result(MmsStaticBrcbConnectionStatus::stale_entry, &entry);
+        result.status = MmsStaticBrcbConnectionStatus::stale_entry;
+        return result;
     }
 
     std::copy_n(workspace.begin(), tpkt.bytes_written, response.begin());
-    auto result = make_result(MmsStaticBrcbConnectionStatus::response_ready, &entry);
     result.bytes_written = tpkt.bytes_written;
     result.required_response_bytes = final_required;
     result.required_workspace_bytes = final_required;
