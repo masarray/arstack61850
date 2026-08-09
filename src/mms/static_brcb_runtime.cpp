@@ -188,17 +188,15 @@ bool MmsStaticBrcbRuntime::initialize() noexcept {
 
     *pending_ = {};
     pending_->revision = 1U;
-    for (auto& slot : slots_) {
-        const auto storage = slot.storage;
-        slot = {};
-        slot.storage = storage;
-    }
+    clear_retained_slots();
     head_ = 0U;
     count_ = 0U;
+    delivery_offset_ = 0U;
     next_entry_number_ = 1U;
     dropped_reports_ = 0U;
     queue_revision_ = 1U;
     sequence_number_ = 0U;
+    replay_gap_ = false;
     enabled_ = false;
     initialized_ = true;
     return true;
@@ -273,7 +271,7 @@ bool MmsStaticBrcbRuntime::next_due(
     plan.queue_revision = queue_revision_;
     plan.entry_number = next_entry_number_;
     plan.sequence_number = next_sequence_number(sequence_number_);
-    plan.buffer_overflow = count_ == slots_.size();
+    plan.buffer_overflow = count_ == slots_.size() && delivery_offset_ == 0U;
     return true;
 }
 
@@ -284,17 +282,19 @@ MmsStaticBrcbCaptureResult MmsStaticBrcbRuntime::capture(
     const std::span<std::uint8_t> workspace) noexcept {
     MmsStaticBrcbCaptureResult result;
     if (!initialized_ || definition_ == nullptr || pending_ == nullptr ||
-        objects_ == nullptr || data_sets_ == nullptr || slots_.empty()) {
+        objects_ == nullptr || data_sets_ == nullptr || slots_.empty() ||
+        delivery_offset_ > count_) {
         result.status = MmsStaticBrcbStatus::invalid_runtime;
         return result;
     }
     const bool full = count_ == slots_.size();
+    const bool overflow = full && delivery_offset_ == 0U;
     if (!enabled_ || !pending_->pending || pending_->pending_member_count == 0U ||
         plan.pending_revision != pending_->revision ||
         plan.queue_revision != queue_revision_ ||
         plan.entry_number != next_entry_number_ ||
         plan.sequence_number != next_sequence_number(sequence_number_) ||
-        plan.buffer_overflow != full) {
+        plan.buffer_overflow != overflow) {
         result.status = MmsStaticBrcbStatus::stale_plan;
         return result;
     }
@@ -416,8 +416,17 @@ MmsStaticBrcbCaptureResult MmsStaticBrcbRuntime::capture(
     slot.occupied = true;
 
     if (full) {
+        // The physical oldest slot is being recycled. If the delivery cursor is
+        // already past it, retain the same logical next-to-deliver entry by
+        // shifting the cursor with the head. Otherwise an undelivered report is
+        // irrecoverably lost and the recovery gap must remain visible.
+        if (delivery_offset_ == 0U) {
+            ++dropped_reports_;
+            replay_gap_ = true;
+        } else {
+            --delivery_offset_;
+        }
         head_ = (head_ + 1U) % slots_.size();
-        ++dropped_reports_;
     } else {
         ++count_;
     }
@@ -437,10 +446,12 @@ MmsStaticBrcbCaptureResult MmsStaticBrcbRuntime::capture(
 
 bool MmsStaticBrcbRuntime::front(MmsStaticBrcbEntryView& entry) const noexcept {
     entry = {};
-    if (!initialized_ || count_ == 0U || head_ >= slots_.size()) {
+    if (!initialized_ || count_ == 0U || delivery_offset_ >= count_ ||
+        head_ >= slots_.size()) {
         return false;
     }
-    const auto& slot = slots_[head_];
+    const auto physical = (head_ + delivery_offset_) % slots_.size();
+    const auto& slot = slots_[physical];
     if (!slot.occupied || slot.bytes == 0U || slot.bytes > slot.storage.size()) {
         return false;
     }
@@ -453,22 +464,96 @@ bool MmsStaticBrcbRuntime::front(MmsStaticBrcbEntryView& entry) const noexcept {
 
 MmsStaticBrcbStatus MmsStaticBrcbRuntime::commit_delivery(
     const std::span<const std::uint8_t> expected_entry_id) noexcept {
-    if (!initialized_ || slots_.empty()) {
+    if (!initialized_ || slots_.empty() || delivery_offset_ > count_) {
         return MmsStaticBrcbStatus::invalid_runtime;
     }
-    if (count_ == 0U || head_ >= slots_.size()) {
+    if (delivery_offset_ >= count_ || head_ >= slots_.size()) {
         return MmsStaticBrcbStatus::entry_not_found;
     }
-    auto& slot = slots_[head_];
+    const auto physical = (head_ + delivery_offset_) % slots_.size();
+    const auto& slot = slots_[physical];
     if (!slot.occupied || !entry_id_equal(expected_entry_id, slot.entry_id)) {
         return MmsStaticBrcbStatus::entry_not_found;
     }
 
-    const auto storage = slot.storage;
-    slot = {};
-    slot.storage = storage;
-    head_ = (head_ + 1U) % slots_.size();
-    --count_;
+    ++delivery_offset_;
+    bump_revision(queue_revision_);
+    return MmsStaticBrcbStatus::ok;
+}
+
+bool MmsStaticBrcbRuntime::find_entry(
+    const std::span<const std::uint8_t> entry_id,
+    std::size_t& logical_index) const noexcept {
+    logical_index = 0U;
+    if (!initialized_ || entry_id.size() != MmsInformationReportSpanCodec::entry_id_bytes ||
+        count_ > slots_.size() || head_ >= slots_.size()) {
+        return false;
+    }
+    for (std::size_t logical = 0U; logical < count_; ++logical) {
+        const auto physical = (head_ + logical) % slots_.size();
+        const auto& slot = slots_[physical];
+        if (slot.occupied && entry_id_equal(entry_id, slot.entry_id)) {
+            logical_index = logical;
+            return true;
+        }
+    }
+    return false;
+}
+
+MmsStaticBrcbStatus MmsStaticBrcbRuntime::replay_from(
+    const std::span<const std::uint8_t> entry_id) noexcept {
+    if (!initialized_) {
+        return MmsStaticBrcbStatus::invalid_runtime;
+    }
+    std::size_t logical{};
+    if (!find_entry(entry_id, logical)) {
+        return MmsStaticBrcbStatus::entry_not_found;
+    }
+    delivery_offset_ = logical;
+    bump_revision(queue_revision_);
+    return MmsStaticBrcbStatus::ok;
+}
+
+MmsStaticBrcbStatus MmsStaticBrcbRuntime::resume_after(
+    const std::span<const std::uint8_t> entry_id) noexcept {
+    if (!initialized_) {
+        return MmsStaticBrcbStatus::invalid_runtime;
+    }
+    std::size_t logical{};
+    if (!find_entry(entry_id, logical)) {
+        return MmsStaticBrcbStatus::entry_not_found;
+    }
+    delivery_offset_ = logical + 1U;
+    bump_revision(queue_revision_);
+    return MmsStaticBrcbStatus::ok;
+}
+
+MmsStaticBrcbStatus MmsStaticBrcbRuntime::rewind_to_oldest() noexcept {
+    if (!initialized_ || count_ > slots_.size()) {
+        return MmsStaticBrcbStatus::invalid_runtime;
+    }
+    delivery_offset_ = 0U;
+    bump_revision(queue_revision_);
+    return MmsStaticBrcbStatus::ok;
+}
+
+void MmsStaticBrcbRuntime::clear_retained_slots() noexcept {
+    for (auto& slot : slots_) {
+        const auto storage = slot.storage;
+        slot = {};
+        slot.storage = storage;
+    }
+}
+
+MmsStaticBrcbStatus MmsStaticBrcbRuntime::purge_buffer() noexcept {
+    if (!initialized_ || slots_.empty()) {
+        return MmsStaticBrcbStatus::invalid_runtime;
+    }
+    clear_retained_slots();
+    head_ = 0U;
+    count_ = 0U;
+    delivery_offset_ = 0U;
+    replay_gap_ = false;
     bump_revision(queue_revision_);
     return MmsStaticBrcbStatus::ok;
 }
