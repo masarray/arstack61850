@@ -38,7 +38,7 @@ jobs:
       - name: Build URCB event hard profile
         run: cmake --build build-urcb-event-hard --parallel
 
-      - name: Run URCB event smoke
+      - name: Run URCB event smokes
         run: >-
           ctest --test-dir build-urcb-event-hard
           --output-on-failure
@@ -48,11 +48,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          binary=build-urcb-event-hard/ariec61850_hard_mms_urcb_event_smoke
-          if nm -C "$binary" | grep -E '__cxa_throw|__cxa_begin_catch|__cxa_end_catch|__gxx_personality_v0'; then
-            echo "exception runtime symbol found in $binary" >&2
-            exit 1
-          fi
+          for binary in \
+            build-urcb-event-hard/ariec61850_hard_mms_urcb_event_smoke \
+            build-urcb-event-hard/ariec61850_hard_mms_urcb_event_connection_smoke; do
+            if nm -C "$binary" | grep -E '__cxa_throw|__cxa_begin_catch|__cxa_end_catch|__gxx_personality_v0'; then
+              echo "exception runtime symbol found in $binary" >&2
+              exit 1
+            fi
+          done
           echo 'NO_EXCEPTION_RUNTIME=PASS'
 
       - name: Report footprint
@@ -61,7 +64,9 @@ jobs:
           set -euo pipefail
           {
             echo "compiler=${{ matrix.compiler }}"
-            size build-urcb-event-hard/ariec61850_hard_mms_urcb_event_smoke
+            size \
+              build-urcb-event-hard/ariec61850_hard_mms_urcb_event_smoke \
+              build-urcb-event-hard/ariec61850_hard_mms_urcb_event_connection_smoke
           } | tee build-urcb-event-hard/urcb-event-footprint.txt
 
       - name: Upload URCB event evidence
