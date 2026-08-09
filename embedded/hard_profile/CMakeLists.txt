@@ -190,48 +190,48 @@ add_executable(ariec61850_hard_mms_urcb_objects_smoke
     ${ARIEC61850_ROOT}/src/mms/static_urcb_objects.cpp)
 ariec61850_configure_hard_target(ariec61850_hard_mms_urcb_objects_smoke)
 
+add_executable(ariec61850_hard_mms_report_connection_smoke
+    ${CMAKE_CURRENT_LIST_DIR}/../mms_report_connection_hard_profile_smoke.cpp
+    ${ARIEC61850_ROOT}/src/asn1/ber_span_reader.cpp
+    ${ARIEC61850_ROOT}/src/osi/tpkt_span.cpp
+    ${ARIEC61850_ROOT}/src/osi/cotp_span.cpp
+    ${ARIEC61850_ROOT}/src/osi/session_span.cpp
+    ${ARIEC61850_ROOT}/src/osi/presentation_span.cpp
+    ${ARIEC61850_ROOT}/src/acse/association_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/pdu_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/services_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/write_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/data_set_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/information_report_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_object_table.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_write.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_data_set_table.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_dispatcher.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_information_report.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_urcb_runtime.cpp
+    ${ARIEC61850_ROOT}/src/mms/connection_runtime.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_report_connection.cpp)
+ariec61850_configure_hard_target(ariec61850_hard_mms_report_connection_smoke)
+
 enable_testing()
 add_test(NAME ariec61850_hard_sv_smoke COMMAND ariec61850_hard_sv_smoke)
 add_test(NAME ariec61850_hard_goose_smoke COMMAND ariec61850_hard_goose_smoke)
 add_test(NAME ariec61850_hard_osi_transport_smoke COMMAND ariec61850_hard_osi_transport_smoke)
-add_test(
-    NAME ariec61850_hard_session_presentation_smoke
-    COMMAND ariec61850_hard_session_presentation_smoke)
-add_test(
-    NAME ariec61850_hard_association_smoke
-    COMMAND ariec61850_hard_association_smoke)
-add_test(
-    NAME ariec61850_hard_mms_pdu_smoke
-    COMMAND ariec61850_hard_mms_pdu_smoke)
-add_test(
-    NAME ariec61850_hard_mms_get_name_list_smoke
-    COMMAND ariec61850_hard_mms_get_name_list_smoke)
-add_test(
-    NAME ariec61850_hard_mms_static_model_smoke
-    COMMAND ariec61850_hard_mms_static_model_smoke)
-add_test(
-    NAME ariec61850_hard_mms_write_smoke
-    COMMAND ariec61850_hard_mms_write_smoke)
-add_test(
-    NAME ariec61850_hard_mms_dispatcher_smoke
-    COMMAND ariec61850_hard_mms_dispatcher_smoke)
-add_test(
-    NAME ariec61850_hard_mms_connection_runtime_smoke
-    COMMAND ariec61850_hard_mms_connection_runtime_smoke)
-add_test(
-    NAME ariec61850_hard_mms_data_set_smoke
-    COMMAND ariec61850_hard_mms_data_set_smoke)
-add_test(
-    NAME ariec61850_hard_mms_information_report_smoke
-    COMMAND ariec61850_hard_mms_information_report_smoke)
-add_test(
-    NAME ariec61850_hard_mms_urcb_runtime_smoke
-    COMMAND ariec61850_hard_mms_urcb_runtime_smoke)
-add_test(
-    NAME ariec61850_hard_mms_urcb_objects_smoke
-    COMMAND ariec61850_hard_mms_urcb_objects_smoke)
+add_test(NAME ariec61850_hard_session_presentation_smoke COMMAND ariec61850_hard_session_presentation_smoke)
+add_test(NAME ariec61850_hard_association_smoke COMMAND ariec61850_hard_association_smoke)
+add_test(NAME ariec61850_hard_mms_pdu_smoke COMMAND ariec61850_hard_mms_pdu_smoke)
+add_test(NAME ariec61850_hard_mms_get_name_list_smoke COMMAND ariec61850_hard_mms_get_name_list_smoke)
+add_test(NAME ariec61850_hard_mms_static_model_smoke COMMAND ariec61850_hard_mms_static_model_smoke)
+add_test(NAME ariec61850_hard_mms_write_smoke COMMAND ariec61850_hard_mms_write_smoke)
+add_test(NAME ariec61850_hard_mms_dispatcher_smoke COMMAND ariec61850_hard_mms_dispatcher_smoke)
+add_test(NAME ariec61850_hard_mms_connection_runtime_smoke COMMAND ariec61850_hard_mms_connection_runtime_smoke)
+add_test(NAME ariec61850_hard_mms_data_set_smoke COMMAND ariec61850_hard_mms_data_set_smoke)
+add_test(NAME ariec61850_hard_mms_information_report_smoke COMMAND ariec61850_hard_mms_information_report_smoke)
+add_test(NAME ariec61850_hard_mms_urcb_runtime_smoke COMMAND ariec61850_hard_mms_urcb_runtime_smoke)
+add_test(NAME ariec61850_hard_mms_urcb_objects_smoke COMMAND ariec61850_hard_mms_urcb_objects_smoke)
+add_test(NAME ariec61850_hard_mms_report_connection_smoke COMMAND ariec61850_hard_mms_report_connection_smoke)
 
 message(STATUS "arstack61850 hard embedded profile: exceptions disabled=ON")
 message(STATUS "arstack61850 hard embedded profile: RTTI disabled=ON")
 message(STATUS "arstack61850 hard embedded profile: host services excluded")
-message(STATUS "arstack61850 hard embedded profile: bounded SV + GOOSE + OSI + ACSE + MMS static dispatcher/connection runtime/DataSet/InformationReport/URCB/RCB-object gates=ON")
+message(STATUS "arstack61850 hard embedded profile: bounded SV + GOOSE + OSI + ACSE + MMS static dispatcher/connection runtime/DataSet/InformationReport/URCB/RCB-object/report-transport gates=ON")
