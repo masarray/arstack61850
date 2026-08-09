@@ -54,6 +54,23 @@ add_executable(ariec61850_hard_mms_brcb_control_smoke
     ${ARIEC61850_ROOT}/src/mms/static_brcb_control.cpp)
 ariec61850_configure_brcb_hard_target(ariec61850_hard_mms_brcb_control_smoke)
 
+add_executable(ariec61850_hard_mms_brcb_objects_smoke
+    ${CMAKE_CURRENT_LIST_DIR}/../mms_brcb_objects_hard_profile_smoke.cpp
+    ${ARIEC61850_ROOT}/src/asn1/ber_span_reader.cpp
+    ${ARIEC61850_ROOT}/src/mms/pdu_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/services_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/write_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/data_set_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/information_report_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_object_table.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_data_set_table.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_dispatcher.cpp
+    ${ARIEC61850_ROOT}/src/mms/buffered_selective_information_report_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_brcb_runtime.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_brcb_control.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_brcb_objects.cpp)
+ariec61850_configure_brcb_hard_target(ariec61850_hard_mms_brcb_objects_smoke)
+
 add_executable(ariec61850_hard_mms_brcb_connection_smoke
     ${CMAKE_CURRENT_LIST_DIR}/../mms_brcb_connection_hard_profile_smoke.cpp
     ${ARIEC61850_ROOT}/src/asn1/ber_span_reader.cpp
@@ -97,6 +114,9 @@ add_test(
     NAME ariec61850_hard_mms_brcb_control_smoke
     COMMAND ariec61850_hard_mms_brcb_control_smoke)
 add_test(
+    NAME ariec61850_hard_mms_brcb_objects_smoke
+    COMMAND ariec61850_hard_mms_brcb_objects_smoke)
+add_test(
     NAME ariec61850_hard_mms_brcb_connection_smoke
     COMMAND ariec61850_hard_mms_brcb_connection_smoke)
 add_test(
@@ -105,6 +125,7 @@ add_test(
 
 message(STATUS "arstack61850 BRCB hard profile: bounded RAM queue + EntryID + BufOvfl=ON")
 message(STATUS "arstack61850 BRCB hard profile: association ownership + ResvTms gate=ON")
+message(STATUS "arstack61850 BRCB hard profile: MMS RptEna/EntryID/PurgeBuf/ResvTms/Owner=ON")
 message(STATUS "arstack61850 BRCB hard profile: retry-safe reconnect delivery=ON")
 message(STATUS "arstack61850 BRCB hard profile: dual-bank checkpoint + reboot recovery oracle=ON")
 message(STATUS "arstack61850 BRCB hard profile: platform non-volatile adapter=NOT_CLAIMED")
