@@ -13,6 +13,7 @@ namespace ar::iec61850::mms {
 
 enum class MmsStaticBrcbConnectionStatus : std::uint8_t {
     no_report_available,
+    reporting_disabled,
     response_ready,
     not_established,
     response_buffer_too_small,
@@ -38,9 +39,10 @@ struct MmsStaticBrcbConnectionResult final {
 
 class MmsStaticBrcbConnection final {
 public:
-    // Deliver at most one already-buffered report. The queue front is removed
-    // only after a complete TPKT image is staged successfully. Capacity errors
-    // and disconnected sessions preserve the exact same EntryID for retry.
+    // Deliver at most one already-buffered report while reporting is enabled.
+    // The queue front is removed only after a complete TPKT image is staged
+    // successfully. Capacity errors, disabled reporting and disconnected
+    // sessions preserve the exact same EntryID for retry.
     [[nodiscard]] static MmsStaticBrcbConnectionResult poll(
         const MmsStaticConnectionRuntime& connection,
         MmsStaticBrcbRuntime& reports,
