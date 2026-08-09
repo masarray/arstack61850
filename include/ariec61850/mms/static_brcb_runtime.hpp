@@ -54,8 +54,6 @@ struct MmsStaticBrcbDefinition final {
     std::uint8_t trigger_options{};
 };
 
-// Payload storage is caller-owned so applications choose the queue RAM budget.
-// `storage` must remain valid for the lifetime of the runtime.
 struct MmsStaticBrcbSlot final {
     std::span<std::uint8_t> storage{};
     std::array<std::uint8_t, MmsInformationReportSpanCodec::entry_id_bytes> entry_id{};
@@ -101,11 +99,6 @@ struct MmsStaticBrcbEntryView final {
     bool buffer_overflow{};
 };
 
-// Bounded BRCB profile: one runtime instance represents one BRCB. Captured
-// snapshots remain retained in caller-owned RAM after successful delivery so a
-// client can reposition the delivery cursor by EntryID. The active delivery
-// queue and the retained-history window are therefore intentionally distinct.
-// Persistence is storage-agnostic and mediated by MmsStaticBrcbStateCodec.
 class MmsStaticBrcbRuntime final {
 public:
     MmsStaticBrcbRuntime(
@@ -138,37 +131,40 @@ public:
         std::span<std::uint8_t> encode_buffer,
         std::span<std::uint8_t> workspace) noexcept;
 
-    // Returns the next entry selected by the current delivery cursor.
     [[nodiscard]] bool front(MmsStaticBrcbEntryView& entry) const noexcept;
 
-    // Marks the currently selected entry as delivered without deleting the
-    // retained snapshot. This is what makes later replay/resume possible.
     [[nodiscard]] MmsStaticBrcbStatus commit_delivery(
         std::span<const std::uint8_t> expected_entry_id) noexcept;
 
-    // Reposition delivery to the exact retained EntryID.
     [[nodiscard]] MmsStaticBrcbStatus replay_from(
         std::span<const std::uint8_t> entry_id) noexcept;
 
-    // Reposition delivery to the retained entry immediately after EntryID.
-    // If EntryID is the newest retained entry, the active queue becomes empty.
     [[nodiscard]] MmsStaticBrcbStatus resume_after(
         std::span<const std::uint8_t> entry_id) noexcept;
 
-    // Replays the complete retained window from its oldest available entry.
     [[nodiscard]] MmsStaticBrcbStatus rewind_to_oldest() noexcept;
 
-    // Implements the runtime PurgeBuf primitive. It clears retained reports and
-    // delivery/recovery state while preserving the report definition, EntryID
-    // monotonic progression, and any independent pending trigger accumulation.
     [[nodiscard]] MmsStaticBrcbStatus purge_buffer() noexcept;
 
-    // Number of reports still selected for delivery.
+    // EntryID attribute readback: all zero when no report is buffered,
+    // otherwise the newest retained report EntryID.
+    [[nodiscard]] std::array<std::uint8_t,
+        MmsInformationReportSpanCodec::entry_id_bytes> latest_entry_id() const noexcept {
+        std::array<std::uint8_t,
+            MmsInformationReportSpanCodec::entry_id_bytes> empty{};
+        if (!initialized_ || slots_.empty() || count_ == 0U ||
+            count_ > slots_.size() || head_ >= slots_.size()) {
+            return empty;
+        }
+        const auto physical = (head_ + count_ - 1U) % slots_.size();
+        const auto& slot = slots_[physical];
+        return slot.occupied ? slot.entry_id : empty;
+    }
+
     [[nodiscard]] constexpr std::size_t queue_size() const noexcept {
         return delivery_offset_ <= count_ ? count_ - delivery_offset_ : 0U;
     }
 
-    // Number of snapshots retained for possible replay, delivered or not.
     [[nodiscard]] constexpr std::size_t retained_size() const noexcept { return count_; }
 
     [[nodiscard]] constexpr std::size_t queue_capacity() const noexcept {
@@ -178,9 +174,6 @@ public:
         return dropped_reports_;
     }
 
-    // True after an undelivered retained entry was evicted because the bounded
-    // buffer filled. PurgeBuf clears this condition; replay cannot reconstruct
-    // data that is no longer retained.
     [[nodiscard]] constexpr bool replay_gap() const noexcept { return replay_gap_; }
 
 private:
