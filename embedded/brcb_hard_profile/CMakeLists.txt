@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(ARIEC61850BrcbHardProfile
-    VERSION 0.1.0
+    VERSION 0.2.0
     DESCRIPTION "No-exception bounded IEC 61850 buffered-report profile"
     LANGUAGES CXX)
 
@@ -64,13 +64,31 @@ add_executable(ariec61850_hard_mms_brcb_connection_smoke
     ${ARIEC61850_ROOT}/src/mms/static_brcb_connection.cpp)
 ariec61850_configure_brcb_hard_target(ariec61850_hard_mms_brcb_connection_smoke)
 
+add_executable(ariec61850_hard_mms_brcb_persistence_smoke
+    ${CMAKE_CURRENT_LIST_DIR}/../mms_brcb_persistence_hard_profile_smoke.cpp
+    ${ARIEC61850_ROOT}/src/asn1/ber_span_reader.cpp
+    ${ARIEC61850_ROOT}/src/mms/pdu_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/services_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/information_report_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_object_table.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_data_set_table.cpp
+    ${ARIEC61850_ROOT}/src/mms/buffered_selective_information_report_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_brcb_runtime.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_brcb_state_codec.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_brcb_checkpoint_store.cpp)
+ariec61850_configure_brcb_hard_target(ariec61850_hard_mms_brcb_persistence_smoke)
+
 enable_testing()
 add_test(NAME ariec61850_hard_mms_brcb_smoke COMMAND ariec61850_hard_mms_brcb_smoke)
 add_test(
     NAME ariec61850_hard_mms_brcb_connection_smoke
     COMMAND ariec61850_hard_mms_brcb_connection_smoke)
+add_test(
+    NAME ariec61850_hard_mms_brcb_persistence_smoke
+    COMMAND ariec61850_hard_mms_brcb_persistence_smoke)
 
 message(STATUS "arstack61850 BRCB hard profile: bounded RAM queue + EntryID + BufOvfl=ON")
 message(STATUS "arstack61850 BRCB hard profile: retry-safe reconnect delivery=ON")
+message(STATUS "arstack61850 BRCB hard profile: dual-bank checkpoint + reboot recovery oracle=ON")
+message(STATUS "arstack61850 BRCB hard profile: platform non-volatile adapter=NOT_CLAIMED")
 message(STATUS "arstack61850 BRCB hard profile: exceptions/RTTI disabled=ON")
-message(STATUS "arstack61850 BRCB hard profile: non-volatile persistence=NOT_CLAIMED")
