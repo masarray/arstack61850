@@ -25,6 +25,7 @@ add_library(ariec61850_core
     src/mms/data_codec.cpp
     src/mms/pdu.cpp
     src/mms/services.cpp
+    src/mms/file_service.cpp
     src/mms/dynamic_data_set.cpp
     src/mms/dynamic_report_planner.cpp
     src/mms/invoke_router.cpp
@@ -133,6 +134,12 @@ if(ARIEC61850_BUILD_TOOLS)
     target_compile_features(ariec61850_pagination_probe PRIVATE cxx_std_20)
     ariec61850_apply_warnings(ariec61850_pagination_probe)
     ariec61850_apply_sanitizers(ariec61850_pagination_probe)
+
+    add_executable(ariec61850_file_transfer tools/file_transfer.cpp)
+    target_link_libraries(ariec61850_file_transfer PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_file_transfer PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_file_transfer)
+    ariec61850_apply_sanitizers(ariec61850_file_transfer)
 endif()
 
 if(ARIEC61850_BUILD_TESTS)
@@ -217,6 +224,15 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_sanitizers(ariec61850_mms_services_tests)
     add_test(NAME ariec61850_mms_services_tests COMMAND ariec61850_mms_services_tests)
 
+    add_executable(ariec61850_mms_file_service_tests tests/test_mms_file_service.cpp)
+    target_link_libraries(ariec61850_mms_file_service_tests PRIVATE ARIEC61850::core)
+    target_compile_definitions(ariec61850_mms_file_service_tests PRIVATE
+        ARIEC61850_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_features(ariec61850_mms_file_service_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_mms_file_service_tests)
+    ariec61850_apply_sanitizers(ariec61850_mms_file_service_tests)
+    add_test(NAME ariec61850_mms_file_service_tests COMMAND ariec61850_mms_file_service_tests)
+
     add_executable(ariec61850_dynamic_data_set_tests tests/test_dynamic_data_set.cpp)
     target_link_libraries(ariec61850_dynamic_data_set_tests PRIVATE ARIEC61850::core)
     target_compile_features(ariec61850_dynamic_data_set_tests PRIVATE cxx_std_20)
@@ -298,6 +314,9 @@ if(ARIEC61850_BUILD_TESTS)
         add_test(
             NAME ariec61850_pagination_probe_help
             COMMAND ariec61850_pagination_probe --help)
+        add_test(
+            NAME ariec61850_file_transfer_help
+            COMMAND ariec61850_file_transfer --help)
     endif()
 endif()
 
@@ -327,5 +346,6 @@ if(ARIEC61850_BUILD_FUZZERS)
     ariec61850_add_fuzzer(ariec61850_fuzz_transport fuzz/fuzz_transport.cpp)
     ariec61850_add_fuzzer(ariec61850_fuzz_association fuzz/fuzz_association.cpp)
     ariec61850_add_fuzzer(ariec61850_fuzz_mms_services fuzz/fuzz_mms_services.cpp)
+    ariec61850_add_fuzzer(ariec61850_fuzz_mms_file_service fuzz/fuzz_mms_file_service.cpp)
     ariec61850_add_fuzzer(ariec61850_fuzz_reporting fuzz/fuzz_reporting.cpp)
 endif()
