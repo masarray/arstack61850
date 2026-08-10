@@ -21,9 +21,11 @@ endfunction()
 add_executable(ariec61850_control_session_tests
     ${ARIEC61850_ROOT}/tests/test_control_session.cpp
     ${ARIEC61850_ROOT}/src/asn1/ber.cpp
+    ${ARIEC61850_ROOT}/src/osi/presentation.cpp
     ${ARIEC61850_ROOT}/src/mms/utc_time.cpp
     ${ARIEC61850_ROOT}/src/mms/data_value.cpp
     ${ARIEC61850_ROOT}/src/mms/data_codec.cpp
+    ${ARIEC61850_ROOT}/src/mms/pdu.cpp
     ${ARIEC61850_ROOT}/src/mms/services.cpp
     ${ARIEC61850_ROOT}/src/control/guarded_control.cpp
     ${ARIEC61850_ROOT}/src/control/mms_control_structure.cpp
