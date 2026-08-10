@@ -53,6 +53,7 @@ MCU-safe protocol boundary.
 - SCL read-only parsing and COMTRADE CFG/DAT support for host engineering tools.
 - RFC 1006 TPKT, COTP, ISO Session, Presentation, ACSE, and MMS Initiate.
 - Confirmed MMS GetNameList, GetVariableAccessAttributes, Read, and Write codecs.
+- Read-only MMS FileDirectory/FileOpen/FileRead/FileClose codecs and bounded streaming runtime.
 - DataSet directory, InformationReport, RCB state, and report-subscription foundations.
 
 ### Phase 1A–1E — deterministic process-bus core
@@ -125,6 +126,22 @@ The live discovery surface sends only read-only services such as GetNameList,
 GetVariableAccessAttributes, GetNamedVariableListAttributes and Read. It does
 **not** authorize or perform Write, control, GI, RCB reservation/enable,
 dynamic DataSet mutation, or file-service mutation.
+
+### Phase 4E - MMS file transfer client
+
+`ariec61850_file_transfer` adds an explicit read-only file-service surface:
+
+- root/nested FileDirectory with bounded continuation;
+- streaming FileOpen/FileRead/FileClose download to a caller-owned sink;
+- full signed Integer32 FRSM support;
+- exact Confirmed-Error evidence and bounded diagnostics;
+- best-effort FileClose that preserves the primary failure; and
+- a single oracle-matched rooted-backslash fallback for file-non-existent.
+
+The default CLI operation is directory listing. Download requires both
+`--remote` and `--output`; upload/delete/rename are not implemented. See
+`docs/MMS_FILE_TRANSFER.md` for API, safety, CLI, exit-code, and acceptance
+details.
 
 #### Public Alpha A1 model work
 
@@ -312,7 +329,9 @@ roles are documented in `docs/EMBEDDED_TARGETS.md`:
 - STM32H7/NXP class: later portability/industrialization target.
 
 The embedded profile already excludes host TCP/live-discovery/PCAP/COMTRADE/SCL
-parser tooling and provides a no-RTTI host-simulation gate. Sampled Values also
+parser tooling and provides a no-RTTI host-simulation gate. The portable MMS
+file-service runtime is included through abstract transport/sink boundaries;
+its filesystem-backed CLI remains host-only. Sampled Values also
 has a caller-owned `encode_into(span)` path so the eventual publisher does not
 need to allocate a fresh Ethernet frame buffer per sample.
 

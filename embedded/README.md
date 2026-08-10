@@ -43,6 +43,12 @@ Host-only facilities remain outside this build profile:
 - filesystem access;
 - desktop diagnostics/UI.
 
+The portable MMS file-service codec and bounded transfer runtime are included in
+`embedded_core`. They use the abstract, caller-supplied `MmsByteTransport` and
+`MmsFileSink`; the native TCP transport and filesystem-backed host CLI remain
+excluded. This is a host-simulation portability result, not yet an ESP32 device
+validation or deterministic no-heap claim.
+
 ## Current compiler contract
 
 The embedded profile currently enforces:

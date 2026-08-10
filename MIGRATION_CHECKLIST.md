@@ -150,7 +150,17 @@ behavioral oracle until laboratory interoperability is complete.
 
 - [ ] Direct and SBO control state machines.
 - [ ] Enhanced-security termination/error handling.
-- [ ] MMS file and fault-record transfer.
+- [x] MMS FileDirectory `[77]` codec with root/nested paths, attributes, `moreFollows`, and `continueAfter`.
+- [x] Bounded FileDirectory pagination with deterministic order-preserving deduplication and no-progress detection.
+- [x] MMS FileOpen/FileRead/FileClose `[72-74]` codecs with signed Integer32 FRSM parity.
+- [x] Caller-owned streaming sink runtime with byte/read/block/diagnostic bounds and advertised-size validation.
+- [x] Best-effort FileClose after read, validation, sink, and observed cancellation failures without replacing the primary error.
+- [x] Precise file/file-non-existent rooted-backslash fallback before the first FileRead only.
+- [x] Host list/download CLI, JSON evidence, dedicated regression suite, mutation smoke, and libFuzzer corpus.
+- [x] Controlled live FileDirectory and small-file download with successful FileClose and local hash evidence.
+- [x] Controlled live forced block-limit failure with zero local bytes and successful FileClose cleanup.
+- [ ] Multi-page physical FileDirectory continuation evidence.
+- [ ] Multi-vendor file-service acceptance and ESP32 device validation.
 
 ## Phase 5 — simulator and applications
 
@@ -160,6 +170,8 @@ behavioral oracle until laboratory interoperability is complete.
 
 ## Safety gate
 
-SCL, COMTRADE, PCAP, and the Phase 4C/4C.1 live discovery surface are read-only. Active RCB
-mutation, control, dynamic DataSet mutation, file transfer, Npcap transmission, and real-time SV
-scheduling require separate explicit APIs, authorization, and physical-laboratory acceptance.
+SCL, COMTRADE, PCAP, and the Phase 4C/4C.1 live discovery surface are read-only. MMS file
+download is also remote-content read-only but has an active FileOpen/FileRead/FileClose resource
+lifecycle, so the host CLI requires an explicit remote path/destination and controlled-lab
+authorization. RCB mutation, control, dynamic DataSet mutation, remote file mutation, Npcap
+transmission, and real-time SV scheduling retain separate explicit safety gates.

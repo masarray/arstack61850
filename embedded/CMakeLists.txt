@@ -38,7 +38,10 @@ set(ARIEC61850_EMBEDDED_SOURCES
     ${ARIEC61850_ROOT}/src/mms/data_value.cpp
     ${ARIEC61850_ROOT}/src/mms/data_codec.cpp
     ${ARIEC61850_ROOT}/src/mms/pdu.cpp
-    ${ARIEC61850_ROOT}/src/mms/services.cpp)
+    ${ARIEC61850_ROOT}/src/mms/services.cpp
+    ${ARIEC61850_ROOT}/src/mms/invoke_router.cpp
+    ${ARIEC61850_ROOT}/src/mms/association_runtime.cpp
+    ${ARIEC61850_ROOT}/src/mms/file_service.cpp)
 
 add_library(ariec61850_embedded_core STATIC ${ARIEC61850_EMBEDDED_SOURCES})
 add_library(ARIEC61850::embedded_core ALIAS ariec61850_embedded_core)
