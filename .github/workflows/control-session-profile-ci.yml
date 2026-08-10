@@ -1,0 +1,61 @@
+name: Control Session Profile CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'include/ariec61850/control/**'
+      - 'src/control/**'
+      - 'include/ariec61850/mms/association_runtime.hpp'
+      - 'src/mms/association_runtime_control_wait.cpp'
+      - 'tests/test_control_session.cpp'
+      - 'tests/control_session_profile/**'
+      - '.github/workflows/control-session-profile-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  control-session-profile:
+    name: Control Session / ${{ matrix.compiler }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select compiler
+        shell: bash
+        run: |
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            echo "CC=clang" >> "$GITHUB_ENV"
+            echo "CXX=clang++" >> "$GITHUB_ENV"
+          else
+            echo "CC=gcc" >> "$GITHUB_ENV"
+            echo "CXX=g++" >> "$GITHUB_ENV"
+          fi
+
+      - name: Configure control session profile
+        run: cmake -S tests/control_session_profile -B build-control-session
+
+      - name: Build control session profile
+        run: cmake --build build-control-session --parallel
+
+      - name: Run smart-control parity tests
+        run: >-
+          ctest --test-dir build-control-session
+          --output-on-failure
+          --output-junit control-session-ctest.xml
+
+      - name: Upload control session evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-session-${{ matrix.compiler }}-${{ github.event.pull_request.head.sha || github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: build-control-session/control-session-ctest.xml
