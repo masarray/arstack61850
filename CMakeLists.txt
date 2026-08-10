@@ -219,6 +219,8 @@ if(ARIEC61850_BUILD_TESTS)
 
     add_executable(ariec61850_mms_file_service_tests tests/test_mms_file_service.cpp)
     target_link_libraries(ariec61850_mms_file_service_tests PRIVATE ARIEC61850::core)
+    target_compile_definitions(ariec61850_mms_file_service_tests PRIVATE
+        ARIEC61850_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_features(ariec61850_mms_file_service_tests PRIVATE cxx_std_20)
     ariec61850_apply_warnings(ariec61850_mms_file_service_tests)
     ariec61850_apply_sanitizers(ariec61850_mms_file_service_tests)

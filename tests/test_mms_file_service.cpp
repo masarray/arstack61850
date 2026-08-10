@@ -9,7 +9,9 @@
 #include <deque>
 #include <exception>
 #include <functional>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <span>
 #include <stdexcept>
@@ -588,6 +590,25 @@ void timeout_preserves_evidence_when_association_drops() {
         }));
 }
 
+void portable_core_has_no_host_file_or_socket_dependencies() {
+    const std::vector<std::string> files{
+        std::string{ARIEC61850_SOURCE_DIR} + "/include/ariec61850/mms/file_service.hpp",
+        std::string{ARIEC61850_SOURCE_DIR} + "/src/mms/file_service.cpp"};
+    const std::vector<std::string> forbidden{
+        "<filesystem>", "<fstream>", "std::filesystem", "std::ifstream",
+        "std::ofstream", "winsock", "sys/socket", "TcpMmsByteTransport",
+        "std::thread"};
+    for (const auto& path : files) {
+        std::ifstream input{path, std::ios::binary};
+        CHECK(input.good());
+        const std::string source{
+            std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+        for (const auto& token : forbidden) {
+            CHECK(source.find(token) == std::string::npos);
+        }
+    }
+}
+
 } // namespace
 
 int main() {
@@ -605,6 +626,7 @@ int main() {
         {"adaptive forbids retry after read", adaptive_fallback_is_forbidden_after_any_read},
         {"cancellation cleanup", cancellation_after_open_still_closes},
         {"timeout evidence", timeout_preserves_evidence_when_association_drops},
+        {"portable dependency boundary", portable_core_has_no_host_file_or_socket_dependencies},
     };
 
     std::size_t passed = 0U;
