@@ -1,0 +1,37 @@
+name: Dynamic RCB Trial Harness CI
+
+on:
+  push:
+    branches: ["agent/phase-4d-d2-dynamic-rcb-live-trial"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            cc: gcc
+            cxx: g++
+          - os: ubuntu-latest
+            cc: clang
+            cxx: clang++
+          - os: windows-latest
+            cc: ""
+            cxx: ""
+    runs-on: ${{ matrix.os }}
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S tools/dynamic_rcb_trial -B build-dynamic-rcb-trial -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build-dynamic-rcb-trial --config Release --parallel
+      - name: Help contract
+        run: ctest --test-dir build-dynamic-rcb-trial -C Release --output-on-failure

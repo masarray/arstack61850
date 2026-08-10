@@ -2,6 +2,9 @@
 
 #include "ariec61850/mms/reporting.hpp"
 
+#include "ariec61850/asn1/ber.hpp"
+#include "ariec61850/mms/data_codec.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -99,6 +102,9 @@ void inventory_builder_groups_datasets_and_rcbs() {
 
 void dataset_directory_round_trip_and_normalization() {
     const MmsDataSetDirectoryRequest request{7U, MmsDataSetDirectoryCodec::parse_data_set_reference("LD0/LLN0.Events")};
+    require(MmsDataSetDirectoryCodec::to_report_attribute_value("LD0/LLN0.Events") ==
+                "LD0/LLN0$Events",
+            "RCB DatSet attribute value did not use the MMS wire reference.");
     const auto request_wire = MmsDataSetDirectoryCodec::encode_request_p_data(request);
     const auto request_decoded = MmsDataSetDirectoryCodec::decode_request(request_wire);
     require(request_decoded.invoke_id == 7U && request_decoded.data_set_name.item == "LLN0$Events",
@@ -121,6 +127,33 @@ void information_report_round_trip() {
     const auto decoded = MmsInformationReportCodec::decode(encoded);
     require(decoded.items.size() == report.items.size(), "InformationReport item count changed.");
     require(decoded.variable_references.size() == 1U, "InformationReport variable reference was lost.");
+}
+
+void information_report_variable_list_name_is_supported() {
+    using ar::iec61850::asn1::BerWriter;
+    const auto object_name = MmsServiceCodec::encode_object_name(
+        MmsObjectName::domain_specific("LD0", "LLN0$DynamicSet"));
+    const auto value = MmsDataCodec::encode(
+        MmsDataValue::visible_string("LD0/LLN0.BR.brcbA01"));
+    const auto result_list = BerWriter::encode_tlv(0xA0U, value);
+
+    const std::array specifications{
+        BerWriter::encode_tlv(0xA1U, object_name),
+        object_name};
+    for (const auto& specification : specifications) {
+        auto body = specification;
+        body.insert(body.end(), result_list.begin(), result_list.end());
+        const auto information_report = BerWriter::encode_tlv(0xA0U, body);
+        const auto pdu = BerWriter::encode_tlv(0xA3U, information_report);
+        const auto decoded = MmsInformationReportCodec::decode(pdu);
+        require(decoded.variable_references.size() == 1U,
+                "InformationReport variableListName was not decoded.");
+        require(decoded.variable_references.front().reference() ==
+                    "LD0/LLN0$DynamicSet",
+                "InformationReport variableListName changed during decode.");
+        require(decoded.items.size() == 1U,
+                "InformationReport access-result list was not preserved.");
+    }
 }
 
 void exact_report_mapping_decodes_optional_fields() {
@@ -281,6 +314,7 @@ int main() {
         {"inventory builder", inventory_builder_groups_datasets_and_rcbs},
         {"DataSet directory", dataset_directory_round_trip_and_normalization},
         {"InformationReport", information_report_round_trip},
+        {"InformationReport variableListName", information_report_variable_list_name_is_supported},
         {"exact report mapping", exact_report_mapping_decodes_optional_fields},
         {"C# exact report shape", csharp_exact_report_shape_maps_byte_semantics},
         {"report failure result", report_failure_result_is_preserved},

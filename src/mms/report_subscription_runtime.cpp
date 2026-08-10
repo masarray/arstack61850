@@ -119,8 +119,13 @@ void MmsReportSubscriptionRuntime::write_attribute(
     const auto response = MmsServiceCodec::decode_write_response(
         response_payload(exchange), invoke_id);
     if (response.results.size() != 1U || !response.results.front().success) {
+        const auto failure = response.results.size() == 1U
+            ? response.results.front().failure_code
+            : std::nullopt;
         throw MmsReportSubscriptionError(
-            "RCB attribute write failed: " + attribute + ".");
+            "RCB attribute write failed: " + attribute +
+            (failure ? " (DataAccessError=" + std::to_string(*failure) + ")."
+                     : "."));
     }
     add_event(MmsReportSubscriptionEventKind::attribute_written,
               "RCB attribute written: " + attribute + ".");
@@ -201,7 +206,9 @@ void MmsReportSubscriptionRuntime::start(
             }
             write_attribute(
                 "DatSet",
-                MmsDataValue::visible_string(options_.data_set_reference),
+                MmsDataValue::visible_string(
+                    MmsDataSetDirectoryCodec::to_report_attribute_value(
+                        options_.data_set_reference)),
                 stop_token);
         }
         if (options_.write_trigger_options) {
