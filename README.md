@@ -77,7 +77,7 @@ interoperability are complete.
 - Sequence, configuration, DataSet, overflow, and segmentation continuity tracking.
 - Bounded offline report monitor and dedicated MMS-reporting fuzz corpus.
 
-No enabled runtime opens TCP sockets, Npcap, raw sockets, or a network interface. Physical IED
+No enabled runtime opens TCP sockets, host packet-capture interfaces, raw sockets, or a network interface. Physical IED
 interoperability and all active transmission remain gated.
 
 ## Phase 4B: association and report-subscription runtime
