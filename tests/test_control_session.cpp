@@ -257,9 +257,12 @@ ControlRequest request(const DoublePointValue value = DoublePointValue::on) {
 
 void discovery_matches_csharp_ctlmodel_gvaa_and_timeout_rules() {
     ScriptedControlTransport transport;
-    transport.reads["LD0/CSWI1$CF$Pos$ctlModel"] = MmsDataValue::integer(2);
-    transport.reads["LD0/CSWI1$CF$Pos$sboTimeout"] = MmsDataValue::unsigned_integer(1'500U);
-    transport.reads["LD0/CSWI1$CF$Pos$operTimeout"] = MmsDataValue::integer(2'500);
+    transport.reads.insert_or_assign(
+        "LD0/CSWI1$CF$Pos$ctlModel", MmsDataValue::integer(2));
+    transport.reads.insert_or_assign(
+        "LD0/CSWI1$CF$Pos$sboTimeout", MmsDataValue::unsigned_integer(1'500U));
+    transport.reads.insert_or_assign(
+        "LD0/CSWI1$CF$Pos$operTimeout", MmsDataValue::integer(2'500));
     transport.specifications["LD0/CSWI1$CO$Pos$Oper"] = oper_spec();
     transport.specifications["LD0/CSWI1$CO$Pos$Cancel"] = cancel_spec();
     transport.names["LD0"] = {
@@ -279,16 +282,15 @@ void discovery_matches_csharp_ctlmodel_gvaa_and_timeout_rules() {
     CHECK(found.status_functional_constraint == "ST");
     CHECK(found.operationally_ready());
 
-    // Cancel is mandatory for a model that requires Select.
     transport.specifications.erase("LD0/CSWI1$CO$Pos$Cancel");
-    bool rejected = false;
+    bool rejected_discovery = false;
     try {
         static_cast<void>(ControlDescriptorDiscovery::discover(
             transport, "LD0/CSWI1.Pos"));
     } catch (const std::runtime_error&) {
-        rejected = true;
+        rejected_discovery = true;
     }
-    CHECK(rejected);
+    CHECK(rejected_discovery);
 }
 
 void direct_normal_is_exactly_one_oper_write() {
@@ -313,15 +315,15 @@ void direct_normal_is_exactly_one_oper_write() {
 
 void sbo_normal_select_oper_and_cancel_are_immutable() {
     ScriptedControlTransport transport;
-    transport.reads["LD0/CSWI1$CO$Pos$SBO"] =
-        MmsDataValue::visible_string("LD0/CSWI1.Pos");
+    transport.reads.insert_or_assign(
+        "LD0/CSWI1$CO$Pos$SBO", MmsDataValue::visible_string("LD0/CSWI1.Pos"));
     ControlObjectSession session{
         transport, descriptor(ControlModel::select_before_operate_normal), options()};
 
     auto selected = session.select(request());
     CHECK(selected.success());
     CHECK(session.has_active_selection());
-    CHECK(transport.writes.empty()); // normal SBO Select is a Read.
+    CHECK(transport.writes.empty());
 
     const auto operated = session.operate(request());
     CHECK(operated.success());
@@ -339,7 +341,8 @@ void sbo_normal_select_oper_and_cancel_are_immutable() {
 
 void stale_sbo_sequence_is_cancelled_not_operated() {
     ScriptedControlTransport transport;
-    transport.reads["LD0/CSWI1$CO$Pos$SBO"] = MmsDataValue::boolean(true);
+    transport.reads.insert_or_assign(
+        "LD0/CSWI1$CO$Pos$SBO", MmsDataValue::boolean(true));
     ControlObjectSession session{
         transport, descriptor(ControlModel::select_before_operate_normal), options()};
     CHECK(session.select(request(DoublePointValue::on)).success());
@@ -354,7 +357,8 @@ void stale_sbo_sequence_is_cancelled_not_operated() {
 
 void auto_select_performs_sbo_read_then_one_oper_write() {
     ScriptedControlTransport transport;
-    transport.reads["LD0/CSWI1$CO$Pos$SBO"] = MmsDataValue::visible_string("SEL-TOKEN");
+    transport.reads.insert_or_assign(
+        "LD0/CSWI1$CO$Pos$SBO", MmsDataValue::visible_string("SEL-TOKEN"));
     ControlObjectSession session{
         transport, descriptor(ControlModel::select_before_operate_normal), options()};
     const auto result = session.operate(request());
