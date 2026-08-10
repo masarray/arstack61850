@@ -1,39 +1,34 @@
-ARIEC61850 C++ Phase 4B validation
-Date: 2026-08-06
+ARIEC61850 C++ validation ledger
 
-GNU C++ 14.2 / Release / warnings-as-errors:
-  Configure: PASS
-  Build:     PASS
-  CTest:     PASS (16/16)
+Phase 4B accepted baseline
+- GCC/Clang warnings-as-errors: passed.
+- Windows MSVC matrix: passed.
+- Clang ASan/UBSan: passed.
+- Repository CTest through Phase 4B: 16/16 passed.
+- Reporting fuzz evidence: passed.
 
-Clang 17 / Release / warnings-as-errors:
-  Configure: PASS
-  Build:     PASS
-  CTest:     PASS (16/16)
+Phase 4C local evidence
+- GCC and Clang strict warning build of TCP transport/loopback: passed.
+- POSIX TCP loopback connect/send/receive: passed.
+- Cancellation behavior: passed.
+- Clang ASan/UBSan loopback smoke: passed.
+- Scripted discovery and read-only service allowlist: added.
 
-Clang 17 / RelWithDebInfo / ASan + UBSan:
-  Configure: PASS
-  Build:     PASS
-  CTest:     PASS (16/16)
+Phase 4C.1 local evidence
+- C#-compatible live-model hierarchy and reference parser: implemented.
+- Direct and nested TypeSpecification resolution: locally validated.
+- Deterministic canonical manifest/fingerprint and parity: locally validated.
+- Header multi-translation-unit GCC/Clang strict validation: passed.
+- Live-model ASan/UBSan smoke: passed.
+- Python parity and interop runners: py_compile passed.
+- Simulated three-cycle physical acceptance runner: passed with stable fingerprint.
 
-Phase 4B deterministic evidence:
-  - COTP/ACSE/MMS association success and negotiated limits
-  - cancelled connect followed by explicit reconnect
-  - confirmed response routing with interleaved InformationReport
-  - confirmed-exchange timeout and association fault transition
-  - RCB live-state re-probe before any write
-  - URCB Resv=true, RptEna=true, optional GI, report delivery, and cleanup
-  - occupied/enabled RCB takeover protection
-  - cleanup-required state after association loss
-  - persistent report mapping into the bounded Phase 4A monitor
+Pending acceptance
+- GitHub workflow_dispatch for GCC/Clang/MSVC and Security/Evidence on PR #14.
+- Full repository CTest on the Phase 4C.1 branch.
+- Reachable physical IED or vendor-simulator run.
+- Primary-vendor ten-cycle run and timeout/reconnect evidence.
+- Large-model pagination evidence where available.
+- C# and C++ same-IED live-ied-model-v1 parity review.
 
-GitHub Actions:
-  GCC / Clang / Windows MSVC matrix: PASS
-  Clang ASan + UBSan:                PASS
-  Existing ten-corpus libFuzzer:     PASS (no crash artifact)
-
-Runtime boundary:
-  Byte transport interface: IMPLEMENTED
-  Built-in TCP socket backend: NOT INCLUDED
-  Physical IED association: NOT VALIDATED
-  Direct/SBO control and file service: DISABLED
+No physical IED evidence is claimed by this ledger.

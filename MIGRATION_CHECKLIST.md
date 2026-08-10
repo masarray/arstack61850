@@ -1,8 +1,8 @@
 # ARIEC61850 C++ Migration Checklist
 
 Status legend: `[x]` implemented and regression-tested, `[~]` implemented but awaiting
-external/CI evidence, `[ ]` not started. The C# repository remains the behavioral oracle
-until laboratory interoperability is complete.
+external/CI or physical-lab evidence, `[ ]` not started. The C# repository remains the
+behavioral oracle until laboratory interoperability is complete.
 
 ## Phase 0 — portable deterministic foundation
 
@@ -84,7 +84,7 @@ until laboratory interoperability is complete.
 - [x] Multi-variable Write with per-variable success/failure results.
 - [x] MMS-services mutation smoke and LLVM libFuzzer corpus.
 
-## Phase 4 — reporting, control, and file service
+## Phase 4 — reporting, live discovery, control, and file service
 
 ### Phase 4A — offline reporting foundation
 
@@ -109,8 +109,42 @@ until laboratory interoperability is complete.
 - [x] URCB reservation, RptEna enable/disable, optional GI, and touched-state cleanup.
 - [x] Persistent report polling and Phase 4A monitor ingestion.
 - [x] Cleanup-required evidence and retry path after association loss.
-- [ ] Built-in TCP socket transport and physical IED association validation.
 - [ ] BRCB EntryID resume, purge decisioning, and buffer-overflow recovery.
+
+### Phase 4C — built-in TCP and live read-only discovery
+
+- [~] Non-blocking Windows Winsock and POSIX TCP `MmsByteTransport` implementation.
+- [~] IPv4/IPv6 resolution, TCP_NODELAY, keepalive, partial-send, and peer-close handling.
+- [~] Deadline and cancellation-aware connect/send/receive readiness waits.
+- [~] Bounded live GetNameList pagination for domains, variables, and DataSets.
+- [~] Optional GetVariableAccessAttributes type probes.
+- [~] Optional GetNamedVariableListAttributes DataSet directory reads.
+- [~] Optional read-only RCB attribute inventory/state probes.
+- [~] Read-only `ariec61850_live_discover` human/JSON CLI.
+- [~] Discovery service allowlist regression proving no MMS Write request is emitted.
+
+### Phase 4C.1 — live-model parity and physical read-only interoperability
+
+- [x] C#-compatible `live-ied-model-v1` output schema.
+- [x] Logical Device / Logical Node / Data Object / Data Attribute hierarchy.
+- [x] IEC 61850 reference and functional-constraint normalization.
+- [x] Direct and nested TypeSpecification mapping to discovered attributes.
+- [x] Conservative IED identity and logical-device alias inference.
+- [x] CDC inference with explicit confidence.
+- [x] DataSet and BRCB/URCB evidence in the live model.
+- [x] Deterministic canonical manifest and fingerprint.
+- [x] C#↔C++ parity comparison script.
+- [x] Reconnect-cycle physical read-only evidence runner for Windows/Linux.
+- [x] Automated stability, warning-policy, coverage, and optional parity gates.
+- [x] Bounded GO/SV/SG/LG deep reader using exact live MMS NameList variables only.
+- [x] Machine-readable control-block runtime attribute/value/status overlay excluded from structural parity fingerprint.
+- [x] GCC/Clang strict validation, sanitizer/libFuzzer smoke, and Windows MSVC matrix accepted on the feature branch.
+- [x] Controlled physical IED read-only evidence accepted: OCR7SR12 RCB contention probe and SGCB 5/5 deep read.
+- [x] Integrated `live_discover --control-block-values` physical OCR7SR12 run accepted: 1/1 SGCB complete, 5/5 attributes read, diagnostics=0, pending-value warning cleared.
+- [x] C# and C++ same-IED OCR7SR12 structural/type/runtime comparison accepted with zero blocking findings.
+- [x] Primary-vendor OCR7SR12 ten-cycle acceptance: 10/10 stable discovery cycles, full 286/286 RCB and control-block gates, 3/3 StableProceed contention cycles, and 13/13 fresh associations.
+- [x] Controlled OCR7SR12 timeout/recovery evidence accepted: healthy baseline, post-association response withholding, client request timeout observed, fresh direct recovery, and identical `934b555dff76a46f` structural fingerprint before/after recovery.
+- [ ] Pagination continuation evidence accepted on a target that requires more than one page.
 
 ### Later Phase 4 work
 
@@ -124,24 +158,8 @@ until laboratory interoperability is complete.
 - [ ] CLI parity and Windows Npcap abstraction.
 - [ ] Native Engineering Workbench, simulator, discovery, and SV publisher UI.
 
-## Current acceptance evidence
-
-- [x] GCC and Clang C++20 warnings-as-errors local validation through Phase 2B.
-- [x] Clang ASan/UBSan local COMTRADE regression pass.
-- [x] C#-derived COMTRADE ASCII and binary fixtures.
-- [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 2B.
-- [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 3A.
-- [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 3B.
-- [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 3C.
-- [x] PR #6 through PR #10 squash-merged sequentially to `main`.
-- [x] Full main-based branch GCC/Clang/MSVC and security workflows through Phase 4A.
-- [x] Full stacked-branch GCC/Clang/MSVC and security workflows through Phase 4B.
-- [ ] Controlled physical-lab process-bus capture evidence.
-- [ ] C# and C++ executable-oracle comparison in one CI job.
-
 ## Safety gate
 
-SCL and COMTRADE tooling is read-only. Process-bus interoperability tooling operates on
-saved PCAP files. Active Npcap transmission, real-time SV scheduling, MMS write/control,
-and IED operation remain outside the enabled runtime surface until separate physical-lab,
-timing, cancellation, and explicit transmit authorization gates are complete.
+SCL, COMTRADE, PCAP, and the Phase 4C/4C.1 live discovery surface are read-only. Active RCB
+mutation, control, dynamic DataSet mutation, file transfer, Npcap transmission, and real-time SV
+scheduling require separate explicit APIs, authorization, and physical-laboratory acceptance.

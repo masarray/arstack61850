@@ -1,70 +1,45 @@
-# Isolated-Laboratory Interoperability Checklist
+# Isolated IEC 61850 Laboratory Checklist
 
-This checklist is intentionally receive-first and read-only. The Phase 1E tooling does
-not open Npcap, transmit Ethernet frames, or operate an IED.
+## Before connection
 
-## 1. Safety boundary
+- Use an isolated engineering network with an approved test IED or vendor simulator.
+- Record vendor, model, firmware, IP, MMS port, C# commit, and C++ commit.
+- Confirm no production breaker/process control is reachable.
+- Confirm the intended Phase 4C.1 command uses only the read-only discovery CLI.
+- Start packet capture when permitted.
 
-- [ ] Use an isolated laboratory switch or an isolated VLAN with no route to a production substation LAN.
-- [ ] Confirm the engineering laptop has no bridge, Internet sharing, or second adapter forwarding traffic.
-- [ ] Begin with a mirror/SPAN port or passive TAP; do not connect an active publisher output first.
-- [ ] Record IED manufacturer, model, firmware, configuration revision, MAC addresses, APPIDs, VLAN IDs, and sampling mode.
-- [ ] Synchronize clocks only through the laboratory timing source approved for the test.
+## Read-only request allowlist
 
-## 2. Receive-only capture
+Phase 4C.1 discovery may issue only:
 
-- [ ] Capture at least one stable GOOSE state and one GOOSE state transition.
-- [ ] Capture Sampled Values across at least two counter wraps or ten seconds, whichever is longer.
-- [ ] Preserve the original PCAP; do not edit it in Wireshark before hashing.
-- [ ] Calculate SHA-256 and record the capture hash in the report template.
-- [ ] Keep a copy of the SCL/CID/SCD file used to configure the streams.
+- MMS GetNameList;
+- MMS GetVariableAccessAttributes;
+- MMS GetNamedVariableListAttributes; and
+- MMS Read.
 
-## 3. Automated evidence check
+Stop the test if Write, GI, RCB reservation/enable, control, dynamic DataSet mutation, or
+file-service traffic is observed.
 
-Windows:
+## Minimum acceptance run
 
-```powershell
-./scripts/run-lab-check.ps1 -Pcap ./captures/device-session.pcap
-```
+1. Build Release with warnings as errors and run repository CTest.
+2. Run three reconnect/discovery cycles against the test target.
+3. Confirm every cycle produces `live-ied-model-v1` and a non-empty hierarchy.
+4. Confirm fingerprints are stable when the IED configuration is unchanged.
+5. Export the C# oracle model against the same target/configuration.
+6. Run C#↔C++ parity and review every blocking finding.
+7. Run ten cycles for the primary target vendor.
+8. Exercise a timeout/connection-failure scenario, then confirm a clean reconnect.
+9. Record multi-page GetNameList evidence when the target model is large enough.
+10. Store `interop-summary.json`, per-cycle models, parity reports, and capture references.
 
-Linux:
+## Review gate
 
-```bash
-./scripts/run-lab-check.sh ./captures/device-session.pcap
-```
+Do not mark Phase 4C.1 physically accepted until:
 
-Acceptance conditions:
-
-- [ ] At least one GOOSE or Sampled Values packet is decoded.
-- [ ] No process-bus packet is malformed.
-- [ ] Every decoded GOOSE/SV frame re-encodes byte-for-byte to the captured frame.
-- [ ] PCAP packet order, payload bytes, and microsecond-normalized timestamps round-trip.
-- [ ] Stream identifiers, APPIDs, VLANs, and configuration revisions match the engineering files.
-
-## 4. Protocol observations
-
-GOOSE:
-
-- [ ] `stNum` increases only on state changes.
-- [ ] `sqNum` behavior and retransmission intervals match the configured profile.
-- [ ] `timeAllowedToLive` remains adequate for observed arrival gaps.
-- [ ] Dataset values match the expected state transition.
-
-Sampled Values:
-
-- [ ] `smpCnt` progression and wrap policy match the configured sampling mode.
-- [ ] `confRev`, `smpSynch`, `smpRate`, and optional `refrTm` are consistent.
-- [ ] Missing, duplicate, and out-of-order sample counts are zero or explained.
-- [ ] `seqOfData` channel mapping and scaling are validated against SCL, not inferred from byte position alone.
-
-## 5. Escalation and evidence retention
-
-- [ ] Save the PCAP, JSON report, SHA-256, SCL files, device configuration export, and test notes together.
-- [ ] Record every mismatch before changing the parser or normalizing captured bytes.
-- [ ] Do not enable active GOOSE/SV transmission from this stack until the receive-only evidence passes and a separate approved transmit test plan exists.
-
-## Current status
-
-The synthetic C#-derived corpus is automated in CI. Physical IED interoperability
-remains **not yet passed** until a real capture and completed report are committed or
-otherwise archived as controlled evidence.
+- the same-target C# parity report has no unexplained blocking finding;
+- warning policy is reviewed;
+- fingerprint stability is demonstrated;
+- reconnect behavior is demonstrated;
+- Windows/MSVC and repository CI pass; and
+- an engineer signs the completed `LAB_INTEROP_REPORT_TEMPLATE.md`.

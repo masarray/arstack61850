@@ -1,63 +1,63 @@
-# ARIEC61850 Isolated-Lab Interoperability Report
+# IEC 61850 Interoperability Evidence Report
 
-## Test identity
+## Target
 
-- Date/time:
-- Engineer:
-- Laboratory/network diagram reference:
-- IED manufacturer/model:
+- Vendor:
+- Model:
 - Firmware:
-- Engineering file and revision:
-- Capture filename:
-- Capture SHA-256:
-- Capture duration:
-- Tool commit SHA:
+- IP / MMS port:
+- Test date and timezone:
+- Isolated engineering network:
+- C++ commit:
+- C# oracle commit:
+- Operator:
 
-## Network parameters
+## Phase 4C.1 read-only discovery
 
-| Stream | Protocol | Source MAC | Destination MAC | VLAN/PCP | APPID | Identifier |
-|---|---|---|---|---|---|---|
-| 1 | | | | | | |
+- Command used:
+- Cycle count:
+- Timeout:
+- Successful cycles:
+- Stable fingerprint: yes / no
+- Fingerprint:
+- Logical Devices:
+- Logical Nodes:
+- Data Objects:
+- Data Attributes:
+- Exact MMS types:
+- DataSets:
+- BRCBs / URCBs:
+- Warning count:
+- `interop-summary.json` reference:
+- Packet-capture reference:
 
-## Automated checker result
+## C#↔C++ parity
 
-- Overall result: PASS / FAIL
-- Packet count:
-- GOOSE count:
-- Sampled Values count:
-- Malformed count:
-- Exact decode/re-encode matches:
-- Re-encode mismatches:
-- Canonical PCAP round trip: PASS / FAIL
-- JSON report path/hash:
+- C# `live-ied-model-v1` file:
+- C++ `live-ied-model-v1` file:
+- Parity report:
+- Blocking findings:
+- Informational findings:
+- Accepted: yes / no
+- Exceptions and rationale:
 
-## GOOSE observations
+## Robustness evidence
 
-- State transitions exercised:
-- `stNum`/`sqNum` observations:
-- Retransmission timing:
-- TTL/arrival-gap result:
-- Dataset/value result:
+- Multi-page GetNameList observed: yes / no
+- Timeout scenario exercised: yes / no
+- Clean reconnect after timeout: yes / no
+- Ten-cycle primary-vendor run: pass / fail
+- Fingerprint changed after deliberate model/config change: yes / no / not tested
 
-## Sampled Values observations
+## Read-only safety review
 
-- Sampling mode/rate:
-- Counter wrap policy:
-- Missing/duplicate/out-of-order samples:
-- Synchronization and reference-time result:
-- SCL-backed channel/scaling result:
+Confirm the run emitted only GetNameList, GetVariableAccessAttributes,
+GetNamedVariableListAttributes, and Read. Confirm no Write, GI, RCB reservation/enable,
+control, dynamic DataSet mutation, or file-service request was used.
 
-## Deviations and evidence
+## Conclusion
 
-| ID | Packet/time | Observation | Expected | Disposition |
-|---|---|---|---|---|
-| 1 | | | | |
-
-## Acceptance
-
-- [ ] Receive-only GOOSE interoperability accepted.
-- [ ] Receive-only Sampled Values interoperability accepted.
-- [ ] All artifacts retained under controlled storage.
-- [ ] Active transmission remains disabled unless separately approved.
-
-Approver/signature:
+- Phase 4C.1 accepted for this target: yes / no
+- Remaining actions:
+- Reviewer:
+- Review date:

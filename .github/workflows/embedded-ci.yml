@@ -1,0 +1,108 @@
+name: Embedded Profile CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  embedded-host-sim:
+    name: Embedded host-sim / ${{ matrix.compiler }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select compiler
+        shell: bash
+        run: |
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            echo "CC=clang" >> "$GITHUB_ENV"
+            echo "CXX=clang++" >> "$GITHUB_ENV"
+          else
+            echo "CC=gcc" >> "$GITHUB_ENV"
+            echo "CXX=g++" >> "$GITHUB_ENV"
+          fi
+
+      - name: Audit embedded source boundary
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          cmake = Path('embedded/CMakeLists.txt').read_text(encoding='utf-8')
+          match = re.search(r'set\(ARIEC61850_EMBEDDED_SOURCES\s*(.*?)\)', cmake, re.S)
+          if not match:
+              raise SystemExit('embedded source list not found')
+
+          paths = []
+          for raw in match.group(1).splitlines():
+              raw = raw.strip()
+              if not raw or raw.startswith('#'):
+                  continue
+              raw = raw.replace('${ARIEC61850_ROOT}/', '')
+              paths.append(Path(raw))
+
+          forbidden = {
+              '#include <filesystem>': 'filesystem',
+              '#include <iostream>': 'iostream',
+              'winsock2.h': 'WinSock',
+              'windows.h': 'Windows API',
+              'sys/socket.h': 'POSIX socket API',
+              'netinet/': 'POSIX network API',
+              'ariec61850/capture/': 'PCAP/capture layer',
+              'ariec61850/comtrade/': 'COMTRADE layer',
+              'ariec61850/evidence/': 'host evidence layer',
+              'ariec61850/scl/parser': 'SCL parser',
+              'ariec61850/mms/tcp_transport': 'host TCP transport',
+              'ariec61850/mms/live_discovery': 'host live discovery',
+          }
+
+          failures = []
+          throw_count = 0
+          for path in paths:
+              if not path.is_file():
+                  failures.append(f'{path}: embedded source does not exist')
+                  continue
+              text = path.read_text(encoding='utf-8')
+              throw_count += len(re.findall(r'\bthrow\b', text))
+              for needle, label in forbidden.items():
+                  if needle in text:
+                      failures.append(f'{path}: forbidden {label} dependency ({needle})')
+
+          print(f'embedded sources={len(paths)}')
+          print(f'legacy throw tokens={throw_count} (migration debt; no-exceptions gate not enabled yet)')
+          if failures:
+              print('\n'.join(failures), file=sys.stderr)
+              raise SystemExit(1)
+          PY
+
+      - name: Configure embedded profile
+        run: >-
+          cmake -S embedded -B build-embedded
+          -DARIEC61850_EMBEDDED_NO_RTTI=ON
+          -DARIEC61850_EMBEDDED_NO_EXCEPTIONS=OFF
+          -DARIEC61850_EMBEDDED_WARNINGS_AS_ERRORS=ON
+
+      - name: Build embedded profile
+        run: cmake --build build-embedded --parallel
+
+      - name: Test embedded full-link smoke
+        run: ctest --test-dir build-embedded --output-on-failure
+
+      - name: Report host-sim footprint
+        shell: bash
+        run: |
+          if command -v size >/dev/null 2>&1; then
+            size build-embedded/ariec61850_embedded_link_smoke || true
+          fi

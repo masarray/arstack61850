@@ -195,6 +195,36 @@ void deterministic_aare_response_matches_csharp_and_decodes() {
     CHECK(decoded.aare.user_information->single_asn1_type.front() == 0xA9U);
 }
 
+void vendor_cpa_accepts_responding_presentation_selector() {
+    auto response = csharp_deterministic_response();
+    const auto session_user_data_marker = from_hex("C1 72 31 70");
+    const auto cpa_marker = from_hex("31 70 A0 03");
+    const auto normal_marker = from_hex("A2 69 A5 12");
+    const auto session_user_data_offset = find_sequence(response, session_user_data_marker);
+    const auto cpa_offset = find_sequence(response, cpa_marker);
+    const auto normal_offset = find_sequence(response, normal_marker);
+    CHECK(session_user_data_offset < response.size());
+    CHECK(cpa_offset < response.size());
+    CHECK(normal_offset < response.size());
+
+    response.insert(
+        response.begin() + static_cast<std::ptrdiff_t>(normal_offset + 2U),
+        {0x83U, 0x04U, 0x00U, 0x00U, 0x00U, 0x01U});
+    response[1] = static_cast<std::uint8_t>(response[1] + 6U);
+    response[session_user_data_offset + 1U] = static_cast<std::uint8_t>(
+        response[session_user_data_offset + 1U] + 6U);
+    response[cpa_offset + 1U] = static_cast<std::uint8_t>(
+        response[cpa_offset + 1U] + 6U);
+    response[normal_offset + 1U] = static_cast<std::uint8_t>(
+        response[normal_offset + 1U] + 6U);
+
+    const auto decoded = AcseAssociationCodec::decode_association_response(response);
+    CHECK(decoded.session.kind == SessionSpduKind::accept);
+    CHECK(decoded.presentation.context_results.size() == 2U);
+    CHECK(decoded.presentation.user_data.context_id == 1U);
+    CHECK(decoded.aare.accepted());
+}
+
 void response_mirrors_session_parameters_and_negotiated_context_ids() {
     auto request = csharp_default_request();
     request[17] = 0x7EU;
@@ -303,11 +333,12 @@ void deterministic_pdv_matrix_preserves_lengths_and_contexts() {
 } // namespace
 
 int main() {
-    const std::array<std::pair<const char*, std::function<void()>>, 9> tests{{
+    const std::array<std::pair<const char*, std::function<void()>>, 10> tests{{
         {"session connect/accept/data transfer", session_connect_accept_and_data_transfer_are_strict},
         {"presentation CP contexts", presentation_cp_decodes_csharp_contexts_and_round_trips},
         {"balanced AARQ golden vector", balanced_aarq_matches_csharp_and_decodes_structurally},
         {"deterministic AARE golden vector", deterministic_aare_response_matches_csharp_and_decodes},
+        {"vendor CPA responding selector", vendor_cpa_accepts_responding_presentation_selector},
         {"session/context mirroring", response_mirrors_session_parameters_and_negotiated_context_ids},
         {"presentation P-DATA", presentation_p_data_round_trips_mms_payload_and_context},
         {"malformed association rejection", malformed_session_presentation_and_acse_are_rejected},

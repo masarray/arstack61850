@@ -120,7 +120,8 @@ void deterministic_decoder_mutation_smoke() {
         mutation_case_count(transport) +
         mutation_case_count(association) +
         mutation_case_count(mms_services) +
-        mutation_case_count(reporting);
+        mutation_case_count(reporting) +
+        1U;
 
     std::size_t cases = 0U;
     cases += exercise_mutations(ber, [](const ByteVector& bytes) {
@@ -129,6 +130,19 @@ void deterministic_decoder_mutation_smoke() {
     cases += exercise_mutations(goose, [](const ByteVector& bytes) {
         ar::iec61850::fuzzing::exercise_goose(bytes);
     });
+
+    // Regress libFuzzer crash 798ea9d3: VLAN TCI 0xFFFF decodes to reserved
+    // VID 4095. try_decode must reject it instead of returning an object whose
+    // subsequent encode throws std::out_of_range.
+    auto reserved_vlan_goose = goose;
+    if (reserved_vlan_goose.size() < 16U) {
+        throw std::runtime_error("GOOSE seed is unexpectedly short.");
+    }
+    reserved_vlan_goose[14] = 0xFFU;
+    reserved_vlan_goose[15] = 0xFFU;
+    ar::iec61850::fuzzing::exercise_goose(reserved_vlan_goose);
+    ++cases;
+
     cases += exercise_mutations(sampled_values, [](const ByteVector& bytes) {
         ar::iec61850::fuzzing::exercise_sampled_values(bytes);
     });

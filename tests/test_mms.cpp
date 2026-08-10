@@ -3,6 +3,7 @@
 #include "ariec61850/asn1/ber.hpp"
 #include "ariec61850/mms/data_codec.hpp"
 #include "ariec61850/mms/data_value.hpp"
+#include "ariec61850/mms/rcb_contention.hpp"
 #include "ariec61850/mms/utc_time.hpp"
 
 #include <chrono>
@@ -136,6 +137,118 @@ void mms_data_codec_rejects_truncated_nested_tlv() {
     CHECK(rejected);
 }
 
+[[nodiscard]] ar::iec61850::mms::MmsRcbContentionProbeObservation contention_observation(
+    const std::size_t number,
+    std::string rpt_ena,
+    std::string resv,
+    std::string resv_tms,
+    std::string data_set,
+    std::string conf_rev) {
+    ar::iec61850::mms::MmsRcbContentionProbeObservation observation;
+    observation.probe_number = number;
+    observation.rcb_reference = "IEDLD0/LLN0.BR.brcb01";
+    observation.rpt_ena = std::move(rpt_ena);
+    observation.resv = std::move(resv);
+    observation.resv_tms = std::move(resv_tms);
+    observation.data_set_reference = std::move(data_set);
+    observation.conf_rev = std::move(conf_rev);
+    return observation;
+}
+
+void rcb_contention_stable_free_matches_csharp() {
+    using namespace ar::iec61850::mms;
+    const std::vector<MmsRcbContentionProbeObservation> observations{
+        contention_observation(1U, "false", "-", "0", "", "7"),
+        contention_observation(2U, "FALSE", "", "0", "-", "7"),
+        contention_observation(3U, "false", "", "0", "", "7")};
+
+    const auto result = MmsRcbContentionProbeEvaluator::evaluate(
+        "IEDLD0/LLN0.BR.brcb01", observations, 60);
+    CHECK(!result.is_contended);
+    CHECK(!result.is_busy_at_probe);
+    CHECK(!result.is_flapping);
+    CHECK(result.cooldown_seconds == 0);
+    CHECK(result.decision == "StableProceed");
+    CHECK(result.reason == "RCB remained stable and free across pre-claim probes.");
+    CHECK(result.observations.size() == 3U);
+}
+
+void rcb_contention_busy_matches_csharp() {
+    using namespace ar::iec61850::mms;
+    const std::vector<MmsRcbContentionProbeObservation> observations{
+        contention_observation(1U, "false", "false", "0", "", "7"),
+        contention_observation(2U, "yes", "false", "0", "", "7")};
+
+    const auto result = MmsRcbContentionProbeEvaluator::evaluate(
+        "IEDLD0/LLN0.BR.brcb01", observations, 45);
+    CHECK(result.is_contended);
+    CHECK(result.is_busy_at_probe);
+    CHECK(result.is_flapping);
+    CHECK(result.cooldown_seconds == 45);
+    CHECK(result.decision == "CooldownSkip");
+}
+
+void rcb_contention_positive_resvtms_is_busy_without_flapping() {
+    using namespace ar::iec61850::mms;
+    const std::vector<MmsRcbContentionProbeObservation> observations{
+        contention_observation(1U, "false", "false", "30", "", "7"),
+        contention_observation(2U, "false", "true", "30", "", "7")};
+
+    const auto result = MmsRcbContentionProbeEvaluator::evaluate(
+        "IEDLD0/LLN0.BR.brcb01", observations, 60);
+    CHECK(result.is_contended);
+    CHECK(result.is_busy_at_probe);
+    CHECK(!result.is_flapping);
+    CHECK(result.cooldown_seconds == 60);
+    CHECK(result.decision == "CooldownSkip");
+}
+
+void rcb_contention_dataset_or_confrev_change_flaps() {
+    using namespace ar::iec61850::mms;
+    const std::vector<MmsRcbContentionProbeObservation> observations{
+        contention_observation(
+            1U, "false", "false", "0", "IEDLD0/LLN0$DataSetA", "7"),
+        contention_observation(
+            2U, "false", "false", "0", "IEDLD0/LLN0$DataSetB", "8")};
+
+    const auto result = MmsRcbContentionProbeEvaluator::evaluate(
+        "IEDLD0/LLN0.BR.brcb01", observations, 60);
+    CHECK(result.is_contended);
+    CHECK(!result.is_busy_at_probe);
+    CHECK(result.is_flapping);
+    CHECK(result.decision == "CooldownSkip");
+    CHECK(result.reason ==
+          "RCB state changed across pre-claim probes. Treat as contended/flapping to avoid fighting another client.");
+}
+
+void rcb_contention_resvtms_precedes_resv_for_flapping() {
+    using namespace ar::iec61850::mms;
+    const std::vector<MmsRcbContentionProbeObservation> observations{
+        contention_observation(1U, "false", "false", "0", "", "7"),
+        contention_observation(2U, "false", "true", "0", "", "7")};
+
+    const auto result = MmsRcbContentionProbeEvaluator::evaluate(
+        "IEDLD0/LLN0.BR.brcb01", observations, 60);
+    CHECK(result.is_contended);
+    CHECK(result.is_busy_at_probe);
+    CHECK(!result.is_flapping);
+}
+
+void rcb_contention_dash_resvtms_does_not_fallback_to_resv() {
+    using namespace ar::iec61850::mms;
+    const std::vector<MmsRcbContentionProbeObservation> observations{
+        contention_observation(1U, "false", "false", "-", "", "7"),
+        contention_observation(2U, "false", "off", "-", "", "7")};
+
+    const auto result = MmsRcbContentionProbeEvaluator::evaluate(
+        "IEDLD0/LLN0.BR.brcb01", observations, 60);
+    CHECK(!result.is_contended);
+    CHECK(!result.is_busy_at_probe);
+    CHECK(!result.is_flapping);
+    CHECK(result.cooldown_seconds == 0);
+    CHECK(result.decision == "StableProceed");
+}
+
 } // namespace
 
 int main() {
@@ -143,7 +256,13 @@ int main() {
         {"IEC 61850 UTC time", iec61850_utc_time_matches_csharp_vector},
         {"MMS data golden vector", mms_data_codec_matches_csharp_golden_vector},
         {"MMS bit string and unknown", mms_data_codec_preserves_bit_strings_and_unknown_tags},
-        {"MMS malformed nested TLV", mms_data_codec_rejects_truncated_nested_tlv}};
+        {"MMS malformed nested TLV", mms_data_codec_rejects_truncated_nested_tlv},
+        {"RCB contention stable free", rcb_contention_stable_free_matches_csharp},
+        {"RCB contention busy", rcb_contention_busy_matches_csharp},
+        {"RCB contention ResvTms busy", rcb_contention_positive_resvtms_is_busy_without_flapping},
+        {"RCB contention flapping", rcb_contention_dataset_or_confrev_change_flaps},
+        {"RCB contention ResvTms precedence", rcb_contention_resvtms_precedes_resv_for_flapping},
+        {"RCB contention dash ResvTms", rcb_contention_dash_resvtms_does_not_fallback_to_resv}};
 
     std::size_t passed = 0;
     for (const auto& [name, test] : tests) {
