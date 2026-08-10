@@ -151,6 +151,17 @@ public:
 
     [[nodiscard]] MmsPduEnvelope poll_once(
         std::stop_token stop_token = {});
+
+    // Bounded receive primitive for application workflows where expiry is a
+    // normal application result rather than an association fault. A transport
+    // timeout returns false and leaves the association active. Caller
+    // cancellation is propagated without rewriting association state. Other
+    // transport/protocol failures retain the normal fail-closed behavior.
+    [[nodiscard]] bool try_poll_once_for(
+        std::chrono::milliseconds timeout,
+        MmsPduEnvelope& envelope,
+        std::stop_token stop_token = {});
+
     [[nodiscard]] bool try_pop_information_report(
         std::vector<std::uint8_t>& presentation_payload);
 
