@@ -1,0 +1,68 @@
+menu "ARStack ESP32-P4 SMV Injector"
+
+config AR_SMV_LIVE_TX
+    bool "Enable raw Layer-2 Sampled Values transmission"
+    default n
+    help
+        Enables active IEC 61850 Sampled Values Ethernet transmission after
+        the PHY reports link-up. Use only on an isolated laboratory process-bus
+        network or a direct capture-NIC connection.
+
+config AR_SMV_P2_REALTIME_50HZ
+    bool "Enable P2 50 Hz / 80 samples-per-cycle realtime publisher"
+    default y
+    depends on AR_SMV_LIVE_TX
+    help
+        Publishes 4000 Sampled Values frames per second with a 250 us hardware
+        timer schedule, 4000-count canonical smpCnt wrap, prebuilt frame
+        templates and a generated balanced three-phase waveform.
+
+config AR_SMV_CANONICAL_VLAN
+    bool "Tag canonical multicast SV with VLAN PCP 4 / VID 0"
+    default y
+    depends on AR_SMV_P2_REALTIME_50HZ
+    help
+        Keeps the standards-facing multicast stream priority tagged. Disable
+        only for targeted capture-path diagnosis.
+
+config AR_SMV_BROADCAST_MIRROR
+    bool "Enable isolated untagged broadcast capture mirror"
+    default y
+    depends on AR_SMV_P2_REALTIME_50HZ
+    help
+        Sends a lab-only untagged broadcast diagnostic stream for capture
+        adapters/drivers that discard IEC 61850 multicast or priority-tagged
+        frames. The mirror uses its own APPID/svID and a normal 16-bit smpCnt
+        sequence so analysis software cannot merge it with the canonical SCL
+        stream. It also carries smpRate/smpMod explicitly for raw waveform
+        reconstruction. Do not treat this mirror as the standards-facing
+        process-bus stream.
+
+config AR_SMV_DIAGNOSTIC_PROBES
+    bool "Enable 0x88B5 broadcast/multicast probes once per second"
+    default n
+    depends on AR_SMV_P2_REALTIME_50HZ
+    help
+        Adds low-rate non-SV probes for capture-path troubleshooting. Keep this
+        disabled while measuring realtime timing unless it is needed.
+
+config AR_SMV_CURRENT_RMS_MA
+    int "Balanced phase current RMS (mA)"
+    range 0 100000
+    default 1000
+    depends on AR_SMV_P2_REALTIME_50HZ
+    help
+        RMS current used by the built-in waveform generator. The 9-2LE-shaped
+        payload uses 1 mA per integer count.
+
+config AR_SMV_VOLTAGE_RMS_MV
+    int "Balanced phase-to-neutral voltage RMS (mV)"
+    range 0 100000000
+    default 57740
+    depends on AR_SMV_P2_REALTIME_50HZ
+    help
+        RMS voltage used by the built-in waveform generator. The 9-2LE-shaped
+        payload uses 10 mV per integer count. The default is approximately
+        57.74 V phase-to-neutral (100 V line-to-line).
+
+endmenu
