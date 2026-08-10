@@ -1,0 +1,43 @@
+name: ESP32-P4 SMV Injector
+
+on:
+  push:
+    paths:
+      - 'embedded/esp32p4_smv_injector/**'
+      - 'include/ariec61850/asn1/**'
+      - 'include/ariec61850/ethernet/**'
+      - 'include/ariec61850/mms/utc_time.hpp'
+      - 'include/ariec61850/sampled_values/**'
+      - 'src/asn1/**'
+      - 'src/ethernet/**'
+      - 'src/mms/utc_time.cpp'
+      - 'src/sampled_values/**'
+      - '.github/workflows/esp32p4-smv-injector.yml'
+  pull_request:
+    paths:
+      - 'embedded/esp32p4_smv_injector/**'
+      - 'include/ariec61850/asn1/**'
+      - 'include/ariec61850/ethernet/**'
+      - 'include/ariec61850/mms/utc_time.hpp'
+      - 'include/ariec61850/sampled_values/**'
+      - 'src/asn1/**'
+      - 'src/ethernet/**'
+      - 'src/mms/utc_time.cpp'
+      - 'src/sampled_values/**'
+      - '.github/workflows/esp32p4-smv-injector.yml'
+
+jobs:
+  build-esp32p4:
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.5.4
+    defaults:
+      run:
+        shell: bash
+        working-directory: embedded/esp32p4_smv_injector
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select ESP32-P4 target
+        run: source /opt/esp/idf/export.sh && idf.py set-target esp32p4
+      - name: Build firmware
+        run: source /opt/esp/idf/export.sh && idf.py build
