@@ -1,0 +1,408 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#include "ariec61850/mms/connection_runtime.hpp"
+
+#include "ariec61850/acse/association_span.hpp"
+#include "ariec61850/mms/pdu_span.hpp"
+#include "ariec61850/mms/services_span.hpp"
+#include "ariec61850/osi/cotp_span.hpp"
+#include "ariec61850/osi/presentation_span.hpp"
+#include "ariec61850/osi/session_span.hpp"
+#include "ariec61850/osi/tpkt_span.hpp"
+
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <span>
+
+namespace ar::iec61850::mms {
+namespace {
+
+[[nodiscard]] MmsStaticConnectionResult make_result(
+    const MmsStaticConnectionStatus status,
+    const MmsStaticConnectionState state,
+    const std::size_t consumed = 0U,
+    const std::size_t written = 0U) noexcept {
+    MmsStaticConnectionResult result;
+    result.status = status;
+    result.state = state;
+    result.consumed_bytes = consumed;
+    result.bytes_written = written;
+    return result;
+}
+
+[[nodiscard]] MmsStaticConnectionResult make_response_capacity(
+    const MmsStaticConnectionState state,
+    const std::size_t required) noexcept {
+    auto result = make_result(
+        MmsStaticConnectionStatus::response_buffer_too_small, state);
+    result.required_response_bytes = required;
+    return result;
+}
+
+[[nodiscard]] MmsStaticConnectionResult make_workspace_capacity(
+    const MmsStaticConnectionState state,
+    const std::size_t required) noexcept {
+    auto result = make_result(
+        MmsStaticConnectionStatus::workspace_too_small, state);
+    result.required_workspace_bytes = required;
+    return result;
+}
+
+[[nodiscard]] bool add_overhead(
+    const std::size_t base,
+    const std::size_t overhead,
+    std::size_t& total) noexcept {
+    if (base > std::numeric_limits<std::size_t>::max() - overhead) {
+        total = 0U;
+        return false;
+    }
+    total = base + overhead;
+    return true;
+}
+
+[[nodiscard]] MmsStaticConnectionResult wrap_cotp_data_response(
+    const std::span<const std::uint8_t> session_or_presentation,
+    const std::size_t consumed,
+    const MmsStaticConnectionState state,
+    const std::span<std::uint8_t> response,
+    const std::span<std::uint8_t> workspace) noexcept {
+    // COTP Data adds three bytes and TPKT adds four bytes. Preflight both
+    // caller-owned buffers so a capacity retry never advances connection state.
+    std::size_t required{};
+    if (!add_overhead(session_or_presentation.size(), 7U, required)) {
+        return make_result(MmsStaticConnectionStatus::backend_failure, state);
+    }
+    if (response.size() < required) {
+        return make_response_capacity(state, required);
+    }
+    if (workspace.size() < required) {
+        return make_workspace_capacity(state, required);
+    }
+
+    const auto cotp = osi::CotpSpanCodec::encode_data_into(
+        session_or_presentation,
+        response.first(required - osi::TpktSpanCodec::header_length));
+    if (!cotp.success()) {
+        if (cotp.status == wire::EncodeStatus::buffer_too_small) {
+            return make_response_capacity(
+                state, cotp.required_bytes + osi::TpktSpanCodec::header_length);
+        }
+        return make_result(MmsStaticConnectionStatus::backend_failure, state);
+    }
+
+    const auto tpkt = osi::TpktSpanCodec::encode_into(
+        response.first(cotp.bytes_written), workspace.first(required));
+    if (!tpkt.success() || tpkt.bytes_written != required) {
+        if (tpkt.status == wire::EncodeStatus::buffer_too_small) {
+            return make_workspace_capacity(state, tpkt.required_bytes);
+        }
+        return make_result(MmsStaticConnectionStatus::backend_failure, state);
+    }
+    std::copy_n(workspace.begin(), tpkt.bytes_written, response.begin());
+    return make_result(
+        MmsStaticConnectionStatus::response_ready,
+        state,
+        consumed,
+        tpkt.bytes_written);
+}
+
+[[nodiscard]] MmsStaticConnectionResult application_rejected(
+    const MmsStaticConnectionState state,
+    const std::size_t consumed,
+    const MmsStaticDispatchResult& application) noexcept {
+    auto result = make_result(
+        MmsStaticConnectionStatus::application_rejected, state, consumed);
+    result.application_status = application.status;
+    result.application_service = application.service;
+    result.invoke_id = application.invoke_id;
+    return result;
+}
+
+[[nodiscard]] bool write_outer_capacity(
+    const MmsConfirmedPduView& confirmed,
+    const MmsStaticApplicationDispatcher& dispatcher,
+    const std::uint32_t presentation_context_id,
+    std::size_t& required) noexcept {
+    required = 0U;
+    if (confirmed.service() != MmsWireConfirmedService::write) {
+        return false;
+    }
+
+    MmsWriteRequestView write;
+    if (!MmsServiceSpanCodec::try_decode_write_request(confirmed, write) ||
+        write.variable_count == 0U ||
+        write.variable_count > dispatcher.policy().maximum_write_variables) {
+        return false;
+    }
+
+    std::array<MmsWriteAccessResultInput, MmsServiceSpanCodec::maximum_variables> worst{};
+    for (std::size_t index = 0U; index < write.variable_count; ++index) {
+        worst[index] = MmsWriteAccessResultInput{
+            false,
+            std::numeric_limits<std::uint32_t>::max()};
+    }
+    const auto probe = MmsServiceSpanCodec::encode_write_response_into(
+        confirmed.invoke_id,
+        std::span<const MmsWriteAccessResultInput>{worst}.first(write.variable_count),
+        {});
+    if (probe.status != wire::EncodeStatus::buffer_too_small ||
+        probe.required_bytes == 0U) {
+        return false;
+    }
+    const auto fully_encoded = osi::PresentationSpanCodec::fully_encoded_data_size(
+        presentation_context_id, probe.required_bytes);
+    return fully_encoded && add_overhead(*fully_encoded, 11U, required);
+}
+
+} // namespace
+
+MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
+    const std::span<const std::uint8_t> tcp_bytes,
+    const std::span<std::uint8_t> response,
+    const std::span<std::uint8_t> workspace) noexcept {
+    if (state_ == MmsStaticConnectionState::closed) {
+        return make_result(MmsStaticConnectionStatus::closed, state_);
+    }
+    if (state_ == MmsStaticConnectionState::fault) {
+        return make_result(MmsStaticConnectionStatus::protocol_violation, state_);
+    }
+
+    const auto peek = osi::TpktSpanCodec::peek_frame(tcp_bytes);
+    if (peek.status == osi::TpktPeekStatus::need_more) {
+        return make_result(MmsStaticConnectionStatus::need_more, state_);
+    }
+    if (peek.status != osi::TpktPeekStatus::ready || peek.frame_bytes == 0U) {
+        state_ = MmsStaticConnectionState::fault;
+        return make_result(MmsStaticConnectionStatus::malformed_transport, state_);
+    }
+
+    const auto frame_bytes = tcp_bytes.first(peek.frame_bytes);
+    osi::TpktFrameView tpkt;
+    osi::CotpTpduView cotp;
+    if (!osi::TpktSpanCodec::try_decode_view(frame_bytes, tpkt) ||
+        !osi::CotpSpanCodec::try_decode_view(tpkt.payload, cotp)) {
+        state_ = MmsStaticConnectionState::fault;
+        return make_result(
+            MmsStaticConnectionStatus::malformed_transport, state_, peek.frame_bytes);
+    }
+
+    if (cotp.kind == osi::CotpWireKind::disconnect_request) {
+        state_ = MmsStaticConnectionState::closed;
+        return make_result(
+            MmsStaticConnectionStatus::closed, state_, peek.frame_bytes);
+    }
+
+    if (state_ == MmsStaticConnectionState::awaiting_cotp_connect) {
+        if (cotp.kind != osi::CotpWireKind::connection_request) {
+            state_ = MmsStaticConnectionState::fault;
+            return make_result(
+                MmsStaticConnectionStatus::protocol_violation,
+                state_,
+                peek.frame_bytes);
+        }
+
+        const auto cc = osi::CotpSpanCodec::encode_connection_confirm_from_request_into(
+            cotp,
+            policy_.cotp_source_reference,
+            workspace,
+            policy_.maximum_tpdu_size_code);
+        if (!cc.success()) {
+            if (cc.status == wire::EncodeStatus::buffer_too_small) {
+                return make_workspace_capacity(state_, cc.required_bytes);
+            }
+            state_ = MmsStaticConnectionState::fault;
+            return make_result(MmsStaticConnectionStatus::backend_failure, state_);
+        }
+
+        std::size_t required{};
+        if (!add_overhead(cc.bytes_written, osi::TpktSpanCodec::header_length, required)) {
+            state_ = MmsStaticConnectionState::fault;
+            return make_result(MmsStaticConnectionStatus::backend_failure, state_);
+        }
+        if (response.size() < required) {
+            return make_response_capacity(state_, required);
+        }
+        const auto encoded = osi::TpktSpanCodec::encode_into(
+            workspace.first(cc.bytes_written), response.first(required));
+        if (!encoded.success()) {
+            if (encoded.status == wire::EncodeStatus::buffer_too_small) {
+                return make_response_capacity(state_, encoded.required_bytes);
+            }
+            state_ = MmsStaticConnectionState::fault;
+            return make_result(MmsStaticConnectionStatus::backend_failure, state_);
+        }
+
+        state_ = MmsStaticConnectionState::awaiting_association;
+        return make_result(
+            MmsStaticConnectionStatus::response_ready,
+            state_,
+            peek.frame_bytes,
+            encoded.bytes_written);
+    }
+
+    if (cotp.kind != osi::CotpWireKind::data ||
+        (policy_.require_end_of_transmission && !cotp.end_of_transmission)) {
+        state_ = MmsStaticConnectionState::fault;
+        return make_result(
+            MmsStaticConnectionStatus::protocol_violation,
+            state_,
+            peek.frame_bytes);
+    }
+
+    if (state_ == MmsStaticConnectionState::awaiting_association) {
+        acse::AssociationRequestView association;
+        if (!acse::AcseSpanCodec::try_decode_association_request_view(
+                cotp.user_data, association)) {
+            state_ = MmsStaticConnectionState::fault;
+            return make_result(
+                MmsStaticConnectionStatus::protocol_violation,
+                state_,
+                peek.frame_bytes);
+        }
+
+        MmsInitiateView initiate;
+        if (!MmsPduSpanCodec::try_decode_initiate_request_view(
+                association.aarq.user_information.single_asn1_type, initiate) ||
+            association.mms_presentation_context_id == 0U) {
+            state_ = MmsStaticConnectionState::fault;
+            return make_result(
+                MmsStaticConnectionStatus::protocol_violation,
+                state_,
+                peek.frame_bytes);
+        }
+
+        const auto accept = acse::AcseSpanCodec::build_accept_response_into(
+            association, workspace);
+        if (!accept.success()) {
+            if (accept.status == wire::EncodeStatus::buffer_too_small) {
+                return make_workspace_capacity(state_, accept.required_bytes);
+            }
+            state_ = MmsStaticConnectionState::fault;
+            return make_result(MmsStaticConnectionStatus::backend_failure, state_);
+        }
+
+        const auto wrapped = wrap_cotp_data_response(
+            workspace.first(accept.bytes_written),
+            peek.frame_bytes,
+            MmsStaticConnectionState::established,
+            response,
+            workspace);
+        if (!wrapped.response_ready()) {
+            return wrapped;
+        }
+        mms_presentation_context_id_ = association.mms_presentation_context_id;
+        state_ = MmsStaticConnectionState::established;
+        auto result = wrapped;
+        result.state = state_;
+        return result;
+    }
+
+    if (state_ != MmsStaticConnectionState::established) {
+        state_ = MmsStaticConnectionState::fault;
+        return make_result(
+            MmsStaticConnectionStatus::protocol_violation,
+            state_,
+            peek.frame_bytes);
+    }
+
+    osi::SessionDataTransferView session;
+    osi::PresentationPdvView pdv;
+    if (!osi::SessionSpanCodec::try_decode_data_transfer_view(cotp.user_data, session) ||
+        !osi::PresentationSpanCodec::try_decode_fully_encoded_data_view(
+            session.presentation_payload, pdv) ||
+        pdv.context_id != mms_presentation_context_id_) {
+        state_ = MmsStaticConnectionState::fault;
+        return make_result(
+            MmsStaticConnectionStatus::protocol_violation,
+            state_,
+            peek.frame_bytes);
+    }
+
+    MmsConfirmedPduView confirmed;
+    if (MmsPduSpanCodec::try_decode_confirmed_request_view(
+            pdv.single_asn1_type, confirmed)) {
+        std::size_t write_required{};
+        if (write_outer_capacity(
+                confirmed, dispatcher_, mms_presentation_context_id_, write_required)) {
+            if (response.size() < write_required) {
+                return make_response_capacity(state_, write_required);
+            }
+            if (workspace.size() < write_required) {
+                return make_workspace_capacity(state_, write_required);
+            }
+        }
+    }
+
+    const auto application = dispatcher_.dispatch(
+        pdv.single_asn1_type, response, workspace);
+    if (!application.success()) {
+        if (application.status == MmsStaticDispatchStatus::response_buffer_too_small) {
+            const auto fully_encoded = osi::PresentationSpanCodec::fully_encoded_data_size(
+                mms_presentation_context_id_, application.required_bytes);
+            std::size_t required{};
+            if (fully_encoded && add_overhead(*fully_encoded, 11U, required)) {
+                auto result = make_response_capacity(state_, required);
+                result.application_status = application.status;
+                result.application_service = application.service;
+                result.invoke_id = application.invoke_id;
+                return result;
+            }
+            state_ = MmsStaticConnectionState::fault;
+            return make_result(MmsStaticConnectionStatus::backend_failure, state_);
+        }
+        if (application.status == MmsStaticDispatchStatus::workspace_too_small) {
+            auto result = make_workspace_capacity(state_, application.required_bytes);
+            result.application_status = application.status;
+            result.application_service = application.service;
+            result.invoke_id = application.invoke_id;
+            return result;
+        }
+        if (application.status == MmsStaticDispatchStatus::backend_failure ||
+            application.status == MmsStaticDispatchStatus::invalid_object_table) {
+            state_ = MmsStaticConnectionState::fault;
+            auto result = make_result(
+                MmsStaticConnectionStatus::backend_failure,
+                state_,
+                peek.frame_bytes);
+            result.application_status = application.status;
+            result.application_service = application.service;
+            result.invoke_id = application.invoke_id;
+            return result;
+        }
+        return application_rejected(state_, peek.frame_bytes, application);
+    }
+
+    const auto p_data = osi::PresentationSpanCodec::encode_p_data_into(
+        response.first(application.bytes_written),
+        workspace,
+        mms_presentation_context_id_,
+        true);
+    if (!p_data.success()) {
+        if (p_data.status == wire::EncodeStatus::buffer_too_small) {
+            std::size_t required{};
+            if (add_overhead(p_data.required_bytes, 7U, required)) {
+                return make_workspace_capacity(state_, required);
+            }
+        }
+        state_ = MmsStaticConnectionState::fault;
+        return make_result(MmsStaticConnectionStatus::backend_failure, state_);
+    }
+
+    auto wrapped = wrap_cotp_data_response(
+        workspace.first(p_data.bytes_written),
+        peek.frame_bytes,
+        state_,
+        response,
+        workspace);
+    if (wrapped.response_ready()) {
+        wrapped.application_status = application.status;
+        wrapped.application_service = application.service;
+        wrapped.invoke_id = application.invoke_id;
+    }
+    return wrapped;
+}
+
+} // namespace ar::iec61850::mms

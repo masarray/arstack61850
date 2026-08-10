@@ -34,11 +34,29 @@ set(ARIEC61850_EMBEDDED_SOURCES
     ${ARIEC61850_ROOT}/src/osi/presentation.cpp
     ${ARIEC61850_ROOT}/src/acse/association.cpp
 
+    ${ARIEC61850_ROOT}/src/asn1/ber_span_reader.cpp
+    ${ARIEC61850_ROOT}/src/osi/tpkt_span.cpp
+    ${ARIEC61850_ROOT}/src/osi/cotp_span.cpp
+    ${ARIEC61850_ROOT}/src/osi/session_span.cpp
+    ${ARIEC61850_ROOT}/src/osi/presentation_span.cpp
+    ${ARIEC61850_ROOT}/src/acse/association_span.cpp
+
     ${ARIEC61850_ROOT}/src/mms/utc_time.cpp
     ${ARIEC61850_ROOT}/src/mms/data_value.cpp
     ${ARIEC61850_ROOT}/src/mms/data_codec.cpp
     ${ARIEC61850_ROOT}/src/mms/pdu.cpp
-    ${ARIEC61850_ROOT}/src/mms/services.cpp)
+    ${ARIEC61850_ROOT}/src/mms/services.cpp
+
+    ${ARIEC61850_ROOT}/src/mms/pdu_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/services_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/write_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/data_set_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_object_table.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_write.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_data_set_table.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_dispatcher.cpp
+    ${ARIEC61850_ROOT}/src/mms/connection_runtime.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_server_session.cpp)
 
 add_library(ariec61850_embedded_core STATIC ${ARIEC61850_EMBEDDED_SOURCES})
 add_library(ARIEC61850::embedded_core ALIAS ariec61850_embedded_core)
@@ -94,6 +112,28 @@ ariec61850_apply_embedded_flags(ariec61850_embedded_link_smoke)
 
 enable_testing()
 add_test(NAME ariec61850_embedded_link_smoke COMMAND ariec61850_embedded_link_smoke)
+
+foreach(server_smoke IN ITEMS
+        osi
+        session_presentation
+        association
+        mms_pdu
+        mms_get_name_list
+        mms_static_model
+        mms_write
+        mms_dispatcher
+        mms_connection_runtime
+        mms_data_set)
+    set(server_smoke_target "ariec61850_embedded_${server_smoke}_smoke")
+    add_executable(
+        ${server_smoke_target}
+        ${CMAKE_CURRENT_LIST_DIR}/${server_smoke}_hard_profile_smoke.cpp)
+    target_link_libraries(
+        ${server_smoke_target} PRIVATE ARIEC61850::embedded_core)
+    target_compile_features(${server_smoke_target} PRIVATE cxx_std_20)
+    ariec61850_apply_embedded_flags(${server_smoke_target})
+    add_test(NAME ${server_smoke_target} COMMAND ${server_smoke_target})
+endforeach()
 
 message(STATUS "arstack61850 embedded profile: host services excluded")
 message(STATUS "arstack61850 embedded profile: RTTI disabled=${ARIEC61850_EMBEDDED_NO_RTTI}")

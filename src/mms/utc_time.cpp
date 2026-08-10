@@ -7,13 +7,18 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
 #include <stdexcept>
+#endif
 
 namespace ar::iec61850::mms {
 
-Iec61850UtcTime Iec61850UtcTime::from_bytes(const std::span<const std::uint8_t> bytes) {
+bool Iec61850UtcTime::try_from_bytes(
+    const std::span<const std::uint8_t> bytes,
+    Iec61850UtcTime& result) noexcept {
     if (bytes.size() != 8U) {
-        throw std::invalid_argument("IEC 61850 UTC time requires exactly 8 bytes.");
+        result = {};
+        return false;
     }
 
     const auto seconds =
@@ -30,8 +35,19 @@ Iec61850UtcTime Iec61850UtcTime::from_bytes(const std::span<const std::uint8_t> 
     const auto timestamp = std::chrono::system_clock::time_point{std::chrono::seconds{seconds}} +
                            std::chrono::duration_cast<std::chrono::system_clock::duration>(
                                fraction_duration{fraction});
-    return {timestamp, bytes[7]};
+    result = {timestamp, bytes[7]};
+    return true;
 }
+
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
+Iec61850UtcTime Iec61850UtcTime::from_bytes(const std::span<const std::uint8_t> bytes) {
+    Iec61850UtcTime result{};
+    if (!try_from_bytes(bytes, result)) {
+        throw std::invalid_argument("IEC 61850 UTC time requires exactly 8 bytes.");
+    }
+    return result;
+}
+#endif
 
 bool Iec61850UtcTime::try_write_bytes(
     const std::span<std::uint8_t, 8> destination) const noexcept {
@@ -64,6 +80,7 @@ bool Iec61850UtcTime::try_write_bytes(
     return true;
 }
 
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
 std::vector<std::uint8_t> Iec61850UtcTime::to_bytes() const {
     std::array<std::uint8_t, 8> bytes{};
     if (!try_write_bytes(bytes)) {
@@ -71,5 +88,6 @@ std::vector<std::uint8_t> Iec61850UtcTime::to_bytes() const {
     }
     return {bytes.begin(), bytes.end()};
 }
+#endif
 
 } // namespace ar::iec61850::mms
