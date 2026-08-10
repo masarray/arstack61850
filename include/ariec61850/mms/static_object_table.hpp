@@ -33,6 +33,7 @@ struct MmsStaticObjectEntry final {
     bool mms_deletable{};
     MmsStaticWriteCallback write{};
     void* write_context{};
+    bool name_list_visible{true};
 
     [[nodiscard]] constexpr bool writable() const noexcept {
         return write != nullptr;

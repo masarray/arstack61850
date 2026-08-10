@@ -121,7 +121,8 @@ namespace {
     if (request.object_class == MmsNameListObjectClass::named_variable &&
         request.scope == MmsNameScopeKind::domain_specific) {
         for (const auto& object : objects.objects()) {
-            if (span_equals(request.domain_id, object.domain)) {
+            if (object.name_list_visible &&
+                span_equals(request.domain_id, object.domain)) {
                 if (count >= names.size()) {
                     return names.size() + 1U;
                 }
