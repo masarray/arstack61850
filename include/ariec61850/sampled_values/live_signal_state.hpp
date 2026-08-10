@@ -42,24 +42,27 @@ public:
     SvLiveSignalBank() noexcept {
         banks_[0] = default_state();
         banks_[1] = banks_[0];
+        banks_[2] = banks_[0];
     }
 
-    // One control-plane writer is expected. Readers can run concurrently at
-    // realtime priority. The sequence guard makes a copied snapshot coherent
-    // even if the writer publishes multiple generations rapidly.
+    // One control-plane writer and any number of serialized realtime snapshots
+    // are expected. The reader advertises the bank it is copying before the
+    // copy begins. With three banks, the writer can always select a bank that
+    // is neither active nor being read, so no non-atomic object is read and
+    // written concurrently.
     [[nodiscard]] SvLiveSignalState snapshot() const noexcept {
-        SvLiveSignalState copy{};
         while (true) {
-            const auto sequence_before = sequence_.load(std::memory_order_acquire);
-            if ((sequence_before & 1U) != 0U) {
+            const auto index = active_index_.load(std::memory_order_acquire);
+            reader_index_.store(index, std::memory_order_release);
+
+            if (active_index_.load(std::memory_order_acquire) != index) {
+                reader_index_.store(kNoReader, std::memory_order_release);
                 continue;
             }
-            const auto index = active_index_.load(std::memory_order_acquire);
-            copy = banks_[index];
-            const auto sequence_after = sequence_.load(std::memory_order_acquire);
-            if (sequence_before == sequence_after && (sequence_after & 1U) == 0U) {
-                return copy;
-            }
+
+            const auto copy = banks_[index];
+            reader_index_.store(kNoReader, std::memory_order_release);
+            return copy;
         }
     }
 
@@ -72,13 +75,23 @@ public:
             return false;
         }
 
-        sequence_.fetch_add(1U, std::memory_order_acq_rel); // writer active: odd
-        const auto current = active_index_.load(std::memory_order_relaxed);
-        const auto next = current ^ 1U;
+        const auto current = active_index_.load(std::memory_order_acquire);
+        const auto reader = reader_index_.load(std::memory_order_acquire);
+
+        std::uint32_t next = kNoReader;
+        for (std::uint32_t candidate = 0U; candidate < banks_.size(); ++candidate) {
+            if (candidate != current && candidate != reader) {
+                next = candidate;
+                break;
+            }
+        }
+        if (next == kNoReader) {
+            return false;
+        }
+
         banks_[next] = requested;
         banks_[next].generation = banks_[current].generation + 1U;
         active_index_.store(next, std::memory_order_release);
-        sequence_.fetch_add(1U, std::memory_order_release); // stable: even
         return true;
     }
 
@@ -112,8 +125,9 @@ public:
     }
 
 private:
-    std::array<SvLiveSignalState, 2> banks_{};
-    mutable std::atomic<std::uint32_t> sequence_{0U};
+    static constexpr std::uint32_t kNoReader = 3U;
+    std::array<SvLiveSignalState, 3> banks_{};
+    mutable std::atomic<std::uint32_t> reader_index_{kNoReader};
     std::atomic<std::uint32_t> active_index_{0U};
 };
 
