@@ -20,12 +20,30 @@ An armed run performs one bounded lifecycle with no automatic mutation retry:
 10. set `DatSet` back to empty;
 11. delete only the Dynamic DataSet created by this run.
 
+Automatic members are projected from the bounded Logical-Node
+`GetVariableAccessAttributes` type trees. The planner walks nested FC/DO/DA
+structures, keeps only scalar `ST`/`MX` leaves in the selected RCB domain, and
+prefers primary values such as `stVal`, `general`, and measurement magnitude
+leaves. Arrays, structures, unknown types, and other domains are excluded.
+The canonical `LD/LN.DataSet` reference used for directory services is
+converted to the IEC 61850 RCB attribute value `LD/LN$DataSet` before the
+`DatSet` write.
+Incoming reports accept both `listOfVariable [0]` and the
+`variableListName [1]` form used by IEDScout, while still decoding only the
+trailing `listOfAccessResult` as report data.
+
 Cleanup traffic is allowed after a failed mutation, but the user action itself is never retried on another RCB automatically.
 
 ## Windows build
 
 ```powershell
 pwsh -ExecutionPolicy Bypass -File .\scripts\build_dynamic_rcb_trial.ps1
+```
+
+Windows PowerShell 5.1 can run the same script when `pwsh` is not installed:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\scripts\build_dynamic_rcb_trial.ps1
 ```
 
 ## First run: read-only plan

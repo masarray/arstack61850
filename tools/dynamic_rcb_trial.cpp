@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ariec61850/mms/dynamic_data_set.hpp"
+#include "ariec61850/mms/dynamic_report_planner.hpp"
 #include "ariec61850/mms/live_discovery.hpp"
 #include "ariec61850/mms/rcb_selection.hpp"
 #include "ariec61850/mms/report_subscription_runtime.hpp"
@@ -8,7 +9,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cctype>
 #include <cstdint>
 #include <exception>
 #include <iomanip>
@@ -16,7 +16,6 @@
 #include <limits>
 #include <memory>
 #include <optional>
-#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -137,17 +136,6 @@ void print_usage() {
     return std::find(candidate.attributes.begin(), candidate.attributes.end(), name) != candidate.attributes.end();
 }
 
-[[nodiscard]] std::string lower_ascii(std::string text) {
-    std::transform(text.begin(), text.end(), text.begin(), [](char value) {
-        return static_cast<char>(std::tolower(static_cast<unsigned char>(value)));
-    });
-    return text;
-}
-
-[[nodiscard]] bool same_text(const std::string& left, const std::string& right) {
-    return lower_ascii(left) == lower_ascii(right);
-}
-
 [[nodiscard]] std::optional<std::pair<std::string, std::string>> split_domain_item(const std::string& reference) {
     const auto slash = reference.find('/');
     if (slash == std::string::npos || slash == 0U || slash + 1U >= reference.size()) return std::nullopt;
@@ -158,57 +146,6 @@ void print_usage() {
     const auto parts = split_domain_item(reference);
     if (!parts) throw std::invalid_argument("--member must use exact MMS form LD/LN$FC$DO$DA...");
     return mms::MmsObjectName::domain_specific(parts->first, parts->second);
-}
-
-struct ItemIdentity final {
-    std::string logical_node;
-    std::string functional_constraint;
-};
-
-[[nodiscard]] std::optional<ItemIdentity> parse_item_identity(const std::string& item) {
-    const auto first = item.find('$');
-    if (first == std::string::npos || first == 0U) return std::nullopt;
-    const auto second = item.find('$', first + 1U);
-    if (second == std::string::npos || second == first + 1U) return std::nullopt;
-    return ItemIdentity{item.substr(0U, first), item.substr(first + 1U, second - first - 1U)};
-}
-
-[[nodiscard]] bool scalar_type(const mms::MmsTypeSpecification& type) {
-    return type.kind != mms::MmsTypeKind::array &&
-           type.kind != mms::MmsTypeKind::structure &&
-           type.kind != mms::MmsTypeKind::unknown;
-}
-
-[[nodiscard]] std::vector<mms::MmsObjectName> select_auto_members(
-    const mms::MmsLiveDiscoveryResult& discovery,
-    const mms::MmsReportControlCandidate& rcb,
-    const std::size_t requested) {
-    struct Ranked final { int score{}; mms::MmsObjectName name; };
-    std::vector<Ranked> ranked;
-    std::set<std::string, std::less<>> unique;
-    for (const auto& evidence : discovery.variable_types) {
-        if (!evidence.success()) continue;
-        const auto& variable = evidence.variable;
-        if (variable.kind != mms::MmsObjectNameKind::domain_specific ||
-            !same_text(variable.domain, rcb.domain) || !scalar_type(evidence.attributes->type)) continue;
-        const auto identity = parse_item_identity(variable.item);
-        if (!identity || (identity->functional_constraint != "ST" && identity->functional_constraint != "MX")) continue;
-        if (!unique.insert(variable.reference()).second) continue;
-        int score = identity->functional_constraint == "ST" ? 40 : 25;
-        if (same_text(identity->logical_node, rcb.logical_node)) score += 80;
-        if (same_text(identity->logical_node, "LLN0")) score += 10;
-        score -= static_cast<int>(std::min<std::size_t>(variable.item.size(), 60U) / 10U);
-        ranked.push_back({score, variable});
-    }
-    std::sort(ranked.begin(), ranked.end(), [](const auto& left, const auto& right) {
-        if (left.score != right.score) return left.score > right.score;
-        return left.name.reference() < right.name.reference();
-    });
-    std::vector<mms::MmsObjectName> result;
-    const auto count = std::min(requested, ranked.size());
-    result.reserve(count);
-    for (std::size_t index = 0U; index < count; ++index) result.push_back(ranked[index].name);
-    return result;
 }
 
 [[nodiscard]] std::string make_trial_data_set_reference(const std::string& domain) {
@@ -243,7 +180,13 @@ void require_write_success(
     }
     const auto response = mms::MmsServiceCodec::decode_write_response(response_payload(exchange), invoke_id);
     if (response.results.size() != 1U || !response.results.front().success) {
-        throw std::runtime_error("RCB " + attribute + " write was rejected.");
+        const auto failure = response.results.size() == 1U
+            ? response.results.front().failure_code
+            : std::nullopt;
+        throw std::runtime_error(
+            "RCB " + attribute + " write was rejected" +
+            (failure ? " (DataAccessError=" + std::to_string(*failure) + ")."
+                     : "."));
     }
 }
 
@@ -353,15 +296,25 @@ int main(int argc, char** argv) {
         }
 
         std::vector<mms::MmsObjectName> members;
+        std::optional<mms::MmsDynamicReportMemberSelection> auto_selection;
         if (!cli.explicit_members.empty()) {
             members.reserve(cli.explicit_members.size());
             for (const auto& reference : cli.explicit_members) members.push_back(parse_member(reference));
         } else {
-            members = select_auto_members(discovery, *candidate, cli.auto_member_count);
+            auto_selection = mms::MmsDynamicReportMemberSelector::select(
+                discovery, *candidate, cli.auto_member_count);
+            members = auto_selection->members;
         }
         if (members.empty()) {
             session.disconnect();
-            std::cerr << "BLOCKED: no safe scalar ST/MX members were selected. Use --member explicitly.\n";
+            std::cerr << "BLOCKED: no safe scalar ST/MX members were selected";
+            if (auto_selection) {
+                std::cerr << " (successfulTypeProbes="
+                          << auto_selection->successful_type_probes
+                          << ", scalarLeafCandidates="
+                          << auto_selection->scalar_leaf_candidates << ')';
+            }
+            std::cerr << ". Use --member explicitly.\n";
             return 3;
         }
 
@@ -374,6 +327,12 @@ int main(int argc, char** argv) {
                   << "  rcb=" << candidate->reference << " mode=" << candidate->mode() << '\n'
                   << "  dataset=" << data_set_reference << '\n'
                   << "  members=" << members.size() << '\n';
+        if (auto_selection) {
+            std::cout << "  autoMemberEvidence=typeProbes:"
+                      << auto_selection->successful_type_probes
+                      << ",scalarLeaves:"
+                      << auto_selection->scalar_leaf_candidates << '\n';
+        }
         for (const auto& member : members) std::cout << "    - " << member.reference() << '\n';
 
         if (!cli.armed) {
@@ -416,6 +375,11 @@ int main(int argc, char** argv) {
             std::cout << "REPORT_EVIDENCE received=" << active.received_reports
                       << " decodeFailures=" << active.decode_failures
                       << " streams=" << active.streams.size() << '\n';
+            for (const auto& event : active.events) {
+                if (event.kind == mms::MmsReportSubscriptionEventKind::report_decode_failed) {
+                    std::cout << "REPORT_DIAGNOSTIC " << event.message << '\n';
+                }
+            }
 
             subscription->stop();
             const auto stopped = subscription->snapshot();

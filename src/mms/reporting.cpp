@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <exception>
 #include <limits>
 #include <set>
 #include <sstream>
@@ -215,6 +216,19 @@ MmsObjectName decode_variable_definition(const BerTlv& definition) {
     return MmsServiceCodec::decode_object_name(fields[0].value);
 }
 
+MmsObjectName decode_variable_list_name(const BerTlv& specification) {
+    // VariableAccessSpecification.variableListName [1] is found in both
+    // explicit-wrapper and implicit ObjectName forms on real IEC 61850 IEDs.
+    // First accept a nested ObjectName, then reconstruct the implicit choice.
+    try {
+        return MmsServiceCodec::decode_object_name(specification.value);
+    } catch (const std::exception&) {
+        const auto encoded = BerWriter::encode_tlv(
+            specification.encoded_tag, specification.value);
+        return MmsServiceCodec::decode_object_name(encoded);
+    }
+}
+
 
 std::string continuity_message(const MmsReportContinuityEventKind kind) {
     switch (kind) {
@@ -331,6 +345,12 @@ std::string MmsDataSetDirectoryCodec::to_iec_reference(const MmsObjectName& name
     return name.domain + "/" + normalize_data_set_item(name.item);
 }
 
+std::string MmsDataSetDirectoryCodec::to_report_attribute_value(
+    const std::string& reference) {
+    if (reference.empty()) return {};
+    return parse_data_set_reference(reference).reference();
+}
+
 std::vector<std::uint8_t> MmsDataSetDirectoryCodec::encode_request_pdu(const MmsDataSetDirectoryRequest& request) {
     const auto object = MmsServiceCodec::encode_object_name(request.data_set_name);
     return MmsPduCodec::encode_confirmed_request({request.invoke_id, k_get_named_variable_list_attributes, true, object});
@@ -416,12 +436,19 @@ MmsInformationReport MmsInformationReportCodec::decode(const std::span<const std
     MmsInformationReport report;
     std::size_t result_index = 0U;
     if (fields.size() == 2U) {
-        if (fields[0].tag_class != BerClass::context_specific || fields[0].tag_number != 0 || !fields[0].constructed) {
+        if (fields[0].tag_class != BerClass::context_specific) {
             throw MmsReportingFormatError("MMS InformationReport variable-access specification is invalid.");
         }
-        const auto definitions = BerReader::read_children(fields[0].value);
-        if (definitions.size() > maximum_variable_references) throw MmsReportingFormatError("MMS InformationReport variable reference count exceeds the configured limit.");
-        for (const auto& definition : definitions) report.variable_references.push_back(decode_variable_definition(definition));
+        if (fields[0].tag_number == 0 && fields[0].constructed) {
+            const auto definitions = BerReader::read_children(fields[0].value);
+            if (definitions.size() > maximum_variable_references) throw MmsReportingFormatError("MMS InformationReport variable reference count exceeds the configured limit.");
+            for (const auto& definition : definitions) report.variable_references.push_back(decode_variable_definition(definition));
+        } else if (fields[0].tag_number == 1) {
+            report.variable_references.push_back(
+                decode_variable_list_name(fields[0]));
+        } else {
+            throw MmsReportingFormatError("MMS InformationReport variable-access specification is invalid.");
+        }
         result_index = 1U;
     }
     const auto& list = fields[result_index];

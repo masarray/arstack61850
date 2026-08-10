@@ -108,6 +108,8 @@ public:
     [[nodiscard]] static MmsObjectName parse_data_set_reference(
         const std::string& reference);
     [[nodiscard]] static std::string to_iec_reference(const MmsObjectName& name);
+    [[nodiscard]] static std::string to_report_attribute_value(
+        const std::string& reference);
 
     [[nodiscard]] static std::vector<std::uint8_t> encode_request_pdu(
         const MmsDataSetDirectoryRequest& request);
