@@ -106,6 +106,9 @@ void deterministic_decoder_mutation_smoke() {
     const auto mms_services = read_file(
         std::filesystem::path{ARIEC61850_SOURCE_DIR} /
         "fuzz/corpus/mms_services/initiate_request");
+    const auto mms_file_service = read_file(
+        std::filesystem::path{ARIEC61850_SOURCE_DIR} /
+        "fuzz/corpus/mms_file_service/file_read_response.hex");
     const auto reporting = read_file(
         std::filesystem::path{ARIEC61850_SOURCE_DIR} /
         "fuzz/corpus/reporting/realistic_information_report");
@@ -120,6 +123,7 @@ void deterministic_decoder_mutation_smoke() {
         mutation_case_count(transport) +
         mutation_case_count(association) +
         mutation_case_count(mms_services) +
+        mutation_case_count(mms_file_service) +
         mutation_case_count(reporting) +
         1U;
 
@@ -163,6 +167,9 @@ void deterministic_decoder_mutation_smoke() {
     });
     cases += exercise_mutations(mms_services, [](const ByteVector& bytes) {
         ar::iec61850::fuzzing::exercise_mms_services(bytes);
+    });
+    cases += exercise_mutations(mms_file_service, [](const ByteVector& bytes) {
+        ar::iec61850::fuzzing::exercise_mms_file_service(bytes);
     });
     cases += exercise_mutations(reporting, [](const ByteVector& bytes) {
         ar::iec61850::fuzzing::exercise_reporting(bytes);

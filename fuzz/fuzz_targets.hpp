@@ -8,6 +8,7 @@
 #include "ariec61850/evidence/pcap_equivalence.hpp"
 #include "ariec61850/goose/frame_codec.hpp"
 #include "ariec61850/goose/pdu_codec.hpp"
+#include "ariec61850/mms/file_service.hpp"
 #include "ariec61850/mms/invoke_router.hpp"
 #include "ariec61850/mms/pdu.hpp"
 #include "ariec61850/mms/reporting.hpp"
@@ -344,6 +345,37 @@ inline void exercise_mms_services(const std::span<const std::uint8_t> bytes) {
     try {
         const auto type = mms::MmsServiceCodec::decode_type_specification(bytes);
         static_cast<void>(mms::MmsServiceCodec::encode_type_specification(type));
+    } catch (...) {
+    }
+}
+
+inline void exercise_mms_file_service(const std::span<const std::uint8_t> bytes) {
+    std::uint32_t invoke_id = 1U;
+    try {
+        const auto envelope = mms::MmsPduCodec::decode_envelope(bytes);
+        if (envelope.invoke_id && *envelope.invoke_id != 0U) {
+            invoke_id = *envelope.invoke_id;
+        }
+    } catch (...) {
+    }
+    try {
+        static_cast<void>(mms::MmsFileServiceCodec::decode_file_directory_response(
+            bytes, invoke_id));
+    } catch (...) {
+    }
+    try {
+        static_cast<void>(mms::MmsFileServiceCodec::decode_file_open_response(
+            bytes, invoke_id));
+    } catch (...) {
+    }
+    try {
+        static_cast<void>(mms::MmsFileServiceCodec::decode_file_read_response(
+            bytes, invoke_id));
+    } catch (...) {
+    }
+    try {
+        static_cast<void>(mms::MmsFileServiceCodec::decode_file_close_response(
+            bytes, invoke_id));
     } catch (...) {
     }
 }

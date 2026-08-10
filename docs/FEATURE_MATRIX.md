@@ -57,9 +57,10 @@ Status terms are intentionally conservative:
 | Embedded | ESP32-S3 8DI/8DO IED application | Planned | Waveshare board application reference after bounded MMS server foundation exists. |
 | MMS server | Association acceptor + static browse/read model | Planned | Required for the ESP32 I/O IED; not yet a public server feature. |
 | MMS mutation | Write/control | Codec/offline foundation only | Live Phase 4C discovery intentionally does not send these operations. |
-| File services | File directory/read/write | Planned for later parity | No file-service mutation/request is part of current live acceptance. |
+| File services | FileDirectory / FileOpen / FileRead / FileClose client | Live-proven / read-only | Bounded portable streaming runtime, signed FRSM, exact error evidence, rooted-backslash fallback, success cleanup, and forced-failure cleanup were exercised on the controlled lab target. Current directory fit one page; multi-page live continuation remains pending. |
+| File services | Upload / delete / rename | Not implemented | Remote file mutation is deliberately outside the current milestone. |
 | Security | ASan/UBSan | CI-gated | Security workflow; latest tranche must be green before acceptance claim. |
-| Security | libFuzzer corpora | CI-gated | BER, GOOSE, SV, PCAP, SCL, COMTRADE, OSI, MMS services/reporting. |
+| Security | libFuzzer corpora | CI-gated | BER, GOOSE, SV, PCAP, SCL, COMTRADE, OSI, MMS services/reporting/file-service. |
 | Portability | GCC / Clang / MSVC | CI-gated | Required for host Public Alpha. |
 | Acceptance | Same-IED repeated structural stability | In progress | Acceptance runner uses `structuralFingerprint`, not mutable legacy canonical fingerprint. Multi-cycle live evidence is the next A1 acceptance tranche. |
 | Acceptance | Timeout/reconnect evidence | In progress | Dedicated controlled failure/reconnect runs remain required; successful association cycles alone are not sufficient evidence. |
