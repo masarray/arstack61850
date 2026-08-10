@@ -36,6 +36,7 @@ add_library(ariec61850_core
     src/mms/live_discovery.cpp
     src/mms/rcb_selection.cpp
     src/mms/rcb_failover.cpp
+    src/mms/static_report_session.cpp
     src/sampled_values/pdu_codec.cpp
     src/sampled_values/frame_codec.cpp
     src/sampled_values/quality.cpp
