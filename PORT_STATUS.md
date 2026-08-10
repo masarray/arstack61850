@@ -2,9 +2,11 @@
 
 ## Current milestone
 
-**Phase 4D-R3 — bounded BRCB operational semantics, association ownership, MMS replay/purge controls, lifecycle handling, and replay-capable recovery state v2 are implemented for review.**
+**Phase 4D-C4 — guarded IEC 61850 control-model software parity is implemented for review: live `ctlModel`/TypeSpecification discovery, Direct/SBO normal and enhanced sequencing, exact `Oper`/`SBOw`/`Cancel` structures, CommandTermination correlation, and LastApplError/AddCause diagnostics.**
 
-The active Phase 4D work is intentionally carried as a stacked draft-PR series on top of the ESP32-P4/SV work. `main` does not yet represent this milestone.
+The active Phase 4D work is intentionally carried as a stacked draft-PR series. `main` does not yet represent this milestone.
+
+Sampled Values / ESP32-P4 process-bus work is developed and validated on a separate branch/thread. Its hardware success is not used as evidence for MMS control behavior.
 
 ## Delivered modules
 
@@ -19,78 +21,81 @@ The active Phase 4D work is intentionally carried as a stacked draft-PR series o
 | Persistent RCB subscription runtime | Merged to `main` |
 | Built-in Windows/Linux TCP transport | Implemented in Phase 4C stack |
 | Live read-only MMS discovery/model parity | Implemented in Phase 4C stack |
-| ESP32-P4 BRCB raw-partition backend + geometry/latency probe firmware | Implemented; physical measurement pending |
 | BRCB retained history + independent delivery cursor | Phase 4D-R1 / PR #16 |
 | Association-aware BRCB reservation/Owner/ResvTms state machine | Phase 4D-R2a / PR #17 |
 | Per-request association identity propagated through MMS writes | Phase 4D-R2b / PR #18 |
 | MMS RptEna/EntryID/PurgeBuf/ResvTms/Owner operational object bank | Phase 4D-R2c / PR #20 |
 | TCP/reset/COTP-DR association-loss lifecycle bridge | Phase 4D-R2d / PR #22 |
 | Replay-capable BRCB recovery image v2 with v1 restore | Phase 4D-R3 / PR #23 |
+| Guarded Direct/SBO control safety core | Phase 4D-C1 / PR #25 |
+| Live-type Oper/SBOw/Cancel MMS structure builder | Phase 4D-C2 / PR #27 |
+| CommandTermination + LastApplError/AddCause correlation | Phase 4D-C3 / PR #28 |
+| Live control discovery/session over MmsAssociationRuntime | Phase 4D-C4 / PR #29 |
 
-## Phase 4D behavior
+## Phase 4D-C control behavior
 
-- BRCB delivery no longer destroys retained report history.
-- The bounded ring has an independent delivery cursor and explicit retained-history size.
-- `EntryID` can resume after a retained report; all-zero `EntryID` rewinds to the oldest retained report.
-- `PurgeBuf` clears retained history and replay-gap state without rolling EntryID backward.
-- Queue overflow remains bounded and records both dropped-report count and a replay-gap condition.
-- Reservation ownership uses an opaque stable Owner identity plus a separate ephemeral MMS association ID; it is not coupled to IP addresses or socket handles.
-- A second live association cannot steal an owned BRCB, including one presenting the same stable Owner identity.
-- `ResvTms=0` releases on association loss; positive `ResvTms` retains the stable Owner until expiry and permits that Owner to reconnect with a new association ID.
-- Association loss always disables `RptEna`.
-- TCP EOF/socket/local close, runtime reset, and incoming COTP Disconnect Request use the same exactly-once lifecycle bridge.
-- MMS static writes carry caller-owned association context without changing legacy non-contextual object callbacks.
-- The operational MMS object bank exposes `RptID`, `RptEna`, `DatSet`, `ConfRev`, `PurgeBuf`, `EntryID`, `ResvTms`, and `Owner`.
-- Recovery image v2 persists the full retained replay window, delivery cursor, replay-gap flag, EntryIDs, report PDUs, sequence state, next EntryID, and dropped-report counter.
-- Recovery image v2 accepts legacy v1 images. A v1 image restores with its original undelivered-only semantics.
-- Reboot recovery deliberately returns reporting disabled and does not restore live association identity or Owner connection state.
+- `ctlModel` values 0..4 match the C# oracle: status-only, Direct normal, SBO normal, Direct enhanced, and SBO enhanced.
+- Control roots are Data Objects (`LD/LN.DO`); service-leaf references are rejected as roots.
+- The control safety planner is association-aware and authorization is **default deny**.
+- `ctlNum` is monotonic in the range 1..255 and wraps to 1; zero is never auto-generated.
+- SBO retains an immutable selected sequence across `ctlVal`, origin, `ctlNum`, `T`, optional `operTm`, `Test`, synchrocheck, and interlock-check.
+- A second association cannot operate or cancel another association's selection.
+- Selection timeout, association loss, value/check mismatch, or authorization loss fail closed.
+- Direct normal and SBO normal complete at the accepted MMS service boundary.
+- Direct enhanced and SBO enhanced remain pending until a correlated CommandTermination arrives.
+- Ordinary ST/MX process reports cannot complete an enhanced command.
+- LastApplError retains the raw ControlError/AddCause values while mapping the standard ControlError 0..3 and AddCause 0..27 names.
+- Positive Oper-only CommandTermination requires an exact `CO/Oper` reference.
+- The live TypeSpecification is the source of truth for `ctlVal`, origin, `ctlNum`, `T`, `Test`, `Check`, and optional `operTm`; unknown vendor fields are rejected rather than guessed.
+- DPC uses MMS network bit order (`Off=01`, `On=10`).
+- `Check` is exactly two bits: bit 0 synchrocheck and bit 1 interlock-check.
+- Normal SBO Select is a Read of `SBO`; SBO enhanced SelectWithValue is exactly one `SBOw` Write.
+- `Cancel` is built from the exact retained selected sequence.
+- Before `SBOw` or `Oper`, stale InformationReports are drained; reports arriving during the confirmed exchange remain available for application-error/termination correlation.
+- Missing CommandTermination expires as a control timeout and does not automatically fault an otherwise healthy MMS association.
+- **No automatic command retry is performed.**
 
-## Validation completed without physical ESP32-P4 flash evidence
+## Control validation completed without issuing a physical command
 
-The BRCB hard profile is compiled with GCC and Clang using `-fno-exceptions -fno-rtti`, and its evidence gate currently covers:
+Dedicated strict profiles currently cover:
 
-- bounded BRCB capture, EntryID progression and BufOvfl behavior;
-- retained replay history and independent delivery cursor;
-- multi-client ownership, reservation, reconnect and expiry semantics;
-- encoded MMS writes crossing BER decode -> dispatcher -> association-aware BRCB control;
-- EntryID resume/rewind, invalid EntryID rejection and PurgeBuf;
-- TCP/reset/COTP-DR association-loss lifecycle behavior;
-- A/B checkpoint generation, torn-write fallback and corruption fallback;
-- recovery state v2 preserving delivered history, cursor and replay gap;
-- durable purge with monotonic EntryID after reboot;
-- backward restore of a legacy v1 recovery image;
-- absence of C++ exception runtime symbols in the hard-profile binaries.
+- GCC and Clang `-fno-exceptions -fno-rtti` guarded-control safety semantics;
+- default-deny authorization and revoked authorization between Select and Oper;
+- second-client takeover rejection, selection expiry, association-loss cleanup, Cancel ownership, and `ctlNum` wrap;
+- exact live-TypeSpecification control-value binding and golden MMS Data bytes for Oper;
+- DPC network bit order, StepPosition and conservative analogue structures;
+- exact `origin`, `ctlNum`, `T`, `Test`, and two-bit `Check` construction;
+- LastApplError standard/ctlObj-omitted layouts, unknown raw-code preservation, and object correlation;
+- positive/negative enhanced CommandTermination behavior;
+- live descriptor-discovery orchestration using `ctlModel`, GVAA, GetNameList, CF timeouts, and ST/MX status-reference priority;
+- Direct one-write behavior, SBO Select -> Oper, SBOw asynchronous application-error window, AutoSelect, stale-selection Cancel, and enhanced termination wait;
+- production `MmsAssociationControlTransport` strict compile validation;
+- integration of C1-C4 sources into the normal `ARIEC61850::core` build graph and normal CTest targets.
 
-## Physical non-volatile storage gate
+## Remaining control acceptance gates
 
-The ESP32-P4 non-volatile adapter and probe firmware are implemented, but **physical acceptance is not yet claimed**.
+The software path is ready for controlled interoperability testing, but **physical IED control acceptance is not yet claimed**.
 
-Current evidence status remains:
+Before any production-control or conformance claim, run on an isolated/non-operational laboratory IED or simulator and retain evidence for:
 
-`READY_NOT_MEASURED`
+1. live `ctlModel` and GVAA discovery for a known controllable object;
+2. Direct normal `Oper` with exactly one command Write and observed process/status feedback;
+3. SBO normal `SBO -> Oper` plus explicit `Cancel` and selection-timeout behavior;
+4. Direct enhanced `Oper -> CommandTermination` positive and at least one safe negative LastApplError/AddCause path;
+5. SBO enhanced `SBOw -> Oper -> CommandTermination` plus ownership/contention behavior;
+6. association loss during selection and while waiting for enhanced termination;
+7. interlock/synchrocheck behavior only where the lab setup can exercise it safely;
+8. packet capture and deterministic event log proving no automatic command retry.
 
-The dedicated ESP32-P4 probe can read the actual partition erase geometry and measure erase/write/read latency using the real `brcb_state` raw partition. Hosted CI cannot replace this evidence.
+## BRCB / non-volatile storage boundary
 
-Before changing the status to hardware-measured/passed, capture and retain:
+BRCB recovery-v2 software and the ESP32-P4 raw-partition adapter/probe remain a separate persistence concern from Sampled Values hardware transmission and from MMS control.
 
-1. actual `esp_partition_t::erase_size` and accepted A/B/probe geometry from the target board;
-2. measured erase/write/read latency records from the destructive isolated probe erase unit;
-3. the actual flash-device endurance/P-E rating used to convert checkpoint frequency into a wear budget;
-4. an accepted checkpoint interval and worst-case lifetime policy based on that rating;
-5. controlled physical power-loss evidence demonstrating committed-bank recovery and torn-write fallback on the real board.
+A board successfully booting/flashing another ESP32-P4 application does not by itself prove the BRCB flash geometry, erase/write/read latency, endurance budget, or controlled power-loss recovery. Those NVM measurements remain an independent hardware gate until their dedicated probe evidence is archived.
 
-Recovery state v2 can be larger than v1 because delivered replay history is intentionally retained. The checkpoint operation must therefore fail closed if the measured bank geometry cannot hold the configured worst-case retained state; software must not silently discard replay history merely to fit flash.
+## Safety / claim boundary
 
-## Remaining Phase 4D acceptance gates
-
-- Complete the repository-wide CI matrix for the final stacked head and resolve any non-BRCB regression if reported.
-- Run the ESP32-P4 flash probe on physical hardware and archive UART geometry/latency evidence.
-- Bind the actual flash P/E endurance rating into an explicit checkpoint-frequency/wear policy.
-- Run controlled physical power-cut/reboot tests against the A/B journal and recovery-v2 image.
-- Review and merge the stacked Phase 4D PRs in dependency order once their parent branches are accepted.
-
-## Deliberately deferred
-
-Mutable BRCB definition/configuration lifecycle for fields such as `OptFlds`, `BufTm`, `TrgOps`, and `IntgPd` is not mixed into the ownership/recovery work. Those fields require their own configuration/versioning rules.
-
-IEC 61850 control-model parity (`ctlModel`, Direct/SBO, enhanced security, `Oper`, `SBO/SBOw`, `Cancel`, command termination, `LastApplError`/`AddCause`, interlock/synchrocheck, and no automatic command retry) is the next major functional phase after the Phase 4D hardware acceptance gate is closed.
+- The C4 branch implements software parity and deterministic validation; it is **not** an IEC 61850 conformance certificate.
+- No physical IED command is claimed from hosted CI.
+- Live control must remain explicit, authorization-gated, and laboratory-scoped until interoperability evidence is accepted.
+- Sampled Values / ESP32-P4 development remains outside this control branch.
