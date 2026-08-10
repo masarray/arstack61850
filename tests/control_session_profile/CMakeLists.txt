@@ -21,6 +21,7 @@ endfunction()
 add_executable(ariec61850_control_session_tests
     ${ARIEC61850_ROOT}/tests/test_control_session.cpp
     ${ARIEC61850_ROOT}/src/asn1/ber.cpp
+    ${ARIEC61850_ROOT}/src/osi/session.cpp
     ${ARIEC61850_ROOT}/src/osi/presentation.cpp
     ${ARIEC61850_ROOT}/src/mms/utc_time.cpp
     ${ARIEC61850_ROOT}/src/mms/data_value.cpp
@@ -34,9 +35,6 @@ add_executable(ariec61850_control_session_tests
     ${ARIEC61850_ROOT}/src/control/control_session.cpp)
 ariec61850_control_strict(ariec61850_control_session_tests)
 
-# Production adapter compile gate. Linking is exercised by repository C++ CI
-# once these sources are part of ariec61850_core; this target catches API and
-# warning regressions without duplicating the complete association link graph.
 add_library(ariec61850_control_transport_compile OBJECT
     ${ARIEC61850_ROOT}/src/control/mms_association_control_transport.cpp
     ${ARIEC61850_ROOT}/src/mms/association_runtime_control_wait.cpp)
