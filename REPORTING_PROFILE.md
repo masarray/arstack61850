@@ -21,6 +21,25 @@ may rank another candidate. Once any mutation is attempted, automatic switching
 is disabled; an uncertain write must be cleaned up and diagnosed on the original
 RCB instead of risking a second remote mutation.
 
+## Static DataSet report session
+
+`MmsStaticReportSessionRuntime` composes the static pool selector, bounded
+pre-claim contention/failover, populated DataSet-directory evidence, and the
+persistent subscription runtime. `prepare()` is read-only and may rerank after
+a busy or flapping candidate. `start()` uses the RCB's existing static binding;
+the runtime rejects any request to rewrite `DatSet`.
+
+The guarded `ariec61850_static_rcb_trial` host tool exposes this lifecycle for
+authorized lab validation. Its default mode performs discovery and pre-claim
+Reads only. Armed mode enables the selected free BRCB/URCB, optionally requests
+GI, observes InformationReports, and cleans up only state acquired by the
+runtime. See [docs/STATIC_RCB_LIVE_TRIAL.md](docs/STATIC_RCB_LIVE_TRIAL.md).
+
+The current guarded single-profile run used a populated static URCB: three
+pre-claim Reads remained stable, GI produced one decoded report with zero decode
+failures, and disable/reservation release completed without deferred cleanup.
+This is not yet long-duration or multi-vendor acceptance.
+
 ## Phase 4C.1 live-model integration
 
 Read-only discovery includes DataSet directory and RCB state evidence in `live-ied-model-v1`.

@@ -31,6 +31,7 @@ Status terms are intentionally conservative:
 | Reporting | Dynamic RCB candidate planner | Live-proven | Read-only ranking identifies safe dynamic candidates without mutation. |
 | Reporting | Bounded smart pre-claim failover | Offline-tested / stable live probe | Repeated read-only probes exclude busy/flapping candidates and rerank before mutation; mutation failures never trigger automatic switching. |
 | Reporting | Guarded Dynamic RCB lifecycle | Live-proven / guarded lab | Explicitly armed trial bound/enabled one RCB, requested GI, decoded a report, then disabled/unbound with cleanup verification. |
+| Reporting | Guarded static DataSet + RCB session | Live-proven / guarded single profile | A populated static URCB was selected after BRCB-only planning found no eligible candidate; the armed trial preserved its existing binding, decoded one report, then disabled/released it with cleanup verified. `DatSet` rewrites are rejected. |
 | Reporting | BRCB retained replay / EntryID / PurgeBuf | Offline-tested | Bounded history, replay/resume/rewind, PurgeBuf, overflow, and replay-gap behavior are implemented. |
 | Reporting | BRCB Owner / ResvTms / association lifecycle | Offline-tested | Multi-client ownership, reconnect/expiry, and association-loss semantics are hard-profile tested. |
 | Reporting | BRCB recovery image v2 | Offline-tested / physical NVM pending | Recovery preserves retained window/cursor/gap with v1 restore; flash endurance and power-loss hardware evidence are separate. |
@@ -89,4 +90,4 @@ C1-C5 provide a guarded production control path plus a live evidence harness. Th
 
 ## Next parity direction
 
-The next gaps are full remaining control-model/association-loss evidence, MMS file and fault-record transfer, mutable SCL export/reconstruction, deterministic IED simulator/server integration, and broader application/UI parity. Sampled Values and ESP hardware work remain separate from this MMS-control tranche.
+The next gaps are association-loss and contention evidence for control, remaining MMS file-service parity and fault-record workflows, mutable SCL export/reconstruction, deterministic IED simulator/server integration, and broader application/UI parity. Sampled Values and ESP hardware work remain separate from this MMS-control tranche.

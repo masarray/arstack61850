@@ -37,6 +37,7 @@ add_library(ariec61850_core
     src/mms/live_discovery.cpp
     src/mms/rcb_selection.cpp
     src/mms/rcb_failover.cpp
+    src/mms/static_report_session.cpp
     src/control/guarded_control.cpp
     src/control/mms_control_structure.cpp
     src/control/command_termination.cpp

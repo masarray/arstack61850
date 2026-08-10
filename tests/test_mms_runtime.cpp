@@ -5,6 +5,7 @@
 #include "ariec61850/mms/report_subscription_runtime.hpp"
 #include "ariec61850/mms/reporting.hpp"
 #include "ariec61850/mms/services.hpp"
+#include "ariec61850/mms/static_report_session.hpp"
 #include "ariec61850/osi/cotp.hpp"
 #include "ariec61850/osi/tpkt.hpp"
 
@@ -387,6 +388,158 @@ void queue_write_success(
         mms::MmsServiceCodec::encode_write_response_p_data(response)));
 }
 
+[[nodiscard]] mms::MmsReportControlCandidate make_static_brcb_candidate(
+    std::string name) {
+    mms::MmsReportControlCandidate candidate;
+    candidate.domain = "LD0";
+    candidate.logical_node = "LLN0";
+    candidate.functional_constraint = "BR";
+    candidate.name = std::move(name);
+    candidate.reference = "LD0/LLN0.BR." + candidate.name;
+    candidate.buffered = true;
+    candidate.attributes = {
+        "RptID", "RptEna", "DatSet", "ConfRev", "GI", "ResvTms"};
+    return candidate;
+}
+
+[[nodiscard]] mms::MmsLiveDiscoveryResult make_static_discovery(
+    const mms::MmsReportControlCandidate& preferred,
+    const mms::MmsReportControlCandidate& fallback) {
+    mms::MmsLiveDiscoveryResult discovery;
+    discovery.report_inventory.report_controls = {preferred, fallback};
+
+    for (const auto& candidate : discovery.report_inventory.report_controls) {
+        mms::MmsReportControlEvidence control;
+        control.candidate = candidate;
+        control.requested_attributes = {
+            "DatSet", "RptID", "ConfRev", "RptEna", "ResvTms"};
+        mms::MmsReportControlState state;
+        state.candidate = candidate;
+        state.data_set_reference = "LD0/LLN0.DataSet";
+        state.report_id = "RPT-" + candidate.name;
+        state.configuration_revision = 1U;
+        state.report_enabled = false;
+        state.reservation_time_seconds = 0U;
+        control.state = std::move(state);
+        discovery.report_controls.push_back(std::move(control));
+    }
+
+    mms::MmsDataSetDirectoryEvidence directory;
+    directory.candidate.domain = "LD0";
+    directory.candidate.logical_node = "LLN0";
+    directory.candidate.name = "DataSet";
+    directory.candidate.reference = "LD0/LLN0.DataSet";
+    directory.directory = make_directory();
+    discovery.data_set_directories.push_back(std::move(directory));
+    return discovery;
+}
+
+void queue_static_preclaim_response(
+    ScriptedTransport& transport,
+    const std::uint32_t invoke_id,
+    const bool enabled) {
+    mms::MmsReadResponse response;
+    response.invoke_id = invoke_id;
+    response.results = {
+        {mms::MmsDataValue::visible_string("LD0/LLN0.DataSet"), std::nullopt},
+        {mms::MmsDataValue::unsigned_integer(1U), std::nullopt},
+        {mms::MmsDataValue::boolean(enabled), std::nullopt},
+        {mms::MmsDataValue::unsigned_integer(0U), std::nullopt},
+    };
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_read_response_p_data(response)));
+}
+
+void queue_static_subscription_probe_response(
+    ScriptedTransport& transport,
+    const std::uint32_t invoke_id) {
+    mms::MmsReadResponse response;
+    response.invoke_id = invoke_id;
+    response.results = {
+        {mms::MmsDataValue::visible_string("RPT-FALLBACK"), std::nullopt},
+        {mms::MmsDataValue::boolean(false), std::nullopt},
+        {mms::MmsDataValue::visible_string("LD0/LLN0.DataSet"), std::nullopt},
+        {mms::MmsDataValue::unsigned_integer(1U), std::nullopt},
+        {mms::MmsDataValue::boolean(false), std::nullopt},
+        {mms::MmsDataValue::unsigned_integer(0U), std::nullopt},
+    };
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_read_response_p_data(response)));
+}
+
+void static_session_skips_contended_preferred_and_subscribes_fallback() {
+    ScriptedTransport transport;
+    queue_handshake(transport);
+    mms::MmsAssociationRuntime association{transport};
+    association.connect({"127.0.0.1", 102U});
+
+    const auto preferred = make_static_brcb_candidate("brcbPreferred01");
+    const auto fallback = make_static_brcb_candidate("brcbFallback01");
+    const auto discovery = make_static_discovery(preferred, fallback);
+
+    queue_static_preclaim_response(transport, 1U, true);
+    queue_static_preclaim_response(transport, 2U, false);
+    queue_static_subscription_probe_response(transport, 3U);
+    queue_write_success(transport, 4U); // RptEna=true
+    queue_write_success(transport, 5U); // GI=true
+
+    mms::MmsStaticReportSessionOptions options;
+    options.selection.preferred_rcb_reference = preferred.reference;
+    options.selection.allow_urcb_fallback = false;
+    options.contention.probe_count = 1U;
+    options.contention.probe_delay = std::chrono::milliseconds{0};
+    options.maximum_candidate_attempts = 2U;
+
+    mms::MmsStaticReportSessionRuntime session{
+        association, discovery, options};
+    session.prepare();
+    const auto prepared = session.snapshot();
+    CHECK(prepared.prepared);
+    CHECK(!prepared.active);
+    CHECK(prepared.selected_rcb_reference == fallback.reference);
+    CHECK(prepared.data_set_reference == "LD0/LLN0.DataSet");
+    CHECK(prepared.data_set_member_count == 1U);
+    CHECK(prepared.failover.attempts.size() == 2U);
+    CHECK(prepared.failover.excluded_rcb_references ==
+          std::vector<std::string>{preferred.reference});
+
+    session.start();
+    CHECK(session.active());
+    auto active = session.snapshot();
+    CHECK(active.subscription.has_value());
+    CHECK(active.subscription->enabled_by_runtime);
+    CHECK(!active.subscription->reservation_touched);
+
+    transport.push_receive(wrap_application(
+        mms::MmsInformationReportCodec::encode_p_data(make_report())));
+    CHECK(session.poll_once());
+    CHECK(session.snapshot().subscription->received_reports == 1U);
+
+    queue_write_success(transport, 6U); // RptEna=false
+    session.stop();
+    const auto stopped = session.snapshot();
+    CHECK(!stopped.active);
+    CHECK(stopped.subscription->state ==
+          mms::MmsReportSubscriptionState::stopped);
+    CHECK(!stopped.subscription->cleanup_required);
+    CHECK(transport.sent().size() == 8U); // CR, AARQ, 3 reads, 3 writes
+}
+
+void static_session_rejects_data_set_rebinding() {
+    ScriptedTransport transport;
+    mms::MmsAssociationRuntime association{transport};
+    const auto preferred = make_static_brcb_candidate("brcbPreferred01");
+    const auto fallback = make_static_brcb_candidate("brcbFallback01");
+    const auto discovery = make_static_discovery(preferred, fallback);
+    mms::MmsStaticReportSessionOptions options;
+    options.subscription.write_data_set_reference = true;
+    check_throws<std::invalid_argument>([&] {
+        mms::MmsStaticReportSessionRuntime session{
+            association, discovery, options};
+        static_cast<void>(session);
+    });
+}
+
 void subscription_runtime_reserves_enables_receives_and_cleans_up() {
     ScriptedTransport transport;
     queue_handshake(transport);
@@ -486,6 +639,8 @@ int main() {
         {"report subscription lifecycle", subscription_runtime_reserves_enables_receives_and_cleans_up},
         {"report cleanup after association loss", subscription_marks_cleanup_required_when_association_is_lost},
         {"report takeover protection", subscription_does_not_take_over_an_enabled_rcb},
+        {"static report session failover lifecycle", static_session_skips_contended_preferred_and_subscribes_fallback},
+        {"static report session forbids DataSet rebinding", static_session_rejects_data_set_rebinding},
     };
 
     std::size_t passed = 0U;
