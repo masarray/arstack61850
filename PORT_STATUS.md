@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-**Phase 4D-C4 — guarded IEC 61850 control-model software parity is implemented for review: live `ctlModel`/TypeSpecification discovery, Direct/SBO normal and enhanced sequencing, exact `Oper`/`SBOw`/`Cancel` structures, CommandTermination correlation, and LastApplError/AddCause diagnostics.**
+**Phase 4D-C5 — guarded IEC 61850 control-model software parity is complete enough for controlled laboratory interoperability: live `ctlModel`/TypeSpecification discovery, Direct/SBO normal and enhanced sequencing, exact `Oper`/`SBOw`/`Cancel` structures, CommandTermination correlation, LastApplError/AddCause diagnostics, and a read-only-by-default live evidence harness are implemented for review.**
 
 The active Phase 4D work is intentionally carried as a stacked draft-PR series. `main` does not yet represent this milestone.
 
@@ -31,6 +31,7 @@ Sampled Values / ESP32-P4 process-bus work is developed and validated on a separ
 | Live-type Oper/SBOw/Cancel MMS structure builder | Phase 4D-C2 / PR #27 |
 | CommandTermination + LastApplError/AddCause correlation | Phase 4D-C3 / PR #28 |
 | Live control discovery/session over MmsAssociationRuntime | Phase 4D-C4 / PR #29 |
+| Guarded live control interoperability/evidence harness | Phase 4D-C5 / PR #30 |
 
 ## Phase 4D-C control behavior
 
@@ -55,7 +56,29 @@ Sampled Values / ESP32-P4 process-bus work is developed and validated on a separ
 - Missing CommandTermination expires as a control timeout and does not automatically fault an otherwise healthy MMS association.
 - **No automatic command retry is performed.**
 
-## Control validation completed without issuing a physical command
+## C5 interoperability harness
+
+`ariec61850_control_interop_probe` is the acceptance harness for controlled live testing.
+
+Safety and evidence properties:
+
+- read-only discovery is the default;
+- a control Write is rejected unless the exact `--arm IEC61850-LAB-CONTROL` token is supplied;
+- the operator must still provide an explicit object, action, and value;
+- supported lab actions are `operate`, `select-operate`, and `select-cancel`;
+- SPC, DPC, integer, unsigned, floating-point and step-position values are supported conservatively;
+- origin category/identifier, Test, synchrocheck and interlock-check are explicit;
+- live status is read before and after the action when the IED exposes a usable ST/MX reference;
+- every control Write service reference is counted and written to evidence;
+- optional JSON evidence includes ctlModel, CDC, status, Write count/list, report-observation counts, completion, raw ControlError/AddCause and mapped AddCause;
+- the tool prints the Wireshark MMS/TCP filter required to reconcile JSON with PCAP/PCAPNG;
+- offline `--self-test` verifies the read-only default and arm gate without network access;
+- a standalone CMake profile and Windows PowerShell build helper are provided;
+- the dedicated C5 CI builds GCC, Clang and Windows/MSVC variants and publishes the tested harness binary with its self-test/help evidence.
+
+The laboratory procedure and evidence bundle format are defined in `docs/CONTROL_INTEROP_RUNBOOK.md`.
+
+## Control software validation completed without issuing a physical command
 
 Dedicated strict profiles currently cover:
 
@@ -70,22 +93,25 @@ Dedicated strict profiles currently cover:
 - live descriptor-discovery orchestration using `ctlModel`, GVAA, GetNameList, CF timeouts, and ST/MX status-reference priority;
 - Direct one-write behavior, SBO Select -> Oper, SBOw asynchronous application-error window, AutoSelect, stale-selection Cancel, and enhanced termination wait;
 - production `MmsAssociationControlTransport` strict compile validation;
-- integration of C1-C4 sources into the normal `ARIEC61850::core` build graph and normal CTest targets.
+- integration of C1-C4 sources into the normal `ARIEC61850::core` build graph and normal CTest targets;
+- C5 harness offline safety gate and cross-platform build profile.
 
 ## Remaining control acceptance gates
 
-The software path is ready for controlled interoperability testing, but **physical IED control acceptance is not yet claimed**.
+The software path and live harness are ready for controlled interoperability testing, but **physical IED control acceptance is not yet claimed**.
 
 Before any production-control or conformance claim, run on an isolated/non-operational laboratory IED or simulator and retain evidence for:
 
-1. live `ctlModel` and GVAA discovery for a known controllable object;
+1. live `ctlModel` and GVAA discovery for a known controllable object with `mmsControlWriteCount=0`;
 2. Direct normal `Oper` with exactly one command Write and observed process/status feedback;
 3. SBO normal `SBO -> Oper` plus explicit `Cancel` and selection-timeout behavior;
 4. Direct enhanced `Oper -> CommandTermination` positive and at least one safe negative LastApplError/AddCause path;
 5. SBO enhanced `SBOw -> Oper -> CommandTermination` plus ownership/contention behavior;
 6. association loss during selection and while waiting for enhanced termination;
 7. interlock/synchrocheck behavior only where the lab setup can exercise it safely;
-8. packet capture and deterministic event log proving no automatic command retry.
+8. packet capture and JSON/event evidence proving no automatic command retry.
+
+An individual tested profile may move from `SOFTWARE_READY_FOR_LAB` to `LAB_INTEROP_PASSED` only when its retained JSON and PCAP evidence agree.
 
 ## BRCB / non-volatile storage boundary
 
@@ -95,7 +121,8 @@ A board successfully booting/flashing another ESP32-P4 application does not by i
 
 ## Safety / claim boundary
 
-- The C4 branch implements software parity and deterministic validation; it is **not** an IEC 61850 conformance certificate.
+- The C5 branch implements software parity plus the controlled live-test harness; it is **not** an IEC 61850 conformance certificate.
 - No physical IED command is claimed from hosted CI.
-- Live control must remain explicit, authorization-gated, and laboratory-scoped until interoperability evidence is accepted.
+- Live control remains explicit, authorization-gated, and laboratory-scoped until interoperability evidence is accepted.
+- The harness is read-only by default and refuses an unarmed Write.
 - Sampled Values / ESP32-P4 development remains outside this control branch.
