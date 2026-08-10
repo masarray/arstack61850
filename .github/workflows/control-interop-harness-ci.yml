@@ -52,7 +52,7 @@ jobs:
         shell: bash
         run: ctest --test-dir build-control-interop -C Release --output-on-failure
 
-      - name: Capture C5 harness contract
+      - name: Stage Linux harness and contract
         if: runner.os == 'Linux'
         shell: bash
         run: |
@@ -61,9 +61,20 @@ jobs:
             | tee evidence/control-interop/self-test-${{ matrix.compiler }}.txt
           ./build-control-interop/ariec61850_control_interop_probe --help \
             > evidence/control-interop/help-${{ matrix.compiler }}.txt
+          cp build-control-interop/ariec61850_control_interop_probe \
+            evidence/control-interop/ariec61850_control_interop_probe-${{ matrix.compiler }}
 
-      - name: Upload C5 harness evidence
-        if: runner.os == 'Linux'
+      - name: Stage Windows harness and contract
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path evidence/control-interop | Out-Null
+          $exe = 'build-control-interop/Release/ariec61850_control_interop_probe.exe'
+          & $exe --self-test | Tee-Object -FilePath evidence/control-interop/self-test-msvc.txt
+          & $exe --help | Out-File -Encoding utf8 evidence/control-interop/help-msvc.txt
+          Copy-Item $exe evidence/control-interop/ariec61850_control_interop_probe.exe
+
+      - name: Upload C5 harness evidence and binary
         uses: actions/upload-artifact@v4
         with:
           name: control-interop-harness-${{ matrix.compiler }}
