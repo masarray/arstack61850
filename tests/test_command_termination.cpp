@@ -35,6 +35,13 @@ MmsObjectName reference(std::string item) {
     return result;
 }
 
+MmsObjectName vmd_reference(std::string item) {
+    MmsObjectName result;
+    result.kind = MmsObjectNameKind::vmd_specific;
+    result.item = std::move(item);
+    return result;
+}
+
 MmsInformationReportItem value_item(MmsDataValue value, const std::size_t index = 0U) {
     MmsInformationReportItem item;
     item.index = index;
@@ -82,6 +89,8 @@ void reference_matching_follows_csharp_oracle() {
         target, "LD0/CSWI1.Pos.stVal"));
     CHECK(CommandTerminationDecoder::matches_reported_reference(
         target, "LD0/CSWI1$CO$Pos$Oper"));
+    CHECK(CommandTerminationDecoder::matches_reported_reference(
+        target, "LD0/CSWI1$CO$Pos"));
     CHECK(!CommandTerminationDecoder::matches_reported_reference(
         target, "LD0/XCBR1.Pos.stVal"));
 }
@@ -144,6 +153,53 @@ void omitted_ctl_obj_layout_is_supported_when_report_correlates() {
     CHECK(result.last_appl_error.has_value());
     CHECK(result.last_appl_error->control_object.empty());
     CHECK(result.add_cause == AddCause::none);
+}
+
+void generic_omitted_ctl_obj_requires_exact_sequence_correlation() {
+    MmsInformationReport report;
+    report.variable_references.push_back(vmd_reference("LastApplError"));
+    report.items.push_back(value_item(MmsDataValue::structure({
+        MmsDataValue::integer(3),
+        MmsDataValue::structure({
+            MmsDataValue::integer(7),
+            MmsDataValue::octet_string(
+                std::vector<std::uint8_t>{'A', 'R', 'S', 'T', 'A', 'C', 'K'}),
+        }),
+        MmsDataValue::unsigned_integer(41U),
+        MmsDataValue::integer(8),
+    })));
+
+    const std::vector<std::uint8_t> expected_origin{
+        'A', 'R', 'S', 'T', 'A', 'C', 'K'};
+    const CommandCorrelation matching{7, expected_origin, 41U};
+    auto result = CommandTerminationDecoder::decode(report, object(), &matching);
+    CHECK(result.is_for_control_object);
+    CHECK(result.is_termination);
+    CHECK(!result.positive);
+    CHECK(result.raw_control_error == 3);
+    CHECK(result.control_error == ControlError::operator_test);
+    CHECK(result.raw_add_cause == 8);
+    CHECK(result.add_cause == AddCause::blocked_by_mode);
+    CHECK(result.last_appl_error.has_value());
+    CHECK(result.last_appl_error->control_object.empty());
+    CHECK(result.last_appl_error->origin_category == 7);
+    CHECK(result.last_appl_error->origin_identifier == expected_origin);
+    CHECK(result.last_appl_error->control_number == 41U);
+
+    const CommandCorrelation wrong_number{7, expected_origin, 42U};
+    result = CommandTerminationDecoder::decode(report, object(), &wrong_number);
+    CHECK(!result.is_for_control_object);
+    CHECK(!result.is_termination);
+
+    const std::vector<std::uint8_t> wrong_origin{'O', 'T', 'H', 'E', 'R'};
+    const CommandCorrelation wrong_identity{7, wrong_origin, 41U};
+    result = CommandTerminationDecoder::decode(report, object(), &wrong_identity);
+    CHECK(!result.is_for_control_object);
+    CHECK(!result.is_termination);
+
+    result = CommandTerminationDecoder::decode(report, object());
+    CHECK(!result.is_for_control_object);
+    CHECK(!result.is_termination);
 }
 
 void uncorrelated_last_appl_error_cannot_complete_command() {
@@ -216,6 +272,7 @@ int main() {
         positive_termination_requires_exact_oper_reference();
         negative_last_appl_error_is_correlated_and_mapped();
         omitted_ctl_obj_layout_is_supported_when_report_correlates();
+        generic_omitted_ctl_obj_requires_exact_sequence_correlation();
         uncorrelated_last_appl_error_cannot_complete_command();
         unknown_numeric_codes_are_preserved_without_false_positive();
         decoder_output_drives_enhanced_planner_completion();

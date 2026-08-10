@@ -230,10 +230,12 @@ private:
         const std::optional<CommandTermination>& app_error = std::nullopt) const;
     [[nodiscard]] std::optional<CommandTermination> wait_for_termination(
         std::chrono::milliseconds timeout,
-        std::stop_token stop_token);
+        std::stop_token stop_token,
+        const ActiveContext& context);
     [[nodiscard]] std::optional<CommandTermination> wait_for_application_error(
         std::chrono::milliseconds timeout,
-        std::stop_token stop_token);
+        std::stop_token stop_token,
+        const ActiveContext& context);
     [[nodiscard]] bool selection_expired(const ActiveContext& context) const noexcept;
     [[nodiscard]] std::chrono::milliseconds effective_operate_timeout(
         const ControlRequest& request) const;

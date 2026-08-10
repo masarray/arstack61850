@@ -239,6 +239,7 @@ Acceptance evidence should preserve:
 
 - raw ControlError;
 - raw AddCause;
+- MMS DataAccessError numeric code and standard name when the confirmed Write is rejected;
 - mapped AddCause text such as `blocked-by-interlocking` or
   `blocked-by-synchrocheck`;
 - the exact control object;

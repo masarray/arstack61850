@@ -378,13 +378,13 @@ ControlActionResult ControlObjectSession::select_with_value(
         value.value.value(), stop_token);
     if (!write.success) {
         const auto app_error = wait_for_application_error(
-            options_.application_error_grace_period, stop_token);
+            options_.application_error_grace_period, stop_token, context);
         planner_.on_association_closed(transport_.association_id());
         return write_failure(ControlAction::select_with_value, context, write, app_error);
     }
 
     const auto post_error = wait_for_application_error(
-        options_.application_error_grace_period, stop_token);
+        options_.application_error_grace_period, stop_token, context);
     if (post_error.has_value() && !post_error->positive) {
         planner_.on_association_closed(transport_.association_id());
         ControlActionResult result;
@@ -521,7 +521,7 @@ ControlActionResult ControlObjectSession::operate(
 
     if (!write.success) {
         const auto app_error = wait_for_application_error(
-            options_.application_error_grace_period, stop_token);
+            options_.application_error_grace_period, stop_token, context);
         clear_selection();
         return write_failure(ControlAction::operate, context, write, app_error);
     }
@@ -538,7 +538,7 @@ ControlActionResult ControlObjectSession::operate(
     }
 
     const auto termination = wait_for_termination(
-        effective_operate_timeout(request), stop_token);
+        effective_operate_timeout(request), stop_token, context);
     if (!termination.has_value()) {
         const bool still_associated = transport_.associated();
         clear_selection();
@@ -650,7 +650,8 @@ ControlActionResult ControlObjectSession::write_failure(
 
 std::optional<CommandTermination> ControlObjectSession::wait_for_termination(
     const std::chrono::milliseconds timeout,
-    const std::stop_token stop_token) {
+    const std::stop_token stop_token,
+    const ActiveContext& context) {
     if (timeout <= std::chrono::milliseconds::zero()) {
         return std::nullopt;
     }
@@ -668,7 +669,12 @@ std::optional<CommandTermination> ControlObjectSession::wait_for_termination(
         if (!transport_.wait_information_report(remaining, report, stop_token)) {
             return std::nullopt;
         }
-        auto termination = CommandTerminationDecoder::decode(report, descriptor_.object);
+        const CommandCorrelation correlation{
+            static_cast<std::int64_t>(context.mms.origin_category),
+            context.mms.origin_identifier,
+            context.mms.control_number};
+        auto termination = CommandTerminationDecoder::decode(
+            report, descriptor_.object, &correlation);
         if (termination.is_for_control_object && termination.is_termination) {
             return termination;
         }
@@ -678,8 +684,9 @@ std::optional<CommandTermination> ControlObjectSession::wait_for_termination(
 
 std::optional<CommandTermination> ControlObjectSession::wait_for_application_error(
     const std::chrono::milliseconds timeout,
-    const std::stop_token stop_token) {
-    return wait_for_termination(timeout, stop_token);
+    const std::stop_token stop_token,
+    const ActiveContext& context) {
+    return wait_for_termination(timeout, stop_token, context);
 }
 
 bool ControlObjectSession::selection_expired(const ActiveContext& context) const noexcept {

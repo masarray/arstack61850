@@ -6,18 +6,29 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
+#include <vector>
 
 namespace ar::iec61850::control {
 
 struct LastApplError final {
     std::string control_object;
+    std::optional<std::int64_t> origin_category;
+    std::vector<std::uint8_t> origin_identifier;
+    std::optional<std::uint8_t> control_number;
     std::int64_t raw_control_error{};
     std::int64_t raw_add_cause{25};
     ControlError control_error{ControlError::no_error};
     AddCause add_cause{AddCause::none};
     std::string control_error_name;
     std::string add_cause_name;
+};
+
+struct CommandCorrelation final {
+    std::int64_t origin_category{};
+    std::span<const std::uint8_t> origin_identifier;
+    std::uint8_t control_number{};
 };
 
 struct CommandTermination final {
@@ -37,7 +48,8 @@ class CommandTerminationDecoder final {
 public:
     [[nodiscard]] static CommandTermination decode(
         const mms::MmsInformationReport& report,
-        const ControlObjectReference& object);
+        const ControlObjectReference& object,
+        const CommandCorrelation* correlation = nullptr);
 
     [[nodiscard]] static std::optional<LastApplError> try_decode_last_appl_error(
         const mms::MmsDataValue& value);

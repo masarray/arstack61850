@@ -59,7 +59,7 @@ The integration preserves Phase 4C live discovery and the Dynamic DataSet/report
 - Origin category/identifier, Test, synchrocheck, and interlock-check are explicit.
 - Live status is read before and after the action when the IED exposes a usable ST/MX reference.
 - Every control Write reference is counted and retained in JSON evidence.
-- JSON evidence includes `ctlModel`, CDC, status, Write count/list, report-observation counts, completion, raw ControlError/AddCause, and mapped AddCause.
+- JSON evidence includes `ctlModel`, CDC, status, Write count/list, report-observation counts, completion, MMS DataAccessError code/name, raw ControlError/AddCause, and mapped AddCause.
 - The tool prints a Wireshark MMS/TCP filter for JSON-to-PCAP reconciliation.
 - Offline `--self-test` verifies the read-only default and arm gate without network access.
 - A standalone CMake profile, Windows build helper, and cross-platform CI workflow are provided.

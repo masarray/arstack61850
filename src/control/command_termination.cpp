@@ -146,6 +146,34 @@ namespace {
     return std::nullopt;
 }
 
+[[nodiscard]] std::vector<std::uint8_t> read_octets(
+    const mms::MmsDataValue& value) {
+    if (value.kind() != mms::MmsDataKind::octet_string) {
+        return {};
+    }
+    return value.raw_value();
+}
+
+[[nodiscard]] bool is_generic_last_appl_error_reference(
+    const std::string& reference) noexcept {
+    return ascii_equal(reference, "LastApplError") ||
+        ascii_ends_with(reference, "$LastApplError") ||
+        ascii_ends_with(reference, ".LastApplError");
+}
+
+[[nodiscard]] bool matches_correlation(
+    const LastApplError& error,
+    const CommandCorrelation& expected) noexcept {
+    return error.control_object.empty() &&
+        error.origin_category.has_value() &&
+        error.origin_category.value() == expected.origin_category &&
+        error.control_number.has_value() &&
+        error.control_number.value() == expected.control_number &&
+        std::equal(
+            error.origin_identifier.begin(), error.origin_identifier.end(),
+            expected.origin_identifier.begin(), expected.origin_identifier.end());
+}
+
 [[nodiscard]] ControlError map_control_error(const std::int64_t value) noexcept {
     switch (value) {
     case 0: return ControlError::no_error;
@@ -245,12 +273,18 @@ bool CommandTerminationDecoder::matches_reported_reference(
     const auto expected = object_reference(object);
     const auto logical_suffix = "/" + std::string{object.logical_node} + "." +
         std::string{object.data_object_path};
-    const auto co_fragment = "/" + std::string{object.logical_node} + ".CO." +
-        std::string{object.data_object_path} + ".";
+    const auto co_object = std::string{object.domain} + "/" +
+        std::string{object.logical_node} + ".CO." +
+        std::string{object.data_object_path};
+    const auto co_suffix = "/" + std::string{object.logical_node} + ".CO." +
+        std::string{object.data_object_path};
     return ascii_equal(normalized, expected) ||
         ascii_starts_with(normalized, expected + ".") ||
         ascii_ends_with(normalized, logical_suffix) ||
-        ascii_contains(normalized, co_fragment);
+        ascii_equal(normalized, co_object) ||
+        ascii_equal(normalized, co_object + ".") ||
+        ascii_ends_with(normalized, co_suffix) ||
+        ascii_contains(normalized, co_suffix + ".");
 }
 
 std::optional<LastApplError> CommandTerminationDecoder::try_decode_last_appl_error(
@@ -288,6 +322,27 @@ std::optional<LastApplError> CommandTerminationDecoder::try_decode_last_appl_err
     const auto add_cause = numeric.back().second;
     LastApplError result;
     result.control_object = read_text(children.front());
+    const auto error_index = std::find_if(
+        numeric.begin(), numeric.end(), [](const auto& entry) {
+            return entry.first == 0U || entry.first == 1U;
+        })->first;
+    const auto origin_index = error_index + 1U;
+    const auto control_number_index = error_index + 2U;
+    if (origin_index < children.size() &&
+        children[origin_index].kind() == mms::MmsDataKind::structure) {
+        const auto& origin = children[origin_index].children();
+        if (origin.size() >= 2U) {
+            result.origin_category = read_number(origin[0]);
+            result.origin_identifier = read_octets(origin[1]);
+        }
+    }
+    if (control_number_index < children.size()) {
+        const auto control_number = read_number(children[control_number_index]);
+        if (control_number.has_value() && control_number.value() >= 0 &&
+            control_number.value() <= std::numeric_limits<std::uint8_t>::max()) {
+            result.control_number = static_cast<std::uint8_t>(control_number.value());
+        }
+    }
     result.raw_control_error = error.value();
     result.raw_add_cause = add_cause;
     result.control_error = map_control_error(error.value());
@@ -299,7 +354,8 @@ std::optional<LastApplError> CommandTerminationDecoder::try_decode_last_appl_err
 
 CommandTermination CommandTerminationDecoder::decode(
     const mms::MmsInformationReport& report,
-    const ControlObjectReference& object) {
+    const ControlObjectReference& object,
+    const CommandCorrelation* correlation) {
     CommandTermination result;
     if (!object.valid()) {
         return result;
@@ -307,10 +363,13 @@ CommandTermination CommandTerminationDecoder::decode(
 
     bool matching_object = false;
     bool matching_operate = false;
+    bool generic_last_appl_error = false;
     for (const auto& reference : report.variable_references) {
         const auto text = mms_reference(reference);
         matching_object = matching_object || matches_reported_reference(object, text);
         matching_operate = matching_operate || matches_operate_reference(object, text);
+        generic_last_appl_error = generic_last_appl_error ||
+            is_generic_last_appl_error_reference(text);
     }
 
     for (const auto& item : report.items) {
@@ -326,7 +385,10 @@ CommandTermination CommandTerminationDecoder::decode(
         const bool embedded_match = !last_error->control_object.empty() &&
             (matches_reported_reference(object, last_error->control_object) ||
              matches_operate_reference(object, last_error->control_object));
-        if (!matching_object && !matching_operate && !embedded_match) {
+        const bool correlated_generic = generic_last_appl_error &&
+            correlation != nullptr && matches_correlation(*last_error, *correlation);
+        if (!matching_object && !matching_operate && !embedded_match &&
+            !correlated_generic) {
             continue;
         }
 

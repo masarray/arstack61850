@@ -185,6 +185,24 @@ struct LabAuthorization final {
     return "unknown";
 }
 
+[[nodiscard]] const char* data_access_error_name(const std::uint32_t code) noexcept {
+    switch (code) {
+    case 0U: return "object-invalidated";
+    case 1U: return "hardware-fault";
+    case 2U: return "temporarily-unavailable";
+    case 3U: return "object-access-denied";
+    case 4U: return "object-undefined";
+    case 5U: return "invalid-address";
+    case 6U: return "type-unsupported";
+    case 7U: return "type-inconsistent";
+    case 8U: return "object-attribute-inconsistent";
+    case 9U: return "object-access-unsupported";
+    case 10U: return "object-non-existent";
+    case 11U: return "object-value-invalid";
+    default: return "unknown";
+    }
+}
+
 [[nodiscard]] std::string json_escape(const std::string& value) {
     std::ostringstream output;
     for (const auto ch : value) {
@@ -496,6 +514,19 @@ void write_evidence(
                << "    \"positiveTermination\": "
                << (result->positive_termination ? "true" : "false") << ",\n"
                << "    \"controlNumber\": " << static_cast<unsigned>(result->control_number) << ",\n"
+               << "    \"mmsFailureCode\": ";
+        if (result->mms_failure_code) {
+            output << *result->mms_failure_code;
+        } else {
+            output << "null";
+        }
+        output << ",\n    \"mmsFailure\": ";
+        if (result->mms_failure_code) {
+            output << '"' << data_access_error_name(*result->mms_failure_code) << '"';
+        } else {
+            output << "null";
+        }
+        output << ",\n"
                << "    \"rawControlError\": " << result->raw_control_error << ",\n"
                << "    \"rawAddCause\": " << result->raw_add_cause << ",\n"
                << "    \"addCause\": \"" << add_cause_name(result->add_cause) << "\",\n"
@@ -705,6 +736,14 @@ int main(int argc, char** argv) {
                   << " termination="
                   << (result.command_termination_received ? "true" : "false")
                   << " ctlNum=" << static_cast<unsigned>(result.control_number)
+                  << " mmsFailure=";
+        if (result.mms_failure_code) {
+            std::cout << *result.mms_failure_code << ':'
+                      << data_access_error_name(*result.mms_failure_code);
+        } else {
+            std::cout << "none";
+        }
+        std::cout
                   << " addCause=" << add_cause_name(result.add_cause)
                   << " rawAddCause=" << result.raw_add_cause
                   << " message=\"" << result.message << "\"\n";

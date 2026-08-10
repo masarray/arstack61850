@@ -172,7 +172,7 @@ behavioral oracle until laboratory interoperability is complete.
 - [x] C1-C4 integrated into the normal `ARIEC61850::core` build and GCC/Clang/MSVC CTest matrix.
 - [x] C5 guarded live-interoperability harness implemented with read-only default, explicit arm token, typed values, status-before/after reads, deterministic control-Write counting, JSON evidence, Wireshark filter hint, and offline safety self-test.
 - [x] C5 dedicated GCC/Clang/MSVC harness CI and build artifact workflow implemented.
-- [~] Physical/simulator C5 acceptance for Direct normal, SBO normal, Direct enhanced, SBO enhanced, negative LastApplError/AddCause, and association-loss cases is pending retained laboratory evidence.
+- [~] IEDScout simulator C5 acceptance is retained for SBO enhanced SelectWithValue/Cancel, negative LastApplError/AddCause, and Direct enhanced Oper/positive CommandTermination with state restoration. Direct normal, SBO normal, association-loss, multi-client contention, and physical-IED cases remain pending.
 
 ### Later Phase 4 work
 
