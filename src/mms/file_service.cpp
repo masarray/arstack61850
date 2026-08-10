@@ -1045,13 +1045,15 @@ MmsFileTransferResult MmsFileTransferRuntime::download_attempt(
                 const auto opened = MmsFileServiceCodec::decode_file_open_response(
                     response_payload, invoke_id);
                 frsm = opened.frsm_id;
-                result.expected_bytes = opened.file_size_bytes;
+                result.expected_bytes = opened.file_size_bytes && *opened.file_size_bytes > 0U
+                    ? std::optional<std::uint64_t>{*opened.file_size_bytes}
+                    : std::nullopt;
                 append_diagnostic(result.diagnostics, {
                     "FileOpen",
                     MmsFileFailureKind::none,
                     true,
                     "FileOpen succeeded; FRSM=" + std::to_string(opened.frsm_id) +
-                        (opened.file_size_bytes
+                        (opened.file_size_bytes && *opened.file_size_bytes > 0U
                             ? ", declaredSize=" + std::to_string(*opened.file_size_bytes) + "."
                             : ", declared size unavailable."),
                     invoke_id,
@@ -1279,14 +1281,6 @@ MmsFileTransferResult MmsFileTransferRuntime::download_attempt(
         result.message = "Downloaded " + std::to_string(result.bytes_transferred) +
             " byte(s) from '" + result.remote_path + "' in " +
             std::to_string(result.read_operations) + " FileRead operation(s).";
-        if (progress != nullptr) {
-            progress->report({
-                result.remote_path,
-                result.bytes_transferred,
-                result.expected_bytes,
-                result.read_operations,
-                true});
-        }
     } else if (result.message.empty()) {
         result.message = "MMS file transfer failed.";
     }

@@ -403,6 +403,22 @@ void runtime_streams_multiple_blocks_and_closes_negative_frsm() {
     CHECK(sent_service_tag(channel.sent[3]) == 74);
 }
 
+void runtime_treats_zero_fileopen_size_as_unavailable() {
+    FakeChannel channel;
+    channel.respond(open_response(1U, 7, 0U));
+    channel.respond(read_response(2U, ByteVector{8U, 8U, 2U}, false));
+    channel.respond(close_response(3U));
+    MemorySink sink;
+    mms::MmsFileTransferRuntime runtime{channel};
+    mms::MmsFileTransferOptions options;
+    options.require_declared_size_match = true;
+    const auto result = runtime.download("relay.inf", sink, options);
+    CHECK(result.success);
+    CHECK(!result.expected_bytes);
+    CHECK(result.bytes_transferred == 3U);
+    CHECK(result.remote_file_closed);
+}
+
 void runtime_bounds_empty_blocks_sizes_operations_and_sink_failures() {
     {
         FakeChannel channel;
@@ -582,6 +598,7 @@ int main() {
         {"codec malformed evidence", codec_rejects_invoke_mismatch_malformed_and_trailing_data},
         {"directory bounded pagination", directory_runtime_paginates_deduplicates_and_detects_no_progress},
         {"runtime streaming and close", runtime_streams_multiple_blocks_and_closes_negative_frsm},
+        {"runtime zero declared size", runtime_treats_zero_fileopen_size_as_unavailable},
         {"runtime bounds and sink", runtime_bounds_empty_blocks_sizes_operations_and_sink_failures},
         {"runtime primary error preservation", runtime_preserves_primary_failure_when_close_also_fails},
         {"adaptive precise fallback", adaptive_fallback_is_precise_and_resets_sink},
