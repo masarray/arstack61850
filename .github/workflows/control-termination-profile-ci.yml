@@ -1,0 +1,62 @@
+name: Control Termination Profile CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'include/ariec61850/control/**'
+      - 'src/control/**'
+      - 'tests/test_command_termination.cpp'
+      - 'tests/control_termination_profile/**'
+      - 'include/ariec61850/mms/data_value.hpp'
+      - 'include/ariec61850/mms/reporting.hpp'
+      - 'src/mms/data_value.cpp'
+      - '.github/workflows/control-termination-profile-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  control-termination-profile:
+    name: Control Termination / ${{ matrix.compiler }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select compiler
+        shell: bash
+        run: |
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            echo "CC=clang" >> "$GITHUB_ENV"
+            echo "CXX=clang++" >> "$GITHUB_ENV"
+          else
+            echo "CC=gcc" >> "$GITHUB_ENV"
+            echo "CXX=g++" >> "$GITHUB_ENV"
+          fi
+
+      - name: Configure control termination profile
+        run: cmake -S tests/control_termination_profile -B build-control-termination
+
+      - name: Build control termination profile
+        run: cmake --build build-control-termination --parallel
+
+      - name: Run CommandTermination parity tests
+        run: >-
+          ctest --test-dir build-control-termination
+          --output-on-failure
+          --output-junit control-termination-ctest.xml
+
+      - name: Upload termination evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-termination-${{ matrix.compiler }}-${{ github.event.pull_request.head.sha || github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: build-control-termination/control-termination-ctest.xml
