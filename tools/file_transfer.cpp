@@ -253,8 +253,8 @@ public:
     output << "{\"schemaVersion\":\"ariec61850-mms-file-directory-v1\","
            << "\"readOnly\":true,\"success\":"
            << (result.success ? "true" : "false") << ','
-           << "\"directory\":\"" << json_escape(result.directory_name) << "\"," 
-           << "\"message\":\"" << json_escape(result.message) << "\"," 
+           << "\"directory\":\"" << json_escape(result.directory_name) << "\","
+           << "\"message\":\"" << json_escape(result.message) << "\","
            << "\"pageCount\":" << result.pages.size() << ','
            << "\"entryCount\":" << result.entries.size() << ",\"pages\":[";
     for (std::size_t index = 0U; index < result.pages.size(); ++index) {
@@ -285,11 +285,11 @@ public:
 [[nodiscard]] std::string transfer_json(
     const mms::MmsFileTransferResult& result) {
     std::ostringstream output;
-    output << "{\"schemaVersion\":\"ariec61850-mms-file-transfer-v1\"," 
+    output << "{\"schemaVersion\":\"ariec61850-mms-file-transfer-v1\","
            << "\"readOnly\":true,\"success\":"
            << (result.success ? "true" : "false") << ','
-           << "\"remotePath\":\"" << json_escape(result.remote_path) << "\"," 
-           << "\"message\":\"" << json_escape(result.message) << "\"," 
+           << "\"remotePath\":\"" << json_escape(result.remote_path) << "\","
+           << "\"message\":\"" << json_escape(result.message) << "\","
            << "\"bytesTransferred\":" << result.bytes_transferred << ',';
     if (result.expected_bytes) output << "\"expectedBytes\":" << *result.expected_bytes << ',';
     else output << "\"expectedBytes\":null,";
