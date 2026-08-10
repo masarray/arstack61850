@@ -26,6 +26,7 @@ add_library(ariec61850_core
     src/mms/pdu.cpp
     src/mms/services.cpp
     src/mms/dynamic_data_set.cpp
+    src/mms/dynamic_report_planner.cpp
     src/mms/invoke_router.cpp
     src/mms/reporting.cpp
     src/mms/association_runtime.cpp
