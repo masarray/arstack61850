@@ -22,8 +22,8 @@ behavioral oracle until laboratory interoperability is complete.
 - [x] Deterministic 8,000-frame / two-second SV host simulation at 4 kHz with independent exact-byte Python PCAP oracle on strict GCC/Clang embedded profiles.
 - [x] ESP32-P4 ESP-IDF v6.0.2 cross-compile/link acceptance for both the integration smoke app and real first-trial SV firmware.
 - [x] ESP32-P4 `FLASHABLE/READY` CI artifact gate: ESP-IDF manifest targets `esp32p4`, validates the `0x2000` bootloader / `0x8000` partition / `0x10000` application layout, retains BIN/ELF/map/flash metadata, and publishes verified SHA-256 checksums.
-- [ ] Real IED or vendor-simulator GOOSE/SV capture accepted.
-- [~] Real-time SV publisher timing-health validation: deterministic host/CI pacing implemented; physical ESP32-P4 evidence pending.
+- [ ] Real IED or vendor-simulator GOOSE/SV capture accepted in this migration evidence set.
+- [~] Real-time SV publisher timing-health validation: deterministic host/CI pacing implemented; physical process-bus work is maintained separately from the MMS-control branch.
 - [ ] Exception-free embedded codec build; the first ESP-IDF trial temporarily enables C++ exceptions for shared legacy validation/convenience APIs while the publisher hot path remains `noexcept`.
 
 ## Phase 2 — engineering file formats
@@ -115,19 +115,19 @@ behavioral oracle until laboratory interoperability is complete.
 - [x] URCB reservation, RptEna enable/disable, optional GI, and touched-state cleanup.
 - [x] Persistent report polling and Phase 4A monitor ingestion.
 - [x] Cleanup-required evidence and retry path after association loss.
-- [ ] BRCB EntryID resume, purge decisioning, and buffer-overflow recovery.
+- [x] BRCB retained-history replay, EntryID resume/rewind, PurgeBuf, replay-gap/overflow recovery, association ownership, ResvTms/Owner lifecycle, and recovery image v2 with legacy v1 restore.
 
 ### Phase 4C — built-in TCP and live read-only discovery
 
-- [~] Non-blocking Windows Winsock and POSIX TCP `MmsByteTransport` implementation.
-- [~] IPv4/IPv6 resolution, TCP_NODELAY, keepalive, partial-send, and peer-close handling.
-- [~] Deadline and cancellation-aware connect/send/receive readiness waits.
-- [~] Bounded live GetNameList pagination for domains, variables, and DataSets.
-- [~] Optional GetVariableAccessAttributes type probes.
-- [~] Optional GetNamedVariableListAttributes DataSet directory reads.
-- [~] Optional read-only RCB attribute inventory/state probes.
-- [~] Read-only `ariec61850_live_discover` human/JSON CLI.
-- [~] Discovery service allowlist regression proving no MMS Write request is emitted.
+- [x] Non-blocking Windows Winsock and POSIX TCP `MmsByteTransport` implementation.
+- [x] IPv4/IPv6 resolution, TCP_NODELAY, keepalive, partial-send, and peer-close handling.
+- [x] Deadline and cancellation-aware connect/send/receive readiness waits.
+- [x] Bounded live GetNameList pagination for domains, variables, and DataSets.
+- [x] Optional GetVariableAccessAttributes type probes.
+- [x] Optional GetNamedVariableListAttributes DataSet directory reads.
+- [x] Optional read-only RCB attribute inventory/state probes.
+- [x] Read-only `ariec61850_live_discover` human/JSON CLI.
+- [x] Discovery service allowlist regression proving no MMS Write request is emitted.
 
 ### Phase 4C.1 — live-model parity and physical read-only interoperability
 
@@ -152,20 +152,50 @@ behavioral oracle until laboratory interoperability is complete.
 - [x] Controlled OCR7SR12 timeout/recovery evidence accepted: healthy baseline, post-association response withholding, client request timeout observed, fresh direct recovery, and identical `934b555dff76a46f` structural fingerprint before/after recovery.
 - [x] Physical GetNameList pagination accepted on OCR7SR12: 9 queries, 4 paginated queries, 88 continuation requests; largest sequence 48 pages / 4,758 names / 47 continuations with final `moreFollows=false`.
 
+### Phase 4D-R — BRCB operational semantics
+
+- [x] Retained bounded history with independent delivery cursor.
+- [x] EntryID replay/resume and rewind-to-oldest semantics.
+- [x] PurgeBuf and explicit replay-gap handling.
+- [x] Association-aware reservation/ownership with ResvTms reconnect/expiry behavior.
+- [x] MMS BRCB operational object exposure and association-context propagation.
+- [x] TCP/reset/COTP-DR association-loss lifecycle bridge.
+- [x] Recovery image v2 preserves retained replay history/cursor/gap and restores legacy v1.
+- [~] Physical ESP32-P4 BRCB raw-partition geometry/latency/endurance/power-loss evidence remains a separate NVM gate.
+
+### Phase 4D-C — guarded IEC 61850 Control Model parity
+
+- [x] C1 association-aware, default-deny guarded-control safety state machine.
+- [x] C1 Direct normal, SBO normal, Direct enhanced, and SBO enhanced lifecycle semantics.
+- [x] C1 immutable selected sequence, ownership, timeout, Cancel, association-loss cleanup, and ctlNum 1..255 wrap.
+- [x] C2 exact live-TypeSpecification `Oper`, `SBOw`, and `Cancel` structure builder.
+- [x] C2 typed SPC/DPC/integer/unsigned/floating/step control values and conservative vendor-field rejection.
+- [x] C2 exact origin, ctlNum, T, optional operTm, Test, and two-bit Check construction with golden MMS Data evidence.
+- [x] C3 enhanced-security CommandTermination and LastApplError object correlation.
+- [x] C3 standard ControlError and AddCause 0..27 mapping with raw unknown-code preservation.
+- [x] C4 live ctlModel/GVAA/GetNameList/CF-timeout discovery over the production MMS association runtime.
+- [x] C4 Direct/SBO/SBOw/Oper/Cancel orchestration, asynchronous application-error grace window, non-fatal enhanced termination timeout, and no automatic command retry.
+- [x] C1-C4 integrated into the normal `ARIEC61850::core` build and GCC/Clang/MSVC CTest matrix.
+- [x] C5 guarded live-interoperability harness implemented with read-only default, explicit arm token, typed values, status-before/after reads, deterministic control-Write counting, JSON evidence, Wireshark filter hint, and offline safety self-test.
+- [x] C5 dedicated GCC/Clang/MSVC harness CI and build artifact workflow implemented.
+- [~] Physical/simulator C5 acceptance for Direct normal, SBO normal, Direct enhanced, SBO enhanced, negative LastApplError/AddCause, and association-loss cases is pending retained laboratory evidence.
+
 ### Later Phase 4 work
 
-- [ ] Direct and SBO control state machines.
-- [ ] Enhanced-security termination/error handling.
 - [ ] MMS file and fault-record transfer.
+- [ ] Dynamic DataSet define/delete parity and full dynamic RCB lifecycle parity where still missing from the C# surface.
 
 ## Phase 5 — simulator and applications
 
-- [ ] Deterministic IED simulation and read-only MMS server.
-- [ ] CLI parity and Windows Npcap abstraction.
-- [ ] Native Engineering Workbench, simulator, discovery, and SV publisher UI.
+- [ ] Deterministic IED simulation and read-only MMS server integration parity.
+- [ ] CLI/application parity and broader Windows Npcap abstraction where still required.
+- [ ] Native Engineering Workbench, simulator, discovery, and SV publisher UI parity where product scope still requires it.
 
 ## Safety gate
 
-SCL, COMTRADE, PCAP, and the Phase 4C/4C.1 live discovery surface are read-only. Active RCB
-mutation, control, dynamic DataSet mutation, file transfer, Npcap transmission, and real-time SV
-scheduling require separate explicit APIs, authorization, and physical-laboratory acceptance.
+SCL, COMTRADE, PCAP, and the Phase 4C/4C.1 discovery surface remain read-only. Phase 4D-C
+live control is an explicit, authorization-gated API and the C5 interoperability harness is
+read-only by default; it refuses a control Write without the exact laboratory arm token.
+Control, dynamic DataSet mutation, file transfer, Npcap transmission, and real-time process-bus
+scheduling require their own explicit APIs and evidence gates. Hosted CI does not constitute
+physical IED interoperability or IEC 61850 conformance certification.
