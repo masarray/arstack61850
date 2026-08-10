@@ -25,6 +25,7 @@ add_library(ariec61850_core
     src/mms/data_codec.cpp
     src/mms/pdu.cpp
     src/mms/services.cpp
+    src/mms/dynamic_data_set.cpp
     src/mms/invoke_router.cpp
     src/mms/reporting.cpp
     src/mms/association_runtime.cpp
@@ -206,6 +207,13 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_warnings(ariec61850_mms_services_tests)
     ariec61850_apply_sanitizers(ariec61850_mms_services_tests)
     add_test(NAME ariec61850_mms_services_tests COMMAND ariec61850_mms_services_tests)
+
+    add_executable(ariec61850_dynamic_data_set_tests tests/test_dynamic_data_set.cpp)
+    target_link_libraries(ariec61850_dynamic_data_set_tests PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_dynamic_data_set_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_dynamic_data_set_tests)
+    ariec61850_apply_sanitizers(ariec61850_dynamic_data_set_tests)
+    add_test(NAME ariec61850_dynamic_data_set_tests COMMAND ariec61850_dynamic_data_set_tests)
 
     add_executable(ariec61850_reporting_tests tests/test_reporting.cpp)
     target_link_libraries(ariec61850_reporting_tests PRIVATE ARIEC61850::core)
