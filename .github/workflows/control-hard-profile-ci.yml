@@ -1,0 +1,81 @@
+name: Control Hard Profile CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'include/ariec61850/control/**'
+      - 'src/control/**'
+      - 'embedded/control_guarded_hard_profile_smoke.cpp'
+      - 'embedded/control_hard_profile/**'
+      - '.github/workflows/control-hard-profile-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  control-hard-profile:
+    name: Control Hard / ${{ matrix.compiler }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select compiler
+        shell: bash
+        run: |
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            echo "CC=clang" >> "$GITHUB_ENV"
+            echo "CXX=clang++" >> "$GITHUB_ENV"
+          else
+            echo "CC=gcc" >> "$GITHUB_ENV"
+            echo "CXX=g++" >> "$GITHUB_ENV"
+          fi
+
+      - name: Configure control hard profile
+        run: cmake -S embedded/control_hard_profile -B build-control-hard
+
+      - name: Build control hard profile
+        run: cmake --build build-control-hard --parallel
+
+      - name: Run control smoke
+        run: >-
+          ctest --test-dir build-control-hard
+          --output-on-failure
+          --output-junit control-ctest.xml
+
+      - name: Prove exception runtime is absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary=build-control-hard/ariec61850_hard_guarded_control_smoke
+          if nm -C "$binary" | grep -E '__cxa_throw|__cxa_begin_catch|__cxa_end_catch|__gxx_personality_v0'; then
+            echo "exception runtime symbol found in $binary" >&2
+            exit 1
+          fi
+          echo 'NO_EXCEPTION_RUNTIME=PASS'
+
+      - name: Report footprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "compiler=${{ matrix.compiler }}"
+            size build-control-hard/ariec61850_hard_guarded_control_smoke
+          } | tee build-control-hard/control-footprint.txt
+
+      - name: Upload control evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-hard-${{ matrix.compiler }}-${{ github.event.pull_request.head.sha || github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            build-control-hard/control-ctest.xml
+            build-control-hard/control-footprint.txt
