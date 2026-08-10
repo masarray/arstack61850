@@ -1,0 +1,71 @@
+name: Control Interop Harness CI
+
+on:
+  push:
+    branches:
+      - "agent/phase-4d-c5-control-interoperability"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  control-interop:
+    name: Control Interop Harness / ${{ matrix.compiler }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            compiler: gcc
+          - os: ubuntu-latest
+            compiler: clang
+          - os: windows-latest
+            compiler: msvc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select compiler
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            echo "CC=clang" >> "$GITHUB_ENV"
+            echo "CXX=clang++" >> "$GITHUB_ENV"
+          else
+            echo "CC=gcc" >> "$GITHUB_ENV"
+            echo "CXX=g++" >> "$GITHUB_ENV"
+          fi
+
+      - name: Configure C5 harness
+        shell: bash
+        run: cmake -S tools/control_interop_probe -B build-control-interop
+
+      - name: Build C5 harness
+        shell: bash
+        run: cmake --build build-control-interop --config Release --parallel
+
+      - name: Run offline safety self-test
+        shell: bash
+        run: ctest --test-dir build-control-interop -C Release --output-on-failure
+
+      - name: Capture C5 harness contract
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p evidence/control-interop
+          ./build-control-interop/ariec61850_control_interop_probe --self-test \
+            | tee evidence/control-interop/self-test-${{ matrix.compiler }}.txt
+          ./build-control-interop/ariec61850_control_interop_probe --help \
+            > evidence/control-interop/help-${{ matrix.compiler }}.txt
+
+      - name: Upload C5 harness evidence
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-interop-harness-${{ matrix.compiler }}
+          path: evidence/control-interop
+          if-no-files-found: error
