@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <limits>
 
 namespace ar::iec61850::control {
@@ -71,10 +70,6 @@ constexpr std::uint64_t kFnvPrime = 1099511628211ULL;
     }
     return hash;
 }
-
-[[nodiscard]] bool same_fingerprint(
-    const GuardedControlPlanner::SequenceFingerprint& left,
-    const GuardedControlPlanner::SequenceFingerprint& right) noexcept;
 
 } // namespace
 
@@ -332,6 +327,11 @@ GuardedControlDecision GuardedControlPlanner::select_with_value(
                       AddCause::inconsistent_parameters);
     }
     expire_selection(now_ms);
+    if (waiting_for_termination_) {
+        return reject(ControlAction::select_with_value,
+                      GuardedControlStatus::command_already_in_execution,
+                      AddCause::command_already_in_execution);
+    }
     if (selected_) {
         return reject(ControlAction::select_with_value,
             owner_association_id_ == client.association_id
@@ -382,9 +382,10 @@ GuardedControlDecision GuardedControlPlanner::operate(
 
     if (model_requires_select(model_)) {
         if (selected_ && selection_expires_at_ms_ != 0U && now_ms >= selection_expires_at_ms_) {
+            const auto control_number = active_sequence_.control_number;
             clear_active();
-            return reject(ControlAction::operate, GuardedControlStatus::selection_expired,
-                          AddCause::time_limit_over);
+            return {GuardedControlStatus::selection_expired, ControlAction::operate,
+                    control_number, ControlError::no_error, AddCause::time_limit_over};
         }
         if (!selected_) {
             return reject(ControlAction::operate, GuardedControlStatus::object_not_selected,
@@ -395,18 +396,20 @@ GuardedControlDecision GuardedControlPlanner::operate(
                           AddCause::locked_by_other_client);
         }
         if (!sequence_matches(sequence, active_sequence_)) {
+            const auto control_number = active_sequence_.control_number;
             clear_active();
-            return reject(ControlAction::operate, GuardedControlStatus::sequence_mismatch,
-                          AddCause::inconsistent_parameters);
+            return {GuardedControlStatus::sequence_mismatch, ControlAction::operate,
+                    control_number, ControlError::no_error, AddCause::inconsistent_parameters};
         }
     }
 
     if (!authorized(ControlAction::operate, client, sequence)) {
+        const auto control_number = active_sequence_.control_number;
         if (model_requires_select(model_)) {
             clear_active();
         }
-        return reject(ControlAction::operate, GuardedControlStatus::access_denied,
-                      AddCause::no_access_authority);
+        return {GuardedControlStatus::access_denied, ControlAction::operate,
+                control_number, ControlError::no_error, AddCause::no_access_authority};
     }
 
     std::uint8_t control_number{};
@@ -445,9 +448,10 @@ GuardedControlDecision GuardedControlPlanner::cancel(
                       AddCause::no_access_authority);
     }
     if (selected_ && selection_expires_at_ms_ != 0U && now_ms >= selection_expires_at_ms_) {
+        const auto control_number = active_sequence_.control_number;
         clear_active();
-        return reject(ControlAction::cancel, GuardedControlStatus::selection_expired,
-                      AddCause::time_limit_over);
+        return {GuardedControlStatus::selection_expired, ControlAction::cancel,
+                control_number, ControlError::no_error, AddCause::time_limit_over};
     }
     if (!selected_) {
         return reject(ControlAction::cancel, GuardedControlStatus::no_active_selection,
@@ -458,13 +462,8 @@ GuardedControlDecision GuardedControlPlanner::cancel(
                       AddCause::locked_by_other_client);
     }
 
-    // Cancel authorization is evaluated with a minimal view because the exact
-    // selected sequence is already locked inside the planner.
-    const ControlSequenceView authorization_sequence{
-        std::span<const std::uint8_t>{}, OriginCategory::station_control, {}};
-    if (policy_.authorize == nullptr ||
-        !policy_.authorize(policy_.authorization_context, ControlAction::cancel,
-                           object_, client, authorization_sequence)) {
+    const ControlSequenceView authorization_sequence{};
+    if (!authorized(ControlAction::cancel, client, authorization_sequence)) {
         return reject(ControlAction::cancel, GuardedControlStatus::access_denied,
                       AddCause::no_access_authority);
     }
