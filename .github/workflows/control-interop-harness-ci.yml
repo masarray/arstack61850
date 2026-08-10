@@ -61,8 +61,14 @@ jobs:
             | tee evidence/control-interop/self-test-${{ matrix.compiler }}.txt
           ./build-control-interop/ariec61850_control_interop_probe --help \
             > evidence/control-interop/help-${{ matrix.compiler }}.txt
+          ./build-control-interop/ariec61850_control_inventory_probe --self-test \
+            | tee evidence/control-interop/inventory-self-test-${{ matrix.compiler }}.txt
+          ./build-control-interop/ariec61850_control_inventory_probe --help \
+            > evidence/control-interop/inventory-help-${{ matrix.compiler }}.txt
           cp build-control-interop/ariec61850_control_interop_probe \
             evidence/control-interop/ariec61850_control_interop_probe-${{ matrix.compiler }}
+          cp build-control-interop/ariec61850_control_inventory_probe \
+            evidence/control-interop/ariec61850_control_inventory_probe-${{ matrix.compiler }}
 
       - name: Stage Windows harness and contract
         if: runner.os == 'Windows'
@@ -70,9 +76,13 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path evidence/control-interop | Out-Null
           $exe = 'build-control-interop/Release/ariec61850_control_interop_probe.exe'
+          $inventory = 'build-control-interop/Release/ariec61850_control_inventory_probe.exe'
           & $exe --self-test | Tee-Object -FilePath evidence/control-interop/self-test-msvc.txt
           & $exe --help | Out-File -Encoding utf8 evidence/control-interop/help-msvc.txt
+          & $inventory --self-test | Tee-Object -FilePath evidence/control-interop/inventory-self-test-msvc.txt
+          & $inventory --help | Out-File -Encoding utf8 evidence/control-interop/inventory-help-msvc.txt
           Copy-Item $exe evidence/control-interop/ariec61850_control_interop_probe.exe
+          Copy-Item $inventory evidence/control-interop/ariec61850_control_inventory_probe.exe
 
       - name: Upload C5 harness evidence and binary
         uses: actions/upload-artifact@v4
