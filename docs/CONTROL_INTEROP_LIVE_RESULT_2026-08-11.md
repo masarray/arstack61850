@@ -58,6 +58,8 @@ Generated artifacts remain under the ignored local build evidence directory and 
 
 ## Remaining acceptance boundary
 
+These bullets describe the scope of this locally retained, hash-identified capture set. A complementary parallel simulator run covering all four control models is recorded in `CONTROL_INTEROP_ACCEPTANCE.md`; its local artifact filenames are documented there, but those artifacts are not part of this checkout.
+
 - GCC/Clang profiles must pass on the integration PR; only MSVC was available locally.
 - Direct normal and SBO normal were not exposed by this tested control object during the retained cases.
 - Association-loss and multi-client contention were not forced against the running IEDScout process.

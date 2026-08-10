@@ -35,10 +35,10 @@ Status terms are intentionally conservative:
 | Reporting | BRCB Owner / ResvTms / association lifecycle | Offline-tested | Multi-client ownership, reconnect/expiry, and association-loss semantics are hard-profile tested. |
 | Reporting | BRCB recovery image v2 | Offline-tested / physical NVM pending | Recovery preserves retained window/cursor/gap with v1 restore; flash endurance and power-loss hardware evidence are separate. |
 | Control | `ctlModel` discovery | Live-proven / simulator | C5 rediscovered live `ctlModel` and exact command types before each action on IEDScout. |
-| Control | Direct normal | Software-ready for lab | Exactly-one `Oper` semantics are deterministic; retained live Direct normal evidence remains pending. |
-| Control | SBO normal | Software-ready for lab | Normal Select is an `SBO` Read; immutable sequence, Oper, and explicit Cancel are implemented; live evidence remains pending. |
+| Control | Direct normal | Live-proven / simulator | The retained C5 acceptance record covers OFF and ON with exactly one `Oper` Write per deliberate action. |
+| Control | SBO normal | Live-proven / simulator | The retained C5 acceptance record covers Select Read followed by exactly one `Oper`, plus explicit Select/Cancel with no following `Oper`. |
 | Control | Direct enhanced | Live-proven / simulator | IEDScout OFF and ON-restore each sent one `Oper`, received positive CommandTermination, and changed/restored status without retry. |
-| Control | SBO enhanced | Live-proven subset / simulator | IEDScout accepted `SBOw -> Cancel`; full `SBOw -> Oper -> CommandTermination` remains pending for an SBO-enhanced profile. |
+| Control | SBO enhanced | Live-proven / simulator | Retained evidence covers `SBOw -> Oper -> CommandTermination` in both directions, plus a separate accepted `SBOw -> Cancel` case. |
 | Control | `Oper` / `SBOw` / `Cancel` live-type binding | Live-proven / simulator | Exact Boolean structures from live GVAA were sent successfully; unknown vendor fields still fail closed. |
 | Control | Control value types | Offline-tested | SPC/DPC/integer/unsigned/floating/step binding is conservative; DPC uses network bit order. |
 | Control | Ownership / immutable sequence | Offline-tested | Second-client takeover, expiry, mismatch, authorization revocation, and association-loss cleanup are covered. |
@@ -67,8 +67,8 @@ Status terms are intentionally conservative:
 | Security | libFuzzer corpora | CI-gated | BER, GOOSE, SV, PCAP, SCL, COMTRADE, OSI, MMS services/reporting, and file-service corpora are maintained. |
 | Portability | GCC / Clang / MSVC | CI-gated | C1-C5 build through normal and dedicated matrices; MSVC was validated locally for this integration. |
 | Acceptance | Read-only same-IED structural stability | Live-proven | Repeated-cycle and timeout/recovery evidence are retained. |
-| Acceptance | Control C5 simulator subset | Live-proven | SBO enhanced Select/Cancel, negative diagnostics, Direct enhanced positive termination, Write counts, and state restoration are retained. |
-| Acceptance | Full physical IEC 61850 control interoperability | Pending | Direct/SBO normal, full SBO enhanced Oper, association-loss, contention, and physical-IED evidence remain required. |
+| Acceptance | Control C5 tested simulator profile | Live-proven | All four ctlModels are recorded in `CONTROL_INTEROP_ACCEPTANCE.md`; the locally retained subset adds hashed JSON/PCAP evidence for negative diagnostics, SBO enhanced Cancel, Direct enhanced termination, exact Write counts, and state restoration. |
+| Acceptance | Full physical IEC 61850 control interoperability | Pending | Association-loss, contention, physical-IED, and broader multi-vendor evidence remain required. |
 | Acceptance | Multi-vendor physical interoperability | Not yet complete | Required before industrial replacement or broad conformance claims. |
 
 ## Current live mutation boundary
@@ -81,11 +81,11 @@ Reporting/BRCB mutation semantics are distinct from the C5 control gate. Failure
 
 ## Current control milestone
 
-C1-C5 provide a guarded production control path plus a live evidence harness. IEDScout simulator evidence is retained for a meaningful subset, but the overall project remains short of complete physical and multi-model acceptance.
+C1-C5 provide a guarded production control path plus a live evidence harness. The tested simulator profile has an acceptance record for all four control models, and a complementary locally retained subset includes hashed JSON/PCAP evidence. The project remains short of physical and broad multi-vendor acceptance.
 
 `SOFTWARE_READY_FOR_LAB` applies to all implemented control models.
 
-`LAB_INTEROP_PASSED` applies only to a specific IED/control-model profile after its required positive, negative, failure, and cleanup evidence agrees across JSON and PCAP. The retained IEDScout results do not constitute IEC 61850 conformance certification.
+`SIMULATOR_INTEROP_PASSED` applies only to the specific simulator profile recorded in `CONTROL_INTEROP_ACCEPTANCE.md`. Any stronger `LAB_INTEROP_PASSED` or physical-IED claim still requires the runbook's retained positive, negative, failure, cleanup, JSON, and packet-capture evidence. These results do not constitute IEC 61850 conformance certification.
 
 ## Next parity direction
 
