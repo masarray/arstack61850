@@ -25,6 +25,8 @@ __pycache__/
 *.pyc
 interop-evidence/
 evidence/
+.artifacts/
 *-live-model.json
+*-live-runtime.json
 *-parity.json
 interop-summary.json
