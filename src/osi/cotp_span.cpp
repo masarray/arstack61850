@@ -185,13 +185,13 @@ bool CotpTpduView::try_parameter(
         if (parameter_bytes.size() - offset < 2U) {
             return false;
         }
-        const auto code = parameter_bytes[offset];
+        const auto current_code = parameter_bytes[offset];
         const auto length = static_cast<std::size_t>(parameter_bytes[offset + 1U]);
         offset += 2U;
         if (length > parameter_bytes.size() - offset) {
             return false;
         }
-        if (code == parameter_code) {
+        if (current_code == parameter_code) {
             value = parameter_bytes.subspan(offset, length);
             return true;
         }
