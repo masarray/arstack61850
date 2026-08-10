@@ -3,6 +3,8 @@
 #include "ariec61850/mms/dynamic_data_set.hpp"
 #include "ariec61850/mms/dynamic_report_planner.hpp"
 #include "ariec61850/mms/live_discovery.hpp"
+#include "ariec61850/mms/rcb_contention.hpp"
+#include "ariec61850/mms/rcb_failover.hpp"
 #include "ariec61850/mms/rcb_selection.hpp"
 #include "ariec61850/mms/report_subscription_runtime.hpp"
 #include "ariec61850/mms/services.hpp"
@@ -40,6 +42,10 @@ struct CliOptions final {
     std::size_t auto_member_count{4U};
     std::size_t maximum_type_probes{2'048U};
     std::size_t maximum_rcb_probes{4'096U};
+    std::size_t maximum_claim_candidates{4U};
+    std::size_t preclaim_probe_count{3U};
+    std::chrono::milliseconds preclaim_probe_delay{250};
+    int contention_cooldown_seconds{60};
     std::size_t probe_cycles{3U};
     std::chrono::milliseconds probe_delay{150};
     bool allow_urcb_fallback{true};
@@ -77,6 +83,10 @@ void print_usage() {
         << "  --auto-members N         Auto-pick N scalar ST/MX members (default 4).\n"
         << "  --max-types N            Bound GVAA probes used for auto-members (default 2048).\n"
         << "  --max-rcb N              Bound RCB probes (default 4096).\n"
+        << "  --max-claim-candidates N Bound pre-claim candidates (default 4).\n"
+        << "  --preclaim-probes N      Read-only probes per candidate (default 3).\n"
+        << "  --preclaim-delay-ms N    Delay between pre-claim probes (default 250).\n"
+        << "  --contention-cooldown N  Recorded skip cooldown seconds (default 60).\n"
         << "  --probe-cycles N         Confirmed read cycles after GI (default 3).\n"
         << "  --probe-delay-ms N       Delay between confirmation reads (default 150).\n"
         << "  --timeout-ms N           Connect/request timeout (default 5000).\n"
@@ -85,7 +95,8 @@ void print_usage() {
         << "                            Enable mutation: Define DataSet -> bind RCB -> enable/GI\n"
         << "                            -> observe -> disable -> unbind -> Delete DataSet.\n"
         << "  -h, --help                Show this help.\n\n"
-        << "This harness never auto-retries a failed mutation and never disables a busy RCB.\n";
+        << "Busy/flapping candidates are skipped before mutation. This harness never\n"
+        << "auto-retries a failed mutation and never disables a busy RCB.\n";
 }
 
 [[nodiscard]] CliOptions parse_cli(int argc, char** argv) {
@@ -104,7 +115,9 @@ void print_usage() {
         else if (option == "--rcb-ld" || option == "--preferred-rcb" ||
                  option == "--dataset-ref" || option == "--member" ||
                  option == "--auto-members" || option == "--max-types" ||
-                 option == "--max-rcb" || option == "--probe-cycles" ||
+                 option == "--max-rcb" || option == "--max-claim-candidates" ||
+                 option == "--preclaim-probes" || option == "--preclaim-delay-ms" ||
+                 option == "--contention-cooldown" || option == "--probe-cycles" ||
                  option == "--probe-delay-ms" || option == "--timeout-ms" ||
                  option == "--arm") {
             if (index >= argc) throw std::invalid_argument(option + " requires a value.");
@@ -116,6 +129,17 @@ void print_usage() {
             else if (option == "--auto-members") options.auto_member_count = parse_positive(option, value);
             else if (option == "--max-types") options.maximum_type_probes = parse_positive(option, value);
             else if (option == "--max-rcb") options.maximum_rcb_probes = parse_positive(option, value);
+            else if (option == "--max-claim-candidates") options.maximum_claim_candidates = parse_positive(option, value);
+            else if (option == "--preclaim-probes") options.preclaim_probe_count = parse_positive(option, value);
+            else if (option == "--preclaim-delay-ms") {
+                options.preclaim_probe_delay = std::chrono::milliseconds{static_cast<std::int64_t>(parse_positive(option, value))};
+            } else if (option == "--contention-cooldown") {
+                const auto seconds = parse_positive(option, value);
+                if (seconds > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+                    throw std::invalid_argument(option + " exceeds the supported integer range.");
+                }
+                options.contention_cooldown_seconds = static_cast<int>(seconds);
+            }
             else if (option == "--probe-cycles") options.probe_cycles = parse_positive(option, value);
             else if (option == "--probe-delay-ms") {
                 options.probe_delay = std::chrono::milliseconds{static_cast<std::int64_t>(parse_positive(option, value))};
@@ -281,12 +305,46 @@ int main(int argc, char** argv) {
         selection_options.preferred_rcb_reference = cli.preferred_rcb_reference;
         selection_options.allow_urcb_fallback = cli.allow_urcb_fallback;
         selection_options.allow_polling_fallback = false;
-        const auto selection = mms::MmsRcbPoolSelector::build_dynamic_selection(discovery, selection_options);
-        print_candidates(selection);
-        const auto* candidate = mms::MmsRcbPoolSelector::select_report_control(discovery, selection);
+        mms::MmsRcbPreclaimFailoverTracker failover{cli.maximum_claim_candidates};
+        mms::MmsRcbContentionProbeClient contention_probe{session.association()};
+        const mms::MmsReportControlCandidate* candidate = nullptr;
+        while (failover.may_attempt()) {
+            selection_options.excluded_rcb_references =
+                failover.excluded_rcb_references();
+            const auto selection = mms::MmsRcbPoolSelector::build_dynamic_selection(
+                discovery, selection_options);
+            print_candidates(selection);
+            candidate = mms::MmsRcbPoolSelector::select_report_control(
+                discovery, selection);
+            if (candidate == nullptr) {
+                break;
+            }
+
+            mms::MmsRcbContentionProbeOptions probe_options;
+            probe_options.probe_count = cli.preclaim_probe_count;
+            probe_options.probe_delay = cli.preclaim_probe_delay;
+            probe_options.cooldown_seconds = cli.contention_cooldown_seconds;
+            const auto probe = contention_probe.probe(*candidate, probe_options);
+            const auto outcome = failover.observe(probe);
+            const auto& attempt = failover.snapshot().attempts.back();
+            std::cout << "PRECLAIM_ATTEMPT attempt=" << attempt.attempt_number
+                      << " rcb=" << attempt.rcb_reference
+                      << " outcome=" << mms::mms_rcb_preclaim_outcome_name(outcome)
+                      << " busy=" << (attempt.busy ? "true" : "false")
+                      << " flapping=" << (attempt.flapping ? "true" : "false")
+                      << " cooldownSeconds=" << attempt.cooldown_seconds << '\n';
+            if (outcome == mms::MmsRcbPreclaimOutcome::stable_proceed) {
+                break;
+            }
+            std::cout << "RCB_FAILOVER_SKIP rcb=" << attempt.rcb_reference
+                      << " reason=" << attempt.reason << '\n';
+            candidate = nullptr;
+        }
         if (candidate == nullptr) {
             session.disconnect();
-            std::cerr << "BLOCKED: no safe empty dynamic RCB slot was found. No mutation sent.\n";
+            std::cerr << "BLOCKED: no stable empty dynamic RCB slot remained after "
+                      << failover.snapshot().attempts.size()
+                      << " bounded pre-claim attempt(s). No mutation sent.\n";
             return 3;
         }
         if (!contains_attribute(*candidate, "DatSet") || !contains_attribute(*candidate, "RptEna")) {
@@ -325,6 +383,8 @@ int main(int argc, char** argv) {
         std::cout << "SMART_DYNAMIC_RCB_PLAN\n"
                   << "  endpoint=" << cli.endpoint.host << ':' << cli.endpoint.port << '\n'
                   << "  rcb=" << candidate->reference << " mode=" << candidate->mode() << '\n'
+                  << "  preclaimAttempts=" << failover.snapshot().attempts.size()
+                  << " skipped=" << failover.snapshot().excluded_rcb_references.size() << '\n'
                   << "  dataset=" << data_set_reference << '\n'
                   << "  members=" << members.size() << '\n';
         if (auto_selection) {

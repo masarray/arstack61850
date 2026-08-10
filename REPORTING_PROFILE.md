@@ -14,6 +14,13 @@ optionally reserves an URCB, configures only explicitly requested attributes, en
 optionally issues GI, receives InformationReports, and cleans up only state touched by the
 runtime. Lost-association cleanup is recorded rather than assumed.
 
+Before an armed Dynamic RCB lifecycle, the smart pre-claim failover layer runs
+bounded repeated Read probes. A candidate that becomes enabled, reserved, or
+flaps between probes is excluded from the current command and the pool selector
+may rank another candidate. Once any mutation is attempted, automatic switching
+is disabled; an uncertain write must be cleaned up and diagnosed on the original
+RCB instead of risking a second remote mutation.
+
 ## Phase 4C.1 live-model integration
 
 Read-only discovery includes DataSet directory and RCB state evidence in `live-ied-model-v1`.
@@ -27,5 +34,6 @@ mode. Runtime report subscription acceptance remains separate from read-only mod
 
 - BRCB EntryID resume and replay;
 - purge policy and buffer-overflow recovery;
-- dynamic DataSet lifecycle;
+- live proof where a contended preferred RCB is skipped for a second candidate;
+- reconnect and automatic resubscribe policy;
 - long-duration multi-vendor report interoperability.

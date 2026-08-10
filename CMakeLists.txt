@@ -35,6 +35,7 @@ add_library(ariec61850_core
     src/mms/tcp_transport.cpp
     src/mms/live_discovery.cpp
     src/mms/rcb_selection.cpp
+    src/mms/rcb_failover.cpp
     src/sampled_values/pdu_codec.cpp
     src/sampled_values/frame_codec.cpp
     src/sampled_values/quality.cpp
@@ -229,6 +230,13 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_warnings(ariec61850_dynamic_data_set_tests)
     ariec61850_apply_sanitizers(ariec61850_dynamic_data_set_tests)
     add_test(NAME ariec61850_dynamic_data_set_tests COMMAND ariec61850_dynamic_data_set_tests)
+
+    add_executable(ariec61850_rcb_failover_tests tests/test_rcb_failover.cpp)
+    target_link_libraries(ariec61850_rcb_failover_tests PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_rcb_failover_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_rcb_failover_tests)
+    ariec61850_apply_sanitizers(ariec61850_rcb_failover_tests)
+    add_test(NAME ariec61850_rcb_failover_tests COMMAND ariec61850_rcb_failover_tests)
 
     add_executable(ariec61850_reporting_tests tests/test_reporting.cpp)
     target_link_libraries(ariec61850_reporting_tests PRIVATE ARIEC61850::core)

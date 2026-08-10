@@ -32,14 +32,16 @@ Status terms are intentionally conservative:
 | Cross-language | Same-IED runtime comparator | Live-proven / mutable | Runtime comparison is informational; C++-only `DataSetBindingStatus` is treated as enrichment rather than a false cross-schema mismatch. |
 | DataSet | Name inventory | Live-proven | Dynamic inventory may legitimately change between sessions. |
 | DataSet | Member directory | Live-proven/optional | Explicitly skipped with `--no-datasets`; empty member list then produces evidence warning, not structural failure. |
+| DataSet | Dynamic create/verify/delete lifecycle | Live-proven / guarded lab | One bounded lifecycle created a domain-specific DataSet, verified exact member order, used it for reporting, and deleted only the runtime-owned DataSet. |
 | Reporting | RCB inventory | Live-proven | Current endpoint exposes 286 RCB identities: 8 BRCB and 278 URCB in the C# oracle capture. |
 | Reporting | Full RCB read-only probe | Live-proven | Current C++ full-probe snapshot classified all 286 RCBs with 0 NotRead and 0 ReadFailed. |
 | Reporting | Bound/Unbound runtime semantics | Live-proven | One current snapshot observed 6 Bound and 280 Unbound. This is mutable runtime state, not a permanent device capability claim. |
 | Reporting | Dynamic RCB candidate planner | Live-proven | Read-only ranking selected an empty dynamic BRCB candidate on current endpoint. |
 | Reporting | Conservative operational availability | Live-proven | Separates dynamic-slot eligibility from populated/static report availability. |
 | Reporting | Read-only contention pre-claim probe | Live-proven | Three repeated probes on `OCR7SR12CTRL/BI6GGIO1.urcbA01` remained free/stable and returned `StableProceed`; no claim/write was performed. |
-| Reporting | RCB claim/reservation/enable | Planned / out of Phase 4C | No Write, reservation, `RptEna` or GI is authorized by live discovery. |
-| Reporting | InformationReport decode / subscription runtime | Offline-tested / partial live integration | Core implementation exists; full live reporting acceptance is not claimed. |
+| Reporting | Bounded smart pre-claim failover | Offline-tested / stable live probe | Immediately before mutation, repeated read-only probes reject busy/flapping candidates, add them to the command-local exclusion set, and rerank the next candidate. A stable live candidate passed three probes; a live contended switch remains pending. Mutation failures never trigger automatic switching. |
+| Reporting | RCB claim/reservation/enable | Live-proven / guarded lab | Explicitly armed Dynamic RCB trial bound and enabled one BRCB, requested GI, then disabled and unbound it with cleanup verified. Live discovery itself remains read-only. |
+| Reporting | InformationReport decode / subscription runtime | Live-proven / single profile | The guarded trial received and decoded an InformationReport through the persistent subscription runtime; long-duration and multi-vendor acceptance remain pending. |
 | GOOSE | PDU / Ethernet encode-decode | Offline-tested | Golden vectors, deterministic tests and fuzz corpus. |
 | GOOSE | Publisher/subscriber runtime foundations | Offline-tested | Physical multi-vendor process-bus acceptance pending. |
 | Sampled Values | PDU / Ethernet encode-decode | Offline-tested | Golden vectors, deterministic tests and fuzz corpus. |
