@@ -66,3 +66,29 @@ jobs:
           python scripts/run-phase4c-physical-acceptance.py --help | Out-Null
           python -m py_compile scripts/run-phase4c-timeout-recovery.py
           python scripts/run-phase4c-timeout-recovery.py --help | Out-Null
+      - name: Build deterministic SV injector evidence bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = 'sv-injector-artifact'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $exe = 'build/Release/ariec61850_sv_injector.exe'
+          if (-not (Test-Path $exe)) { throw "Missing $exe" }
+          & $exe --capabilities | Out-File -Encoding utf8 "$out/capabilities.json"
+          & $exe --scenario normal --frames 8000 --pcap "$out/sv-loopback-normal-2s.pcap" --json |
+            Out-File -Encoding utf8 "$out/normal-2s-evidence.json"
+          if ($LASTEXITCODE -ne 0) { throw "Normal 8,000-frame injector evidence run failed: $LASTEXITCODE" }
+          & $exe --scenario protection-fault --json |
+            Out-File -Encoding utf8 "$out/protection-fault-evidence.json"
+          if ($LASTEXITCODE -ne 0) { throw "Protection-fault injector evidence run failed: $LASTEXITCODE" }
+          Copy-Item $exe "$out/ariec61850_sv_injector.exe"
+          Get-FileHash "$out/ariec61850_sv_injector.exe", "$out/sv-loopback-normal-2s.pcap", "$out/normal-2s-evidence.json", "$out/protection-fault-evidence.json", "$out/capabilities.json" -Algorithm SHA256 |
+            ForEach-Object { "{0}  {1}" -f $_.Hash.ToLowerInvariant(), (Split-Path $_.Path -Leaf) } |
+            Out-File -Encoding ascii "$out/SHA256SUMS"
+      - name: Upload Windows SV injector
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-sv-injector-${{ github.event.pull_request.head.sha || github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: sv-injector-artifact/

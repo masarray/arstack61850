@@ -9,7 +9,9 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
 #include <vector>
+#endif
 
 namespace ar::iec61850::sampled_values {
 
@@ -22,12 +24,15 @@ public:
         const SampledValuesFrame& frame,
         std::span<std::uint8_t> destination) noexcept;
 
-    // Host convenience wrapper. Embedded SV publishers should use encode_into
-    // with a persistent Ethernet-sized buffer.
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
+    // Host/soft-profile convenience wrapper. Hard embedded publishers should
+    // use encode_into with persistent caller-owned Ethernet storage.
     [[nodiscard]] static std::vector<std::uint8_t> encode(const SampledValuesFrame& frame);
 
+    // Dynamic receive-side decode remains outside the first hard profile.
     [[nodiscard]] static bool try_decode(
         std::span<const std::uint8_t> bytes, SampledValuesFrame& frame) noexcept;
+#endif
 };
 
 } // namespace ar::iec61850::sampled_values

@@ -1,0 +1,6 @@
+# The MCU component is compiled as a hard no-exception/no-RTTI transmit/storage slice.
+CONFIG_COMPILER_CXX_EXCEPTIONS=n
+
+# Reserve two raw BRCB journal banks plus one destructive latency-probe erase unit.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

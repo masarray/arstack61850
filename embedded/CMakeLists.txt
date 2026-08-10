@@ -92,8 +92,79 @@ target_compile_definitions(ariec61850_embedded_link_smoke PRIVATE
     ARIEC61850_HOST_SERVICES=0)
 ariec61850_apply_embedded_flags(ariec61850_embedded_link_smoke)
 
+# Exercise the allocation-bounded SV publisher and its no-catch-up pacing policy
+# against a fake RawEthernetPort using the same embedded core library.
+add_executable(ariec61850_embedded_sv_publisher_smoke
+    ${CMAKE_CURRENT_LIST_DIR}/sv_publisher_smoke.cpp)
+target_link_libraries(ariec61850_embedded_sv_publisher_smoke PRIVATE ARIEC61850::embedded_core)
+target_compile_features(ariec61850_embedded_sv_publisher_smoke PRIVATE cxx_std_20)
+target_include_directories(ariec61850_embedded_sv_publisher_smoke PRIVATE ${ARIEC61850_ROOT}/include)
+target_compile_definitions(ariec61850_embedded_sv_publisher_smoke PRIVATE
+    ARIEC61850_EMBEDDED_PROFILE=1
+    ARIEC61850_HOST_SERVICES=0)
+ariec61850_apply_embedded_flags(ariec61850_embedded_sv_publisher_smoke)
+
+# Keep the deterministic waveform/scenario engine inside the same MCU boundary.
+# This catches accidental host-service or floating-point-library dependencies
+# before the engine is integrated into the ESP32-P4 firmware application.
+add_executable(ariec61850_embedded_sv_injector_smoke
+    ${CMAKE_CURRENT_LIST_DIR}/sv_injector_smoke.cpp)
+target_link_libraries(ariec61850_embedded_sv_injector_smoke PRIVATE ARIEC61850::embedded_core)
+target_compile_features(ariec61850_embedded_sv_injector_smoke PRIVATE cxx_std_20)
+target_include_directories(ariec61850_embedded_sv_injector_smoke PRIVATE ${ARIEC61850_ROOT}/include)
+target_compile_definitions(ariec61850_embedded_sv_injector_smoke PRIVATE
+    ARIEC61850_EMBEDDED_PROFILE=1
+    ARIEC61850_HOST_SERVICES=0)
+ariec61850_apply_embedded_flags(ariec61850_embedded_sv_injector_smoke)
+
+# Exercise the transport-independent configure/arm/start/stop/fault lifecycle
+# under the same MCU warning/RTTI boundary before USB-serial transport is added.
+add_executable(ariec61850_embedded_sv_injector_controller_smoke
+    ${CMAKE_CURRENT_LIST_DIR}/sv_injector_controller_smoke.cpp)
+target_link_libraries(ariec61850_embedded_sv_injector_controller_smoke PRIVATE ARIEC61850::embedded_core)
+target_compile_features(ariec61850_embedded_sv_injector_controller_smoke PRIVATE cxx_std_20)
+target_include_directories(ariec61850_embedded_sv_injector_controller_smoke PRIVATE ${ARIEC61850_ROOT}/include)
+target_compile_definitions(ariec61850_embedded_sv_injector_controller_smoke PRIVATE
+    ARIEC61850_EMBEDDED_PROFILE=1
+    ARIEC61850_HOST_SERVICES=0)
+ariec61850_apply_embedded_flags(ariec61850_embedded_sv_injector_controller_smoke)
+
+# Realtime source-program smoke: hot manual edits, sample-indexed ramps, and
+# finite state sequences must preserve the logical sample timeline and remain
+# inside the allocation-bounded MCU profile.
+add_executable(ariec61850_embedded_sv_runtime_program_smoke
+    ${CMAKE_CURRENT_LIST_DIR}/sv_runtime_program_smoke.cpp)
+target_link_libraries(ariec61850_embedded_sv_runtime_program_smoke PRIVATE ARIEC61850::embedded_core)
+target_compile_features(ariec61850_embedded_sv_runtime_program_smoke PRIVATE cxx_std_20)
+target_include_directories(ariec61850_embedded_sv_runtime_program_smoke PRIVATE ${ARIEC61850_ROOT}/include)
+target_compile_definitions(ariec61850_embedded_sv_runtime_program_smoke PRIVATE
+    ARIEC61850_EMBEDDED_PROFILE=1
+    ARIEC61850_HOST_SERVICES=0)
+ariec61850_apply_embedded_flags(ariec61850_embedded_sv_runtime_program_smoke)
+
+# Produce a deterministic two-second classic-PCAP capture using only the
+# publisher/encoder path. A separate Python implementation verifies the complete
+# wire image byte-for-byte in CI, so encoder bugs cannot be hidden by the C++
+# decoder accepting the same mistake.
+add_executable(ariec61850_embedded_sv_stream_pcap
+    ${CMAKE_CURRENT_LIST_DIR}/sv_stream_pcap.cpp)
+target_link_libraries(ariec61850_embedded_sv_stream_pcap PRIVATE ARIEC61850::embedded_core)
+target_compile_features(ariec61850_embedded_sv_stream_pcap PRIVATE cxx_std_20)
+target_include_directories(ariec61850_embedded_sv_stream_pcap PRIVATE ${ARIEC61850_ROOT}/include)
+target_compile_definitions(ariec61850_embedded_sv_stream_pcap PRIVATE
+    ARIEC61850_EMBEDDED_PROFILE=1
+    ARIEC61850_HOST_SERVICES=0)
+ariec61850_apply_embedded_flags(ariec61850_embedded_sv_stream_pcap)
+
 enable_testing()
 add_test(NAME ariec61850_embedded_link_smoke COMMAND ariec61850_embedded_link_smoke)
+add_test(NAME ariec61850_embedded_sv_publisher_smoke COMMAND ariec61850_embedded_sv_publisher_smoke)
+add_test(NAME ariec61850_embedded_sv_injector_smoke COMMAND ariec61850_embedded_sv_injector_smoke)
+add_test(NAME ariec61850_embedded_sv_injector_controller_smoke COMMAND ariec61850_embedded_sv_injector_controller_smoke)
+add_test(NAME ariec61850_embedded_sv_runtime_program_smoke COMMAND ariec61850_embedded_sv_runtime_program_smoke)
+add_test(
+    NAME ariec61850_embedded_sv_stream_pcap
+    COMMAND ariec61850_embedded_sv_stream_pcap "${CMAKE_BINARY_DIR}/sv_trial_2s.pcap")
 
 message(STATUS "arstack61850 embedded profile: host services excluded")
 message(STATUS "arstack61850 embedded profile: RTTI disabled=${ARIEC61850_EMBEDDED_NO_RTTI}")

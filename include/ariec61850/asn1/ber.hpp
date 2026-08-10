@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "ariec61850/asn1/ber_types.hpp"
+
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -12,13 +14,6 @@
 #include <vector>
 
 namespace ar::iec61850::asn1 {
-
-enum class BerClass : std::uint8_t {
-    universal = 0,
-    application = 1,
-    context_specific = 2,
-    private_class = 3
-};
 
 class BerFormatError final : public std::runtime_error {
 public:

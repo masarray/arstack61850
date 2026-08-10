@@ -1,0 +1,80 @@
+name: URCB Event Hard Profile CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  urcb-event-hard-profile:
+    name: URCB Event Hard / ${{ matrix.compiler }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select compiler
+        shell: bash
+        run: |
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            echo "CC=clang" >> "$GITHUB_ENV"
+            echo "CXX=clang++" >> "$GITHUB_ENV"
+          else
+            echo "CC=gcc" >> "$GITHUB_ENV"
+            echo "CXX=g++" >> "$GITHUB_ENV"
+          fi
+
+      - name: Configure URCB event hard profile
+        run: cmake -S embedded/urcb_event_hard_profile -B build-urcb-event-hard
+
+      - name: Build URCB event hard profile
+        run: cmake --build build-urcb-event-hard --parallel
+
+      - name: Run URCB event smokes
+        run: >-
+          ctest --test-dir build-urcb-event-hard
+          --output-on-failure
+          --output-junit urcb-event-ctest.xml
+
+      - name: Prove exception runtime is absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          for binary in \
+            build-urcb-event-hard/ariec61850_hard_mms_urcb_event_smoke \
+            build-urcb-event-hard/ariec61850_hard_mms_urcb_event_connection_smoke; do
+            if nm -C "$binary" | grep -E '__cxa_throw|__cxa_begin_catch|__cxa_end_catch|__gxx_personality_v0'; then
+              echo "exception runtime symbol found in $binary" >&2
+              exit 1
+            fi
+          done
+          echo 'NO_EXCEPTION_RUNTIME=PASS'
+
+      - name: Report footprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "compiler=${{ matrix.compiler }}"
+            size \
+              build-urcb-event-hard/ariec61850_hard_mms_urcb_event_smoke \
+              build-urcb-event-hard/ariec61850_hard_mms_urcb_event_connection_smoke
+          } | tee build-urcb-event-hard/urcb-event-footprint.txt
+
+      - name: Upload URCB event evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: urcb-event-hard-${{ matrix.compiler }}-${{ github.event.pull_request.head.sha || github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            build-urcb-event-hard/urcb-event-ctest.xml
+            build-urcb-event-hard/urcb-event-footprint.txt

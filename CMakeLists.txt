@@ -6,7 +6,7 @@ project(ARIEC61850Cpp
     LANGUAGES CXX)
 
 option(ARIEC61850_BUILD_TESTS "Build ARIEC61850 C++ regression tests" ON)
-option(ARIEC61850_BUILD_TOOLS "Build read-only evidence tools" ON)
+option(ARIEC61850_BUILD_TOOLS "Build CLI and evidence tools" ON)
 option(ARIEC61850_BUILD_FUZZERS "Build LLVM libFuzzer targets" OFF)
 option(ARIEC61850_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(ARIEC61850_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
@@ -131,6 +131,12 @@ if(ARIEC61850_BUILD_TOOLS)
     target_compile_features(ariec61850_pagination_probe PRIVATE cxx_std_20)
     ariec61850_apply_warnings(ariec61850_pagination_probe)
     ariec61850_apply_sanitizers(ariec61850_pagination_probe)
+
+    add_executable(ariec61850_sv_injector tools/sv_injector.cpp)
+    target_link_libraries(ariec61850_sv_injector PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_sv_injector PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_sv_injector)
+    ariec61850_apply_sanitizers(ariec61850_sv_injector)
 endif()
 
 if(ARIEC61850_BUILD_TESTS)
@@ -282,6 +288,9 @@ if(ARIEC61850_BUILD_TESTS)
         add_test(
             NAME ariec61850_pagination_probe_help
             COMMAND ariec61850_pagination_probe --help)
+        add_test(
+            NAME ariec61850_sv_injector_loopback_smoke
+            COMMAND ariec61850_sv_injector --frames 160 --json)
     endif()
 endif()
 

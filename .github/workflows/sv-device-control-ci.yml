@@ -1,0 +1,71 @@
+name: SV Device Control CI
+
+on:
+  push:
+    branches:
+      - agent/esp32p4-sv-publisher-first-trial
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows / MSVC
+          - os: ubuntu-24.04
+            name: Linux / GCC portability
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S tools/device_ctl -B build-device-ctl
+
+      - name: Build
+        run: cmake --build build-device-ctl --config Release --parallel
+
+      - name: CLI contract smoke (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = '.\build-device-ctl\Release\ariec61850_sv_device_ctl.exe'
+          & $exe --help
+          $manual = & $exe --emit-request set-channel Ia rms 2500
+          if ($manual -ne '{"command":"set-channel","channel":"Ia","rms":2500}') { throw "manual request mismatch: $manual" }
+          $ramp = & $exe --emit-request ramp-channel Va rms 9000 4000
+          if ($ramp -ne '{"command":"ramp-channel","channel":"Va","rms":9000,"durationSamples":4000}') { throw "ramp request mismatch: $ramp" }
+          $state = & $exe --emit-request sequence-state-begin 800 linear
+          if ($state -ne '{"command":"sequence-state-begin","durationSamples":800,"transition":"linear"}') { throw "state request mismatch: $state" }
+          $edit = & $exe --emit-request sequence-set-channel Ic phase 120000
+          if ($edit -ne '{"command":"sequence-set-channel","channel":"Ic","phaseMilliDeg":120000}') { throw "sequence edit mismatch: $edit" }
+          $commit = & $exe --emit-request sequence-commit
+          if ($commit -ne '{"command":"sequence-commit"}') { throw "sequence commit mismatch: $commit" }
+
+      - name: CLI contract smoke (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe=./build-device-ctl/ariec61850_sv_device_ctl
+          "$exe" --help
+          test "$("$exe" --emit-request set-channel Ia rms 2500)" = '{"command":"set-channel","channel":"Ia","rms":2500}'
+          test "$("$exe" --emit-request ramp-channel Va rms 9000 4000)" = '{"command":"ramp-channel","channel":"Va","rms":9000,"durationSamples":4000}'
+          test "$("$exe" --emit-request sequence-state-begin 800 linear)" = '{"command":"sequence-state-begin","durationSamples":800,"transition":"linear"}'
+          test "$("$exe" --emit-request sequence-set-channel Ic phase 120000)" = '{"command":"sequence-set-channel","channel":"Ic","phaseMilliDeg":120000}'
+          test "$("$exe" --emit-request sequence-commit)" = '{"command":"sequence-commit"}'
+
+      - name: Upload Windows device controller
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-sv-device-control-${{ github.sha }}
+          path: build-device-ctl/Release/ariec61850_sv_device_ctl.exe
+          if-no-files-found: error

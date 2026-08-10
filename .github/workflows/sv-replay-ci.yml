@@ -1,0 +1,85 @@
+name: SV Replay CI
+
+on:
+  push:
+    branches:
+      - agent/esp32p4-sv-publisher-first-trial
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  replay-bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows / MSVC
+          - os: ubuntu-24.04
+            name: Linux / GCC
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S tools/replay_prepare -B build-replay
+
+      - name: Build
+        run: cmake --build build-replay --config Release --parallel
+
+      - name: Prepare and validate replay bundle (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          .\build-replay\Release\ariec61850_sv_replay_prepare.exe tests\fixtures\comtrade\simple_fault.cfg build-replay\simple_fault.arsvr
+          .\build-replay\Release\ariec61850_sv_replay_live.exe --bundle build-replay\simple_fault.arsvr --validate
+
+      - name: Prepare and validate replay bundle (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./build-replay/ariec61850_sv_replay_prepare tests/fixtures/comtrade/simple_fault.cfg build-replay/simple_fault.arsvr
+          ./build-replay/ariec61850_sv_replay_live --bundle build-replay/simple_fault.arsvr --validate
+
+      - name: Independent replay bundle oracle
+        shell: python
+        run: |
+          import pathlib
+          import struct
+
+          path = pathlib.Path('build-replay/simple_fault.arsvr')
+          data = path.read_bytes()
+          assert data[:8] == b'ARSVRPL1', data[:8]
+          version, sample_rate, payload_bytes, channels = struct.unpack('>IIII', data[8:24])
+          frames = struct.unpack('>Q', data[24:32])[0]
+          assert version == 1
+          assert sample_rate == 4000
+          assert payload_bytes == 64
+          assert channels == 8
+          assert frames == 40
+          assert len(data) == 32 + frames * payload_bytes
+
+          first = data[32:96]
+          pairs = [struct.unpack('>iI', first[i:i+8]) for i in range(0, 64, 8)]
+          values = [value for value, quality in pairs]
+          qualities = [quality for value, quality in pairs]
+          assert values == [0, -1, 1, 0, 0, -71, 71, 0], values
+          assert qualities == [0] * 8, qualities
+          print({'status': 'REPLAY-BUNDLE/PASSED', 'frames': frames, 'values0': values})
+
+      - name: Upload Windows replay tools and evidence
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-sv-replay-${{ github.sha }}
+          path: |
+            build-replay/Release/ariec61850_sv_replay_prepare.exe
+            build-replay/Release/ariec61850_sv_replay_live.exe
+            build-replay/simple_fault.arsvr
+          if-no-files-found: error

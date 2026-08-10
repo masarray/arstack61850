@@ -9,7 +9,9 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
 #include <vector>
+#endif
 
 namespace ar::iec61850::sampled_values {
 
@@ -22,12 +24,16 @@ public:
         const SampledValuesPdu& pdu,
         std::span<std::uint8_t> destination) noexcept;
 
-    // Host convenience wrapper. Embedded steady-state publishers should use
-    // encode_into with caller-owned storage to avoid per-frame allocation.
+#if !defined(ARIEC61850_NO_EXCEPTIONS)
+    // Host/soft-profile convenience wrapper. Hard embedded publishers use
+    // encode_into with caller-owned storage.
     [[nodiscard]] static std::vector<std::uint8_t> encode(const SampledValuesPdu& pdu);
 
+    // The current dynamic decoder is retained outside the hard no-exception
+    // profile until its BER traversal/storage path is fully status-based.
     [[nodiscard]] static bool try_decode(
         std::span<const std::uint8_t> apdu, SampledValuesPdu& pdu) noexcept;
+#endif
 };
 
 } // namespace ar::iec61850::sampled_values

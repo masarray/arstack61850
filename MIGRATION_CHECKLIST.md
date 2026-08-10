@@ -17,8 +17,14 @@ behavioral oracle until laboratory interoperability is complete.
 - [x] GOOSE wire codec and offline runtime supervision.
 - [x] Sampled Values PDU/frame codec, quality, payload, counter, and stream diagnostics.
 - [x] Synthetic PCAP equivalence, sanitizer, mutation, and libFuzzer hardening.
+- [x] Allocation-bounded SV publisher runtime with caller-owned Ethernet buffer, successful-TX counter progression, and no-catch-up pacing.
+- [x] Platform-neutral raw-Ethernet/clock HAL plus ESP-IDF `esp_eth_transmit()` adapter.
+- [x] Deterministic 8,000-frame / two-second SV host simulation at 4 kHz with independent exact-byte Python PCAP oracle on strict GCC/Clang embedded profiles.
+- [x] ESP32-P4 ESP-IDF v6.0.2 cross-compile/link acceptance for both the integration smoke app and real first-trial SV firmware.
+- [x] ESP32-P4 `FLASHABLE/READY` CI artifact gate: ESP-IDF manifest targets `esp32p4`, validates the `0x2000` bootloader / `0x8000` partition / `0x10000` application layout, retains BIN/ELF/map/flash metadata, and publishes verified SHA-256 checksums.
 - [ ] Real IED or vendor-simulator GOOSE/SV capture accepted.
-- [ ] Real-time SV publisher timing-health validation.
+- [~] Real-time SV publisher timing-health validation: deterministic host/CI pacing implemented; physical ESP32-P4 evidence pending.
+- [ ] Exception-free embedded codec build; the first ESP-IDF trial temporarily enables C++ exceptions for shared legacy validation/convenience APIs while the publisher hot path remains `noexcept`.
 
 ## Phase 2 — engineering file formats
 
@@ -144,7 +150,7 @@ behavioral oracle until laboratory interoperability is complete.
 - [x] C# and C++ same-IED OCR7SR12 structural/type/runtime comparison accepted with zero blocking findings.
 - [x] Primary-vendor OCR7SR12 ten-cycle acceptance: 10/10 stable discovery cycles, full 286/286 RCB and control-block gates, 3/3 StableProceed contention cycles, and 13/13 fresh associations.
 - [x] Controlled OCR7SR12 timeout/recovery evidence accepted: healthy baseline, post-association response withholding, client request timeout observed, fresh direct recovery, and identical `934b555dff76a46f` structural fingerprint before/after recovery.
-- [ ] Pagination continuation evidence accepted on a target that requires more than one page.
+- [x] Physical GetNameList pagination accepted on OCR7SR12: 9 queries, 4 paginated queries, 88 continuation requests; largest sequence 48 pages / 4,758 names / 47 continuations with final `moreFollows=false`.
 
 ### Later Phase 4 work
 

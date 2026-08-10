@@ -1,74 +1,151 @@
 # ESP32-first embedded roadmap
 
-The embedded roadmap is product-driven. The first hardware proof should be small enough to finish and measure.
+The embedded roadmap is product-driven. The first hardware proofs are deliberately small, measurable, and reusable as foundations for a portable IEC 61850 product family.
+
+See [`docs/REFERENCE_PRODUCT_ARCHITECTURE.md`](../docs/REFERENCE_PRODUCT_ARCHITECTURE.md) for the reference-product topology and long-term architecture.
+
+## Reference products
+
+Short-term roles are fixed as:
+
+- **Windows PC** — reference CLI/workbench, loopback QA, scenario/configuration controller, evidence collection;
+- **ESP32-P4 / Waveshare ESP32-P4-ETH** — IEC 61850 process-bus injector, SV first and GOOSE next;
+- **ESP32-S3 / Waveshare ESP32-S3-Relay-6CH** — static I/O IED, six physical relay outputs and isolated RS485, MMS/IP first and wired station-bus/GOOSE after a supported Ethernet path is added.
+
+The protocol core must remain common across these products. Board-specific code belongs only in HAL/platform/application adapters.
 
 ## E0 — portability boundary
 
-Status: in progress.
+Status: accepted for the current embedded slice, with hard-profile work still remaining in E5.
 
-Acceptance:
+Accepted:
 
 - standalone `embedded/` CMake build;
 - GCC and Clang host-sim compile;
-- RTTI disabled;
-- host TCP/PCAP/COMTRADE/SCL/CLI dependencies rejected by CI;
-- all embedded objects participate in a full-link smoke executable;
-- existing desktop C++ CI remains unchanged and green.
+- RTTI disabled in the embedded profile;
+- host TCP/filesystem/capture services excluded from the first MCU component boundary;
+- all selected embedded objects participate in a full-link smoke executable;
+- desktop C++ CI remains independent;
+- platform-neutral raw-Ethernet/clock abstraction exists;
+- ESP-IDF component boundary exists.
 
-Not yet accepted:
+Still deferred to the hard embedded profile:
 
-- `-fno-exceptions`;
-- deterministic/no-heap wire encoding;
-- ESP-IDF compilation;
-- real ESP32 Ethernet traffic.
+- global `-fno-exceptions` acceptance;
+- removal/splitting of remaining exception-dependent convenience/decode APIs from the MCU slice;
+- explicit footprint budgets for every future embedded protocol subset.
 
 ## E1 — allocation-bounded SV wire path
 
-This is the next protocol refactor because it directly enables the smallest useful ESP32 product.
+Status: accepted for the first-trial publisher slice.
 
-Target API direction:
-
-```cpp
-EncodeResult encode_into(
-    const SampledValuesFrame& frame,
-    std::span<std::uint8_t> destination) noexcept;
-```
-
-Acceptance:
+Accepted:
 
 - caller-owned Ethernet frame buffer;
-- no heap allocation on the steady-state SV encode/transmit path;
-- no exceptions on that path;
-- byte-for-byte parity with existing C++/ARIEC61850 golden SV vectors;
-- existing `std::vector` host API retained as a compatibility wrapper;
+- allocation-bounded steady-state SV encode/transmit path;
+- no exception propagation from the publisher hot path;
+- existing host API retained;
 - VLAN/non-VLAN framing remains explicit;
-- sample counter wrap behavior remains tested.
+- sample counter wrap behavior tested;
+- deterministic 8,000-frame / two-second simulation at 4 kHz;
+- exact-byte independent Python PCAP oracle;
+- GCC + Clang embedded-host simulation evidence retained by CI.
 
-## E2 — ESP32 SV Publisher MVP
+Semantic follow-up before mature process-bus acceptance:
+
+- finalize and document `smpCnt` progression when a transmit fails or nominal sample instants are intentionally skipped after scheduler lateness.
+
+## E2 — Windows SV loopback reference CLI
+
+Status: next implementation slice.
+
+Initial executable direction:
+
+```text
+ariec61850_sv_loopback.exe
+```
+
+Required first modes:
+
+1. `software` — `SampledValuesPublisher` -> in-memory `RawEthernetPort` -> decoder/verifier;
+2. `pcap` — generated stream -> PCAP -> reopen/independent verification;
+3. machine-readable JSON summary plus human console output.
+
+Fault/regression modes should then cover:
+
+- drop;
+- duplicate;
+- corrupt;
+- late poll/tick;
+- counter wrap;
+- rate/profile change.
+
+Later add `live-npcap` raw Layer-2 transmit/capture through a selected Windows Ethernet adapter.
+
+This CLI becomes both a pre-hardware QA tool and the desktop behavioral reference against which the ESP32-P4 injector is compared.
+
+## E3 — ESP32-P4 SV injector MVP
+
+Status: software/cross-compile/flashable gates accepted; physical Ethernet acceptance pending.
 
 Platform layer:
 
-- ESP-IDF/FreeRTOS owns task scheduling and network driver;
-- `RawEthernetPort` binds to the platform raw Ethernet TX function;
-- fixed frame buffers are owned by the application;
-- sample source is pluggable (synthetic first, ADC later).
+- ESP-IDF/FreeRTOS owns task scheduling and Ethernet driver;
+- `RawEthernetPort` binds to `esp_eth_transmit()`;
+- fixed frame buffers are application-owned;
+- sample source is pluggable;
+- management plane is conceptually separated from the process-bus data plane.
 
-Minimum demonstration:
+Accepted before hardware:
+
+- real ESP32-P4 ESP-IDF v6.0.2 cross-compile/link;
+- flashable firmware image produced by CI;
+- ESP-IDF flasher manifest targets `esp32p4`;
+- bootloader, partition table, application image, ELF/map, checksums and build-profile evidence retained;
+- first synthetic SV profile is reproducible by host simulation.
+
+Physical minimum demonstration:
 
 1. configure destination MAC, APPID and svID;
-2. generate deterministic sampled values;
-3. publish valid IEC 61850 SV Layer-2 frames;
-4. decode them with the desktop arstack61850 decoder and an independent IEC 61850 tool;
-5. capture PCAP and compare payload fields against the host golden path;
-6. run a sustained-rate test appropriate to the selected SV profile.
+2. initialize native ESP32-P4 EMAC/RMII and PHY;
+3. generate deterministic sampled values;
+4. publish valid IEC 61850 SV Layer-2 frames;
+5. decode them with Wireshark/desktop tools;
+6. capture PCAP and compare fields against the host golden path;
+7. measure sustained 4,000-frame/s behavior, TX failures, missed/coalesced ticks, lateness, and heap watermark;
+8. short, 10-minute, then one-hour soak.
 
-A common 50 Hz / 80 samples-per-cycle profile implies 4,000 sample instants per second. That is a useful stress target, not a blanket standards claim for every SV application.
+A common 50 Hz / 80 samples-per-cycle profile implies 4,000 sample instants per second. That is the first stress target, not a blanket standards claim for every SV application.
 
-Timing quality must be reported honestly. A lab ESP32 publisher is not called protection-grade or time-synchronized until jitter and synchronization/PTP evidence support that claim.
+### P4 injector evolution
 
-## E3 — simple ESP32 IEC 61850 I/O IED
+After physical SV acceptance:
 
-Start with a deliberately static device model.
+- PC-controlled start/stop/arm/trigger;
+- versioned configuration/scenario protocol, USB serial first;
+- configurable SV identities/profile/VLAN;
+- waveform and transient scenarios;
+- COMTRADE-to-SV playback;
+- controlled drop/duplicate/corrupt/jitter injection;
+- GOOSE publisher/subscriber laboratory modes;
+- PCAP compare/replay workflows;
+- synchronized triggering and PTP only after separate hardware/timing evidence exists.
+
+## E4 — ESP32-S3 I/O IED MVP
+
+Status: planned after the Windows loopback slice and P4 first physical proof are stable enough to serve as test peers.
+
+First hardware:
+
+- Waveshare ESP32-S3-Relay-6CH, SKU 26756;
+- six physical relay outputs;
+- isolated RS485;
+- Wi-Fi/Bluetooth/USB management capability;
+- industrial DC input and isolation/protection hardware.
+
+The Relay-6CH board has no onboard wired Ethernet, so development is split deliberately.
+
+### E4.1 — MMS/static IED over IP/Wi-Fi
 
 Initial server surface:
 
@@ -78,32 +155,83 @@ Initial server surface:
 - `GetVariableAccessAttributes`;
 - `Read`;
 - compile-time/static Logical Device / Logical Node / Data Object table;
-- GPIO-backed SPS/DPS/measurement points.
+- six relay outputs exposed through a small static GGIO-style I/O model;
+- bounded, explicitly authorized relay control/write path;
+- safe startup/recovery output policy;
+- PC CLI interoperability and host-sim regression.
+
+Wi-Fi proves MMS/application behavior but is not evidence for deterministic station-bus or protection-grade GOOSE.
+
+### E4.2 — wired Ethernet IED
+
+Add a supported wired network adapter behind the same portable HAL, for example a suitable SPI Ethernet controller, or use a Waveshare S3 industrial Ethernet I/O variant with onboard W5500 as the wired reference platform.
 
 Then add, in controlled slices:
 
-- bounded `Write` for configuration points where appropriate;
-- control model for outputs;
 - one small static DataSet;
-- URCB reporting first;
+- URCB reporting;
+- bounded GOOSE publisher/subscriber;
+- refined control model;
+- input/status/event timestamp expansion;
+- RS485/Modbus gateway points where useful;
+- SCL-driven static model generation;
 - BRCB only after reservation/buffering semantics are proven.
 
-Dynamic DataSet and large live-discovery structures are not initial MCU requirements.
+Dynamic DataSet and large dynamic discovery structures are not initial MCU requirements.
 
-## E4 — hard embedded profile
+## E5 — shared PC-to-device control plane
+
+Status: planned.
+
+The P4 injector and S3 IED must not invent unrelated ad-hoc command protocols.
+
+Define one versioned, transport-independent management schema for:
+
+- identity and capabilities;
+- stack/firmware version;
+- configuration get/set/export/import;
+- start/stop/arm/trigger;
+- scenario/profile selection;
+- runtime statistics and health;
+- explicit structured errors;
+- fault injection where applicable;
+- protocol-version negotiation.
+
+Early development transport may be line-delimited JSON over USB serial. Later transports may include TCP/WebSocket without changing command semantics.
+
+## E6 — hard embedded profile
 
 Acceptance:
 
-- `-fno-exceptions` enabled in CI;
+- `-fno-exceptions` enabled for the intended embedded protocol slices;
 - `-fno-rtti` remains enabled;
 - no uncontrolled heap use in protocol steady state;
 - explicit compile-time capacities;
-- platform clock/TCP/raw-Ethernet HAL only;
-- ESP-IDF build in CI or reproducible local toolchain build;
-- RAM/flash footprint report.
+- platform clock/TCP/raw-Ethernet/I/O HAL only;
+- ESP-IDF target builds in CI;
+- per-profile RAM/flash/stack footprint reports;
+- long-soak resource stability;
+- fault/recovery behavior documented and regression-tested.
 
-## E5 — STM32/NXP industrial target
+## E7 — industrial portability targets
 
-After the ESP32 proof is stable, port only the HAL and platform integration. The protocol core must remain unchanged.
+After ESP32 proofs are stable, port only HAL/platform integration to additional hardware.
 
-For higher-end protection/process-bus ambitions, select hardware based on Ethernet MAC/DMA, timer determinism, memory, and synchronization/PTP requirements rather than rewriting the stack around a vendor SDK.
+Candidate families include STM32, NXP and other industrial MCU/MPU platforms selected according to Ethernet MAC/DMA capability, timer determinism, memory, isolation, watchdog/recovery, synchronization/PTP requirements, lifecycle, and toolchain quality.
+
+For higher-end protection/process-bus ambitions, hardware is selected to satisfy the timing/conformance goal. The IEC 61850 core must not be rewritten around a vendor SDK.
+
+## Long-term outcome
+
+ARStack61850 should converge into one coherent, smart, portable IEC 61850 platform spanning:
+
+- SV and GOOSE process bus;
+- MMS client/server, discovery, reporting, control and file service;
+- SCL engineering and static embedded-model generation;
+- COMTRADE and PCAP workflows;
+- deterministic simulator/virtual IED;
+- Windows/Linux engineering workbench;
+- constrained MCU profiles and larger industrial targets;
+- reproducible QA from host simulation through physical interoperability and timing evidence.
+
+"Top global" is treated as an engineering quality target: clean architecture, standards-aware behavior, deterministic tests, bounded resources, fuzz/sanitizer coverage, reproducible artifacts, physical interoperability, timing evidence, long-soak results, clear documentation, and independent/certification evidence for any conformance level that is eventually claimed.
