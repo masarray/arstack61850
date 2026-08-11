@@ -162,19 +162,6 @@ constexpr std::array<std::uint8_t, 76U> kDefaultAcceptAare{
             }
             external.indirect_reference = *value;
             saw_indirect = true;
-        } else if (field.tag_class == asn1::BerClass::universal &&
-                   field.tag_number == 2 && !field.constructed) {
-            if (saw_indirect) {
-                external = {};
-                return false;
-            }
-            const auto value = asn1::BerSpanReader::read_uint32(field);
-            if (!value) {
-                external = {};
-                return false;
-            }
-            external.indirect_reference = *value;
-            saw_indirect = true;
         } else if (field.tag_class == asn1::BerClass::context_specific &&
                    field.tag_number == 0 && field.constructed) {
             if (saw_encoding || field.value.size() > AcseSpanCodec::maximum_acse_bytes) {
