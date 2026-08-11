@@ -3,8 +3,23 @@ setlocal EnableExtensions
 
 set "APP_DIR=%~dp0"
 for %%I in ("%APP_DIR%\..\..") do set "REPO_ROOT=%%~fI"
-set "BUILD_DIR=%REPO_ROOT%\build-smv-slint"
 set "TARGET=arstack_smv_slint_shell"
+
+if defined ARSTACK_BUILD_DIR (
+    set "BUILD_DIR=%ARSTACK_BUILD_DIR%"
+) else if exist "D:\" (
+    set "BUILD_DIR=D:\Build\arstack61850-smv-slint"
+) else (
+    set "BUILD_DIR=%REPO_ROOT%\build-smv-slint"
+)
+
+if defined ARSTACK_SLINT_DEPS_DIR (
+    set "SLINT_DEPS_DIR=%ARSTACK_SLINT_DEPS_DIR%"
+) else if exist "D:\" (
+    set "SLINT_DEPS_DIR=D:\Tools\Slint\1.17.1"
+) else (
+    set "SLINT_DEPS_DIR=%REPO_ROOT%\build-smv-slint-deps"
+)
 
 where cmake >nul 2>nul
 if errorlevel 1 (
@@ -28,7 +43,9 @@ if not errorlevel 1 (
 )
 
 echo [ARStack61850] Configuring native Slint shell...
-cmake -S "%APP_DIR%" -B "%BUILD_DIR%" %GENERATOR_ARGS% -DCMAKE_BUILD_TYPE=Release
+echo [ARStack61850] Build: %BUILD_DIR%
+echo [ARStack61850] Slint cache: %SLINT_DEPS_DIR%
+cmake -S "%APP_DIR%" -B "%BUILD_DIR%" %GENERATOR_ARGS% -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_BASE_DIR="%SLINT_DEPS_DIR%"
 if errorlevel 1 exit /b 1
 
 echo [ARStack61850] Building %TARGET%...

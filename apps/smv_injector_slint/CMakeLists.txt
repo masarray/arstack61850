@@ -27,13 +27,23 @@ if(NOT Slint_FOUND)
 endif()
 
 add_executable(arstack_smv_slint_shell
-    src/main.cpp)
+    src/main.cpp
+    src/serial_device.cpp)
 
 target_compile_features(arstack_smv_slint_shell PRIVATE cxx_std_20)
 target_link_libraries(arstack_smv_slint_shell PRIVATE Slint::Slint)
 
 slint_target_sources(arstack_smv_slint_shell
     ui/app-window.slint)
+
+if(WIN32)
+    add_custom_command(TARGET arstack_smv_slint_shell POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_RUNTIME_DLLS:arstack_smv_slint_shell>
+            $<TARGET_FILE_DIR:arstack_smv_slint_shell>
+        COMMAND_EXPAND_LISTS
+        COMMENT "Copying Slint runtime dependencies")
+endif()
 
 if(MSVC)
     target_compile_options(arstack_smv_slint_shell PRIVATE /W4 /permissive-)
