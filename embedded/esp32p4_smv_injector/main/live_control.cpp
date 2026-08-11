@@ -288,13 +288,6 @@ void handle_line(char* line) noexcept {
     ESP_LOGW(kTag, "Unknown command '%s'; type HELP", command);
 }
 
-void discard_overlong_line_tail() noexcept {
-    int byte{};
-    do {
-        byte = std::fgetc(stdin);
-    } while (byte != '\n' && byte != EOF);
-}
-
 } // namespace
 
 void live_control_initialize(
@@ -330,33 +323,81 @@ void live_control_task(void*) noexcept {
     std::setvbuf(stdin, nullptr, _IONBF, 0);
     print_help();
     print_state();
+    ESP_LOGI(kTag, "Console ready: type a complete command, then press Enter.");
 
     std::array<char, 192> line{};
+    std::size_t length = 0U;
+    bool discard_until_eol = false;
+
     while (true) {
-        line.fill('\0');
-        if (std::fgets(line.data(), static_cast<int>(line.size()), stdin) == nullptr) {
+        const int input = std::fgetc(stdin);
+        if (input == EOF) {
             std::clearerr(stdin);
-            vTaskDelay(pdMS_TO_TICKS(20));
+            vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
 
-        const auto length = std::strlen(line.data());
-        const bool complete_line =
-            length > 0U && (line[length - 1U] == '\n' || line[length - 1U] == '\r');
-        if (!complete_line && length == line.size() - 1U) {
-            discard_overlong_line_tail();
-            ESP_LOGW(kTag, "Discarded overlong bench command");
+        const auto byte = static_cast<unsigned char>(input);
+
+        // The ESP-IDF monitor forwards interactive input byte-by-byte. Assemble
+        // those bytes here and execute only after Enter; std::fgets() is not
+        // suitable for this VFS because a short UART read can look like a
+        // complete stdio record.
+        if (byte == static_cast<unsigned char>('\r') ||
+            byte == static_cast<unsigned char>('\n')) {
+            if (discard_until_eol) {
+                discard_until_eol = false;
+                length = 0U;
+                line.fill('\0');
+                ESP_LOGW(kTag, "Discarded invalid/overlong bench command");
+                continue;
+            }
+
+            if (length == 0U) {
+                // Ignore the second half of CRLF and empty Enter presses.
+                continue;
+            }
+
+            line[length] = '\0';
+            if (!is_safe_ascii_command_line(line.data())) {
+                ESP_LOGW(kTag, "Discarded invalid bench command");
+            } else {
+                handle_line(line.data());
+            }
+            length = 0U;
+            line.fill('\0');
             continue;
         }
 
-        if (!is_safe_ascii_command_line(line.data())) {
-            // Startup UART noise and terminal escape/UTF-8 fragments are
-            // intentionally dropped without echoing their bytes back to logs.
-            ESP_LOGD(kTag, "Discarded non-ASCII/empty bench input");
+        if (discard_until_eol) {
             continue;
         }
 
-        handle_line(line.data());
+        // Support normal terminal editing without treating backspace/delete as
+        // a command byte.
+        if (byte == 0x08U || byte == 0x7FU) {
+            if (length > 0U) {
+                --length;
+                line[length] = '\0';
+            }
+            continue;
+        }
+
+        const bool accepted =
+            byte == static_cast<unsigned char>(' ') ||
+            byte == static_cast<unsigned char>('\t') ||
+            (byte >= 0x21U && byte <= 0x7EU);
+        if (!accepted) {
+            discard_until_eol = true;
+            continue;
+        }
+
+        if (length + 1U >= line.size()) {
+            discard_until_eol = true;
+            continue;
+        }
+
+        line[length++] = static_cast<char>(byte);
     }
 }
 
