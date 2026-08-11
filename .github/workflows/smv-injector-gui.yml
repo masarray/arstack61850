@@ -88,3 +88,23 @@ jobs:
             --data-binary @tests/fixtures/scl/sv-4800-structured-4i4v.scd \
             'http://127.0.0.1:8765/api/scl/inspect?counterModulus=4800' >/tmp/api.json
           grep -q '"deviceSupport":"ready"' /tmp/api.json
+
+  windows-launcher-smoke:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify native-host launcher
+        shell: cmd
+        run: apps\smv_injector_gui\run.cmd --build-only
+
+      - name: Verify Windows profile compiler
+        shell: powershell
+        run: |
+          $tool = Join-Path $PWD 'build-smv-gui\ariec61850_smv_profile_inspect.exe'
+          if (-not (Test-Path $tool)) { throw "profile compiler missing: $tool" }
+          & $tool 'tests\fixtures\scl\sv-4800-structured-4i4v.scd' '--counter-modulus' '4800' | Tee-Object -FilePath profile-a.json
+          if (-not (Select-String -Path profile-a.json -SimpleMatch '"deviceSupport":"ready"')) {
+            throw 'Windows profile compiler did not produce a deployable Class-A fixture result'
+          }
