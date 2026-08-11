@@ -46,6 +46,42 @@ config AR_SMV_DIAGNOSTIC_PROBES
         Adds low-rate non-SV probes for capture-path troubleshooting. Keep this
         disabled while measuring realtime timing unless it is needed.
 
+config AR_PTP_LAB_TX
+    bool "Enable PTPv2 Layer-2 lab timing companion"
+    default n
+    help
+        Enables a low-rate PTPv2 Layer-2 laboratory broadcaster for isolated
+        troubleshooting, internal testing and interoperability work when a
+        normal station PTP/GPS time server is unavailable. On ESP32-P4 with
+        ESP-IDF 5.x the two-step Sync/Follow_Up path uses the EMAC hardware TX
+        timestamp. This feature is not a GPS-backed or certified grandmaster.
+
+config AR_PTP_DOMAIN
+    int "PTP domain number"
+    range 0 255
+    default 0
+    depends on AR_PTP_LAB_TX
+    help
+        Domain number written into Announce, Sync and Follow_Up messages.
+
+config AR_PTP_ANNOUNCE_INTERVAL_MS
+    int "PTP Announce interval (ms)"
+    range 100 10000
+    default 1000
+    depends on AR_PTP_LAB_TX
+    help
+        Interval for lab Announce traffic. The default matches the existing
+        ARIEC61850/ARSVIN laboratory publisher behavior.
+
+config AR_PTP_SYNC_INTERVAL_MS
+    int "PTP Sync interval (ms)"
+    range 20 5000
+    default 250
+    depends on AR_PTP_LAB_TX
+    help
+        Interval for two-step Sync/Follow_Up traffic. Follow_Up carries the
+        ESP32-P4 EMAC transmit timestamp when the IDF 5.x adapter is available.
+
 config AR_SMV_CURRENT_RMS_MA
     int "Balanced phase current RMS (mA)"
     range 0 100000
