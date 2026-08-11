@@ -8,17 +8,23 @@
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="responsive.css" />
 </head>
-<body>
+<body data-running="false">
   <div class="app-shell">
     <header class="topbar">
-      <div class="brand">
-        <div class="brand-mark" aria-hidden="true">
-          <span></span><span></span><span></span>
+      <div class="brand-block">
+        <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div class="brand-copy">
+          <span class="product-family">ARStack61850</span>
+          <strong>SMV Injector</strong>
         </div>
-        <div>
-          <div class="eyebrow">ARStack61850</div>
-          <h1>SMV Injector</h1>
-        </div>
+      </div>
+
+      <div class="top-context" aria-label="Active stream context">
+        <span class="context-kicker">Active stream</span>
+        <strong id="topStreamId">MU01_SV1</strong>
+        <span class="context-separator"></span>
+        <span>APPID <b>0x4000</b></span>
+        <span>4000 sample/s</span>
       </div>
 
       <div class="connection-strip">
@@ -26,122 +32,181 @@
           <span class="status-dot"></span>
           <span id="deviceStatusText">Device offline</span>
         </div>
-        <button class="btn secondary" id="connectButton">Connect device</button>
+        <button class="btn compact secondary" id="connectButton">Connect device</button>
       </div>
     </header>
 
-    <main class="workspace">
-      <section class="hero-grid">
-        <article class="panel stream-panel">
-          <div class="panel-header">
-            <div>
-              <div class="eyebrow">Process bus stream</div>
-              <h2>Active publisher profile</h2>
-            </div>
-            <span class="badge neutral" id="profileBadge">Development profile</span>
-          </div>
-
-          <div class="stream-identity">
-            <div class="identity-main">
-              <span class="identity-label">svID</span>
-              <strong id="svIdValue">MU01_SV1</strong>
-            </div>
-            <div class="identity-grid">
-              <div><span>APPID</span><strong id="appIdValue">0x4000</strong></div>
-              <div><span>Rate</span><strong id="sampleRateValue">4000 fps</strong></div>
-              <div><span>smpCnt</span><strong id="counterValue">wrap 4000</strong></div>
-              <div><span>VLAN</span><strong id="vlanValue">PCP 4 · VID 0</strong></div>
-            </div>
-          </div>
-
-          <div class="profile-actions">
-            <label class="file-button" for="sclFile">
-              <span>Import SCL / CID</span>
-              <input id="sclFile" type="file" accept=".scd,.cid,.icd,.iid,.ssd,.xml" />
-            </label>
-            <div class="file-state" id="sclState">No engineering file loaded</div>
-          </div>
-          <p class="microcopy">Engineering files are loaded locally. Runtime profile deployment will connect to the host profile compiler; live signal control below already talks directly to the ESP32-P4 bench firmware.</p>
-        </article>
-
-        <article class="panel run-panel">
-          <div class="run-state" id="runState" data-state="stopped">
-            <span class="run-icon"></span>
-            <div>
-              <div class="eyebrow">Publisher state</div>
-              <strong id="runStateText">STOPPED</strong>
-            </div>
-          </div>
-
-          <div class="run-metrics">
-            <div><span>Observed rate</span><strong id="fpsMetric">—</strong></div>
-            <div><span>Missed slots</span><strong id="missedMetric">—</strong></div>
-            <div><span>TX failures</span><strong id="failMetric">—</strong></div>
-            <div><span>Signal generation</span><strong id="generationMetric">—</strong></div>
-          </div>
-
-          <div class="run-actions">
-            <button class="btn start" id="startButton" disabled>Start</button>
-            <button class="btn stop" id="stopButton" disabled>Stop</button>
-          </div>
-        </article>
-      </section>
-
-      <section class="control-toolbar panel">
-        <div class="frequency-control">
+    <main class="cockpit">
+      <aside class="surface stream-pane">
+        <div class="pane-heading">
           <div>
-            <div class="eyebrow">Signal frequency</div>
-            <div class="frequency-value"><input id="frequencyInput" type="number" min="1" max="1000" step="0.001" value="50.000" /><span>Hz</span></div>
+            <span class="eyebrow">Process bus</span>
+            <h2>Stream</h2>
           </div>
-          <input id="frequencySlider" type="range" min="45" max="65" step="0.001" value="50" />
+          <span class="profile-chip">DEV</span>
         </div>
 
-        <div class="toolbar-actions">
-          <label class="switch-row">
+        <div class="stream-card">
+          <span class="field-label">svID</span>
+          <strong id="svIdValue">MU01_SV1</strong>
+          <div class="stream-meta-grid">
+            <div><span>APPID</span><b id="appIdValue">0x4000</b></div>
+            <div><span>VLAN</span><b id="vlanValue">P4 · VID 0</b></div>
+            <div><span>Rate</span><b id="sampleRateValue">4000/s</b></div>
+            <div><span>smpCnt</span><b id="counterValue">wrap 4000</b></div>
+          </div>
+        </div>
+
+        <div class="engineering-file">
+          <span class="field-label">Engineering source</span>
+          <label class="file-button" for="sclFile">
+            <span>Open SCL / CID</span>
+            <input id="sclFile" type="file" accept=".scd,.cid,.icd,.iid,.ssd,.xml" />
+          </label>
+          <div class="file-state" id="sclState">Development profile active</div>
+        </div>
+
+        <div class="section-divider"></div>
+
+        <div class="quick-presets">
+          <span class="field-label">Quick setup</span>
+          <button class="preset-button" id="balancedButton">
+            <span class="preset-icon">3Φ</span>
+            <span><b>Balanced</b><small>1 A · 57.74 V</small></span>
+          </button>
+          <button class="preset-button" id="zeroButton">
+            <span class="preset-icon zero">0</span>
+            <span><b>Zero output</b><small>Clear all magnitudes</small></span>
+          </button>
+        </div>
+
+        <div class="section-divider"></div>
+
+        <div class="health-block">
+          <div class="health-heading">
+            <span class="field-label">Runtime health</span>
+            <span class="health-state" id="systemReadiness" data-state="offline">OFFLINE</span>
+          </div>
+          <div class="health-grid">
+            <div><span>Rate</span><strong id="fpsMetric">—</strong></div>
+            <div><span>Missed</span><strong id="missedMetric">—</strong></div>
+            <div><span>TX fail</span><strong id="failMetric">—</strong></div>
+            <div><span>Generation</span><strong id="generationMetric">—</strong></div>
+          </div>
+        </div>
+
+        <details class="diagnostics-panel">
+          <summary>Device diagnostics</summary>
+          <div class="diagnostics-head">
+            <span>Serial evidence</span>
+            <button class="text-button" id="clearLogButton">Clear</button>
+          </div>
+          <pre id="runtimeLog" aria-live="polite">Waiting for device connection…</pre>
+        </details>
+      </aside>
+
+      <section class="surface injector-pane">
+        <div class="injector-heading">
+          <div>
+            <span class="eyebrow">Fast injection</span>
+            <h1>4I + 4V</h1>
+          </div>
+          <div class="run-state" id="runState" data-state="stopped">
+            <span class="run-dot"></span>
+            <span id="runStateText">STOPPED</span>
+          </div>
+        </div>
+
+        <div class="frequency-strip">
+          <div class="frequency-main">
+            <span class="field-label">Frequency</span>
+            <div class="frequency-value">
+              <input id="frequencyInput" type="number" min="1" max="1000" step="0.001" value="50.000" aria-label="Signal frequency" />
+              <span>Hz</span>
+            </div>
+          </div>
+          <input id="frequencySlider" class="frequency-slider" type="range" min="45" max="65" step="0.001" value="50" aria-label="Frequency fine adjustment" />
+          <label class="switch-row" title="Apply edited values to the connected device automatically">
             <input id="liveApplyToggle" type="checkbox" checked />
             <span class="switch"></span>
             <span>Live apply</span>
           </label>
-          <button class="btn secondary" id="balancedButton">Balanced 3-phase</button>
-          <button class="btn secondary" id="zeroButton" disabled>Zero outputs</button>
-          <button class="btn primary" id="applyAllButton" disabled>Apply all</button>
+        </div>
+
+        <div class="injection-table" role="table" aria-label="Injection values">
+          <div class="grid-head" role="row">
+            <span>On</span>
+            <span>Channel</span>
+            <span>Magnitude</span>
+            <span>Phase</span>
+            <span>Wire</span>
+            <span></span>
+          </div>
+          <div id="channelGrid" class="channel-grid"></div>
+        </div>
+
+        <div class="grid-hint">
+          <span><kbd>Tab</kbd> next value</span>
+          <span><kbd>Enter</kbd> apply channel</span>
+          <span>Values remain editable while disconnected for setup and preview.</span>
         </div>
       </section>
 
-      <section class="channels-section">
-        <div class="section-heading">
-          <div>
-            <div class="eyebrow">Live signal control</div>
-            <h2>Current & voltage channels</h2>
-          </div>
-          <p>Magnitude uses engineering units. Phase uses ordinary degrees. Conversion to wire counts and milli-degrees happens inside the GUI.</p>
-        </div>
-        <div class="channel-grid" id="channelGrid"></div>
-      </section>
-
-      <section class="bottom-grid">
-        <article class="panel phase-panel">
-          <div class="panel-header compact">
+      <aside class="visual-pane">
+        <section class="surface visual-card phasor-card">
+          <div class="visual-heading">
             <div>
-              <div class="eyebrow">Vector preview</div>
-              <h2>Phase relationships</h2>
+              <span class="eyebrow">Generated</span>
+              <h2>Phasor</h2>
             </div>
+            <span class="visual-badge">SETPOINT</span>
           </div>
-          <canvas id="phasorCanvas" width="640" height="360" aria-label="Current and voltage phasor preview"></canvas>
-        </article>
+          <canvas id="phasorCanvas" width="720" height="420" aria-label="Generated current and voltage phasor diagram"></canvas>
+          <div class="visual-footer">
+            <span><i class="legend-line voltage"></i> Voltage</span>
+            <span><i class="legend-line current"></i> Current</span>
+            <span>Setpoint preview · not on-wire proof</span>
+          </div>
+        </section>
 
-        <article class="panel console-panel">
-          <div class="panel-header compact">
+        <section class="surface visual-card waveform-card">
+          <div class="visual-heading">
             <div>
-              <div class="eyebrow">Device evidence</div>
-              <h2>Runtime log</h2>
+              <span class="eyebrow">Generated</span>
+              <h2>Output waveform</h2>
             </div>
-            <button class="btn ghost small" id="clearLogButton">Clear</button>
+            <span class="visual-badge">40 ms</span>
           </div>
-          <pre id="runtimeLog" aria-live="polite">Waiting for device connection…</pre>
-        </article>
-      </section>
+          <canvas id="waveformCanvas" width="720" height="360" aria-label="Generated voltage and current waveform preview"></canvas>
+          <div class="visual-footer waveform-footer">
+            <span>Voltage + current · normalized view</span>
+            <span id="waveformFrequencyLabel">50.000 Hz</span>
+          </div>
+        </section>
+      </aside>
     </main>
+
+    <footer class="action-bar">
+      <div class="readiness-strip">
+        <span class="ready-dot"></span>
+        <div>
+          <strong id="footerReadiness">DEVICE OFFLINE</strong>
+          <span id="footerReadinessDetail">Connect ESP32-P4 to arm live injection</span>
+        </div>
+      </div>
+
+      <div class="action-context">
+        <span>MU01_SV1</span>
+        <span class="action-separator"></span>
+        <span id="footerRate">4000 sample/s</span>
+      </div>
+
+      <div class="primary-actions">
+        <button class="btn action secondary" id="applyAllButton" disabled>Apply all</button>
+        <button class="btn action stop" id="stopButton" disabled>Stop</button>
+        <button class="btn action start" id="startButton" disabled><span>▶</span> Start live</button>
+      </div>
+    </footer>
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
