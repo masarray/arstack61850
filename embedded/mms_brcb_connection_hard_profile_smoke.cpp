@@ -20,6 +20,8 @@ using namespace ar::iec61850;
 constexpr std::array<std::uint8_t, 2U> kBooleanType{0x83U, 0x00U};
 constexpr std::array<std::uint8_t, 6U> kReportTime{
     0x00U, 0x00U, 0x12U, 0x34U, 0x00U, 0x01U};
+constexpr std::array<std::uint8_t, 2U> kOwnerA{0xAAU, 0x01U};
+constexpr std::array<std::uint8_t, 2U> kOwnerB{0xBBU, 0x01U};
 
 constexpr std::array<std::uint8_t, 184U> kAssociationRequest{
     0x0DU,0xB6U,0x05U,0x06U,0x13U,0x01U,0x00U,0x16U,0x01U,0x02U,0x14U,0x02U,
@@ -51,6 +53,28 @@ constexpr std::array<std::uint8_t, 184U> kAssociationRequest{
     destination[1] = 0x01U;
     destination[2] = *static_cast<const bool*>(context) ? 0xFFU : 0x00U;
     return {wire::EncodeStatus::ok, required, required};
+}
+
+[[nodiscard]] mms::MmsStaticBrcbClientIdentity identity(
+    const std::uint64_t association,
+    const std::array<std::uint8_t, 2U>& owner) noexcept {
+    mms::MmsStaticBrcbClientIdentity result;
+    result.association_id = association;
+    result.owner[0] = owner[0];
+    result.owner[1] = owner[1];
+    result.owner_size = owner.size();
+    return result;
+}
+
+[[nodiscard]] mms::MmsStaticConnectionPolicy connection_policy(
+    const std::uint64_t association,
+    const std::array<std::uint8_t, 2U>& owner) noexcept {
+    mms::MmsStaticConnectionPolicy result;
+    result.association_id = association;
+    result.owner[0] = owner[0];
+    result.owner[1] = owner[1];
+    result.owner_size = owner.size();
+    return result;
 }
 
 [[nodiscard]] bool establish(
@@ -136,7 +160,14 @@ int main() {
         mms::MmsStaticDataSetEntry{"LD0", "LLN0$Events", members, false}};
     const mms::MmsStaticDataSetTable data_set_table{data_sets};
     const mms::MmsStaticApplicationDispatcher dispatcher{object_table, data_set_table};
-    mms::MmsStaticConnectionRuntime connection{dispatcher};
+
+    const auto owner_a1 = identity(101U, kOwnerA);
+    const auto owner_a2 = identity(102U, kOwnerA);
+    const auto foreign_b = identity(201U, kOwnerB);
+    mms::MmsStaticConnectionRuntime connection{
+        dispatcher, connection_policy(owner_a1.association_id, kOwnerA)};
+    mms::MmsStaticConnectionRuntime foreign_connection{
+        dispatcher, connection_policy(foreign_b.association_id, kOwnerB)};
 
     const mms::MmsStaticBrcbDefinition definition{
         "LD0", "LLN0$BR$Events", "LD0/LLN0$BR$Events",
@@ -147,10 +178,16 @@ int main() {
     mms::MmsStaticBrcbPendingState pending{};
     mms::MmsStaticBrcbRuntime reports{
         definition, pending, slots, object_table, data_set_table};
-    if (!reports.initialize() || reports.set_enabled(true) != mms::MmsStaticBrcbStatus::ok ||
+    if (!reports.initialize()) {
+        return 1;
+    }
+    mms::MmsStaticBrcbControl control{reports};
+    if (control.reserve(owner_a1, 5U, 100U) != mms::MmsStaticBrcbControlStatus::ok ||
+        control.set_report_enabled(owner_a1, true, 100U) !=
+            mms::MmsStaticBrcbControlStatus::ok ||
         reports.notify(0U, mms::MmsStaticBrcbEventReason::data_change, 100U) !=
             mms::MmsStaticBrcbStatus::ok) {
-        return 1;
+        return 2;
     }
 
     mms::MmsStaticBrcbCapturePlan plan;
@@ -159,101 +196,138 @@ int main() {
     if (!reports.next_due(100U, plan) ||
         !reports.capture(plan, kReportTime, staging, value_workspace).success() ||
         reports.queue_size() != 1U) {
-        return 2;
+        return 3;
     }
 
-    // Mutate the live backend after capture. Delivery must retain the old true snapshot.
     value = false;
     std::array<std::uint8_t, 2048U> request{};
     std::array<std::uint8_t, 2048U> response{};
     std::array<std::uint8_t, 2048U> workspace{};
     std::array<std::uint8_t, 2048U> scratch{};
     auto delivery = mms::MmsStaticBrcbConnection::poll(
-        connection, reports, response, workspace);
+        connection, control, reports, 100U, response, workspace);
     if (delivery.status != mms::MmsStaticBrcbConnectionStatus::not_established ||
         reports.queue_size() != 1U) {
-        return 3;
+        return 4;
     }
-    if (!establish(connection, request, response, workspace, scratch)) return 4;
+    if (!establish(connection, request, response, workspace, scratch) ||
+        !establish(foreign_connection, request, response, workspace, scratch)) {
+        return 5;
+    }
+
+    // A foreign established association must not see or consume the owner's entry.
+    delivery = mms::MmsStaticBrcbConnection::poll(
+        foreign_connection, control, reports, 100U, response, workspace);
+    if (delivery.status != mms::MmsStaticBrcbConnectionStatus::access_denied ||
+        reports.queue_size() != 1U) {
+        return 6;
+    }
 
     mms::MmsStaticBrcbEntryView held_entry;
     if (!reports.front(held_entry) || held_entry.entry_id.size() != 8U ||
         held_entry.entry_id[7U] != 1U ||
-        reports.set_enabled(false) != mms::MmsStaticBrcbStatus::ok) {
-        return 5;
+        control.set_report_enabled(owner_a1, false, 100U) !=
+            mms::MmsStaticBrcbControlStatus::ok) {
+        return 7;
     }
     delivery = mms::MmsStaticBrcbConnection::poll(
-        connection, reports, response, workspace);
+        connection, control, reports, 100U, response, workspace);
     if (delivery.status != mms::MmsStaticBrcbConnectionStatus::reporting_disabled ||
         reports.queue_size() != 1U || !reports.front(held_entry) ||
         held_entry.entry_id[7U] != 1U ||
-        reports.set_enabled(true) != mms::MmsStaticBrcbStatus::ok) {
-        return 6;
+        control.set_report_enabled(owner_a1, true, 100U) !=
+            mms::MmsStaticBrcbControlStatus::ok) {
+        return 8;
     }
 
     std::array<std::uint8_t, 8U> tiny_response{};
     delivery = mms::MmsStaticBrcbConnection::poll(
-        connection, reports, tiny_response, workspace);
+        connection, control, reports, 100U, tiny_response, workspace);
     if (delivery.status != mms::MmsStaticBrcbConnectionStatus::response_buffer_too_small ||
         delivery.required_response_bytes <= tiny_response.size() ||
-        delivery.entry_id[7] != 1U || reports.queue_size() != 1U) {
-        return 7;
+        delivery.entry_id[7U] != 1U || reports.queue_size() != 1U) {
+        return 9;
     }
 
     std::array<std::uint8_t, 2U> tiny_workspace{};
     delivery = mms::MmsStaticBrcbConnection::poll(
-        connection, reports, response, tiny_workspace);
+        connection, control, reports, 100U, response, tiny_workspace);
     if (delivery.status != mms::MmsStaticBrcbConnectionStatus::workspace_too_small ||
         delivery.required_workspace_bytes <= tiny_workspace.size() ||
-        delivery.entry_id[7] != 1U || reports.queue_size() != 1U) {
-        return 8;
+        delivery.entry_id[7U] != 1U || reports.queue_size() != 1U) {
+        return 10;
     }
 
+    // Staging is retry-safe: no delivery cursor movement until commit_sent().
     delivery = mms::MmsStaticBrcbConnection::poll(
-        connection, reports, response, workspace);
+        connection, control, reports, 100U, response, workspace);
     if (!delivery.response_ready() || delivery.bytes_written == 0U ||
-        delivery.entry_id[7] != 1U || delivery.sequence_number != 1U ||
-        delivery.buffer_overflow || reports.queue_size() != 0U) {
-        return 9;
+        delivery.entry_id[7U] != 1U || delivery.sequence_number != 1U ||
+        delivery.buffer_overflow || reports.queue_size() != 1U) {
+        return 11;
+    }
+    const auto retry = mms::MmsStaticBrcbConnection::poll(
+        connection, control, reports, 100U, response, workspace);
+    if (!retry.response_ready() || retry.entry_id != delivery.entry_id ||
+        reports.queue_size() != 1U) {
+        return 12;
     }
 
     mms::MmsInformationReportView decoded;
     if (!decode_report_frame(
-            std::span<const std::uint8_t>{response}.first(delivery.bytes_written), decoded) ||
+            std::span<const std::uint8_t>{response}.first(retry.bytes_written), decoded) ||
         decoded.item_count != 12U) {
-        return 10;
+        return 13;
     }
     mms::MmsReadAccessResultView item;
     bool historical_value = false;
     if (!decoded.try_item(10U, item) || !decode_boolean(item, historical_value) ||
         !historical_value) {
-        return 11;
+        return 14;
+    }
+    if (mms::MmsStaticBrcbConnection::commit_sent(reports, retry) !=
+            mms::MmsStaticBrcbStatus::ok ||
+        reports.queue_size() != 0U) {
+        return 15;
     }
 
-    // Queue another historical entry, then drop the association. The queue must survive reset.
+    // Queue another historical entry, close A1, then reclaim with the same stable
+    // Owner on association A2. The retained entry must remain retryable.
     if (reports.notify(0U, mms::MmsStaticBrcbEventReason::data_update, 200U) !=
             mms::MmsStaticBrcbStatus::ok ||
         !reports.next_due(200U, plan) ||
         !reports.capture(plan, kReportTime, staging, value_workspace).success() ||
         reports.queue_size() != 1U) {
-        return 12;
+        return 16;
     }
     connection.reset();
+    control.on_association_closed(owner_a1.association_id, 200U);
     delivery = mms::MmsStaticBrcbConnection::poll(
-        connection, reports, response, workspace);
+        connection, control, reports, 200U, response, workspace);
     if (delivery.status != mms::MmsStaticBrcbConnectionStatus::not_established ||
-        reports.queue_size() != 1U) {
-        return 13;
+        reports.queue_size() != 1U ||
+        control.reserve(owner_a2, 5U, 201U) != mms::MmsStaticBrcbControlStatus::ok ||
+        control.set_report_enabled(owner_a2, true, 201U) !=
+            mms::MmsStaticBrcbControlStatus::ok) {
+        return 17;
     }
-    if (!establish(connection, request, response, workspace, scratch)) return 14;
+
+    mms::MmsStaticConnectionRuntime reconnect{
+        dispatcher, connection_policy(owner_a2.association_id, kOwnerA)};
+    if (!establish(reconnect, request, response, workspace, scratch)) {
+        return 18;
+    }
     delivery = mms::MmsStaticBrcbConnection::poll(
-        connection, reports, response, workspace);
-    if (!delivery.response_ready() || delivery.entry_id[7] != 2U ||
+        reconnect, control, reports, 201U, response, workspace);
+    if (!delivery.response_ready() || delivery.entry_id[7U] != 2U ||
+        reports.queue_size() != 1U ||
+        mms::MmsStaticBrcbConnection::commit_sent(reports, delivery) !=
+            mms::MmsStaticBrcbStatus::ok ||
         reports.queue_size() != 0U ||
         mms::MmsStaticBrcbConnection::poll(
-            connection, reports, response, workspace).status !=
+            reconnect, control, reports, 201U, response, workspace).status !=
             mms::MmsStaticBrcbConnectionStatus::no_report_available) {
-        return 15;
+        return 19;
     }
 
     return 0;
