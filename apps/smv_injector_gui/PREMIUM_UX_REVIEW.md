@@ -55,6 +55,8 @@ The target is a precision engineering instrument, not a dashboard and not a gami
 - selected signal color is used for data identity, not decoration
 - phasor and waveform are part of the working surface, not afterthought cards
 
+The screen should feel comfortable during repeated bench work: the eye should land first on Current/Voltage values, then immediately on the phasor/waveform result, while source metadata and diagnostics remain quiet in the periphery.
+
 ## Visualization truthfulness
 
 Phasor and waveform are generated setpoint previews. They visualize what the configured signal generator is intended to produce. They are not Ethernet on-wire proof. Future observed/captured data must be clearly separated from generated data.
