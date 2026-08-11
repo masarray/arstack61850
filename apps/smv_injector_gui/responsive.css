@@ -51,7 +51,7 @@
   .source-pane, .injector-pane, .monitor-pane { grid-column: 1; grid-row: auto; }
   .source-pane { overflow: visible; }
   .signal-matrices { grid-template-columns: 1fr; }
-  .signal-group { min-height: 255px; }
+  .signal-group { min-height: 240px; }
   .monitor-pane { display: grid; grid-template-columns: 1fr; grid-template-rows: auto 300px 270px auto; }
   .monitor-heading, .phasor-section, .waveform-section, .monitor-footer { grid-column: 1; grid-row: auto; }
   .editor-status { align-items: flex-start; flex-direction: column; }
