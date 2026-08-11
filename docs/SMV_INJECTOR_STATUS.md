@@ -130,6 +130,29 @@ The analyzer can only inspect frames that physically reach its Ethernet port. In
 
 The goal is to remove the current Windows USB-NIC capture ambiguity and make configured-vs-observed evidence a first-class ARStack61850 capability.
 
+## Parallel synchronization phase: PTP Grandmaster Clock
+
+PTP Grandmaster work is now a separate stacked track so synchronization can advance without reopening the completed injector core.
+
+The dedicated roadmap is `docs/PTP_GMC_ROADMAP.md` and implementation is tracked by issue #56 under parent PTP/SV roadmap #24.
+
+The sequence is intentionally evidence-first:
+
+```text
+ESP32-P4 EMAC hardware clock/timestamp adapter
+        -> portable PTP wire codec
+        -> passive PTP monitor
+        -> LAB GMC Announce/Sync/Follow_Up
+        -> independent receiver evidence
+        -> explicit clock-source/traceability state
+        -> anchor SV sample timeline to the same PTP hardware clock
+        -> only then derive smpSynch from measured state + sourced profile rules
+```
+
+The PTP implementation must start from `feature/smv-scl-profile-bridge` and remain a stacked branch. It must preserve the established 4000/4800 fps injector behavior, keep PTP state out of the SV hot path, and retain `smpSynch=0` until synchronization is actually evidenced.
+
+A free-running laboratory grandmaster, a host-seeded clock and a traceable external-reference grandmaster are different states and must never be collapsed into one `locked` claim.
+
 ## Product interpretation
 
 The injector has crossed the boundary from a fixed bench waveform generator to an **SCL-driven IEC 61850 Sampled Values injection instrument** for the current supported profile.
@@ -141,6 +164,13 @@ Configured engineering intent
         -> deterministic injector
         -> independent raw analyzer
         -> configured-vs-observed evidence
+
+and in parallel:
+
+EMAC hardware time
+        -> PTP GMC
+        -> PTP-anchored SV timeline
+        -> truthful synchronization evidence
 ```
 
-No decoded packet or successful bench run by itself is treated as a formal conformance certificate.
+No decoded packet, successful bench run, or visible PTP traffic by itself is treated as a formal conformance certificate.
