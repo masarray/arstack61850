@@ -26,6 +26,7 @@ using ar::iec61850::sampled_values::live_channel_index;
 constexpr char kTag[] = "ar_smv_ctrl";
 constexpr std::array<std::string_view, 8> kChannelNames{
     "IA", "IB", "IC", "IN", "UA", "UB", "UC", "UN"};
+constexpr std::string_view kTokenDelimiters{" \t\r\n"};
 
 SvLiveSignalBank g_signal_bank;
 std::atomic<bool> g_running{false};
@@ -38,6 +39,38 @@ void uppercase_ascii(char* text) noexcept {
     for (; *text != '\0'; ++text) {
         *text = static_cast<char>(std::toupper(static_cast<unsigned char>(*text)));
     }
+}
+
+// The bench console is a safety-sensitive control surface: random UART bytes,
+// terminal escape sequences or UTF-8 fragments must never be normalized into a
+// valid command. Accept printable 7-bit ASCII plus normal line whitespace only;
+// reject the whole line otherwise.
+bool is_safe_ascii_command_line(const char* line) noexcept {
+    if (line == nullptr) {
+        return false;
+    }
+
+    bool has_payload = false;
+    for (const auto* cursor = reinterpret_cast<const unsigned char*>(line);
+         *cursor != 0U;
+         ++cursor) {
+        const auto byte = *cursor;
+        if (byte == static_cast<unsigned char>(' ') ||
+            byte == static_cast<unsigned char>('\t') ||
+            byte == static_cast<unsigned char>('\r') ||
+            byte == static_cast<unsigned char>('\n')) {
+            continue;
+        }
+        if (byte < 0x20U || byte > 0x7EU) {
+            return false;
+        }
+        has_payload = true;
+    }
+    return has_payload;
+}
+
+bool has_extra_token(char** save) noexcept {
+    return strtok_r(nullptr, kTokenDelimiters.data(), save) != nullptr;
 }
 
 bool parse_i32(const char* text, std::int32_t& value) noexcept {
@@ -115,32 +148,52 @@ bool publish_state(const SvLiveSignalState& state) noexcept {
 
 void handle_line(char* line) noexcept {
     char* save{};
-    char* command = strtok_r(line, " \t\r\n", &save);
+    char* command = strtok_r(line, kTokenDelimiters.data(), &save);
     if (command == nullptr) {
         return;
     }
     uppercase_ascii(command);
 
     if (std::strcmp(command, "START") == 0) {
+        if (has_extra_token(&save)) {
+            ESP_LOGE(kTag, "Usage: START");
+            return;
+        }
         g_start_request.store(true, std::memory_order_release);
         g_running.store(true, std::memory_order_release);
         ESP_LOGI(kTag, "START accepted: phase and smpCnt reset at the next sample boundary");
         return;
     }
     if (std::strcmp(command, "STOP") == 0) {
+        if (has_extra_token(&save)) {
+            ESP_LOGE(kTag, "Usage: STOP");
+            return;
+        }
         g_running.store(false, std::memory_order_release);
         ESP_LOGI(kTag, "STOP accepted: SV transmission suppressed");
         return;
     }
     if (std::strcmp(command, "SHOW") == 0) {
+        if (has_extra_token(&save)) {
+            ESP_LOGE(kTag, "Usage: SHOW");
+            return;
+        }
         print_state();
         return;
     }
     if (std::strcmp(command, "HELP") == 0) {
+        if (has_extra_token(&save)) {
+            ESP_LOGE(kTag, "Usage: HELP");
+            return;
+        }
         print_help();
         return;
     }
     if (std::strcmp(command, "ZERO") == 0) {
+        if (has_extra_token(&save)) {
+            ESP_LOGE(kTag, "Usage: ZERO");
+            return;
+        }
         auto state = g_signal_bank.snapshot();
         for (auto& channel : state.channels) {
             channel.rms_counts = 0;
@@ -149,9 +202,9 @@ void handle_line(char* line) noexcept {
         return;
     }
     if (std::strcmp(command, "FREQ") == 0) {
-        char* value_text = strtok_r(nullptr, " \t\r\n", &save);
+        char* value_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
         std::uint32_t frequency{};
-        if (!parse_u32(value_text, frequency)) {
+        if (!parse_u32(value_text, frequency) || has_extra_token(&save)) {
             ESP_LOGE(kTag, "Usage: FREQ <millihertz>");
             return;
         }
@@ -164,7 +217,7 @@ void handle_line(char* line) noexcept {
     if (std::strcmp(command, "SET") == 0 ||
         std::strcmp(command, "ENABLE") == 0 ||
         std::strcmp(command, "QUALITY") == 0) {
-        char* channel_text = strtok_r(nullptr, " \t\r\n", &save);
+        char* channel_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
         if (channel_text == nullptr) {
             ESP_LOGE(kTag, "Channel name is required");
             return;
@@ -180,9 +233,9 @@ void handle_line(char* line) noexcept {
         auto& channel = state.channels[*channel_index];
 
         if (std::strcmp(command, "SET") == 0) {
-            char* rms_text = strtok_r(nullptr, " \t\r\n", &save);
-            char* phase_text = strtok_r(nullptr, " \t\r\n", &save);
-            char* quality_text = strtok_r(nullptr, " \t\r\n", &save);
+            char* rms_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
+            char* phase_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
+            char* quality_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
             std::int32_t rms{};
             std::int32_t phase{};
             if (!parse_i32(rms_text, rms) || !parse_i32(phase_text, phase)) {
@@ -190,14 +243,19 @@ void handle_line(char* line) noexcept {
                          "Usage: SET <channel> <rms_wire_counts> <phase_mdeg> [quality]");
                 return;
             }
+            std::uint32_t quality{};
+            if (quality_text != nullptr && !parse_u32(quality_text, quality)) {
+                ESP_LOGE(kTag, "Invalid quality value '%s'", quality_text);
+                return;
+            }
+            if (has_extra_token(&save)) {
+                ESP_LOGE(kTag,
+                         "Usage: SET <channel> <rms_wire_counts> <phase_mdeg> [quality]");
+                return;
+            }
             channel.rms_counts = rms;
             channel.phase_millidegrees = phase;
             if (quality_text != nullptr) {
-                std::uint32_t quality{};
-                if (!parse_u32(quality_text, quality)) {
-                    ESP_LOGE(kTag, "Invalid quality value '%s'", quality_text);
-                    return;
-                }
                 channel.quality = quality;
             }
             static_cast<void>(publish_state(state));
@@ -205,9 +263,9 @@ void handle_line(char* line) noexcept {
         }
 
         if (std::strcmp(command, "ENABLE") == 0) {
-            char* enabled_text = strtok_r(nullptr, " \t\r\n", &save);
+            char* enabled_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
             std::uint32_t enabled{};
-            if (!parse_u32(enabled_text, enabled) || enabled > 1U) {
+            if (!parse_u32(enabled_text, enabled) || enabled > 1U || has_extra_token(&save)) {
                 ESP_LOGE(kTag, "Usage: ENABLE <channel> <0|1>");
                 return;
             }
@@ -216,9 +274,9 @@ void handle_line(char* line) noexcept {
             return;
         }
 
-        char* quality_text = strtok_r(nullptr, " \t\r\n", &save);
+        char* quality_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
         std::uint32_t quality{};
-        if (!parse_u32(quality_text, quality)) {
+        if (!parse_u32(quality_text, quality) || has_extra_token(&save)) {
             ESP_LOGE(kTag, "Usage: QUALITY <channel> <uint32/0xhex>");
             return;
         }
@@ -228,6 +286,13 @@ void handle_line(char* line) noexcept {
     }
 
     ESP_LOGW(kTag, "Unknown command '%s'; type HELP", command);
+}
+
+void discard_overlong_line_tail() noexcept {
+    int byte{};
+    do {
+        byte = std::fgetc(stdin);
+    } while (byte != '\n' && byte != EOF);
 }
 
 } // namespace
@@ -268,11 +333,29 @@ void live_control_task(void*) noexcept {
 
     std::array<char, 192> line{};
     while (true) {
+        line.fill('\0');
         if (std::fgets(line.data(), static_cast<int>(line.size()), stdin) == nullptr) {
             std::clearerr(stdin);
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
+
+        const auto length = std::strlen(line.data());
+        const bool complete_line =
+            length > 0U && (line[length - 1U] == '\n' || line[length - 1U] == '\r');
+        if (!complete_line && length == line.size() - 1U) {
+            discard_overlong_line_tail();
+            ESP_LOGW(kTag, "Discarded overlong bench command");
+            continue;
+        }
+
+        if (!is_safe_ascii_command_line(line.data())) {
+            // Startup UART noise and terminal escape/UTF-8 fragments are
+            // intentionally dropped without echoing their bytes back to logs.
+            ESP_LOGD(kTag, "Discarded non-ASCII/empty bench input");
+            continue;
+        }
+
         handle_line(line.data());
     }
 }
