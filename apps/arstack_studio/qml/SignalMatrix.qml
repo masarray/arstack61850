@@ -18,9 +18,13 @@ Rectangle {
     property bool compact: false
 
     color: theme.surface2
-    radius: 7
+    radius: 8
     border.width: 1
     border.color: theme.lineSoft
+
+    function phaseColorFor(index) {
+        return [theme.phaseA, theme.phaseB, theme.phaseC, theme.phaseN][index]
+    }
 
     function focusCell(row, column) {
         var rowItem = rowRepeater.itemAt(row)
@@ -37,16 +41,18 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 42
+            Layout.preferredHeight: 40
             Layout.leftMargin: 10
             Layout.rightMargin: 10
             spacing: 8
 
             Rectangle {
-                width: 21
-                height: 21
+                width: 20
+                height: 20
                 radius: 5
-                color: "#152235"
+                color: "#122033"
+                border.width: 1
+                border.color: "#223955"
                 Label {
                     anchors.centerIn: parent
                     text: matrix.symbolText
@@ -58,7 +64,7 @@ Rectangle {
             }
             Label {
                 text: matrix.titleText
-                color: matrix.theme.textSoft
+                color: matrix.theme.text
                 font.family: matrix.uiFont
                 font.pixelSize: 11
                 font.weight: Font.DemiBold
@@ -70,9 +76,12 @@ Rectangle {
                 color: matrix.theme.muted
                 font.family: matrix.uiFont
                 font.pixelSize: 9
+                font.weight: Font.Medium
                 verticalAlignment: Text.AlignVCenter
             }
         }
+
+        Rectangle { Layout.fillWidth: true; height: 1; color: matrix.theme.lineSoft }
 
         RowLayout {
             Layout.fillWidth: true
@@ -98,25 +107,30 @@ Rectangle {
                 property real angle: model.phase
                 property bool channelEnabled: model.enabled
                 property real signalQuality: model.quality
-                property color phaseColor: model.traceColor
+                property color phaseColor: matrix.phaseColorFor(rowIndex)
+                property bool selected: matrix.controller.activeSignal === signalRow.sid
                 property alias magnitudeEditor: magnitudeField
                 property alias phaseEditor: phaseField
 
                 Layout.fillWidth: true
-                Layout.preferredHeight: matrix.compact ? 51 : 55
-                color: magnitudeField.activeFocus || phaseField.activeFocus ? "#141d27" : "transparent"
-                Behavior on color { ColorAnimation { duration: 80 } }
+                Layout.preferredHeight: matrix.compact ? 50 : 54
+                color: signalRow.selected ? "#111c27"
+                    : (magnitudeField.activeFocus || phaseField.activeFocus) ? "#131f2b"
+                    : rowHover.hovered ? "#101820" : "transparent"
+                Behavior on color { ColorAnimation { duration: 90 } }
+
+                HoverHandler { id: rowHover }
 
                 onMagChanged: if (!magnitudeField.activeFocus) magnitudeField.text = mag.toFixed(3)
                 onAngleChanged: if (!phaseField.activeFocus) phaseField.text = angle.toFixed(2)
 
                 Rectangle {
-                    visible: matrix.controller.activeSignal === signalRow.sid
-                    width: 2
+                    visible: signalRow.selected
+                    width: 3
                     anchors.left: parent.left
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
-                    color: matrix.theme.accent
+                    color: signalRow.phaseColor
                 }
 
                 RowLayout {
@@ -142,10 +156,15 @@ Rectangle {
                         Layout.preferredWidth: 34
                         Layout.alignment: Qt.AlignVCenter
                         spacing: 5
-                        Rectangle { width: 6; height: 6; radius: 3; color: signalRow.phaseColor }
+                        Rectangle {
+                            width: 7
+                            height: 7
+                            radius: 3.5
+                            color: signalRow.phaseColor
+                        }
                         Label {
                             text: signalRow.sid
-                            color: matrix.theme.text
+                            color: signalRow.selected ? matrix.theme.text : matrix.theme.textSoft
                             font.family: matrix.monoFont
                             font.pixelSize: 9
                             font.weight: Font.Bold

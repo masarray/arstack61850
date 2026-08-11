@@ -23,6 +23,17 @@ QtObject {
     readonly property color red: "#ff727f"
     readonly property color redSoft: "#46252b"
 
+    // One signal palette everywhere. Current and voltage deliberately share
+    // the exact same phase colors; grouping is communicated by the view/lane,
+    // never by making one electrical quantity dimmer or thinner than another.
+    readonly property color phaseA: "#ff5b70"
+    readonly property color phaseB: "#ffd24a"
+    readonly property color phaseC: "#49a9ff"
+    readonly property color phaseN: "#aa8cff"
+    readonly property color plotGrid: "#22303d"
+    readonly property color plotGridStrong: "#334353"
+    readonly property color plotSurface: "#0b1219"
+
     // Shared density and typography tokens. Keep engineering data compact,
     // but never depend on tiny text to make the workspace fit.
     readonly property int captionSize: 10
