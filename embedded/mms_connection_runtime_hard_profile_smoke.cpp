@@ -256,6 +256,7 @@ int main() {
     osi::CotpTpduView cc;
     if (!result.response_ready() || result.consumed_bytes != cr_tpkt.bytes_written ||
         runtime.state() != mms::MmsStaticConnectionState::awaiting_association ||
+        runtime.negotiated_tpdu_size_code() != 0x0AU ||
         !extract_cotp(
             std::span<const std::uint8_t>{response}.first(result.bytes_written), cc) ||
         cc.kind != osi::CotpWireKind::connection_confirm ||
@@ -416,9 +417,27 @@ int main() {
         response,
         workspace);
     if (!segmented_tpkt.success() ||
-        result.status != mms::MmsStaticConnectionStatus::protocol_violation ||
-        runtime.state() != mms::MmsStaticConnectionState::fault) {
+        result.status != mms::MmsStaticConnectionStatus::consumed_no_response ||
+        result.consumed_bytes != segmented_tpkt.bytes_written ||
+        runtime.state() != mms::MmsStaticConnectionState::established) {
         return 15;
+    }
+
+    const std::span<const std::uint8_t> empty_payload{};
+    const auto final_segment = build_data_tpkt(
+        empty_payload, request, scratch, true);
+    result = runtime.process_tcp_window(
+        std::span<const std::uint8_t>{request}.first(final_segment.bytes_written),
+        response,
+        workspace);
+    if (!final_segment.success() || !result.response_ready() ||
+        result.consumed_bytes != final_segment.bytes_written ||
+        result.application_service != mms::MmsWireConfirmedService::read ||
+        runtime.state() != mms::MmsStaticConnectionState::established ||
+        !extract_mms(
+            std::span<const std::uint8_t>{response}.first(result.bytes_written), pdv) ||
+        !matches(pdv.single_asn1_type, kReadResponse)) {
+        return 20;
     }
 
     runtime.reset();
