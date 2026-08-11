@@ -3,7 +3,7 @@
 #include "ariec61850/time_sync/ptp_monitor.hpp"
 
 #include <algorithm>
-#include <sstream>
+#include <utility>
 
 namespace ar::iec61850::time_sync {
 namespace {
@@ -108,6 +108,7 @@ void PtpPassiveMonitor::observe(
     const PtpObservedMessage observed{
         observed_at,
         frame.header.message_type,
+        frame.header.transport_specific,
         frame.header.domain_number,
         frame.header.source_port_identity,
         frame.header.sequence_id,
@@ -131,12 +132,18 @@ void PtpPassiveMonitor::observe(
         state.snapshot.source_port_identity = frame.header.source_port_identity;
         state.snapshot.first_seen_at = observed_at;
         state.snapshot.last_seen_at = observed_at;
+        state.snapshot.transport_specific = frame.header.transport_specific;
         sources_.push_back(state);
         source = &sources_.back();
     }
 
     auto& state = source->snapshot;
     state.last_seen_at = observed_at;
+    if (state.transport_specific.has_value() &&
+        *state.transport_specific != frame.header.transport_specific) {
+        ++state.transport_specific_change_count;
+    }
+    state.transport_specific = frame.header.transport_specific;
     state.vlan_id = frame.vlan_id;
     state.outer_vlan_id = frame.outer_vlan_id;
     const auto index = message_index(frame.header.message_type);
@@ -249,10 +256,36 @@ PtpTimingHealthReport PtpTimingHealthValidator::evaluate(
         }
     }
 
+    if (options.expected_transport_specific.has_value()) {
+        const auto matching = std::count_if(active_sources.begin(), active_sources.end(), [&](const auto* source) {
+            return source->transport_specific.has_value() &&
+                   *source->transport_specific == *options.expected_transport_specific;
+        });
+        if (matching == 0) {
+            checks.push_back({
+                "ptp.transportSpecific",
+                PtpHealthSeverity::fail,
+                "No active source is using expected transportSpecific " +
+                    std::to_string(*options.expected_transport_specific) + ".",
+            });
+        } else {
+            checks.push_back({
+                "ptp.transportSpecific",
+                PtpHealthSeverity::ok,
+                "Expected transportSpecific is visible.",
+            });
+        }
+    }
+
     const PtpSourceClockSnapshot* selected = nullptr;
     for (const auto* source : active_sources) {
         if (options.expected_domain_number.has_value() &&
             source->domain_number != *options.expected_domain_number) {
+            continue;
+        }
+        if (options.expected_transport_specific.has_value() &&
+            (!source->transport_specific.has_value() ||
+             *source->transport_specific != *options.expected_transport_specific)) {
             continue;
         }
         if (selected == nullptr ||
@@ -271,6 +304,21 @@ PtpTimingHealthReport PtpTimingHealthValidator::evaluate(
         return report;
     }
     report.selected_source = selected->source_port_identity;
+
+    if (selected->transport_specific_change_count != 0U) {
+        checks.push_back({
+            "ptp.transportSpecific.stability",
+            PtpHealthSeverity::warning,
+            "Selected source changed transportSpecific " +
+                std::to_string(selected->transport_specific_change_count) + " time(s) during the capture.",
+        });
+    } else {
+        checks.push_back({
+            "ptp.transportSpecific.stability",
+            PtpHealthSeverity::ok,
+            "Selected source transportSpecific remained stable.",
+        });
+    }
 
     if (options.require_announce) {
         add_presence_check(checks, *selected, PtpMessageType::announce, "ptp.announce", "Announce");
