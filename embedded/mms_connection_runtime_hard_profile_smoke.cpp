@@ -85,6 +85,16 @@ constexpr std::array<std::uint8_t, 9U> kWriteResponse{
 constexpr std::array<std::uint8_t, 8U> kIdentifyReject{
     0xA4U, 0x06U, 0x80U, 0x01U, 0x15U, 0x81U, 0x01U, 0x01U};
 
+constexpr std::array<std::uint8_t, 20U> kMissingAttributesRequest{
+    0xA0U, 0x12U, 0x02U, 0x01U, 0x16U,
+    0xA6U, 0x0DU, 0xA0U, 0x0BU, 0xA1U, 0x09U,
+    0x1AU, 0x03U, 0x4CU, 0x44U, 0x30U,
+    0x1AU, 0x02U, 0x5AU, 0x5AU};
+
+constexpr std::array<std::uint8_t, 12U> kMissingObjectConfirmedError{
+    0xA2U, 0x0AU, 0x80U, 0x01U, 0x16U,
+    0xA2U, 0x05U, 0xA0U, 0x03U, 0x87U, 0x01U, 0x02U};
+
 template <std::size_t N>
 [[nodiscard]] bool matches(
     const std::span<const std::uint8_t> actual,
@@ -359,6 +369,28 @@ int main() {
             std::span<const std::uint8_t>{response}.first(result.bytes_written), pdv) ||
         !matches(pdv.single_asn1_type, kIdentifyReject)) {
         return 11;
+    }
+
+    const auto missing_attributes_tpkt = build_mms_tpkt(
+        kMissingAttributesRequest, request, presentation, scratch);
+    if (!missing_attributes_tpkt.success()) {
+        return 18;
+    }
+    result = runtime.process_tcp_window(
+        std::span<const std::uint8_t>{request}.first(missing_attributes_tpkt.bytes_written),
+        response,
+        workspace);
+    if (!result.response_ready() ||
+        result.application_status != mms::MmsStaticDispatchStatus::object_not_found ||
+        result.application_service !=
+            mms::MmsWireConfirmedService::get_variable_access_attributes ||
+        result.invoke_id != 22U ||
+        result.consumed_bytes != missing_attributes_tpkt.bytes_written ||
+        runtime.state() != mms::MmsStaticConnectionState::established ||
+        !extract_mms(
+            std::span<const std::uint8_t>{response}.first(result.bytes_written), pdv) ||
+        !matches(pdv.single_asn1_type, kMissingObjectConfirmedError)) {
+        return 19;
     }
 
     const auto write_tpkt = build_mms_tpkt(
