@@ -40,6 +40,36 @@ if not exist "%APP_DIR%index.html" (
   exit /b 1
 )
 
+if not exist "%APP_DIR%host_server.py" (
+  echo ERROR: GUI host_server.py is missing from the local working tree.
+  echo Restore the GUI files from the current branch, then run this launcher again:
+  echo   git -C "%REPO_ROOT%" restore --source=HEAD -- apps/smv_injector_gui
+  pause
+  exit /b 1
+)
+
+rem The tiny host CMake scaffold is tracked in Git, but a locally deleted tracked
+rem directory can survive a fast-forward pull. Self-heal this generated-style
+rem scaffold so the operator never has to restore one internal build file by hand.
+if not exist "%APP_DIR%host\CMakeLists.txt" (
+  echo Repairing missing local host build scaffold...
+  if not exist "%APP_DIR%host" mkdir "%APP_DIR%host" >nul 2>nul
+  > "%APP_DIR%host\CMakeLists.txt" echo cmake_minimum_required^(VERSION 3.20^)
+  >> "%APP_DIR%host\CMakeLists.txt" echo project^(ARStackSmvGuiHost LANGUAGES CXX^)
+  >> "%APP_DIR%host\CMakeLists.txt" echo.
+  >> "%APP_DIR%host\CMakeLists.txt" echo set^(ARIEC61850_BUILD_TESTS OFF CACHE BOOL "" FORCE^)
+  >> "%APP_DIR%host\CMakeLists.txt" echo set^(ARIEC61850_BUILD_TOOLS OFF CACHE BOOL "" FORCE^)
+  >> "%APP_DIR%host\CMakeLists.txt" echo set^(ARIEC61850_BUILD_FUZZERS OFF CACHE BOOL "" FORCE^)
+  >> "%APP_DIR%host\CMakeLists.txt" echo set^(ARIEC61850_ENABLE_SANITIZERS OFF CACHE BOOL "" FORCE^)
+  >> "%APP_DIR%host\CMakeLists.txt" echo.
+  >> "%APP_DIR%host\CMakeLists.txt" echo add_subdirectory^(${CMAKE_CURRENT_LIST_DIR}/../../.. arstack-core^)
+  >> "%APP_DIR%host\CMakeLists.txt" echo.
+  >> "%APP_DIR%host\CMakeLists.txt" echo add_executable^(ariec61850_smv_profile_inspect
+  >> "%APP_DIR%host\CMakeLists.txt" echo     ${CMAKE_CURRENT_LIST_DIR}/../../../tools/smv_profile_inspect.cpp^)
+  >> "%APP_DIR%host\CMakeLists.txt" echo target_link_libraries^(ariec61850_smv_profile_inspect PRIVATE ARIEC61850::core^)
+  >> "%APP_DIR%host\CMakeLists.txt" echo target_compile_features^(ariec61850_smv_profile_inspect PRIVATE cxx_std_20^)
+)
+
 call :prepare_host_toolchain
 if errorlevel 1 goto :host_compiler_missing
 
