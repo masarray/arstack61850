@@ -1,0 +1,50 @@
+name: IEDScout Parity Server CI
+
+on:
+  pull_request:
+    paths:
+      - 'tools/static_ied_server_iedsim/**'
+      - 'tools/static_ied_server.cpp'
+      - 'tools/static_ied_server_sigpipe.cpp'
+      - 'src/asn1/ber_span_reader.cpp'
+      - 'src/osi/**'
+      - 'src/acse/**'
+      - 'src/mms/**'
+      - 'include/ariec61850/**'
+      - '.github/workflows/iedscout-parity-server-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  linux:
+    strategy:
+      matrix:
+        compiler: [gcc, clang]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select compiler
+        run: |
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            echo "CC=clang" >> "$GITHUB_ENV"
+            echo "CXX=clang++" >> "$GITHUB_ENV"
+          else
+            echo "CC=gcc" >> "$GITHUB_ENV"
+            echo "CXX=g++" >> "$GITHUB_ENV"
+          fi
+      - name: Configure
+        run: cmake -S tools/static_ied_server_iedsim -B build-iedscout-parity -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build-iedscout-parity --parallel
+      - name: Test
+        run: ctest --test-dir build-iedscout-parity --output-on-failure
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S tools/static_ied_server_iedsim -B build-iedscout-parity
+      - name: Build
+        run: cmake --build build-iedscout-parity --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build-iedscout-parity -C Release --output-on-failure
