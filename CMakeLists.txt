@@ -185,7 +185,10 @@ if(ARIEC61850_BUILD_TOOLS)
     ariec61850_apply_warnings(ariec61850_file_transfer)
     ariec61850_apply_sanitizers(ariec61850_file_transfer)
 
-    add_executable(ariec61850_static_ied_server tools/static_ied_server.cpp)
+    add_executable(
+        ariec61850_static_ied_server
+        tools/static_ied_server.cpp
+        tools/static_ied_server_sigpipe.cpp)
     target_link_libraries(
         ariec61850_static_ied_server
         PRIVATE ARIEC61850::mms_server_core)
