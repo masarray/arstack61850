@@ -15,6 +15,9 @@ enum class MmsWirePduKind : std::uint8_t {
     confirmed_response,
     initiate_request,
     initiate_response,
+    confirmed_error,
+    conclude_request,
+    conclude_response,
 };
 
 enum class MmsWireConfirmedService : std::int32_t {
@@ -89,6 +92,24 @@ public:
         std::int32_t service_tag,
         bool service_constructed,
         std::span<const std::uint8_t> service_value,
+        std::span<std::uint8_t> destination) noexcept;
+
+    // Engineering-client compatibility primitives ported from the proven
+    // ARIEC61850 simulator/server behavior. These remain bounded/no-throw and
+    // are consumed by the server connection runtime rather than weakening the
+    // strict application dispatcher contract.
+    [[nodiscard]] static wire::EncodeResult encode_identify_response_into(
+        std::uint32_t invoke_id,
+        std::span<std::uint8_t> destination) noexcept;
+
+    [[nodiscard]] static wire::EncodeResult encode_confirmed_error_into(
+        std::uint32_t invoke_id,
+        std::span<std::uint8_t> destination) noexcept;
+
+    [[nodiscard]] static bool is_conclude_request(
+        std::span<const std::uint8_t> bytes) noexcept;
+
+    [[nodiscard]] static wire::EncodeResult encode_conclude_response_into(
         std::span<std::uint8_t> destination) noexcept;
 };
 
