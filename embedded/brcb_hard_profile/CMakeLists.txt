@@ -153,6 +153,30 @@ add_executable(ariec61850_hard_mms_brcb_checkpoint_fallback_smoke
     ${ARIEC61850_ROOT}/src/mms/static_brcb_checkpoint_store.cpp)
 ariec61850_configure_brcb_hard_target(ariec61850_hard_mms_brcb_checkpoint_fallback_smoke)
 
+add_executable(ariec61850_hard_mms_negotiated_limits_smoke
+    ${CMAKE_CURRENT_LIST_DIR}/../mms_negotiated_limits_hard_profile_smoke.cpp
+    ${ARIEC61850_ROOT}/src/asn1/ber_span_reader.cpp
+    ${ARIEC61850_ROOT}/src/osi/tpkt_span.cpp
+    ${ARIEC61850_ROOT}/src/osi/cotp_span.cpp
+    ${ARIEC61850_ROOT}/src/osi/session_span.cpp
+    ${ARIEC61850_ROOT}/src/osi/presentation_span.cpp
+    ${ARIEC61850_ROOT}/src/acse/association_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/pdu_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/services_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/write_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/data_set_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/information_report_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_object_table.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_write.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_data_set_table.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_dispatcher.cpp
+    ${ARIEC61850_ROOT}/src/mms/connection_runtime.cpp
+    ${ARIEC61850_ROOT}/src/mms/buffered_selective_information_report_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_brcb_runtime.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_brcb_control.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_brcb_connection.cpp)
+ariec61850_configure_brcb_hard_target(ariec61850_hard_mms_negotiated_limits_smoke)
+
 enable_testing()
 add_test(NAME ariec61850_hard_mms_brcb_smoke COMMAND ariec61850_hard_mms_brcb_smoke)
 add_test(NAME ariec61850_hard_mms_brcb_control_smoke COMMAND ariec61850_hard_mms_brcb_control_smoke)
@@ -162,6 +186,7 @@ add_test(NAME ariec61850_hard_mms_brcb_connection_smoke COMMAND ariec61850_hard_
 add_test(NAME ariec61850_hard_mms_brcb_recovery_v2_smoke COMMAND ariec61850_hard_mms_brcb_recovery_v2_smoke)
 add_test(NAME ariec61850_hard_mms_brcb_persistence_smoke COMMAND ariec61850_hard_mms_brcb_persistence_smoke)
 add_test(NAME ariec61850_hard_mms_brcb_checkpoint_fallback_smoke COMMAND ariec61850_hard_mms_brcb_checkpoint_fallback_smoke)
+add_test(NAME ariec61850_hard_mms_negotiated_limits_smoke COMMAND ariec61850_hard_mms_negotiated_limits_smoke)
 
 message(STATUS "arstack61850 BRCB hard profile: bounded RAM queue + EntryID + BufOvfl=ON")
 message(STATUS "arstack61850 BRCB hard profile: association ownership + ResvTms gate=ON")
@@ -169,6 +194,7 @@ message(STATUS "arstack61850 BRCB hard profile: MMS RptEna/EntryID/PurgeBuf/Resv
 message(STATUS "arstack61850 BRCB hard profile: transport association lifecycle bridge=ON")
 message(STATUS "arstack61850 BRCB hard profile: retained-history recovery state v2 + v1 restore=ON")
 message(STATUS "arstack61850 BRCB hard profile: retry-safe two-phase owner-bound delivery=ON")
+message(STATUS "arstack61850 BRCB hard profile: negotiated COTP/MMS outbound bounds=ON")
 message(STATUS "arstack61850 BRCB hard profile: dual-bank checkpoint + one-bank recovery=ON")
 message(STATUS "arstack61850 BRCB hard profile: platform non-volatile adapter=NOT_CLAIMED")
 message(STATUS "arstack61850 BRCB hard profile: exceptions/RTTI disabled=ON")
