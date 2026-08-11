@@ -121,8 +121,6 @@ int main() {
         return 4;
     }
 
-    // Confirm the deterministic AARE itself is stable and contains the expected
-    // MMS Initiate response used by the host association profile.
     std::array<std::uint8_t, 128U> aare{};
     const auto aare_result = acse::AcseSpanCodec::encode_default_accept_aare_into(aare);
     if (!aare_result.success() ||
@@ -143,8 +141,6 @@ int main() {
         return 5;
     }
 
-    // Association setup is not a realtime hot path, but repeated construction
-    // still proves the bounded responder does not require owning protocol trees.
     for (std::uint32_t iteration = 0U; iteration < 10'000U; ++iteration) {
         const auto repeated = acse::AcseSpanCodec::build_accept_response_into(
             request, response);
@@ -158,8 +154,33 @@ int main() {
     constexpr std::array<std::uint8_t, 4U> malformed{
         0x0DU, 0x02U, 0xC1U, 0x00U};
     acse::AssociationRequestView rejected;
-    if (acse::AcseSpanCodec::try_decode_association_request_view(malformed, rejected)) {
+    if (acse::AcseSpanCodec::try_decode_association_request_view(malformed, rejected) ||
+        acse::AcseSpanCodec::try_decode_association_request_compat_view(malformed, rejected)) {
         return 7;
+    }
+
+    // Preserve a strict/offline path while proving the live engineering-client
+    // fallback accepts a BER-valid optional Presentation field. Byte 35 is the
+    // calling-selector tag in the captured association profile; changing it to
+    // an otherwise unused context tag keeps all BER lengths identical.
+    auto engineering_client_variant = kRequest;
+    engineering_client_variant[35U] = 0x83U;
+    acse::AssociationRequestView compatible;
+    if (acse::AcseSpanCodec::try_decode_association_request_view(
+            engineering_client_variant, compatible) ||
+        !acse::AcseSpanCodec::try_decode_association_request_compat_view(
+            engineering_client_variant, compatible) ||
+        compatible.acse_presentation_context_id != 1U ||
+        compatible.mms_presentation_context_id != 3U ||
+        compatible.presentation.context_count != 2U ||
+        compatible.presentation.user_data.context_id != 1U) {
+        return 8;
+    }
+    const auto compatible_response = acse::AcseSpanCodec::build_accept_response_into(
+        compatible, response);
+    if (!compatible_response.success() || compatible_response.bytes_written == 0U ||
+        response[0] != osi::SessionSpanCodec::accept_code) {
+        return 9;
     }
 
     return 0;
