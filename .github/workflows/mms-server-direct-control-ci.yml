@@ -1,0 +1,38 @@
+name: MMS Direct Control Server CI
+
+on:
+  push:
+    branches: ["agent/mms-server-direct-normal-control"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            cc: gcc
+            cxx: g++
+          - os: ubuntu-latest
+            cc: clang
+            cxx: clang++
+          - os: windows-latest
+            cc: ""
+            cxx: ""
+    runs-on: ${{ matrix.os }}
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S tools/mms_direct_control_server -B build-mms-direct-control -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build-mms-direct-control --config Release --parallel
+      - name: Unit and help contract
+        run: ctest --test-dir build-mms-direct-control -C Release --output-on-failure
