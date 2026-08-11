@@ -22,6 +22,9 @@ namespace {
 
 // Must remain aligned with MmsPduSpanCodec::encode_default_initiate_response_into().
 constexpr std::uint32_t kServerMaximumMmsPduSize = 65'000U;
+constexpr std::uint32_t kServerMaximumOutstandingCalling = 10U;
+constexpr std::uint32_t kServerMaximumOutstandingCalled = 10U;
+constexpr std::uint32_t kServerMaximumNestingLevel = 5U;
 
 [[nodiscard]] MmsStaticConnectionResult make_result(
     const MmsStaticConnectionStatus status,
@@ -171,8 +174,10 @@ constexpr std::uint32_t kServerMaximumMmsPduSize = 65'000U;
     const MmsConfirmedPduView& confirmed,
     const MmsStaticApplicationDispatcher& dispatcher,
     const std::uint32_t presentation_context_id,
-    std::size_t& required) noexcept {
-    required = 0U;
+    std::size_t& mms_required,
+    std::size_t& frame_required) noexcept {
+    mms_required = 0U;
+    frame_required = 0U;
     if (confirmed.service() != MmsWireConfirmedService::write) {
         return false;
     }
@@ -198,9 +203,10 @@ constexpr std::uint32_t kServerMaximumMmsPduSize = 65'000U;
         probe.required_bytes == 0U) {
         return false;
     }
+    mms_required = probe.required_bytes;
     const auto fully_encoded = osi::PresentationSpanCodec::fully_encoded_data_size(
         presentation_context_id, probe.required_bytes);
-    return fully_encoded && add_overhead(*fully_encoded, 11U, required);
+    return fully_encoded && add_overhead(*fully_encoded, 11U, frame_required);
 }
 
 } // namespace
@@ -371,8 +377,32 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
         const auto selected_mms_pdu_size = std::min(
             initiate.maximum_mms_pdu_size, kServerMaximumMmsPduSize);
 
+        const auto selected_outstanding_calling = std::min(
+            initiate.maximum_outstanding_calling,
+            kServerMaximumOutstandingCalling);
+        const auto selected_outstanding_called = std::min(
+            initiate.maximum_outstanding_called,
+            kServerMaximumOutstandingCalled);
+        const auto selected_nesting_level = std::min(
+            initiate.data_structure_nesting_level,
+            kServerMaximumNestingLevel);
+        std::array<std::uint8_t, 64U> initiate_response{};
+        const auto initiate_encoded = MmsPduSpanCodec::encode_initiate_response_into(
+            selected_mms_pdu_size,
+            selected_outstanding_calling,
+            selected_outstanding_called,
+            selected_nesting_level,
+            initiate_response);
+        if (!initiate_encoded.success()) {
+            state_ = MmsStaticConnectionState::fault;
+            return make_result(MmsStaticConnectionStatus::backend_failure, state_);
+        }
+
         const auto accept = acse::AcseSpanCodec::build_accept_response_into(
-            association, workspace);
+            association,
+            std::span<const std::uint8_t>{initiate_response}.first(
+                initiate_encoded.bytes_written),
+            workspace);
         if (!accept.success()) {
             if (accept.status == wire::EncodeStatus::buffer_too_small) {
                 return make_workspace_capacity(state_, accept.required_bytes);
@@ -426,14 +456,29 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
     const bool is_confirmed_request = MmsPduSpanCodec::try_decode_confirmed_request_view(
         pdv.single_asn1_type, confirmed);
     if (is_confirmed_request) {
-        std::size_t write_required{};
+        std::size_t write_mms_required{};
+        std::size_t write_frame_required{};
         if (write_outer_capacity(
-                confirmed, dispatcher_, mms_presentation_context_id_, write_required)) {
-            if (response.size() < write_required) {
-                return make_response_capacity(state_, write_required);
+                confirmed,
+                dispatcher_,
+                mms_presentation_context_id_,
+                write_mms_required,
+                write_frame_required)) {
+            if (negotiated_mms_pdu_size_ == 0U ||
+                write_mms_required > negotiated_mms_pdu_size_ ||
+                write_frame_required < osi::TpktSpanCodec::header_length ||
+                write_frame_required - osi::TpktSpanCodec::header_length >
+                    negotiated_tpdu_size_bytes_) {
+                return make_result(
+                    MmsStaticConnectionStatus::peer_limit_exceeded,
+                    state_,
+                    peek.frame_bytes);
             }
-            if (workspace.size() < write_required) {
-                return make_workspace_capacity(state_, write_required);
+            if (response.size() < write_frame_required) {
+                return make_response_capacity(state_, write_frame_required);
+            }
+            if (workspace.size() < write_frame_required) {
+                return make_workspace_capacity(state_, write_frame_required);
             }
         }
     }

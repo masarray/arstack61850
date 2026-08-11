@@ -32,6 +32,12 @@ constexpr std::array<std::uint8_t, 40U> kDefaultInitiateResponse{
     0x82U, 0x0CU, 0x03U, 0x4EU, 0x08U, 0x00U, 0x00U, 0x00U,
     0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U};
 
+constexpr std::array<std::uint8_t, 22U> kInitiateResponseDetail{
+    0x80U, 0x01U, 0x01U,
+    0x81U, 0x03U, 0x05U, 0xF1U, 0x00U,
+    0x82U, 0x0CU, 0x03U, 0x4EU, 0x08U, 0x00U, 0x00U, 0x00U,
+    0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U};
+
 [[nodiscard]] bool read_u32(
     const asn1::BerTlvView& tlv,
     std::uint32_t& value) noexcept {
@@ -418,6 +424,77 @@ wire::EncodeResult MmsPduSpanCodec::encode_default_initiate_response_into(
         wire::EncodeStatus::ok,
         kDefaultInitiateResponse.size(),
         kDefaultInitiateResponse.size()};
+}
+
+wire::EncodeResult MmsPduSpanCodec::encode_initiate_response_into(
+    const std::uint32_t maximum_mms_pdu_size,
+    const std::uint32_t maximum_outstanding_calling,
+    const std::uint32_t maximum_outstanding_called,
+    const std::uint32_t data_structure_nesting_level,
+    const std::span<std::uint8_t> destination) noexcept {
+    if (maximum_mms_pdu_size < 64U ||
+        maximum_mms_pdu_size > maximum_pdu_bytes ||
+        maximum_outstanding_calling == 0U ||
+        maximum_outstanding_called == 0U ||
+        data_structure_nesting_level == 0U) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+
+    const std::array<std::uint32_t, 4U> values{
+        maximum_mms_pdu_size,
+        maximum_outstanding_calling,
+        maximum_outstanding_called,
+        data_structure_nesting_level};
+    std::array<std::size_t, 4U> value_sizes{};
+    std::size_t content_size = 0U;
+    for (std::size_t index = 0U; index < values.size(); ++index) {
+        value_sizes[index] = positive_integer_size(values[index]);
+        const auto field = asn1::BerSpanWriter::tlv_size(
+            static_cast<std::int32_t>(index), value_sizes[index]);
+        if (!field || *field > std::numeric_limits<std::size_t>::max() - content_size) {
+            return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+        }
+        content_size += *field;
+    }
+    const auto detail = asn1::BerSpanWriter::tlv_size(4, kInitiateResponseDetail.size());
+    if (!detail || *detail > std::numeric_limits<std::size_t>::max() - content_size) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    content_size += *detail;
+    const auto required = asn1::BerSpanWriter::tlv_size(9, content_size);
+    if (!required || destination.size() < *required) {
+        return {
+            required ? wire::EncodeStatus::buffer_too_small
+                     : wire::EncodeStatus::value_out_of_range,
+            0U,
+            required.value_or(0U)};
+    }
+
+    asn1::BerSpanWriter writer{destination.first(*required)};
+    if (!writer.write_tlv_header(
+            asn1::BerClass::context_specific, true, 9, content_size)) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, *required};
+    }
+    for (std::size_t index = 0U; index < values.size(); ++index) {
+        if (!writer.write_tlv_header(
+                asn1::BerClass::context_specific,
+                false,
+                static_cast<std::int32_t>(index),
+                value_sizes[index]) ||
+            !write_positive_integer(writer, values[index])) {
+            return {wire::EncodeStatus::value_out_of_range, 0U, *required};
+        }
+    }
+    if (!writer.write_tlv_header(
+            asn1::BerClass::context_specific,
+            true,
+            4,
+            kInitiateResponseDetail.size()) ||
+        !writer.write_bytes(kInitiateResponseDetail) ||
+        writer.size() != *required) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, *required};
+    }
+    return {wire::EncodeStatus::ok, *required, *required};
 }
 
 bool MmsPduSpanCodec::try_decode_confirmed_request_view(

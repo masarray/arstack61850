@@ -106,6 +106,29 @@ int main() {
         return 3;
     }
 
+    const auto dynamic_default = mms::MmsPduSpanCodec::encode_initiate_response_into(
+        65'000U, 10U, 10U, 5U, buffer);
+    if (!dynamic_default.success() ||
+        dynamic_default.bytes_written != kInitiateResponse.size() ||
+        !matches(
+            std::span<const std::uint8_t>{buffer}.first(dynamic_default.bytes_written),
+            kInitiateResponse)) {
+        return 30;
+    }
+
+    const auto negotiated = mms::MmsPduSpanCodec::encode_initiate_response_into(
+        1'024U, 2U, 3U, 1U, buffer);
+    if (!negotiated.success() ||
+        !mms::MmsPduSpanCodec::try_decode_initiate_response_view(
+            std::span<const std::uint8_t>{buffer}.first(negotiated.bytes_written),
+            initiate) ||
+        initiate.maximum_mms_pdu_size != 1'024U ||
+        initiate.maximum_outstanding_calling != 2U ||
+        initiate.maximum_outstanding_called != 3U ||
+        initiate.data_structure_nesting_level != 1U) {
+        return 31;
+    }
+
     constexpr std::array<std::uint8_t, 7U> confirmed_request_golden{
         0xA0U, 0x05U, 0x02U, 0x01U, 0x07U, 0xA4U, 0x00U};
     const auto confirmed_request_result =

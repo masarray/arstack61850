@@ -79,6 +79,11 @@ public:
     [[nodiscard]] static wire::EncodeResult build_accept_response_into(
         const AssociationRequestView& request,
         std::span<std::uint8_t> destination) noexcept;
+
+    [[nodiscard]] static wire::EncodeResult build_accept_response_into(
+        const AssociationRequestView& request,
+        std::span<const std::uint8_t> mms_initiate_response,
+        std::span<std::uint8_t> destination) noexcept;
 };
 
 } // namespace ar::iec61850::acse

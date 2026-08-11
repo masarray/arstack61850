@@ -68,6 +68,17 @@ constexpr std::array<std::uint8_t, 41U> kReadRequest{
     0x1AU, 0x03U, 0x4CU, 0x44U, 0x30U,
     0x1AU, 0x02U, 0x4DU, 0x31U};
 
+constexpr std::array<std::uint8_t, 44U> kReadWithSpecificationRequest{
+    0xA0U, 0x2AU, 0x02U, 0x01U, 0x0DU,
+    0xA4U, 0x25U, 0x80U, 0x01U, 0xFFU,
+    0xA1U, 0x20U, 0xA0U, 0x1EU,
+    0x30U, 0x0DU, 0xA0U, 0x0BU, 0xA1U, 0x09U,
+    0x1AU, 0x03U, 0x4CU, 0x44U, 0x30U,
+    0x1AU, 0x02U, 0x52U, 0x31U,
+    0x30U, 0x0DU, 0xA0U, 0x0BU, 0xA1U, 0x09U,
+    0x1AU, 0x03U, 0x4CU, 0x44U, 0x30U,
+    0x1AU, 0x02U, 0x4DU, 0x31U};
+
 constexpr std::array<std::uint8_t, 15U> kReadResponse{
     0xA1U, 0x0DU, 0x02U, 0x01U, 0x0CU,
     0xA4U, 0x08U, 0xA1U, 0x06U,
@@ -237,6 +248,14 @@ int main() {
             std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
             kReadResponse)) {
         return 6;
+    }
+
+    dispatched = dispatcher.dispatch(
+        kReadWithSpecificationRequest, response, workspace);
+    if (dispatched.status != mms::MmsStaticDispatchStatus::unsupported_request ||
+        dispatched.service != mms::MmsWireConfirmedService::read ||
+        dispatched.invoke_id != 13U) {
+        return 30;
     }
 
     std::array<std::uint8_t, 2U> tiny_workspace{};

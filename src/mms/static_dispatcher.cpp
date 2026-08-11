@@ -297,6 +297,12 @@ namespace {
     if (!MmsServiceSpanCodec::try_decode_read_request(confirmed, request)) {
         return make_status(MmsStaticDispatchStatus::malformed_request, confirmed);
     }
+    if (request.specification_with_result) {
+        // This bounded profile does not encode variableAccessSpecification in
+        // Read responses. Reject the optional request form explicitly before
+        // invoking any object callbacks instead of returning an incomplete PDU.
+        return make_status(MmsStaticDispatchStatus::unsupported_request, confirmed);
+    }
 
     std::array<MmsReadAccessResultInput, MmsServiceSpanCodec::maximum_variables> results{};
     std::size_t workspace_offset = 0U;
