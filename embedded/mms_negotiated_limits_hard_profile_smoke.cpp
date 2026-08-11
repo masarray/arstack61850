@@ -252,7 +252,9 @@ int main() {
         return 6;
     }
     const auto read_result = runtime.process_tcp_window(
-        request.first(read_tpkt.bytes_written), response, workspace);
+        std::span<const std::uint8_t>{request}.first(read_tpkt.bytes_written),
+        response,
+        workspace);
     if (read_result.status != mms::MmsStaticConnectionStatus::peer_limit_exceeded ||
         read_result.bytes_written != 0U ||
         read_result.consumed_bytes != read_tpkt.bytes_written ||
