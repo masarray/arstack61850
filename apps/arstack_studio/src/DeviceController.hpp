@@ -6,7 +6,7 @@
 #include <QStringList>
 #include <QVariantMap>
 
-class DeviceController final : public QObject {
+class DeviceController : public QObject {
     Q_OBJECT
     Q_PROPERTY(QStringList ports READ ports NOTIFY portsChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
