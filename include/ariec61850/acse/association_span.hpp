@@ -51,7 +51,18 @@ public:
         std::span<const std::uint8_t> bytes,
         AcseAarqView& aarq) noexcept;
 
+    // Strict protocol decoder used by conformance-oriented/offline paths.
     [[nodiscard]] static bool try_decode_association_request_view(
+        std::span<const std::uint8_t> bytes,
+        AssociationRequestView& request) noexcept;
+
+    // Bounded engineering-client compatibility decoder. It prefers the strict
+    // path, then falls back to the tolerant association-inspection behavior
+    // used by the proven ARIEC61850 simulator/server: Session Connect,
+    // Presentation contexts, AARQ UserInformation and MMS InitiateRequest are
+    // required, while harmless optional Presentation/ACSE decorations are
+    // ignored rather than turning into a disconnect.
+    [[nodiscard]] static bool try_decode_association_request_compat_view(
         std::span<const std::uint8_t> bytes,
         AssociationRequestView& request) noexcept;
 
