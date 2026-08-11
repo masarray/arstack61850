@@ -10,6 +10,7 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -162,11 +163,20 @@ private:
  * frame preparation, and status accounting. It intentionally owns no NIC,
  * OS thread, or clock servo. A platform adapter supplies transport and any
  * hardware RX/TX timestamps.
+ *
+ * Public stateful operations are serialized so a GUI/status reader may safely
+ * observe the runtime while a publisher task is active. Reconfiguration is
+ * still deliberately rejected while running.
  */
 class PtpPublisherRuntime final {
 public:
     explicit PtpPublisherRuntime(PtpPublisherOptions options = {})
         : options_(std::move(options)) {}
+
+    PtpPublisherRuntime(const PtpPublisherRuntime&) = delete;
+    PtpPublisherRuntime& operator=(const PtpPublisherRuntime&) = delete;
+    PtpPublisherRuntime(PtpPublisherRuntime&&) = delete;
+    PtpPublisherRuntime& operator=(PtpPublisherRuntime&&) = delete;
 
     [[nodiscard]] static bool validate_options(
         const PtpPublisherOptions& options,
@@ -208,10 +218,18 @@ public:
         return true;
     }
 
-    [[nodiscard]] const PtpPublisherOptions& options() const noexcept { return options_; }
-    [[nodiscard]] PtpPublisherStatus status() const { return status_; }
+    [[nodiscard]] PtpPublisherOptions options() const {
+        const std::lock_guard<std::mutex> lock{mutex_};
+        return options_;
+    }
+
+    [[nodiscard]] PtpPublisherStatus status() const {
+        const std::lock_guard<std::mutex> lock{mutex_};
+        return status_;
+    }
 
     [[nodiscard]] bool reconfigure(PtpPublisherOptions options, std::string& error) noexcept {
+        const std::lock_guard<std::mutex> lock{mutex_};
         if (status_.is_running) {
             error = "PTP runtime must be stopped before reconfiguration";
             return false;
@@ -225,6 +243,7 @@ public:
     [[nodiscard]] bool start(
         const std::chrono::system_clock::time_point wall_time = std::chrono::system_clock::now(),
         const std::chrono::steady_clock::time_point monotonic_time = std::chrono::steady_clock::now()) noexcept {
+        const std::lock_guard<std::mutex> lock{mutex_};
         std::string error;
         if (!validate_options(options_, error)) {
             status_.last_error = std::move(error);
@@ -239,10 +258,14 @@ public:
         return true;
     }
 
-    void stop() noexcept { status_.is_running = false; }
+    void stop() noexcept {
+        const std::lock_guard<std::mutex> lock{mutex_};
+        status_.is_running = false;
+    }
 
     [[nodiscard]] PtpDueMessages poll_due(
         const std::chrono::steady_clock::time_point monotonic_time = std::chrono::steady_clock::now()) noexcept {
+        const std::lock_guard<std::mutex> lock{mutex_};
         PtpDueMessages due;
         if (!status_.is_running) return due;
 
@@ -259,6 +282,7 @@ public:
 
     [[nodiscard]] std::optional<PtpPreparedFrame> prepare_announce(
         const PtpTimestamp origin_timestamp) {
+        const std::lock_guard<std::mutex> lock{mutex_};
         if (!status_.is_running) return std::nullopt;
         const auto sequence = sequences_.next(PtpMessageType::announce);
         const auto options = make_build_options(
@@ -275,6 +299,7 @@ public:
 
     [[nodiscard]] std::optional<PtpPreparedFrame> prepare_sync(
         const PtpTimestamp origin_timestamp) {
+        const std::lock_guard<std::mutex> lock{mutex_};
         if (!status_.is_running) return std::nullopt;
         const auto sequence = sequences_.next(PtpMessageType::sync);
         const auto options = make_build_options(
@@ -292,6 +317,7 @@ public:
     [[nodiscard]] std::optional<PtpPreparedFrame> prepare_follow_up(
         const std::uint16_t sync_sequence_id,
         const PtpTimestamp precise_origin_timestamp) {
+        const std::lock_guard<std::mutex> lock{mutex_};
         if (!status_.is_running || !options_.two_step_clock) return std::nullopt;
         const auto options = make_build_options(
             sync_sequence_id,
@@ -310,6 +336,7 @@ public:
         const std::uint16_t request_sequence_id,
         const std::int8_t request_log_message_interval,
         const PtpTimestamp request_receipt_timestamp) {
+        const std::lock_guard<std::mutex> lock{mutex_};
         if (!status_.is_running || !options_.respond_to_peer_delay) return std::nullopt;
         const auto options = make_build_options(
             request_sequence_id,
@@ -328,6 +355,7 @@ public:
         const std::uint16_t request_sequence_id,
         const std::int8_t request_log_message_interval,
         const PtpTimestamp response_origin_timestamp) {
+        const std::lock_guard<std::mutex> lock{mutex_};
         if (!status_.is_running || !options_.respond_to_peer_delay || !options_.two_step_clock) {
             return std::nullopt;
         }
@@ -346,6 +374,7 @@ public:
     void record_sent(
         const PtpMessageType message_type,
         const std::chrono::system_clock::time_point wall_time = std::chrono::system_clock::now()) noexcept {
+        const std::lock_guard<std::mutex> lock{mutex_};
         if (!status_.is_running) return;
         status_.last_sent_at = wall_time;
         switch (message_type) {
@@ -367,8 +396,15 @@ public:
         }
     }
 
-    void record_error(std::string error) { status_.last_error = std::move(error); }
-    void clear_error() { status_.last_error.clear(); }
+    void record_error(std::string error) {
+        const std::lock_guard<std::mutex> lock{mutex_};
+        status_.last_error = std::move(error);
+    }
+
+    void clear_error() {
+        const std::lock_guard<std::mutex> lock{mutex_};
+        status_.last_error.clear();
+    }
 
 private:
     [[nodiscard]] static std::int8_t interval_to_log2(
@@ -416,7 +452,7 @@ private:
         const std::uint16_t sequence_id,
         const std::array<std::uint8_t, 6>& destination_mac,
         std::vector<std::uint8_t> ptp_message) const {
-        if (!status_.is_running || ptp_message.empty()) return std::nullopt;
+        if (ptp_message.empty()) return std::nullopt;
         auto ethernet_frame = PtpCodec::build_ethernet_frame(
             destination_mac,
             options_.source_mac,
@@ -432,6 +468,7 @@ private:
         };
     }
 
+    mutable std::mutex mutex_;
     PtpPublisherOptions options_;
     PtpPublisherStatus status_;
     PtpSequenceCounters sequences_;
