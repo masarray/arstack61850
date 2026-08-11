@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <span>
@@ -69,11 +70,15 @@ struct PtpLabContext final {
     QueueHandle_t pdelay_queue{};
     TaskHandle_t task_handle{};
     std::optional<PtpPublisherRuntime> runtime;
+    std::uint8_t rx_domain{};
+    std::uint8_t rx_transport_specific{};
+    bool rx_respond_to_peer_delay{};
 };
 
 PtpLabContext g_ptp_context{};
 std::atomic_bool g_ptp_started{false};
 std::atomic_bool g_stop_requested{false};
+std::atomic_bool g_ptp_accept_rx{false};
 std::atomic<std::uint64_t> g_announce_sent{0U};
 std::atomic<std::uint64_t> g_sync_sent{0U};
 std::atomic<std::uint64_t> g_follow_up_sent{0U};
@@ -131,13 +136,15 @@ void fill_kconfig_defaults(ar_ptp_lab_config_t& config) noexcept {
 
 [[nodiscard]] ar_ptp_lab_config_t selected_config() noexcept {
     ar_ptp_lab_config_t result{};
+    bool has_override = false;
     portENTER_CRITICAL(&g_control_mux);
-    if (g_runtime_config_override_valid) {
-        result = g_runtime_config_override;
-    } else {
-        fill_kconfig_defaults(result);
-    }
+    has_override = g_runtime_config_override_valid;
+    if (has_override) result = g_runtime_config_override;
     portEXIT_CRITICAL(&g_control_mux);
+
+    // Avoid heap/string work inside the critical section when defaults include
+    // a textual ClockIdentity override.
+    if (!has_override) fill_kconfig_defaults(result);
     return result;
 }
 
@@ -409,21 +416,19 @@ esp_err_t ptp_input_info(
     auto* context = static_cast<PtpLabContext*>(priv);
     if (buffer == nullptr) return ESP_OK;
 
-    if (g_ptp_started.load(std::memory_order_acquire) &&
+    if (g_ptp_accept_rx.load(std::memory_order_acquire) &&
         context != nullptr &&
-        context->runtime.has_value() &&
-        context->runtime->options().respond_to_peer_delay &&
+        context->rx_respond_to_peer_delay &&
         context->pdelay_queue != nullptr &&
         info != nullptr) {
         PtpFrame frame;
-        const auto& profile = context->runtime->options();
         if (ar::iec61850::time_sync::PtpCodec::try_parse_ethernet_frame(
                 std::span<const std::uint8_t>{buffer, length},
                 frame) &&
             frame.peer_delay_multicast &&
             frame.header.message_type == PtpMessageType::pdelay_req &&
-            frame.header.domain_number == profile.domain_number &&
-            frame.header.transport_specific == profile.transport_specific) {
+            frame.header.domain_number == context->rx_domain &&
+            frame.header.transport_specific == context->rx_transport_specific) {
             const auto& rx_timestamp = *static_cast<const eth_mac_time_t*>(info);
             if (valid_hw_timestamp(rx_timestamp)) {
                 const PdelayRequestEvent event{
@@ -445,6 +450,7 @@ esp_err_t ptp_input_info(
 }
 
 void finish_runtime(PtpLabContext& context) {
+    g_ptp_accept_rx.store(false, std::memory_order_release);
     if (context.runtime.has_value()) {
         context.runtime->stop();
         const auto status = context.runtime->status();
@@ -502,15 +508,20 @@ void ptp_lab_task(void* argument) {
         return;
     }
 
+    const auto options = context.runtime->options();
+    context.rx_domain = options.domain_number;
+    context.rx_transport_specific = options.transport_specific;
+    context.rx_respond_to_peer_delay = options.respond_to_peer_delay;
+
     bool pdelay_enabled = false;
-    if (context.runtime->options().respond_to_peer_delay &&
-        context.pdelay_queue != nullptr) {
+    if (options.respond_to_peer_delay && context.pdelay_queue != nullptr) {
         const auto input_result = esp_eth_update_input_path_info(
             context.eth_handle,
             &ptp_input_info,
             &context);
         if (input_result == ESP_OK) {
             pdelay_enabled = true;
+            g_ptp_accept_rx.store(true, std::memory_order_release);
         } else {
             ESP_LOGW(kTag,
                      "Hardware RX timestamp path unavailable; Pdelay responder disabled: %s",
@@ -518,7 +529,6 @@ void ptp_lab_task(void* argument) {
         }
     }
 
-    const auto& options = context.runtime->options();
     const auto clock_identity = format_ptp_clock_identity(options.clock_identity);
     ESP_LOGW(kTag,
              "PTP LAB TX enabled: troubleshooting/interoperability helper only; not a GPS-backed or certified grandmaster");
@@ -583,6 +593,7 @@ void ptp_lab_task(void* argument) {
 void ptp_lab_task(void*) {
     ESP_LOGE(kTag,
              "PTP lab broadcaster requires ESP32-P4 IEEE1588 support and the ESP-IDF 5.x EMAC timestamp adapter");
+    g_ptp_accept_rx.store(false, std::memory_order_release);
     g_ptp_context.task_handle = nullptr;
     g_ptp_started.store(false, std::memory_order_release);
     vTaskDelete(nullptr);
@@ -596,19 +607,21 @@ void start_ptp_lab(const esp_eth_handle_t eth_handle) {
         return;
     }
 
-    bool expected = false;
-    if (!g_ptp_started.compare_exchange_strong(
-            expected,
-            true,
-            std::memory_order_acq_rel)) {
+    portENTER_CRITICAL(&g_control_mux);
+    if (g_ptp_started.load(std::memory_order_relaxed)) {
+        portEXIT_CRITICAL(&g_control_mux);
         return;
     }
+    g_ptp_started.store(true, std::memory_order_relaxed);
+    portEXIT_CRITICAL(&g_control_mux);
 
     reset_live_status();
+    g_ptp_accept_rx.store(false, std::memory_order_release);
     g_stop_requested.store(false, std::memory_order_release);
     g_ptp_context.eth_handle = eth_handle;
     g_ptp_context.runtime.reset();
     g_ptp_context.task_handle = nullptr;
+    g_ptp_context.rx_respond_to_peer_delay = false;
 
     if (g_ptp_context.pdelay_queue == nullptr) {
         g_ptp_context.pdelay_queue = xQueueCreate(
@@ -649,12 +662,18 @@ void stop_ptp_lab() noexcept {
 
 [[nodiscard]] bool configure_ptp_lab(const ar_ptp_lab_config_t& config) {
     if (g_ptp_started.load(std::memory_order_acquire)) return false;
+
     std::string error;
     if (!validate_runtime_config(config, error)) {
         ESP_LOGE(kTag, "PTP runtime configuration rejected: %s", error.c_str());
         return false;
     }
+
     portENTER_CRITICAL(&g_control_mux);
+    if (g_ptp_started.load(std::memory_order_relaxed)) {
+        portEXIT_CRITICAL(&g_control_mux);
+        return false;
+    }
     g_runtime_config_override = config;
     g_runtime_config_override_valid = true;
     portEXIT_CRITICAL(&g_control_mux);
