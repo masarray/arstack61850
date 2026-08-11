@@ -2,24 +2,25 @@
 
 #include "SclProfileModel.hpp"
 
+#include "ariec61850/sampled_values/esp32p4_profile_support.hpp"
 #include "ariec61850/scl/parser.hpp"
 
-#include <QFileInfo>
 #include <QStringList>
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cstdint>
 #include <filesystem>
-#include <sstream>
 
 namespace {
+using ar::iec61850::sampled_values::Esp32P4SvProfileSupport;
 using ar::iec61850::sampled_values::SvPublisherProfile;
 using ar::iec61850::sampled_values::SvPublisherProfileCompileContext;
 using ar::iec61850::sampled_values::SvPublisherProfileCompiler;
 using ar::iec61850::sampled_values::SvSampleCounterPolicy;
 using ar::iec61850::sampled_values::SvSampleMode;
+using ar::iec61850::sampled_values::classify_esp32p4_sv_profile;
+using ar::iec61850::sampled_values::esp32p4_sv_profile_support_name;
 
 QString qstring(const std::string& value) {
     return QString::fromStdString(value);
@@ -32,18 +33,13 @@ QStringList qstrings(const std::vector<std::string>& values) {
     return out;
 }
 
-std::string lowerCopy(std::string text) {
-    std::transform(text.begin(), text.end(), text.begin(), [](const unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
-    return text;
-}
-
 QString macText(const std::array<std::uint8_t, 6>& mac) {
     QStringList bytes;
     bytes.reserve(6);
     for (const auto byte : mac) {
-        bytes.push_back(QStringLiteral("%1").arg(static_cast<unsigned>(byte), 2, 16, QLatin1Char('0')).toUpper());
+        bytes.push_back(QStringLiteral("%1")
+            .arg(static_cast<unsigned>(byte), 2, 16, QLatin1Char('0'))
+            .toUpper());
     }
     return bytes.join(QLatin1Char(':'));
 }
@@ -64,32 +60,10 @@ QString counterPolicyText(const SvSampleCounterPolicy policy) {
     }
 }
 
-// Mirrors the currently proven ESP32-P4 acceptance boundary used by the
-// existing profile-inspection tool. The Qt PR does not enable live deployment
-// yet; before that gate is enabled this policy should be extracted into one
-// shared core helper so browser/tool/Qt cannot drift.
-bool currentDeviceLayoutSupported(const SvPublisherProfile& profile) {
-    if (profile.no_asdu != 1U || profile.payload_size_bytes != 64U ||
-        profile.channels.size() != 16U || !profile.publisher_rate_hz.has_value() ||
-        *profile.publisher_rate_hz == 0U || *profile.publisher_rate_hz > 65535U ||
-        profile.sample_counter_policy != SvSampleCounterPolicy::explicit_modulus ||
-        !profile.sample_counter_modulus.has_value()) {
-        return false;
-    }
-    if (profile.asdu_options.refresh_time || profile.asdu_options.security ||
-        profile.asdu_options.synch_source_id) {
-        return false;
-    }
-    for (std::size_t i = 0; i < profile.channels.size(); ++i) {
-        const auto& channel = profile.channels[i];
-        if (channel.wire_width_bytes != 4U) return false;
-        if ((i % 2U) == 0U) {
-            if (channel.is_quality || lowerCopy(channel.basic_type) != "int32") return false;
-        } else if (!channel.is_quality) {
-            return false;
-        }
-    }
-    return true;
+QString supportText(const Esp32P4SvProfileSupport support) {
+    return QString::fromLatin1(
+        esp32p4_sv_profile_support_name(support).data(),
+        static_cast<qsizetype>(esp32p4_sv_profile_support_name(support).size()));
 }
 } // namespace
 
@@ -122,11 +96,15 @@ QVariant SclProfileModel::data(const QModelIndex& index, const int role) const {
     case DestinationMacRole: return macText(p.destination_mac);
     case AppIdRole: return static_cast<int>(p.app_id);
     case PublisherRateRole:
-        return p.publisher_rate_hz.has_value() ? QVariant::fromValue(static_cast<qulonglong>(*p.publisher_rate_hz)) : QVariant{};
+        return p.publisher_rate_hz.has_value()
+            ? QVariant::fromValue(static_cast<qulonglong>(*p.publisher_rate_hz))
+            : QVariant{};
     case PayloadBytesRole: return static_cast<qulonglong>(p.payload_size_bytes);
     case CounterPolicyRole: return counterPolicyText(p.sample_counter_policy);
     case CounterModulusRole:
-        return p.sample_counter_modulus.has_value() ? QVariant::fromValue(static_cast<int>(*p.sample_counter_modulus)) : QVariant{};
+        return p.sample_counter_modulus.has_value()
+            ? QVariant::fromValue(static_cast<int>(*p.sample_counter_modulus))
+            : QVariant{};
     default: return {};
     }
 }
@@ -157,7 +135,7 @@ QString SclProfileModel::sourceName() const {
 QString SclProfileModel::documentStatus() const {
     if (!document_.has_value()) return QStringLiteral("No engineering file loaded");
     return QStringLiteral("%1 resolved SV stream%2")
-        .arg(rows_.size())
+        .arg(static_cast<qulonglong>(rows_.size()))
         .arg(rows_.size() == 1U ? QString{} : QStringLiteral("s"));
 }
 
@@ -184,7 +162,9 @@ QVariantMap SclProfileModel::selectedProfile() const {
     out.insert(QStringLiteral("errors"), row.errors);
     if (row.profile.has_value()) {
         const auto profileMap = profileToVariantMap(*row.profile);
-        for (auto it = profileMap.cbegin(); it != profileMap.cend(); ++it) out.insert(it.key(), it.value());
+        for (auto it = profileMap.cbegin(); it != profileMap.cend(); ++it) {
+            out.insert(it.key(), it.value());
+        }
     }
     return out;
 }
@@ -198,7 +178,8 @@ bool SclProfileModel::loadFile(const QUrl& fileUrl) {
     }
 
     try {
-        auto loaded = ar::iec61850::scl::SclParser{}.load(std::filesystem::path{localPath.toStdWString()});
+        auto loaded = ar::iec61850::scl::SclParser{}.load(
+            std::filesystem::path{localPath.toStdWString()});
         beginResetModel();
         document_ = std::move(loaded);
         confirmedCounterModulus_.reset();
@@ -224,9 +205,11 @@ void SclProfileModel::clear() {
     confirmedCounterModulus_.reset();
     rows_.clear();
     selectedIndex_ = -1;
+    fatalError_.clear();
     endResetModel();
     emit selectedIndexChanged();
     emit selectedProfileChanged();
+    emit fatalErrorChanged();
     emit sourceChanged();
 }
 
@@ -277,20 +260,18 @@ void SclProfileModel::rebuildRows() {
         } else {
             row.profile = std::move(compiled.profile);
             const auto& profile = *row.profile;
-            row.compatibilityClass = profile.sample_counter_policy == SvSampleCounterPolicy::explicit_modulus
-                ? QStringLiteral("A") : QStringLiteral("B");
-            if (currentDeviceLayoutSupported(profile)) {
-                row.deviceSupport = QStringLiteral("ready");
-            } else if (row.compatibilityClass == QStringLiteral("B")) {
-                row.deviceSupport = QStringLiteral("needs-counter-confirmation");
-            } else {
-                row.deviceSupport = QStringLiteral("unsupported-layout");
-            }
+            row.compatibilityClass =
+                profile.sample_counter_policy == SvSampleCounterPolicy::explicit_modulus
+                    ? QStringLiteral("A")
+                    : QStringLiteral("B");
+            row.deviceSupport = supportText(classify_esp32p4_sv_profile(profile));
         }
         rows_.push_back(std::move(row));
     }
 
-    selectedIndex_ = rows_.empty() ? -1 : std::clamp(previousSelection, 0, static_cast<int>(rows_.size()) - 1);
+    selectedIndex_ = rows_.empty()
+        ? -1
+        : std::clamp(previousSelection, 0, static_cast<int>(rows_.size()) - 1);
     if (selectedIndex_ < 0 && !rows_.empty()) selectedIndex_ = 0;
     endResetModel();
 
@@ -306,18 +287,28 @@ QVariantMap SclProfileModel::profileToVariantMap(const SvPublisherProfile& p) co
     map.insert(QStringLiteral("dataSetReference"), qstring(p.data_set_reference));
     map.insert(QStringLiteral("destinationMac"), macText(p.destination_mac));
     map.insert(QStringLiteral("appId"), static_cast<int>(p.app_id));
-    map.insert(QStringLiteral("appIdHex"), QStringLiteral("0x%1").arg(p.app_id, 4, 16, QLatin1Char('0')).toUpper());
+    map.insert(QStringLiteral("appIdHex"),
+        QStringLiteral("0x%1").arg(p.app_id, 4, 16, QLatin1Char('0')).toUpper());
     map.insert(QStringLiteral("vlanPresent"), p.vlan_present);
     map.insert(QStringLiteral("vlanId"), static_cast<int>(p.vlan_id));
     map.insert(QStringLiteral("vlanPriority"), static_cast<int>(p.vlan_priority));
     map.insert(QStringLiteral("confRev"), static_cast<qulonglong>(p.configuration_revision));
     map.insert(QStringLiteral("sampleRate"), static_cast<qulonglong>(p.sample_rate_value));
     map.insert(QStringLiteral("sampleMode"), sampleModeText(p.sample_mode));
-    map.insert(QStringLiteral("publisherRate"), p.publisher_rate_hz.has_value() ? QVariant::fromValue(static_cast<qulonglong>(*p.publisher_rate_hz)) : QVariant{});
+    map.insert(QStringLiteral("publisherRate"),
+        p.publisher_rate_hz.has_value()
+            ? QVariant::fromValue(static_cast<qulonglong>(*p.publisher_rate_hz))
+            : QVariant{});
     map.insert(QStringLiteral("counterPolicy"), counterPolicyText(p.sample_counter_policy));
-    map.insert(QStringLiteral("counterModulus"), p.sample_counter_modulus.has_value() ? QVariant::fromValue(static_cast<int>(*p.sample_counter_modulus)) : QVariant{});
+    map.insert(QStringLiteral("counterModulus"),
+        p.sample_counter_modulus.has_value()
+            ? QVariant::fromValue(static_cast<int>(*p.sample_counter_modulus))
+            : QVariant{});
     map.insert(QStringLiteral("payloadBytes"), static_cast<qulonglong>(p.payload_size_bytes));
     map.insert(QStringLiteral("nofASDU"), static_cast<int>(p.no_asdu));
     map.insert(QStringLiteral("channelLeafCount"), static_cast<qulonglong>(p.channels.size()));
+    map.insert(QStringLiteral("includeDataSet"), p.asdu_options.data_set);
+    map.insert(QStringLiteral("includeSampleRate"), p.asdu_options.sample_rate);
+    map.insert(QStringLiteral("sampleSynchronizedField"), p.asdu_options.sample_synchronized);
     return map;
 }
