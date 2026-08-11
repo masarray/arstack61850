@@ -76,7 +76,7 @@ void announce_matches_csharp_oracle_and_roundtrips() {
     const auto encoded = PtpCodec::build_announce(options, 37);
     CHECK(to_hex(encoded) ==
         "0B02004000000000000000000000000000000000020000FFFE000001000100070500"
-        "00000000000000000000250080F8FEFFFF80020000FFFE0000010000A0");
+        "0000000000000000000000250080F8FEFFFF80020000FFFE0000010000A0");
 
     PtpFrame decoded;
     CHECK(PtpCodec::try_parse_message(encoded, decoded));
