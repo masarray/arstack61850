@@ -36,7 +36,7 @@ jobs:
       - name: Select ESP32-P4 target
         run: source /opt/esp/idf/export.sh && idf.py set-target esp32p4
 
-      - name: Enable guarded PTP lab profile
+      - name: Enable guarded non-default PTP lab profile
         shell: bash
         run: |
           if grep -q '^# CONFIG_AR_PTP_LAB_TX is not set$' sdkconfig; then
@@ -44,9 +44,34 @@ jobs:
           elif ! grep -q '^CONFIG_AR_PTP_LAB_TX=y$' sdkconfig; then
             echo 'CONFIG_AR_PTP_LAB_TX=y' >> sdkconfig
           fi
+
+          if grep -q '^CONFIG_AR_PTP_TRANSPORT_SPECIFIC=' sdkconfig; then
+            sed -i 's/^CONFIG_AR_PTP_TRANSPORT_SPECIFIC=.*/CONFIG_AR_PTP_TRANSPORT_SPECIFIC=1/' sdkconfig
+          else
+            echo 'CONFIG_AR_PTP_TRANSPORT_SPECIFIC=1' >> sdkconfig
+          fi
+
+          if grep -q '^# CONFIG_AR_PTP_VLAN is not set$' sdkconfig; then
+            sed -i 's/^# CONFIG_AR_PTP_VLAN is not set$/CONFIG_AR_PTP_VLAN=y/' sdkconfig
+          elif ! grep -q '^CONFIG_AR_PTP_VLAN=y$' sdkconfig; then
+            echo 'CONFIG_AR_PTP_VLAN=y' >> sdkconfig
+          fi
+
+          if grep -q '^CONFIG_AR_PTP_VLAN_ID=' sdkconfig; then
+            sed -i 's/^CONFIG_AR_PTP_VLAN_ID=.*/CONFIG_AR_PTP_VLAN_ID=100/' sdkconfig
+          else
+            echo 'CONFIG_AR_PTP_VLAN_ID=100' >> sdkconfig
+          fi
+
+          if grep -q '^CONFIG_AR_PTP_VLAN_PRIORITY=' sdkconfig; then
+            sed -i 's/^CONFIG_AR_PTP_VLAN_PRIORITY=.*/CONFIG_AR_PTP_VLAN_PRIORITY=4/' sdkconfig
+          else
+            echo 'CONFIG_AR_PTP_VLAN_PRIORITY=4' >> sdkconfig
+          fi
+
           source /opt/esp/idf/export.sh
           idf.py reconfigure
-          grep -E '^CONFIG_AR_PTP_(LAB_TX|DOMAIN|ANNOUNCE_INTERVAL_MS|SYNC_INTERVAL_MS)=' sdkconfig
+          grep -E '^CONFIG_AR_PTP_(LAB_TX|DOMAIN|TRANSPORT_SPECIFIC|VLAN|VLAN_ID|VLAN_PRIORITY|ANNOUNCE_INTERVAL_MS|SYNC_INTERVAL_MS)=' sdkconfig
 
       - name: Build PTP-enabled firmware
         run: source /opt/esp/idf/export.sh && idf.py build
