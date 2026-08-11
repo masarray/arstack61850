@@ -15,6 +15,7 @@ void live_control_initialize(
     std::int32_t voltage_rms_counts) noexcept;
 
 void live_control_bind_publisher_task(TaskHandle_t task) noexcept;
+void live_control_force_stop() noexcept;
 
 [[nodiscard]] ar::iec61850::sampled_values::SvLiveSignalState
 live_signal_snapshot() noexcept;
