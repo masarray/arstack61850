@@ -49,8 +49,10 @@ struct MmsStaticConnectionPolicy final {
     // Optional adapter-owned COTP Data reassembly storage. When non-empty, the
     // live server accepts a bounded sequence of EOT=false Data TPDUs and
     // presents their concatenated user data to ACSE/MMS only after the final
-    // EOT=true segment. Leaving this empty preserves the strict single-TPDU
-    // embedded behavior. The runtime never allocates or owns this storage.
+    // EOT=true segment. When empty, the runtime may borrow half of the stable
+    // per-session workspace while reassembly is active, keeping the core free
+    // of heap/global buffers. Set require_end_of_transmission=false to preserve
+    // the legacy partial-TPDU opt-out.
     std::span<std::uint8_t> cotp_reassembly{};
 
     // Optional portable association identity used by contextual MMS writes.
@@ -150,6 +152,9 @@ private:
     std::uint32_t mms_presentation_context_id_{};
     std::size_t cotp_reassembly_size_{};
     bool cotp_reassembly_complete_{};
+    bool cotp_reassembly_uses_workspace_{};
+    std::uint8_t* cotp_reassembly_workspace_data_{};
+    std::size_t cotp_reassembly_workspace_size_{};
     std::uint8_t negotiated_tpdu_size_code_{0x0AU};
     bool association_active_{};
     bool association_close_notified_{};
