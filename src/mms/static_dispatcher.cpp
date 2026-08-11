@@ -121,8 +121,7 @@ namespace {
     if (request.object_class == MmsNameListObjectClass::named_variable &&
         request.scope == MmsNameScopeKind::domain_specific) {
         for (const auto& object : objects.objects()) {
-            if (object.name_list_visible &&
-                span_equals(request.domain_id, object.domain)) {
+            if (span_equals(request.domain_id, object.domain)) {
                 if (count >= names.size()) {
                     return names.size() + 1U;
                 }
@@ -321,7 +320,8 @@ namespace {
     const MmsStaticObjectTable& objects,
     const MmsStaticDispatchPolicy& policy,
     const MmsConfirmedPduView& confirmed,
-    const std::span<std::uint8_t> response) noexcept {
+    const std::span<std::uint8_t> response,
+    const MmsStaticRequestAccessContext& access) noexcept {
     MmsWriteRequestView request;
     if (!MmsServiceSpanCodec::try_decode_write_request(confirmed, request)) {
         return make_status(MmsStaticDispatchStatus::malformed_request, confirmed);
@@ -353,7 +353,9 @@ namespace {
                 false, policy.access_denied_failure_code};
             continue;
         }
-        const auto applied = object->write(object->write_context, values[index]);
+        const auto applied = object->contextual_write != nullptr
+            ? object->contextual_write(object->write_context, values[index], access)
+            : object->write(object->write_context, values[index]);
         results[index] = MmsWriteAccessResultInput{
             applied.success,
             applied.success ? 0U : applied.failure_code};
@@ -372,7 +374,8 @@ namespace {
 MmsStaticDispatchResult MmsStaticApplicationDispatcher::dispatch(
     const std::span<const std::uint8_t> mms_request,
     const std::span<std::uint8_t> response,
-    const std::span<std::uint8_t> workspace) const noexcept {
+    const std::span<std::uint8_t> workspace,
+    const MmsStaticRequestAccessContext& access) const noexcept {
     MmsConfirmedPduView request;
     if (!MmsPduSpanCodec::try_decode_confirmed_request_view(mms_request, request)) {
         return MmsStaticDispatchResult{
@@ -382,13 +385,14 @@ MmsStaticDispatchResult MmsStaticApplicationDispatcher::dispatch(
             0U,
             0U};
     }
-    return dispatch(request, response, workspace);
+    return dispatch(request, response, workspace, access);
 }
 
 MmsStaticDispatchResult MmsStaticApplicationDispatcher::dispatch(
     const MmsConfirmedPduView& request,
     const std::span<std::uint8_t> response,
-    const std::span<std::uint8_t> workspace) const noexcept {
+    const std::span<std::uint8_t> workspace,
+    const MmsStaticRequestAccessContext& access) const noexcept {
     if (!objects_.valid() || !data_sets_.valid_against(objects_) || !policy_valid(policy_)) {
         return make_status(MmsStaticDispatchStatus::invalid_object_table, request);
     }
@@ -406,7 +410,7 @@ MmsStaticDispatchResult MmsStaticApplicationDispatcher::dispatch(
     case MmsWireConfirmedService::read:
         return dispatch_read(objects_, policy_, request, response, workspace);
     case MmsWireConfirmedService::write:
-        return dispatch_write(objects_, policy_, request, response);
+        return dispatch_write(objects_, policy_, request, response, access);
     default:
         return make_status(MmsStaticDispatchStatus::unsupported_service, request);
     }

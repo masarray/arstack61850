@@ -3,6 +3,7 @@
 
 #include "ariec61850/mms/static_dispatcher.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -30,10 +31,44 @@ enum class MmsStaticConnectionStatus : std::uint8_t {
     closed,
 };
 
+using MmsStaticConnectionNowMsCallback = std::uint64_t (*)(
+    const void* context) noexcept;
+
+using MmsStaticAssociationClosedCallback = void (*)(
+    void* context,
+    std::uint64_t association_id,
+    std::uint64_t now_ms) noexcept;
+
 struct MmsStaticConnectionPolicy final {
+    static constexpr std::size_t maximum_owner_bytes = 16U;
+
     std::uint16_t cotp_source_reference{0x1001U};
     std::uint8_t maximum_tpdu_size_code{0x0AU};
     bool require_end_of_transmission{true};
+
+    // Optional portable association identity used by contextual MMS writes.
+    // The transport/server adapter assigns association_id and stable Owner.
+    // Leaving these zero/empty preserves legacy non-contextual behavior.
+    std::uint64_t association_id{};
+    std::array<std::uint8_t, maximum_owner_bytes> owner{};
+    std::size_t owner_size{};
+
+    // Optional lifecycle bridge. The connection runtime remains independent of
+    // reporting/control classes: a server adapter may forward this event to a
+    // BRCB control block, session registry, audit sink, or several fan-out
+    // targets. `now_ms` must use the same monotonic clock as ResvTms handling.
+    MmsStaticConnectionNowMsCallback now_ms{};
+    const void* now_context{};
+    MmsStaticAssociationClosedCallback association_closed{};
+    void* association_closed_context{};
+
+    [[nodiscard]] constexpr MmsStaticRequestAccessContext access_context() const noexcept {
+        return {
+            association_id,
+            owner_size > 0U && owner_size <= owner.size()
+                ? std::span<const std::uint8_t>{owner.data(), owner_size}
+                : std::span<const std::uint8_t>{}};
+    }
 };
 
 struct MmsStaticConnectionResult final {
@@ -68,10 +103,14 @@ public:
         std::span<std::uint8_t> response,
         std::span<std::uint8_t> workspace) noexcept;
 
-    constexpr void reset() noexcept {
-        state_ = MmsStaticConnectionState::awaiting_cotp_connect;
-        mms_presentation_context_id_ = 0U;
-    }
+    // Notify the lifecycle bridge exactly once for an established association
+    // and mark the transport closed. Call this for TCP EOF, socket error, local
+    // close, or any fatal transport teardown not represented by a COTP DR TPDU.
+    void close_transport() noexcept;
+
+    // Reuse this runtime for a fresh transport. If an association was still
+    // active, reset first emits the same single association-closed event.
+    void reset() noexcept;
 
     [[nodiscard]] constexpr MmsStaticConnectionState state() const noexcept {
         return state_;
@@ -81,11 +120,23 @@ public:
         return mms_presentation_context_id_;
     }
 
+    [[nodiscard]] constexpr MmsStaticRequestAccessContext access_context() const noexcept {
+        return policy_.access_context();
+    }
+
+    [[nodiscard]] constexpr bool association_active() const noexcept {
+        return association_active_;
+    }
+
 private:
+    void notify_association_closed() noexcept;
+
     const MmsStaticApplicationDispatcher& dispatcher_;
     MmsStaticConnectionPolicy policy_{};
     MmsStaticConnectionState state_{MmsStaticConnectionState::awaiting_cotp_connect};
     std::uint32_t mms_presentation_context_id_{};
+    bool association_active_{};
+    bool association_close_notified_{};
 };
 
 } // namespace ar::iec61850::mms

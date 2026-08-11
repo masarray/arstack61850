@@ -159,6 +159,40 @@ namespace {
 
 } // namespace
 
+void MmsStaticConnectionRuntime::notify_association_closed() noexcept {
+    if (!association_active_ || association_close_notified_) {
+        return;
+    }
+
+    association_close_notified_ = true;
+    association_active_ = false;
+    if (policy_.association_closed == nullptr || policy_.association_id == 0U) {
+        return;
+    }
+
+    const auto now = policy_.now_ms == nullptr
+        ? std::uint64_t{0U}
+        : policy_.now_ms(policy_.now_context);
+    policy_.association_closed(
+        policy_.association_closed_context,
+        policy_.association_id,
+        now);
+}
+
+void MmsStaticConnectionRuntime::close_transport() noexcept {
+    notify_association_closed();
+    state_ = MmsStaticConnectionState::closed;
+    mms_presentation_context_id_ = 0U;
+}
+
+void MmsStaticConnectionRuntime::reset() noexcept {
+    notify_association_closed();
+    state_ = MmsStaticConnectionState::awaiting_cotp_connect;
+    mms_presentation_context_id_ = 0U;
+    association_active_ = false;
+    association_close_notified_ = false;
+}
+
 MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
     const std::span<const std::uint8_t> tcp_bytes,
     const std::span<std::uint8_t> response,
@@ -190,7 +224,7 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
     }
 
     if (cotp.kind == osi::CotpWireKind::disconnect_request) {
-        state_ = MmsStaticConnectionState::closed;
+        close_transport();
         return make_result(
             MmsStaticConnectionStatus::closed, state_, peek.frame_bytes);
     }
@@ -295,6 +329,8 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
         }
         mms_presentation_context_id_ = association.mms_presentation_context_id;
         state_ = MmsStaticConnectionState::established;
+        association_active_ = true;
+        association_close_notified_ = false;
         auto result = wrapped;
         result.state = state_;
         return result;
@@ -337,7 +373,7 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
     }
 
     const auto application = dispatcher_.dispatch(
-        pdv.single_asn1_type, response, workspace);
+        pdv.single_asn1_type, response, workspace, policy_.access_context());
     if (!application.success()) {
         if (application.status == MmsStaticDispatchStatus::response_buffer_too_small) {
             const auto fully_encoded = osi::PresentationSpanCodec::fully_encoded_data_size(
