@@ -415,7 +415,8 @@ if(ARIEC61850_BUILD_TESTS)
             mms_brcb_lifecycle
             mms_brcb_persistence
             mms_brcb_recovery_v2
-            mms_brcb_checkpoint_fallback)
+            mms_brcb_checkpoint_fallback
+            mms_negotiated_limits)
         set(brcb_target "ariec61850_${brcb_smoke}_server_core_tests")
         add_executable(
             ${brcb_target}
