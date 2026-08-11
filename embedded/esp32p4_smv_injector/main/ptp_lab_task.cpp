@@ -3,6 +3,7 @@
 #include "ptp_lab_task.hpp"
 
 #include "ariec61850/time_sync/ptp.hpp"
+#include "ariec61850/time_sync/ptp_runtime.hpp"
 
 #include "esp_err.h"
 #include "esp_eth.h"
@@ -21,35 +22,34 @@
 #endif
 
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
 #include <limits>
 #include <optional>
 #include <span>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace ar::esp32p4::smv {
 namespace {
 
-using ar::iec61850::time_sync::PtpBuildOptions;
 using ar::iec61850::time_sync::PtpClockAccuracy;
-using ar::iec61850::time_sync::PtpCodec;
 using ar::iec61850::time_sync::PtpFrame;
 using ar::iec61850::time_sync::PtpMessageType;
 using ar::iec61850::time_sync::PtpPortIdentity;
+using ar::iec61850::time_sync::PtpPublisherOptions;
+using ar::iec61850::time_sync::PtpPublisherRuntime;
 using ar::iec61850::time_sync::PtpTimeSource;
 using ar::iec61850::time_sync::PtpTimestamp;
-using ar::iec61850::time_sync::ptp_general_multicast_mac;
-using ar::iec61850::time_sync::ptp_peer_delay_multicast_mac;
+using ar::iec61850::time_sync::format_ptp_clock_identity;
+using ar::iec61850::time_sync::ptp_clock_identity_from_mac;
+using ar::iec61850::time_sync::try_parse_ptp_clock_identity;
 
 constexpr char kTag[] = "ar_ptp_lab";
-constexpr std::uint16_t kPortNumber = 1U;
-constexpr std::uint8_t kPriority1 = 128U;
-constexpr std::uint8_t kPriority2 = 128U;
-constexpr std::uint8_t kClockClass = 248U;
-constexpr std::uint16_t kOffsetScaledLogVariance = 0xFFFFU;
-constexpr std::int16_t kCurrentUtcOffset = 37;
 constexpr TickType_t kStartupDelay = pdMS_TO_TICKS(500);
 constexpr UBaseType_t kPdelayQueueDepth = 8U;
 
@@ -63,40 +63,14 @@ struct PdelayRequestEvent final {
 struct PtpLabContext final {
     esp_eth_handle_t eth_handle{};
     std::array<std::uint8_t, 6> source_mac{};
-    PtpBuildOptions base_options{};
     QueueHandle_t pdelay_queue{};
     TaskHandle_t task_handle{};
-    std::uint16_t announce_sequence{};
-    std::uint16_t sync_sequence{};
-    std::uint64_t pdelay_responses{};
+    std::optional<PtpPublisherRuntime> runtime;
 };
 
 PtpLabContext g_ptp_context{};
-bool g_ptp_started = false;
-
-[[nodiscard]] std::int8_t interval_to_log2(const std::uint32_t interval_ms) noexcept {
-    if (interval_ms == 0U) return 0;
-    // PTP logMessageInterval is log2(seconds). The configured lab intervals are
-    // represented by the nearest useful bounded integer exponent.
-    std::uint32_t numerator = interval_ms;
-    std::int8_t exponent = 0;
-    while (numerator < 1000U && exponent > -7) {
-        numerator *= 2U;
-        --exponent;
-    }
-    while (numerator >= 2000U && exponent < 7) {
-        numerator = (numerator + 1U) / 2U;
-        ++exponent;
-    }
-    return exponent;
-}
-
-[[nodiscard]] std::array<std::uint8_t, 8> clock_identity_from_mac(
-    const std::array<std::uint8_t, 6>& mac) noexcept {
-    return {
-        mac[0], mac[1], mac[2], 0xFFU, 0xFEU, mac[3], mac[4], mac[5],
-    };
-}
+std::atomic_bool g_ptp_started{false};
+std::atomic_bool g_stop_requested{false};
 
 [[nodiscard]] std::optional<std::uint16_t> ptp_vlan_id() noexcept {
 #if defined(CONFIG_AR_PTP_VLAN) && CONFIG_AR_PTP_VLAN
@@ -112,6 +86,58 @@ bool g_ptp_started = false;
 #else
     return 0U;
 #endif
+}
+
+[[nodiscard]] std::optional<PtpPublisherOptions> make_runtime_options(
+    const std::array<std::uint8_t, 6>& source_mac) {
+    PtpPublisherOptions options;
+    options.transport_specific = static_cast<std::uint8_t>(CONFIG_AR_PTP_TRANSPORT_SPECIFIC);
+    options.domain_number = static_cast<std::uint8_t>(CONFIG_AR_PTP_DOMAIN);
+    options.source_mac = source_mac;
+    options.vlan_id = ptp_vlan_id();
+    options.vlan_priority = ptp_vlan_priority();
+    options.clock_identity = ptp_clock_identity_from_mac(source_mac);
+    options.port_number = static_cast<std::uint16_t>(CONFIG_AR_PTP_PORT_NUMBER);
+    options.announce_interval = std::chrono::milliseconds{CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS};
+    options.sync_interval = std::chrono::milliseconds{CONFIG_AR_PTP_SYNC_INTERVAL_MS};
+    options.follow_up_delay = std::chrono::milliseconds::zero();
+    // ESP32-P4 intentionally stays two-step so the exact EMAC egress timestamp
+    // can be placed in Follow_Up instead of approximating a one-step timestamp.
+    options.two_step_clock = true;
+#if defined(CONFIG_AR_PTP_RESPOND_PDELAY) && CONFIG_AR_PTP_RESPOND_PDELAY
+    options.respond_to_peer_delay = true;
+#else
+    options.respond_to_peer_delay = false;
+#endif
+    options.priority1 = static_cast<std::uint8_t>(CONFIG_AR_PTP_PRIORITY1);
+    options.priority2 = static_cast<std::uint8_t>(CONFIG_AR_PTP_PRIORITY2);
+    options.clock_class = static_cast<std::uint8_t>(CONFIG_AR_PTP_CLOCK_CLASS);
+    options.clock_accuracy = static_cast<PtpClockAccuracy>(
+        static_cast<std::uint8_t>(CONFIG_AR_PTP_CLOCK_ACCURACY));
+    options.offset_scaled_log_variance =
+        static_cast<std::uint16_t>(CONFIG_AR_PTP_OFFSET_SCALED_LOG_VARIANCE);
+    options.time_source = static_cast<PtpTimeSource>(
+        static_cast<std::uint8_t>(CONFIG_AR_PTP_TIME_SOURCE));
+    options.current_utc_offset = static_cast<std::int16_t>(CONFIG_AR_PTP_CURRENT_UTC_OFFSET);
+
+    const std::string configured_identity{CONFIG_AR_PTP_CLOCK_IDENTITY};
+    if (!configured_identity.empty()) {
+        ar::iec61850::time_sync::PtpClockIdentity parsed{};
+        if (!try_parse_ptp_clock_identity(configured_identity, parsed)) {
+            ESP_LOGE(kTag,
+                     "Invalid CONFIG_AR_PTP_CLOCK_IDENTITY '%s'; expected 8 hex bytes",
+                     configured_identity.c_str());
+            return std::nullopt;
+        }
+        options.clock_identity = parsed;
+    }
+
+    std::string validation_error;
+    if (!PtpPublisherRuntime::validate_options(options, validation_error)) {
+        ESP_LOGE(kTag, "Invalid PTP runtime profile: %s", validation_error.c_str());
+        return std::nullopt;
+    }
+    return options;
 }
 
 #if defined(SOC_EMAC_IEEE1588V2_SUPPORTED) && SOC_EMAC_IEEE1588V2_SUPPORTED && ESP_IDF_VERSION_MAJOR < 6
@@ -196,111 +222,81 @@ void seed_hardware_clock(const esp_eth_handle_t eth_handle) noexcept {
     return true;
 }
 
-[[nodiscard]] std::vector<std::uint8_t> wrap_ptp_message(
-    const std::array<std::uint8_t, 6>& destination_mac,
-    const PtpLabContext& context,
-    const std::vector<std::uint8_t>& message) {
-    return PtpCodec::build_ethernet_frame(
-        destination_mac,
-        context.source_mac,
-        message,
-        ptp_vlan_id(),
-        ptp_vlan_priority());
-}
+[[nodiscard]] bool send_sync_follow_up(PtpLabContext& context) {
+    if (!context.runtime.has_value()) return false;
+    auto& runtime = *context.runtime;
 
-[[nodiscard]] bool send_sync_follow_up(PtpLabContext& context) noexcept {
-    auto sync_options = context.base_options;
-    sync_options.sequence_id = context.sync_sequence;
-    sync_options.log_message_interval = interval_to_log2(CONFIG_AR_PTP_SYNC_INTERVAL_MS);
-    sync_options.two_step = true;
     // Two-step Sync intentionally carries zero originTimestamp. The exact MAC
-    // egress timestamp returned by the ESP32-P4 DMA descriptor is carried by
-    // the subsequent Follow_Up.
-    sync_options.timestamp = {};
-
-    const auto sync_message = PtpCodec::build_sync(sync_options);
-    auto sync_frame = wrap_ptp_message(ptp_general_multicast_mac, context, sync_message);
+    // egress timestamp returned by the ESP32-P4 descriptor becomes Follow_Up.
+    auto sync = runtime.prepare_sync(PtpTimestamp{});
+    if (!sync.has_value()) return false;
 
     PtpTimestamp tx_timestamp;
-    if (!transmit_with_hw_timestamp(context.eth_handle, sync_frame, tx_timestamp)) {
+    if (!transmit_with_hw_timestamp(
+            context.eth_handle,
+            sync->ethernet_frame,
+            tx_timestamp)) {
         return false;
     }
+    runtime.record_sent(PtpMessageType::sync);
 
-    auto follow_up_options = sync_options;
-    follow_up_options.two_step = false;
-    follow_up_options.timestamp = tx_timestamp;
-    const auto follow_up_message = PtpCodec::build_follow_up(follow_up_options);
-    auto follow_up_frame = wrap_ptp_message(
-        ptp_general_multicast_mac,
-        context,
-        follow_up_message);
-    if (!send_frame(context.eth_handle, follow_up_frame)) {
+    auto follow_up = runtime.prepare_follow_up(sync->sequence_id, tx_timestamp);
+    if (!follow_up.has_value() ||
+        !send_frame(context.eth_handle, follow_up->ethernet_frame)) {
         return false;
     }
-
-    context.sync_sequence = static_cast<std::uint16_t>(context.sync_sequence + 1U);
+    runtime.record_sent(PtpMessageType::follow_up);
     return true;
 }
 
-[[nodiscard]] bool send_announce(PtpLabContext& context) noexcept {
-    auto options = context.base_options;
-    options.sequence_id = context.announce_sequence;
-    options.log_message_interval = interval_to_log2(CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS);
-    options.two_step = false;
-    options.timestamp = hardware_time(context.eth_handle);
-
-    const auto message = PtpCodec::build_announce(options, kCurrentUtcOffset);
-    auto frame = wrap_ptp_message(ptp_general_multicast_mac, context, message);
-    if (!send_frame(context.eth_handle, frame)) {
+[[nodiscard]] bool send_announce(PtpLabContext& context) {
+    if (!context.runtime.has_value()) return false;
+    auto& runtime = *context.runtime;
+    auto announce = runtime.prepare_announce(hardware_time(context.eth_handle));
+    if (!announce.has_value() ||
+        !send_frame(context.eth_handle, announce->ethernet_frame)) {
         return false;
     }
-    context.announce_sequence = static_cast<std::uint16_t>(context.announce_sequence + 1U);
+    runtime.record_sent(PtpMessageType::announce);
     return true;
 }
 
 [[nodiscard]] bool send_pdelay_response(
     PtpLabContext& context,
-    const PdelayRequestEvent& request) noexcept {
-    auto response_options = context.base_options;
-    response_options.sequence_id = request.sequence_id;
-    response_options.log_message_interval = request.log_message_interval;
-    response_options.two_step = true;
-    // t2: hardware receive timestamp of Pdelay_Req.
-    response_options.timestamp = request.receive_timestamp;
+    const PdelayRequestEvent& request) {
+    if (!context.runtime.has_value()) return false;
+    auto& runtime = *context.runtime;
 
-    const auto response_message = PtpCodec::build_pdelay_resp(
-        response_options,
-        request.requesting_port_identity);
-    auto response_frame = wrap_ptp_message(
-        ptp_peer_delay_multicast_mac,
-        context,
-        response_message);
+    // t2 comes from the EMAC RX descriptor captured with Pdelay_Req.
+    auto response = runtime.prepare_pdelay_response(
+        request.requesting_port_identity,
+        request.sequence_id,
+        request.log_message_interval,
+        request.receive_timestamp);
+    if (!response.has_value()) return false;
 
     PtpTimestamp response_tx_timestamp;
     if (!transmit_with_hw_timestamp(
             context.eth_handle,
-            response_frame,
+            response->ethernet_frame,
             response_tx_timestamp)) {
         return false;
     }
+    runtime.record_sent(PtpMessageType::pdelay_resp);
 
-    auto follow_up_options = response_options;
-    follow_up_options.two_step = false;
-    // t3: hardware transmit timestamp of Pdelay_Resp.
-    follow_up_options.timestamp = response_tx_timestamp;
-    const auto follow_up_message = PtpCodec::build_pdelay_resp_follow_up(
-        follow_up_options,
-        request.requesting_port_identity);
-    auto follow_up_frame = wrap_ptp_message(
-        ptp_peer_delay_multicast_mac,
-        context,
-        follow_up_message);
-    if (!send_frame(context.eth_handle, follow_up_frame)) {
+    // t3 is the exact Pdelay_Resp EMAC transmit timestamp.
+    auto follow_up = runtime.prepare_pdelay_response_follow_up(
+        request.requesting_port_identity,
+        request.sequence_id,
+        request.log_message_interval,
+        response_tx_timestamp);
+    if (!follow_up.has_value() ||
+        !send_frame(context.eth_handle, follow_up->ethernet_frame)) {
         return false;
     }
+    runtime.record_sent(PtpMessageType::pdelay_resp_follow_up);
 
-    ++context.pdelay_responses;
-    if (context.pdelay_responses == 1U) {
+    if (runtime.status().peer_delay_responses_sent == 2U) {
         ESP_LOGI(kTag, "First hardware-timestamped Pdelay exchange completed");
     }
     return true;
@@ -313,19 +309,23 @@ esp_err_t ptp_input_info(
     void* priv,
     void* info) {
     auto* context = static_cast<PtpLabContext*>(priv);
-    if (buffer == nullptr) {
-        return ESP_OK;
-    }
+    if (buffer == nullptr) return ESP_OK;
 
-    if (context != nullptr && context->pdelay_queue != nullptr && info != nullptr) {
+    if (g_ptp_started.load(std::memory_order_acquire) &&
+        context != nullptr &&
+        context->runtime.has_value() &&
+        context->runtime->options().respond_to_peer_delay &&
+        context->pdelay_queue != nullptr &&
+        info != nullptr) {
         PtpFrame frame;
-        if (PtpCodec::try_parse_ethernet_frame(
+        const auto& profile = context->runtime->options();
+        if (ar::iec61850::time_sync::PtpCodec::try_parse_ethernet_frame(
                 std::span<const std::uint8_t>{buffer, length},
                 frame) &&
             frame.peer_delay_multicast &&
             frame.header.message_type == PtpMessageType::pdelay_req &&
-            frame.header.domain_number == context->base_options.domain_number &&
-            frame.header.transport_specific == context->base_options.transport_specific) {
+            frame.header.domain_number == profile.domain_number &&
+            frame.header.transport_specific == profile.transport_specific) {
             const auto& rx_timestamp = *static_cast<const eth_mac_time_t*>(info);
             if (valid_hw_timestamp(rx_timestamp)) {
                 const PdelayRequestEvent event{
@@ -342,11 +342,26 @@ esp_err_t ptp_input_info(
         }
     }
 
-    // The injector is a standalone raw-L2 application and currently has no
-    // competing TCP/IP input consumer. This registered input path owns the RX
-    // buffer and must release it after inspection.
+    // Standalone raw-L2 injector owns this RX buffer while PTP adapter is active.
     std::free(buffer);
     return ESP_OK;
+}
+
+void finish_runtime(PtpLabContext& context) {
+    if (context.runtime.has_value()) {
+        context.runtime->stop();
+        const auto status = context.runtime->status();
+        ESP_LOGI(kTag,
+                 "PTP stopped: Announce=%llu Sync=%llu FollowUp=%llu PdelayFrames=%llu%s%s",
+                 static_cast<unsigned long long>(status.announce_sent),
+                 static_cast<unsigned long long>(status.sync_sent),
+                 static_cast<unsigned long long>(status.follow_up_sent),
+                 static_cast<unsigned long long>(status.peer_delay_responses_sent),
+                 status.last_error.empty() ? "" : " lastError=",
+                 status.last_error.empty() ? "" : status.last_error.c_str());
+    }
+    context.task_handle = nullptr;
+    g_ptp_started.store(false, std::memory_order_release);
 }
 
 void ptp_lab_task(void* argument) {
@@ -355,7 +370,7 @@ void ptp_lab_task(void* argument) {
 
     if (!enable_hardware_ptp(context.eth_handle)) {
         ESP_LOGE(kTag, "PTP lab broadcaster stopped: hardware timestamp clock unavailable");
-        g_ptp_started = false;
+        finish_runtime(context);
         vTaskDelete(nullptr);
         return;
     }
@@ -368,27 +383,31 @@ void ptp_lab_task(void* argument) {
     if (mac_result != ESP_OK) {
         ESP_LOGE(kTag, "PTP lab broadcaster stopped: MAC address unavailable: %s",
                  esp_err_to_name(mac_result));
-        g_ptp_started = false;
+        finish_runtime(context);
         vTaskDelete(nullptr);
         return;
     }
 
-    context.base_options.transport_specific =
-        static_cast<std::uint8_t>(CONFIG_AR_PTP_TRANSPORT_SPECIFIC);
-    context.base_options.domain_number = static_cast<std::uint8_t>(CONFIG_AR_PTP_DOMAIN);
-    context.base_options.source_port_identity.clock_identity =
-        clock_identity_from_mac(context.source_mac);
-    context.base_options.source_port_identity.port_number = kPortNumber;
-    context.base_options.priority1 = kPriority1;
-    context.base_options.priority2 = kPriority2;
-    context.base_options.clock_class = kClockClass;
-    context.base_options.clock_accuracy = PtpClockAccuracy::unknown;
-    context.base_options.offset_scaled_log_variance = kOffsetScaledLogVariance;
-    context.base_options.grandmaster_identity = context.base_options.source_port_identity.clock_identity;
-    context.base_options.time_source = PtpTimeSource::internal_oscillator;
+    auto profile = make_runtime_options(context.source_mac);
+    if (!profile.has_value()) {
+        finish_runtime(context);
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    context.runtime.emplace(std::move(*profile));
+    if (!context.runtime->start()) {
+        ESP_LOGE(kTag,
+                 "PTP runtime rejected profile: %s",
+                 context.runtime->status().last_error.c_str());
+        finish_runtime(context);
+        vTaskDelete(nullptr);
+        return;
+    }
 
     bool pdelay_enabled = false;
-    if (context.pdelay_queue != nullptr) {
+    if (context.runtime->options().respond_to_peer_delay &&
+        context.pdelay_queue != nullptr) {
         const auto input_result = esp_eth_update_input_path_info(
             context.eth_handle,
             &ptp_input_info,
@@ -402,22 +421,23 @@ void ptp_lab_task(void* argument) {
         }
     }
 
+    const auto& options = context.runtime->options();
+    const auto clock_identity = format_ptp_clock_identity(options.clock_identity);
     ESP_LOGW(kTag,
              "PTP LAB TX enabled: troubleshooting/interoperability helper only; not a GPS-backed or certified grandmaster");
     ESP_LOGI(kTag,
-             "PTP domain=%u transportSpecific=0x%X VLAN=%s Announce=%d ms Sync=%d ms HW Sync TX timestamp=enabled HW Pdelay=%s",
-             static_cast<unsigned>(context.base_options.domain_number),
-             static_cast<unsigned>(context.base_options.transport_specific),
-             ptp_vlan_id().has_value() ? "tagged" : "untagged",
-             CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS,
-             CONFIG_AR_PTP_SYNC_INTERVAL_MS,
+             "PTP runtime domain=%u transportSpecific=0x%X clockIdentity=%s port=%u VLAN=%s Announce=%lld ms Sync=%lld ms HW Sync TX=enabled HW Pdelay=%s",
+             static_cast<unsigned>(options.domain_number),
+             static_cast<unsigned>(options.transport_specific),
+             clock_identity.c_str(),
+             static_cast<unsigned>(options.port_number),
+             options.vlan_id.has_value() ? "tagged" : "untagged",
+             static_cast<long long>(options.announce_interval.count()),
+             static_cast<long long>(options.sync_interval.count()),
              pdelay_enabled ? "enabled" : "disabled");
 
-    TickType_t next_sync = xTaskGetTickCount();
-    TickType_t next_announce = next_sync;
     std::uint32_t consecutive_failures = 0U;
-
-    while (true) {
+    while (!g_stop_requested.load(std::memory_order_acquire)) {
         bool attempted = false;
         bool success = true;
 
@@ -428,22 +448,22 @@ void ptp_lab_task(void* argument) {
             success = send_pdelay_response(context, pdelay_request) && success;
         }
 
-        const TickType_t now = xTaskGetTickCount();
-        if (static_cast<std::int32_t>(now - next_announce) >= 0) {
+        const auto due = context.runtime->poll_due();
+        if (due.announce) {
             attempted = true;
             success = send_announce(context) && success;
-            next_announce = now + pdMS_TO_TICKS(CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS);
         }
-        if (static_cast<std::int32_t>(now - next_sync) >= 0) {
+        if (due.sync) {
             attempted = true;
             success = send_sync_follow_up(context) && success;
-            next_sync = now + pdMS_TO_TICKS(CONFIG_AR_PTP_SYNC_INTERVAL_MS);
         }
 
         if (attempted) {
             if (success) {
                 consecutive_failures = 0U;
+                context.runtime->clear_error();
             } else {
+                context.runtime->record_error("Ethernet transmit or hardware timestamp failure");
                 ++consecutive_failures;
                 if (consecutive_failures == 1U || (consecutive_failures % 16U) == 0U) {
                     ESP_LOGW(kTag,
@@ -453,10 +473,12 @@ void ptp_lab_task(void* argument) {
             }
         }
 
-        // A Pdelay RX notification wakes this task immediately; the timeout only
-        // bounds the cadence check for Announce/Sync and avoids a busy loop.
+        // Pdelay RX or stop requests wake immediately; timeout only services due cadence.
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
     }
+
+    finish_runtime(context);
+    vTaskDelete(nullptr);
 }
 
 #else
@@ -464,7 +486,7 @@ void ptp_lab_task(void* argument) {
 void ptp_lab_task(void*) {
     ESP_LOGE(kTag,
              "PTP lab broadcaster requires ESP32-P4 IEEE1588 support and the ESP-IDF 5.x EMAC timestamp adapter");
-    g_ptp_started = false;
+    g_ptp_started.store(false, std::memory_order_release);
     vTaskDelete(nullptr);
 }
 
@@ -475,35 +497,55 @@ void start_ptp_lab(const esp_eth_handle_t eth_handle) {
         ESP_LOGE(kTag, "PTP lab broadcaster not started: Ethernet handle is null");
         return;
     }
-    if (g_ptp_started) {
+
+    bool expected = false;
+    if (!g_ptp_started.compare_exchange_strong(
+            expected,
+            true,
+            std::memory_order_acq_rel)) {
         return;
     }
 
-    g_ptp_context = {};
+    g_stop_requested.store(false, std::memory_order_release);
     g_ptp_context.eth_handle = eth_handle;
-    g_ptp_context.pdelay_queue = xQueueCreate(
-        kPdelayQueueDepth,
-        sizeof(PdelayRequestEvent));
+    g_ptp_context.runtime.reset();
+    g_ptp_context.task_handle = nullptr;
+
+    if (g_ptp_context.pdelay_queue == nullptr) {
+        g_ptp_context.pdelay_queue = xQueueCreate(
+            kPdelayQueueDepth,
+            sizeof(PdelayRequestEvent));
+    } else {
+        xQueueReset(g_ptp_context.pdelay_queue);
+    }
     if (g_ptp_context.pdelay_queue == nullptr) {
         ESP_LOGW(kTag, "Pdelay queue allocation failed; broadcaster will run without Pdelay RX responses");
     }
 
-    g_ptp_started = true;
     if (xTaskCreatePinnedToCore(
             &ptp_lab_task,
             "ar_ptp_lab",
-            6144,
+            7168,
             &g_ptp_context,
             4,
             &g_ptp_context.task_handle,
             0) != pdPASS) {
-        g_ptp_started = false;
-        if (g_ptp_context.pdelay_queue != nullptr) {
-            vQueueDelete(g_ptp_context.pdelay_queue);
-            g_ptp_context.pdelay_queue = nullptr;
-        }
+        g_ptp_context.task_handle = nullptr;
+        g_ptp_started.store(false, std::memory_order_release);
         ESP_LOGE(kTag, "Failed to create PTP lab task on CPU0");
     }
+}
+
+void stop_ptp_lab() noexcept {
+    if (!g_ptp_started.load(std::memory_order_acquire)) return;
+    g_stop_requested.store(true, std::memory_order_release);
+    if (g_ptp_context.task_handle != nullptr) {
+        xTaskNotifyGive(g_ptp_context.task_handle);
+    }
+}
+
+[[nodiscard]] bool ptp_lab_is_running() noexcept {
+    return g_ptp_started.load(std::memory_order_acquire);
 }
 
 } // namespace
@@ -511,4 +553,12 @@ void start_ptp_lab(const esp_eth_handle_t eth_handle) {
 
 extern "C" void ar_ptp_lab_start(const esp_eth_handle_t eth_handle) {
     ar::esp32p4::smv::start_ptp_lab(eth_handle);
+}
+
+extern "C" void ar_ptp_lab_stop(void) {
+    ar::esp32p4::smv::stop_ptp_lab();
+}
+
+extern "C" bool ar_ptp_lab_is_running(void) {
+    return ar::esp32p4::smv::ptp_lab_is_running();
 }
