@@ -1,14 +1,14 @@
 "use strict";
 
 const CHANNELS = [
-  { id: "IA", kind: "current", label: "Current A", magnitude: 1.0, phase: 0, color: "#ff5f6d" },
-  { id: "IB", kind: "current", label: "Current B", magnitude: 1.0, phase: -120, color: "#f2bb4c" },
-  { id: "IC", kind: "current", label: "Current C", magnitude: 1.0, phase: 120, color: "#42a5f5" },
-  { id: "IN", kind: "current", label: "Current N", magnitude: 0.0, phase: 0, color: "#a88cff" },
-  { id: "UA", kind: "voltage", label: "Voltage A", magnitude: 57.74, phase: 0, color: "#ff5f6d" },
-  { id: "UB", kind: "voltage", label: "Voltage B", magnitude: 57.74, phase: -120, color: "#f2bb4c" },
-  { id: "UC", kind: "voltage", label: "Voltage C", magnitude: 57.74, phase: 120, color: "#42a5f5" },
-  { id: "UN", kind: "voltage", label: "Voltage N", magnitude: 0.0, phase: 0, color: "#a88cff" },
+  { id: "IA", kind: "current", label: "Current A", magnitude: 1.0, phase: 0, color: "#ff6b74" },
+  { id: "IB", kind: "current", label: "Current B", magnitude: 1.0, phase: -120, color: "#e7b652" },
+  { id: "IC", kind: "current", label: "Current C", magnitude: 1.0, phase: 120, color: "#5aa9ff" },
+  { id: "IN", kind: "current", label: "Current N", magnitude: 0.0, phase: 0, color: "#9a86df" },
+  { id: "UA", kind: "voltage", label: "Voltage A", magnitude: 57.74, phase: 0, color: "#ff6b74" },
+  { id: "UB", kind: "voltage", label: "Voltage B", magnitude: 57.74, phase: -120, color: "#e7b652" },
+  { id: "UC", kind: "voltage", label: "Voltage C", magnitude: 57.74, phase: 120, color: "#5aa9ff" },
+  { id: "UN", kind: "voltage", label: "Voltage N", magnitude: 0.0, phase: 0, color: "#9a86df" },
 ];
 
 const state = {
@@ -19,12 +19,14 @@ const state = {
   running: false,
   liveApply: true,
   frequencyHz: 50,
+  activeChannel: "UA",
   channels: new Map(CHANNELS.map((channel) => [channel.id, { ...channel, enabled: true, quality: 0 }])),
   sendChain: Promise.resolve(),
 };
 
 const els = {};
 let toastTimer = null;
+let visualFramePending = false;
 
 function $(id) { return document.getElementById(id); }
 
@@ -34,7 +36,9 @@ function initElements() {
     "startButton", "stopButton", "fpsMetric", "missedMetric", "failMetric",
     "generationMetric", "frequencyInput", "frequencySlider", "liveApplyToggle",
     "balancedButton", "zeroButton", "applyAllButton", "channelGrid", "runtimeLog",
-    "clearLogButton", "phasorCanvas", "toast", "sclFile", "sclState"
+    "clearLogButton", "phasorCanvas", "waveformCanvas", "toast", "sclFile", "sclState",
+    "systemReadiness", "footerReadiness", "footerReadinessDetail", "footerRate",
+    "waveformFrequencyLabel"
   ].forEach((id) => { els[id] = $(id); });
 }
 
@@ -45,13 +49,22 @@ function wireCountFor(channel) {
 
 function phaseMdeg(channel) { return Math.round(channel.phase * 1000); }
 function frequencyMhz() { return Math.round(state.frequencyHz * 1000); }
+function displayId(id) { return `${id[0]}${id[1].toLowerCase()}`; }
+
+function formatMagnitude(channel) {
+  return Number(channel.magnitude).toFixed(3);
+}
+
+function formatPhase(channel) {
+  return Number(channel.phase).toFixed(2);
+}
 
 function showToast(message, error = false) {
   clearTimeout(toastTimer);
   els.toast.textContent = message;
   els.toast.classList.toggle("error", error);
   els.toast.classList.add("show");
-  toastTimer = setTimeout(() => els.toast.classList.remove("show"), 2400);
+  toastTimer = setTimeout(() => els.toast.classList.remove("show"), 2200);
 }
 
 function logLine(text, direction = "rx") {
@@ -66,126 +79,168 @@ function logLine(text, direction = "rx") {
   els.runtimeLog.scrollTop = els.runtimeLog.scrollHeight;
 }
 
+function updateReadiness() {
+  document.body.dataset.connected = String(state.connected);
+  document.body.dataset.running = String(state.running);
+
+  if (state.running) {
+    els.systemReadiness.dataset.state = "running";
+    els.systemReadiness.textContent = "INJECTING";
+    els.footerReadiness.textContent = "INJECTING";
+    els.footerReadinessDetail.textContent = "ESP32-P4 realtime publisher active";
+    return;
+  }
+
+  if (state.connected) {
+    els.systemReadiness.dataset.state = "ready";
+    els.systemReadiness.textContent = "READY";
+    els.footerReadiness.textContent = "READY";
+    els.footerReadinessDetail.textContent = "Device connected · profile ready for live injection";
+    return;
+  }
+
+  els.systemReadiness.dataset.state = "offline";
+  els.systemReadiness.textContent = "OFFLINE";
+  els.footerReadiness.textContent = "DEVICE OFFLINE";
+  els.footerReadinessDetail.textContent = "Connect ESP32-P4 to arm live injection";
+}
+
 function setConnected(connected) {
   state.connected = connected;
   els.deviceStatus.dataset.state = connected ? "online" : "offline";
-  els.deviceStatusText.textContent = connected ? "Device connected" : "Device offline";
+  els.deviceStatusText.textContent = connected ? "ESP32-P4 connected" : "Device offline";
   els.connectButton.textContent = connected ? "Disconnect" : "Connect device";
   els.startButton.disabled = !connected || state.running;
   els.stopButton.disabled = !connected || !state.running;
-  els.zeroButton.disabled = !connected;
   els.applyAllButton.disabled = !connected;
   document.querySelectorAll(".channel-apply").forEach((button) => { button.disabled = !connected; });
+  updateReadiness();
 }
 
 function setRunning(running) {
   state.running = running;
   els.runState.dataset.state = running ? "running" : "stopped";
-  els.runStateText.textContent = running ? "RUNNING" : "STOPPED";
+  els.runStateText.textContent = running ? "INJECTING" : "STOPPED";
   els.startButton.disabled = !state.connected || running;
   els.stopButton.disabled = !state.connected || !running;
+  updateReadiness();
+}
+
+function setActiveChannel(id) {
+  state.activeChannel = id;
+  document.querySelectorAll(".channel-row").forEach((row) => {
+    row.dataset.active = String(row.dataset.channel === id);
+  });
+  scheduleVisualUpdate();
 }
 
 function buildChannels() {
   els.channelGrid.innerHTML = "";
+
   for (const source of CHANNELS) {
     const channel = state.channels.get(source.id);
-    const unit = channel.kind === "current" ? "A RMS" : "V RMS";
-    const magStep = channel.kind === "current" ? "0.001" : "0.01";
+    const unit = channel.kind === "current" ? "A" : "V";
+    const magStep = channel.kind === "current" ? "0.001" : "0.001";
     const magMax = channel.kind === "current" ? "10000" : "1000000";
 
-    const card = document.createElement("article");
-    card.className = "channel-card";
-    card.dataset.channel = channel.id;
-    card.dataset.enabled = String(channel.enabled);
-    card.style.setProperty("--phase-color", channel.color);
-    card.innerHTML = `
-      <div class="channel-head">
-        <div class="channel-title">
-          <span class="phase-dot"></span>
-          <div><strong>${channel.id}</strong><span>${channel.label}</span></div>
-        </div>
-        <label class="enable-toggle" title="Enable ${channel.id}">
-          <input class="channel-enable" type="checkbox" ${channel.enabled ? "checked" : ""} />
-          <span></span>
-        </label>
+    const row = document.createElement("div");
+    row.className = "channel-row";
+    row.setAttribute("role", "row");
+    row.dataset.channel = channel.id;
+    row.dataset.enabled = String(channel.enabled);
+    row.dataset.active = String(channel.id === state.activeChannel);
+    row.style.setProperty("--phase-color", channel.color);
+    row.innerHTML = `
+      <label class="enable-toggle" title="Enable ${displayId(channel.id)}">
+        <input class="channel-enable" type="checkbox" ${channel.enabled ? "checked" : ""} aria-label="Enable ${displayId(channel.id)}" />
+        <span></span>
+      </label>
+      <div class="channel-name">
+        <span class="phase-dot"></span>
+        <span class="channel-name-copy"><strong>${displayId(channel.id)}</strong><small>${channel.label}</small></span>
       </div>
-      <div class="channel-fields">
-        <div class="field">
-          <label>Magnitude</label>
-          <div class="input-unit">
-            <input class="magnitude-input" type="number" min="0" max="${magMax}" step="${magStep}" value="${channel.magnitude}" />
-            <span>${unit}</span>
-          </div>
-        </div>
-        <div class="field">
-          <label>Phase</label>
-          <div class="input-unit">
-            <input class="phase-input" type="number" min="-360" max="360" step="0.1" value="${channel.phase}" />
-            <span>deg</span>
-          </div>
+      <div class="value-cell">
+        <div class="input-unit">
+          <input class="magnitude-input" type="number" min="0" max="${magMax}" step="${magStep}" value="${formatMagnitude(channel)}" aria-label="${displayId(channel.id)} magnitude" />
+          <span>${unit}</span>
         </div>
       </div>
-      <input class="phase-slider" type="range" min="-180" max="180" step="0.1" value="${Math.max(-180, Math.min(180, channel.phase))}" />
-      <div class="channel-footer">
-        <span class="wire-preview"></span>
-        <button class="btn ghost channel-apply" ${state.connected ? "" : "disabled"}>Apply</button>
-      </div>`;
+      <div class="value-cell">
+        <div class="input-unit">
+          <input class="phase-input" type="number" min="-360" max="360" step="0.01" value="${formatPhase(channel)}" aria-label="${displayId(channel.id)} phase" />
+          <span>°</span>
+        </div>
+      </div>
+      <span class="wire-preview" title="Wire representation"></span>
+      <button class="btn secondary channel-apply" ${state.connected ? "" : "disabled"}>Apply</button>`;
 
-    els.channelGrid.appendChild(card);
-    bindChannelCard(card, channel.id);
-    updateWirePreview(card, channel);
+    els.channelGrid.appendChild(row);
+    bindChannelRow(row, channel.id);
+    updateWirePreview(row, channel);
   }
 }
 
-function readCardValues(card, id) {
+function readRowValues(row, id) {
   const channel = state.channels.get(id);
-  const magnitude = Number(card.querySelector(".magnitude-input").value);
-  const phase = Number(card.querySelector(".phase-input").value);
-  const enabled = card.querySelector(".channel-enable").checked;
+  const magnitude = Number(row.querySelector(".magnitude-input").value);
+  const phase = Number(row.querySelector(".phase-input").value);
+  const enabled = row.querySelector(".channel-enable").checked;
+
   if (!Number.isFinite(magnitude) || magnitude < 0 || !Number.isFinite(phase)) return false;
+
   channel.magnitude = magnitude;
   channel.phase = phase;
   channel.enabled = enabled;
-  card.dataset.enabled = String(enabled);
-  updateWirePreview(card, channel);
-  drawPhasors();
+  row.dataset.enabled = String(enabled);
+  updateWirePreview(row, channel);
+  scheduleVisualUpdate();
   return true;
 }
 
-function updateWirePreview(card, channel) {
-  card.querySelector(".wire-preview").textContent = `${wireCountFor(channel)} counts · ${phaseMdeg(channel)} mdeg`;
+function updateWirePreview(row, channel) {
+  row.querySelector(".wire-preview").textContent = `${wireCountFor(channel)} · ${phaseMdeg(channel)}m°`;
 }
 
-function bindChannelCard(card, id) {
-  const magnitude = card.querySelector(".magnitude-input");
-  const phase = card.querySelector(".phase-input");
-  const slider = card.querySelector(".phase-slider");
-  const enable = card.querySelector(".channel-enable");
-  const apply = card.querySelector(".channel-apply");
+function bindChannelRow(row, id) {
+  const magnitude = row.querySelector(".magnitude-input");
+  const phase = row.querySelector(".phase-input");
+  const enable = row.querySelector(".channel-enable");
+  const apply = row.querySelector(".channel-apply");
 
   const schedule = debounce(async () => {
-    if (!readCardValues(card, id)) return;
+    if (!readRowValues(row, id)) return;
     if (state.liveApply && state.connected) await applyChannel(id);
-  }, 130);
+  }, 110);
 
+  const activate = () => setActiveChannel(id);
+  row.addEventListener("pointerdown", activate);
+  magnitude.addEventListener("focus", activate);
+  phase.addEventListener("focus", activate);
   magnitude.addEventListener("input", schedule);
-  phase.addEventListener("input", () => {
-    const value = Number(phase.value);
-    if (Number.isFinite(value) && value >= -180 && value <= 180) slider.value = String(value);
-    schedule();
-  });
-  slider.addEventListener("input", () => {
-    phase.value = Number(slider.value).toFixed(1).replace(/\.0$/, "");
-    schedule();
-  });
+  phase.addEventListener("input", schedule);
+
+  for (const input of [magnitude, phase]) {
+    input.addEventListener("dblclick", () => input.select());
+    input.addEventListener("keydown", async (event) => {
+      if (event.key !== "Enter") return;
+      if (!readRowValues(row, id)) return;
+      if (state.connected) {
+        event.preventDefault();
+        await applyChannel(id);
+        showToast(`${displayId(id)} applied`);
+      }
+    });
+  }
+
   enable.addEventListener("change", async () => {
-    if (!readCardValues(card, id)) return;
+    if (!readRowValues(row, id)) return;
     if (state.connected) await sendCommand(`ENABLE ${id} ${state.channels.get(id).enabled ? 1 : 0}`);
   });
+
   apply.addEventListener("click", async () => {
-    if (!readCardValues(card, id)) return;
+    if (!readRowValues(row, id)) return;
     await applyChannel(id);
+    showToast(`${displayId(id)} applied`);
   });
 }
 
@@ -202,6 +257,7 @@ async function sendCommand(command) {
     showToast("Connect the device first", true);
     return false;
   }
+
   state.sendChain = state.sendChain.then(async () => {
     const writer = state.port.writable.getWriter();
     try {
@@ -214,6 +270,7 @@ async function sendCommand(command) {
     logLine(`Serial write failed: ${error.message}`, "ui");
     showToast(`Serial write failed: ${error.message}`, true);
   });
+
   await state.sendChain;
   return true;
 }
@@ -226,7 +283,7 @@ async function applyChannel(id) {
 async function applyAll() {
   for (const source of CHANNELS) await applyChannel(source.id);
   await sendCommand(`FREQ ${frequencyMhz()}`);
-  showToast("All live signal values applied");
+  showToast("All injection values applied");
 }
 
 async function connectSerial() {
@@ -268,6 +325,8 @@ async function disconnectSerial() {
     els.fpsMetric.textContent = "—";
     els.missedMetric.textContent = "—";
     els.failMetric.textContent = "—";
+    els.generationMetric.textContent = "—";
+    els.footerRate.textContent = "4000 sample/s";
     showToast("Device disconnected");
   }
 }
@@ -317,10 +376,11 @@ function processDeviceLine(raw) {
 
   const timing = line.match(/samples=(\d+)\s+\(~(\d+)\s+fps\).*?MC ok=(\d+) fail=(\d+).*?missed=(\d+).*?signal_gen=(\d+)/i);
   if (timing) {
-    els.fpsMetric.textContent = `${timing[2]} fps`;
+    els.fpsMetric.textContent = `${timing[2]}`;
     els.failMetric.textContent = timing[4];
     els.missedMetric.textContent = timing[5];
     els.generationMetric.textContent = timing[6];
+    els.footerRate.textContent = `${timing[2]} fps observed`;
   }
 
   const committed = line.match(/Live signal generation\s+(\d+)\s+committed/i);
@@ -330,7 +390,9 @@ function processDeviceLine(raw) {
 function setFrequencyUi(hz, transmit = true) {
   state.frequencyHz = hz;
   els.frequencyInput.value = hz.toFixed(3);
+  els.waveformFrequencyLabel.textContent = `${hz.toFixed(3)} Hz`;
   if (hz >= 45 && hz <= 65) els.frequencySlider.value = String(hz);
+  scheduleVisualUpdate();
   if (transmit && state.liveApply && state.connected) {
     sendCommand(`FREQ ${frequencyMhz()}`);
   }
@@ -341,89 +403,216 @@ function setBalanced() {
     IA: [1.0, 0], IB: [1.0, -120], IC: [1.0, 120], IN: [0, 0],
     UA: [57.74, 0], UB: [57.74, -120], UC: [57.74, 120], UN: [0, 0],
   };
+
   for (const [id, [magnitude, phase]] of Object.entries(values)) {
     const channel = state.channels.get(id);
     channel.magnitude = magnitude;
     channel.phase = phase;
     channel.enabled = true;
   }
+
   buildChannels();
-  drawPhasors();
+  scheduleVisualUpdate();
   if (state.connected) applyAll();
 }
 
 async function zeroOutputs() {
   for (const channel of state.channels.values()) channel.magnitude = 0;
   buildChannels();
-  drawPhasors();
+  scheduleVisualUpdate();
   if (state.connected) await sendCommand("ZERO");
+  showToast(state.connected ? "Outputs zeroed" : "Local setpoints zeroed");
 }
 
-function drawPhasors() {
-  const canvas = els.phasorCanvas;
+function scheduleVisualUpdate() {
+  if (visualFramePending) return;
+  visualFramePending = true;
+  requestAnimationFrame(() => {
+    visualFramePending = false;
+    drawPhasors();
+    drawWaveforms();
+  });
+}
+
+function prepareCanvas(canvas, minWidth = 280, minHeight = 180) {
   const ctx = canvas.getContext("2d");
   const rect = canvas.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  const width = Math.max(300, Math.floor(rect.width * dpr));
-  const height = Math.max(220, Math.floor(rect.height * dpr));
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const width = Math.max(minWidth, Math.floor(rect.width * dpr));
+  const height = Math.max(minHeight, Math.floor(rect.height * dpr));
+
   if (canvas.width !== width || canvas.height !== height) {
     canvas.width = width;
     canvas.height = height;
   }
-  ctx.clearRect(0, 0, width, height);
-  ctx.save();
-  ctx.scale(dpr, dpr);
-  const w = width / dpr;
-  const h = height / dpr;
-  const cx = w / 2;
-  const cy = h / 2;
-  const radius = Math.min(w, h) * 0.36;
 
-  ctx.strokeStyle = "rgba(143,166,183,.16)";
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  ctx.scale(dpr, dpr);
+  return { ctx, w: width / dpr, h: height / dpr };
+}
+
+function drawPhasors() {
+  const { ctx, w, h } = prepareCanvas(els.phasorCanvas, 320, 220);
+  const cx = w * 0.5;
+  const cy = h * 0.52;
+  const radius = Math.max(62, Math.min(w * 0.38, h * 0.36));
+
+  ctx.save();
   ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(139,154,170,.13)";
   for (const factor of [0.33, 0.66, 1]) {
-    ctx.beginPath(); ctx.arc(cx, cy, radius * factor, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius * factor, 0, Math.PI * 2);
+    ctx.stroke();
   }
-  ctx.beginPath(); ctx.moveTo(cx - radius - 20, cy); ctx.lineTo(cx + radius + 20, cy); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(cx, cy - radius - 20); ctx.lineTo(cx, cy + radius + 20); ctx.stroke();
+
+  ctx.strokeStyle = "rgba(139,154,170,.10)";
+  for (const deg of [0, 30, 60, 90, 120, 150]) {
+    const a = deg * Math.PI / 180;
+    const dx = Math.cos(a) * (radius + 10);
+    const dy = Math.sin(a) * (radius + 10);
+    ctx.beginPath();
+    ctx.moveTo(cx - dx, cy - dy);
+    ctx.lineTo(cx + dx, cy + dy);
+    ctx.stroke();
+  }
 
   const groups = [
-    ["IA", "IB", "IC"],
-    ["UA", "UB", "UC"],
+    { ids: ["UA", "UB", "UC"], radius: 1, width: 2.2, dash: [] },
+    { ids: ["IA", "IB", "IC"], radius: .82, width: 1.4, dash: [5, 4] },
   ];
-  groups.forEach((ids, groupIndex) => {
-    const maxMagnitude = Math.max(0.0001, ...ids.map((id) => state.channels.get(id).magnitude));
-    ids.forEach((id) => {
+
+  for (const group of groups) {
+    const maxMagnitude = Math.max(0.0001, ...group.ids.map((id) => state.channels.get(id).magnitude));
+    for (const id of group.ids) {
       const channel = state.channels.get(id);
-      if (!channel.enabled || channel.magnitude <= 0) return;
+      if (!channel.enabled || channel.magnitude <= 0) continue;
+
       const angle = channel.phase * Math.PI / 180;
-      const visualScale = 0.38 + 0.62 * Math.min(1, channel.magnitude / maxMagnitude);
-      const length = radius * visualScale * (groupIndex === 0 ? 0.86 : 1);
+      const ratio = Math.min(1, channel.magnitude / maxMagnitude);
+      const length = radius * group.radius * (.35 + .65 * ratio);
       const x = cx + Math.cos(angle) * length;
       const y = cy - Math.sin(angle) * length;
+      const active = state.activeChannel === id;
+
+      ctx.save();
+      ctx.globalAlpha = active ? 1 : .62;
       ctx.strokeStyle = channel.color;
       ctx.fillStyle = channel.color;
-      ctx.globalAlpha = groupIndex === 0 ? 0.75 : 1;
-      ctx.lineWidth = groupIndex === 0 ? 2 : 3;
-      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y); ctx.stroke();
-      const head = 8;
+      ctx.lineWidth = active ? group.width + .9 : group.width;
+      ctx.setLineDash(group.dash);
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      const head = active ? 8 : 6;
       ctx.beginPath();
       ctx.moveTo(x, y);
-      ctx.lineTo(x - Math.cos(angle - 0.45) * head, y + Math.sin(angle - 0.45) * head);
-      ctx.lineTo(x - Math.cos(angle + 0.45) * head, y + Math.sin(angle + 0.45) * head);
-      ctx.closePath(); ctx.fill();
-      ctx.font = "600 11px system-ui";
-      ctx.fillText(id, x + 7, y - 6);
-      ctx.globalAlpha = 1;
-    });
-  });
+      ctx.lineTo(x - Math.cos(angle - .44) * head, y + Math.sin(angle - .44) * head);
+      ctx.lineTo(x - Math.cos(angle + .44) * head, y + Math.sin(angle + .44) * head);
+      ctx.closePath();
+      ctx.fill();
 
-  ctx.fillStyle = "rgba(238,246,251,.72)";
-  ctx.font = "600 10px system-ui";
-  ctx.fillText("0°", cx + radius + 24, cy + 3);
-  ctx.fillText("+90°", cx + 5, cy - radius - 18);
-  ctx.fillText("±180°", cx - radius - 52, cy + 3);
-  ctx.fillText("−90°", cx + 5, cy + radius + 22);
+      ctx.font = `${active ? 650 : 560} 10px ${getComputedStyle(document.body).fontFamily}`;
+      ctx.fillText(displayId(id), x + 7, y - 6);
+      ctx.restore();
+    }
+  }
+
+  ctx.fillStyle = "rgba(199,208,218,.52)";
+  ctx.font = "500 9px system-ui";
+  ctx.fillText("0°", cx + radius + 12, cy + 3);
+  ctx.fillText("90°", cx + 5, cy - radius - 10);
+  ctx.fillText("180°", cx - radius - 35, cy + 3);
+  ctx.fillText("270°", cx + 5, cy + radius + 15);
+
+  ctx.fillStyle = "rgba(238,242,246,.28)";
+  ctx.beginPath();
+  ctx.arc(cx, cy, 2.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawWaveforms() {
+  const { ctx, w, h } = prepareCanvas(els.waveformCanvas, 320, 190);
+  const pad = { left: 34, right: 10, top: 18, bottom: 17 };
+  const plotW = Math.max(1, w - pad.left - pad.right);
+  const plotH = Math.max(1, h - pad.top - pad.bottom);
+  const laneGap = 18;
+  const laneH = (plotH - laneGap) / 2;
+  const voltageY = pad.top + laneH / 2;
+  const currentY = pad.top + laneH + laneGap + laneH / 2;
+  const windowSeconds = .04;
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(139,154,170,.10)";
+  ctx.lineWidth = 1;
+
+  for (let i = 0; i <= 8; i += 1) {
+    const x = pad.left + plotW * (i / 8);
+    ctx.beginPath();
+    ctx.moveTo(x, pad.top);
+    ctx.lineTo(x, pad.top + plotH);
+    ctx.stroke();
+  }
+
+  for (const y of [voltageY, currentY]) {
+    ctx.strokeStyle = "rgba(139,154,170,.18)";
+    ctx.beginPath();
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(pad.left + plotW, y);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = "rgba(127,139,153,.70)";
+  ctx.font = "600 8px system-ui";
+  ctx.fillText("V", 14, voltageY + 3);
+  ctx.fillText("I", 14, currentY + 3);
+
+  const drawGroup = (ids, centerY, amplitude, dashed) => {
+    const maxMagnitude = Math.max(0.0001, ...ids.map((id) => state.channels.get(id).magnitude));
+    for (const id of ids) {
+      const channel = state.channels.get(id);
+      if (!channel.enabled || channel.magnitude <= 0) continue;
+      const active = state.activeChannel === id;
+      const normalized = Math.min(1, channel.magnitude / maxMagnitude);
+      const amp = amplitude * normalized;
+      const phaseRad = channel.phase * Math.PI / 180;
+
+      ctx.save();
+      ctx.strokeStyle = channel.color;
+      ctx.globalAlpha = active ? .98 : .46;
+      ctx.lineWidth = active ? 1.8 : 1.15;
+      if (dashed) ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      const points = Math.max(180, Math.floor(plotW));
+      for (let i = 0; i <= points; i += 1) {
+        const ratio = i / points;
+        const t = windowSeconds * ratio;
+        const value = Math.sin(2 * Math.PI * state.frequencyHz * t + phaseRad);
+        const x = pad.left + plotW * ratio;
+        const y = centerY - value * amp;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+  };
+
+  drawGroup(["UA", "UB", "UC"], voltageY, laneH * .39, false);
+  drawGroup(["IA", "IB", "IC"], currentY, laneH * .39, true);
+
+  ctx.fillStyle = "rgba(127,139,153,.52)";
+  ctx.font = "500 8px system-ui";
+  for (const ms of [0, 10, 20, 30, 40]) {
+    const x = pad.left + plotW * (ms / 40);
+    ctx.fillText(`${ms}`, x - (ms === 0 ? 0 : 5), h - 5);
+  }
+  ctx.fillText("ms", w - 18, h - 5);
   ctx.restore();
 }
 
@@ -445,8 +634,10 @@ function bindUi() {
     const hz = Number(els.frequencyInput.value);
     if (!Number.isFinite(hz) || hz < 1 || hz > 1000) return;
     setFrequencyUi(hz, true);
-  }, 140);
+  }, 120);
+
   els.frequencyInput.addEventListener("input", frequencyDebounced);
+  els.frequencyInput.addEventListener("dblclick", () => els.frequencyInput.select());
   els.frequencySlider.addEventListener("input", () => {
     const hz = Number(els.frequencySlider.value);
     setFrequencyUi(hz, true);
@@ -463,7 +654,7 @@ function bindUi() {
         throw new Error("File is not a well-formed SCL document");
       }
       const streamCount = xml.getElementsByTagNameNS("*", "SampledValueControl").length;
-      els.sclState.textContent = `${file.name} · ${streamCount} SV stream${streamCount === 1 ? "" : "s"} detected`;
+      els.sclState.textContent = `${file.name} · ${streamCount} SV stream${streamCount === 1 ? "" : "s"}`;
       showToast("Engineering file loaded locally");
     } catch (error) {
       els.sclState.textContent = "Engineering file rejected";
@@ -471,7 +662,7 @@ function bindUi() {
     }
   });
 
-  window.addEventListener("resize", debounce(drawPhasors, 80));
+  window.addEventListener("resize", debounce(scheduleVisualUpdate, 70));
   window.addEventListener("beforeunload", () => {
     if (state.port) disconnectSerial();
   });
@@ -484,7 +675,7 @@ function init() {
   setConnected(false);
   setRunning(false);
   setFrequencyUi(50, false);
-  requestAnimationFrame(drawPhasors);
+  scheduleVisualUpdate();
 
   if (!("serial" in navigator)) {
     els.deviceStatusText.textContent = "Web Serial unavailable";
