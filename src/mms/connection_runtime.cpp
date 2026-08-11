@@ -20,6 +20,9 @@
 namespace ar::iec61850::mms {
 namespace {
 
+constexpr std::array<std::uint8_t, 4U> kConservativeStructureType{
+    0xA2U, 0x02U, 0xA1U, 0x00U};
+
 [[nodiscard]] MmsStaticConnectionResult make_result(
     const MmsStaticConnectionStatus status,
     const MmsStaticConnectionState state,
@@ -121,6 +124,66 @@ namespace {
     return result;
 }
 
+[[nodiscard]] MmsStaticConnectionResult wrap_mms_response(
+    const wire::EncodeResult encoded_mms,
+    const std::size_t consumed,
+    const MmsStaticConnectionState state,
+    const std::uint32_t presentation_context_id,
+    const std::span<std::uint8_t> response,
+    const std::span<std::uint8_t> workspace,
+    const MmsStaticDispatchStatus application_status,
+    const MmsWireConfirmedService service,
+    const std::uint32_t invoke_id) noexcept {
+    if (!encoded_mms.success()) {
+        if (encoded_mms.status == wire::EncodeStatus::buffer_too_small &&
+            encoded_mms.required_bytes > 0U) {
+            const auto fully_encoded = osi::PresentationSpanCodec::fully_encoded_data_size(
+                presentation_context_id, encoded_mms.required_bytes);
+            std::size_t required{};
+            if (fully_encoded && add_overhead(*fully_encoded, 11U, required)) {
+                auto result = make_response_capacity(state, required);
+                result.application_status = application_status;
+                result.application_service = service;
+                result.invoke_id = invoke_id;
+                return result;
+            }
+        }
+        return make_result(MmsStaticConnectionStatus::backend_failure, state);
+    }
+
+    const auto p_data = osi::PresentationSpanCodec::encode_p_data_into(
+        response.first(encoded_mms.bytes_written),
+        workspace,
+        presentation_context_id,
+        true);
+    if (!p_data.success()) {
+        if (p_data.status == wire::EncodeStatus::buffer_too_small) {
+            std::size_t required{};
+            if (add_overhead(p_data.required_bytes, 7U, required)) {
+                auto result = make_workspace_capacity(state, required);
+                result.application_status = application_status;
+                result.application_service = service;
+                result.invoke_id = invoke_id;
+                return result;
+            }
+        }
+        return make_result(MmsStaticConnectionStatus::backend_failure, state);
+    }
+
+    auto wrapped = wrap_cotp_data_response(
+        workspace.first(p_data.bytes_written),
+        consumed,
+        state,
+        response,
+        workspace);
+    if (wrapped.response_ready()) {
+        wrapped.application_status = application_status;
+        wrapped.application_service = service;
+        wrapped.invoke_id = invoke_id;
+    }
+    return wrapped;
+}
+
 [[nodiscard]] bool write_outer_capacity(
     const MmsConfirmedPduView& confirmed,
     const MmsStaticApplicationDispatcher& dispatcher,
@@ -155,6 +218,14 @@ namespace {
     const auto fully_encoded = osi::PresentationSpanCodec::fully_encoded_data_size(
         presentation_context_id, probe.required_bytes);
     return fully_encoded && add_overhead(*fully_encoded, 11U, required);
+}
+
+[[nodiscard]] bool compatibility_error_status(
+    const MmsStaticDispatchStatus status) noexcept {
+    return status == MmsStaticDispatchStatus::malformed_request ||
+        status == MmsStaticDispatchStatus::unsupported_service ||
+        status == MmsStaticDispatchStatus::unsupported_request ||
+        status == MmsStaticDispatchStatus::object_not_found;
 }
 
 } // namespace
@@ -357,9 +428,42 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
             peek.frame_bytes);
     }
 
+    if (MmsPduSpanCodec::is_conclude_request(pdv.single_asn1_type)) {
+        const auto conclude = MmsPduSpanCodec::encode_conclude_response_into(response);
+        return wrap_mms_response(
+            conclude,
+            peek.frame_bytes,
+            state_,
+            mms_presentation_context_id_,
+            response,
+            workspace,
+            MmsStaticDispatchStatus::response_ready,
+            MmsWireConfirmedService::unknown,
+            0U);
+    }
+
     MmsConfirmedPduView confirmed;
-    if (MmsPduSpanCodec::try_decode_confirmed_request_view(
-            pdv.single_asn1_type, confirmed)) {
+    const bool confirmed_decoded = MmsPduSpanCodec::try_decode_confirmed_request_view(
+        pdv.single_asn1_type, confirmed);
+    if (confirmed_decoded) {
+        if (confirmed.service() == MmsWireConfirmedService::identify) {
+            const auto identify = !confirmed.service_constructed && confirmed.service_value.empty()
+                ? MmsPduSpanCodec::encode_identify_response_into(
+                    confirmed.invoke_id, response)
+                : MmsPduSpanCodec::encode_confirmed_error_into(
+                    confirmed.invoke_id, response);
+            return wrap_mms_response(
+                identify,
+                peek.frame_bytes,
+                state_,
+                mms_presentation_context_id_,
+                response,
+                workspace,
+                MmsStaticDispatchStatus::response_ready,
+                MmsWireConfirmedService::identify,
+                confirmed.invoke_id);
+        }
+
         std::size_t write_required{};
         if (write_outer_capacity(
                 confirmed, dispatcher_, mms_presentation_context_id_, write_required)) {
@@ -407,6 +511,48 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
             result.application_service = application.service;
             result.invoke_id = application.invoke_id;
             return result;
+        }
+
+        if (confirmed_decoded &&
+            application.status == MmsStaticDispatchStatus::object_not_found &&
+            confirmed.service() == MmsWireConfirmedService::get_variable_access_attributes) {
+            MmsVariableAccessAttributesRequestView attributes;
+            if (MmsServiceSpanCodec::try_decode_variable_access_attributes_request(
+                    confirmed, attributes) &&
+                attributes.name.kind == MmsObjectNameViewKind::vmd_specific &&
+                !attributes.name.item.empty()) {
+                const auto fallback =
+                    MmsServiceSpanCodec::encode_variable_access_attributes_response_into(
+                        confirmed.invoke_id,
+                        false,
+                        kConservativeStructureType,
+                        response);
+                return wrap_mms_response(
+                    fallback,
+                    peek.frame_bytes,
+                    state_,
+                    mms_presentation_context_id_,
+                    response,
+                    workspace,
+                    application.status,
+                    confirmed.service(),
+                    confirmed.invoke_id);
+            }
+        }
+
+        if (confirmed_decoded && compatibility_error_status(application.status)) {
+            const auto error = MmsPduSpanCodec::encode_confirmed_error_into(
+                confirmed.invoke_id, response);
+            return wrap_mms_response(
+                error,
+                peek.frame_bytes,
+                state_,
+                mms_presentation_context_id_,
+                response,
+                workspace,
+                application.status,
+                confirmed.service(),
+                confirmed.invoke_id);
         }
         return application_rejected(state_, peek.frame_bytes, application);
     }
