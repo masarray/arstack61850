@@ -3,6 +3,7 @@
 #include "ariec61850/mms/connection_runtime.hpp"
 
 #include "ariec61850/acse/association_span.hpp"
+#include "ariec61850/asn1/ber_span_writer.hpp"
 #include "ariec61850/mms/pdu_span.hpp"
 #include "ariec61850/mms/services_span.hpp"
 #include "ariec61850/osi/cotp_span.hpp"
@@ -168,6 +169,89 @@ constexpr std::uint32_t kServerMaximumNestingLevel = 5U;
         return MmsConfirmedRequestRejectReason::other;
     }
     return MmsConfirmedRequestRejectReason::other;
+}
+
+[[nodiscard]] std::size_t positive_integer_size(const std::uint32_t value) noexcept {
+    std::size_t bytes = 1U;
+    auto remaining = value;
+    while (remaining > 0xFFU) {
+        ++bytes;
+        remaining >>= 8U;
+    }
+    const auto leading = static_cast<std::uint8_t>(
+        value >> static_cast<unsigned>((bytes - 1U) * 8U));
+    return bytes + ((leading & 0x80U) != 0U ? 1U : 0U);
+}
+
+[[nodiscard]] bool write_positive_integer(
+    asn1::BerSpanWriter& writer,
+    const std::uint32_t value,
+    const std::size_t bytes) noexcept {
+    const auto encoded_bytes = bytes -
+        ((bytes > 1U &&
+          (value >> static_cast<unsigned>((bytes - 2U) * 8U)) <= 0xFFU)
+            ? 1U
+            : 0U);
+    if (encoded_bytes < bytes && !writer.write_byte(0U)) {
+        return false;
+    }
+    for (std::size_t index = encoded_bytes; index > 0U; --index) {
+        const auto shift = static_cast<unsigned>((index - 1U) * 8U);
+        if (!writer.write_byte(static_cast<std::uint8_t>((value >> shift) & 0xFFU))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] wire::EncodeResult encode_object_not_found_confirmed_error(
+    const std::uint32_t invoke_id,
+    const std::span<std::uint8_t> destination) noexcept {
+    if (invoke_id > MmsPduSpanCodec::maximum_invoke_id) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+
+    // ConfirmedErrorPDU ::= [2] { invokeID [0], serviceError [2] }
+    // serviceError.errorClass uses access[7] object-non-existent(2).
+    const auto invoke_bytes = positive_integer_size(invoke_id);
+    const auto invoke_tlv = asn1::BerSpanWriter::tlv_size(0, invoke_bytes);
+    const auto access_tlv = asn1::BerSpanWriter::tlv_size(7, 1U);
+    if (!invoke_tlv || !access_tlv) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    const auto error_class_tlv = asn1::BerSpanWriter::tlv_size(0, *access_tlv);
+    if (!error_class_tlv) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    const auto service_error_tlv = asn1::BerSpanWriter::tlv_size(2, *error_class_tlv);
+    if (!service_error_tlv ||
+        *invoke_tlv > std::numeric_limits<std::size_t>::max() - *service_error_tlv) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    const auto content = *invoke_tlv + *service_error_tlv;
+    const auto required = asn1::BerSpanWriter::tlv_size(2, content);
+    if (!required) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    if (destination.size() < *required) {
+        return {wire::EncodeStatus::buffer_too_small, 0U, *required};
+    }
+
+    asn1::BerSpanWriter writer{destination.first(*required)};
+    if (!writer.write_tlv_header(asn1::BerClass::context_specific, true, 2, content) ||
+        !writer.write_tlv_header(
+            asn1::BerClass::context_specific, false, 0, invoke_bytes) ||
+        !write_positive_integer(writer, invoke_id, invoke_bytes) ||
+        !writer.write_tlv_header(
+            asn1::BerClass::context_specific, true, 2, *error_class_tlv) ||
+        !writer.write_tlv_header(
+            asn1::BerClass::context_specific, true, 0, *access_tlv) ||
+        !writer.write_tlv_header(
+            asn1::BerClass::context_specific, false, 7, 1U) ||
+        !writer.write_byte(2U) || writer.size() != *required) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, *required};
+    }
+    return {wire::EncodeStatus::ok, *required, *required};
 }
 
 [[nodiscard]] bool write_outer_capacity(
@@ -532,9 +616,7 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
         }
 
         const auto rejected = application.status == MmsStaticDispatchStatus::object_not_found
-            ? MmsPduSpanCodec::encode_confirmed_error_into(
-                confirmed.invoke_id,
-                response)
+            ? encode_object_not_found_confirmed_error(confirmed.invoke_id, response)
             : MmsPduSpanCodec::encode_confirmed_request_reject_into(
                 confirmed.invoke_id,
                 reject_reason_for(application.status),
