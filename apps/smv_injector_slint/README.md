@@ -42,7 +42,17 @@ Requirements:
 - Rust 1.92+ when Slint is built from source
 - Slint 1.17.1 (installed package or FetchContent fallback)
 
-Configure and build:
+### Windows quick start
+
+From the repository root:
+
+```powershell
+.\apps\smv_injector_slint\run.cmd
+```
+
+The launcher detects Ninja when available, otherwise uses the installed CMake/Visual Studio generator, builds the Release target and opens the shell.
+
+### Manual build
 
 ```powershell
 cmake -S apps/smv_injector_slint -B build-smv-slint -G Ninja -DCMAKE_BUILD_TYPE=Release
