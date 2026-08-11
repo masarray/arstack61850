@@ -36,42 +36,51 @@ jobs:
       - name: Select ESP32-P4 target
         run: source /opt/esp/idf/export.sh && idf.py set-target esp32p4
 
-      - name: Enable guarded non-default PTP lab profile
+      - name: Enable guarded non-default PTP-P1.5 runtime profile
         shell: bash
         run: |
-          if grep -q '^# CONFIG_AR_PTP_LAB_TX is not set$' sdkconfig; then
-            sed -i 's/^# CONFIG_AR_PTP_LAB_TX is not set$/CONFIG_AR_PTP_LAB_TX=y/' sdkconfig
-          elif ! grep -q '^CONFIG_AR_PTP_LAB_TX=y$' sdkconfig; then
-            echo 'CONFIG_AR_PTP_LAB_TX=y' >> sdkconfig
-          fi
+          set_config() {
+            local key="$1"
+            local value="$2"
+            if grep -q "^${key}=" sdkconfig; then
+              sed -i "s|^${key}=.*|${key}=${value}|" sdkconfig
+            elif grep -q "^# ${key} is not set$" sdkconfig && [ "$value" = "y" ]; then
+              sed -i "s|^# ${key} is not set$|${key}=y|" sdkconfig
+            else
+              echo "${key}=${value}" >> sdkconfig
+            fi
+          }
 
-          if grep -q '^CONFIG_AR_PTP_TRANSPORT_SPECIFIC=' sdkconfig; then
-            sed -i 's/^CONFIG_AR_PTP_TRANSPORT_SPECIFIC=.*/CONFIG_AR_PTP_TRANSPORT_SPECIFIC=1/' sdkconfig
-          else
-            echo 'CONFIG_AR_PTP_TRANSPORT_SPECIFIC=1' >> sdkconfig
-          fi
-
-          if grep -q '^# CONFIG_AR_PTP_VLAN is not set$' sdkconfig; then
-            sed -i 's/^# CONFIG_AR_PTP_VLAN is not set$/CONFIG_AR_PTP_VLAN=y/' sdkconfig
-          elif ! grep -q '^CONFIG_AR_PTP_VLAN=y$' sdkconfig; then
-            echo 'CONFIG_AR_PTP_VLAN=y' >> sdkconfig
-          fi
-
-          if grep -q '^CONFIG_AR_PTP_VLAN_ID=' sdkconfig; then
-            sed -i 's/^CONFIG_AR_PTP_VLAN_ID=.*/CONFIG_AR_PTP_VLAN_ID=100/' sdkconfig
-          else
-            echo 'CONFIG_AR_PTP_VLAN_ID=100' >> sdkconfig
-          fi
-
-          if grep -q '^CONFIG_AR_PTP_VLAN_PRIORITY=' sdkconfig; then
-            sed -i 's/^CONFIG_AR_PTP_VLAN_PRIORITY=.*/CONFIG_AR_PTP_VLAN_PRIORITY=4/' sdkconfig
-          else
-            echo 'CONFIG_AR_PTP_VLAN_PRIORITY=4' >> sdkconfig
-          fi
+          set_config CONFIG_AR_PTP_LAB_TX y
+          set_config CONFIG_AR_PTP_DOMAIN 0
+          set_config CONFIG_AR_PTP_TRANSPORT_SPECIFIC 1
+          set_config CONFIG_AR_PTP_PORT_NUMBER 2
+          set_config CONFIG_AR_PTP_VLAN y
+          set_config CONFIG_AR_PTP_VLAN_ID 100
+          set_config CONFIG_AR_PTP_VLAN_PRIORITY 4
+          set_config CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS 1000
+          set_config CONFIG_AR_PTP_SYNC_INTERVAL_MS 250
+          set_config CONFIG_AR_PTP_RESPOND_PDELAY y
+          set_config CONFIG_AR_PTP_PRIORITY1 120
+          set_config CONFIG_AR_PTP_PRIORITY2 121
+          set_config CONFIG_AR_PTP_CLOCK_CLASS 248
+          set_config CONFIG_AR_PTP_CLOCK_ACCURACY 254
+          set_config CONFIG_AR_PTP_OFFSET_SCALED_LOG_VARIANCE 65535
+          set_config CONFIG_AR_PTP_TIME_SOURCE 160
+          set_config CONFIG_AR_PTP_CURRENT_UTC_OFFSET 37
 
           source /opt/esp/idf/export.sh
           idf.py reconfigure
-          grep -E '^CONFIG_AR_PTP_(LAB_TX|DOMAIN|TRANSPORT_SPECIFIC|VLAN|VLAN_ID|VLAN_PRIORITY|ANNOUNCE_INTERVAL_MS|SYNC_INTERVAL_MS)=' sdkconfig
 
-      - name: Build PTP-enabled firmware
+          grep -E '^CONFIG_AR_PTP_(LAB_TX|DOMAIN|TRANSPORT_SPECIFIC|PORT_NUMBER|VLAN|VLAN_ID|VLAN_PRIORITY|ANNOUNCE_INTERVAL_MS|SYNC_INTERVAL_MS|RESPOND_PDELAY|PRIORITY1|PRIORITY2|CLOCK_CLASS|CLOCK_ACCURACY|OFFSET_SCALED_LOG_VARIANCE|TIME_SOURCE|CURRENT_UTC_OFFSET)=' sdkconfig
+
+          grep -q '^CONFIG_AR_PTP_LAB_TX=y$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_TRANSPORT_SPECIFIC=1$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_PORT_NUMBER=2$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_VLAN_ID=100$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_PRIORITY1=120$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_PRIORITY2=121$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_RESPOND_PDELAY=y$' sdkconfig
+
+      - name: Build PTP-P1.5 enabled firmware
         run: source /opt/esp/idf/export.sh && idf.py build
