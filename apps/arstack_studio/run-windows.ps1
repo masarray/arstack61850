@@ -27,11 +27,21 @@ if (-not (Test-Path -LiteralPath $developerCommand)) {
 }
 
 $environmentLines = & $env:ComSpec /s /c "`"$developerCommand`" -no_logo -arch=x64 -host_arch=x64 && set"
+$developerPath = $null
 foreach ($line in $environmentLines) {
     $separator = $line.IndexOf('=')
     if ($separator -gt 0) {
-        [Environment]::SetEnvironmentVariable($line.Substring(0, $separator), $line.Substring($separator + 1), 'Process')
+        $name = $line.Substring(0, $separator)
+        $value = $line.Substring($separator + 1)
+        if ($name -ceq 'PATH') {
+            $developerPath = $value
+        } elseif ($name -ine 'Path') {
+            [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+        }
     }
+}
+if ($developerPath) {
+    $env:Path = $developerPath
 }
 
 $ninja = Join-Path $visualStudio 'Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe'

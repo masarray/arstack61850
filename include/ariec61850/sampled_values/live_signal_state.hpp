@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -27,11 +28,22 @@ struct SvLiveChannelState final {
     friend bool operator==(const SvLiveChannelState&, const SvLiveChannelState&) = default;
 };
 
+struct SvCurrentWaveformShape final {
+    bool enabled{false};
+    std::int32_t dc_offset_permille{0};
+    std::uint32_t harmonic_permille{0};
+    std::uint8_t harmonic_order{2};
+    std::uint32_t clip_permille{1000};
+
+    friend bool operator==(const SvCurrentWaveformShape&, const SvCurrentWaveformShape&) = default;
+};
+
 struct SvLiveSignalState final {
     // Fundamental signal frequency in millihertz. This is deliberately
     // independent of the SV publisher event rate.
     std::uint32_t frequency_millihz{50000U};
     std::array<SvLiveChannelState, kLiveSignalChannelCount> channels{};
+    SvCurrentWaveformShape current_shape{};
     std::uint64_t generation{};
 
     friend bool operator==(const SvLiveSignalState&, const SvLiveSignalState&) = default;
@@ -96,7 +108,9 @@ public:
     }
 
     [[nodiscard]] static bool validate(const SvLiveSignalState& state) noexcept {
-        if (state.frequency_millihz < 1000U || state.frequency_millihz > 1000000U) {
+        // 0 mHz is the explicit DC mode. AC remains bounded to 1..1000 Hz.
+        if (state.frequency_millihz != 0U &&
+            (state.frequency_millihz < 1000U || state.frequency_millihz > 1000000U)) {
             return false;
         }
         for (const auto& channel : state.channels) {
@@ -107,6 +121,15 @@ public:
                 channel.phase_millidegrees > 360000000) {
                 return false;
             }
+        }
+        if (state.current_shape.dc_offset_permille < -3000 ||
+            state.current_shape.dc_offset_permille > 3000 ||
+            state.current_shape.harmonic_permille > 3000U ||
+            state.current_shape.harmonic_order < 2U ||
+            state.current_shape.harmonic_order > 63U ||
+            state.current_shape.clip_permille < 10U ||
+            state.current_shape.clip_permille > 10000U) {
+            return false;
         }
         return true;
     }
@@ -175,10 +198,27 @@ public:
                 continue;
             }
 
+            if (state.frequency_millihz == 0U) {
+                // In DC mode the engineering magnitude is an instantaneous
+                // signed value. Phase is intentionally ignored.
+                row[index] = channel.rms_counts;
+                continue;
+            }
+
             const auto offset = phase_from_millidegrees(channel.phase_millidegrees);
             const std::uint32_t phase = base_phase + offset;
             const auto lut_index = static_cast<std::size_t>(phase >> (32U - 12U));
-            const std::int64_t sine_q30 = sine_lut_[lut_index & (kLiveSineLutSize - 1U)];
+            std::int64_t sine_q30 = sine_lut_[lut_index & (kLiveSineLutSize - 1U)];
+            if (index < 4U && state.current_shape.enabled) {
+                const auto harmonic_phase = phase * state.current_shape.harmonic_order;
+                const auto harmonic_index = static_cast<std::size_t>(harmonic_phase >> (32U - 12U));
+                const std::int64_t harmonic_q30 = sine_lut_[harmonic_index & (kLiveSineLutSize - 1U)];
+                constexpr std::int64_t q30 = std::int64_t{1} << 30U;
+                sine_q30 += (harmonic_q30 * state.current_shape.harmonic_permille) / 1000LL;
+                sine_q30 += (q30 * state.current_shape.dc_offset_permille) / 1000LL;
+                const auto clip_q30 = (q30 * state.current_shape.clip_permille) / 1000LL;
+                sine_q30 = std::clamp(sine_q30, -clip_q30, clip_q30);
+            }
             const std::int64_t peak_counts = rms_to_peak_counts(channel.rms_counts);
             const std::int64_t value = (sine_q30 * peak_counts) >> 30U;
             row[index] = clamp_i32(value);

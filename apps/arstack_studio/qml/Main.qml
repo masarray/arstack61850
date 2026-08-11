@@ -23,6 +23,12 @@ ApplicationWindow {
     property real currentScale: 1000.0
     property real voltageScale: 100.0
     property real signalFrequency: 50.0
+    property real previousAcFrequency: 50.0
+    property bool ctSaturationEnabled: false
+    property real ctDcOffsetPercent: 30.0
+    property real ctHarmonicPercent: 28.0
+    property int ctHarmonicOrder: 2
+    property real ctClipPercent: 60.0
     property string activeSignal: "Ia"
     property int activeGroup: 0
     property int activeRow: 0
@@ -32,10 +38,12 @@ ApplicationWindow {
     property real activeQuality: 0
     property string transientMessage: ""
     property bool transientError: false
-    property bool previewDockVisible: true
-    property bool previewDetached: false
+    property bool phasorDockVisible: true
+    property bool phasorDetached: false
+    property bool waveformDockVisible: true
+    property bool waveformDetached: false
     property bool telemetryDockVisible: true
-    property bool telemetryExpanded: true
+    property bool telemetryExpanded: false
 
     font.family: root.uiFont
 
@@ -49,11 +57,12 @@ ApplicationWindow {
         sclProfiles.selectedProfile.compatibilityClass === "A" &&
         sclProfiles.selectedProfile.deviceSupport === "ready"
     readonly property bool canDeploy:
-        device.connected && !device.running && selectedProfileDeployable && !device.profileDeploying
+        device.deviceVerified && !device.running && selectedProfileDeployable && !device.profileDeploying
     readonly property bool canStart:
-        device.connected && !device.running &&
+        device.deviceVerified && !device.running &&
         (!sclProfiles.hasProfiles || (device.profileArmed && !profileDirty))
     readonly property string instrumentState: {
+        if (device.discovering || (device.connected && !device.deviceVerified)) return "VERIFYING"
         if (!device.connected) return "OFFLINE"
         if (device.profileDeploying) return "DEPLOYING"
         if (device.running) return "RUNNING"
@@ -66,12 +75,13 @@ ApplicationWindow {
     readonly property color instrumentStateColor: {
         if (instrumentState === "RUNNING") return studioTheme.green
         if (instrumentState === "ARMED") return studioTheme.accent
-        if (instrumentState === "DEPLOYING" || instrumentState === "PROFILE CHANGED") return studioTheme.amber
+        if (instrumentState === "VERIFYING" || instrumentState === "DEPLOYING" || instrumentState === "PROFILE CHANGED") return studioTheme.amber
         if (instrumentState === "PROFILE BLOCKED") return studioTheme.red
         return device.connected ? studioTheme.textSoft : studioTheme.muted
     }
     readonly property string stateReason: {
-        if (!device.connected) return "Connect the injector; setpoints remain editable offline."
+        if (device.discovering || (device.connected && !device.deviceVerified)) return device.discoveryStatus
+        if (!device.connected) return device.discoveryStatus
         if (device.profileDeploying) return "Committing immutable SCL profile to the device."
         if (device.running) return "Live apply active · valid edits update SMV immediately."
         if (profileDirty) return "Selected profile changed · deploy before Start."
@@ -95,10 +105,17 @@ ApplicationWindow {
         function onDeviceMessage(message) {
             root.showMessage(message, false)
         }
-        function onConnectedChanged() {
-            if (device.connected)
+        function onDeviceVerifiedChanged() {
+            if (device.deviceVerified)
                 Qt.callLater(root.applyAllSignals)
         }
+    }
+
+    Timer {
+        interval: 650
+        running: true
+        repeat: false
+        onTriggered: device.autoDetectAndConnect()
     }
 
     Timer {
@@ -144,15 +161,32 @@ ApplicationWindow {
         messageTimer.restart()
     }
 
-    function detachPreview() {
-        previewDockVisible = false
-        previewDetached = true
-        detachedPreviewWindow.raise()
-        detachedPreviewWindow.requestActivate()
+    function detachPhasor() {
+        phasorDockVisible = false
+        phasorDetached = true
+        detachedPhasorWindow.raise()
+        detachedPhasorWindow.requestActivate()
+    }
+
+    function detachWaveform() {
+        waveformDockVisible = false
+        waveformDetached = true
+        detachedWaveformWindow.raise()
+        detachedWaveformWindow.requestActivate()
     }
 
     function openEngineeringFile() {
         profilePanel.openEngineeringFile()
+    }
+
+    function openConfiguration() {
+        configurationWindow.show()
+        configurationWindow.raise()
+        configurationWindow.requestActivate()
+    }
+
+    function openDiagnostics() {
+        diagnosticsDialog.open()
     }
 
     function deploySelectedProfile() {
@@ -169,10 +203,10 @@ ApplicationWindow {
             showMessage("Selected stream is valid SCL but outside the current ESP32-P4 deployment boundary.", true)
             return
         }
-        if (!device.connected) {
+        if (!device.deviceVerified) {
             showMessage(sclProfiles.hasProfiles ?
-                "Profile is valid. Connect the injector before deployment." :
-                "Development setpoints are ready. Connect the injector before Start.", false)
+                "Profile is valid. Waiting for injector recognition before deployment." :
+                "Development setpoints are ready. Waiting for injector recognition.", false)
             return
         }
         if (sclProfiles.hasProfiles && (profileDirty || !device.profileArmed)) {
@@ -223,7 +257,9 @@ ApplicationWindow {
     }
 
     function validMagnitude(group, value) {
-        return isFinite(value) && value >= 0 && value <= maximumMagnitude(group)
+        return isFinite(value) &&
+            (signalFrequency === 0 ? Math.abs(value) : value) <= maximumMagnitude(group) &&
+            (signalFrequency === 0 || value >= 0)
     }
 
     function validPhase(value) {
@@ -231,7 +267,7 @@ ApplicationWindow {
     }
 
     function validFrequency(value) {
-        return isFinite(value) && value > 0 && value <= 1000.0
+        return isFinite(value) && value >= 0 && value <= 1000.0
     }
 
     function normalizedAngle(value) {
@@ -244,8 +280,12 @@ ApplicationWindow {
     function refreshPreview() {
         if (previewPanel)
             previewPanel.requestPaint()
-        if (detachedPreviewPanel)
-            detachedPreviewPanel.requestPaint()
+        if (waveformPanel)
+            waveformPanel.requestPaint()
+        if (detachedPhasorPanel)
+            detachedPhasorPanel.requestPaint()
+        if (detachedWaveformPanel)
+            detachedWaveformPanel.requestPaint()
     }
 
     function selectSignal(group, row) {
@@ -286,7 +326,7 @@ ApplicationWindow {
     }
 
     function sendSignal(group, row) {
-        if (!device.connected)
+        if (!device.deviceVerified)
             return true
         var signal = groupModel(group).get(row)
         return device.setSignal(
@@ -333,7 +373,7 @@ ApplicationWindow {
         }
 
         selectSignal(group, row)
-        if (device.connected) {
+        if (device.deviceVerified) {
             if (phaseLink && row < 3)
                 sendLinkedGroup(group)
             else
@@ -343,22 +383,56 @@ ApplicationWindow {
     }
 
     function applyAllSignals() {
-        if (!device.connected)
+        if (!device.deviceVerified)
             return
+        device.setFrequency(signalFrequency)
         for (var group = 0; group < 2; ++group)
             applyGroupSignals(group)
-        device.setFrequency(signalFrequency)
+        device.setCtSaturation(ctSaturationEnabled, ctDcOffsetPercent,
+                               ctHarmonicPercent, ctHarmonicOrder, ctClipPercent)
     }
 
     function setFrequencyValue(value) {
         if (!validFrequency(value))
             return false
         signalFrequency = value
+        if (value > 0)
+            previousAcFrequency = value
         frequencyField.text = value.toFixed(3)
         frequencyField.invalidInput = false
         refreshPreview()
-        if (device.connected)
+        if (device.deviceVerified)
             device.setFrequency(value)
+        return true
+    }
+
+    function setWaveformMode(mode) {
+        if (mode === "DC") {
+            if (ctSaturationEnabled)
+                setCtSaturation(false)
+            if (signalFrequency > 0)
+                previousAcFrequency = signalFrequency
+            setFrequencyValue(0)
+            showMessage("DC mode selected. Magnitude is an instantaneous signed value; phase is not used.", false)
+        } else {
+            setFrequencyValue(previousAcFrequency > 0 ? previousAcFrequency : 50)
+            showMessage("AC mode selected. Frequency and phase controls are active.", false)
+        }
+    }
+
+    function setCtSaturation(enabled) {
+        if (enabled && signalFrequency === 0) {
+            showMessage("CT saturation shaping requires AC mode.", true)
+            return false
+        }
+        ctSaturationEnabled = enabled
+        refreshPreview()
+        if (device.deviceVerified)
+            device.setCtSaturation(enabled, ctDcOffsetPercent,
+                                   ctHarmonicPercent, ctHarmonicOrder, ctClipPercent)
+        showMessage(enabled
+            ? "CT saturation stress enabled · DC offset + 2nd harmonic + clipping approximation."
+            : "CT saturation stress disabled.", false)
         return true
     }
 
@@ -374,7 +448,7 @@ ApplicationWindow {
         }
         selectSignal(activeGroup, activeRow)
         refreshPreview()
-        if (device.connected)
+        if (device.deviceVerified)
             applyAllSignals()
     }
 
@@ -385,7 +459,7 @@ ApplicationWindow {
         }
         selectSignal(activeGroup, activeRow)
         refreshPreview()
-        if (device.connected)
+        if (device.deviceVerified)
             device.zero()
     }
 
@@ -393,7 +467,7 @@ ApplicationWindow {
         var unsignedValue = Number(value) >>> 0
         groupModel(activeGroup).setProperty(activeRow, "quality", unsignedValue)
         activeQuality = unsignedValue
-        if (device.connected)
+        if (device.deviceVerified)
             device.setQuality(activeSignal, unsignedValue)
     }
 
@@ -442,7 +516,7 @@ ApplicationWindow {
     }
 
     header: Rectangle {
-        height: 54
+        height: 50
         color: studioTheme.chrome
         border.width: 1
         border.color: studioTheme.lineSoft
@@ -454,87 +528,86 @@ ApplicationWindow {
             spacing: 9
 
             Rectangle {
-                width: 27
-                height: 27
+                width: 30
+                height: 30
                 radius: 6
                 color: "#101b27"
                 border.width: 1
                 border.color: "#315071"
-                Label { anchors.centerIn: parent; text: "≋"; color: studioTheme.accent; font.pixelSize: 16 }
+                Image {
+                    anchors.centerIn: parent
+                    width: 17
+                    height: 17
+                    source: Qt.resolvedUrl("../assets/lucide/radio-tower.svg")
+                    sourceSize.width: 34
+                    sourceSize.height: 34
+                }
             }
 
             ColumnLayout {
                 spacing: 0
-                Label { text: "ARSTACK61850"; color: studioTheme.muted; font.family: root.uiFont; font.pixelSize: studioTheme.captionSize - 1; font.weight: Font.Bold; font.letterSpacing: 1.0 }
-                Label { text: "SMV Injector"; color: studioTheme.text; font.family: root.uiFont; font.pixelSize: 13; font.weight: Font.DemiBold }
+                Layout.alignment: Qt.AlignVCenter
+                Label { text: "ARSTACK61850"; color: studioTheme.muted; font.family: root.uiFont; font.pixelSize: studioTheme.captionSize - 1; font.weight: Font.Bold; font.letterSpacing: 1.0; verticalAlignment: Text.AlignVCenter }
+                Label { text: "SMV Injector"; color: studioTheme.text; font.family: root.uiFont; font.pixelSize: 13; font.weight: Font.DemiBold; verticalAlignment: Text.AlignVCenter }
             }
 
             Item { Layout.fillWidth: true }
 
             Rectangle {
-                visible: device.connected
-                implicitWidth: liveApplyText.implicitWidth + 18
-                implicitHeight: 22
-                radius: 5
-                color: studioTheme.greenSoft
+                Layout.preferredWidth: root.compactLayout ? 160 : 190
+                implicitHeight: 32
+                radius: 7
+                color: studioTheme.surface2
                 border.width: 1
-                border.color: "#2b674d"
-                Label {
-                    id: liveApplyText
-                    anchors.centerIn: parent
-                    text: "LIVE APPLY"
-                    color: studioTheme.green
-                    font.family: root.monoFont
-                    font.pixelSize: 7
-                    font.weight: Font.Bold
-                    font.letterSpacing: 0.65
+                border.color: device.deviceVerified ? "#2c674e" : (device.discovering ? "#705827" : studioTheme.lineSoft)
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 10
+                    spacing: 8
+                    Rectangle {
+                        width: 8; height: 8; radius: 4
+                        color: device.deviceVerified ? studioTheme.green : (device.discovering ? studioTheme.amber : studioTheme.muted2)
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        Layout.alignment: Qt.AlignVCenter
+                        text: device.deviceVerified ? "Injector ready" : (device.discovering ? "Recognizing..." : "Injector offline")
+                        color: device.deviceVerified ? studioTheme.green : studioTheme.textSoft
+                        font.family: root.uiFont
+                        font.pixelSize: 9
+                        font.weight: Font.DemiBold
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    Label {
+                        text: device.deviceVerified ? "•••" : "↻"
+                        color: studioTheme.accent
+                        font.family: root.uiFont
+                        font.pixelSize: 13
+                        font.weight: Font.Bold
+                        verticalAlignment: Text.AlignVCenter
+                    }
                 }
-            }
-
-            Label {
-                visible: !root.compactLayout
-                text: sclProfiles.hasProfiles ? (sclProfiles.selectedProfile.svId || "Resolved SV") : "Development profile"
-                color: studioTheme.textSoft
-                font.family: root.monoFont
-                font.pixelSize: 9
-            }
-
-            Rectangle { width: 1; height: 19; color: studioTheme.line }
-
-            ComboBox {
-                id: portCombo
-                implicitWidth: root.compactLayout ? 96 : 112
-                model: device.ports
-                enabled: !device.connected
-                font.family: root.monoFont
-                font.pixelSize: 9
-                onPressedChanged: if (pressed) device.refreshPorts()
-            }
-
-            Rectangle { width: 7; height: 7; radius: 4; color: device.connected ? studioTheme.green : studioTheme.muted2 }
-
-            Label {
-                visible: !root.compactLayout
-                text: device.connected ? device.portName : "Device offline"
-                color: studioTheme.muted
-                font.family: root.uiFont
-                font.pixelSize: 9
-            }
-
-            CalmButton {
-                theme: studioTheme
-                uiFont: root.uiFont
-                text: device.connected ? "Disconnect" : "Connect"
-                onClicked: {
-                    if (device.connected) device.disconnectPort()
-                    else device.connectPort(portCombo.currentText)
+                MouseArea {
+                    id: identityMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    enabled: !device.discovering
+                    onClicked: device.deviceVerified ? root.openConfiguration() : device.autoDetectAndConnect()
                 }
+                ToolTip.visible: identityMouse.containsMouse
+                ToolTip.text: device.deviceVerified
+                    ? "ARStack ESP32-P4 · ID " + device.deviceId.slice(-6) + " · Protocol v" + device.protocolVersion
+                    : device.discoveryStatus
+                ToolTip.delay: 450
             }
         }
     }
 
     footer: Rectangle {
-        height: 62
+        height: 48
         color: studioTheme.chrome
         border.width: 1
         border.color: studioTheme.lineSoft
@@ -547,23 +620,13 @@ ApplicationWindow {
 
             StateBadge { theme: studioTheme; state: root.instrumentState; stateColor: root.instrumentStateColor; monoFont: root.monoFont }
 
-            ColumnLayout {
-                Layout.maximumWidth: root.compactLayout ? 280 : 420
-                spacing: 1
-                Label {
-                    Layout.fillWidth: true
-                    text: root.stateReason
-                    color: studioTheme.muted
-                    font.family: root.uiFont
-                    font.pixelSize: 9
-                    elide: Text.ElideRight
-                }
-                Label {
-                    text: "FPS " + device.fps + "   ·   MISSED " + device.missed + "   ·   TX FAIL " + device.txFailures
-                    color: studioTheme.muted
-                    font.family: root.monoFont
-                    font.pixelSize: 7
-                }
+            Label {
+                Layout.maximumWidth: root.compactLayout ? 320 : 520
+                text: root.stateReason
+                color: studioTheme.muted
+                font.family: root.uiFont
+                font.pixelSize: studioTheme.captionSize
+                elide: Text.ElideRight
             }
 
             Item { Layout.fillWidth: true }
@@ -586,19 +649,57 @@ ApplicationWindow {
     }
 
     Window {
-        id: detachedPreviewWindow
-        width: 520
-        height: 720
-        minimumWidth: 400
-        minimumHeight: 520
-        visible: root.previewDetached
-        title: "ARStack Studio · Signal Preview"
+        id: configurationWindow
+        width: 760
+        height: 780
+        minimumWidth: 640
+        minimumHeight: 660
+        visible: false
+        title: "ARStack Studio · Configuration"
         color: studioTheme.bg
 
         onClosing: function(close) {
             close.accepted = false
-            root.previewDetached = false
-            root.previewDockVisible = true
+            configurationWindow.hide()
+        }
+
+        DockFrame {
+            anchors.fill: parent
+            anchors.margins: 10
+            theme: studioTheme
+            titleText: "Smart & Expert Configuration"
+            statusText: device.deviceVerified ? "ESP32-P4 VERIFIED" : "OFFLINE EDIT"
+            uiFont: root.uiFont
+            monoFont: root.monoFont
+            closable: false
+
+            ConfigurationHub {
+                id: profilePanel
+                anchors.fill: parent
+                theme: studioTheme
+                controller: root
+                device: device
+                profiles: sclProfiles
+                uiFont: root.uiFont
+                monoFont: root.monoFont
+            }
+        }
+    }
+
+    Window {
+        id: detachedPhasorWindow
+        width: 560
+        height: 580
+        minimumWidth: 400
+        minimumHeight: 400
+        visible: root.phasorDetached
+        title: "ARStack Studio · Phasor View"
+        color: studioTheme.bg
+
+        onClosing: function(close) {
+            close.accepted = false
+            root.phasorDetached = false
+            root.phasorDockVisible = true
         }
 
         Rectangle {
@@ -607,7 +708,7 @@ ApplicationWindow {
             color: studioTheme.bg
 
             SignalPreview {
-                id: detachedPreviewPanel
+                id: detachedPhasorPanel
                 anchors.fill: parent
                 theme: studioTheme
                 currentModel: currentModel
@@ -615,11 +716,62 @@ ApplicationWindow {
                 uiFont: root.uiFont
                 monoFont: root.monoFont
                 compact: false
+                viewMode: "phasor"
                 activeSignal: root.activeSignal
                 activeUnit: root.activeUnit
                 activeMagnitude: root.activeMagnitude
                 activePhase: root.activePhase
                 signalFrequency: root.signalFrequency
+                ctSaturationEnabled: root.ctSaturationEnabled
+                ctDcOffsetPercent: root.ctDcOffsetPercent
+                ctHarmonicPercent: root.ctHarmonicPercent
+                ctHarmonicOrder: root.ctHarmonicOrder
+                ctClipPercent: root.ctClipPercent
+            }
+        }
+    }
+
+    Window {
+        id: detachedWaveformWindow
+        width: 720
+        height: 480
+        minimumWidth: 480
+        minimumHeight: 340
+        visible: root.waveformDetached
+        title: "ARStack Studio · Waveform View"
+        color: studioTheme.bg
+
+        onClosing: function(close) {
+            close.accepted = false
+            root.waveformDetached = false
+            root.waveformDockVisible = true
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: 10
+            color: studioTheme.bg
+
+            SignalPreview {
+                id: detachedWaveformPanel
+                anchors.fill: parent
+                theme: studioTheme
+                currentModel: currentModel
+                voltageModel: voltageModel
+                uiFont: root.uiFont
+                monoFont: root.monoFont
+                compact: false
+                viewMode: "waveform"
+                activeSignal: root.activeSignal
+                activeUnit: root.activeUnit
+                activeMagnitude: root.activeMagnitude
+                activePhase: root.activePhase
+                signalFrequency: root.signalFrequency
+                ctSaturationEnabled: root.ctSaturationEnabled
+                ctDcOffsetPercent: root.ctDcOffsetPercent
+                ctHarmonicPercent: root.ctHarmonicPercent
+                ctHarmonicOrder: root.ctHarmonicOrder
+                ctClipPercent: root.ctClipPercent
             }
         }
     }
@@ -631,8 +783,8 @@ ApplicationWindow {
 
         WorkflowBar {
             Layout.fillWidth: true
-            Layout.preferredHeight: 82
-            Layout.minimumHeight: 82
+            Layout.preferredHeight: 94
+            Layout.minimumHeight: 94
             theme: studioTheme
             controller: root
             device: device
@@ -642,29 +794,48 @@ ApplicationWindow {
             compact: root.compactLayout
         }
 
-        RowLayout {
+        SplitView {
+            id: shellSplit
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: root.compactLayout ? 9 : 11
+            orientation: Qt.Vertical
+            handle: Rectangle {
+                implicitHeight: 9
+                color: SplitHandle.pressed ? studioTheme.accentSoft
+                     : SplitHandle.hovered ? studioTheme.raisedHover : "transparent"
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: parent.width
+                    height: 1
+                    color: SplitHandle.hovered || SplitHandle.pressed ? studioTheme.accent : studioTheme.line
+                }
+                HoverHandler { cursorShape: Qt.SplitVCursor }
+            }
 
-        ProfileInspector {
-            id: profilePanel
-            Layout.preferredWidth: root.compactLayout ? 200 : 238
-            Layout.minimumWidth: root.compactLayout ? 192 : 214
-            Layout.fillHeight: true
-            theme: studioTheme
-            controller: root
-            device: device
-            profiles: sclProfiles
-            uiFont: root.uiFont
-            monoFont: root.monoFont
-            compact: root.compactLayout
-        }
+            SplitView {
+                id: workspaceSplit
+                SplitView.fillWidth: true
+                SplitView.fillHeight: true
+                SplitView.minimumHeight: 390
+                orientation: Qt.Horizontal
+                handle: Rectangle {
+                    implicitWidth: 9
+                    color: SplitHandle.pressed ? studioTheme.accentSoft
+                         : SplitHandle.hovered ? studioTheme.raisedHover : "transparent"
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 1
+                        height: parent.height
+                        color: SplitHandle.hovered || SplitHandle.pressed ? studioTheme.accent : studioTheme.line
+                    }
+                    HoverHandler { cursorShape: Qt.SplitHCursor }
+                }
 
         SurfacePanel {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            Layout.minimumWidth: root.compactLayout ? 500 : 550
+            SplitView.fillWidth: true
+            SplitView.fillHeight: true
+            SplitView.minimumWidth: root.compactLayout ? 500 : 550
+            SplitView.preferredWidth: root.compactLayout ? 700 : 860
             theme: studioTheme
 
             ColumnLayout {
@@ -680,23 +851,6 @@ ApplicationWindow {
                         Label { text: "Manual Injection"; color: studioTheme.text; font.family: root.uiFont; font.pixelSize: root.compactLayout ? 18 : 20; font.weight: Font.DemiBold }
                     }
                     Item { Layout.fillWidth: true }
-                    Rectangle {
-                        implicitWidth: workspaceApplyText.implicitWidth + 17
-                        implicitHeight: 22
-                        radius: 5
-                        color: device.connected ? studioTheme.greenSoft : "#141b23"
-                        border.width: 1
-                        border.color: device.connected ? "#2c674e" : studioTheme.lineSoft
-                        Label {
-                            id: workspaceApplyText
-                            anchors.centerIn: parent
-                            text: device.connected ? "LIVE APPLY" : "LOCAL EDIT"
-                            color: device.connected ? studioTheme.green : studioTheme.muted
-                            font.family: root.monoFont
-                            font.pixelSize: 7
-                            font.weight: Font.Bold
-                        }
-                    }
                 }
 
                 Rectangle {
@@ -713,9 +867,14 @@ ApplicationWindow {
                         anchors.rightMargin: 11
                         spacing: 8
 
+                        CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "AC"; tone: root.signalFrequency > 0 ? "accent" : "normal"; implicitWidth: 46; onClicked: root.setWaveformMode("AC") }
+                        CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "DC"; tone: root.signalFrequency === 0 ? "accent" : "normal"; implicitWidth: 46; onClicked: root.setWaveformMode("DC") }
+
+                        Rectangle { width: 1; height: 24; color: studioTheme.lineSoft }
+
                         ColumnLayout {
                             spacing: 0
-                            Label { text: "FREQUENCY"; color: studioTheme.muted; font.family: root.uiFont; font.pixelSize: studioTheme.captionSize - 1; font.weight: Font.DemiBold; font.letterSpacing: 0.8 }
+                            Label { text: root.signalFrequency === 0 ? "DC MODE" : "EDITABLE FREQUENCY"; color: studioTheme.muted; font.family: root.uiFont; font.pixelSize: studioTheme.captionSize - 1; font.weight: Font.DemiBold; font.letterSpacing: 0.8 }
                             RowLayout {
                                 spacing: 5
                                 NumericField {
@@ -723,16 +882,19 @@ ApplicationWindow {
                                     theme: studioTheme
                                     monoFont: root.monoFont
                                     compact: root.compactLayout
-                                    implicitWidth: 84
-                                    text: "50.000"
+                                     implicitWidth: 84
+                                     text: "50.000"
+                                     suffixText: "Hz"
+                                    enabled: root.signalFrequency > 0
                                     validator: DoubleValidator { bottom: 0.001; top: 1000.0; decimals: 3 }
                                     onTextEdited: {
                                         var value = root.parseOperatorNumber(text)
                                         if (root.validFrequency(value)) {
                                             invalidInput = false
                                             root.signalFrequency = value
+                                            if (value > 0) root.previousAcFrequency = value
                                             root.refreshPreview()
-                                            if (device.connected) device.setFrequency(value)
+                                            if (device.deviceVerified) device.setFrequency(value)
                                         } else {
                                             invalidInput = true
                                         }
@@ -742,22 +904,22 @@ ApplicationWindow {
                                         if (!root.validFrequency(value)) {
                                             text = root.signalFrequency.toFixed(3)
                                             invalidInput = false
-                                            root.showMessage("Frequency must be greater than 0 and not exceed 1000 Hz.", true)
+                                            root.showMessage("AC frequency must be greater than 0 and not exceed 1000 Hz.", true)
                                         } else {
                                             text = value.toFixed(3)
                                         }
                                     }
                                 }
-                                Label { text: "Hz"; color: studioTheme.muted; font.family: root.uiFont; font.pixelSize: 8 }
                             }
                         }
 
-                        CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "50"; implicitWidth: 44; onClicked: root.setFrequencyValue(50) }
-                        CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "60"; implicitWidth: 44; onClicked: root.setFrequencyValue(60) }
+                        CalmButton { visible: root.signalFrequency > 0; theme: studioTheme; uiFont: root.uiFont; text: "50"; implicitWidth: 44; onClicked: root.setFrequencyValue(50) }
+                        CalmButton { visible: root.signalFrequency > 0; theme: studioTheme; uiFont: root.uiFont; text: "60"; implicitWidth: 44; onClicked: root.setFrequencyValue(60) }
 
                         Rectangle { width: 1; height: 24; color: studioTheme.lineSoft }
 
                         CheckBox {
+                            enabled: root.signalFrequency > 0
                             checked: root.phaseLink
                             text: "3-phase link"
                             onToggled: root.phaseLink = checked
@@ -766,14 +928,6 @@ ApplicationWindow {
                         }
 
                         Item { Layout.fillWidth: true }
-
-                        Label {
-                            visible: !root.compactLayout
-                            text: device.connected ? "Valid edit → SMV immediately" : "Connect to stream edits live"
-                            color: device.connected ? studioTheme.green : studioTheme.muted
-                            font.family: root.uiFont
-                            font.pixelSize: 8
-                        }
                     }
                 }
 
@@ -795,7 +949,7 @@ ApplicationWindow {
                         groupIndex: 0
                         titleText: "Current"
                         symbolText: "I"
-                        unitText: "A RMS"
+                        unitText: root.signalFrequency === 0 ? "A DC" : "A RMS"
                         compact: root.compactLayout
                     }
 
@@ -812,7 +966,7 @@ ApplicationWindow {
                         groupIndex: 1
                         titleText: "Voltage"
                         symbolText: "U"
-                        unitText: "V RMS"
+                        unitText: root.signalFrequency === 0 ? "V DC" : "V RMS"
                         compact: root.compactLayout
                     }
                 }
@@ -825,7 +979,9 @@ ApplicationWindow {
                     Rectangle { width: 6; height: 6; radius: 3; color: studioTheme.accent }
                     Label { text: root.activeSignal; color: studioTheme.textSoft; font.family: root.monoFont; font.pixelSize: studioTheme.labelSize; font.weight: Font.Bold }
                     Label {
-                        text: root.activeMagnitude.toFixed(3) + " " + root.activeUnit + " RMS · " + root.activePhase.toFixed(2) + "°"
+                        text: root.signalFrequency === 0
+                            ? root.activeMagnitude.toFixed(3) + " " + root.activeUnit + " DC"
+                            : root.activeMagnitude.toFixed(3) + " " + root.activeUnit + " RMS · " + root.activePhase.toFixed(2) + "°"
                         color: studioTheme.muted
                         font.family: root.uiFont
                         font.pixelSize: 9
@@ -852,43 +1008,114 @@ ApplicationWindow {
             }
         }
 
-        DockFrame {
-            visible: root.previewDockVisible && !root.previewDetached
-            Layout.preferredWidth: root.compactLayout ? 290 : 360
-            Layout.minimumWidth: root.compactLayout ? 280 : 320
-            Layout.fillHeight: true
-            theme: studioTheme
-            titleText: "Signal preview"
-            statusText: "GENERATED"
-            uiFont: root.uiFont
-            monoFont: root.monoFont
-            detachable: true
-            onDetachRequested: root.detachPreview()
-            onCloseRequested: root.previewDockVisible = false
+        SplitView {
+            visible: (root.phasorDockVisible && !root.phasorDetached) ||
+                     (root.waveformDockVisible && !root.waveformDetached)
+            SplitView.preferredWidth: root.compactLayout ? 300 : 380
+            SplitView.minimumWidth: root.compactLayout ? 270 : 300
+            SplitView.maximumWidth: 680
+            SplitView.fillHeight: true
+            orientation: Qt.Vertical
+            handle: Rectangle {
+                implicitHeight: 9
+                color: SplitHandle.pressed ? studioTheme.accentSoft
+                     : SplitHandle.hovered ? studioTheme.raisedHover : "transparent"
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: parent.width
+                    height: 1
+                    color: SplitHandle.hovered || SplitHandle.pressed ? studioTheme.accent : studioTheme.line
+                }
+                HoverHandler { cursorShape: Qt.SplitVCursor }
+            }
 
-            SignalPreview {
-                id: previewPanel
-                anchors.fill: parent
+            DockFrame {
+                visible: root.phasorDockVisible && !root.phasorDetached
+                SplitView.fillWidth: true
+                SplitView.fillHeight: true
+                SplitView.minimumHeight: 170
+                SplitView.preferredHeight: 300
                 theme: studioTheme
-                currentModel: currentModel
-                voltageModel: voltageModel
+                titleText: "Phasor View"
+                statusText: "GENERATED"
                 uiFont: root.uiFont
                 monoFont: root.monoFont
-                compact: root.compactLayout
-                showHeader: false
-                activeSignal: root.activeSignal
-                activeUnit: root.activeUnit
-                activeMagnitude: root.activeMagnitude
-                activePhase: root.activePhase
-                signalFrequency: root.signalFrequency
+                detachable: true
+                onDetachRequested: root.detachPhasor()
+                onCloseRequested: root.phasorDockVisible = false
+
+                SignalPreview {
+                    id: previewPanel
+                    anchors.fill: parent
+                    theme: studioTheme
+                    currentModel: currentModel
+                    voltageModel: voltageModel
+                    uiFont: root.uiFont
+                    monoFont: root.monoFont
+                    compact: root.compactLayout
+                    showHeader: false
+                    viewMode: "phasor"
+                    activeSignal: root.activeSignal
+                    activeUnit: root.activeUnit
+                    activeMagnitude: root.activeMagnitude
+                    activePhase: root.activePhase
+                    signalFrequency: root.signalFrequency
+                    ctSaturationEnabled: root.ctSaturationEnabled
+                    ctDcOffsetPercent: root.ctDcOffsetPercent
+                    ctHarmonicPercent: root.ctHarmonicPercent
+                    ctHarmonicOrder: root.ctHarmonicOrder
+                    ctClipPercent: root.ctClipPercent
+                }
+            }
+
+            DockFrame {
+                visible: root.waveformDockVisible && !root.waveformDetached
+                SplitView.fillWidth: true
+                SplitView.fillHeight: true
+                SplitView.minimumHeight: 170
+                SplitView.preferredHeight: 300
+                theme: studioTheme
+                titleText: "Waveform View"
+                statusText: root.signalFrequency.toFixed(3) + " Hz"
+                uiFont: root.uiFont
+                monoFont: root.monoFont
+                detachable: true
+                onDetachRequested: root.detachWaveform()
+                onCloseRequested: root.waveformDockVisible = false
+
+                SignalPreview {
+                    id: waveformPanel
+                    anchors.fill: parent
+                    theme: studioTheme
+                    currentModel: currentModel
+                    voltageModel: voltageModel
+                    uiFont: root.uiFont
+                    monoFont: root.monoFont
+                    compact: root.compactLayout
+                    showHeader: false
+                    viewMode: "waveform"
+                    activeSignal: root.activeSignal
+                    activeUnit: root.activeUnit
+                    activeMagnitude: root.activeMagnitude
+                    activePhase: root.activePhase
+                    signalFrequency: root.signalFrequency
+                    ctSaturationEnabled: root.ctSaturationEnabled
+                    ctDcOffsetPercent: root.ctDcOffsetPercent
+                    ctHarmonicPercent: root.ctHarmonicPercent
+                    ctHarmonicOrder: root.ctHarmonicOrder
+                    ctClipPercent: root.ctClipPercent
+                }
             }
         }
         }
 
         TelemetryDock {
             visible: root.telemetryDockVisible
-            Layout.fillWidth: true
-            Layout.preferredHeight: implicitHeight
+            SplitView.fillWidth: true
+            SplitView.minimumHeight: root.telemetryExpanded ? 88 : 32
+            SplitView.maximumHeight: root.telemetryExpanded ? 320 : 32
+            SplitView.preferredHeight: root.telemetryExpanded ? 124 : 32
+            Behavior on SplitView.preferredHeight { NumberAnimation { duration: 220; easing.type: Easing.InOutCubic } }
             theme: studioTheme
             device: device
             currentModel: currentModel
@@ -899,6 +1126,7 @@ ApplicationWindow {
             expanded: root.telemetryExpanded
             onExpandedChanged: root.telemetryExpanded = expanded
             onCloseRequested: root.telemetryDockVisible = false
+        }
         }
     }
 

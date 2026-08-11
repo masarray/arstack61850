@@ -28,6 +28,33 @@ const QRegularExpression kProfileCommittedExpression{
 const QRegularExpression kProfileArmedExpression{
     QStringLiteral("PROFILE armed generation=(\\d+)\\s+svID=(\\S+)\\s+APPID=0x([0-9A-Fa-f]+)\\s+rate=(\\d+)\\s+wrap=(\\d+)"),
     QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kIdentityExpression{
+    QStringLiteral("ARSTACK identity product=([A-Z0-9_-]+) target=ESP32-P4 protocol=(\\d+) device_id=([A-Fa-f0-9]{12})"),
+    QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kPtpStatusExpression{
+    QStringLiteral("PTP status=(RUNNING|STOPPED) Announce=(\\d+) Sync=(\\d+) FollowUp=(\\d+) PdelayFrames=(\\d+) TXfail=(\\d+)"),
+    QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kPtpConfigExpression{
+    QStringLiteral("PTP config domain=(\\d+) transportSpecific=0x([0-9A-Fa-f]+) VLAN=(\\S+) Announce=(\\d+) ms Sync=(\\d+) ms Pdelay=(ON|OFF)"),
+    QRegularExpression::CaseInsensitiveOption};
+
+struct PortCandidate {
+    QString name;
+    int confidence{};
+};
+
+[[nodiscard]] int portConfidence(const QSerialPortInfo& info) {
+    int score = 0;
+    if (info.hasVendorIdentifier() && info.vendorIdentifier() == 0x303AU) score += 100;
+    const QString identity = QStringLiteral("%1 %2 %3")
+        .arg(info.description(), info.manufacturer(), info.serialNumber()).toLower();
+    if (identity.contains(QStringLiteral("esp32-p4"))) score += 90;
+    else if (identity.contains(QStringLiteral("esp32"))) score += 65;
+    if (identity.contains(QStringLiteral("espressif"))) score += 60;
+    if (identity.contains(QStringLiteral("usb jtag")) ||
+        identity.contains(QStringLiteral("usb serial"))) score += 15;
+    return score;
+}
 
 [[nodiscard]] bool finitePositive(const double value) noexcept {
     return std::isfinite(value) && value > 0.0;
@@ -57,10 +84,36 @@ DeviceController::DeviceController(QObject* parent) : QObject(parent) {
         }
     });
 
+    verificationTimer_.setSingleShot(true);
+    verificationTimer_.setInterval(2600);
+    connect(&verificationTimer_, &QTimer::timeout, this, [this] {
+        if (!serial_.isOpen() || deviceVerified_) return;
+        const bool wasAutomatic = automaticConnection_;
+        const bool continueProbing = wasAutomatic && genericProbeActive_ && !probeQueue_.isEmpty();
+        disconnectPort();
+        if (continueProbing) {
+            QTimer::singleShot(0, this, [this] { static_cast<void>(tryNextProbe()); });
+            return;
+        }
+        genericProbeActive_ = false;
+        setDiscoveryState(
+            wasAutomatic
+                ? QStringLiteral("A connected serial device did not identify as an ARStack injector.")
+                : QStringLiteral("The selected serial port did not answer as an ARStack injector."),
+            false);
+    });
+
     refreshPorts();
 }
 
 QStringList DeviceController::ports() const { return ports_; }
+QString DeviceController::recommendedPort() const { return recommendedPort_; }
+QString DeviceController::discoveryStatus() const { return discoveryStatus_; }
+bool DeviceController::discovering() const noexcept { return discovering_; }
+bool DeviceController::deviceVerified() const noexcept { return deviceVerified_; }
+QString DeviceController::deviceProduct() const { return deviceProduct_; }
+QString DeviceController::deviceId() const { return deviceId_; }
+QString DeviceController::protocolVersion() const { return protocolVersion_; }
 bool DeviceController::connected() const noexcept { return serial_.isOpen(); }
 bool DeviceController::running() const noexcept { return running_; }
 QString DeviceController::portName() const { return serial_.portName(); }
@@ -73,27 +126,101 @@ QString DeviceController::signalGeneration() const { return signalGeneration_; }
 QString DeviceController::profileGeneration() const { return profileGeneration_; }
 bool DeviceController::profileArmed() const noexcept { return profileArmed_; }
 bool DeviceController::profileDeploying() const noexcept { return profileDeploying_; }
+bool DeviceController::ptpAvailable() const noexcept { return ptpAvailable_; }
+bool DeviceController::ptpRunning() const noexcept { return ptpRunning_; }
+QString DeviceController::ptpStatus() const { return ptpStatus_; }
+QString DeviceController::ptpDomain() const { return ptpDomain_; }
+QString DeviceController::ptpTransportSpecific() const { return ptpTransportSpecific_; }
+QString DeviceController::ptpVlan() const { return ptpVlan_; }
+QString DeviceController::ptpAnnounceSent() const { return ptpAnnounceSent_; }
+QString DeviceController::ptpSyncSent() const { return ptpSyncSent_; }
+QString DeviceController::ptpTxFailures() const { return ptpTxFailures_; }
 
 void DeviceController::refreshPorts() {
-    QStringList discovered;
+    QList<PortCandidate> candidates;
     for (const auto& info : QSerialPortInfo::availablePorts()) {
-        discovered.push_back(info.portName());
+        candidates.push_back({info.portName(), portConfidence(info)});
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const PortCandidate& left, const PortCandidate& right) {
+        if (left.confidence != right.confidence) return left.confidence > right.confidence;
+        return left.name.localeAwareCompare(right.name) < 0;
+    });
+
+    QStringList discovered;
+    QStringList highConfidence;
+    for (const auto& candidate : candidates) {
+        discovered.push_back(candidate.name);
+        if (candidate.confidence >= 60) highConfidence.push_back(candidate.name);
     }
     discovered.removeDuplicates();
-    std::sort(discovered.begin(), discovered.end(), [](const QString& left, const QString& right) {
-        return left.localeAwareCompare(right) < 0;
-    });
-    if (discovered == ports_) return;
+    const QString recommended = highConfidence.size() == 1 ? highConfidence.front() : QString{};
+    const bool portsDidChange = discovered != ports_;
+    const bool recommendationChanged = recommended != recommendedPort_;
     ports_ = std::move(discovered);
-    emit portsChanged();
+    recommendedPort_ = recommended;
+    if (portsDidChange) emit portsChanged();
+    if (recommendationChanged) emit discoveryChanged();
+
+    if (!serial_.isOpen() && !discovering_) {
+        if (!recommendedPort_.isEmpty()) {
+            setDiscoveryState(QStringLiteral("Compatible ESP32-P4 USB device found."), false);
+        } else if (highConfidence.size() > 1) {
+            setDiscoveryState(QStringLiteral("Multiple Espressif devices found; choose the intended injector."), false);
+        } else {
+            setDiscoveryState(QStringLiteral("No verified injector found; setpoints remain editable offline."), false);
+        }
+    }
 }
 
 bool DeviceController::connectPort(const QString& portName) {
+    return connectPortInternal(portName, false);
+}
+
+bool DeviceController::autoDetectAndConnect() {
+    if (deviceVerified_) return true;
+    refreshPorts();
+    probeQueue_.clear();
+    genericProbeActive_ = false;
+    if (!recommendedPort_.isEmpty()) {
+        setDiscoveryState(
+            QStringLiteral("Compatible device found. Verifying ARStack identity..."), true);
+        return connectPortInternal(recommendedPort_, true);
+    }
+    if (ports_.isEmpty()) return false;
+
+    // Windows often exposes ESP USB CDC as the generic "USB Serial Device".
+    // Probe one port at a time with read-only SHOW commands and trust only the
+    // firmware-specific response grammar parsed by processLine().
+    probeQueue_ = ports_;
+    genericProbeActive_ = true;
+    return tryNextProbe();
+}
+
+bool DeviceController::tryNextProbe() {
+    while (!probeQueue_.isEmpty()) {
+        const QString port = probeQueue_.takeFirst();
+        setDiscoveryState(QStringLiteral("Checking connected devices for an ARStack injector..."), true);
+        if (connectPortInternal(port, true)) return true;
+    }
+    genericProbeActive_ = false;
+    setDiscoveryState(QStringLiteral("No ARStack injector answered; manual port selection remains available."), false);
+    return false;
+}
+
+bool DeviceController::connectPortInternal(const QString& portName, const bool automatic) {
     if (portName.trimmed().isEmpty()) {
         setError(QStringLiteral("Select a serial port first."));
         return false;
     }
     if (serial_.isOpen()) disconnectPort();
+
+    if (!automatic) {
+        probeQueue_.clear();
+        genericProbeActive_ = false;
+    }
+    automaticConnection_ = automatic;
+    deviceVerified_ = false;
+    setDiscoveryState(QStringLiteral("Verifying ARStack injector identity..."), true);
 
     serial_.setPortName(portName.trimmed());
     serial_.setBaudRate(kBaudRate);
@@ -103,7 +230,11 @@ bool DeviceController::connectPort(const QString& portName) {
     serial_.setFlowControl(QSerialPort::NoFlowControl);
 
     if (!serial_.open(QIODevice::ReadWrite)) {
-        setError(QStringLiteral("Cannot open %1: %2").arg(portName, serial_.errorString()));
+        automaticConnection_ = false;
+        if (!automatic) {
+            setDiscoveryState(QStringLiteral("The selected serial port could not be opened."), false);
+            setError(QStringLiteral("Cannot open %1: %2").arg(portName, serial_.errorString()));
+        }
         return false;
     }
 
@@ -118,6 +249,9 @@ bool DeviceController::connectPort(const QString& portName) {
     emit runningChanged();
     emit lastErrorChanged();
     emit profileStateChanged();
+    verificationTimer_.setInterval(genericProbeActive_ ? 1100 : 2600);
+    verificationTimer_.start();
+    static_cast<void>(sendCommand(QStringLiteral("IDENTIFY")));
     static_cast<void>(sendCommand(QStringLiteral("SHOW")));
     static_cast<void>(sendCommand(QStringLiteral("PROFILE SHOW")));
     return true;
@@ -125,6 +259,7 @@ bool DeviceController::connectPort(const QString& portName) {
 
 void DeviceController::disconnectPort() {
     const bool wasConnected = serial_.isOpen();
+    verificationTimer_.stop();
     if (serial_.isOpen()) serial_.close();
     pendingRx_.clear();
     if (running_) {
@@ -137,6 +272,19 @@ void DeviceController::disconnectPort() {
         emit profileStateChanged();
     }
     resetTelemetry();
+    const bool wasVerified = deviceVerified_;
+    deviceVerified_ = false;
+    deviceProduct_.clear();
+    deviceId_.clear();
+    protocolVersion_.clear();
+    discovering_ = false;
+    automaticConnection_ = false;
+    ptpAvailable_ = false;
+    ptpRunning_ = false;
+    ptpStatus_ = QStringLiteral("Waiting for device");
+    emit discoveryChanged();
+    emit ptpStateChanged();
+    if (wasVerified) emit deviceVerifiedChanged();
     if (wasConnected) {
         appendLog(QStringLiteral("•"), QStringLiteral("Device disconnected"));
         emit connectedChanged();
@@ -149,13 +297,15 @@ bool DeviceController::stop() { return sendCommand(QStringLiteral("STOP")); }
 bool DeviceController::zero() { return sendCommand(QStringLiteral("ZERO")); }
 
 bool DeviceController::setFrequency(const double hz) {
-    if (!finitePositive(hz) || hz > 1000.0) {
-        setError(QStringLiteral("Frequency must be within 0..1000 Hz."));
+    if (!std::isfinite(hz) || hz < 0.0 || hz > 1000.0) {
+        setError(QStringLiteral("Frequency must be within 0..1000 Hz (0 = DC)."));
         return false;
     }
     const auto millihertz = std::llround(hz * 1000.0);
-    if (millihertz <= 0 || millihertz > std::numeric_limits<quint32>::max()) return false;
-    return sendCommand(QStringLiteral("FREQ %1").arg(millihertz));
+    if (millihertz < 0 || millihertz > std::numeric_limits<quint32>::max()) return false;
+    if (!sendCommand(QStringLiteral("FREQ %1").arg(millihertz))) return false;
+    signalFrequencyHz_ = hz;
+    return true;
 }
 
 bool DeviceController::setSignal(
@@ -169,7 +319,8 @@ bool DeviceController::setSignal(
     static const QStringList validIds{
         QStringLiteral("IA"), QStringLiteral("IB"), QStringLiteral("IC"), QStringLiteral("IN"),
         QStringLiteral("UA"), QStringLiteral("UB"), QStringLiteral("UC"), QStringLiteral("UN")};
-    if (!validIds.contains(id) || !std::isfinite(magnitude) || magnitude < 0.0 || !std::isfinite(phaseDegrees)) {
+    if (!validIds.contains(id) || !std::isfinite(magnitude) ||
+        (signalFrequencyHz_ > 0.0 && magnitude < 0.0) || !std::isfinite(phaseDegrees)) {
         setError(QStringLiteral("Invalid signal setpoint."));
         return false;
     }
@@ -207,7 +358,7 @@ bool DeviceController::setQuality(const QString& signalId, const quint32 quality
 }
 
 bool DeviceController::deployProfile(const QVariantMap& profile) {
-    if (!connected()) {
+    if (!deviceVerified_) {
         setError(QStringLiteral("Connect the ESP32-P4 before deployment."));
         return false;
     }
@@ -274,6 +425,61 @@ bool DeviceController::deployProfile(const QVariantMap& profile) {
     return true;
 }
 
+bool DeviceController::setCtSaturation(
+    const bool enabled,
+    const double dcOffsetPercent,
+    const double harmonicPercent,
+    const int harmonicOrder,
+    const double clipPercent) {
+    if (enabled && signalFrequencyHz_ == 0.0) {
+        setError(QStringLiteral("CT saturation shaping requires AC mode."));
+        return false;
+    }
+    if (!std::isfinite(dcOffsetPercent) || dcOffsetPercent < -300.0 || dcOffsetPercent > 300.0 ||
+        !std::isfinite(harmonicPercent) || harmonicPercent < 0.0 || harmonicPercent > 300.0 ||
+        harmonicOrder < 2 || harmonicOrder > 63 || !std::isfinite(clipPercent) ||
+        clipPercent < 1.0 || clipPercent > 1000.0) {
+        setError(QStringLiteral("CT saturation parameters are outside the bounded lab range."));
+        return false;
+    }
+    return sendCommand(QStringLiteral("SHAPE CT %1 %2 %3 %4 %5")
+        .arg(enabled ? 1 : 0)
+        .arg(std::llround(dcOffsetPercent * 10.0))
+        .arg(std::llround(harmonicPercent * 10.0))
+        .arg(harmonicOrder)
+        .arg(std::llround(clipPercent * 10.0)));
+}
+
+bool DeviceController::sendPtpShow() { return sendCommand(QStringLiteral("PTP SHOW")); }
+bool DeviceController::startPtp() { return sendCommand(QStringLiteral("PTP START")); }
+bool DeviceController::stopPtp() { return sendCommand(QStringLiteral("PTP STOP")); }
+
+bool DeviceController::configurePtp(const QVariantMap& profile) {
+    if (!deviceVerified_ || ptpRunning_) {
+        setError(ptpRunning_
+            ? QStringLiteral("Stop PTP Lab TX before applying expert timing settings.")
+            : QStringLiteral("Verify the ESP32-P4 before configuring PTP."));
+        return false;
+    }
+    const auto domain = profile.value(QStringLiteral("domain")).toUInt();
+    const auto transport = profile.value(QStringLiteral("transportSpecific")).toUInt();
+    const bool vlanEnabled = profile.value(QStringLiteral("vlanEnabled")).toBool();
+    const auto vlanId = profile.value(QStringLiteral("vlanId")).toUInt();
+    const auto pcp = profile.value(QStringLiteral("vlanPriority")).toUInt();
+    const auto announceMs = profile.value(QStringLiteral("announceIntervalMs")).toUInt();
+    const auto syncMs = profile.value(QStringLiteral("syncIntervalMs")).toUInt();
+    const bool pdelay = profile.value(QStringLiteral("respondToPeerDelay")).toBool();
+    if (domain > 255U || transport > 15U || (vlanEnabled && (vlanId == 0U || vlanId > 4094U)) ||
+        pcp > 7U || announceMs < 100U || announceMs > 10000U ||
+        syncMs < 20U || syncMs > 5000U) {
+        setError(QStringLiteral("PTP expert profile is outside the firmware safety bounds."));
+        return false;
+    }
+    return sendCommand(QStringLiteral("PTP CONFIG %1 %2 %3 %4 %5 %6 %7 %8")
+        .arg(domain).arg(transport).arg(vlanEnabled ? 1 : 0).arg(vlanId).arg(pcp)
+        .arg(announceMs).arg(syncMs).arg(pdelay ? 1 : 0));
+}
+
 void DeviceController::clearLog() {
     if (logText_.isEmpty()) return;
     logText_.clear();
@@ -298,6 +504,26 @@ void DeviceController::setRunning(const bool value) {
     if (running_ == value) return;
     running_ = value;
     emit runningChanged();
+}
+
+void DeviceController::setDiscoveryState(const QString& status, const bool active) {
+    if (discoveryStatus_ == status && discovering_ == active) return;
+    discoveryStatus_ = status;
+    discovering_ = active;
+    emit discoveryChanged();
+}
+
+void DeviceController::markDeviceVerified() {
+    if (deviceVerified_) return;
+    verificationTimer_.stop();
+    deviceVerified_ = true;
+    automaticConnection_ = false;
+    genericProbeActive_ = false;
+    probeQueue_.clear();
+    setDiscoveryState(QStringLiteral("ARStack ESP32-P4 identity verified."), false);
+    emit deviceVerifiedChanged();
+    emit deviceMessage(QStringLiteral("ESP32-P4 recognized. Device is ready."));
+    static_cast<void>(sendPtpShow());
 }
 
 void DeviceController::setError(const QString& message) {
@@ -362,6 +588,45 @@ void DeviceController::processLine(const QString& rawLine) {
         profileDeploying_ = false;
         profileArmed_ = true;
         emit profileStateChanged();
+    }
+
+    match = kIdentityExpression.match(line);
+    if (match.hasMatch()) {
+        deviceProduct_ = match.captured(1);
+        protocolVersion_ = match.captured(2);
+        deviceId_ = match.captured(3).toUpper();
+        markDeviceVerified();
+    }
+
+    match = kPtpStatusExpression.match(line);
+    if (match.hasMatch()) {
+        ptpAvailable_ = true;
+        ptpRunning_ = match.captured(1).compare(QStringLiteral("RUNNING"), Qt::CaseInsensitive) == 0;
+        ptpAnnounceSent_ = match.captured(2);
+        ptpSyncSent_ = match.captured(3);
+        ptpTxFailures_ = match.captured(6);
+        ptpStatus_ = ptpRunning_ ? QStringLiteral("Lab TX active") : QStringLiteral("Lab TX stopped");
+        emit ptpStateChanged();
+    }
+
+    match = kPtpConfigExpression.match(line);
+    if (match.hasMatch()) {
+        ptpAvailable_ = true;
+        ptpDomain_ = match.captured(1);
+        ptpTransportSpecific_ = QStringLiteral("0x%1").arg(match.captured(2).toUpper());
+        ptpVlan_ = match.captured(3);
+        emit ptpStateChanged();
+    }
+
+    if (line.contains(QStringLiteral("PTP unavailable"), Qt::CaseInsensitive)) {
+        ptpAvailable_ = false;
+        ptpRunning_ = false;
+        ptpStatus_ = QStringLiteral("Not enabled in firmware");
+        emit ptpStateChanged();
+    }
+    if (line.contains(QStringLiteral("PTP configuration accepted"), Qt::CaseInsensitive)) {
+        emit deviceMessage(QStringLiteral("PTP expert profile accepted."));
+        static_cast<void>(sendPtpShow());
     }
 
     if (line.contains(QStringLiteral("PROFILE commit rejected"), Qt::CaseInsensitive) ||

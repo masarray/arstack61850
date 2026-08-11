@@ -4,7 +4,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 SurfacePanel {
-    id: workflow
+    id: ribbon
 
     property var controller
     property var device
@@ -12,242 +12,237 @@ SurfacePanel {
     property string uiFont: "Inter"
     property string monoFont: "Inter"
     property bool compact: false
+    property int activeTab: 0
 
-    function withAlpha(value, alpha) {
-        return Qt.rgba(value.r, value.g, value.b, alpha)
-    }
-
-    Menu {
-        id: viewMenu
-        MenuItem {
-            text: "Signal preview"
-            checkable: true
-            checked: workflow.controller.previewDockVisible || workflow.controller.previewDetached
-            onTriggered: {
-                workflow.controller.previewDetached = false
-                workflow.controller.previewDockVisible = checked
-            }
-        }
-        MenuItem {
-            text: "Status & output monitor"
-            checkable: true
-            checked: workflow.controller.telemetryDockVisible
-            onTriggered: workflow.controller.telemetryDockVisible = checked
-        }
-        MenuSeparator { }
-        MenuItem {
-            text: "Detach signal preview"
-            enabled: workflow.controller.previewDockVisible && !workflow.controller.previewDetached
-            onTriggered: workflow.controller.detachPreview()
-        }
-    }
-
-    implicitHeight: 82
+    implicitHeight: 94
     color: theme.raised
     border.color: theme.line
 
-    component StepMarker: Rectangle {
-        required property string numberText
-        required property string titleText
-        required property string statusText
-        required property color statusColor
-
-        implicitWidth: workflow.compact ? 94 : 112
-        implicitHeight: 48
-        radius: workflow.theme.controlRadius
-        color: "#101820"
-        border.width: 1
-        border.color: statusColor === workflow.theme.muted ? workflow.theme.lineSoft : workflow.withAlpha(statusColor, 0.55)
-
-        RowLayout {
-            anchors.fill: parent
-            anchors.margins: 8
-            spacing: 7
-
+    component RibbonTab: TabButton {
+        implicitWidth: 104
+        implicitHeight: 32
+        font.family: ribbon.uiFont
+        font.pixelSize: 10
+        font.weight: checked ? Font.DemiBold : Font.Medium
+        contentItem: Label {
+            text: parent.text
+            color: parent.checked ? ribbon.theme.text : ribbon.theme.muted
+            font: parent.font
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+        background: Rectangle {
+            color: parent.checked ? ribbon.theme.surface2 : "transparent"
+            radius: 6
             Rectangle {
-                width: 23
-                height: 23
-                radius: 6
-                color: workflow.withAlpha(statusColor, 0.16)
-                border.width: 1
-                border.color: workflow.withAlpha(statusColor, 0.48)
-                Label {
-                    anchors.centerIn: parent
-                    text: numberText
-                    color: statusColor
-                    font.family: workflow.monoFont
-                    font.pixelSize: workflow.theme.captionSize
-                    font.weight: Font.Bold
-                }
-            }
-
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 0
-                Label {
-                    Layout.fillWidth: true
-                    text: titleText
-                    color: workflow.theme.textSoft
-                    font.family: workflow.uiFont
-                    font.pixelSize: workflow.theme.labelSize
-                    font.weight: Font.DemiBold
-                    elide: Text.ElideRight
-                }
-                Label {
-                    Layout.fillWidth: true
-                    text: statusText
-                    color: statusColor
-                    font.family: workflow.monoFont
-                    font.pixelSize: workflow.theme.captionSize - 1
-                    elide: Text.ElideRight
-                }
+                visible: parent.parent.checked
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.leftMargin: 14
+                anchors.rightMargin: 14
+                height: 2
+                radius: 1
+                color: ribbon.theme.accent
             }
         }
     }
 
-    RowLayout {
+    component RibbonAction: CalmButton {
+        theme: ribbon.theme
+        uiFont: ribbon.uiFont
+        implicitHeight: 42
+        iconSize: 16
+    }
+
+    component RibbonDivider: Rectangle {
+        width: 1
+        height: 32
+        color: ribbon.theme.lineSoft
+        Layout.alignment: Qt.AlignVCenter
+    }
+
+    ColumnLayout {
         anchors.fill: parent
-        anchors.leftMargin: workflow.compact ? 10 : 13
-        anchors.rightMargin: workflow.compact ? 10 : 13
-        spacing: workflow.compact ? 7 : 9
-
-        ColumnLayout {
-            visible: !workflow.compact
-            Layout.preferredWidth: 92
-            spacing: 1
-            Label {
-                text: "FAST WORKFLOW"
-                color: workflow.theme.muted
-                font.family: workflow.uiFont
-                font.pixelSize: workflow.theme.captionSize - 1
-                font.weight: Font.DemiBold
-                font.letterSpacing: 0.9
-            }
-            Label {
-                text: "Manual"
-                color: workflow.theme.text
-                font.family: workflow.uiFont
-                font.pixelSize: workflow.theme.subtitleSize
-                font.weight: Font.DemiBold
-            }
-            Label {
-                text: "live setpoints"
-                color: workflow.theme.muted
-                font.family: workflow.uiFont
-                font.pixelSize: workflow.theme.captionSize
-            }
-        }
-
-        StepMarker {
-            numberText: "1"
-            titleText: "Source"
-            statusText: workflow.profiles.hasProfiles ? "READY" : "DEV PROFILE"
-            statusColor: workflow.profiles.hasProfiles ? workflow.theme.green : workflow.theme.muted
-        }
-
-        StepMarker {
-            numberText: "2"
-            titleText: "Device"
-            statusText: workflow.device.connected ? workflow.device.portName : "OFFLINE"
-            statusColor: workflow.device.connected ? workflow.theme.green : workflow.theme.muted
-        }
-
-        StepMarker {
-            numberText: "3"
-            titleText: "Output"
-            statusText: workflow.controller.instrumentState
-            statusColor: workflow.controller.instrumentStateColor
-        }
-
-        Rectangle { width: 1; height: 40; color: workflow.theme.lineSoft }
+        spacing: 0
 
         RowLayout {
-            spacing: 6
+            Layout.fillWidth: true
+            Layout.preferredHeight: 33
+            Layout.leftMargin: 9
+            Layout.rightMargin: 9
+            spacing: 2
 
-            CalmButton {
-                theme: workflow.theme
-                uiFont: workflow.uiFont
-                text: "Open SCL"
-                enabled: !workflow.device.running
-                onClicked: workflow.controller.openEngineeringFile()
-                ToolTip.visible: hovered
-                ToolTip.text: "Open SCL, CID, SCD or IID  ·  Ctrl+O"
-            }
-            CalmButton {
-                visible: !workflow.compact
-                theme: workflow.theme
-                uiFont: workflow.uiFont
-                text: "Balanced"
-                onClicked: workflow.controller.balanced()
-                ToolTip.visible: hovered
-                ToolTip.text: "Apply balanced 3-phase defaults  ·  Ctrl+B"
-            }
-            CalmButton {
-                theme: workflow.theme
-                uiFont: workflow.uiFont
-                text: "Zero"
-                onClicked: workflow.controller.zeroAll()
-                ToolTip.visible: hovered
-                ToolTip.text: "Set all magnitudes to zero  ·  Ctrl+0"
-            }
-            CalmButton {
-                visible: !workflow.compact
-                theme: workflow.theme
-                uiFont: workflow.uiFont
-                text: "Check"
-                onClicked: workflow.controller.runReadinessCheck()
-                ToolTip.visible: hovered
-                ToolTip.text: "Check profile and device readiness  ·  Ctrl+K"
-            }
-            CalmButton {
-                id: viewsButton
-                theme: workflow.theme
-                uiFont: workflow.uiFont
-                text: "Views"
-                onClicked: viewMenu.popup(viewsButton, 0, viewsButton.height)
-                ToolTip.visible: hovered
-                ToolTip.text: "Show, hide, or detach engineering views"
-            }
+            RibbonTab { text: "Home"; checked: ribbon.activeTab === 0; onClicked: ribbon.activeTab = 0 }
+            RibbonTab { text: "View"; checked: ribbon.activeTab === 1; onClicked: ribbon.activeTab = 1 }
+            RibbonTab { text: "Engineering"; checked: ribbon.activeTab === 2; onClicked: ribbon.activeTab = 2 }
+            Item { Layout.fillWidth: true }
         }
 
-        Item { Layout.fillWidth: true }
+        Rectangle { Layout.fillWidth: true; height: 1; color: ribbon.theme.lineSoft }
 
-        CalmButton {
-            visible: !workflow.compact
-            theme: workflow.theme
-            uiFont: workflow.uiFont
-            tone: "accent"
-            text: workflow.device.profileDeploying ? "Deploying…" : "Deploy"
-            enabled: workflow.controller.canDeploy
-            onClicked: workflow.controller.deploySelectedProfile()
-            ToolTip.visible: hovered
-            ToolTip.text: "Commit the selected immutable profile  ·  Ctrl+D"
-        }
+        StackLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            currentIndex: ribbon.activeTab
 
-        CalmButton {
-            theme: workflow.theme
-            uiFont: workflow.uiFont
-            tone: "danger"
-            text: "Stop"
-            implicitWidth: 72
-            implicitHeight: 42
-            enabled: workflow.device.connected && workflow.device.running
-            onClicked: workflow.device.stop()
-            ToolTip.visible: hovered
-            ToolTip.text: "Stop output  ·  F6"
-        }
+            RowLayout {
+                Layout.leftMargin: 11
+                Layout.rightMargin: 11
+                spacing: 7
 
-        CalmButton {
-            theme: workflow.theme
-            uiFont: workflow.uiFont
-            tone: "success"
-            text: "Start"
-            implicitWidth: 82
-            implicitHeight: 42
-            enabled: workflow.controller.canStart
-            onClicked: workflow.device.start()
-            ToolTip.visible: hovered
-            ToolTip.text: "Start armed output  ·  F5"
+                RibbonAction {
+                    text: "Balanced"
+                    iconSource: Qt.resolvedUrl("../assets/lucide/scale.svg")
+                    toolTipText: "Apply a balanced three-phase setpoint"
+                    onClicked: ribbon.controller.balanced()
+                }
+                RibbonAction {
+                    text: "Zero"
+                    iconSource: Qt.resolvedUrl("../assets/lucide/circle-off.svg")
+                    toolTipText: "Set all magnitudes to zero"
+                    onClicked: ribbon.controller.zeroAll()
+                }
+                RibbonAction {
+                    visible: !ribbon.compact
+                    text: "CT Saturation"
+                    iconSource: Qt.resolvedUrl("../assets/lucide/activity.svg")
+                    tone: ribbon.controller.ctSaturationEnabled ? "accent" : "neutral"
+                    enabled: ribbon.controller.signalFrequency > 0
+                    toolTipText: ribbon.controller.ctSaturationEnabled ? "Disable CT saturation stress" : "Enable CT saturation stress"
+                    onClicked: ribbon.controller.setCtSaturation(!ribbon.controller.ctSaturationEnabled)
+                }
+                RibbonDivider {}
+                RibbonAction {
+                    visible: !ribbon.compact
+                    text: "Check"
+                    iconSource: Qt.resolvedUrl("../assets/lucide/circle-check.svg")
+                    toolTipText: "Run readiness checks"
+                    onClicked: ribbon.controller.runReadinessCheck()
+                }
+                RibbonAction {
+                    text: "Configure"
+                    iconSource: Qt.resolvedUrl("../assets/lucide/settings-2.svg")
+                    toolTipText: "Open Smart and Expert configuration"
+                    onClicked: ribbon.controller.openConfiguration()
+                }
+                Item { Layout.fillWidth: true }
+                RibbonDivider {}
+                RibbonAction {
+                    visible: !ribbon.compact
+                    tone: "accent"
+                    text: ribbon.device.profileDeploying ? "Deploying..." : "Deploy"
+                    iconSource: Qt.resolvedUrl("../assets/lucide/upload.svg")
+                    enabled: ribbon.controller.canDeploy
+                    toolTipText: "Deploy the validated SV profile"
+                    onClicked: ribbon.controller.deploySelectedProfile()
+                }
+                RibbonAction {
+                    tone: "danger"
+                    text: "Stop"
+                    iconSource: Qt.resolvedUrl("../assets/lucide/square.svg")
+                    implicitWidth: 78
+                    enabled: ribbon.device.deviceVerified && ribbon.device.running
+                    onClicked: ribbon.device.stop()
+                }
+                RibbonAction {
+                    tone: "success"
+                    text: "Start"
+                    iconSource: Qt.resolvedUrl("../assets/lucide/play.svg")
+                    implicitWidth: 88
+                    enabled: ribbon.controller.canStart
+                    onClicked: ribbon.device.start()
+                }
+            }
+
+            RowLayout {
+                Layout.leftMargin: 11
+                Layout.rightMargin: 11
+                spacing: 7
+
+                RibbonAction {
+                    text: "Phasor"
+                    iconSource: Qt.resolvedUrl("../assets/lucide/panels-top-left.svg")
+                    tone: ribbon.controller.phasorDockVisible || ribbon.controller.phasorDetached ? "accent" : "neutral"
+                    onClicked: {
+                        ribbon.controller.phasorDetached = false
+                        ribbon.controller.phasorDockVisible = !ribbon.controller.phasorDockVisible
+                    }
+                }
+                RibbonAction {
+                    text: "Waveform"
+                    iconSource: Qt.resolvedUrl("../assets/lucide/activity.svg")
+                    tone: ribbon.controller.waveformDockVisible || ribbon.controller.waveformDetached ? "accent" : "neutral"
+                    onClicked: {
+                        ribbon.controller.waveformDetached = false
+                        ribbon.controller.waveformDockVisible = !ribbon.controller.waveformDockVisible
+                    }
+                }
+                RibbonAction {
+                    text: "Monitor"
+                    iconSource: Qt.resolvedUrl("../assets/lucide/panels-top-left.svg")
+                    tone: ribbon.controller.telemetryDockVisible ? "accent" : "neutral"
+                    onClicked: ribbon.controller.telemetryDockVisible = !ribbon.controller.telemetryDockVisible
+                }
+                RibbonDivider {}
+                RibbonAction {
+                    visible: !ribbon.compact
+                    text: "Detach phasor"
+                    iconSource: Qt.resolvedUrl("../assets/lucide/external-link.svg")
+                    enabled: ribbon.controller.phasorDockVisible && !ribbon.controller.phasorDetached
+                    onClicked: ribbon.controller.detachPhasor()
+                }
+                RibbonAction {
+                    visible: !ribbon.compact
+                    text: "Detach waveform"
+                    iconSource: Qt.resolvedUrl("../assets/lucide/external-link.svg")
+                    enabled: ribbon.controller.waveformDockVisible && !ribbon.controller.waveformDetached
+                    onClicked: ribbon.controller.detachWaveform()
+                }
+                Item { Layout.fillWidth: true }
+                RibbonAction {
+                    text: ribbon.controller.telemetryExpanded ? "Collapse" : "Expand"
+                    iconSource: ribbon.controller.telemetryExpanded
+                        ? Qt.resolvedUrl("../assets/lucide/chevron-down.svg")
+                        : Qt.resolvedUrl("../assets/lucide/chevron-up.svg")
+                    onClicked: ribbon.controller.telemetryExpanded = !ribbon.controller.telemetryExpanded
+                }
+            }
+
+            RowLayout {
+                Layout.leftMargin: 11
+                Layout.rightMargin: 11
+                spacing: 7
+
+                RibbonAction {
+                    text: "Configuration"
+                    iconSource: Qt.resolvedUrl("../assets/lucide/settings-2.svg")
+                    onClicked: ribbon.controller.openConfiguration()
+                }
+                RibbonAction {
+                    text: "Open SCL"
+                    iconSource: Qt.resolvedUrl("../assets/lucide/folder-open.svg")
+                    onClicked: ribbon.controller.openEngineeringFile()
+                }
+                RibbonAction {
+                    text: "Detect device"
+                    iconSource: Qt.resolvedUrl("../assets/lucide/scan-search.svg")
+                    enabled: !ribbon.device.connected
+                    onClicked: ribbon.device.autoDetectAndConnect()
+                }
+                RibbonAction {
+                    text: "Refresh PTP"
+                    iconSource: Qt.resolvedUrl("../assets/lucide/clock-3.svg")
+                    enabled: ribbon.device.deviceVerified
+                    onClicked: ribbon.device.sendPtpShow()
+                }
+                Item { Layout.fillWidth: true }
+                RibbonAction {
+                    text: "Diagnostics"
+                    iconSource: Qt.resolvedUrl("../assets/lucide/activity.svg")
+                    onClicked: ribbon.controller.openDiagnostics()
+                }
+            }
         }
     }
 }

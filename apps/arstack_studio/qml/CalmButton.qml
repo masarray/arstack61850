@@ -7,6 +7,9 @@ Button {
     property var theme
     property string uiFont: "Inter"
     property string tone: "neutral"
+    property url iconSource
+    property real iconSize: 16
+    property string toolTipText: ""
 
     implicitHeight: theme ? theme.controlHeight : 36
     implicitWidth: Math.max(70, contentItem.implicitWidth + 24)
@@ -31,13 +34,30 @@ Button {
                                         tone === "success" ? "#d6f4e6" :
                                         tone === "danger" ? "#ffdce0" : theme.textSoft
 
-    contentItem: Text {
-        text: control.text
-        color: control.activeText
-        font: control.font
-        horizontalAlignment: Text.AlignHCenter
-        verticalAlignment: Text.AlignVCenter
+    contentItem: Row {
+        spacing: control.iconSource.toString().length > 0 ? 7 : 0
+        anchors.centerIn: parent
+        Image {
+            visible: control.iconSource.toString().length > 0
+            width: control.iconSize
+            height: control.iconSize
+            anchors.verticalCenter: parent.verticalCenter
+            source: control.iconSource
+            sourceSize.width: control.iconSize * 2
+            sourceSize.height: control.iconSize * 2
+            opacity: control.enabled ? 0.9 : 0.32
+        }
+        Text {
+            text: control.text
+            color: control.activeText
+            font: control.font
+            anchors.verticalCenter: parent.verticalCenter
+        }
     }
+
+    ToolTip.visible: hovered && toolTipText.length > 0
+    ToolTip.text: toolTipText
+    ToolTip.delay: 500
 
     background: Rectangle {
         radius: control.theme ? control.theme.controlRadius : 7

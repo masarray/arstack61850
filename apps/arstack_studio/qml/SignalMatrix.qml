@@ -62,6 +62,7 @@ Rectangle {
                 font.family: matrix.uiFont
                 font.pixelSize: 11
                 font.weight: Font.DemiBold
+                verticalAlignment: Text.AlignVCenter
             }
             Item { Layout.fillWidth: true }
             Label {
@@ -69,6 +70,7 @@ Rectangle {
                 color: matrix.theme.muted
                 font.family: matrix.uiFont
                 font.pixelSize: 9
+                verticalAlignment: Text.AlignVCenter
             }
         }
 
@@ -78,10 +80,10 @@ Rectangle {
             Layout.leftMargin: 9
             Layout.rightMargin: 9
             spacing: 7
-            Label { text: "ON"; Layout.preferredWidth: 28; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: matrix.theme.captionSize - 1; font.weight: Font.DemiBold }
-            Label { text: "CH"; Layout.preferredWidth: 34; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: matrix.theme.captionSize - 1; font.weight: Font.DemiBold }
-            Label { text: "MAGNITUDE"; Layout.fillWidth: true; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: matrix.theme.captionSize - 1; font.weight: Font.DemiBold }
-            Label { text: "PHASE"; Layout.preferredWidth: matrix.compact ? 82 : 98; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: matrix.theme.captionSize - 1; font.weight: Font.DemiBold }
+            Label { text: "ON"; Layout.preferredWidth: 28; Layout.alignment: Qt.AlignVCenter; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: matrix.theme.captionSize - 1; font.weight: Font.DemiBold; verticalAlignment: Text.AlignVCenter }
+            Label { text: "CH"; Layout.preferredWidth: 34; Layout.alignment: Qt.AlignVCenter; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: matrix.theme.captionSize - 1; font.weight: Font.DemiBold; verticalAlignment: Text.AlignVCenter }
+            Label { text: "MAGNITUDE"; Layout.fillWidth: true; Layout.alignment: Qt.AlignVCenter; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: matrix.theme.captionSize - 1; font.weight: Font.DemiBold; verticalAlignment: Text.AlignVCenter }
+            Label { text: "PHASE"; Layout.preferredWidth: matrix.compact ? 82 : 98; Layout.alignment: Qt.AlignVCenter; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: matrix.theme.captionSize - 1; font.weight: Font.DemiBold; verticalAlignment: Text.AlignVCenter }
         }
 
         Repeater {
@@ -125,6 +127,7 @@ Rectangle {
 
                     CheckBox {
                         Layout.preferredWidth: 28
+                        Layout.alignment: Qt.AlignVCenter
                         checked: signalRow.channelEnabled
                         onToggled: {
                             matrix.sourceModel.setProperty(signalRow.rowIndex, "enabled", checked)
@@ -137,6 +140,7 @@ Rectangle {
 
                     RowLayout {
                         Layout.preferredWidth: 34
+                        Layout.alignment: Qt.AlignVCenter
                         spacing: 5
                         Rectangle { width: 6; height: 6; radius: 3; color: signalRow.phaseColor }
                         Label {
@@ -145,6 +149,7 @@ Rectangle {
                             font.family: matrix.monoFont
                             font.pixelSize: 9
                             font.weight: Font.Bold
+                            verticalAlignment: Text.AlignVCenter
                         }
                     }
 
@@ -154,6 +159,7 @@ Rectangle {
                         theme: matrix.theme
                         monoFont: matrix.monoFont
                         compact: matrix.compact
+                        suffixText: matrix.groupIndex === 0 ? "A" : "V"
                         text: signalRow.mag.toFixed(3)
                         invalidInput: false
                         onActiveFocusChanged: {
@@ -195,10 +201,12 @@ Rectangle {
 
                     NumericField {
                         id: phaseField
+                        enabled: matrix.controller.signalFrequency > 0
                         Layout.preferredWidth: matrix.compact ? 82 : 98
                         theme: matrix.theme
                         monoFont: matrix.monoFont
                         compact: matrix.compact
+                        suffixText: "°"
                         text: signalRow.angle.toFixed(2)
                         invalidInput: false
                         onActiveFocusChanged: {

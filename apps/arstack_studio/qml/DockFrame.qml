@@ -48,6 +48,7 @@ Rectangle {
                     font.pixelSize: theme.labelSize
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
+                    verticalAlignment: Text.AlignVCenter
                 }
                 Label {
                     visible: frame.statusText.length > 0
@@ -55,21 +56,23 @@ Rectangle {
                     color: theme.muted
                     font.family: frame.monoFont
                     font.pixelSize: theme.captionSize - 1
+                    verticalAlignment: Text.AlignVCenter
                 }
-                ToolButton {
+                DarkToolButton {
                     visible: frame.detachable
-                    text: "↗"
-                    font.family: frame.uiFont
-                    font.pixelSize: theme.bodySize
+                    iconSource: Qt.resolvedUrl("../assets/lucide/external-link.svg")
+                    theme: frame.theme
+                    uiFont: frame.uiFont
                     onClicked: frame.detachRequested()
                     ToolTip.visible: hovered
                     ToolTip.text: "Detach into a separate window"
                 }
-                ToolButton {
+                DarkToolButton {
                     visible: frame.closable
-                    text: "×"
-                    font.family: frame.uiFont
-                    font.pixelSize: theme.bodySize
+                    iconSource: Qt.resolvedUrl("../assets/lucide/x.svg")
+                    iconSize: 19
+                    theme: frame.theme
+                    uiFont: frame.uiFont
                     onClicked: frame.closeRequested()
                     ToolTip.visible: hovered
                     ToolTip.text: "Close this view"

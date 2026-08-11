@@ -41,10 +41,60 @@ void bank_commits_complete_generations() {
     CHECK(after.channels[4].rms_counts == 12000);
     CHECK(after.channels[4].phase_millidegrees == 15000);
 
-    auto invalid = after;
-    invalid.frequency_millihz = 0U;
+    auto dc = after;
+    dc.frequency_millihz = 0U;
+    CHECK(bank.publish(dc));
+    CHECK(bank.snapshot().frequency_millihz == 0U);
+
+    auto invalid = dc;
+    invalid.frequency_millihz = 500U;
     CHECK(!bank.publish(invalid));
-    CHECK(bank.snapshot() == after);
+    CHECK(bank.snapshot().frequency_millihz == 0U);
+}
+
+void dc_engine_outputs_constant_engineering_values() {
+    using namespace ar::iec61850::sampled_values;
+
+    SvFixedPointSineEngine engine;
+    auto state = SvLiveSignalBank::default_state();
+    state.frequency_millihz = 0U;
+    state.channels[0].rms_counts = 1234;
+    state.channels[0].phase_millidegrees = -90000;
+    state.channels[1].rms_counts = -4321;
+
+    const auto phase_before = engine.phase_accumulator();
+    for (int sample = 0; sample < 12; ++sample) {
+        const auto row = engine.next(state, 4000U);
+        CHECK(row[0] == 1234);
+        CHECK(row[1] == -4321);
+    }
+    CHECK(engine.phase_accumulator() == phase_before);
+}
+
+void ct_saturation_shape_is_bounded_and_asymmetric() {
+    using namespace ar::iec61850::sampled_values;
+
+    SvFixedPointSineEngine engine;
+    auto state = SvLiveSignalBank::default_state();
+    state.current_shape.enabled = true;
+    state.current_shape.dc_offset_permille = 300;
+    state.current_shape.harmonic_permille = 280U;
+    state.current_shape.harmonic_order = 2U;
+    state.current_shape.clip_permille = 600U;
+
+    std::int32_t maximum = std::numeric_limits<std::int32_t>::min();
+    std::int32_t minimum = std::numeric_limits<std::int32_t>::max();
+    std::int64_t sum{};
+    for (int sample = 0; sample < 80; ++sample) {
+        const auto row = engine.next(state, 4000U);
+        maximum = std::max(maximum, row[0]);
+        minimum = std::min(minimum, row[0]);
+        sum += row[0];
+    }
+    CHECK(maximum <= 850);
+    CHECK(minimum >= -850);
+    CHECK(maximum > 700);
+    CHECK(sum > 0);
 }
 
 void fixed_point_engine_preserves_frequency_and_phase() {
@@ -121,6 +171,8 @@ int main() {
     try {
         bank_commits_complete_generations();
         fixed_point_engine_preserves_frequency_and_phase();
+        dc_engine_outputs_constant_engineering_values();
+        ct_saturation_shape_is_bounded_and_asymmetric();
         independent_channels_change_without_stream_restart();
         std::cout << "[PASS] live Sampled Values signal state\n";
         return 0;

@@ -17,22 +17,33 @@ Rectangle {
 
     signal closeRequested()
 
-    implicitHeight: expanded ? 108 : 32
+    implicitHeight: 32
+    Layout.preferredHeight: expanded ? 124 : 32
     color: theme.surface
     radius: theme.panelRadius
     border.width: 1
     border.color: theme.line
     clip: true
-    Behavior on implicitHeight { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
+    Behavior on Layout.preferredHeight { NumberAnimation { duration: 220; easing.type: Easing.InOutCubic } }
 
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
 
         Rectangle {
+            id: headerBar
             Layout.fillWidth: true
             Layout.preferredHeight: 32
-            color: theme.raised
+            color: headerMouse.containsMouse ? theme.raisedHover : theme.raised
+            Behavior on color { ColorAnimation { duration: 90 } }
+
+            MouseArea {
+                id: headerMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: telemetry.expanded = !telemetry.expanded
+            }
 
             RowLayout {
                 anchors.fill: parent
@@ -47,6 +58,7 @@ Rectangle {
                     font.family: telemetry.uiFont
                     font.pixelSize: theme.labelSize
                     font.weight: Font.DemiBold
+                    verticalAlignment: Text.AlignVCenter
                 }
                 Label {
                     text: telemetry.device.running ? "LIVE" : "STANDBY"
@@ -54,6 +66,7 @@ Rectangle {
                     font.family: telemetry.monoFont
                     font.pixelSize: theme.captionSize - 1
                     font.weight: Font.Bold
+                    verticalAlignment: Text.AlignVCenter
                 }
                 Item { Layout.fillWidth: true }
                 Label {
@@ -61,17 +74,23 @@ Rectangle {
                     color: theme.muted
                     font.family: telemetry.monoFont
                     font.pixelSize: theme.captionSize - 1
+                    verticalAlignment: Text.AlignVCenter
                 }
-                ToolButton {
-                    text: telemetry.expanded ? "⌄" : "⌃"
-                    font.pixelSize: theme.bodySize
+                DarkToolButton {
+                    theme: telemetry.theme
+                    uiFont: telemetry.uiFont
+                    iconSource: telemetry.expanded
+                        ? Qt.resolvedUrl("../assets/lucide/chevron-down.svg")
+                        : Qt.resolvedUrl("../assets/lucide/chevron-up.svg")
                     onClicked: telemetry.expanded = !telemetry.expanded
                     ToolTip.visible: hovered
                     ToolTip.text: telemetry.expanded ? "Collapse monitor" : "Expand monitor"
                 }
-                ToolButton {
-                    text: "×"
-                    font.pixelSize: theme.bodySize
+                DarkToolButton {
+                    theme: telemetry.theme
+                    uiFont: telemetry.uiFont
+                    iconSource: Qt.resolvedUrl("../assets/lucide/x.svg")
+                    iconSize: 19
                     onClicked: telemetry.closeRequested()
                     ToolTip.visible: hovered
                     ToolTip.text: "Close monitor"
@@ -80,7 +99,9 @@ Rectangle {
         }
 
         RowLayout {
-            visible: telemetry.expanded
+            visible: opacity > 0
+            opacity: telemetry.expanded ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: telemetry.expanded ? 180 : 110; easing.type: Easing.OutCubic } }
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.margins: 9

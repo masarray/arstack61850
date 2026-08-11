@@ -33,12 +33,17 @@ qt_add_qml_module(arstack_studio
         qml/StudioTheme.qml
         qml/SurfacePanel.qml
         qml/DockFrame.qml
+        qml/DarkToolButton.qml
         qml/TelemetryDock.qml
         qml/WorkflowBar.qml
         qml/CalmButton.qml
         qml/NumericField.qml
         qml/StateBadge.qml
         qml/ProfileInspector.qml
+        qml/ConfigurationHub.qml
+        qml/PtpExpertPanel.qml
+        qml/DeviceExpertPanel.qml
+        qml/WaveformExpertPanel.qml
         qml/SignalMatrix.qml
         qml/QualityEditor.qml
         qml/SignalPreview.qml
@@ -46,6 +51,24 @@ qt_add_qml_module(arstack_studio
     RESOURCES
         assets/InterVariable.ttf
         assets/INTER_LICENSE.txt
+        assets/LUCIDE_LICENSE.txt
+        assets/lucide/x.svg
+        assets/lucide/external-link.svg
+        assets/lucide/chevron-up.svg
+        assets/lucide/chevron-down.svg
+        assets/lucide/radio-tower.svg
+        assets/lucide/scale.svg
+        assets/lucide/circle-off.svg
+        assets/lucide/activity.svg
+        assets/lucide/circle-check.svg
+        assets/lucide/settings-2.svg
+        assets/lucide/upload.svg
+        assets/lucide/square.svg
+        assets/lucide/play.svg
+        assets/lucide/panels-top-left.svg
+        assets/lucide/folder-open.svg
+        assets/lucide/scan-search.svg
+        assets/lucide/clock-3.svg
 )
 
 target_link_libraries(arstack_studio PRIVATE
