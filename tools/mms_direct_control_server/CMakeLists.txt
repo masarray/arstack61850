@@ -10,6 +10,9 @@ set(ARIEC61850_BUILD_FUZZERS OFF CACHE BOOL "" FORCE)
 set(ARIEC61850_ENABLE_SANITIZERS OFF CACHE BOOL "" FORCE)
 set(ARIEC61850_WARNINGS_AS_ERRORS ON CACHE BOOL "" FORCE)
 
+# Keep the repository's regular targets available, but do not link the public
+# MMS server core into this A/B profile. The profile below compiles the current
+# codecs with the isolated IED-simulator parity runtime instead.
 add_subdirectory("${ARSTACK_ROOT}" arstack-core)
 
 function(server_strict_warnings target)
@@ -21,30 +24,41 @@ function(server_strict_warnings target)
     endif()
 endfunction()
 
-# Current-lineage R1/R2 overlay. These files are intentionally compiled once in
-# one library while the parent #51 build graph remains the source of truth for
-# strict ACSE/MMS transport, negotiated limits, RejectPDU behavior and BRCB.
-# The compatibility source only supplies the explicitly declared server-side
-# association fallback; it does not replace the strict current implementation.
-add_library(ariec61850_mms_r12_overlay STATIC
+add_library(ariec61850_mms_r12_server_core STATIC
+    "${ARSTACK_ROOT}/src/asn1/ber_span_reader.cpp"
+    "${ARSTACK_ROOT}/src/osi/tpkt_span.cpp"
+    "${ARSTACK_ROOT}/src/osi/cotp_span.cpp"
+    "${ARSTACK_ROOT}/src/osi/session_span.cpp"
+    "${ARSTACK_ROOT}/src/osi/presentation_span.cpp"
+    "${ARSTACK_ROOT}/src/acse/association_span.cpp"
     "${ARSTACK_ROOT}/src/acse/association_compat_span.cpp"
+    "${ARSTACK_ROOT}/src/mms/pdu_span.cpp"
+    "${ARSTACK_ROOT}/src/mms/pdu_compat_span.cpp"
+    "${ARSTACK_ROOT}/src/mms/services_span.cpp"
+    "${ARSTACK_ROOT}/src/mms/write_span.cpp"
+    "${ARSTACK_ROOT}/src/mms/data_set_span.cpp"
+    "${ARSTACK_ROOT}/src/mms/information_report_span.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_object_table.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_write.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_data_set_table.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_dispatcher.cpp"
+    "${ARSTACK_ROOT}/src/mms/connection_runtime_iedsim.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_server_session.cpp"
     "${ARSTACK_ROOT}/src/mms/static_direct_control.cpp"
     "${ARSTACK_ROOT}/src/mms/static_information_report.cpp"
     "${ARSTACK_ROOT}/src/mms/static_report_connection.cpp"
     "${ARSTACK_ROOT}/src/mms/static_urcb_objects.cpp"
     "${ARSTACK_ROOT}/src/mms/static_urcb_runtime.cpp")
-target_include_directories(ariec61850_mms_r12_overlay PUBLIC
+target_include_directories(ariec61850_mms_r12_server_core PUBLIC
     "${ARSTACK_ROOT}/include")
-target_link_libraries(ariec61850_mms_r12_overlay PUBLIC
-    ARIEC61850::mms_server_core
-    ARIEC61850::core)
-target_compile_features(ariec61850_mms_r12_overlay PUBLIC cxx_std_20)
-server_strict_warnings(ariec61850_mms_r12_overlay)
+target_compile_features(ariec61850_mms_r12_server_core PUBLIC cxx_std_20)
+server_strict_warnings(ariec61850_mms_r12_server_core)
 
 add_executable(ariec61850_mms_direct_control_server
     "${ARSTACK_ROOT}/tools/mms_direct_control_server.cpp")
 target_link_libraries(ariec61850_mms_direct_control_server PRIVATE
-    ariec61850_mms_r12_overlay)
+    ariec61850_mms_r12_server_core
+    ARIEC61850::core)
 if(WIN32)
     target_link_libraries(ariec61850_mms_direct_control_server PRIVATE ws2_32)
 endif()
@@ -54,7 +68,8 @@ server_strict_warnings(ariec61850_mms_direct_control_server)
 add_executable(ariec61850_mms_urcb_server
     "${ARSTACK_ROOT}/tools/mms_urcb_server.cpp")
 target_link_libraries(ariec61850_mms_urcb_server PRIVATE
-    ariec61850_mms_r12_overlay)
+    ariec61850_mms_r12_server_core
+    ARIEC61850::core)
 if(WIN32)
     target_link_libraries(ariec61850_mms_urcb_server PRIVATE ws2_32)
 endif()
@@ -67,14 +82,16 @@ enable_testing()
 add_executable(ariec61850_mms_direct_control_tests
     "${ARSTACK_ROOT}/tests/test_mms_static_direct_control.cpp")
 target_link_libraries(ariec61850_mms_direct_control_tests PRIVATE
-    ariec61850_mms_r12_overlay)
+    ariec61850_mms_r12_server_core
+    ARIEC61850::core)
 target_compile_features(ariec61850_mms_direct_control_tests PRIVATE cxx_std_20)
 server_strict_warnings(ariec61850_mms_direct_control_tests)
 
 add_executable(ariec61850_mms_server_urcb_tests
     "${ARSTACK_ROOT}/tests/test_mms_server_urcb_report.cpp")
 target_link_libraries(ariec61850_mms_server_urcb_tests PRIVATE
-    ariec61850_mms_r12_overlay)
+    ariec61850_mms_r12_server_core
+    ARIEC61850::core)
 target_compile_features(ariec61850_mms_server_urcb_tests PRIVATE cxx_std_20)
 server_strict_warnings(ariec61850_mms_server_urcb_tests)
 
