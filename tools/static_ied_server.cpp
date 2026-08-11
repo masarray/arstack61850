@@ -462,7 +462,7 @@ void serve_connection(
 int main(int argc, char** argv) {
     try {
         const auto options = parse_cli(argc, argv);
-        SocketRuntime socket_runtime;
+        [[maybe_unused]] SocketRuntime socket_runtime;
         std::signal(SIGINT, signal_handler);
 #if !defined(_WIN32)
         std::signal(SIGTERM, signal_handler);
