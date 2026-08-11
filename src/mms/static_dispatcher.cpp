@@ -3,31 +3,16 @@
 #include "ariec61850/mms/static_dispatcher.hpp"
 
 #include "ariec61850/asn1/ber_span_reader.hpp"
-#include "ariec61850/asn1/ber_span_writer.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <span>
 #include <string_view>
 
 namespace ar::iec61850::mms {
 namespace {
-
-constexpr std::array<std::uint8_t, 40U> kIdentifyFields{
-    0x80U, 0x0AU,
-    'A','R','I','E','C','6','1','8','5','0',
-    0x81U, 0x15U,
-    'V','i','r','t','u','a','l',' ','I','E','D',' ','S','i','m','u','l','a','t','o','r',
-    0x82U, 0x03U, '1','.','0'};
-
-// Empty MMS structure TypeSpecification: structure [2] { components [1] {} }.
-// The legacy ARIEC61850 server used a conservative structure for VMD-specific
-// engineering-tool catalogue probes that do not map to an IEC 61850 LD/LN object.
-constexpr std::array<std::uint8_t, 4U> kConservativeStructureType{
-    0xA2U, 0x02U, 0xA1U, 0x00U};
 
 [[nodiscard]] bool span_equals(
     const std::span<const std::uint8_t> bytes,
@@ -87,87 +72,6 @@ constexpr std::array<std::uint8_t, 4U> kConservativeStructureType{
             encoded.required_bytes);
     }
     return make_status(MmsStaticDispatchStatus::backend_failure, request);
-}
-
-[[nodiscard]] std::size_t minimal_unsigned_size(std::uint32_t value) noexcept {
-    std::size_t bytes = 1U;
-    while (value > 0xFFU) {
-        ++bytes;
-        value >>= 8U;
-    }
-    return bytes;
-}
-
-[[nodiscard]] bool needs_positive_prefix(
-    const std::uint32_t value,
-    const std::size_t minimal_bytes) noexcept {
-    const auto shift = static_cast<unsigned>((minimal_bytes - 1U) * 8U);
-    return ((value >> shift) & 0x80U) != 0U;
-}
-
-[[nodiscard]] bool write_positive_integer(
-    asn1::BerSpanWriter& writer,
-    const std::uint32_t value,
-    const std::size_t minimal_bytes) noexcept {
-    if (needs_positive_prefix(value, minimal_bytes) && !writer.write_byte(0x00U)) {
-        return false;
-    }
-    for (std::size_t index = minimal_bytes; index-- > 0U;) {
-        const auto shift = static_cast<unsigned>(index * 8U);
-        if (!writer.write_byte(static_cast<std::uint8_t>((value >> shift) & 0xFFU))) {
-            return false;
-        }
-    }
-    return true;
-}
-
-[[nodiscard]] wire::EncodeResult encode_confirmed_error(
-    const std::uint32_t invoke_id,
-    const std::span<std::uint8_t> destination) noexcept {
-    // Port of the proven ARIEC61850 engineering-client fallback:
-    // Confirmed-ErrorPDU [2] { invokeID [0], serviceError [2]
-    //   { errorClass [0] { service [12] = 0 } } }.
-    const auto minimal = minimal_unsigned_size(invoke_id);
-    const auto invoke_value = minimal + (needs_positive_prefix(invoke_id, minimal) ? 1U : 0U);
-    const auto invoke_tlv = asn1::BerSpanWriter::tlv_size(0, invoke_value);
-    const auto class_choice_tlv = asn1::BerSpanWriter::tlv_size(12, 1U);
-    if (!invoke_tlv || !class_choice_tlv) {
-        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
-    }
-    const auto error_class_tlv = asn1::BerSpanWriter::tlv_size(0, *class_choice_tlv);
-    if (!error_class_tlv) {
-        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
-    }
-    const auto service_error_tlv = asn1::BerSpanWriter::tlv_size(2, *error_class_tlv);
-    if (!service_error_tlv || *invoke_tlv > std::numeric_limits<std::size_t>::max() - *service_error_tlv) {
-        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
-    }
-    const auto outer_content = *invoke_tlv + *service_error_tlv;
-    const auto required = asn1::BerSpanWriter::tlv_size(2, outer_content);
-    if (!required) {
-        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
-    }
-    if (destination.size() < *required) {
-        return {wire::EncodeStatus::buffer_too_small, 0U, *required};
-    }
-
-    asn1::BerSpanWriter writer{destination.first(*required)};
-    if (!writer.write_tlv_header(asn1::BerClass::context_specific, true, 2, outer_content) ||
-        !writer.write_tlv_header(asn1::BerClass::context_specific, false, 0, invoke_value) ||
-        !write_positive_integer(writer, invoke_id, minimal) ||
-        !writer.write_tlv_header(asn1::BerClass::context_specific, true, 2, *error_class_tlv) ||
-        !writer.write_tlv_header(asn1::BerClass::context_specific, true, 0, *class_choice_tlv) ||
-        !writer.write_tlv_header(asn1::BerClass::context_specific, false, 12, 1U) ||
-        !writer.write_byte(0x00U) || writer.size() != *required) {
-        return {wire::EncodeStatus::value_out_of_range, 0U, *required};
-    }
-    return {wire::EncodeStatus::ok, *required, *required};
-}
-
-[[nodiscard]] MmsStaticDispatchResult make_compatibility_error(
-    const MmsConfirmedPduView& request,
-    const std::span<std::uint8_t> response) noexcept {
-    return make_encoded(request, encode_confirmed_error(request.invoke_id, response));
 }
 
 [[nodiscard]] bool policy_valid(const MmsStaticDispatchPolicy& policy) noexcept {
@@ -314,16 +218,6 @@ constexpr std::array<std::uint8_t, 4U> kConservativeStructureType{
     }
     const auto* object = objects.find(request.name);
     if (object == nullptr) {
-        if (request.name.kind == MmsObjectNameViewKind::vmd_specific &&
-            !request.name.item.empty()) {
-            return make_encoded(
-                confirmed,
-                MmsServiceSpanCodec::encode_variable_access_attributes_response_into(
-                    confirmed.invoke_id,
-                    false,
-                    kConservativeStructureType,
-                    response));
-        }
         return make_status(MmsStaticDispatchStatus::object_not_found, confirmed);
     }
     return make_encoded(
@@ -475,21 +369,6 @@ constexpr std::array<std::uint8_t, 4U> kConservativeStructureType{
             response));
 }
 
-[[nodiscard]] MmsStaticDispatchResult normalize_engineering_client_result(
-    const MmsConfirmedPduView& request,
-    const MmsStaticDispatchResult result,
-    const std::span<std::uint8_t> response) noexcept {
-    switch (result.status) {
-    case MmsStaticDispatchStatus::malformed_request:
-    case MmsStaticDispatchStatus::unsupported_service:
-    case MmsStaticDispatchStatus::unsupported_request:
-    case MmsStaticDispatchStatus::object_not_found:
-        return make_compatibility_error(request, response);
-    default:
-        return result;
-    }
-}
-
 } // namespace
 
 MmsStaticDispatchResult MmsStaticApplicationDispatcher::dispatch(
@@ -521,42 +400,20 @@ MmsStaticDispatchResult MmsStaticApplicationDispatcher::dispatch(
         return make_status(MmsStaticDispatchStatus::malformed_request, request);
     }
 
-    MmsStaticDispatchResult result;
     switch (request.service()) {
     case MmsWireConfirmedService::get_name_list:
-        result = dispatch_get_name_list(objects_, data_sets_, policy_, request, response);
-        break;
-    case MmsWireConfirmedService::identify:
-        if (request.service_constructed || !request.service_value.empty()) {
-            result = make_status(MmsStaticDispatchStatus::malformed_request, request);
-        } else {
-            result = make_encoded(
-                request,
-                MmsPduSpanCodec::encode_confirmed_response_into(
-                    request.invoke_id,
-                    2,
-                    true,
-                    kIdentifyFields,
-                    response));
-        }
-        break;
+        return dispatch_get_name_list(objects_, data_sets_, policy_, request, response);
     case MmsWireConfirmedService::get_variable_access_attributes:
-        result = dispatch_attributes(objects_, request, response);
-        break;
+        return dispatch_attributes(objects_, request, response);
     case MmsWireConfirmedService::get_named_variable_list_attributes:
-        result = dispatch_data_set_attributes(data_sets_, request, response);
-        break;
+        return dispatch_data_set_attributes(data_sets_, request, response);
     case MmsWireConfirmedService::read:
-        result = dispatch_read(objects_, policy_, request, response, workspace);
-        break;
+        return dispatch_read(objects_, policy_, request, response, workspace);
     case MmsWireConfirmedService::write:
-        result = dispatch_write(objects_, policy_, request, response, access);
-        break;
+        return dispatch_write(objects_, policy_, request, response, access);
     default:
-        result = make_status(MmsStaticDispatchStatus::unsupported_service, request);
-        break;
+        return make_status(MmsStaticDispatchStatus::unsupported_service, request);
     }
-    return normalize_engineering_client_result(request, result, response);
 }
 
 } // namespace ar::iec61850::mms
