@@ -81,6 +81,11 @@ MmsStaticBrcbConnectionResult MmsStaticBrcbConnection::poll(
         return make_result(MmsStaticBrcbConnectionStatus::no_report_available);
     }
 
+    const auto mms_limit = connection.negotiated_mms_pdu_size();
+    if (mms_limit == 0U || entry.mms_pdu.size() > mms_limit) {
+        return make_result(MmsStaticBrcbConnectionStatus::peer_limit_exceeded, &entry);
+    }
+
     const auto p_data = osi::PresentationSpanCodec::encode_p_data_into(
         entry.mms_pdu,
         workspace,
@@ -101,8 +106,17 @@ MmsStaticBrcbConnectionResult MmsStaticBrcbConnection::poll(
         return result;
     }
 
+    std::size_t cotp_required{};
+    if (!add_size(p_data.bytes_written, 3U, cotp_required)) {
+        return make_result(MmsStaticBrcbConnectionStatus::frame_encode_failed, &entry);
+    }
+    const auto tpdu_limit = connection.negotiated_tpdu_size_bytes();
+    if (tpdu_limit == 0U || cotp_required > tpdu_limit) {
+        return make_result(MmsStaticBrcbConnectionStatus::peer_limit_exceeded, &entry);
+    }
+
     std::size_t final_required{};
-    if (!add_size(p_data.bytes_written, 7U, final_required)) {
+    if (!add_size(cotp_required, osi::TpktSpanCodec::header_length, final_required)) {
         return make_result(MmsStaticBrcbConnectionStatus::frame_encode_failed, &entry);
     }
     if (response.size() < final_required) {
