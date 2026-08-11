@@ -1,22 +1,22 @@
 name: MMS Server Parity Finalizer
 
 on:
-  push:
-    branches:
-      - 'agent/mms-server-r1-r2-current-main'
+  pull_request:
     paths:
       - '.github/workflows/mms-runtime-diagnostic.yml'
+      - 'scripts/mms_server_parity_finalize.py'
 
 permissions:
   contents: write
 
 jobs:
   finalize:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: agent/mms-server-r1-r2-current-main
+          ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
       - name: Apply deterministic parity patch
@@ -67,4 +67,4 @@ jobs:
             CMakeLists.txt \
             tools/mms_direct_control_server/CMakeLists.txt
           git commit -m 'mms-server: finalize engineering-client parity tranche'
-          git push origin HEAD:agent/mms-server-r1-r2-current-main
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
