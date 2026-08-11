@@ -7,6 +7,7 @@ idf_component_register(
         "${ARSTACK_ROOT}/src/mms/utc_time.cpp"
         "${ARSTACK_ROOT}/src/sampled_values/pdu_codec.cpp"
         "${ARSTACK_ROOT}/src/sampled_values/frame_codec.cpp"
+        "${ARSTACK_ROOT}/src/time_sync/ptp.cpp"
     INCLUDE_DIRS
         "${ARSTACK_ROOT}/include")
 
