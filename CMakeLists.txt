@@ -14,6 +14,8 @@ option(ARIEC61850_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 add_library(ariec61850_core
     src/asn1/ber.cpp
     src/ethernet/ethernet.cpp
+    src/time_sync/ptp.cpp
+    src/time_sync/ptp_monitor.cpp
     src/capture/pcap.cpp
     src/goose/retransmission_schedule.cpp
     src/goose/pdu_codec.cpp
@@ -149,6 +151,12 @@ if(ARIEC61850_BUILD_TOOLS)
     ariec61850_apply_warnings(ariec61850_pcap_interop_check)
     ariec61850_apply_sanitizers(ariec61850_pcap_interop_check)
 
+    add_executable(ariec61850_ptp_analyze tools/ptp_analyze.cpp)
+    target_link_libraries(ariec61850_ptp_analyze PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_ptp_analyze PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_ptp_analyze)
+    ariec61850_apply_sanitizers(ariec61850_ptp_analyze)
+
     add_executable(ariec61850_comtrade_inspect tools/comtrade_inspect.cpp)
     target_link_libraries(ariec61850_comtrade_inspect PRIVATE ARIEC61850::core)
     target_compile_features(ariec61850_comtrade_inspect PRIVATE cxx_std_20)
@@ -211,7 +219,7 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_sanitizers(ariec61850_core_tests)
     add_test(NAME ariec61850_core_tests COMMAND ariec61850_core_tests)
 
-    foreach(test_name IN ITEMS mms goose sampled_values)
+    foreach(test_name IN ITEMS mms goose sampled_values ptp)
         add_executable(ariec61850_${test_name}_tests tests/test_${test_name}.cpp)
         target_link_libraries(ariec61850_${test_name}_tests PRIVATE ARIEC61850::core)
         target_compile_features(ariec61850_${test_name}_tests PRIVATE cxx_std_20)
@@ -439,6 +447,9 @@ if(ARIEC61850_BUILD_TESTS)
             COMMAND ariec61850_comtrade_inspect
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/comtrade/simple_fault.cfg
                 --json)
+        add_test(
+            NAME ariec61850_ptp_analyze_help
+            COMMAND ariec61850_ptp_analyze --help)
         add_test(
             NAME ariec61850_pagination_probe_help
             COMMAND ariec61850_pagination_probe --help)

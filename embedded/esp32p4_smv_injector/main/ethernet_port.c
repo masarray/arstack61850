@@ -5,6 +5,11 @@
 #include "esp_err.h"
 #include "esp_eth_mac_esp.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
+
+#if CONFIG_AR_PTP_LAB_TX
+#include "ptp_lab_task.hpp"
+#endif
 
 static const char *TAG = "ar_smv_eth";
 
@@ -68,6 +73,13 @@ esp_eth_handle_t ar_esp32p4_eth_init(void)
         phy->del(phy);
         return NULL;
     }
+
+#if CONFIG_AR_PTP_LAB_TX
+    // The PTP task starts independently and tolerates link-not-ready TX failures
+    // while the normal app flow proceeds to esp_eth_start(). Keeping this hook
+    // beside driver installation also allows future PTP-only/analyzer firmware.
+    ar_ptp_lab_start(handle);
+#endif
 
     ESP_LOGI(TAG,
              "Ethernet configured: PHY addr=%d MDC=%d MDIO=%d REF_CLK=%d",

@@ -17,7 +17,9 @@ struct SampledValueAsdu final {
     std::uint16_t sample_count{};
     std::uint32_t configuration_revision{1U};
     std::optional<mms::Iec61850UtcTime> reference_time;
-    std::uint8_t sample_synchronization{2U};
+    // Synchronization claims are evidence-driven. New ASDUs therefore start
+    // unsynchronized and must be promoted explicitly by a validated policy.
+    std::uint8_t sample_synchronization{0U};
     std::optional<std::uint16_t> sample_rate;
     std::optional<std::uint16_t> sample_mode;
     std::vector<std::uint8_t> sample_payload;

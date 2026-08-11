@@ -1,0 +1,155 @@
+name: PTP Core CI
+
+on:
+  push:
+    paths:
+      - 'include/ariec61850/time_sync/**'
+      - 'src/time_sync/**'
+      - 'include/ariec61850/ethernet/**'
+      - 'src/ethernet/**'
+      - 'src/capture/pcap.cpp'
+      - 'tools/ptp_analyze.cpp'
+      - 'tests/test_ptp.cpp'
+      - 'tests/test_ptp_runtime.cpp'
+      - 'tests/ptp_profile/**'
+      - '.github/workflows/ptp-core-ci.yml'
+  pull_request:
+    paths:
+      - 'include/ariec61850/time_sync/**'
+      - 'src/time_sync/**'
+      - 'include/ariec61850/ethernet/**'
+      - 'src/ethernet/**'
+      - 'src/capture/pcap.cpp'
+      - 'tools/ptp_analyze.cpp'
+      - 'tests/test_ptp.cpp'
+      - 'tests/test_ptp_runtime.cpp'
+      - 'tests/ptp_profile/**'
+      - '.github/workflows/ptp-core-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  portable-ptp:
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build PTP strict profile
+        shell: bash
+        run: |
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            CXX=clang++
+          else
+            CXX=g++
+          fi
+
+          set +e
+          "$CXX" \
+            -std=c++20 \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Werror \
+            -pthread \
+            -Iinclude \
+            src/ethernet/ethernet.cpp \
+            src/time_sync/ptp.cpp \
+            src/time_sync/ptp_monitor.cpp \
+            tests/test_ptp.cpp \
+            -o ptp-core-tests \
+            >ptp-build.log 2>&1
+          core_status=$?
+
+          "$CXX" \
+            -std=c++20 \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Werror \
+            -pthread \
+            -Iinclude \
+            src/ethernet/ethernet.cpp \
+            src/time_sync/ptp.cpp \
+            tests/test_ptp_runtime.cpp \
+            -o ptp-runtime-tests \
+            >ptp-runtime-build.log 2>&1
+          runtime_status=$?
+          set -e
+
+          cat ptp-build.log
+          cat ptp-runtime-build.log
+          if [ "$core_status" -ne 0 ] || [ "$runtime_status" -ne 0 ]; then
+            cat ptp-build.log ptp-runtime-build.log | grep -Ei 'error:|fatal error:|undefined reference|collect2: error|ld: error' | while IFS= read -r line; do
+              escaped=${line//'%'/'%25'}
+              escaped=${escaped//$'\r'/'%0D'}
+              escaped=${escaped//$'\n'/'%0A'}
+              echo "::error::$escaped"
+            done || true
+            [ "$core_status" -ne 0 ] && exit "$core_status"
+            exit "$runtime_status"
+          fi
+
+      - name: Run PTP regression tests
+        shell: bash
+        run: |
+          set +e
+          ./ptp-core-tests >ptp-test.log 2>&1
+          core_status=$?
+          ./ptp-runtime-tests >ptp-runtime-test.log 2>&1
+          runtime_status=$?
+          set -e
+          cat ptp-test.log
+          cat ptp-runtime-test.log
+          if [ "$core_status" -ne 0 ] || [ "$runtime_status" -ne 0 ]; then
+            cat ptp-test.log ptp-runtime-test.log | grep -E '\[FAIL\]|CHECK failed|error' | while IFS= read -r line; do
+              escaped=${line//'%'/'%25'}
+              escaped=${escaped//$'\r'/'%0D'}
+              escaped=${escaped//$'\n'/'%0A'}
+              echo "::error::$escaped"
+            done || true
+            [ "$core_status" -ne 0 ] && exit "$core_status"
+            exit "$runtime_status"
+          fi
+
+  portable-ptp-msvc:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure standalone strict MSVC PTP profile
+        shell: pwsh
+        run: cmake -S tests/ptp_profile -B build-ptp-msvc -A x64
+
+      - name: Build PTP core and analyzer with diagnostics
+        shell: pwsh
+        run: |
+          function Build-Target([string]$Target) {
+            $output = & cmake --build build-ptp-msvc --config Release --target $Target --parallel 2>&1
+            $status = $LASTEXITCODE
+            $output | Tee-Object -FilePath "ptp-msvc-$Target.log"
+            if ($status -ne 0) {
+              $matched = $false
+              foreach ($line in $output) {
+                $text = "$line"
+                if ($text -match '(?i)(error C\d+|fatal error|error LNK\d+|error MSB\d+|: error )') {
+                  $matched = $true
+                  $escaped = $text.Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+                  Write-Output "::error title=MSVC $Target::$escaped"
+                }
+              }
+              if (-not $matched) {
+                Write-Output "::error title=MSVC $Target::Build failed; inspect ptp-msvc-$Target.log in the job output."
+              }
+              exit $status
+            }
+          }
+
+          Build-Target 'ptp_profile_core'
+          Build-Target 'ptp_profile_tests'
+          Build-Target 'ptp_runtime_tests'
+          Build-Target 'ptp_profile_analyze'
+
+      - name: Run PTP regression and analyzer smoke tests on MSVC
+        shell: pwsh
+        run: ctest --test-dir build-ptp-msvc -C Release --output-on-failure
