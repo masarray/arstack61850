@@ -246,26 +246,56 @@ void print_candidates(const mms::MmsRcbSelectionEvidence& selection) {
     }
 }
 
+[[nodiscard]] bool subscription_wrote_attribute(
+    const mms::MmsReportSubscriptionSnapshot& snapshot,
+    const std::string_view attribute) {
+    const std::string expected = "RCB attribute written: " + std::string{attribute} + ".";
+    return std::any_of(
+        snapshot.events.begin(), snapshot.events.end(),
+        [&expected](const auto& event) {
+            return event.kind == mms::MmsReportSubscriptionEventKind::attribute_written &&
+                   event.message == expected;
+        });
+}
+
 void best_effort_cleanup(
     mms::MmsAssociationRuntime& association,
     const mms::MmsReportControlCandidate* candidate,
+    const mms::MmsReportSubscriptionSnapshot* subscription_snapshot,
     mms::MmsDynamicDataSetRuntime* dynamic_data_set,
     const std::string& data_set_reference,
     const bool data_set_created) noexcept {
     if (!association.associated()) return;
-    if (candidate != nullptr) {
-        try { require_write_success(association, *candidate, "RptEna", mms::MmsDataValue::boolean(false)); }
-        catch (const std::exception& exception) { std::cerr << "CLEANUP warning: RptEna=false failed: " << exception.what() << '\n'; }
-        if (!candidate->buffered && contains_attribute(*candidate, "Resv")) {
-            try { require_write_success(association, *candidate, "Resv", mms::MmsDataValue::boolean(false)); }
-            catch (const std::exception& exception) { std::cerr << "CLEANUP warning: Resv=false failed: " << exception.what() << '\n'; }
-        }
-        if (contains_attribute(*candidate, "DatSet")) {
-            try { require_write_success(association, *candidate, "DatSet", mms::MmsDataValue::visible_string("")); }
-            catch (const std::exception& exception) { std::cerr << "CLEANUP warning: DatSet unbind failed: " << exception.what() << '\n'; }
+
+    bool safe_to_delete_data_set = true;
+    const bool data_set_binding_touched =
+        candidate != nullptr && subscription_snapshot != nullptr &&
+        subscription_wrote_attribute(*subscription_snapshot, "DatSet");
+
+    // RptEna and Resv cleanup belongs exclusively to
+    // MmsReportSubscriptionRuntime, which already tracks whether this run
+    // successfully touched those attributes. Never emit unconditional cleanup
+    // writes here: a re-probe may have rejected the RCB because another client
+    // claimed it after discovery.
+    if (subscription_snapshot != nullptr && subscription_snapshot->cleanup_required) {
+        safe_to_delete_data_set = false;
+        std::cerr << "CLEANUP warning: subscription still has owned RCB cleanup pending; "
+                     "retaining any bound Dynamic DataSet rather than unbinding/deleting unsafely.\n";
+    } else if (data_set_binding_touched && candidate != nullptr &&
+               contains_attribute(*candidate, "DatSet")) {
+        try {
+            require_write_success(
+                association, *candidate, "DatSet",
+                mms::MmsDataValue::visible_string(""));
+            std::cerr << "CLEANUP RCB DatSet unbound because this run wrote the binding.\n";
+        } catch (const std::exception& exception) {
+            safe_to_delete_data_set = false;
+            std::cerr << "CLEANUP warning: owned DatSet unbind failed: "
+                      << exception.what() << '\n';
         }
     }
-    if (data_set_created && dynamic_data_set != nullptr) {
+
+    if (data_set_created && dynamic_data_set != nullptr && safe_to_delete_data_set) {
         try {
             const auto response = dynamic_data_set->remove(data_set_reference);
             std::cerr << "CLEANUP Dynamic DataSet delete matched=" << response.number_matched.value_or(0U)
@@ -273,6 +303,8 @@ void best_effort_cleanup(
         } catch (const std::exception& exception) {
             std::cerr << "CLEANUP warning: Dynamic DataSet delete failed: " << exception.what() << '\n';
         }
+    } else if (data_set_created && !safe_to_delete_data_set) {
+        std::cerr << "CLEANUP retained Dynamic DataSet because safe RCB cleanup could not be proven.\n";
     }
 }
 
@@ -465,10 +497,15 @@ int main(int argc, char** argv) {
             std::cout << "SMART_DYNAMIC_RCB_TRIAL_PASS\n";
             return 0;
         } catch (...) {
-            if (subscription) subscription->stop();
+            std::optional<mms::MmsReportSubscriptionSnapshot> cleanup_snapshot;
+            if (subscription) {
+                subscription->stop();
+                cleanup_snapshot = subscription->snapshot();
+            }
             best_effort_cleanup(
-                session.association(), candidate, &dynamic_data_set,
-                data_set_reference, data_set_created);
+                session.association(), candidate,
+                cleanup_snapshot ? &*cleanup_snapshot : nullptr,
+                &dynamic_data_set, data_set_reference, data_set_created);
             session.disconnect();
             throw;
         }
