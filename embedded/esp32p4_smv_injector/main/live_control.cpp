@@ -293,6 +293,12 @@ void live_control_bind_publisher_task(const TaskHandle_t task) noexcept {
     g_publisher_task.store(task, std::memory_order_release);
 }
 
+void live_control_force_stop() noexcept {
+    g_running.store(false, std::memory_order_release);
+    g_start_request.store(false, std::memory_order_release);
+    wake_publisher();
+}
+
 SvLiveSignalState live_signal_snapshot() noexcept {
     return g_signal_bank.snapshot();
 }
