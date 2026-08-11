@@ -2,19 +2,24 @@
 
 This branch is intentionally an evaluation surface. Do not merge it into the production GUI until the injection workflow and visual direction are approved.
 
-## V2 direction after first visual review
+## V3 visual direction
 
-The first cockpit prototype still behaved too much like a web form: one long 8-channel table, per-row Apply buttons, wire-value clutter, a large frequency slider, and responsive stacking that moved the phasor/waveform below the injector on normal laptop widths.
+The second review confirmed the keyboard workflow is moving in the right direction, but the screen still felt visually noisy and the generated phasor/waveform did not read strongly enough during normal bench use.
 
-V2 changes the working model rather than only polishing colors:
+V3 keeps the V2 matrix interaction intact and focuses on calm premium instrument art direction:
 
-- Current and Voltage are separate 4-row matrices shown side-by-side.
-- Magnitude and Phase are the only primary numeric columns.
-- Wire counts/mdeg remain available in the selected-value detail instead of occupying a permanent column.
-- Per-row Apply buttons are removed; Live Apply is the normal fast path and `Enter` commits when Live Apply is paused.
-- Phasor and waveform remain beside the injector down to approximately 1010 px viewport width.
-- Frequency is a compact direct-entry value with 50/60 Hz presets; the large slider is removed.
-- A 3-phase link mode can couple A/B/C magnitude and preserve 120-degree phase relationships while editing.
+- one UI type stack: Inter -> Plus Jakarta Sans -> native system fallback, with monospace reserved for engineering numbers;
+- larger and more consistent breathing space between working groups;
+- borders reduced to secondary separators instead of outlining every object;
+- idle numeric fields use low-contrast tonal surfaces and only become strongly framed on focus;
+- source/runtime information is intentionally quieter than the injection workspace;
+- Current and Voltage remain separate side-by-side matrices;
+- the command strip becomes a tonal toolbar instead of another bordered card;
+- the preview stays beside the injection matrix down to a narrower viewport before stacking;
+- phasor vectors and waveform traces use stronger strokes, round line caps, and higher non-active contrast;
+- no blur, glassmorphism, decorative glow, chart dependency, or high-rate animation is introduced.
+
+The repository does not currently contain a local Inter or Plus Jakarta font asset, so this review branch does not add a network font dependency. The stack prefers either font when available and remains fully offline. A vendored font binary can be added separately only after the project decides its font packaging/license policy.
 
 ## Keyboard-first matrix navigation
 
@@ -41,40 +46,22 @@ The navigation wraps through `Ia → Ib → Ic → In → Ua → Ub → Uc → U
 7. Use Live Apply for immediate setpoint updates, or pause Live Apply and use Enter / Apply All.
 8. Start live injection from the persistent bottom action bar.
 
-## Visual intent
-
-The target is a precision engineering instrument, not a dashboard and not a gaming UI:
-
-- compact hierarchy
-- graphite surfaces
-- restrained accent color
-- small tabular numeric typography
-- thin separators
-- minimal radius and shadow
-- no glass blur or decorative glow
-- selected signal color is used for data identity, not decoration
-- phasor and waveform are part of the working surface, not afterthought cards
-
-The screen should feel comfortable during repeated bench work: the eye should land first on Current/Voltage values, then immediately on the phasor/waveform result, while source metadata and diagnostics remain quiet in the periphery.
-
 ## Visualization truthfulness
 
 Phasor and waveform are generated setpoint previews. They visualize what the configured signal generator is intended to produce. They are not Ethernet on-wire proof. Future observed/captured data must be clearly separated from generated data.
 
 ## Review checklist
 
-Please judge the branch on these questions:
+Please judge this V3 branch on these questions:
 
 - Can an engineer change many Ia/Ib/Ic/Ua/Ub/Uc values without touching the mouse?
-- Can the operator understand the active injection in one glance?
-- Are Current and Voltage easy to compare independently?
-- Do phasor and waveform remain visible at the laptop viewport actually used on the bench?
-- Is the UI calm and premium rather than card-heavy or browser-like?
+- Does the screen feel calmer, more expensive, and less like a browser form?
+- Do Current and Voltage read as the central task instead of being surrounded by competing metadata?
+- Are the phasor vectors and waveform traces immediately visible without squinting?
+- Does Signal Preview remain beside the injector at the actual browser zoom used on the bench?
 - Is Start/Stop always obvious without dominating the entire screen?
 - Is secondary protocol information available without slowing the primary workflow?
 
 ## Scope
 
 GUI only. No firmware timing, SV packet layout, or serial command protocol is changed by this evaluation branch. The PR remains draft and unmerged until the visual direction is approved.
-
-Latest review iteration: **V2 keyboard-first matrix + side-by-side signal preview**. Evaluate this version before any merge decision.
