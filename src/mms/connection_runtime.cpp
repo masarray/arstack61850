@@ -158,8 +158,8 @@ constexpr std::uint32_t kServerMaximumNestingLevel = 5U;
         return MmsConfirmedRequestRejectReason::unrecognized_service;
     case MmsStaticDispatchStatus::malformed_request:
     case MmsStaticDispatchStatus::unsupported_request:
-    case MmsStaticDispatchStatus::object_not_found:
         return MmsConfirmedRequestRejectReason::invalid_argument;
+    case MmsStaticDispatchStatus::object_not_found:
     case MmsStaticDispatchStatus::response_ready:
     case MmsStaticDispatchStatus::invalid_object_table:
     case MmsStaticDispatchStatus::workspace_too_small:
@@ -531,10 +531,14 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
             return result;
         }
 
-        const auto rejected = MmsPduSpanCodec::encode_confirmed_request_reject_into(
-            confirmed.invoke_id,
-            reject_reason_for(application.status),
-            response);
+        const auto rejected = application.status == MmsStaticDispatchStatus::object_not_found
+            ? MmsPduSpanCodec::encode_confirmed_error_into(
+                confirmed.invoke_id,
+                response)
+            : MmsPduSpanCodec::encode_confirmed_request_reject_into(
+                confirmed.invoke_id,
+                reject_reason_for(application.status),
+                response);
         if (!rejected.success()) {
             if (rejected.status == wire::EncodeStatus::buffer_too_small) {
                 const auto fully_encoded = osi::PresentationSpanCodec::fully_encoded_data_size(
