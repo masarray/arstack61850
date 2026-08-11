@@ -25,6 +25,8 @@
 #include <cstdlib>
 #include <ctime>
 #include <limits>
+#include <optional>
+#include <span>
 #include <vector>
 
 namespace ar::esp32p4::smv {
@@ -94,6 +96,22 @@ bool g_ptp_started = false;
     return {
         mac[0], mac[1], mac[2], 0xFFU, 0xFEU, mac[3], mac[4], mac[5],
     };
+}
+
+[[nodiscard]] std::optional<std::uint16_t> ptp_vlan_id() noexcept {
+#if defined(CONFIG_AR_PTP_VLAN) && CONFIG_AR_PTP_VLAN
+    return static_cast<std::uint16_t>(CONFIG_AR_PTP_VLAN_ID);
+#else
+    return std::nullopt;
+#endif
+}
+
+[[nodiscard]] std::uint8_t ptp_vlan_priority() noexcept {
+#if defined(CONFIG_AR_PTP_VLAN) && CONFIG_AR_PTP_VLAN
+    return static_cast<std::uint8_t>(CONFIG_AR_PTP_VLAN_PRIORITY);
+#else
+    return 0U;
+#endif
 }
 
 #if defined(SOC_EMAC_IEEE1588V2_SUPPORTED) && SOC_EMAC_IEEE1588V2_SUPPORTED && ESP_IDF_VERSION_MAJOR < 6
@@ -178,6 +196,18 @@ void seed_hardware_clock(const esp_eth_handle_t eth_handle) noexcept {
     return true;
 }
 
+[[nodiscard]] std::vector<std::uint8_t> wrap_ptp_message(
+    const std::array<std::uint8_t, 6>& destination_mac,
+    const PtpLabContext& context,
+    const std::vector<std::uint8_t>& message) {
+    return PtpCodec::build_ethernet_frame(
+        destination_mac,
+        context.source_mac,
+        message,
+        ptp_vlan_id(),
+        ptp_vlan_priority());
+}
+
 [[nodiscard]] bool send_sync_follow_up(PtpLabContext& context) noexcept {
     auto sync_options = context.base_options;
     sync_options.sequence_id = context.sync_sequence;
@@ -189,10 +219,7 @@ void seed_hardware_clock(const esp_eth_handle_t eth_handle) noexcept {
     sync_options.timestamp = {};
 
     const auto sync_message = PtpCodec::build_sync(sync_options);
-    auto sync_frame = PtpCodec::build_ethernet_frame(
-        ptp_general_multicast_mac,
-        context.source_mac,
-        sync_message);
+    auto sync_frame = wrap_ptp_message(ptp_general_multicast_mac, context, sync_message);
 
     PtpTimestamp tx_timestamp;
     if (!transmit_with_hw_timestamp(context.eth_handle, sync_frame, tx_timestamp)) {
@@ -203,9 +230,9 @@ void seed_hardware_clock(const esp_eth_handle_t eth_handle) noexcept {
     follow_up_options.two_step = false;
     follow_up_options.timestamp = tx_timestamp;
     const auto follow_up_message = PtpCodec::build_follow_up(follow_up_options);
-    auto follow_up_frame = PtpCodec::build_ethernet_frame(
+    auto follow_up_frame = wrap_ptp_message(
         ptp_general_multicast_mac,
-        context.source_mac,
+        context,
         follow_up_message);
     if (!send_frame(context.eth_handle, follow_up_frame)) {
         return false;
@@ -223,10 +250,7 @@ void seed_hardware_clock(const esp_eth_handle_t eth_handle) noexcept {
     options.timestamp = hardware_time(context.eth_handle);
 
     const auto message = PtpCodec::build_announce(options, kCurrentUtcOffset);
-    auto frame = PtpCodec::build_ethernet_frame(
-        ptp_general_multicast_mac,
-        context.source_mac,
-        message);
+    auto frame = wrap_ptp_message(ptp_general_multicast_mac, context, message);
     if (!send_frame(context.eth_handle, frame)) {
         return false;
     }
@@ -247,9 +271,9 @@ void seed_hardware_clock(const esp_eth_handle_t eth_handle) noexcept {
     const auto response_message = PtpCodec::build_pdelay_resp(
         response_options,
         request.requesting_port_identity);
-    auto response_frame = PtpCodec::build_ethernet_frame(
+    auto response_frame = wrap_ptp_message(
         ptp_peer_delay_multicast_mac,
-        context.source_mac,
+        context,
         response_message);
 
     PtpTimestamp response_tx_timestamp;
@@ -267,9 +291,9 @@ void seed_hardware_clock(const esp_eth_handle_t eth_handle) noexcept {
     const auto follow_up_message = PtpCodec::build_pdelay_resp_follow_up(
         follow_up_options,
         request.requesting_port_identity);
-    auto follow_up_frame = PtpCodec::build_ethernet_frame(
+    auto follow_up_frame = wrap_ptp_message(
         ptp_peer_delay_multicast_mac,
-        context.source_mac,
+        context,
         follow_up_message);
     if (!send_frame(context.eth_handle, follow_up_frame)) {
         return false;
@@ -298,8 +322,10 @@ esp_err_t ptp_input_info(
         if (PtpCodec::try_parse_ethernet_frame(
                 std::span<const std::uint8_t>{buffer, length},
                 frame) &&
+            frame.peer_delay_multicast &&
             frame.header.message_type == PtpMessageType::pdelay_req &&
-            frame.header.domain_number == context->base_options.domain_number) {
+            frame.header.domain_number == context->base_options.domain_number &&
+            frame.header.transport_specific == context->base_options.transport_specific) {
             const auto& rx_timestamp = *static_cast<const eth_mac_time_t*>(info);
             if (valid_hw_timestamp(rx_timestamp)) {
                 const PdelayRequestEvent event{
@@ -347,6 +373,8 @@ void ptp_lab_task(void* argument) {
         return;
     }
 
+    context.base_options.transport_specific =
+        static_cast<std::uint8_t>(CONFIG_AR_PTP_TRANSPORT_SPECIFIC);
     context.base_options.domain_number = static_cast<std::uint8_t>(CONFIG_AR_PTP_DOMAIN);
     context.base_options.source_port_identity.clock_identity =
         clock_identity_from_mac(context.source_mac);
@@ -377,8 +405,10 @@ void ptp_lab_task(void* argument) {
     ESP_LOGW(kTag,
              "PTP LAB TX enabled: troubleshooting/interoperability helper only; not a GPS-backed or certified grandmaster");
     ESP_LOGI(kTag,
-             "PTP domain=%u Announce=%d ms Sync=%d ms HW Sync TX timestamp=enabled HW Pdelay=%s",
+             "PTP domain=%u transportSpecific=0x%X VLAN=%s Announce=%d ms Sync=%d ms HW Sync TX timestamp=enabled HW Pdelay=%s",
              static_cast<unsigned>(context.base_options.domain_number),
+             static_cast<unsigned>(context.base_options.transport_specific),
+             ptp_vlan_id().has_value() ? "tagged" : "untagged",
              CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS,
              CONFIG_AR_PTP_SYNC_INTERVAL_MS,
              pdelay_enabled ? "enabled" : "disabled");
