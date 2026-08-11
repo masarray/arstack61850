@@ -46,6 +46,13 @@ struct MmsStaticConnectionPolicy final {
     std::uint8_t maximum_tpdu_size_code{0x0AU};
     bool require_end_of_transmission{true};
 
+    // Optional adapter-owned COTP Data reassembly storage. When non-empty, the
+    // live server accepts a bounded sequence of EOT=false Data TPDUs and
+    // presents their concatenated user data to ACSE/MMS only after the final
+    // EOT=true segment. Leaving this empty preserves the strict single-TPDU
+    // embedded behavior. The runtime never allocates or owns this storage.
+    std::span<std::uint8_t> cotp_reassembly{};
+
     // Optional portable association identity used by contextual MMS writes.
     // The transport/server adapter assigns association_id and stable Owner.
     // Leaving these zero/empty preserves legacy non-contextual behavior.
@@ -92,7 +99,8 @@ public:
     explicit constexpr MmsStaticConnectionRuntime(
         const MmsStaticApplicationDispatcher& dispatcher,
         const MmsStaticConnectionPolicy policy = {}) noexcept
-        : dispatcher_{dispatcher}, policy_{policy} {}
+        : dispatcher_{dispatcher}, policy_{policy},
+          negotiated_tpdu_size_code_{policy.maximum_tpdu_size_code} {}
 
     // Process at most the first complete TPKT frame in a TCP receive window.
     // `consumed_bytes` identifies the prefix the transport adapter may remove.
@@ -120,6 +128,10 @@ public:
         return mms_presentation_context_id_;
     }
 
+    [[nodiscard]] constexpr std::uint8_t negotiated_tpdu_size_code() const noexcept {
+        return negotiated_tpdu_size_code_;
+    }
+
     [[nodiscard]] constexpr MmsStaticRequestAccessContext access_context() const noexcept {
         return policy_.access_context();
     }
@@ -130,11 +142,15 @@ public:
 
 private:
     void notify_association_closed() noexcept;
+    void clear_cotp_reassembly() noexcept;
 
     const MmsStaticApplicationDispatcher& dispatcher_;
     MmsStaticConnectionPolicy policy_{};
     MmsStaticConnectionState state_{MmsStaticConnectionState::awaiting_cotp_connect};
     std::uint32_t mms_presentation_context_id_{};
+    std::size_t cotp_reassembly_size_{};
+    bool cotp_reassembly_complete_{};
+    std::uint8_t negotiated_tpdu_size_code_{0x0AU};
     bool association_active_{};
     bool association_close_notified_{};
 };
