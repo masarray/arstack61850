@@ -76,6 +76,13 @@ public:
     [[nodiscard]] static wire::EncodeResult encode_default_initiate_response_into(
         std::span<std::uint8_t> destination) noexcept;
 
+    [[nodiscard]] static wire::EncodeResult encode_initiate_response_into(
+        std::uint32_t maximum_mms_pdu_size,
+        std::uint32_t maximum_outstanding_calling,
+        std::uint32_t maximum_outstanding_called,
+        std::uint32_t data_structure_nesting_level,
+        std::span<std::uint8_t> destination) noexcept;
+
     [[nodiscard]] static bool try_decode_confirmed_request_view(
         std::span<const std::uint8_t> bytes,
         MmsConfirmedPduView& request) noexcept;
