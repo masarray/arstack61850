@@ -25,6 +25,102 @@
     };
 }
 
+std::vector<SclDataSetEntry> build_data_set_entries(
+    const std::string& fallback_ied_name,
+    const XmlNode& fcda,
+    const std::size_t first_index,
+    const SclTypeIndex& type_index,
+    std::vector<std::string>& warnings) {
+    const auto explicit_da_name = attribute(&fcda, "daName");
+    if (!explicit_da_name.empty()) {
+        return {build_data_set_entry(
+            fallback_ied_name,
+            fcda,
+            first_index,
+            type_index,
+            warnings)};
+    }
+
+    auto ied_name = attribute(&fcda, "iedName");
+    if (ied_name.empty()) {
+        ied_name = fallback_ied_name;
+    }
+    const auto ld_inst = attribute(&fcda, "ldInst");
+    const auto prefix = attribute(&fcda, "prefix");
+    const auto ln_class = attribute(&fcda, "lnClass");
+    const auto ln_inst = attribute(&fcda, "lnInst");
+    const auto do_name = attribute(&fcda, "doName");
+    const auto functional_constraint = attribute(&fcda, "fc");
+
+    const auto expanded = type_index.expand_data_object(
+        ied_name,
+        ld_inst,
+        prefix,
+        ln_class,
+        ln_inst,
+        do_name,
+        functional_constraint);
+    if (expanded.empty()) {
+        const auto reference = build_signal_reference(
+            ied_name,
+            ld_inst,
+            prefix,
+            ln_class,
+            ln_inst,
+            do_name,
+            {},
+            functional_constraint);
+        warnings.push_back(
+            "Unable to expand structured FCDA " + reference +
+            "; preserving the unresolved object entry.");
+        return {build_data_set_entry(
+            fallback_ied_name,
+            fcda,
+            first_index,
+            type_index,
+            warnings)};
+    }
+
+    std::vector<SclDataSetEntry> result;
+    result.reserve(expanded.size());
+    auto index = first_index;
+    for (const auto& leaf : expanded) {
+        const auto signal_reference = build_signal_reference(
+            ied_name,
+            ld_inst,
+            prefix,
+            ln_class,
+            ln_inst,
+            do_name,
+            leaf.da_name,
+            functional_constraint);
+        if (!leaf.resolution.resolved) {
+            warnings.push_back("Type unresolved for " + signal_reference + ".");
+        }
+        result.push_back({
+            index++,
+            signal_reference,
+            ied_name,
+            ld_inst,
+            prefix,
+            ln_class,
+            ln_inst,
+            do_name,
+            leaf.da_name,
+            functional_constraint.empty()
+                ? leaf.resolution.functional_constraint
+                : functional_constraint,
+            leaf.resolution.cdc,
+            leaf.resolution.basic_type,
+            leaf.resolution.type_id,
+            leaf.resolution.enum_type,
+            is_quality_attribute(leaf.da_name),
+            is_timestamp_attribute(leaf.da_name),
+        });
+    }
+    return result;
+}
+
 SclStreamAddress build_address(const XmlNode& owner) {
     std::unordered_map<std::string, std::string> values;
     for (const auto* parameter : descendants(owner, "P")) {
@@ -202,12 +298,16 @@ SclDocument SclParser::parse(
 
                     std::size_t entry_index = 1U;
                     for (const auto* fcda : direct_children(*data_set_node, "FCDA")) {
-                        data_set.entries.push_back(build_data_set_entry(
+                        auto entries = build_data_set_entries(
                             ied_name,
                             *fcda,
-                            entry_index++,
+                            entry_index,
                             type_index,
-                            document.warnings));
+                            document.warnings);
+                        entry_index += entries.size();
+                        for (auto& entry : entries) {
+                            data_set.entries.push_back(std::move(entry));
+                        }
                     }
                     document.data_sets.push_back(std::move(data_set));
                 }

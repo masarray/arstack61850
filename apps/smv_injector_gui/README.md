@@ -1,96 +1,129 @@
 # ARStack61850 SMV Injector GUI
 
-This is the first operator-facing control surface for the ESP32-P4 Sampled Values injector runtime.
+Operator-facing control plane for the ESP32-P4 Sampled Values injector.
 
-It intentionally replaces direct bench command entry with user-facing engineering controls while keeping the current firmware protocol unchanged underneath.
+The GUI is not the realtime waveform generator. The PC compiles engineering intent and sends bounded profile/control updates; the ESP32-P4 remains the realtime publisher.
 
-## What works now
+For the current completion boundary and retained bench evidence, see [`../../docs/SMV_INJECTOR_STATUS.md`](../../docs/SMV_INJECTOR_STATUS.md).
 
-- connect directly to the ESP32-P4 serial control port;
-- START and STOP the deterministic publisher;
-- edit Ia, Ib, Ic, In, Ua, Ub, Uc and Un while the stream is running;
-- use engineering units instead of raw firmware units:
-  - current: A RMS -> current wire counts for the current development profile;
-  - voltage: V RMS -> voltage wire counts for the current development profile;
-  - phase: degrees -> milli-degrees;
-  - frequency: Hz -> millihertz;
-- enable/disable channels;
-- zero all outputs;
-- restore a balanced three-phase bench state;
-- live-apply values as the operator edits them, or pause live apply and use Apply/Apply all;
-- display a local phasor preview;
-- parse device telemetry for publisher rate, missed slots, failures and signal generation;
-- load an SCL/CID/SCD/IID file locally and confirm that it is well-formed SCL plus count discovered `SampledValueControl` elements.
+## Current workflow
 
-The SCL file picker is deliberately not a second IEC 61850 semantic engine. Full engineering-file normalization and `SvPublisherProfile` compilation remain in the C++ host engine and will be connected to this GUI through the P3-A1 device-profile bridge.
+```text
+Import SCL / CID / SCD / IID
+    -> C++ SCL parser
+    -> normalized SvPublisherProfile
+    -> select SV stream
+    -> resolve Class A/B/C diagnostics
+    -> confirm sample-counter policy when required
+    -> configure explicit test scaling when SCL does not establish it
+    -> Deploy to device while STOPPED
+    -> immutable profile armed on ESP32-P4
+    -> Start
+    -> live I/U/phase/frequency/quality changes
+    -> Stop
+```
+
+The browser does not implement a second IEC 61850 semantic parser. `run.cmd` builds the focused native C++ profile compiler and starts a localhost-only Python bridge. Engineering data is written to a temporary local file only for compilation and removed immediately after the request.
+
+## Functional status
+
+The SCL-driven injector workflow is physically proven for the current supported 4I+4V device profile.
+
+A real engineering-file-derived 4800 fps profile has been compiled, validated, deployed and run on the ESP32-P4 with retained device telemetry showing approximately 4800 samples/s, zero missed slots and zero canonical TX failures in the observed run.
+
+This is a functional-completion statement, not a claim of universal SCL support or formal IEC conformance.
+
+## Supported device profile in this phase
+
+The host parser can inspect broader SCL SV structures, but the first ESP32-P4 deployment bridge intentionally accepts only the physically proven 4I+4V wire layout:
+
+- one ASDU;
+- `SmpPerSec` with an absolute publisher rate;
+- explicit/validated sample-counter modulus;
+- 16 ordered leaves as 8 `INT32 value + Quality` pairs;
+- 64-byte sample payload;
+- channel order `Ia, Ib, Ic, In, Ua, Ub, Uc, Un`;
+- configurable destination MAC, APPID, VLAN/PCP, `svID`, `confRev` and supported ASDU field presence.
+
+A structurally valid but unsupported layout remains visible in the GUI and is blocked from deployment. The firmware does not guess a payload layout.
+
+## Counter-policy rule
+
+SCL sampling rate does not universally prove the `smpCnt` wrap policy. When the compiler can only infer a rate-sized candidate, the GUI shows Class B and requires explicit confirmation from an applicable profile rule, independent wire evidence, or engineering knowledge before deployment becomes Class A.
+
+## Engineering scaling
+
+Generic SCL does not always establish physical scaling. The GUI therefore exposes current and voltage counts-per-unit conversion for the active test profile instead of claiming a universal scale. This scaling affects only engineering-value conversion in the control plane; it does not change realtime scheduling.
+
+## Canonical stream and diagnostic visibility
+
+The active SCL profile is the canonical standards-facing stream identity. During the current bench phase, firmware also emits a separate untagged broadcast diagnostic mirror:
+
+```text
+canonical
+  -> SCL-derived multicast destination / APPID / svID / VLAN
+
+diagnostic mirror
+  -> broadcast / APPID 0x4F01 / svID AR_DIAG_SV1 / untagged
+```
+
+The mirror exists because the currently tested host USB-Ethernet capture path does not reliably expose multicast/priority-tagged canonical traffic. If a raw analyzer shows `AR_DIAG_SV1`, it is seeing the diagnostic mirror, not evidence that the SCL profile failed to deploy.
+
+The diagnostic mirror follows the active publisher rate and configuration revision but intentionally keeps a different identity.
 
 ## Run
 
-1. Flash the current `feature/sv-live-control-runtime` compatible firmware (the GUI branch is based on that runtime).
-2. Exit `idf.py monitor` with `Ctrl+]`. The serial port cannot be owned by the monitor and GUI at the same time.
-3. From the repository root, run:
+1. Flash firmware from the same `feature/smv-scl-profile-bridge` branch.
+2. Exit `idf.py monitor` with `Ctrl+]`; the GUI and monitor cannot own the serial port simultaneously.
+3. From the repository root run:
 
 ```powershell
 .\apps\smv_injector_gui\run.cmd
 ```
 
-4. The launcher opens the local GUI and starts an HTTP server bound only to `127.0.0.1`.
-5. Click **Connect device** and select the ESP32-P4 serial port.
-6. Use **Start**, edit channel magnitude/phase/frequency, and observe the live stream.
+The launcher:
 
-The browser must expose the Web Serial API. The GUI is served from localhost because device serial APIs require a secure local context.
+- detects a native Windows C++ compiler by capability rather than Visual Studio product year;
+- incrementally builds the smart SCL profile tool into `build-smv-gui`;
+- starts the local control-plane server on `127.0.0.1:8765`;
+- opens the GUI.
 
-## Important unit boundary
+4. Click **Connect device** and select the ESP32-P4 serial port.
+5. Import an engineering file and select an SV stream.
+6. Resolve any Class-B counter-policy requirement.
+7. **Deploy to device** while STOPPED.
+8. Press **Start**. Magnitude, phase, frequency, quality and enabled state remain live controls while running.
 
-The firmware bench protocol still carries raw units. The GUI hides those details from the operator:
-
-```text
-GUI current A RMS      -> SET ... current_counts ...
-GUI voltage V RMS      -> SET ... voltage_counts ...
-GUI phase deg          -> SET ... phase_mdeg ...
-GUI frequency Hz       -> FREQ frequency_millihz
-```
-
-This means an operator can enter `-120` degrees and the GUI sends `-120000` milli-degrees. The earlier confusing direct-console behavior is no longer part of the normal operator workflow.
-
-The current A/V conversion is explicitly tied to the development profile that is still hard-coded in the firmware. When the compiled SCL profile bridge lands, the GUI must obtain engineering-unit scaling from the resolved profile rather than assume a universal scale.
-
-## Realtime rule
-
-The GUI is control plane only. It does not synthesize the 4 kHz waveform and does not become a timing dependency.
+## Realtime boundary
 
 ```text
-GUI / host
-   |
-   | control updates
-   v
-ESP32-P4 live state bank
-   |
-   v
-fixed-point signal engine
-   |
-   v
-prebuilt SV packet template
-   |
-   v
-realtime Ethernet publisher
+engineering file
+      |
+      v
+C++ profile compiler ---- GUI engineering values
+      |                           |
+      +-----------+---------------+
+                  |
+                  v
+           ESP32-P4 control state
+                  |
+          immutable wire profile
+          + mutable signal state
+                  |
+                  v
+       fixed-point signal engine
+                  |
+                  v
+       prebuilt SV packet template
+                  |
+                  v
+        realtime Ethernet publisher
 ```
 
-Disconnecting or closing the GUI must not make the PC responsible for sample timing. The embedded publisher remains the realtime authority.
+Profile identity/layout changes require `STOP -> validate -> deploy -> arm`. Live signal values do not rebuild BER and do not restart `smpCnt`.
 
-## Next integration
+The rational GPTimer scheduler supports runtime publisher rates without permanently rounding fractional-microsecond periods. For example, 4800 events/s uses a repeating 208/208/209 microsecond schedule in the 1 MHz timer domain.
 
-The next product step is to connect the C++ SCL profile compiler to this surface so the workflow becomes:
+## Next validation surface
 
-```text
-Import SCL/CID
-    -> select SV stream
-    -> validate normalized profile
-    -> deploy immutable stream identity/layout
-    -> edit live engineering values
-    -> Start
-    -> change values while running
-    -> Stop
-```
-
-Stream identity/layout changes remain a STOP -> validate -> arm operation. Magnitude, phase, frequency, quality and enabled state are live controls.
+The preferred next hardware validation path is an independent raw Ethernet analyzer, potentially using a second ESP32-P4 board in promiscuous/all-multicast receive mode with application-layer VLAN parsing. That analyzer should compare configured SCL truth against observed canonical wire truth without relying on the current Windows USB-NIC capture path.

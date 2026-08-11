@@ -7,25 +7,17 @@
   <title>ARStack61850 · SMV Injector</title>
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="responsive.css" />
+  <link rel="stylesheet" href="profile_bridge.css" />
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
       <div class="brand">
-        <div class="brand-mark" aria-hidden="true">
-          <span></span><span></span><span></span>
-        </div>
-        <div>
-          <div class="eyebrow">ARStack61850</div>
-          <h1>SMV Injector</h1>
-        </div>
+        <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div><div class="eyebrow">ARStack61850</div><h1>SMV Injector</h1></div>
       </div>
-
       <div class="connection-strip">
-        <div class="status-pill" id="deviceStatus" data-state="offline">
-          <span class="status-dot"></span>
-          <span id="deviceStatusText">Device offline</span>
-        </div>
+        <div class="status-pill" id="deviceStatus" data-state="offline"><span class="status-dot"></span><span id="deviceStatusText">Device offline</span></div>
         <button class="btn secondary" id="connectButton">Connect device</button>
       </div>
     </header>
@@ -34,18 +26,11 @@
       <section class="hero-grid">
         <article class="panel stream-panel">
           <div class="panel-header">
-            <div>
-              <div class="eyebrow">Process bus stream</div>
-              <h2>Active publisher profile</h2>
-            </div>
+            <div><div class="eyebrow">Process bus stream</div><h2>Active publisher profile</h2></div>
             <span class="badge neutral" id="profileBadge">Development profile</span>
           </div>
-
           <div class="stream-identity">
-            <div class="identity-main">
-              <span class="identity-label">svID</span>
-              <strong id="svIdValue">MU01_SV1</strong>
-            </div>
+            <div class="identity-main"><span class="identity-label">svID</span><strong id="svIdValue">MU01_SV1</strong></div>
             <div class="identity-grid">
               <div><span>APPID</span><strong id="appIdValue">0x4000</strong></div>
               <div><span>Rate</span><strong id="sampleRateValue">4000 fps</strong></div>
@@ -53,55 +38,32 @@
               <div><span>VLAN</span><strong id="vlanValue">PCP 4 · VID 0</strong></div>
             </div>
           </div>
-
           <div class="profile-actions">
-            <label class="file-button" for="sclFile">
-              <span>Import SCL / CID</span>
-              <input id="sclFile" type="file" accept=".scd,.cid,.icd,.iid,.ssd,.xml" />
-            </label>
+            <label class="file-button" for="sclFile"><span>Import SCL / CID</span><input id="sclFile" type="file" accept=".scd,.cid,.icd,.iid,.ssd,.xml" /></label>
             <div class="file-state" id="sclState">No engineering file loaded</div>
           </div>
-          <p class="microcopy">Engineering files are loaded locally. Runtime profile deployment will connect to the host profile compiler; live signal control below already talks directly to the ESP32-P4 bench firmware.</p>
+          <p class="microcopy">Engineering files are compiled by the local IEC 61850 profile engine before deployment.</p>
         </article>
 
         <article class="panel run-panel">
-          <div class="run-state" id="runState" data-state="stopped">
-            <span class="run-icon"></span>
-            <div>
-              <div class="eyebrow">Publisher state</div>
-              <strong id="runStateText">STOPPED</strong>
-            </div>
-          </div>
-
+          <div class="run-state" id="runState" data-state="stopped"><span class="run-icon"></span><div><div class="eyebrow">Publisher state</div><strong id="runStateText">STOPPED</strong></div></div>
           <div class="run-metrics">
             <div><span>Observed rate</span><strong id="fpsMetric">—</strong></div>
             <div><span>Missed slots</span><strong id="missedMetric">—</strong></div>
             <div><span>TX failures</span><strong id="failMetric">—</strong></div>
             <div><span>Signal generation</span><strong id="generationMetric">—</strong></div>
           </div>
-
-          <div class="run-actions">
-            <button class="btn start" id="startButton" disabled>Start</button>
-            <button class="btn stop" id="stopButton" disabled>Stop</button>
-          </div>
+          <div class="run-actions"><button class="btn start" id="startButton" disabled>Start</button><button class="btn stop" id="stopButton" disabled>Stop</button></div>
         </article>
       </section>
 
       <section class="control-toolbar panel">
         <div class="frequency-control">
-          <div>
-            <div class="eyebrow">Signal frequency</div>
-            <div class="frequency-value"><input id="frequencyInput" type="number" min="1" max="1000" step="0.001" value="50.000" /><span>Hz</span></div>
-          </div>
+          <div><div class="eyebrow">Signal frequency</div><div class="frequency-value"><input id="frequencyInput" type="number" min="1" max="1000" step="0.001" value="50.000" /><span>Hz</span></div></div>
           <input id="frequencySlider" type="range" min="45" max="65" step="0.001" value="50" />
         </div>
-
         <div class="toolbar-actions">
-          <label class="switch-row">
-            <input id="liveApplyToggle" type="checkbox" checked />
-            <span class="switch"></span>
-            <span>Live apply</span>
-          </label>
+          <label class="switch-row"><input id="liveApplyToggle" type="checkbox" checked /><span class="switch"></span><span>Live apply</span></label>
           <button class="btn secondary" id="balancedButton">Balanced 3-phase</button>
           <button class="btn secondary" id="zeroButton" disabled>Zero outputs</button>
           <button class="btn primary" id="applyAllButton" disabled>Apply all</button>
@@ -109,42 +71,25 @@
       </section>
 
       <section class="channels-section">
-        <div class="section-heading">
-          <div>
-            <div class="eyebrow">Live signal control</div>
-            <h2>Current & voltage channels</h2>
-          </div>
-          <p>Magnitude uses engineering units. Phase uses ordinary degrees. Conversion to wire counts and milli-degrees happens inside the GUI.</p>
-        </div>
+        <div class="section-heading"><div><div class="eyebrow">Live signal control</div><h2>Current & voltage channels</h2></div><p>Magnitude uses engineering units. Phase uses ordinary degrees. Conversion to wire values remains outside the realtime publisher.</p></div>
         <div class="channel-grid" id="channelGrid"></div>
       </section>
 
       <section class="bottom-grid">
         <article class="panel phase-panel">
-          <div class="panel-header compact">
-            <div>
-              <div class="eyebrow">Vector preview</div>
-              <h2>Phase relationships</h2>
-            </div>
-          </div>
+          <div class="panel-header compact"><div><div class="eyebrow">Vector preview</div><h2>Phase relationships</h2></div></div>
           <canvas id="phasorCanvas" width="640" height="360" aria-label="Current and voltage phasor preview"></canvas>
         </article>
-
         <article class="panel console-panel">
-          <div class="panel-header compact">
-            <div>
-              <div class="eyebrow">Device evidence</div>
-              <h2>Runtime log</h2>
-            </div>
-            <button class="btn ghost small" id="clearLogButton">Clear</button>
-          </div>
+          <div class="panel-header compact"><div><div class="eyebrow">Device evidence</div><h2>Runtime log</h2></div><button class="btn ghost small" id="clearLogButton">Clear</button></div>
           <pre id="runtimeLog" aria-live="polite">Waiting for device connection…</pre>
         </article>
       </section>
     </main>
   </div>
-
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="app.js" defer></script>
+  <script src="scl_bridge_bootstrap.js" defer></script>
+  <script src="profile_bridge.js" defer></script>
 </body>
 </html>

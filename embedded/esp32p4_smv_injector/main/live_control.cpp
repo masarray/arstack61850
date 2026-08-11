@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "live_control.hpp"
+#include "profile_control.hpp"
 
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -31,29 +32,27 @@ constexpr std::string_view kTokenDelimiters{" \t\r\n"};
 SvLiveSignalBank g_signal_bank;
 std::atomic<bool> g_running{false};
 std::atomic<bool> g_start_request{false};
+std::atomic<TaskHandle_t> g_publisher_task{nullptr};
+
+void wake_publisher() noexcept {
+    const auto task = g_publisher_task.load(std::memory_order_acquire);
+    if (task != nullptr) {
+        xTaskNotifyGive(task);
+    }
+}
 
 void uppercase_ascii(char* text) noexcept {
-    if (text == nullptr) {
-        return;
-    }
+    if (text == nullptr) return;
     for (; *text != '\0'; ++text) {
         *text = static_cast<char>(std::toupper(static_cast<unsigned char>(*text)));
     }
 }
 
-// The bench console is a safety-sensitive control surface: random UART bytes,
-// terminal escape sequences or UTF-8 fragments must never be normalized into a
-// valid command. Accept printable 7-bit ASCII plus normal line whitespace only;
-// reject the whole line otherwise.
 bool is_safe_ascii_command_line(const char* line) noexcept {
-    if (line == nullptr) {
-        return false;
-    }
-
+    if (line == nullptr) return false;
     bool has_payload = false;
     for (const auto* cursor = reinterpret_cast<const unsigned char*>(line);
-         *cursor != 0U;
-         ++cursor) {
+         *cursor != 0U; ++cursor) {
         const auto byte = *cursor;
         if (byte == static_cast<unsigned char>(' ') ||
             byte == static_cast<unsigned char>('\t') ||
@@ -61,9 +60,7 @@ bool is_safe_ascii_command_line(const char* line) noexcept {
             byte == static_cast<unsigned char>('\n')) {
             continue;
         }
-        if (byte < 0x20U || byte > 0x7EU) {
-            return false;
-        }
+        if (byte < 0x20U || byte > 0x7EU) return false;
         has_payload = true;
     }
     return has_payload;
@@ -74,32 +71,24 @@ bool has_extra_token(char** save) noexcept {
 }
 
 bool parse_i32(const char* text, std::int32_t& value) noexcept {
-    if (text == nullptr || *text == '\0') {
-        return false;
-    }
+    if (text == nullptr || *text == '\0') return false;
     errno = 0;
     char* end{};
     const long parsed = std::strtol(text, &end, 0);
     if (errno != 0 || end == text || *end != '\0' ||
         parsed < std::numeric_limits<std::int32_t>::min() ||
-        parsed > std::numeric_limits<std::int32_t>::max()) {
-        return false;
-    }
+        parsed > std::numeric_limits<std::int32_t>::max()) return false;
     value = static_cast<std::int32_t>(parsed);
     return true;
 }
 
 bool parse_u32(const char* text, std::uint32_t& value) noexcept {
-    if (text == nullptr || *text == '\0' || *text == '-') {
-        return false;
-    }
+    if (text == nullptr || *text == '\0' || *text == '-') return false;
     errno = 0;
     char* end{};
     const unsigned long parsed = std::strtoul(text, &end, 0);
     if (errno != 0 || end == text || *end != '\0' ||
-        parsed > std::numeric_limits<std::uint32_t>::max()) {
-        return false;
-    }
+        parsed > std::numeric_limits<std::uint32_t>::max()) return false;
     value = static_cast<std::uint32_t>(parsed);
     return true;
 }
@@ -111,7 +100,7 @@ void print_help() noexcept {
     ESP_LOGI(kTag, "  SET <IA|IB|IC|IN|UA|UB|UC|UN> <rms_wire_counts> <phase_mdeg> [quality]");
     ESP_LOGI(kTag, "  ENABLE <channel> <0|1>");
     ESP_LOGI(kTag, "  QUALITY <channel> <uint32/0xhex>");
-    ESP_LOGI(kTag, "SET/FREQ/QUALITY/ENABLE commit coherently; stream identity is unchanged.");
+    ESP_LOGI(kTag, "GUI profile deployment uses bounded PROFILE subcommands while STOPPED.");
 }
 
 void print_state() noexcept {
@@ -140,8 +129,7 @@ bool publish_state(const SvLiveSignalState& state) noexcept {
         return false;
     }
     const auto active = g_signal_bank.snapshot();
-    ESP_LOGI(kTag,
-             "Live signal generation %llu committed",
+    ESP_LOGI(kTag, "Live signal generation %llu committed",
              static_cast<unsigned long long>(active.generation));
     return true;
 }
@@ -149,9 +137,7 @@ bool publish_state(const SvLiveSignalState& state) noexcept {
 void handle_line(char* line) noexcept {
     char* save{};
     char* command = strtok_r(line, kTokenDelimiters.data(), &save);
-    if (command == nullptr) {
-        return;
-    }
+    if (command == nullptr) return;
     uppercase_ascii(command);
 
     if (std::strcmp(command, "START") == 0) {
@@ -161,7 +147,8 @@ void handle_line(char* line) noexcept {
         }
         g_start_request.store(true, std::memory_order_release);
         g_running.store(true, std::memory_order_release);
-        ESP_LOGI(kTag, "START accepted: phase and smpCnt reset at the next sample boundary");
+        wake_publisher();
+        ESP_LOGI(kTag, "START accepted: profile armed, phase and smpCnt reset at first sample boundary");
         return;
     }
     if (std::strcmp(command, "STOP") == 0) {
@@ -170,6 +157,7 @@ void handle_line(char* line) noexcept {
             return;
         }
         g_running.store(false, std::memory_order_release);
+        wake_publisher();
         ESP_LOGI(kTag, "STOP accepted: SV transmission suppressed");
         return;
     }
@@ -189,15 +177,17 @@ void handle_line(char* line) noexcept {
         print_help();
         return;
     }
+    if (std::strcmp(command, "PROFILE") == 0) {
+        handle_profile_command(save);
+        return;
+    }
     if (std::strcmp(command, "ZERO") == 0) {
         if (has_extra_token(&save)) {
             ESP_LOGE(kTag, "Usage: ZERO");
             return;
         }
         auto state = g_signal_bank.snapshot();
-        for (auto& channel : state.channels) {
-            channel.rms_counts = 0;
-        }
+        for (auto& channel : state.channels) channel.rms_counts = 0;
         static_cast<void>(publish_state(state));
         return;
     }
@@ -239,8 +229,7 @@ void handle_line(char* line) noexcept {
             std::int32_t rms{};
             std::int32_t phase{};
             if (!parse_i32(rms_text, rms) || !parse_i32(phase_text, phase)) {
-                ESP_LOGE(kTag,
-                         "Usage: SET <channel> <rms_wire_counts> <phase_mdeg> [quality]");
+                ESP_LOGE(kTag, "Usage: SET <channel> <rms_wire_counts> <phase_mdeg> [quality]");
                 return;
             }
             std::uint32_t quality{};
@@ -249,15 +238,12 @@ void handle_line(char* line) noexcept {
                 return;
             }
             if (has_extra_token(&save)) {
-                ESP_LOGE(kTag,
-                         "Usage: SET <channel> <rms_wire_counts> <phase_mdeg> [quality]");
+                ESP_LOGE(kTag, "Usage: SET <channel> <rms_wire_counts> <phase_mdeg> [quality]");
                 return;
             }
             channel.rms_counts = rms;
             channel.phase_millidegrees = phase;
-            if (quality_text != nullptr) {
-                channel.quality = quality;
-            }
+            if (quality_text != nullptr) channel.quality = quality;
             static_cast<void>(publish_state(state));
             return;
         }
@@ -294,17 +280,23 @@ void live_control_initialize(
     const std::int32_t current_rms_counts,
     const std::int32_t voltage_rms_counts) noexcept {
     auto initial = g_signal_bank.snapshot();
-    for (std::size_t index = 0U; index < 3U; ++index) {
-        initial.channels[index].rms_counts = current_rms_counts;
-    }
+    for (std::size_t index = 0U; index < 3U; ++index) initial.channels[index].rms_counts = current_rms_counts;
     initial.channels[3].rms_counts = 0;
-    for (std::size_t index = 4U; index < 7U; ++index) {
-        initial.channels[index].rms_counts = voltage_rms_counts;
-    }
+    for (std::size_t index = 4U; index < 7U; ++index) initial.channels[index].rms_counts = voltage_rms_counts;
     initial.channels[7].rms_counts = 0;
     static_cast<void>(g_signal_bank.publish(initial));
     g_running.store(false, std::memory_order_release);
     g_start_request.store(false, std::memory_order_release);
+}
+
+void live_control_bind_publisher_task(const TaskHandle_t task) noexcept {
+    g_publisher_task.store(task, std::memory_order_release);
+}
+
+void live_control_force_stop() noexcept {
+    g_running.store(false, std::memory_order_release);
+    g_start_request.store(false, std::memory_order_release);
+    wake_publisher();
 }
 
 SvLiveSignalState live_signal_snapshot() noexcept {
@@ -338,11 +330,6 @@ void live_control_task(void*) noexcept {
         }
 
         const auto byte = static_cast<unsigned char>(input);
-
-        // The ESP-IDF monitor forwards interactive input byte-by-byte. Assemble
-        // those bytes here and execute only after Enter; std::fgets() is not
-        // suitable for this VFS because a short UART read can look like a
-        // complete stdio record.
         if (byte == static_cast<unsigned char>('\r') ||
             byte == static_cast<unsigned char>('\n')) {
             if (discard_until_eol) {
@@ -352,12 +339,7 @@ void live_control_task(void*) noexcept {
                 ESP_LOGW(kTag, "Discarded invalid/overlong bench command");
                 continue;
             }
-
-            if (length == 0U) {
-                // Ignore the second half of CRLF and empty Enter presses.
-                continue;
-            }
-
+            if (length == 0U) continue;
             line[length] = '\0';
             if (!is_safe_ascii_command_line(line.data())) {
                 ESP_LOGW(kTag, "Discarded invalid bench command");
@@ -369,12 +351,7 @@ void live_control_task(void*) noexcept {
             continue;
         }
 
-        if (discard_until_eol) {
-            continue;
-        }
-
-        // Support normal terminal editing without treating backspace/delete as
-        // a command byte.
+        if (discard_until_eol) continue;
         if (byte == 0x08U || byte == 0x7FU) {
             if (length > 0U) {
                 --length;
@@ -387,16 +364,10 @@ void live_control_task(void*) noexcept {
             byte == static_cast<unsigned char>(' ') ||
             byte == static_cast<unsigned char>('\t') ||
             (byte >= 0x21U && byte <= 0x7EU);
-        if (!accepted) {
+        if (!accepted || length + 1U >= line.size()) {
             discard_until_eol = true;
             continue;
         }
-
-        if (length + 1U >= line.size()) {
-            discard_until_eol = true;
-            continue;
-        }
-
         line[length++] = static_cast<char>(byte);
     }
 }

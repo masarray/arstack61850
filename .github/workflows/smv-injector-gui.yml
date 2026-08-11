@@ -4,17 +4,27 @@ on:
   push:
     paths:
       - 'apps/smv_injector_gui/**'
+      - 'tools/smv_profile_inspect.cpp'
+      - 'include/ariec61850/sampled_values/publisher_profile.hpp'
+      - 'include/ariec61850/scl/**'
+      - 'src/scl/**'
+      - 'tests/fixtures/scl/**'
       - '.github/workflows/smv-injector-gui.yml'
   pull_request:
     paths:
       - 'apps/smv_injector_gui/**'
+      - 'tools/smv_profile_inspect.cpp'
+      - 'include/ariec61850/sampled_values/publisher_profile.hpp'
+      - 'include/ariec61850/scl/**'
+      - 'src/scl/**'
+      - 'tests/fixtures/scl/**'
       - '.github/workflows/smv-injector-gui.yml'
 
 permissions:
   contents: read
 
 jobs:
-  static-smoke:
+  profile-bridge-smoke:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -26,28 +36,79 @@ jobs:
           node-version: '22'
 
       - name: JavaScript syntax
-        run: node --check apps/smv_injector_gui/app.js
+        run: |
+          node --check apps/smv_injector_gui/app.js
+          node --check apps/smv_injector_gui/scl_bridge_bootstrap.js
+          node --check apps/smv_injector_gui/profile_bridge.js
 
       - name: Required UI files
         shell: bash
         run: |
           test -s apps/smv_injector_gui/index.html
           test -s apps/smv_injector_gui/styles.css
+          test -s apps/smv_injector_gui/profile_bridge.css
           test -s apps/smv_injector_gui/app.js
+          test -s apps/smv_injector_gui/scl_bridge_bootstrap.js
+          test -s apps/smv_injector_gui/profile_bridge.js
+          test -s apps/smv_injector_gui/host_server.py
           test -s apps/smv_injector_gui/run.cmd
-          grep -q 'SMV Injector' apps/smv_injector_gui/index.html
           grep -q 'navigator.serial' apps/smv_injector_gui/app.js
+          grep -q '/api/scl/inspect' apps/smv_injector_gui/profile_bridge.js
 
-      - name: Local-server smoke
+      - name: Build smart SCL profile engine
         shell: bash
         run: |
-          python3 -m http.server 8765 --bind 127.0.0.1 --directory apps/smv_injector_gui >/tmp/smv-gui-http.log 2>&1 &
+          cmake -S apps/smv_injector_gui/host -B build-smv-gui -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-smv-gui --target ariec61850_smv_profile_inspect
+
+      - name: Profile compiler regression
+        shell: bash
+        run: |
+          fixture=tests/fixtures/scl/sv-4800-structured-4i4v.scd
+          build-smv-gui/ariec61850_smv_profile_inspect "$fixture" > /tmp/profile-b.json
+          grep -q '"compatibilityClass":"B"' /tmp/profile-b.json
+          grep -q '"publisherRateHz":4800' /tmp/profile-b.json
+          build-smv-gui/ariec61850_smv_profile_inspect "$fixture" --counter-modulus 4800 > /tmp/profile-a.json
+          grep -q '"compatibilityClass":"A"' /tmp/profile-a.json
+          grep -q '"deviceSupport":"ready"' /tmp/profile-a.json
+
+      - name: Local backend smoke
+        shell: bash
+        run: |
+          python3 apps/smv_injector_gui/host_server.py --profile-tool build-smv-gui/ariec61850_smv_profile_inspect --port 8765 >/tmp/smv-gui-http.log 2>&1 &
           server_pid=$!
           trap 'kill ${server_pid} 2>/dev/null || true' EXIT
-          for attempt in $(seq 1 20); do
-            if curl --fail --silent http://127.0.0.1:8765/ >/tmp/smv-gui-index.html; then
-              break
-            fi
-            sleep 0.25
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8765/ >/tmp/smv-gui-index.html; then break; fi
+            sleep 0.2
           done
           grep -q 'ARStack61850' /tmp/smv-gui-index.html
+          curl --fail --silent -X POST \
+            -H 'X-File-Name: fixture.scd' \
+            --data-binary @tests/fixtures/scl/sv-4800-structured-4i4v.scd \
+            'http://127.0.0.1:8765/api/scl/inspect?counterModulus=4800' >/tmp/api.json
+          grep -q '"deviceSupport":"ready"' /tmp/api.json
+
+  windows-launcher-smoke:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Simulate locally deleted host scaffold
+        shell: powershell
+        run: Remove-Item 'apps\smv_injector_gui\host' -Recurse -Force
+
+      - name: Verify native-host launcher and self-heal
+        shell: cmd
+        run: apps\smv_injector_gui\run.cmd --build-only
+
+      - name: Verify Windows profile compiler
+        shell: powershell
+        run: |
+          $tool = Join-Path $PWD 'build-smv-gui\ariec61850_smv_profile_inspect.exe'
+          if (-not (Test-Path $tool)) { throw "profile compiler missing: $tool" }
+          & $tool 'tests\fixtures\scl\sv-4800-structured-4i4v.scd' '--counter-modulus' '4800' | Tee-Object -FilePath profile-a.json
+          if (-not (Select-String -Path profile-a.json -SimpleMatch '"deviceSupport":"ready"')) {
+            throw 'Windows profile compiler did not produce a deployable Class-A fixture result'
+          }
