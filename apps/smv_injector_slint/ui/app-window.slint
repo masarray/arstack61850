@@ -1,0 +1,708 @@
+import { LineEdit } from "std-widgets.slint";
+
+component ShellButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary: false;
+    in property <bool> danger: false;
+    in property <bool> enabled: true;
+    callback clicked;
+
+    height: 30px;
+    min-width: 76px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: root.primary ? #0a6faa : root.danger ? #a94848 : #c8d0d8;
+    background: !root.enabled ? #eef1f4
+        : touch.pressed ? (root.primary ? #075f93 : root.danger ? #8f3838 : #dfe6ec)
+        : touch.has-hover ? (root.primary ? #1382c2 : root.danger ? #c25555 : #f7f9fb)
+        : root.primary ? #0f78b5
+        : root.danger ? #b74747
+        : #eef3f7;
+
+    Text {
+        text: root.text;
+        color: !root.enabled ? #929ca6 : (root.primary || root.danger) ? #ffffff : #263746;
+        font-size: 12px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component IconCommand inherits Rectangle {
+    in property <string> glyph;
+    in property <string> text;
+    in property <bool> active: false;
+    callback clicked;
+
+    width: 70px;
+    height: 54px;
+    border-radius: 3px;
+    background: touch.pressed ? #d8e7f2 : touch.has-hover ? #edf6fb : root.active ? #e5f3fb : transparent;
+
+    VerticalLayout {
+        padding-top: 5px;
+        padding-bottom: 4px;
+        spacing: 2px;
+        Text {
+            text: root.glyph;
+            color: root.active ? #0877b8 : #405565;
+            font-size: 19px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.text;
+            color: #344957;
+            font-size: 10px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component NavTab inherits Rectangle {
+    in property <string> text;
+    in property <bool> active: false;
+    callback clicked;
+
+    height: 42px;
+    min-width: 112px;
+    background: touch.has-hover ? #1768a0 : transparent;
+
+    Text {
+        text: root.text;
+        color: root.active ? #ffffff : #d8e8f5;
+        font-size: 12px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    if root.active: Rectangle {
+        y: parent.height - 3px;
+        height: 3px;
+        background: #58c4ff;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component StatusPill inherits Rectangle {
+    in property <string> text;
+    in property <string> tone: "neutral";
+
+    height: 20px;
+    min-width: 54px;
+    border-radius: 10px;
+    background: root.tone == "good" ? #dff5e7
+        : root.tone == "warn" ? #fff0d2
+        : root.tone == "bad" ? #fde2e2
+        : root.tone == "blue" ? #dfeffc
+        : #e9edf1;
+
+    Text {
+        text: root.text;
+        color: root.tone == "good" ? #187044
+            : root.tone == "warn" ? #8b5a00
+            : root.tone == "bad" ? #9c3333
+            : root.tone == "blue" ? #165f8c
+            : #566674;
+        font-size: 10px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component PropertyRow inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <bool> alternate: false;
+
+    height: 28px;
+    background: root.alternate ? #f7f9fb : transparent;
+
+    HorizontalLayout {
+        padding-left: 9px;
+        padding-right: 9px;
+        spacing: 8px;
+        Text {
+            text: root.label;
+            color: #687887;
+            font-size: 10px;
+            min-width: 76px;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.value;
+            color: #263a49;
+            font-size: 11px;
+            horizontal-stretch: 1;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component SignalRow inherits Rectangle {
+    in property <string> channel;
+    in property <string> kind;
+    in-out property <string> magnitude;
+    in-out property <string> phase;
+    in property <string> unit;
+    in property <bool> alternate: false;
+    callback live-apply(string, string, string);
+
+    height: 42px;
+    background: root.alternate ? #f7f9fb : #ffffff;
+    border-width: 0px;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 8px;
+        spacing: 7px;
+
+        Rectangle {
+            width: 6px;
+            height: 6px;
+            border-radius: 3px;
+            background: root.kind == "I" ? #e15e5e : #1689cf;
+        }
+
+        Text {
+            text: root.channel;
+            color: #213746;
+            font-size: 12px;
+            min-width: 34px;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            min-width: 94px;
+            height: 28px;
+            border-radius: 3px;
+            border-width: 1px;
+            border-color: #cad3da;
+            background: #ffffff;
+            LineEdit {
+                x: 2px;
+                y: 1px;
+                width: parent.width - 4px;
+                height: parent.height - 2px;
+                text: root.magnitude;
+                font-size: 11px;
+                horizontal-alignment: right;
+                input-type: decimal;
+                edited(value) => { root.magnitude = value; }
+                accepted(value) => { root.live-apply(root.channel, "magnitude", value); }
+            }
+        }
+
+        Text {
+            text: root.unit;
+            color: #71818e;
+            font-size: 10px;
+            min-width: 24px;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            min-width: 70px;
+            height: 28px;
+            border-radius: 3px;
+            border-width: 1px;
+            border-color: #cad3da;
+            background: #ffffff;
+            LineEdit {
+                x: 2px;
+                y: 1px;
+                width: parent.width - 4px;
+                height: parent.height - 2px;
+                text: root.phase;
+                font-size: 11px;
+                horizontal-alignment: right;
+                input-type: decimal;
+                edited(value) => { root.phase = value; }
+                accepted(value) => { root.live-apply(root.channel, "phase", value); }
+            }
+        }
+
+        Text {
+            text: "deg";
+            color: #71818e;
+            font-size: 10px;
+            min-width: 22px;
+            vertical-alignment: center;
+        }
+
+        ShellButton {
+            text: "Apply";
+            min-width: 60px;
+            clicked => {
+                root.live-apply(root.channel, "magnitude", root.magnitude);
+                root.live-apply(root.channel, "phase", root.phase);
+            }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "ARStack61850 - SMV Workbench";
+    width: 1440px;
+    height: 900px;
+    min-width: 1120px;
+    min-height: 720px;
+    background: #e8edf2;
+
+    callback action-requested(string);
+    callback live-apply-requested(string, string, string);
+
+    in-out property <int> active-section: 1;
+    in-out property <bool> connected: false;
+    in-out property <bool> running: false;
+    in-out property <string> selected-stream: "MU01 / MSVCB01";
+
+    VerticalLayout {
+        spacing: 0px;
+
+        // Compact application title bar.
+        Rectangle {
+            height: 36px;
+            background: #07568d;
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 12px;
+                spacing: 10px;
+
+                Rectangle {
+                    width: 23px;
+                    height: 23px;
+                    border-radius: 4px;
+                    background: #18a0d6;
+                    Text {
+                        text: "AR";
+                        color: #ffffff;
+                        font-size: 9px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Text {
+                    text: "ARStack61850";
+                    color: #ffffff;
+                    font-size: 12px;
+                    min-width: 106px;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: "SMV Workbench  |  Lab Session 01";
+                    color: #cfe4f3;
+                    font-size: 11px;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+
+                StatusPill {
+                    text: root.connected ? "DEVICE ONLINE" : "OFFLINE";
+                    tone: root.connected ? "good" : "neutral";
+                    min-width: root.connected ? 92px : 58px;
+                }
+            }
+        }
+
+        // DANEO-inspired information hierarchy: major work modes stay persistent.
+        Rectangle {
+            height: 43px;
+            background: #0a5d96;
+            HorizontalLayout {
+                padding-left: 9px;
+                spacing: 2px;
+                NavTab { text: "Measurement"; active: root.active-section == 0; clicked => { root.active-section = 0; root.action-requested("nav-measurement"); } }
+                NavTab { text: "Signal Source"; active: root.active-section == 1; clicked => { root.active-section = 1; root.action-requested("nav-signal-source"); } }
+                NavTab { text: "Network"; active: root.active-section == 2; clicked => { root.active-section = 2; root.action-requested("nav-network"); } }
+                NavTab { text: "Supervision"; active: root.active-section == 3; clicked => { root.active-section = 3; root.action-requested("nav-supervision"); } }
+                NavTab { text: "Injection"; active: root.active-section == 4; clicked => { root.active-section = 4; root.action-requested("nav-injection"); } }
+                NavTab { text: "Observation"; active: root.active-section == 5; clicked => { root.active-section = 5; root.action-requested("nav-observation"); } }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+            }
+        }
+
+        // Ribbon is intentionally shallow so engineering data keeps most of the screen.
+        Rectangle {
+            height: 66px;
+            background: #ffffff;
+            border-width: 1px;
+            border-color: #cfd7de;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 9px;
+                padding-top: 5px;
+                padding-bottom: 5px;
+                spacing: 3px;
+
+                IconCommand { glyph: "+"; text: "New"; clicked => { root.action-requested("new-session"); } }
+                IconCommand { glyph: "↥"; text: "Import SCL"; clicked => { root.action-requested("import-scl"); } }
+                IconCommand { glyph: "▣"; text: "Save"; clicked => { root.action-requested("save-session"); } }
+
+                Rectangle { width: 1px; background: #d9e0e5; }
+
+                IconCommand {
+                    glyph: root.connected ? "●" : "○";
+                    text: root.connected ? "Disconnect" : "Connect";
+                    active: root.connected;
+                    clicked => {
+                        root.connected = !root.connected;
+                        root.action-requested(root.connected ? "connect-device" : "disconnect-device");
+                    }
+                }
+                IconCommand { glyph: "✓"; text: "Validate"; clicked => { root.action-requested("validate-profile"); } }
+                IconCommand { glyph: "⇩"; text: "Deploy"; clicked => { root.action-requested("deploy-profile"); } }
+
+                Rectangle { width: 1px; background: #d9e0e5; }
+
+                Rectangle {
+                    width: 190px;
+                    background: transparent;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        ShellButton {
+                            text: "Start";
+                            primary: true;
+                            enabled: root.connected && !root.running;
+                            clicked => { root.running = true; root.action-requested("start-injection"); }
+                        }
+                        ShellButton {
+                            text: "Stop";
+                            danger: true;
+                            enabled: root.running;
+                            clicked => { root.running = false; root.action-requested("stop-injection"); }
+                        }
+                    }
+                }
+
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+
+                VerticalLayout {
+                    min-width: 190px;
+                    spacing: 2px;
+                    Text { text: "Profile state"; color: #738391; font-size: 9px; horizontal-alignment: right; }
+                    Text { text: root.running ? "RUNNING · LIVE APPLY" : root.connected ? "READY / STOPPED" : "NO DEVICE"; color: root.running ? #18844e : #405463; font-size: 12px; horizontal-alignment: right; }
+                }
+            }
+        }
+
+        // Three-pane workstation: system tree, engineering canvas, live inspector.
+        HorizontalLayout {
+            vertical-stretch: 1;
+            spacing: 1px;
+
+            Rectangle {
+                min-width: 230px;
+                preferred-width: 248px;
+                max-width: 270px;
+                background: #3c4a57;
+
+                VerticalLayout {
+                    spacing: 0px;
+                    Rectangle {
+                        height: 37px;
+                        background: #34424e;
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 10px;
+                            Text { text: "TEST SYSTEM"; color: #e7eef3; font-size: 11px; vertical-alignment: center; horizontal-stretch: 1; }
+                            Text { text: "+"; color: #9fc6de; font-size: 17px; vertical-alignment: center; }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 48px;
+                        background: #455563;
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 8px;
+                            spacing: 8px;
+                            Rectangle { width: 8px; height: 8px; border-radius: 4px; background: root.connected ? #55c878 : #7b8994; }
+                            VerticalLayout {
+                                spacing: 1px;
+                                Text { text: "ESP32-P4 Injector"; color: #ffffff; font-size: 11px; }
+                                Text { text: root.connected ? "USB Serial · connected" : "Device not connected"; color: #b9c7d0; font-size: 9px; }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 38px;
+                        background: #2f3c47;
+                        HorizontalLayout {
+                            padding-left: 22px;
+                            padding-right: 8px;
+                            spacing: 8px;
+                            Text { text: "◇"; color: #5ec3ff; font-size: 14px; vertical-alignment: center; }
+                            Text { text: root.selected-stream; color: #dce8ef; font-size: 10px; vertical-alignment: center; horizontal-stretch: 1; }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 34px;
+                        background: #3c4a57;
+                        HorizontalLayout {
+                            padding-left: 36px;
+                            Text { text: "4I + 4V · 4800 fps"; color: #aabac5; font-size: 9px; vertical-alignment: center; }
+                        }
+                    }
+
+                    Rectangle { vertical-stretch: 1; background: #3c4a57; }
+
+                    Rectangle {
+                        height: 92px;
+                        background: #34424e;
+                        VerticalLayout {
+                            padding: 10px;
+                            spacing: 5px;
+                            Text { text: "SESSION"; color: #8fa3b1; font-size: 9px; }
+                            Text { text: "SCL profile loaded"; color: #d7e3ea; font-size: 10px; }
+                            Text { text: "Class A · deployable"; color: #6fd595; font-size: 10px; }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                min-width: 610px;
+                horizontal-stretch: 1;
+                background: #edf1f4;
+
+                VerticalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    padding-top: 9px;
+                    padding-bottom: 10px;
+                    spacing: 8px;
+
+                    Rectangle {
+                        height: 46px;
+                        border-radius: 4px;
+                        background: #ffffff;
+                        border-width: 1px;
+                        border-color: #d2d9df;
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            spacing: 8px;
+                            VerticalLayout {
+                                spacing: 1px;
+                                Text { text: "Signal Source"; color: #1e3545; font-size: 15px; }
+                                Text { text: "Live engineering values · press Enter or Apply after validation"; color: #778792; font-size: 9px; }
+                            }
+                            Rectangle { horizontal-stretch: 1; background: transparent; }
+                            StatusPill { text: root.running ? "LIVE" : "STAGED"; tone: root.running ? "good" : "blue"; }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 388px;
+                        border-radius: 4px;
+                        background: #ffffff;
+                        border-width: 1px;
+                        border-color: #d2d9df;
+                        VerticalLayout {
+                            spacing: 0px;
+                            Rectangle {
+                                height: 34px;
+                                background: #f2f5f7;
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    Text { text: "CHANNEL"; color: #6b7b87; font-size: 9px; min-width: 54px; vertical-alignment: center; }
+                                    Text { text: "MAGNITUDE"; color: #6b7b87; font-size: 9px; min-width: 126px; vertical-alignment: center; }
+                                    Text { text: "PHASE"; color: #6b7b87; font-size: 9px; min-width: 95px; vertical-alignment: center; }
+                                    Text { text: "LIVE CONTROL"; color: #6b7b87; font-size: 9px; horizontal-stretch: 1; vertical-alignment: center; }
+                                }
+                            }
+                            SignalRow { channel: "Ia"; kind: "I"; magnitude: "1000"; phase: "0"; unit: "A"; live-apply(ch, field, value) => { root.live-apply-requested(ch, field, value); } }
+                            SignalRow { channel: "Ib"; kind: "I"; magnitude: "1000"; phase: "-120"; unit: "A"; alternate: true; live-apply(ch, field, value) => { root.live-apply-requested(ch, field, value); } }
+                            SignalRow { channel: "Ic"; kind: "I"; magnitude: "1000"; phase: "120"; unit: "A"; live-apply(ch, field, value) => { root.live-apply-requested(ch, field, value); } }
+                            SignalRow { channel: "In"; kind: "I"; magnitude: "0"; phase: "0"; unit: "A"; alternate: true; live-apply(ch, field, value) => { root.live-apply-requested(ch, field, value); } }
+                            SignalRow { channel: "Ua"; kind: "U"; magnitude: "63.5"; phase: "0"; unit: "V"; live-apply(ch, field, value) => { root.live-apply-requested(ch, field, value); } }
+                            SignalRow { channel: "Ub"; kind: "U"; magnitude: "63.5"; phase: "-120"; unit: "V"; alternate: true; live-apply(ch, field, value) => { root.live-apply-requested(ch, field, value); } }
+                            SignalRow { channel: "Uc"; kind: "U"; magnitude: "63.5"; phase: "120"; unit: "V"; live-apply(ch, field, value) => { root.live-apply-requested(ch, field, value); } }
+                            SignalRow { channel: "Un"; kind: "U"; magnitude: "0"; phase: "0"; unit: "V"; alternate: true; live-apply(ch, field, value) => { root.live-apply-requested(ch, field, value); } }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        vertical-stretch: 1;
+                        spacing: 8px;
+
+                        Rectangle {
+                            horizontal-stretch: 2;
+                            border-radius: 4px;
+                            background: #ffffff;
+                            border-width: 1px;
+                            border-color: #d2d9df;
+                            VerticalLayout {
+                                spacing: 0px;
+                                Rectangle {
+                                    height: 32px;
+                                    background: #f3f6f8;
+                                    HorizontalLayout {
+                                        padding-left: 10px;
+                                        padding-right: 10px;
+                                        Text { text: "LIVE PREVIEW"; color: #5d707e; font-size: 9px; horizontal-stretch: 1; vertical-alignment: center; }
+                                        Text { text: "50.000 Hz"; color: #245e80; font-size: 10px; vertical-alignment: center; }
+                                    }
+                                }
+                                Rectangle {
+                                    vertical-stretch: 1;
+                                    background: #fbfcfd;
+                                    // Lightweight placeholder for the future real-time plot renderer.
+                                    Rectangle { x: 14px; y: parent.height * 0.50; width: parent.width - 28px; height: 1px; background: #d9e1e7; }
+                                    Rectangle { x: 14px; y: parent.height * 0.28; width: parent.width - 28px; height: 1px; background: #edf1f4; }
+                                    Rectangle { x: 14px; y: parent.height * 0.72; width: parent.width - 28px; height: 1px; background: #edf1f4; }
+                                    Text { x: 16px; y: 13px; text: root.running ? "Streaming preview surface" : "Start injection to activate preview"; color: #7b8a96; font-size: 10px; }
+                                    Text { x: 16px; y: 32px; text: "Waveform / phasor / FFT modules plug into this canvas."; color: #a0abb3; font-size: 9px; }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            min-width: 210px;
+                            border-radius: 4px;
+                            background: #ffffff;
+                            border-width: 1px;
+                            border-color: #d2d9df;
+                            VerticalLayout {
+                                spacing: 0px;
+                                Rectangle { height: 32px; background: #f3f6f8; Text { x: 10px; text: "RUNTIME HEALTH"; color: #5d707e; font-size: 9px; vertical-alignment: center; } }
+                                PropertyRow { label: "Publisher"; value: root.running ? "Running" : "Stopped"; }
+                                PropertyRow { label: "Target rate"; value: "4800 fps"; alternate: true; }
+                                PropertyRow { label: "Missed slots"; value: "0"; }
+                                PropertyRow { label: "TX failures"; value: "0"; alternate: true; }
+                                Rectangle { vertical-stretch: 1; background: transparent; }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                min-width: 252px;
+                preferred-width: 282px;
+                max-width: 310px;
+                background: #f7f9fb;
+                border-width: 1px;
+                border-color: #cdd5dc;
+
+                VerticalLayout {
+                    spacing: 7px;
+                    padding: 8px;
+
+                    Rectangle {
+                        height: 34px;
+                        border-radius: 3px;
+                        background: #3b4b58;
+                        HorizontalLayout {
+                            padding-left: 9px;
+                            padding-right: 8px;
+                            Text { text: "ACTIVE STREAM"; color: #eef4f7; font-size: 10px; horizontal-stretch: 1; vertical-alignment: center; }
+                            Rectangle { width: 7px; height: 7px; border-radius: 4px; background: root.running ? #52ca78 : #9aa7b0; }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 224px;
+                        border-radius: 3px;
+                        background: #ffffff;
+                        border-width: 1px;
+                        border-color: #d4dbe1;
+                        VerticalLayout {
+                            spacing: 0px;
+                            PropertyRow { label: "svID"; value: "MU01_MSV1"; }
+                            PropertyRow { label: "APPID"; value: "0x4000"; alternate: true; }
+                            PropertyRow { label: "Destination"; value: "01-0C-CD-04-00-01"; }
+                            PropertyRow { label: "VLAN / PCP"; value: "100 / 4"; alternate: true; }
+                            PropertyRow { label: "Sample rate"; value: "4800 fps"; }
+                            PropertyRow { label: "confRev"; value: "1"; alternate: true; }
+                            PropertyRow { label: "Layout"; value: "4I + 4V"; }
+                            PropertyRow { label: "Compatibility"; value: "Class A"; alternate: true; }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 34px;
+                        border-radius: 3px;
+                        background: #e7f3fb;
+                        HorizontalLayout {
+                            padding-left: 9px;
+                            padding-right: 8px;
+                            Text { text: "LIVE APPLY"; color: #1f6085; font-size: 10px; horizontal-stretch: 1; vertical-alignment: center; }
+                            StatusPill { text: root.running ? "ARMED" : "IDLE"; tone: root.running ? "good" : "neutral"; }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 130px;
+                        border-radius: 3px;
+                        background: #ffffff;
+                        border-width: 1px;
+                        border-color: #d4dbe1;
+                        VerticalLayout {
+                            spacing: 0px;
+                            PropertyRow { label: "Frequency"; value: "50.000 Hz"; }
+                            PropertyRow { label: "Quality"; value: "GOOD"; alternate: true; }
+                            PropertyRow { label: "smpCnt"; value: root.running ? "live" : "paused"; }
+                            PropertyRow { label: "Apply path"; value: "mutable state"; alternate: true; }
+                        }
+                    }
+
+                    Rectangle {
+                        vertical-stretch: 1;
+                        border-radius: 3px;
+                        background: #ffffff;
+                        border-width: 1px;
+                        border-color: #d4dbe1;
+                        VerticalLayout {
+                            padding: 10px;
+                            spacing: 6px;
+                            Text { text: "ENGINEERING NOTE"; color: #6d7d89; font-size: 9px; }
+                            Text { text: "Profile identity changes remain STOP → validate → deploy."; color: #405563; font-size: 10px; }
+                            Text { text: "Magnitude, phase, frequency and quality use the live mutable path."; color: #405563; font-size: 10px; }
+                            Rectangle { vertical-stretch: 1; background: transparent; }
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 24px;
+            background: #33424e;
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 12px;
+                Text { text: root.connected ? "●  ESP32-P4 connected" : "○  No device"; color: root.connected ? #77d99a : #b6c2ca; font-size: 9px; vertical-alignment: center; }
+                Text { text: "SCL: Class A"; color: #b6c2ca; font-size: 9px; vertical-alignment: center; }
+                Text { text: "Publisher: " + (root.running ? "RUNNING" : "STOPPED"); color: #b6c2ca; font-size: 9px; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                Text { text: "ARStack61850 · Native Slint shell"; color: #8396a3; font-size: 9px; vertical-alignment: center; }
+            }
+        }
+    }
+}
