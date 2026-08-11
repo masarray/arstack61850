@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-class SclProfileModel final : public QAbstractListModel {
+class SclProfileModel : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(QString sourceName READ sourceName NOTIFY sourceChanged)
     Q_PROPERTY(QString documentStatus READ documentStatus NOTIFY sourceChanged)
