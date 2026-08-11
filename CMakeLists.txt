@@ -67,8 +67,42 @@ add_library(ariec61850_core
 
 add_library(ARIEC61850::core ALIAS ariec61850_core)
 
+add_library(ariec61850_mms_server_core
+    src/asn1/ber_span_reader.cpp
+    src/osi/tpkt_span.cpp
+    src/osi/cotp_span.cpp
+    src/osi/session_span.cpp
+    src/osi/presentation_span.cpp
+    src/acse/association_span.cpp
+    src/mms/pdu_span.cpp
+    src/mms/services_span.cpp
+    src/mms/write_span.cpp
+    src/mms/data_set_span.cpp
+    src/mms/information_report_span.cpp
+    src/mms/buffered_selective_information_report_span.cpp
+    src/mms/static_object_table.cpp
+    src/mms/static_write.cpp
+    src/mms/static_data_set_table.cpp
+    src/mms/static_dispatcher.cpp
+    src/mms/connection_runtime.cpp
+    src/mms/static_server_session.cpp
+    src/mms/static_brcb_runtime.cpp
+    src/mms/static_brcb_control.cpp
+    src/mms/static_brcb_objects.cpp
+    src/mms/static_brcb_connection.cpp
+    src/mms/static_brcb_checkpoint_store.cpp
+    src/mms/static_brcb_state_codec.cpp)
+
+add_library(ARIEC61850::mms_server_core ALIAS ariec61850_mms_server_core)
+
 target_compile_features(ariec61850_core PUBLIC cxx_std_20)
 target_include_directories(ariec61850_core
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+
+target_compile_features(ariec61850_mms_server_core PUBLIC cxx_std_20)
+target_include_directories(ariec61850_mms_server_core
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)
@@ -107,6 +141,8 @@ endfunction()
 
 ariec61850_apply_warnings(ariec61850_core)
 ariec61850_apply_sanitizers(ariec61850_core)
+ariec61850_apply_warnings(ariec61850_mms_server_core)
+ariec61850_apply_sanitizers(ariec61850_mms_server_core)
 
 if(ARIEC61850_BUILD_TOOLS)
     add_executable(ariec61850_pcap_interop_check tools/pcap_interop_check.cpp)
@@ -156,6 +192,20 @@ if(ARIEC61850_BUILD_TOOLS)
     target_compile_features(ariec61850_file_transfer PRIVATE cxx_std_20)
     ariec61850_apply_warnings(ariec61850_file_transfer)
     ariec61850_apply_sanitizers(ariec61850_file_transfer)
+
+    add_executable(
+        ariec61850_static_ied_server
+        tools/static_ied_server.cpp
+        tools/static_ied_server_sigpipe.cpp)
+    target_link_libraries(
+        ariec61850_static_ied_server
+        PRIVATE ARIEC61850::mms_server_core)
+    if(WIN32)
+        target_link_libraries(ariec61850_static_ied_server PRIVATE ws2_32)
+    endif()
+    target_compile_features(ariec61850_static_ied_server PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_static_ied_server)
+    ariec61850_apply_sanitizers(ariec61850_static_ied_server)
 endif()
 
 if(ARIEC61850_BUILD_TESTS)
@@ -337,6 +387,55 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_sanitizers(ariec61850_fuzz_smoke_tests)
     add_test(NAME ariec61850_fuzz_smoke_tests COMMAND ariec61850_fuzz_smoke_tests)
 
+    add_executable(
+        ariec61850_mms_server_session_tests
+        tests/test_mms_static_server_session.cpp)
+    target_link_libraries(
+        ariec61850_mms_server_session_tests
+        PRIVATE ARIEC61850::mms_server_core)
+    target_compile_features(
+        ariec61850_mms_server_session_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_mms_server_session_tests)
+    ariec61850_apply_sanitizers(ariec61850_mms_server_session_tests)
+    add_test(
+        NAME ariec61850_mms_server_session_tests
+        COMMAND ariec61850_mms_server_session_tests)
+
+    add_executable(
+        ariec61850_mms_connection_runtime_tests
+        embedded/mms_connection_runtime_hard_profile_smoke.cpp)
+    target_link_libraries(
+        ariec61850_mms_connection_runtime_tests
+        PRIVATE ARIEC61850::mms_server_core)
+    target_compile_features(
+        ariec61850_mms_connection_runtime_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_mms_connection_runtime_tests)
+    ariec61850_apply_sanitizers(ariec61850_mms_connection_runtime_tests)
+    add_test(
+        NAME ariec61850_mms_connection_runtime_tests
+        COMMAND ariec61850_mms_connection_runtime_tests)
+
+    foreach(brcb_smoke IN ITEMS
+            mms_brcb
+            mms_brcb_control
+            mms_brcb_connection
+            mms_brcb_objects
+            mms_brcb_lifecycle
+            mms_brcb_persistence
+            mms_brcb_recovery_v2
+            mms_brcb_checkpoint_fallback
+            mms_negotiated_limits)
+        set(brcb_target "ariec61850_${brcb_smoke}_server_core_tests")
+        add_executable(
+            ${brcb_target}
+            ${CMAKE_CURRENT_SOURCE_DIR}/embedded/${brcb_smoke}_hard_profile_smoke.cpp)
+        target_link_libraries(${brcb_target} PRIVATE ARIEC61850::mms_server_core)
+        target_compile_features(${brcb_target} PRIVATE cxx_std_20)
+        ariec61850_apply_warnings(${brcb_target})
+        ariec61850_apply_sanitizers(${brcb_target})
+        add_test(NAME ${brcb_target} COMMAND ${brcb_target})
+    endforeach()
+
     if(ARIEC61850_BUILD_TOOLS)
         add_test(
             NAME ariec61850_pcap_interop_smoke
@@ -357,6 +456,9 @@ if(ARIEC61850_BUILD_TESTS)
         add_test(
             NAME ariec61850_file_transfer_help
             COMMAND ariec61850_file_transfer --help)
+        add_test(
+            NAME ariec61850_static_ied_server_help
+            COMMAND ariec61850_static_ied_server --help)
     endif()
 endif()
 
