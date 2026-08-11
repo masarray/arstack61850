@@ -133,7 +133,7 @@ Rectangle {
                             matrix.sourceModel.setProperty(signalRow.rowIndex, "enabled", checked)
                             matrix.controller.selectSignal(matrix.groupIndex, signalRow.rowIndex)
                             matrix.controller.refreshPreview()
-                            if (matrix.device.connected)
+                            if (matrix.device.deviceVerified)
                                 matrix.device.setEnabled(signalRow.sid, checked)
                         }
                     }

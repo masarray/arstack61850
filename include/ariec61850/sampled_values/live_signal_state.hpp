@@ -221,7 +221,7 @@ public:
                 sine_q30 = std::clamp(sine_q30, -clip_q30, clip_q30);
             }
             const std::int64_t peak_counts = rms_to_peak_counts(channel.rms_counts);
-            const std::int64_t value = (sine_q30 * peak_counts) >> 30U;
+            const std::int64_t value = scale_q30(peak_counts, sine_q30);
             row[index] = clamp_i32(value);
         }
 
@@ -273,6 +273,18 @@ private:
     [[nodiscard]] static std::int64_t rms_to_peak_counts(const std::int32_t rms) noexcept {
         constexpr std::int64_t sqrt2_q30 = 1518500250LL;
         return (static_cast<std::int64_t>(rms) * sqrt2_q30) >> 30U;
+    }
+
+    [[nodiscard]] static std::int64_t scale_q30(
+        const std::int64_t value,
+        const std::int64_t factor_q30) noexcept {
+        // Splitting the Q30 factor avoids overflowing int64_t when extreme
+        // clip/DC/harmonic settings meet near-INT32 signal magnitudes. The
+        // validated shape range keeps both products below int64_t limits.
+        constexpr std::int64_t q30 = std::int64_t{1} << 30U;
+        const std::int64_t whole = factor_q30 / q30;
+        const std::int64_t remainder = factor_q30 % q30;
+        return value * whole + (value * remainder) / q30;
     }
 
     [[nodiscard]] static std::int32_t clamp_i32(const std::int64_t value) noexcept {
