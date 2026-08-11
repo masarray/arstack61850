@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/mms-runtime-diagnostic.yml'
       - 'scripts/mms_server_parity_finalize.py'
+      - 'scripts/mms_server_parity_namespace_fix.py'
 
 permissions:
   contents: write
@@ -20,7 +21,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply deterministic parity patch
-        run: python3 scripts/mms_server_parity_finalize.py
+        run: |
+          python3 scripts/mms_server_parity_finalize.py
+          python3 scripts/mms_server_parity_namespace_fix.py
 
       - name: Diff safety check
         run: |
