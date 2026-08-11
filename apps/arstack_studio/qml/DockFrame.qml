@@ -30,8 +30,8 @@ Rectangle {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 32
-            color: theme.raised
+            Layout.preferredHeight: 34
+            color: "#131b24"
 
             RowLayout {
                 anchors.fill: parent
@@ -39,7 +39,12 @@ Rectangle {
                 anchors.rightMargin: 6
                 spacing: 7
 
-                Rectangle { width: 3; height: 14; radius: 2; color: theme.accent }
+                Rectangle {
+                    width: 3
+                    height: 16
+                    radius: 2
+                    color: theme.accent
+                }
                 Label {
                     Layout.fillWidth: true
                     text: frame.titleText
@@ -50,17 +55,32 @@ Rectangle {
                     elide: Text.ElideRight
                     verticalAlignment: Text.AlignVCenter
                 }
-                Label {
+
+                Rectangle {
                     visible: frame.statusText.length > 0
-                    text: frame.statusText
-                    color: theme.muted
-                    font.family: frame.monoFont
-                    font.pixelSize: theme.captionSize - 1
-                    verticalAlignment: Text.AlignVCenter
+                    implicitWidth: statusLabel.implicitWidth + 12
+                    implicitHeight: 20
+                    radius: 5
+                    color: "#0d141c"
+                    border.width: 1
+                    border.color: theme.lineSoft
+
+                    Label {
+                        id: statusLabel
+                        anchors.centerIn: parent
+                        text: frame.statusText
+                        color: theme.muted
+                        font.family: frame.monoFont
+                        font.pixelSize: theme.captionSize - 2
+                        font.weight: Font.DemiBold
+                        verticalAlignment: Text.AlignVCenter
+                    }
                 }
+
                 DarkToolButton {
                     visible: frame.detachable
                     iconSource: Qt.resolvedUrl("../assets/lucide/external-link.svg")
+                    iconSize: 17
                     theme: frame.theme
                     uiFont: frame.uiFont
                     onClicked: frame.detachRequested()
@@ -70,7 +90,7 @@ Rectangle {
                 DarkToolButton {
                     visible: frame.closable
                     iconSource: Qt.resolvedUrl("../assets/lucide/x.svg")
-                    iconSize: 19
+                    iconSize: 18
                     theme: frame.theme
                     uiFont: frame.uiFont
                     onClicked: frame.closeRequested()
@@ -79,7 +99,13 @@ Rectangle {
                 }
             }
 
-            Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: theme.lineSoft }
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 1
+                color: theme.lineSoft
+            }
         }
 
         Item {
