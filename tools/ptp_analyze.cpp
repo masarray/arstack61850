@@ -5,7 +5,6 @@
 #include "ariec61850/time_sync/ptp_monitor.hpp"
 
 #include <cstdint>
-#include <cstdlib>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
@@ -41,21 +40,25 @@ using ar::iec61850::time_sync::PtpPortIdentity;
     return stream.str();
 }
 
-[[nodiscard]] std::uint8_t parse_domain(const std::string_view text) {
+[[nodiscard]] std::uint8_t parse_byte_range(
+    const std::string_view text,
+    const unsigned maximum,
+    const char* label) {
     std::size_t consumed{};
     const auto value = std::stoul(std::string{text}, &consumed, 0);
-    if (consumed != text.size() || value > 255UL) {
-        throw std::invalid_argument("PTP domain must be in the range 0..255.");
+    if (consumed != text.size() || value > maximum) {
+        throw std::invalid_argument(
+            std::string{label} + " must be in the range 0.." + std::to_string(maximum) + ".");
     }
     return static_cast<std::uint8_t>(value);
 }
 
 void print_help() {
     std::cout
-        << "Usage: ariec61850_ptp_analyze <capture.pcap> [--domain N] [--json]\n"
+        << "Usage: ariec61850_ptp_analyze <capture.pcap> [--domain N] [--transport-specific N] [--json]\n"
         << "\n"
         << "Read-only PTPv2 Layer-2 analyzer for laboratory captures.\n"
-        << "It reports source/domain/message visibility and sequence health;\n"
+        << "It reports source/domain/transportSpecific/message visibility and sequence health;\n"
         << "it does not claim measured clock accuracy from host capture timestamps.\n";
 }
 
@@ -70,6 +73,7 @@ int main(int argc, char** argv) {
 
         std::filesystem::path capture_path;
         std::optional<std::uint8_t> expected_domain;
+        std::optional<std::uint8_t> expected_transport_specific;
         bool json = false;
 
         for (int index = 1; index < argc; ++index) {
@@ -86,7 +90,17 @@ int main(int argc, char** argv) {
                 if (index + 1 >= argc) {
                     throw std::invalid_argument("--domain requires a value.");
                 }
-                expected_domain = parse_domain(argv[++index]);
+                expected_domain = parse_byte_range(argv[++index], 255U, "PTP domain");
+                continue;
+            }
+            if (argument == "--transport-specific") {
+                if (index + 1 >= argc) {
+                    throw std::invalid_argument("--transport-specific requires a value.");
+                }
+                expected_transport_specific = parse_byte_range(
+                    argv[++index],
+                    15U,
+                    "transportSpecific");
                 continue;
             }
             if (!capture_path.empty()) {
@@ -120,6 +134,7 @@ int main(int argc, char** argv) {
         const auto snapshot = monitor.snapshot(captured_at);
         ar::iec61850::time_sync::PtpTimingHealthOptions options;
         options.expected_domain_number = expected_domain;
+        options.expected_transport_specific = expected_transport_specific;
         const auto report = ar::iec61850::time_sync::PtpTimingHealthValidator::evaluate(snapshot, options);
 
         if (json) {
@@ -141,7 +156,12 @@ int main(int argc, char** argv) {
                           << "\"pdelayReq\":" << source.count(PtpMessageType::pdelay_req) << ','
                           << "\"pdelayResp\":" << source.count(PtpMessageType::pdelay_resp) << ','
                           << "\"pdelayRespFollowUp\":" << source.count(PtpMessageType::pdelay_resp_follow_up) << ','
-                          << "\"sequenceAnomalies\":" << source.sequence_anomaly_count;
+                          << "\"sequenceAnomalies\":" << source.sequence_anomaly_count << ','
+                          << "\"transportSpecificChanges\":" << source.transport_specific_change_count;
+                if (source.transport_specific.has_value()) {
+                    std::cout << ",\"transportSpecific\":"
+                              << static_cast<unsigned>(*source.transport_specific);
+                }
                 if (source.outer_vlan_id.has_value()) {
                     std::cout << ",\"outerVlan\":" << *source.outer_vlan_id;
                 }
@@ -169,13 +189,22 @@ int main(int argc, char** argv) {
                   << " health=" << severity_text(report.severity) << '\n';
         for (const auto& source : snapshot.sources) {
             std::cout << "  domain=" << static_cast<unsigned>(source.domain_number)
-                      << " source=" << port_identity_text(source.source_port_identity)
+                      << " transportSpecific=";
+            if (source.transport_specific.has_value()) {
+                std::cout << "0x" << std::hex
+                          << static_cast<unsigned>(*source.transport_specific)
+                          << std::dec;
+            } else {
+                std::cout << "unknown";
+            }
+            std::cout << " source=" << port_identity_text(source.source_port_identity)
                       << " announce=" << source.count(PtpMessageType::announce)
                       << " sync=" << source.count(PtpMessageType::sync)
                       << " followUp=" << source.count(PtpMessageType::follow_up)
                       << " pdelayReq=" << source.count(PtpMessageType::pdelay_req)
                       << " pdelayResp=" << source.count(PtpMessageType::pdelay_resp)
                       << " seqAnomaly=" << source.sequence_anomaly_count
+                      << " tsChanges=" << source.transport_specific_change_count
                       << '\n';
         }
         for (const auto& check : report.checks) {
