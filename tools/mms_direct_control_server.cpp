@@ -421,6 +421,15 @@ struct EncodedValue final { std::span<const std::uint8_t> bytes; };
         case mms::MmsStaticServerSessionStatus::peer_closed:
             return true;
         default:
+            std::cerr
+                << "MMS_DIRECT_CONTROL_SESSION_TERMINAL sessionStatus="
+                << static_cast<unsigned>(result.status)
+                << " connectionStatus="
+                << static_cast<unsigned>(result.connection_status)
+                << " bytesReceived=" << result.bytes_received
+                << " bytesSent=" << result.bytes_sent
+                << " bufferedInput=" << result.buffered_input_bytes
+                << " pendingOutput=" << result.pending_output_bytes << '\n';
             return false;
         }
     }
