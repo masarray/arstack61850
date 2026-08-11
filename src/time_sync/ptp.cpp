@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <limits>
+#include <utility>
 
 namespace ar::iec61850::time_sync {
 namespace {
@@ -105,8 +106,8 @@ void write_u64_be(const std::span<std::uint8_t> destination, const std::uint64_t
 } // namespace
 
 PtpTimestamp PtpTimestamp::from_system_time(const std::chrono::system_clock::time_point time) noexcept {
-    using namespace std::chrono;
-    const auto elapsed = duration_cast<nanoseconds>(time.time_since_epoch()).count();
+    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        time.time_since_epoch()).count();
     if (elapsed <= 0) {
         return {};
     }
@@ -230,8 +231,8 @@ std::vector<std::uint8_t> PtpCodec::build_ethernet_frame(
     }
 
     ethernet::EthernetFrame frame;
-    frame.destination = ethernet::MacAddress{destination_mac};
-    frame.source = ethernet::MacAddress{source_mac};
+    frame.destination = ethernet::MacAddress{std::span<const std::uint8_t>{destination_mac}};
+    frame.source = ethernet::MacAddress{std::span<const std::uint8_t>{source_mac}};
     frame.ether_type = ptp_ethertype;
     if (vlan_id.has_value()) {
         frame.vlan = ethernet::VlanTag{vlan_priority, *vlan_id};
