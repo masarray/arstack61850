@@ -33,6 +33,15 @@ struct MmsStaticServerSessionResult final {
     std::size_t buffered_input_bytes{};
     std::size_t pending_output_bytes{};
 
+    // Preserve application evidence emitted by the connection runtime.  This
+    // lets platform adapters diagnose a standards-level Reject/ConfirmedError
+    // without parsing the encoded response or coupling the core to logging.
+    MmsStaticDispatchStatus application_status{
+        MmsStaticDispatchStatus::response_ready};
+    MmsWireConfirmedService application_service{
+        MmsWireConfirmedService::unknown};
+    std::uint32_t invoke_id{};
+
     [[nodiscard]] constexpr bool terminal() const noexcept {
         return status == MmsStaticServerSessionStatus::peer_closed ||
             status == MmsStaticServerSessionStatus::transport_error ||

@@ -28,6 +28,11 @@ struct MmsStaticDispatchPolicy final {
     std::uint32_t missing_object_failure_code{10U};
     std::uint32_t access_denied_failure_code{3U};
     std::uint32_t backend_failure_code{10U};
+    // Some live discovery clients still derive the Logical Node root from
+    // flattened LN$FC$DO$DA names before requesting the root TypeSpecification.
+    // Keep strict IED-simulator root-only discovery as the default, while
+    // allowing host interoperability adapters to advertise both forms.
+    bool advertise_flattened_child_aliases{};
 };
 
 struct MmsStaticDispatchResult final {

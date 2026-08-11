@@ -125,6 +125,7 @@ namespace {
 [[nodiscard]] std::size_t collect_names(
     const MmsStaticObjectTable& objects,
     const MmsStaticDataSetTable& data_sets,
+    const MmsStaticDispatchPolicy& policy,
     const MmsGetNameListRequestView& request,
     std::array<std::string_view, MmsServiceSpanCodec::maximum_identifiers>& names) noexcept {
     std::size_t count = 0U;
@@ -147,7 +148,8 @@ namespace {
         request.scope == MmsNameScopeKind::domain_specific) {
         for (const auto& object : objects.objects()) {
             if (!span_equals(request.domain_id, object.domain) ||
-                is_flattened_child_with_root(objects, object.domain, object.item)) {
+                (!policy.advertise_flattened_child_aliases &&
+                 is_flattened_child_with_root(objects, object.domain, object.item))) {
                 continue;
             }
             if (!append_unique(names, count, object.item)) {
@@ -185,7 +187,7 @@ namespace {
     }
 
     std::array<std::string_view, MmsServiceSpanCodec::maximum_identifiers> names{};
-    const auto name_count = collect_names(objects, data_sets, request, names);
+    const auto name_count = collect_names(objects, data_sets, policy, request, names);
     if (name_count > names.size()) {
         return make_status(MmsStaticDispatchStatus::unsupported_request, confirmed);
     }
