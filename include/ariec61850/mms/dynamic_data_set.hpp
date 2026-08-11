@@ -145,10 +145,25 @@ private:
     [[nodiscard]] MmsDataSetDirectoryResponse verify(
         const MmsObjectName& data_set_name,
         std::stop_token stop_token);
+    void synchronize_ownership_scope() const;
+    void capture_ownership_scope() const;
+    void clear_ownership_scope() const noexcept;
+    void require_request_within_negotiated_limit(
+        std::span<const std::uint8_t> mms_pdu,
+        const char* operation) const;
 
     MmsAssociationRuntime& association_;
     MmsDynamicDataSetOptions options_{};
-    std::set<std::string, std::less<>> owned_data_sets_;
+    mutable std::set<std::string, std::less<>> owned_data_sets_;
+    mutable bool ownership_scope_valid_{};
+    mutable MmsEndpoint ownership_endpoint_{};
+    mutable std::size_t ownership_event_count_{};
+    mutable MmsAssociationEventKind ownership_marker_kind_{
+        MmsAssociationEventKind::state_changed};
+    mutable MmsAssociationRuntimeState ownership_marker_state_{
+        MmsAssociationRuntimeState::disconnected};
+    mutable std::optional<std::uint32_t> ownership_marker_invoke_id_;
+    mutable std::string ownership_marker_message_;
 };
 
 } // namespace ar::iec61850::mms
