@@ -1,66 +1,76 @@
-# Premium UX review build
+# Premium UX review — ESP32-P4 SMV Injector
 
-This branch is intentionally an evaluation build for the ESP32-P4 SMV Injector GUI. It does not change the firmware command protocol and it is not intended to be merged until the operator workflow and visual direction are approved.
+This branch is intentionally an evaluation surface. Do not merge it into the production GUI until the injection workflow and visual direction are approved.
 
-## Design target
+## V2 direction after first visual review
 
-- premium, clean engineering-instrument appearance rather than a dashboard
-- no-scroll primary workflow on normal engineering laptops
-- fast 4I + 4V value entry in a compact precision grid
-- persistent generated phasor and waveform visualization
-- clear separation between generated setpoint preview and future on-wire observation
-- device/profile/runtime status always visible
-- Start/Stop always in one fixed location
-- minimal visual effects and no heavy chart dependencies
+The first cockpit prototype still behaved too much like a web form: one long 8-channel table, per-row Apply buttons, wire-value clutter, a large frequency slider, and responsive stacking that moved the phasor/waveform below the injector on normal laptop widths.
 
-## Primary workflow
+V2 changes the working model rather than only polishing colors:
 
-1. Connect the ESP32-P4.
-2. Optionally load SCL/CID engineering data.
-3. Edit magnitude, phase, and frequency directly in the injection grid.
-4. Confirm the generated phasor and 40 ms waveform preview.
-5. Keep Live apply enabled for immediate updates or disable it and use Apply / Apply all.
-6. Press Start live.
-7. Observe runtime rate, missed slots, TX failures, and generation counter.
-8. Press Stop from the fixed action bar.
+- Current and Voltage are separate 4-row matrices shown side-by-side.
+- Magnitude and Phase are the only primary numeric columns.
+- Wire counts/mdeg remain available in the selected-value detail instead of occupying a permanent column.
+- Per-row Apply buttons are removed; Live Apply is the normal fast path and `Enter` commits when Live Apply is paused.
+- Phasor and waveform remain beside the injector down to approximately 1010 px viewport width.
+- Frequency is a compact direct-entry value with 50/60 Hz presets; the large slider is removed.
+- A 3-phase link mode can couple A/B/C magnitude and preserve 120-degree phase relationships while editing.
 
-Balanced and Zero can be used while disconnected so a test state can be prepared and visually reviewed before the device is armed.
+## Keyboard-first matrix navigation
+
+Numeric cells behave as an engineering matrix rather than independent HTML fields:
+
+- `Arrow Up / Down` — previous / next channel in the same numeric column.
+- `Arrow Left / Right` — move between Magnitude and Phase, wrapping to the adjacent row.
+- `Enter` — commit when Live Apply is off, then move to the next channel.
+- `Ctrl + Arrow Up / Down` — increment / decrement by the field step.
+- `Ctrl + Shift + Arrow Up / Down` — coarse step (10×).
+- `Tab / Shift+Tab` — normal sequential field navigation.
+- Focusing a numeric cell selects its whole value so typing immediately replaces the old value.
+
+The navigation wraps through `Ia → Ib → Ic → In → Ua → Ub → Uc → Un`, so repeated arrow-key operation never requires reaching for the mouse.
+
+## Primary workflow to evaluate
+
+1. Open the GUI.
+2. Prepare values while the device is offline if desired.
+3. Use the arrow keys to move through the injection matrix and type new values directly.
+4. Optionally enable 3-phase link for balanced magnitude/angle editing.
+5. Confirm the generated phasor and waveform without leaving the workspace.
+6. Connect the ESP32-P4.
+7. Use Live Apply for immediate setpoint updates, or pause Live Apply and use Enter / Apply All.
+8. Start live injection from the persistent bottom action bar.
+
+## Visual intent
+
+The target is a precision engineering instrument, not a dashboard and not a gaming UI:
+
+- compact hierarchy
+- graphite surfaces
+- restrained accent color
+- small tabular numeric typography
+- thin separators
+- minimal radius and shadow
+- no glass blur or decorative glow
+- selected signal color is used for data identity, not decoration
+- phasor and waveform are part of the working surface, not afterthought cards
 
 ## Visualization truthfulness
 
-The phasor and waveform are labelled **Generated / SETPOINT**. They are calculated from the configured magnitude, phase, enable state, and frequency. They show what the injector is configured to generate; they are not presented as proof of frames observed on the Ethernet wire.
+Phasor and waveform are generated setpoint previews. They visualize what the configured signal generator is intended to produce. They are not Ethernet on-wire proof. Future observed/captured data must be clearly separated from generated data.
 
-A later monitor path can add an **Observed** trace and generated-vs-observed comparison without changing the main cockpit layout.
+## Review checklist
 
-## Keyboard / fast-entry behavior
+Please judge the branch on these questions:
 
-- `Tab` moves through value fields naturally.
-- Double-click selects the complete numeric value.
-- `Enter` applies the active channel when a device is connected.
-- Number inputs retain native arrow-key fine adjustment.
-- Clicking/focusing a row makes that channel visually dominant in the phasor and waveform previews.
+- Can an engineer change many Ia/Ib/Ic/Ua/Ub/Uc values without touching the mouse?
+- Can the operator understand the active injection in one glance?
+- Are Current and Voltage easy to compare independently?
+- Do phasor and waveform remain visible at the laptop viewport actually used on the bench?
+- Is the UI calm and premium rather than card-heavy or browser-like?
+- Is Start/Stop always obvious without dominating the entire screen?
+- Is secondary protocol information available without slowing the primary workflow?
 
-## Performance approach
+## Scope
 
-The prototype remains dependency-free HTML/CSS/JavaScript. Visualization uses two canvas surfaces and redraws only on state changes or resize through `requestAnimationFrame`. Device serial traffic and the firmware realtime publisher remain unchanged.
-
-## Review focus
-
-Please judge this PR primarily on:
-
-- visual quality / premium feel
-- density and readability
-- speed of the injection workflow
-- usefulness of persistent phasor + waveform
-- whether profile/status information is visible without competing with the injection task
-- whether the layout is a good visual foundation for the later Qt/QML desktop implementation
-
-## Run
-
-Use the existing launcher from the repository root:
-
-```powershell
-.\apps\smv_injector_gui\run.cmd
-```
-
-The same Web Serial requirements and firmware compatibility rules as the existing GUI apply.
+GUI only. No firmware timing, SV packet layout, or serial command protocol is changed by this evaluation branch.
