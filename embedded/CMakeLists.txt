@@ -46,6 +46,9 @@ set(ARIEC61850_EMBEDDED_SOURCES
     ${ARIEC61850_ROOT}/src/mms/data_codec.cpp
     ${ARIEC61850_ROOT}/src/mms/pdu.cpp
     ${ARIEC61850_ROOT}/src/mms/services.cpp
+    ${ARIEC61850_ROOT}/src/mms/invoke_router.cpp
+    ${ARIEC61850_ROOT}/src/mms/association_runtime.cpp
+    ${ARIEC61850_ROOT}/src/mms/file_service.cpp
 
     ${ARIEC61850_ROOT}/src/mms/pdu_span.cpp
     ${ARIEC61850_ROOT}/src/mms/services_span.cpp
