@@ -7,9 +7,9 @@ Rectangle {
     property var theme
     property string state: "OFFLINE"
     property color stateColor: theme.muted
-    property string monoFont: "Cascadia Mono"
+    property string monoFont: "Inter"
 
-    implicitHeight: 24
+    implicitHeight: 26
     implicitWidth: stateText.implicitWidth + 24
     radius: 6
     color: state === "RUNNING" ? theme.greenSoft :
@@ -26,7 +26,7 @@ Rectangle {
         text: badge.state
         color: badge.stateColor
         font.family: badge.monoFont
-        font.pixelSize: 8
+        font.pixelSize: badge.theme.captionSize
         font.weight: Font.Bold
         font.letterSpacing: 0.45
     }

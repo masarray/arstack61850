@@ -68,6 +68,44 @@ cmake --build build-arstack-studio --target arstack_studio --parallel
 .\build-arstack-studio\arstack_studio.exe
 ```
 
+On the Windows development workstation used for this phase, Qt is installed at
+`D:\Qt\6.8.3\msvc2022_64`. Build and launch with one command:
+
+```powershell
+.\apps\arstack_studio\run-windows.ps1
+```
+
+Use `-NoLaunch` for a build-only verification. The launcher discovers the
+installed Visual Studio C++ toolchain with `vswhere`, reuses its bundled Ninja,
+and does not modify the user's global `PATH`.
+
+## P2 fast-workflow command deck
+
+The fixed command deck carries ARSVIN's short operator loop into the native Qt
+surface without copying its visual styling:
+
+1. Source shows whether an engineering file or development profile is active.
+2. Device shows the serial connection state.
+3. Output shows the authoritative runtime gate (`OFFLINE`, `ARMED`, `RUNNING`,
+   `PROFILE CHANGED`, or `PROFILE BLOCKED`).
+
+Open SCL, Balanced, Zero, Check, Deploy, Start, and Stop remain visible above
+the three-column workspace. Keyboard operators can use `Ctrl+O`, `Ctrl+B`,
+`Ctrl+0`, `Ctrl+K`, `Ctrl+D`, `F5`, and `F6`. Check reports readiness through
+the existing non-modal status surface; it does not bypass the deployment gate.
+
+## P2 dock shell
+
+The main window now behaves as a compact engineering shell rather than a fixed
+form. Signal Preview is a right-side dock that can be hidden or detached into a
+real secondary Qt window. Status History and Output Monitor share a collapsible
+bottom dock so runtime evidence stays visible without displacing the manual
+injection grid. The Views menu restores closed panels and detaches Preview.
+
+This first dock phase intentionally keeps the safety-critical editor fixed in
+the center. Arbitrary panel dragging and layout persistence remain follow-up
+work; detaching a view must never move or duplicate the output controls.
+
 For redistribution, package the required dynamically linked Qt runtime libraries with the normal Qt deployment tooling and review the applicable Qt/LGPL distribution obligations for the chosen module set.
 
 ## CI
@@ -96,6 +134,8 @@ Before this desktop GUI is treated as a proven replacement for the current bench
 
 The desktop visual target is a calm premium engineering instrument:
 
+- Inter Variable is bundled under the SIL Open Font License and used for all
+  interface, numeric, status, and plot-label text; no monospace family is used;
 - Current and Voltage are the primary working matrices;
 - SCL/profile information stays available without dominating the work surface;
 - phasor and waveform remain persistent;

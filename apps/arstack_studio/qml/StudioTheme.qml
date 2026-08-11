@@ -22,4 +22,15 @@ QtObject {
     readonly property color amberSoft: "#3b301c"
     readonly property color red: "#ff727f"
     readonly property color redSoft: "#46252b"
+
+    // Shared density and typography tokens. Keep engineering data compact,
+    // but never depend on tiny text to make the workspace fit.
+    readonly property int captionSize: 10
+    readonly property int labelSize: 11
+    readonly property int bodySize: 12
+    readonly property int subtitleSize: 15
+    readonly property int titleSize: 20
+    readonly property int controlHeight: 36
+    readonly property int panelRadius: 10
+    readonly property int controlRadius: 7
 }

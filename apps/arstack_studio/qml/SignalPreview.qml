@@ -8,13 +8,14 @@ SurfacePanel {
     property var currentModel
     property var voltageModel
     property string uiFont: "Inter"
-    property string monoFont: "Cascadia Mono"
+    property string monoFont: "Inter"
     property bool compact: false
     property string activeSignal: "Ia"
     property string activeUnit: "A"
     property real activeMagnitude: 1
     property real activePhase: 0
     property real signalFrequency: 50
+    property bool showHeader: true
 
     function requestPaint() {
         phasor.requestPaint()
@@ -27,14 +28,15 @@ SurfacePanel {
         spacing: 8
 
         RowLayout {
+            visible: preview.showHeader
             Layout.fillWidth: true
             ColumnLayout {
                 spacing: 1
-                Label { text: "GENERATED SETPOINT"; color: preview.theme.muted; font.family: preview.uiFont; font.pixelSize: 8; font.weight: Font.DemiBold; font.letterSpacing: 1.0 }
+                Label { text: "GENERATED SETPOINT"; color: preview.theme.muted; font.family: preview.uiFont; font.pixelSize: preview.theme.captionSize; font.weight: Font.DemiBold; font.letterSpacing: 0.9 }
                 Label { text: "Signal Preview"; color: preview.theme.text; font.family: preview.uiFont; font.pixelSize: preview.compact ? 15 : 17; font.weight: Font.DemiBold }
             }
             Item { Layout.fillWidth: true }
-            Label { text: "LOCAL"; color: preview.theme.muted; font.family: preview.monoFont; font.pixelSize: 8; font.weight: Font.Bold }
+            Label { text: "LOCAL"; color: preview.theme.muted; font.family: preview.monoFont; font.pixelSize: preview.theme.captionSize; font.weight: Font.Bold }
         }
 
         RowLayout {
@@ -115,7 +117,7 @@ SurfacePanel {
                         ctx.closePath()
                         ctx.fill()
                         if (active) {
-                            ctx.font = "600 10px Inter"
+                            ctx.font = "600 11px '" + preview.uiFont + "'"
                             ctx.fillText(signal.signalId, ex + 7, ey - 7)
                         }
                         ctx.restore()

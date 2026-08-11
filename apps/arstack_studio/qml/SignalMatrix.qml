@@ -10,7 +10,7 @@ Rectangle {
     property var device
     property var sourceModel
     property string uiFont: "Inter"
-    property string monoFont: "Cascadia Mono"
+    property string monoFont: "Inter"
     property int groupIndex: 0
     property string titleText: "Current"
     property string symbolText: "I"
@@ -78,10 +78,10 @@ Rectangle {
             Layout.leftMargin: 9
             Layout.rightMargin: 9
             spacing: 7
-            Label { text: "ON"; Layout.preferredWidth: 28; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: 7; font.weight: Font.DemiBold }
-            Label { text: "CH"; Layout.preferredWidth: 34; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: 7; font.weight: Font.DemiBold }
-            Label { text: "MAGNITUDE"; Layout.fillWidth: true; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: 7; font.weight: Font.DemiBold }
-            Label { text: "PHASE"; Layout.preferredWidth: matrix.compact ? 82 : 98; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: 7; font.weight: Font.DemiBold }
+            Label { text: "ON"; Layout.preferredWidth: 28; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: matrix.theme.captionSize - 1; font.weight: Font.DemiBold }
+            Label { text: "CH"; Layout.preferredWidth: 34; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: matrix.theme.captionSize - 1; font.weight: Font.DemiBold }
+            Label { text: "MAGNITUDE"; Layout.fillWidth: true; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: matrix.theme.captionSize - 1; font.weight: Font.DemiBold }
+            Label { text: "PHASE"; Layout.preferredWidth: matrix.compact ? 82 : 98; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: matrix.theme.captionSize - 1; font.weight: Font.DemiBold }
         }
 
         Repeater {

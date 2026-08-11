@@ -10,7 +10,7 @@ SurfacePanel {
     property var device
     property var profiles
     property string uiFont: "Inter"
-    property string monoFont: "Cascadia Mono"
+    property string monoFont: "Inter"
     property bool compact: false
 
     readonly property var profile: profiles.selectedProfile
@@ -32,6 +32,10 @@ SurfacePanel {
 
     function kicker(textValue) {
         return textValue
+    }
+
+    function openEngineeringFile() {
+        engineeringFileDialog.open()
     }
 
     FileDialog {
@@ -63,7 +67,7 @@ SurfacePanel {
                 text: "ENGINEERING SOURCE"
                 color: panel.theme.muted
                 font.family: panel.uiFont
-                font.pixelSize: 8
+                font.pixelSize: panel.theme.captionSize
                 font.weight: Font.DemiBold
                 font.letterSpacing: 1.0
             }
@@ -92,7 +96,7 @@ SurfacePanel {
                         text: "DEPLOY"
                         color: panel.theme.amber
                         font.family: panel.monoFont
-                        font.pixelSize: 7
+                        font.pixelSize: panel.theme.captionSize - 1
                         font.weight: Font.Bold
                     }
                 }
@@ -102,7 +106,7 @@ SurfacePanel {
                 text: panel.profiles.sourceName.length ? panel.profiles.sourceName : "SCL / CID / SCD / IID"
                 color: panel.theme.muted
                 font.family: panel.uiFont
-                font.pixelSize: 9
+                font.pixelSize: panel.theme.labelSize
                 elide: Text.ElideMiddle
             }
         }
@@ -125,7 +129,7 @@ SurfacePanel {
                 text: "RESOLVED STREAM"
                 color: panel.theme.muted
                 font.family: panel.uiFont
-                font.pixelSize: 8
+                font.pixelSize: panel.theme.captionSize
                 font.weight: Font.DemiBold
                 font.letterSpacing: 1.0
             }
@@ -137,7 +141,7 @@ SurfacePanel {
                 currentIndex: panel.profiles.selectedIndex
                 enabled: !panel.device.running
                 font.family: panel.uiFont
-                font.pixelSize: 9
+                font.pixelSize: panel.theme.labelSize
                 onActivated: {
                     panel.profiles.selectStream(currentIndex)
                     panel.controller.profileDirty = true
@@ -163,7 +167,7 @@ SurfacePanel {
                         color: panel.profile.compatibilityClass === "A" ? panel.theme.green :
                                panel.profile.compatibilityClass === "B" ? panel.theme.amber : panel.theme.red
                         font.family: panel.monoFont
-                        font.pixelSize: 7
+                        font.pixelSize: panel.theme.captionSize - 1
                         font.weight: Font.Bold
                     }
                 }
@@ -172,7 +176,7 @@ SurfacePanel {
                     text: String(panel.profile.deviceSupport || "—").toUpperCase()
                     color: panel.profile.deviceSupport === "ready" ? panel.theme.green : panel.theme.textSoft
                     font.family: panel.monoFont
-                    font.pixelSize: 8
+                    font.pixelSize: panel.theme.captionSize
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
                 }
@@ -197,18 +201,18 @@ SurfacePanel {
                     columnSpacing: 8
                     rowSpacing: 4
 
-                    Label { text: "svID"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-                    Label { Layout.fillWidth: true; text: panel.profile.svId || "—"; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: 8; elide: Text.ElideMiddle }
-                    Label { text: "DataSet"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-                    Label { Layout.fillWidth: true; text: panel.profile.dataSetReference || "—"; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: 8; elide: Text.ElideMiddle }
-                    Label { text: "MAC / APPID"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-                    Label { Layout.fillWidth: true; text: (panel.profile.destinationMac || "—") + " · " + (panel.profile.appIdHex || "—"); color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: 8; elide: Text.ElideRight }
-                    Label { text: "Rate"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-                    Label { text: panel.profile.publisherRate ? panel.profile.publisherRate + " fps" : "—"; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: 8 }
-                    Label { text: "VLAN"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-                    Label { text: panel.profile.vlanPresent ? "PCP " + panel.profile.vlanPriority + " · VID " + panel.profile.vlanId : "untagged"; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: 8 }
-                    Label { text: "Payload"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-                    Label { text: panel.profile.payloadBytes ? panel.profile.payloadBytes + " B · " + panel.profile.channelLeafCount + " leaves" : "—"; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: 8 }
+                    Label { text: "svID"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize }
+                    Label { Layout.fillWidth: true; text: panel.profile.svId || "—"; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: panel.theme.captionSize; elide: Text.ElideMiddle }
+                    Label { text: "DataSet"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize }
+                    Label { Layout.fillWidth: true; text: panel.profile.dataSetReference || "—"; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: panel.theme.captionSize; elide: Text.ElideMiddle }
+                    Label { text: "MAC / APPID"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize }
+                    Label { Layout.fillWidth: true; text: (panel.profile.destinationMac || "—") + " · " + (panel.profile.appIdHex || "—"); color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: panel.theme.captionSize; elide: Text.ElideRight }
+                    Label { text: "Rate"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize }
+                    Label { text: panel.profile.publisherRate ? panel.profile.publisherRate + " fps" : "—"; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: panel.theme.captionSize }
+                    Label { text: "VLAN"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize }
+                    Label { text: panel.profile.vlanPresent ? "PCP " + panel.profile.vlanPriority + " · VID " + panel.profile.vlanId : "untagged"; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: panel.theme.captionSize }
+                    Label { text: "Payload"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize }
+                    Label { text: panel.profile.payloadBytes ? panel.profile.payloadBytes + " B · " + panel.profile.channelLeafCount + " leaves" : "—"; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: panel.theme.captionSize }
                 }
             }
 
@@ -224,7 +228,7 @@ SurfacePanel {
                         text: (modelData.severity === "error" ? "×  " : "!  ") + modelData.text
                         color: modelData.severity === "error" ? panel.theme.red : panel.theme.amber
                         font.family: panel.uiFont
-                        font.pixelSize: 8
+                        font.pixelSize: panel.theme.captionSize
                         wrapMode: Text.WordWrap
                         maximumLineCount: 2
                         elide: Text.ElideRight
@@ -237,13 +241,13 @@ SurfacePanel {
             visible: panel.profile.compatibilityClass === "B"
             Layout.fillWidth: true
             spacing: 5
-            Label { text: "COUNTER POLICY"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8; font.weight: Font.DemiBold; font.letterSpacing: 1.0 }
+            Label { text: "COUNTER POLICY"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize; font.weight: Font.DemiBold; font.letterSpacing: 0.9 }
             Label {
                 Layout.fillWidth: true
                 text: "Confirm the evidenced smpCnt modulus before deployment."
                 color: panel.theme.muted
                 font.family: panel.uiFont
-                font.pixelSize: 8
+                font.pixelSize: panel.theme.captionSize
                 wrapMode: Text.WordWrap
             }
             RowLayout {
@@ -276,7 +280,7 @@ SurfacePanel {
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 5
-            Label { text: "ENGINEERING SCALING"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8; font.weight: Font.DemiBold; font.letterSpacing: 1.0 }
+            Label { text: "ENGINEERING SCALING"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize; font.weight: Font.DemiBold; font.letterSpacing: 0.9 }
 
             RowLayout {
                 Layout.fillWidth: true
@@ -329,7 +333,7 @@ SurfacePanel {
 
         Rectangle { Layout.fillWidth: true; height: 1; color: panel.theme.lineSoft }
 
-        Label { text: "QUICK SETUP"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8; font.weight: Font.DemiBold; font.letterSpacing: 1.0 }
+        Label { text: "QUICK SETUP"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize; font.weight: Font.DemiBold; font.letterSpacing: 0.9 }
         RowLayout {
             Layout.fillWidth: true
             CalmButton { Layout.fillWidth: true; theme: panel.theme; uiFont: panel.uiFont; text: "Balanced"; onClicked: panel.controller.balanced() }
@@ -338,20 +342,20 @@ SurfacePanel {
 
         Item { Layout.fillHeight: true }
 
-        Label { text: "RUNTIME"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8; font.weight: Font.DemiBold; font.letterSpacing: 1.0 }
+        Label { text: "RUNTIME"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize; font.weight: Font.DemiBold; font.letterSpacing: 0.9 }
         GridLayout {
             Layout.fillWidth: true
             columns: 2
             columnSpacing: 8
             rowSpacing: 3
             Label { text: "Rate"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-            Label { text: panel.device.fps; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: 8; Layout.alignment: Qt.AlignRight }
+            Label { text: panel.device.fps; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: panel.theme.captionSize; Layout.alignment: Qt.AlignRight }
             Label { text: "Missed"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-            Label { text: panel.device.missed; color: Number(panel.device.missed) > 0 ? panel.theme.amber : panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: 8; Layout.alignment: Qt.AlignRight }
+            Label { text: panel.device.missed; color: Number(panel.device.missed) > 0 ? panel.theme.amber : panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: panel.theme.captionSize; Layout.alignment: Qt.AlignRight }
             Label { text: "TX fail"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-            Label { text: panel.device.txFailures; color: Number(panel.device.txFailures) > 0 ? panel.theme.red : panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: 8; Layout.alignment: Qt.AlignRight }
+            Label { text: panel.device.txFailures; color: Number(panel.device.txFailures) > 0 ? panel.theme.red : panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: panel.theme.captionSize; Layout.alignment: Qt.AlignRight }
             Label { text: "Generation"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-            Label { text: panel.device.signalGeneration; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: 8; Layout.alignment: Qt.AlignRight }
+            Label { text: panel.device.signalGeneration; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: panel.theme.captionSize; Layout.alignment: Qt.AlignRight }
         }
     }
 }

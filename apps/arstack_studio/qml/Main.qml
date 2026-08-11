@@ -16,8 +16,8 @@ ApplicationWindow {
 
     StudioTheme { id: studioTheme }
 
-    property string uiFont: "Inter"
-    property string monoFont: "Cascadia Mono"
+    property string uiFont: interFont.status === FontLoader.Ready ? interFont.name : "Inter"
+    property string monoFont: uiFont
     property bool phaseLink: false
     property bool profileDirty: false
     property real currentScale: 1000.0
@@ -32,6 +32,17 @@ ApplicationWindow {
     property real activeQuality: 0
     property string transientMessage: ""
     property bool transientError: false
+    property bool previewDockVisible: true
+    property bool previewDetached: false
+    property bool telemetryDockVisible: true
+    property bool telemetryExpanded: true
+
+    font.family: root.uiFont
+
+    FontLoader {
+        id: interFont
+        source: Qt.resolvedUrl("../assets/InterVariable.ttf")
+    }
 
     readonly property bool compactLayout: width < 1300
     readonly property bool selectedProfileDeployable:
@@ -115,11 +126,71 @@ ApplicationWindow {
         ListElement { signalId: "Un"; magnitude: 0.000; phase: 0.0; enabled: true; quality: 0; traceColor: "#9a88df" }
     }
 
+    ListModel {
+        id: statusHistoryModel
+        ListElement { timeText: "--:--:--"; messageText: "ARStack Studio ready. Edit locally or connect an injector."; isError: false }
+    }
+
     function showMessage(message, error) {
         transientMessage = message
         transientError = error === true
+        statusHistoryModel.append({
+            timeText: new Date().toLocaleTimeString(Qt.locale(), "HH:mm:ss"),
+            messageText: message,
+            isError: error === true
+        })
+        while (statusHistoryModel.count > 100)
+            statusHistoryModel.remove(0)
         messageTimer.restart()
     }
+
+    function detachPreview() {
+        previewDockVisible = false
+        previewDetached = true
+        detachedPreviewWindow.raise()
+        detachedPreviewWindow.requestActivate()
+    }
+
+    function openEngineeringFile() {
+        profilePanel.openEngineeringFile()
+    }
+
+    function deploySelectedProfile() {
+        if (canDeploy && device.deployProfile(sclProfiles.selectedProfile))
+            profileDirty = true
+    }
+
+    function runReadinessCheck() {
+        if (sclProfiles.fatalError.length) {
+            showMessage(sclProfiles.fatalError, true)
+            return
+        }
+        if (sclProfiles.hasProfiles && !selectedProfileDeployable) {
+            showMessage("Selected stream is valid SCL but outside the current ESP32-P4 deployment boundary.", true)
+            return
+        }
+        if (!device.connected) {
+            showMessage(sclProfiles.hasProfiles ?
+                "Profile is valid. Connect the injector before deployment." :
+                "Development setpoints are ready. Connect the injector before Start.", false)
+            return
+        }
+        if (sclProfiles.hasProfiles && (profileDirty || !device.profileArmed)) {
+            showMessage("Profile is valid and the device is connected. Deploy to arm output.", false)
+            return
+        }
+        showMessage(device.running ?
+            "Output is running and live apply is active." :
+            "Ready to start. Device and output state are consistent.", false)
+    }
+
+    Shortcut { sequence: "Ctrl+O"; onActivated: root.openEngineeringFile() }
+    Shortcut { sequence: "Ctrl+B"; onActivated: root.balanced() }
+    Shortcut { sequence: "Ctrl+0"; onActivated: root.zeroAll() }
+    Shortcut { sequence: "Ctrl+K"; onActivated: root.runReadinessCheck() }
+    Shortcut { sequence: "Ctrl+D"; onActivated: root.deploySelectedProfile() }
+    Shortcut { sequence: "F5"; enabled: root.canStart; onActivated: device.start() }
+    Shortcut { sequence: "F6"; enabled: device.connected && device.running; onActivated: device.stop() }
 
     function groupModel(group) {
         return group === 0 ? currentModel : voltageModel
@@ -173,6 +244,8 @@ ApplicationWindow {
     function refreshPreview() {
         if (previewPanel)
             previewPanel.requestPaint()
+        if (detachedPreviewPanel)
+            detachedPreviewPanel.requestPaint()
     }
 
     function selectSignal(group, row) {
@@ -392,7 +465,7 @@ ApplicationWindow {
 
             ColumnLayout {
                 spacing: 0
-                Label { text: "ARSTACK61850"; color: studioTheme.muted; font.family: root.uiFont; font.pixelSize: 7; font.weight: Font.Bold; font.letterSpacing: 1.15 }
+                Label { text: "ARSTACK61850"; color: studioTheme.muted; font.family: root.uiFont; font.pixelSize: studioTheme.captionSize - 1; font.weight: Font.Bold; font.letterSpacing: 1.0 }
                 Label { text: "SMV Injector"; color: studioTheme.text; font.family: root.uiFont; font.pixelSize: 13; font.weight: Font.DemiBold }
             }
 
@@ -495,53 +568,87 @@ ApplicationWindow {
 
             Item { Layout.fillWidth: true }
 
-            CalmButton {
+            Label {
                 visible: !root.compactLayout
+                text: "Ctrl+O source   ·   Ctrl+K check   ·   F5 start   ·   F6 stop"
+                color: studioTheme.muted
+                font.family: root.uiFont
+                font.pixelSize: studioTheme.captionSize
+            }
+
+            CalmButton {
                 theme: studioTheme
                 uiFont: root.uiFont
                 text: "Diagnostics"
                 onClicked: diagnosticsDialog.open()
             }
+        }
+    }
 
-            CalmButton {
-                theme: studioTheme
-                uiFont: root.uiFont
-                tone: "accent"
-                text: device.profileDeploying ? "Deploying…" : "Deploy"
-                enabled: root.canDeploy
-                onClicked: if (device.deployProfile(sclProfiles.selectedProfile)) root.profileDirty = true
-            }
+    Window {
+        id: detachedPreviewWindow
+        width: 520
+        height: 720
+        minimumWidth: 400
+        minimumHeight: 520
+        visible: root.previewDetached
+        title: "ARStack Studio · Signal Preview"
+        color: studioTheme.bg
 
-            CalmButton {
-                theme: studioTheme
-                uiFont: root.uiFont
-                tone: "danger"
-                text: "■  Stop"
-                implicitWidth: 88
-                implicitHeight: 35
-                enabled: device.connected && device.running
-                onClicked: device.stop()
-            }
+        onClosing: function(close) {
+            close.accepted = false
+            root.previewDetached = false
+            root.previewDockVisible = true
+        }
 
-            CalmButton {
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: 10
+            color: studioTheme.bg
+
+            SignalPreview {
+                id: detachedPreviewPanel
+                anchors.fill: parent
                 theme: studioTheme
+                currentModel: currentModel
+                voltageModel: voltageModel
                 uiFont: root.uiFont
-                tone: "success"
-                text: "▶  Start"
-                implicitWidth: 98
-                implicitHeight: 35
-                enabled: root.canStart
-                onClicked: device.start()
+                monoFont: root.monoFont
+                compact: false
+                activeSignal: root.activeSignal
+                activeUnit: root.activeUnit
+                activeMagnitude: root.activeMagnitude
+                activePhase: root.activePhase
+                signalFrequency: root.signalFrequency
             }
         }
     }
 
-    RowLayout {
+    ColumnLayout {
         anchors.fill: parent
         anchors.margins: root.compactLayout ? 9 : 11
         spacing: root.compactLayout ? 9 : 11
 
+        WorkflowBar {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 82
+            Layout.minimumHeight: 82
+            theme: studioTheme
+            controller: root
+            device: device
+            profiles: sclProfiles
+            uiFont: root.uiFont
+            monoFont: root.monoFont
+            compact: root.compactLayout
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: root.compactLayout ? 9 : 11
+
         ProfileInspector {
+            id: profilePanel
             Layout.preferredWidth: root.compactLayout ? 200 : 238
             Layout.minimumWidth: root.compactLayout ? 192 : 214
             Layout.fillHeight: true
@@ -569,7 +676,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     ColumnLayout {
                         spacing: 1
-                        Label { text: "INJECTION WORKSPACE"; color: studioTheme.muted; font.family: root.uiFont; font.pixelSize: 8; font.weight: Font.DemiBold; font.letterSpacing: 1.0 }
+                        Label { text: "INJECTION WORKSPACE"; color: studioTheme.muted; font.family: root.uiFont; font.pixelSize: studioTheme.captionSize; font.weight: Font.DemiBold; font.letterSpacing: 0.9 }
                         Label { text: "Manual Injection"; color: studioTheme.text; font.family: root.uiFont; font.pixelSize: root.compactLayout ? 18 : 20; font.weight: Font.DemiBold }
                     }
                     Item { Layout.fillWidth: true }
@@ -608,7 +715,7 @@ ApplicationWindow {
 
                         ColumnLayout {
                             spacing: 0
-                            Label { text: "FREQUENCY"; color: studioTheme.muted; font.family: root.uiFont; font.pixelSize: 7; font.weight: Font.DemiBold; font.letterSpacing: 0.85 }
+                            Label { text: "FREQUENCY"; color: studioTheme.muted; font.family: root.uiFont; font.pixelSize: studioTheme.captionSize - 1; font.weight: Font.DemiBold; font.letterSpacing: 0.8 }
                             RowLayout {
                                 spacing: 5
                                 NumericField {
@@ -716,7 +823,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     spacing: 8
                     Rectangle { width: 6; height: 6; radius: 3; color: studioTheme.accent }
-                    Label { text: root.activeSignal; color: studioTheme.textSoft; font.family: root.monoFont; font.pixelSize: 9; font.weight: Font.Bold }
+                    Label { text: root.activeSignal; color: studioTheme.textSoft; font.family: root.monoFont; font.pixelSize: studioTheme.labelSize; font.weight: Font.Bold }
                     Label {
                         text: root.activeMagnitude.toFixed(3) + " " + root.activeUnit + " RMS · " + root.activePhase.toFixed(2) + "°"
                         color: studioTheme.muted
@@ -745,22 +852,53 @@ ApplicationWindow {
             }
         }
 
-        SignalPreview {
-            id: previewPanel
+        DockFrame {
+            visible: root.previewDockVisible && !root.previewDetached
             Layout.preferredWidth: root.compactLayout ? 290 : 360
             Layout.minimumWidth: root.compactLayout ? 280 : 320
             Layout.fillHeight: true
             theme: studioTheme
-            currentModel: currentModel
-            voltageModel: voltageModel
+            titleText: "Signal preview"
+            statusText: "GENERATED"
             uiFont: root.uiFont
             monoFont: root.monoFont
-            compact: root.compactLayout
-            activeSignal: root.activeSignal
-            activeUnit: root.activeUnit
-            activeMagnitude: root.activeMagnitude
-            activePhase: root.activePhase
-            signalFrequency: root.signalFrequency
+            detachable: true
+            onDetachRequested: root.detachPreview()
+            onCloseRequested: root.previewDockVisible = false
+
+            SignalPreview {
+                id: previewPanel
+                anchors.fill: parent
+                theme: studioTheme
+                currentModel: currentModel
+                voltageModel: voltageModel
+                uiFont: root.uiFont
+                monoFont: root.monoFont
+                compact: root.compactLayout
+                showHeader: false
+                activeSignal: root.activeSignal
+                activeUnit: root.activeUnit
+                activeMagnitude: root.activeMagnitude
+                activePhase: root.activePhase
+                signalFrequency: root.signalFrequency
+            }
+        }
+        }
+
+        TelemetryDock {
+            visible: root.telemetryDockVisible
+            Layout.fillWidth: true
+            Layout.preferredHeight: implicitHeight
+            theme: studioTheme
+            device: device
+            currentModel: currentModel
+            voltageModel: voltageModel
+            historyModel: statusHistoryModel
+            uiFont: root.uiFont
+            monoFont: root.monoFont
+            expanded: root.telemetryExpanded
+            onExpandedChanged: root.telemetryExpanded = expanded
+            onCloseRequested: root.telemetryDockVisible = false
         }
     }
 

@@ -32,6 +32,9 @@ qt_add_qml_module(arstack_studio
         qml/Main.qml
         qml/StudioTheme.qml
         qml/SurfacePanel.qml
+        qml/DockFrame.qml
+        qml/TelemetryDock.qml
+        qml/WorkflowBar.qml
         qml/CalmButton.qml
         qml/NumericField.qml
         qml/StateBadge.qml
@@ -40,6 +43,9 @@ qt_add_qml_module(arstack_studio
         qml/QualityEditor.qml
         qml/SignalPreview.qml
         qml/StatusToast.qml
+    RESOURCES
+        assets/InterVariable.ttf
+        assets/INTER_LICENSE.txt
 )
 
 target_link_libraries(arstack_studio PRIVATE

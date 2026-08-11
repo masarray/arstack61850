@@ -9,7 +9,7 @@ RowLayout {
     property var controller
     property var device
     property string uiFont: "Inter"
-    property string monoFont: "Cascadia Mono"
+    property string monoFont: "Inter"
     property real qualityValue: 0
     property bool compact: false
 

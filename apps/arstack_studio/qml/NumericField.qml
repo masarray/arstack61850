@@ -5,7 +5,7 @@ import QtQuick.Controls
 TextField {
     id: field
     property var theme
-    property string monoFont: "Cascadia Mono"
+    property string monoFont: "Inter"
     property bool invalidInput: false
     property bool compact: false
 
