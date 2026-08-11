@@ -559,7 +559,7 @@ int main(int argc, char** argv) {
             {"ESP32S3IOLD0", "GGIO1$ST$Ind6$stVal"},
             {"ESP32S3IOLD0", "GGIO1$ST$Ind7$stVal"},
             {"ESP32S3IOLD0", "GGIO1$ST$Ind8$stVal"}}};
-        constexpr std::array<mms::MmsStaticDataSetEntry, 1U> data_set_entries{{
+        const std::array<mms::MmsStaticDataSetEntry, 1U> data_set_entries{{
             {"ESP32S3IOLD0", "LLN0$EventData", data_set_members, false}}};
 
         const mms::MmsStaticObjectTable object_table{objects};
