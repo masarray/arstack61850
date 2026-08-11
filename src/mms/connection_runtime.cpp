@@ -100,8 +100,6 @@ constexpr std::uint32_t kServerMaximumMmsPduSize = 65'000U;
     const std::size_t negotiated_tpdu_size_bytes,
     const std::span<std::uint8_t> response,
     const std::span<std::uint8_t> workspace) noexcept {
-    // COTP Data adds three bytes and TPKT adds four bytes. Preflight both
-    // caller-owned buffers so a capacity retry never advances connection state.
     std::size_t cotp_required{};
     if (!add_overhead(session_or_presentation.size(), 3U, cotp_required)) {
         return make_result(MmsStaticConnectionStatus::backend_failure, state);
@@ -150,16 +148,23 @@ constexpr std::uint32_t kServerMaximumMmsPduSize = 65'000U;
         tpkt.bytes_written);
 }
 
-[[nodiscard]] MmsStaticConnectionResult application_rejected(
-    const MmsStaticConnectionState state,
-    const std::size_t consumed,
-    const MmsStaticDispatchResult& application) noexcept {
-    auto result = make_result(
-        MmsStaticConnectionStatus::application_rejected, state, consumed);
-    result.application_status = application.status;
-    result.application_service = application.service;
-    result.invoke_id = application.invoke_id;
-    return result;
+[[nodiscard]] MmsConfirmedRequestRejectReason reject_reason_for(
+    const MmsStaticDispatchStatus status) noexcept {
+    switch (status) {
+    case MmsStaticDispatchStatus::unsupported_service:
+        return MmsConfirmedRequestRejectReason::unrecognized_service;
+    case MmsStaticDispatchStatus::malformed_request:
+    case MmsStaticDispatchStatus::unsupported_request:
+    case MmsStaticDispatchStatus::object_not_found:
+        return MmsConfirmedRequestRejectReason::invalid_argument;
+    case MmsStaticDispatchStatus::response_ready:
+    case MmsStaticDispatchStatus::invalid_object_table:
+    case MmsStaticDispatchStatus::workspace_too_small:
+    case MmsStaticDispatchStatus::response_buffer_too_small:
+    case MmsStaticDispatchStatus::backend_failure:
+        return MmsConfirmedRequestRejectReason::other;
+    }
+    return MmsConfirmedRequestRejectReason::other;
 }
 
 [[nodiscard]] bool write_outer_capacity(
@@ -418,8 +423,9 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
     }
 
     MmsConfirmedPduView confirmed;
-    if (MmsPduSpanCodec::try_decode_confirmed_request_view(
-            pdv.single_asn1_type, confirmed)) {
+    const bool is_confirmed_request = MmsPduSpanCodec::try_decode_confirmed_request_view(
+        pdv.single_asn1_type, confirmed);
+    if (is_confirmed_request) {
         std::size_t write_required{};
         if (write_outer_capacity(
                 confirmed, dispatcher_, mms_presentation_context_id_, write_required)) {
@@ -434,6 +440,7 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
 
     const auto application = dispatcher_.dispatch(
         pdv.single_asn1_type, response, workspace, policy_.access_context());
+    std::size_t mms_response_bytes = application.bytes_written;
     if (!application.success()) {
         if (application.status == MmsStaticDispatchStatus::response_buffer_too_small) {
             const auto fully_encoded = osi::PresentationSpanCodec::fully_encoded_data_size(
@@ -468,11 +475,42 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
             result.invoke_id = application.invoke_id;
             return result;
         }
-        return application_rejected(state_, peek.frame_bytes, application);
+        if (!is_confirmed_request) {
+            auto result = make_result(
+                MmsStaticConnectionStatus::application_rejected,
+                state_,
+                peek.frame_bytes);
+            result.application_status = application.status;
+            result.application_service = application.service;
+            result.invoke_id = application.invoke_id;
+            return result;
+        }
+
+        const auto rejected = MmsPduSpanCodec::encode_confirmed_request_reject_into(
+            confirmed.invoke_id,
+            reject_reason_for(application.status),
+            response);
+        if (!rejected.success()) {
+            if (rejected.status == wire::EncodeStatus::buffer_too_small) {
+                const auto fully_encoded = osi::PresentationSpanCodec::fully_encoded_data_size(
+                    mms_presentation_context_id_, rejected.required_bytes);
+                std::size_t required{};
+                if (fully_encoded && add_overhead(*fully_encoded, 11U, required)) {
+                    auto result = make_response_capacity(state_, required);
+                    result.application_status = application.status;
+                    result.application_service = application.service;
+                    result.invoke_id = confirmed.invoke_id;
+                    return result;
+                }
+            }
+            state_ = MmsStaticConnectionState::fault;
+            return make_result(MmsStaticConnectionStatus::backend_failure, state_);
+        }
+        mms_response_bytes = rejected.bytes_written;
     }
 
     if (negotiated_mms_pdu_size_ == 0U ||
-        application.bytes_written > negotiated_mms_pdu_size_) {
+        mms_response_bytes > negotiated_mms_pdu_size_) {
         return make_result(
             MmsStaticConnectionStatus::peer_limit_exceeded,
             state_,
@@ -480,7 +518,7 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
     }
 
     const auto p_data = osi::PresentationSpanCodec::encode_p_data_into(
-        response.first(application.bytes_written),
+        response.first(mms_response_bytes),
         workspace,
         mms_presentation_context_id_,
         true);
@@ -505,7 +543,7 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
     if (wrapped.response_ready()) {
         wrapped.application_status = application.status;
         wrapped.application_service = application.service;
-        wrapped.invoke_id = application.invoke_id;
+        wrapped.invoke_id = is_confirmed_request ? confirmed.invoke_id : application.invoke_id;
     }
     return wrapped;
 }

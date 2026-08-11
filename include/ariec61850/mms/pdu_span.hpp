@@ -27,6 +27,12 @@ enum class MmsWireConfirmedService : std::int32_t {
     get_named_variable_list_attributes = 12,
 };
 
+enum class MmsConfirmedRequestRejectReason : std::uint8_t {
+    other = 0U,
+    unrecognized_service = 1U,
+    invalid_argument = 4U,
+};
+
 struct MmsInitiateDetailView final {
     std::uint32_t version_number{};
     std::span<const std::uint8_t> parameter_support_options{};
@@ -89,6 +95,15 @@ public:
         std::int32_t service_tag,
         bool service_constructed,
         std::span<const std::uint8_t> service_value,
+        std::span<std::uint8_t> destination) noexcept;
+
+    // Encode MMS RejectPDU for a syntactically valid confirmed request that the
+    // bounded server cannot service. The result preserves the invoke ID and uses
+    // rejectReason.confirmed-requestPDU so clients receive a protocol-level
+    // outcome instead of waiting indefinitely for a response.
+    [[nodiscard]] static wire::EncodeResult encode_confirmed_request_reject_into(
+        std::uint32_t invoke_id,
+        MmsConfirmedRequestRejectReason reason,
         std::span<std::uint8_t> destination) noexcept;
 };
 

@@ -50,8 +50,8 @@ constexpr std::array<std::uint8_t, 138U> kAssociationResponse{
     0x00U, 0xBEU, 0x33U, 0x28U, 0x31U, 0x06U, 0x02U, 0x51U, 0x01U, 0x02U, 0x01U, 0x03U,
     0xA0U, 0x28U, 0xA9U, 0x26U, 0x80U, 0x03U, 0x00U, 0xFDU, 0xE8U, 0x81U, 0x01U, 0x0AU,
     0x82U, 0x01U, 0x0AU, 0x83U, 0x01U, 0x05U, 0xA4U, 0x16U, 0x80U, 0x01U, 0x01U, 0x81U,
-    0x03U, 0x05U, 0xF1U, 0x00U, 0x82U, 0x0CU, 0x03U, 0xEEU, 0x1CU, 0x00U, 0x00U, 0x04U,
-    0x08U, 0x00U, 0x00U, 0x79U, 0xEFU, 0x18U};
+    0x03U, 0x05U, 0xF1U, 0x00U, 0x82U, 0x0CU, 0x03U, 0x4EU, 0x08U, 0x00U, 0x00U, 0x00U,
+    0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U};
 
 constexpr std::array<std::uint8_t, 41U> kReadRequest{
     0xA0U, 0x27U, 0x02U, 0x01U, 0x0CU,
@@ -81,6 +81,9 @@ constexpr std::array<std::uint8_t, 29U> kWriteRequest{
 constexpr std::array<std::uint8_t, 9U> kWriteResponse{
     0xA1U, 0x07U, 0x02U, 0x01U, 0x0EU,
     0xA5U, 0x02U, 0x81U, 0x00U};
+
+constexpr std::array<std::uint8_t, 8U> kIdentifyReject{
+    0xA4U, 0x06U, 0x80U, 0x01U, 0x15U, 0x81U, 0x01U, 0x01U};
 
 template <std::size_t N>
 [[nodiscard]] bool matches(
@@ -347,11 +350,14 @@ int main() {
         std::span<const std::uint8_t>{request}.first(identify_tpkt.bytes_written),
         response,
         workspace);
-    if (result.status != mms::MmsStaticConnectionStatus::application_rejected ||
+    if (!result.response_ready() ||
         result.application_status != mms::MmsStaticDispatchStatus::unsupported_service ||
         result.application_service != mms::MmsWireConfirmedService::identify ||
         result.invoke_id != 21U || result.consumed_bytes != identify_tpkt.bytes_written ||
-        runtime.state() != mms::MmsStaticConnectionState::established) {
+        runtime.state() != mms::MmsStaticConnectionState::established ||
+        !extract_mms(
+            std::span<const std::uint8_t>{response}.first(result.bytes_written), pdv) ||
+        !matches(pdv.single_asn1_type, kIdentifyReject)) {
         return 11;
     }
 
