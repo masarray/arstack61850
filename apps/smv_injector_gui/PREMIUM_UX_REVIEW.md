@@ -77,4 +77,4 @@ Please judge the branch on these questions:
 
 GUI only. No firmware timing, SV packet layout, or serial command protocol is changed by this evaluation branch. The PR remains draft and unmerged until the visual direction is approved.
 
-Latest review iteration: V2 keyboard-first matrix + side-by-side signal preview. Please evaluate this version before any merge decision.
+Latest review iteration: **V2 keyboard-first matrix + side-by-side signal preview**. Evaluate this version before any merge decision.
