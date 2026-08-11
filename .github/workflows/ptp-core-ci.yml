@@ -7,7 +7,10 @@ on:
       - 'src/time_sync/**'
       - 'include/ariec61850/ethernet/**'
       - 'src/ethernet/**'
+      - 'src/capture/pcap.cpp'
+      - 'tools/ptp_analyze.cpp'
       - 'tests/test_ptp.cpp'
+      - 'tests/ptp_profile/**'
       - '.github/workflows/ptp-core-ci.yml'
   pull_request:
     paths:
@@ -15,7 +18,10 @@ on:
       - 'src/time_sync/**'
       - 'include/ariec61850/ethernet/**'
       - 'src/ethernet/**'
+      - 'src/capture/pcap.cpp'
+      - 'tools/ptp_analyze.cpp'
       - 'tests/test_ptp.cpp'
+      - 'tests/ptp_profile/**'
       - '.github/workflows/ptp-core-ci.yml'
 
 permissions:
@@ -91,11 +97,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure strict MSVC build
+      - name: Configure standalone strict MSVC PTP profile
         shell: pwsh
-        run: cmake -S . -B build-ptp-msvc -A x64 -DARIEC61850_BUILD_TESTS=ON -DARIEC61850_BUILD_TOOLS=ON -DARIEC61850_WARNINGS_AS_ERRORS=ON
+        run: cmake -S tests/ptp_profile -B build-ptp-msvc -A x64
 
-      - name: Build with diagnostics
+      - name: Build PTP core and analyzer with diagnostics
         shell: pwsh
         run: |
           $output = & cmake --build build-ptp-msvc --config Release --parallel 2>&1
@@ -109,6 +115,6 @@ jobs:
             exit $status
           }
 
-      - name: Run PTP regression test on MSVC
+      - name: Run PTP regression and analyzer smoke tests on MSVC
         shell: pwsh
-        run: ctest --test-dir build-ptp-msvc -C Release -R ariec61850_ptp_tests --output-on-failure
+        run: ctest --test-dir build-ptp-msvc -C Release --output-on-failure
