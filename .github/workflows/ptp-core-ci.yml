@@ -64,12 +64,12 @@ jobs:
 
           cat ptp-build.log
           if [ "$status" -ne 0 ]; then
-            while IFS= read -r line; do
+            grep -Ei 'error:|fatal error:|undefined reference|collect2: error|ld: error' ptp-build.log | while IFS= read -r line; do
               escaped=${line//'%'/'%25'}
               escaped=${escaped//$'\r'/'%0D'}
               escaped=${escaped//$'\n'/'%0A'}
               echo "::error::$escaped"
-            done < ptp-build.log
+            done || true
             exit "$status"
           fi
 
@@ -82,12 +82,12 @@ jobs:
           set -e
           cat ptp-test.log
           if [ "$status" -ne 0 ]; then
-            while IFS= read -r line; do
+            grep -E '\[FAIL\]|CHECK failed|error' ptp-test.log | while IFS= read -r line; do
               escaped=${line//'%'/'%25'}
               escaped=${escaped//$'\r'/'%0D'}
               escaped=${escaped//$'\n'/'%0A'}
               echo "::error::$escaped"
-            done < ptp-test.log
+            done || true
             exit "$status"
           fi
 
@@ -104,16 +104,30 @@ jobs:
       - name: Build PTP core and analyzer with diagnostics
         shell: pwsh
         run: |
-          $output = & cmake --build build-ptp-msvc --config Release --parallel 2>&1
-          $status = $LASTEXITCODE
-          $output | Tee-Object -FilePath ptp-msvc-build.log
-          if ($status -ne 0) {
-            foreach ($line in $output) {
-              $escaped = "$line".Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
-              Write-Output "::error::$escaped"
+          function Build-Target([string]$Target) {
+            $output = & cmake --build build-ptp-msvc --config Release --target $Target --parallel 2>&1
+            $status = $LASTEXITCODE
+            $output | Tee-Object -FilePath "ptp-msvc-$Target.log"
+            if ($status -ne 0) {
+              $matched = $false
+              foreach ($line in $output) {
+                $text = "$line"
+                if ($text -match '(?i)(error C\d+|fatal error|error LNK\d+|error MSB\d+|: error )') {
+                  $matched = $true
+                  $escaped = $text.Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+                  Write-Output "::error title=MSVC $Target::$escaped"
+                }
+              }
+              if (-not $matched) {
+                Write-Output "::error title=MSVC $Target::Build failed; inspect ptp-msvc-$Target.log in the job output."
+              }
+              exit $status
             }
-            exit $status
           }
+
+          Build-Target 'ptp_profile_core'
+          Build-Target 'ptp_profile_tests'
+          Build-Target 'ptp_profile_analyze'
 
       - name: Run PTP regression and analyzer smoke tests on MSVC
         shell: pwsh
