@@ -347,41 +347,71 @@ MmsStaticBrcbCheckpointResult MmsStaticBrcbCheckpointStore::restore(
 
     const auto first = inspect_bank(backend_, 0U, bank_bytes_);
     const auto second = inspect_bank(backend_, 1U, bank_bytes_);
-    if (first.io_error || second.io_error) {
-        result.status = MmsStaticBrcbCheckpointStatus::storage_failure;
-        return result;
-    }
-    if (!first.valid && !second.valid) {
-        result.status = MmsStaticBrcbCheckpointStatus::no_checkpoint;
-        return result;
-    }
-
-    std::size_t selected = 0U;
-    BankInfo info = first;
-    if (!first.valid || (second.valid && generation_newer(second.generation, first.generation))) {
-        selected = 1U;
-        info = second;
-    }
-    result.generation = info.generation;
-    result.bank_index = selected;
-    result.state_bytes = info.payload_bytes;
-    result.required_state_bytes = info.payload_bytes;
-    if (state_buffer.size() < info.payload_bytes) {
-        result.status = MmsStaticBrcbCheckpointStatus::state_buffer_too_small;
+    const bool first_usable = first.valid && !first.io_error;
+    const bool second_usable = second.valid && !second.io_error;
+    if (!first_usable && !second_usable) {
+        result.status = first.io_error || second.io_error
+            ? MmsStaticBrcbCheckpointStatus::storage_failure
+            : MmsStaticBrcbCheckpointStatus::no_checkpoint;
         return result;
     }
 
-    const auto base = bank_offset(selected, bank_bytes_);
-    auto payload = state_buffer.first(info.payload_bytes);
-    if (!backend_.read(
-            backend_.context,
-            base + record_header_bytes,
-            payload) ||
-        crc32(payload) != info.payload_crc) {
-        result.status = MmsStaticBrcbCheckpointStatus::storage_failure;
+    std::size_t primary_index = 0U;
+    BankInfo primary = first;
+    bool fallback_available = false;
+    std::size_t fallback_index = 0U;
+    BankInfo fallback{};
+    if (first_usable && second_usable) {
+        if (generation_newer(second.generation, first.generation)) {
+            primary_index = 1U;
+            primary = second;
+            fallback_index = 0U;
+            fallback = first;
+        } else {
+            primary_index = 0U;
+            primary = first;
+            fallback_index = 1U;
+            fallback = second;
+        }
+        fallback_available = true;
+    } else if (second_usable) {
+        primary_index = 1U;
+        primary = second;
+    }
+
+    const auto load_bank = [this, state_buffer, &result](
+                               const std::size_t selected,
+                               const BankInfo& info) noexcept {
+        result.generation = info.generation;
+        result.bank_index = selected;
+        result.state_bytes = info.payload_bytes;
+        result.required_state_bytes = info.payload_bytes;
+        if (state_buffer.size() < info.payload_bytes) {
+            return MmsStaticBrcbCheckpointStatus::state_buffer_too_small;
+        }
+        const auto base = bank_offset(selected, bank_bytes_);
+        auto payload = state_buffer.first(info.payload_bytes);
+        if (!backend_.read(
+                backend_.context,
+                base + record_header_bytes,
+                payload) ||
+            crc32(payload) != info.payload_crc) {
+            return MmsStaticBrcbCheckpointStatus::storage_failure;
+        }
+        return MmsStaticBrcbCheckpointStatus::ok;
+    };
+
+    auto load_status = load_bank(primary_index, primary);
+    if (load_status == MmsStaticBrcbCheckpointStatus::storage_failure &&
+        fallback_available) {
+        load_status = load_bank(fallback_index, fallback);
+    }
+    if (load_status != MmsStaticBrcbCheckpointStatus::ok) {
+        result.status = load_status;
         return result;
     }
 
+    const auto payload = state_buffer.first(result.state_bytes);
     const auto restored = MmsStaticBrcbStateCodec::restore(runtime, payload);
     result.state_status = restored.status;
     if (!restored.success()) {
