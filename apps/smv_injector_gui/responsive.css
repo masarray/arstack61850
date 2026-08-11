@@ -1,0 +1,42 @@
+/* Responsive operator layout. Keep all primary controls visible on laptops and split-screen benches. */
+html { min-width: 0 !important; }
+body { overflow-x: hidden; }
+.app-shell { min-width: 0; }
+.workspace { width: 100%; min-width: 0; }
+.hero-grid, .control-toolbar, .bottom-grid, .channel-grid { min-width: 0; }
+
+@media (max-width: 1180px) {
+  .topbar { padding: 14px 18px; }
+  .workspace { padding: 18px 18px 32px; }
+  .hero-grid { grid-template-columns: 1fr; }
+  .run-panel { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; column-gap: 18px; }
+  .run-metrics { grid-column: 1 / -1; grid-row: 2; margin: 14px 0 0; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .run-actions { align-self: center; }
+  .run-actions .btn { min-width: 120px; }
+  .control-toolbar { grid-template-columns: 1fr; }
+  .frequency-control { grid-template-columns: 150px minmax(0, 1fr); }
+  .toolbar-actions { justify-content: flex-start; }
+  .channel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bottom-grid { grid-template-columns: 1fr; }
+  .section-heading { align-items: flex-start; }
+  .section-heading p { text-align: left; max-width: 520px; }
+}
+
+@media (max-width: 760px) {
+  .topbar { position: static; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+  .connection-strip { width: 100%; justify-content: space-between; }
+  .workspace { padding: 14px 12px 28px; }
+  .stream-panel, .run-panel, .phase-panel, .console-panel { padding: 16px; }
+  .panel-header { align-items: flex-start; }
+  .identity-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .profile-actions { align-items: flex-start; flex-direction: column; }
+  .file-state { max-width: 100%; white-space: normal; }
+  .run-panel { display: block; }
+  .run-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .run-actions { margin-top: 14px; }
+  .frequency-control { grid-template-columns: 1fr; }
+  .channel-grid { grid-template-columns: 1fr; }
+  .section-heading { display: block; }
+  .section-heading p { margin-top: 8px; }
+  .channel-fields { grid-template-columns: 1fr 1fr; }
+}
