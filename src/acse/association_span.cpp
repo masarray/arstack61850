@@ -30,6 +30,9 @@ constexpr std::array<std::uint8_t, 40U> kDefaultMmsInitiateRequest{
     0x82U, 0x0CU, 0x03U, 0xEEU, 0x1CU, 0x00U, 0x00U, 0x04U,
     0x08U, 0x00U, 0x00U, 0x79U, 0xEFU, 0x18U};
 
+// servicesSupportedCalled contains only the confirmed services implemented by
+// MmsStaticApplicationDispatcher: GetNameList(1), Read(4), Write(5),
+// GetVariableAccessAttributes(6), and GetNamedVariableListAttributes(12).
 constexpr std::array<std::uint8_t, 40U> kDefaultMmsInitiateResponse{
     0xA9U, 0x26U,
     0x80U, 0x03U, 0x00U, 0xFDU, 0xE8U,
@@ -39,10 +42,12 @@ constexpr std::array<std::uint8_t, 40U> kDefaultMmsInitiateResponse{
     0xA4U, 0x16U,
     0x80U, 0x01U, 0x01U,
     0x81U, 0x03U, 0x05U, 0xF1U, 0x00U,
-    0x82U, 0x0CU, 0x03U, 0xEEU, 0x1CU, 0x00U, 0x00U, 0x04U,
-    0x08U, 0x00U, 0x00U, 0x79U, 0xEFU, 0x18U};
+    0x82U, 0x0CU, 0x03U, 0x4EU, 0x08U, 0x00U, 0x00U, 0x00U,
+    0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U};
 
-// Byte-identical to AcseAssociationCodec::encode_aare(default_accept_aare()).
+// Byte-identical to the deterministic static AARE profile used by the bounded
+// server. The embedded MMS Initiate response carries the same narrow service
+// bitmap as kDefaultMmsInitiateResponse above.
 constexpr std::array<std::uint8_t, 76U> kDefaultAcceptAare{
     0x61U, 0x4AU,
     0xA1U, 0x07U, 0x06U, 0x05U, 0x28U, 0xCAU, 0x22U, 0x02U, 0x03U,
@@ -61,8 +66,8 @@ constexpr std::array<std::uint8_t, 76U> kDefaultAcceptAare{
     0xA4U, 0x16U,
     0x80U, 0x01U, 0x01U,
     0x81U, 0x03U, 0x05U, 0xF1U, 0x00U,
-    0x82U, 0x0CU, 0x03U, 0xEEU, 0x1CU, 0x00U, 0x00U, 0x04U,
-    0x08U, 0x00U, 0x00U, 0x79U, 0xEFU, 0x18U};
+    0x82U, 0x0CU, 0x03U, 0x4EU, 0x08U, 0x00U, 0x00U, 0x00U,
+    0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U};
 
 [[nodiscard]] bool valid_oid(
     const std::span<const std::uint8_t> value,
@@ -144,6 +149,19 @@ constexpr std::array<std::uint8_t, 76U> kDefaultAcceptAare{
             }
             external.direct_reference = field.value;
             saw_direct = true;
+        } else if (field.tag_class == asn1::BerClass::universal &&
+                   field.tag_number == 2 && !field.constructed) {
+            if (saw_indirect) {
+                external = {};
+                return false;
+            }
+            const auto value = asn1::BerSpanReader::read_uint32(field);
+            if (!value) {
+                external = {};
+                return false;
+            }
+            external.indirect_reference = *value;
+            saw_indirect = true;
         } else if (field.tag_class == asn1::BerClass::universal &&
                    field.tag_number == 2 && !field.constructed) {
             if (saw_indirect) {
