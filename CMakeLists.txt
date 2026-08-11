@@ -25,16 +25,25 @@ add_library(ariec61850_core
     src/mms/data_codec.cpp
     src/mms/pdu.cpp
     src/mms/services.cpp
+    src/mms/file_service.cpp
     src/mms/dynamic_data_set.cpp
     src/mms/dynamic_report_planner.cpp
     src/mms/invoke_router.cpp
     src/mms/reporting.cpp
     src/mms/association_runtime.cpp
+    src/mms/association_runtime_control_wait.cpp
     src/mms/report_subscription_runtime.cpp
     src/mms/tcp_transport.cpp
     src/mms/live_discovery.cpp
     src/mms/rcb_selection.cpp
     src/mms/rcb_failover.cpp
+    src/mms/static_report_session.cpp
+    src/control/guarded_control.cpp
+    src/control/mms_control_structure.cpp
+    src/control/command_termination.cpp
+    src/control/control_discovery.cpp
+    src/control/control_session.cpp
+    src/control/mms_association_control_transport.cpp
     src/sampled_values/pdu_codec.cpp
     src/sampled_values/frame_codec.cpp
     src/sampled_values/quality.cpp
@@ -161,6 +170,13 @@ if(ARIEC61850_BUILD_TOOLS)
     target_compile_features(ariec61850_pagination_probe PRIVATE cxx_std_20)
     ariec61850_apply_warnings(ariec61850_pagination_probe)
     ariec61850_apply_sanitizers(ariec61850_pagination_probe)
+
+    add_executable(ariec61850_file_transfer tools/file_transfer.cpp)
+    target_link_libraries(ariec61850_file_transfer PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_file_transfer PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_file_transfer)
+    ariec61850_apply_sanitizers(ariec61850_file_transfer)
+
     add_executable(ariec61850_static_ied_server tools/static_ied_server.cpp)
     target_link_libraries(
         ariec61850_static_ied_server
@@ -248,6 +264,15 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_sanitizers(ariec61850_mms_services_tests)
     add_test(NAME ariec61850_mms_services_tests COMMAND ariec61850_mms_services_tests)
 
+    add_executable(ariec61850_mms_file_service_tests tests/test_mms_file_service.cpp)
+    target_link_libraries(ariec61850_mms_file_service_tests PRIVATE ARIEC61850::core)
+    target_compile_definitions(ariec61850_mms_file_service_tests PRIVATE
+        ARIEC61850_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_features(ariec61850_mms_file_service_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_mms_file_service_tests)
+    ariec61850_apply_sanitizers(ariec61850_mms_file_service_tests)
+    add_test(NAME ariec61850_mms_file_service_tests COMMAND ariec61850_mms_file_service_tests)
+
     add_executable(ariec61850_dynamic_data_set_tests tests/test_dynamic_data_set.cpp)
     target_link_libraries(ariec61850_dynamic_data_set_tests PRIVATE ARIEC61850::core)
     target_compile_features(ariec61850_dynamic_data_set_tests PRIVATE cxx_std_20)
@@ -304,6 +329,27 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_sanitizers(ariec61850_control_block_read_tests)
     add_test(NAME ariec61850_control_block_read_tests COMMAND ariec61850_control_block_read_tests)
 
+    add_executable(ariec61850_control_mms_structure_tests tests/test_control_mms_structure.cpp)
+    target_link_libraries(ariec61850_control_mms_structure_tests PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_control_mms_structure_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_control_mms_structure_tests)
+    ariec61850_apply_sanitizers(ariec61850_control_mms_structure_tests)
+    add_test(NAME ariec61850_control_mms_structure_tests COMMAND ariec61850_control_mms_structure_tests)
+
+    add_executable(ariec61850_command_termination_tests tests/test_command_termination.cpp)
+    target_link_libraries(ariec61850_command_termination_tests PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_command_termination_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_command_termination_tests)
+    ariec61850_apply_sanitizers(ariec61850_command_termination_tests)
+    add_test(NAME ariec61850_command_termination_tests COMMAND ariec61850_command_termination_tests)
+
+    add_executable(ariec61850_control_session_tests tests/test_control_session.cpp)
+    target_link_libraries(ariec61850_control_session_tests PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_control_session_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_control_session_tests)
+    ariec61850_apply_sanitizers(ariec61850_control_session_tests)
+    add_test(NAME ariec61850_control_session_tests COMMAND ariec61850_control_session_tests)
+
     add_executable(ariec61850_fuzz_smoke_tests tests/test_fuzz_smoke.cpp)
     target_link_libraries(ariec61850_fuzz_smoke_tests PRIVATE ARIEC61850::core)
     target_include_directories(ariec61850_fuzz_smoke_tests PRIVATE
@@ -358,6 +404,9 @@ if(ARIEC61850_BUILD_TESTS)
             NAME ariec61850_pagination_probe_help
             COMMAND ariec61850_pagination_probe --help)
         add_test(
+            NAME ariec61850_file_transfer_help
+            COMMAND ariec61850_file_transfer --help)
+        add_test(
             NAME ariec61850_static_ied_server_help
             COMMAND ariec61850_static_ied_server --help)
     endif()
@@ -389,5 +438,6 @@ if(ARIEC61850_BUILD_FUZZERS)
     ariec61850_add_fuzzer(ariec61850_fuzz_transport fuzz/fuzz_transport.cpp)
     ariec61850_add_fuzzer(ariec61850_fuzz_association fuzz/fuzz_association.cpp)
     ariec61850_add_fuzzer(ariec61850_fuzz_mms_services fuzz/fuzz_mms_services.cpp)
+    ariec61850_add_fuzzer(ariec61850_fuzz_mms_file_service fuzz/fuzz_mms_file_service.cpp)
     ariec61850_add_fuzzer(ariec61850_fuzz_reporting fuzz/fuzz_reporting.cpp)
 endif()
