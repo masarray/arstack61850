@@ -214,9 +214,10 @@ public:
                 const auto harmonic_index = static_cast<std::size_t>(harmonic_phase >> (32U - 12U));
                 const std::int64_t harmonic_q30 = sine_lut_[harmonic_index & (kLiveSineLutSize - 1U)];
                 constexpr std::int64_t q30 = std::int64_t{1} << 30U;
-                sine_q30 += (harmonic_q30 * state.current_shape.harmonic_permille) / 1000LL;
-                sine_q30 += (q30 * state.current_shape.dc_offset_permille) / 1000LL;
-                const auto clip_q30 = (q30 * state.current_shape.clip_permille) / 1000LL;
+                sine_q30 += (harmonic_q30 * state.current_shape.harmonic_permille) / std::int64_t{1000};
+                sine_q30 += (q30 * state.current_shape.dc_offset_permille) / std::int64_t{1000};
+                const std::int64_t clip_q30 =
+                    (q30 * state.current_shape.clip_permille) / std::int64_t{1000};
                 sine_q30 = std::clamp(sine_q30, -clip_q30, clip_q30);
             }
             const std::int64_t peak_counts = rms_to_peak_counts(channel.rms_counts);
