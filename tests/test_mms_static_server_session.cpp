@@ -15,6 +15,24 @@ namespace {
 
 using namespace ar::iec61850;
 
+constexpr std::array<std::uint8_t, 184U> kAssociationRequest{
+    0x0DU,0xB6U,0x05U,0x06U,0x13U,0x01U,0x00U,0x16U,0x01U,0x02U,0x14U,0x02U,
+    0x00U,0x02U,0x33U,0x02U,0x00U,0x01U,0x34U,0x02U,0x00U,0x01U,0xC1U,0xA0U,
+    0x31U,0x81U,0x9DU,0xA0U,0x03U,0x80U,0x01U,0x01U,0xA2U,0x81U,0x95U,0x81U,
+    0x04U,0x00U,0x00U,0x00U,0x01U,0x82U,0x04U,0x00U,0x00U,0x00U,0x01U,0xA4U,
+    0x23U,0x30U,0x0FU,0x02U,0x01U,0x01U,0x06U,0x04U,0x52U,0x01U,0x00U,0x01U,
+    0x30U,0x04U,0x06U,0x02U,0x51U,0x01U,0x30U,0x10U,0x02U,0x01U,0x03U,0x06U,
+    0x05U,0x28U,0xCAU,0x22U,0x02U,0x01U,0x30U,0x04U,0x06U,0x02U,0x51U,0x01U,
+    0x61U,0x62U,0x30U,0x60U,0x02U,0x01U,0x01U,0xA0U,0x5BU,0x60U,0x59U,0xA1U,
+    0x07U,0x06U,0x05U,0x28U,0xCAU,0x22U,0x02U,0x03U,0xA2U,0x07U,0x06U,0x05U,
+    0x29U,0x01U,0x87U,0x67U,0x01U,0xA3U,0x03U,0x02U,0x01U,0x0CU,0xA6U,0x06U,
+    0x06U,0x04U,0x29U,0x01U,0x87U,0x67U,0xA7U,0x03U,0x02U,0x01U,0x0CU,0xBEU,
+    0x33U,0x28U,0x31U,0x06U,0x02U,0x51U,0x01U,0x02U,0x01U,0x03U,0xA0U,0x28U,
+    0xA8U,0x26U,0x80U,0x03U,0x00U,0xFDU,0xE8U,0x81U,0x01U,0x0AU,0x82U,0x01U,
+    0x0AU,0x83U,0x01U,0x05U,0xA4U,0x16U,0x80U,0x01U,0x01U,0x81U,0x03U,0x05U,
+    0xF1U,0x00U,0x82U,0x0CU,0x03U,0xEEU,0x1CU,0x00U,0x00U,0x04U,0x08U,0x00U,
+    0x00U,0x79U,0xEFU,0x18U};
+
 struct FakeTcp final {
     std::span<const std::uint8_t> inbound;
     std::span<std::uint8_t> outbound;
@@ -80,6 +98,67 @@ struct FakeTcp final {
     destination[1] = 0x01U;
     destination[2] = *static_cast<const bool*>(context) ? 0xFFU : 0x00U;
     return {wire::EncodeStatus::ok, required, required};
+}
+
+[[nodiscard]] bool establish(
+    mms::MmsStaticConnectionRuntime& runtime,
+    std::span<std::uint8_t> request,
+    std::span<std::uint8_t> response,
+    std::span<std::uint8_t> workspace,
+    std::span<std::uint8_t> scratch) noexcept {
+    constexpr std::array<std::uint8_t, 1U> tpdu_size{0x0AU};
+    constexpr std::array<std::uint8_t, 2U> source_tsap{0x00U, 0x01U};
+    constexpr std::array<std::uint8_t, 2U> destination_tsap{0x00U, 0x01U};
+    const std::array<osi::CotpParameterView, 3U> parameters{
+        osi::CotpParameterView{osi::CotpSpanCodec::tpdu_size_parameter, tpdu_size},
+        osi::CotpParameterView{osi::CotpSpanCodec::source_tsap_parameter, source_tsap},
+        osi::CotpParameterView{
+            osi::CotpSpanCodec::destination_tsap_parameter,
+            destination_tsap}};
+
+    const auto cr = osi::CotpSpanCodec::encode_connection_request_into(
+        0x0001U, parameters, scratch);
+    if (!cr.success()) return false;
+    const auto cr_tpkt = osi::TpktSpanCodec::encode_into(
+        scratch.first(cr.bytes_written), request);
+    if (!cr_tpkt.success()) return false;
+    auto result = runtime.process_tcp_window(
+        request.first(cr_tpkt.bytes_written), response, workspace);
+    if (!result.response_ready() ||
+        runtime.state() != mms::MmsStaticConnectionState::awaiting_association) {
+        return false;
+    }
+
+    const auto cotp = osi::CotpSpanCodec::encode_data_into(kAssociationRequest, scratch);
+    if (!cotp.success()) return false;
+    const auto association = osi::TpktSpanCodec::encode_into(
+        scratch.first(cotp.bytes_written), request);
+    if (!association.success()) return false;
+    result = runtime.process_tcp_window(
+        request.first(association.bytes_written), response, workspace);
+    return result.response_ready() && runtime.association_active() &&
+        runtime.state() == mms::MmsStaticConnectionState::established;
+}
+
+struct LifecycleSink final {
+    std::size_t calls{};
+    std::uint64_t association_id{};
+    std::uint64_t now_ms{};
+};
+
+[[nodiscard]] std::uint64_t read_now(const void* context) noexcept {
+    return context == nullptr ? 0U : *static_cast<const std::uint64_t*>(context);
+}
+
+void association_closed(
+    void* context,
+    const std::uint64_t association_id,
+    const std::uint64_t now_ms) noexcept {
+    auto* sink = static_cast<LifecycleSink*>(context);
+    if (sink == nullptr) return;
+    ++sink->calls;
+    sink->association_id = association_id;
+    sink->now_ms = now_ms;
 }
 
 [[nodiscard]] bool fragmented_connection_request_is_pumped() noexcept {
@@ -188,7 +267,7 @@ struct FakeTcp final {
     return first.status == mms::MmsStaticServerSessionStatus::progressed &&
         second.status ==
             mms::MmsStaticServerSessionStatus::receive_buffer_full &&
-        second.terminal();
+        second.terminal() && runtime.state() == mms::MmsStaticConnectionState::closed;
 }
 
 [[nodiscard]] bool peer_close_is_reported() noexcept {
@@ -213,7 +292,61 @@ struct FakeTcp final {
         {receive, response, workspace}};
     const auto result = session.poll_once();
     return result.status == mms::MmsStaticServerSessionStatus::peer_closed &&
-        result.terminal();
+        result.terminal() && runtime.state() == mms::MmsStaticConnectionState::closed;
+}
+
+[[nodiscard]] bool established_peer_close_notifies_once() noexcept {
+    const bool value = true;
+    constexpr std::array<std::uint8_t, 2U> boolean_type{0x83U, 0x00U};
+    const std::array<mms::MmsStaticObjectEntry, 1U> objects{
+        mms::MmsStaticObjectEntry{
+            "LD0", "X", boolean_type, read_boolean, &value}};
+    const mms::MmsStaticObjectTable table{objects};
+    const mms::MmsStaticApplicationDispatcher dispatcher{table};
+
+    std::uint64_t now = 9'000U;
+    LifecycleSink sink;
+    mms::MmsStaticConnectionPolicy policy;
+    policy.association_id = 77U;
+    policy.owner[0] = 0xA1U;
+    policy.owner_size = 1U;
+    policy.now_ms = read_now;
+    policy.now_context = &now;
+    policy.association_closed = association_closed;
+    policy.association_closed_context = &sink;
+    mms::MmsStaticConnectionRuntime runtime{dispatcher, policy};
+
+    std::array<std::uint8_t, 2048U> request{};
+    std::array<std::uint8_t, 2048U> response{};
+    std::array<std::uint8_t, 2048U> workspace{};
+    std::array<std::uint8_t, 2048U> scratch{};
+    if (!establish(runtime, request, response, workspace, scratch)) {
+        return false;
+    }
+
+    std::array<std::uint8_t, 1U> empty_inbound{};
+    std::array<std::uint8_t, 16U> outbound{};
+    FakeTcp fake{std::span<const std::uint8_t>{empty_inbound}.first(0U), outbound};
+    const embedded::TcpByteStream stream{&fake, fake_send, fake_receive};
+    std::array<std::uint8_t, 32U> receive{};
+    std::array<std::uint8_t, 32U> session_response{};
+    std::array<std::uint8_t, 32U> session_workspace{};
+    mms::MmsStaticServerSession session{
+        runtime,
+        stream,
+        {receive, session_response, session_workspace}};
+
+    const auto closed = session.poll_once();
+    if (closed.status != mms::MmsStaticServerSessionStatus::peer_closed ||
+        !closed.terminal() || runtime.association_active() ||
+        runtime.state() != mms::MmsStaticConnectionState::closed ||
+        sink.calls != 1U || sink.association_id != 77U || sink.now_ms != now) {
+        return false;
+    }
+
+    static_cast<void>(session.poll_once());
+    runtime.close_transport();
+    return sink.calls == 1U;
 }
 
 } // namespace
@@ -227,6 +360,9 @@ int main() {
     }
     if (!peer_close_is_reported()) {
         return 3;
+    }
+    if (!established_peer_close_notifies_once()) {
+        return 4;
     }
     return 0;
 }
