@@ -26,16 +26,23 @@ jobs:
           node-version: '22'
 
       - name: JavaScript syntax
-        run: node --check apps/smv_injector_gui/app.js
+        run: |
+          node --check apps/smv_injector_gui/app.js
+          node --check apps/smv_injector_gui/premium-v3.js
 
       - name: Required UI files
         shell: bash
         run: |
           test -s apps/smv_injector_gui/index.html
           test -s apps/smv_injector_gui/styles.css
+          test -s apps/smv_injector_gui/responsive.css
+          test -s apps/smv_injector_gui/premium-v3.css
           test -s apps/smv_injector_gui/app.js
+          test -s apps/smv_injector_gui/premium-v3.js
           test -s apps/smv_injector_gui/run.cmd
           grep -q 'SMV Injector' apps/smv_injector_gui/index.html
+          grep -q 'premium-v3.css' apps/smv_injector_gui/index.html
+          grep -q 'premium-v3.js' apps/smv_injector_gui/index.html
           grep -q 'navigator.serial' apps/smv_injector_gui/app.js
 
       - name: Local-server smoke
@@ -51,3 +58,4 @@ jobs:
             sleep 0.25
           done
           grep -q 'ARStack61850' /tmp/smv-gui-index.html
+          grep -q 'premium-v3.css' /tmp/smv-gui-index.html
