@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "ariec61850/sampled_values/publisher_profile.hpp"
+#include "ariec61850/sampled_values/rational_schedule.hpp"
 #include "ariec61850/scl/dataset_reference.hpp"
 #include "ariec61850/scl/parser.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -137,6 +141,98 @@ void parser_extracts_multiple_sampled_values_streams_and_conflicts() {
         }));
 }
 
+void parser_compiles_structured_4800_sv_profile_without_drift() {
+    using namespace ar::iec61850::sampled_values;
+    using namespace ar::iec61850::scl;
+
+    const auto document = SclParser{}.load(fixture("sv-4800-structured-4i4v.scd"));
+    CHECK(document.sampled_values_streams.size() == 1U);
+    CHECK(document.data_sets.size() == 1U);
+    CHECK(document.warnings.empty());
+
+    const auto& stream = document.sampled_values_streams.front();
+    CHECK(stream.address.destination_mac_text == "01:0C:CD:04:00:00");
+    CHECK(stream.address.app_id == std::optional<std::uint16_t>{
+        static_cast<std::uint16_t>(0x4001U)});
+    CHECK(stream.address.vlan_id == std::optional<std::uint16_t>{
+        static_cast<std::uint16_t>(0U)});
+    CHECK(stream.address.vlan_priority == std::optional<std::uint8_t>{
+        static_cast<std::uint8_t>(4U)});
+    CHECK(stream.configuration_revision == 100U);
+    CHECK(stream.sample_rate == 4800U);
+    CHECK(stream.sample_mode == "SmpPerSec");
+    CHECK(stream.no_asdu == 1U);
+    CHECK(stream.smv_options.element_present);
+    CHECK(!stream.smv_options.refresh_time);
+    CHECK(!stream.smv_options.sample_synchronized);
+    CHECK(!stream.smv_options.sample_rate);
+    CHECK(!stream.smv_options.data_set);
+    CHECK(!stream.smv_options.security);
+    CHECK(!stream.smv_options.synch_source_id);
+    CHECK(stream.entries.size() == 16U);
+
+    for (std::size_t channel = 0U; channel < 8U; ++channel) {
+        const auto& value = stream.entries[channel * 2U];
+        const auto& quality = stream.entries[channel * 2U + 1U];
+        CHECK(value.da_name == "instMag.i");
+        CHECK(value.cdc == "SAV");
+        CHECK(value.basic_type == "INT32");
+        CHECK(!value.is_quality);
+        CHECK(quality.da_name == "q");
+        CHECK(quality.cdc == "SAV");
+        CHECK(quality.basic_type == "Quality");
+        CHECK(quality.is_quality);
+    }
+
+    SvPublisherProfileCompileContext context;
+    context.sample_counter_modulus = static_cast<std::uint16_t>(4800U);
+    const auto compiled = SvPublisherProfileCompiler::compile(stream, context);
+    CHECK(compiled.ok());
+    CHECK(compiled.profile.has_value());
+    const auto& profile = *compiled.profile;
+    CHECK(profile.app_id == 0x4001U);
+    CHECK(profile.vlan_present);
+    CHECK(profile.vlan_id == 0U);
+    CHECK(profile.vlan_priority == 4U);
+    CHECK(profile.configuration_revision == 100U);
+    CHECK(profile.sample_mode == SvSampleMode::samples_per_second);
+    CHECK(profile.publisher_rate_hz == std::optional<std::uint32_t>{4800U});
+    CHECK(profile.sample_counter_policy == SvSampleCounterPolicy::explicit_modulus);
+    CHECK(profile.sample_counter_modulus == std::optional<std::uint16_t>{
+        static_cast<std::uint16_t>(4800U)});
+    CHECK(profile.channels.size() == 16U);
+    CHECK(profile.payload_size_bytes == 64U);
+    CHECK(profile.asdu_options.element_present);
+
+    RationalTickSchedule schedule_4800{1'000'000U, 4800U};
+    std::uint64_t total_ticks{};
+    std::uint32_t intervals_208{};
+    std::uint32_t intervals_209{};
+    for (std::uint32_t sample = 0U; sample < 4800U; ++sample) {
+        const auto interval = schedule_4800.next_interval_ticks();
+        total_ticks += interval;
+        if (interval == 208U) {
+            ++intervals_208;
+        } else if (interval == 209U) {
+            ++intervals_209;
+        } else {
+            CHECK(false);
+        }
+    }
+    CHECK(total_ticks == 1'000'000U);
+    CHECK(intervals_208 == 3200U);
+    CHECK(intervals_209 == 1600U);
+
+    RationalTickSchedule schedule_4000{1'000'000U, 4000U};
+    total_ticks = 0U;
+    for (std::uint32_t sample = 0U; sample < 4000U; ++sample) {
+        const auto interval = schedule_4000.next_interval_ticks();
+        CHECK(interval == 250U);
+        total_ticks += interval;
+    }
+    CHECK(total_ticks == 1'000'000U);
+}
+
 void dataset_reference_resolver_accepts_canonical_and_local_forms() {
     using namespace ar::iec61850::scl;
 
@@ -263,6 +359,7 @@ int main() {
     const std::vector<std::pair<std::string, std::function<void()>>> tests{
         {"SCL minimal station", parser_extracts_minimal_station_semantics},
         {"SCL multi-stream", parser_extracts_multiple_sampled_values_streams_and_conflicts},
+        {"SCL structured 4800 SV profile", parser_compiles_structured_4800_sv_profile_without_drift},
         {"SCL dataset references", dataset_reference_resolver_accepts_canonical_and_local_forms},
         {"SCL conflicts and warnings", parser_detects_duplicate_ieds_and_missing_dataset_references},
         {"SCL edition detection", parser_detects_editions_from_root_metadata},
