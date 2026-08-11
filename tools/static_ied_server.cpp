@@ -30,6 +30,7 @@
 #include <arpa/inet.h>
 #include <cerrno>
 #include <netinet/in.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
@@ -67,6 +68,13 @@ using NativeSocket = int;
 constexpr NativeSocket kInvalidSocket = -1;
 #endif
 
+enum class SocketWaitStatus : std::uint8_t {
+    ready,
+    timeout,
+    interrupted,
+    error,
+};
+
 void close_socket(const NativeSocket socket) noexcept {
     if (socket == kInvalidSocket) {
         return;
@@ -84,6 +92,57 @@ void close_socket(const NativeSocket socket) noexcept {
 #else
     return std::to_string(errno);
 #endif
+}
+
+[[nodiscard]] bool socket_interrupted() noexcept {
+#if defined(_WIN32)
+    return ::WSAGetLastError() == WSAEINTR;
+#else
+    return errno == EINTR;
+#endif
+}
+
+[[nodiscard]] SocketWaitStatus wait_socket(
+    const NativeSocket socket,
+    const bool for_read,
+    const std::uint32_t timeout_ms) noexcept {
+    fd_set read_set;
+    fd_set write_set;
+    FD_ZERO(&read_set);
+    FD_ZERO(&write_set);
+    if (for_read) {
+        FD_SET(socket, &read_set);
+    } else {
+        FD_SET(socket, &write_set);
+    }
+
+    timeval timeout{};
+    timeout.tv_sec = static_cast<long>(timeout_ms / 1'000U);
+    timeout.tv_usec = static_cast<long>((timeout_ms % 1'000U) * 1'000U);
+#if defined(_WIN32)
+    const auto result = ::select(
+        0,
+        for_read ? &read_set : nullptr,
+        for_read ? nullptr : &write_set,
+        nullptr,
+        &timeout);
+#else
+    const auto result = ::select(
+        socket + 1,
+        for_read ? &read_set : nullptr,
+        for_read ? nullptr : &write_set,
+        nullptr,
+        &timeout);
+#endif
+    if (result > 0) {
+        return SocketWaitStatus::ready;
+    }
+    if (result == 0) {
+        return SocketWaitStatus::timeout;
+    }
+    return socket_interrupted()
+        ? SocketWaitStatus::interrupted
+        : SocketWaitStatus::error;
 }
 
 [[nodiscard]] NativeSocket create_listener(const std::uint16_t port) {
@@ -145,6 +204,17 @@ struct SocketStreamContext final {
         return {embedded::IoStatus::closed, 0U};
     }
 
+    const auto readiness = wait_socket(stream.socket, true, 100U);
+    if (readiness == SocketWaitStatus::timeout) {
+        return {embedded::IoStatus::timeout, 0U};
+    }
+    if (readiness == SocketWaitStatus::interrupted) {
+        return {embedded::IoStatus::would_block, 0U};
+    }
+    if (readiness != SocketWaitStatus::ready) {
+        return {embedded::IoStatus::io_error, 0U};
+    }
+
 #if defined(_WIN32)
     const auto bounded = std::min<std::size_t>(
         destination.size(), static_cast<std::size_t>(INT_MAX));
@@ -193,6 +263,17 @@ struct SocketStreamContext final {
     auto& stream = *static_cast<SocketStreamContext*>(context);
     if (stream.socket == kInvalidSocket) {
         return {embedded::IoStatus::closed, 0U};
+    }
+
+    const auto readiness = wait_socket(stream.socket, false, 100U);
+    if (readiness == SocketWaitStatus::timeout) {
+        return {embedded::IoStatus::timeout, 0U};
+    }
+    if (readiness == SocketWaitStatus::interrupted) {
+        return {embedded::IoStatus::would_block, 0U};
+    }
+    if (readiness != SocketWaitStatus::ready) {
+        return {embedded::IoStatus::io_error, 0U};
     }
 
 #if defined(_WIN32)
@@ -580,6 +661,16 @@ int main(int argc, char** argv) {
         while (!g_stop.load(std::memory_order_relaxed) &&
                (options.maximum_connections == 0U ||
                 connection_count < options.maximum_connections)) {
+            const auto readiness = wait_socket(listener, true, 200U);
+            if (readiness == SocketWaitStatus::timeout ||
+                readiness == SocketWaitStatus::interrupted) {
+                continue;
+            }
+            if (readiness != SocketWaitStatus::ready) {
+                throw std::runtime_error(
+                    "select(listener) failed: " + socket_error_text());
+            }
+
             sockaddr_in peer{};
 #if defined(_WIN32)
             int peer_size = static_cast<int>(sizeof(peer));
@@ -591,8 +682,8 @@ int main(int argc, char** argv) {
                 reinterpret_cast<sockaddr*>(&peer),
                 &peer_size);
             if (client == kInvalidSocket) {
-                if (g_stop.load(std::memory_order_relaxed)) {
-                    break;
+                if (g_stop.load(std::memory_order_relaxed) || socket_interrupted()) {
+                    continue;
                 }
                 std::cerr << "accept() failed: " << socket_error_text() << '\n';
                 continue;
