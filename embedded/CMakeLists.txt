@@ -54,12 +54,20 @@ set(ARIEC61850_EMBEDDED_SOURCES
     ${ARIEC61850_ROOT}/src/mms/services_span.cpp
     ${ARIEC61850_ROOT}/src/mms/write_span.cpp
     ${ARIEC61850_ROOT}/src/mms/data_set_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/information_report_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/buffered_selective_information_report_span.cpp
     ${ARIEC61850_ROOT}/src/mms/static_object_table.cpp
     ${ARIEC61850_ROOT}/src/mms/static_write.cpp
     ${ARIEC61850_ROOT}/src/mms/static_data_set_table.cpp
     ${ARIEC61850_ROOT}/src/mms/static_dispatcher.cpp
     ${ARIEC61850_ROOT}/src/mms/connection_runtime.cpp
-    ${ARIEC61850_ROOT}/src/mms/static_server_session.cpp)
+    ${ARIEC61850_ROOT}/src/mms/static_server_session.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_brcb_runtime.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_brcb_control.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_brcb_objects.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_brcb_connection.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_brcb_checkpoint_store.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_brcb_state_codec.cpp)
 
 add_library(ariec61850_embedded_core STATIC ${ARIEC61850_EMBEDDED_SOURCES})
 add_library(ARIEC61850::embedded_core ALIAS ariec61850_embedded_core)
@@ -126,7 +134,14 @@ foreach(server_smoke IN ITEMS
         mms_write
         mms_dispatcher
         mms_connection_runtime
-        mms_data_set)
+        mms_data_set
+        mms_brcb
+        mms_brcb_control
+        mms_brcb_connection
+        mms_brcb_objects
+        mms_brcb_lifecycle
+        mms_brcb_persistence
+        mms_brcb_recovery_v2)
     set(server_smoke_target "ariec61850_embedded_${server_smoke}_smoke")
     add_executable(
         ${server_smoke_target}
