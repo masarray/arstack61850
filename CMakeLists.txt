@@ -84,6 +84,11 @@ add_library(ariec61850_mms_server_core
     src/mms/static_dispatcher.cpp
     src/mms/connection_runtime.cpp
     src/mms/static_server_session.cpp
+    src/mms/static_direct_control.cpp
+    src/mms/static_information_report.cpp
+    src/mms/static_report_connection.cpp
+    src/mms/static_urcb_objects.cpp
+    src/mms/static_urcb_runtime.cpp
     src/mms/static_brcb_runtime.cpp
     src/mms/static_brcb_control.cpp
     src/mms/static_brcb_objects.cpp
@@ -198,6 +203,32 @@ if(ARIEC61850_BUILD_TOOLS)
     target_compile_features(ariec61850_static_ied_server PRIVATE cxx_std_20)
     ariec61850_apply_warnings(ariec61850_static_ied_server)
     ariec61850_apply_sanitizers(ariec61850_static_ied_server)
+
+    add_executable(
+        ariec61850_mms_direct_control_server
+        tools/mms_direct_control_server.cpp)
+    target_link_libraries(
+        ariec61850_mms_direct_control_server
+        PRIVATE ARIEC61850::mms_server_core ARIEC61850::core)
+    if(WIN32)
+        target_link_libraries(ariec61850_mms_direct_control_server PRIVATE ws2_32)
+    endif()
+    target_compile_features(ariec61850_mms_direct_control_server PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_mms_direct_control_server)
+    ariec61850_apply_sanitizers(ariec61850_mms_direct_control_server)
+
+    add_executable(
+        ariec61850_mms_urcb_server
+        tools/mms_urcb_server.cpp)
+    target_link_libraries(
+        ariec61850_mms_urcb_server
+        PRIVATE ARIEC61850::mms_server_core ARIEC61850::core)
+    if(WIN32)
+        target_link_libraries(ariec61850_mms_urcb_server PRIVATE ws2_32)
+    endif()
+    target_compile_features(ariec61850_mms_urcb_server PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_mms_urcb_server)
+    ariec61850_apply_sanitizers(ariec61850_mms_urcb_server)
 endif()
 
 if(ARIEC61850_BUILD_TESTS)
@@ -400,6 +431,32 @@ if(ARIEC61850_BUILD_TESTS)
         NAME ariec61850_mms_connection_runtime_tests
         COMMAND ariec61850_mms_connection_runtime_tests)
 
+    add_executable(
+        ariec61850_mms_direct_control_tests
+        tests/test_mms_static_direct_control.cpp)
+    target_link_libraries(
+        ariec61850_mms_direct_control_tests
+        PRIVATE ARIEC61850::mms_server_core ARIEC61850::core)
+    target_compile_features(ariec61850_mms_direct_control_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_mms_direct_control_tests)
+    ariec61850_apply_sanitizers(ariec61850_mms_direct_control_tests)
+    add_test(
+        NAME ariec61850_mms_direct_control_tests
+        COMMAND ariec61850_mms_direct_control_tests)
+
+    add_executable(
+        ariec61850_mms_server_urcb_tests
+        tests/test_mms_server_urcb_report.cpp)
+    target_link_libraries(
+        ariec61850_mms_server_urcb_tests
+        PRIVATE ARIEC61850::mms_server_core ARIEC61850::core)
+    target_compile_features(ariec61850_mms_server_urcb_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_mms_server_urcb_tests)
+    ariec61850_apply_sanitizers(ariec61850_mms_server_urcb_tests)
+    add_test(
+        NAME ariec61850_mms_server_urcb_tests
+        COMMAND ariec61850_mms_server_urcb_tests)
+
     foreach(brcb_smoke IN ITEMS
             mms_brcb
             mms_brcb_control
@@ -440,6 +497,12 @@ if(ARIEC61850_BUILD_TESTS)
         add_test(
             NAME ariec61850_static_ied_server_help
             COMMAND ariec61850_static_ied_server --help)
+        add_test(
+            NAME ariec61850_mms_direct_control_server_help
+            COMMAND ariec61850_mms_direct_control_server --help)
+        add_test(
+            NAME ariec61850_mms_urcb_server_help
+            COMMAND ariec61850_mms_urcb_server --help)
     endif()
 endif()
 
