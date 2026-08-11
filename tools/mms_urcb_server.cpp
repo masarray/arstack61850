@@ -195,8 +195,8 @@ private:
     while (offset < bytes.size()) {
         auto socket_copy = socket;
         const auto result = socket_send(&socket_copy, bytes.subspan(offset));
-        if (result.status != embedded::IoStatus::ok || result.bytes_transferred == 0U) return false;
-        offset += result.bytes_transferred;
+        if (result.status != embedded::IoStatus::ok || result.transferred == 0U) return false;
+        offset += result.transferred;
     }
     return true;
 }
