@@ -90,6 +90,65 @@ void announce_matches_csharp_oracle_and_roundtrips() {
     CHECK(decoded.announce->grandmaster_identity == options.source_port_identity.clock_identity);
 }
 
+void pdelay_response_preserves_request_identity_and_hardware_timestamp_fields() {
+    using namespace ar::iec61850::time_sync;
+    auto options = make_options();
+    options.sequence_id = 0x0055U;
+    options.log_message_interval = -3;
+    options.two_step = true;
+    options.timestamp = {0x000102030405ULL, 222333444U};
+
+    const PtpPortIdentity requesting_port{
+        {0x10U, 0x20U, 0x30U, 0x40U, 0x50U, 0x60U, 0x70U, 0x80U},
+        2U,
+    };
+
+    const auto response = PtpCodec::build_pdelay_resp(options, requesting_port);
+    CHECK(response.size() == 54U);
+
+    PtpFrame decoded;
+    CHECK(PtpCodec::try_parse_message(response, decoded));
+    CHECK(decoded.header.message_type == PtpMessageType::pdelay_resp);
+    CHECK(decoded.header.sequence_id == 0x0055U);
+    CHECK(decoded.header.log_message_interval == -3);
+    CHECK(decoded.header.is_two_step());
+    CHECK(decoded.body.size() == 20U);
+
+    PtpTimestamp request_receipt_timestamp;
+    CHECK(PtpTimestamp::try_read(
+        std::span<const std::uint8_t>{decoded.body}.first(10U),
+        request_receipt_timestamp));
+    CHECK(request_receipt_timestamp == options.timestamp);
+    CHECK(std::equal(
+        requesting_port.clock_identity.begin(),
+        requesting_port.clock_identity.end(),
+        decoded.body.begin() + 10));
+    CHECK(decoded.body[18] == 0x00U);
+    CHECK(decoded.body[19] == 0x02U);
+
+    auto follow_up_options = options;
+    follow_up_options.two_step = false;
+    follow_up_options.timestamp = {0x000102030406ULL, 555666777U};
+    const auto follow_up = PtpCodec::build_pdelay_resp_follow_up(
+        follow_up_options,
+        requesting_port);
+    CHECK(follow_up.size() == 54U);
+    CHECK(PtpCodec::try_parse_message(follow_up, decoded));
+    CHECK(decoded.header.message_type == PtpMessageType::pdelay_resp_follow_up);
+    CHECK(decoded.header.sequence_id == 0x0055U);
+    CHECK(!decoded.header.is_two_step());
+
+    PtpTimestamp response_origin_timestamp;
+    CHECK(PtpTimestamp::try_read(
+        std::span<const std::uint8_t>{decoded.body}.first(10U),
+        response_origin_timestamp));
+    CHECK(response_origin_timestamp == follow_up_options.timestamp);
+    CHECK(std::equal(
+        requesting_port.clock_identity.begin(),
+        requesting_port.clock_identity.end(),
+        decoded.body.begin() + 10));
+}
+
 void ethernet_vlan_and_qinq_are_parsed_for_analyzer_use() {
     using namespace ar::iec61850::time_sync;
     auto options = make_options();
@@ -184,6 +243,7 @@ int main() {
     const std::vector<std::pair<std::string, std::function<void()>>> tests{
         {"PTP Sync C# oracle", sync_matches_csharp_oracle_and_roundtrips},
         {"PTP Announce C# oracle", announce_matches_csharp_oracle_and_roundtrips},
+        {"PTP Pdelay response wire fields", pdelay_response_preserves_request_identity_and_hardware_timestamp_fields},
         {"PTP VLAN/QinQ analyzer parser", ethernet_vlan_and_qinq_are_parsed_for_analyzer_use},
         {"PTP monitor health and smpSynch", passive_monitor_health_drives_conservative_smp_synch_policy},
         {"PTP malformed input", malformed_or_non_ptp_frames_are_rejected},
