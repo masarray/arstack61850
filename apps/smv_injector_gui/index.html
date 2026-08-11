@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="responsive.css" />
 </head>
-<body data-running="false">
+<body data-running="false" data-connected="false">
   <div class="app-shell">
     <header class="topbar">
       <div class="brand-block">
@@ -20,11 +20,11 @@
       </div>
 
       <div class="top-context" aria-label="Active stream context">
-        <span class="context-kicker">Active stream</span>
-        <strong id="topStreamId">MU01_SV1</strong>
-        <span class="context-separator"></span>
+        <strong>MU01_SV1</strong>
         <span>APPID <b>0x4000</b></span>
         <span>4000 sample/s</span>
+        <span class="context-separator"></span>
+        <span class="top-mode">FAST INJECT</span>
       </div>
 
       <div class="connection-strip">
@@ -32,62 +32,53 @@
           <span class="status-dot"></span>
           <span id="deviceStatusText">Device offline</span>
         </div>
-        <button class="btn compact secondary" id="connectButton">Connect device</button>
+        <button class="btn compact secondary" id="connectButton">Connect</button>
       </div>
     </header>
 
     <main class="cockpit">
-      <aside class="surface stream-pane">
+      <aside class="surface source-pane">
         <div class="pane-heading">
           <div>
-            <span class="eyebrow">Process bus</span>
-            <h2>Stream</h2>
+            <span class="eyebrow">Source</span>
+            <h2>MU01_SV1</h2>
           </div>
-          <span class="profile-chip">DEV</span>
+          <span class="stream-state">SV</span>
         </div>
 
-        <div class="stream-card">
-          <span class="field-label">svID</span>
-          <strong id="svIdValue">MU01_SV1</strong>
-          <div class="stream-meta-grid">
-            <div><span>APPID</span><b id="appIdValue">0x4000</b></div>
-            <div><span>VLAN</span><b id="vlanValue">P4 · VID 0</b></div>
-            <div><span>Rate</span><b id="sampleRateValue">4000/s</b></div>
-            <div><span>smpCnt</span><b id="counterValue">wrap 4000</b></div>
+        <div class="stream-summary">
+          <div><span>APPID</span><b>0x4000</b></div>
+          <div><span>VLAN</span><b>P4 · VID 0</b></div>
+          <div><span>RATE</span><b>4000/s</b></div>
+          <div><span>smpCnt</span><b>wrap 4000</b></div>
+        </div>
+
+        <label class="file-button" for="sclFile">
+          <span>Open SCL / CID</span>
+          <input id="sclFile" type="file" accept=".scd,.cid,.icd,.iid,.ssd,.xml" />
+        </label>
+        <div class="file-state" id="sclState">Development profile</div>
+
+        <div class="source-section">
+          <span class="section-label">Quick setup</span>
+          <div class="preset-stack">
+            <button class="preset-button" id="balancedButton">
+              <span class="preset-icon">3Φ</span>
+              <span><b>Balanced</b><small>1 A · 57.74 V</small></span>
+            </button>
+            <button class="preset-button" id="zeroButton">
+              <span class="preset-icon neutral">0</span>
+              <span><b>Zero output</b><small>All magnitudes</small></span>
+            </button>
           </div>
         </div>
 
-        <div class="engineering-file">
-          <span class="field-label">Engineering source</span>
-          <label class="file-button" for="sclFile">
-            <span>Open SCL / CID</span>
-            <input id="sclFile" type="file" accept=".scd,.cid,.icd,.iid,.ssd,.xml" />
-          </label>
-          <div class="file-state" id="sclState">Development profile active</div>
-        </div>
-
-        <div class="section-divider"></div>
-
-        <div class="quick-presets">
-          <span class="field-label">Quick setup</span>
-          <button class="preset-button" id="balancedButton">
-            <span class="preset-icon">3Φ</span>
-            <span><b>Balanced</b><small>1 A · 57.74 V</small></span>
-          </button>
-          <button class="preset-button" id="zeroButton">
-            <span class="preset-icon zero">0</span>
-            <span><b>Zero output</b><small>Clear all magnitudes</small></span>
-          </button>
-        </div>
-
-        <div class="section-divider"></div>
-
-        <div class="health-block">
+        <div class="source-section health-block">
           <div class="health-heading">
-            <span class="field-label">Runtime health</span>
+            <span class="section-label">Runtime</span>
             <span class="health-state" id="systemReadiness" data-state="offline">OFFLINE</span>
           </div>
-          <div class="health-grid">
+          <div class="health-list">
             <div><span>Rate</span><strong id="fpsMetric">—</strong></div>
             <div><span>Missed</span><strong id="missedMetric">—</strong></div>
             <div><span>TX fail</span><strong id="failMetric">—</strong></div>
@@ -108,8 +99,8 @@
       <section class="surface injector-pane">
         <div class="injector-heading">
           <div>
-            <span class="eyebrow">Fast injection</span>
-            <h1>4I + 4V</h1>
+            <span class="eyebrow">Injection workspace</span>
+            <h1>Manual Injection</h1>
           </div>
           <div class="run-state" id="runState" data-state="stopped">
             <span class="run-dot"></span>
@@ -117,72 +108,76 @@
           </div>
         </div>
 
-        <div class="frequency-strip">
-          <div class="frequency-main">
-            <span class="field-label">Frequency</span>
+        <div class="command-strip">
+          <div class="frequency-control">
+            <span class="command-label">Frequency</span>
             <div class="frequency-value">
               <input id="frequencyInput" type="number" min="1" max="1000" step="0.001" value="50.000" aria-label="Signal frequency" />
               <span>Hz</span>
             </div>
           </div>
-          <input id="frequencySlider" class="frequency-slider" type="range" min="45" max="65" step="0.001" value="50" aria-label="Frequency fine adjustment" />
+          <div class="frequency-presets" aria-label="Frequency presets">
+            <button class="micro-button" id="freq50Button">50</button>
+            <button class="micro-button" id="freq60Button">60</button>
+          </div>
+          <span class="command-divider"></span>
+          <button class="mode-button" id="phaseLinkButton" aria-pressed="false">
+            <span class="link-icon">3Φ</span>
+            <span><b>3-phase link</b><small>Independent</small></span>
+          </button>
           <label class="switch-row" title="Apply edited values to the connected device automatically">
             <input id="liveApplyToggle" type="checkbox" checked />
             <span class="switch"></span>
-            <span>Live apply</span>
+            <span><b>Live</b><small>Auto apply</small></span>
           </label>
         </div>
 
-        <div class="injection-table" role="table" aria-label="Injection values">
-          <div class="grid-head" role="row">
-            <span>On</span>
-            <span>Channel</span>
-            <span>Magnitude</span>
-            <span>Phase</span>
-            <span>Wire</span>
-            <span></span>
-          </div>
-          <div id="channelGrid" class="channel-grid"></div>
-        </div>
+        <div class="signal-matrices" id="channelGrid" aria-label="Injection values"></div>
 
-        <div class="grid-hint">
-          <span><kbd>Tab</kbd> next value</span>
-          <span><kbd>Enter</kbd> apply channel</span>
-          <span>Values remain editable while disconnected for setup and preview.</span>
+        <div class="editor-status">
+          <div class="active-value" id="activeValueDetail">
+            <span class="active-dot"></span>
+            <strong>Ua</strong>
+            <span>57.740 V RMS · 0.00°</span>
+          </div>
+          <div class="keyboard-hint">
+            <span><kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> move</span>
+            <span><kbd>Enter</kbd> next / apply</span>
+            <span><kbd>+</kbd><kbd>−</kbd> step</span>
+          </div>
         </div>
       </section>
 
-      <aside class="visual-pane">
-        <section class="surface visual-card phasor-card">
-          <div class="visual-heading">
-            <div>
-              <span class="eyebrow">Generated</span>
-              <h2>Phasor</h2>
-            </div>
-            <span class="visual-badge">SETPOINT</span>
+      <aside class="surface monitor-pane">
+        <div class="monitor-heading">
+          <div>
+            <span class="eyebrow">Generated setpoint</span>
+            <h2>Signal Preview</h2>
+          </div>
+          <span class="visual-badge">LOCAL</span>
+        </div>
+
+        <section class="visual-section phasor-section">
+          <div class="visual-section-heading">
+            <strong>Phasor</strong>
+            <span id="phasorSelectedLabel">Ua · 57.740 V ∠ 0.00°</span>
           </div>
           <canvas id="phasorCanvas" width="720" height="420" aria-label="Generated current and voltage phasor diagram"></canvas>
-          <div class="visual-footer">
-            <span><i class="legend-line voltage"></i> Voltage</span>
-            <span><i class="legend-line current"></i> Current</span>
-            <span>Setpoint preview · not on-wire proof</span>
-          </div>
         </section>
 
-        <section class="surface visual-card waveform-card">
-          <div class="visual-heading">
-            <div>
-              <span class="eyebrow">Generated</span>
-              <h2>Output waveform</h2>
-            </div>
-            <span class="visual-badge">40 ms</span>
+        <section class="visual-section waveform-section">
+          <div class="visual-section-heading">
+            <strong>Waveform</strong>
+            <span><b id="waveformFrequencyLabel">50.000 Hz</b> · 40 ms</span>
           </div>
           <canvas id="waveformCanvas" width="720" height="360" aria-label="Generated voltage and current waveform preview"></canvas>
-          <div class="visual-footer waveform-footer">
-            <span>Voltage + current · normalized view</span>
-            <span id="waveformFrequencyLabel">50.000 Hz</span>
-          </div>
         </section>
+
+        <div class="monitor-footer">
+          <span><i class="legend-line voltage"></i> Voltage</span>
+          <span><i class="legend-line current"></i> Current</span>
+          <span>Generated preview · not on-wire proof</span>
+        </div>
       </aside>
     </main>
 
@@ -196,7 +191,7 @@
       </div>
 
       <div class="action-context">
-        <span>MU01_SV1</span>
+        <span id="footerSelection">Ua 57.740 V ∠0.00°</span>
         <span class="action-separator"></span>
         <span id="footerRate">4000 sample/s</span>
       </div>
