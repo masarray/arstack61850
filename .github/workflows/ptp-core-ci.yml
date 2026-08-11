@@ -84,3 +84,31 @@ jobs:
             done < ptp-test.log
             exit "$status"
           fi
+
+  portable-ptp-msvc:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure strict MSVC build
+        shell: pwsh
+        run: cmake -S . -B build-ptp-msvc -A x64 -DARIEC61850_BUILD_TESTS=ON -DARIEC61850_BUILD_TOOLS=ON -DARIEC61850_WARNINGS_AS_ERRORS=ON
+
+      - name: Build with diagnostics
+        shell: pwsh
+        run: |
+          $output = & cmake --build build-ptp-msvc --config Release --parallel 2>&1
+          $status = $LASTEXITCODE
+          $output | Tee-Object -FilePath ptp-msvc-build.log
+          if ($status -ne 0) {
+            foreach ($line in $output) {
+              $escaped = "$line".Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+              Write-Output "::error::$escaped"
+            }
+            exit $status
+          }
+
+      - name: Run PTP regression test on MSVC
+        shell: pwsh
+        run: ctest --test-dir build-ptp-msvc -C Release -R ariec61850_ptp_tests --output-on-failure
