@@ -1,42 +1,81 @@
-/* Responsive operator layout. Keep all primary controls visible on laptops and split-screen benches. */
-html { min-width: 0 !important; }
-body { overflow-x: hidden; }
-.app-shell { min-width: 0; }
-.workspace { width: 100%; min-width: 0; }
-.hero-grid, .control-toolbar, .bottom-grid, .channel-grid { min-width: 0; }
+/* Keep the injector + signal preview side-by-side for normal engineering laptop widths.
+   Stack only when the viewport is genuinely narrow. */
 
-@media (max-width: 1180px) {
-  .topbar { padding: 14px 18px; }
-  .workspace { padding: 18px 18px 32px; }
-  .hero-grid { grid-template-columns: 1fr; }
-  .run-panel { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; column-gap: 18px; }
-  .run-metrics { grid-column: 1 / -1; grid-row: 2; margin: 14px 0 0; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .run-actions { align-self: center; }
-  .run-actions .btn { min-width: 120px; }
-  .control-toolbar { grid-template-columns: 1fr; }
-  .frequency-control { grid-template-columns: 150px minmax(0, 1fr); }
-  .toolbar-actions { justify-content: flex-start; }
-  .channel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .bottom-grid { grid-template-columns: 1fr; }
-  .section-heading { align-items: flex-start; }
-  .section-heading p { text-align: left; max-width: 520px; }
+@media (max-width: 1240px) {
+  .cockpit { grid-template-columns: 178px minmax(400px,1fr) minmax(300px,330px); }
+  .source-pane { padding: 10px; }
+  .injector-pane { padding: 10px; }
+  .monitor-pane { padding: 9px; }
+  .top-context { justify-content: flex-start; }
+  .top-context .top-mode { display: none; }
+  .command-strip { grid-template-columns: 102px auto 1px minmax(108px,1fr) auto; gap: 5px; }
+  .keyboard-hint { gap: 6px; }
+  .keyboard-hint span:nth-child(3) { display: none; }
+  .matrix-head, .channel-row { grid-template-columns: 25px 43px minmax(78px,1fr) minmax(70px,.8fr); }
+}
+
+@media (max-width: 1010px) {
+  body { overflow: auto; }
+  .app-shell { height: auto; min-height: 100vh; grid-template-rows: var(--topbar) auto var(--actionbar); }
+  .top-context span:nth-of-type(2), .top-context .context-separator { display: none; }
+  .cockpit {
+    min-height: 760px;
+    grid-template-columns: 176px minmax(0,1fr);
+    grid-template-rows: minmax(500px,1fr) 300px;
+    overflow: visible;
+  }
+  .source-pane { grid-column: 1; grid-row: 1; }
+  .injector-pane { grid-column: 2; grid-row: 1; }
+  .monitor-pane {
+    grid-column: 1 / -1; grid-row: 2;
+    grid-template-columns: 1fr 1fr; grid-template-rows: auto minmax(0,1fr) auto;
+  }
+  .monitor-heading { grid-column: 1 / -1; }
+  .phasor-section { grid-column: 1; grid-row: 2; }
+  .waveform-section { grid-column: 2; grid-row: 2; }
+  .monitor-footer { grid-column: 1 / -1; }
+  .action-bar { position: sticky; bottom: 0; }
 }
 
 @media (max-width: 760px) {
-  .topbar { position: static; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
-  .connection-strip { width: 100%; justify-content: space-between; }
-  .workspace { padding: 14px 12px 28px; }
-  .stream-panel, .run-panel, .phase-panel, .console-panel { padding: 16px; }
-  .panel-header { align-items: flex-start; }
-  .identity-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .profile-actions { align-items: flex-start; flex-direction: column; }
-  .file-state { max-width: 100%; white-space: normal; }
-  .run-panel { display: block; }
-  .run-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .run-actions { margin-top: 14px; }
-  .frequency-control { grid-template-columns: 1fr; }
-  .channel-grid { grid-template-columns: 1fr; }
-  .section-heading { display: block; }
-  .section-heading p { margin-top: 8px; }
-  .channel-fields { grid-template-columns: 1fr 1fr; }
+  :root { --topbar: auto; --actionbar: auto; }
+  .app-shell { display: block; min-height: 100vh; }
+  .topbar {
+    min-height: 54px; padding: 8px 10px; display: grid;
+    grid-template-columns: 1fr auto; grid-template-rows: auto auto;
+  }
+  .brand-block { grid-column: 1; grid-row: 1; }
+  .connection-strip { grid-column: 2; grid-row: 1; }
+  .top-context { grid-column: 1 / -1; grid-row: 2; min-height: 22px; justify-content: flex-start; border-top: 1px solid var(--line); padding-top: 6px; }
+  .cockpit { min-height: 0; padding: 6px; display: grid; grid-template-columns: 1fr; grid-template-rows: auto auto auto; gap: 6px; }
+  .source-pane, .injector-pane, .monitor-pane { grid-column: 1; grid-row: auto; }
+  .source-pane { overflow: visible; }
+  .signal-matrices { grid-template-columns: 1fr; }
+  .signal-group { min-height: 240px; }
+  .monitor-pane { display: grid; grid-template-columns: 1fr; grid-template-rows: auto 300px 270px auto; }
+  .monitor-heading, .phasor-section, .waveform-section, .monitor-footer { grid-column: 1; grid-row: auto; }
+  .editor-status { align-items: flex-start; flex-direction: column; }
+  .keyboard-hint { display: none; }
+  .action-bar {
+    position: sticky; bottom: 0; min-height: 64px; padding: 7px 8px;
+    grid-template-columns: minmax(0,1fr) auto; gap: 8px;
+  }
+  .action-context { display: none; }
+  .primary-actions { gap: 4px; }
+  .btn.action { min-width: 64px; }
+  .btn.start { min-width: 92px; }
+}
+
+@media (max-width: 520px) {
+  .connection-strip .status-pill { display: none; }
+  .top-context { overflow-x: auto; }
+  .command-strip { grid-template-columns: 1fr auto; gap: 6px; }
+  .command-divider { display: none; }
+  .mode-button { grid-column: 1; grid-row: 2; }
+  .switch-row { grid-column: 2; grid-row: 2; }
+  .signal-matrices { grid-template-columns: 1fr; }
+  .action-bar { grid-template-columns: 1fr; }
+  .readiness-strip { display: none; }
+  .primary-actions { width: 100%; }
+  .primary-actions .btn { flex: 1; }
 }
