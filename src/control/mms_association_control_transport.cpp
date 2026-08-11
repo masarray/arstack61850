@@ -18,9 +18,11 @@ std::atomic<std::uint64_t> g_next_control_association_id{1U};
 
 [[nodiscard]] std::span<const std::uint8_t> response_payload(
     const mms::MmsConfirmedExchangeResult& exchange) noexcept {
-    return exchange.presentation_payload.empty()
-        ? std::span<const std::uint8_t>{exchange.envelope.mms_payload}
-        : std::span<const std::uint8_t>{exchange.presentation_payload};
+    // exchange_confirmed() has already decoded, invoke-routed, and retained the
+    // canonical MMS PDU in the envelope.  Always consume that payload here so
+    // control Read/Write decoding is independent of whether the peer returned
+    // a bare Presentation P-DATA unit or a compatibility session wrapper.
+    return exchange.envelope.mms_payload;
 }
 
 [[nodiscard]] std::uint64_t allocate_association_id() noexcept {
@@ -61,6 +63,11 @@ std::optional<mms::MmsDataValue> MmsAssociationControlTransport::read(
     if (exchange.envelope.kind == mms::MmsPduKind::confirmed_error) {
         return std::nullopt;
     }
+    if (exchange.envelope.kind != mms::MmsPduKind::confirmed_response) {
+        throw std::runtime_error(
+            "MMS Read rejected for " + object.reference() + " (PDU kind=" +
+            std::to_string(static_cast<unsigned>(exchange.envelope.kind)) + ").");
+    }
     const auto response = mms::MmsServiceCodec::decode_read_response(
         response_payload(exchange), invoke_id);
     if (response.results.size() != 1U || !response.results.front().success()) {
@@ -86,6 +93,12 @@ MmsAssociationControlTransport::variable_specification(
     const auto exchange = association_.exchange_confirmed(encoded, invoke_id, stop_token);
     if (exchange.envelope.kind == mms::MmsPduKind::confirmed_error) {
         return std::nullopt;
+    }
+    if (exchange.envelope.kind != mms::MmsPduKind::confirmed_response) {
+        throw std::runtime_error(
+            "GetVariableAccessAttributes rejected for " + object.reference() +
+            " (PDU kind=" +
+            std::to_string(static_cast<unsigned>(exchange.envelope.kind)) + ").");
     }
     const auto response =
         mms::MmsServiceCodec::decode_variable_access_attributes_response(

@@ -16,9 +16,10 @@
 namespace ar::iec61850::mms {
 namespace {
 
-// Match the bounded static dispatcher capability surface exactly:
+// Advertise only the bounded static dispatcher capability surface:
 // GetNameList(1), Read(4), Write(5), GetVariableAccessAttributes(6), and
-// GetNamedVariableListAttributes(12).
+// GetNamedVariableListAttributes(12). Do not echo the client's requested
+// service mask because that would claim services the server cannot dispatch.
 constexpr std::array<std::uint8_t, 40U> kDefaultInitiateResponse{
     0xA9U, 0x26U,
     0x80U, 0x03U, 0x00U, 0xFDU, 0xE8U,
@@ -152,19 +153,29 @@ constexpr std::array<std::uint8_t, 40U> kDefaultInitiateResponse{
         }
     }
 
-    if (count != 5U ||
-        !std::all_of(seen.begin(), seen.end(), [](const bool value) { return value; }) ||
-        values[0] < 64U || values[0] > MmsPduSpanCodec::maximum_pdu_bytes ||
-        values[1] == 0U || values[2] == 0U || values[3] == 0U) {
+    // ISO 9506 InitiateRequest permits localDetailCalling [0] and
+    // proposedDataStructureNestingLevel [3] to be absent. The original
+    // ARIEC61850 server accepted such request profiles and several engineering
+    // clients rely on that tolerance. Keep InitiateResponse decoding strict,
+    // but do not turn standards-valid optional omissions into a protocol fault.
+    const bool is_request = kind == MmsWirePduKind::initiate_request;
+    const bool mandatory_present = seen[1] && seen[2] && seen[4];
+    const bool response_complete = seen[0] && seen[1] && seen[2] && seen[3] && seen[4];
+    if (!mandatory_present || (!is_request && !response_complete) ||
+        (seen[0] && (values[0] < 64U || values[0] > MmsPduSpanCodec::maximum_pdu_bytes)) ||
+        values[1] == 0U || values[2] == 0U ||
+        (seen[3] && values[3] == 0U)) {
         result = {};
         return false;
     }
 
     result.kind = kind;
-    result.maximum_mms_pdu_size = values[0];
+    result.maximum_mms_pdu_size = seen[0]
+        ? values[0]
+        : static_cast<std::uint32_t>(MmsPduSpanCodec::maximum_pdu_bytes);
     result.maximum_outstanding_calling = values[1];
     result.maximum_outstanding_called = values[2];
-    result.data_structure_nesting_level = values[3];
+    result.data_structure_nesting_level = seen[3] ? values[3] : 5U;
     result.detail = detail;
     return true;
 }
@@ -323,6 +334,47 @@ constexpr std::array<std::uint8_t, 40U> kDefaultInitiateResponse{
     return {wire::EncodeStatus::ok, *required, *required};
 }
 
+[[nodiscard]] wire::EncodeResult encode_reject(
+    const std::uint32_t invoke_id,
+    const MmsConfirmedRequestRejectReason reason,
+    const std::span<std::uint8_t> destination) noexcept {
+    if (invoke_id > MmsPduSpanCodec::maximum_invoke_id ||
+        static_cast<std::uint8_t>(reason) >
+            static_cast<std::uint8_t>(MmsConfirmedRequestRejectReason::invalid_argument)) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+
+    const auto invoke_value = positive_integer_size(invoke_id);
+    const auto invoke_tlv = asn1::BerSpanWriter::tlv_size(0, invoke_value);
+    const auto reason_tlv = asn1::BerSpanWriter::tlv_size(1, 1U);
+    if (!invoke_tlv || !reason_tlv ||
+        *invoke_tlv > std::numeric_limits<std::size_t>::max() - *reason_tlv) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    const auto content = *invoke_tlv + *reason_tlv;
+    const auto required = asn1::BerSpanWriter::tlv_size(4, content);
+    if (!required || *required > MmsPduSpanCodec::maximum_pdu_bytes) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    if (destination.size() < *required) {
+        return {wire::EncodeStatus::buffer_too_small, 0U, *required};
+    }
+
+    asn1::BerSpanWriter writer{destination.first(*required)};
+    if (!writer.write_tlv_header(
+            asn1::BerClass::context_specific, true, 4, content) ||
+        !writer.write_tlv_header(
+            asn1::BerClass::context_specific, false, 0, invoke_value) ||
+        !write_positive_integer(writer, invoke_id) ||
+        !writer.write_tlv_header(
+            asn1::BerClass::context_specific, false, 1, 1U) ||
+        !writer.write_byte(static_cast<std::uint8_t>(reason)) ||
+        writer.size() != *required) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, *required};
+    }
+    return {wire::EncodeStatus::ok, *required, *required};
+}
+
 } // namespace
 
 MmsWireConfirmedService MmsConfirmedPduView::service() const noexcept {
@@ -333,6 +385,7 @@ MmsWireConfirmedService MmsConfirmedPduView::service() const noexcept {
     case 5: return MmsWireConfirmedService::write;
     case 6: return MmsWireConfirmedService::get_variable_access_attributes;
     case 12: return MmsWireConfirmedService::get_named_variable_list_attributes;
+    case 77: return MmsWireConfirmedService::file_directory;
     default: return MmsWireConfirmedService::unknown;
     }
 }
@@ -403,43 +456,7 @@ wire::EncodeResult MmsPduSpanCodec::encode_confirmed_request_reject_into(
     const std::uint32_t invoke_id,
     const MmsConfirmedRequestRejectReason reason,
     const std::span<std::uint8_t> destination) noexcept {
-    const auto reason_value = static_cast<std::uint8_t>(reason);
-    if (invoke_id > maximum_invoke_id ||
-        (reason != MmsConfirmedRequestRejectReason::other &&
-         reason != MmsConfirmedRequestRejectReason::unrecognized_service &&
-         reason != MmsConfirmedRequestRejectReason::invalid_argument)) {
-        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
-    }
-
-    const auto invoke_value = positive_integer_size(invoke_id);
-    const auto invoke_tlv = asn1::BerSpanWriter::tlv_size(0, invoke_value);
-    const auto reason_tlv = asn1::BerSpanWriter::tlv_size(1, 1U);
-    if (!invoke_tlv || !reason_tlv ||
-        *reason_tlv > std::numeric_limits<std::size_t>::max() - *invoke_tlv) {
-        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
-    }
-    const auto content = *invoke_tlv + *reason_tlv;
-    const auto required = asn1::BerSpanWriter::tlv_size(4, content);
-    if (!required || *required > maximum_pdu_bytes) {
-        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
-    }
-    if (destination.size() < *required) {
-        return {wire::EncodeStatus::buffer_too_small, 0U, *required};
-    }
-
-    asn1::BerSpanWriter writer{destination.first(*required)};
-    if (!writer.write_tlv_header(
-            asn1::BerClass::context_specific, true, 4, content) ||
-        !writer.write_tlv_header(
-            asn1::BerClass::context_specific, false, 0, invoke_value) ||
-        !write_positive_integer(writer, invoke_id) ||
-        !writer.write_tlv_header(
-            asn1::BerClass::context_specific, false, 1, 1U) ||
-        !writer.write_byte(reason_value) ||
-        writer.size() != *required) {
-        return {wire::EncodeStatus::value_out_of_range, 0U, *required};
-    }
-    return {wire::EncodeStatus::ok, *required, *required};
+    return encode_reject(invoke_id, reason, destination);
 }
 
 } // namespace ar::iec61850::mms

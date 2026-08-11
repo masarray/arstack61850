@@ -97,9 +97,35 @@ namespace {
     return true;
 }
 
+// IEC 61850 engineering clients discover each Logical Node as one MMS
+// NamedVariable and then walk its hierarchical TypeSpecification. Static
+// profiles also keep flattened leaf aliases in the table so Read/Write can
+// resolve exact FC/DO/DA paths. Do not advertise those aliases as additional
+// top-level NamedVariables when their root Logical Node object is present.
+//
+// The fallback is intentional: a generic MMS profile that only supplies flat
+// names (and no corresponding root entry) keeps the legacy directory behavior.
+[[nodiscard]] bool is_flattened_child_with_root(
+    const MmsStaticObjectTable& objects,
+    const std::string_view domain,
+    const std::string_view item) noexcept {
+    const auto separator = item.find('$');
+    if (separator == std::string_view::npos || separator == 0U) {
+        return false;
+    }
+    const auto root = item.substr(0U, separator);
+    for (const auto& candidate : objects.objects()) {
+        if (candidate.domain == domain && candidate.item == root) {
+            return true;
+        }
+    }
+    return false;
+}
+
 [[nodiscard]] std::size_t collect_names(
     const MmsStaticObjectTable& objects,
     const MmsStaticDataSetTable& data_sets,
+    const MmsStaticDispatchPolicy& policy,
     const MmsGetNameListRequestView& request,
     std::array<std::string_view, MmsServiceSpanCodec::maximum_identifiers>& names) noexcept {
     std::size_t count = 0U;
@@ -121,11 +147,13 @@ namespace {
     if (request.object_class == MmsNameListObjectClass::named_variable &&
         request.scope == MmsNameScopeKind::domain_specific) {
         for (const auto& object : objects.objects()) {
-            if (span_equals(request.domain_id, object.domain)) {
-                if (count >= names.size()) {
-                    return names.size() + 1U;
-                }
-                names[count++] = object.item;
+            if (!span_equals(request.domain_id, object.domain) ||
+                (!policy.advertise_flattened_child_aliases &&
+                 is_flattened_child_with_root(objects, object.domain, object.item))) {
+                continue;
+            }
+            if (!append_unique(names, count, object.item)) {
+                return names.size() + 1U;
             }
         }
         return count;
@@ -159,7 +187,7 @@ namespace {
     }
 
     std::array<std::string_view, MmsServiceSpanCodec::maximum_identifiers> names{};
-    const auto name_count = collect_names(objects, data_sets, request, names);
+    const auto name_count = collect_names(objects, data_sets, policy, request, names);
     if (name_count > names.size()) {
         return make_status(MmsStaticDispatchStatus::unsupported_request, confirmed);
     }

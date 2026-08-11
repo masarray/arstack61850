@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string_view>
 
 namespace {
 
@@ -27,6 +28,12 @@ constexpr std::array<std::uint8_t, 21U> kDomainContinueRequest{
     0xA0U, 0x03U, 0x80U, 0x01U, 0x09U,
     0xA1U, 0x02U, 0x80U, 0x00U,
     0x82U, 0x03U, 0x4CU, 0x44U, 0x30U};
+
+constexpr std::array<std::uint8_t, 19U> kNamedVariableDirectoryRequest{
+    0xA0U, 0x11U, 0x02U, 0x01U, 0x16U,
+    0xA1U, 0x0CU,
+    0xA0U, 0x03U, 0x80U, 0x01U, 0x00U,
+    0xA1U, 0x05U, 0x81U, 0x03U, 0x4CU, 0x44U, 0x48U};
 
 constexpr std::array<std::uint8_t, 17U> kDomainFirstResponse{
     0xA1U, 0x0FU, 0x02U, 0x01U, 0x07U,
@@ -90,6 +97,21 @@ template <std::size_t N>
     const std::array<std::uint8_t, N>& expected) noexcept {
     return actual.size() == expected.size() &&
         std::equal(actual.begin(), actual.end(), expected.begin());
+}
+
+[[nodiscard]] bool identifier_equals(
+    const std::span<const std::uint8_t> identifier,
+    const std::string_view expected) noexcept {
+    if (identifier.size() != expected.size()) {
+        return false;
+    }
+    for (std::size_t index = 0U; index < identifier.size(); ++index) {
+        if (identifier[index] != static_cast<std::uint8_t>(
+                static_cast<unsigned char>(expected[index]))) {
+            return false;
+        }
+    }
+    return true;
 }
 
 [[nodiscard]] wire::EncodeResult read_boolean(
@@ -307,12 +329,103 @@ int main() {
         return 16;
     }
 
+    // ARIEC61850 IED simulator parity: when a root Logical Node object exists,
+    // GetNameList(NamedVariable) advertises the root and leaves its flattened
+    // FC/DO/DA aliases for Read/Write lookup and TypeSpecification traversal.
+    // A flat-only generic MMS item remains discoverable for compatibility.
+    bool hierarchy_value = true;
+    const std::array<mms::MmsStaticObjectEntry, 5U> hierarchy_objects{
+        mms::MmsStaticObjectEntry{
+            "LDH", "LLN0", kBooleanType,
+            read_boolean, &hierarchy_value, false},
+        mms::MmsStaticObjectEntry{
+            "LDH", "LLN0$ST$Mod$stVal", kBooleanType,
+            read_boolean, &hierarchy_value, false},
+        mms::MmsStaticObjectEntry{
+            "LDH", "GGIO1", kBooleanType,
+            read_boolean, &hierarchy_value, false},
+        mms::MmsStaticObjectEntry{
+            "LDH", "GGIO1$ST$Ind1$stVal", kBooleanType,
+            read_boolean, &hierarchy_value, false},
+        mms::MmsStaticObjectEntry{
+            "LDH", "Orphan$ST$stVal", kBooleanType,
+            read_boolean, &hierarchy_value, false}};
+    const mms::MmsStaticObjectTable hierarchy_table{hierarchy_objects};
+    const mms::MmsStaticDispatchPolicy hierarchy_policy{
+        8U,
+        1U,
+        10U,
+        3U,
+        10U};
+    const mms::MmsStaticApplicationDispatcher hierarchy_dispatcher{
+        hierarchy_table,
+        hierarchy_policy};
+    if (!hierarchy_table.valid()) {
+        return 17;
+    }
+
+    dispatched = hierarchy_dispatcher.dispatch(
+        kNamedVariableDirectoryRequest,
+        response,
+        workspace);
+    mms::MmsGetNameListResponseView hierarchy_directory;
+    if (!dispatched.success() ||
+        !mms::MmsServiceSpanCodec::try_decode_get_name_list_response(
+            std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
+            hierarchy_directory) ||
+        hierarchy_directory.invoke_id != 22U ||
+        hierarchy_directory.identifier_count != 3U ||
+        hierarchy_directory.more_follows) {
+        return 18;
+    }
+
+    std::span<const std::uint8_t> identifier;
+    if (!hierarchy_directory.try_identifier(0U, identifier) ||
+        !identifier_equals(identifier, "LLN0") ||
+        !hierarchy_directory.try_identifier(1U, identifier) ||
+        !identifier_equals(identifier, "GGIO1") ||
+        !hierarchy_directory.try_identifier(2U, identifier) ||
+        !identifier_equals(identifier, "Orphan$ST$stVal")) {
+        return 19;
+    }
+
+    auto dual_directory_policy = hierarchy_policy;
+    dual_directory_policy.advertise_flattened_child_aliases = true;
+    const mms::MmsStaticApplicationDispatcher dual_directory_dispatcher{
+        hierarchy_table,
+        dual_directory_policy};
+    dispatched = dual_directory_dispatcher.dispatch(
+        kNamedVariableDirectoryRequest,
+        response,
+        workspace);
+    mms::MmsGetNameListResponseView dual_directory;
+    if (!dispatched.success() ||
+        !mms::MmsServiceSpanCodec::try_decode_get_name_list_response(
+            std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
+            dual_directory) ||
+        dual_directory.identifier_count != 5U ||
+        dual_directory.more_follows) {
+        return 20;
+    }
+    constexpr std::array<std::string_view, 5U> dual_names{
+        "LLN0",
+        "LLN0$ST$Mod$stVal",
+        "GGIO1",
+        "GGIO1$ST$Ind1$stVal",
+        "Orphan$ST$stVal"};
+    for (std::size_t index = 0U; index < dual_names.size(); ++index) {
+        if (!dual_directory.try_identifier(index, identifier) ||
+            !identifier_equals(identifier, dual_names[index])) {
+            return 21;
+        }
+    }
+
     for (std::uint32_t iteration = 0U; iteration < 20'000U; ++iteration) {
         relay_state = true;
         const auto read = dispatcher.dispatch(kReadRequest, response, workspace);
         const auto write = dispatcher.dispatch(kWriteRequest, response, workspace);
         if (!read.success() || !write.success() || relay_state) {
-            return 17;
+            return 22;
         }
     }
 

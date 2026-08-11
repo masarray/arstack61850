@@ -1,0 +1,61 @@
+name: MMS R1-R2 Server CI
+
+on:
+  pull_request:
+    paths:
+      - 'include/ariec61850/acse/**'
+      - 'include/ariec61850/mms/**'
+      - 'src/acse/**'
+      - 'src/mms/**'
+      - 'tools/mms_direct_control_server.cpp'
+      - 'tools/mms_urcb_server.cpp'
+      - 'tools/mms_direct_control_server/**'
+      - 'tests/test_mms_static_direct_control.cpp'
+      - 'tests/test_mms_server_urcb_report.cpp'
+      - 'scripts/build_mms_direct_control_server.ps1'
+      - '.github/workflows/mms-r12-server-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux ${{ matrix.compiler }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select compiler
+        shell: bash
+        run: |
+          if [[ "${{ matrix.compiler }}" == "clang" ]]; then
+            echo "CC=clang" >> "$GITHUB_ENV"
+            echo "CXX=clang++" >> "$GITHUB_ENV"
+          else
+            echo "CC=gcc" >> "$GITHUB_ENV"
+            echo "CXX=g++" >> "$GITHUB_ENV"
+          fi
+      - name: Configure
+        run: cmake -S tools/mms_direct_control_server -B build-mms-r12 -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build-mms-r12 --parallel
+      - name: Test
+        run: ctest --test-dir build-mms-r12 --output-on-failure
+      - name: Help contracts
+        shell: bash
+        run: |
+          ./build-mms-r12/ariec61850_mms_direct_control_server --help
+          ./build-mms-r12/ariec61850_mms_urcb_server --help
+
+  windows:
+    name: Windows MSVC
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure, build, test and locate executables
+        shell: powershell
+        run: .\scripts\build_mms_direct_control_server.ps1 -BuildDir build-mms-r12

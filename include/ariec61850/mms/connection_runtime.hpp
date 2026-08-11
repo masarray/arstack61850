@@ -63,6 +63,12 @@ struct MmsStaticConnectionPolicy final {
     MmsStaticAssociationClosedCallback association_closed{};
     void* association_closed_context{};
 
+    // Appended for aggregate source compatibility. When non-empty, this is the
+    // adapter-owned COTP Data reassembly buffer. Otherwise the runtime may
+    // borrow half of the stable per-session workspace while a fragmented COTP
+    // message is active. No heap/global storage is introduced.
+    std::span<std::uint8_t> cotp_reassembly{};
+
     [[nodiscard]] constexpr MmsStaticRequestAccessContext access_context() const noexcept {
         return {
             association_id,
@@ -141,6 +147,7 @@ public:
 
 private:
     void notify_association_closed() noexcept;
+    void clear_cotp_reassembly() noexcept;
 
     const MmsStaticApplicationDispatcher& dispatcher_;
     MmsStaticConnectionPolicy policy_{};
@@ -148,6 +155,11 @@ private:
     std::uint32_t mms_presentation_context_id_{};
     std::size_t negotiated_tpdu_size_bytes_{};
     std::uint32_t negotiated_mms_pdu_size_{};
+    std::size_t cotp_reassembly_size_{};
+    bool cotp_reassembly_complete_{};
+    bool cotp_reassembly_uses_workspace_{};
+    std::uint8_t* cotp_reassembly_workspace_data_{};
+    std::size_t cotp_reassembly_workspace_size_{};
     bool association_active_{};
     bool association_close_notified_{};
 };

@@ -118,9 +118,15 @@ MmsStaticServerSessionResult MmsStaticServerSession::poll_once() noexcept {
             consume_input(connection.consumed_bytes);
             response_offset_ = 0U;
             response_size_ = connection.bytes_written;
-            return make_result(
+            {
+                auto result = make_result(
                 MmsStaticServerSessionStatus::response_pending,
                 connection.status);
+                result.application_status = connection.application_status;
+                result.application_service = connection.application_service;
+                result.invoke_id = connection.invoke_id;
+                return result;
+            }
         case MmsStaticConnectionStatus::consumed_no_response:
             consume_input(connection.consumed_bytes);
             return make_result(
@@ -128,9 +134,15 @@ MmsStaticServerSessionResult MmsStaticServerSession::poll_once() noexcept {
                 connection.status);
         case MmsStaticConnectionStatus::application_rejected:
             consume_input(connection.consumed_bytes);
-            return make_result(
+            {
+                auto result = make_result(
                 MmsStaticServerSessionStatus::application_rejected,
                 connection.status);
+                result.application_status = connection.application_status;
+                result.application_service = connection.application_service;
+                result.invoke_id = connection.invoke_id;
+                return result;
+            }
         case MmsStaticConnectionStatus::closed:
             consume_input(connection.consumed_bytes);
             return terminate(
