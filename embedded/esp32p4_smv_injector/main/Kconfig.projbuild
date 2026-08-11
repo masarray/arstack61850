@@ -46,6 +46,136 @@ config AR_SMV_DIAGNOSTIC_PROBES
         Adds low-rate non-SV probes for capture-path troubleshooting. Keep this
         disabled while measuring realtime timing unless it is needed.
 
+config AR_PTP_LAB_TX
+    bool "Enable PTPv2 Layer-2 lab timing companion"
+    default n
+    help
+        Enables a low-rate PTPv2 Layer-2 laboratory broadcaster for isolated
+        troubleshooting, internal testing and interoperability work when a
+        normal station PTP/GPS time server is unavailable. On ESP32-P4 with
+        ESP-IDF 5.x the two-step Sync/Follow_Up and Pdelay response paths use
+        EMAC hardware timestamps. This feature is not a GPS-backed or certified
+        grandmaster.
+
+config AR_PTP_DOMAIN
+    int "PTP domain number"
+    range 0 255
+    default 0
+    depends on AR_PTP_LAB_TX
+
+config AR_PTP_TRANSPORT_SPECIFIC
+    int "PTP transportSpecific nibble"
+    range 0 15
+    default 0
+    depends on AR_PTP_LAB_TX
+    help
+        Upper-nibble transportSpecific value written into PTP messageType.
+        Strict receivers may reject a profile mismatch.
+
+config AR_PTP_CLOCK_IDENTITY
+    string "PTP clockIdentity override (empty = derive from MAC)"
+    default ""
+    depends on AR_PTP_LAB_TX
+    help
+        Optional 8-byte identity such as 02:11:22:FF:FE:33:44:55. Leave empty
+        to derive an EUI-64-style identity from the ESP32-P4 Ethernet MAC.
+
+config AR_PTP_PORT_NUMBER
+    int "PTP port number"
+    range 1 65535
+    default 1
+    depends on AR_PTP_LAB_TX
+
+config AR_PTP_VLAN
+    bool "Tag PTP lab traffic with IEEE 802.1Q VLAN"
+    default n
+    depends on AR_PTP_LAB_TX
+
+config AR_PTP_VLAN_ID
+    int "PTP VLAN ID"
+    range 1 4094
+    default 100
+    depends on AR_PTP_LAB_TX && AR_PTP_VLAN
+
+config AR_PTP_VLAN_PRIORITY
+    int "PTP VLAN PCP"
+    range 0 7
+    default 4
+    depends on AR_PTP_LAB_TX && AR_PTP_VLAN
+
+config AR_PTP_ANNOUNCE_INTERVAL_MS
+    int "PTP Announce interval (ms)"
+    range 100 10000
+    default 1000
+    depends on AR_PTP_LAB_TX
+
+config AR_PTP_SYNC_INTERVAL_MS
+    int "PTP Sync interval (ms)"
+    range 20 5000
+    default 250
+    depends on AR_PTP_LAB_TX
+    help
+        ESP32-P4 uses two-step Sync/Follow_Up so Follow_Up can carry the exact
+        EMAC transmit timestamp rather than a software send-time estimate.
+
+config AR_PTP_RESPOND_PDELAY
+    bool "Respond to peer-delay requests"
+    default y
+    depends on AR_PTP_LAB_TX
+    help
+        Uses the ESP32-P4 RX descriptor timestamp as t2 and the Pdelay_Resp TX
+        descriptor timestamp as t3 for Pdelay_Resp_Follow_Up.
+
+config AR_PTP_PRIORITY1
+    int "PTP priority1"
+    range 0 255
+    default 128
+    depends on AR_PTP_LAB_TX
+
+config AR_PTP_PRIORITY2
+    int "PTP priority2"
+    range 0 255
+    default 128
+    depends on AR_PTP_LAB_TX
+
+config AR_PTP_CLOCK_CLASS
+    int "PTP clockClass"
+    range 0 255
+    default 248
+    depends on AR_PTP_LAB_TX
+    help
+        Default 248 deliberately describes a conservative lab clock rather than
+        falsely claiming a GPS-disciplined or traceable grandmaster.
+
+config AR_PTP_CLOCK_ACCURACY
+    int "PTP clockAccuracy octet"
+    range 0 255
+    default 254
+    depends on AR_PTP_LAB_TX
+    help
+        254 (0xFE) is Unknown and is the conservative default.
+
+config AR_PTP_OFFSET_SCALED_LOG_VARIANCE
+    int "PTP offsetScaledLogVariance"
+    range 0 65535
+    default 65535
+    depends on AR_PTP_LAB_TX
+
+config AR_PTP_TIME_SOURCE
+    int "PTP timeSource octet"
+    range 0 255
+    default 160
+    depends on AR_PTP_LAB_TX
+    help
+        160 (0xA0) is Internal Oscillator. Do not select GPS unless a future
+        disciplined external time source actually provides that evidence.
+
+config AR_PTP_CURRENT_UTC_OFFSET
+    int "PTP currentUtcOffset"
+    range -32768 32767
+    default 37
+    depends on AR_PTP_LAB_TX
+
 config AR_SMV_CURRENT_RMS_MA
     int "Balanced phase current RMS (mA)"
     range 0 100000

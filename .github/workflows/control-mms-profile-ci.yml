@@ -1,0 +1,64 @@
+name: Control MMS Profile CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'include/ariec61850/control/**'
+      - 'src/control/**'
+      - 'tests/test_control_mms_structure.cpp'
+      - 'tests/control_mms_profile/**'
+      - 'include/ariec61850/mms/data_value.hpp'
+      - 'include/ariec61850/mms/services.hpp'
+      - 'src/mms/data_value.cpp'
+      - 'src/mms/data_codec.cpp'
+      - 'src/mms/utc_time.cpp'
+      - '.github/workflows/control-mms-profile-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  control-mms-profile:
+    name: Control MMS / ${{ matrix.compiler }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select compiler
+        shell: bash
+        run: |
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            echo "CC=clang" >> "$GITHUB_ENV"
+            echo "CXX=clang++" >> "$GITHUB_ENV"
+          else
+            echo "CC=gcc" >> "$GITHUB_ENV"
+            echo "CXX=g++" >> "$GITHUB_ENV"
+          fi
+
+      - name: Configure control MMS profile
+        run: cmake -S tests/control_mms_profile -B build-control-mms
+
+      - name: Build control MMS profile
+        run: cmake --build build-control-mms --parallel
+
+      - name: Run control MMS golden-wire tests
+        run: >-
+          ctest --test-dir build-control-mms
+          --output-on-failure
+          --output-junit control-mms-ctest.xml
+
+      - name: Upload control MMS evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-mms-${{ matrix.compiler }}-${{ github.event.pull_request.head.sha || github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: build-control-mms/control-mms-ctest.xml

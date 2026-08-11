@@ -14,6 +14,8 @@ option(ARIEC61850_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 add_library(ariec61850_core
     src/asn1/ber.cpp
     src/ethernet/ethernet.cpp
+    src/time_sync/ptp.cpp
+    src/time_sync/ptp_monitor.cpp
     src/capture/pcap.cpp
     src/goose/retransmission_schedule.cpp
     src/goose/pdu_codec.cpp
@@ -31,11 +33,19 @@ add_library(ariec61850_core
     src/mms/invoke_router.cpp
     src/mms/reporting.cpp
     src/mms/association_runtime.cpp
+    src/mms/association_runtime_control_wait.cpp
     src/mms/report_subscription_runtime.cpp
     src/mms/tcp_transport.cpp
     src/mms/live_discovery.cpp
     src/mms/rcb_selection.cpp
     src/mms/rcb_failover.cpp
+    src/mms/static_report_session.cpp
+    src/control/guarded_control.cpp
+    src/control/mms_control_structure.cpp
+    src/control/command_termination.cpp
+    src/control/control_discovery.cpp
+    src/control/control_session.cpp
+    src/control/mms_association_control_transport.cpp
     src/sampled_values/pdu_codec.cpp
     src/sampled_values/frame_codec.cpp
     src/sampled_values/quality.cpp
@@ -105,6 +115,12 @@ if(ARIEC61850_BUILD_TOOLS)
     ariec61850_apply_warnings(ariec61850_pcap_interop_check)
     ariec61850_apply_sanitizers(ariec61850_pcap_interop_check)
 
+    add_executable(ariec61850_ptp_analyze tools/ptp_analyze.cpp)
+    target_link_libraries(ariec61850_ptp_analyze PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_ptp_analyze PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_ptp_analyze)
+    ariec61850_apply_sanitizers(ariec61850_ptp_analyze)
+
     add_executable(ariec61850_comtrade_inspect tools/comtrade_inspect.cpp)
     target_link_libraries(ariec61850_comtrade_inspect PRIVATE ARIEC61850::core)
     target_compile_features(ariec61850_comtrade_inspect PRIVATE cxx_std_20)
@@ -153,7 +169,7 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_sanitizers(ariec61850_core_tests)
     add_test(NAME ariec61850_core_tests COMMAND ariec61850_core_tests)
 
-    foreach(test_name IN ITEMS mms goose sampled_values)
+    foreach(test_name IN ITEMS mms goose sampled_values ptp)
         add_executable(ariec61850_${test_name}_tests tests/test_${test_name}.cpp)
         target_link_libraries(ariec61850_${test_name}_tests PRIVATE ARIEC61850::core)
         target_compile_features(ariec61850_${test_name}_tests PRIVATE cxx_std_20)
@@ -289,6 +305,27 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_sanitizers(ariec61850_control_block_read_tests)
     add_test(NAME ariec61850_control_block_read_tests COMMAND ariec61850_control_block_read_tests)
 
+    add_executable(ariec61850_control_mms_structure_tests tests/test_control_mms_structure.cpp)
+    target_link_libraries(ariec61850_control_mms_structure_tests PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_control_mms_structure_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_control_mms_structure_tests)
+    ariec61850_apply_sanitizers(ariec61850_control_mms_structure_tests)
+    add_test(NAME ariec61850_control_mms_structure_tests COMMAND ariec61850_control_mms_structure_tests)
+
+    add_executable(ariec61850_command_termination_tests tests/test_command_termination.cpp)
+    target_link_libraries(ariec61850_command_termination_tests PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_command_termination_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_command_termination_tests)
+    ariec61850_apply_sanitizers(ariec61850_command_termination_tests)
+    add_test(NAME ariec61850_command_termination_tests COMMAND ariec61850_command_termination_tests)
+
+    add_executable(ariec61850_control_session_tests tests/test_control_session.cpp)
+    target_link_libraries(ariec61850_control_session_tests PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_control_session_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_control_session_tests)
+    ariec61850_apply_sanitizers(ariec61850_control_session_tests)
+    add_test(NAME ariec61850_control_session_tests COMMAND ariec61850_control_session_tests)
+
     add_executable(ariec61850_fuzz_smoke_tests tests/test_fuzz_smoke.cpp)
     target_link_libraries(ariec61850_fuzz_smoke_tests PRIVATE ARIEC61850::core)
     target_include_directories(ariec61850_fuzz_smoke_tests PRIVATE
@@ -311,6 +348,9 @@ if(ARIEC61850_BUILD_TESTS)
             COMMAND ariec61850_comtrade_inspect
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/comtrade/simple_fault.cfg
                 --json)
+        add_test(
+            NAME ariec61850_ptp_analyze_help
+            COMMAND ariec61850_ptp_analyze --help)
         add_test(
             NAME ariec61850_pagination_probe_help
             COMMAND ariec61850_pagination_probe --help)
