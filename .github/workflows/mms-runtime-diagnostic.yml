@@ -17,12 +17,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Configure embedded runtime smoke
-        run: cmake -S embedded -B build-embedded -DARIEC61850_EMBEDDED_WARNINGS_AS_ERRORS=ON
+        run: cmake -S embedded -B build-embedded -DCMAKE_BUILD_TYPE=Debug -DARIEC61850_EMBEDDED_WARNINGS_AS_ERRORS=ON
       - name: Build runtime smoke
         run: cmake --build build-embedded --target ariec61850_embedded_mms_connection_runtime_smoke --parallel 2
-      - name: Run runtime smoke with exit code
+      - name: Run under debugger at segmented replay assertion
         shell: bash
         run: |
+          line=$(grep -n 'return 20;' embedded/mms_connection_runtime_hard_profile_smoke.cpp | head -n1 | cut -d: -f1)
+          echo "RETURN20_LINE=${line}"
+          gdb -q -batch \
+            -ex "break embedded/mms_connection_runtime_hard_profile_smoke.cpp:${line}" \
+            -ex run \
+            -ex 'print result.status' \
+            -ex 'print result.state' \
+            -ex 'print result.consumed_bytes' \
+            -ex 'print result.bytes_written' \
+            -ex 'print result.application_status' \
+            -ex 'print result.application_service' \
+            -ex 'print result.invoke_id' \
+            -ex 'print final_segment.bytes_written' \
+            -ex 'print pdv.context_id' \
+            -ex 'print pdv.single_asn1_type.size()' \
+            -ex 'x/24bx pdv.single_asn1_type.data()' \
+            ./build-embedded/ariec61850_embedded_mms_connection_runtime_smoke
           set +e
           ./build-embedded/ariec61850_embedded_mms_connection_runtime_smoke
           code=$?
