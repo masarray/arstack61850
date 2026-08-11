@@ -25,6 +25,7 @@ enum class MmsWireConfirmedService : std::int32_t {
     write = 5,
     get_variable_access_attributes = 6,
     get_named_variable_list_attributes = 12,
+    file_directory = 77,
 };
 
 enum class MmsConfirmedRequestRejectReason : std::uint8_t {
@@ -104,6 +105,25 @@ public:
     [[nodiscard]] static wire::EncodeResult encode_confirmed_request_reject_into(
         std::uint32_t invoke_id,
         MmsConfirmedRequestRejectReason reason,
+        std::span<std::uint8_t> destination) noexcept;
+
+    // Compatibility shims used by the isolated IED-simulator parity profile.
+    // They do not change the strict current capability advertisement. The
+    // ConfirmedError-named shim intentionally maps to the current RejectPDU
+    // primitive so unsupported engineering-client probes keep the association
+    // alive without resurrecting unsupported service claims.
+    [[nodiscard]] static wire::EncodeResult encode_identify_response_into(
+        std::uint32_t invoke_id,
+        std::span<std::uint8_t> destination) noexcept;
+
+    [[nodiscard]] static wire::EncodeResult encode_confirmed_error_into(
+        std::uint32_t invoke_id,
+        std::span<std::uint8_t> destination) noexcept;
+
+    [[nodiscard]] static bool is_conclude_request(
+        std::span<const std::uint8_t> bytes) noexcept;
+
+    [[nodiscard]] static wire::EncodeResult encode_conclude_response_into(
         std::span<std::uint8_t> destination) noexcept;
 };
 
