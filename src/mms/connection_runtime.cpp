@@ -72,8 +72,6 @@ constexpr std::array<std::uint8_t, 4U> kConservativeStructureType{
     const MmsStaticConnectionState state,
     const std::span<std::uint8_t> response,
     const std::span<std::uint8_t> workspace) noexcept {
-    // COTP Data adds three bytes and TPKT adds four bytes. Preflight both
-    // caller-owned buffers so a capacity retry never advances connection state.
     std::size_t required{};
     if (!add_overhead(session_or_presentation.size(), 7U, required)) {
         return make_result(MmsStaticConnectionStatus::backend_failure, state);
@@ -359,7 +357,7 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
 
     if (state_ == MmsStaticConnectionState::awaiting_association) {
         acse::AssociationRequestView association;
-        if (!acse::AcseSpanCodec::try_decode_association_request_view(
+        if (!acse::AcseSpanCodec::try_decode_association_request_compat_view(
                 cotp.user_data, association)) {
             state_ = MmsStaticConnectionState::fault;
             return make_result(
