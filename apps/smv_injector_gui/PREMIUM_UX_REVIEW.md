@@ -73,4 +73,4 @@ Please judge the branch on these questions:
 
 ## Scope
 
-GUI only. No firmware timing, SV packet layout, or serial command protocol is changed by this evaluation branch.
+GUI only. No firmware timing, SV packet layout, or serial command protocol is changed by this evaluation branch. The PR remains draft and unmerged until the visual direction is approved.
