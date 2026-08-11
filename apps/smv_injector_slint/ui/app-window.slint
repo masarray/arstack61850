@@ -260,8 +260,8 @@ component SignalRow inherits Rectangle {
 
 export component AppWindow inherits Window {
     title: "ARStack61850 - SMV Workbench";
-    width: 1440px;
-    height: 900px;
+    preferred-width: 1440px;
+    preferred-height: 900px;
     min-width: 1120px;
     min-height: 720px;
     background: #e8edf2;
@@ -277,7 +277,6 @@ export component AppWindow inherits Window {
     VerticalLayout {
         spacing: 0px;
 
-        // Compact application title bar.
         Rectangle {
             height: 36px;
             background: #07568d;
@@ -324,7 +323,6 @@ export component AppWindow inherits Window {
             }
         }
 
-        // DANEO-inspired information hierarchy: major work modes stay persistent.
         Rectangle {
             height: 43px;
             background: #0a5d96;
@@ -341,7 +339,6 @@ export component AppWindow inherits Window {
             }
         }
 
-        // Ribbon is intentionally shallow so engineering data keeps most of the screen.
         Rectangle {
             height: 66px;
             background: #ffffff;
@@ -405,7 +402,6 @@ export component AppWindow inherits Window {
             }
         }
 
-        // Three-pane workstation: system tree, engineering canvas, live inspector.
         HorizontalLayout {
             vertical-stretch: 1;
             spacing: 1px;
@@ -570,7 +566,6 @@ export component AppWindow inherits Window {
                                 Rectangle {
                                     vertical-stretch: 1;
                                     background: #fbfcfd;
-                                    // Lightweight placeholder for the future real-time plot renderer.
                                     Rectangle { x: 14px; y: parent.height * 0.50; width: parent.width - 28px; height: 1px; background: #d9e1e7; }
                                     Rectangle { x: 14px; y: parent.height * 0.28; width: parent.width - 28px; height: 1px; background: #edf1f4; }
                                     Rectangle { x: 14px; y: parent.height * 0.72; width: parent.width - 28px; height: 1px; background: #edf1f4; }
