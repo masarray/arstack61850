@@ -95,7 +95,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Verify native-host launcher
+      - name: Simulate locally deleted host scaffold
+        shell: powershell
+        run: Remove-Item 'apps\smv_injector_gui\host' -Recurse -Force
+
+      - name: Verify native-host launcher and self-heal
         shell: cmd
         run: apps\smv_injector_gui\run.cmd --build-only
 
