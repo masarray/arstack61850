@@ -4,14 +4,18 @@
 
 #include "esp_eth.h"
 
-namespace ar::esp32p4::smv {
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /**
- * Start the optional PTPv2 Layer-2 laboratory broadcaster.
+ * Start the optional PTPv2 Layer-2 laboratory timing companion.
  *
- * This is a troubleshooting/interoperability timing companion, not a GPS-backed
- * or certified grandmaster. The task is independent from the realtime SV hot path.
+ * This is an isolated troubleshooting/interoperability helper, not a GPS-backed
+ * or certified grandmaster. The task runs independently from the realtime SV path.
  */
-void ptp_lab_start(esp_eth_handle_t eth_handle);
+void ar_ptp_lab_start(esp_eth_handle_t eth_handle);
 
-} // namespace ar::esp32p4::smv
+#ifdef __cplusplus
+}
+#endif
