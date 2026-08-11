@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "ariec61850/acse/association.hpp"
 #include "ariec61850/mms/dynamic_data_set.hpp"
 #include "ariec61850/mms/pdu.hpp"
+#include "ariec61850/osi/cotp.hpp"
+#include "ariec61850/osi/tpkt.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <exception>
 #include <functional>
 #include <iostream>
 #include <stdexcept>
+#include <stop_token>
 #include <string>
 #include <utility>
 #include <vector>
@@ -24,11 +29,14 @@ using ar::iec61850::mms::MmsDefineNamedVariableListResponse;
 using ar::iec61850::mms::MmsDeleteNamedVariableListRequest;
 using ar::iec61850::mms::MmsDeleteNamedVariableListResponse;
 using ar::iec61850::mms::MmsDynamicDataSetError;
+using ar::iec61850::mms::MmsDynamicDataSetOptions;
 using ar::iec61850::mms::MmsDynamicDataSetRuntime;
 using ar::iec61850::mms::MmsEndpoint;
 using ar::iec61850::mms::MmsNamedVariableListCodec;
 using ar::iec61850::mms::MmsObjectName;
 using ar::iec61850::mms::MmsPduCodec;
+namespace acse = ar::iec61850::acse;
+namespace osi = ar::iec61850::osi;
 
 #define CHECK(condition) \
     do { \
@@ -93,6 +101,88 @@ public:
     void close() noexcept override {}
     [[nodiscard]] bool connected() const noexcept override { return false; }
 };
+
+class ScriptedTransport final : public MmsByteTransport {
+public:
+    void connect(
+        const MmsEndpoint& endpoint,
+        Deadline,
+        std::stop_token stop_token) override {
+        if (stop_token.stop_requested()) {
+            throw std::runtime_error("scripted connect cancelled");
+        }
+        endpoint_ = endpoint;
+        connected_ = true;
+    }
+
+    void send(
+        const std::span<const std::uint8_t> bytes,
+        Deadline,
+        std::stop_token stop_token) override {
+        if (stop_token.stop_requested()) {
+            throw std::runtime_error("scripted send cancelled");
+        }
+        if (!connected_) {
+            throw std::runtime_error("scripted transport is disconnected");
+        }
+        sent_.emplace_back(bytes.begin(), bytes.end());
+    }
+
+    [[nodiscard]] std::vector<std::uint8_t> receive(
+        Deadline,
+        std::stop_token stop_token) override {
+        if (stop_token.stop_requested()) {
+            throw std::runtime_error("scripted receive cancelled");
+        }
+        if (!connected_) {
+            throw std::runtime_error("scripted transport is disconnected");
+        }
+        if (receive_queue_.empty()) {
+            throw ar::iec61850::mms::MmsTransportTimeoutError(
+                "scripted receive timeout");
+        }
+        auto value = std::move(receive_queue_.front());
+        receive_queue_.pop_front();
+        return value;
+    }
+
+    void close() noexcept override { connected_ = false; }
+    [[nodiscard]] bool connected() const noexcept override { return connected_; }
+
+    void push_receive(std::vector<std::uint8_t> bytes) {
+        receive_queue_.push_back(std::move(bytes));
+    }
+
+    [[nodiscard]] const std::vector<std::vector<std::uint8_t>>& sent() const noexcept {
+        return sent_;
+    }
+
+private:
+    MmsEndpoint endpoint_;
+    bool connected_{};
+    std::deque<std::vector<std::uint8_t>> receive_queue_;
+    std::vector<std::vector<std::uint8_t>> sent_;
+};
+
+[[nodiscard]] std::vector<std::uint8_t> wrap_application(
+    const std::span<const std::uint8_t> application) {
+    const auto cotp = osi::CotpFrameCodec::encode_data(application);
+    return osi::TpktFrameCodec::encode(cotp);
+}
+
+void queue_handshake(ScriptedTransport& transport) {
+    const auto request_bytes =
+        acse::AcseAssociationCodec::build_default_association_request();
+    const auto confirm = osi::CotpFrameCodec::encode_connection_confirm(
+        0x0001U, 0x2345U, 0x0AU);
+    transport.push_receive(osi::TpktFrameCodec::encode(confirm));
+
+    const auto request = acse::AcseAssociationCodec::decode_association_request(
+        request_bytes);
+    const auto response = acse::AcseAssociationCodec::build_accept_response(
+        request, acse::AcseAssociationCodec::default_accept_aare());
+    transport.push_receive(wrap_application(response.payload));
+}
 
 MmsDefineNamedVariableListRequest oracle_define_request() {
     MmsDefineNamedVariableListRequest request;
@@ -198,6 +288,68 @@ void runtime_requires_live_association_before_mutation() {
     });
 }
 
+void ownership_is_invalidated_across_same_endpoint_reconnect() {
+    ScriptedTransport transport;
+    MmsAssociationRuntime association{transport};
+    const MmsEndpoint endpoint{"127.0.0.1", 102U};
+    queue_handshake(transport);
+    association.connect(endpoint);
+
+    MmsDynamicDataSetOptions options;
+    options.verify_after_create = false;
+    MmsDynamicDataSetRuntime runtime{association, options};
+    const auto request = oracle_define_request();
+
+    transport.push_receive(wrap_application(
+        MmsNamedVariableListCodec::encode_define_response_p_data({1U})));
+    const auto created = runtime.create(
+        "LD0/LLN0.AR_DYN_DS01", request.members);
+    CHECK(created.data_set_reference == "LD0/LLN0.AR_DYN_DS01");
+    CHECK(runtime.owns(created.data_set_reference));
+
+    association.disconnect();
+    queue_handshake(transport);
+    association.connect(endpoint);
+
+    CHECK(!runtime.owns(created.data_set_reference));
+    const auto sent_before = transport.sent().size();
+    check_throws<MmsDynamicDataSetError>([&] {
+        static_cast<void>(runtime.remove(created.data_set_reference));
+    });
+    CHECK(transport.sent().size() == sent_before);
+    association.disconnect();
+}
+
+void oversized_define_is_rejected_before_network_send() {
+    ScriptedTransport transport;
+    MmsAssociationRuntime association{transport};
+    const MmsEndpoint endpoint{"127.0.0.1", 102U};
+    queue_handshake(transport);
+    association.connect(endpoint);
+
+    MmsDynamicDataSetOptions options;
+    options.maximum_members = 512U;
+    options.verify_after_create = false;
+    MmsDynamicDataSetRuntime runtime{association, options};
+
+    std::vector<MmsObjectName> members;
+    members.reserve(300U);
+    for (std::size_t index = 0U; index < 300U; ++index) {
+        std::string item = "GGIO1$ST$";
+        item.append(220U, 'A');
+        item += std::to_string(index);
+        members.push_back(MmsObjectName::domain_specific("LD0", std::move(item)));
+    }
+
+    const auto sent_before = transport.sent().size();
+    check_throws<MmsDynamicDataSetError>([&] {
+        static_cast<void>(runtime.create(
+            "LD0/LLN0.AR_OVERSIZED", members));
+    });
+    CHECK(transport.sent().size() == sent_before);
+    association.disconnect();
+}
+
 } // namespace
 
 int main() {
@@ -208,6 +360,8 @@ int main() {
         delete_response_reads_and_emits_csharp_oracle_counts();
         invalid_or_unsafe_requests_fail_closed();
         runtime_requires_live_association_before_mutation();
+        ownership_is_invalidated_across_same_endpoint_reconnect();
+        oversized_define_is_rejected_before_network_send();
         std::cout << "Dynamic DataSet tests passed.\n";
         return 0;
     } catch (const std::exception& exception) {

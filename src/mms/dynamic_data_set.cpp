@@ -382,6 +382,92 @@ std::string MmsDynamicDataSetRuntime::normalize_reference(
     return MmsDataSetDirectoryCodec::to_iec_reference(name);
 }
 
+void MmsDynamicDataSetRuntime::clear_ownership_scope() const noexcept {
+    owned_data_sets_.clear();
+    ownership_scope_valid_ = false;
+    ownership_endpoint_ = {};
+    ownership_event_count_ = 0U;
+    ownership_marker_kind_ = MmsAssociationEventKind::state_changed;
+    ownership_marker_state_ = MmsAssociationRuntimeState::disconnected;
+    ownership_marker_invoke_id_.reset();
+    ownership_marker_message_.clear();
+}
+
+void MmsDynamicDataSetRuntime::capture_ownership_scope() const {
+    const auto& events = association_.events();
+    if (!association_.associated() || events.empty()) {
+        clear_ownership_scope();
+        return;
+    }
+    ownership_scope_valid_ = true;
+    ownership_endpoint_ = association_.endpoint();
+    ownership_event_count_ = events.size();
+    const auto& marker = events.back();
+    ownership_marker_kind_ = marker.kind;
+    ownership_marker_state_ = marker.state;
+    ownership_marker_invoke_id_ = marker.invoke_id;
+    ownership_marker_message_ = marker.message;
+}
+
+void MmsDynamicDataSetRuntime::synchronize_ownership_scope() const {
+    if (owned_data_sets_.empty()) {
+        if (!association_.associated()) {
+            clear_ownership_scope();
+        }
+        return;
+    }
+    if (!ownership_scope_valid_ || !association_.associated() ||
+        association_.endpoint() != ownership_endpoint_) {
+        clear_ownership_scope();
+        return;
+    }
+
+    const auto& events = association_.events();
+    if (ownership_event_count_ == 0U || events.size() < ownership_event_count_) {
+        clear_ownership_scope();
+        return;
+    }
+    const auto& marker = events[ownership_event_count_ - 1U];
+    if (marker.kind != ownership_marker_kind_ ||
+        marker.state != ownership_marker_state_ ||
+        marker.invoke_id != ownership_marker_invoke_id_ ||
+        marker.message != ownership_marker_message_) {
+        // The bounded event deque shifted, so the original association scope can
+        // no longer be proven. Forget ownership rather than risk deleting a
+        // foreign DataSet.
+        clear_ownership_scope();
+        return;
+    }
+
+    for (std::size_t index = ownership_event_count_; index < events.size(); ++index) {
+        switch (events[index].kind) {
+        case MmsAssociationEventKind::association_accepted:
+        case MmsAssociationEventKind::disconnected:
+        case MmsAssociationEventKind::cancelled:
+        case MmsAssociationEventKind::timed_out:
+        case MmsAssociationEventKind::faulted:
+            clear_ownership_scope();
+            return;
+        default:
+            break;
+        }
+    }
+}
+
+void MmsDynamicDataSetRuntime::require_request_within_negotiated_limit(
+    const std::span<const std::uint8_t> mms_pdu,
+    const char* operation) const {
+    const auto negotiated_limit =
+        static_cast<std::size_t>(association_.negotiated().maximum_mms_pdu_size);
+    if (negotiated_limit == 0U || mms_pdu.size() > negotiated_limit) {
+        throw MmsDynamicDataSetError(
+            std::string{"MMS "} + operation + " request is " +
+            std::to_string(mms_pdu.size()) +
+            " bytes and exceeds the negotiated maximum MMS PDU size of " +
+            std::to_string(negotiated_limit) + " bytes.");
+    }
+}
+
 MmsDataSetDirectoryResponse MmsDynamicDataSetRuntime::verify(
     const MmsObjectName& data_set_name,
     const std::stop_token stop_token) {
@@ -401,9 +487,11 @@ MmsDynamicDataSetCreateResult MmsDynamicDataSetRuntime::create(
     const std::span<const MmsObjectName> members,
     const std::stop_token stop_token) {
     if (!association_.associated()) {
+        clear_ownership_scope();
         throw MmsDynamicDataSetError(
             "Cannot create a dynamic DataSet without an active MMS association.");
     }
+    synchronize_ownership_scope();
     if (members.empty() || members.size() > options_.maximum_members) {
         throw MmsDynamicDataSetError(
             "Dynamic DataSet member count exceeds the configured operational limit.");
@@ -413,7 +501,7 @@ MmsDynamicDataSetCreateResult MmsDynamicDataSetRuntime::create(
     const auto normalized = normalize_reference(data_set_reference);
     if (owned_data_sets_.contains(normalized)) {
         throw MmsDynamicDataSetError(
-            "This runtime already owns the requested dynamic DataSet reference.");
+            "This runtime already owns the requested dynamic DataSet reference in the current association scope.");
     }
     const auto data_set_name = MmsDataSetDirectoryCodec::parse_data_set_reference(normalized);
 
@@ -422,8 +510,10 @@ MmsDynamicDataSetCreateResult MmsDynamicDataSetRuntime::create(
     request.invoke_id = invoke_id;
     request.data_set_name = data_set_name;
     request.members.assign(members.begin(), members.end());
-    const auto encoded = MmsNamedVariableListCodec::encode_define_request_p_data(
-        request, association_.negotiated().presentation_context_id);
+    const auto pdu = MmsNamedVariableListCodec::encode_define_request_pdu(request);
+    require_request_within_negotiated_limit(pdu, "DefineNamedVariableList");
+    const auto encoded = MmsPduCodec::wrap_p_data(
+        pdu, association_.negotiated().presentation_context_id);
     const auto exchange = association_.exchange_confirmed(
         encoded, invoke_id, stop_token);
     require_confirmed_response(exchange, "DefineNamedVariableList");
@@ -459,7 +549,16 @@ MmsDynamicDataSetCreateResult MmsDynamicDataSetRuntime::create(
         }
     }
 
+    const bool first_owned_data_set = owned_data_sets_.empty();
     owned_data_sets_.insert(normalized);
+    if (first_owned_data_set) {
+        capture_ownership_scope();
+        if (!ownership_scope_valid_) {
+            owned_data_sets_.erase(normalized);
+            throw MmsDynamicDataSetError(
+                "Dynamic DataSet was created, but the current association ownership scope could not be retained safely.");
+        }
+    }
     return result;
 }
 
@@ -470,8 +569,10 @@ MmsDeleteNamedVariableListResponse MmsDynamicDataSetRuntime::remove_impl(
         MmsDataSetDirectoryCodec::parse_data_set_reference(normalized_reference);
     const auto invoke_id = association_.next_invoke_id();
     const MmsDeleteNamedVariableListRequest request{invoke_id, data_set_name};
-    const auto encoded = MmsNamedVariableListCodec::encode_delete_request_p_data(
-        request, association_.negotiated().presentation_context_id);
+    const auto pdu = MmsNamedVariableListCodec::encode_delete_request_pdu(request);
+    require_request_within_negotiated_limit(pdu, "DeleteNamedVariableList");
+    const auto encoded = MmsPduCodec::wrap_p_data(
+        pdu, association_.negotiated().presentation_context_id);
     const auto exchange = association_.exchange_confirmed(
         encoded, invoke_id, stop_token);
     require_confirmed_response(exchange, "DeleteNamedVariableList");
@@ -484,19 +585,24 @@ MmsDeleteNamedVariableListResponse MmsDynamicDataSetRuntime::remove(
     const MmsDynamicDataSetDeletePolicy policy,
     const std::stop_token stop_token) {
     if (!association_.associated()) {
+        clear_ownership_scope();
         throw MmsDynamicDataSetError(
             "Cannot delete a dynamic DataSet without an active MMS association.");
     }
+    synchronize_ownership_scope();
     const auto normalized = normalize_reference(data_set_reference);
     const auto owned = owned_data_sets_.contains(normalized);
     if (!owned && policy != MmsDynamicDataSetDeletePolicy::explicit_override) {
         throw MmsDynamicDataSetError(
-            "Refusing to delete a DataSet not created by this runtime; use explicit_override intentionally.");
+            "Refusing to delete a DataSet not created in the current association scope; use explicit_override intentionally.");
     }
 
     const auto response = remove_impl(normalized, stop_token);
     if (response.deleted() || response.number_matched.value_or(1U) == 0U) {
         owned_data_sets_.erase(normalized);
+        if (owned_data_sets_.empty()) {
+            clear_ownership_scope();
+        }
     }
     return response;
 }
@@ -504,6 +610,7 @@ MmsDeleteNamedVariableListResponse MmsDynamicDataSetRuntime::remove(
 bool MmsDynamicDataSetRuntime::owns(
     const std::string& data_set_reference) const {
     try {
+        synchronize_ownership_scope();
         return owned_data_sets_.contains(normalize_reference(data_set_reference));
     } catch (...) {
         return false;
@@ -511,6 +618,7 @@ bool MmsDynamicDataSetRuntime::owns(
 }
 
 std::vector<std::string> MmsDynamicDataSetRuntime::owned_data_sets() const {
+    synchronize_ownership_scope();
     return {owned_data_sets_.begin(), owned_data_sets_.end()};
 }
 
