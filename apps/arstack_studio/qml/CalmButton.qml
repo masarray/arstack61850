@@ -12,19 +12,20 @@ Button {
     property string toolTipText: ""
 
     implicitHeight: theme ? theme.controlHeight : 36
-    implicitWidth: Math.max(70, contentItem.implicitWidth + 24)
+    implicitWidth: Math.max(64, contentItem.implicitWidth + 20)
     font.family: uiFont
     font.pixelSize: theme ? theme.labelSize : 11
     font.weight: Font.DemiBold
     activeFocusOnTab: true
-    scale: down ? 0.985 : 1.0
-    Behavior on scale { NumberAnimation { duration: 70 } }
+    hoverEnabled: true
+    scale: down ? 0.988 : 1.0
+    Behavior on scale { NumberAnimation { duration: 70; easing.type: Easing.OutCubic } }
 
-    readonly property color activeFill: !enabled ? "#121820" :
-                                        tone === "success" ? "#194d38" :
-                                        tone === "danger" ? theme.redSoft :
-                                        tone === "accent" ? theme.accentSoft :
-                                        (down ? "#1c2733" : hovered ? theme.raisedHover : theme.raised)
+    readonly property color activeFill: !enabled ? "#10161d" :
+                                        tone === "success" ? (hovered ? "#1e5c43" : "#194d38") :
+                                        tone === "danger" ? (hovered ? "#523039" : theme.redSoft) :
+                                        tone === "accent" ? (hovered ? "#1d3c5e" : theme.accentSoft) :
+                                        (down ? "#1a2530" : hovered ? theme.raisedHover : "#141c25")
     readonly property color activeEdge: !enabled ? theme.lineSoft :
                                         tone === "success" ? "#347a59" :
                                         tone === "danger" ? "#86434b" :
@@ -32,7 +33,8 @@ Button {
                                         (activeFocus ? theme.accent : hovered ? "#3a4a5b" : theme.line)
     readonly property color activeText: !enabled ? theme.muted2 :
                                         tone === "success" ? "#d6f4e6" :
-                                        tone === "danger" ? "#ffdce0" : theme.textSoft
+                                        tone === "danger" ? "#ffdce0" :
+                                        tone === "accent" ? "#dcebff" : theme.textSoft
 
     contentItem: Row {
         spacing: control.iconSource.toString().length > 0 ? 7 : 0
@@ -45,19 +47,20 @@ Button {
             source: control.iconSource
             sourceSize.width: control.iconSize * 2
             sourceSize.height: control.iconSize * 2
-            opacity: control.enabled ? 0.9 : 0.32
+            opacity: control.enabled ? 0.94 : 0.30
         }
         Text {
             text: control.text
             color: control.activeText
             font: control.font
             anchors.verticalCenter: parent.verticalCenter
+            Behavior on color { ColorAnimation { duration: 90 } }
         }
     }
 
     ToolTip.visible: hovered && toolTipText.length > 0
     ToolTip.text: toolTipText
-    ToolTip.delay: 500
+    ToolTip.delay: 450
 
     background: Rectangle {
         radius: control.theme ? control.theme.controlRadius : 7
