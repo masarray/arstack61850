@@ -134,6 +134,7 @@ foreach(server_smoke IN ITEMS
         mms_write
         mms_dispatcher
         mms_connection_runtime
+        mms_negotiated_limits
         mms_data_set
         mms_brcb
         mms_brcb_control
