@@ -7,7 +7,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick QuickControls2)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2)
+qt_standard_project_setup(REQUIRES 6.5)
 
 # Reuse the repository's IEC 61850/SCL implementation directly. The desktop UI
 # is a presentation/control plane; it must not grow a second SCL semantic engine.
@@ -32,6 +33,7 @@ qt_add_qml_module(arstack_studio
 target_link_libraries(arstack_studio PRIVATE
     Qt6::Core
     Qt6::Gui
+    Qt6::Qml
     Qt6::Quick
     Qt6::QuickControls2
     ARIEC61850::core
