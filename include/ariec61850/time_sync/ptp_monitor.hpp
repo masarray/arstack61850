@@ -19,6 +19,7 @@ namespace ar::iec61850::time_sync {
 struct PtpObservedMessage final {
     std::chrono::system_clock::time_point observed_at{};
     PtpMessageType message_type{PtpMessageType::sync};
+    std::uint8_t transport_specific{};
     std::uint8_t domain_number{};
     PtpPortIdentity source_port_identity{};
     std::uint16_t sequence_id{};
@@ -36,6 +37,8 @@ struct PtpSourceClockSnapshot final {
     std::array<std::uint32_t, 16> message_counts{};
     std::array<std::optional<std::uint16_t>, 16> last_sequence_ids{};
     std::uint32_t sequence_anomaly_count{};
+    std::optional<std::uint8_t> transport_specific;
+    std::uint32_t transport_specific_change_count{};
     std::optional<std::uint16_t> vlan_id;
     std::optional<std::uint16_t> outer_vlan_id;
 
@@ -100,6 +103,7 @@ struct PtpHealthCheck final {
 
 struct PtpTimingHealthOptions final {
     std::optional<std::uint8_t> expected_domain_number;
+    std::optional<std::uint8_t> expected_transport_specific;
     std::chrono::milliseconds source_timeout{3000};
     bool require_announce{true};
     bool require_sync{true};
