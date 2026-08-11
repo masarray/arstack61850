@@ -20,6 +20,28 @@ permissions:
   contents: read
 
 jobs:
+  windows-launcher-parse:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse Windows launcher
+        shell: powershell
+        run: |
+          $path = Resolve-Path '.\apps\arstack_studio\run-windows.ps1'
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            $path,
+            [ref]$tokens,
+            [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | Format-List *
+            throw "Windows launcher contains $($errors.Count) PowerShell parser error(s)."
+          }
+          Write-Host 'Windows launcher PowerShell parse: PASS'
+
   qt-build-smoke:
     runs-on: ubuntu-latest
     container: ubuntu:26.04
