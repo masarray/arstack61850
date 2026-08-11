@@ -285,10 +285,18 @@ int main() {
         !historical_value) {
         return 14;
     }
-    if (mms::MmsStaticBrcbConnection::commit_sent(reports, retry) !=
-            mms::MmsStaticBrcbStatus::ok ||
-        reports.queue_size() != 0U) {
+
+    // A staged token is not transferable: a foreign association cannot commit
+    // an EntryID staged by the legitimate BRCB owner.
+    if (mms::MmsStaticBrcbConnection::commit_sent(
+            foreign_connection, control, reports, 100U, retry) ||
+        reports.queue_size() != 1U) {
         return 15;
+    }
+    if (!mms::MmsStaticBrcbConnection::commit_sent(
+            connection, control, reports, 100U, retry) ||
+        reports.queue_size() != 0U) {
+        return 16;
     }
 
     // Queue another historical entry, close A1, then reclaim with the same stable
@@ -298,7 +306,7 @@ int main() {
         !reports.next_due(200U, plan) ||
         !reports.capture(plan, kReportTime, staging, value_workspace).success() ||
         reports.queue_size() != 1U) {
-        return 16;
+        return 17;
     }
     connection.reset();
     control.on_association_closed(owner_a1.association_id, 200U);
@@ -309,25 +317,25 @@ int main() {
         control.reserve(owner_a2, 5U, 201U) != mms::MmsStaticBrcbControlStatus::ok ||
         control.set_report_enabled(owner_a2, true, 201U) !=
             mms::MmsStaticBrcbControlStatus::ok) {
-        return 17;
+        return 18;
     }
 
     mms::MmsStaticConnectionRuntime reconnect{
         dispatcher, connection_policy(owner_a2.association_id, kOwnerA)};
     if (!establish(reconnect, request, response, workspace, scratch)) {
-        return 18;
+        return 19;
     }
     delivery = mms::MmsStaticBrcbConnection::poll(
         reconnect, control, reports, 201U, response, workspace);
     if (!delivery.response_ready() || delivery.entry_id[7U] != 2U ||
         reports.queue_size() != 1U ||
-        mms::MmsStaticBrcbConnection::commit_sent(reports, delivery) !=
-            mms::MmsStaticBrcbStatus::ok ||
+        !mms::MmsStaticBrcbConnection::commit_sent(
+            reconnect, control, reports, 201U, delivery) ||
         reports.queue_size() != 0U ||
         mms::MmsStaticBrcbConnection::poll(
             reconnect, control, reports, 201U, response, workspace).status !=
             mms::MmsStaticBrcbConnectionStatus::no_report_available) {
-        return 19;
+        return 20;
     }
 
     return 0;
