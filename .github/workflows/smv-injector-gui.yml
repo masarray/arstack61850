@@ -1,0 +1,53 @@
+name: SMV Injector GUI
+
+on:
+  push:
+    paths:
+      - 'apps/smv_injector_gui/**'
+      - '.github/workflows/smv-injector-gui.yml'
+  pull_request:
+    paths:
+      - 'apps/smv_injector_gui/**'
+      - '.github/workflows/smv-injector-gui.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  static-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: JavaScript syntax
+        run: node --check apps/smv_injector_gui/app.js
+
+      - name: Required UI files
+        shell: bash
+        run: |
+          test -s apps/smv_injector_gui/index.html
+          test -s apps/smv_injector_gui/styles.css
+          test -s apps/smv_injector_gui/app.js
+          test -s apps/smv_injector_gui/run.cmd
+          grep -q 'SMV Injector' apps/smv_injector_gui/index.html
+          grep -q 'navigator.serial' apps/smv_injector_gui/app.js
+
+      - name: Local-server smoke
+        shell: bash
+        run: |
+          python3 -m http.server 8765 --bind 127.0.0.1 --directory apps/smv_injector_gui >/tmp/smv-gui-http.log 2>&1 &
+          server_pid=$!
+          trap 'kill ${server_pid} 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://127.0.0.1:8765/ >/tmp/smv-gui-index.html; then
+              break
+            fi
+            sleep 0.25
+          done
+          grep -q 'ARStack61850' /tmp/smv-gui-index.html
