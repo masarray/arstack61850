@@ -2,6 +2,7 @@
 #pragma once
 
 #include "esp_eth.h"
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,6 +18,9 @@ extern "C" {
  * initialization details into the portable C++ publisher code.
  */
 esp_eth_handle_t ar_esp32p4_eth_init(void);
+
+/** Restart the optional PTP lab runtime on the initialized Ethernet device. */
+bool ar_esp32p4_ptp_start(void);
 
 #ifdef __cplusplus
 }

@@ -1,0 +1,203 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+
+Rectangle {
+    id: telemetry
+
+    property var theme
+    property var device
+    property var currentModel
+    property var voltageModel
+    property var historyModel
+    property string uiFont: "Inter"
+    property string monoFont: "Inter"
+    property bool expanded: true
+
+    signal closeRequested()
+
+    implicitHeight: 32
+    Layout.preferredHeight: expanded ? 124 : 32
+    color: theme.surface
+    radius: theme.panelRadius
+    border.width: 1
+    border.color: theme.line
+    clip: true
+    Behavior on Layout.preferredHeight { NumberAnimation { duration: 220; easing.type: Easing.InOutCubic } }
+
+    ColumnLayout {
+        anchors.fill: parent
+        spacing: 0
+
+        Rectangle {
+            id: headerBar
+            Layout.fillWidth: true
+            Layout.preferredHeight: 32
+            color: headerMouse.containsMouse ? theme.raisedHover : theme.raised
+            Behavior on color { ColorAnimation { duration: 90 } }
+
+            MouseArea {
+                id: headerMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: telemetry.expanded = !telemetry.expanded
+            }
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 10
+                anchors.rightMargin: 6
+                spacing: 7
+
+                Rectangle { width: 3; height: 14; radius: 2; color: telemetry.device.running ? theme.green : theme.accent }
+                Label {
+                    text: "Status & output monitor"
+                    color: theme.textSoft
+                    font.family: telemetry.uiFont
+                    font.pixelSize: theme.labelSize
+                    font.weight: Font.DemiBold
+                    verticalAlignment: Text.AlignVCenter
+                }
+                Label {
+                    text: telemetry.device.running ? "LIVE" : "STANDBY"
+                    color: telemetry.device.running ? theme.green : theme.muted
+                    font.family: telemetry.monoFont
+                    font.pixelSize: theme.captionSize - 1
+                    font.weight: Font.Bold
+                    verticalAlignment: Text.AlignVCenter
+                }
+                Item { Layout.fillWidth: true }
+                Label {
+                    text: "FPS " + telemetry.device.fps + "   ·   MISSED " + telemetry.device.missed + "   ·   TX FAIL " + telemetry.device.txFailures
+                    color: theme.muted
+                    font.family: telemetry.monoFont
+                    font.pixelSize: theme.captionSize - 1
+                    verticalAlignment: Text.AlignVCenter
+                }
+                DarkToolButton {
+                    theme: telemetry.theme
+                    uiFont: telemetry.uiFont
+                    iconSource: telemetry.expanded
+                        ? Qt.resolvedUrl("../assets/lucide/chevron-down.svg")
+                        : Qt.resolvedUrl("../assets/lucide/chevron-up.svg")
+                    onClicked: telemetry.expanded = !telemetry.expanded
+                    ToolTip.visible: hovered
+                    ToolTip.text: telemetry.expanded ? "Collapse monitor" : "Expand monitor"
+                }
+                DarkToolButton {
+                    theme: telemetry.theme
+                    uiFont: telemetry.uiFont
+                    iconSource: Qt.resolvedUrl("../assets/lucide/x.svg")
+                    iconSize: 19
+                    onClicked: telemetry.closeRequested()
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Close monitor"
+                }
+            }
+        }
+
+        RowLayout {
+            visible: opacity > 0
+            opacity: telemetry.expanded ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: telemetry.expanded ? 180 : 110; easing.type: Easing.OutCubic } }
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.margins: 9
+            spacing: 10
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.preferredWidth: 1.25
+                radius: theme.controlRadius
+                color: theme.surface2
+                border.width: 1
+                border.color: theme.lineSoft
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    spacing: 3
+                    Label {
+                        text: "STATUS HISTORY"
+                        color: theme.muted
+                        font.family: telemetry.uiFont
+                        font.pixelSize: theme.captionSize - 1
+                        font.weight: Font.DemiBold
+                        font.letterSpacing: 0.8
+                    }
+                    ListView {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        model: telemetry.historyModel
+                        clip: true
+                        spacing: 2
+                        delegate: RowLayout {
+                            required property string timeText
+                            required property string messageText
+                            required property bool isError
+                            width: ListView.view.width
+                            spacing: 7
+                            Label { text: timeText; color: theme.muted; font.family: telemetry.monoFont; font.pixelSize: theme.captionSize - 1 }
+                            Label { Layout.fillWidth: true; text: messageText; color: isError ? theme.red : theme.textSoft; font.family: telemetry.uiFont; font.pixelSize: theme.captionSize; elide: Text.ElideRight }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.preferredWidth: 0.75
+                radius: theme.controlRadius
+                color: theme.surface2
+                border.width: 1
+                border.color: theme.lineSoft
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    spacing: 4
+                    Label {
+                        text: "OUTPUT CHANNELS"
+                        color: theme.muted
+                        font.family: telemetry.uiFont
+                        font.pixelSize: theme.captionSize - 1
+                        font.weight: Font.DemiBold
+                        font.letterSpacing: 0.8
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+                        Repeater {
+                            model: telemetry.currentModel
+                            delegate: RowLayout {
+                                required property string signalId
+                                required property bool enabled
+                                spacing: 4
+                                Rectangle { width: 7; height: 7; radius: 4; color: enabled ? theme.green : theme.muted2 }
+                                Label { text: signalId; color: theme.textSoft; font.family: telemetry.monoFont; font.pixelSize: theme.captionSize }
+                            }
+                        }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+                        Repeater {
+                            model: telemetry.voltageModel
+                            delegate: RowLayout {
+                                required property string signalId
+                                required property bool enabled
+                                spacing: 4
+                                Rectangle { width: 7; height: 7; radius: 4; color: enabled ? theme.accent : theme.muted2 }
+                                Label { text: signalId; color: theme.textSoft; font.family: telemetry.monoFont; font.pixelSize: theme.captionSize }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

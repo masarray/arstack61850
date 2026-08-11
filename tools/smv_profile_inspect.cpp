@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "ariec61850/sampled_values/esp32p4_profile_support.hpp"
 #include "ariec61850/sampled_values/publisher_profile.hpp"
 #include "ariec61850/scl/parser.hpp"
 
-#include <algorithm>
 #include <array>
-#include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <iomanip>
@@ -14,19 +13,19 @@
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace {
-
 using ar::iec61850::sampled_values::SvPublisherProfile;
 using ar::iec61850::sampled_values::SvPublisherProfileCompileContext;
 using ar::iec61850::sampled_values::SvPublisherProfileCompiler;
 using ar::iec61850::sampled_values::SvSampleCounterPolicy;
 using ar::iec61850::sampled_values::SvSampleMode;
+using ar::iec61850::sampled_values::classify_esp32p4_sv_profile;
+using ar::iec61850::sampled_values::esp32p4_sv_profile_support_name;
 using ar::iec61850::scl::SclDocument;
 using ar::iec61850::scl::SclEdition;
 
-std::string json_escape(std::string_view text) {
+std::string json_escape(const std::string_view text) {
     std::ostringstream out;
     for (const unsigned char ch : text) {
         switch (ch) {
@@ -49,7 +48,7 @@ std::string json_escape(std::string_view text) {
     return out.str();
 }
 
-void quoted(std::ostream& out, std::string_view value) {
+void quoted(std::ostream& out, const std::string_view value) {
     out << '"' << json_escape(value) << '"';
 }
 
@@ -93,42 +92,11 @@ std::string counter_policy_name(const SvSampleCounterPolicy policy) {
 std::string mac_text(const std::array<std::uint8_t, 6>& mac) {
     std::ostringstream out;
     out << std::uppercase << std::hex << std::setfill('0');
-    for (std::size_t i = 0; i < mac.size(); ++i) {
+    for (std::size_t i = 0U; i < mac.size(); ++i) {
         if (i != 0U) out << ':';
         out << std::setw(2) << static_cast<unsigned>(mac[i]);
     }
     return out.str();
-}
-
-std::string lower_copy(std::string text) {
-    std::transform(text.begin(), text.end(), text.begin(), [](const unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
-    return text;
-}
-
-bool current_device_layout_supported(const SvPublisherProfile& profile) {
-    if (profile.no_asdu != 1U || profile.payload_size_bytes != 64U ||
-        profile.channels.size() != 16U || !profile.publisher_rate_hz.has_value() ||
-        *profile.publisher_rate_hz == 0U || *profile.publisher_rate_hz > 65535U ||
-        profile.sample_counter_policy != SvSampleCounterPolicy::explicit_modulus ||
-        !profile.sample_counter_modulus.has_value()) {
-        return false;
-    }
-    if (profile.asdu_options.refresh_time || profile.asdu_options.security ||
-        profile.asdu_options.synch_source_id) {
-        return false;
-    }
-    for (std::size_t i = 0U; i < profile.channels.size(); ++i) {
-        const auto& channel = profile.channels[i];
-        if (channel.wire_width_bytes != 4U) return false;
-        if ((i % 2U) == 0U) {
-            if (channel.is_quality || lower_copy(channel.basic_type) != "int32") return false;
-        } else if (!channel.is_quality) {
-            return false;
-        }
-    }
-    return true;
 }
 
 void emit_profile(std::ostream& out, const SvPublisherProfile& p) {
@@ -163,7 +131,7 @@ void emit_profile(std::ostream& out, const SvPublisherProfile& p) {
     out << "\"security\":" << (p.asdu_options.security ? "true" : "false") << ',';
     out << "\"synchSourceId\":" << (p.asdu_options.synch_source_id ? "true" : "false") << "},";
     out << "\"channels\":[";
-    for (std::size_t i = 0; i < p.channels.size(); ++i) {
+    for (std::size_t i = 0U; i < p.channels.size(); ++i) {
         if (i != 0U) out << ',';
         const auto& channel = p.channels[i];
         out << '{';
@@ -190,7 +158,7 @@ void emit_document(
     out << "\"headerID\":"; quoted(out, document.header_id); out << ',';
     out << "\"warnings\":"; string_array(out, document.warnings); out << ',';
     out << "\"conflicts\":[";
-    for (std::size_t i = 0; i < document.conflicts.size(); ++i) {
+    for (std::size_t i = 0U; i < document.conflicts.size(); ++i) {
         if (i != 0U) out << ',';
         const auto& conflict = document.conflicts[i];
         out << '{';
@@ -201,21 +169,21 @@ void emit_document(
     }
     out << "],\"streams\":[";
 
-    for (std::size_t index = 0; index < document.sampled_values_streams.size(); ++index) {
+    for (std::size_t index = 0U; index < document.sampled_values_streams.size(); ++index) {
         if (index != 0U) out << ',';
         const auto& stream = document.sampled_values_streams[index];
         SvPublisherProfileCompileContext context;
         context.sample_counter_modulus = counter_modulus;
         const auto compiled = SvPublisherProfileCompiler::compile(stream, context);
 
-        std::string compatibility = "C";
-        std::string device_support = "blocked";
+        std::string compatibility{"C"};
+        std::string device_support{"blocked"};
         if (compiled.ok()) {
             const auto& profile = *compiled.profile;
-            compatibility = profile.sample_counter_policy == SvSampleCounterPolicy::explicit_modulus ? "A" : "B";
-            if (current_device_layout_supported(profile)) device_support = "ready";
-            else if (compatibility == "B") device_support = "needs-counter-confirmation";
-            else device_support = "unsupported-layout";
+            compatibility = profile.sample_counter_policy == SvSampleCounterPolicy::explicit_modulus
+                ? "A" : "B";
+            device_support = std::string{
+                esp32p4_sv_profile_support_name(classify_esp32p4_sv_profile(profile))};
         }
 
         out << '{';
@@ -234,7 +202,7 @@ void emit_document(
     out << "]}";
 }
 
-std::optional<std::uint16_t> parse_u16(std::string_view text) {
+std::optional<std::uint16_t> parse_u16(const std::string_view text) {
     try {
         const auto value = std::stoul(std::string{text});
         if (value == 0U || value > 65535U) return std::nullopt;
@@ -243,7 +211,6 @@ std::optional<std::uint16_t> parse_u16(std::string_view text) {
         return std::nullopt;
     }
 }
-
 } // namespace
 
 int main(int argc, char** argv) {
@@ -267,7 +234,8 @@ int main(int argc, char** argv) {
     }
 
     try {
-        const auto document = ar::iec61850::scl::SclParser{}.load(std::filesystem::path{argv[1]});
+        const auto document = ar::iec61850::scl::SclParser{}.load(
+            std::filesystem::path{argv[1]});
         emit_document(std::cout, document, counter_modulus);
         std::cout << '\n';
         return 0;
