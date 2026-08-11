@@ -1,510 +1,362 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-
 #include "ariec61850/mms/static_server_session.hpp"
-#include "ariec61850/mms/static_object_table.hpp"
-#include "ariec61850/mms/services.hpp"
+#include "ariec61850/mms/tcp_transport.hpp"
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#else
-#include <cerrno>
-#include <netdb.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <unistd.h>
-#endif
-
-#include <algorithm>
 #include <array>
-#include <charconv>
+#include <atomic>
+#include <chrono>
+#include <csignal>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <iostream>
 #include <limits>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#include <cerrno>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
+
 namespace {
+namespace mms = ar::iec61850::mms;
 
-using namespace ar::iec61850;
+std::atomic_bool g_stop{false};
 
-#ifdef _WIN32
-using SocketHandle = SOCKET;
-constexpr SocketHandle kInvalidSocket = INVALID_SOCKET;
-#else
-using SocketHandle = int;
-constexpr SocketHandle kInvalidSocket = -1;
-#endif
+void signal_handler(int) {
+    g_stop.store(true, std::memory_order_relaxed);
+}
 
-struct Options final {
-    std::string bind_address{"0.0.0.0"};
-    std::uint16_t port{8102U};
-    std::uint8_t digital_input_mask{};
-    bool serve_once{};
-};
-
-class SocketSystem final {
-public:
-    SocketSystem() noexcept {
-#ifdef _WIN32
+struct SocketRuntime final {
+#if defined(_WIN32)
+    SocketRuntime() {
         WSADATA data{};
-        ready_ = WSAStartup(MAKEWORD(2, 2), &data) == 0;
-#else
-        ready_ = true;
-#endif
-    }
-
-    ~SocketSystem() {
-#ifdef _WIN32
-        if (ready_) {
-            WSACleanup();
+        if (::WSAStartup(MAKEWORD(2, 2), &data) != 0) {
+            throw std::runtime_error("WSAStartup failed.");
         }
+    }
+    ~SocketRuntime() { ::WSACleanup(); }
+#else
+    SocketRuntime() = default;
 #endif
-    }
-
-    SocketSystem(const SocketSystem&) = delete;
-    SocketSystem& operator=(const SocketSystem&) = delete;
-
-    [[nodiscard]] bool ready() const noexcept {
-        return ready_;
-    }
-
-private:
-    bool ready_{};
 };
 
-class OwnedSocket final {
-public:
-    OwnedSocket() noexcept = default;
-    explicit OwnedSocket(const SocketHandle handle) noexcept : handle_{handle} {}
-
-    ~OwnedSocket() {
-        reset();
-    }
-
-    OwnedSocket(const OwnedSocket&) = delete;
-    OwnedSocket& operator=(const OwnedSocket&) = delete;
-
-    OwnedSocket(OwnedSocket&& other) noexcept : handle_{other.release()} {}
-
-    OwnedSocket& operator=(OwnedSocket&& other) noexcept {
-        if (this != &other) {
-            reset(other.release());
-        }
-        return *this;
-    }
-
-    [[nodiscard]] SocketHandle get() const noexcept {
-        return handle_;
-    }
-
-    [[nodiscard]] bool valid() const noexcept {
-        return handle_ != kInvalidSocket;
-    }
-
-    [[nodiscard]] SocketHandle release() noexcept {
-        const auto handle = handle_;
-        handle_ = kInvalidSocket;
-        return handle;
-    }
-
-    void reset(const SocketHandle replacement = kInvalidSocket) noexcept {
-        if (valid()) {
-#ifdef _WIN32
-            closesocket(handle_);
+#if defined(_WIN32)
+using NativeSocket = SOCKET;
+constexpr NativeSocket k_invalid_socket = INVALID_SOCKET;
 #else
-            close(handle_);
+using NativeSocket = int;
+constexpr NativeSocket k_invalid_socket = -1;
 #endif
-        }
-        handle_ = replacement;
+
+void close_socket(const NativeSocket socket) noexcept {
+    if (socket == k_invalid_socket) {
+        return;
     }
-
-private:
-    SocketHandle handle_{kInvalidSocket};
-};
-
-[[nodiscard]] int last_socket_error() noexcept {
-#ifdef _WIN32
-    return WSAGetLastError();
+#if defined(_WIN32)
+    static_cast<void>(::closesocket(socket));
 #else
-    return errno;
+    static_cast<void>(::close(socket));
 #endif
 }
 
-[[nodiscard]] bool is_would_block(const int error) noexcept {
-#ifdef _WIN32
-    return error == WSAEWOULDBLOCK;
+[[nodiscard]] std::string socket_error_text() {
+#if defined(_WIN32)
+    return std::to_string(::WSAGetLastError());
 #else
-    return error == EAGAIN || error == EWOULDBLOCK;
+    return std::to_string(errno);
 #endif
 }
 
-[[nodiscard]] bool is_timeout(const int error) noexcept {
-#ifdef _WIN32
-    return error == WSAETIMEDOUT;
+[[nodiscard]] NativeSocket create_listener(const std::uint16_t port) {
+    const auto listener = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (listener == k_invalid_socket) {
+        throw std::runtime_error("socket() failed: " + socket_error_text());
+    }
+
+    int yes = 1;
+#if defined(_WIN32)
+    static_cast<void>(::setsockopt(
+        listener, SOL_SOCKET, SO_REUSEADDR,
+        reinterpret_cast<const char*>(&yes), sizeof(yes)));
 #else
-    return error == ETIMEDOUT;
+    static_cast<void>(::setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)));
 #endif
-}
 
-[[nodiscard]] bool is_interrupted(const int error) noexcept {
-#ifdef _WIN32
-    return error == WSAEINTR;
-#else
-    return error == EINTR;
-#endif
-}
-
-[[nodiscard]] embedded::IoResult socket_receive(
-    void* context,
-    const std::span<std::uint8_t> destination) noexcept {
-    const auto socket = *static_cast<const SocketHandle*>(context);
-#ifdef _WIN32
-    const auto requested = static_cast<int>(std::min<std::size_t>(
-        destination.size(),
-        static_cast<std::size_t>(std::numeric_limits<int>::max())));
-#else
-    const auto requested = destination.size();
-#endif
-    const auto received = recv(
-        socket,
-        reinterpret_cast<char*>(destination.data()),
-        requested,
-        0);
-    if (received > 0) {
-        return {
-            embedded::IoStatus::ok,
-            static_cast<std::size_t>(received)};
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_ANY);
+    address.sin_port = htons(port);
+    if (::bind(
+            listener,
+            reinterpret_cast<const sockaddr*>(&address),
+            static_cast<socklen_t>(sizeof(address))) != 0) {
+        const auto error = socket_error_text();
+        close_socket(listener);
+        throw std::runtime_error("bind() failed: " + error);
     }
-    if (received == 0) {
-        return {embedded::IoStatus::closed, 0U};
+    if (::listen(listener, 4) != 0) {
+        const auto error = socket_error_text();
+        close_socket(listener);
+        throw std::runtime_error("listen() failed: " + error);
     }
-    const auto error = last_socket_error();
-    if (is_would_block(error)) {
-        return {embedded::IoStatus::would_block, 0U};
-    }
-    if (is_timeout(error) || is_interrupted(error)) {
-        return {embedded::IoStatus::timeout, 0U};
-    }
-    return {embedded::IoStatus::io_error, 0U};
-}
-
-[[nodiscard]] embedded::IoResult socket_send(
-    void* context,
-    const std::span<const std::uint8_t> bytes) noexcept {
-    const auto socket = *static_cast<const SocketHandle*>(context);
-#ifdef _WIN32
-    const auto requested = static_cast<int>(std::min<std::size_t>(
-        bytes.size(),
-        static_cast<std::size_t>(std::numeric_limits<int>::max())));
-#else
-    const auto requested = bytes.size();
-#endif
-#ifdef MSG_NOSIGNAL
-    constexpr int flags = MSG_NOSIGNAL;
-#else
-    constexpr int flags = 0;
-#endif
-    const auto sent = send(
-        socket,
-        reinterpret_cast<const char*>(bytes.data()),
-        requested,
-        flags);
-    if (sent > 0) {
-        return {embedded::IoStatus::ok, static_cast<std::size_t>(sent)};
-    }
-    if (sent == 0) {
-        return {embedded::IoStatus::closed, 0U};
-    }
-    const auto error = last_socket_error();
-    if (is_would_block(error)) {
-        return {embedded::IoStatus::would_block, 0U};
-    }
-    if (is_timeout(error) || is_interrupted(error)) {
-        return {embedded::IoStatus::timeout, 0U};
-    }
-    return {embedded::IoStatus::io_error, 0U};
-}
-
-void print_help() {
-    std::cout
-        << "arstack61850 static IEC 61850 IED server\n\n"
-        << "Usage:\n"
-        << "  ariec61850_static_ied_server [options]\n\n"
-        << "Options:\n"
-        << "  --bind ADDRESS     Bind address (default 0.0.0.0)\n"
-        << "  --port PORT        TCP port (default 8102; use 102 for IEC 61850)\n"
-        << "  --di-mask VALUE    Initial GGIO1 Ind1..Ind8 bit mask, decimal or 0xHEX\n"
-        << "  --once             Serve one TCP connection, then exit\n"
-        << "  --help             Show this help\n\n"
-        << "Read-only MMS services: association, Initiate, GetNameList, "
-           "GetVariableAccessAttributes, Read.\n";
-}
-
-template <typename Integer>
-[[nodiscard]] bool parse_integer(
-    const std::string_view text,
-    Integer& output) noexcept {
-    auto digits = text;
-    int base = 10;
-    if (digits.size() > 2U && digits[0] == '0' &&
-        (digits[1] == 'x' || digits[1] == 'X')) {
-        digits.remove_prefix(2U);
-        base = 16;
-    }
-    unsigned int parsed{};
-    const auto result = std::from_chars(
-        digits.data(), digits.data() + digits.size(), parsed, base);
-    if (result.ec != std::errc{} || result.ptr != digits.data() + digits.size() ||
-        parsed > static_cast<unsigned int>(std::numeric_limits<Integer>::max())) {
-        return false;
-    }
-    output = static_cast<Integer>(parsed);
-    return true;
-}
-
-[[nodiscard]] bool parse_options(
-    const int argc,
-    char** argv,
-    Options& options,
-    bool& help) {
-    help = false;
-    for (int index = 1; index < argc; ++index) {
-        const std::string_view argument{argv[index]};
-        if (argument == "--help" || argument == "-h") {
-            help = true;
-            return true;
-        }
-        if (argument == "--once") {
-            options.serve_once = true;
-            continue;
-        }
-        if (index + 1 >= argc) {
-            std::cerr << "Missing value after " << argument << "\n";
-            return false;
-        }
-        const std::string_view value{argv[++index]};
-        if (argument == "--bind") {
-            options.bind_address.assign(value);
-        } else if (argument == "--port") {
-            if (!parse_integer(value, options.port) || options.port == 0U) {
-                std::cerr << "Invalid TCP port: " << value << "\n";
-                return false;
-            }
-        } else if (argument == "--di-mask") {
-            if (!parse_integer(value, options.digital_input_mask)) {
-                std::cerr << "Invalid DI mask: " << value << "\n";
-                return false;
-            }
-        } else {
-            std::cerr << "Unknown option: " << argument << "\n";
-            return false;
-        }
-    }
-    return true;
-}
-
-[[nodiscard]] OwnedSocket create_listener(const Options& options) {
-    addrinfo hints{};
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = IPPROTO_TCP;
-    hints.ai_flags = AI_PASSIVE;
-
-    const auto service = std::to_string(options.port);
-    addrinfo* addresses{};
-    const auto address_status = getaddrinfo(
-        options.bind_address.empty() ? nullptr : options.bind_address.c_str(),
-        service.c_str(),
-        &hints,
-        &addresses);
-    if (address_status != 0) {
-        std::cerr << "Unable to resolve bind address: "
-                  << options.bind_address << "\n";
-        return {};
-    }
-
-    OwnedSocket listener;
-    for (auto* address = addresses; address != nullptr; address = address->ai_next) {
-        OwnedSocket candidate{socket(
-            address->ai_family,
-            address->ai_socktype,
-            address->ai_protocol)};
-        if (!candidate.valid()) {
-            continue;
-        }
-        constexpr int enabled = 1;
-        static_cast<void>(setsockopt(
-            candidate.get(),
-            SOL_SOCKET,
-            SO_REUSEADDR,
-            reinterpret_cast<const char*>(&enabled),
-            static_cast<int>(sizeof(enabled))));
-#ifdef _WIN32
-        const auto address_length = static_cast<int>(address->ai_addrlen);
-#else
-        const auto address_length = static_cast<socklen_t>(address->ai_addrlen);
-#endif
-        if (bind(
-                candidate.get(),
-                address->ai_addr,
-                address_length) == 0 &&
-            listen(candidate.get(), 8) == 0) {
-            listener = std::move(candidate);
-            break;
-        }
-    }
-    freeaddrinfo(addresses);
     return listener;
 }
 
-void set_client_timeouts(const SocketHandle socket) noexcept {
-#ifdef _WIN32
-    constexpr DWORD timeout_ms = 1000U;
-    static_cast<void>(setsockopt(
+[[nodiscard]] bool recv_bytes(
+    const NativeSocket socket,
+    std::span<std::uint8_t> destination,
+    std::size_t& received) noexcept {
+    received = 0U;
+#if defined(_WIN32)
+    const auto count = ::recv(
         socket,
-        SOL_SOCKET,
-        SO_RCVTIMEO,
-        reinterpret_cast<const char*>(&timeout_ms),
-        static_cast<int>(sizeof(timeout_ms))));
-    static_cast<void>(setsockopt(
-        socket,
-        SOL_SOCKET,
-        SO_SNDTIMEO,
-        reinterpret_cast<const char*>(&timeout_ms),
-        static_cast<int>(sizeof(timeout_ms))));
+        reinterpret_cast<char*>(destination.data()),
+        static_cast<int>(destination.size()),
+        0);
 #else
-    constexpr timeval timeout{1, 0};
-    static_cast<void>(setsockopt(
-        socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)));
-    static_cast<void>(setsockopt(
-        socket, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)));
+    const auto count = ::recv(socket, destination.data(), destination.size(), 0);
 #endif
+    if (count <= 0) {
+        return false;
+    }
+    received = static_cast<std::size_t>(count);
+    return true;
 }
 
-[[nodiscard]] wire::EncodeResult read_boolean(
-    const void* context,
-    const std::span<std::uint8_t> destination) noexcept {
-    constexpr std::size_t required = 3U;
-    if (context == nullptr) {
-        return {wire::EncodeStatus::value_out_of_range, 0U, required};
+[[nodiscard]] bool send_all(
+    const NativeSocket socket,
+    std::span<const std::uint8_t> bytes) noexcept {
+    std::size_t offset = 0U;
+    while (offset < bytes.size()) {
+#if defined(_WIN32)
+        const auto count = ::send(
+            socket,
+            reinterpret_cast<const char*>(bytes.data() + offset),
+            static_cast<int>(bytes.size() - offset),
+            0);
+#else
+        const auto count = ::send(
+            socket,
+            bytes.data() + offset,
+            bytes.size() - offset,
+            0);
+#endif
+        if (count <= 0) {
+            return false;
+        }
+        offset += static_cast<std::size_t>(count);
     }
-    if (destination.size() < required) {
-        return {wire::EncodeStatus::buffer_too_small, 0U, required};
+    return true;
+}
+
+struct CliOptions final {
+    std::uint16_t port{102U};
+    std::uint8_t digital_input_mask{0U};
+    std::size_t maximum_connections{};
+};
+
+[[nodiscard]] std::uint32_t parse_u32(
+    const std::string& option,
+    const std::string& text,
+    const std::uint32_t maximum) {
+    std::size_t consumed = 0U;
+    const auto value = std::stoull(text, &consumed, 0);
+    if (consumed != text.size() || value > maximum) {
+        throw std::invalid_argument(option + " is outside the supported range.");
     }
-    destination[0] = 0x83U;
-    destination[1] = 0x01U;
-    destination[2] = *static_cast<const std::uint8_t*>(context) != 0U
-        ? 0xFFU
-        : 0x00U;
-    return {wire::EncodeStatus::ok, required, required};
+    return static_cast<std::uint32_t>(value);
+}
+
+void print_usage() {
+    std::cout
+        << "Usage: ariec61850_static_ied_server [options]\n\n"
+        << "Options:\n"
+        << "  --port N                  TCP listen port (default 102).\n"
+        << "  --digital-input-mask N    GGIO1 Ind1..Ind8 bit mask (default 0).\n"
+        << "  --max-connections N       Exit after N accepted TCP connections (default unlimited).\n"
+        << "  -h, --help                Show this help.\n\n"
+        << "Portable bounded static IEC 61850 MMS server for lab/interoperability work.\n"
+        << "The tool exposes a fixed static object model; it does not claim IEC 61850 conformance.\n";
+}
+
+[[nodiscard]] CliOptions parse_cli(const int argc, char** argv) {
+    CliOptions options;
+    for (int index = 1; index < argc; ++index) {
+        const std::string option = argv[index];
+        if (option == "-h" || option == "--help") {
+            print_usage();
+            std::exit(0);
+        }
+        if (option == "--port" || option == "--digital-input-mask" ||
+            option == "--max-connections") {
+            if (++index >= argc) {
+                throw std::invalid_argument(option + " requires a value.");
+            }
+            const std::string value = argv[index];
+            if (option == "--port") {
+                const auto parsed = parse_u32(option, value, 65'535U);
+                if (parsed == 0U) {
+                    throw std::invalid_argument("--port must be 1..65535.");
+                }
+                options.port = static_cast<std::uint16_t>(parsed);
+            } else if (option == "--digital-input-mask") {
+                options.digital_input_mask =
+                    static_cast<std::uint8_t>(parse_u32(option, value, 0xFFU));
+            } else {
+                options.maximum_connections = static_cast<std::size_t>(
+                    parse_u32(option, value, std::numeric_limits<std::uint32_t>::max()));
+            }
+            continue;
+        }
+        throw std::invalid_argument("Unknown option: " + option);
+    }
+    return options;
 }
 
 struct EncodedValue final {
     std::span<const std::uint8_t> bytes;
 };
 
-[[nodiscard]] wire::EncodeResult read_encoded(
+[[nodiscard]] ar::iec61850::wire::EncodeResult read_encoded(
     const void* context,
     const std::span<std::uint8_t> destination) noexcept {
-    if (context == nullptr) {
-        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    const auto* value = static_cast<const EncodedValue*>(context);
+    if (value == nullptr || destination.size() < value->bytes.size()) {
+        return ar::iec61850::wire::EncodeResult::failure();
     }
-    const auto bytes = static_cast<const EncodedValue*>(context)->bytes;
-    if (destination.size() < bytes.size()) {
-        return {wire::EncodeStatus::buffer_too_small, 0U, bytes.size()};
-    }
-    std::copy(bytes.begin(), bytes.end(), destination.begin());
-    return {wire::EncodeStatus::ok, bytes.size(), bytes.size()};
+    std::copy(value->bytes.begin(), value->bytes.end(), destination.begin());
+    return ar::iec61850::wire::EncodeResult::success(value->bytes.size());
 }
 
-[[nodiscard]] mms::MmsTypeSpecification boolean_component(
-    const std::string& name) {
-    mms::MmsTypeSpecification component;
-    component.kind = mms::MmsTypeKind::boolean;
-    component.name = name;
-    return component;
+[[nodiscard]] ar::iec61850::wire::EncodeResult read_boolean(
+    const void* context,
+    const std::span<std::uint8_t> destination) noexcept {
+    if (context == nullptr || destination.size() < 3U) {
+        return ar::iec61850::wire::EncodeResult::failure();
+    }
+    const auto value = *static_cast<const std::uint8_t*>(context) != 0U;
+    destination[0] = 0x83U;
+    destination[1] = 0x01U;
+    destination[2] = value ? 0xFFU : 0x00U;
+    return ar::iec61850::wire::EncodeResult::success(3U);
 }
 
-[[nodiscard]] mms::MmsTypeSpecification structure_component(
-    const std::string& name,
-    std::vector<mms::MmsTypeSpecification> children) {
-    mms::MmsTypeSpecification component;
-    component.kind = mms::MmsTypeKind::structure;
-    component.name = name;
-    component.children = std::move(children);
-    return component;
+[[nodiscard]] std::vector<std::uint8_t> encode_ber_length(const std::size_t length) {
+    if (length < 0x80U) {
+        return {static_cast<std::uint8_t>(length)};
+    }
+    if (length <= 0xFFU) {
+        return {0x81U, static_cast<std::uint8_t>(length)};
+    }
+    return {
+        0x82U,
+        static_cast<std::uint8_t>((length >> 8U) & 0xFFU),
+        static_cast<std::uint8_t>(length & 0xFFU)};
+}
+
+[[nodiscard]] std::vector<std::uint8_t> make_tlv(
+    const std::uint8_t tag,
+    const std::span<const std::uint8_t> content) {
+    std::vector<std::uint8_t> bytes;
+    const auto length = encode_ber_length(content.size());
+    bytes.reserve(1U + length.size() + content.size());
+    bytes.push_back(tag);
+    bytes.insert(bytes.end(), length.begin(), length.end());
+    bytes.insert(bytes.end(), content.begin(), content.end());
+    return bytes;
+}
+
+[[nodiscard]] std::vector<std::uint8_t> concat(
+    const std::initializer_list<std::span<const std::uint8_t>> parts) {
+    std::size_t total = 0U;
+    for (const auto part : parts) {
+        total += part.size();
+    }
+    std::vector<std::uint8_t> result;
+    result.reserve(total);
+    for (const auto part : parts) {
+        result.insert(result.end(), part.begin(), part.end());
+    }
+    return result;
 }
 
 [[nodiscard]] std::vector<std::uint8_t> build_single_status_ln_type(
-    const std::string& data_object) {
-    mms::MmsTypeSpecification root;
-    root.kind = mms::MmsTypeKind::structure;
-    root.children.push_back(structure_component(
-        "ST",
-        {structure_component(
-            data_object,
-            {boolean_component("stVal")})}));
-    return mms::MmsServiceCodec::encode_type_specification(root);
+    const std::string_view do_name) {
+    const std::array<std::uint8_t, 2U> boolean_type{0x83U, 0x00U};
+    const auto da_name = make_tlv(0x1AU, std::span<const std::uint8_t>{
+        reinterpret_cast<const std::uint8_t*>("stVal"), 5U});
+    const auto da = make_tlv(0xA2U, concat({da_name, boolean_type}));
+    const auto da_list = make_tlv(0xA2U, da);
+    const auto do_name_tlv = make_tlv(0x1AU, std::span<const std::uint8_t>{
+        reinterpret_cast<const std::uint8_t*>(do_name.data()), do_name.size()});
+    const auto do_entry = make_tlv(0xA2U, concat({do_name_tlv, da_list}));
+    return make_tlv(0xA2U, do_entry);
 }
 
 [[nodiscard]] std::vector<std::uint8_t> build_ggio_type() {
-    std::vector<mms::MmsTypeSpecification> indications;
-    indications.reserve(8U);
-    for (std::size_t index = 0U; index < 8U; ++index) {
-        indications.push_back(structure_component(
-            "Ind" + std::to_string(index + 1U),
-            {boolean_component("stVal")}));
+    std::vector<std::uint8_t> do_entries;
+    for (std::size_t index = 1U; index <= 8U; ++index) {
+        const auto do_name = std::string{"Ind"} + std::to_string(index);
+        const auto encoded = build_single_status_ln_type(do_name);
+        const auto inner = std::span<const std::uint8_t>{encoded}.subspan(2U);
+        do_entries.insert(do_entries.end(), inner.begin(), inner.end());
     }
-    mms::MmsTypeSpecification root;
-    root.kind = mms::MmsTypeKind::structure;
-    root.children.push_back(structure_component("ST", std::move(indications)));
-    return mms::MmsServiceCodec::encode_type_specification(root);
+    return make_tlv(0xA2U, do_entries);
 }
 
-[[nodiscard]] bool serve_client(
-    SocketHandle client,
-    const mms::MmsStaticApplicationDispatcher& dispatcher) {
-    mms::MmsStaticConnectionRuntime runtime{dispatcher};
-    embedded::TcpByteStream stream{&client, socket_send, socket_receive};
-    std::array<std::uint8_t, 65'535U> receive{};
-    std::array<std::uint8_t, 65'535U> response{};
-    std::array<std::uint8_t, 65'535U> workspace{};
-    mms::MmsStaticServerSession session{
-        runtime,
-        stream,
-        {receive, response, workspace}};
+struct ConnectionBuffers final {
+    std::array<std::uint8_t, 32'768U> receive{};
+    std::array<std::uint8_t, 32'768U> send{};
+    std::array<std::uint8_t, 8'192U> scratch{};
+};
 
-    for (;;) {
-        const auto result = session.poll_once();
-        switch (result.status) {
-        case mms::MmsStaticServerSessionStatus::progressed:
-        case mms::MmsStaticServerSessionStatus::response_pending:
-        case mms::MmsStaticServerSessionStatus::would_block:
-        case mms::MmsStaticServerSessionStatus::timed_out:
-            continue;
-        case mms::MmsStaticServerSessionStatus::application_rejected:
-            std::cerr << "MMS request rejected; connection remains open.\n";
-            continue;
-        case mms::MmsStaticServerSessionStatus::peer_closed:
-            return true;
-        case mms::MmsStaticServerSessionStatus::transport_error:
-            std::cerr << "Client transport failed.\n";
-            return false;
-        case mms::MmsStaticServerSessionStatus::protocol_error:
-            std::cerr << "Malformed or unsupported connection sequence.\n";
-            return false;
-        case mms::MmsStaticServerSessionStatus::receive_buffer_full:
-            std::cerr << "Client TPKT exceeds the bounded receive capacity.\n";
-            return false;
-        case mms::MmsStaticServerSessionStatus::invalid_configuration:
-            std::cerr << "Server session configuration is invalid.\n";
-            return false;
+void serve_connection(
+    const NativeSocket socket,
+    const mms::MmsStaticObjectTable& object_table,
+    const mms::MmsStaticDataSetTable& data_sets) {
+    mms::MmsStaticDispatcher dispatcher{object_table, data_sets};
+    mms::MmsStaticServerSession session{dispatcher};
+    ConnectionBuffers buffers{};
+
+    while (!g_stop.load(std::memory_order_relaxed)) {
+        std::array<std::uint8_t, 4096U> chunk{};
+        std::size_t received = 0U;
+        if (!recv_bytes(socket, chunk, received)) {
+            return;
+        }
+        auto input = std::span<const std::uint8_t>{chunk}.first(received);
+        std::size_t offset = 0U;
+        while (offset < input.size()) {
+            const auto result = session.process(
+                input.subspan(offset),
+                buffers.receive,
+                buffers.send,
+                buffers.scratch);
+            offset += result.consumed_bytes;
+            if (result.response_bytes != 0U &&
+                !send_all(socket, std::span<const std::uint8_t>{buffers.send}.first(
+                    result.response_bytes))) {
+                return;
+            }
+            if (result.close_connection ||
+                (result.consumed_bytes == 0U && result.response_bytes == 0U)) {
+                return;
+            }
         }
     }
 }
@@ -512,127 +364,133 @@ struct EncodedValue final {
 } // namespace
 
 int main(int argc, char** argv) {
-    Options options;
-    bool help{};
-    if (!parse_options(argc, argv, options, help)) {
-        return 2;
-    }
-    if (help) {
-        print_help();
-        return 0;
-    }
+    try {
+        const auto options = parse_cli(argc, argv);
+        SocketRuntime socket_runtime;
+        std::signal(SIGINT, signal_handler);
+#if !defined(_WIN32)
+        std::signal(SIGTERM, signal_handler);
+#endif
 
-    SocketSystem socket_system;
-    if (!socket_system.ready()) {
-        std::cerr << "Unable to initialize the platform socket API.\n";
-        return 3;
-    }
+        constexpr std::array<std::uint8_t, 2U> boolean_type{0x83U, 0x00U};
+        std::array<std::uint8_t, 10U> values{};
+        values[0] = 1U;
+        values[1] = 1U;
+        for (std::size_t index = 0U; index < 8U; ++index) {
+            values[index + 2U] = static_cast<std::uint8_t>(
+                (options.digital_input_mask >> index) & 0x01U);
+        }
 
-    constexpr std::array<std::uint8_t, 2U> boolean_type{0x83U, 0x00U};
-    constexpr std::array<std::string_view, 8U> leaf_items{
-        "GGIO1$ST$Ind1$stVal",
-        "GGIO1$ST$Ind2$stVal",
-        "GGIO1$ST$Ind3$stVal",
-        "GGIO1$ST$Ind4$stVal",
-        "GGIO1$ST$Ind5$stVal",
-        "GGIO1$ST$Ind6$stVal",
-        "GGIO1$ST$Ind7$stVal",
-        "GGIO1$ST$Ind8$stVal"};
-    std::array<std::uint8_t, 10U> values{};
-    values[0] = 1U;
-    values[1] = 1U;
-    for (std::size_t index = 0U; index < 8U; ++index) {
-        values[index + 2U] = static_cast<std::uint8_t>(
-            (options.digital_input_mask >> index) & 0x01U);
-    }
+        const auto lln0_type = build_single_status_ln_type("Mod");
+        const auto lphd1_type = build_single_status_ln_type("PhyHealth");
+        const auto ggio1_type = build_ggio_type();
+        constexpr std::array<std::uint8_t, 9U> healthy_ln_data{
+            0xA2U, 0x07U, 0xA2U, 0x05U, 0xA2U, 0x03U, 0x83U, 0x01U, 0xFFU};
+        std::array<std::uint8_t, 44U> ggio_data{};
+        ggio_data[0] = 0xA2U;
+        ggio_data[1] = 0x2AU;
+        ggio_data[2] = 0xA2U;
+        ggio_data[3] = 0x28U;
+        for (std::size_t index = 0U; index < 8U; ++index) {
+            const auto offset = 4U + index * 5U;
+            ggio_data[offset] = 0xA2U;
+            ggio_data[offset + 1U] = 0x03U;
+            ggio_data[offset + 2U] = 0x83U;
+            ggio_data[offset + 3U] = 0x01U;
+            ggio_data[offset + 4U] = values[index + 2U] != 0U ? 0xFFU : 0x00U;
+        }
+        const std::array<EncodedValue, 3U> root_values{
+            EncodedValue{healthy_ln_data},
+            EncodedValue{healthy_ln_data},
+            EncodedValue{ggio_data}};
 
-    const auto lln0_type = build_single_status_ln_type("Mod");
-    const auto lphd1_type = build_single_status_ln_type("PhyHealth");
-    const auto ggio1_type = build_ggio_type();
-    constexpr std::array<std::uint8_t, 9U> healthy_ln_data{
-        0xA2U, 0x07U, 0xA2U, 0x05U, 0xA2U, 0x03U, 0x83U, 0x01U, 0xFFU};
-    std::array<std::uint8_t, 44U> ggio_data{};
-    ggio_data[0] = 0xA2U;
-    ggio_data[1] = 0x2AU;
-    ggio_data[2] = 0xA2U;
-    ggio_data[3] = 0x28U;
-    for (std::size_t index = 0U; index < 8U; ++index) {
-        const auto offset = 4U + index * 5U;
-        ggio_data[offset] = 0xA2U;
-        ggio_data[offset + 1U] = 0x03U;
-        ggio_data[offset + 2U] = 0x83U;
-        ggio_data[offset + 3U] = 0x01U;
-        ggio_data[offset + 4U] = values[index + 2U] != 0U ? 0xFFU : 0x00U;
-    }
-    const std::array<EncodedValue, 3U> root_values{
-        EncodedValue{healthy_ln_data},
-        EncodedValue{healthy_ln_data},
-        EncodedValue{ggio_data}};
+        std::array<mms::MmsStaticObjectEntry, 13U> objects{};
+        objects[0] = mms::MmsStaticObjectEntry{
+            "ESP32S3IOLD0", "LLN0", lln0_type,
+            read_encoded, &root_values[0], false, nullptr, nullptr, nullptr};
+        objects[1] = mms::MmsStaticObjectEntry{
+            "ESP32S3IOLD0", "LPHD1", lphd1_type,
+            read_encoded, &root_values[1], false, nullptr, nullptr, nullptr};
+        objects[2] = mms::MmsStaticObjectEntry{
+            "ESP32S3IOLD0", "GGIO1", ggio1_type,
+            read_encoded, &root_values[2], false, nullptr, nullptr, nullptr};
+        objects[3] = mms::MmsStaticObjectEntry{
+            "ESP32S3IOLD0", "LLN0$ST$Mod$stVal", boolean_type,
+            read_boolean, &values[0]};
+        objects[4] = mms::MmsStaticObjectEntry{
+            "ESP32S3IOLD0", "LPHD1$ST$PhyHealth$stVal", boolean_type,
+            read_boolean, &values[1]};
+        constexpr std::array<std::string_view, 8U> leaf_items{
+            "GGIO1$ST$Ind1$stVal", "GGIO1$ST$Ind2$stVal",
+            "GGIO1$ST$Ind3$stVal", "GGIO1$ST$Ind4$stVal",
+            "GGIO1$ST$Ind5$stVal", "GGIO1$ST$Ind6$stVal",
+            "GGIO1$ST$Ind7$stVal", "GGIO1$ST$Ind8$stVal"};
+        for (std::size_t index = 0U; index < leaf_items.size(); ++index) {
+            objects[index + 5U] = mms::MmsStaticObjectEntry{
+                "ESP32S3IOLD0",
+                leaf_items[index],
+                boolean_type,
+                read_boolean,
+                &values[index + 2U]};
+        }
 
-    std::array<mms::MmsStaticObjectEntry, 13U> objects{};
-    objects[0] = mms::MmsStaticObjectEntry{
-        "ESP32S3IOLD0", "LLN0", lln0_type,
-        read_encoded, &root_values[0], false, nullptr, nullptr, false};
-    objects[1] = mms::MmsStaticObjectEntry{
-        "ESP32S3IOLD0", "LPHD1", lphd1_type,
-        read_encoded, &root_values[1], false, nullptr, nullptr, false};
-    objects[2] = mms::MmsStaticObjectEntry{
-        "ESP32S3IOLD0", "GGIO1", ggio1_type,
-        read_encoded, &root_values[2], false, nullptr, nullptr, false};
-    objects[3] = mms::MmsStaticObjectEntry{
-        "ESP32S3IOLD0", "LLN0$ST$Mod$stVal", boolean_type,
-        read_boolean, &values[0]};
-    objects[4] = mms::MmsStaticObjectEntry{
-        "ESP32S3IOLD0", "LPHD1$ST$PhyHealth$stVal", boolean_type,
-        read_boolean, &values[1]};
-    for (std::size_t index = 0U; index < leaf_items.size(); ++index) {
-        objects[index + 5U] = mms::MmsStaticObjectEntry{
-            "ESP32S3IOLD0",
-            leaf_items[index],
-            boolean_type,
-            read_boolean,
-            &values[index + 2U]};
-    }
+        constexpr std::array<mms::MmsObjectNameView, 8U> data_set_members{{
+            {mms::MmsObjectNameView::Kind::domain_specific, "ESP32S3IOLD0", "GGIO1$ST$Ind1$stVal"},
+            {mms::MmsObjectNameView::Kind::domain_specific, "ESP32S3IOLD0", "GGIO1$ST$Ind2$stVal"},
+            {mms::MmsObjectNameView::Kind::domain_specific, "ESP32S3IOLD0", "GGIO1$ST$Ind3$stVal"},
+            {mms::MmsObjectNameView::Kind::domain_specific, "ESP32S3IOLD0", "GGIO1$ST$Ind4$stVal"},
+            {mms::MmsObjectNameView::Kind::domain_specific, "ESP32S3IOLD0", "GGIO1$ST$Ind5$stVal"},
+            {mms::MmsObjectNameView::Kind::domain_specific, "ESP32S3IOLD0", "GGIO1$ST$Ind6$stVal"},
+            {mms::MmsObjectNameView::Kind::domain_specific, "ESP32S3IOLD0", "GGIO1$ST$Ind7$stVal"},
+            {mms::MmsObjectNameView::Kind::domain_specific, "ESP32S3IOLD0", "GGIO1$ST$Ind8$stVal"}}};
+        constexpr std::array<mms::MmsStaticDataSetEntry, 1U> data_set_entries{{
+            {"ESP32S3IOLD0", "LLN0$EventData", data_set_members, false}}};
 
-    const mms::MmsStaticObjectTable object_table{objects};
-    if (!object_table.valid()) {
-        std::cerr << "Static MMS model is invalid.\n";
-        return 4;
-    }
-    const mms::MmsStaticApplicationDispatcher dispatcher{object_table};
-    auto listener = create_listener(options);
-    if (!listener.valid()) {
-        std::cerr << "Unable to bind/listen on " << options.bind_address
-                  << ':' << options.port << ".\n";
-        return 5;
-    }
+        const mms::MmsStaticObjectTable object_table{objects};
+        const mms::MmsStaticDataSetTable data_sets{data_set_entries};
+        if (!object_table.valid() || !data_sets.valid()) {
+            throw std::runtime_error("Static MMS server model is invalid.");
+        }
 
-    std::cout << "STATIC_IED_SERVER_READY bind=" << options.bind_address
-              << " port=" << options.port
-              << " domain=ESP32S3IOLD0 listed_variables=10 root_types=3"
-                 " readable_leaves=10\n";
-    do {
-        sockaddr_storage peer{};
-        socklen_t peer_size = sizeof(peer);
-        OwnedSocket client{accept(
-            listener.get(),
-            reinterpret_cast<sockaddr*>(&peer),
-            &peer_size)};
-        if (!client.valid()) {
-            const auto error = last_socket_error();
-            if (is_interrupted(error)) {
+        const auto listener = create_listener(options.port);
+        std::cout << "STATIC_IED_SERVER_READY port=" << options.port
+                  << " objects=" << objects.size()
+                  << " datasets=" << data_set_entries.size() << '\n';
+        std::cout.flush();
+
+        std::size_t connection_count = 0U;
+        while (!g_stop.load(std::memory_order_relaxed) &&
+               (options.maximum_connections == 0U ||
+                connection_count < options.maximum_connections)) {
+            sockaddr_in peer{};
+#if defined(_WIN32)
+            int peer_size = static_cast<int>(sizeof(peer));
+#else
+            socklen_t peer_size = static_cast<socklen_t>(sizeof(peer));
+#endif
+            const auto client = ::accept(
+                listener,
+                reinterpret_cast<sockaddr*>(&peer),
+                &peer_size);
+            if (client == k_invalid_socket) {
+                if (g_stop.load(std::memory_order_relaxed)) {
+                    break;
+                }
+                std::cerr << "accept() failed: " << socket_error_text() << '\n';
                 continue;
             }
-            std::cerr << "TCP accept failed with platform error " << error << ".\n";
-            return 6;
+            ++connection_count;
+            std::cout << "CONNECTION_ACCEPTED count=" << connection_count << '\n';
+            serve_connection(client, object_table, data_sets);
+            close_socket(client);
+            std::cout << "CONNECTION_CLOSED count=" << connection_count << '\n';
         }
-        set_client_timeouts(client.get());
-        std::cout << "STATIC_IED_CLIENT_ACCEPTED\n";
-        const auto clean_close = serve_client(client.get(), dispatcher);
-        std::cout << (clean_close ? "STATIC_IED_CLIENT_CLOSED"
-                                  : "STATIC_IED_CLIENT_ABORTED")
-                  << "\n";
-    } while (!options.serve_once);
 
-    return 0;
+        close_socket(listener);
+        std::cout << "STATIC_IED_SERVER_STOPPED connections=" << connection_count << '\n';
+        return 0;
+    } catch (const std::exception& exception) {
+        std::cerr << "Static IED server failed: " << exception.what() << '\n';
+        return 2;
+    }
 }
