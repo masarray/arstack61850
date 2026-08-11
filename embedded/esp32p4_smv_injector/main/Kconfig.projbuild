@@ -53,8 +53,9 @@ config AR_PTP_LAB_TX
         Enables a low-rate PTPv2 Layer-2 laboratory broadcaster for isolated
         troubleshooting, internal testing and interoperability work when a
         normal station PTP/GPS time server is unavailable. On ESP32-P4 with
-        ESP-IDF 5.x the two-step Sync/Follow_Up path uses the EMAC hardware TX
-        timestamp. This feature is not a GPS-backed or certified grandmaster.
+        ESP-IDF 5.x the two-step Sync/Follow_Up and Pdelay response paths use
+        EMAC hardware timestamps. This feature is not a GPS-backed or certified
+        grandmaster.
 
 config AR_PTP_DOMAIN
     int "PTP domain number"
@@ -62,7 +63,43 @@ config AR_PTP_DOMAIN
     default 0
     depends on AR_PTP_LAB_TX
     help
-        Domain number written into Announce, Sync and Follow_Up messages.
+        Domain number written into Announce, Sync, Follow_Up and Pdelay
+        response messages.
+
+config AR_PTP_TRANSPORT_SPECIFIC
+    int "PTP transportSpecific nibble"
+    range 0 15
+    default 0
+    depends on AR_PTP_LAB_TX
+    help
+        Upper-nibble transportSpecific value written into PTP messageType.
+        Keep the default 0 for the ARIEC61850/default IEEE 1588 lab behavior.
+        Change it only when the tested relay/profile requires another value;
+        strict PTP receivers may reject a transportSpecific mismatch.
+
+config AR_PTP_VLAN
+    bool "Tag PTP lab traffic with IEEE 802.1Q VLAN"
+    default n
+    depends on AR_PTP_LAB_TX
+    help
+        Tags Announce, Sync/Follow_Up and Pdelay responses. Leave disabled for
+        the default untagged C#-oracle behavior. Enable only when the isolated
+        process-bus test network or target relay expects tagged PTP traffic.
+
+config AR_PTP_VLAN_ID
+    int "PTP VLAN ID"
+    range 0 4095
+    default 0
+    depends on AR_PTP_LAB_TX && AR_PTP_VLAN
+
+config AR_PTP_VLAN_PRIORITY
+    int "PTP VLAN PCP"
+    range 0 7
+    default 4
+    depends on AR_PTP_LAB_TX && AR_PTP_VLAN
+    help
+        IEEE 802.1Q priority code point for tagged PTP lab traffic. PCP 4 keeps
+        parity with the existing ARIEC61850 PTP publisher option default.
 
 config AR_PTP_ANNOUNCE_INTERVAL_MS
     int "PTP Announce interval (ms)"
