@@ -127,6 +127,7 @@ constexpr std::array<std::uint8_t, 76U> kDefaultAcceptAare{
 
     bool saw_direct = false;
     bool saw_indirect = false;
+    bool saw_descriptor = false;
     bool saw_encoding = false;
     std::size_t offset = 0U;
     while (offset < outer.value.size()) {
@@ -157,6 +158,15 @@ constexpr std::array<std::uint8_t, 76U> kDefaultAcceptAare{
             }
             external.indirect_reference = *value;
             saw_indirect = true;
+        } else if (field.tag_class == asn1::BerClass::universal &&
+                   field.tag_number == 7 && !field.constructed) {
+            // data-value-descriptor is optional in EXTERNAL. It is not needed
+            // for MMS association negotiation, but engineering tools may emit it.
+            if (saw_descriptor || field.value.size() > AcseSpanCodec::maximum_acse_bytes) {
+                external = {};
+                return false;
+            }
+            saw_descriptor = true;
         } else if (field.tag_class == asn1::BerClass::context_specific &&
                    field.tag_number == 0 && field.constructed) {
             if (saw_encoding || field.value.size() > AcseSpanCodec::maximum_acse_bytes) {
@@ -170,7 +180,10 @@ constexpr std::array<std::uint8_t, 76U> kDefaultAcceptAare{
             return false;
         }
     }
-    return saw_direct && saw_indirect && saw_encoding;
+
+    // direct-reference and indirect-reference are optional members of EXTERNAL.
+    // The server only requires the single-ASN1-type carrying MMS InitiateRequest.
+    return saw_encoding;
 }
 
 [[nodiscard]] bool request_is_valid_for_response(
@@ -288,8 +301,13 @@ bool AcseSpanCodec::try_decode_aarq_view(
             saw_user_information = true;
             break;
         default:
-            aarq = {};
-            return false;
+            // AARQ carries several optional standard fields (AP/AE invocation
+            // identifiers, ACSE requirements, authentication mechanism/value,
+            // implementation information). The original ARIEC61850 server did
+            // not require them to establish MMS. They are already bounded and
+            // BER-validated by BerSpanReader, so ignore what this profile does
+            // not need rather than aborting an otherwise valid association.
+            break;
         }
     }
 
