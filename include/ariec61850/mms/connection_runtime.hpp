@@ -27,6 +27,7 @@ enum class MmsStaticConnectionStatus : std::uint8_t {
     application_rejected,
     response_buffer_too_small,
     workspace_too_small,
+    peer_limit_exceeded,
     backend_failure,
     closed,
 };
@@ -120,6 +121,16 @@ public:
         return mms_presentation_context_id_;
     }
 
+    // Negotiated outbound limits. They are zero until the corresponding COTP
+    // and MMS association handshakes have completed successfully.
+    [[nodiscard]] constexpr std::size_t negotiated_tpdu_size_bytes() const noexcept {
+        return negotiated_tpdu_size_bytes_;
+    }
+
+    [[nodiscard]] constexpr std::uint32_t negotiated_mms_pdu_size() const noexcept {
+        return negotiated_mms_pdu_size_;
+    }
+
     [[nodiscard]] constexpr MmsStaticRequestAccessContext access_context() const noexcept {
         return policy_.access_context();
     }
@@ -135,6 +146,8 @@ private:
     MmsStaticConnectionPolicy policy_{};
     MmsStaticConnectionState state_{MmsStaticConnectionState::awaiting_cotp_connect};
     std::uint32_t mms_presentation_context_id_{};
+    std::size_t negotiated_tpdu_size_bytes_{};
+    std::uint32_t negotiated_mms_pdu_size_{};
     bool association_active_{};
     bool association_close_notified_{};
 };
