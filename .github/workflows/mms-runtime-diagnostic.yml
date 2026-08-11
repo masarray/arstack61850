@@ -16,6 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install debugger
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gdb
       - name: Configure embedded runtime smoke
         run: cmake -S embedded -B build-embedded -DCMAKE_BUILD_TYPE=Debug -DARIEC61850_EMBEDDED_WARNINGS_AS_ERRORS=ON
       - name: Build runtime smoke
