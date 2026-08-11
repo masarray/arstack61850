@@ -43,10 +43,23 @@ void MmsStaticServerSession::reset() noexcept {
 }
 
 MmsStaticServerSessionResult MmsStaticServerSession::poll_once() noexcept {
+    const auto terminate = [this](
+                               const MmsStaticServerSessionStatus status,
+                               const MmsStaticConnectionStatus connection_status,
+                               const std::size_t bytes_received = 0U,
+                               const std::size_t bytes_sent = 0U) noexcept {
+        // All terminal transport/session outcomes are association teardown
+        // boundaries. MmsStaticConnectionRuntime guards its lifecycle callback,
+        // so this remains exactly-once even when process_tcp_window() already
+        // observed a COTP disconnect before the session reaches this helper.
+        runtime_.close_transport();
+        terminal_ = true;
+        return make_result(status, connection_status, bytes_received, bytes_sent);
+    };
+
     if (!buffers_.valid() || stream_.send_callback == nullptr ||
         stream_.receive_callback == nullptr) {
-        terminal_ = true;
-        return make_result(
+        return terminate(
             MmsStaticServerSessionStatus::invalid_configuration,
             MmsStaticConnectionStatus::backend_failure);
     }
@@ -71,15 +84,13 @@ MmsStaticServerSessionResult MmsStaticServerSession::poll_once() noexcept {
                 MmsStaticConnectionStatus::response_ready);
         }
         if (sent.status == embedded::IoStatus::closed) {
-            terminal_ = true;
-            return make_result(
+            return terminate(
                 MmsStaticServerSessionStatus::peer_closed,
                 MmsStaticConnectionStatus::closed);
         }
         if (!sent.success() || sent.transferred == 0U ||
             sent.transferred > remaining.size()) {
-            terminal_ = true;
-            return make_result(
+            return terminate(
                 MmsStaticServerSessionStatus::transport_error,
                 MmsStaticConnectionStatus::backend_failure);
         }
@@ -122,8 +133,7 @@ MmsStaticServerSessionResult MmsStaticServerSession::poll_once() noexcept {
                 connection.status);
         case MmsStaticConnectionStatus::closed:
             consume_input(connection.consumed_bytes);
-            terminal_ = true;
-            return make_result(
+            return terminate(
                 MmsStaticServerSessionStatus::peer_closed,
                 connection.status);
         case MmsStaticConnectionStatus::need_more:
@@ -133,16 +143,14 @@ MmsStaticServerSessionResult MmsStaticServerSession::poll_once() noexcept {
         case MmsStaticConnectionStatus::response_buffer_too_small:
         case MmsStaticConnectionStatus::workspace_too_small:
         case MmsStaticConnectionStatus::backend_failure:
-            terminal_ = true;
-            return make_result(
+            return terminate(
                 MmsStaticServerSessionStatus::protocol_error,
                 connection.status);
         }
     }
 
     if (receive_size_ == buffers_.receive.size()) {
-        terminal_ = true;
-        return make_result(
+        return terminate(
             MmsStaticServerSessionStatus::receive_buffer_full,
             MmsStaticConnectionStatus::need_more);
     }
@@ -160,15 +168,13 @@ MmsStaticServerSessionResult MmsStaticServerSession::poll_once() noexcept {
             MmsStaticConnectionStatus::need_more);
     }
     if (received.status == embedded::IoStatus::closed) {
-        terminal_ = true;
-        return make_result(
+        return terminate(
             MmsStaticServerSessionStatus::peer_closed,
             MmsStaticConnectionStatus::closed);
     }
     if (!received.success() || received.transferred == 0U ||
         received.transferred > destination.size()) {
-        terminal_ = true;
-        return make_result(
+        return terminate(
             MmsStaticServerSessionStatus::transport_error,
             MmsStaticConnectionStatus::backend_failure);
     }
