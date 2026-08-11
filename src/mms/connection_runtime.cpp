@@ -89,7 +89,7 @@ constexpr std::array<std::uint8_t, 4U> kConservativeStructureType{
         return false;
     }
     required = payload_bytes + segment_count * 7U;
-    return required <= std::numeric_limits<std::uint16_t>::max() * segment_count;
+    return true;
 }
 
 [[nodiscard]] MmsStaticConnectionResult wrap_cotp_data_response(
@@ -291,6 +291,9 @@ constexpr std::array<std::uint8_t, 4U> kConservativeStructureType{
 void MmsStaticConnectionRuntime::clear_cotp_reassembly() noexcept {
     cotp_reassembly_size_ = 0U;
     cotp_reassembly_complete_ = false;
+    cotp_reassembly_uses_workspace_ = false;
+    cotp_reassembly_workspace_data_ = nullptr;
+    cotp_reassembly_workspace_size_ = 0U;
 }
 
 void MmsStaticConnectionRuntime::notify_association_closed() noexcept {
@@ -333,7 +336,8 @@ void MmsStaticConnectionRuntime::reset() noexcept {
 MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
     const std::span<const std::uint8_t> tcp_bytes,
     const std::span<std::uint8_t> response,
-    const std::span<std::uint8_t> workspace) noexcept {
+    const std::span<std::uint8_t> workspace_storage) noexcept {
+    auto workspace = workspace_storage;
     if (state_ == MmsStaticConnectionState::closed) {
         return make_result(MmsStaticConnectionStatus::closed, state_);
     }
@@ -438,8 +442,33 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
     }
 
     bool using_reassembly = false;
+    std::span<std::uint8_t> reassembly = policy_.cotp_reassembly;
+    const auto select_workspace_reassembly = [this, workspace_storage, &workspace, &reassembly]() noexcept {
+        if (workspace_storage.size() < 2U) {
+            return false;
+        }
+        const auto processing_bytes = workspace_storage.size() / 2U;
+        const auto reassembly_bytes = workspace_storage.size() - processing_bytes;
+        if (processing_bytes == 0U || reassembly_bytes == 0U) {
+            return false;
+        }
+        if (cotp_reassembly_uses_workspace_) {
+            if (cotp_reassembly_workspace_data_ != workspace_storage.data() ||
+                cotp_reassembly_workspace_size_ != workspace_storage.size()) {
+                return false;
+            }
+        } else {
+            cotp_reassembly_uses_workspace_ = true;
+            cotp_reassembly_workspace_data_ = workspace_storage.data();
+            cotp_reassembly_workspace_size_ = workspace_storage.size();
+        }
+        workspace = workspace_storage.first(processing_bytes);
+        reassembly = workspace_storage.subspan(processing_bytes, reassembly_bytes);
+        return true;
+    };
+
     if (cotp_reassembly_complete_) {
-        if (!cotp.end_of_transmission || cotp_reassembly_size_ == 0U) {
+        if (cotp_reassembly_size_ == 0U || !cotp.end_of_transmission) {
             state_ = MmsStaticConnectionState::fault;
             clear_cotp_reassembly();
             return make_result(
@@ -447,24 +476,32 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
                 state_,
                 peek.frame_bytes);
         }
-        cotp.user_data = std::span<const std::uint8_t>{policy_.cotp_reassembly}
-            .first(cotp_reassembly_size_);
+        if (cotp_reassembly_uses_workspace_ && !select_workspace_reassembly()) {
+            state_ = MmsStaticConnectionState::fault;
+            clear_cotp_reassembly();
+            return make_result(MmsStaticConnectionStatus::backend_failure, state_);
+        }
+        if (reassembly.empty() || cotp_reassembly_size_ > reassembly.size()) {
+            state_ = MmsStaticConnectionState::fault;
+            clear_cotp_reassembly();
+            return make_result(MmsStaticConnectionStatus::backend_failure, state_);
+        }
+        cotp.user_data = std::span<const std::uint8_t>{reassembly}.first(cotp_reassembly_size_);
         using_reassembly = true;
     } else if (cotp_reassembly_size_ != 0U || !cotp.end_of_transmission) {
-        if (policy_.cotp_reassembly.empty()) {
+        if (reassembly.empty()) {
             if (!policy_.require_end_of_transmission) {
-                // Legacy opt-out: allow the caller to inspect/process the partial
-                // user data exactly as the pre-reassembly runtime did.
-            } else {
+                // Explicit compatibility opt-out: expose the partial TPDU to the
+                // upper decoder exactly as the historical strict runtime did.
+            } else if (!select_workspace_reassembly()) {
                 state_ = MmsStaticConnectionState::fault;
-                return make_result(
-                    MmsStaticConnectionStatus::protocol_violation,
-                    state_,
-                    peek.frame_bytes);
+                clear_cotp_reassembly();
+                return make_result(MmsStaticConnectionStatus::backend_failure, state_);
             }
-        } else {
-            if (cotp.user_data.size() >
-                policy_.cotp_reassembly.size() - cotp_reassembly_size_) {
+        }
+        if (!reassembly.empty()) {
+            if (cotp_reassembly_size_ > reassembly.size() ||
+                cotp.user_data.size() > reassembly.size() - cotp_reassembly_size_) {
                 state_ = MmsStaticConnectionState::fault;
                 clear_cotp_reassembly();
                 return make_result(
@@ -475,8 +512,7 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
             std::copy(
                 cotp.user_data.begin(),
                 cotp.user_data.end(),
-                policy_.cotp_reassembly.begin() +
-                    static_cast<std::ptrdiff_t>(cotp_reassembly_size_));
+                reassembly.begin() + static_cast<std::ptrdiff_t>(cotp_reassembly_size_));
             cotp_reassembly_size_ += cotp.user_data.size();
             if (!cotp.end_of_transmission) {
                 return make_result(
@@ -485,8 +521,7 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
                     peek.frame_bytes);
             }
             cotp_reassembly_complete_ = true;
-            cotp.user_data = std::span<const std::uint8_t>{policy_.cotp_reassembly}
-                .first(cotp_reassembly_size_);
+            cotp.user_data = std::span<const std::uint8_t>{reassembly}.first(cotp_reassembly_size_);
             using_reassembly = true;
         }
     }
