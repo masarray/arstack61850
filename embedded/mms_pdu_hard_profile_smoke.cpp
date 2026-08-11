@@ -34,14 +34,17 @@ constexpr std::array<std::uint8_t, 40U> kInitiateResponse{
     0xA4U, 0x16U,
     0x80U, 0x01U, 0x01U,
     0x81U, 0x03U, 0x05U, 0xF1U, 0x00U,
-    0x82U, 0x0CU, 0x03U, 0xEEU, 0x1CU, 0x00U, 0x00U, 0x04U,
-    0x08U, 0x00U, 0x00U, 0x79U, 0xEFU, 0x18U};
+    0x82U, 0x0CU, 0x03U, 0x4EU, 0x08U, 0x00U, 0x00U, 0x00U,
+    0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U};
 
 constexpr std::array<std::uint8_t, 3U> kParameterSupport{
     0x05U, 0xF1U, 0x00U};
-constexpr std::array<std::uint8_t, 12U> kServicesSupported{
+constexpr std::array<std::uint8_t, 12U> kServicesSupportedRequest{
     0x03U, 0xEEU, 0x1CU, 0x00U, 0x00U, 0x04U,
     0x08U, 0x00U, 0x00U, 0x79U, 0xEFU, 0x18U};
+constexpr std::array<std::uint8_t, 12U> kServicesSupportedResponse{
+    0x03U, 0x4EU, 0x08U, 0x00U, 0x00U, 0x00U,
+    0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U};
 
 template <std::size_t N>
 [[nodiscard]] bool matches(
@@ -53,7 +56,8 @@ template <std::size_t N>
 
 [[nodiscard]] bool valid_initiate(
     const mms::MmsInitiateView& value,
-    const mms::MmsWirePduKind expected_kind) noexcept {
+    const mms::MmsWirePduKind expected_kind,
+    const std::span<const std::uint8_t> expected_services) noexcept {
     return value.kind == expected_kind &&
         value.maximum_mms_pdu_size == 65'000U &&
         value.maximum_outstanding_calling == 10U &&
@@ -61,7 +65,11 @@ template <std::size_t N>
         value.data_structure_nesting_level == 5U &&
         value.detail.version_number == 1U &&
         matches(value.detail.parameter_support_options, kParameterSupport) &&
-        matches(value.detail.services_supported_calling, kServicesSupported);
+        value.detail.services_supported_calling.size() == expected_services.size() &&
+        std::equal(
+            value.detail.services_supported_calling.begin(),
+            value.detail.services_supported_calling.end(),
+            expected_services.begin());
 }
 
 } // namespace
@@ -70,13 +78,19 @@ int main() {
     mms::MmsInitiateView initiate;
     if (!mms::MmsPduSpanCodec::try_decode_initiate_request_view(
             kInitiateRequest, initiate) ||
-        !valid_initiate(initiate, mms::MmsWirePduKind::initiate_request)) {
+        !valid_initiate(
+            initiate,
+            mms::MmsWirePduKind::initiate_request,
+            kServicesSupportedRequest)) {
         return 1;
     }
 
     if (!mms::MmsPduSpanCodec::try_decode_initiate_response_view(
             kInitiateResponse, initiate) ||
-        !valid_initiate(initiate, mms::MmsWirePduKind::initiate_response)) {
+        !valid_initiate(
+            initiate,
+            mms::MmsWirePduKind::initiate_response,
+            kServicesSupportedResponse)) {
         return 2;
     }
 
@@ -134,8 +148,21 @@ int main() {
         return 6;
     }
 
-    // Positive ASN.1 INTEGER boundary: max supported invoke ID has no sign
-    // prefix because its most-significant octet is 0x7F.
+    constexpr std::array<std::uint8_t, 8U> reject_golden{
+        0xA4U, 0x06U, 0x80U, 0x01U, 0x07U, 0x81U, 0x01U, 0x01U};
+    const auto reject_result =
+        mms::MmsPduSpanCodec::encode_confirmed_request_reject_into(
+            7U,
+            mms::MmsConfirmedRequestRejectReason::unrecognized_service,
+            buffer);
+    if (!reject_result.success() ||
+        reject_result.bytes_written != reject_golden.size() ||
+        !matches(
+            std::span<const std::uint8_t>{buffer}.first(reject_result.bytes_written),
+            reject_golden)) {
+        return 7;
+    }
+
     constexpr std::array<std::uint8_t, 10U> maximum_invoke_golden{
         0xA0U, 0x08U, 0x02U, 0x04U,
         0x7FU, 0xFFU, 0xFFU, 0xFFU,
@@ -150,10 +177,9 @@ int main() {
         !mms::MmsPduSpanCodec::try_decode_confirmed_request_view(
             maximum_invoke_golden, confirmed) ||
         confirmed.invoke_id != mms::MmsPduSpanCodec::maximum_invoke_id) {
-        return 7;
+        return 8;
     }
 
-    // Values beginning with bit 7 set require an explicit positive prefix.
     constexpr std::array<std::uint8_t, 8U> invoke_128_golden{
         0xA0U, 0x06U, 0x02U, 0x02U, 0x00U, 0x80U, 0xA4U, 0x00U};
     const auto invoke_128 = mms::MmsPduSpanCodec::encode_confirmed_request_into(
@@ -162,11 +188,9 @@ int main() {
         !matches(
             std::span<const std::uint8_t>{buffer}.first(invoke_128.bytes_written),
             invoke_128_golden)) {
-        return 8;
+        return 9;
     }
 
-    // Exercise the real post-association path: MMS Confirmed Request wrapped in
-    // Presentation P-DATA, then recovered as zero-copy spans.
     std::array<std::uint8_t, 256U> p_data{};
     const auto p_data_result = osi::PresentationSpanCodec::encode_p_data_into(
         confirmed_request_golden, p_data, 3U, true);
@@ -180,10 +204,9 @@ int main() {
             pdv.single_asn1_type, confirmed) ||
         confirmed.invoke_id != 7U ||
         confirmed.service() != mms::MmsWireConfirmedService::read) {
-        return 9;
+        return 10;
     }
 
-    // Repeated application-layer operation must stay inside caller-owned spans.
     for (std::uint32_t iteration = 0U; iteration < 50'000U; ++iteration) {
         const auto invoke = iteration & 0x7FFFU;
         const auto encoded = mms::MmsPduSpanCodec::encode_confirmed_response_into(
@@ -194,7 +217,7 @@ int main() {
                 std::span<const std::uint8_t>{buffer}.first(encoded.bytes_written),
                 decoded) ||
             decoded.invoke_id != invoke || decoded.service_tag != 4) {
-            return 10;
+            return 11;
         }
     }
 
@@ -202,7 +225,7 @@ int main() {
         0xA8U, 0x03U, 0x80U, 0x01U, 0x01U};
     if (mms::MmsPduSpanCodec::try_decode_initiate_request_view(
             malformed_initiate, initiate)) {
-        return 11;
+        return 12;
     }
 
     return 0;
