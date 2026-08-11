@@ -412,7 +412,7 @@ ApplicationWindow {
                (root.instrumentState === "PROFILE CHANGED" || root.instrumentState === "DEPLOYING") ? theme.amberSoft :
                theme.accentSoft
         border.width: 1
-        border.color: Qt.alpha(root.instrumentStateColor, 0.55)
+        border.color: root.instrumentStateColor
         Label {
             id: stateText
             anchors.centerIn: parent
@@ -986,7 +986,7 @@ ApplicationWindow {
                                     validator: DoubleValidator { bottom: 0.001; top: 1000.0; decimals: 3 }
                                     onTextEdited: {
                                         var value = root.parseOperatorNumber(text)
-                                        if (acceptableInput && root.validFrequency(value)) {
+                                        if (root.validFrequency(value)) {
                                             invalidInput = false
                                             root.signalFrequency = value
                                             waveform.requestPaint()
@@ -997,7 +997,7 @@ ApplicationWindow {
                                     }
                                     onEditingFinished: {
                                         var value = root.parseOperatorNumber(text)
-                                        if (!acceptableInput || !root.validFrequency(value)) {
+                                        if (!root.validFrequency(value)) {
                                             text = root.signalFrequency.toFixed(3)
                                             invalidInput = false
                                             root.showMessage("Frequency must be greater than 0 and not exceed 1000 Hz.", true)
