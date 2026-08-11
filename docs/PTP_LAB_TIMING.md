@@ -61,7 +61,7 @@ The PTP wire model belongs in the portable C++ core rather than in the ESP32 fir
 The same parser and semantic model therefore serve both product directions:
 
 - **Injector** — transmit PTP traffic beside deterministic SMV traffic;
-- **Analyzer** — observe PTP source/domain/message behavior without transmitting anything.
+- **Analyzer** — observe PTP source/domain/profile/message behavior without transmitting anything.
 
 ## PTP-P1 implementation boundary
 
@@ -73,6 +73,7 @@ Implemented:
 
 - IEEE 1588/PTPv2 Layer-2 EtherType `0x88F7`;
 - PTP header encode/decode;
+- transportSpecific preservation;
 - Announce;
 - Sync;
 - Follow_Up;
@@ -83,6 +84,7 @@ Implemented:
 - QinQ parsing;
 - general and peer-delay multicast recognition;
 - passive source/domain/message monitor;
+- transportSpecific stability/mismatch evidence;
 - sequence-anomaly tracking;
 - conservative health and `smpSynch` policy primitives;
 - read-only PCAP analyzer CLI.
@@ -110,6 +112,10 @@ Relevant ESP32-P4 configuration options:
 ```text
 CONFIG_AR_PTP_LAB_TX
 CONFIG_AR_PTP_DOMAIN
+CONFIG_AR_PTP_TRANSPORT_SPECIFIC
+CONFIG_AR_PTP_VLAN
+CONFIG_AR_PTP_VLAN_ID
+CONFIG_AR_PTP_VLAN_PRIORITY
 CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS
 CONFIG_AR_PTP_SYNC_INTERVAL_MS
 ```
@@ -118,6 +124,10 @@ Current defaults when the feature is enabled:
 
 ```text
 Domain              0
+transportSpecific   0
+PTP VLAN            disabled / untagged
+PTP VLAN ID         0 when tagging is enabled
+PTP VLAN PCP        4 when tagging is enabled
 Announce interval   1000 ms
 Sync interval       250 ms
 Two-step clock      yes
@@ -128,6 +138,8 @@ Time source         internal oscillator
 Priority1           128
 Priority2           128
 ```
+
+The default `transportSpecific=0` and untagged Ethernet behavior preserve the existing ARIEC61850/ARSVIN laboratory behavior. They are configuration, not universal relay-profile claims. Some strict PTP implementations reject a `transportSpecific` mismatch, and real process-bus networks may expect a particular VLAN binding, so the lab tool exposes both explicitly rather than hard-coding a guessed utility profile.
 
 These clock-quality values are intentionally conservative. The lab helper must not advertise GPS traceability or calibrated accuracy it does not possess.
 
@@ -158,13 +170,14 @@ Compatibility overrides may later be exposed for controlled laboratory use, but 
 The portable stack includes:
 
 ```text
-ariec61850_ptp_analyze <capture.pcap> [--domain N] [--json]
+ariec61850_ptp_analyze <capture.pcap> [--domain N] [--transport-specific N] [--json]
 ```
 
 It reports, among other evidence:
 
 - PTP versus non-PTP frame counts;
 - observed domain;
+- observed `transportSpecific` and changes during the capture;
 - source port identity;
 - Announce count;
 - Sync count;
@@ -172,7 +185,10 @@ It reports, among other evidence:
 - Pdelay activity;
 - VLAN/QinQ visibility;
 - sequence anomalies;
-- basic liveness/health checks.
+- basic liveness/health checks;
+- expected-domain or expected-transportSpecific mismatch when requested.
+
+This is intended to help diagnose cases where PTP is visibly present on the wire but the target relay still ignores it because the profile identity or network binding does not match what that relay expects.
 
 Host PCAP timestamps are observation timestamps, not proof of PTP clock accuracy. The analyzer deliberately does not convert a normal host capture into a precision-timing claim.
 
@@ -193,6 +209,8 @@ On an independent capture path verify:
 - EtherType `0x88F7`;
 - expected source MAC / clock identity;
 - configured PTP domain;
+- configured `transportSpecific`;
+- configured tagged/untagged state and VLAN/PCP when enabled;
 - periodic Announce;
 - periodic Sync;
 - matching Follow_Up sequence IDs;
@@ -215,9 +233,11 @@ Relay              ARStack ESP32-P4
 
 Acceptance evidence should show:
 
+- incoming Pdelay_Req uses the expected domain and `transportSpecific`;
 - response sequence ID equals request sequence ID;
 - requestingPortIdentity is echoed exactly;
 - response and follow-up use the peer-delay multicast destination;
+- configured PTP VLAN behavior is preserved on the responses;
 - timestamps are hardware-derived and valid;
 - no sustained response loss under the relay's normal Pdelay cadence.
 
@@ -229,7 +249,7 @@ Record, without overclaiming:
 - whether it selects/locks to it in the isolated test setup;
 - time until relay timing-ready state;
 - whether SMV becomes readable/usable after PTP is available;
-- any relay-specific profile mismatch or rejection diagnostic.
+- any relay-specific domain, transportSpecific, VLAN, timing-profile or clock-quality rejection diagnostic.
 
 A successful result proves interoperability with that tested relay/configuration. It is not a universal IEC/IEEE 61850-9-3 conformance certificate.
 
