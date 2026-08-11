@@ -4,6 +4,7 @@ idf_component_register(
         "ethernet_port.c"
         "live_control.cpp"
         "profile_control.cpp"
+        "ptp_lab_task.cpp"
         "runtime_profile.cpp"
     INCLUDE_DIRS "."
     REQUIRES arstack_process_bus esp_eth esp_event esp_timer esp_driver_gptimer freertos)
