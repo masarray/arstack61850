@@ -10,6 +10,7 @@ on:
       - 'src/capture/pcap.cpp'
       - 'tools/ptp_analyze.cpp'
       - 'tests/test_ptp.cpp'
+      - 'tests/test_ptp_runtime.cpp'
       - 'tests/ptp_profile/**'
       - '.github/workflows/ptp-core-ci.yml'
   pull_request:
@@ -21,6 +22,7 @@ on:
       - 'src/capture/pcap.cpp'
       - 'tools/ptp_analyze.cpp'
       - 'tests/test_ptp.cpp'
+      - 'tests/test_ptp_runtime.cpp'
       - 'tests/ptp_profile/**'
       - '.github/workflows/ptp-core-ci.yml'
 
@@ -59,18 +61,32 @@ jobs:
             tests/test_ptp.cpp \
             -o ptp-core-tests \
             >ptp-build.log 2>&1
-          status=$?
+          core_status=$?
+
+          "$CXX" \
+            -std=c++20 \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Werror \
+            -pthread \
+            -Iinclude \
+            src/ethernet/ethernet.cpp \
+            src/time_sync/ptp.cpp \
+            tests/test_ptp_runtime.cpp \
+            -o ptp-runtime-tests \
+            >ptp-runtime-build.log 2>&1
+          runtime_status=$?
           set -e
 
           cat ptp-build.log
-          if [ "$status" -ne 0 ]; then
-            grep -Ei 'error:|fatal error:|undefined reference|collect2: error|ld: error' ptp-build.log | while IFS= read -r line; do
+          cat ptp-runtime-build.log
+          if [ "$core_status" -ne 0 ] || [ "$runtime_status" -ne 0 ]; then
+            cat ptp-build.log ptp-runtime-build.log | grep -Ei 'error:|fatal error:|undefined reference|collect2: error|ld: error' | while IFS= read -r line; do
               escaped=${line//'%'/'%25'}
               escaped=${escaped//$'\r'/'%0D'}
               escaped=${escaped//$'\n'/'%0A'}
               echo "::error::$escaped"
             done || true
-            exit "$status"
+            [ "$core_status" -ne 0 ] && exit "$core_status"
+            exit "$runtime_status"
           fi
 
       - name: Run PTP regression tests
@@ -78,17 +94,21 @@ jobs:
         run: |
           set +e
           ./ptp-core-tests >ptp-test.log 2>&1
-          status=$?
+          core_status=$?
+          ./ptp-runtime-tests >ptp-runtime-test.log 2>&1
+          runtime_status=$?
           set -e
           cat ptp-test.log
-          if [ "$status" -ne 0 ]; then
-            grep -E '\[FAIL\]|CHECK failed|error' ptp-test.log | while IFS= read -r line; do
+          cat ptp-runtime-test.log
+          if [ "$core_status" -ne 0 ] || [ "$runtime_status" -ne 0 ]; then
+            cat ptp-test.log ptp-runtime-test.log | grep -E '\[FAIL\]|CHECK failed|error' | while IFS= read -r line; do
               escaped=${line//'%'/'%25'}
               escaped=${escaped//$'\r'/'%0D'}
               escaped=${escaped//$'\n'/'%0A'}
               echo "::error::$escaped"
             done || true
-            exit "$status"
+            [ "$core_status" -ne 0 ] && exit "$core_status"
+            exit "$runtime_status"
           fi
 
   portable-ptp-msvc:
@@ -127,6 +147,7 @@ jobs:
 
           Build-Target 'ptp_profile_core'
           Build-Target 'ptp_profile_tests'
+          Build-Target 'ptp_runtime_tests'
           Build-Target 'ptp_profile_analyze'
 
       - name: Run PTP regression and analyzer smoke tests on MSVC
