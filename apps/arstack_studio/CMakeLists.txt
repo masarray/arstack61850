@@ -30,6 +30,16 @@ qt_add_qml_module(arstack_studio
     VERSION 1.0
     QML_FILES
         qml/Main.qml
+        qml/StudioTheme.qml
+        qml/SurfacePanel.qml
+        qml/CalmButton.qml
+        qml/NumericField.qml
+        qml/StateBadge.qml
+        qml/ProfileInspector.qml
+        qml/SignalMatrix.qml
+        qml/QualityEditor.qml
+        qml/SignalPreview.qml
+        qml/StatusToast.qml
 )
 
 target_link_libraries(arstack_studio PRIVATE
