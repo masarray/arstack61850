@@ -1,0 +1,55 @@
+name: BRCB Lab Server CI
+
+on:
+  push:
+    branches:
+      - agent/live-brcb-server-harness
+  pull_request:
+    paths:
+      - 'tools/brcb_lab_server.cpp'
+      - 'tools/brcb_lab_server/**'
+      - 'tools/static_ied_server_sigpipe.cpp'
+      - 'include/ariec61850/mms/**'
+      - 'src/mms/**'
+      - 'include/ariec61850/osi/**'
+      - 'src/osi/**'
+      - 'include/ariec61850/acse/**'
+      - 'src/acse/**'
+      - '.github/workflows/brcb-lab-server-ci.yml'
+
+jobs:
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select compiler
+        shell: bash
+        run: |
+          if [[ "${{ matrix.compiler }}" == "clang" ]]; then
+            echo "CC=clang" >> "$GITHUB_ENV"
+            echo "CXX=clang++" >> "$GITHUB_ENV"
+          else
+            echo "CC=gcc" >> "$GITHUB_ENV"
+            echo "CXX=g++" >> "$GITHUB_ENV"
+          fi
+      - name: Configure
+        run: cmake -S tools/brcb_lab_server -B build-brcb-lab -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build-brcb-lab --parallel 2
+      - name: Test
+        run: ctest --test-dir build-brcb-lab --output-on-failure
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S tools/brcb_lab_server -B build-brcb-lab
+      - name: Build
+        run: cmake --build build-brcb-lab --config Release --parallel 2
+      - name: Test
+        run: ctest --test-dir build-brcb-lab -C Release --output-on-failure
