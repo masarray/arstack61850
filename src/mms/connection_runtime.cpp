@@ -23,6 +23,12 @@ namespace {
 constexpr std::array<std::uint8_t, 4U> kConservativeStructureType{
     0xA2U, 0x02U, 0xA1U, 0x00U};
 
+// FileDirectory-Response service value: listOfDirectoryEntry [0] empty,
+// moreFollows [1] FALSE. Mirrors the bounded deterministic behavior of
+// the proven ARIEC61850 engineering-client simulator.
+constexpr std::array<std::uint8_t, 5U> kEmptyFileDirectoryFields{
+    0xA0U, 0x00U, 0x81U, 0x01U, 0x00U};
+
 [[nodiscard]] MmsStaticConnectionResult make_result(
     const MmsStaticConnectionStatus status,
     const MmsStaticConnectionState state,
@@ -644,6 +650,29 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
                 workspace,
                 MmsStaticDispatchStatus::response_ready,
                 MmsWireConfirmedService::identify,
+                confirmed.invoke_id));
+        }
+
+        if (confirmed.service() == MmsWireConfirmedService::file_directory) {
+            const auto directory = confirmed.service_constructed
+                ? MmsPduSpanCodec::encode_confirmed_response_into(
+                    confirmed.invoke_id,
+                    static_cast<std::int32_t>(MmsWireConfirmedService::file_directory),
+                    true,
+                    kEmptyFileDirectoryFields,
+                    response)
+                : MmsPduSpanCodec::encode_confirmed_error_into(
+                    confirmed.invoke_id, response);
+            return finish(wrap_mms_response(
+                directory,
+                peek.frame_bytes,
+                state_,
+                mms_presentation_context_id_,
+                negotiated_tpdu_size_code_,
+                response,
+                workspace,
+                MmsStaticDispatchStatus::response_ready,
+                MmsWireConfirmedService::file_directory,
                 confirmed.invoke_id));
         }
 

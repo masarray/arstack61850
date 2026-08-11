@@ -28,6 +28,7 @@ enum class MmsWireConfirmedService : std::int32_t {
     write = 5,
     get_variable_access_attributes = 6,
     get_named_variable_list_attributes = 12,
+    file_directory = 77,
 };
 
 struct MmsInitiateDetailView final {

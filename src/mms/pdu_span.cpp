@@ -398,6 +398,7 @@ MmsWireConfirmedService MmsConfirmedPduView::service() const noexcept {
     case 5: return MmsWireConfirmedService::write;
     case 6: return MmsWireConfirmedService::get_variable_access_attributes;
     case 12: return MmsWireConfirmedService::get_named_variable_list_attributes;
+    case 77: return MmsWireConfirmedService::file_directory;
     default: return MmsWireConfirmedService::unknown;
     }
 }

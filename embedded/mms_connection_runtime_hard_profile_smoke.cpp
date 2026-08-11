@@ -69,6 +69,15 @@ constexpr std::array<std::uint8_t, 15U> kReadResponse{
     0x83U, 0x01U, 0xFFU,
     0x85U, 0x01U, 0x2AU};
 
+constexpr std::array<std::uint8_t, 15U> kReadResponseAfterWrite{
+    0xA1U, 0x0DU, 0x02U, 0x01U, 0x0CU,
+    0xA4U, 0x08U, 0xA1U, 0x06U,
+    0x83U, 0x01U, 0x00U,
+    0x85U, 0x01U, 0x2AU};
+
+constexpr std::array<std::uint8_t, 5U> kEmptyFileDirectoryFields{
+    0xA0U, 0x00U, 0x81U, 0x01U, 0x00U};
+
 constexpr std::array<std::uint8_t, 29U> kWriteRequest{
     0xA0U, 0x1BU, 0x02U, 0x01U, 0x0EU,
     0xA5U, 0x16U,
@@ -365,6 +374,43 @@ int main() {
         return 11;
     }
 
+    std::array<std::uint8_t, 64U> file_directory_mms{};
+    const auto file_directory_request = mms::MmsPduSpanCodec::encode_confirmed_request_into(
+        22U,
+        static_cast<std::int32_t>(mms::MmsWireConfirmedService::file_directory),
+        true,
+        {},
+        file_directory_mms);
+    const auto file_directory_tpkt = file_directory_request.success()
+        ? build_mms_tpkt(
+            std::span<const std::uint8_t>{file_directory_mms}.first(
+                file_directory_request.bytes_written),
+            request,
+            presentation,
+            scratch)
+        : wire::EncodeResult{};
+    if (!file_directory_request.success() || !file_directory_tpkt.success()) {
+        return 21;
+    }
+    result = runtime.process_tcp_window(
+        std::span<const std::uint8_t>{request}.first(file_directory_tpkt.bytes_written),
+        response,
+        workspace);
+    mms::MmsConfirmedPduView file_directory_response;
+    if (!result.response_ready() ||
+        result.application_service != mms::MmsWireConfirmedService::file_directory ||
+        result.invoke_id != 22U ||
+        runtime.state() != mms::MmsStaticConnectionState::established ||
+        !extract_mms(
+            std::span<const std::uint8_t>{response}.first(result.bytes_written), pdv) ||
+        !mms::MmsPduSpanCodec::try_decode_confirmed_response_view(
+            pdv.single_asn1_type, file_directory_response) ||
+        file_directory_response.invoke_id != 22U ||
+        file_directory_response.service() != mms::MmsWireConfirmedService::file_directory ||
+        !matches(file_directory_response.service_value, kEmptyFileDirectoryFields)) {
+        return 22;
+    }
+
     const auto conclude_tpkt = build_mms_tpkt(
         kConcludeRequest, request, presentation, scratch);
     if (!conclude_tpkt.success()) {
@@ -436,7 +482,7 @@ int main() {
         runtime.state() != mms::MmsStaticConnectionState::established ||
         !extract_mms(
             std::span<const std::uint8_t>{response}.first(result.bytes_written), pdv) ||
-        !matches(pdv.single_asn1_type, kReadResponse)) {
+        !matches(pdv.single_asn1_type, kReadResponseAfterWrite)) {
         return 20;
     }
 

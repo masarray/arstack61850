@@ -21,16 +21,8 @@ function(server_strict_warnings target)
     endif()
 endfunction()
 
-set(SERVER_REPORT_SOURCES
-    "${ARSTACK_ROOT}/src/mms/information_report_span.cpp"
-    "${ARSTACK_ROOT}/src/mms/static_information_report.cpp"
-    "${ARSTACK_ROOT}/src/mms/static_report_connection.cpp"
-    "${ARSTACK_ROOT}/src/mms/static_urcb_objects.cpp"
-    "${ARSTACK_ROOT}/src/mms/static_urcb_runtime.cpp")
-
 add_executable(ariec61850_mms_direct_control_server
-    "${ARSTACK_ROOT}/tools/mms_direct_control_server.cpp"
-    "${ARSTACK_ROOT}/src/mms/static_direct_control.cpp")
+    "${ARSTACK_ROOT}/tools/mms_direct_control_server.cpp")
 target_include_directories(ariec61850_mms_direct_control_server PRIVATE
     "${ARSTACK_ROOT}/include")
 target_link_libraries(ariec61850_mms_direct_control_server PRIVATE
@@ -43,8 +35,7 @@ target_compile_features(ariec61850_mms_direct_control_server PRIVATE cxx_std_20)
 server_strict_warnings(ariec61850_mms_direct_control_server)
 
 add_executable(ariec61850_mms_urcb_server
-    "${ARSTACK_ROOT}/tools/mms_urcb_server.cpp"
-    ${SERVER_REPORT_SOURCES})
+    "${ARSTACK_ROOT}/tools/mms_urcb_server.cpp")
 target_include_directories(ariec61850_mms_urcb_server PRIVATE
     "${ARSTACK_ROOT}/include")
 target_link_libraries(ariec61850_mms_urcb_server PRIVATE
@@ -60,8 +51,7 @@ include(CTest)
 enable_testing()
 
 add_executable(ariec61850_mms_direct_control_tests
-    "${ARSTACK_ROOT}/tests/test_mms_static_direct_control.cpp"
-    "${ARSTACK_ROOT}/src/mms/static_direct_control.cpp")
+    "${ARSTACK_ROOT}/tests/test_mms_static_direct_control.cpp")
 target_include_directories(ariec61850_mms_direct_control_tests PRIVATE
     "${ARSTACK_ROOT}/include")
 target_link_libraries(ariec61850_mms_direct_control_tests PRIVATE
@@ -71,8 +61,7 @@ target_compile_features(ariec61850_mms_direct_control_tests PRIVATE cxx_std_20)
 server_strict_warnings(ariec61850_mms_direct_control_tests)
 
 add_executable(ariec61850_mms_server_urcb_tests
-    "${ARSTACK_ROOT}/tests/test_mms_server_urcb_report.cpp"
-    ${SERVER_REPORT_SOURCES})
+    "${ARSTACK_ROOT}/tests/test_mms_server_urcb_report.cpp")
 target_include_directories(ariec61850_mms_server_urcb_tests PRIVATE
     "${ARSTACK_ROOT}/include")
 target_link_libraries(ariec61850_mms_server_urcb_tests PRIVATE
