@@ -1,0 +1,17 @@
+<RCC>
+    <qresource prefix="/iedsim/assets">
+        <file alias="InterVariable.ttf">../arstack_studio/assets/InterVariable.ttf</file>
+        <file alias="activity.svg">../arstack_studio/assets/lucide/activity.svg</file>
+        <file alias="chevron-down.svg">../arstack_studio/assets/lucide/chevron-down.svg</file>
+        <file alias="chevron-up.svg">../arstack_studio/assets/lucide/chevron-up.svg</file>
+        <file alias="circle-check.svg">../arstack_studio/assets/lucide/circle-check.svg</file>
+        <file alias="folder-open.svg">../arstack_studio/assets/lucide/folder-open.svg</file>
+        <file alias="play.svg">../arstack_studio/assets/lucide/play.svg</file>
+        <file alias="radio-tower.svg">../arstack_studio/assets/lucide/radio-tower.svg</file>
+        <file alias="scan-search.svg">../arstack_studio/assets/lucide/scan-search.svg</file>
+        <file alias="settings-2.svg">../arstack_studio/assets/lucide/settings-2.svg</file>
+        <file alias="square.svg">../arstack_studio/assets/lucide/square.svg</file>
+        <file alias="upload.svg">../arstack_studio/assets/lucide/upload.svg</file>
+        <file alias="x.svg">../arstack_studio/assets/lucide/x.svg</file>
+    </qresource>
+</RCC>
