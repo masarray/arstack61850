@@ -20,6 +20,9 @@
 namespace ar::iec61850::mms {
 namespace {
 
+// Must remain aligned with MmsPduSpanCodec::encode_default_initiate_response_into().
+constexpr std::uint32_t kServerMaximumMmsPduSize = 65'000U;
+
 [[nodiscard]] MmsStaticConnectionResult make_result(
     const MmsStaticConnectionStatus status,
     const MmsStaticConnectionState state,
@@ -63,16 +66,54 @@ namespace {
     return true;
 }
 
+[[nodiscard]] bool selected_tpdu_size_bytes(
+    const osi::CotpTpduView& request,
+    const std::uint8_t local_maximum_code,
+    std::size_t& selected_bytes) noexcept {
+    selected_bytes = 0U;
+    std::size_t local_bytes{};
+    if (!osi::CotpSpanCodec::try_tpdu_size_bytes(local_maximum_code, local_bytes)) {
+        return false;
+    }
+
+    std::span<const std::uint8_t> offered;
+    if (!request.try_parameter(osi::CotpSpanCodec::tpdu_size_parameter, offered)) {
+        selected_bytes = local_bytes;
+        return true;
+    }
+    if (offered.size() != 1U) {
+        return false;
+    }
+
+    std::size_t peer_bytes{};
+    if (!osi::CotpSpanCodec::try_tpdu_size_bytes(offered[0], peer_bytes)) {
+        return false;
+    }
+    selected_bytes = std::min(local_bytes, peer_bytes);
+    return true;
+}
+
 [[nodiscard]] MmsStaticConnectionResult wrap_cotp_data_response(
     const std::span<const std::uint8_t> session_or_presentation,
     const std::size_t consumed,
     const MmsStaticConnectionState state,
+    const std::size_t negotiated_tpdu_size_bytes,
     const std::span<std::uint8_t> response,
     const std::span<std::uint8_t> workspace) noexcept {
     // COTP Data adds three bytes and TPKT adds four bytes. Preflight both
     // caller-owned buffers so a capacity retry never advances connection state.
+    std::size_t cotp_required{};
+    if (!add_overhead(session_or_presentation.size(), 3U, cotp_required)) {
+        return make_result(MmsStaticConnectionStatus::backend_failure, state);
+    }
+    if (negotiated_tpdu_size_bytes == 0U ||
+        cotp_required > negotiated_tpdu_size_bytes) {
+        return make_result(
+            MmsStaticConnectionStatus::peer_limit_exceeded, state, consumed);
+    }
+
     std::size_t required{};
-    if (!add_overhead(session_or_presentation.size(), 7U, required)) {
+    if (!add_overhead(cotp_required, osi::TpktSpanCodec::header_length, required)) {
         return make_result(MmsStaticConnectionStatus::backend_failure, state);
     }
     if (response.size() < required) {
@@ -183,12 +224,16 @@ void MmsStaticConnectionRuntime::close_transport() noexcept {
     notify_association_closed();
     state_ = MmsStaticConnectionState::closed;
     mms_presentation_context_id_ = 0U;
+    negotiated_tpdu_size_bytes_ = 0U;
+    negotiated_mms_pdu_size_ = 0U;
 }
 
 void MmsStaticConnectionRuntime::reset() noexcept {
     notify_association_closed();
     state_ = MmsStaticConnectionState::awaiting_cotp_connect;
     mms_presentation_context_id_ = 0U;
+    negotiated_tpdu_size_bytes_ = 0U;
+    negotiated_mms_pdu_size_ = 0U;
     association_active_ = false;
     association_close_notified_ = false;
 }
@@ -238,6 +283,16 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
                 peek.frame_bytes);
         }
 
+        std::size_t selected_tpdu_bytes{};
+        if (!selected_tpdu_size_bytes(
+                cotp, policy_.maximum_tpdu_size_code, selected_tpdu_bytes)) {
+            state_ = MmsStaticConnectionState::fault;
+            return make_result(
+                MmsStaticConnectionStatus::protocol_violation,
+                state_,
+                peek.frame_bytes);
+        }
+
         const auto cc = osi::CotpSpanCodec::encode_connection_confirm_from_request_into(
             cotp,
             policy_.cotp_source_reference,
@@ -269,6 +324,7 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
             return make_result(MmsStaticConnectionStatus::backend_failure, state_);
         }
 
+        negotiated_tpdu_size_bytes_ = selected_tpdu_bytes;
         state_ = MmsStaticConnectionState::awaiting_association;
         return make_result(
             MmsStaticConnectionStatus::response_ready,
@@ -307,6 +363,8 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
                 state_,
                 peek.frame_bytes);
         }
+        const auto selected_mms_pdu_size = std::min(
+            initiate.maximum_mms_pdu_size, kServerMaximumMmsPduSize);
 
         const auto accept = acse::AcseSpanCodec::build_accept_response_into(
             association, workspace);
@@ -322,12 +380,14 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
             workspace.first(accept.bytes_written),
             peek.frame_bytes,
             MmsStaticConnectionState::established,
+            negotiated_tpdu_size_bytes_,
             response,
             workspace);
         if (!wrapped.response_ready()) {
             return wrapped;
         }
         mms_presentation_context_id_ = association.mms_presentation_context_id;
+        negotiated_mms_pdu_size_ = selected_mms_pdu_size;
         state_ = MmsStaticConnectionState::established;
         association_active_ = true;
         association_close_notified_ = false;
@@ -411,6 +471,14 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
         return application_rejected(state_, peek.frame_bytes, application);
     }
 
+    if (negotiated_mms_pdu_size_ == 0U ||
+        application.bytes_written > negotiated_mms_pdu_size_) {
+        return make_result(
+            MmsStaticConnectionStatus::peer_limit_exceeded,
+            state_,
+            peek.frame_bytes);
+    }
+
     const auto p_data = osi::PresentationSpanCodec::encode_p_data_into(
         response.first(application.bytes_written),
         workspace,
@@ -431,6 +499,7 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
         workspace.first(p_data.bytes_written),
         peek.frame_bytes,
         state_,
+        negotiated_tpdu_size_bytes_,
         response,
         workspace);
     if (wrapped.response_ready()) {
