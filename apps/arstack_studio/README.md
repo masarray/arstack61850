@@ -81,15 +81,29 @@ cmake --build build-arstack-studio --target arstack_studio --parallel
 ```
 
 On the Windows development workstation used for this phase, Qt is installed at
-`D:\Qt\6.8.3\msvc2022_64`. Build and launch with one command:
+`D:\Qt\6.8.3\msvc2022_64`. The `msvc2022_64` directory is the Qt binary-kit
+name; the launcher does **not** require the Visual Studio 2022 IDE. It discovers
+the newest installed Visual Studio x64 C++ toolchain with `vswhere`, including
+Visual Studio 2026 / MSVC v145.
+
+Build and launch with one command:
+
+```powershell
+.\apps\arstack_studio\run.cmd
+```
+
+Or call the PowerShell launcher directly:
 
 ```powershell
 .\apps\arstack_studio\run-windows.ps1
 ```
 
-Use `-NoLaunch` for a build-only verification. The launcher discovers the
-installed Visual Studio C++ toolchain with `vswhere`, reuses its bundled Ninja,
-and does not modify the user's global `PATH`.
+Use `-NoLaunch` for a build-only verification. Use `-VisualStudioRoot` only when
+you intentionally want to override automatic Visual Studio discovery. Use
+`-QtRoot` when the Qt kit is installed somewhere other than the default path.
+The launcher imports the selected Visual Studio developer environment, verifies
+`cl.exe`, and reuses Visual Studio's bundled Ninja without modifying the user's
+global `PATH`.
 
 ## P2 fast-workflow ribbon
 
