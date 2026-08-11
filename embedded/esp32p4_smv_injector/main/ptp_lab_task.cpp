@@ -22,7 +22,6 @@
 #include <cstdint>
 #include <ctime>
 #include <limits>
-#include <span>
 #include <vector>
 
 namespace ar::esp32p4::smv {
@@ -43,7 +42,6 @@ constexpr std::uint8_t kClockClass = 248U;
 constexpr std::uint16_t kOffsetScaledLogVariance = 0xFFFFU;
 constexpr std::int16_t kCurrentUtcOffset = 37;
 constexpr TickType_t kStartupDelay = pdMS_TO_TICKS(500);
-constexpr TickType_t kRetryDelay = pdMS_TO_TICKS(250);
 
 struct PtpLabContext final {
     esp_eth_handle_t eth_handle{};
@@ -54,11 +52,12 @@ struct PtpLabContext final {
 };
 
 PtpLabContext g_ptp_context{};
+bool g_ptp_started = false;
 
 [[nodiscard]] std::int8_t interval_to_log2(const std::uint32_t interval_ms) noexcept {
     if (interval_ms == 0U) return 0;
     // PTP logMessageInterval is log2(seconds). The configured lab intervals are
-    // kept to the nearest integer power of two, bounded by the standard byte field.
+    // represented by the nearest useful bounded integer exponent.
     std::uint32_t numerator = interval_ms;
     std::int8_t exponent = 0;
     while (numerator < 1000U && exponent > -7) {
@@ -205,15 +204,23 @@ void ptp_lab_task(void* argument) {
 
     if (!enable_hardware_ptp(context.eth_handle)) {
         ESP_LOGE(kTag, "PTP lab broadcaster stopped: hardware timestamp clock unavailable");
+        g_ptp_started = false;
         vTaskDelete(nullptr);
         return;
     }
     seed_hardware_clock(context.eth_handle);
 
-    ESP_ERROR_CHECK(esp_eth_ioctl(
+    const auto mac_result = esp_eth_ioctl(
         context.eth_handle,
         ETH_CMD_G_MAC_ADDR,
-        context.source_mac.data()));
+        context.source_mac.data());
+    if (mac_result != ESP_OK) {
+        ESP_LOGE(kTag, "PTP lab broadcaster stopped: MAC address unavailable: %s",
+                 esp_err_to_name(mac_result));
+        g_ptp_started = false;
+        vTaskDelete(nullptr);
+        return;
+    }
 
     context.base_options.domain_number = static_cast<std::uint8_t>(CONFIG_AR_PTP_DOMAIN);
     context.base_options.source_port_identity.clock_identity =
@@ -277,20 +284,23 @@ void ptp_lab_task(void* argument) {
 void ptp_lab_task(void*) {
     ESP_LOGE(kTag,
              "PTP lab broadcaster requires ESP32-P4 IEEE1588 support and the ESP-IDF 5.x EMAC timestamp adapter");
+    g_ptp_started = false;
     vTaskDelete(nullptr);
 }
 
 #endif
 
-} // namespace
-
-void ptp_lab_start(const esp_eth_handle_t eth_handle) {
+void start_ptp_lab(const esp_eth_handle_t eth_handle) {
     if (eth_handle == nullptr) {
         ESP_LOGE(kTag, "PTP lab broadcaster not started: Ethernet handle is null");
         return;
     }
+    if (g_ptp_started) {
+        return;
+    }
     g_ptp_context = {};
     g_ptp_context.eth_handle = eth_handle;
+    g_ptp_started = true;
     if (xTaskCreatePinnedToCore(
             &ptp_lab_task,
             "ar_ptp_lab",
@@ -299,8 +309,14 @@ void ptp_lab_start(const esp_eth_handle_t eth_handle) {
             4,
             nullptr,
             0) != pdPASS) {
+        g_ptp_started = false;
         ESP_LOGE(kTag, "Failed to create PTP lab task on CPU0");
     }
 }
 
+} // namespace
 } // namespace ar::esp32p4::smv
+
+extern "C" void ar_ptp_lab_start(const esp_eth_handle_t eth_handle) {
+    ar::esp32p4::smv::start_ptp_lab(eth_handle);
+}
