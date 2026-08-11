@@ -1,0 +1,86 @@
+name: ESP32-P4 PTP Lab Profile
+
+on:
+  push:
+    paths:
+      - 'embedded/esp32p4_smv_injector/**'
+      - 'include/ariec61850/time_sync/**'
+      - 'src/time_sync/**'
+      - 'include/ariec61850/ethernet/**'
+      - 'src/ethernet/**'
+      - '.github/workflows/esp32p4-ptp-lab.yml'
+  pull_request:
+    paths:
+      - 'embedded/esp32p4_smv_injector/**'
+      - 'include/ariec61850/time_sync/**'
+      - 'src/time_sync/**'
+      - 'include/ariec61850/ethernet/**'
+      - 'src/ethernet/**'
+      - '.github/workflows/esp32p4-ptp-lab.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-esp32p4-ptp:
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.5.4
+    defaults:
+      run:
+        shell: bash
+        working-directory: embedded/esp32p4_smv_injector
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select ESP32-P4 target
+        run: source /opt/esp/idf/export.sh && idf.py set-target esp32p4
+
+      - name: Enable guarded non-default PTP-P1.5 runtime profile
+        shell: bash
+        run: |
+          set_config() {
+            local key="$1"
+            local value="$2"
+            if grep -q "^${key}=" sdkconfig; then
+              sed -i "s|^${key}=.*|${key}=${value}|" sdkconfig
+            elif grep -q "^# ${key} is not set$" sdkconfig && [ "$value" = "y" ]; then
+              sed -i "s|^# ${key} is not set$|${key}=y|" sdkconfig
+            else
+              echo "${key}=${value}" >> sdkconfig
+            fi
+          }
+
+          set_config CONFIG_AR_PTP_LAB_TX y
+          set_config CONFIG_AR_PTP_DOMAIN 0
+          set_config CONFIG_AR_PTP_TRANSPORT_SPECIFIC 1
+          set_config CONFIG_AR_PTP_PORT_NUMBER 2
+          set_config CONFIG_AR_PTP_VLAN y
+          set_config CONFIG_AR_PTP_VLAN_ID 100
+          set_config CONFIG_AR_PTP_VLAN_PRIORITY 4
+          set_config CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS 1000
+          set_config CONFIG_AR_PTP_SYNC_INTERVAL_MS 250
+          set_config CONFIG_AR_PTP_RESPOND_PDELAY y
+          set_config CONFIG_AR_PTP_PRIORITY1 120
+          set_config CONFIG_AR_PTP_PRIORITY2 121
+          set_config CONFIG_AR_PTP_CLOCK_CLASS 248
+          set_config CONFIG_AR_PTP_CLOCK_ACCURACY 254
+          set_config CONFIG_AR_PTP_OFFSET_SCALED_LOG_VARIANCE 65535
+          set_config CONFIG_AR_PTP_TIME_SOURCE 160
+          set_config CONFIG_AR_PTP_CURRENT_UTC_OFFSET 37
+
+          source /opt/esp/idf/export.sh
+          idf.py reconfigure
+
+          grep -E '^CONFIG_AR_PTP_(LAB_TX|DOMAIN|TRANSPORT_SPECIFIC|PORT_NUMBER|VLAN|VLAN_ID|VLAN_PRIORITY|ANNOUNCE_INTERVAL_MS|SYNC_INTERVAL_MS|RESPOND_PDELAY|PRIORITY1|PRIORITY2|CLOCK_CLASS|CLOCK_ACCURACY|OFFSET_SCALED_LOG_VARIANCE|TIME_SOURCE|CURRENT_UTC_OFFSET)=' sdkconfig
+
+          grep -q '^CONFIG_AR_PTP_LAB_TX=y$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_TRANSPORT_SPECIFIC=1$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_PORT_NUMBER=2$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_VLAN_ID=100$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_PRIORITY1=120$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_PRIORITY2=121$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_RESPOND_PDELAY=y$' sdkconfig
+
+      - name: Build PTP-P1.5 enabled firmware
+        run: source /opt/esp/idf/export.sh && idf.py build
