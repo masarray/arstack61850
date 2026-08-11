@@ -1,0 +1,52 @@
+name: ESP32-P4 PTP Lab Profile
+
+on:
+  push:
+    paths:
+      - 'embedded/esp32p4_smv_injector/**'
+      - 'include/ariec61850/time_sync/**'
+      - 'src/time_sync/**'
+      - 'include/ariec61850/ethernet/**'
+      - 'src/ethernet/**'
+      - '.github/workflows/esp32p4-ptp-lab.yml'
+  pull_request:
+    paths:
+      - 'embedded/esp32p4_smv_injector/**'
+      - 'include/ariec61850/time_sync/**'
+      - 'src/time_sync/**'
+      - 'include/ariec61850/ethernet/**'
+      - 'src/ethernet/**'
+      - '.github/workflows/esp32p4-ptp-lab.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-esp32p4-ptp:
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.5.4
+    defaults:
+      run:
+        shell: bash
+        working-directory: embedded/esp32p4_smv_injector
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select ESP32-P4 target
+        run: source /opt/esp/idf/export.sh && idf.py set-target esp32p4
+
+      - name: Enable guarded PTP lab profile
+        shell: bash
+        run: |
+          if grep -q '^# CONFIG_AR_PTP_LAB_TX is not set$' sdkconfig; then
+            sed -i 's/^# CONFIG_AR_PTP_LAB_TX is not set$/CONFIG_AR_PTP_LAB_TX=y/' sdkconfig
+          elif ! grep -q '^CONFIG_AR_PTP_LAB_TX=y$' sdkconfig; then
+            echo 'CONFIG_AR_PTP_LAB_TX=y' >> sdkconfig
+          fi
+          source /opt/esp/idf/export.sh
+          idf.py reconfigure
+          grep -E '^CONFIG_AR_PTP_(LAB_TX|DOMAIN|ANNOUNCE_INTERVAL_MS|SYNC_INTERVAL_MS)=' sdkconfig
+
+      - name: Build PTP-enabled firmware
+        run: source /opt/esp/idf/export.sh && idf.py build
