@@ -38,6 +38,7 @@ jobs:
       - name: JavaScript syntax
         run: |
           node --check apps/smv_injector_gui/app.js
+          node --check apps/smv_injector_gui/scl_bridge_bootstrap.js
           node --check apps/smv_injector_gui/profile_bridge.js
 
       - name: Required UI files
@@ -47,6 +48,7 @@ jobs:
           test -s apps/smv_injector_gui/styles.css
           test -s apps/smv_injector_gui/profile_bridge.css
           test -s apps/smv_injector_gui/app.js
+          test -s apps/smv_injector_gui/scl_bridge_bootstrap.js
           test -s apps/smv_injector_gui/profile_bridge.js
           test -s apps/smv_injector_gui/host_server.py
           test -s apps/smv_injector_gui/run.cmd
