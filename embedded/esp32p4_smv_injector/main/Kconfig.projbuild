@@ -62,9 +62,6 @@ config AR_PTP_DOMAIN
     range 0 255
     default 0
     depends on AR_PTP_LAB_TX
-    help
-        Domain number written into Announce, Sync, Follow_Up and Pdelay
-        response messages.
 
 config AR_PTP_TRANSPORT_SPECIFIC
     int "PTP transportSpecific nibble"
@@ -73,23 +70,31 @@ config AR_PTP_TRANSPORT_SPECIFIC
     depends on AR_PTP_LAB_TX
     help
         Upper-nibble transportSpecific value written into PTP messageType.
-        Keep the default 0 for the ARIEC61850/default IEEE 1588 lab behavior.
-        Change it only when the tested relay/profile requires another value;
-        strict PTP receivers may reject a transportSpecific mismatch.
+        Strict receivers may reject a profile mismatch.
+
+config AR_PTP_CLOCK_IDENTITY
+    string "PTP clockIdentity override (empty = derive from MAC)"
+    default ""
+    depends on AR_PTP_LAB_TX
+    help
+        Optional 8-byte identity such as 02:11:22:FF:FE:33:44:55. Leave empty
+        to derive an EUI-64-style identity from the ESP32-P4 Ethernet MAC.
+
+config AR_PTP_PORT_NUMBER
+    int "PTP port number"
+    range 1 65535
+    default 1
+    depends on AR_PTP_LAB_TX
 
 config AR_PTP_VLAN
     bool "Tag PTP lab traffic with IEEE 802.1Q VLAN"
     default n
     depends on AR_PTP_LAB_TX
-    help
-        Tags Announce, Sync/Follow_Up and Pdelay responses. Leave disabled for
-        the default untagged C#-oracle behavior. Enable only when the isolated
-        process-bus test network or target relay expects tagged PTP traffic.
 
 config AR_PTP_VLAN_ID
     int "PTP VLAN ID"
-    range 0 4095
-    default 0
+    range 1 4094
+    default 100
     depends on AR_PTP_LAB_TX && AR_PTP_VLAN
 
 config AR_PTP_VLAN_PRIORITY
@@ -97,18 +102,12 @@ config AR_PTP_VLAN_PRIORITY
     range 0 7
     default 4
     depends on AR_PTP_LAB_TX && AR_PTP_VLAN
-    help
-        IEEE 802.1Q priority code point for tagged PTP lab traffic. PCP 4 keeps
-        parity with the existing ARIEC61850 PTP publisher option default.
 
 config AR_PTP_ANNOUNCE_INTERVAL_MS
     int "PTP Announce interval (ms)"
     range 100 10000
     default 1000
     depends on AR_PTP_LAB_TX
-    help
-        Interval for lab Announce traffic. The default matches the existing
-        ARIEC61850/ARSVIN laboratory publisher behavior.
 
 config AR_PTP_SYNC_INTERVAL_MS
     int "PTP Sync interval (ms)"
@@ -116,8 +115,66 @@ config AR_PTP_SYNC_INTERVAL_MS
     default 250
     depends on AR_PTP_LAB_TX
     help
-        Interval for two-step Sync/Follow_Up traffic. Follow_Up carries the
-        ESP32-P4 EMAC transmit timestamp when the IDF 5.x adapter is available.
+        ESP32-P4 uses two-step Sync/Follow_Up so Follow_Up can carry the exact
+        EMAC transmit timestamp rather than a software send-time estimate.
+
+config AR_PTP_RESPOND_PDELAY
+    bool "Respond to peer-delay requests"
+    default y
+    depends on AR_PTP_LAB_TX
+    help
+        Uses the ESP32-P4 RX descriptor timestamp as t2 and the Pdelay_Resp TX
+        descriptor timestamp as t3 for Pdelay_Resp_Follow_Up.
+
+config AR_PTP_PRIORITY1
+    int "PTP priority1"
+    range 0 255
+    default 128
+    depends on AR_PTP_LAB_TX
+
+config AR_PTP_PRIORITY2
+    int "PTP priority2"
+    range 0 255
+    default 128
+    depends on AR_PTP_LAB_TX
+
+config AR_PTP_CLOCK_CLASS
+    int "PTP clockClass"
+    range 0 255
+    default 248
+    depends on AR_PTP_LAB_TX
+    help
+        Default 248 deliberately describes a conservative lab clock rather than
+        falsely claiming a GPS-disciplined or traceable grandmaster.
+
+config AR_PTP_CLOCK_ACCURACY
+    int "PTP clockAccuracy octet"
+    range 0 255
+    default 254
+    depends on AR_PTP_LAB_TX
+    help
+        254 (0xFE) is Unknown and is the conservative default.
+
+config AR_PTP_OFFSET_SCALED_LOG_VARIANCE
+    int "PTP offsetScaledLogVariance"
+    range 0 65535
+    default 65535
+    depends on AR_PTP_LAB_TX
+
+config AR_PTP_TIME_SOURCE
+    int "PTP timeSource octet"
+    range 0 255
+    default 160
+    depends on AR_PTP_LAB_TX
+    help
+        160 (0xA0) is Internal Oscillator. Do not select GPS unless a future
+        disciplined external time source actually provides that evidence.
+
+config AR_PTP_CURRENT_UTC_OFFSET
+    int "PTP currentUtcOffset"
+    range -32768 32767
+    default 37
+    depends on AR_PTP_LAB_TX
 
 config AR_SMV_CURRENT_RMS_MA
     int "Balanced phase current RMS (mA)"
