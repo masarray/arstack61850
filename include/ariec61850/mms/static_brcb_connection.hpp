@@ -63,9 +63,14 @@ public:
 
     // Second phase of report delivery. Call only after every byte of the staged
     // response was accepted by the transport. The staged EntryID acts as the
-    // bounded delivery token; stale/replayed tokens are rejected by the runtime.
-    [[nodiscard]] static MmsStaticBrcbStatus commit_sent(
+    // bounded delivery token. Association/Owner authorization is checked again
+    // at commit time so a token staged by an earlier association cannot advance
+    // the cursor after ownership changes.
+    [[nodiscard]] static bool commit_sent(
+        const MmsStaticConnectionRuntime& connection,
+        MmsStaticBrcbControl& control,
         MmsStaticBrcbRuntime& reports,
+        std::uint64_t now_ms,
         const MmsStaticBrcbConnectionResult& staged) noexcept;
 };
 
