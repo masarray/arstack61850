@@ -142,6 +142,7 @@ MmsStaticServerSessionResult MmsStaticServerSession::poll_once() noexcept {
         case MmsStaticConnectionStatus::protocol_violation:
         case MmsStaticConnectionStatus::response_buffer_too_small:
         case MmsStaticConnectionStatus::workspace_too_small:
+        case MmsStaticConnectionStatus::peer_limit_exceeded:
         case MmsStaticConnectionStatus::backend_failure:
             return terminate(
                 MmsStaticServerSessionStatus::protocol_error,
