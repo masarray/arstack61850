@@ -20,6 +20,7 @@ enum class MmsStaticBrcbConnectionStatus : std::uint8_t {
     access_denied,
     response_buffer_too_small,
     workspace_too_small,
+    peer_limit_exceeded,
     frame_encode_failed,
     stale_entry,
 };
@@ -50,9 +51,9 @@ public:
     // A successful poll only stages a complete TPKT image. It deliberately does
     // NOT advance the BRCB delivery cursor. The transport adapter must call
     // commit_sent() only after the complete staged frame has been accepted by
-    // the transport. Capacity errors, denied access, disabled reporting,
-    // disconnected sessions and send failures therefore preserve the same
-    // EntryID for retry/reconnect.
+    // the transport. Capacity errors, peer-limit rejection, denied access,
+    // disabled reporting, disconnected sessions and send failures therefore
+    // preserve the same EntryID for retry/reconnect.
     [[nodiscard]] static MmsStaticBrcbConnectionResult poll(
         const MmsStaticConnectionRuntime& connection,
         MmsStaticBrcbControl& control,
