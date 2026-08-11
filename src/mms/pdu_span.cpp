@@ -28,6 +28,13 @@ constexpr std::array<std::uint8_t, 40U> kDefaultInitiateResponse{
     0x82U, 0x0CU, 0x03U, 0xEEU, 0x1CU, 0x00U, 0x00U, 0x04U,
     0x08U, 0x00U, 0x00U, 0x79U, 0xEFU, 0x18U};
 
+constexpr std::array<std::uint8_t, 40U> kIdentifyFields{
+    0x80U, 0x0AU,
+    'A','R','I','E','C','6','1','8','5','0',
+    0x81U, 0x15U,
+    'V','i','r','t','u','a','l',' ','I','E','D',' ','S','i','m','u','l','a','t','o','r',
+    0x82U, 0x03U, '1','.','0'};
+
 [[nodiscard]] bool read_u32(
     const asn1::BerTlvView& tlv,
     std::uint32_t& value) noexcept {
@@ -330,6 +337,57 @@ constexpr std::array<std::uint8_t, 40U> kDefaultInitiateResponse{
     return {wire::EncodeStatus::ok, *required, *required};
 }
 
+[[nodiscard]] wire::EncodeResult encode_confirmed_error(
+    const std::uint32_t invoke_id,
+    const std::span<std::uint8_t> destination) noexcept {
+    if (invoke_id > MmsPduSpanCodec::maximum_invoke_id) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+
+    // Confirmed-ErrorPDU [2] { invokeID [0], serviceError [2]
+    //   { errorClass [0] { service [12] = 0 } } }.
+    const auto invoke_value = positive_integer_size(invoke_id);
+    const auto invoke_tlv = asn1::BerSpanWriter::tlv_size(0, invoke_value);
+    const auto class_choice_tlv = asn1::BerSpanWriter::tlv_size(12, 1U);
+    if (!invoke_tlv || !class_choice_tlv) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    const auto error_class_tlv = asn1::BerSpanWriter::tlv_size(0, *class_choice_tlv);
+    if (!error_class_tlv) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    const auto service_error_tlv = asn1::BerSpanWriter::tlv_size(2, *error_class_tlv);
+    if (!service_error_tlv ||
+        *invoke_tlv > std::numeric_limits<std::size_t>::max() - *service_error_tlv) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    const auto outer_content = *invoke_tlv + *service_error_tlv;
+    const auto required = asn1::BerSpanWriter::tlv_size(2, outer_content);
+    if (!required || *required > MmsPduSpanCodec::maximum_pdu_bytes) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    if (destination.size() < *required) {
+        return {wire::EncodeStatus::buffer_too_small, 0U, *required};
+    }
+
+    asn1::BerSpanWriter writer{destination.first(*required)};
+    if (!writer.write_tlv_header(
+            asn1::BerClass::context_specific, true, 2, outer_content) ||
+        !writer.write_tlv_header(
+            asn1::BerClass::context_specific, false, 0, invoke_value) ||
+        !write_positive_integer(writer, invoke_id) ||
+        !writer.write_tlv_header(
+            asn1::BerClass::context_specific, true, 2, *error_class_tlv) ||
+        !writer.write_tlv_header(
+            asn1::BerClass::context_specific, true, 0, *class_choice_tlv) ||
+        !writer.write_tlv_header(
+            asn1::BerClass::context_specific, false, 12, 1U) ||
+        !writer.write_byte(0x00U) || writer.size() != *required) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, *required};
+    }
+    return {wire::EncodeStatus::ok, *required, *required};
+}
+
 } // namespace
 
 MmsWireConfirmedService MmsConfirmedPduView::service() const noexcept {
@@ -404,6 +462,37 @@ wire::EncodeResult MmsPduSpanCodec::encode_confirmed_response_into(
     const std::span<std::uint8_t> destination) noexcept {
     return encode_confirmed(
         1, invoke_id, service_tag, service_constructed, service_value, destination);
+}
+
+wire::EncodeResult MmsPduSpanCodec::encode_identify_response_into(
+    const std::uint32_t invoke_id,
+    const std::span<std::uint8_t> destination) noexcept {
+    return encode_confirmed(1, invoke_id, 2, true, kIdentifyFields, destination);
+}
+
+wire::EncodeResult MmsPduSpanCodec::encode_confirmed_error_into(
+    const std::uint32_t invoke_id,
+    const std::span<std::uint8_t> destination) noexcept {
+    return encode_confirmed_error(invoke_id, destination);
+}
+
+bool MmsPduSpanCodec::is_conclude_request(
+    const std::span<const std::uint8_t> bytes) noexcept {
+    asn1::BerTlvView pdu;
+    return asn1::BerSpanReader::try_read_exact(bytes, pdu) &&
+        pdu.tag_class == asn1::BerClass::context_specific &&
+        pdu.tag_number == 11 && !pdu.constructed && pdu.value.empty();
+}
+
+wire::EncodeResult MmsPduSpanCodec::encode_conclude_response_into(
+    const std::span<std::uint8_t> destination) noexcept {
+    constexpr std::size_t required = 2U;
+    if (destination.size() < required) {
+        return {wire::EncodeStatus::buffer_too_small, 0U, required};
+    }
+    destination[0] = 0x8CU;
+    destination[1] = 0x00U;
+    return {wire::EncodeStatus::ok, required, required};
 }
 
 } // namespace ar::iec61850::mms
