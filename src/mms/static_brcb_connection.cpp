@@ -42,19 +42,38 @@ namespace {
     return result;
 }
 
+[[nodiscard]] bool same_owner(
+    const std::span<const std::uint8_t> left,
+    const std::span<const std::uint8_t> right) noexcept {
+    return left.size() == right.size() && !left.empty() &&
+        std::equal(left.begin(), left.end(), right.begin());
+}
+
 } // namespace
 
 MmsStaticBrcbConnectionResult MmsStaticBrcbConnection::poll(
     const MmsStaticConnectionRuntime& connection,
+    MmsStaticBrcbControl& control,
     MmsStaticBrcbRuntime& reports,
+    const std::uint64_t now_ms,
     const std::span<std::uint8_t> response,
     const std::span<std::uint8_t> workspace) noexcept {
     if (connection.state() != MmsStaticConnectionState::established ||
         connection.mms_presentation_context_id() == 0U) {
         return make_result(MmsStaticBrcbConnectionStatus::not_established);
     }
-    if (!reports.enabled()) {
+
+    const auto control_state = control.state(now_ms);
+    if (!control_state.report_enabled) {
         return make_result(MmsStaticBrcbConnectionStatus::reporting_disabled);
+    }
+
+    const auto access = connection.access_context();
+    if (!control.valid() || !control_state.reserved || !control_state.owner_connected ||
+        control_state.association_id == 0U ||
+        access.association_id != control_state.association_id ||
+        !same_owner(access.owner, control_state.owner)) {
+        return make_result(MmsStaticBrcbConnectionStatus::access_denied);
     }
 
     MmsStaticBrcbEntryView entry;
@@ -115,17 +134,38 @@ MmsStaticBrcbConnectionResult MmsStaticBrcbConnection::poll(
     }
 
     auto result = make_result(MmsStaticBrcbConnectionStatus::response_ready, &entry);
-    const auto committed = reports.commit_delivery(entry.entry_id);
-    if (committed != MmsStaticBrcbStatus::ok) {
-        result.status = MmsStaticBrcbConnectionStatus::stale_entry;
-        return result;
-    }
-
     std::copy_n(workspace.begin(), tpkt.bytes_written, response.begin());
     result.bytes_written = tpkt.bytes_written;
     result.required_response_bytes = final_required;
     result.required_workspace_bytes = final_required;
     return result;
+}
+
+bool MmsStaticBrcbConnection::commit_sent(
+    const MmsStaticConnectionRuntime& connection,
+    MmsStaticBrcbControl& control,
+    MmsStaticBrcbRuntime& reports,
+    const std::uint64_t now_ms,
+    const MmsStaticBrcbConnectionResult& staged) noexcept {
+    if (!staged.response_ready() ||
+        connection.state() != MmsStaticConnectionState::established ||
+        connection.mms_presentation_context_id() == 0U || !control.valid()) {
+        return false;
+    }
+
+    const auto control_state = control.state(now_ms);
+    if (!control_state.report_enabled || !control_state.reserved ||
+        !control_state.owner_connected || control_state.association_id == 0U) {
+        return false;
+    }
+
+    const auto access = connection.access_context();
+    if (access.association_id != control_state.association_id ||
+        !same_owner(access.owner, control_state.owner)) {
+        return false;
+    }
+
+    return reports.commit_delivery(staged.entry_id) == MmsStaticBrcbStatus::ok;
 }
 
 } // namespace ar::iec61850::mms
