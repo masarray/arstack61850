@@ -39,24 +39,42 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure
-        run: >-
-          cmake -S apps/arstack_studio -B build-arstack-studio -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DARIEC61850_WARNINGS_AS_ERRORS=ON
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake -S apps/arstack_studio -B build-arstack-studio -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DARIEC61850_WARNINGS_AS_ERRORS=ON 2>&1 | tee /tmp/arstack-studio-configure.log
 
       - name: Build
-        run: cmake --build build-arstack-studio --target arstack_studio --parallel 2
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build build-arstack-studio --target arstack_studio --parallel 2 \
+            2>&1 | tee /tmp/arstack-studio-build.log
 
       - name: Headless QML launch smoke
         shell: bash
         run: |
           set +e
           timeout 6s env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
-            ./build-arstack-studio/arstack_studio > /tmp/arstack-studio.log 2>&1
+            ./build-arstack-studio/arstack_studio > /tmp/arstack-studio-launch.log 2>&1
           status=$?
           set -e
-          cat /tmp/arstack-studio.log
+          cat /tmp/arstack-studio-launch.log
           if [ "$status" -ne 124 ]; then
             echo "ARStack Studio exited before smoke timeout (status=$status)."
             exit "$status"
           fi
+
+      - name: Retain Qt smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arstack-studio-qt-logs
+          path: |
+            /tmp/arstack-studio-configure.log
+            /tmp/arstack-studio-build.log
+            /tmp/arstack-studio-launch.log
+          if-no-files-found: ignore
+          retention-days: 7
