@@ -23,10 +23,11 @@ endfunction()
 
 # Current-lineage R1/R2 overlay. These files are intentionally compiled once in
 # one library while the parent #51 build graph remains the source of truth for
-# ACSE/MMS transport, negotiated limits, RejectPDU behavior and BRCB runtime.
-# Once this profile is green on GCC/Clang/MSVC the same five source entries can
-# be promoted into the root ARIEC61850::mms_server_core without source drift.
+# strict ACSE/MMS transport, negotiated limits, RejectPDU behavior and BRCB.
+# The compatibility source only supplies the explicitly declared server-side
+# association fallback; it does not replace the strict current implementation.
 add_library(ariec61850_mms_r12_overlay STATIC
+    "${ARSTACK_ROOT}/src/acse/association_compat_span.cpp"
     "${ARSTACK_ROOT}/src/mms/static_direct_control.cpp"
     "${ARSTACK_ROOT}/src/mms/static_information_report.cpp"
     "${ARSTACK_ROOT}/src/mms/static_report_connection.cpp"
