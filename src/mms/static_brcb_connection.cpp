@@ -141,13 +141,31 @@ MmsStaticBrcbConnectionResult MmsStaticBrcbConnection::poll(
     return result;
 }
 
-MmsStaticBrcbStatus MmsStaticBrcbConnection::commit_sent(
+bool MmsStaticBrcbConnection::commit_sent(
+    const MmsStaticConnectionRuntime& connection,
+    MmsStaticBrcbControl& control,
     MmsStaticBrcbRuntime& reports,
+    const std::uint64_t now_ms,
     const MmsStaticBrcbConnectionResult& staged) noexcept {
-    if (!staged.response_ready()) {
-        return MmsStaticBrcbStatus::stale_plan;
+    if (!staged.response_ready() ||
+        connection.state() != MmsStaticConnectionState::established ||
+        connection.mms_presentation_context_id() == 0U || !control.valid()) {
+        return false;
     }
-    return reports.commit_delivery(staged.entry_id);
+
+    const auto control_state = control.state(now_ms);
+    if (!control_state.report_enabled || !control_state.reserved ||
+        !control_state.owner_connected || control_state.association_id == 0U) {
+        return false;
+    }
+
+    const auto access = connection.access_context();
+    if (access.association_id != control_state.association_id ||
+        !same_owner(access.owner, control_state.owner)) {
+        return false;
+    }
+
+    return reports.commit_delivery(staged.entry_id) == MmsStaticBrcbStatus::ok;
 }
 
 } // namespace ar::iec61850::mms
