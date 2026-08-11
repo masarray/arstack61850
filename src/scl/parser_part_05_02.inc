@@ -11,6 +11,17 @@
                     stream.no_asdu = std::max<std::uint16_t>(
                         1U,
                         ushort_attribute(*control, "nofASDU"));
+                    if (const auto* options = first_child(*control, "SmvOpts"); options != nullptr) {
+                        stream.smv_options.element_present = true;
+                        stream.smv_options.refresh_time = bool_attribute(*options, "refreshTime");
+                        stream.smv_options.sample_synchronized =
+                            bool_attribute(*options, "sampleSynchronized");
+                        stream.smv_options.sample_rate = bool_attribute(*options, "sampleRate");
+                        stream.smv_options.data_set = bool_attribute(*options, "dataSet");
+                        stream.smv_options.security = bool_attribute(*options, "security");
+                        stream.smv_options.synch_source_id =
+                            bool_attribute(*options, "synchSourceId");
+                    }
                     document.sampled_values_streams.push_back(std::move(stream));
                 }
             }

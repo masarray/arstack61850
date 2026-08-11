@@ -94,12 +94,28 @@ struct SclGooseStream final : SclProcessBusStream {
     friend bool operator==(const SclGooseStream&, const SclGooseStream&) = default;
 };
 
+struct SclSmvOptions final {
+    // Preserve both element presence and the normalized boolean attributes.
+    // This lets later profile compilation distinguish an omitted SmvOpts
+    // element from an explicitly present element whose options are all false.
+    bool element_present{};
+    bool refresh_time{};
+    bool sample_synchronized{};
+    bool sample_rate{};
+    bool data_set{};
+    bool security{};
+    bool synch_source_id{};
+
+    friend bool operator==(const SclSmvOptions&, const SclSmvOptions&) = default;
+};
+
 struct SclSampledValuesStream final : SclProcessBusStream {
     std::string sv_id;
     std::string smv_id;
     std::uint16_t sample_rate{};
     std::string sample_mode;
     std::uint16_t no_asdu{1U};
+    SclSmvOptions smv_options;
 
     friend bool operator==(const SclSampledValuesStream&, const SclSampledValuesStream&) = default;
 };
