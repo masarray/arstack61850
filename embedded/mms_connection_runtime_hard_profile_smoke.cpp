@@ -82,6 +82,9 @@ constexpr std::array<std::uint8_t, 9U> kWriteResponse{
     0xA1U, 0x07U, 0x02U, 0x01U, 0x0EU,
     0xA5U, 0x02U, 0x81U, 0x00U};
 
+constexpr std::array<std::uint8_t, 2U> kConcludeRequest{0x8BU, 0x00U};
+constexpr std::array<std::uint8_t, 2U> kConcludeResponse{0x8CU, 0x00U};
+
 template <std::size_t N>
 [[nodiscard]] bool matches(
     const std::span<const std::uint8_t> actual,
@@ -347,12 +350,35 @@ int main() {
         std::span<const std::uint8_t>{request}.first(identify_tpkt.bytes_written),
         response,
         workspace);
-    if (result.status != mms::MmsStaticConnectionStatus::application_rejected ||
-        result.application_status != mms::MmsStaticDispatchStatus::unsupported_service ||
+    mms::MmsConfirmedPduView identify_response;
+    if (!result.response_ready() ||
         result.application_service != mms::MmsWireConfirmedService::identify ||
         result.invoke_id != 21U || result.consumed_bytes != identify_tpkt.bytes_written ||
-        runtime.state() != mms::MmsStaticConnectionState::established) {
+        runtime.state() != mms::MmsStaticConnectionState::established ||
+        !extract_mms(
+            std::span<const std::uint8_t>{response}.first(result.bytes_written), pdv) ||
+        !mms::MmsPduSpanCodec::try_decode_confirmed_response_view(
+            pdv.single_asn1_type, identify_response) ||
+        identify_response.invoke_id != 21U ||
+        identify_response.service() != mms::MmsWireConfirmedService::identify) {
         return 11;
+    }
+
+    const auto conclude_tpkt = build_mms_tpkt(
+        kConcludeRequest, request, presentation, scratch);
+    if (!conclude_tpkt.success()) {
+        return 18;
+    }
+    result = runtime.process_tcp_window(
+        std::span<const std::uint8_t>{request}.first(conclude_tpkt.bytes_written),
+        response,
+        workspace);
+    if (!result.response_ready() ||
+        runtime.state() != mms::MmsStaticConnectionState::established ||
+        !extract_mms(
+            std::span<const std::uint8_t>{response}.first(result.bytes_written), pdv) ||
+        !matches(pdv.single_asn1_type, kConcludeResponse)) {
+        return 19;
     }
 
     const auto write_tpkt = build_mms_tpkt(
