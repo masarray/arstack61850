@@ -21,6 +21,7 @@
 #include "esp_eth_mac_esp.h"
 #endif
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -52,6 +53,8 @@ using ar::iec61850::time_sync::try_parse_ptp_clock_identity;
 constexpr char kTag[] = "ar_ptp_lab";
 constexpr TickType_t kStartupDelay = pdMS_TO_TICKS(500);
 constexpr UBaseType_t kPdelayQueueDepth = 8U;
+constexpr std::array<std::uint8_t, 6> kValidationMac{
+    0x02U, 0x00U, 0x00U, 0x00U, 0x00U, 0x01U};
 
 struct PdelayRequestEvent final {
     PtpPortIdentity requesting_port_identity{};
@@ -71,73 +74,167 @@ struct PtpLabContext final {
 PtpLabContext g_ptp_context{};
 std::atomic_bool g_ptp_started{false};
 std::atomic_bool g_stop_requested{false};
+std::atomic<std::uint64_t> g_announce_sent{0U};
+std::atomic<std::uint64_t> g_sync_sent{0U};
+std::atomic<std::uint64_t> g_follow_up_sent{0U};
+std::atomic<std::uint64_t> g_pdelay_frames_sent{0U};
+std::atomic<std::uint64_t> g_tx_failure_count{0U};
 
-[[nodiscard]] std::optional<std::uint16_t> ptp_vlan_id() noexcept {
-#if defined(CONFIG_AR_PTP_VLAN) && CONFIG_AR_PTP_VLAN
-    return static_cast<std::uint16_t>(CONFIG_AR_PTP_VLAN_ID);
-#else
-    return std::nullopt;
-#endif
+portMUX_TYPE g_control_mux = portMUX_INITIALIZER_UNLOCKED;
+ar_ptp_lab_config_t g_runtime_config_override{};
+bool g_runtime_config_override_valid = false;
+
+[[nodiscard]] bool all_zero_identity(const std::uint8_t (&identity)[8]) noexcept {
+    return std::all_of(
+        std::begin(identity),
+        std::end(identity),
+        [](const std::uint8_t value) { return value == 0U; });
 }
 
-[[nodiscard]] std::uint8_t ptp_vlan_priority() noexcept {
+void fill_kconfig_defaults(ar_ptp_lab_config_t& config) noexcept {
+    config = {};
+    config.transport_specific = static_cast<std::uint8_t>(CONFIG_AR_PTP_TRANSPORT_SPECIFIC);
+    config.domain_number = static_cast<std::uint8_t>(CONFIG_AR_PTP_DOMAIN);
 #if defined(CONFIG_AR_PTP_VLAN) && CONFIG_AR_PTP_VLAN
-    return static_cast<std::uint8_t>(CONFIG_AR_PTP_VLAN_PRIORITY);
+    config.vlan_enabled = true;
 #else
-    return 0U;
+    config.vlan_enabled = false;
 #endif
-}
-
-[[nodiscard]] std::optional<PtpPublisherOptions> make_runtime_options(
-    const std::array<std::uint8_t, 6>& source_mac) {
-    PtpPublisherOptions options;
-    options.transport_specific = static_cast<std::uint8_t>(CONFIG_AR_PTP_TRANSPORT_SPECIFIC);
-    options.domain_number = static_cast<std::uint8_t>(CONFIG_AR_PTP_DOMAIN);
-    options.source_mac = source_mac;
-    options.vlan_id = ptp_vlan_id();
-    options.vlan_priority = ptp_vlan_priority();
-    options.clock_identity = ptp_clock_identity_from_mac(source_mac);
-    options.port_number = static_cast<std::uint16_t>(CONFIG_AR_PTP_PORT_NUMBER);
-    options.announce_interval = std::chrono::milliseconds{CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS};
-    options.sync_interval = std::chrono::milliseconds{CONFIG_AR_PTP_SYNC_INTERVAL_MS};
-    options.follow_up_delay = std::chrono::milliseconds::zero();
-    // ESP32-P4 intentionally stays two-step so the exact EMAC egress timestamp
-    // can be placed in Follow_Up instead of approximating a one-step timestamp.
-    options.two_step_clock = true;
+    config.vlan_id = static_cast<std::uint16_t>(CONFIG_AR_PTP_VLAN_ID);
+    config.vlan_priority = static_cast<std::uint8_t>(CONFIG_AR_PTP_VLAN_PRIORITY);
+    config.port_number = static_cast<std::uint16_t>(CONFIG_AR_PTP_PORT_NUMBER);
+    config.announce_interval_ms = static_cast<std::uint32_t>(CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS);
+    config.sync_interval_ms = static_cast<std::uint32_t>(CONFIG_AR_PTP_SYNC_INTERVAL_MS);
 #if defined(CONFIG_AR_PTP_RESPOND_PDELAY) && CONFIG_AR_PTP_RESPOND_PDELAY
-    options.respond_to_peer_delay = true;
+    config.respond_to_peer_delay = true;
 #else
-    options.respond_to_peer_delay = false;
+    config.respond_to_peer_delay = false;
 #endif
-    options.priority1 = static_cast<std::uint8_t>(CONFIG_AR_PTP_PRIORITY1);
-    options.priority2 = static_cast<std::uint8_t>(CONFIG_AR_PTP_PRIORITY2);
-    options.clock_class = static_cast<std::uint8_t>(CONFIG_AR_PTP_CLOCK_CLASS);
-    options.clock_accuracy = static_cast<PtpClockAccuracy>(
-        static_cast<std::uint8_t>(CONFIG_AR_PTP_CLOCK_ACCURACY));
-    options.offset_scaled_log_variance =
+    config.priority1 = static_cast<std::uint8_t>(CONFIG_AR_PTP_PRIORITY1);
+    config.priority2 = static_cast<std::uint8_t>(CONFIG_AR_PTP_PRIORITY2);
+    config.clock_class = static_cast<std::uint8_t>(CONFIG_AR_PTP_CLOCK_CLASS);
+    config.clock_accuracy = static_cast<std::uint8_t>(CONFIG_AR_PTP_CLOCK_ACCURACY);
+    config.offset_scaled_log_variance =
         static_cast<std::uint16_t>(CONFIG_AR_PTP_OFFSET_SCALED_LOG_VARIANCE);
-    options.time_source = static_cast<PtpTimeSource>(
-        static_cast<std::uint8_t>(CONFIG_AR_PTP_TIME_SOURCE));
-    options.current_utc_offset = static_cast<std::int16_t>(CONFIG_AR_PTP_CURRENT_UTC_OFFSET);
+    config.time_source = static_cast<std::uint8_t>(CONFIG_AR_PTP_TIME_SOURCE);
+    config.current_utc_offset = static_cast<std::int16_t>(CONFIG_AR_PTP_CURRENT_UTC_OFFSET);
 
     const std::string configured_identity{CONFIG_AR_PTP_CLOCK_IDENTITY};
     if (!configured_identity.empty()) {
         ar::iec61850::time_sync::PtpClockIdentity parsed{};
-        if (!try_parse_ptp_clock_identity(configured_identity, parsed)) {
-            ESP_LOGE(kTag,
-                     "Invalid CONFIG_AR_PTP_CLOCK_IDENTITY '%s'; expected 8 hex bytes",
-                     configured_identity.c_str());
-            return std::nullopt;
+        if (try_parse_ptp_clock_identity(configured_identity, parsed)) {
+            config.clock_identity_override = true;
+            std::copy(parsed.begin(), parsed.end(), std::begin(config.clock_identity));
         }
-        options.clock_identity = parsed;
     }
+}
 
-    std::string validation_error;
-    if (!PtpPublisherRuntime::validate_options(options, validation_error)) {
-        ESP_LOGE(kTag, "Invalid PTP runtime profile: %s", validation_error.c_str());
+[[nodiscard]] ar_ptp_lab_config_t selected_config() noexcept {
+    ar_ptp_lab_config_t result{};
+    portENTER_CRITICAL(&g_control_mux);
+    if (g_runtime_config_override_valid) {
+        result = g_runtime_config_override;
+    } else {
+        fill_kconfig_defaults(result);
+    }
+    portEXIT_CRITICAL(&g_control_mux);
+    return result;
+}
+
+[[nodiscard]] std::optional<PtpPublisherOptions> options_from_config(
+    const ar_ptp_lab_config_t& config,
+    const std::array<std::uint8_t, 6>& source_mac,
+    std::string* validation_error = nullptr) {
+    PtpPublisherOptions options;
+    options.transport_specific = config.transport_specific;
+    options.domain_number = config.domain_number;
+    options.source_mac = source_mac;
+    if (config.vlan_enabled) {
+        options.vlan_id = config.vlan_id;
+        options.vlan_priority = config.vlan_priority;
+    } else {
+        options.vlan_id = std::nullopt;
+        options.vlan_priority = 0U;
+    }
+    options.clock_identity = ptp_clock_identity_from_mac(source_mac);
+    if (config.clock_identity_override) {
+        std::copy(
+            std::begin(config.clock_identity),
+            std::end(config.clock_identity),
+            options.clock_identity.begin());
+    }
+    options.port_number = config.port_number;
+    options.announce_interval = std::chrono::milliseconds{config.announce_interval_ms};
+    options.sync_interval = std::chrono::milliseconds{config.sync_interval_ms};
+    options.follow_up_delay = std::chrono::milliseconds::zero();
+    // ESP32-P4 intentionally stays two-step so the exact EMAC egress timestamp
+    // can be placed in Follow_Up instead of approximating a one-step timestamp.
+    options.two_step_clock = true;
+    options.respond_to_peer_delay = config.respond_to_peer_delay;
+    options.priority1 = config.priority1;
+    options.priority2 = config.priority2;
+    options.clock_class = config.clock_class;
+    options.clock_accuracy = static_cast<PtpClockAccuracy>(config.clock_accuracy);
+    options.offset_scaled_log_variance = config.offset_scaled_log_variance;
+    options.time_source = static_cast<PtpTimeSource>(config.time_source);
+    options.current_utc_offset = config.current_utc_offset;
+
+    std::string error;
+    if (!PtpPublisherRuntime::validate_options(options, error)) {
+        if (validation_error != nullptr) *validation_error = std::move(error);
         return std::nullopt;
     }
+    if (validation_error != nullptr) validation_error->clear();
     return options;
+}
+
+[[nodiscard]] bool validate_runtime_config(
+    const ar_ptp_lab_config_t& config,
+    std::string& error) {
+    if (config.clock_identity_override && all_zero_identity(config.clock_identity)) {
+        error = "clockIdentity override must be non-zero";
+        return false;
+    }
+    return options_from_config(config, kValidationMac, &error).has_value();
+}
+
+[[nodiscard]] std::optional<PtpPublisherOptions> make_runtime_options(
+    const std::array<std::uint8_t, 6>& source_mac) {
+    const auto config = selected_config();
+    std::string validation_error;
+    auto options = options_from_config(config, source_mac, &validation_error);
+    if (!options.has_value()) {
+        ESP_LOGE(kTag, "Invalid PTP runtime profile: %s", validation_error.c_str());
+    }
+    return options;
+}
+
+void reset_live_status() noexcept {
+    g_announce_sent.store(0U, std::memory_order_release);
+    g_sync_sent.store(0U, std::memory_order_release);
+    g_follow_up_sent.store(0U, std::memory_order_release);
+    g_pdelay_frames_sent.store(0U, std::memory_order_release);
+    g_tx_failure_count.store(0U, std::memory_order_release);
+}
+
+void record_live_sent(const PtpMessageType message_type) noexcept {
+    switch (message_type) {
+    case PtpMessageType::announce:
+        g_announce_sent.fetch_add(1U, std::memory_order_relaxed);
+        break;
+    case PtpMessageType::sync:
+        g_sync_sent.fetch_add(1U, std::memory_order_relaxed);
+        break;
+    case PtpMessageType::follow_up:
+        g_follow_up_sent.fetch_add(1U, std::memory_order_relaxed);
+        break;
+    case PtpMessageType::pdelay_resp:
+    case PtpMessageType::pdelay_resp_follow_up:
+        g_pdelay_frames_sent.fetch_add(1U, std::memory_order_relaxed);
+        break;
+    default:
+        break;
+    }
 }
 
 #if defined(SOC_EMAC_IEEE1588V2_SUPPORTED) && SOC_EMAC_IEEE1588V2_SUPPORTED && ESP_IDF_VERSION_MAJOR < 6
@@ -226,8 +323,6 @@ void seed_hardware_clock(const esp_eth_handle_t eth_handle) noexcept {
     if (!context.runtime.has_value()) return false;
     auto& runtime = *context.runtime;
 
-    // Two-step Sync intentionally carries zero originTimestamp. The exact MAC
-    // egress timestamp returned by the ESP32-P4 descriptor becomes Follow_Up.
     auto sync = runtime.prepare_sync(PtpTimestamp{});
     if (!sync.has_value()) return false;
 
@@ -239,6 +334,7 @@ void seed_hardware_clock(const esp_eth_handle_t eth_handle) noexcept {
         return false;
     }
     runtime.record_sent(PtpMessageType::sync);
+    record_live_sent(PtpMessageType::sync);
 
     auto follow_up = runtime.prepare_follow_up(sync->sequence_id, tx_timestamp);
     if (!follow_up.has_value() ||
@@ -246,6 +342,7 @@ void seed_hardware_clock(const esp_eth_handle_t eth_handle) noexcept {
         return false;
     }
     runtime.record_sent(PtpMessageType::follow_up);
+    record_live_sent(PtpMessageType::follow_up);
     return true;
 }
 
@@ -258,6 +355,7 @@ void seed_hardware_clock(const esp_eth_handle_t eth_handle) noexcept {
         return false;
     }
     runtime.record_sent(PtpMessageType::announce);
+    record_live_sent(PtpMessageType::announce);
     return true;
 }
 
@@ -267,7 +365,6 @@ void seed_hardware_clock(const esp_eth_handle_t eth_handle) noexcept {
     if (!context.runtime.has_value()) return false;
     auto& runtime = *context.runtime;
 
-    // t2 comes from the EMAC RX descriptor captured with Pdelay_Req.
     auto response = runtime.prepare_pdelay_response(
         request.requesting_port_identity,
         request.sequence_id,
@@ -283,8 +380,8 @@ void seed_hardware_clock(const esp_eth_handle_t eth_handle) noexcept {
         return false;
     }
     runtime.record_sent(PtpMessageType::pdelay_resp);
+    record_live_sent(PtpMessageType::pdelay_resp);
 
-    // t3 is the exact Pdelay_Resp EMAC transmit timestamp.
     auto follow_up = runtime.prepare_pdelay_response_follow_up(
         request.requesting_port_identity,
         request.sequence_id,
@@ -295,8 +392,9 @@ void seed_hardware_clock(const esp_eth_handle_t eth_handle) noexcept {
         return false;
     }
     runtime.record_sent(PtpMessageType::pdelay_resp_follow_up);
+    record_live_sent(PtpMessageType::pdelay_resp_follow_up);
 
-    if (runtime.status().peer_delay_responses_sent == 2U) {
+    if (g_pdelay_frames_sent.load(std::memory_order_relaxed) == 2U) {
         ESP_LOGI(kTag, "First hardware-timestamped Pdelay exchange completed");
     }
     return true;
@@ -342,7 +440,6 @@ esp_err_t ptp_input_info(
         }
     }
 
-    // Standalone raw-L2 injector owns this RX buffer while PTP adapter is active.
     std::free(buffer);
     return ESP_OK;
 }
@@ -464,6 +561,7 @@ void ptp_lab_task(void* argument) {
                 context.runtime->clear_error();
             } else {
                 context.runtime->record_error("Ethernet transmit or hardware timestamp failure");
+                g_tx_failure_count.fetch_add(1U, std::memory_order_relaxed);
                 ++consecutive_failures;
                 if (consecutive_failures == 1U || (consecutive_failures % 16U) == 0U) {
                     ESP_LOGW(kTag,
@@ -473,7 +571,6 @@ void ptp_lab_task(void* argument) {
             }
         }
 
-        // Pdelay RX or stop requests wake immediately; timeout only services due cadence.
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
     }
 
@@ -486,6 +583,7 @@ void ptp_lab_task(void* argument) {
 void ptp_lab_task(void*) {
     ESP_LOGE(kTag,
              "PTP lab broadcaster requires ESP32-P4 IEEE1588 support and the ESP-IDF 5.x EMAC timestamp adapter");
+    g_ptp_context.task_handle = nullptr;
     g_ptp_started.store(false, std::memory_order_release);
     vTaskDelete(nullptr);
 }
@@ -506,6 +604,7 @@ void start_ptp_lab(const esp_eth_handle_t eth_handle) {
         return;
     }
 
+    reset_live_status();
     g_stop_requested.store(false, std::memory_order_release);
     g_ptp_context.eth_handle = eth_handle;
     g_ptp_context.runtime.reset();
@@ -548,8 +647,38 @@ void stop_ptp_lab() noexcept {
     return g_ptp_started.load(std::memory_order_acquire);
 }
 
+[[nodiscard]] bool configure_ptp_lab(const ar_ptp_lab_config_t& config) {
+    if (g_ptp_started.load(std::memory_order_acquire)) return false;
+    std::string error;
+    if (!validate_runtime_config(config, error)) {
+        ESP_LOGE(kTag, "PTP runtime configuration rejected: %s", error.c_str());
+        return false;
+    }
+    portENTER_CRITICAL(&g_control_mux);
+    g_runtime_config_override = config;
+    g_runtime_config_override_valid = true;
+    portEXIT_CRITICAL(&g_control_mux);
+    return true;
+}
+
 } // namespace
 } // namespace ar::esp32p4::smv
+
+extern "C" void ar_ptp_lab_get_default_config(ar_ptp_lab_config_t* config) {
+    if (config == nullptr) return;
+    ar::esp32p4::smv::fill_kconfig_defaults(*config);
+}
+
+extern "C" bool ar_ptp_lab_configure(const ar_ptp_lab_config_t* config) {
+    if (config == nullptr) return false;
+    return ar::esp32p4::smv::configure_ptp_lab(*config);
+}
+
+extern "C" bool ar_ptp_lab_get_config(ar_ptp_lab_config_t* config) {
+    if (config == nullptr) return false;
+    *config = ar::esp32p4::smv::selected_config();
+    return true;
+}
 
 extern "C" void ar_ptp_lab_start(const esp_eth_handle_t eth_handle) {
     ar::esp32p4::smv::start_ptp_lab(eth_handle);
@@ -561,4 +690,17 @@ extern "C" void ar_ptp_lab_stop(void) {
 
 extern "C" bool ar_ptp_lab_is_running(void) {
     return ar::esp32p4::smv::ptp_lab_is_running();
+}
+
+extern "C" bool ar_ptp_lab_get_status(ar_ptp_lab_status_t* status) {
+    if (status == nullptr) return false;
+    status->is_running = ar::esp32p4::smv::g_ptp_started.load(std::memory_order_acquire);
+    status->announce_sent = ar::esp32p4::smv::g_announce_sent.load(std::memory_order_relaxed);
+    status->sync_sent = ar::esp32p4::smv::g_sync_sent.load(std::memory_order_relaxed);
+    status->follow_up_sent = ar::esp32p4::smv::g_follow_up_sent.load(std::memory_order_relaxed);
+    status->peer_delay_frames_sent =
+        ar::esp32p4::smv::g_pdelay_frames_sent.load(std::memory_order_relaxed);
+    status->tx_failure_count =
+        ar::esp32p4::smv::g_tx_failure_count.load(std::memory_order_relaxed);
+    return true;
 }
