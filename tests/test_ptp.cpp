@@ -57,6 +57,7 @@ void sync_matches_csharp_oracle_and_roundtrips() {
     CHECK(decoded.header.message_type == PtpMessageType::sync);
     CHECK(decoded.header.version == 2U);
     CHECK(decoded.header.message_length == 44U);
+    CHECK(decoded.header.transport_specific == 0U);
     CHECK(decoded.header.domain_number == 0U);
     CHECK(decoded.header.is_two_step());
     CHECK(decoded.header.sequence_id == 0x1234U);
@@ -149,9 +150,10 @@ void pdelay_response_preserves_request_identity_and_hardware_timestamp_fields() 
         decoded.body.begin() + 10));
 }
 
-void ethernet_vlan_and_qinq_are_parsed_for_analyzer_use() {
+void ethernet_vlan_qinq_and_transport_specific_are_parsed_for_analyzer_use() {
     using namespace ar::iec61850::time_sync;
     auto options = make_options();
+    options.transport_specific = 1U;
     const auto message = PtpCodec::build_sync(options);
     const std::array<std::uint8_t, 6> source{0x02U, 0x00U, 0x00U, 0x00U, 0x00U, 0x01U};
     const auto vlan_frame = PtpCodec::build_ethernet_frame(
@@ -160,6 +162,7 @@ void ethernet_vlan_and_qinq_are_parsed_for_analyzer_use() {
 
     PtpFrame decoded;
     CHECK(PtpCodec::try_parse_ethernet_frame(vlan_frame, decoded));
+    CHECK(decoded.header.transport_specific == 1U);
     CHECK(decoded.vlan_id == 100U);
     CHECK(!decoded.outer_vlan_id.has_value());
     CHECK(!decoded.peer_delay_multicast);
@@ -174,6 +177,7 @@ void ethernet_vlan_and_qinq_are_parsed_for_analyzer_use() {
     qinq.insert(qinq.end(), vlan_frame.begin() + 12, vlan_frame.end());
 
     CHECK(PtpCodec::try_parse_ethernet_frame(qinq, decoded));
+    CHECK(decoded.header.transport_specific == 1U);
     CHECK(decoded.outer_vlan_id == 10U);
     CHECK(decoded.vlan_id == 100U);
     CHECK(decoded.header.sequence_id == 0x1234U);
@@ -205,8 +209,13 @@ void passive_monitor_health_drives_conservative_smp_synch_policy() {
     CHECK(monitor.observe_ethernet_frame(follow_up, observed_at + std::chrono::milliseconds{20}));
 
     const auto snapshot = monitor.snapshot(observed_at + std::chrono::milliseconds{100});
+    CHECK(snapshot.sources.size() == 1U);
+    CHECK(snapshot.sources[0].transport_specific == 0U);
+    CHECK(snapshot.sources[0].transport_specific_change_count == 0U);
+
     PtpTimingHealthOptions health_options;
     health_options.expected_domain_number = 0U;
+    health_options.expected_transport_specific = 0U;
     const auto report = PtpTimingHealthValidator::evaluate(snapshot, health_options);
     CHECK(report.is_healthy());
     CHECK(report.selected_source.has_value());
@@ -220,6 +229,49 @@ void passive_monitor_health_drives_conservative_smp_synch_policy() {
     CHECK(!incomplete_report.is_healthy());
     CHECK(resolve_smp_synch(incomplete_report, true) == SmpSynchValue::local_synchronized);
     CHECK(resolve_smp_synch(incomplete_report, false) == SmpSynchValue::not_synchronized);
+}
+
+void transport_specific_change_is_visible_as_health_warning() {
+    using namespace ar::iec61850::time_sync;
+    const auto observed_at = std::chrono::system_clock::time_point{std::chrono::seconds{2000}};
+    const std::array<std::uint8_t, 6> source{0x02U, 0x00U, 0x00U, 0x00U, 0x00U, 0x01U};
+
+    auto options = make_options();
+    options.sequence_id = 1U;
+    options.two_step = false;
+    options.timestamp = {};
+    const auto announce = PtpCodec::build_ethernet_frame(
+        ptp_general_multicast_mac, source, PtpCodec::build_announce(options));
+    CHECK(!announce.empty());
+
+    options.two_step = true;
+    const auto sync = PtpCodec::build_ethernet_frame(
+        ptp_general_multicast_mac, source, PtpCodec::build_sync(options));
+    CHECK(!sync.empty());
+
+    options.transport_specific = 1U;
+    options.two_step = false;
+    const auto follow_up_changed = PtpCodec::build_ethernet_frame(
+        ptp_general_multicast_mac, source, PtpCodec::build_follow_up(options));
+    CHECK(!follow_up_changed.empty());
+
+    PtpPassiveMonitor monitor;
+    CHECK(monitor.observe_ethernet_frame(announce, observed_at));
+    CHECK(monitor.observe_ethernet_frame(sync, observed_at + std::chrono::milliseconds{10}));
+    CHECK(monitor.observe_ethernet_frame(
+        follow_up_changed,
+        observed_at + std::chrono::milliseconds{20}));
+
+    const auto snapshot = monitor.snapshot(observed_at + std::chrono::milliseconds{50});
+    CHECK(snapshot.sources.size() == 1U);
+    CHECK(snapshot.sources[0].transport_specific == 1U);
+    CHECK(snapshot.sources[0].transport_specific_change_count == 1U);
+
+    PtpTimingHealthOptions health_options;
+    health_options.expected_domain_number = 0U;
+    const auto report = PtpTimingHealthValidator::evaluate(snapshot, health_options);
+    CHECK(report.severity == PtpHealthSeverity::warning);
+    CHECK(resolve_smp_synch(report, true) == SmpSynchValue::local_synchronized);
 }
 
 void malformed_or_non_ptp_frames_are_rejected() {
@@ -244,8 +296,9 @@ int main() {
         {"PTP Sync C# oracle", sync_matches_csharp_oracle_and_roundtrips},
         {"PTP Announce C# oracle", announce_matches_csharp_oracle_and_roundtrips},
         {"PTP Pdelay response wire fields", pdelay_response_preserves_request_identity_and_hardware_timestamp_fields},
-        {"PTP VLAN/QinQ analyzer parser", ethernet_vlan_and_qinq_are_parsed_for_analyzer_use},
+        {"PTP VLAN/QinQ/transportSpecific analyzer parser", ethernet_vlan_qinq_and_transport_specific_are_parsed_for_analyzer_use},
         {"PTP monitor health and smpSynch", passive_monitor_health_drives_conservative_smp_synch_policy},
+        {"PTP transportSpecific stability", transport_specific_change_is_visible_as_health_warning},
         {"PTP malformed input", malformed_or_non_ptp_frames_are_rejected},
     };
 
