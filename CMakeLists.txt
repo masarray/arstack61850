@@ -188,7 +188,7 @@ if(ARIEC61850_BUILD_TOOLS)
     add_executable(ariec61850_static_ied_server tools/static_ied_server.cpp)
     target_link_libraries(
         ariec61850_static_ied_server
-        PRIVATE ARIEC61850::mms_server_core ARIEC61850::core)
+        PRIVATE ARIEC61850::mms_server_core)
     if(WIN32)
         target_link_libraries(ariec61850_static_ied_server PRIVATE ws2_32)
     endif()
@@ -404,7 +404,8 @@ if(ARIEC61850_BUILD_TESTS)
             mms_brcb_objects
             mms_brcb_lifecycle
             mms_brcb_persistence
-            mms_brcb_recovery_v2)
+            mms_brcb_recovery_v2
+            mms_brcb_checkpoint_fallback)
         set(brcb_target "ariec61850_${brcb_smoke}_server_core_tests")
         add_executable(
             ${brcb_target}
