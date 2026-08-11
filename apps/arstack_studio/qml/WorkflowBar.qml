@@ -15,32 +15,35 @@ SurfacePanel {
     property int activeTab: 0
 
     implicitHeight: 94
-    color: theme.raised
+    color: theme.surface2
     border.color: theme.line
 
     component RibbonTab: TabButton {
-        implicitWidth: 104
-        implicitHeight: 32
+        implicitWidth: text === "Engineering" ? 112 : 88
+        implicitHeight: 31
+        hoverEnabled: true
         font.family: ribbon.uiFont
         font.pixelSize: 10
         font.weight: checked ? Font.DemiBold : Font.Medium
         contentItem: Label {
             text: parent.text
-            color: parent.checked ? ribbon.theme.text : ribbon.theme.muted
+            color: parent.checked ? ribbon.theme.text : (parent.hovered ? ribbon.theme.textSoft : ribbon.theme.muted)
             font: parent.font
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
+            Behavior on color { ColorAnimation { duration: 90 } }
         }
         background: Rectangle {
-            color: parent.checked ? ribbon.theme.surface2 : "transparent"
+            color: parent.hovered || parent.checked ? "#121b25" : "transparent"
             radius: 6
+            Behavior on color { ColorAnimation { duration: 90 } }
             Rectangle {
                 visible: parent.parent.checked
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                anchors.leftMargin: 14
-                anchors.rightMargin: 14
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
                 height: 2
                 radius: 1
                 color: ribbon.theme.accent
@@ -51,13 +54,14 @@ SurfacePanel {
     component RibbonAction: CalmButton {
         theme: ribbon.theme
         uiFont: ribbon.uiFont
-        implicitHeight: 42
-        iconSize: 16
+        implicitHeight: 40
+        iconSize: 15
+        font.pixelSize: 10
     }
 
     component RibbonDivider: Rectangle {
         width: 1
-        height: 32
+        height: 28
         color: ribbon.theme.lineSoft
         Layout.alignment: Qt.AlignVCenter
     }
@@ -68,7 +72,7 @@ SurfacePanel {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 33
+            Layout.preferredHeight: 32
             Layout.leftMargin: 9
             Layout.rightMargin: 9
             spacing: 2
@@ -87,9 +91,9 @@ SurfacePanel {
             currentIndex: ribbon.activeTab
 
             RowLayout {
-                Layout.leftMargin: 11
-                Layout.rightMargin: 11
-                spacing: 7
+                Layout.leftMargin: 10
+                Layout.rightMargin: 10
+                spacing: 6
 
                 RibbonAction {
                     text: "Balanced"
@@ -112,7 +116,9 @@ SurfacePanel {
                     toolTipText: ribbon.controller.ctSaturationEnabled ? "Disable CT saturation stress" : "Enable CT saturation stress"
                     onClicked: ribbon.controller.setCtSaturation(!ribbon.controller.ctSaturationEnabled)
                 }
+
                 RibbonDivider {}
+
                 RibbonAction {
                     visible: !ribbon.compact
                     text: "Check"
@@ -126,13 +132,16 @@ SurfacePanel {
                     toolTipText: "Open Smart and Expert configuration"
                     onClicked: ribbon.controller.openConfiguration()
                 }
+
                 Item { Layout.fillWidth: true }
+
                 RibbonDivider {}
+
                 RibbonAction {
                     visible: !ribbon.compact
-                    tone: "accent"
-                    text: ribbon.device.profileDeploying ? "Deploying..." : "Deploy"
+                    text: ribbon.device.profileDeploying ? "Deploying…" : "Deploy"
                     iconSource: Qt.resolvedUrl("../assets/lucide/upload.svg")
+                    implicitWidth: 86
                     enabled: ribbon.controller.canDeploy
                     toolTipText: "Deploy the validated SV profile"
                     onClicked: ribbon.controller.deploySelectedProfile()
@@ -141,24 +150,26 @@ SurfacePanel {
                     tone: "danger"
                     text: "Stop"
                     iconSource: Qt.resolvedUrl("../assets/lucide/square.svg")
-                    implicitWidth: 78
+                    implicitWidth: 82
                     enabled: ribbon.device.deviceVerified && ribbon.device.running
+                    toolTipText: "Stop SMV output"
                     onClicked: ribbon.device.stop()
                 }
                 RibbonAction {
                     tone: "success"
                     text: "Start"
                     iconSource: Qt.resolvedUrl("../assets/lucide/play.svg")
-                    implicitWidth: 88
+                    implicitWidth: 92
                     enabled: ribbon.controller.canStart
+                    toolTipText: "Start validated SMV output"
                     onClicked: ribbon.device.start()
                 }
             }
 
             RowLayout {
-                Layout.leftMargin: 11
-                Layout.rightMargin: 11
-                spacing: 7
+                Layout.leftMargin: 10
+                Layout.rightMargin: 10
+                spacing: 6
 
                 RibbonAction {
                     text: "Phasor"
@@ -184,7 +195,9 @@ SurfacePanel {
                     tone: ribbon.controller.telemetryDockVisible ? "accent" : "neutral"
                     onClicked: ribbon.controller.telemetryDockVisible = !ribbon.controller.telemetryDockVisible
                 }
+
                 RibbonDivider {}
+
                 RibbonAction {
                     visible: !ribbon.compact
                     text: "Detach phasor"
@@ -199,9 +212,11 @@ SurfacePanel {
                     enabled: ribbon.controller.waveformDockVisible && !ribbon.controller.waveformDetached
                     onClicked: ribbon.controller.detachWaveform()
                 }
+
                 Item { Layout.fillWidth: true }
+
                 RibbonAction {
-                    text: ribbon.controller.telemetryExpanded ? "Collapse" : "Expand"
+                    text: ribbon.controller.telemetryExpanded ? "Collapse monitor" : "Expand monitor"
                     iconSource: ribbon.controller.telemetryExpanded
                         ? Qt.resolvedUrl("../assets/lucide/chevron-down.svg")
                         : Qt.resolvedUrl("../assets/lucide/chevron-up.svg")
@@ -210,9 +225,9 @@ SurfacePanel {
             }
 
             RowLayout {
-                Layout.leftMargin: 11
-                Layout.rightMargin: 11
-                spacing: 7
+                Layout.leftMargin: 10
+                Layout.rightMargin: 10
+                spacing: 6
 
                 RibbonAction {
                     text: "Configuration"
@@ -236,7 +251,9 @@ SurfacePanel {
                     enabled: ribbon.device.deviceVerified
                     onClicked: ribbon.device.sendPtpShow()
                 }
+
                 Item { Layout.fillWidth: true }
+
                 RibbonAction {
                     text: "Diagnostics"
                     iconSource: Qt.resolvedUrl("../assets/lucide/activity.svg")
