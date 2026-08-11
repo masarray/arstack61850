@@ -13,7 +13,55 @@ import urllib.parse
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 APP_DIR = pathlib.Path(__file__).resolve().parent
+REPO_ROOT = APP_DIR.parent.parent
 MAX_SCL_BYTES = 16 * 1024 * 1024
+REQUIRED_RUNTIME_ASSETS = (
+    "index.html",
+    "styles.css",
+    "responsive.css",
+    "app.js",
+    "scl_bridge_bootstrap.js",
+    "profile_bridge.js",
+    "profile_bridge.css",
+)
+
+
+def ensure_runtime_assets() -> None:
+    """Restore only missing tracked GUI assets from the current Git HEAD.
+
+    A locally deleted tracked file can survive a fast-forward pull. The operator
+    should not have to discover that from a silent browser 404. Existing files
+    are never overwritten, so intentional local edits remain untouched.
+    """
+
+    missing = [name for name in REQUIRED_RUNTIME_ASSETS if not (APP_DIR / name).is_file()]
+    if not missing:
+        return
+
+    git = "git.exe" if os.name == "nt" else "git"
+    paths = [f"apps/smv_injector_gui/{name}" for name in missing]
+    print(f"Repairing missing tracked GUI assets: {', '.join(missing)}")
+    try:
+        completed = subprocess.run(
+            [git, "-C", str(REPO_ROOT), "restore", "--source=HEAD", "--", *paths],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise SystemExit(f"Unable to restore missing GUI assets: {error}") from error
+
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip() or "git restore failed"
+        raise SystemExit(f"Unable to restore missing GUI assets: {detail}")
+
+    still_missing = [name for name in missing if not (APP_DIR / name).is_file()]
+    if still_missing:
+        raise SystemExit(
+            "Required GUI assets are still missing after restore: " + ", ".join(still_missing)
+        )
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -110,6 +158,8 @@ def main() -> int:
     parser.add_argument("--profile-tool", required=True)
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
+
+    ensure_runtime_assets()
 
     tool = pathlib.Path(args.profile_tool).resolve()
     if not tool.is_file():
