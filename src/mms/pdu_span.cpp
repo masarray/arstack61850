@@ -149,19 +149,29 @@ constexpr std::array<std::uint8_t, 40U> kDefaultInitiateResponse{
         }
     }
 
-    if (count != 5U ||
-        !std::all_of(seen.begin(), seen.end(), [](const bool value) { return value; }) ||
-        values[0] < 64U || values[0] > MmsPduSpanCodec::maximum_pdu_bytes ||
-        values[1] == 0U || values[2] == 0U || values[3] == 0U) {
+    // ISO 9506 InitiateRequest permits localDetailCalling [0] and
+    // proposedDataStructureNestingLevel [3] to be absent. The original
+    // ARIEC61850 server accepted such request profiles and several engineering
+    // clients rely on that tolerance. Keep InitiateResponse decoding strict,
+    // but do not turn standards-valid optional omissions into a protocol fault.
+    const bool is_request = kind == MmsWirePduKind::initiate_request;
+    const bool mandatory_present = seen[1] && seen[2] && seen[4];
+    const bool response_complete = seen[0] && seen[1] && seen[2] && seen[3] && seen[4];
+    if (!mandatory_present || (!is_request && !response_complete) ||
+        (seen[0] && (values[0] < 64U || values[0] > MmsPduSpanCodec::maximum_pdu_bytes)) ||
+        values[1] == 0U || values[2] == 0U ||
+        (seen[3] && values[3] == 0U)) {
         result = {};
         return false;
     }
 
     result.kind = kind;
-    result.maximum_mms_pdu_size = values[0];
+    result.maximum_mms_pdu_size = seen[0]
+        ? values[0]
+        : static_cast<std::uint32_t>(MmsPduSpanCodec::maximum_pdu_bytes);
     result.maximum_outstanding_calling = values[1];
     result.maximum_outstanding_called = values[2];
-    result.data_structure_nesting_level = values[3];
+    result.data_structure_nesting_level = seen[3] ? values[3] : 5U;
     result.detail = detail;
     return true;
 }
