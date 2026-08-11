@@ -389,12 +389,43 @@ int main() {
         return 19;
     }
 
+    auto dual_directory_policy = hierarchy_policy;
+    dual_directory_policy.advertise_flattened_child_aliases = true;
+    const mms::MmsStaticApplicationDispatcher dual_directory_dispatcher{
+        hierarchy_table,
+        dual_directory_policy};
+    dispatched = dual_directory_dispatcher.dispatch(
+        kNamedVariableDirectoryRequest,
+        response,
+        workspace);
+    mms::MmsGetNameListResponseView dual_directory;
+    if (!dispatched.success() ||
+        !mms::MmsServiceSpanCodec::try_decode_get_name_list_response(
+            std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
+            dual_directory) ||
+        dual_directory.identifier_count != 5U ||
+        dual_directory.more_follows) {
+        return 20;
+    }
+    constexpr std::array<std::string_view, 5U> dual_names{
+        "LLN0",
+        "LLN0$ST$Mod$stVal",
+        "GGIO1",
+        "GGIO1$ST$Ind1$stVal",
+        "Orphan$ST$stVal"};
+    for (std::size_t index = 0U; index < dual_names.size(); ++index) {
+        if (!dual_directory.try_identifier(index, identifier) ||
+            !identifier_equals(identifier, dual_names[index])) {
+            return 21;
+        }
+    }
+
     for (std::uint32_t iteration = 0U; iteration < 20'000U; ++iteration) {
         relay_state = true;
         const auto read = dispatcher.dispatch(kReadRequest, response, workspace);
         const auto write = dispatcher.dispatch(kWriteRequest, response, workspace);
         if (!read.success() || !write.success() || relay_state) {
-            return 20;
+            return 22;
         }
     }
 

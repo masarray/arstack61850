@@ -411,9 +411,19 @@ struct EncodedValue final { std::span<const std::uint8_t> bytes; };
         const auto result = session.poll_once();
         switch (result.status) {
         case mms::MmsStaticServerSessionStatus::progressed:
-        case mms::MmsStaticServerSessionStatus::response_pending:
         case mms::MmsStaticServerSessionStatus::would_block:
         case mms::MmsStaticServerSessionStatus::timed_out:
+            continue;
+        case mms::MmsStaticServerSessionStatus::response_pending:
+            if (result.application_service != mms::MmsWireConfirmedService::unknown &&
+                result.application_status != mms::MmsStaticDispatchStatus::response_ready &&
+                result.application_status != mms::MmsStaticDispatchStatus::object_not_found) {
+                std::cerr
+                    << "MMS_DIRECT_CONTROL_APPLICATION_DIAGNOSTIC status="
+                    << static_cast<unsigned>(result.application_status)
+                    << " service=" << static_cast<int>(result.application_service)
+                    << " invokeID=" << result.invoke_id << '\n';
+            }
             continue;
         case mms::MmsStaticServerSessionStatus::application_rejected:
             std::cerr << "MMS request rejected; connection remains open.\n";
@@ -535,6 +545,7 @@ int main(int argc, char** argv) {
 
     mms::MmsStaticDispatchPolicy policy;
     policy.maximum_write_variables = 1U;
+    policy.advertise_flattened_child_aliases = true;
     const mms::MmsStaticApplicationDispatcher dispatcher{object_table, data_set_table, policy};
 
     auto listener = create_listener(options);

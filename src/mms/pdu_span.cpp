@@ -16,6 +16,10 @@
 namespace ar::iec61850::mms {
 namespace {
 
+// Advertise only the bounded static dispatcher capability surface:
+// GetNameList(1), Read(4), Write(5), GetVariableAccessAttributes(6), and
+// GetNamedVariableListAttributes(12). Do not echo the client's requested
+// service mask because that would claim services the server cannot dispatch.
 constexpr std::array<std::uint8_t, 40U> kDefaultInitiateResponse{
     0xA9U, 0x26U,
     0x80U, 0x03U, 0x00U, 0xFDU, 0xE8U,
@@ -25,8 +29,8 @@ constexpr std::array<std::uint8_t, 40U> kDefaultInitiateResponse{
     0xA4U, 0x16U,
     0x80U, 0x01U, 0x01U,
     0x81U, 0x03U, 0x05U, 0xF1U, 0x00U,
-    0x82U, 0x0CU, 0x03U, 0xEEU, 0x1CU, 0x00U, 0x00U, 0x04U,
-    0x08U, 0x00U, 0x00U, 0x79U, 0xEFU, 0x18U};
+    0x82U, 0x0CU, 0x03U, 0x4EU, 0x08U, 0x00U, 0x00U, 0x00U,
+    0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U};
 
 [[nodiscard]] bool read_u32(
     const asn1::BerTlvView& tlv,

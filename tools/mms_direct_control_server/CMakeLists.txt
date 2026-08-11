@@ -76,6 +76,30 @@ endif()
 target_compile_features(ariec61850_mms_urcb_server PRIVATE cxx_std_20)
 server_strict_warnings(ariec61850_mms_urcb_server)
 
+# Build the repository's operational discovery client inside this isolated
+# profile. The loopback CTest below is the integration contract between the
+# runnable servers and the client path used by current engineering workflows.
+add_executable(ariec61850_mms_live_discover_client
+    "${ARSTACK_ROOT}/tools/live_discover.cpp")
+target_link_libraries(ariec61850_mms_live_discover_client PRIVATE
+    ARIEC61850::core)
+target_compile_features(ariec61850_mms_live_discover_client PRIVATE cxx_std_20)
+server_strict_warnings(ariec61850_mms_live_discover_client)
+
+add_executable(ariec61850_mms_control_inventory_client
+    "${ARSTACK_ROOT}/tools/control_inventory_probe.cpp")
+target_link_libraries(ariec61850_mms_control_inventory_client PRIVATE
+    ARIEC61850::core)
+target_compile_features(ariec61850_mms_control_inventory_client PRIVATE cxx_std_20)
+server_strict_warnings(ariec61850_mms_control_inventory_client)
+
+add_executable(ariec61850_mms_control_interop_client
+    "${ARSTACK_ROOT}/tools/control_interop_probe.cpp")
+target_link_libraries(ariec61850_mms_control_interop_client PRIVATE
+    ARIEC61850::core)
+target_compile_features(ariec61850_mms_control_interop_client PRIVATE cxx_std_20)
+server_strict_warnings(ariec61850_mms_control_interop_client)
+
 include(CTest)
 enable_testing()
 
@@ -99,3 +123,15 @@ add_test(NAME mms_direct_control_unit COMMAND ariec61850_mms_direct_control_test
 add_test(NAME mms_direct_control_help COMMAND ariec61850_mms_direct_control_server --help)
 add_test(NAME mms_server_urcb_report COMMAND ariec61850_mms_server_urcb_tests)
 add_test(NAME mms_urcb_server_help COMMAND ariec61850_mms_urcb_server --help)
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(
+    NAME mms_server_live_discovery_loopback
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${ARSTACK_ROOT}/scripts/test-mms-server-live-discovery.py"
+        --client $<TARGET_FILE:ariec61850_mms_live_discover_client>
+        --control-inventory $<TARGET_FILE:ariec61850_mms_control_inventory_client>
+        --control-client $<TARGET_FILE:ariec61850_mms_control_interop_client>
+        --direct-server $<TARGET_FILE:ariec61850_mms_direct_control_server>
+        --urcb-server $<TARGET_FILE:ariec61850_mms_urcb_server>)
