@@ -58,6 +58,7 @@ if exist "%BUILD_DIR%\CMakeCache.txt" (
 echo ARStack61850 SMV Injector GUI
 echo Repository: %REPO_ROOT%
 echo Native host compiler: %HOST_COMPILER_LABEL%
+if defined VSINSTALL_USED echo Visual Studio: %VSINSTALL_USED%
 echo Building smart SCL profile engine...
 cmake -S "%APP_DIR%host" -B "%BUILD_DIR%" -G Ninja -DCMAKE_BUILD_TYPE=Release
 if errorlevel 1 goto :build_failed
@@ -89,7 +90,7 @@ exit /b %ERRORLEVEL%
 :prepare_host_toolchain
 rem ESP-IDF PowerShell intentionally exports an embedded clang toolchain. That
 rem compiler cannot link a native Windows host executable. Clear compiler hints
-rem first, then deliberately select a native Windows compiler.
+rem first, then deliberately select any installed native Windows compiler.
 set "CC="
 set "CXX="
 set "AR="
@@ -99,28 +100,85 @@ set "CFLAGS="
 set "CXXFLAGS="
 set "LDFLAGS="
 set "HOST_COMPILER_LABEL="
+set "VSINSTALL_USED="
+set "VISUAL_STUDIO_FOUND="
+set "VISUAL_STUDIO_PATH="
 
+rem If the current shell already has native MSVC configured, use it directly.
 where cl.exe >nul 2>nul
 if not errorlevel 1 (
   set "CC=cl.exe"
   set "CXX=cl.exe"
-  set "HOST_COMPILER_LABEL=MSVC cl.exe"
+  set "HOST_COMPILER_LABEL=MSVC cl.exe from current environment"
   exit /b 0
 )
 
+rem Discover Visual Studio by capability, not by product year. Include preview /
+rem prerelease installations so newer Visual Studio releases work without any
+rem launcher change. vswhere is installed by the Visual Studio Installer.
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
 if exist "%VSWHERE%" (
   set "VSINSTALL="
-  for /f "usebackq tokens=*" %%I in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTALL=%%I"
+  for /f "usebackq tokens=*" %%I in (`"%VSWHERE%" -latest -prerelease -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTALL=%%I"
   if defined VSINSTALL (
+    set "VISUAL_STUDIO_FOUND=1"
+    set "VISUAL_STUDIO_PATH=%VSINSTALL%"
     if exist "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" (
       call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -no_logo -arch=x64 -host_arch=x64 >nul 2>nul
       where cl.exe >nul 2>nul
       if not errorlevel 1 (
         set "CC=cl.exe"
         set "CXX=cl.exe"
-        set "HOST_COMPILER_LABEL=MSVC x64 via Visual Studio Build Tools"
+        set "HOST_COMPILER_LABEL=MSVC x64 via installed Visual Studio"
+        set "VSINSTALL_USED=%VSINSTALL%"
         exit /b 0
+      )
+    )
+  )
+
+  rem If Visual Studio exists but the VC workload query did not match, remember
+  rem the installation so the error can ask to modify that existing install
+  rem instead of recommending another Visual Studio version.
+  if not defined VISUAL_STUDIO_FOUND (
+    set "VSINSTALL="
+    for /f "usebackq tokens=*" %%I in (`"%VSWHERE%" -latest -prerelease -products * -property installationPath`) do set "VSINSTALL=%%I"
+    if defined VSINSTALL (
+      set "VISUAL_STUDIO_FOUND=1"
+      set "VISUAL_STUDIO_PATH=%VSINSTALL%"
+      if exist "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" (
+        call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -no_logo -arch=x64 -host_arch=x64 >nul 2>nul
+        where cl.exe >nul 2>nul
+        if not errorlevel 1 (
+          set "CC=cl.exe"
+          set "CXX=cl.exe"
+          set "HOST_COMPILER_LABEL=MSVC x64 via installed Visual Studio"
+          set "VSINSTALL_USED=%VSINSTALL%"
+          exit /b 0
+        )
+      )
+    )
+  )
+)
+
+rem Final Visual Studio fallback if vswhere is unavailable: scan version-neutral
+rem install roots, including future product-year folders.
+for %%R in ("%ProgramFiles%\Microsoft Visual Studio" "%ProgramFiles(x86)%\Microsoft Visual Studio") do (
+  if exist "%%~R" (
+    for /d %%V in ("%%~R\*") do (
+      for /d %%E in ("%%~fV\*") do (
+        if exist "%%~fE\Common7\Tools\VsDevCmd.bat" (
+          set "VISUAL_STUDIO_FOUND=1"
+          set "VISUAL_STUDIO_PATH=%%~fE"
+          call "%%~fE\Common7\Tools\VsDevCmd.bat" -no_logo -arch=x64 -host_arch=x64 >nul 2>nul
+          where cl.exe >nul 2>nul
+          if not errorlevel 1 (
+            set "CC=cl.exe"
+            set "CXX=cl.exe"
+            set "HOST_COMPILER_LABEL=MSVC x64 via installed Visual Studio"
+            set "VSINSTALL_USED=%%~fE"
+            exit /b 0
+          )
+        )
       )
     )
   )
@@ -141,13 +199,24 @@ exit /b 1
 
 :host_compiler_missing
 echo.
-echo ERROR: no native Windows C++ compiler was found.
+echo ERROR: no usable native Windows C++ compiler was found.
 echo The ESP-IDF esp-clang compiler is an embedded cross compiler and cannot
  echo link the Windows host-side SCL profile tool.
 echo.
-echo Install Microsoft Visual Studio Build Tools with the Desktop development
- echo with C++ workload, then run this same command again. The launcher will
- echo discover it automatically; do not change the ESP32-P4 toolchain.
+if defined VISUAL_STUDIO_FOUND (
+  echo Visual Studio was detected at:
+  echo   %VISUAL_STUDIO_PATH%
+  echo.
+  echo Keep that existing Visual Studio installation. Open Visual Studio Installer,
+  echo choose Modify for that installation, and enable Desktop development with C++
+  echo ^(MSVC x64/x86 build tools plus a Windows SDK^). No specific Visual Studio
+  echo product year is required by ARStack61850.
+) else (
+  echo No Visual Studio installation with native C++ tools was detected.
+  echo Install or modify any supported Visual Studio edition with Desktop development
+  echo with C++, or provide a native MinGW GCC/G++ toolchain on PATH. ARStack61850
+  echo does not require a specific Visual Studio product year.
+)
 echo.
 pause
 exit /b 1
@@ -156,5 +225,6 @@ exit /b 1
 echo.
 echo ERROR: smart SCL profile engine build failed.
 echo Native compiler selected: %HOST_COMPILER_LABEL%
+if defined VSINSTALL_USED echo Visual Studio: %VSINSTALL_USED%
 pause
 exit /b 1
