@@ -12,6 +12,7 @@
 #endif
 
 static const char *TAG = "ar_smv_eth";
+static esp_eth_handle_t s_eth_handle = NULL;
 
 // Bench-validated ESP32-P4 Ethernet-board RMII wiring.
 // REF_CLK is supplied by the onboard PHY as a 50 MHz input to ESP32-P4.
@@ -73,6 +74,7 @@ esp_eth_handle_t ar_esp32p4_eth_init(void)
         phy->del(phy);
         return NULL;
     }
+    s_eth_handle = handle;
 
 #if CONFIG_AR_PTP_LAB_TX
     // The PTP task starts independently and tolerates link-not-ready TX failures
@@ -85,4 +87,17 @@ esp_eth_handle_t ar_esp32p4_eth_init(void)
              "Ethernet configured: PHY addr=%d MDC=%d MDIO=%d REF_CLK=%d",
              AR_PHY_ADDRESS, AR_MDC_GPIO, AR_MDIO_GPIO, AR_RMII_REF_CLK_GPIO);
     return handle;
+}
+
+bool ar_esp32p4_ptp_start(void)
+{
+#if CONFIG_AR_PTP_LAB_TX
+    if (s_eth_handle == NULL) {
+        return false;
+    }
+    ar_ptp_lab_start(s_eth_handle);
+    return true;
+#else
+    return false;
+#endif
 }

@@ -1,0 +1,80 @@
+name: ARStack Studio Qt
+
+on:
+  push:
+    paths:
+      - 'apps/arstack_studio/**'
+      - 'include/ariec61850/sampled_values/**'
+      - 'src/scl/**'
+      - 'include/ariec61850/scl/**'
+      - '.github/workflows/arstack-studio-qt.yml'
+  pull_request:
+    paths:
+      - 'apps/arstack_studio/**'
+      - 'include/ariec61850/sampled_values/**'
+      - 'src/scl/**'
+      - 'include/ariec61850/scl/**'
+      - '.github/workflows/arstack-studio-qt.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  qt-build-smoke:
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04
+    steps:
+      - name: Install build and Qt dependencies
+        shell: bash
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates git cmake ninja-build g++ \
+            qt6-base-dev qt6-declarative-dev qt6-serialport-dev \
+            qml6-module-qtquick qml6-module-qtquick-controls \
+            qml6-module-qtquick-layouts qml6-module-qtquick-dialogs \
+            qml6-module-qtquick-window
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake -S apps/arstack_studio -B build-arstack-studio -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DARIEC61850_WARNINGS_AS_ERRORS=ON 2>&1 | tee /tmp/arstack-studio-configure.log
+
+      - name: Build
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build build-arstack-studio --target arstack_studio --parallel 2 \
+            2>&1 | tee /tmp/arstack-studio-build.log
+
+      - name: Headless QML launch smoke
+        shell: bash
+        run: |
+          set +e
+          timeout 6s env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+            ./build-arstack-studio/arstack_studio > /tmp/arstack-studio-launch.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/arstack-studio-launch.log
+          if [ "$status" -ne 124 ]; then
+            echo "ARStack Studio exited before smoke timeout (status=$status)."
+            exit "$status"
+          fi
+
+      - name: Retain Qt smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arstack-studio-qt-logs
+          path: |
+            /tmp/arstack-studio-configure.log
+            /tmp/arstack-studio-build.log
+            /tmp/arstack-studio-launch.log
+          if-no-files-found: ignore
+          retention-days: 7

@@ -1,11 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "live_control.hpp"
+#include "ethernet_port.h"
 #include "profile_control.hpp"
 
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
+
+#if CONFIG_AR_PTP_LAB_TX
+#include "ptp_lab_task.hpp"
+#endif
 
 #include <array>
 #include <atomic>
@@ -95,12 +102,140 @@ bool parse_u32(const char* text, std::uint32_t& value) noexcept {
 
 void print_help() noexcept {
     ESP_LOGI(kTag, "Live control commands (bench serial transport):");
-    ESP_LOGI(kTag, "  START | STOP | SHOW | ZERO | HELP");
+    ESP_LOGI(kTag, "  IDENTIFY | START | STOP | SHOW | ZERO | HELP");
     ESP_LOGI(kTag, "  FREQ <millihertz>");
     ESP_LOGI(kTag, "  SET <IA|IB|IC|IN|UA|UB|UC|UN> <rms_wire_counts> <phase_mdeg> [quality]");
     ESP_LOGI(kTag, "  ENABLE <channel> <0|1>");
     ESP_LOGI(kTag, "  QUALITY <channel> <uint32/0xhex>");
+    ESP_LOGI(kTag, "  SHAPE CT <0|1> <dc_permille> <harmonic_permille> <order> <clip_permille>");
+    ESP_LOGI(kTag, "  PTP SHOW | PTP START | PTP STOP");
+    ESP_LOGI(kTag, "  PTP CONFIG <domain> <transport> <vlan> <vid> <pcp> <announce_ms> <sync_ms> <pdelay>");
     ESP_LOGI(kTag, "GUI profile deployment uses bounded PROFILE subcommands while STOPPED.");
+}
+
+void print_identity() noexcept {
+    std::array<std::uint8_t, 6> device_id{};
+    if (esp_read_mac(device_id.data(), ESP_MAC_EFUSE_FACTORY) != ESP_OK) {
+        ESP_LOGE(kTag, "ARSTACK identity unavailable: factory device ID read failed");
+        return;
+    }
+    ESP_LOGI(kTag,
+             "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 device_id=%02X%02X%02X%02X%02X%02X",
+             static_cast<unsigned>(device_id[0]), static_cast<unsigned>(device_id[1]),
+             static_cast<unsigned>(device_id[2]), static_cast<unsigned>(device_id[3]),
+             static_cast<unsigned>(device_id[4]), static_cast<unsigned>(device_id[5]));
+}
+
+void print_ptp_state() noexcept {
+#if CONFIG_AR_PTP_LAB_TX
+    ar_ptp_lab_status_t status{};
+    ar_ptp_lab_config_t config{};
+    if (!ar_ptp_lab_get_status(&status) || !ar_ptp_lab_get_config(&config)) {
+        ESP_LOGE(kTag, "PTP status unavailable");
+        return;
+    }
+    ESP_LOGI(kTag,
+             "PTP status=%s Announce=%llu Sync=%llu FollowUp=%llu PdelayFrames=%llu TXfail=%llu",
+             status.is_running ? "RUNNING" : "STOPPED",
+             static_cast<unsigned long long>(status.announce_sent),
+             static_cast<unsigned long long>(status.sync_sent),
+             static_cast<unsigned long long>(status.follow_up_sent),
+             static_cast<unsigned long long>(status.peer_delay_frames_sent),
+             static_cast<unsigned long long>(status.tx_failure_count));
+    if (config.vlan_enabled) {
+        ESP_LOGI(kTag,
+                 "PTP config domain=%u transportSpecific=0x%X VLAN=%u/%u Announce=%lu ms Sync=%lu ms Pdelay=%s",
+                 static_cast<unsigned>(config.domain_number),
+                 static_cast<unsigned>(config.transport_specific),
+                 static_cast<unsigned>(config.vlan_id),
+                 static_cast<unsigned>(config.vlan_priority),
+                 static_cast<unsigned long>(config.announce_interval_ms),
+                 static_cast<unsigned long>(config.sync_interval_ms),
+                 config.respond_to_peer_delay ? "ON" : "OFF");
+    } else {
+        ESP_LOGI(kTag,
+                 "PTP config domain=%u transportSpecific=0x%X VLAN=OFF Announce=%lu ms Sync=%lu ms Pdelay=%s",
+                 static_cast<unsigned>(config.domain_number),
+                 static_cast<unsigned>(config.transport_specific),
+                 static_cast<unsigned long>(config.announce_interval_ms),
+                 static_cast<unsigned long>(config.sync_interval_ms),
+                 config.respond_to_peer_delay ? "ON" : "OFF");
+    }
+#else
+    ESP_LOGW(kTag, "PTP unavailable: firmware built without CONFIG_AR_PTP_LAB_TX");
+#endif
+}
+
+void handle_ptp_command(char* save) noexcept {
+    char* subcommand = strtok_r(nullptr, kTokenDelimiters.data(), &save);
+    if (subcommand == nullptr) {
+        ESP_LOGE(kTag, "PTP subcommand required");
+        return;
+    }
+    uppercase_ascii(subcommand);
+
+    if (std::strcmp(subcommand, "SHOW") == 0) {
+        if (has_extra_token(&save)) ESP_LOGE(kTag, "Usage: PTP SHOW");
+        else print_ptp_state();
+        return;
+    }
+#if CONFIG_AR_PTP_LAB_TX
+    if (std::strcmp(subcommand, "START") == 0) {
+        if (has_extra_token(&save)) {
+            ESP_LOGE(kTag, "Usage: PTP START");
+            return;
+        }
+        if (!ar_esp32p4_ptp_start()) ESP_LOGE(kTag, "PTP start rejected: Ethernet is unavailable");
+        else ESP_LOGI(kTag, "PTP start accepted");
+        print_ptp_state();
+        return;
+    }
+    if (std::strcmp(subcommand, "STOP") == 0) {
+        if (has_extra_token(&save)) {
+            ESP_LOGE(kTag, "Usage: PTP STOP");
+            return;
+        }
+        ar_ptp_lab_stop();
+        ESP_LOGI(kTag, "PTP stop requested");
+        return;
+    }
+    if (std::strcmp(subcommand, "CONFIG") == 0) {
+        std::array<std::uint32_t, 8> values{};
+        for (auto& value : values) {
+            if (!parse_u32(strtok_r(nullptr, kTokenDelimiters.data(), &save), value)) {
+                ESP_LOGE(kTag, "Usage: PTP CONFIG <domain> <transport> <vlan> <vid> <pcp> <announce_ms> <sync_ms> <pdelay>");
+                return;
+            }
+        }
+        if (has_extra_token(&save) || values[0] > 255U || values[1] > 15U || values[2] > 1U ||
+            values[3] > 4094U || values[4] > 7U || values[5] < 100U || values[5] > 10000U ||
+            values[6] < 20U || values[6] > 5000U || values[7] > 1U) {
+            ESP_LOGE(kTag, "PTP configuration rejected: value outside safe bounds");
+            return;
+        }
+        ar_ptp_lab_config_t config{};
+        if (!ar_ptp_lab_get_config(&config)) {
+            ESP_LOGE(kTag, "PTP configuration unavailable");
+            return;
+        }
+        config.domain_number = static_cast<std::uint8_t>(values[0]);
+        config.transport_specific = static_cast<std::uint8_t>(values[1]);
+        config.vlan_enabled = values[2] != 0U;
+        config.vlan_id = static_cast<std::uint16_t>(values[3]);
+        config.vlan_priority = static_cast<std::uint8_t>(values[4]);
+        config.announce_interval_ms = values[5];
+        config.sync_interval_ms = values[6];
+        config.respond_to_peer_delay = values[7] != 0U;
+        if (!ar_ptp_lab_configure(&config)) {
+            ESP_LOGE(kTag, "PTP configuration rejected: stop PTP first or correct the profile");
+            return;
+        }
+        ESP_LOGI(kTag, "PTP configuration accepted");
+        print_ptp_state();
+        return;
+    }
+#endif
+    ESP_LOGE(kTag, "Unknown or unavailable PTP subcommand '%s'", subcommand);
 }
 
 void print_state() noexcept {
@@ -139,6 +274,12 @@ void handle_line(char* line) noexcept {
     char* command = strtok_r(line, kTokenDelimiters.data(), &save);
     if (command == nullptr) return;
     uppercase_ascii(command);
+
+    if (std::strcmp(command, "IDENTIFY") == 0) {
+        if (has_extra_token(&save)) ESP_LOGE(kTag, "Usage: IDENTIFY");
+        else print_identity();
+        return;
+    }
 
     if (std::strcmp(command, "START") == 0) {
         if (has_extra_token(&save)) {
@@ -181,6 +322,10 @@ void handle_line(char* line) noexcept {
         handle_profile_command(save);
         return;
     }
+    if (std::strcmp(command, "PTP") == 0) {
+        handle_ptp_command(save);
+        return;
+    }
     if (std::strcmp(command, "ZERO") == 0) {
         if (has_extra_token(&save)) {
             ESP_LOGE(kTag, "Usage: ZERO");
@@ -201,6 +346,47 @@ void handle_line(char* line) noexcept {
         auto state = g_signal_bank.snapshot();
         state.frequency_millihz = frequency;
         static_cast<void>(publish_state(state));
+        return;
+    }
+
+    if (std::strcmp(command, "SHAPE") == 0) {
+        char* shape_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
+        if (shape_text == nullptr) {
+            ESP_LOGE(kTag, "Usage: SHAPE CT <0|1> <dc_permille> <harmonic_permille> <order> <clip_permille>");
+            return;
+        }
+        uppercase_ascii(shape_text);
+        char* enabled_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
+        char* dc_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
+        char* harmonic_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
+        char* order_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
+        char* clip_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
+        std::uint32_t enabled{};
+        std::int32_t dc_offset{};
+        std::uint32_t harmonic{};
+        std::uint32_t order{};
+        std::uint32_t clip{};
+        if (std::strcmp(shape_text, "CT") != 0 || !parse_u32(enabled_text, enabled) ||
+            !parse_i32(dc_text, dc_offset) || !parse_u32(harmonic_text, harmonic) ||
+            !parse_u32(order_text, order) || !parse_u32(clip_text, clip) || has_extra_token(&save) ||
+            enabled > 1U || dc_offset < -3000 || dc_offset > 3000 || harmonic > 3000U ||
+            order < 2U || order > 63U || clip < 10U || clip > 10000U) {
+            ESP_LOGE(kTag, "Usage: SHAPE CT <0|1> <dc_permille> <harmonic_permille> <order> <clip_permille>");
+            return;
+        }
+        auto state = g_signal_bank.snapshot();
+        state.current_shape.enabled = enabled != 0U;
+        state.current_shape.dc_offset_permille = dc_offset;
+        state.current_shape.harmonic_permille = harmonic;
+        state.current_shape.harmonic_order = static_cast<std::uint8_t>(order);
+        state.current_shape.clip_permille = clip;
+        static_cast<void>(publish_state(state));
+        ESP_LOGI(kTag, "CT saturation shape %s: DC=%ld.%u%% H%u=%lu.%u%% clip=%lu.%u%%",
+                 enabled ? "enabled" : "disabled",
+                 static_cast<long>(dc_offset / 10), static_cast<unsigned>(std::abs(dc_offset % 10)),
+                 static_cast<unsigned>(order),
+                 static_cast<unsigned long>(harmonic / 10U), static_cast<unsigned>(harmonic % 10U),
+                 static_cast<unsigned long>(clip / 10U), static_cast<unsigned>(clip % 10U));
         return;
     }
 
