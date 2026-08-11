@@ -157,13 +157,18 @@ void ethernet_vlan_qinq_and_transport_specific_are_parsed_for_analyzer_use() {
     const auto message = PtpCodec::build_sync(options);
     const std::array<std::uint8_t, 6> source{0x02U, 0x00U, 0x00U, 0x00U, 0x00U, 0x01U};
     const auto vlan_frame = PtpCodec::build_ethernet_frame(
-        ptp_general_multicast_mac, source, message, 100U, 4U);
+        ptp_general_multicast_mac,
+        source,
+        message,
+        std::uint16_t{100},
+        std::uint8_t{4});
     CHECK(!vlan_frame.empty());
 
     PtpFrame decoded;
     CHECK(PtpCodec::try_parse_ethernet_frame(vlan_frame, decoded));
     CHECK(decoded.header.transport_specific == 1U);
-    CHECK(decoded.vlan_id == 100U);
+    CHECK(decoded.vlan_id.has_value());
+    CHECK(*decoded.vlan_id == std::uint16_t{100});
     CHECK(!decoded.outer_vlan_id.has_value());
     CHECK(!decoded.peer_delay_multicast);
 
@@ -178,8 +183,10 @@ void ethernet_vlan_qinq_and_transport_specific_are_parsed_for_analyzer_use() {
 
     CHECK(PtpCodec::try_parse_ethernet_frame(qinq, decoded));
     CHECK(decoded.header.transport_specific == 1U);
-    CHECK(decoded.outer_vlan_id == 10U);
-    CHECK(decoded.vlan_id == 100U);
+    CHECK(decoded.outer_vlan_id.has_value());
+    CHECK(*decoded.outer_vlan_id == std::uint16_t{10});
+    CHECK(decoded.vlan_id.has_value());
+    CHECK(*decoded.vlan_id == std::uint16_t{100});
     CHECK(decoded.header.sequence_id == 0x1234U);
 }
 
@@ -210,12 +217,13 @@ void passive_monitor_health_drives_conservative_smp_synch_policy() {
 
     const auto snapshot = monitor.snapshot(observed_at + std::chrono::milliseconds{100});
     CHECK(snapshot.sources.size() == 1U);
-    CHECK(snapshot.sources[0].transport_specific == 0U);
+    CHECK(snapshot.sources[0].transport_specific.has_value());
+    CHECK(*snapshot.sources[0].transport_specific == std::uint8_t{0});
     CHECK(snapshot.sources[0].transport_specific_change_count == 0U);
 
     PtpTimingHealthOptions health_options;
-    health_options.expected_domain_number = 0U;
-    health_options.expected_transport_specific = 0U;
+    health_options.expected_domain_number = std::uint8_t{0};
+    health_options.expected_transport_specific = std::uint8_t{0};
     const auto report = PtpTimingHealthValidator::evaluate(snapshot, health_options);
     CHECK(report.is_healthy());
     CHECK(report.selected_source.has_value());
@@ -264,11 +272,12 @@ void transport_specific_change_is_visible_as_health_warning() {
 
     const auto snapshot = monitor.snapshot(observed_at + std::chrono::milliseconds{50});
     CHECK(snapshot.sources.size() == 1U);
-    CHECK(snapshot.sources[0].transport_specific == 1U);
+    CHECK(snapshot.sources[0].transport_specific.has_value());
+    CHECK(*snapshot.sources[0].transport_specific == std::uint8_t{1});
     CHECK(snapshot.sources[0].transport_specific_change_count == 1U);
 
     PtpTimingHealthOptions health_options;
-    health_options.expected_domain_number = 0U;
+    health_options.expected_domain_number = std::uint8_t{0};
     const auto report = PtpTimingHealthValidator::evaluate(snapshot, health_options);
     CHECK(report.severity == PtpHealthSeverity::warning);
     CHECK(resolve_smp_synch(report, true) == SmpSynchValue::local_synchronized);
