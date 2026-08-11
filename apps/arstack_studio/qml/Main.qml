@@ -9,7 +9,7 @@ ApplicationWindow {
     id: root
     width: 1480
     height: 900
-    minimumWidth: 1180
+    minimumWidth: 1080
     minimumHeight: 720
     visible: true
     title: "ARStack Studio · SMV Injector"
@@ -22,6 +22,7 @@ ApplicationWindow {
         readonly property color surface: "#11171f"
         readonly property color surface2: "#0e141b"
         readonly property color raised: "#151d27"
+        readonly property color raisedHover: "#1a2430"
         readonly property color line: "#26313d"
         readonly property color lineSoft: "#1c252f"
         readonly property color text: "#edf2f7"
@@ -29,18 +30,22 @@ ApplicationWindow {
         readonly property color muted: "#778493"
         readonly property color muted2: "#566271"
         readonly property color accent: "#69a9ff"
+        readonly property color accentSoft: "#18314c"
         readonly property color green: "#58d49d"
+        readonly property color greenSoft: "#153a2d"
         readonly property color amber: "#e1b25a"
+        readonly property color amberSoft: "#3b301c"
         readonly property color red: "#ff727f"
+        readonly property color redSoft: "#46252b"
     }
 
     property string uiFont: "Inter"
     property string monoFont: "Cascadia Mono"
     property bool phaseLink: false
-    property bool liveApply: true
     property bool profileDirty: false
     property real currentScale: 1000.0
     property real voltageScale: 100.0
+    property real signalFrequency: 50.0
     property string activeSignal: "Ia"
     property int activeGroup: 0
     property int activeRow: 0
@@ -49,7 +54,9 @@ ApplicationWindow {
     property real activePhase: 0.0
     property real activeQuality: 0
     property string transientMessage: ""
+    property bool transientError: false
 
+    readonly property bool compactLayout: width < 1300
     readonly property bool selectedProfileDeployable:
         sclProfiles.selectedProfile.compatibilityClass === "A" &&
         sclProfiles.selectedProfile.deviceSupport === "ready"
@@ -58,6 +65,34 @@ ApplicationWindow {
     readonly property bool canStart:
         device.connected && !device.running &&
         (!sclProfiles.hasProfiles || (device.profileArmed && !profileDirty))
+
+    readonly property string instrumentState: {
+        if (!device.connected) return "OFFLINE"
+        if (device.profileDeploying) return "DEPLOYING"
+        if (device.running) return "RUNNING"
+        if (profileDirty) return "PROFILE CHANGED"
+        if (sclProfiles.hasProfiles && !selectedProfileDeployable) return "PROFILE BLOCKED"
+        if (sclProfiles.hasProfiles && !device.profileArmed) return "PROFILE VALIDATED"
+        if (device.profileArmed) return "ARMED"
+        return "CONNECTED"
+    }
+    readonly property color instrumentStateColor: {
+        if (instrumentState === "RUNNING") return theme.green
+        if (instrumentState === "ARMED") return theme.accent
+        if (instrumentState === "DEPLOYING" || instrumentState === "PROFILE CHANGED") return theme.amber
+        if (instrumentState === "PROFILE BLOCKED") return theme.red
+        return device.connected ? theme.textSoft : theme.muted
+    }
+    readonly property string stateReason: {
+        if (!device.connected) return "Connect the injector; setpoints remain editable offline."
+        if (device.profileDeploying) return "Committing immutable SCL profile to the device."
+        if (device.running) return "Live apply active · valid edits update SMV immediately."
+        if (profileDirty) return "Selected profile changed · deploy before Start."
+        if (sclProfiles.hasProfiles && !selectedProfileDeployable) return "Selected stream is not deployable on the current ESP32-P4 layout."
+        if (sclProfiles.hasProfiles && !device.profileArmed) return "Profile validated · deploy to arm the injector."
+        if (device.profileArmed) return "Ready · live setpoint editing is armed."
+        return "Connected · development setpoints ready."
+    }
 
     SclProfileModel { id: sclProfiles }
     DeviceController { id: device }
@@ -69,15 +104,21 @@ ApplicationWindow {
                 root.profileDirty = false
         }
         function onDeviceMessage(message) {
-            root.transientMessage = message
-            messageTimer.restart()
+            root.showMessage(message, false)
+        }
+        function onConnectedChanged() {
+            if (device.connected)
+                Qt.callLater(root.applyAllSignals)
         }
     }
 
     Timer {
         id: messageTimer
         interval: 2800
-        onTriggered: root.transientMessage = ""
+        onTriggered: {
+            root.transientMessage = ""
+            root.transientError = false
+        }
     }
 
     ListModel {
@@ -96,12 +137,61 @@ ApplicationWindow {
         ListElement { signalId: "Un"; magnitude: 0.000; phase: 0.0; enabled: true; quality: 0; traceColor: "#9a88df" }
     }
 
+    function showMessage(message, error) {
+        transientMessage = message
+        transientError = error === true
+        messageTimer.restart()
+    }
+
     function groupModel(group) {
         return group === 0 ? currentModel : voltageModel
     }
 
     function groupRepeater(group) {
         return group === 0 ? currentRepeater : voltageRepeater
+    }
+
+    function parseOperatorNumber(text) {
+        var normalized = String(text).trim()
+            .replace(/\s/g, "")
+            .replace(/degrees?/ig, "")
+            .replace(/deg/ig, "")
+            .replace(/°/g, "")
+            .replace(/Hz/ig, "")
+            .replace(/[AV]$/i, "")
+        if (normalized.indexOf(",") >= 0 && normalized.indexOf(".") < 0)
+            normalized = normalized.replace(",", ".")
+        if (!normalized.length || normalized === "+" || normalized === "-" || normalized === ".")
+            return NaN
+        return Number(normalized)
+    }
+
+    function maximumMagnitude(group) {
+        var scale = group === 0 ? currentScale : voltageScale
+        if (!isFinite(scale) || scale <= 0)
+            return 0
+        return Math.min(1000000000.0, 2147483647.0 / scale)
+    }
+
+    function validMagnitude(group, value) {
+        return isFinite(value) && value >= 0 && value <= maximumMagnitude(group)
+    }
+
+    function validPhase(value) {
+        return isFinite(value) && Math.abs(value) <= 360000.0
+    }
+
+    function validFrequency(value) {
+        return isFinite(value) && value > 0 && value <= 1000.0
+    }
+
+    function normalizedAngle(value) {
+        var result = value % 360
+        if (result > 180)
+            result -= 360
+        if (result <= -180)
+            result += 360
+        return result
     }
 
     function selectSignal(group, row) {
@@ -147,20 +237,11 @@ ApplicationWindow {
             column === 0 ? focusCell(group, row, 1) : focusCell(group, row + 1, 0)
     }
 
-    function normalizedAngle(value) {
-        var result = value % 360
-        if (result > 180)
-            result -= 360
-        if (result <= -180)
-            result += 360
-        return result
-    }
-
     function sendSignal(group, row) {
         if (!device.connected)
-            return
+            return true
         var signal = groupModel(group).get(row)
-        device.setSignal(
+        return device.setSignal(
             signal.signalId,
             signal.magnitude,
             signal.phase,
@@ -170,13 +251,21 @@ ApplicationWindow {
     }
 
     function sendLinkedGroup(group) {
+        var ok = true
         for (var i = 0; i < 3; ++i)
-            sendSignal(group, i)
+            ok = sendSignal(group, i) && ok
+        return ok
+    }
+
+    function applyGroupSignals(group) {
+        for (var row = 0; row < 4; ++row)
+            sendSignal(group, row)
     }
 
     function editSignal(group, row, field, value) {
-        if (isNaN(value) || (field === "magnitude" && value < 0))
-            return
+        if ((field === "magnitude" && !validMagnitude(group, value)) ||
+            (field === "phase" && !validPhase(value)))
+            return false
 
         var model = groupModel(group)
         model.setProperty(row, field, value)
@@ -198,20 +287,21 @@ ApplicationWindow {
         }
 
         selectSignal(group, row)
-        if (liveApply && device.connected) {
+        if (device.connected) {
             if (phaseLink && row < 3)
                 sendLinkedGroup(group)
             else
                 sendSignal(group, row)
         }
+        return true
     }
 
     function applyAllSignals() {
-        for (var group = 0; group < 2; ++group) {
-            for (var row = 0; row < 4; ++row)
-                sendSignal(group, row)
-        }
-        device.setFrequency(parseFloat(frequencyField.text))
+        if (!device.connected)
+            return
+        for (var group = 0; group < 2; ++group)
+            applyGroupSignals(group)
+        device.setFrequency(signalFrequency)
     }
 
     function balanced() {
@@ -226,7 +316,7 @@ ApplicationWindow {
         }
         phasor.requestPaint()
         waveform.requestPaint()
-        if (device.connected && liveApply)
+        if (device.connected)
             applyAllSignals()
     }
 
@@ -249,33 +339,12 @@ ApplicationWindow {
             device.setQuality(activeSignal, unsignedValue)
     }
 
-    component CalmButton: Button {
-        id: calmButton
-        implicitHeight: 36
-        font.family: root.uiFont
-        font.pixelSize: 12
-        font.weight: Font.DemiBold
-        contentItem: Text {
-            text: calmButton.text
-            color: calmButton.enabled ? theme.textSoft : theme.muted2
-            font: calmButton.font
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-        }
-        background: Rectangle {
-            radius: 7
-            color: calmButton.down ? "#1b2530" : calmButton.hovered ? "#17202a" : theme.raised
-            border.width: 1
-            border.color: calmButton.hovered ? "#3a4a5b" : theme.line
-        }
-    }
-
     component Kicker: Label {
         color: theme.muted
         font.family: root.uiFont
         font.pixelSize: 9
         font.weight: Font.DemiBold
-        font.letterSpacing: 1.25
+        font.letterSpacing: 1.2
     }
 
     component Quiet: Label {
@@ -286,9 +355,74 @@ ApplicationWindow {
 
     component Surface: Rectangle {
         color: theme.surface
-        radius: 10
+        radius: 9
         border.width: 1
         border.color: theme.lineSoft
+    }
+
+    component CalmButton: Button {
+        id: calmButton
+        implicitHeight: 34
+        font.family: root.uiFont
+        font.pixelSize: 11
+        font.weight: Font.DemiBold
+        contentItem: Text {
+            text: calmButton.text
+            color: calmButton.enabled ? theme.textSoft : theme.muted2
+            font: calmButton.font
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+        background: Rectangle {
+            radius: 6
+            color: calmButton.down ? "#1c2733" : calmButton.hovered ? theme.raisedHover : theme.raised
+            border.width: 1
+            border.color: calmButton.hovered ? "#3a4a5b" : theme.line
+        }
+    }
+
+    component NumericField: TextField {
+        id: numericField
+        property bool invalidInput: false
+        property bool compact: false
+        selectByMouse: true
+        horizontalAlignment: Text.AlignRight
+        color: invalidInput ? theme.red : theme.text
+        selectionColor: theme.accent
+        selectedTextColor: theme.bg
+        font.family: root.monoFont
+        font.pixelSize: compact ? 11 : 13
+        font.weight: Font.DemiBold
+        leftPadding: 8
+        rightPadding: 8
+        background: Rectangle {
+            radius: 6
+            color: numericField.activeFocus ? "#0c141d" : "#111820"
+            border.width: numericField.activeFocus || numericField.invalidInput ? 1 : 0
+            border.color: numericField.invalidInput ? theme.red : theme.accent
+        }
+    }
+
+    component StateBadge: Rectangle {
+        implicitHeight: 24
+        implicitWidth: stateText.implicitWidth + 24
+        radius: 6
+        color: root.instrumentState === "RUNNING" ? theme.greenSoft :
+               root.instrumentState === "PROFILE BLOCKED" ? theme.redSoft :
+               (root.instrumentState === "PROFILE CHANGED" || root.instrumentState === "DEPLOYING") ? theme.amberSoft :
+               theme.accentSoft
+        border.width: 1
+        border.color: Qt.alpha(root.instrumentStateColor, 0.55)
+        Label {
+            id: stateText
+            anchors.centerIn: parent
+            text: root.instrumentState
+            color: root.instrumentStateColor
+            font.family: root.monoFont
+            font.pixelSize: 9
+            font.weight: Font.Bold
+            font.letterSpacing: 0.5
+        }
     }
 
     FileDialog {
@@ -314,7 +448,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         background: Rectangle {
             color: theme.surface
-            radius: 10
+            radius: 9
             border.color: theme.line
         }
         contentItem: ColumnLayout {
@@ -347,25 +481,28 @@ ApplicationWindow {
     }
 
     header: Rectangle {
-        height: 58
+        height: 56
         color: theme.chrome
+        border.width: 1
+        border.color: theme.lineSoft
+
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 18
-            anchors.rightMargin: 18
-            spacing: 12
+            anchors.leftMargin: 16
+            anchors.rightMargin: 16
+            spacing: 10
 
             Rectangle {
-                width: 30
-                height: 30
-                radius: 7
+                width: 28
+                height: 28
+                radius: 6
                 color: "#101b27"
                 border.color: "#315071"
                 Label {
                     anchors.centerIn: parent
                     text: "≋"
                     color: theme.accent
-                    font.pixelSize: 18
+                    font.pixelSize: 17
                 }
             }
 
@@ -377,7 +514,7 @@ ApplicationWindow {
                     font.family: root.uiFont
                     font.pixelSize: 8
                     font.weight: Font.Bold
-                    font.letterSpacing: 1.3
+                    font.letterSpacing: 1.2
                 }
                 Label {
                     text: "SMV Injector"
@@ -390,7 +527,28 @@ ApplicationWindow {
 
             Item { Layout.fillWidth: true }
 
+            Rectangle {
+                visible: device.connected
+                implicitWidth: liveText.implicitWidth + 20
+                implicitHeight: 23
+                radius: 6
+                color: theme.greenSoft
+                border.width: 1
+                border.color: "#2b674d"
+                Label {
+                    id: liveText
+                    anchors.centerIn: parent
+                    text: "LIVE APPLY"
+                    color: theme.green
+                    font.family: root.monoFont
+                    font.pixelSize: 8
+                    font.weight: Font.Bold
+                    font.letterSpacing: 0.7
+                }
+            }
+
             Label {
+                visible: !root.compactLayout
                 text: sclProfiles.hasProfiles ?
                     (sclProfiles.selectedProfile.svId || "Resolved SV") :
                     "Development profile"
@@ -403,15 +561,12 @@ ApplicationWindow {
 
             ComboBox {
                 id: portCombo
-                implicitWidth: 116
+                implicitWidth: root.compactLayout ? 100 : 116
                 model: device.ports
                 enabled: !device.connected
                 font.family: root.monoFont
                 font.pixelSize: 10
-                onPressedChanged: {
-                    if (pressed)
-                        device.refreshPorts()
-                }
+                onPressedChanged: if (pressed) device.refreshPorts()
             }
 
             Rectangle {
@@ -421,7 +576,10 @@ ApplicationWindow {
                 color: device.connected ? theme.green : theme.muted2
             }
 
-            Quiet { text: device.connected ? device.portName : "Device offline" }
+            Quiet {
+                visible: !root.compactLayout
+                text: device.connected ? device.portName : "Device offline"
+            }
 
             CalmButton {
                 text: device.connected ? "Disconnect" : "Connect"
@@ -436,79 +594,85 @@ ApplicationWindow {
     }
 
     footer: Rectangle {
-        height: 62
+        height: 66
         color: theme.chrome
         border.width: 1
         border.color: theme.lineSoft
+
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 18
-            anchors.rightMargin: 18
-            spacing: 12
+            anchors.leftMargin: 16
+            anchors.rightMargin: 16
+            spacing: 10
 
-            Rectangle {
-                width: 8
-                height: 8
-                radius: 4
-                color: device.running ? theme.green : device.connected ? theme.accent : theme.muted2
-            }
+            StateBadge {}
 
             ColumnLayout {
+                Layout.maximumWidth: root.compactLayout ? 300 : 440
                 spacing: 1
-                Label {
-                    text: device.running ? "INJECTING" :
-                          device.connected ? (profileDirty ? "PROFILE CHANGED" : "READY") :
-                          "DEVICE OFFLINE"
-                    color: theme.textSoft
-                    font.family: root.uiFont
-                    font.pixelSize: 9
-                    font.weight: Font.Bold
-                }
                 Quiet {
-                    text: device.running ? "ESP32-P4 realtime publisher active" :
-                          device.connected && profileDirty ? "Validate and deploy the selected SCL profile before Start" :
-                          device.connected ? "Setpoints editable · live control armed" :
-                          "Setpoints remain editable offline"
+                    Layout.fillWidth: true
+                    text: root.stateReason
+                    elide: Text.ElideRight
+                }
+                Label {
+                    text: "FPS " + device.fps + "   ·   MISSED " + device.missed + "   ·   TX FAIL " + device.txFailures
+                    color: theme.muted
+                    font.family: root.monoFont
+                    font.pixelSize: 8
                 }
             }
 
             Item { Layout.fillWidth: true }
 
-            Label {
-                text: activeSignal + "  " + activeMagnitude.toFixed(3) + " " + activeUnit +
-                      "  ∠" + activePhase.toFixed(2) + "°"
-                color: theme.muted
-                font.family: root.monoFont
-                font.pixelSize: 9
+            CalmButton {
+                visible: !root.compactLayout
+                text: "Diagnostics"
+                onClicked: diagnosticsDialog.open()
             }
 
-            CalmButton { text: "Diagnostics"; onClicked: diagnosticsDialog.open() }
             CalmButton {
-                text: "Apply all"
-                enabled: device.connected
-                onClicked: root.applyAllSignals()
-            }
-            CalmButton {
-                text: device.profileDeploying ? "Deploying…" : "Deploy profile"
+                text: device.profileDeploying ? "Deploying…" : "Deploy"
                 enabled: root.canDeploy
                 onClicked: {
                     if (device.deployProfile(sclProfiles.selectedProfile))
                         root.profileDirty = true
                 }
             }
-            CalmButton {
-                text: "Stop"
-                enabled: device.connected && device.running
-                onClicked: device.stop()
-            }
+
             Button {
-                id: startButton
-                text: "▶  Start live"
-                enabled: root.canStart
-                implicitWidth: 120
+                id: stopButton
+                text: "■  Stop"
+                enabled: device.connected && device.running
+                implicitWidth: 92
                 implicitHeight: 36
                 font.family: root.uiFont
-                font.pixelSize: 12
+                font.pixelSize: 11
+                font.weight: Font.DemiBold
+                contentItem: Text {
+                    text: stopButton.text
+                    color: stopButton.enabled ? "#ffdce0" : theme.muted2
+                    font: stopButton.font
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    radius: 6
+                    color: stopButton.enabled ? theme.redSoft : "#121820"
+                    border.width: 1
+                    border.color: stopButton.enabled ? "#86434b" : theme.lineSoft
+                }
+                onClicked: device.stop()
+            }
+
+            Button {
+                id: startButton
+                text: "▶  Start"
+                enabled: root.canStart
+                implicitWidth: 104
+                implicitHeight: 36
+                font.family: root.uiFont
+                font.pixelSize: 11
                 font.weight: Font.DemiBold
                 contentItem: Text {
                     text: startButton.text
@@ -518,8 +682,9 @@ ApplicationWindow {
                     verticalAlignment: Text.AlignVCenter
                 }
                 background: Rectangle {
-                    radius: 7
+                    radius: 6
                     color: startButton.enabled ? "#194d38" : "#121820"
+                    border.width: 1
                     border.color: startButton.enabled ? "#347a59" : theme.lineSoft
                 }
                 onClicked: device.start()
@@ -529,28 +694,33 @@ ApplicationWindow {
 
     RowLayout {
         anchors.fill: parent
-        anchors.margins: 12
-        spacing: 12
+        anchors.margins: root.compactLayout ? 10 : 12
+        spacing: root.compactLayout ? 10 : 12
 
         Surface {
-            Layout.preferredWidth: 246
+            Layout.preferredWidth: root.compactLayout ? 206 : 246
+            Layout.minimumWidth: root.compactLayout ? 196 : 220
             Layout.fillHeight: true
+
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 16
-                spacing: 13
+                anchors.margins: root.compactLayout ? 12 : 15
+                spacing: root.compactLayout ? 9 : 12
 
                 ColumnLayout {
-                    spacing: 3
+                    Layout.fillWidth: true
+                    spacing: 2
                     Kicker { text: "ENGINEERING SOURCE" }
                     Label {
+                        Layout.fillWidth: true
                         text: sclProfiles.hasProfiles ?
                             (sclProfiles.selectedProfile.svId || "Compiled SCL") :
                             "Development profile"
                         color: theme.text
                         font.family: root.uiFont
-                        font.pixelSize: 17
+                        font.pixelSize: root.compactLayout ? 14 : 16
                         font.weight: Font.DemiBold
+                        elide: Text.ElideRight
                     }
                     Quiet {
                         Layout.fillWidth: true
@@ -569,7 +739,7 @@ ApplicationWindow {
                 ColumnLayout {
                     visible: sclProfiles.hasProfiles
                     Layout.fillWidth: true
-                    spacing: 7
+                    spacing: 6
                     Kicker { text: "RESOLVED STREAM" }
                     ComboBox {
                         Layout.fillWidth: true
@@ -578,24 +748,25 @@ ApplicationWindow {
                         currentIndex: sclProfiles.selectedIndex
                         enabled: !device.running
                         font.family: root.uiFont
-                        font.pixelSize: 11
+                        font.pixelSize: 10
                         onActivated: {
                             sclProfiles.selectStream(currentIndex)
                             root.profileDirty = true
                         }
                     }
+
                     GridLayout {
                         Layout.fillWidth: true
                         columns: 2
                         columnSpacing: 8
-                        rowSpacing: 6
+                        rowSpacing: 5
                         Quiet { text: "Class" }
                         Label {
                             text: "CLASS " + (sclProfiles.selectedProfile.compatibilityClass || "—")
                             color: sclProfiles.selectedProfile.compatibilityClass === "A" ? theme.green :
                                    sclProfiles.selectedProfile.compatibilityClass === "B" ? theme.amber : theme.red
                             font.family: root.uiFont
-                            font.pixelSize: 10
+                            font.pixelSize: 9
                             font.weight: Font.Bold
                         }
                         Quiet { text: "Support" }
@@ -608,16 +779,10 @@ ApplicationWindow {
                             Layout.fillWidth: true
                         }
                         Quiet { text: "APPID" }
-                        Label {
-                            text: sclProfiles.selectedProfile.appIdHex || "—"
-                            color: theme.textSoft
-                            font.family: root.monoFont
-                            font.pixelSize: 9
-                        }
+                        Label { text: sclProfiles.selectedProfile.appIdHex || "—"; color: theme.textSoft; font.family: root.monoFont; font.pixelSize: 9 }
                         Quiet { text: "Rate" }
                         Label {
-                            text: sclProfiles.selectedProfile.publisherRate ?
-                                sclProfiles.selectedProfile.publisherRate + "/s" : "—"
+                            text: sclProfiles.selectedProfile.publisherRate ? sclProfiles.selectedProfile.publisherRate + "/s" : "—"
                             color: theme.textSoft
                             font.family: root.monoFont
                             font.pixelSize: 9
@@ -625,21 +790,20 @@ ApplicationWindow {
                         Quiet { text: "VLAN" }
                         Label {
                             text: sclProfiles.selectedProfile.vlanPresent ?
-                                "P" + sclProfiles.selectedProfile.vlanPriority + " · VID " + sclProfiles.selectedProfile.vlanId :
-                                "untagged"
+                                "P" + sclProfiles.selectedProfile.vlanPriority + " · " + sclProfiles.selectedProfile.vlanId : "untagged"
                             color: theme.textSoft
                             font.family: root.monoFont
                             font.pixelSize: 9
                         }
                         Quiet { text: "Payload" }
                         Label {
-                            text: sclProfiles.selectedProfile.payloadBytes ?
-                                sclProfiles.selectedProfile.payloadBytes + " B" : "—"
+                            text: sclProfiles.selectedProfile.payloadBytes ? sclProfiles.selectedProfile.payloadBytes + " B" : "—"
                             color: theme.textSoft
                             font.family: root.monoFont
                             font.pixelSize: 9
                         }
                     }
+
                     Quiet {
                         Layout.fillWidth: true
                         visible: (sclProfiles.selectedProfile.warnings || []).length > 0 ||
@@ -647,8 +811,7 @@ ApplicationWindow {
                         wrapMode: Text.WordWrap
                         maximumLineCount: 3
                         elide: Text.ElideRight
-                        color: sclProfiles.selectedProfile.errors && sclProfiles.selectedProfile.errors.length ?
-                            theme.red : theme.amber
+                        color: sclProfiles.selectedProfile.errors && sclProfiles.selectedProfile.errors.length ? theme.red : theme.amber
                         text: sclProfiles.selectedProfile.errors && sclProfiles.selectedProfile.errors.length ?
                             sclProfiles.selectedProfile.errors[0] : sclProfiles.selectedProfile.warnings[0]
                     }
@@ -657,27 +820,26 @@ ApplicationWindow {
                 ColumnLayout {
                     visible: sclProfiles.selectedProfile.compatibilityClass === "B"
                     Layout.fillWidth: true
-                    spacing: 7
+                    spacing: 6
                     Kicker { text: "COUNTER POLICY" }
                     Quiet {
                         Layout.fillWidth: true
                         wrapMode: Text.WordWrap
-                        text: "Candidate smpCnt modulus requires explicit profile/evidence confirmation before deployment."
+                        text: "Candidate smpCnt modulus requires explicit evidence confirmation."
                     }
                     RowLayout {
                         Layout.fillWidth: true
-                        TextField {
+                        NumericField {
                             id: counterField
                             Layout.fillWidth: true
+                            compact: true
                             text: sclProfiles.selectedProfile.counterModulus || ""
-                            placeholderText: "modulus"
-                            font.family: root.monoFont
                             validator: IntValidator { bottom: 1; top: 65535 }
                         }
                         CalmButton {
                             text: "Confirm"
                             onClicked: {
-                                if (sclProfiles.confirmCounterModulus(parseInt(counterField.text)))
+                                if (counterField.acceptableInput && sclProfiles.confirmCounterModulus(parseInt(counterField.text)))
                                     root.profileDirty = true
                             }
                         }
@@ -686,39 +848,44 @@ ApplicationWindow {
 
                 ColumnLayout {
                     Layout.fillWidth: true
-                    spacing: 6
-                    Kicker { text: "ENGINEERING SCALING" }
-                    Quiet {
-                        Layout.fillWidth: true
-                        wrapMode: Text.WordWrap
-                        text: "Explicit test conversion; generic SCL is not assumed to define physical scaling."
-                    }
+                    spacing: 5
+                    Kicker { text: "SCALING" }
                     RowLayout {
-                        Quiet { text: "Current"; Layout.preferredWidth: 48 }
-                        TextField {
+                        Layout.fillWidth: true
+                        Quiet { text: "I"; Layout.preferredWidth: 18 }
+                        NumericField {
                             Layout.fillWidth: true
+                            compact: true
                             text: root.currentScale.toString()
-                            font.family: root.monoFont
-                            validator: DoubleValidator { bottom: 0.000001 }
+                            validator: DoubleValidator { bottom: 0.000001; top: 2147483647; decimals: 6 }
                             onEditingFinished: {
-                                var value = parseFloat(text)
-                                if (value > 0)
+                                var value = root.parseOperatorNumber(text)
+                                if (acceptableInput && isFinite(value) && value > 0) {
                                     root.currentScale = value
+                                    if (device.connected) root.applyGroupSignals(0)
+                                } else {
+                                    text = root.currentScale.toString()
+                                }
                             }
                         }
                         Quiet { text: "ct/A" }
                     }
                     RowLayout {
-                        Quiet { text: "Voltage"; Layout.preferredWidth: 48 }
-                        TextField {
+                        Layout.fillWidth: true
+                        Quiet { text: "U"; Layout.preferredWidth: 18 }
+                        NumericField {
                             Layout.fillWidth: true
+                            compact: true
                             text: root.voltageScale.toString()
-                            font.family: root.monoFont
-                            validator: DoubleValidator { bottom: 0.000001 }
+                            validator: DoubleValidator { bottom: 0.000001; top: 2147483647; decimals: 6 }
                             onEditingFinished: {
-                                var value = parseFloat(text)
-                                if (value > 0)
+                                var value = root.parseOperatorNumber(text)
+                                if (acceptableInput && isFinite(value) && value > 0) {
                                     root.voltageScale = value
+                                    if (device.connected) root.applyGroupSignals(1)
+                                } else {
+                                    text = root.voltageScale.toString()
+                                }
                             }
                         }
                         Quiet { text: "ct/V" }
@@ -737,13 +904,13 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     columns: 2
                     columnSpacing: 8
-                    rowSpacing: 5
+                    rowSpacing: 4
                     Quiet { text: "Rate" }
                     Label { text: device.fps; color: theme.textSoft; font.family: root.monoFont; font.pixelSize: 9; Layout.alignment: Qt.AlignRight }
                     Quiet { text: "Missed" }
-                    Label { text: device.missed; color: theme.textSoft; font.family: root.monoFont; font.pixelSize: 9; Layout.alignment: Qt.AlignRight }
+                    Label { text: device.missed; color: Number(device.missed) > 0 ? theme.amber : theme.textSoft; font.family: root.monoFont; font.pixelSize: 9; Layout.alignment: Qt.AlignRight }
                     Quiet { text: "TX fail" }
-                    Label { text: device.txFailures; color: theme.textSoft; font.family: root.monoFont; font.pixelSize: 9; Layout.alignment: Qt.AlignRight }
+                    Label { text: device.txFailures; color: Number(device.txFailures) > 0 ? theme.red : theme.textSoft; font.family: root.monoFont; font.pixelSize: 9; Layout.alignment: Qt.AlignRight }
                     Quiet { text: "Generation" }
                     Label { text: device.signalGeneration; color: theme.textSoft; font.family: root.monoFont; font.pixelSize: 9; Layout.alignment: Qt.AlignRight }
                 }
@@ -753,100 +920,133 @@ ApplicationWindow {
         Surface {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.minimumWidth: 560
+            Layout.minimumWidth: root.compactLayout ? 500 : 560
+
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 18
-                spacing: 13
+                anchors.margins: root.compactLayout ? 14 : 17
+                spacing: 11
 
                 RowLayout {
                     Layout.fillWidth: true
                     ColumnLayout {
-                        spacing: 2
+                        spacing: 1
                         Kicker { text: "INJECTION WORKSPACE" }
                         Label {
                             text: "Manual Injection"
                             color: theme.text
                             font.family: root.uiFont
-                            font.pixelSize: 23
+                            font.pixelSize: root.compactLayout ? 19 : 22
                             font.weight: Font.DemiBold
                         }
                     }
                     Item { Layout.fillWidth: true }
-                    Label {
-                        text: device.running ? "● INJECTING" : "STOPPED"
-                        color: device.running ? theme.green : theme.muted
-                        font.family: root.monoFont
-                        font.pixelSize: 9
-                        font.weight: Font.Bold
+                    Rectangle {
+                        implicitWidth: applyText.implicitWidth + 18
+                        implicitHeight: 24
+                        radius: 6
+                        color: device.connected ? theme.greenSoft : "#141b23"
+                        border.width: 1
+                        border.color: device.connected ? "#2c674e" : theme.lineSoft
+                        Label {
+                            id: applyText
+                            anchors.centerIn: parent
+                            text: device.connected ? "LIVE APPLY" : "LOCAL EDIT"
+                            color: device.connected ? theme.green : theme.muted
+                            font.family: root.monoFont
+                            font.pixelSize: 8
+                            font.weight: Font.Bold
+                        }
                     }
                 }
 
                 Rectangle {
                     Layout.fillWidth: true
-                    height: 58
-                    radius: 9
+                    height: 56
+                    radius: 8
                     color: theme.surface2
+                    border.width: 1
+                    border.color: theme.lineSoft
+
                     RowLayout {
                         anchors.fill: parent
-                        anchors.leftMargin: 14
-                        anchors.rightMargin: 14
-                        spacing: 10
+                        anchors.leftMargin: 13
+                        anchors.rightMargin: 13
+                        spacing: 9
+
                         ColumnLayout {
                             spacing: 0
                             Kicker { text: "FREQUENCY" }
                             RowLayout {
-                                TextField {
+                                NumericField {
                                     id: frequencyField
+                                    implicitWidth: 88
                                     text: "50.000"
-                                    implicitWidth: 82
-                                    selectByMouse: true
-                                    color: theme.text
-                                    font.family: root.monoFont
-                                    font.pixelSize: 16
-                                    background: Item {}
-                                    onTextEdited: waveform.requestPaint()
+                                    invalidInput: !acceptableInput
+                                    validator: DoubleValidator { bottom: 0.001; top: 1000.0; decimals: 3 }
+                                    onTextEdited: {
+                                        var value = root.parseOperatorNumber(text)
+                                        if (acceptableInput && root.validFrequency(value)) {
+                                            invalidInput = false
+                                            root.signalFrequency = value
+                                            waveform.requestPaint()
+                                            if (device.connected) device.setFrequency(value)
+                                        } else {
+                                            invalidInput = true
+                                        }
+                                    }
                                     onEditingFinished: {
-                                        if (root.liveApply && device.connected)
-                                            device.setFrequency(parseFloat(text))
+                                        var value = root.parseOperatorNumber(text)
+                                        if (!acceptableInput || !root.validFrequency(value)) {
+                                            text = root.signalFrequency.toFixed(3)
+                                            invalidInput = false
+                                            root.showMessage("Frequency must be greater than 0 and not exceed 1000 Hz.", true)
+                                        } else {
+                                            text = value.toFixed(3)
+                                        }
                                     }
                                 }
                                 Quiet { text: "Hz" }
                             }
                         }
+
                         CalmButton {
                             text: "50"
                             onClicked: {
+                                root.signalFrequency = 50
                                 frequencyField.text = "50.000"
+                                frequencyField.invalidInput = false
                                 waveform.requestPaint()
-                                if (device.connected && root.liveApply)
-                                    device.setFrequency(50)
+                                if (device.connected) device.setFrequency(50)
                             }
                         }
                         CalmButton {
                             text: "60"
                             onClicked: {
+                                root.signalFrequency = 60
                                 frequencyField.text = "60.000"
+                                frequencyField.invalidInput = false
                                 waveform.requestPaint()
-                                if (device.connected && root.liveApply)
-                                    device.setFrequency(60)
+                                if (device.connected) device.setFrequency(60)
                             }
                         }
-                        Rectangle { width: 1; height: 28; color: theme.lineSoft }
+
+                        Rectangle { width: 1; height: 26; color: theme.lineSoft }
+
                         CheckBox {
                             checked: root.phaseLink
                             text: "3-phase link"
                             onToggled: root.phaseLink = checked
                             font.family: root.uiFont
-                            font.pixelSize: 11
+                            font.pixelSize: 10
                         }
+
                         Item { Layout.fillWidth: true }
-                        CheckBox {
-                            checked: root.liveApply
-                            text: "Live apply"
-                            onToggled: root.liveApply = checked
-                            font.family: root.uiFont
-                            font.pixelSize: 11
+
+                        Quiet {
+                            visible: !root.compactLayout
+                            text: device.connected ? "Valid edits → SMV immediately" : "Connect to stream edits live"
+                            color: device.connected ? theme.green : theme.muted
                         }
                     }
                 }
@@ -854,13 +1054,13 @@ ApplicationWindow {
                 RowLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    spacing: 12
+                    spacing: 10
 
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         color: theme.surface2
-                        radius: 9
+                        radius: 8
                         border.color: theme.lineSoft
                         ColumnLayout {
                             anchors.fill: parent
@@ -890,7 +1090,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         color: theme.surface2
-                        radius: 9
+                        radius: 8
                         border.color: theme.lineSoft
                         ColumnLayout {
                             anchors.fill: parent
@@ -928,50 +1128,54 @@ ApplicationWindow {
                         font.pixelSize: 10
                         font.weight: Font.Bold
                     }
-                    Quiet {
-                        text: activeMagnitude.toFixed(3) + " " + activeUnit + " RMS · " +
-                              activePhase.toFixed(2) + "°"
-                    }
+                    Quiet { text: activeMagnitude.toFixed(3) + " " + activeUnit + " RMS · " + activePhase.toFixed(2) + "°" }
                     Item { Layout.fillWidth: true }
                     Quiet { text: "Quality" }
-                    TextField {
+                    NumericField {
                         id: qualityField
-                        implicitWidth: 98
+                        implicitWidth: 102
+                        compact: true
                         text: "0x" + (Number(root.activeQuality) >>> 0).toString(16).padStart(8, "0").toUpperCase()
-                        color: theme.textSoft
-                        font.family: root.monoFont
-                        font.pixelSize: 9
                         onEditingFinished: {
                             var trimmed = text.trim()
                             var qualityValue = trimmed.toLowerCase().startsWith("0x") ?
                                 parseInt(trimmed.substring(2), 16) : parseInt(trimmed, 10)
-                            if (!isNaN(qualityValue) && qualityValue >= 0)
+                            if (!isNaN(qualityValue) && qualityValue >= 0 && qualityValue <= 0xFFFFFFFF) {
                                 root.setActiveQuality(qualityValue)
+                                text = "0x" + (qualityValue >>> 0).toString(16).padStart(8, "0").toUpperCase()
+                                invalidInput = false
+                            } else {
+                                invalidInput = true
+                                text = "0x" + (Number(root.activeQuality) >>> 0).toString(16).padStart(8, "0").toUpperCase()
+                                root.showMessage("Quality must be a valid 32-bit value.", true)
+                            }
                         }
                     }
-                    Quiet { text: "↑↓ channel  ←→ field  Enter next" }
+                    Quiet { visible: !root.compactLayout; text: "↑↓ channel  ←→ field  Enter next" }
                 }
             }
         }
 
         Surface {
-            Layout.preferredWidth: 386
+            Layout.preferredWidth: root.compactLayout ? 304 : 386
+            Layout.minimumWidth: root.compactLayout ? 286 : 330
             Layout.fillHeight: true
+
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 16
-                spacing: 10
+                anchors.margins: root.compactLayout ? 12 : 15
+                spacing: 9
 
                 RowLayout {
                     Layout.fillWidth: true
                     ColumnLayout {
-                        spacing: 2
+                        spacing: 1
                         Kicker { text: "GENERATED SETPOINT" }
                         Label {
                             text: "Signal Preview"
                             color: theme.text
                             font.family: root.uiFont
-                            font.pixelSize: 19
+                            font.pixelSize: root.compactLayout ? 16 : 18
                             font.weight: Font.DemiBold
                         }
                     }
@@ -981,8 +1185,7 @@ ApplicationWindow {
 
                 PreviewTitle {
                     titleText: "Phasor"
-                    detailText: activeSignal + " · " + activeMagnitude.toFixed(3) + " " + activeUnit +
-                                " ∠ " + activePhase.toFixed(2) + "°"
+                    detailText: activeSignal + " · " + activeMagnitude.toFixed(3) + " " + activeUnit + " ∠ " + activePhase.toFixed(2) + "°"
                 }
 
                 Canvas {
@@ -995,11 +1198,9 @@ ApplicationWindow {
                     onPaint: {
                         var ctx = getContext("2d")
                         ctx.reset()
-                        var widthValue = width
-                        var heightValue = height
-                        var centerX = widthValue / 2
-                        var centerY = heightValue / 2
-                        var radiusValue = Math.min(widthValue, heightValue) * 0.39
+                        var centerX = width / 2
+                        var centerY = height / 2
+                        var radiusValue = Math.min(width, height) * 0.39
 
                         ctx.strokeStyle = "#283441"
                         ctx.lineWidth = 1
@@ -1028,8 +1229,7 @@ ApplicationWindow {
                                 if (!signal.enabled || signal.magnitude <= 0)
                                     continue
                                 var angleValue = signal.phase * Math.PI / 180
-                                var length = radiusValue * scale *
-                                    (0.30 + 0.70 * Math.min(1, signal.magnitude / maxMagnitude))
+                                var length = radiusValue * scale * (0.30 + 0.70 * Math.min(1, signal.magnitude / maxMagnitude))
                                 var endX = centerX + Math.cos(angleValue) * length
                                 var endY = centerY - Math.sin(angleValue) * length
                                 var active = signal.signalId === root.activeSignal
@@ -1038,7 +1238,7 @@ ApplicationWindow {
                                 ctx.globalAlpha = active ? 1 : 0.70
                                 ctx.strokeStyle = signal.traceColor
                                 ctx.fillStyle = signal.traceColor
-                                ctx.lineWidth = active ? 3.2 : 2.0
+                                ctx.lineWidth = active ? 3.0 : 1.8
                                 ctx.lineCap = "round"
                                 ctx.setLineDash(dashed ? [5, 4] : [])
                                 ctx.beginPath()
@@ -1050,12 +1250,8 @@ ApplicationWindow {
                                 var arrowHead = active ? 8 : 6
                                 ctx.beginPath()
                                 ctx.moveTo(endX, endY)
-                                ctx.lineTo(
-                                    endX - Math.cos(angleValue - 0.45) * arrowHead,
-                                    endY + Math.sin(angleValue - 0.45) * arrowHead)
-                                ctx.lineTo(
-                                    endX - Math.cos(angleValue + 0.45) * arrowHead,
-                                    endY + Math.sin(angleValue + 0.45) * arrowHead)
+                                ctx.lineTo(endX - Math.cos(angleValue - 0.45) * arrowHead, endY + Math.sin(angleValue - 0.45) * arrowHead)
+                                ctx.lineTo(endX - Math.cos(angleValue + 0.45) * arrowHead, endY + Math.sin(angleValue + 0.45) * arrowHead)
                                 ctx.closePath()
                                 ctx.fill()
 
@@ -1072,10 +1268,7 @@ ApplicationWindow {
                     }
                 }
 
-                PreviewTitle {
-                    titleText: "Waveform"
-                    detailText: frequencyField.text + " Hz · 40 ms"
-                }
+                PreviewTitle { titleText: "Waveform"; detailText: root.signalFrequency.toFixed(3) + " Hz · 40 ms" }
 
                 Canvas {
                     id: waveform
@@ -1097,7 +1290,7 @@ ApplicationWindow {
                         var laneHeight = (plotHeight - gap) / 2
                         var voltageY = top + laneHeight / 2
                         var currentY = top + laneHeight + gap + laneHeight / 2
-                        var frequency = parseFloat(frequencyField.text) || 50
+                        var frequency = root.signalFrequency
 
                         ctx.strokeStyle = "#202b36"
                         ctx.lineWidth = 1
@@ -1128,27 +1321,24 @@ ApplicationWindow {
                                 if (!signal.enabled || signal.magnitude <= 0)
                                     continue
                                 var active = signal.signalId === root.activeSignal
-                                var amplitude = laneHeight * 0.39 *
-                                    Math.min(1, signal.magnitude / maxMagnitude)
+                                var amplitude = laneHeight * 0.39 * Math.min(1, signal.magnitude / maxMagnitude)
                                 var phaseRadians = signal.phase * Math.PI / 180
 
                                 ctx.save()
                                 ctx.strokeStyle = signal.traceColor
                                 ctx.globalAlpha = active ? 1 : 0.64
-                                ctx.lineWidth = active ? 2.6 : 1.7
+                                ctx.lineWidth = active ? 2.5 : 1.6
                                 ctx.lineCap = "round"
                                 ctx.setLineDash(dashed ? [5, 4] : [])
                                 ctx.beginPath()
-                                for (var point = 0; point <= 220; ++point) {
-                                    var ratio = point / 220
+                                for (var point = 0; point <= 180; ++point) {
+                                    var ratio = point / 180
                                     var time = 0.04 * ratio
                                     var sample = Math.sin(2 * Math.PI * frequency * time + phaseRadians)
                                     var x = left + plotWidth * ratio
                                     var y = center - sample * amplitude
-                                    if (point === 0)
-                                        ctx.moveTo(x, y)
-                                    else
-                                        ctx.lineTo(x, y)
+                                    if (point === 0) ctx.moveTo(x, y)
+                                    else ctx.lineTo(x, y)
                                 }
                                 ctx.stroke()
                                 ctx.restore()
@@ -1174,16 +1364,17 @@ ApplicationWindow {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 78
-        radius: 8
+        radius: 7
         color: "#18212b"
-        border.color: device.lastError.length > 0 ? "#70404a" : "#36536f"
+        border.width: 1
+        border.color: root.transientError || device.lastError.length > 0 ? "#70404a" : "#36536f"
         implicitWidth: messageLabel.implicitWidth + 28
         implicitHeight: 38
         Label {
             id: messageLabel
             anchors.centerIn: parent
             text: root.transientMessage.length ? root.transientMessage : device.lastError
-            color: theme.textSoft
+            color: root.transientError || device.lastError.length > 0 ? "#ffb3bb" : theme.textSoft
             font.family: root.uiFont
             font.pixelSize: 10
         }
@@ -1194,12 +1385,12 @@ ApplicationWindow {
         required property string symbolText
         required property string unitText
         Layout.fillWidth: true
-        Layout.preferredHeight: 46
-        Layout.leftMargin: 12
-        Layout.rightMargin: 12
+        Layout.preferredHeight: 44
+        Layout.leftMargin: 11
+        Layout.rightMargin: 11
         Rectangle {
-            width: 23
-            height: 23
+            width: 22
+            height: 22
             radius: 5
             color: "#152235"
             Label {
@@ -1215,7 +1406,7 @@ ApplicationWindow {
             text: titleText
             color: theme.textSoft
             font.family: root.uiFont
-            font.pixelSize: 13
+            font.pixelSize: 12
             font.weight: Font.DemiBold
         }
         Item { Layout.fillWidth: true }
@@ -1224,14 +1415,14 @@ ApplicationWindow {
 
     component MatrixColumns: RowLayout {
         Layout.fillWidth: true
-        Layout.preferredHeight: 30
-        Layout.leftMargin: 10
-        Layout.rightMargin: 10
-        spacing: 8
+        Layout.preferredHeight: 28
+        Layout.leftMargin: 9
+        Layout.rightMargin: 9
+        spacing: 7
         Quiet { text: "ON"; Layout.preferredWidth: 28; font.pixelSize: 8 }
         Quiet { text: "CH"; Layout.preferredWidth: 34; font.pixelSize: 8 }
         Quiet { text: "MAGNITUDE"; Layout.fillWidth: true; font.pixelSize: 8 }
-        Quiet { text: "PHASE"; Layout.preferredWidth: 108; font.pixelSize: 8 }
+        Quiet { text: "PHASE"; Layout.preferredWidth: root.compactLayout ? 86 : 104; font.pixelSize: 8 }
     }
 
     component SignalRow: Rectangle {
@@ -1249,14 +1440,23 @@ ApplicationWindow {
         property alias phaseEditor: phaseField
 
         Layout.fillWidth: true
-        Layout.preferredHeight: 58
+        Layout.preferredHeight: root.compactLayout ? 54 : 57
         color: magnitudeField.activeFocus || phaseField.activeFocus ? "#141d27" : "transparent"
+
+        onMagChanged: {
+            if (!magnitudeField.activeFocus)
+                magnitudeField.text = mag.toFixed(3)
+        }
+        onAngleChanged: {
+            if (!phaseField.activeFocus)
+                phaseField.text = angle.toFixed(2)
+        }
 
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 10
-            anchors.rightMargin: 10
-            spacing: 8
+            anchors.leftMargin: 9
+            anchors.rightMargin: 9
+            spacing: 7
 
             CheckBox {
                 Layout.preferredWidth: 28
@@ -1274,45 +1474,47 @@ ApplicationWindow {
             RowLayout {
                 Layout.preferredWidth: 34
                 spacing: 5
-                Rectangle {
-                    width: 6
-                    height: 6
-                    radius: 3
-                    color: signalRow.phaseColor
-                }
+                Rectangle { width: 6; height: 6; radius: 3; color: signalRow.phaseColor }
                 Label {
                     text: signalRow.sid
                     color: theme.text
                     font.family: root.monoFont
-                    font.pixelSize: 11
+                    font.pixelSize: 10
                     font.weight: Font.Bold
                 }
             }
 
-            TextField {
+            NumericField {
                 id: magnitudeField
                 Layout.fillWidth: true
                 text: signalRow.mag.toFixed(3)
-                selectByMouse: true
-                horizontalAlignment: Text.AlignRight
-                color: theme.text
-                font.family: root.monoFont
-                font.pixelSize: 13
-                font.weight: Font.DemiBold
-                background: Rectangle {
-                    radius: 6
-                    color: magnitudeField.activeFocus ? "#0c141d" : "#111820"
-                    border.width: magnitudeField.activeFocus ? 1 : 0
-                    border.color: theme.accent
-                }
+                invalidInput: false
                 onActiveFocusChanged: {
                     if (activeFocus) {
                         root.selectSignal(signalRow.groupIndex, signalRow.rowIndex)
+                        text = signalRow.mag.toFixed(3)
                         selectAll()
                     }
                 }
-                onEditingFinished:
-                    root.editSignal(signalRow.groupIndex, signalRow.rowIndex, "magnitude", parseFloat(text))
+                onTextEdited: {
+                    var value = root.parseOperatorNumber(text)
+                    if (root.validMagnitude(signalRow.groupIndex, value)) {
+                        invalidInput = false
+                        root.editSignal(signalRow.groupIndex, signalRow.rowIndex, "magnitude", value)
+                    } else {
+                        invalidInput = true
+                    }
+                }
+                onEditingFinished: {
+                    var value = root.parseOperatorNumber(text)
+                    if (!root.validMagnitude(signalRow.groupIndex, value)) {
+                        text = signalRow.mag.toFixed(3)
+                        invalidInput = false
+                        root.showMessage(signalRow.sid + " magnitude is outside the valid wire/scaling range.", true)
+                    } else {
+                        text = value.toFixed(3)
+                    }
+                }
                 Keys.onPressed: function(event) {
                     if ([Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right].indexOf(event.key) >= 0) {
                         root.navigate(signalRow.groupIndex, signalRow.rowIndex, 0, event.key)
@@ -1324,30 +1526,37 @@ ApplicationWindow {
                 }
             }
 
-            TextField {
+            NumericField {
                 id: phaseField
-                Layout.preferredWidth: 108
+                Layout.preferredWidth: root.compactLayout ? 86 : 104
                 text: signalRow.angle.toFixed(2)
-                selectByMouse: true
-                horizontalAlignment: Text.AlignRight
-                color: theme.text
-                font.family: root.monoFont
-                font.pixelSize: 13
-                font.weight: Font.DemiBold
-                background: Rectangle {
-                    radius: 6
-                    color: phaseField.activeFocus ? "#0c141d" : "#111820"
-                    border.width: phaseField.activeFocus ? 1 : 0
-                    border.color: theme.accent
-                }
+                invalidInput: false
                 onActiveFocusChanged: {
                     if (activeFocus) {
                         root.selectSignal(signalRow.groupIndex, signalRow.rowIndex)
+                        text = signalRow.angle.toFixed(2)
                         selectAll()
                     }
                 }
-                onEditingFinished:
-                    root.editSignal(signalRow.groupIndex, signalRow.rowIndex, "phase", parseFloat(text))
+                onTextEdited: {
+                    var value = root.parseOperatorNumber(text)
+                    if (root.validPhase(value)) {
+                        invalidInput = false
+                        root.editSignal(signalRow.groupIndex, signalRow.rowIndex, "phase", value)
+                    } else {
+                        invalidInput = true
+                    }
+                }
+                onEditingFinished: {
+                    var value = root.parseOperatorNumber(text)
+                    if (!root.validPhase(value)) {
+                        text = signalRow.angle.toFixed(2)
+                        invalidInput = false
+                        root.showMessage(signalRow.sid + " phase must stay within ±360000°.", true)
+                    } else {
+                        text = value.toFixed(2)
+                    }
+                }
                 Keys.onPressed: function(event) {
                     if ([Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right].indexOf(event.key) >= 0) {
                         root.navigate(signalRow.groupIndex, signalRow.rowIndex, 1, event.key)
@@ -1386,6 +1595,7 @@ ApplicationWindow {
             color: theme.muted
             font.family: root.monoFont
             font.pixelSize: 8
+            elide: Text.ElideRight
         }
     }
 }
