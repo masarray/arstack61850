@@ -149,13 +149,15 @@ once(
     if (connection.state() != mms::MmsStaticConnectionState::established ||
         connection.mms_presentation_context_id() == 0U || host.last_oper.empty()) return false;
     try {
+        const auto values = mms::MmsDataCodec::decode_all(host.last_oper);
+        if (values.size() != 1U) return false;
         mms::MmsInformationReport report;
         report.variable_references.push_back(
             mms::MmsObjectName::domain_specific(host.manifest->domain, host.oper_item));
-        report.items.push_back({
-            0U,
-            mms::MmsDataCodec::decode(host.last_oper),
-            std::nullopt});
+        mms::MmsInformationReportItem item;
+        item.index = 0U;
+        item.value = values.front();
+        report.items.push_back(std::move(item));
         const auto raw = mms::MmsInformationReportCodec::encode_pdu(report);
         if (raw.empty() || raw.size() > buffers.report_response.size()) return false;
         std::copy(raw.begin(), raw.end(), buffers.report_response.begin());
