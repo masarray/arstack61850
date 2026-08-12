@@ -22,7 +22,14 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          echo "aligned-run-8"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('tools/agent_p0_patch_launcher.py')
+          text = p.read_text(encoding='utf-8')
+          text = text.replace("source = source[:tail] + r'''#", 'source = source[:tail] + r\"\"\"#', 1)
+          text = text.replace("\n'''\n\nexec(compile(source, \"agent_p0_full_model_patch.py\", \"exec\")", "\n\"\"\"\n\nexec(compile(source, \"agent_p0_full_model_patch.py\", \"exec\")", 1)
+          p.write_text(text, encoding='utf-8')
+          PY
           python3 tools/agent_p0_patch_launcher.py 2>&1 | tee p0-patch.log
       - name: Upload patch diagnostics
         if: always()
