@@ -92,9 +92,9 @@ public:
     void reset() noexcept {
         status_ = {};
         selected_quality_.reset();
-        selected_announce_last_seen_.reset();
+        selected_announce_last_seen_valid_ = false;
         selected_source_timeout_ = options_.source_timeout;
-        last_path_delay_at_.reset();
+        last_path_delay_at_valid_ = false;
         clear_exchanges();
     }
 
@@ -145,12 +145,13 @@ public:
             ptp_announce_is_globally_traceable(frame);
         selected_quality_ = quality;
         selected_announce_last_seen_ = now;
+        selected_announce_last_seen_valid_ = true;
         selected_source_timeout_ = receiver_detail::announce_source_timeout(
             frame.header.log_message_interval,
             options_.source_timeout);
         if (changed) {
             status_.mean_path_delay_ns.reset();
-            last_path_delay_at_.reset();
+            last_path_delay_at_valid_ = false;
             clear_exchanges();
         }
         return changed;
@@ -170,6 +171,7 @@ public:
             false,
             now,
         };
+        pending_pdelay_valid_ = true;
     }
 
     [[nodiscard]] bool observe_pdelay_response(
@@ -185,20 +187,20 @@ public:
             requester);
         if (!profile_matches(frame) ||
             frame.header.message_type != PtpMessageType::pdelay_resp ||
-            !pending_pdelay_.has_value() ||
+            !pending_pdelay_valid_ ||
             !body_valid ||
             requester != options_.local_port_identity ||
-            frame.header.sequence_id != pending_pdelay_->sequence_id ||
+            frame.header.sequence_id != pending_pdelay_.sequence_id ||
             !source_matches_selected(frame.header.source_port_identity) ||
             selected_announce_stale(now)) {
             ++status_.rejected_exchanges;
             return false;
         }
         ++status_.pdelay_responses;
-        pending_pdelay_->t2 = peer_request_rx;
-        pending_pdelay_->t4 = local_rx_timestamp;
-        pending_pdelay_->response_correction_field = frame.header.correction_field;
-        pending_pdelay_->response_received = true;
+        pending_pdelay_.t2 = peer_request_rx;
+        pending_pdelay_.t4 = local_rx_timestamp;
+        pending_pdelay_.response_correction_field = frame.header.correction_field;
+        pending_pdelay_.response_received = true;
         return true;
     }
 
@@ -215,25 +217,25 @@ public:
             requester);
         if (!profile_matches(frame) ||
             frame.header.message_type != PtpMessageType::pdelay_resp_follow_up ||
-            !pending_pdelay_.has_value() ||
-            !pending_pdelay_->response_received ||
+            !pending_pdelay_valid_ ||
+            !pending_pdelay_.response_received ||
             !body_valid ||
             requester != options_.local_port_identity ||
-            frame.header.sequence_id != pending_pdelay_->sequence_id ||
+            frame.header.sequence_id != pending_pdelay_.sequence_id ||
             !source_matches_selected(frame.header.source_port_identity) ||
             selected_announce_stale(now)) {
             ++status_.rejected_exchanges;
             return std::nullopt;
         }
         const PtpPeerDelayExchange exchange{
-            pending_pdelay_->t1,
-            pending_pdelay_->t2,
+            pending_pdelay_.t1,
+            pending_pdelay_.t2,
             peer_response_tx,
-            pending_pdelay_->t4,
-            pending_pdelay_->response_correction_field,
+            pending_pdelay_.t4,
+            pending_pdelay_.response_correction_field,
             frame.header.correction_field,
         };
-        pending_pdelay_.reset();
+        pending_pdelay_valid_ = false;
         const auto measurement = calculate_peer_delay(exchange);
         if (!measurement.has_value()) {
             ++status_.rejected_exchanges;
@@ -241,6 +243,7 @@ public:
         }
         status_.mean_path_delay_ns = measurement->mean_path_delay_ns;
         last_path_delay_at_ = now;
+        last_path_delay_at_valid_ = true;
         ++status_.completed_pdelay_exchanges;
         return measurement;
     }
@@ -265,10 +268,11 @@ public:
             frame.header.correction_field,
             now,
         };
+        pending_sync_valid_ = true;
         if (frame.header.is_two_step()) return std::nullopt;
         if (!frame.timestamp.has_value()) {
             ++status_.rejected_exchanges;
-            pending_sync_.reset();
+            pending_sync_valid_ = false;
             return std::nullopt;
         }
         return complete_sync(*frame.timestamp, 0LL, frame.header.sequence_id);
@@ -287,9 +291,9 @@ public:
             return std::nullopt;
         }
         ++status_.follow_up_frames;
-        if (!pending_sync_.has_value() ||
-            pending_sync_->source != frame.header.source_port_identity ||
-            pending_sync_->sequence_id != frame.header.sequence_id) {
+        if (!pending_sync_valid_ ||
+            pending_sync_.source != frame.header.source_port_identity ||
+            pending_sync_.sequence_id != frame.header.sequence_id) {
             ++status_.rejected_exchanges;
             return std::nullopt;
         }
@@ -308,31 +312,31 @@ public:
             status_.mean_path_delay_ns.reset();
             status_.selected_source_globally_traceable = false;
             selected_quality_.reset();
-            selected_announce_last_seen_.reset();
+            selected_announce_last_seen_valid_ = false;
             selected_source_timeout_ = options_.source_timeout;
-            last_path_delay_at_.reset();
+            last_path_delay_at_valid_ = false;
             clear_exchanges();
             return true;
         }
 
         if (path_delay_stale(now)) {
             status_.mean_path_delay_ns.reset();
-            last_path_delay_at_.reset();
-            pending_sync_.reset();
+            last_path_delay_at_valid_ = false;
+            pending_sync_valid_ = false;
         }
-        if (pending_sync_.has_value()) {
-            const auto observed_at = pending_sync_->observed_at;
+        if (pending_sync_valid_) {
+            const auto observed_at = pending_sync_.observed_at;
             if (now > observed_at &&
                 now - observed_at > options_.exchange_timeout) {
-                pending_sync_.reset();
+                pending_sync_valid_ = false;
                 ++status_.rejected_exchanges;
             }
         }
-        if (pending_pdelay_.has_value()) {
-            const auto started_at = pending_pdelay_->started_at;
+        if (pending_pdelay_valid_) {
+            const auto started_at = pending_pdelay_.started_at;
             if (now > started_at &&
                 now - started_at > options_.exchange_timeout) {
-                pending_pdelay_.reset();
+                pending_pdelay_valid_ = false;
                 ++status_.rejected_exchanges;
             }
         }
@@ -385,21 +389,19 @@ private:
 
     [[nodiscard]] bool selected_announce_stale(
         const std::chrono::steady_clock::time_point now) const noexcept {
-        if (!selected_announce_last_seen_.has_value()) return false;
-        const auto last_seen = *selected_announce_last_seen_;
-        return now > last_seen &&
-               now - last_seen > selected_source_timeout_;
+        if (!selected_announce_last_seen_valid_) return false;
+        return now > selected_announce_last_seen_ &&
+               now - selected_announce_last_seen_ > selected_source_timeout_;
     }
 
     [[nodiscard]] bool path_delay_stale(
         const std::chrono::steady_clock::time_point now) const noexcept {
         if (!status_.mean_path_delay_ns.has_value() ||
-            !last_path_delay_at_.has_value()) {
+            !last_path_delay_at_valid_) {
             return false;
         }
-        const auto last_path_delay = *last_path_delay_at_;
-        return now > last_path_delay &&
-               now - last_path_delay > options_.path_delay_timeout;
+        return now > last_path_delay_at_ &&
+               now - last_path_delay_at_ > options_.path_delay_timeout;
     }
 
     [[nodiscard]] static bool better_quality(
@@ -424,29 +426,29 @@ private:
     }
 
     void clear_exchanges() noexcept {
-        pending_sync_.reset();
-        pending_pdelay_.reset();
+        pending_sync_valid_ = false;
+        pending_pdelay_valid_ = false;
     }
 
     [[nodiscard]] std::optional<PtpOffsetMeasurement> complete_sync(
         const PtpTimestamp& origin,
         const std::int64_t follow_up_correction_field,
         const std::uint16_t sequence_id) noexcept {
-        if (!pending_sync_.has_value() ||
-            pending_sync_->sequence_id != sequence_id ||
+        if (!pending_sync_valid_ ||
+            pending_sync_.sequence_id != sequence_id ||
             !status_.mean_path_delay_ns.has_value()) {
             ++status_.rejected_exchanges;
             return std::nullopt;
         }
         const PtpSyncExchange exchange{
             origin,
-            pending_sync_->local_rx_timestamp,
+            pending_sync_.local_rx_timestamp,
             *status_.mean_path_delay_ns,
-            pending_sync_->sync_correction_field,
+            pending_sync_.sync_correction_field,
             follow_up_correction_field,
         };
-        const auto source = pending_sync_->source;
-        pending_sync_.reset();
+        const auto source = pending_sync_.source;
+        pending_sync_valid_ = false;
         const auto offset = calculate_offset_from_master(exchange);
         if (!offset.has_value()) {
             ++status_.rejected_exchanges;
@@ -465,11 +467,15 @@ private:
     PtpTimeReceiverOptions options_{};
     PtpTimeReceiverStatus status_{};
     std::optional<AnnounceQuality> selected_quality_;
-    std::optional<std::chrono::steady_clock::time_point> selected_announce_last_seen_;
+    std::chrono::steady_clock::time_point selected_announce_last_seen_{};
+    bool selected_announce_last_seen_valid_{false};
     std::chrono::milliseconds selected_source_timeout_{};
-    std::optional<std::chrono::steady_clock::time_point> last_path_delay_at_;
-    std::optional<PendingSync> pending_sync_;
-    std::optional<PendingPdelay> pending_pdelay_;
+    std::chrono::steady_clock::time_point last_path_delay_at_{};
+    bool last_path_delay_at_valid_{false};
+    PendingSync pending_sync_{};
+    bool pending_sync_valid_{false};
+    PendingPdelay pending_pdelay_{};
+    bool pending_pdelay_valid_{false};
 };
 
 } // namespace ar::iec61850::time_sync
