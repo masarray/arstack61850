@@ -61,6 +61,14 @@ public:
         status_.offset_from_master_ns = measurement.offset_from_master_ns;
         status_.mean_path_delay_ns = measurement.mean_path_delay_ns;
 
+        // FAULT is a safety latch. Timing traffic alone must never restart the
+        // servo or authorize another phase discontinuity after a hard fault.
+        // Recovery requires an explicit reset, which the ESP adapter performs
+        // on a deliberate source reselection/restart path.
+        if (status_.state == PtpDisciplineState::fault) {
+            return {};
+        }
+
         const auto offset_magnitude =
             discipline_detail::magnitude(measurement.offset_from_master_ns);
         const auto fault_limit =
@@ -120,8 +128,7 @@ public:
         status_.consecutive_bad_samples = 0U;
         status_.globally_traceable = measurement.globally_traceable;
         if (status_.state == PtpDisciplineState::unlocked ||
-            status_.state == PtpDisciplineState::holdover ||
-            status_.state == PtpDisciplineState::fault) {
+            status_.state == PtpDisciplineState::holdover) {
             status_.state = PtpDisciplineState::acquiring;
             status_.consecutive_qualified_samples = 0U;
         }
@@ -192,7 +199,8 @@ public:
     void tick(
         const std::chrono::steady_clock::time_point now =
             std::chrono::steady_clock::now()) noexcept {
-        if (!last_accepted_sample_time_.has_value() ||
+        if (status_.state == PtpDisciplineState::fault ||
+            !last_accepted_sample_time_.has_value() ||
             now <= *last_accepted_sample_time_) {
             return;
         }
