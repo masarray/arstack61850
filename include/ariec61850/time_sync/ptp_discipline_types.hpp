@@ -228,6 +228,10 @@ struct PtpDisciplineOptions final {
     std::int64_t unlock_offset_threshold_ns{20'000LL};
     std::int64_t phase_step_threshold_ns{1'000'000LL};
     std::int64_t fault_offset_threshold_ns{5'000'000'000LL};
+    // Allows a fresh receiver to acquire the master's epoch without weakening
+    // normal post-acquisition fault handling. 4e18 ns is below the uint32-second
+    // ESP EMAC clock ceiling while covering the current PTP/TAI epoch for decades.
+    std::int64_t maximum_acquisition_phase_step_ns{4'000'000'000'000'000'000LL};
     std::uint32_t lock_required_samples{8U};
     std::uint32_t unlock_required_samples{3U};
     std::uint32_t invalid_samples_before_fault{8U};
