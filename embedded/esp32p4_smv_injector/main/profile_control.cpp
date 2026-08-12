@@ -4,6 +4,7 @@
 
 #include "live_control.hpp"
 #include "runtime_profile.hpp"
+#include "smp_synch_lab.hpp"
 
 #include "esp_log.h"
 
@@ -81,6 +82,44 @@ bool no_extra(char** save) noexcept {
     return strtok_r(nullptr, kDelimiters, save) == nullptr;
 }
 
+bool parse_smp_synch_mode(char* text, SvSyncPolicyMode& mode) noexcept {
+    if (text == nullptr) return false;
+    uppercase_ascii(text);
+    if (std::strcmp(text, "AUTO") == 0 || std::strcmp(text, "EXTERNAL") == 0) {
+        mode = SvSyncPolicyMode::external_ptp_auto;
+        return true;
+    }
+    if (std::strcmp(text, "0") == 0 || std::strcmp(text, "UNSYNC") == 0 ||
+        std::strcmp(text, "FORCE0") == 0 || std::strcmp(text, "FORCE_0") == 0) {
+        mode = SvSyncPolicyMode::honest_unsynchronized;
+        return true;
+    }
+    if (std::strcmp(text, "1") == 0 || std::strcmp(text, "LOCAL") == 0 ||
+        std::strcmp(text, "FORCE1") == 0 || std::strcmp(text, "FORCE_1") == 0) {
+        mode = SvSyncPolicyMode::local_compatibility;
+        return true;
+    }
+    if (std::strcmp(text, "2") == 0 || std::strcmp(text, "GLOBAL") == 0 ||
+        std::strcmp(text, "FORCE2") == 0 || std::strcmp(text, "FORCE_2") == 0) {
+        mode = SvSyncPolicyMode::global_compatibility;
+        return true;
+    }
+    return false;
+}
+
+void print_smp_synch_policy() noexcept {
+    const auto status = smp_synch_lab_status();
+    const auto mode_name = ar::iec61850::time_sync::sv_sync_policy_name(status.decision.mode);
+    const auto source_name = ar::iec61850::time_sync::smp_synch_source_name(status.decision.source);
+    ESP_LOGI(kTag,
+             "SMPSYNCH mode=%.*s advertised=%u source=%.*s simulated=%u measured=%u",
+             static_cast<int>(mode_name.size()), mode_name.data(),
+             static_cast<unsigned>(status.decision.value),
+             static_cast<int>(source_name.size()), source_name.data(),
+             status.decision.simulated() ? 1U : 0U,
+             status.measured_input_valid ? 1U : 0U);
+}
+
 void print_profile(const RuntimePublisherProfile& profile) noexcept {
     ESP_LOGI(kTag,
              "PROFILE generation=%llu svID=%s APPID=0x%04X rate=%lu wrap=%u confRev=%lu VLAN=%u/%u/%u dataSetField=%u sampleRateField=%u",
@@ -114,6 +153,22 @@ void handle_profile_command(char* arguments) noexcept {
             return;
         }
         print_profile(runtime_profile_snapshot());
+        print_smp_synch_policy();
+        return;
+    }
+
+    // smpSynch is a lab stimulus, not stream identity/layout. It may therefore
+    // change live without rebuilding the deterministic SV packet template.
+    if (std::strcmp(subcommand, "SMPSYNCH") == 0) {
+        char* value = strtok_r(nullptr, kDelimiters, &save);
+        SvSyncPolicyMode mode{};
+        if (!parse_smp_synch_mode(value, mode) || !no_extra(&save)) {
+            ESP_LOGE(kTag, "Usage: PROFILE SMPSYNCH <AUTO|0|1|2>");
+            return;
+        }
+        smp_synch_lab_set_mode(mode);
+        ESP_LOGI(kTag, "Live smpSynch lab policy accepted");
+        print_smp_synch_policy();
         return;
     }
 
