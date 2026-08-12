@@ -36,12 +36,30 @@ namespace receiver_detail {
     return true;
 }
 
+[[nodiscard]] inline std::chrono::milliseconds announce_source_timeout(
+    const std::int8_t log_message_interval,
+    const std::chrono::milliseconds configured_floor) noexcept {
+    // The default 3 s floor already tolerates three 1 s Announce periods and
+    // all faster cadences. Extend only for slower advertised power-of-two
+    // cadences. Unknown/reserved values fall back to the configured floor.
+    if (log_message_interval <= 0 || log_message_interval > 7) {
+        return configured_floor;
+    }
+    const auto shift = static_cast<unsigned>(log_message_interval);
+    const auto interval_ms = static_cast<std::int64_t>(1000LL << shift);
+    const auto missed_message_allowance =
+        std::chrono::milliseconds{interval_ms * 3LL};
+    return std::max(configured_floor, missed_message_allowance);
+}
+
 } // namespace receiver_detail
 
 struct PtpTimeReceiverOptions final {
     std::uint8_t domain_number{};
     std::uint8_t transport_specific{};
     PtpPortIdentity local_port_identity{};
+    // Minimum Announce receipt timeout. Slower selected sources extend this
+    // from their advertised logMessageInterval with a 3-message allowance.
     std::chrono::milliseconds source_timeout{3000};
     std::chrono::milliseconds exchange_timeout{2000};
     // The default is derived from the configured exchange cadence. The ESP
@@ -68,12 +86,14 @@ struct PtpTimeReceiverStatus final {
 class PtpTimeReceiver final {
 public:
     explicit PtpTimeReceiver(PtpTimeReceiverOptions options = {}) noexcept
-        : options_(std::move(options)) {}
+        : options_(std::move(options)),
+          selected_source_timeout_(options_.source_timeout) {}
 
     void reset() noexcept {
         status_ = {};
         selected_quality_.reset();
         selected_announce_last_seen_.reset();
+        selected_source_timeout_ = options_.source_timeout;
         last_path_delay_at_.reset();
         clear_exchanges();
     }
@@ -125,6 +145,9 @@ public:
             ptp_announce_is_globally_traceable(frame);
         selected_quality_ = quality;
         selected_announce_last_seen_ = now;
+        selected_source_timeout_ = receiver_detail::announce_source_timeout(
+            frame.header.log_message_interval,
+            options_.source_timeout);
         if (changed) {
             status_.mean_path_delay_ns.reset();
             last_path_delay_at_.reset();
@@ -286,6 +309,7 @@ public:
             status_.selected_source_globally_traceable = false;
             selected_quality_.reset();
             selected_announce_last_seen_.reset();
+            selected_source_timeout_ = options_.source_timeout;
             last_path_delay_at_.reset();
             clear_exchanges();
             return true;
@@ -359,7 +383,7 @@ private:
         const std::chrono::steady_clock::time_point now) const noexcept {
         return selected_announce_last_seen_.has_value() &&
                now > *selected_announce_last_seen_ &&
-               now - *selected_announce_last_seen_ > options_.source_timeout;
+               now - *selected_announce_last_seen_ > selected_source_timeout_;
     }
 
     [[nodiscard]] bool path_delay_stale(
@@ -434,6 +458,7 @@ private:
     PtpTimeReceiverStatus status_{};
     std::optional<AnnounceQuality> selected_quality_;
     std::optional<std::chrono::steady_clock::time_point> selected_announce_last_seen_;
+    std::chrono::milliseconds selected_source_timeout_{};
     std::optional<std::chrono::steady_clock::time_point> last_path_delay_at_;
     std::optional<PendingSync> pending_sync_;
     std::optional<PendingPdelay> pending_pdelay_;
