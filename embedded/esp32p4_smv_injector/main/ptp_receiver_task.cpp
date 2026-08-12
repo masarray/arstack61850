@@ -547,7 +547,12 @@ void process_rx_event(
 
     switch (event.message_type) {
     case PtpMessageType::announce: {
+        const bool was_globally_traceable =
+            context.receiver->status().selected_source_globally_traceable;
         const bool changed = context.receiver->observe_announce(frame, now);
+        const bool is_globally_traceable =
+            context.receiver->status().selected_source_globally_traceable;
+
         if (changed && context.config.role == AR_PTP_ROLE_TIME_RECEIVER) {
             reset_discipline_for_new_source(context);
             const auto source = context.receiver->status().selected_source;
@@ -556,9 +561,15 @@ void process_rx_event(
                 ESP_LOGI(kTag, "Selected PTP source %s/%u traceable=%s",
                          name.c_str(),
                          static_cast<unsigned>(source->port_number),
-                         context.receiver->status().selected_source_globally_traceable
-                             ? "yes" : "no");
+                         is_globally_traceable ? "yes" : "no");
             }
+        } else if (context.config.role == AR_PTP_ROLE_TIME_RECEIVER &&
+                   context.discipline.has_value() &&
+                   was_globally_traceable &&
+                   !is_globally_traceable) {
+            context.discipline->revoke_global_traceability();
+            ESP_LOGW(kTag,
+                     "Selected PTP source revoked global traceability; measured sync demoted to local");
         }
         break;
     }
@@ -721,6 +732,9 @@ void receiver_task(void* argument) {
         const bool source_dropped = context.receiver->tick(now);
         if (source_dropped) {
             ESP_LOGW(kTag, "Selected PTP source timed out");
+            if (context.discipline.has_value()) {
+                context.discipline->revoke_global_traceability();
+            }
         }
         if (context.discipline.has_value()) {
             const auto previous_state = context.discipline->status().state;
