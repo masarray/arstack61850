@@ -382,8 +382,6 @@ void rejected_measurements_preserve_qualified_telemetry() {
     CHECK(discipline.status().path_delay_jitter_ns == 0LL);
     CHECK(discipline.status().accepted_samples == 1U);
 
-    // This sample passes path bounds but fails jitter qualification. None of
-    // its timing values may replace the last accepted telemetry.
     static_cast<void>(discipline.observe(
         PtpOffsetMeasurement{port(0x7EU), 2U, 9'999LL, 900LL, false},
         t0 + std::chrono::milliseconds{10}));
@@ -393,8 +391,6 @@ void rejected_measurements_preserve_qualified_telemetry() {
     CHECK(discipline.status().accepted_samples == 1U);
     CHECK(discipline.status().rejected_samples == 1U);
 
-    // Excessive path delay is rejected even earlier and likewise cannot become
-    // user-visible valid timing telemetry.
     static_cast<void>(discipline.observe(
         PtpOffsetMeasurement{port(0x7EU), 3U, 8'888LL, 5'000LL, false},
         t0 + std::chrono::milliseconds{20}));
@@ -403,6 +399,54 @@ void rejected_measurements_preserve_qualified_telemetry() {
     CHECK(discipline.status().path_delay_jitter_ns == 0LL);
     CHECK(discipline.status().accepted_samples == 1U);
     CHECK(discipline.status().rejected_samples == 2U);
+}
+
+void invalid_samples_do_not_seed_unlock_streak() {
+    PtpDisciplineOptions options;
+    options.lock_required_samples = 1U;
+    options.unlock_required_samples = 3U;
+    options.invalid_samples_before_fault = 8U;
+    options.maximum_path_delay_ns = 1'000LL;
+    PtpClockDiscipline discipline(options);
+    const auto t0 = Clock::time_point{};
+
+    static_cast<void>(discipline.observe(
+        PtpOffsetMeasurement{port(0x7FU), 1U, 500LL, 500LL, true}, t0));
+    CHECK(discipline.status().state == PtpDisciplineState::locked);
+
+    for (std::uint16_t sequence = 2U; sequence <= 3U; ++sequence) {
+        static_cast<void>(discipline.observe(
+            PtpOffsetMeasurement{port(0x7FU), sequence, 500LL, 5'000LL, true},
+            t0 + std::chrono::milliseconds{10LL * static_cast<long long>(sequence - 1U)}));
+        CHECK(discipline.status().state == PtpDisciplineState::locked);
+        CHECK(discipline.status().consecutive_bad_samples == 0U);
+    }
+
+    static_cast<void>(discipline.observe(
+        PtpOffsetMeasurement{port(0x7FU), 4U, 50'000LL, 500LL, true},
+        t0 + std::chrono::milliseconds{30}));
+    CHECK(discipline.status().state == PtpDisciplineState::locked);
+    CHECK(discipline.status().consecutive_bad_samples == 1U);
+
+    // An invalid sample breaks the valid high-offset unlock streak.
+    static_cast<void>(discipline.observe(
+        PtpOffsetMeasurement{port(0x7FU), 5U, 50'000LL, 5'000LL, true},
+        t0 + std::chrono::milliseconds{40}));
+    CHECK(discipline.status().state == PtpDisciplineState::locked);
+    CHECK(discipline.status().consecutive_bad_samples == 0U);
+
+    for (std::uint16_t sequence = 6U; sequence <= 7U; ++sequence) {
+        static_cast<void>(discipline.observe(
+            PtpOffsetMeasurement{port(0x7FU), sequence, 50'000LL, 500LL, true},
+            t0 + std::chrono::milliseconds{10LL * static_cast<long long>(sequence - 1U)}));
+        CHECK(discipline.status().state == PtpDisciplineState::locked);
+        CHECK(discipline.status().consecutive_bad_samples == sequence - 5U);
+    }
+    static_cast<void>(discipline.observe(
+        PtpOffsetMeasurement{port(0x7FU), 8U, 50'000LL, 500LL, true},
+        t0 + std::chrono::milliseconds{70}));
+    CHECK(discipline.status().state == PtpDisciplineState::acquiring);
+    CHECK(discipline.status().consecutive_bad_samples == 3U);
 }
 
 } // namespace
@@ -421,6 +465,7 @@ int main() {
         {"active Sync replacement rejection", active_receiver_counts_replaced_pending_sync},
         {"passive Sync observation", passive_sync_observation_does_not_create_false_rejections},
         {"qualified telemetry survives rejects", rejected_measurements_preserve_qualified_telemetry},
+        {"invalid samples break unlock streak", invalid_samples_do_not_seed_unlock_streak},
     };
 
     std::size_t passed = 0U;
