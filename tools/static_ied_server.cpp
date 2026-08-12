@@ -51,6 +51,55 @@ namespace wire = ar::iec61850::wire;
 
 std::atomic_bool g_stop{false};
 
+// Desktop/lab simulator profile. These bounds are deliberately local to this
+// host executable; the strict embedded MmsStaticObjectTable/DataSetTable limits
+// remain unchanged for deterministic MCU builds.
+constexpr std::size_t kHostMaximumManifestObjects = 65'536U;
+constexpr std::size_t kHostMaximumManifestDataSets = 4'096U;
+
+[[nodiscard]] bool host_identifier_valid(const std::string_view value) noexcept {
+    if (value.empty() || value.size() > mms::MmsServiceSpanCodec::maximum_identifier_bytes) return false;
+    for (const char ch : value) {
+        const auto byte = static_cast<unsigned char>(ch);
+        if (byte == 0U || byte > 0x7FU) return false;
+    }
+    return true;
+}
+
+[[nodiscard]] bool host_manifest_tables_valid(
+    const mms::MmsStaticObjectTable& objects,
+    const mms::MmsStaticDataSetTable& data_sets) noexcept {
+    const auto object_span = objects.objects();
+    if (object_span.empty() || object_span.size() > kHostMaximumManifestObjects) return false;
+    std::set<std::pair<std::string_view, std::string_view>> object_names;
+    for (const auto& object : object_span) {
+        if (!host_identifier_valid(object.domain) || !host_identifier_valid(object.item) ||
+            object.type_specification.empty() || object.read == nullptr ||
+            !object_names.emplace(object.domain, object.item).second) return false;
+    }
+
+    const auto data_set_span = data_sets.data_sets();
+    if (data_set_span.size() > kHostMaximumManifestDataSets) return false;
+    std::set<std::pair<std::string_view, std::string_view>> data_set_names;
+    for (const auto& data_set : data_set_span) {
+        if (!host_identifier_valid(data_set.domain) || !host_identifier_valid(data_set.item) ||
+            data_set.members.empty() ||
+            data_set.members.size() > mms::MmsDataSetSpanCodec::maximum_members ||
+            !data_set_names.emplace(data_set.domain, data_set.item).second) return false;
+        std::set<std::pair<std::string_view, std::string_view>> member_names;
+        for (const auto& member : data_set.members) {
+            if (!host_identifier_valid(member.domain) || !host_identifier_valid(member.item) ||
+                !member_names.emplace(member.domain, member.item).second) return false;
+            const mms::MmsObjectNameView name{
+                mms::MmsObjectNameViewKind::domain_specific,
+                std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(member.domain.data()), member.domain.size()},
+                std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(member.item.data()), member.item.size()}};
+            if (objects.find(name) == nullptr) return false;
+        }
+    }
+    return true;
+}
+
 void signal_handler(int) {
     g_stop.store(true, std::memory_order_relaxed);
 }
@@ -828,12 +877,13 @@ void rebuild_manifest_roots(ManifestModel& model) {
         throw std::runtime_error("Model manifest contains no usable logical-node entries.");
     }
 
-    model.values.reserve(mms::MmsStaticObjectTable::maximum_objects);
+    model.values.reserve(std::min<std::size_t>(
+        kHostMaximumManifestObjects, roots.size() + parsed_objects.size()));
     model.root_trees.reserve(roots.size());
     model.root_value_indices.reserve(roots.size());
     std::unordered_map<std::string, std::size_t> root_indices;
     for (const auto& [domain, item] : roots) {
-        if (model.values.size() >= mms::MmsStaticObjectTable::maximum_objects) break;
+        if (model.values.size() >= kHostMaximumManifestObjects) break;
         ManifestValue root;
         root.domain = domain;
         root.item = item;
@@ -849,7 +899,7 @@ void rebuild_manifest_roots(ManifestModel& model) {
     }
 
     for (const auto& parsed : parsed_objects) {
-        if (model.values.size() >= mms::MmsStaticObjectTable::maximum_objects) break;
+        if (model.values.size() >= kHostMaximumManifestObjects) break;
         const auto key = object_key(parsed.domain, parsed.item);
         if (model.value_indices.contains(key)) continue;
         ManifestValue value;
@@ -895,9 +945,9 @@ void rebuild_manifest_roots(ManifestModel& model) {
             member.member_domain, member.member_item);
     }
     model.data_set_storage.reserve(std::min<std::size_t>(
-        grouped_members.size(), mms::MmsStaticDataSetTable::maximum_data_sets));
+        grouped_members.size(), kHostMaximumManifestDataSets));
     for (auto& [name, members] : grouped_members) {
-        if (model.data_set_storage.size() >= mms::MmsStaticDataSetTable::maximum_data_sets) break;
+        if (model.data_set_storage.size() >= kHostMaximumManifestDataSets) break;
         if (members.empty()) continue;
         ManifestDataSetStorage storage;
         storage.domain = std::move(name.first);
@@ -1199,9 +1249,10 @@ int main(int argc, char** argv) {
             : std::span<const mms::MmsStaticDataSetEntry>{manifest_model.data_sets};
         const mms::MmsStaticObjectTable object_table{object_span};
         const mms::MmsStaticDataSetTable data_sets{data_set_span};
-        if (!object_table.valid() ||
-            !data_sets.valid() ||
-            !data_sets.valid_against(object_table)) {
+        const bool model_valid = manifest_model.objects.empty()
+            ? (object_table.valid() && data_sets.valid() && data_sets.valid_against(object_table))
+            : host_manifest_tables_valid(object_table, data_sets);
+        if (!model_valid) {
             throw std::runtime_error("Static MMS server model is invalid.");
         }
 
