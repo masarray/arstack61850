@@ -28,6 +28,8 @@ public:
                options.unlock_offset_threshold_ns >= options.lock_offset_threshold_ns &&
                options.phase_step_threshold_ns >= options.unlock_offset_threshold_ns &&
                options.fault_offset_threshold_ns >= options.phase_step_threshold_ns &&
+               options.maximum_acquisition_phase_step_ns >=
+                   options.fault_offset_threshold_ns &&
                options.lock_required_samples != 0U &&
                options.unlock_required_samples != 0U &&
                options.invalid_samples_before_fault != 0U &&
@@ -48,6 +50,7 @@ public:
         previous_servo_offset_ns_.reset();
         filtered_path_delay_ns_.reset();
         frequency_bias_ppb_ = 0.0;
+        large_acquisition_phase_step_used_ = false;
         static_cast<void>(now);
     }
 
@@ -60,13 +63,25 @@ public:
 
         const auto offset_magnitude =
             discipline_detail::magnitude(measurement.offset_from_master_ns);
+        const auto fault_limit =
+            static_cast<std::uint64_t>(options_.fault_offset_threshold_ns);
+        const auto acquisition_limit =
+            static_cast<std::uint64_t>(options_.maximum_acquisition_phase_step_ns);
+        const bool acquisition_state =
+            status_.state == PtpDisciplineState::unlocked ||
+            status_.state == PtpDisciplineState::acquiring;
+        const bool exceeds_normal_fault_limit = offset_magnitude > fault_limit;
+        const bool bounded_large_acquisition =
+            acquisition_state &&
+            !large_acquisition_phase_step_used_ &&
+            exceeds_normal_fault_limit &&
+            offset_magnitude <= acquisition_limit;
+
         if (measurement.mean_path_delay_ns < 0 ||
             measurement.mean_path_delay_ns > options_.maximum_path_delay_ns ||
-            offset_magnitude >
-                static_cast<std::uint64_t>(options_.fault_offset_threshold_ns)) {
+            (exceeds_normal_fault_limit && !bounded_large_acquisition)) {
             reject_sample();
-            if (offset_magnitude >
-                static_cast<std::uint64_t>(options_.fault_offset_threshold_ns)) {
+            if (exceeds_normal_fault_limit) {
                 status_.state = PtpDisciplineState::fault;
                 status_.globally_traceable = false;
             }
@@ -114,6 +129,19 @@ public:
         if (status_.state != PtpDisciplineState::locked &&
             offset_magnitude >
                 static_cast<std::uint64_t>(options_.phase_step_threshold_ns)) {
+            std::int64_t phase_step_ns{};
+            if (!discipline_detail::checked_subtract(
+                    0LL,
+                    measurement.offset_from_master_ns,
+                    phase_step_ns)) {
+                reject_sample();
+                status_.state = PtpDisciplineState::fault;
+                status_.globally_traceable = false;
+                return {};
+            }
+            if (bounded_large_acquisition) {
+                large_acquisition_phase_step_used_ = true;
+            }
             status_.state = PtpDisciplineState::acquiring;
             status_.consecutive_qualified_samples = 0U;
             previous_servo_time_.reset();
@@ -121,7 +149,7 @@ public:
             ++status_.phase_steps;
             return {
                 PtpClockCommandKind::step_phase,
-                -measurement.offset_from_master_ns,
+                phase_step_ns,
                 status_.frequency_adjustment_ppb,
             };
         }
@@ -293,6 +321,7 @@ private:
     std::optional<std::int64_t> previous_servo_offset_ns_;
     std::optional<double> filtered_path_delay_ns_;
     double frequency_bias_ppb_{};
+    bool large_acquisition_phase_step_used_{};
 };
 
 } // namespace ar::iec61850::time_sync
