@@ -366,8 +366,8 @@ private:
     struct AnnounceQuality final {
         std::uint8_t priority1{255U};
         std::uint8_t clock_class{255U};
-        std::uint16_t variance{0xFFFFU};
         std::uint8_t clock_accuracy{255U};
+        std::uint16_t variance{0xFFFFU};
         std::uint8_t priority2{255U};
         PtpClockIdentity grandmaster_identity{};
         std::uint16_t steps_removed{0xFFFFU};
