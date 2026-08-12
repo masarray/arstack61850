@@ -170,44 +170,51 @@ jobs:
             --report-probe build-clean-qt \
             --scl tests/fixtures/scl/iedsim-full-model.scd
 
-      - name: Control hard profiles GCC and Clang
+      - name: Official control profiles GCC and Clang
         run: |
           set -euo pipefail
           for toolchain in 'gcc:g++' 'clang:clang++'; do
             IFS=: read -r CC_BIN CXX_BIN <<< "$toolchain"
             tag=${CC_BIN%%-*}
-            CC=$CC_BIN CXX=$CXX_BIN cmake -S . -B "build-guarded-$tag" -G Ninja \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DARIEC61850_BUILD_TESTS=OFF \
-              -DARIEC61850_BUILD_TOOLS=OFF \
-              -DARIEC61850_BUILD_EMBEDDED_PROFILE=ON
-            cmake --build "build-guarded-$tag" --target ariec61850_embedded_control_guarded_hard_profile --parallel 2
-            "./build-guarded-$tag/embedded/ariec61850_embedded_control_guarded_hard_profile"
 
-            CC=$CC_BIN CXX=$CXX_BIN cmake -S tests/control_mms_profile -B "build-control-mms-$tag" -G Ninja -DCMAKE_BUILD_TYPE=Release
+            CC=$CC_BIN CXX=$CXX_BIN cmake -S embedded/control_hard_profile -B "build-control-hard-$tag" -G Ninja
+            cmake --build "build-control-hard-$tag" --parallel 2
+            ctest --test-dir "build-control-hard-$tag" --output-on-failure
+            binary="build-control-hard-$tag/ariec61850_hard_guarded_control_smoke"
+            if nm -C "$binary" | grep -E '__cxa_throw|__cxa_begin_catch|__cxa_end_catch|__gxx_personality_v0'; then
+              echo "exception runtime symbol found in $binary" >&2
+              exit 1
+            fi
+            echo "CONTROL_HARD_${tag^^}=PASS"
+
+            CC=$CC_BIN CXX=$CXX_BIN cmake -S tests/control_mms_profile -B "build-control-mms-$tag" -G Ninja
             cmake --build "build-control-mms-$tag" --parallel 2
             ctest --test-dir "build-control-mms-$tag" --output-on-failure
 
-            CC=$CC_BIN CXX=$CXX_BIN cmake -S tests/control_session_profile -B "build-control-session-$tag" -G Ninja -DCMAKE_BUILD_TYPE=Release
+            CC=$CC_BIN CXX=$CXX_BIN cmake -S tests/control_session_profile -B "build-control-session-$tag" -G Ninja
             cmake --build "build-control-session-$tag" --parallel 2
             ctest --test-dir "build-control-session-$tag" --output-on-failure
 
-            CC=$CC_BIN CXX=$CXX_BIN cmake -S tests/control_termination_profile -B "build-control-term-$tag" -G Ninja -DCMAKE_BUILD_TYPE=Release
+            CC=$CC_BIN CXX=$CXX_BIN cmake -S tests/control_termination_profile -B "build-control-term-$tag" -G Ninja
             cmake --build "build-control-term-$tag" --parallel 2
             ctest --test-dir "build-control-term-$tag" --output-on-failure
           done
 
-      - name: Embedded host-sim boundary GCC and Clang
+      - name: Official embedded boundary GCC and Clang
         run: |
           set -euo pipefail
-          CC=gcc CXX=g++ cmake -S embedded -B build-embedded-gcc -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-embedded-gcc --parallel 2
-          ctest --test-dir build-embedded-gcc --output-on-failure
-          CC=clang CXX=clang++ cmake -S embedded -B build-embedded-clang -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-embedded-clang --parallel 2
-          ctest --test-dir build-embedded-clang --output-on-failure
+          for toolchain in 'gcc:g++' 'clang:clang++'; do
+            IFS=: read -r CC_BIN CXX_BIN <<< "$toolchain"
+            tag=${CC_BIN%%-*}
+            CC=$CC_BIN CXX=$CXX_BIN cmake -S embedded -B "build-embedded-$tag" -G Ninja \
+              -DARIEC61850_EMBEDDED_NO_RTTI=ON \
+              -DARIEC61850_EMBEDDED_NO_EXCEPTIONS=OFF \
+              -DARIEC61850_EMBEDDED_WARNINGS_AS_ERRORS=ON
+            cmake --build "build-embedded-$tag" --parallel 2
+            ctest --test-dir "build-embedded-$tag" --output-on-failure
+          done
 
-      - name: IEDScout parity server GCC and Clang
+      - name: Official IEDScout parity server GCC and Clang
         run: |
           set -euo pipefail
           CC=gcc CXX=g++ cmake -S tools/static_ied_server_iedsim -B build-parity-gcc -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -224,10 +231,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.clean-linux-gates.outputs.clean_sha }}
-      - name: IEDScout parity server Windows
+      - name: Official IEDScout parity server Windows
         shell: pwsh
         run: |
-          cmake -S tools/static_ied_server_iedsim -B build-parity -DCMAKE_BUILD_TYPE=Release
+          cmake -S tools/static_ied_server_iedsim -B build-parity
           cmake --build build-parity --config Release --parallel 2
           ctest --test-dir build-parity -C Release --output-on-failure
 
