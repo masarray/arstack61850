@@ -69,29 +69,19 @@ void fill_p2_defaults(ar_ptp_lab_config_t& config) noexcept {
     options.unlock_offset_threshold_ns = config.unlock_offset_threshold_ns;
     options.phase_step_threshold_ns = config.phase_step_threshold_ns;
     options.lock_required_samples = config.lock_required_samples;
-    options.maximum_frequency_adjustment_ppb =
-        config.maximum_frequency_adjustment_ppb;
+    options.maximum_frequency_adjustment_ppb = config.maximum_frequency_adjustment_ppb;
     options.sync_timeout = std::chrono::milliseconds{config.sync_timeout_ms};
-    options.holdover_timeout =
-        std::chrono::milliseconds{config.holdover_timeout_ms};
+    options.holdover_timeout = std::chrono::milliseconds{config.holdover_timeout_ms};
     return options;
 }
 
-[[nodiscard]] bool valid_public_config(
-    const ar_ptp_lab_config_t& config) noexcept {
+[[nodiscard]] bool valid_public_config(const ar_ptp_lab_config_t& config) noexcept {
     if (config.role != AR_PTP_ROLE_LAB_SOURCE &&
         config.role != AR_PTP_ROLE_TIME_RECEIVER &&
         config.role != AR_PTP_ROLE_MONITOR) {
         return false;
     }
-
-    // Pdelay cadence and servo thresholds are receiver-only P2 settings.
-    // Preserve the P1.5 LAB_SOURCE configuration contract and allow MONITOR
-    // profiles to remain passive even when these receiver-only fields are zero.
-    if (config.role != AR_PTP_ROLE_TIME_RECEIVER) {
-        return true;
-    }
-
+    if (config.role != AR_PTP_ROLE_TIME_RECEIVER) return true;
     if (config.pdelay_request_interval_ms < 100U ||
         config.pdelay_request_interval_ms > 10'000U) {
         return false;
@@ -117,8 +107,7 @@ void fill_p2_defaults(ar_ptp_lab_config_t& config) noexcept {
 }
 
 [[nodiscard]] ar_ptp_role_t active_role() noexcept {
-    return static_cast<ar_ptp_role_t>(
-        g_active_role.load(std::memory_order_acquire));
+    return static_cast<ar_ptp_role_t>(g_active_role.load(std::memory_order_acquire));
 }
 
 [[nodiscard]] const char* role_name(const ar_ptp_role_t role) noexcept {
@@ -166,12 +155,9 @@ void log_p2_status(const ar_ptp_lab_status_t& status) noexcept {
     char path[32]{};
     char jitter[32]{};
     char measured[8]{};
-    if (status.offset_valid) {
-        std::snprintf(offset, sizeof(offset), "%lld",
-                      static_cast<long long>(status.offset_from_master_ns));
-    } else {
-        std::snprintf(offset, sizeof(offset), "NA");
-    }
+    std::snprintf(offset, sizeof(offset), status.offset_valid ? "%lld" : "%s",
+                  status.offset_valid ? static_cast<long long>(status.offset_from_master_ns) : 0LL);
+    if (!status.offset_valid) std::snprintf(offset, sizeof(offset), "NA");
     if (status.mean_path_delay_valid) {
         std::snprintf(path, sizeof(path), "%lld",
                       static_cast<long long>(status.mean_path_delay_ns));
@@ -193,19 +179,14 @@ void log_p2_status(const ar_ptp_lab_status_t& status) noexcept {
 
     ESP_LOGI(kTag,
              "PTP2 role=%s discipline=%s source=%s offset=%s path=%s jitter=%s freq=%ld global=%u measured=%s rxAnnounce=%llu rxSync=%llu rxFollowUp=%llu rxPdelay=%llu pdelayReq=%llu accepted=%llu rejected=%llu",
-             role_name(status.role),
-             discipline_name(status.discipline_state),
-             source,
-             offset,
-             path,
-             jitter,
+             role_name(status.role), discipline_name(status.discipline_state), source,
+             offset, path, jitter,
              static_cast<long>(status.frequency_adjustment_ppb),
-             status.globally_traceable ? 1U : 0U,
-             measured,
+             status.globally_traceable ? 1U : 0U, measured,
              static_cast<unsigned long long>(status.announce_received),
              static_cast<unsigned long long>(status.sync_received),
              static_cast<unsigned long long>(status.follow_up_received),
-             static_cast<unsigned long long>(status.peer_delay_responses_received),
+             static_cast<unsigned long long>(status.peer_delay_frames_observed),
              static_cast<unsigned long long>(status.peer_delay_requests_sent),
              static_cast<unsigned long long>(status.accepted_discipline_samples),
              static_cast<unsigned long long>(status.rejected_discipline_samples));
@@ -220,8 +201,7 @@ extern "C" void ar_ptp_lab_get_default_config(ar_ptp_lab_config_t* config) {
 }
 
 extern "C" bool ar_ptp_lab_configure(const ar_ptp_lab_config_t* config) {
-    if (config == nullptr ||
-        ar_ptp_source_is_running() ||
+    if (config == nullptr || ar_ptp_source_is_running() ||
         ar::esp32p4::smv::ptp_receiver_is_running() ||
         !ar::esp32p4::smv::valid_public_config(*config)) {
         return false;
@@ -229,8 +209,7 @@ extern "C" bool ar_ptp_lab_configure(const ar_ptp_lab_config_t* config) {
     if (!ar_ptp_source_configure(config)) return false;
 
     portENTER_CRITICAL(&ar::esp32p4::smv::g_ptp_facade_mux);
-    if (ar_ptp_source_is_running() ||
-        ar::esp32p4::smv::ptp_receiver_is_running()) {
+    if (ar_ptp_source_is_running() || ar::esp32p4::smv::ptp_receiver_is_running()) {
         portEXIT_CRITICAL(&ar::esp32p4::smv::g_ptp_facade_mux);
         return false;
     }
@@ -250,17 +229,14 @@ extern "C" void ar_ptp_lab_start(const esp_eth_handle_t eth_handle) {
     if (eth_handle == nullptr || ar_ptp_lab_is_running()) return;
     const auto config = ar::esp32p4::smv::selected_config();
     ar::esp32p4::smv::g_active_role.store(
-        static_cast<int>(config.role),
-        std::memory_order_release);
+        static_cast<int>(config.role), std::memory_order_release);
 
     if (config.role == AR_PTP_ROLE_LAB_SOURCE) {
         if (!ar_ptp_source_configure(&config)) return;
         ar_ptp_source_start(eth_handle);
         return;
     }
-    static_cast<void>(ar::esp32p4::smv::ptp_receiver_start(
-        eth_handle,
-        config));
+    static_cast<void>(ar::esp32p4::smv::ptp_receiver_start(eth_handle, config));
 }
 
 extern "C" void ar_ptp_lab_stop(void) {
@@ -272,8 +248,7 @@ extern "C" void ar_ptp_lab_stop(void) {
 }
 
 extern "C" bool ar_ptp_lab_is_running(void) {
-    return ar_ptp_source_is_running() ||
-           ar::esp32p4::smv::ptp_receiver_is_running();
+    return ar_ptp_source_is_running() || ar::esp32p4::smv::ptp_receiver_is_running();
 }
 
 extern "C" bool ar_ptp_lab_get_status(ar_ptp_lab_status_t* status) {
@@ -290,8 +265,6 @@ extern "C" bool ar_ptp_lab_get_status(ar_ptp_lab_status_t* status) {
     } else if (ar::esp32p4::smv::ptp_receiver_is_running()) {
         result = ar::esp32p4::smv::ptp_receiver_get_status(*status);
     } else {
-        // While stopped, report the selected profile role rather than the last
-        // active role. This keeps serial/Studio role state coherent before START.
         status->role = ar::esp32p4::smv::selected_config().role;
         status->discipline_state = AR_PTP_DISCIPLINE_UNLOCKED;
         result = true;
