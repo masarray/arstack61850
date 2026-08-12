@@ -34,12 +34,15 @@ using Clock = std::chrono::steady_clock;
     return {identity(suffix), number};
 }
 
-[[nodiscard]] PtpFrame announce_frame(const PtpPortIdentity& source) {
+[[nodiscard]] PtpFrame announce_frame(
+    const PtpPortIdentity& source,
+    const std::int8_t log_message_interval = 0) {
     PtpFrame frame;
     frame.header.message_type = PtpMessageType::announce;
     frame.header.domain_number = 0U;
     frame.header.transport_specific = 0U;
     frame.header.source_port_identity = source;
+    frame.header.log_message_interval = log_message_interval;
 
     PtpAnnounceMessage announce;
     announce.priority1 = 128U;
@@ -254,6 +257,28 @@ void stale_same_source_announce_forces_reselection() {
     CHECK(!receiver.observe_announce(announce, t0 + 152ms));
 }
 
+void slow_announce_cadence_extends_source_evidence_lifetime() {
+    using namespace std::chrono_literals;
+    const auto local = port(0x78U, 2U);
+    const auto master = port(0x79U, 1U);
+    PtpTimeReceiver receiver(PtpTimeReceiverOptions{0U, 0U, local, 3000ms, 500ms});
+    const auto t0 = Clock::time_point{};
+
+    // logMessageInterval=3 advertises an 8 s nominal Announce cadence. The
+    // receiver therefore allows 24 s (three missed periods), which safely
+    // accommodates the product's 10 s slow-cadence profile without falsely
+    // dropping and reacquiring the same healthy source between messages.
+    const auto slow_announce = announce_frame(master, 3);
+    CHECK(receiver.observe_announce(slow_announce, t0));
+    CHECK(!receiver.tick(t0 + 9999ms));
+    CHECK(!receiver.observe_announce(slow_announce, t0 + 10000ms));
+    CHECK(receiver.status().selected_source == master);
+    CHECK(!receiver.tick(t0 + 33000ms));
+    CHECK(receiver.status().selected_source == master);
+    CHECK(receiver.tick(t0 + 34001ms));
+    CHECK(!receiver.status().selected_source.has_value());
+}
+
 void path_delay_lifetime_tracks_configured_exchange_cadence() {
     using namespace std::chrono_literals;
     const PtpTimeReceiverOptions slow_profile{0U, 0U, {}, 3000ms, 7500ms};
@@ -274,6 +299,7 @@ int main() {
         {"no phase step after lock", phase_step_stays_disabled_after_lock_until_reset},
         {"global provenance revoke", global_provenance_revokes_immediately_and_requires_new_measurement},
         {"stale same-source reselection", stale_same_source_announce_forces_reselection},
+        {"slow Announce cadence", slow_announce_cadence_extends_source_evidence_lifetime},
         {"path-delay cadence", path_delay_lifetime_tracks_configured_exchange_cadence},
     };
 
