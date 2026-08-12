@@ -72,6 +72,10 @@ typedef struct ar_ptp_lab_status_t {
     uint64_t announce_received;
     uint64_t sync_received;
     uint64_t follow_up_received;
+    // Raw matching-profile Pdelay_Req/Resp/Resp_Follow_Up frames observed on RX.
+    // This remains meaningful in passive MONITOR mode where no exchange is owned.
+    uint64_t peer_delay_frames_observed;
+    // Responses accepted into an owned receiver exchange correlation path.
     uint64_t peer_delay_responses_received;
 
     ar_ptp_discipline_state_t discipline_state;
