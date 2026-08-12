@@ -69,6 +69,11 @@ typedef struct ar_ptp_lab_status_t {
     uint64_t peer_delay_requests_sent;
     uint64_t tx_failure_count;
 
+    uint64_t announce_received;
+    uint64_t sync_received;
+    uint64_t follow_up_received;
+    uint64_t peer_delay_responses_received;
+
     ar_ptp_discipline_state_t discipline_state;
     bool source_selected;
     uint8_t selected_source_clock_identity[8];
