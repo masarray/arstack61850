@@ -115,12 +115,9 @@ void fill_p2_defaults(ar_ptp_lab_config_t& config) noexcept {
 
 [[nodiscard]] const char* role_name(const ar_ptp_role_t role) noexcept {
     switch (role) {
-    case AR_PTP_ROLE_LAB_SOURCE:
-        return "SOURCE";
-    case AR_PTP_ROLE_TIME_RECEIVER:
-        return "RECEIVER";
-    case AR_PTP_ROLE_MONITOR:
-        return "MONITOR";
+    case AR_PTP_ROLE_LAB_SOURCE: return "SOURCE";
+    case AR_PTP_ROLE_TIME_RECEIVER: return "RECEIVER";
+    case AR_PTP_ROLE_MONITOR: return "MONITOR";
     }
     return "UNKNOWN";
 }
@@ -128,16 +125,11 @@ void fill_p2_defaults(ar_ptp_lab_config_t& config) noexcept {
 [[nodiscard]] const char* discipline_name(
     const ar_ptp_discipline_state_t state) noexcept {
     switch (state) {
-    case AR_PTP_DISCIPLINE_UNLOCKED:
-        return "UNLOCKED";
-    case AR_PTP_DISCIPLINE_ACQUIRING:
-        return "ACQUIRING";
-    case AR_PTP_DISCIPLINE_LOCKED:
-        return "LOCKED";
-    case AR_PTP_DISCIPLINE_HOLDOVER:
-        return "HOLDOVER";
-    case AR_PTP_DISCIPLINE_FAULT:
-        return "FAULT";
+    case AR_PTP_DISCIPLINE_UNLOCKED: return "UNLOCKED";
+    case AR_PTP_DISCIPLINE_ACQUIRING: return "ACQUIRING";
+    case AR_PTP_DISCIPLINE_LOCKED: return "LOCKED";
+    case AR_PTP_DISCIPLINE_HOLDOVER: return "HOLDOVER";
+    case AR_PTP_DISCIPLINE_FAULT: return "FAULT";
     }
     return "FAULT";
 }
@@ -226,10 +218,6 @@ extern "C" bool ar_ptp_lab_configure(const ar_ptp_lab_config_t* config) {
         !ar::esp32p4::smv::valid_public_config(*config)) {
         return false;
     }
-
-    // Reuse P1.5 source-profile validation for domain, VLAN, identity and
-    // clock-quality fields in every role. The source implementation will not
-    // be started unless LAB_SOURCE is selected.
     if (!ar_ptp_source_configure(config)) return false;
 
     portENTER_CRITICAL(&ar::esp32p4::smv::g_ptp_facade_mux);
@@ -276,25 +264,31 @@ extern "C" void ar_ptp_lab_stop(void) {
 }
 
 extern "C" bool ar_ptp_lab_is_running(void) {
-    if (ar::esp32p4::smv::active_role() == AR_PTP_ROLE_LAB_SOURCE) {
-        return ar_ptp_source_is_running();
-    }
-    return ar::esp32p4::smv::ptp_receiver_is_running();
+    return ar_ptp_source_is_running() ||
+           ar::esp32p4::smv::ptp_receiver_is_running();
 }
 
 extern "C" bool ar_ptp_lab_get_status(ar_ptp_lab_status_t* status) {
     if (status == nullptr) return false;
     *status = {};
     bool result = false;
-    if (ar::esp32p4::smv::active_role() == AR_PTP_ROLE_LAB_SOURCE) {
+
+    if (ar_ptp_source_is_running()) {
         result = ar_ptp_source_get_status(status);
         if (result) {
             status->role = AR_PTP_ROLE_LAB_SOURCE;
             status->discipline_state = AR_PTP_DISCIPLINE_UNLOCKED;
         }
-    } else {
+    } else if (ar::esp32p4::smv::ptp_receiver_is_running()) {
         result = ar::esp32p4::smv::ptp_receiver_get_status(*status);
+    } else {
+        // While stopped, report the selected profile role rather than the last
+        // active role. This keeps serial/Studio role state coherent before START.
+        status->role = ar::esp32p4::smv::selected_config().role;
+        status->discipline_state = AR_PTP_DISCIPLINE_UNLOCKED;
+        result = true;
     }
+
     if (result) ar::esp32p4::smv::log_p2_status(*status);
     return result;
 }
