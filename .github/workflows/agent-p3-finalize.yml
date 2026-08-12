@@ -46,8 +46,11 @@ jobs:
             CMakeLists.txt
             apps/ied_simulator/CMakeLists.txt
             apps/ied_simulator/src/IedSimulatorController.cpp
+            apps/ied_simulator/src/IedSimulatorController.hpp
             apps/ied_simulator/src/SclMmsMaterializer.hpp
+            apps/ied_simulator/src/main.cpp
             apps/ied_simulator/test_control_live.py
+            apps/ied_simulator/test_gui_live_value.py
             include/ariec61850/mms/static_object_table.hpp
             src/mms/static_object_table.cpp
             src/mms/static_dispatcher.cpp
@@ -205,7 +208,7 @@ jobs:
 
   parity-windows:
     needs: construct-clean
-    runs-on: windows-2025
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -213,7 +216,7 @@ jobs:
       - name: IEDScout parity server Windows
         shell: pwsh
         run: |
-          cmake -S tools/static_ied_server_iedsim -B build-parity -A x64 -DCMAKE_BUILD_TYPE=Release
+          cmake -S tools/static_ied_server_iedsim -B build-parity -DCMAKE_BUILD_TYPE=Release
           cmake --build build-parity --config Release --parallel 2
           ctest --test-dir build-parity -C Release --output-on-failure
 
