@@ -1,0 +1,114 @@
+name: Agent P2 Reporting Runner
+
+on:
+  push:
+    branches:
+      - agent/p2-reporting-run
+    paths:
+      - .github/scripts/agent_p2_reporting_patch.py
+      - .github/scripts/agent_p2_reporting_repair.py
+      - .github/workflows/agent-p2-reporting-run.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/p2-reporting-run
+          fetch-depth: 0
+
+      - name: Preserve patchers and checkout P2 target
+        run: |
+          cp .github/scripts/agent_p2_reporting_patch.py /tmp/agent_p2_reporting_patch.py
+          cp .github/scripts/agent_p2_reporting_repair.py /tmp/agent_p2_reporting_repair.py
+          git checkout -B agent/iedsim-full-scl-live-store origin/agent/iedsim-full-scl-live-store
+
+      - name: Apply P2 reporting patch
+        run: |
+          python3 /tmp/agent_p2_reporting_patch.py
+          python3 /tmp/agent_p2_reporting_repair.py
+
+      - name: Diff sanity
+        run: |
+          git diff --check
+          python3 -m py_compile apps/ied_simulator/test_gui_live_value.py
+          git status --short
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
+
+      - name: Configure Qt simulator
+        run: >-
+          cmake -S apps/ied_simulator -B build-p2 -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Qt simulator and P2 probes
+        run: >-
+          cmake --build build-p2
+          --target arstack_ied_simulator ariec61850_mms_read_probe ariec61850_static_rcb_trial
+          --parallel 2
+
+      - name: QML smoke
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ./build-p2/arstack_ied_simulator --smoke-test
+
+      - name: P2 end-to-end reporting gate
+        run: >-
+          python3 apps/ied_simulator/test_gui_live_value.py
+          --app ./build-p2/arstack_ied_simulator
+          --read-probe ./build-p2
+          --report-probe ./build-p2
+          --scl ./tests/fixtures/scl/iedsim-full-model.scd
+
+      - name: Configure Clang parity target
+        env:
+          CC: clang
+          CXX: clang++
+        run: cmake -S tools/static_ied_server_iedsim -B build-p2-clang -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build and test Clang parity target
+        run: |
+          cmake --build build-p2-clang --parallel 2
+          ctest --test-dir build-p2-clang --output-on-failure
+
+      - name: Configure focused root build
+        run: >-
+          cmake -S . -B build-p2-root -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DARIEC61850_BUILD_TESTS=ON
+          -DARIEC61850_BUILD_TOOLS=ON
+
+      - name: Build focused root targets
+        run: >-
+          cmake --build build-p2-root
+          --target ariec61850_scl_tests ariec61850_static_ied_server ariec61850_static_rcb_trial
+          --parallel 2
+
+      - name: Run SCL parser regression
+        run: ./build-p2-root/ariec61850_scl_tests
+
+      - name: Commit validated P2 source to target branch
+        run: |
+          git config user.name openai-agent
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add \
+            CMakeLists.txt \
+            apps/ied_simulator/CMakeLists.txt \
+            apps/ied_simulator/src/IedSimulatorController.cpp \
+            apps/ied_simulator/test_gui_live_value.py \
+            include/ariec61850/scl/model.hpp \
+            src/scl/parser_part_05_03.inc \
+            tests/fixtures/scl/iedsim-full-model.scd \
+            tools/static_ied_server.cpp \
+            tools/static_ied_server_iedsim/CMakeLists.txt \
+            tools/static_rcb_trial.cpp
+          git commit -m 'feat(iedsim): integrate live URCB reporting runtime'
+          git push origin HEAD:agent/iedsim-full-scl-live-store
