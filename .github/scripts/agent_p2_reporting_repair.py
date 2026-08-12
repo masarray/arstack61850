@@ -79,8 +79,59 @@ replace_once(
     "    const mms::MmsStaticApplicationDispatcher dispatcher{\n",
 )
 
+# IEC 61850 report AccessResults are ordered inclusion, optional data-reference
+# list, values, then optional reason-for-inclusion list. The high-level mapper
+# previously consumed values before data references; old tests mirrored that
+# mistake. Align it with the static wire encoder used by the server.
+replace_once(
+    "src/mms/reporting.cpp",
+    "    const auto included_count = frame.included_data_set_indexes.size();\n"
+    "    std::vector<MmsInformationReportItem> value_items;\n"
+    "    for (std::size_t i = 0U; i < included_count; ++i) value_items.push_back(require_item(report, cursor++));\n"
+    "    std::vector<std::string> data_references(included_count);\n"
+    "    if (frame.header.optional_fields.has(\"data-reference\")) {\n"
+    "        for (auto& reference : data_references) {\n"
+    "            const auto value = string_value(require_value(report, cursor++, \"data-reference\"));\n"
+    "            if (!value) throw MmsReportingFormatError(\"MMS report data-reference is not a visible string.\");\n"
+    "            reference = *value;\n"
+    "        }\n"
+    "    }\n",
+    "    const auto included_count = frame.included_data_set_indexes.size();\n"
+    "    std::vector<std::string> data_references(included_count);\n"
+    "    if (frame.header.optional_fields.has(\"data-reference\")) {\n"
+    "        for (auto& reference : data_references) {\n"
+    "            const auto value = string_value(require_value(report, cursor++, \"data-reference\"));\n"
+    "            if (!value) throw MmsReportingFormatError(\"MMS report data-reference is not a visible string.\");\n"
+    "            reference = *value;\n"
+    "        }\n"
+    "    }\n"
+    "    std::vector<MmsInformationReportItem> value_items;\n"
+    "    for (std::size_t i = 0U; i < included_count; ++i) value_items.push_back(require_item(report, cursor++));\n",
+)
+
+# Correct the realistic unit fixture so it is independent evidence for the wire
+# ordering rather than reproducing the previous mapper implementation.
+replace_once(
+    "tests/test_reporting.cpp",
+    "    add(MmsDataValue::bit_string(6U, inclusion));\n"
+    "    add(MmsDataValue::boolean(true));\n"
+    "    add(MmsDataValue::boolean(false));\n"
+    "    add(MmsDataValue::visible_string(\"LD0/GGIO1.Ind1.stVal\"));\n"
+    "    add(MmsDataValue::visible_string(\"LD0/GGIO1.Ind2.stVal\"));\n",
+    "    add(MmsDataValue::bit_string(6U, inclusion));\n"
+    "    add(MmsDataValue::visible_string(\"LD0/GGIO1.Ind1.stVal\"));\n"
+    "    add(MmsDataValue::visible_string(\"LD0/GGIO1.Ind2.stVal\"));\n"
+    "    add(MmsDataValue::boolean(true));\n"
+    "    add(MmsDataValue::boolean(false));\n",
+)
+replace_once(
+    "tests/test_reporting.cpp",
+    "    report.items[9U] = {9U, std::nullopt, 3U};\n",
+    "    report.items[11U] = {11U, std::nullopt, 3U};\n",
+)
+
 # Let the static-session selector discover the only URCB naturally. The test
-# then verifies the selected RCB/DataSet binding from STATIC_PLAN rather than
+# verifies the selected RCB/DataSet binding from STATIC_PLAN rather than
 # steering selection with a pre-filter.
 replace_once(
     "apps/ied_simulator/test_gui_live_value.py",
@@ -93,15 +144,13 @@ replace_once(
 replace_once(
     "apps/ied_simulator/test_gui_live_value.py",
     '            evidence = re.search(r"REPORT_EVIDENCE received=(\\d+) decodeFailures=(\\d+)", report_trial.stdout)\n',
-    '            if "STATIC_PLAN selectedRcb=MU01LD0/LLN0.urcb01 mode=URCB dataSet=MU01LD0/LLN0.dsSV" not in report_trial.stdout:\n'
+    '            if "STATIC_PLAN selectedRcb=MU01LD0/LLN0.urcb01 mode=URCB dataSet=MU01LD0/LLN0$dsSV" not in report_trial.stdout:\n'
     '                raise RuntimeError(f"P2 static RCB/DataSet binding mismatch: {report_trial.stdout}")\n'
     '            evidence = re.search(r"REPORT_EVIDENCE received=(\\d+) decodeFailures=(\\d+)", report_trial.stdout)\n',
 )
 
 # Diagnostic inventory is intentionally part of the trial output. It makes a
-# failed interoperability selection actionable: whether NameList inventory,
-# RptEna/DatSet reads, or DataSet directory evidence is incomplete is visible
-# before the selector makes a decision.
+# failed interoperability selection actionable.
 replace_once(
     "tools/static_rcb_trial.cpp",
     "        auto discovery = live_session.discover(discovery_options);\n\n"
