@@ -32,4 +32,11 @@ replace_once(
     "    ariec61850_apply_sanitizers(ariec61850_static_rcb_trial)\n\n",
 )
 
+# The persistent manifest report definition replaces P0's local ParsedRcb type.
+replace_once(
+    "tools/static_ied_server.cpp",
+    "    const auto add_rcb_object = [&](const ParsedRcb& rcb,\n",
+    "    const auto add_rcb_object = [&](const ManifestReportControl& rcb,\n",
+)
+
 print("P2 reporting repair applied")
