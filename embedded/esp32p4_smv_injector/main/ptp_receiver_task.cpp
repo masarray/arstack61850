@@ -287,6 +287,19 @@ void seed_hardware_clock(const esp_eth_handle_t handle) noexcept {
            type == PtpMessageType::pdelay_resp_follow_up;
 }
 
+[[nodiscard]] bool vlan_profile_matches(
+    const ar_ptp_lab_config_t& config,
+    const PtpFrame& frame) noexcept {
+    // P2 currently configures either untagged or one 802.1Q VLAN. Do not let
+    // untagged, wrong-VLAN, or QinQ traffic contribute timing evidence for a
+    // different configured profile.
+    if (frame.outer_vlan_id.has_value()) return false;
+    if (config.vlan_enabled) {
+        return frame.vlan_id.has_value() && *frame.vlan_id == config.vlan_id;
+    }
+    return !frame.vlan_id.has_value();
+}
+
 [[nodiscard]] bool should_queue(
     const ar_ptp_role_t role,
     const PtpMessageType type) noexcept {
@@ -322,7 +335,8 @@ esp_err_t receiver_input_info(
         if (PtpCodec::try_parse_ethernet_frame(
                 std::span<const std::uint8_t>{buffer, length}, frame) &&
             frame.header.domain_number == context->config.domain_number &&
-            frame.header.transport_specific == context->config.transport_specific) {
+            frame.header.transport_specific == context->config.transport_specific &&
+            vlan_profile_matches(context->config, frame)) {
             // Raw passive observability is independent of owning/correlating a
             // peer-delay exchange. Count matching-profile Pdelay traffic before
             // role-specific queue filtering so MONITOR sees Req/Resp/RespFU.
