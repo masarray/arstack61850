@@ -84,6 +84,14 @@ void fill_p2_defaults(ar_ptp_lab_config_t& config) noexcept {
         config.role != AR_PTP_ROLE_MONITOR) {
         return false;
     }
+
+    // Pdelay cadence and servo thresholds are receiver-only P2 settings.
+    // Preserve the P1.5 LAB_SOURCE configuration contract and allow MONITOR
+    // profiles to remain passive even when these receiver-only fields are zero.
+    if (config.role != AR_PTP_ROLE_TIME_RECEIVER) {
+        return true;
+    }
+
     if (config.pdelay_request_interval_ms < 100U ||
         config.pdelay_request_interval_ms > 10'000U) {
         return false;
