@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Prove full SCL materialization and GUI-applied state are visible over MMS."""
+"""Prove P0 model fidelity plus the P1 server-authoritative live-value store."""
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import socket
@@ -38,7 +39,15 @@ def resolve_read_probe(argument: str) -> str:
     raise FileNotFoundError(f"MMS read probe not found under {path}")
 
 
-def run_probe(read_probe: str, port: int, item: str, *, type_only: bool = False) -> subprocess.CompletedProcess[str]:
+def run_probe(
+    read_probe: str,
+    port: int,
+    item: str,
+    *,
+    type_only: bool = False,
+    write_option: str | None = None,
+    write_value: str | None = None,
+) -> subprocess.CompletedProcess[str]:
     command = [
         read_probe,
         "127.0.0.1",
@@ -52,6 +61,10 @@ def run_probe(read_probe: str, port: int, item: str, *, type_only: bool = False)
     ]
     if type_only:
         command.append("--type")
+    if write_option is not None:
+        if write_value is None:
+            raise ValueError("write_value is required with write_option")
+        command.extend([write_option, write_value])
     return subprocess.run(
         command,
         capture_output=True,
@@ -63,9 +76,7 @@ def run_probe(read_probe: str, port: int, item: str, *, type_only: bool = False)
 
 
 def require_probe(
-    probe: subprocess.CompletedProcess[str],
-    expected: str,
-    description: str,
+    probe: subprocess.CompletedProcess[str], expected: str, description: str
 ) -> None:
     if probe.returncode != 0 or expected not in probe.stdout:
         raise RuntimeError(
@@ -85,7 +96,10 @@ def main() -> int:
     port = free_port()
     environment = dict(os.environ)
     environment["QT_QPA_PLATFORM"] = "offscreen"
-    with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as app_log:
+    with tempfile.TemporaryDirectory() as temp_dir, tempfile.TemporaryFile(
+        mode="w+t", encoding="utf-8"
+    ) as app_log:
+        state_dump = Path(temp_dir) / "live-state.json"
         app = subprocess.Popen(
             [
                 args.app,
@@ -96,8 +110,12 @@ def main() -> int:
                 "--runtime",
                 "--set-first-value",
                 "42",
+                "--undo-after-ms",
+                "8000",
+                "--state-dump",
+                str(state_dump),
                 "--exit-after-ms",
-                "30000",
+                "12000",
             ],
             stdout=app_log,
             stderr=subprocess.STDOUT,
@@ -106,6 +124,7 @@ def main() -> int:
             creationflags=creation_flags(),
         )
         last_error = "server not ready"
+        manifest_text = ""
         try:
             manifest_path = (
                 Path(tempfile.gettempdir()) / f"arstack-ied-simulator-{app.pid}.model"
@@ -113,25 +132,30 @@ def main() -> int:
             manifest_deadline = time.monotonic() + 8.0
             while time.monotonic() < manifest_deadline:
                 if app.poll() is not None:
-                    last_error = f"application exited early with code {app.returncode}"
-                    break
+                    raise RuntimeError(
+                        f"application exited early with code {app.returncode}"
+                    )
                 try:
                     manifest_text = manifest_path.read_text(encoding="utf-8")
                 except (FileNotFoundError, PermissionError, UnicodeDecodeError):
                     manifest_text = ""
-                gui_value_present = (
-                    "TCTR1$MX$Amp$instMag$i\tINT16\tNumber\tinteger:16\t42"
+
+                p0_value_present = (
+                    "TCTR1$MX$Amp$instMag$i\tINT16\tNumber\tinteger:16\t0"
                     in manifest_text
                 )
                 ordered_range_present = (
                     "TCTR1$MX$Amp$instMag$range\tINT8U\tNumber\tunsigned-integer:8\t0"
                     in manifest_text
                 )
-                # XCBR1.Health is deliberately absent from every DataSet. Its presence
-                # proves DataTypeTemplates materialization, not FCDA-driven projection.
                 structural_only_leaf_present = (
                     "XCBR1$ST$Health$stVal\tBOOLEAN\tBoolean\tboolean\tfalse"
                     in manifest_text
+                )
+                writable_sp_present = (
+                    "XCBR1$SP$SimCfg$setVal\tBOOLEAN\tBoolean\tboolean\tfalse"
+                    in manifest_text
+                    and "MUT\tMU01LD0\tXCBR1$SP$SimCfg$setVal" in manifest_text
                 )
                 data_set_present = (
                     "DS\tMU01LD0\tLLN0$dsSV\tMU01LD0\tTCTR1$MX$Amp$instMag$i"
@@ -149,10 +173,11 @@ def main() -> int:
                     < manifest_text.index("TCTR1$MX$Amp$instMag$range")
                 )
                 if (
-                    manifest_text.startswith("ARSTACK_IED_MODEL\t4\t2\n")
-                    and gui_value_present
+                    manifest_text.startswith("ARSTACK_IED_MODEL\t4\t1\n")
+                    and p0_value_present
                     and ordered_range_present
                     and structural_only_leaf_present
+                    and writable_sp_present
                     and data_set_present
                     and rcb_present
                     and no_ln_scaffold
@@ -162,101 +187,161 @@ def main() -> int:
                 time.sleep(0.1)
             else:
                 raise RuntimeError(
-                    "GUI did not publish the complete v4 P0 model with exact types, "
-                    "DataSet, RCB, and structural-only leaves"
+                    "P0 regression: exact v4 structural model was not published"
                 )
 
-            deadline = time.monotonic() + 15.0
+            # GUI -> authoritative server store -> MMS Read. The structural manifest
+            # must remain revision 1 and keep its initial value, proving the live state
+            # is no longer file-reload driven.
+            deadline = time.monotonic() + 10.0
+            edited_probe: subprocess.CompletedProcess[str] | None = None
             while time.monotonic() < deadline:
                 if app.poll() is not None:
-                    last_error = f"application exited early with code {app.returncode}"
-                    break
-                time.sleep(0.25)
+                    raise RuntimeError(
+                        f"application exited early with code {app.returncode}"
+                    )
                 edited_probe = run_probe(
                     read_probe, port, "TCTR1$MX$Amp$instMag$i"
                 )
-                if edited_probe.returncode != 0 or "value=42" not in edited_probe.stdout:
-                    last_error = (
-                        f"edited read exit={edited_probe.returncode} "
-                        f"stdout={edited_probe.stdout} stderr={edited_probe.stderr}"
+                if edited_probe.returncode == 0 and "value=42" in edited_probe.stdout:
+                    break
+                time.sleep(0.15)
+            else:
+                assert edited_probe is not None
+                raise RuntimeError(
+                    "GUI -> server live mutation not visible: "
+                    f"{edited_probe.stdout} {edited_probe.stderr}"
+                )
+
+            manifest_after_gui = manifest_path.read_text(encoding="utf-8")
+            if not manifest_after_gui.startswith("ARSTACK_IED_MODEL\t4\t1\n") or (
+                "TCTR1$MX$Amp$instMag$i\tINT16\tNumber\tinteger:16\t0"
+                not in manifest_after_gui
+            ):
+                raise RuntimeError(
+                    "GUI mutation unexpectedly rewrote the structural manifest"
+                )
+
+            exact_type_probe = run_probe(
+                read_probe, port, "TCTR1$MX$Amp$instMag$i", type_only=True
+            )
+            require_probe(
+                exact_type_probe, "kind=integer size=16", "GVAA INT16 evidence"
+            )
+            exact_unsigned_probe = run_probe(
+                read_probe, port, "TCTR1$MX$Amp$instMag$range", type_only=True
+            )
+            require_probe(
+                exact_unsigned_probe,
+                "kind=unsigned size=8",
+                "GVAA INT8U evidence",
+            )
+
+            # Real reverse direction: MMS Write -> authoritative server store -> Qt.
+            # Only SCL leaves explicitly marked mmsWritable get a write callback.
+            writable_write = run_probe(
+                read_probe,
+                port,
+                "XCBR1$SP$SimCfg$setVal",
+                write_option="--write-bool",
+                write_value="true",
+            )
+            require_probe(writable_write, "MMS_WRITE", "bounded SP MMS Write")
+            writable_read = run_probe(
+                read_probe, port, "XCBR1$SP$SimCfg$setVal"
+            )
+            require_probe(writable_read, "value=true", "SP write readback")
+
+            # MX is deliberately not generic-write enabled. CO/control remains a P3
+            # concern and is not opened by this P1 mutation channel.
+            non_writable_write = run_probe(
+                read_probe,
+                port,
+                "TCTR1$MX$Amp$instMag$i",
+                write_option="--write-int",
+                write_value="99",
+            )
+            if non_writable_write.returncode == 0:
+                raise RuntimeError("MX leaf unexpectedly accepted generic MMS Write")
+            still_edited = run_probe(read_probe, port, "TCTR1$MX$Amp$instMag$i")
+            require_probe(still_edited, "value=42", "write-boundary preservation")
+
+            structural_probe = run_probe(
+                read_probe, port, "XCBR1$ST$Health$stVal"
+            )
+            require_probe(
+                structural_probe, "value=false", "structural-only leaf read"
+            )
+            rcb_probe = run_probe(read_probe, port, "LLN0$RP$urcb01$RptID")
+            require_probe(
+                rcb_probe, "value=MU01_LD0_URCB01", "URCB RptID read"
+            )
+
+            # QA undo runs at 8 s and must mutate the same authoritative store.
+            undo_deadline = time.monotonic() + 9.0
+            restored: subprocess.CompletedProcess[str] | None = None
+            while time.monotonic() < undo_deadline:
+                restored = run_probe(read_probe, port, "TCTR1$MX$Amp$instMag$i")
+                if restored.returncode == 0 and "value=0" in restored.stdout:
+                    break
+                time.sleep(0.15)
+            else:
+                assert restored is not None
+                raise RuntimeError(
+                    "Undo did not restore authoritative value: "
+                    f"{restored.stdout} {restored.stderr}"
+                )
+
+            app.wait(timeout=16)
+            states = json.loads(state_dump.read_text(encoding="utf-8"))
+            by_item = {state.get("mmsItem"): state for state in states}
+            tctr = by_item["TCTR1$MX$Amp$instMag$i"]
+            simcfg = by_item["XCBR1$SP$SimCfg$setVal"]
+
+            expected_tctr = {
+                "value": "0",
+                "quality": "Good",
+                "origin": "gui-undo",
+                "timestamp": "1970-01-01T00:00:00.003Z",
+                "liveRevision": 3,
+            }
+            expected_simcfg = {
+                "value": "true",
+                "quality": "Good",
+                "origin": "mms-write",
+                "timestamp": "1970-01-01T00:00:00.002Z",
+                "liveRevision": 2,
+            }
+            for key, expected in expected_tctr.items():
+                if tctr.get(key) != expected:
+                    raise RuntimeError(
+                        f"Qt mirror TCTR {key}: {tctr.get(key)!r} != {expected!r}"
                     )
-                    time.sleep(0.2)
-                    continue
+            for key, expected in expected_simcfg.items():
+                if simcfg.get(key) != expected:
+                    raise RuntimeError(
+                        f"Qt mirror SimCfg {key}: {simcfg.get(key)!r} != {expected!r}"
+                    )
 
-                # P0 exact TypeSpecification is proven on the wire with
-                # GetVariableAccessAttributes, not inferred from manifest text.
-                exact_type_probe = run_probe(
-                    read_probe,
-                    port,
-                    "TCTR1$MX$Amp$instMag$i",
-                    type_only=True,
-                )
-                require_probe(
-                    exact_type_probe,
-                    "kind=integer size=16",
-                    "GVAA INT16 evidence",
-                )
-                exact_unsigned_probe = run_probe(
-                    read_probe,
-                    port,
-                    "TCTR1$MX$Amp$instMag$range",
-                    type_only=True,
-                )
-                require_probe(
-                    exact_unsigned_probe,
-                    "kind=unsigned size=8",
-                    "GVAA INT8U evidence",
-                )
+            if not manifest_after_gui.startswith("ARSTACK_IED_MODEL\t4\t1\n"):
+                raise RuntimeError("Live state changed structural manifest revision")
 
-                structural_probe = run_probe(
-                    read_probe, port, "XCBR1$ST$Health$stVal"
-                )
-                require_probe(
-                    structural_probe,
-                    "value=false",
-                    "structural-only leaf read",
-                )
-
-                # The SCL ReportControl is part of the P0 structural model even
-                # though RptEna/GI/report emission are intentionally deferred to P2.
-                rcb_probe = run_probe(
-                    read_probe, port, "LLN0$RP$urcb01$RptID"
-                )
-                require_probe(
-                    rcb_probe,
-                    "value=MU01_LD0_URCB01",
-                    "URCB RptID read",
-                )
-                rcb_dataset_probe = run_probe(
-                    read_probe, port, "LLN0$RP$urcb01$DatSet"
-                )
-                require_probe(
-                    rcb_dataset_probe,
-                    "value=MU01LD0/LLN0$dsSV",
-                    "URCB DataSet binding read",
-                )
-
-                app.wait(timeout=32)
-                print(
-                    "IEDSIM_P0_FULL_MODEL_PASS "
-                    "edited=MU01LD0/TCTR1$MX$Amp$instMag$i:42 "
-                    "gvaa=integer:16,unsigned:8 dataset=LLN0$dsSV "
-                    "rcb=LLN0$RP$urcb01 structural=MU01LD0/XCBR1$ST$Health$stVal:false"
-                )
-                return 0
-            raise RuntimeError(last_error)
+            print(
+                "IEDSIM_P1_UNIFIED_LIVE_VALUE_PASS "
+                "gui_to_mms=42 mms_to_qt=SP:true undo=0 "
+                "clock_ms=1,2,3 origin=Simulator-QA,mms-write,gui-undo "
+                "generic_write_bound=SP-only"
+            )
+            return 0
         except BaseException as exception:
             last_error = str(exception) or last_error
             if app.poll() is None:
-                try:
-                    app.wait(timeout=4)
-                except subprocess.TimeoutExpired:
-                    app.kill()
-                    app.wait(timeout=5)
+                app.kill()
+                app.wait(timeout=5)
             app_log.seek(0)
             output = app_log.read().strip()
             raise RuntimeError(
-                f"GUI full-model/live-value test failed: {last_error}; app_output={output}"
+                f"GUI P1 live-value test failed: {last_error}; app_output={output}"
             ) from exception
 
 
