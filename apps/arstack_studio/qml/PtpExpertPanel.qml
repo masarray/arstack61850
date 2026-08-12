@@ -20,20 +20,37 @@ SurfacePanel {
         return { mode: "AUTO", value: "0", source: "SAFE_DEFAULT", simulated: false, measured: false }
     }
 
-    function latestRole() {
-        const lines = String(device.logText).split("\n")
-        for (let i = lines.length - 1; i >= 0; --i) {
-            let m = lines[i].match(/PTPROLE role=(SOURCE|RECEIVER|MONITOR)/)
-            if (m) return m[1]
-            m = lines[i].match(/PTP2 role=(SOURCE|RECEIVER|MONITOR)/)
-            if (m) return m[1]
+    function emptyPtpState(role) {
+        return {
+            role: role,
+            discipline: "UNLOCKED",
+            source: "NONE",
+            offset: "NA",
+            path: "NA",
+            jitter: "NA",
+            freq: "0",
+            global: false,
+            measured: "NA",
+            rxAnnounce: "0",
+            rxSync: "0",
+            rxFollowUp: "0",
+            rxPdelay: "0",
+            pdelayReq: "0",
+            accepted: "0",
+            rejected: "0"
         }
-        return "SOURCE"
     }
 
-    function latestPtp2() {
+    function latestPtpState() {
         const lines = String(device.logText).split("\n")
         for (let i = lines.length - 1; i >= 0; --i) {
+            // Both PTPROLE and PTP2 are role-bearing events. Whichever appears
+            // newest is authoritative. A stopped role change therefore resets
+            // stale timing metrics immediately until a fresh PTP2 snapshot for
+            // that role arrives.
+            const role = lines[i].match(/PTPROLE role=(SOURCE|RECEIVER|MONITOR)/)
+            if (role) return emptyPtpState(role[1])
+
             const m = lines[i].match(/PTP2 role=(SOURCE|RECEIVER|MONITOR) discipline=(UNLOCKED|ACQUIRING|LOCKED|HOLDOVER|FAULT) source=(\S+) offset=(NA|-?\d+) path=(NA|-?\d+) jitter=(NA|-?\d+) freq=(-?\d+) global=([01]) measured=(NA|[012]) rxAnnounce=(\d+) rxSync=(\d+) rxFollowUp=(\d+) rxPdelay=(\d+) pdelayReq=(\d+) accepted=(\d+) rejected=(\d+)/)
             if (m) return {
                 role: m[1], discipline: m[2], source: m[3], offset: m[4], path: m[5], jitter: m[6], freq: m[7],
@@ -41,7 +58,7 @@ SurfacePanel {
                 rxPdelay: m[13], pdelayReq: m[14], accepted: m[15], rejected: m[16]
             }
         }
-        return { role: latestRole(), discipline: "UNLOCKED", source: "NONE", offset: "NA", path: "NA", jitter: "NA", freq: "0", global: false, measured: "NA", rxAnnounce: "0", rxSync: "0", rxFollowUp: "0", rxPdelay: "0", pdelayReq: "0", accepted: "0", rejected: "0" }
+        return emptyPtpState("SOURCE")
     }
 
     function latestTx() {
@@ -84,7 +101,7 @@ SurfacePanel {
     }
 
     readonly property var sync: latestSync()
-    readonly property var p2: latestPtp2()
+    readonly property var p2: latestPtpState()
     readonly property var tx: latestTx()
     readonly property bool receiverRole: p2.role === "RECEIVER"
     readonly property bool monitorRole: p2.role === "MONITOR"
