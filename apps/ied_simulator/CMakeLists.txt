@@ -59,7 +59,46 @@ target_include_directories(arstack_ied_simulator PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src)
 
 target_compile_features(arstack_ied_simulator PRIVATE cxx_std_20)
-add_dependencies(arstack_ied_simulator ariec61850_static_ied_server)
+
+# The regular library intentionally keeps a strict portable connection runtime.
+# The desktop simulator needs the separate compatibility runtime validated
+# against IEDScout-style AARQ, selector, browse, Identify and FileDirectory
+# traffic.  Keep the two runtimes isolated so the embedded core is unchanged.
+add_library(ariec61850_ied_simulator_server_core STATIC
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/asn1/ber_span_reader.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/osi/tpkt_span.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/osi/cotp_span.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/osi/session_span.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/osi/presentation_span.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/acse/association_span.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/acse/association_compat_span.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/pdu_span.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/pdu_compat_span.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/services_span.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/write_span.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/data_set_span.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/information_report_span.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_object_table.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_write.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_data_set_table.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_dispatcher.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/connection_runtime_iedsim.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_server_session.cpp)
+target_include_directories(ariec61850_ied_simulator_server_core PUBLIC
+    ${CMAKE_CURRENT_LIST_DIR}/../../include)
+target_compile_features(ariec61850_ied_simulator_server_core PUBLIC cxx_std_20)
+
+add_executable(ariec61850_ied_simulator_server
+    ${CMAKE_CURRENT_LIST_DIR}/../../tools/static_ied_server.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../tools/static_ied_server_sigpipe.cpp)
+target_link_libraries(ariec61850_ied_simulator_server PRIVATE
+    ariec61850_ied_simulator_server_core)
+if(WIN32)
+    target_link_libraries(ariec61850_ied_simulator_server PRIVATE ws2_32)
+endif()
+target_compile_features(ariec61850_ied_simulator_server PRIVATE cxx_std_20)
+
+add_dependencies(arstack_ied_simulator ariec61850_ied_simulator_server)
 
 if(WIN32)
     set_target_properties(arstack_ied_simulator PROPERTIES WIN32_EXECUTABLE TRUE)

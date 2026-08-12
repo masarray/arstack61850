@@ -92,6 +92,8 @@ public:
         const QString& origin);
     Q_INVOKABLE bool undoLastChange();
     Q_INVOKABLE void clearActivity();
+    Q_INVOKABLE void copyDiagnostics();
+    Q_INVOKABLE QString diagnosticsText() const;
 
 signals:
     void modelChanged();
@@ -121,6 +123,10 @@ private:
         const QString& message,
         const QString& severity = QStringLiteral("Info"));
     void setRuntimeState(bool running, bool starting);
+    void consumeServerOutput(QByteArray& buffer, const QByteArray& bytes, bool standardError);
+    void processServerLine(const QString& line, bool standardError);
+    [[nodiscard]] bool writeModelManifest();
+    void removeModelManifest();
     [[nodiscard]] QString serverExecutable() const;
     [[nodiscard]] static QVariantMap valueMap(
         const ar::iec61850::scl::SclDataSetEntry& entry);
@@ -131,6 +137,9 @@ private:
     QVariantList activity_;
     std::optional<ValueSnapshot> previousValue_;
     QProcess serverProcess_;
+    QByteArray standardOutputBuffer_;
+    QByteArray standardErrorBuffer_;
+    QString serverModelManifestPath_;
     QString sourceName_;
     QString sourcePath_;
     QString fatalError_;
@@ -145,8 +154,9 @@ private:
     int dataSetCount_{};
     int reportCount_{};
     int gooseCount_{};
+    quint64 serverStartGeneration_{};
     bool running_{};
     bool starting_{};
-    bool gooseEnabled_{true};
+    bool gooseEnabled_{};
     bool fileServiceEnabled_{};
 };

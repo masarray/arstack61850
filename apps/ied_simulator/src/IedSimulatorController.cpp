@@ -5,9 +5,16 @@
 #include "ariec61850/scl/parser.hpp"
 
 #include <QCoreApplication>
+#include <QClipboard>
 #include <QDateTime>
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QNetworkInterface>
+#include <QSet>
+#include <QTimer>
+#include <QXmlStreamReader>
 
 #include <algorithm>
 #include <filesystem>
@@ -88,15 +95,19 @@ IedSimulatorController::IedSimulatorController(QObject* parent)
         &QProcess::started,
         this,
         [this] {
-            setRuntimeState(true, false);
+            const auto generation = serverStartGeneration_;
             appendActivity(
                 QStringLiteral("Server"),
-                QStringLiteral("MMS endpoint is listening on %1:%2.")
-                    .arg(listenAddress_ == QStringLiteral("0.0.0.0")
-                            ? QStringLiteral("all interfaces")
-                            : listenAddress_)
-                    .arg(port_),
-                QStringLiteral("Success"));
+                QStringLiteral("Server process launched; waiting for listener confirmation."));
+            QTimer::singleShot(5'000, this, [this, generation] {
+                if (generation != serverStartGeneration_ || !starting_ ||
+                    serverProcess_.state() == QProcess::NotRunning) return;
+                appendActivity(
+                    QStringLiteral("Server"),
+                    QStringLiteral("Listener readiness was not confirmed within 5 seconds."),
+                    QStringLiteral("Error"));
+                stopSimulation();
+            });
         });
     connect(
         &serverProcess_,
@@ -115,6 +126,18 @@ IedSimulatorController::IedSimulatorController(QObject* parent)
         qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
         this,
         [this](const int exitCode, const QProcess::ExitStatus) {
+            consumeServerOutput(
+                standardOutputBuffer_, serverProcess_.readAllStandardOutput(), false);
+            consumeServerOutput(
+                standardErrorBuffer_, serverProcess_.readAllStandardError(), true);
+            if (!standardOutputBuffer_.isEmpty()) {
+                processServerLine(QString::fromUtf8(standardOutputBuffer_), false);
+                standardOutputBuffer_.clear();
+            }
+            if (!standardErrorBuffer_.isEmpty()) {
+                processServerLine(QString::fromUtf8(standardErrorBuffer_), true);
+                standardErrorBuffer_.clear();
+            }
             const bool wasActive = running_ || starting_;
             setRuntimeState(false, false);
             if (wasActive) {
@@ -125,14 +148,12 @@ IedSimulatorController::IedSimulatorController(QObject* parent)
             }
         });
     connect(&serverProcess_, &QProcess::readyReadStandardOutput, this, [this] {
-        const auto output = QString::fromUtf8(serverProcess_.readAllStandardOutput()).trimmed();
-        if (!output.isEmpty()) appendActivity(QStringLiteral("MMS"), output);
+        consumeServerOutput(
+            standardOutputBuffer_, serverProcess_.readAllStandardOutput(), false);
     });
     connect(&serverProcess_, &QProcess::readyReadStandardError, this, [this] {
-        const auto output = QString::fromUtf8(serverProcess_.readAllStandardError()).trimmed();
-        if (!output.isEmpty()) {
-            appendActivity(QStringLiteral("MMS"), output, QStringLiteral("Warning"));
-        }
+        consumeServerOutput(
+            standardErrorBuffer_, serverProcess_.readAllStandardError(), true);
     });
     appendActivity(
         QStringLiteral("Workspace"),
@@ -147,6 +168,7 @@ IedSimulatorController::~IedSimulatorController() {
             serverProcess_.waitForFinished(800);
         }
     }
+    removeModelManifest();
 }
 
 bool IedSimulatorController::imported() const noexcept { return !documents_.empty(); }
@@ -316,17 +338,26 @@ bool IedSimulatorController::startSimulation() {
     if (executable.isEmpty()) {
         appendActivity(
             QStringLiteral("Server"),
-            QStringLiteral("ariec61850_static_ied_server was not found beside the GUI."),
+            QStringLiteral("ariec61850_ied_simulator_server was not found beside the GUI."),
             QStringLiteral("Error"));
         return false;
     }
+    if (!writeModelManifest()) return false;
+    standardOutputBuffer_.clear();
+    standardErrorBuffer_.clear();
+    ++serverStartGeneration_;
     setRuntimeState(false, true);
     serverProcess_.setProgram(executable);
-    serverProcess_.setArguments({QStringLiteral("--port"), QString::number(port_)});
+    serverProcess_.setArguments({
+        QStringLiteral("--host"), listenAddress_,
+        QStringLiteral("--port"), QString::number(port_),
+        QStringLiteral("--model-manifest"), serverModelManifestPath_});
     serverProcess_.start();
     appendActivity(
         QStringLiteral("Server"),
-        QStringLiteral("Starting MMS endpoint on port %1…").arg(port_));
+        QStringLiteral("Starting IEDScout-compatible MMS endpoint on %1:%2.")
+            .arg(listenAddress_)
+            .arg(port_));
     return true;
 }
 
@@ -392,6 +423,242 @@ bool IedSimulatorController::undoLastChange() {
 void IedSimulatorController::clearActivity() {
     activity_.clear();
     emit activityChanged();
+}
+
+QString IedSimulatorController::diagnosticsText() const {
+    QString text;
+    text += QStringLiteral("ARStack IED Simulator diagnostics\n");
+    text += QStringLiteral("Captured: %1\n")
+        .arg(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    text += QStringLiteral("Model: %1\nSource: %2\n")
+        .arg(sourceName_.isEmpty() ? QStringLiteral("<none>") : sourceName_)
+        .arg(sourcePath_.isEmpty() ? QStringLiteral("<none>") : sourcePath_);
+    text += QStringLiteral("Endpoint: %1:%2\nState: %3\nProcess: %4 (pid %5)\n")
+        .arg(listenAddress_)
+        .arg(port_)
+        .arg(running_ ? QStringLiteral("ready")
+                      : (starting_ ? QStringLiteral("starting") : QStringLiteral("stopped")))
+        .arg(serverProcess_.state() == QProcess::NotRunning
+                 ? QStringLiteral("not running")
+                 : QStringLiteral("running"))
+        .arg(serverProcess_.processId());
+    text += QStringLiteral(
+        "IEDScout profile: Authentication=None; AP-title=1,1,1,999,1; "
+        "AE-qualifier=12; P-selector=00 00 00 01; S-selector=00 01; T-selector=00 01\n");
+    text += QStringLiteral(
+        "Counts: IED=%1; LD=%2; referenced DO=%3; referenced DA=%4; "
+        "DataSet=%5; Report=%6; GOOSE=%7\n")
+        .arg(ieds_.size())
+        .arg(logicalDeviceCount_)
+        .arg(dataObjectCount_)
+        .arg(dataAttributeCount_)
+        .arg(dataSetCount_)
+        .arg(reportCount_)
+        .arg(gooseCount_);
+    text += QStringLiteral("\nRecent activity (newest first):\n");
+    for (const auto& item : activity_) {
+        const auto event = item.toMap();
+        text += QStringLiteral("%1 | %2 | %3 | %4\n")
+            .arg(
+                event.value(QStringLiteral("time")).toString(),
+                event.value(QStringLiteral("severity")).toString(),
+                event.value(QStringLiteral("category")).toString(),
+                event.value(QStringLiteral("message")).toString());
+    }
+    return text;
+}
+
+void IedSimulatorController::copyDiagnostics() {
+    if (auto* clipboard = QGuiApplication::clipboard(); clipboard != nullptr) {
+        clipboard->setText(diagnosticsText());
+        appendActivity(
+            QStringLiteral("Diagnostics"),
+            QStringLiteral("Connection diagnostics copied to the clipboard."),
+            QStringLiteral("Success"));
+    }
+}
+
+void IedSimulatorController::consumeServerOutput(
+    QByteArray& buffer,
+    const QByteArray& bytes,
+    const bool standardError) {
+    buffer += bytes;
+    while (true) {
+        const auto newline = buffer.indexOf('\n');
+        if (newline < 0) break;
+        const auto line = QString::fromUtf8(buffer.left(newline)).trimmed();
+        buffer.remove(0, newline + 1);
+        if (!line.isEmpty()) processServerLine(line, standardError);
+    }
+}
+
+void IedSimulatorController::processServerLine(
+    const QString& line,
+    const bool standardError) {
+    if (!line.startsWith(QStringLiteral("IEDSIM_EVENT "))) {
+        appendActivity(
+            QStringLiteral("MMS"),
+            line,
+            standardError ? QStringLiteral("Error") : QStringLiteral("Info"));
+        return;
+    }
+
+    QVariantMap fields;
+    const auto tokens = line.mid(13).split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    for (const auto& token : tokens) {
+        const auto separator = token.indexOf(QLatin1Char('='));
+        if (separator > 0) fields.insert(token.left(separator), token.mid(separator + 1));
+    }
+    const auto kind = fields.value(QStringLiteral("kind")).toString();
+    if (kind == QStringLiteral("server_ready")) {
+        setRuntimeState(true, false);
+        appendActivity(
+            QStringLiteral("Server"),
+            QStringLiteral(
+                "MMS listener ready on %1:%2; %3 domains, %4 logical-node roots; profile %5.")
+                .arg(fields.value(QStringLiteral("bind")).toString())
+                .arg(fields.value(QStringLiteral("port")).toString())
+                .arg(fields.value(QStringLiteral("domains")).toString())
+                .arg(fields.value(QStringLiteral("objects")).toString())
+                .arg(fields.value(QStringLiteral("profile")).toString()),
+            QStringLiteral("Success"));
+        const auto truncated = fields.value(QStringLiteral("truncated")).toInt();
+        if (truncated > 0) {
+            appendActivity(
+                QStringLiteral("Model"),
+                QStringLiteral("%1 logical-node roots exceeded the bounded host profile and were omitted.")
+                    .arg(truncated),
+                QStringLiteral("Warning"));
+        }
+        return;
+    }
+    if (kind == QStringLiteral("client_connected")) {
+        appendActivity(
+            QStringLiteral("TCP"),
+            QStringLiteral("Client %1 connected (association %2).")
+                .arg(fields.value(QStringLiteral("remote")).toString())
+                .arg(fields.value(QStringLiteral("association")).toString()),
+            QStringLiteral("Success"));
+        return;
+    }
+    if (kind == QStringLiteral("protocol_stage")) {
+        appendActivity(
+            QStringLiteral("Protocol"),
+            QStringLiteral("Association %1 reached %2 stage.")
+                .arg(fields.value(QStringLiteral("association")).toString())
+                .arg(fields.value(QStringLiteral("stage")).toString().toUpper()),
+            QStringLiteral("Success"));
+        return;
+    }
+    if (kind == QStringLiteral("mms_service")) {
+        const bool accepted = fields.value(QStringLiteral("accepted")).toString() !=
+            QStringLiteral("false");
+        appendActivity(
+            QStringLiteral("MMS"),
+            QStringLiteral("%1 invoke %2 %3.")
+                .arg(fields.value(QStringLiteral("service")).toString())
+                .arg(fields.value(QStringLiteral("invoke")).toString())
+                .arg(accepted ? QStringLiteral("answered") : QStringLiteral("rejected")),
+            accepted ? QStringLiteral("Success") : QStringLiteral("Warning"));
+        return;
+    }
+    if (kind == QStringLiteral("client_closed")) {
+        appendActivity(
+            QStringLiteral("TCP"),
+            QStringLiteral("Client %1 closed; RX %2 bytes, TX %3 bytes, final state %4.")
+                .arg(fields.value(QStringLiteral("remote")).toString())
+                .arg(fields.value(QStringLiteral("rx")).toString())
+                .arg(fields.value(QStringLiteral("tx")).toString())
+                .arg(fields.value(QStringLiteral("state")).toString()));
+        return;
+    }
+    if (kind != QStringLiteral("server_stopped")) {
+        appendActivity(QStringLiteral("MMS"), line);
+    }
+}
+
+bool IedSimulatorController::writeModelManifest() {
+    removeModelManifest();
+    serverModelManifestPath_ = QDir::temp().filePath(
+        QStringLiteral("arstack-ied-simulator-%1.model")
+            .arg(QCoreApplication::applicationPid()));
+    QByteArray manifest{"ARSTACK_IED_MODEL\t1\n"};
+    QSet<QString> uniqueRoots;
+    for (const auto& loaded : documents_) {
+        QFile input{loaded.path};
+        if (!input.open(QIODevice::ReadOnly)) {
+            appendActivity(
+                QStringLiteral("Model"),
+                QStringLiteral("Could not reopen %1 for runtime model projection.").arg(loaded.path),
+                QStringLiteral("Error"));
+            return false;
+        }
+        QXmlStreamReader xml{&input};
+        QString currentIed;
+        QString currentDomain;
+        while (!xml.atEnd()) {
+            xml.readNext();
+            if (xml.isStartElement()) {
+                const auto element = xml.name();
+                const auto attributes = xml.attributes();
+                if (element == QStringLiteral("IED")) {
+                    currentIed = attributes.value(QStringLiteral("name")).toString();
+                } else if (element == QStringLiteral("LDevice")) {
+                    currentDomain = currentIed + attributes.value(QStringLiteral("inst")).toString();
+                } else if ((element == QStringLiteral("LN") ||
+                            element == QStringLiteral("LN0")) &&
+                           !currentDomain.isEmpty()) {
+                    const auto logicalNode =
+                        attributes.value(QStringLiteral("prefix")).toString() +
+                        attributes.value(QStringLiteral("lnClass")).toString() +
+                        attributes.value(QStringLiteral("inst")).toString();
+                    if (!logicalNode.isEmpty()) {
+                        const auto key = currentDomain + QLatin1Char('\n') + logicalNode;
+                        if (!uniqueRoots.contains(key)) {
+                            uniqueRoots.insert(key);
+                            manifest += "LN\t" + currentDomain.toUtf8() + "\t" +
+                                logicalNode.toUtf8() + "\n";
+                        }
+                    }
+                }
+            } else if (xml.isEndElement()) {
+                if (xml.name() == QStringLiteral("LDevice")) currentDomain.clear();
+                if (xml.name() == QStringLiteral("IED")) currentIed.clear();
+            }
+        }
+        if (xml.hasError()) {
+            appendActivity(
+                QStringLiteral("Model"),
+                QStringLiteral("Runtime model projection failed: %1").arg(xml.errorString()),
+                QStringLiteral("Error"));
+            return false;
+        }
+    }
+    if (uniqueRoots.isEmpty()) {
+        appendActivity(
+            QStringLiteral("Model"),
+            QStringLiteral("The imported SCL contains no discoverable logical-node roots."),
+            QStringLiteral("Error"));
+        return false;
+    }
+    QFile output{serverModelManifestPath_};
+    if (!output.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
+        output.write(manifest) != manifest.size()) {
+        appendActivity(
+            QStringLiteral("Model"),
+            QStringLiteral("Could not create the temporary MMS model manifest."),
+            QStringLiteral("Error"));
+        removeModelManifest();
+        return false;
+    }
+    output.close();
+    return true;
+}
+
+void IedSimulatorController::removeModelManifest() {
+    if (serverModelManifestPath_.isEmpty()) return;
+    QFile::remove(serverModelManifestPath_);
+    serverModelManifestPath_.clear();
 }
 
 void IedSimulatorController::rebuildPresentation() {
@@ -571,9 +838,9 @@ void IedSimulatorController::setRuntimeState(const bool running, const bool star
 
 QString IedSimulatorController::serverExecutable() const {
 #if defined(Q_OS_WIN)
-    constexpr auto executableName = "ariec61850_static_ied_server.exe";
+    constexpr auto executableName = "ariec61850_ied_simulator_server.exe";
 #else
-    constexpr auto executableName = "ariec61850_static_ied_server";
+    constexpr auto executableName = "ariec61850_ied_simulator_server";
 #endif
     const auto besideGui = QCoreApplication::applicationDirPath() + QLatin1Char('/') +
         QString::fromLatin1(executableName);

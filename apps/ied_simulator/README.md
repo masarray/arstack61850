@@ -9,15 +9,16 @@ one executable while reusing the repository SCL parser and MMS server.
 1. Import an SCL, CID, SCD, IID, or ICD engineering file.
 2. Review parsed IEDs and model/service counts.
 3. Select the local interface, MMS port, GOOSE option, and file-service folder.
-4. Start the bundled `ariec61850_static_ied_server`.
+4. Start the bundled IEDScout-compatible `ariec61850_ied_simulator_server`.
 5. Use the runtime workspace to switch between imported IEDs and edit resolved
    DataSet/report/GOOSE members with type-aware controls, quality, origin, and
    undo history.
 
-The current MMS process still exposes the bounded static prototype model from
-`ariec61850_static_ied_server`; the Qt model browser is driven by the imported
-SCL. Runtime SCL-to-MMS object materialization, GOOSE transmission, and host
-file-service mapping remain explicit follow-up work and are not claimed here.
+The desktop server projects the imported SCL logical-device and logical-node
+roots into a bounded host MMS model (up to 128 objects), binds the selected
+IPv4 interface, and reports TCP/COTP/ACSE/MMS activity back to the GUI. GOOSE
+transmission, host file-service mapping, and complete leaf-value materialization
+remain explicit follow-up work and are not claimed here.
 
 ## Windows build
 
@@ -28,8 +29,12 @@ cmake -S apps/ied_simulator -B build-ied-simulator-qt -G Ninja `
 cmake --build build-ied-simulator-qt --target arstack_ied_simulator --parallel
 ```
 
-The app target also builds `ariec61850_static_ied_server`. Keep both
+The app target also builds `ariec61850_ied_simulator_server`. Keep both
 executables beside each other when packaging.
+
+The discovery status becomes green only after the server emits listener-ready
+evidence. Use **Copy diagnostics** to capture the endpoint, IEDScout association
+profile, process state, model counts, and recent protocol activity.
 
 ## Deterministic UI smoke test
 

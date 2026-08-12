@@ -38,6 +38,7 @@ Item {
                 anchors.leftMargin: 24
                 anchors.rightMargin: 24
                 spacing: 12
+                Layout.alignment: Qt.AlignVCenter
 
                 Rectangle {
                     width: 30; height: 30; radius: 7
@@ -45,17 +46,20 @@ Item {
                     border.width: 1; border.color: theme.accent
                     Image { anchors.centerIn: parent; width: 17; height: 17; source: "qrc:/iedsim/assets/radio-tower.svg" }
                 }
-                Column {
-                    spacing: 1
-                    Label { text: "ARSTACK61850"; color: theme.muted; font.pixelSize: 10; font.weight: Font.DemiBold; font.letterSpacing: 1.1 }
-                    Label { text: "IED Simulator"; color: theme.text; font.pixelSize: theme.subtitleSize; font.weight: Font.DemiBold }
+                Label {
+                    text: "ARSTACK61850  /  IED Simulator"
+                    color: theme.text
+                    font.pixelSize: theme.subtitleSize
+                    font.weight: Font.Medium
+                    Layout.alignment: Qt.AlignVCenter
                 }
                 Item { Layout.fillWidth: true }
                 StatusPill {
                     theme: root.theme
-                    text: backend.imported ? "Ready" : "Waiting for model"
+                    text: backend.starting ? "Starting" : (backend.imported ? "Configured" : "Waiting for model")
                     tone: backend.imported ? theme.green : theme.muted
                     fill: backend.imported ? theme.greenSoft : theme.surfaceRaised
+                    Layout.alignment: Qt.AlignVCenter
                 }
                 Rectangle { width: 1; height: 24; color: theme.line }
                 Label {
@@ -191,9 +195,9 @@ Item {
                             Repeater {
                                 model: [
                                     { label: "IEDs", value: backend.ieds.length },
-                                    { label: "Logical Devices", value: backend.logicalDeviceCount },
-                                    { label: "Data Objects", value: backend.dataObjectCount },
-                                    { label: "Data Attributes", value: backend.dataAttributeCount },
+                                    { label: "Referenced LDs", value: backend.logicalDeviceCount },
+                                    { label: "Referenced Objects", value: backend.dataObjectCount },
+                                    { label: "Referenced Attributes", value: backend.dataAttributeCount },
                                     { label: "DataSets", value: backend.dataSetCount },
                                     { label: "GOOSE", value: backend.gooseCount }
                                 ]
@@ -287,8 +291,8 @@ Item {
                                 model: [
                                     { label: "Import complete", ready: backend.imported },
                                     { label: "Model validated", ready: backend.imported && !backend.fatalError.length },
-                                    { label: "Endpoint available", ready: backend.port > 0 },
-                                    { label: "Services configured", ready: backend.imported }
+                                    { label: "Endpoint configured", ready: backend.port > 0 },
+                                    { label: "MMS profile selected", ready: backend.imported }
                                 ]
                                 delegate: Rectangle {
                                     required property var modelData
@@ -323,7 +327,7 @@ Item {
                         model: backend.availableAddresses
                         currentIndex: Math.max(0, backend.availableAddresses.indexOf(backend.listenAddress))
                         onActivated: backend.listenAddress = currentText
-                        contentItem: Label { leftPadding: 10; text: addressBox.displayText; color: theme.text; verticalAlignment: Text.AlignVCenter; font.pixelSize: theme.labelSize }
+                        contentItem: Label { leftPadding: 10; rightPadding: 28; text: addressBox.displayText; color: theme.text; verticalAlignment: Text.AlignVCenter; font.pixelSize: theme.labelSize }
                         background: Rectangle { radius: theme.controlRadius; color: theme.surfaceRaised; border.width: 1; border.color: addressBox.activeFocus ? theme.accent : theme.line }
                     }
                     Label { text: "PORT"; color: theme.muted; font.pixelSize: 10; font.weight: Font.DemiBold; font.letterSpacing: 0.8 }
@@ -342,9 +346,9 @@ Item {
                             Layout.fillWidth: true
                             spacing: 2
                             Label { text: "GOOSE Publishing"; color: theme.textSoft; font.pixelSize: theme.labelSize }
-                            Label { text: "Publish configured GOOSE control blocks"; color: theme.muted; font.pixelSize: 10 }
+                            Label { text: "Planned service · inactive in this build"; color: theme.muted; font.pixelSize: 10 }
                         }
-                        ToggleSwitch { theme: root.theme; checked: backend.gooseEnabled; onToggled: backend.gooseEnabled = checked }
+                        ToggleSwitch { theme: root.theme; enabled: false; checked: false }
                     }
                     RowLayout {
                         Layout.fillWidth: true
@@ -352,9 +356,9 @@ Item {
                             Layout.fillWidth: true
                             spacing: 2
                             Label { text: "File Service"; color: theme.textSoft; font.pixelSize: theme.labelSize }
-                            Label { text: "Expose a controlled lab folder"; color: theme.muted; font.pixelSize: 10 }
+                            Label { text: "Planned service · inactive in this build"; color: theme.muted; font.pixelSize: 10 }
                         }
-                        ToggleSwitch { theme: root.theme; checked: backend.fileServiceEnabled; onToggled: backend.fileServiceEnabled = checked }
+                        ToggleSwitch { theme: root.theme; enabled: false; checked: false }
                     }
                     Label { text: "FILE SERVICE FOLDER"; color: backend.fileServiceEnabled ? theme.muted : theme.line; font.pixelSize: 10; font.weight: Font.DemiBold; font.letterSpacing: 0.8 }
                     RowLayout {
@@ -373,7 +377,7 @@ Item {
                     ComboBox {
                         Layout.fillWidth: true; implicitHeight: theme.controlHeight
                         model: ["Simulation Mode (Live)", "Training Mode (Isolated)", "Read-only Demonstration"]
-                        contentItem: Label { leftPadding: 10; text: parent.displayText; color: theme.text; verticalAlignment: Text.AlignVCenter; font.pixelSize: theme.labelSize }
+                        contentItem: Label { leftPadding: 10; rightPadding: 28; text: parent.displayText; color: theme.text; verticalAlignment: Text.AlignVCenter; font.pixelSize: theme.labelSize }
                         background: Rectangle { radius: theme.controlRadius; color: theme.surfaceRaised; border.width: 1; border.color: parent.activeFocus ? theme.accent : theme.line }
                     }
                     Item { Layout.fillHeight: true }
@@ -395,7 +399,7 @@ Item {
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: backend.imported ? "The model will be discoverable through the configured MMS endpoint." : "Import and validate a model before starting."
+                        text: backend.imported ? "Discovery status turns green only after the MMS listener confirms readiness." : "Import and validate a model before starting."
                         color: theme.muted; font.pixelSize: 10; wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter
                     }
                 }
@@ -405,7 +409,7 @@ Item {
         SurfaceCard {
             theme: root.theme
             Layout.fillWidth: true
-            Layout.preferredHeight: 124
+            Layout.preferredHeight: 142
             Layout.leftMargin: 18; Layout.rightMargin: 18; Layout.bottomMargin: 16
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 12; spacing: 7
@@ -414,7 +418,8 @@ Item {
                     Image { width: 15; height: 15; source: "qrc:/iedsim/assets/activity.svg" }
                     Label { text: "Activity & Diagnostics"; color: theme.textSoft; font.pixelSize: theme.labelSize; font.weight: Font.DemiBold }
                     Item { Layout.fillWidth: true }
-                    StatusPill { theme: root.theme; text: backend.imported ? "Ready for discovery" : "Standby"; tone: backend.imported ? theme.green : theme.muted; fill: backend.imported ? theme.greenSoft : theme.surfaceRaised }
+                    StatusPill { theme: root.theme; text: backend.starting ? "Starting endpoint" : (backend.imported ? "Configuration ready" : "Standby"); tone: backend.starting ? theme.accent : (backend.imported ? theme.green : theme.muted); fill: backend.starting ? theme.accentSoft : (backend.imported ? theme.greenSoft : theme.surfaceRaised) }
+                    ActionButton { theme: root.theme; text: "Copy diagnostics"; implicitHeight: 28; onClicked: backend.copyDiagnostics() }
                 }
                 Rectangle { Layout.fillWidth: true; height: 1; color: theme.lineSoft }
                 ListView {

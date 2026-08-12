@@ -8,9 +8,9 @@ import ARStack.IedSimulator 1.0
 ApplicationWindow {
     id: root
     width: 1480
-    height: 940
+    height: 1000
     minimumWidth: 1180
-    minimumHeight: 760
+    minimumHeight: 820
     visible: true
     title: "ARStack IED Simulator"
     color: appTheme.background

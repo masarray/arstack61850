@@ -11,9 +11,12 @@
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
+#include <fstream>
 #include <iostream>
 #include <limits>
+#include <set>
 #include <span>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -145,7 +148,9 @@ void close_socket(const NativeSocket socket) noexcept {
         : SocketWaitStatus::error;
 }
 
-[[nodiscard]] NativeSocket create_listener(const std::uint16_t port) {
+[[nodiscard]] NativeSocket create_listener(
+    const std::string_view bind_address,
+    const std::uint16_t port) {
     const auto listener = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (listener == kInvalidSocket) {
         throw std::runtime_error("socket() failed: " + socket_error_text());
@@ -166,7 +171,16 @@ void close_socket(const NativeSocket socket) noexcept {
 
     sockaddr_in address{};
     address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (bind_address == "0.0.0.0" || bind_address.empty()) {
+        address.sin_addr.s_addr = htonl(INADDR_ANY);
+    } else if (::inet_pton(
+                   AF_INET,
+                   std::string{bind_address}.c_str(),
+                   &address.sin_addr) != 1) {
+        close_socket(listener);
+        throw std::runtime_error(
+            "Invalid IPv4 bind address: " + std::string{bind_address});
+    }
     address.sin_port = htons(port);
 #if defined(_WIN32)
     const auto address_size = static_cast<int>(sizeof(address));
@@ -316,6 +330,8 @@ struct SocketStreamContext final {
 }
 
 struct CliOptions final {
+    std::string bind_address{"0.0.0.0"};
+    std::string model_manifest;
     std::uint16_t port{102U};
     std::uint8_t digital_input_mask{};
     std::size_t maximum_connections{};
@@ -337,7 +353,9 @@ void print_usage() {
     std::cout
         << "Usage: ariec61850_static_ied_server [options]\n\n"
         << "Options:\n"
+        << "  --host IPv4               IPv4 listen address (default 0.0.0.0).\n"
         << "  --port N                  TCP listen port (default 102).\n"
+        << "  --model-manifest PATH     Host model manifest emitted by the Qt simulator.\n"
         << "  --digital-input-mask N    GGIO1 Ind1..Ind8 bit mask (default 0).\n"
         << "  --max-connections N       Exit after N accepted TCP connections (default unlimited).\n"
         << "  -h, --help                Show this help.\n\n"
@@ -353,13 +371,18 @@ void print_usage() {
             print_usage();
             std::exit(0);
         }
-        if (option == "--port" || option == "--digital-input-mask" ||
+        if (option == "--host" || option == "--model-manifest" ||
+            option == "--port" || option == "--digital-input-mask" ||
             option == "--max-connections") {
             if (++index >= argc) {
                 throw std::invalid_argument(option + " requires a value.");
             }
             const std::string value = argv[index];
-            if (option == "--port") {
+            if (option == "--host") {
+                options.bind_address = value;
+            } else if (option == "--model-manifest") {
+                options.model_manifest = value;
+            } else if (option == "--port") {
                 const auto parsed = parse_u32(option, value, 65'535U);
                 if (parsed == 0U) {
                     throw std::invalid_argument("--port must be 1..65535.");
@@ -467,17 +490,21 @@ struct EncodedValue final {
     const std::string_view do_name) {
     constexpr std::array<std::uint8_t, 2U> boolean_type{0x83U, 0x00U};
     const auto da_name = make_tlv(
-        0x1AU,
+        0x80U,
         std::span<const std::uint8_t>{
             reinterpret_cast<const std::uint8_t*>("stVal"), 5U});
-    const auto da = make_tlv(0xA2U, concat({da_name, boolean_type}));
-    const auto da_list = make_tlv(0xA2U, da);
+    const auto da_type = make_tlv(0xA1U, boolean_type);
+    const auto da = make_tlv(0x30U, concat({da_name, da_type}));
+    const auto da_list = make_tlv(0xA1U, da);
+    const auto data_object_type = make_tlv(0xA2U, da_list);
     const auto do_name_tlv = make_tlv(
-        0x1AU,
+        0x80U,
         std::span<const std::uint8_t>{
             reinterpret_cast<const std::uint8_t*>(do_name.data()), do_name.size()});
-    const auto do_entry = make_tlv(0xA2U, concat({do_name_tlv, da_list}));
-    return make_tlv(0xA2U, do_entry);
+    const auto do_type = make_tlv(0xA1U, data_object_type);
+    const auto do_entry = make_tlv(0x30U, concat({do_name_tlv, do_type}));
+    const auto do_list = make_tlv(0xA1U, do_entry);
+    return make_tlv(0xA2U, do_list);
 }
 
 [[nodiscard]] std::vector<std::uint8_t> build_ggio_type() {
@@ -485,10 +512,13 @@ struct EncodedValue final {
     for (std::size_t index = 1U; index <= 8U; ++index) {
         const auto do_name = std::string{"Ind"} + std::to_string(index);
         const auto encoded = build_single_status_ln_type(do_name);
-        const auto inner = std::span<const std::uint8_t>{encoded}.subspan(2U);
-        do_entries.insert(do_entries.end(), inner.begin(), inner.end());
+        // A single-status LN is A2/A1/SEQUENCE. Reuse the complete named DO
+        // component while building the GGIO structure component list.
+        const auto structure_fields = std::span<const std::uint8_t>{encoded}.subspan(2U);
+        const auto component_list = structure_fields.subspan(2U);
+        do_entries.insert(do_entries.end(), component_list.begin(), component_list.end());
     }
-    return make_tlv(0xA2U, do_entries);
+    return make_tlv(0xA2U, make_tlv(0xA1U, do_entries));
 }
 
 struct ConnectionBuffers final {
@@ -497,12 +527,118 @@ struct ConnectionBuffers final {
     std::array<std::uint8_t, 8'192U> workspace{};
 };
 
+struct ManifestModel final {
+    std::vector<std::string> domains;
+    std::vector<std::string> items;
+    std::vector<mms::MmsStaticObjectEntry> objects;
+    std::size_t declared_entries{};
+};
+
+[[nodiscard]] ManifestModel load_manifest_model(
+    const std::string& path,
+    const std::span<const std::uint8_t> type_specification,
+    const EncodedValue& value) {
+    ManifestModel model;
+    if (path.empty()) {
+        return model;
+    }
+    std::ifstream input{path};
+    if (!input) {
+        throw std::runtime_error("Could not open model manifest: " + path);
+    }
+
+    std::vector<std::pair<std::string, std::string>> names;
+    std::set<std::pair<std::string, std::string>> unique_names;
+    std::string line;
+    while (std::getline(input, line)) {
+        if (line.rfind("LN\t", 0U) != 0U) {
+            continue;
+        }
+        std::istringstream fields{line};
+        std::string kind;
+        std::string domain;
+        std::string item;
+        std::getline(fields, kind, '\t');
+        std::getline(fields, domain, '\t');
+        std::getline(fields, item, '\t');
+        if (domain.empty() || item.empty()) {
+            continue;
+        }
+        ++model.declared_entries;
+        if (unique_names.emplace(domain, item).second &&
+            names.size() < mms::MmsStaticObjectTable::maximum_objects) {
+            names.emplace_back(std::move(domain), std::move(item));
+        }
+    }
+    if (names.empty()) {
+        throw std::runtime_error(
+            "Model manifest contains no usable logical-node entries.");
+    }
+
+    model.domains.reserve(names.size());
+    model.items.reserve(names.size());
+    for (const auto& [domain, item] : names) {
+        model.domains.push_back(domain);
+        model.items.push_back(item);
+    }
+    model.objects.reserve(names.size());
+    for (std::size_t index = 0U; index < names.size(); ++index) {
+        model.objects.push_back(mms::MmsStaticObjectEntry{
+            model.domains[index],
+            model.items[index],
+            type_specification,
+            read_encoded,
+            &value});
+    }
+    return model;
+}
+
+[[nodiscard]] std::string_view connection_state_text(
+    const mms::MmsStaticConnectionState state) noexcept {
+    switch (state) {
+    case mms::MmsStaticConnectionState::awaiting_cotp_connect: return "tcp";
+    case mms::MmsStaticConnectionState::awaiting_association: return "cotp";
+    case mms::MmsStaticConnectionState::established: return "mms";
+    case mms::MmsStaticConnectionState::closed: return "closed";
+    case mms::MmsStaticConnectionState::fault: return "fault";
+    }
+    return "unknown";
+}
+
+[[nodiscard]] std::string_view service_text(
+    const mms::MmsWireConfirmedService service) noexcept {
+    switch (service) {
+    case mms::MmsWireConfirmedService::get_name_list: return "GetNameList";
+    case mms::MmsWireConfirmedService::identify: return "Identify";
+    case mms::MmsWireConfirmedService::read: return "Read";
+    case mms::MmsWireConfirmedService::write: return "Write";
+    case mms::MmsWireConfirmedService::get_variable_access_attributes:
+        return "GetVariableAccessAttributes";
+    case mms::MmsWireConfirmedService::get_named_variable_list_attributes:
+        return "GetNamedVariableListAttributes";
+    case mms::MmsWireConfirmedService::file_directory: return "FileDirectory";
+    case mms::MmsWireConfirmedService::unknown: return "Unknown";
+    }
+    return "Unknown";
+}
+
+[[nodiscard]] std::string peer_address(const sockaddr_in& peer) {
+    std::array<char, INET_ADDRSTRLEN> text{};
+    if (::inet_ntop(AF_INET, &peer.sin_addr, text.data(), text.size()) == nullptr) {
+        return "unknown";
+    }
+    return std::string{text.data()} + ':' + std::to_string(ntohs(peer.sin_port));
+}
+
 void serve_connection(
     const NativeSocket socket,
     const mms::MmsStaticObjectTable& object_table,
     const mms::MmsStaticDataSetTable& data_sets,
-    const std::uint64_t association_id) {
-    const mms::MmsStaticApplicationDispatcher dispatcher{object_table, data_sets};
+    const std::uint64_t association_id,
+    const std::string_view remote) {
+    mms::MmsStaticDispatchPolicy dispatch_policy;
+    const mms::MmsStaticApplicationDispatcher dispatcher{
+        object_table, data_sets, dispatch_policy};
 
     mms::MmsStaticConnectionPolicy policy;
     policy.association_id = association_id;
@@ -525,9 +661,38 @@ void serve_connection(
         stream,
         {buffers.receive, buffers.response, buffers.workspace}};
 
+    auto previous_state = runtime.state();
+    std::size_t total_received = 0U;
+    std::size_t total_sent = 0U;
     while (!g_stop.load(std::memory_order_relaxed)) {
         const auto result = session.poll_once();
+        total_received += result.bytes_received;
+        total_sent += result.bytes_sent;
+        const auto current_state = runtime.state();
+        if (current_state != previous_state) {
+            std::cout << "IEDSIM_EVENT kind=protocol_stage association="
+                      << association_id << " remote=" << remote
+                      << " stage=" << connection_state_text(current_state) << '\n';
+            std::cout.flush();
+            previous_state = current_state;
+        }
+        if (result.application_service != mms::MmsWireConfirmedService::unknown) {
+            std::cout << "IEDSIM_EVENT kind=mms_service association="
+                      << association_id << " remote=" << remote
+                      << " service=" << service_text(result.application_service)
+                      << " invoke=" << result.invoke_id
+                      << " accepted="
+                      << (result.status == mms::MmsStaticServerSessionStatus::application_rejected
+                              ? "false" : "true")
+                      << '\n';
+            std::cout.flush();
+        }
         if (result.terminal()) {
+            std::cout << "IEDSIM_EVENT kind=client_closed association="
+                      << association_id << " remote=" << remote
+                      << " rx=" << total_received << " tx=" << total_sent
+                      << " state=" << connection_state_text(runtime.state()) << '\n';
+            std::cout.flush();
             return;
         }
         if (result.status == mms::MmsStaticServerSessionStatus::would_block ||
@@ -581,6 +746,11 @@ int main(int argc, char** argv) {
             EncodedValue{healthy_ln_data},
             EncodedValue{healthy_ln_data},
             EncodedValue{ggio_data}};
+
+        const auto manifest_type = build_single_status_ln_type("Mod");
+        const EncodedValue manifest_value{healthy_ln_data};
+        auto manifest_model = load_manifest_model(
+            options.model_manifest, manifest_type, manifest_value);
 
         std::array<mms::MmsStaticObjectEntry, 13U> objects{};
         objects[0] = mms::MmsStaticObjectEntry{
@@ -643,18 +813,33 @@ int main(int argc, char** argv) {
         const std::array<mms::MmsStaticDataSetEntry, 1U> data_set_entries{{
             {"ESP32S3IOLD0", "LLN0$EventData", data_set_members, false}}};
 
-        const mms::MmsStaticObjectTable object_table{objects};
-        const mms::MmsStaticDataSetTable data_sets{data_set_entries};
+        const auto object_span = manifest_model.objects.empty()
+            ? std::span<const mms::MmsStaticObjectEntry>{objects}
+            : std::span<const mms::MmsStaticObjectEntry>{manifest_model.objects};
+        const auto data_set_span = manifest_model.objects.empty()
+            ? std::span<const mms::MmsStaticDataSetEntry>{data_set_entries}
+            : std::span<const mms::MmsStaticDataSetEntry>{};
+        const mms::MmsStaticObjectTable object_table{object_span};
+        const mms::MmsStaticDataSetTable data_sets{data_set_span};
         if (!object_table.valid() ||
             !data_sets.valid() ||
             !data_sets.valid_against(object_table)) {
             throw std::runtime_error("Static MMS server model is invalid.");
         }
 
-        const auto listener = create_listener(options.port);
-        std::cout << "STATIC_IED_SERVER_READY port=" << options.port
-                  << " objects=" << objects.size()
-                  << " datasets=" << data_set_entries.size() << '\n';
+        const auto listener = create_listener(options.bind_address, options.port);
+        std::set<std::string_view> domain_names;
+        for (const auto& object : object_span) domain_names.insert(object.domain);
+        const auto truncated = manifest_model.declared_entries > object_span.size()
+            ? manifest_model.declared_entries - object_span.size()
+            : 0U;
+        std::cout << "IEDSIM_EVENT kind=server_ready bind="
+                  << options.bind_address << " port=" << options.port
+                  << " objects=" << object_span.size()
+                  << " domains=" << domain_names.size()
+                  << " datasets=" << data_set_span.size()
+                  << " truncated=" << truncated
+                  << " profile=iedscout" << '\n';
         std::cout.flush();
 
         std::size_t connection_count = 0U;
@@ -689,18 +874,22 @@ int main(int argc, char** argv) {
                 continue;
             }
             ++connection_count;
-            std::cout << "CONNECTION_ACCEPTED count=" << connection_count << '\n';
+            const auto remote = peer_address(peer);
+            std::cout << "IEDSIM_EVENT kind=client_connected association="
+                      << connection_count << " remote=" << remote << '\n';
+            std::cout.flush();
             serve_connection(
                 client,
                 object_table,
                 data_sets,
-                static_cast<std::uint64_t>(connection_count));
+                static_cast<std::uint64_t>(connection_count),
+                remote);
             close_socket(client);
-            std::cout << "CONNECTION_CLOSED count=" << connection_count << '\n';
         }
 
         close_socket(listener);
-        std::cout << "STATIC_IED_SERVER_STOPPED connections=" << connection_count << '\n';
+        std::cout << "IEDSIM_EVENT kind=server_stopped connections="
+                  << connection_count << '\n';
         return 0;
     } catch (const std::exception& exception) {
         std::cerr << "Static IED server failed: " << exception.what() << '\n';
