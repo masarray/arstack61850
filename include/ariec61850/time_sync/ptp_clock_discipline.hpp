@@ -51,6 +51,7 @@ public:
         filtered_path_delay_ns_.reset();
         frequency_bias_ppb_ = 0.0;
         large_acquisition_phase_step_used_ = false;
+        lock_achieved_since_reset_ = false;
         static_cast<void>(now);
     }
 
@@ -81,6 +82,7 @@ public:
         const bool exceeds_normal_fault_limit = offset_magnitude > fault_limit;
         const bool bounded_large_acquisition =
             acquisition_state &&
+            !lock_achieved_since_reset_ &&
             !large_acquisition_phase_step_used_ &&
             exceeds_normal_fault_limit &&
             offset_magnitude <= acquisition_limit;
@@ -138,7 +140,12 @@ public:
             status_.consecutive_bad_samples = 0U;
         }
 
-        if (status_.state != PtpDisciplineState::locked &&
+        // Phase discontinuities are permitted only during the initial
+        // pre-lock acquisition window. Once this discipline has achieved
+        // LOCKED, ordinary unlock/holdover recovery must slew using bounded
+        // frequency correction until an explicit reset/source reselection.
+        if (!lock_achieved_since_reset_ &&
+            status_.state != PtpDisciplineState::locked &&
             offset_magnitude >
                 static_cast<std::uint64_t>(options_.phase_step_threshold_ns)) {
             std::int64_t phase_step_ns{};
@@ -194,6 +201,7 @@ public:
                 options_.lock_required_samples) {
                 status_.state = PtpDisciplineState::locked;
                 status_.consecutive_bad_samples = 0U;
+                lock_achieved_since_reset_ = true;
             }
         } else {
             status_.consecutive_qualified_samples = 0U;
@@ -335,6 +343,7 @@ private:
     std::optional<double> filtered_path_delay_ns_;
     double frequency_bias_ppb_{};
     bool large_acquisition_phase_step_used_{};
+    bool lock_achieved_since_reset_{};
 };
 
 } // namespace ar::iec61850::time_sync
