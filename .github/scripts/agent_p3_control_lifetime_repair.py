@@ -65,15 +65,16 @@ once(
 ''',
 'context initialization')
 
-# IEC 61850 Origin.orIdent is variable-length octet-string. The live control
-# client deliberately supports identifiers up to 64 bytes, so advertise that
-# capacity rather than the 8-byte placeholder used by the first adapter draft.
+# Match the proven direct-control server's live Oper contract exactly: Origin.orCat
+# is MMS unsigned and orIdent is a variable-length octet-string up to 64 bytes.
 once(
-'''    origin.children.push_back(field("orIdent", mms::MmsTypeKind::octet_string, 8U));
+'''    origin.children.push_back(field("orCat", mms::MmsTypeKind::integer, 8U));
+    origin.children.push_back(field("orIdent", mms::MmsTypeKind::octet_string, 8U));
 ''',
-'''    origin.children.push_back(field("orIdent", mms::MmsTypeKind::octet_string, 64U));
+'''    origin.children.push_back(field("orCat", mms::MmsTypeKind::unsigned_integer, 8U));
+    origin.children.push_back(field("orIdent", mms::MmsTypeKind::octet_string, 64U));
 ''',
-'origin identifier capacity')
+'origin exact live type')
 
 # Add explicit enhanced-SBO selection evidence.
 once(
@@ -96,4 +97,4 @@ once(
 'enhanced select evidence')
 
 p.write_text(s, encoding='utf-8')
-print('P3 lifetime/type-contract repair applied')
+print('P3 lifetime/exact-type repair applied')
