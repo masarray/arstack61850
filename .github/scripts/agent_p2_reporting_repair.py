@@ -67,4 +67,17 @@ replace_once(
     "    const auto add_rcb_object = [&](const ManifestReportControl& rcb,\n",
 )
 
+# static_rcb_trial filters use IEC-facing inventory references, not raw MMS
+# variable/list names. Keep the acceptance contract aligned with discovery.
+replace_once(
+    "apps/ied_simulator/test_gui_live_value.py",
+    '                    "MU01LD0/LLN0$RP$urcb01",\n',
+    '                    "MU01LD0/LLN0.urcb01",\n',
+)
+replace_once(
+    "apps/ied_simulator/test_gui_live_value.py",
+    '                    "MU01LD0/LLN0$dsSV",\n',
+    '                    "MU01LD0/LLN0.dsSV",\n',
+)
+
 print("P2 reporting repair applied")
