@@ -320,17 +320,21 @@ public:
             last_path_delay_at_.reset();
             pending_sync_.reset();
         }
-        if (pending_sync_.has_value() &&
-            now > pending_sync_->observed_at &&
-            now - pending_sync_->observed_at > options_.exchange_timeout) {
-            pending_sync_.reset();
-            ++status_.rejected_exchanges;
+        if (pending_sync_.has_value()) {
+            const auto observed_at = pending_sync_->observed_at;
+            if (now > observed_at &&
+                now - observed_at > options_.exchange_timeout) {
+                pending_sync_.reset();
+                ++status_.rejected_exchanges;
+            }
         }
-        if (pending_pdelay_.has_value() &&
-            now > pending_pdelay_->started_at &&
-            now - pending_pdelay_->started_at > options_.exchange_timeout) {
-            pending_pdelay_.reset();
-            ++status_.rejected_exchanges;
+        if (pending_pdelay_.has_value()) {
+            const auto started_at = pending_pdelay_->started_at;
+            if (now > started_at &&
+                now - started_at > options_.exchange_timeout) {
+                pending_pdelay_.reset();
+                ++status_.rejected_exchanges;
+            }
         }
         return false;
     }
@@ -381,17 +385,21 @@ private:
 
     [[nodiscard]] bool selected_announce_stale(
         const std::chrono::steady_clock::time_point now) const noexcept {
-        return selected_announce_last_seen_.has_value() &&
-               now > *selected_announce_last_seen_ &&
-               now - *selected_announce_last_seen_ > selected_source_timeout_;
+        if (!selected_announce_last_seen_.has_value()) return false;
+        const auto last_seen = *selected_announce_last_seen_;
+        return now > last_seen &&
+               now - last_seen > selected_source_timeout_;
     }
 
     [[nodiscard]] bool path_delay_stale(
         const std::chrono::steady_clock::time_point now) const noexcept {
-        return status_.mean_path_delay_ns.has_value() &&
-               last_path_delay_at_.has_value() &&
-               now > *last_path_delay_at_ &&
-               now - *last_path_delay_at_ > options_.path_delay_timeout;
+        if (!status_.mean_path_delay_ns.has_value() ||
+            !last_path_delay_at_.has_value()) {
+            return false;
+        }
+        const auto last_path_delay = *last_path_delay_at_;
+        return now > last_path_delay &&
+               now - last_path_delay > options_.path_delay_timeout;
     }
 
     [[nodiscard]] static bool better_quality(
