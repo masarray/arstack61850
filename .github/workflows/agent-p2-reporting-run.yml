@@ -5,17 +5,14 @@ on:
     branches:
       - agent/p2-reporting-run
     paths:
-      - .github/scripts/agent_p2_reporting_patch.py
-      - .github/scripts/agent_p2_reporting_repair.py
-      - .github/scripts/agent_p2_cleanup_diag.py
-      - .github/scripts/agent_p2_transport_fix.py
+      - .github/scripts/agent_p2_brcb_patch.py
       - .github/workflows/agent-p2-reporting-run.yml
 
 permissions:
   contents: write
 
 jobs:
-  patch-build-test:
+  brcb-integration:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -23,20 +20,13 @@ jobs:
           ref: agent/p2-reporting-run
           fetch-depth: 0
 
-      - name: Preserve patchers and checkout P2 target
+      - name: Preserve BRCB patcher and checkout validated URCB target
         run: |
-          cp .github/scripts/agent_p2_reporting_patch.py /tmp/agent_p2_reporting_patch.py
-          cp .github/scripts/agent_p2_reporting_repair.py /tmp/agent_p2_reporting_repair.py
-          cp .github/scripts/agent_p2_cleanup_diag.py /tmp/agent_p2_cleanup_diag.py
-          cp .github/scripts/agent_p2_transport_fix.py /tmp/agent_p2_transport_fix.py
+          cp .github/scripts/agent_p2_brcb_patch.py /tmp/agent_p2_brcb_patch.py
           git checkout -B agent/iedsim-full-scl-live-store origin/agent/iedsim-full-scl-live-store
 
-      - name: Apply P2 reporting patch
-        run: |
-          python3 /tmp/agent_p2_reporting_patch.py
-          python3 /tmp/agent_p2_reporting_repair.py
-          python3 /tmp/agent_p2_cleanup_diag.py
-          python3 /tmp/agent_p2_transport_fix.py
+      - name: Apply BRCB R1-R3 integration
+        run: python3 /tmp/agent_p2_brcb_patch.py
 
       - name: Diff sanity
         run: |
@@ -55,7 +45,7 @@ jobs:
           cmake -S apps/ied_simulator -B build-p2 -G Ninja
           -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build Qt simulator and P2 probes
+      - name: Build Qt simulator and probes
         run: >-
           cmake --build build-p2
           --target arstack_ied_simulator ariec61850_mms_read_probe ariec61850_static_rcb_trial
@@ -66,7 +56,7 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: ./build-p2/arstack_ied_simulator --smoke-test
 
-      - name: P2 end-to-end reporting gate
+      - name: P2 URCB plus BRCB end-to-end gate
         run: >-
           python3 apps/ied_simulator/test_gui_live_value.py
           --app ./build-p2/arstack_ied_simulator
@@ -104,24 +94,24 @@ jobs:
           ./build-p2-root/ariec61850_mms_runtime_tests
           ./build-p2-root/ariec61850_scl_tests
 
-      - name: Commit validated P2 URCB source to target branch
+      - name: Configure BRCB R1-R3 hard profile
+        run: cmake -S embedded/brcb_hard_profile -B build-brcb-hard -G Ninja
+
+      - name: Build and run BRCB hard profile
+        run: |
+          cmake --build build-brcb-hard --parallel 2
+          ctest --test-dir build-brcb-hard --output-on-failure
+
+      - name: Commit validated complete P2 source to target branch
         run: |
           git config user.name openai-agent
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add \
-            CMakeLists.txt \
             apps/ied_simulator/CMakeLists.txt \
-            apps/ied_simulator/src/IedSimulatorController.cpp \
             apps/ied_simulator/test_gui_live_value.py \
-            include/ariec61850/scl/model.hpp \
-            src/mms/association_runtime.cpp \
-            src/mms/reporting.cpp \
-            src/scl/parser_part_05_03.inc \
             tests/fixtures/scl/iedsim-full-model.scd \
-            tests/test_mms_runtime.cpp \
-            tests/test_reporting.cpp \
             tools/static_ied_server.cpp \
             tools/static_ied_server_iedsim/CMakeLists.txt \
             tools/static_rcb_trial.cpp
-          git commit -m 'feat(iedsim): integrate live URCB reporting runtime'
+          git commit -m 'feat(iedsim): integrate buffered reporting R1-R3'
           git push origin HEAD:agent/iedsim-full-scl-live-store
