@@ -24,6 +24,10 @@ using Clock = std::chrono::steady_clock;
     } \
 } while (false)
 
+[[nodiscard]] PtpTimestamp ts(const std::uint64_t seconds, const std::uint32_t ns) {
+    return {seconds, ns};
+}
+
 [[nodiscard]] PtpClockIdentity identity(const std::uint8_t suffix) {
     return {0x02U, 0x00U, 0x00U, 0xFFU, 0xFEU, 0x00U, 0x00U, suffix};
 }
@@ -54,6 +58,33 @@ using Clock = std::chrono::steady_clock;
     announce.steps_removed = 0U;
     announce.time_source = PtpTimeSource::internal_oscillator;
     frame.announce = announce;
+    return frame;
+}
+
+[[nodiscard]] PtpFrame two_step_sync_frame(
+    const PtpPortIdentity& source,
+    const std::uint16_t sequence_id) {
+    PtpFrame frame;
+    frame.header.message_type = PtpMessageType::sync;
+    frame.header.domain_number = 0U;
+    frame.header.transport_specific = 0U;
+    frame.header.source_port_identity = source;
+    frame.header.sequence_id = sequence_id;
+    frame.header.flags = 0x0200U;
+    return frame;
+}
+
+[[nodiscard]] PtpFrame follow_up_frame(
+    const PtpPortIdentity& source,
+    const std::uint16_t sequence_id,
+    const PtpTimestamp& origin) {
+    PtpFrame frame;
+    frame.header.message_type = PtpMessageType::follow_up;
+    frame.header.domain_number = 0U;
+    frame.header.transport_specific = 0U;
+    frame.header.source_port_identity = source;
+    frame.header.sequence_id = sequence_id;
+    frame.timestamp = origin;
     return frame;
 }
 
@@ -288,6 +319,54 @@ void path_delay_lifetime_tracks_configured_exchange_cadence() {
     CHECK(fast_profile.path_delay_timeout == 150ms);
 }
 
+void active_receiver_counts_replaced_pending_sync() {
+    using namespace std::chrono_literals;
+    const auto local = port(0x7AU, 2U);
+    const auto master = port(0x7BU, 1U);
+    PtpTimeReceiver receiver(PtpTimeReceiverOptions{0U, 0U, local, 3000ms, 500ms});
+    const auto t0 = Clock::time_point{};
+    CHECK(receiver.observe_announce(announce_frame(master), t0));
+
+    // Owning a Pdelay request marks this as an active TIME_RECEIVER-style
+    // correlation path even before a valid path-delay result is available.
+    receiver.note_pdelay_request(1U, ts(1U, 0U), t0 + 1ms);
+    CHECK(!receiver.observe_sync(
+        two_step_sync_frame(master, 10U), ts(2U, 100U), t0 + 2ms).has_value());
+    CHECK(receiver.status().rejected_exchanges == 0U);
+
+    CHECK(!receiver.observe_sync(
+        two_step_sync_frame(master, 11U), ts(2U, 200U), t0 + 3ms).has_value());
+    CHECK(receiver.status().sync_frames == 2U);
+    CHECK(receiver.status().rejected_exchanges == 1U);
+}
+
+void passive_sync_observation_does_not_create_false_rejections() {
+    using namespace std::chrono_literals;
+    const auto local = port(0x7CU, 2U);
+    const auto master = port(0x7DU, 1U);
+    PtpTimeReceiver receiver(PtpTimeReceiverOptions{0U, 0U, local, 3000ms, 100ms});
+    const auto t0 = Clock::time_point{};
+    CHECK(receiver.observe_announce(announce_frame(master), t0));
+
+    CHECK(!receiver.observe_sync(
+        two_step_sync_frame(master, 20U), ts(3U, 100U), t0 + 1ms).has_value());
+    CHECK(!receiver.observe_follow_up(
+        follow_up_frame(master, 20U, ts(3U, 0U)), t0 + 2ms).has_value());
+    CHECK(receiver.status().sync_frames == 1U);
+    CHECK(receiver.status().follow_up_frames == 1U);
+    CHECK(receiver.status().rejected_exchanges == 0U);
+
+    // A passive observer may also miss Follow_Up traffic. A later Sync and the
+    // timeout cleanup must remain observation-only rather than a receiver fault.
+    CHECK(!receiver.observe_sync(
+        two_step_sync_frame(master, 21U), ts(4U, 100U), t0 + 3ms).has_value());
+    CHECK(!receiver.observe_sync(
+        two_step_sync_frame(master, 22U), ts(4U, 200U), t0 + 4ms).has_value());
+    CHECK(receiver.status().rejected_exchanges == 0U);
+    CHECK(!receiver.tick(t0 + 200ms));
+    CHECK(receiver.status().rejected_exchanges == 0U);
+}
+
 } // namespace
 
 int main() {
@@ -301,6 +380,8 @@ int main() {
         {"stale same-source reselection", stale_same_source_announce_forces_reselection},
         {"slow Announce cadence", slow_announce_cadence_extends_source_evidence_lifetime},
         {"path-delay cadence", path_delay_lifetime_tracks_configured_exchange_cadence},
+        {"active Sync replacement rejection", active_receiver_counts_replaced_pending_sync},
+        {"passive Sync observation", passive_sync_observation_does_not_create_false_rejections},
     };
 
     std::size_t passed = 0U;
