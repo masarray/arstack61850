@@ -169,6 +169,40 @@ void fault_is_latched_until_explicit_reset() {
     CHECK(discipline.status().state == PtpDisciplineState::acquiring);
 }
 
+void consecutive_unlock_samples_leave_locked_state() {
+    PtpDisciplineOptions options;
+    options.lock_required_samples = 1U;
+    options.unlock_required_samples = 3U;
+    PtpClockDiscipline discipline(options);
+    const auto t0 = Clock::time_point{};
+
+    static_cast<void>(discipline.observe(
+        PtpOffsetMeasurement{port(0x76U), 1U, 500LL, 500LL, true},
+        t0));
+    CHECK(discipline.status().state == PtpDisciplineState::locked);
+    CHECK(discipline.measured_smp_synch() ==
+          SmpSynchValue::global_synchronized);
+
+    constexpr std::int64_t out_of_tolerance_ns = 50'000LL;
+    for (std::uint16_t sequence = 2U; sequence <= 3U; ++sequence) {
+        static_cast<void>(discipline.observe(
+            PtpOffsetMeasurement{
+                port(0x76U), sequence, out_of_tolerance_ns, 500LL, true},
+            t0 + std::chrono::milliseconds{
+                10LL * static_cast<long long>(sequence - 1U)}));
+        CHECK(discipline.status().state == PtpDisciplineState::locked);
+        CHECK(discipline.status().consecutive_bad_samples == sequence - 1U);
+    }
+
+    static_cast<void>(discipline.observe(
+        PtpOffsetMeasurement{port(0x76U), 4U, out_of_tolerance_ns, 500LL, true},
+        t0 + std::chrono::milliseconds{30}));
+    CHECK(discipline.status().state == PtpDisciplineState::acquiring);
+    CHECK(discipline.status().consecutive_bad_samples == 3U);
+    CHECK(!discipline.status().globally_traceable);
+    CHECK(!discipline.measured_smp_synch().has_value());
+}
+
 void global_provenance_revokes_immediately_and_requires_new_measurement() {
     PtpDisciplineOptions options;
     options.lock_required_samples = 1U;
@@ -255,6 +289,7 @@ int main() {
         {"cold epoch acquisition", cold_epoch_can_acquire_once_then_lock},
         {"one-shot and post-lock guard", large_epoch_step_is_one_shot_and_never_allowed_post_lock},
         {"fault latch", fault_is_latched_until_explicit_reset},
+        {"consecutive unlock", consecutive_unlock_samples_leave_locked_state},
         {"global provenance revoke", global_provenance_revokes_immediately_and_requires_new_measurement},
         {"stale same-source reselection", stale_same_source_announce_forces_reselection},
         {"path-delay cadence", path_delay_lifetime_tracks_configured_exchange_cadence},
