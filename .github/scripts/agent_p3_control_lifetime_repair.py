@@ -96,5 +96,21 @@ once(
 ''',
 'enhanced select evidence')
 
+# MmsInformationReportSpanCodec validates data_set_reference even when the
+# DataSetName optional field is not selected. Supply a valid internal reference;
+# it is not emitted on the wire because OptFlds keeps DataSetName disabled.
+once(
+'''    report.report_id = "CommandTermination";
+    report.optional_fields = opt;
+    report.conf_revision = 1U;
+''',
+'''    report.report_id = "CommandTermination";
+    report.optional_fields = opt;
+    report.data_set_reference = mms::MmsInformationReportReferenceInput{
+        host.manifest->domain, host.oper_item};
+    report.conf_revision = 1U;
+''',
+'command termination internal reference')
+
 p.write_text(s, encoding='utf-8')
-print('P3 lifetime/exact-type repair applied')
+print('P3 lifetime/exact-type/termination repair applied')
