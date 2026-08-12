@@ -59,9 +59,6 @@ public:
         const PtpOffsetMeasurement& measurement,
         const std::chrono::steady_clock::time_point now =
             std::chrono::steady_clock::now()) noexcept {
-        status_.offset_from_master_ns = measurement.offset_from_master_ns;
-        status_.mean_path_delay_ns = measurement.mean_path_delay_ns;
-
         // FAULT is a safety latch. Timing traffic alone must never restart the
         // servo or authorize another phase discontinuity after a hard fault.
         // Recovery requires an explicit reset, which the ESP adapter performs
@@ -106,11 +103,17 @@ public:
             const auto rounded = std::llround(difference);
             jitter_ns = rounded < 0LL ? 0LL : rounded;
         }
-        status_.path_delay_jitter_ns = jitter_ns;
         if (jitter_ns > options_.maximum_path_delay_jitter_ns) {
             reject_sample();
             return {};
         }
+
+        // Only measurements that pass all qualification gates are published as
+        // valid timing telemetry. Rejected observations remain visible through
+        // rejected_samples without replacing the last qualified offset/path.
+        status_.offset_from_master_ns = measurement.offset_from_master_ns;
+        status_.mean_path_delay_ns = measurement.mean_path_delay_ns;
+        status_.path_delay_jitter_ns = jitter_ns;
 
         // Synchronization age is based only on measurements that have passed
         // path, offset and jitter qualification. Rejected traffic must never
