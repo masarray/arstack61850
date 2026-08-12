@@ -101,6 +101,7 @@ std::atomic_bool g_receiver_running{false};
 std::atomic_bool g_receiver_stop_requested{false};
 std::atomic_bool g_receiver_accept_rx{false};
 std::atomic<std::uint64_t> g_pdelay_requests_sent{0U};
+std::atomic<std::uint64_t> g_peer_delay_frames_observed{0U};
 std::atomic<std::uint64_t> g_receiver_tx_failures{0U};
 portMUX_TYPE g_receiver_status_mux = portMUX_INITIALIZER_UNLOCKED;
 ar_ptp_lab_status_t g_receiver_status{};
@@ -113,10 +114,7 @@ ar_ptp_lab_status_t g_receiver_status{};
 }
 
 [[nodiscard]] PtpTimestamp to_ptp_timestamp(const eth_mac_time_t& timestamp) noexcept {
-    return {
-        static_cast<std::uint64_t>(timestamp.seconds),
-        timestamp.nanoseconds,
-    };
+    return {static_cast<std::uint64_t>(timestamp.seconds), timestamp.nanoseconds};
 }
 
 [[nodiscard]] bool enable_hardware_ptp(const esp_eth_handle_t handle) noexcept {
@@ -219,9 +217,6 @@ void seed_hardware_clock(const esp_eth_handle_t handle) noexcept {
     std::int32_t& applied_ppb) noexcept {
     if (desired_ppb == applied_ppb) return true;
 
-    // ESP-IDF 5.x ADJ_PTP_FREQ multiplies the *current* addend. Convert our
-    // absolute servo output into a relative scale so repeated updates do not
-    // compound the requested correction.
     constexpr double kPpb = 1'000'000'000.0;
     const double desired_scale = 1.0 + static_cast<double>(desired_ppb) / kPpb;
     const double applied_scale = 1.0 + static_cast<double>(applied_ppb) / kPpb;
@@ -242,8 +237,7 @@ void seed_hardware_clock(const esp_eth_handle_t handle) noexcept {
     ReceiverContext& context,
     const PtpClockCommand& command) noexcept {
     switch (command.kind) {
-    case PtpClockCommandKind::none:
-        return true;
+    case PtpClockCommandKind::none: return true;
     case PtpClockCommandKind::step_phase:
         return apply_phase_step(context.eth_handle, command.phase_step_ns);
     case PtpClockCommandKind::set_frequency:
@@ -286,6 +280,13 @@ void seed_hardware_clock(const esp_eth_handle_t handle) noexcept {
     return body;
 }
 
+[[nodiscard]] constexpr bool is_peer_delay_message(
+    const PtpMessageType type) noexcept {
+    return type == PtpMessageType::pdelay_req ||
+           type == PtpMessageType::pdelay_resp ||
+           type == PtpMessageType::pdelay_resp_follow_up;
+}
+
 [[nodiscard]] bool should_queue(
     const ar_ptp_role_t role,
     const PtpMessageType type) noexcept {
@@ -318,43 +319,50 @@ esp_err_t receiver_input_info(
         context->rx_queue != nullptr) {
         PtpFrame frame;
         if (PtpCodec::try_parse_ethernet_frame(
-                std::span<const std::uint8_t>{buffer, length},
-                frame) &&
+                std::span<const std::uint8_t>{buffer, length}, frame) &&
             frame.header.domain_number == context->config.domain_number &&
-            frame.header.transport_specific == context->config.transport_specific &&
-            should_queue(context->config.role, frame.header.message_type)) {
-            PtpRxEvent event;
-            event.message_type = frame.header.message_type;
-            event.source = frame.header.source_port_identity;
-            event.sequence_id = frame.header.sequence_id;
-            event.flags = frame.header.flags;
-            event.correction_field = frame.header.correction_field;
-            event.log_message_interval = frame.header.log_message_interval;
-            if (info != nullptr) {
-                const auto& rx = *static_cast<const eth_mac_time_t*>(info);
-                if (valid_hw_timestamp(rx)) {
-                    event.rx_timestamp_valid = true;
-                    event.rx_timestamp = to_ptp_timestamp(rx);
+            frame.header.transport_specific == context->config.transport_specific) {
+            // Raw passive observability is independent of owning/correlating a
+            // peer-delay exchange. Count matching-profile Pdelay traffic before
+            // role-specific queue filtering so MONITOR sees Req/Resp/RespFU.
+            if (is_peer_delay_message(frame.header.message_type)) {
+                g_peer_delay_frames_observed.fetch_add(1U, std::memory_order_relaxed);
+            }
+
+            if (should_queue(context->config.role, frame.header.message_type)) {
+                PtpRxEvent event;
+                event.message_type = frame.header.message_type;
+                event.source = frame.header.source_port_identity;
+                event.sequence_id = frame.header.sequence_id;
+                event.flags = frame.header.flags;
+                event.correction_field = frame.header.correction_field;
+                event.log_message_interval = frame.header.log_message_interval;
+                if (info != nullptr) {
+                    const auto& rx = *static_cast<const eth_mac_time_t*>(info);
+                    if (valid_hw_timestamp(rx)) {
+                        event.rx_timestamp_valid = true;
+                        event.rx_timestamp = to_ptp_timestamp(rx);
+                    }
                 }
-            }
-            if (frame.timestamp.has_value()) {
-                event.message_timestamp_valid = true;
-                event.message_timestamp = *frame.timestamp;
-            }
-            if (frame.announce.has_value()) {
-                event.announce_valid = true;
-                event.announce = *frame.announce;
-            }
-            if (frame.header.message_type == PtpMessageType::pdelay_resp ||
-                frame.header.message_type == PtpMessageType::pdelay_resp_follow_up) {
-                event.pdelay_body_valid = parse_pdelay_body(
-                    frame,
-                    event.pdelay_body_timestamp,
-                    event.requesting_port_identity);
-            }
-            if (xQueueSend(context->rx_queue, &event, 0U) == pdTRUE &&
-                context->task_handle != nullptr) {
-                xTaskNotifyGive(context->task_handle);
+                if (frame.timestamp.has_value()) {
+                    event.message_timestamp_valid = true;
+                    event.message_timestamp = *frame.timestamp;
+                }
+                if (frame.announce.has_value()) {
+                    event.announce_valid = true;
+                    event.announce = *frame.announce;
+                }
+                if (frame.header.message_type == PtpMessageType::pdelay_resp ||
+                    frame.header.message_type == PtpMessageType::pdelay_resp_follow_up) {
+                    event.pdelay_body_valid = parse_pdelay_body(
+                        frame,
+                        event.pdelay_body_timestamp,
+                        event.requesting_port_identity);
+                }
+                if (xQueueSend(context->rx_queue, &event, 0U) == pdTRUE &&
+                    context->task_handle != nullptr) {
+                    xTaskNotifyGive(context->task_handle);
+                }
             }
         }
     }
@@ -400,8 +408,7 @@ esp_err_t receiver_input_info(
     return options;
 }
 
-[[nodiscard]] std::int8_t pdelay_log_interval(
-    const std::uint32_t interval_ms) noexcept {
+[[nodiscard]] std::int8_t pdelay_log_interval(const std::uint32_t interval_ms) noexcept {
     std::uint32_t value = 1000U;
     std::int8_t result = 0;
     if (interval_ms >= value) {
@@ -467,6 +474,8 @@ void update_status(ReceiverContext& context) noexcept {
     snapshot.role = context.config.role;
     snapshot.peer_delay_requests_sent =
         g_pdelay_requests_sent.load(std::memory_order_relaxed);
+    snapshot.peer_delay_frames_observed =
+        g_peer_delay_frames_observed.load(std::memory_order_relaxed);
     snapshot.tx_failure_count =
         g_receiver_tx_failures.load(std::memory_order_relaxed);
 
@@ -493,8 +502,7 @@ void update_status(ReceiverContext& context) noexcept {
 
     if (context.discipline.has_value()) {
         const auto& discipline = context.discipline->status();
-        snapshot.discipline_state = static_cast<ar_ptp_discipline_state_t>(
-            discipline.state);
+        snapshot.discipline_state = static_cast<ar_ptp_discipline_state_t>(discipline.state);
         if (discipline.offset_from_master_ns.has_value()) {
             snapshot.offset_valid = true;
             snapshot.offset_from_master_ns = *discipline.offset_from_master_ns;
@@ -528,9 +536,7 @@ void update_status(ReceiverContext& context) noexcept {
 void reset_discipline_for_new_source(ReceiverContext& context) noexcept {
     if (!context.discipline.has_value()) return;
     if (!apply_frequency_adjustment(
-            context.eth_handle,
-            0,
-            context.applied_frequency_ppb)) {
+            context.eth_handle, 0, context.applied_frequency_ppb)) {
         context.discipline->record_actuation_failure();
         return;
     }
@@ -538,9 +544,7 @@ void reset_discipline_for_new_source(ReceiverContext& context) noexcept {
     smp_synch_lab_set_measured(std::nullopt);
 }
 
-void process_rx_event(
-    ReceiverContext& context,
-    const PtpRxEvent& event) {
+void process_rx_event(ReceiverContext& context, const PtpRxEvent& event) {
     if (!context.receiver.has_value()) return;
     auto frame = frame_from_event(context, event);
     const auto now = std::chrono::steady_clock::now();
@@ -576,22 +580,16 @@ void process_rx_event(
     case PtpMessageType::pdelay_resp:
         if (event.rx_timestamp_valid) {
             static_cast<void>(context.receiver->observe_pdelay_response(
-                frame,
-                event.rx_timestamp,
-                now));
+                frame, event.rx_timestamp, now));
         }
         break;
     case PtpMessageType::pdelay_resp_follow_up:
-        static_cast<void>(context.receiver->observe_pdelay_response_follow_up(
-            frame,
-            now));
+        static_cast<void>(context.receiver->observe_pdelay_response_follow_up(frame, now));
         break;
     case PtpMessageType::sync:
         if (event.rx_timestamp_valid) {
             const auto measurement = context.receiver->observe_sync(
-                frame,
-                event.rx_timestamp,
-                now);
+                frame, event.rx_timestamp, now);
             if (measurement.has_value() && context.discipline.has_value()) {
                 const auto command = context.discipline->observe(*measurement, now);
                 if (!apply_clock_command(context, command)) {
@@ -621,8 +619,7 @@ void process_rx_event(
         }
         break;
     }
-    default:
-        break;
+    default: break;
     }
     publish_measured_sync(context);
 }
@@ -631,9 +628,7 @@ void finish_receiver(ReceiverContext& context) noexcept {
     g_receiver_accept_rx.store(false, std::memory_order_release);
     if (context.applied_frequency_ppb != 0) {
         static_cast<void>(apply_frequency_adjustment(
-            context.eth_handle,
-            0,
-            context.applied_frequency_ppb));
+            context.eth_handle, 0, context.applied_frequency_ppb));
     }
     smp_synch_lab_set_measured(std::nullopt);
     context.receiver.reset();
@@ -674,16 +669,12 @@ void receiver_task(void* argument) {
             std::end(context.config.clock_identity),
             clock_identity.begin());
     }
-    context.local_port_identity = {
-        clock_identity,
-        context.config.port_number,
-    };
+    context.local_port_identity = {clock_identity, context.config.port_number};
 
     const auto interval = std::chrono::milliseconds{
         context.config.pdelay_request_interval_ms};
     const auto exchange_timeout = std::max(
-        std::chrono::milliseconds{50},
-        interval * 3 / 4);
+        std::chrono::milliseconds{50}, interval * 3 / 4);
     context.receiver.emplace(PtpTimeReceiverOptions{
         context.config.domain_number,
         context.config.transport_specific,
@@ -696,9 +687,7 @@ void receiver_task(void* argument) {
     }
 
     const auto input_result = esp_eth_update_input_path_info(
-        context.eth_handle,
-        &receiver_input_info,
-        &context);
+        context.eth_handle, &receiver_input_info, &context);
     if (input_result != ESP_OK) {
         ESP_LOGE(kTag, "Hardware RX timestamp path unavailable: %s",
                  esp_err_to_name(input_result));
@@ -793,6 +782,7 @@ bool ptp_receiver_start(
     g_receiver_stop_requested.store(false, std::memory_order_release);
     g_receiver_accept_rx.store(false, std::memory_order_release);
     g_pdelay_requests_sent.store(0U, std::memory_order_release);
+    g_peer_delay_frames_observed.store(0U, std::memory_order_release);
     g_receiver_tx_failures.store(0U, std::memory_order_release);
     g_receiver_context.eth_handle = eth_handle;
     g_receiver_context.config = config;
@@ -814,9 +804,7 @@ bool ptp_receiver_start(
 
     if (xTaskCreatePinnedToCore(
             &receiver_task,
-            config.role == AR_PTP_ROLE_TIME_RECEIVER
-                ? "ar_ptp_rx"
-                : "ar_ptp_mon",
+            config.role == AR_PTP_ROLE_TIME_RECEIVER ? "ar_ptp_rx" : "ar_ptp_mon",
             8192,
             &g_receiver_context,
             4,
