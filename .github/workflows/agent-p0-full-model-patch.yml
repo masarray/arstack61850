@@ -8,24 +8,31 @@ on:
       - .github/workflows/agent-p0-full-model-patch.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply:
-    runs-on: ubuntu-latest
+  validate-p0:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
           ref: agent/iedsim-full-scl-live-store
-          fetch-depth: 0
-      - name: Apply P0 compile corrections
-        run: python3 tools/agent_p0_compile_fix.py
-      - name: Commit corrections to PR branch
-        run: |
-          git config user.name "openai-agent"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps/ied_simulator/src/SclMmsMaterializer.hpp \
-                  apps/ied_simulator/src/IedSimulatorController.cpp
-          git diff --cached --check
-          git commit -m "fix(iedsim): correct P0 materializer projection"
-          git push origin HEAD:agent/iedsim-full-scl-live-store
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
+      - name: Configure
+        run: cmake -S apps/ied_simulator -B build-p0 -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build simulator and read probe
+        run: cmake --build build-p0 --target arstack_ied_simulator ariec61850_mms_read_probe --parallel 2
+      - name: QML smoke
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ./build-p0/arstack_ied_simulator --smoke-test
+      - name: P0 full structural model gate
+        run: >-
+          python3 apps/ied_simulator/test_gui_live_value.py
+          --app ./build-p0/arstack_ied_simulator
+          --read-probe ./build-p0
+          --scl ./tests/fixtures/scl/iedsim-full-model.scd
