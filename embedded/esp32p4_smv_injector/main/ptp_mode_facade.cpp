@@ -38,30 +38,19 @@ std::atomic<int> g_active_role{static_cast<int>(AR_PTP_ROLE_LAB_SOURCE)};
 
 void fill_p2_defaults(ar_ptp_lab_config_t& config) noexcept {
     config.role = static_cast<ar_ptp_role_t>(CONFIG_AR_PTP_OPERATING_ROLE);
-    config.pdelay_request_interval_ms =
-        static_cast<std::uint32_t>(CONFIG_AR_PTP_PDELAY_REQUEST_INTERVAL_MS);
-    config.maximum_path_delay_ns =
-        static_cast<std::int64_t>(CONFIG_AR_PTP_MAX_PATH_DELAY_NS);
-    config.maximum_path_delay_jitter_ns =
-        static_cast<std::int64_t>(CONFIG_AR_PTP_MAX_PATH_JITTER_NS);
-    config.lock_offset_threshold_ns =
-        static_cast<std::int64_t>(CONFIG_AR_PTP_LOCK_OFFSET_NS);
-    config.unlock_offset_threshold_ns =
-        static_cast<std::int64_t>(CONFIG_AR_PTP_UNLOCK_OFFSET_NS);
-    config.phase_step_threshold_ns =
-        static_cast<std::int64_t>(CONFIG_AR_PTP_PHASE_STEP_THRESHOLD_NS);
-    config.lock_required_samples =
-        static_cast<std::uint32_t>(CONFIG_AR_PTP_LOCK_REQUIRED_SAMPLES);
-    config.sync_timeout_ms =
-        static_cast<std::uint32_t>(CONFIG_AR_PTP_SYNC_TIMEOUT_MS);
-    config.holdover_timeout_ms =
-        static_cast<std::uint32_t>(CONFIG_AR_PTP_HOLDOVER_TIMEOUT_MS);
-    config.maximum_frequency_adjustment_ppb =
-        static_cast<std::int32_t>(CONFIG_AR_PTP_MAX_FREQ_ADJ_PPB);
+    config.pdelay_request_interval_ms = static_cast<std::uint32_t>(CONFIG_AR_PTP_PDELAY_REQUEST_INTERVAL_MS);
+    config.maximum_path_delay_ns = static_cast<std::int64_t>(CONFIG_AR_PTP_MAX_PATH_DELAY_NS);
+    config.maximum_path_delay_jitter_ns = static_cast<std::int64_t>(CONFIG_AR_PTP_MAX_PATH_JITTER_NS);
+    config.lock_offset_threshold_ns = static_cast<std::int64_t>(CONFIG_AR_PTP_LOCK_OFFSET_NS);
+    config.unlock_offset_threshold_ns = static_cast<std::int64_t>(CONFIG_AR_PTP_UNLOCK_OFFSET_NS);
+    config.phase_step_threshold_ns = static_cast<std::int64_t>(CONFIG_AR_PTP_PHASE_STEP_THRESHOLD_NS);
+    config.lock_required_samples = static_cast<std::uint32_t>(CONFIG_AR_PTP_LOCK_REQUIRED_SAMPLES);
+    config.sync_timeout_ms = static_cast<std::uint32_t>(CONFIG_AR_PTP_SYNC_TIMEOUT_MS);
+    config.holdover_timeout_ms = static_cast<std::uint32_t>(CONFIG_AR_PTP_HOLDOVER_TIMEOUT_MS);
+    config.maximum_frequency_adjustment_ppb = static_cast<std::int32_t>(CONFIG_AR_PTP_MAX_FREQ_ADJ_PPB);
 }
 
-[[nodiscard]] PtpDisciplineOptions discipline_options(
-    const ar_ptp_lab_config_t& config) noexcept {
+[[nodiscard]] PtpDisciplineOptions discipline_options(const ar_ptp_lab_config_t& config) noexcept {
     PtpDisciplineOptions options;
     options.maximum_path_delay_ns = config.maximum_path_delay_ns;
     options.maximum_path_delay_jitter_ns = config.maximum_path_delay_jitter_ns;
@@ -76,16 +65,9 @@ void fill_p2_defaults(ar_ptp_lab_config_t& config) noexcept {
 }
 
 [[nodiscard]] bool valid_public_config(const ar_ptp_lab_config_t& config) noexcept {
-    if (config.role != AR_PTP_ROLE_LAB_SOURCE &&
-        config.role != AR_PTP_ROLE_TIME_RECEIVER &&
-        config.role != AR_PTP_ROLE_MONITOR) {
-        return false;
-    }
+    if (config.role != AR_PTP_ROLE_LAB_SOURCE && config.role != AR_PTP_ROLE_TIME_RECEIVER && config.role != AR_PTP_ROLE_MONITOR) return false;
     if (config.role != AR_PTP_ROLE_TIME_RECEIVER) return true;
-    if (config.pdelay_request_interval_ms < 100U ||
-        config.pdelay_request_interval_ms > 10'000U) {
-        return false;
-    }
+    if (config.pdelay_request_interval_ms < 100U || config.pdelay_request_interval_ms > 10'000U) return false;
     return PtpClockDiscipline::validate_options(discipline_options(config));
 }
 
@@ -119,8 +101,7 @@ void fill_p2_defaults(ar_ptp_lab_config_t& config) noexcept {
     return "UNKNOWN";
 }
 
-[[nodiscard]] const char* discipline_name(
-    const ar_ptp_discipline_state_t state) noexcept {
+[[nodiscard]] const char* discipline_name(const ar_ptp_discipline_state_t state) noexcept {
     switch (state) {
     case AR_PTP_DISCIPLINE_UNLOCKED: return "UNLOCKED";
     case AR_PTP_DISCIPLINE_ACQUIRING: return "ACQUIRING";
@@ -134,18 +115,11 @@ void fill_p2_defaults(ar_ptp_lab_config_t& config) noexcept {
 void log_p2_status(const ar_ptp_lab_status_t& status) noexcept {
     char source[32]{};
     if (status.source_selected) {
-        std::snprintf(
-            source,
-            sizeof(source),
-            "%02X%02X%02X%02X%02X%02X%02X%02X/%u",
-            static_cast<unsigned>(status.selected_source_clock_identity[0]),
-            static_cast<unsigned>(status.selected_source_clock_identity[1]),
-            static_cast<unsigned>(status.selected_source_clock_identity[2]),
-            static_cast<unsigned>(status.selected_source_clock_identity[3]),
-            static_cast<unsigned>(status.selected_source_clock_identity[4]),
-            static_cast<unsigned>(status.selected_source_clock_identity[5]),
-            static_cast<unsigned>(status.selected_source_clock_identity[6]),
-            static_cast<unsigned>(status.selected_source_clock_identity[7]),
+        std::snprintf(source, sizeof(source), "%02X%02X%02X%02X%02X%02X%02X%02X/%u",
+            static_cast<unsigned>(status.selected_source_clock_identity[0]), static_cast<unsigned>(status.selected_source_clock_identity[1]),
+            static_cast<unsigned>(status.selected_source_clock_identity[2]), static_cast<unsigned>(status.selected_source_clock_identity[3]),
+            static_cast<unsigned>(status.selected_source_clock_identity[4]), static_cast<unsigned>(status.selected_source_clock_identity[5]),
+            static_cast<unsigned>(status.selected_source_clock_identity[6]), static_cast<unsigned>(status.selected_source_clock_identity[7]),
             static_cast<unsigned>(status.selected_source_port_number));
     } else {
         std::snprintf(source, sizeof(source), "NONE");
@@ -155,41 +129,35 @@ void log_p2_status(const ar_ptp_lab_status_t& status) noexcept {
     char path[32]{};
     char jitter[32]{};
     char measured[8]{};
-    std::snprintf(offset, sizeof(offset), status.offset_valid ? "%lld" : "%s",
-                  status.offset_valid ? static_cast<long long>(status.offset_from_master_ns) : 0LL);
-    if (!status.offset_valid) std::snprintf(offset, sizeof(offset), "NA");
+    if (status.offset_valid) {
+        std::snprintf(offset, sizeof(offset), "%lld", static_cast<long long>(status.offset_from_master_ns));
+    } else {
+        std::snprintf(offset, sizeof(offset), "NA");
+    }
     if (status.mean_path_delay_valid) {
-        std::snprintf(path, sizeof(path), "%lld",
-                      static_cast<long long>(status.mean_path_delay_ns));
+        std::snprintf(path, sizeof(path), "%lld", static_cast<long long>(status.mean_path_delay_ns));
     } else {
         std::snprintf(path, sizeof(path), "NA");
     }
     if (status.path_delay_jitter_valid) {
-        std::snprintf(jitter, sizeof(jitter), "%lld",
-                      static_cast<long long>(status.path_delay_jitter_ns));
+        std::snprintf(jitter, sizeof(jitter), "%lld", static_cast<long long>(status.path_delay_jitter_ns));
     } else {
         std::snprintf(jitter, sizeof(jitter), "NA");
     }
     if (status.measured_smp_synch_valid) {
-        std::snprintf(measured, sizeof(measured), "%u",
-                      static_cast<unsigned>(status.measured_smp_synch));
+        std::snprintf(measured, sizeof(measured), "%u", static_cast<unsigned>(status.measured_smp_synch));
     } else {
         std::snprintf(measured, sizeof(measured), "NA");
     }
 
     ESP_LOGI(kTag,
-             "PTP2 role=%s discipline=%s source=%s offset=%s path=%s jitter=%s freq=%ld global=%u measured=%s rxAnnounce=%llu rxSync=%llu rxFollowUp=%llu rxPdelay=%llu pdelayReq=%llu accepted=%llu rejected=%llu",
-             role_name(status.role), discipline_name(status.discipline_state), source,
-             offset, path, jitter,
-             static_cast<long>(status.frequency_adjustment_ppb),
-             status.globally_traceable ? 1U : 0U, measured,
-             static_cast<unsigned long long>(status.announce_received),
-             static_cast<unsigned long long>(status.sync_received),
-             static_cast<unsigned long long>(status.follow_up_received),
-             static_cast<unsigned long long>(status.peer_delay_frames_observed),
-             static_cast<unsigned long long>(status.peer_delay_requests_sent),
-             static_cast<unsigned long long>(status.accepted_discipline_samples),
-             static_cast<unsigned long long>(status.rejected_discipline_samples));
+        "PTP2 role=%s discipline=%s source=%s offset=%s path=%s jitter=%s freq=%ld global=%u measured=%s rxAnnounce=%llu rxSync=%llu rxFollowUp=%llu rxPdelay=%llu pdelayReq=%llu accepted=%llu rejected=%llu",
+        role_name(status.role), discipline_name(status.discipline_state), source, offset, path, jitter,
+        static_cast<long>(status.frequency_adjustment_ppb), status.globally_traceable ? 1U : 0U, measured,
+        static_cast<unsigned long long>(status.announce_received), static_cast<unsigned long long>(status.sync_received),
+        static_cast<unsigned long long>(status.follow_up_received), static_cast<unsigned long long>(status.peer_delay_frames_observed),
+        static_cast<unsigned long long>(status.peer_delay_requests_sent), static_cast<unsigned long long>(status.accepted_discipline_samples),
+        static_cast<unsigned long long>(status.rejected_discipline_samples));
 }
 
 } // namespace
@@ -201,13 +169,8 @@ extern "C" void ar_ptp_lab_get_default_config(ar_ptp_lab_config_t* config) {
 }
 
 extern "C" bool ar_ptp_lab_configure(const ar_ptp_lab_config_t* config) {
-    if (config == nullptr || ar_ptp_source_is_running() ||
-        ar::esp32p4::smv::ptp_receiver_is_running() ||
-        !ar::esp32p4::smv::valid_public_config(*config)) {
-        return false;
-    }
+    if (config == nullptr || ar_ptp_source_is_running() || ar::esp32p4::smv::ptp_receiver_is_running() || !ar::esp32p4::smv::valid_public_config(*config)) return false;
     if (!ar_ptp_source_configure(config)) return false;
-
     portENTER_CRITICAL(&ar::esp32p4::smv::g_ptp_facade_mux);
     if (ar_ptp_source_is_running() || ar::esp32p4::smv::ptp_receiver_is_running()) {
         portEXIT_CRITICAL(&ar::esp32p4::smv::g_ptp_facade_mux);
@@ -228,9 +191,7 @@ extern "C" bool ar_ptp_lab_get_config(ar_ptp_lab_config_t* config) {
 extern "C" void ar_ptp_lab_start(const esp_eth_handle_t eth_handle) {
     if (eth_handle == nullptr || ar_ptp_lab_is_running()) return;
     const auto config = ar::esp32p4::smv::selected_config();
-    ar::esp32p4::smv::g_active_role.store(
-        static_cast<int>(config.role), std::memory_order_release);
-
+    ar::esp32p4::smv::g_active_role.store(static_cast<int>(config.role), std::memory_order_release);
     if (config.role == AR_PTP_ROLE_LAB_SOURCE) {
         if (!ar_ptp_source_configure(&config)) return;
         ar_ptp_source_start(eth_handle);
@@ -240,11 +201,8 @@ extern "C" void ar_ptp_lab_start(const esp_eth_handle_t eth_handle) {
 }
 
 extern "C" void ar_ptp_lab_stop(void) {
-    if (ar::esp32p4::smv::active_role() == AR_PTP_ROLE_LAB_SOURCE) {
-        ar_ptp_source_stop();
-    } else {
-        ar::esp32p4::smv::ptp_receiver_stop();
-    }
+    if (ar::esp32p4::smv::active_role() == AR_PTP_ROLE_LAB_SOURCE) ar_ptp_source_stop();
+    else ar::esp32p4::smv::ptp_receiver_stop();
 }
 
 extern "C" bool ar_ptp_lab_is_running(void) {
@@ -255,7 +213,6 @@ extern "C" bool ar_ptp_lab_get_status(ar_ptp_lab_status_t* status) {
     if (status == nullptr) return false;
     *status = {};
     bool result = false;
-
     if (ar_ptp_source_is_running()) {
         result = ar_ptp_source_get_status(status);
         if (result) {
@@ -269,7 +226,6 @@ extern "C" bool ar_ptp_lab_get_status(ar_ptp_lab_status_t* status) {
         status->discipline_state = AR_PTP_DISCIPLINE_UNLOCKED;
         result = true;
     }
-
     if (result) ar::esp32p4::smv::log_p2_status(*status);
     return result;
 }
