@@ -197,6 +197,16 @@ public:
         status_.consecutive_qualified_samples = 0U;
     }
 
+    /**
+     * Revoke only the global provenance claim immediately. A subsequent
+     * qualified measurement may restore it if fresh Announce evidence again
+     * proves global traceability. This allows LOCKED local timing to remain 1
+     * while ensuring stale/degraded Announce evidence can never leave AUTO at 2.
+     */
+    void revoke_global_traceability() noexcept {
+        status_.globally_traceable = false;
+    }
+
     [[nodiscard]] const PtpDisciplineStatus& status() const noexcept {
         return status_;
     }
