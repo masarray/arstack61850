@@ -21,6 +21,7 @@
 #include <QXmlStreamReader>
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <set>
 #include <string>
@@ -189,6 +190,31 @@ QString deterministicTimestamp(const quint64 milliseconds) {
     return QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(milliseconds))
         .toUTC()
         .toString(Qt::ISODateWithMs);
+}
+
+quint8 reportTriggerMask(const ar::iec61850::scl::SclReportControl& report) {
+    quint8 mask{};
+    if (report.trigger_options.data_change) mask |= 0x40U;
+    if (report.trigger_options.quality_change) mask |= 0x20U;
+    if (report.trigger_options.data_update) mask |= 0x10U;
+    if (report.trigger_options.integrity) mask |= 0x08U;
+    if (report.trigger_options.general_interrogation) mask |= 0x04U;
+    return mask;
+}
+
+std::array<quint8, 2U> reportOptionalMask(
+    const ar::iec61850::scl::SclReportControl& report) {
+    std::array<quint8, 2U> mask{};
+    if (report.optional_fields.sequence_number) mask[0] |= 0x40U;
+    if (report.optional_fields.report_timestamp) mask[0] |= 0x20U;
+    if (report.optional_fields.reason_code) mask[0] |= 0x10U;
+    if (report.optional_fields.data_set) mask[0] |= 0x08U;
+    if (report.optional_fields.data_reference) mask[0] |= 0x04U;
+    if (report.buffered && report.optional_fields.buffer_overflow) mask[0] |= 0x02U;
+    if (report.buffered && report.optional_fields.entry_id) mask[0] |= 0x01U;
+    if (report.optional_fields.configuration_revision) mask[1] |= 0x80U;
+    if (report.buffered && report.optional_fields.segmentation) mask[1] |= 0x40U;
+    return mask;
 }
 } // namespace
 
@@ -972,6 +998,14 @@ bool IedSimulatorController::writeModelManifest() {
             output.write(QByteArray::number(report.integrity_period_milliseconds));
             output.write("\t");
             output.write(report.indexed ? "1" : "0");
+            const auto triggerMask = reportTriggerMask(report);
+            const auto optionalMask = reportOptionalMask(report);
+            output.write("\t");
+            output.write(QByteArray::number(triggerMask));
+            output.write("\t");
+            output.write(QByteArray::number(optionalMask[0]));
+            output.write("\t");
+            output.write(QByteArray::number(optionalMask[1]));
             output.write("\n");
         }
     }

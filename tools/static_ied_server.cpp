@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ariec61850/mms/static_server_session.hpp"
+#include "ariec61850/mms/static_report_connection.hpp"
+#include "ariec61850/mms/static_brcb_connection.hpp"
+#include "ariec61850/mms/static_brcb_objects.hpp"
+#include "ariec61850/mms/static_brcb_runtime.hpp"
+#include "ariec61850/mms/static_urcb_objects.hpp"
+#include "ariec61850/mms/static_urcb_runtime.hpp"
 #include "ariec61850/mms/data_codec.hpp"
 #include "ariec61850/mms/services.hpp"
 
@@ -20,6 +26,7 @@
 #include <iostream>
 #include <limits>
 #include <mutex>
+#include <memory>
 #include <optional>
 #include <set>
 #include <span>
@@ -606,6 +613,10 @@ struct ConnectionBuffers final {
     std::array<std::uint8_t, 32'768U> receive{};
     std::array<std::uint8_t, 32'768U> response{};
     std::array<std::uint8_t, 8'192U> workspace{};
+    std::array<std::uint8_t, 32'768U> report_response{};
+    std::array<std::uint8_t, 32'768U> report_workspace{};
+    std::array<std::uint8_t, 32'768U> brcb_capture_encode{};
+    std::array<std::uint8_t, 16'384U> brcb_capture_workspace{};
 };
 
 struct ManifestValue final {
@@ -650,6 +661,21 @@ struct ManifestDataSetStorage final {
     std::vector<mms::MmsStaticDataSetMember> members;
 };
 
+struct ManifestReportControl final {
+    std::string domain;
+    std::string item;
+    bool buffered{};
+    std::string report_id;
+    std::string data_set_domain;
+    std::string data_set_item;
+    std::uint32_t conf_rev{1U};
+    std::uint32_t buffer_time_ms{};
+    std::uint32_t integrity_period_ms{};
+    bool indexed{};
+    std::uint8_t trigger_options{};
+    std::array<std::uint8_t, 2U> optional_fields{};
+};
+
 struct ManifestModel final {
     std::string path;
     std::uint64_t revision{};
@@ -660,6 +686,7 @@ struct ManifestModel final {
     std::unordered_map<std::string, std::size_t> value_indices;
     std::vector<ManifestDataSetStorage> data_set_storage;
     std::vector<mms::MmsStaticDataSetEntry> data_sets;
+    std::vector<ManifestReportControl> report_controls;
     std::uint64_t live_revision{};
     std::uint64_t logical_time_ms{};
     std::size_t declared_entries{};
@@ -1118,6 +1145,9 @@ void rebuild_manifest_roots(ManifestModel& model) {
     return mms::MmsDataCodec::to_display_string(data);
 }
 
+void notify_active_brcb_mutation(
+    std::string_view domain, std::string_view item) noexcept;
+
 void emit_live_state(const ManifestValue& value, const std::uint64_t request_id) {
     std::cout << "IEDSIM_EVENT kind=value_state request=" << request_id
               << " domain=" << hex_encode(value.domain)
@@ -1165,6 +1195,7 @@ void emit_live_rejected(const std::uint64_t request_id, const std::string_view r
             model.values[root_index].type_specification;
     }
     emit_live_state(value, request_id);
+    notify_active_brcb_mutation(value.domain, value.item);
     return true;
 }
 
@@ -1297,23 +1328,10 @@ void drain_live_commands(ManifestModel& model) {
         std::string member_domain;
         std::string member_item;
     };
-    struct ParsedRcb final {
-        std::string domain;
-        std::string item;
-        bool buffered{};
-        std::string report_id;
-        std::string data_set_domain;
-        std::string data_set_item;
-        std::uint32_t conf_rev{1U};
-        std::uint32_t buffer_time_ms{};
-        std::uint32_t integrity_period_ms{};
-        bool indexed{};
-    };
-
     std::vector<std::pair<std::string, std::string>> roots;
     std::vector<ParsedObject> parsed_objects;
     std::vector<ParsedDataSetMember> parsed_members;
-    std::vector<ParsedRcb> parsed_rcbs;
+    std::vector<ManifestReportControl> parsed_rcbs;
     std::set<std::pair<std::string, std::string>> unique_roots;
     std::set<std::pair<std::string, std::string>> unique_objects;
     std::set<std::pair<std::string, std::string>> writable_objects;
@@ -1356,7 +1374,7 @@ void drain_live_commands(ManifestModel& model) {
         } else if (fields.size() >= 5U && fields[0] == "DS") {
             parsed_members.push_back({fields[1], fields[2], fields[3], fields[4]});
         } else if (fields.size() >= 11U && fields[0] == "RCB") {
-            ParsedRcb rcb;
+            ManifestReportControl rcb;
             rcb.domain = fields[1];
             rcb.item = fields[2];
             rcb.buffered = fields[3] == "1";
@@ -1367,11 +1385,20 @@ void drain_live_commands(ManifestModel& model) {
             try { rcb.buffer_time_ms = static_cast<std::uint32_t>(std::stoul(fields[8])); } catch (...) {}
             try { rcb.integrity_period_ms = static_cast<std::uint32_t>(std::stoul(fields[9])); } catch (...) {}
             rcb.indexed = fields[10] == "1";
+            if (fields.size() >= 12U) {
+                try { rcb.trigger_options = static_cast<std::uint8_t>(std::stoul(fields[11])); } catch (...) {}
+            }
+            if (fields.size() >= 13U) {
+                try { rcb.optional_fields[0] = static_cast<std::uint8_t>(std::stoul(fields[12])); } catch (...) {}
+            }
+            if (fields.size() >= 14U) {
+                try { rcb.optional_fields[1] = static_cast<std::uint8_t>(std::stoul(fields[13])); } catch (...) {}
+            }
             if (!rcb.domain.empty() && !rcb.item.empty()) parsed_rcbs.push_back(std::move(rcb));
         }
     }
 
-    const auto add_rcb_object = [&](const ParsedRcb& rcb,
+    const auto add_rcb_object = [&](const ManifestReportControl& rcb,
                                     const std::string& suffix,
                                     const std::string& signature,
                                     const std::string& text) {
@@ -1402,6 +1429,7 @@ void drain_live_commands(ManifestModel& model) {
         }
         ++model.declared_entries;
     }
+    model.report_controls = parsed_rcbs;
 
     // Manifest v4 is object-driven: derive logical-node roots from the first
     // item component instead of requiring a separate LN scaffold.
@@ -1515,6 +1543,504 @@ void drain_live_commands(ManifestModel& model) {
     return model;
 }
 
+
+struct HostUrcbControl final {
+    ManifestReportControl* manifest{};
+    std::vector<mms::MmsStaticObjectEntry> member_objects;
+    std::array<mms::MmsStaticDataSetEntry, 1U> data_set_entries{};
+    mms::MmsStaticObjectTable object_table{std::span<const mms::MmsStaticObjectEntry>{}};
+    mms::MmsStaticDataSetTable data_set_table{};
+    std::array<mms::MmsStaticUrcbDefinition, 1U> definitions{};
+    std::array<mms::MmsStaticUrcbState, 1U> states{};
+    std::unique_ptr<mms::MmsStaticUrcbRuntime> runtime;
+    std::array<mms::MmsStaticObjectEntry,
+        mms::MmsStaticUrcbObjectBank::attributes_per_control_block> bank_objects{};
+    std::array<mms::MmsStaticUrcbObjectContext,
+        mms::MmsStaticUrcbObjectBank::attributes_per_control_block> bank_contexts{};
+    std::array<char, 4'096U> bank_names{};
+    std::unique_ptr<mms::MmsStaticUrcbObjectBank> bank;
+};
+
+struct HostUrcbReporting final {
+    std::chrono::steady_clock::time_point epoch{std::chrono::steady_clock::now()};
+    std::vector<std::unique_ptr<HostUrcbControl>> controls;
+};
+
+[[nodiscard]] std::uint64_t report_now_ms(const void* raw) noexcept {
+    const auto* reporting = static_cast<const HostUrcbReporting*>(raw);
+    if (reporting == nullptr) return 0U;
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - reporting->epoch).count();
+    return elapsed <= 0 ? 0U : static_cast<std::uint64_t>(elapsed);
+}
+
+[[nodiscard]] std::array<std::uint8_t,
+    mms::MmsInformationReportSpanCodec::binary_time_bytes> report_binary_time() noexcept {
+    constexpr std::uint64_t kMillisecondsPerDay = 86'400'000ULL;
+    constexpr std::uint64_t kUnixDaysTo1984 = 5'113ULL;
+    const auto raw = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    const auto milliseconds = raw <= 0 ? 0ULL : static_cast<std::uint64_t>(raw);
+    const auto unix_days = milliseconds / kMillisecondsPerDay;
+    const auto since_midnight = static_cast<std::uint32_t>(milliseconds % kMillisecondsPerDay);
+    const auto days_1984 = static_cast<std::uint16_t>(std::min<std::uint64_t>(
+        unix_days > kUnixDaysTo1984 ? unix_days - kUnixDaysTo1984 : 0ULL,
+        std::numeric_limits<std::uint16_t>::max()));
+    return {
+        static_cast<std::uint8_t>((since_midnight >> 24U) & 0xFFU),
+        static_cast<std::uint8_t>((since_midnight >> 16U) & 0xFFU),
+        static_cast<std::uint8_t>((since_midnight >> 8U) & 0xFFU),
+        static_cast<std::uint8_t>(since_midnight & 0xFFU),
+        static_cast<std::uint8_t>((days_1984 >> 8U) & 0xFFU),
+        static_cast<std::uint8_t>(days_1984 & 0xFFU)};
+}
+
+[[nodiscard]] std::string_view report_reason_text(
+    const mms::MmsStaticUrcbReportReason reason) noexcept {
+    switch (reason) {
+    case mms::MmsStaticUrcbReportReason::general_interrogation: return "gi";
+    case mms::MmsStaticUrcbReportReason::integrity: return "integrity";
+    case mms::MmsStaticUrcbReportReason::none: return "none";
+    }
+    return "unknown";
+}
+
+[[nodiscard]] HostUrcbReporting initialize_host_urcb_reporting(ManifestModel& model) {
+    HostUrcbReporting reporting;
+    for (auto& report : model.report_controls) {
+        if (report.buffered) continue;
+        const auto data_set = std::find_if(
+            model.data_sets.begin(), model.data_sets.end(), [&report](const auto& candidate) {
+                return candidate.domain == report.data_set_domain &&
+                    candidate.item == report.data_set_item;
+            });
+        if (data_set == model.data_sets.end() || data_set->members.empty()) {
+            throw std::runtime_error(
+                "URCB references a missing/empty DataSet: " + report.domain + "/" + report.item);
+        }
+
+        auto control = std::make_unique<HostUrcbControl>();
+        control->manifest = &report;
+        control->member_objects.reserve(data_set->members.size());
+        for (const auto& member : data_set->members) {
+            const auto object = std::find_if(
+                model.objects.begin(), model.objects.end(), [&member](const auto& candidate) {
+                    return candidate.domain == member.domain && candidate.item == member.item;
+                });
+            if (object == model.objects.end()) {
+                throw std::runtime_error(
+                    "URCB DataSet member is absent from the live object table.");
+            }
+            control->member_objects.push_back(*object);
+        }
+        if (control->member_objects.empty() ||
+            control->member_objects.size() > mms::MmsStaticObjectTable::maximum_objects) {
+            throw std::runtime_error(
+                "URCB DataSet exceeds the bounded static reporting object profile.");
+        }
+        control->object_table = mms::MmsStaticObjectTable{control->member_objects};
+        control->data_set_entries[0] = *data_set;
+        control->data_set_table = mms::MmsStaticDataSetTable{control->data_set_entries};
+        if (!control->object_table.valid() || !control->data_set_table.valid() ||
+            !control->data_set_table.valid_against(control->object_table)) {
+            throw std::runtime_error("URCB reporting subset failed strict static-table validation.");
+        }
+
+        if (report.report_id.empty()) {
+            report.report_id = report.domain + "/" + report.item;
+        }
+        control->definitions[0] = mms::MmsStaticUrcbDefinition{
+            report.domain,
+            report.item,
+            report.report_id,
+            report.data_set_domain,
+            report.data_set_item,
+            report.conf_rev,
+            report.optional_fields,
+            report.buffer_time_ms,
+            report.trigger_options,
+            report.integrity_period_ms};
+        control->runtime = std::make_unique<mms::MmsStaticUrcbRuntime>(
+            control->definitions,
+            control->states,
+            control->object_table,
+            control->data_set_table);
+        if (!control->runtime->initialize()) {
+            throw std::runtime_error(
+                "MmsStaticUrcbRuntime rejected SCL report definition: " +
+                report.domain + "/" + report.item);
+        }
+        control->bank = std::make_unique<mms::MmsStaticUrcbObjectBank>(
+            *control->runtime,
+            std::span<const mms::MmsStaticObjectEntry>{},
+            control->bank_objects,
+            control->bank_contexts,
+            control->bank_names,
+            report_now_ms,
+            &reporting);
+        if (!control->bank->initialize()) {
+            throw std::runtime_error(
+                "MmsStaticUrcbObjectBank failed to materialize dynamic RCB attributes.");
+        }
+
+        for (const auto& dynamic : control->bank->table().objects()) {
+            const auto existing = std::find_if(
+                model.objects.begin(), model.objects.end(), [&dynamic](const auto& candidate) {
+                    return candidate.domain == dynamic.domain && candidate.item == dynamic.item;
+                });
+            if (existing == model.objects.end()) {
+                if (model.objects.size() >= kHostMaximumManifestObjects) {
+                    throw std::runtime_error("Dynamic URCB attributes exceed host object bound.");
+                }
+                model.objects.push_back(dynamic);
+            } else {
+                *existing = dynamic;
+            }
+        }
+        reporting.controls.push_back(std::move(control));
+    }
+    return reporting;
+}
+
+[[nodiscard]] bool send_complete_report_frame(
+    const embedded::TcpByteStream& stream,
+    const std::span<const std::uint8_t> frame,
+    std::size_t& total_sent) noexcept {
+    std::size_t offset{};
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+    while (offset < frame.size() && std::chrono::steady_clock::now() < deadline) {
+        const auto sent = stream.send(frame.subspan(offset));
+        if (sent.success() && sent.transferred != 0U) {
+            offset += std::min(sent.transferred, frame.size() - offset);
+            continue;
+        }
+        if (sent.status == embedded::IoStatus::would_block ||
+            sent.status == embedded::IoStatus::timeout) {
+            continue;
+        }
+        return false;
+    }
+    if (offset != frame.size()) return false;
+    total_sent += frame.size();
+    return true;
+}
+
+[[nodiscard]] bool poll_host_urcb_reports(
+    HostUrcbReporting& reporting,
+    const mms::MmsStaticConnectionRuntime& connection,
+    const embedded::TcpByteStream& stream,
+    ConnectionBuffers& buffers,
+    const std::uint64_t association_id,
+    const std::string_view remote,
+    std::size_t& total_sent) {
+    const auto now = report_now_ms(&reporting);
+    const auto report_time = report_binary_time();
+    for (auto& control : reporting.controls) {
+        const auto result = mms::MmsStaticReportConnection::poll(
+            connection,
+            *control->runtime,
+            now,
+            report_time,
+            buffers.report_response,
+            buffers.report_workspace);
+        if (result.status == mms::MmsStaticReportConnectionStatus::no_report_due ||
+            result.status == mms::MmsStaticReportConnectionStatus::not_established) {
+            continue;
+        }
+        if (!result.response_ready()) {
+            std::cerr << "IEDSIM_EVENT kind=report_error association=" << association_id
+                      << " rcb=" << control->manifest->domain << '/' << control->manifest->item
+                      << " status=" << static_cast<unsigned>(result.status)
+                      << " urcb_status=" << static_cast<unsigned>(result.urcb_status) << '\n';
+            return false;
+        }
+        if (!send_complete_report_frame(
+                stream,
+                std::span<const std::uint8_t>{buffers.report_response.data(), result.bytes_written},
+                total_sent)) {
+            std::cerr << "IEDSIM_EVENT kind=report_send_error association=" << association_id
+                      << " rcb=" << control->manifest->domain << '/' << control->manifest->item
+                      << " remote=" << remote << '\n';
+            return false;
+        }
+        std::cout << "IEDSIM_EVENT kind=report_sent association=" << association_id
+                  << " remote=" << remote
+                  << " rcb=" << control->manifest->domain << '/' << control->manifest->item
+                  << " reason=" << report_reason_text(result.reason)
+                  << " sequence=" << static_cast<unsigned>(result.sequence_number)
+                  << " bytes=" << result.bytes_written << '\n';
+        std::cout.flush();
+        return true;
+    }
+    return true;
+}
+
+void reset_host_urcb_connection(
+    HostUrcbReporting* reporting) noexcept {
+    if (reporting == nullptr) return;
+    const auto now = report_now_ms(reporting);
+    for (auto& control : reporting->controls) {
+        static_cast<void>(control->runtime->set_enabled(0U, false, now));
+        static_cast<void>(control->runtime->set_reserved(0U, false));
+    }
+}
+
+
+struct HostBrcbControl final {
+    ManifestReportControl* manifest{};
+    std::vector<mms::MmsStaticObjectEntry> member_objects;
+    std::vector<std::string> member_keys;
+    std::array<mms::MmsStaticDataSetEntry, 1U> data_set_entries{};
+    mms::MmsStaticObjectTable object_table{std::span<const mms::MmsStaticObjectEntry>{}};
+    mms::MmsStaticDataSetTable data_set_table{};
+    mms::MmsStaticBrcbDefinition definition{};
+    std::array<std::array<std::uint8_t, 16'384U>, 8U> slot_bytes{};
+    std::array<mms::MmsStaticBrcbSlot, 8U> slots{};
+    mms::MmsStaticBrcbPendingState pending{};
+    std::unique_ptr<mms::MmsStaticBrcbRuntime> runtime;
+    std::unique_ptr<mms::MmsStaticBrcbControl> control;
+    std::vector<mms::MmsStaticObjectEntry> bank_objects;
+    std::array<mms::MmsStaticBrcbObjectContext,
+        mms::MmsStaticBrcbObjectBank::attributes_per_control_block> bank_contexts{};
+    std::array<char, 4'096U> bank_names{};
+    std::unique_ptr<mms::MmsStaticBrcbObjectBank> bank;
+};
+
+struct HostBrcbReporting final {
+    std::vector<std::unique_ptr<HostBrcbControl>> controls;
+};
+
+HostBrcbReporting* g_active_brcb_reporting{};
+
+[[nodiscard]] std::uint64_t brcb_now_ms(const void*) noexcept {
+    const auto elapsed = std::chrono::steady_clock::now().time_since_epoch();
+    const auto count = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+    return count <= 0 ? 0U : static_cast<std::uint64_t>(count);
+}
+
+[[nodiscard]] HostBrcbReporting initialize_host_brcb_reporting(ManifestModel& model) {
+    HostBrcbReporting reporting;
+    for (auto& report : model.report_controls) {
+        if (!report.buffered) continue;
+        const auto data_set = std::find_if(
+            model.data_sets.begin(), model.data_sets.end(), [&report](const auto& candidate) {
+                return candidate.domain == report.data_set_domain &&
+                    candidate.item == report.data_set_item;
+            });
+        if (data_set == model.data_sets.end() || data_set->members.empty()) {
+            throw std::runtime_error(
+                "BRCB references a missing/empty DataSet: " + report.domain + "/" + report.item);
+        }
+
+        auto host = std::make_unique<HostBrcbControl>();
+        host->manifest = &report;
+        host->member_objects.reserve(data_set->members.size());
+        host->member_keys.reserve(data_set->members.size());
+        for (const auto& member : data_set->members) {
+            const auto object = std::find_if(
+                model.objects.begin(), model.objects.end(), [&member](const auto& candidate) {
+                    return candidate.domain == member.domain && candidate.item == member.item;
+                });
+            if (object == model.objects.end()) {
+                throw std::runtime_error("BRCB DataSet member is absent from the live object table.");
+            }
+            host->member_objects.push_back(*object);
+            host->member_keys.push_back(object_key(member.domain, member.item));
+        }
+        if (host->member_objects.empty() ||
+            host->member_objects.size() > mms::MmsStaticObjectTable::maximum_objects) {
+            throw std::runtime_error("BRCB DataSet exceeds the bounded static reporting object profile.");
+        }
+        host->object_table = mms::MmsStaticObjectTable{host->member_objects};
+        host->data_set_entries[0] = *data_set;
+        host->data_set_table = mms::MmsStaticDataSetTable{host->data_set_entries};
+        if (!host->object_table.valid() || !host->data_set_table.valid() ||
+            !host->data_set_table.valid_against(host->object_table)) {
+            throw std::runtime_error("BRCB reporting subset failed strict static-table validation.");
+        }
+
+        if (report.report_id.empty()) report.report_id = report.domain + "/" + report.item;
+        host->definition = mms::MmsStaticBrcbDefinition{
+            report.domain,
+            report.item,
+            report.report_id,
+            report.data_set_domain,
+            report.data_set_item,
+            report.conf_rev,
+            report.optional_fields,
+            report.buffer_time_ms,
+            report.trigger_options};
+        for (std::size_t index = 0U; index < host->slots.size(); ++index) {
+            host->slots[index].storage = host->slot_bytes[index];
+        }
+        host->runtime = std::make_unique<mms::MmsStaticBrcbRuntime>(
+            host->definition,
+            host->pending,
+            host->slots,
+            host->object_table,
+            host->data_set_table);
+        if (!host->runtime->initialize()) {
+            throw std::runtime_error(
+                "MmsStaticBrcbRuntime rejected SCL report definition: " +
+                report.domain + "/" + report.item);
+        }
+        host->control = std::make_unique<mms::MmsStaticBrcbControl>(*host->runtime);
+        host->bank_objects.resize(
+            host->member_objects.size() + mms::MmsStaticBrcbObjectBank::attributes_per_control_block);
+        host->bank = std::make_unique<mms::MmsStaticBrcbObjectBank>(
+            host->definition,
+            *host->runtime,
+            *host->control,
+            host->member_objects,
+            host->bank_objects,
+            host->bank_contexts,
+            host->bank_names,
+            brcb_now_ms,
+            nullptr);
+        if (!host->bank->initialize()) {
+            throw std::runtime_error("MmsStaticBrcbObjectBank failed to materialize dynamic BRCB attributes.");
+        }
+
+        const auto attribute_prefix = report.item + "$";
+        for (const auto& dynamic : host->bank->table().objects()) {
+            if (!dynamic.item.starts_with(attribute_prefix)) continue;
+            const auto existing = std::find_if(
+                model.objects.begin(), model.objects.end(), [&dynamic](const auto& candidate) {
+                    return candidate.domain == dynamic.domain && candidate.item == dynamic.item;
+                });
+            if (existing == model.objects.end()) {
+                if (model.objects.size() >= kHostMaximumManifestObjects) {
+                    throw std::runtime_error("Dynamic BRCB attributes exceed host object bound.");
+                }
+                model.objects.push_back(dynamic);
+            } else {
+                *existing = dynamic;
+            }
+        }
+        reporting.controls.push_back(std::move(host));
+    }
+    return reporting;
+}
+
+void notify_active_brcb_mutation(
+    const std::string_view domain,
+    const std::string_view item) noexcept {
+    if (g_active_brcb_reporting == nullptr) return;
+    const auto key = object_key(domain, item);
+    const auto now = brcb_now_ms(nullptr);
+    for (auto& host : g_active_brcb_reporting->controls) {
+        for (std::size_t index = 0U; index < host->member_keys.size(); ++index) {
+            if (host->member_keys[index] != key) continue;
+            const auto status = host->runtime->notify(
+                index, mms::MmsStaticBrcbEventReason::data_change, now);
+            if (status == mms::MmsStaticBrcbStatus::ok) {
+                std::cout << "IEDSIM_EVENT kind=brcb_event rcb="
+                          << host->manifest->domain << '/' << host->manifest->item
+                          << " member=" << domain << '/' << item << '\n';
+                std::cout.flush();
+            }
+        }
+    }
+}
+
+void host_brcb_association_closed(
+    void* context,
+    const std::uint64_t association_id,
+    const std::uint64_t now_ms) noexcept {
+    auto* reporting = static_cast<HostBrcbReporting*>(context);
+    if (reporting == nullptr) return;
+    for (auto& host : reporting->controls) {
+        host->control->on_association_closed(association_id, now_ms);
+    }
+}
+
+[[nodiscard]] bool capture_host_brcb_reports(
+    HostBrcbReporting& reporting,
+    ConnectionBuffers& buffers) {
+    const auto now = brcb_now_ms(nullptr);
+    const auto report_time = report_binary_time();
+    for (auto& host : reporting.controls) {
+        host->control->tick(now);
+        mms::MmsStaticBrcbCapturePlan plan;
+        if (!host->runtime->next_due(now, plan)) continue;
+        const auto captured = host->runtime->capture(
+            plan,
+            report_time,
+            buffers.brcb_capture_encode,
+            buffers.brcb_capture_workspace);
+        if (!captured.success()) {
+            std::cerr << "IEDSIM_EVENT kind=brcb_capture_error rcb="
+                      << host->manifest->domain << '/' << host->manifest->item
+                      << " status=" << static_cast<unsigned>(captured.status) << '\n';
+            return false;
+        }
+        std::cout << "IEDSIM_EVENT kind=brcb_captured rcb="
+                  << host->manifest->domain << '/' << host->manifest->item
+                  << " sequence=" << static_cast<unsigned>(plan.sequence_number)
+                  << " retained=" << host->runtime->retained_size()
+                  << " queue=" << host->runtime->queue_size() << '\n';
+        std::cout.flush();
+    }
+    return true;
+}
+
+[[nodiscard]] bool poll_host_brcb_reports(
+    HostBrcbReporting& reporting,
+    const mms::MmsStaticConnectionRuntime& connection,
+    const embedded::TcpByteStream& stream,
+    ConnectionBuffers& buffers,
+    const std::uint64_t association_id,
+    const std::string_view remote,
+    std::size_t& total_sent) {
+    const auto now = brcb_now_ms(nullptr);
+    for (auto& host : reporting.controls) {
+        const auto staged = mms::MmsStaticBrcbConnection::poll(
+            connection,
+            *host->control,
+            *host->runtime,
+            now,
+            buffers.report_response,
+            buffers.report_workspace);
+        if (staged.status == mms::MmsStaticBrcbConnectionStatus::no_report_available ||
+            staged.status == mms::MmsStaticBrcbConnectionStatus::reporting_disabled ||
+            staged.status == mms::MmsStaticBrcbConnectionStatus::not_established ||
+            staged.status == mms::MmsStaticBrcbConnectionStatus::access_denied) {
+            continue;
+        }
+        if (!staged.response_ready()) {
+            std::cerr << "IEDSIM_EVENT kind=brcb_stage_error association=" << association_id
+                      << " rcb=" << host->manifest->domain << '/' << host->manifest->item
+                      << " status=" << static_cast<unsigned>(staged.status) << '\n';
+            return false;
+        }
+        if (!send_complete_report_frame(
+                stream,
+                std::span<const std::uint8_t>{buffers.report_response.data(), staged.bytes_written},
+                total_sent)) {
+            std::cerr << "IEDSIM_EVENT kind=brcb_send_error association=" << association_id
+                      << " rcb=" << host->manifest->domain << '/' << host->manifest->item
+                      << " remote=" << remote << '\n';
+            return false;
+        }
+        if (!mms::MmsStaticBrcbConnection::commit_sent(
+                connection, *host->control, *host->runtime, now, staged)) {
+            std::cerr << "IEDSIM_EVENT kind=brcb_commit_error association=" << association_id
+                      << " rcb=" << host->manifest->domain << '/' << host->manifest->item << '\n';
+            return false;
+        }
+        std::cout << "IEDSIM_EVENT kind=brcb_report_sent association=" << association_id
+                  << " remote=" << remote
+                  << " rcb=" << host->manifest->domain << '/' << host->manifest->item
+                  << " sequence=" << static_cast<unsigned>(staged.sequence_number)
+                  << " bytes=" << staged.bytes_written
+                  << " retained=" << host->runtime->retained_size()
+                  << " queue=" << host->runtime->queue_size() << '\n';
+        std::cout.flush();
+        return true;
+    }
+    return true;
+}
+
 [[nodiscard]] std::size_t refresh_manifest_values(ManifestModel& model) {
     if (model.path.empty()) return 0U;
     std::ifstream input{model.path};
@@ -1593,9 +2119,12 @@ void serve_connection(
     const mms::MmsStaticObjectTable& object_table,
     const mms::MmsStaticDataSetTable& data_sets,
     ManifestModel* const manifest_model,
+    HostUrcbReporting* const reporting,
+    HostBrcbReporting* const brcb_reporting,
     const std::uint64_t association_id,
     const std::string_view remote) {
     mms::MmsStaticDispatchPolicy dispatch_policy;
+    dispatch_policy.advertise_flattened_child_aliases = manifest_model != nullptr;
     const mms::MmsStaticApplicationDispatcher dispatcher{
         object_table, data_sets, dispatch_policy};
 
@@ -1606,6 +2135,11 @@ void serve_connection(
         const auto shift = static_cast<unsigned>((policy.owner_size - 1U - index) * 8U);
         policy.owner[index] = static_cast<std::uint8_t>(
             (association_id >> shift) & 0xFFU);
+    }
+    if (brcb_reporting != nullptr) {
+        policy.now_ms = brcb_now_ms;
+        policy.association_closed = host_brcb_association_closed;
+        policy.association_closed_context = brcb_reporting;
     }
 
     mms::MmsStaticConnectionRuntime runtime{dispatcher, policy};
@@ -1666,7 +2200,29 @@ void serve_connection(
                       << '\n';
             std::cout.flush();
         }
+        if (brcb_reporting != nullptr && !capture_host_brcb_reports(*brcb_reporting, buffers)) {
+            reset_host_urcb_connection(reporting);
+            runtime.close_transport();
+            return;
+        }
+        if (reporting != nullptr && runtime.state() == mms::MmsStaticConnectionState::established &&
+            session.pending_output_bytes() == 0U && session.buffered_input_bytes() == 0U &&
+            !poll_host_urcb_reports(
+                *reporting, runtime, stream, buffers, association_id, remote, total_sent)) {
+            reset_host_urcb_connection(reporting);
+            runtime.close_transport();
+            return;
+        }
+        if (brcb_reporting != nullptr && runtime.state() == mms::MmsStaticConnectionState::established &&
+            session.pending_output_bytes() == 0U && session.buffered_input_bytes() == 0U &&
+            !poll_host_brcb_reports(
+                *brcb_reporting, runtime, stream, buffers, association_id, remote, total_sent)) {
+            reset_host_urcb_connection(reporting);
+            runtime.close_transport();
+            return;
+        }
         if (result.terminal()) {
+            reset_host_urcb_connection(reporting);
             std::cout << "IEDSIM_EVENT kind=client_closed association="
                       << association_id << " remote=" << remote
                       << " rx=" << total_received << " tx=" << total_sent
@@ -1679,6 +2235,7 @@ void serve_connection(
             std::this_thread::sleep_for(std::chrono::milliseconds{1});
         }
     }
+    reset_host_urcb_connection(reporting);
     runtime.close_transport();
 }
 
@@ -1734,6 +2291,10 @@ int main(int argc, char** argv) {
             g_active_manifest_model = &manifest_model;
             start_live_command_reader();
         }
+
+        auto urcb_reporting = initialize_host_urcb_reporting(manifest_model);
+        auto brcb_reporting = initialize_host_brcb_reporting(manifest_model);
+        g_active_brcb_reporting = brcb_reporting.controls.empty() ? nullptr : &brcb_reporting;
 
         std::array<mms::MmsStaticObjectEntry, 13U> objects{};
         objects[0] = mms::MmsStaticObjectEntry{
@@ -1826,6 +2387,11 @@ int main(int argc, char** argv) {
                   << " profile=iedscout" << '\n';
         std::cout.flush();
         if (g_active_manifest_model != nullptr) {
+            std::cout << "IEDSIM_EVENT kind=reporting_ready urcb="
+                      << urcb_reporting.controls.size()
+                      << " brcb=" << brcb_reporting.controls.size()
+                      << " runtime=static-urcb+brcb-core" << '\n';
+            std::cout.flush();
             std::cout << "IEDSIM_EVENT kind=state_ready values="
                       << manifest_model.value_indices.size()
                       << " revision=" << manifest_model.live_revision
@@ -1876,12 +2442,15 @@ int main(int argc, char** argv) {
                 object_table,
                 data_sets,
                 manifest_model.objects.empty() ? nullptr : &manifest_model,
+                urcb_reporting.controls.empty() ? nullptr : &urcb_reporting,
+                brcb_reporting.controls.empty() ? nullptr : &brcb_reporting,
                 static_cast<std::uint64_t>(connection_count),
                 remote);
             close_socket(client);
         }
 
         close_socket(listener);
+        g_active_brcb_reporting = nullptr;
         std::cout << "IEDSIM_EVENT kind=server_stopped connections="
                   << connection_count << '\n';
         return 0;

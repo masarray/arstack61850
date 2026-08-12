@@ -78,6 +78,15 @@ add_library(ariec61850_ied_simulator_server_core STATIC
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/write_span.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/data_set_span.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/information_report_span.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_information_report.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_urcb_runtime.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_urcb_objects.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_report_connection.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/buffered_selective_information_report_span.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_brcb_runtime.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_brcb_control.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_brcb_objects.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_brcb_connection.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_object_table.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_write.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_data_set_table.cpp

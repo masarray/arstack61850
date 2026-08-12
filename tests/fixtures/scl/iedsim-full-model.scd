@@ -9,7 +9,17 @@
             <DataSet name="dsSV">
               <FCDA ldInst="LD0" lnClass="TCTR" lnInst="1" doName="Amp" daName="instMag.i" fc="MX" />
             </DataSet>
-            <ReportControl name="urcb01" datSet="dsSV" rptID="MU01_LD0_URCB01" buffered="false" bufTime="20" intgPd="1000" confRev="7" indexed="false" />
+            <DataSet name="dsBuffered">
+              <FCDA ldInst="LD0" lnClass="XCBR" lnInst="1" doName="SimCfg" daName="setVal" fc="SP" />
+            </DataSet>
+            <ReportControl name="urcb01" datSet="dsSV" rptID="MU01_LD0_URCB01" buffered="false" bufTime="20" intgPd="1000" confRev="7" indexed="false">
+              <TrgOps period="true" gi="true" />
+              <OptFields seqNum="true" timeStamp="true" reasonCode="true" dataSet="true" dataRef="true" configRef="true" />
+            </ReportControl>
+            <ReportControl name="brcb01" datSet="dsBuffered" rptID="MU01_LD0_BRCB01" buffered="true" bufTime="20" intgPd="0" confRev="8" indexed="false">
+              <TrgOps dchg="true" />
+              <OptFields seqNum="true" timeStamp="true" reasonCode="true" dataSet="true" dataRef="true" bufOvfl="true" entryID="true" configRef="true" />
+            </ReportControl>
           </LN0>
           <LN lnClass="TCTR" inst="1" lnType="TCTRType" />
           <LN lnClass="XCBR" inst="1" lnType="XCBRType" />
