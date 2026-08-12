@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 def replace_once(path: str, old: str, new: str) -> None:
@@ -8,6 +9,15 @@ def replace_once(path: str, old: str, new: str) -> None:
     if count != 1:
         raise RuntimeError(f"{path}: expected one match, got {count}: {old!r}")
     p.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def regex_once(path: str, pattern: str, replacement: str) -> None:
+    p = Path(path)
+    text = p.read_text(encoding="utf-8")
+    updated, count = re.subn(pattern, lambda _: replacement, text, count=1, flags=re.S)
+    if count != 1:
+        raise RuntimeError(f"{path}: regex expected one match, got {count}: {pattern!r}")
+    p.write_text(updated, encoding="utf-8")
 
 
 cpp = "apps/ied_simulator/src/IedSimulatorController.cpp"
@@ -29,6 +39,18 @@ replace_once(
     "QVariantMap materializedValueMap(const arstack::iedsim::MaterializedSclValue& value) {\n",
     "QString deterministicTimestamp(quint64 milliseconds);\n\n"
     "QVariantMap materializedValueMap(const arstack::iedsim::MaterializedSclValue& value) {\n",
+)
+
+# Avoid Qt's deprecated TimeSpec overload while preserving UTC deterministic
+# timestamps for the simulator logical clock.
+replace_once(
+    cpp,
+    "    return QDateTime::fromMSecsSinceEpoch(\n"
+    "               static_cast<qint64>(milliseconds), Qt::UTC)\n"
+    "        .toString(Qt::ISODateWithMs);\n",
+    "    return QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(milliseconds))\n"
+    "        .toUTC()\n"
+    "        .toString(Qt::ISODateWithMs);\n",
 )
 
 # Surface child-server protocol events in the host process log as well as the
@@ -67,6 +89,91 @@ replace_once(
     "    }\n"
     "    emit_live_state(value, request_id);\n"
     "    return true;\n",
+)
+
+# Keep the old hot-manifest interoperability behavior, but demote the manifest
+# to an input adapter. A changed OBJ line is validated and applied through the
+# exact same authoritative live-store mutation primitive used by GUI and MMS
+# Write; the file is never the in-memory backing store.
+regex_once(
+    server,
+    r"\[\[maybe_unused\]\] \[\[nodiscard\]\] std::size_t refresh_manifest_values\(ManifestModel& model\) \{.*?\n\}\n\n\[\[nodiscard\]\] std::string_view connection_state_text",
+    '''[[nodiscard]] std::size_t refresh_manifest_values(ManifestModel& model) {
+    if (model.path.empty()) return 0U;
+    std::ifstream input{model.path};
+    if (!input) return 0U;
+    std::string line;
+    if (!std::getline(input, line)) return 0U;
+    const auto revision = manifest_revision(line);
+    if (revision == 0U || revision == model.revision) return 0U;
+
+    std::size_t changed{};
+    while (std::getline(input, line)) {
+        const auto fields = split_fields(line, '\\t');
+        if (fields.size() < 6U || fields[0] != "OBJ") continue;
+        const auto found = model.value_indices.find(object_key(fields[1], fields[2]));
+        if (found == model.value_indices.end()) continue;
+        auto& value = model.values[found->second];
+        const auto text_index = fields.size() >= 7U ? 6U : 5U;
+        if (value.text == fields[text_index]) continue;
+        if (!live_text_valid(value.type, fields[text_index])) continue;
+        auto data = manifest_data(value.type, fields[text_index]);
+        if (apply_live_data(
+                model,
+                found->second,
+                std::move(data),
+                fields[text_index],
+                "Good",
+                "manifest-sync",
+                0U,
+                std::nullopt)) {
+            ++changed;
+        }
+    }
+    model.revision = revision;
+    return changed;
+}
+
+[[nodiscard]] std::string_view connection_state_text''',
+)
+
+# Poll the compatibility adapter while an association is active. GUI/MMS
+# mutations do not rewrite the manifest, so this path is idle during normal P1
+# operation and cannot become a second source of truth.
+replace_once(
+    server,
+    "    auto previous_state = runtime.state();\n"
+    "    std::size_t total_received = 0U;\n",
+    "    auto previous_state = runtime.state();\n"
+    "    auto next_manifest_refresh = std::chrono::steady_clock::now();\n"
+    "    std::size_t total_received = 0U;\n",
+)
+replace_once(
+    server,
+    "    while (!g_stop.load(std::memory_order_relaxed)) {\n"
+    "        if (manifest_model != nullptr) drain_live_commands(*manifest_model);\n"
+    "        const auto result = session.poll_once();\n",
+    "    while (!g_stop.load(std::memory_order_relaxed)) {\n"
+    "        if (manifest_model != nullptr) {\n"
+    "            drain_live_commands(*manifest_model);\n"
+    "            const auto now = std::chrono::steady_clock::now();\n"
+    "            if (now >= next_manifest_refresh) {\n"
+    "                next_manifest_refresh = now + std::chrono::milliseconds{25};\n"
+    "                try {\n"
+    "                    const auto changed = refresh_manifest_values(*manifest_model);\n"
+    "                    if (changed != 0U) {\n"
+    "                        std::cout << \"IEDSIM_EVENT kind=value_sync association=\"\n"
+    "                                  << association_id << \" changed=\" << changed\n"
+    "                                  << \" revision=\" << manifest_model->revision << '\\n';\n"
+    "                        std::cout.flush();\n"
+    "                    }\n"
+    "                } catch (const std::exception& exception) {\n"
+    "                    std::cerr << \"IEDSIM_EVENT kind=value_sync_error association=\"\n"
+    "                              << association_id << \" message=\" << exception.what() << '\\n';\n"
+    "                }\n"
+    "            }\n"
+    "        }\n"
+    "        const auto result = session.poll_once();\n",
 )
 
 print("P1 generated-source repair applied")
