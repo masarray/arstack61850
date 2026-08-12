@@ -44,7 +44,11 @@ struct PtpTimeReceiverOptions final {
     PtpPortIdentity local_port_identity{};
     std::chrono::milliseconds source_timeout{3000};
     std::chrono::milliseconds exchange_timeout{2000};
-    std::chrono::milliseconds path_delay_timeout{3000};
+    // The default is derived from the configured exchange cadence. The ESP
+    // adapter sets exchange_timeout to 3/4 of the Pdelay request interval, so
+    // 2x keeps valid path-delay evidence alive for 1.5 request intervals while
+    // still expiring independently when peer-delay traffic stops.
+    std::chrono::milliseconds path_delay_timeout{exchange_timeout + exchange_timeout};
 };
 
 struct PtpTimeReceiverStatus final {
