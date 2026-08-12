@@ -223,7 +223,7 @@ def main() -> int:
             )
             require_success(
                 direct_normal,
-                "model=direct-normal",
+                "ctlModel=direct-normal",
                 "completion=accepted",
                 "accepted=true",
                 "STATUS_AFTER true",
@@ -233,13 +233,13 @@ def main() -> int:
             sbo_cancel = run_control(
                 control_probe, port, "MU01LD0/GGIO1.SPCSO2", "select-cancel"
             )
-            require_success(sbo_cancel, "model=sbo-normal", "STATUS_AFTER false")
+            require_success(sbo_cancel, "ctlModel=sbo-normal", "STATUS_AFTER false")
             sbo_normal = run_control(
                 control_probe, port, "MU01LD0/GGIO1.SPCSO2", "select-operate"
             )
             require_success(
                 sbo_normal,
-                "model=sbo-normal",
+                "ctlModel=sbo-normal",
                 "completion=accepted",
                 "accepted=true",
                 "STATUS_AFTER true",
@@ -250,7 +250,7 @@ def main() -> int:
             )
             require_success(
                 direct_enhanced,
-                "model=direct-enhanced",
+                "ctlModel=direct-enhanced",
                 "completion=positive-termination",
                 "termination=true",
                 "STATUS_AFTER true",
@@ -261,7 +261,7 @@ def main() -> int:
             )
             require_success(
                 sbo_enhanced,
-                "model=sbo-enhanced",
+                "ctlModel=sbo-enhanced",
                 "completion=positive-termination",
                 "termination=true",
                 "STATUS_AFTER true",
