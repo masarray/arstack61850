@@ -85,6 +85,7 @@ public:
     Q_INVOKABLE void clear();
     Q_INVOKABLE void selectIed(int index);
     Q_INVOKABLE void selectValue(int index);
+    Q_INVOKABLE bool selectValueByMmsItem(const QString& mmsItem);
     Q_INVOKABLE bool startSimulation();
     Q_INVOKABLE void stopSimulation();
     Q_INVOKABLE bool applySelectedValue(
