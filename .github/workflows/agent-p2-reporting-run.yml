@@ -89,11 +89,13 @@ jobs:
       - name: Build focused root targets
         run: >-
           cmake --build build-p2-root
-          --target ariec61850_scl_tests ariec61850_static_ied_server ariec61850_static_rcb_trial
+          --target ariec61850_scl_tests ariec61850_reporting_tests ariec61850_static_ied_server ariec61850_static_rcb_trial
           --parallel 2
 
-      - name: Run SCL parser regression
-        run: ./build-p2-root/ariec61850_scl_tests
+      - name: Run reporting and SCL regressions
+        run: |
+          ./build-p2-root/ariec61850_reporting_tests
+          ./build-p2-root/ariec61850_scl_tests
 
       - name: Commit validated P2 source to target branch
         run: |
@@ -105,8 +107,10 @@ jobs:
             apps/ied_simulator/src/IedSimulatorController.cpp \
             apps/ied_simulator/test_gui_live_value.py \
             include/ariec61850/scl/model.hpp \
+            src/mms/reporting.cpp \
             src/scl/parser_part_05_03.inc \
             tests/fixtures/scl/iedsim-full-model.scd \
+            tests/test_reporting.cpp \
             tools/static_ied_server.cpp \
             tools/static_ied_server_iedsim/CMakeLists.txt \
             tools/static_rcb_trial.cpp
