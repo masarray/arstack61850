@@ -18,34 +18,14 @@ jobs:
         with:
           ref: agent/iedsim-full-scl-live-store
           fetch-depth: 0
-      - name: Apply P0 patch to PR branch
-        shell: bash
-        run: |
-          set -o pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('tools/agent_p0_patch_launcher.py')
-          text = p.read_text(encoding='utf-8')
-          text = text.replace("source = source[:tail] + r'''#", 'source = source[:tail] + r\"\"\"#', 1)
-          text = text.replace("\n'''\n\nexec(compile(source, \"agent_p0_full_model_patch.py\", \"exec\")", "\n\"\"\"\n\nexec(compile(source, \"agent_p0_full_model_patch.py\", \"exec\")", 1)
-          p.write_text(text, encoding='utf-8')
-          PY
-          python3 tools/agent_p0_patch_launcher.py 2>&1 | tee p0-patch.log
-      - name: Upload patch diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: p0-patch-diagnostics
-          path: p0-patch.log
-      - name: Commit P0 implementation
+      - name: Apply P0 compile corrections
+        run: python3 tools/agent_p0_compile_fix.py
+      - name: Commit corrections to PR branch
         run: |
           git config user.name "openai-agent"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add apps/ied_simulator/src/SclMmsMaterializer.hpp \
-                  apps/ied_simulator/src/IedSimulatorController.cpp \
-                  tools/static_ied_server.cpp \
-                  tests/fixtures/scl/iedsim-full-model.scd \
-                  apps/ied_simulator/test_gui_live_value.py
+                  apps/ied_simulator/src/IedSimulatorController.cpp
           git diff --cached --check
-          git commit -m "feat(iedsim): complete P0 SCL MMS model projection"
+          git commit -m "fix(iedsim): correct P0 materializer projection"
           git push origin HEAD:agent/iedsim-full-scl-live-store
