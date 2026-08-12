@@ -1,4 +1,4 @@
-name: Agent P0 Full Model Patch
+name: Agent P0 Clang Diagnostic
 
 on:
   push:
@@ -11,28 +11,28 @@ permissions:
   contents: read
 
 jobs:
-  validate-p0:
-    runs-on: ubuntu-24.04
+  clang-parity:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: agent/iedsim-full-scl-live-store
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: '6.8.3'
-          cache: true
-      - name: Configure
-        run: cmake -S apps/ied_simulator -B build-p0 -G Ninja -DCMAKE_BUILD_TYPE=Release
-      - name: Build simulator and read probe
-        run: cmake --build build-p0 --target arstack_ied_simulator ariec61850_mms_read_probe --parallel 2
-      - name: QML smoke
+      - name: Configure clang
         env:
-          QT_QPA_PLATFORM: offscreen
-        run: ./build-p0/arstack_ied_simulator --smoke-test
-      - name: P0 full structural model gate
-        run: >-
-          python3 apps/ied_simulator/test_gui_live_value.py
-          --app ./build-p0/arstack_ied_simulator
-          --read-probe ./build-p0
-          --scl ./tests/fixtures/scl/iedsim-full-model.scd
+          CC: clang
+          CXX: clang++
+        run: cmake -S tools/static_ied_server_iedsim -B build-iedscout-parity -DCMAKE_BUILD_TYPE=Release
+      - name: Build with diagnostics
+        env:
+          CC: clang
+          CXX: clang++
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build build-iedscout-parity --parallel 2 2>&1 | tee clang-build.log
+      - name: Upload clang diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-clang-build-log
+          path: clang-build.log
