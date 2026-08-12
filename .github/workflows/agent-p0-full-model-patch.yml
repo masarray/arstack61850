@@ -6,6 +6,7 @@ on:
       - agent/iedsim-full-scl-live-store
     paths:
       - tools/agent_p0_full_model_patch.py
+      - tools/agent_p0_patch_repair.py
       - .github/workflows/agent-p0-full-model-patch.yml
 
 permissions:
@@ -19,6 +20,8 @@ jobs:
         with:
           ref: agent/iedsim-full-scl-live-store
           fetch-depth: 0
+      - name: Repair guarded patcher
+        run: python3 tools/agent_p0_patch_repair.py
       - name: Apply P0 patch
         run: python3 tools/agent_p0_full_model_patch.py
       - name: Commit P0 implementation
