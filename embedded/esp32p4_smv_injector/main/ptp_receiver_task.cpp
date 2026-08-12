@@ -62,6 +62,15 @@ using ar::iec61850::time_sync::ptp_peer_delay_multicast_mac;
 constexpr char kTag[] = "ar_ptp_p2";
 constexpr UBaseType_t kRxQueueDepth = 24U;
 constexpr TickType_t kStartupDelay = pdMS_TO_TICKS(300);
+constexpr TickType_t kStartupReadyTimeout = pdMS_TO_TICKS(2000);
+constexpr TickType_t kStartupPollDelay = pdMS_TO_TICKS(5);
+
+enum class ReceiverStartupState : std::uint8_t {
+    idle = 0U,
+    pending = 1U,
+    ready = 2U,
+    failed = 3U,
+};
 
 struct PtpRxEvent final {
     PtpMessageType message_type{PtpMessageType::sync};
@@ -100,11 +109,18 @@ ReceiverContext g_receiver_context{};
 std::atomic_bool g_receiver_running{false};
 std::atomic_bool g_receiver_stop_requested{false};
 std::atomic_bool g_receiver_accept_rx{false};
+std::atomic<ReceiverStartupState> g_receiver_startup_state{ReceiverStartupState::idle};
 std::atomic<std::uint64_t> g_pdelay_requests_sent{0U};
 std::atomic<std::uint64_t> g_peer_delay_frames_observed{0U};
 std::atomic<std::uint64_t> g_receiver_tx_failures{0U};
 portMUX_TYPE g_receiver_status_mux = portMUX_INITIALIZER_UNLOCKED;
 ar_ptp_lab_status_t g_receiver_status{};
+
+[[nodiscard]] bool receiver_runtime_ready() noexcept {
+    return g_receiver_running.load(std::memory_order_acquire) &&
+           g_receiver_startup_state.load(std::memory_order_acquire) ==
+               ReceiverStartupState::ready;
+}
 
 #if defined(SOC_EMAC_IEEE1588V2_SUPPORTED) && SOC_EMAC_IEEE1588V2_SUPPORTED && ESP_IDF_VERSION_MAJOR < 6
 
@@ -485,7 +501,7 @@ void publish_measured_sync(const ReceiverContext& context) noexcept {
 
 void update_status(ReceiverContext& context) noexcept {
     ar_ptp_lab_status_t snapshot{};
-    snapshot.is_running = g_receiver_running.load(std::memory_order_acquire);
+    snapshot.is_running = receiver_runtime_ready();
     snapshot.role = context.config.role;
     snapshot.peer_delay_requests_sent =
         g_pdelay_requests_sent.load(std::memory_order_relaxed);
@@ -511,9 +527,6 @@ void update_status(ReceiverContext& context) noexcept {
             snapshot.selected_source_port_number =
                 receiver.selected_source->port_number;
         }
-        // The receiver owns path-delay evidence lifetime. If it has expired,
-        // leave validity false instead of resurrecting the discipline's cached
-        // value from the last accepted offset measurement.
         if (receiver.mean_path_delay_ns.has_value()) {
             snapshot.mean_path_delay_valid = true;
             snapshot.mean_path_delay_ns = *receiver.mean_path_delay_ns;
@@ -528,8 +541,6 @@ void update_status(ReceiverContext& context) noexcept {
             snapshot.offset_valid = true;
             snapshot.offset_from_master_ns = *discipline.offset_from_master_ns;
         }
-        // Do not set mean_path_delay_valid from discipline cache; validity is
-        // authoritative only while PtpTimeReceiver still owns fresh Pdelay evidence.
         if (snapshot.mean_path_delay_valid && discipline.path_delay_jitter_ns.has_value()) {
             snapshot.path_delay_jitter_valid = true;
             snapshot.path_delay_jitter_ns = *discipline.path_delay_jitter_ns;
@@ -660,12 +671,30 @@ void finish_receiver(ReceiverContext& context) noexcept {
     context.discipline.reset();
     context.task_handle = nullptr;
     g_receiver_running.store(false, std::memory_order_release);
+
+    const auto startup_state =
+        g_receiver_startup_state.load(std::memory_order_acquire);
+    if (startup_state == ReceiverStartupState::pending) {
+        g_receiver_startup_state.store(
+            ReceiverStartupState::failed, std::memory_order_release);
+    } else if (startup_state == ReceiverStartupState::ready) {
+        g_receiver_startup_state.store(
+            ReceiverStartupState::idle, std::memory_order_release);
+    }
     update_status(context);
 }
 
 void receiver_task(void* argument) {
     auto& context = *static_cast<ReceiverContext*>(argument);
     vTaskDelay(kStartupDelay);
+
+    if (g_receiver_stop_requested.load(std::memory_order_acquire) ||
+        g_receiver_startup_state.load(std::memory_order_acquire) !=
+            ReceiverStartupState::pending) {
+        finish_receiver(context);
+        vTaskDelete(nullptr);
+        return;
+    }
 
     if (!enable_hardware_ptp(context.eth_handle)) {
         finish_receiver(context);
@@ -720,7 +749,19 @@ void receiver_task(void* argument) {
         vTaskDelete(nullptr);
         return;
     }
+
+    if (g_receiver_stop_requested.load(std::memory_order_acquire) ||
+        g_receiver_startup_state.load(std::memory_order_acquire) !=
+            ReceiverStartupState::pending) {
+        finish_receiver(context);
+        vTaskDelete(nullptr);
+        return;
+    }
+
     g_receiver_accept_rx.store(true, std::memory_order_release);
+    g_receiver_startup_state.store(
+        ReceiverStartupState::ready, std::memory_order_release);
+    update_status(context);
 
     const auto local_name = format_ptp_clock_identity(clock_identity);
     ESP_LOGW(kTag,
@@ -785,6 +826,8 @@ void receiver_task(void*) {
     ESP_LOGE(kTag,
              "PTP-P2 receiver requires ESP32-P4 IEEE1588 support and ESP-IDF 5.x");
     smp_synch_lab_set_measured(std::nullopt);
+    g_receiver_startup_state.store(
+        ReceiverStartupState::failed, std::memory_order_release);
     g_receiver_running.store(false, std::memory_order_release);
     g_receiver_context.task_handle = nullptr;
     vTaskDelete(nullptr);
@@ -806,6 +849,8 @@ bool ptp_receiver_start(
 
     g_receiver_stop_requested.store(false, std::memory_order_release);
     g_receiver_accept_rx.store(false, std::memory_order_release);
+    g_receiver_startup_state.store(
+        ReceiverStartupState::pending, std::memory_order_release);
     g_pdelay_requests_sent.store(0U, std::memory_order_release);
     g_peer_delay_frames_observed.store(0U, std::memory_order_release);
     g_receiver_tx_failures.store(0U, std::memory_order_release);
@@ -823,6 +868,8 @@ bool ptp_receiver_start(
         xQueueReset(g_receiver_context.rx_queue);
     }
     if (g_receiver_context.rx_queue == nullptr) {
+        g_receiver_startup_state.store(
+            ReceiverStartupState::failed, std::memory_order_release);
         g_receiver_running.store(false, std::memory_order_release);
         return false;
     }
@@ -836,11 +883,36 @@ bool ptp_receiver_start(
             &g_receiver_context.task_handle,
             0) != pdPASS) {
         g_receiver_context.task_handle = nullptr;
+        g_receiver_startup_state.store(
+            ReceiverStartupState::failed, std::memory_order_release);
         g_receiver_running.store(false, std::memory_order_release);
         return false;
     }
     update_status(g_receiver_context);
-    return true;
+
+    const TickType_t started_at = xTaskGetTickCount();
+    while (true) {
+        const auto startup_state =
+            g_receiver_startup_state.load(std::memory_order_acquire);
+        if (startup_state == ReceiverStartupState::ready) {
+            return true;
+        }
+        if (startup_state == ReceiverStartupState::failed ||
+            !g_receiver_running.load(std::memory_order_acquire)) {
+            return false;
+        }
+        if (xTaskGetTickCount() - started_at >= kStartupReadyTimeout) {
+            ESP_LOGE(kTag, "PTP receiver startup readiness timed out");
+            g_receiver_startup_state.store(
+                ReceiverStartupState::failed, std::memory_order_release);
+            g_receiver_stop_requested.store(true, std::memory_order_release);
+            if (g_receiver_context.task_handle != nullptr) {
+                xTaskNotifyGive(g_receiver_context.task_handle);
+            }
+            return false;
+        }
+        vTaskDelay(kStartupPollDelay > 0U ? kStartupPollDelay : 1U);
+    }
 }
 
 void ptp_receiver_stop() noexcept {
@@ -852,14 +924,14 @@ void ptp_receiver_stop() noexcept {
 }
 
 bool ptp_receiver_is_running() noexcept {
-    return g_receiver_running.load(std::memory_order_acquire);
+    return receiver_runtime_ready();
 }
 
 bool ptp_receiver_get_status(ar_ptp_lab_status_t& status) noexcept {
     portENTER_CRITICAL(&g_receiver_status_mux);
     status = g_receiver_status;
     portEXIT_CRITICAL(&g_receiver_status_mux);
-    status.is_running = g_receiver_running.load(std::memory_order_acquire);
+    status.is_running = receiver_runtime_ready();
     return true;
 }
 
