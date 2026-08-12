@@ -23,6 +23,15 @@ permissions:
 
 jobs:
   build-esp32p4-ptp:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - role_name: source
+            role_value: 0
+          - role_name: receiver
+            role_value: 1
+    name: build-esp32p4-ptp-${{ matrix.role_name }}
     runs-on: ubuntu-latest
     container:
       image: espressif/idf:v5.5.4
@@ -36,7 +45,7 @@ jobs:
       - name: Select ESP32-P4 target
         run: source /opt/esp/idf/export.sh && idf.py set-target esp32p4
 
-      - name: Enable guarded non-default PTP-P1.5 runtime profile
+      - name: Enable guarded PTP-P2 profile
         shell: bash
         run: |
           set_config() {
@@ -52,6 +61,7 @@ jobs:
           }
 
           set_config CONFIG_AR_PTP_LAB_TX y
+          set_config CONFIG_AR_PTP_OPERATING_ROLE ${{ matrix.role_value }}
           set_config CONFIG_AR_PTP_DOMAIN 0
           set_config CONFIG_AR_PTP_TRANSPORT_SPECIFIC 1
           set_config CONFIG_AR_PTP_PORT_NUMBER 2
@@ -61,6 +71,7 @@ jobs:
           set_config CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS 1000
           set_config CONFIG_AR_PTP_SYNC_INTERVAL_MS 250
           set_config CONFIG_AR_PTP_RESPOND_PDELAY y
+          set_config CONFIG_AR_PTP_PDELAY_REQUEST_INTERVAL_MS 1000
           set_config CONFIG_AR_PTP_PRIORITY1 120
           set_config CONFIG_AR_PTP_PRIORITY2 121
           set_config CONFIG_AR_PTP_CLOCK_CLASS 248
@@ -68,19 +79,28 @@ jobs:
           set_config CONFIG_AR_PTP_OFFSET_SCALED_LOG_VARIANCE 65535
           set_config CONFIG_AR_PTP_TIME_SOURCE 160
           set_config CONFIG_AR_PTP_CURRENT_UTC_OFFSET 37
+          set_config CONFIG_AR_PTP_MAX_PATH_DELAY_NS 5000000
+          set_config CONFIG_AR_PTP_MAX_PATH_JITTER_NS 100000
+          set_config CONFIG_AR_PTP_LOCK_OFFSET_NS 2000
+          set_config CONFIG_AR_PTP_UNLOCK_OFFSET_NS 20000
+          set_config CONFIG_AR_PTP_PHASE_STEP_THRESHOLD_NS 1000000
+          set_config CONFIG_AR_PTP_LOCK_REQUIRED_SAMPLES 8
+          set_config CONFIG_AR_PTP_SYNC_TIMEOUT_MS 1000
+          set_config CONFIG_AR_PTP_HOLDOVER_TIMEOUT_MS 5000
+          set_config CONFIG_AR_PTP_MAX_FREQ_ADJ_PPB 100000
 
           source /opt/esp/idf/export.sh
           idf.py reconfigure
 
-          grep -E '^CONFIG_AR_PTP_(LAB_TX|DOMAIN|TRANSPORT_SPECIFIC|PORT_NUMBER|VLAN|VLAN_ID|VLAN_PRIORITY|ANNOUNCE_INTERVAL_MS|SYNC_INTERVAL_MS|RESPOND_PDELAY|PRIORITY1|PRIORITY2|CLOCK_CLASS|CLOCK_ACCURACY|OFFSET_SCALED_LOG_VARIANCE|TIME_SOURCE|CURRENT_UTC_OFFSET)=' sdkconfig
+          grep -E '^CONFIG_AR_PTP_(LAB_TX|OPERATING_ROLE|DOMAIN|TRANSPORT_SPECIFIC|PORT_NUMBER|VLAN|VLAN_ID|VLAN_PRIORITY|PDELAY_REQUEST_INTERVAL_MS|LOCK_OFFSET_NS|UNLOCK_OFFSET_NS|LOCK_REQUIRED_SAMPLES|MAX_FREQ_ADJ_PPB)=' sdkconfig
 
           grep -q '^CONFIG_AR_PTP_LAB_TX=y$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_OPERATING_ROLE=${{ matrix.role_value }}$' sdkconfig
           grep -q '^CONFIG_AR_PTP_TRANSPORT_SPECIFIC=1$' sdkconfig
           grep -q '^CONFIG_AR_PTP_PORT_NUMBER=2$' sdkconfig
           grep -q '^CONFIG_AR_PTP_VLAN_ID=100$' sdkconfig
-          grep -q '^CONFIG_AR_PTP_PRIORITY1=120$' sdkconfig
-          grep -q '^CONFIG_AR_PTP_PRIORITY2=121$' sdkconfig
-          grep -q '^CONFIG_AR_PTP_RESPOND_PDELAY=y$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_LOCK_OFFSET_NS=2000$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_LOCK_REQUIRED_SAMPLES=8$' sdkconfig
 
-      - name: Build PTP-P1.5 enabled firmware
+      - name: Build PTP-P2 firmware
         run: source /opt/esp/idf/export.sh && idf.py build
