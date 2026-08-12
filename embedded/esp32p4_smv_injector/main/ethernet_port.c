@@ -77,11 +77,10 @@ esp_eth_handle_t ar_esp32p4_eth_init(void)
     s_eth_handle = handle;
 
 #if CONFIG_AR_PTP_LAB_TX
-    // The PTP task starts independently and tolerates link-not-ready TX failures
-    // while the normal app flow proceeds to esp_eth_start(). Keeping this hook
-    // beside driver installation also allows future PTP-only/analyzer firmware.
-    ar_ptp_lab_start(handle);
-    if (!ar_ptp_lab_is_running()) {
+    // Boot auto-start uses the same checked admission/readiness contract as the
+    // live serial control path. A rejected or failed start is never reported as
+    // running merely because an older runtime is still cleaning up.
+    if (!ar_ptp_lab_try_start(handle)) {
         ESP_LOGW(TAG, "PTP auto-start was rejected or could not start");
     }
 #endif
@@ -98,8 +97,7 @@ bool ar_esp32p4_ptp_start(void)
     if (s_eth_handle == NULL) {
         return false;
     }
-    ar_ptp_lab_start(s_eth_handle);
-    return ar_ptp_lab_is_running();
+    return ar_ptp_lab_try_start(s_eth_handle);
 #else
     return false;
 #endif
