@@ -23,6 +23,7 @@
           </LN0>
           <LN lnClass="TCTR" inst="1" lnType="TCTRType" />
           <LN lnClass="XCBR" inst="1" lnType="XCBRType" />
+          <LN lnClass="GGIO" inst="1" lnType="GGIOControlType" />
         </LDevice>
       </Server>
     </AccessPoint>
@@ -40,6 +41,34 @@
       <BDA name="i" bType="INT16" />
       <BDA name="range" bType="INT8U" />
     </DAType>
+    <LNodeType id="GGIOControlType" lnClass="GGIO">
+      <DO name="SPCSO1" type="SPCSOType1" />
+      <DO name="SPCSO2" type="SPCSOType2" />
+      <DO name="SPCSO3" type="SPCSOType3" />
+      <DO name="SPCSO4" type="SPCSOType4" />
+    </LNodeType>
+    <DOType id="SPCSOType1" cdc="SPC">
+      <DA name="stVal" bType="BOOLEAN" fc="ST" />
+      <DA name="ctlModel" bType="INT8U" fc="CF"><Val>1</Val></DA>
+      <DA name="operTimeout" bType="INT32U" fc="CF"><Val>1000</Val></DA>
+    </DOType>
+    <DOType id="SPCSOType2" cdc="SPC">
+      <DA name="stVal" bType="BOOLEAN" fc="ST" />
+      <DA name="ctlModel" bType="INT8U" fc="CF"><Val>2</Val></DA>
+      <DA name="sboTimeout" bType="INT32U" fc="CF"><Val>1500</Val></DA>
+      <DA name="operTimeout" bType="INT32U" fc="CF"><Val>1000</Val></DA>
+    </DOType>
+    <DOType id="SPCSOType3" cdc="SPC">
+      <DA name="stVal" bType="BOOLEAN" fc="ST" />
+      <DA name="ctlModel" bType="INT8U" fc="CF"><Val>3</Val></DA>
+      <DA name="operTimeout" bType="INT32U" fc="CF"><Val>1000</Val></DA>
+    </DOType>
+    <DOType id="SPCSOType4" cdc="SPC">
+      <DA name="stVal" bType="BOOLEAN" fc="ST" />
+      <DA name="ctlModel" bType="INT8U" fc="CF"><Val>4</Val></DA>
+      <DA name="sboTimeout" bType="INT32U" fc="CF"><Val>1500</Val></DA>
+      <DA name="operTimeout" bType="INT32U" fc="CF"><Val>1000</Val></DA>
+    </DOType>
     <LNodeType id="XCBRType" lnClass="XCBR">
       <DO name="Pos" type="PosType" />
       <DO name="Health" type="HealthType" />

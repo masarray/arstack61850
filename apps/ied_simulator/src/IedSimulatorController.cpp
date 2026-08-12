@@ -1010,6 +1010,69 @@ bool IedSimulatorController::writeModelManifest() {
         }
     }
 
+    // P3: materialize command services from SCL control metadata without
+    // making CO a generic writable value. ctlModel/sboTimeout/operTimeout stay
+    // regular read-only CF leaves; CTRL only binds the service runtime to the
+    // authoritative ST/MX status leaf.
+    for (const auto& loaded : documents_) {
+        for (const auto& variant : loaded.materializedValues) {
+            const auto ctl = variant.toMap();
+            if (ctl.value(QStringLiteral("dataAttribute")).toString()
+                    .compare(QStringLiteral("ctlModel"), Qt::CaseInsensitive) != 0) continue;
+            bool modelOk = false;
+            const auto model = ctl.value(QStringLiteral("value")).toString().toUInt(&modelOk);
+            if (!modelOk || model < 1U || model > 4U) continue;
+            const auto domain = ctl.value(QStringLiteral("mmsDomain")).toString();
+            const auto ln = ctl.value(QStringLiteral("logicalNode")).toString();
+            const auto dataObject = ctl.value(QStringLiteral("dataObject")).toString();
+            if (domain.isEmpty() || ln.isEmpty() || dataObject.isEmpty()) continue;
+
+            QString statusDomain;
+            QString statusItem;
+            quint64 sboTimeout = 10'000U;
+            quint64 operTimeout = 1'000U;
+            for (const auto& siblingVariant : loaded.materializedValues) {
+                const auto sibling = siblingVariant.toMap();
+                if (sibling.value(QStringLiteral("mmsDomain")).toString() != domain ||
+                    sibling.value(QStringLiteral("logicalNode")).toString() != ln ||
+                    sibling.value(QStringLiteral("dataObject")).toString() != dataObject) continue;
+                const auto da = sibling.value(QStringLiteral("dataAttribute")).toString();
+                const auto fc = sibling.value(QStringLiteral("fc")).toString();
+                if (da.compare(QStringLiteral("stVal"), Qt::CaseInsensitive) == 0 &&
+                    fc.compare(QStringLiteral("ST"), Qt::CaseInsensitive) == 0) {
+                    statusDomain = sibling.value(QStringLiteral("mmsDomain")).toString();
+                    statusItem = sibling.value(QStringLiteral("mmsItem")).toString();
+                } else if (da.compare(QStringLiteral("sboTimeout"), Qt::CaseInsensitive) == 0) {
+                    bool ok = false;
+                    const auto parsed = sibling.value(QStringLiteral("value")).toString().toULongLong(&ok);
+                    if (ok && parsed > 0U) sboTimeout = parsed;
+                } else if (da.compare(QStringLiteral("operTimeout"), Qt::CaseInsensitive) == 0) {
+                    bool ok = false;
+                    const auto parsed = sibling.value(QStringLiteral("value")).toString().toULongLong(&ok);
+                    if (ok && parsed > 0U) operTimeout = parsed;
+                }
+            }
+            if (statusDomain.isEmpty() || statusItem.isEmpty()) continue;
+            output.write("CTRL\t");
+            output.write(manifestField(domain));
+            output.write("\t");
+            output.write(manifestField(ln));
+            output.write("\t");
+            output.write(manifestField(dataObject));
+            output.write("\t");
+            output.write(QByteArray::number(model));
+            output.write("\t");
+            output.write(manifestField(statusDomain));
+            output.write("\t");
+            output.write(manifestField(statusItem));
+            output.write("\t");
+            output.write(QByteArray::number(sboTimeout));
+            output.write("\t");
+            output.write(QByteArray::number(operTimeout));
+            output.write("\n");
+        }
+    }
+
     if (emittedObjects.isEmpty()) {
         appendActivity(
             QStringLiteral("Server"),
