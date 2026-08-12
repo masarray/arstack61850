@@ -51,6 +51,55 @@ namespace wire = ar::iec61850::wire;
 
 std::atomic_bool g_stop{false};
 
+// Desktop/lab simulator profile. These bounds are deliberately local to this
+// host executable; the strict embedded MmsStaticObjectTable/DataSetTable limits
+// remain unchanged for deterministic MCU builds.
+constexpr std::size_t kHostMaximumManifestObjects = 65'536U;
+constexpr std::size_t kHostMaximumManifestDataSets = 4'096U;
+
+[[nodiscard]] bool host_identifier_valid(const std::string_view value) noexcept {
+    if (value.empty() || value.size() > mms::MmsServiceSpanCodec::maximum_identifier_bytes) return false;
+    for (const char ch : value) {
+        const auto byte = static_cast<unsigned char>(ch);
+        if (byte == 0U || byte > 0x7FU) return false;
+    }
+    return true;
+}
+
+[[nodiscard]] bool host_manifest_tables_valid(
+    const mms::MmsStaticObjectTable& objects,
+    const mms::MmsStaticDataSetTable& data_sets) noexcept {
+    const auto object_span = objects.objects();
+    if (object_span.empty() || object_span.size() > kHostMaximumManifestObjects) return false;
+    std::set<std::pair<std::string_view, std::string_view>> object_names;
+    for (const auto& object : object_span) {
+        if (!host_identifier_valid(object.domain) || !host_identifier_valid(object.item) ||
+            object.type_specification.empty() || object.read == nullptr ||
+            !object_names.emplace(object.domain, object.item).second) return false;
+    }
+
+    const auto data_set_span = data_sets.data_sets();
+    if (data_set_span.size() > kHostMaximumManifestDataSets) return false;
+    std::set<std::pair<std::string_view, std::string_view>> data_set_names;
+    for (const auto& data_set : data_set_span) {
+        if (!host_identifier_valid(data_set.domain) || !host_identifier_valid(data_set.item) ||
+            data_set.members.empty() ||
+            data_set.members.size() > mms::MmsDataSetSpanCodec::maximum_members ||
+            !data_set_names.emplace(data_set.domain, data_set.item).second) return false;
+        std::set<std::pair<std::string_view, std::string_view>> member_names;
+        for (const auto& member : data_set.members) {
+            if (!host_identifier_valid(member.domain) || !host_identifier_valid(member.item) ||
+                !member_names.emplace(member.domain, member.item).second) return false;
+            const mms::MmsObjectNameView name{
+                mms::MmsObjectNameViewKind::domain_specific,
+                std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(member.domain.data()), member.domain.size()},
+                std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(member.item.data()), member.item.size()}};
+            if (objects.find(name) == nullptr) return false;
+        }
+    }
+    return true;
+}
+
 void signal_handler(int) {
     g_stop.store(true, std::memory_order_relaxed);
 }
@@ -538,6 +587,7 @@ struct ManifestValue final {
     std::string item;
     std::string raw_type;
     std::string normalized_type;
+    std::string type_signature;
     std::string text;
     mms::MmsTypeSpecification type;
     std::optional<mms::MmsDataValue> data;
@@ -547,9 +597,20 @@ struct ManifestValue final {
 };
 
 struct ManifestTypeNode final {
-    std::map<std::string, ManifestTypeNode> children;
+    std::vector<std::string> child_names;
+    std::vector<ManifestTypeNode> children;
     std::optional<std::size_t> value_index;
 };
+
+[[nodiscard]] ManifestTypeNode& manifest_child(
+    ManifestTypeNode& node, const std::string& name) {
+    for (std::size_t index = 0U; index < node.child_names.size(); ++index) {
+        if (node.child_names[index] == name) return node.children[index];
+    }
+    node.child_names.push_back(name);
+    node.children.emplace_back();
+    return node.children.back();
+}
 
 struct ManifestDataSetStorage final {
     std::string domain;
@@ -652,15 +713,113 @@ struct ManifestModel final {
     return result;
 }
 
+[[nodiscard]] std::uint32_t signature_size(
+    const std::string_view text, const std::string_view prefix) {
+    if (!text.starts_with(prefix)) {
+        throw std::runtime_error("Invalid exact MMS type signature: " + std::string{text});
+    }
+    const auto suffix = text.substr(prefix.size());
+    if (suffix.empty()) {
+        throw std::runtime_error("Missing size in exact MMS type signature: " + std::string{text});
+    }
+    const auto value = std::stoull(std::string{suffix});
+    if (value == 0U || value > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::runtime_error("Invalid size in exact MMS type signature: " + std::string{text});
+    }
+    return static_cast<std::uint32_t>(value);
+}
+
+[[nodiscard]] mms::MmsTypeSpecification exact_manifest_type(
+    const std::string& signature,
+    std::string name = {}) {
+    mms::MmsTypeSpecification result;
+    result.name = std::move(name);
+    if (signature == "boolean") {
+        result.kind = mms::MmsTypeKind::boolean;
+        return result;
+    }
+    if (signature == "utc-time") {
+        result.kind = mms::MmsTypeKind::utc_time;
+        return result;
+    }
+    if (signature.starts_with("integer:")) {
+        result.kind = mms::MmsTypeKind::integer;
+        result.size = signature_size(signature, "integer:");
+        return result;
+    }
+    if (signature.starts_with("unsigned-integer:")) {
+        result.kind = mms::MmsTypeKind::unsigned_integer;
+        result.size = signature_size(signature, "unsigned-integer:");
+        return result;
+    }
+    if (signature.starts_with("bit-string:")) {
+        result.kind = mms::MmsTypeKind::bit_string;
+        result.size = signature_size(signature, "bit-string:");
+        return result;
+    }
+    if (signature.starts_with("octet-string:")) {
+        result.kind = mms::MmsTypeKind::octet_string;
+        result.size = signature_size(signature, "octet-string:");
+        return result;
+    }
+    if (signature.starts_with("visible-string:")) {
+        result.kind = mms::MmsTypeKind::visible_string;
+        result.size = signature_size(signature, "visible-string:");
+        return result;
+    }
+    if (signature.starts_with("mms-string:")) {
+        result.kind = mms::MmsTypeKind::mms_string;
+        result.size = signature_size(signature, "mms-string:");
+        return result;
+    }
+    if (signature.starts_with("floating-point:")) {
+        const auto parts = split_fields(signature, ':');
+        if (parts.size() != 3U) {
+            throw std::runtime_error("Invalid floating-point exact MMS type signature: " + signature);
+        }
+        result.kind = mms::MmsTypeKind::floating_point;
+        result.size = static_cast<std::uint32_t>(std::stoul(parts[1]));
+        result.exponent_width = static_cast<std::uint32_t>(std::stoul(parts[2]));
+        return result;
+    }
+    if (signature.starts_with("array:")) {
+        const auto first = signature.find(':', 6U);
+        if (first == std::string::npos || first + 1U >= signature.size()) {
+            throw std::runtime_error("Invalid array exact MMS type signature: " + signature);
+        }
+        const auto count = std::stoull(signature.substr(6U, first - 6U));
+        if (count == 0U || count > 65'535U) {
+            throw std::runtime_error("Invalid array bound in exact MMS type signature: " + signature);
+        }
+        result.kind = mms::MmsTypeKind::array;
+        result.size = static_cast<std::uint32_t>(count);
+        result.children.push_back(exact_manifest_type(signature.substr(first + 1U)));
+        return result;
+    }
+    throw std::runtime_error("Unsupported exact MMS type signature: " + signature);
+}
+
 [[nodiscard]] mms::MmsDataValue manifest_data(
     const mms::MmsTypeSpecification& type,
     const std::string& text) {
     switch (type.kind) {
+    case mms::MmsTypeKind::array: {
+        if (type.children.size() != 1U) return mms::MmsDataValue::array({});
+        std::vector<mms::MmsDataValue> children;
+        children.reserve(type.size.value_or(0U));
+        for (std::uint32_t index = 0U; index < type.size.value_or(0U); ++index) {
+            children.push_back(manifest_data(type.children.front(), text));
+        }
+        return mms::MmsDataValue::array(std::move(children));
+    }
     case mms::MmsTypeKind::boolean:
         return mms::MmsDataValue::boolean(text_boolean(text));
     case mms::MmsTypeKind::bit_string: {
-        constexpr std::array<std::uint8_t, 2U> good_quality{};
-        return mms::MmsDataValue::bit_string(3U, good_quality);
+        const auto bits = type.size.value_or(0U);
+        const auto bytes = static_cast<std::size_t>((bits + 7U) / 8U);
+        std::vector<std::uint8_t> raw(bytes, 0U);
+        const auto unused = static_cast<std::uint8_t>(bytes == 0U ? 0U : bytes * 8U - bits);
+        return mms::MmsDataValue::bit_string(unused, raw);
     }
     case mms::MmsTypeKind::integer:
         return mms::MmsDataValue::integer(text_integer(text));
@@ -673,18 +832,28 @@ struct ManifestModel final {
                 ? mms::MmsDataValue::floating_point(std::stod(text))
                 : mms::MmsDataValue::floating_point(std::stof(text));
         } catch (...) {
-            return mms::MmsDataValue::floating_point(0.0F);
+            return type.size.value_or(32U) == 64U
+                ? mms::MmsDataValue::floating_point(0.0)
+                : mms::MmsDataValue::floating_point(0.0F);
         }
+    case mms::MmsTypeKind::octet_string: {
+        std::vector<std::uint8_t> bytes(type.size.value_or(0U), 0U);
+        return mms::MmsDataValue::octet_string(bytes);
+    }
+    case mms::MmsTypeKind::mms_string:
+        return mms::MmsDataValue::mms_string(text == "---" ? std::string{} : text);
     case mms::MmsTypeKind::utc_time:
         return mms::MmsDataValue::utc_time(
-            mms::Iec61850UtcTime{std::chrono::system_clock::now(), 0U});
+            mms::Iec61850UtcTime{std::chrono::system_clock::time_point{}, 0U});
     default:
         return mms::MmsDataValue::visible_string(text == "---" ? std::string{} : text);
     }
 }
 
 void encode_manifest_value(ManifestValue& value) {
-    value.type = manifest_type(value.raw_type, value.normalized_type);
+    value.type = value.type_signature.empty()
+        ? manifest_type(value.raw_type, value.normalized_type)
+        : exact_manifest_type(value.type_signature);
     value.data = manifest_data(value.type, value.text);
     value.type_specification = mms::MmsServiceCodec::encode_type_specification(value.type);
     value.encoded = mms::MmsDataCodec::encode(*value.data);
@@ -720,8 +889,9 @@ void encode_manifest_value(ManifestValue& value) {
     result.kind = mms::MmsTypeKind::structure;
     result.name = std::move(name);
     result.children.reserve(node.children.size());
-    for (const auto& [child_name, child] : node.children) {
-        result.children.push_back(node_type(child, model, child_name));
+    for (std::size_t index = 0U; index < node.children.size(); ++index) {
+        result.children.push_back(
+            node_type(node.children[index], model, node.child_names[index]));
     }
     return result;
 }
@@ -734,8 +904,7 @@ void encode_manifest_value(ManifestValue& value) {
     }
     std::vector<mms::MmsDataValue> children;
     children.reserve(node.children.size());
-    for (const auto& [name, child] : node.children) {
-        static_cast<void>(name);
+    for (const auto& child : node.children) {
         children.push_back(node_data(child, model));
     }
     return mms::MmsDataValue::structure(std::move(children));
@@ -791,6 +960,7 @@ void rebuild_manifest_roots(ManifestModel& model) {
         std::string item;
         std::string raw_type;
         std::string normalized_type;
+        std::string type_signature;
         std::string text;
     };
     struct ParsedDataSetMember final {
@@ -799,13 +969,35 @@ void rebuild_manifest_roots(ManifestModel& model) {
         std::string member_domain;
         std::string member_item;
     };
+    struct ParsedRcb final {
+        std::string domain;
+        std::string item;
+        bool buffered{};
+        std::string report_id;
+        std::string data_set_domain;
+        std::string data_set_item;
+        std::uint32_t conf_rev{1U};
+        std::uint32_t buffer_time_ms{};
+        std::uint32_t integrity_period_ms{};
+        bool indexed{};
+    };
+
     std::vector<std::pair<std::string, std::string>> roots;
     std::vector<ParsedObject> parsed_objects;
     std::vector<ParsedDataSetMember> parsed_members;
+    std::vector<ParsedRcb> parsed_rcbs;
     std::set<std::pair<std::string, std::string>> unique_roots;
     std::set<std::pair<std::string, std::string>> unique_objects;
     std::string line;
-    if (std::getline(input, line)) model.revision = manifest_revision(line);
+    std::uint32_t manifest_version{};
+    if (std::getline(input, line)) {
+        const auto header_fields = split_fields(line, '\t');
+        model.revision = manifest_revision(line);
+        if (header_fields.size() >= 2U) {
+            try { manifest_version = static_cast<std::uint32_t>(std::stoul(header_fields[1])); }
+            catch (...) { manifest_version = 0U; }
+        }
+    }
     while (std::getline(input, line)) {
         const auto fields = split_fields(line, '\t');
         if (fields.size() >= 3U && fields[0] == "LN") {
@@ -814,26 +1006,92 @@ void rebuild_manifest_roots(ManifestModel& model) {
                 unique_roots.emplace(fields[1], fields[2]).second) {
                 roots.emplace_back(fields[1], fields[2]);
             }
-        } else if (fields.size() >= 6U && fields[0] == "OBJ") {
+        } else if (fields[0] == "OBJ" && fields.size() >= 6U) {
             ++model.declared_entries;
-            if (!fields[1].empty() && !fields[2].empty() &&
-                unique_objects.emplace(fields[1], fields[2]).second) {
-                parsed_objects.push_back({fields[1], fields[2], fields[3], fields[4], fields[5]});
+            if (fields[1].empty() || fields[2].empty() ||
+                !unique_objects.emplace(fields[1], fields[2]).second) continue;
+            if (manifest_version >= 4U) {
+                if (fields.size() < 7U || fields[5].empty()) {
+                    throw std::runtime_error("Manifest v4 OBJ is missing exact MMS type metadata.");
+                }
+                parsed_objects.push_back({
+                    fields[1], fields[2], fields[3], fields[4], fields[5], fields[6]});
+            } else {
+                parsed_objects.push_back({
+                    fields[1], fields[2], fields[3], fields[4], {}, fields[5]});
             }
         } else if (fields.size() >= 5U && fields[0] == "DS") {
             parsed_members.push_back({fields[1], fields[2], fields[3], fields[4]});
+        } else if (fields.size() >= 11U && fields[0] == "RCB") {
+            ParsedRcb rcb;
+            rcb.domain = fields[1];
+            rcb.item = fields[2];
+            rcb.buffered = fields[3] == "1";
+            rcb.report_id = fields[4];
+            rcb.data_set_domain = fields[5];
+            rcb.data_set_item = fields[6];
+            try { rcb.conf_rev = static_cast<std::uint32_t>(std::stoul(fields[7])); } catch (...) {}
+            try { rcb.buffer_time_ms = static_cast<std::uint32_t>(std::stoul(fields[8])); } catch (...) {}
+            try { rcb.integrity_period_ms = static_cast<std::uint32_t>(std::stoul(fields[9])); } catch (...) {}
+            rcb.indexed = fields[10] == "1";
+            if (!rcb.domain.empty() && !rcb.item.empty()) parsed_rcbs.push_back(std::move(rcb));
+        }
+    }
+
+    const auto add_rcb_object = [&](const ParsedRcb& rcb,
+                                    const std::string& suffix,
+                                    const std::string& signature,
+                                    const std::string& text) {
+        const auto item = rcb.item + "$" + suffix;
+        if (!unique_objects.emplace(rcb.domain, item).second) return;
+        parsed_objects.push_back({rcb.domain, item, {}, {}, signature, text});
+    };
+    for (const auto& rcb : parsed_rcbs) {
+        const auto data_set_ref = rcb.data_set_domain.empty()
+            ? rcb.data_set_item
+            : rcb.data_set_domain + "/" + rcb.data_set_item;
+        add_rcb_object(rcb, "RptID", "visible-string:255", rcb.report_id);
+        add_rcb_object(rcb, "RptEna", "boolean", "false");
+        add_rcb_object(rcb, "DatSet", "visible-string:255", data_set_ref);
+        add_rcb_object(rcb, "ConfRev", "unsigned-integer:32", std::to_string(rcb.conf_rev));
+        add_rcb_object(rcb, "OptFlds", "bit-string:10", "0");
+        add_rcb_object(rcb, "BufTm", "unsigned-integer:32", std::to_string(rcb.buffer_time_ms));
+        add_rcb_object(rcb, "TrgOps", "bit-string:6", "0");
+        add_rcb_object(rcb, "IntgPd", "unsigned-integer:32", std::to_string(rcb.integrity_period_ms));
+        if (rcb.buffered) {
+            add_rcb_object(rcb, "PurgeBuf", "boolean", "false");
+            add_rcb_object(rcb, "EntryID", "octet-string:8", "");
+            add_rcb_object(rcb, "TimeOfEntry", "utc-time", "1970-01-01 00:00:00.000");
+        } else {
+            add_rcb_object(rcb, "Resv", "boolean", "false");
+            add_rcb_object(rcb, "GI", "boolean", "false");
+            add_rcb_object(rcb, "SqNum", "unsigned-integer:32", "0");
+        }
+        ++model.declared_entries;
+    }
+
+    // Manifest v4 is object-driven: derive logical-node roots from the first
+    // item component instead of requiring a separate LN scaffold.
+    if (manifest_version >= 4U) {
+        for (const auto& object : parsed_objects) {
+            const auto parts = split_fields(object.item, '$');
+            if (parts.empty() || parts[0].empty()) continue;
+            if (unique_roots.emplace(object.domain, parts[0]).second) {
+                roots.emplace_back(object.domain, parts[0]);
+            }
         }
     }
     if (roots.empty()) {
-        throw std::runtime_error("Model manifest contains no usable logical-node entries.");
+        throw std::runtime_error("Model manifest contains no usable structural MMS objects.");
     }
 
-    model.values.reserve(mms::MmsStaticObjectTable::maximum_objects);
+    model.values.reserve(std::min<std::size_t>(
+        kHostMaximumManifestObjects, roots.size() + parsed_objects.size()));
     model.root_trees.reserve(roots.size());
     model.root_value_indices.reserve(roots.size());
     std::unordered_map<std::string, std::size_t> root_indices;
     for (const auto& [domain, item] : roots) {
-        if (model.values.size() >= mms::MmsStaticObjectTable::maximum_objects) break;
+        if (model.values.size() >= kHostMaximumManifestObjects) break;
         ManifestValue root;
         root.domain = domain;
         root.item = item;
@@ -849,7 +1107,7 @@ void rebuild_manifest_roots(ManifestModel& model) {
     }
 
     for (const auto& parsed : parsed_objects) {
-        if (model.values.size() >= mms::MmsStaticObjectTable::maximum_objects) break;
+        if (model.values.size() >= kHostMaximumManifestObjects) break;
         const auto key = object_key(parsed.domain, parsed.item);
         if (model.value_indices.contains(key)) continue;
         ManifestValue value;
@@ -857,6 +1115,7 @@ void rebuild_manifest_roots(ManifestModel& model) {
         value.item = parsed.item;
         value.raw_type = parsed.raw_type;
         value.normalized_type = parsed.normalized_type;
+        value.type_signature = parsed.type_signature;
         value.text = parsed.text;
         encode_manifest_value(value);
         const auto value_index = model.values.size();
@@ -869,7 +1128,7 @@ void rebuild_manifest_roots(ManifestModel& model) {
         if (found_root == root_indices.end()) continue;
         auto* node = &model.root_trees[found_root->second];
         for (std::size_t part = 1U; part < parts.size(); ++part) {
-            node = &node->children[parts[part]];
+            node = &manifest_child(*node, parts[part]);
         }
         node->value_index = value_index;
     }
@@ -895,9 +1154,9 @@ void rebuild_manifest_roots(ManifestModel& model) {
             member.member_domain, member.member_item);
     }
     model.data_set_storage.reserve(std::min<std::size_t>(
-        grouped_members.size(), mms::MmsStaticDataSetTable::maximum_data_sets));
+        grouped_members.size(), kHostMaximumManifestDataSets));
     for (auto& [name, members] : grouped_members) {
-        if (model.data_set_storage.size() >= mms::MmsStaticDataSetTable::maximum_data_sets) break;
+        if (model.data_set_storage.size() >= kHostMaximumManifestDataSets) break;
         if (members.empty()) continue;
         ManifestDataSetStorage storage;
         storage.domain = std::move(name.first);
@@ -933,8 +1192,9 @@ void rebuild_manifest_roots(ManifestModel& model) {
         const auto found = model.value_indices.find(object_key(fields[1], fields[2]));
         if (found == model.value_indices.end()) continue;
         auto& value = model.values[found->second];
-        if (value.text == fields[5]) continue;
-        value.text = fields[5];
+        const auto text_index = fields.size() >= 7U ? 6U : 5U;
+        if (value.text == fields[text_index]) continue;
+        value.text = fields[text_index];
         value.data = manifest_data(value.type, value.text);
         value.encoded = mms::MmsDataCodec::encode(*value.data);
         ++changed;
@@ -1199,9 +1459,10 @@ int main(int argc, char** argv) {
             : std::span<const mms::MmsStaticDataSetEntry>{manifest_model.data_sets};
         const mms::MmsStaticObjectTable object_table{object_span};
         const mms::MmsStaticDataSetTable data_sets{data_set_span};
-        if (!object_table.valid() ||
-            !data_sets.valid() ||
-            !data_sets.valid_against(object_table)) {
+        const bool model_valid = manifest_model.objects.empty()
+            ? (object_table.valid() && data_sets.valid() && data_sets.valid_against(object_table))
+            : host_manifest_tables_valid(object_table, data_sets);
+        if (!model_valid) {
             throw std::runtime_error("Static MMS server model is invalid.");
         }
 
