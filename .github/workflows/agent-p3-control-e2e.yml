@@ -6,6 +6,7 @@ on:
       - agent/p3-control-e2e
     paths:
       - '.github/scripts/agent_p3_control_lifetime_repair.py'
+      - 'apps/ied_simulator/test_control_live.py'
       - '.github/workflows/agent-p3-control-e2e.yml'
   workflow_dispatch:
 
