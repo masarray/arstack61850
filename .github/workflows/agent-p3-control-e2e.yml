@@ -42,20 +42,16 @@ jobs:
           version: '6.8.3'
           cache: true
 
-      - name: Configure simulator
-        run: cmake -S apps/ied_simulator -B build-p3e-qt -G Ninja -DCMAKE_BUILD_TYPE=Release
-
       - name: Build simulator and probes
-        run: cmake --build build-p3e-qt --target arstack_ied_simulator ariec61850_mms_read_probe ariec61850_static_rcb_trial --parallel 2
+        run: |
+          cmake -S apps/ied_simulator -B build-p3e-qt -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-p3e-qt --target arstack_ied_simulator ariec61850_mms_read_probe ariec61850_static_rcb_trial --parallel 2
 
-      - name: Configure control profile
-        run: cmake -S tools/mms_direct_control_server -B build-p3e-control -G Ninja -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build control probe and unit
-        run: cmake --build build-p3e-control --target ariec61850_mms_control_interop_client ariec61850_mms_direct_control_tests --parallel 2
-
-      - name: Static direct control unit
-        run: ctest --test-dir build-p3e-control -R mms_direct_control_unit --output-on-failure
+      - name: Build control probe and strict unit
+        run: |
+          cmake -S tools/mms_direct_control_server -B build-p3e-control -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-p3e-control --target ariec61850_mms_control_interop_client ariec61850_mms_direct_control_tests --parallel 2
+          ctest --test-dir build-p3e-control -R mms_direct_control_unit --output-on-failure
 
       - name: P3 live four-model control matrix
         run: |
@@ -76,7 +72,7 @@ jobs:
             --report-probe build-p3e-qt \
             --scl tests/fixtures/scl/iedsim-full-model.scd
 
-      - name: Commit validated P3 product source
+      - name: Persist validated P3 product source when needed
         run: |
           git config user.name openai-agent
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -92,3 +88,171 @@ jobs:
             git commit -m 'fix(iedsim): harden hosted control runtime and QA selection'
             git push origin HEAD:agent/p3-control-e2e
           fi
+
+  clean-linux-gates:
+    needs: p3-live-control
+    runs-on: ubuntu-24.04
+    outputs:
+      clean_sha: ${{ steps.clean.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/p3-control-e2e
+          fetch-depth: 0
+
+      - name: Guard main and PR source head
+        run: |
+          set -euo pipefail
+          EXPECTED_MAIN=75df1edbf631c7e3f67318bfc56cdcaf1c504c05
+          EXPECTED_TARGET=4e243e9abeef812859203de664738e6a3110597c
+          MAIN=$(git ls-remote origin refs/heads/main | awk '{print $1}')
+          TARGET=$(git ls-remote origin refs/heads/agent/iedsim-full-scl-live-store | awk '{print $1}')
+          test "$MAIN" = "$EXPECTED_MAIN"
+          test "$TARGET" = "$EXPECTED_TARGET"
+
+      - name: Construct single clean P3 commit on P2
+        id: clean
+        run: |
+          set -euo pipefail
+          SOURCE=$(git rev-parse HEAD)
+          BASE=4e243e9abeef812859203de664738e6a3110597c
+          git switch --detach "$BASE"
+          git switch -C agent/p3-clean-staging
+          files=(
+            CMakeLists.txt
+            apps/ied_simulator/CMakeLists.txt
+            apps/ied_simulator/src/IedSimulatorController.cpp
+            apps/ied_simulator/src/IedSimulatorController.hpp
+            apps/ied_simulator/src/SclMmsMaterializer.hpp
+            apps/ied_simulator/src/main.cpp
+            apps/ied_simulator/test_control_live.py
+            apps/ied_simulator/test_gui_live_value.py
+            include/ariec61850/mms/static_object_table.hpp
+            src/mms/static_object_table.cpp
+            src/mms/static_dispatcher.cpp
+            tests/fixtures/scl/iedsim-full-model.scd
+            tools/static_ied_server.cpp
+            tools/static_ied_server_iedsim/CMakeLists.txt
+          )
+          git checkout "$SOURCE" -- "${files[@]}"
+          git diff --check
+          git config user.name openai-agent
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "${files[@]}"
+          git commit -m 'feat(iedsim): integrate guarded IEC 61850 controls'
+          CLEAN=$(git rev-parse HEAD)
+          git push --force origin HEAD:refs/heads/agent/p3-clean-staging
+          echo "sha=$CLEAN" >> "$GITHUB_OUTPUT"
+          echo "P3_CLEAN_SHA=$CLEAN"
+
+      - name: Install Qt for clean-head E2E
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
+
+      - name: Clean-head P3 and P0-P2 live E2E
+        run: |
+          cmake -S apps/ied_simulator -B build-clean-qt -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-clean-qt --target arstack_ied_simulator ariec61850_mms_read_probe ariec61850_static_rcb_trial --parallel 2
+          cmake -S tools/mms_direct_control_server -B build-clean-control -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-clean-control --target ariec61850_mms_control_interop_client ariec61850_mms_direct_control_tests --parallel 2
+          ctest --test-dir build-clean-control -R mms_direct_control_unit --output-on-failure
+          APP=$(find build-clean-qt -type f -name arstack_ied_simulator -perm -111 | head -1)
+          python3 apps/ied_simulator/test_control_live.py \
+            --app "$APP" \
+            --read-probe build-clean-qt \
+            --control-probe build-clean-control \
+            --scl tests/fixtures/scl/iedsim-full-model.scd
+          python3 apps/ied_simulator/test_gui_live_value.py \
+            --app "$APP" \
+            --read-probe build-clean-qt \
+            --report-probe build-clean-qt \
+            --scl tests/fixtures/scl/iedsim-full-model.scd
+
+      - name: Control hard profiles GCC and Clang
+        run: |
+          set -euo pipefail
+          for toolchain in 'gcc:g++' 'clang:clang++'; do
+            IFS=: read -r CC_BIN CXX_BIN <<< "$toolchain"
+            tag=${CC_BIN%%-*}
+            CC=$CC_BIN CXX=$CXX_BIN cmake -S . -B "build-guarded-$tag" -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DARIEC61850_BUILD_TESTS=OFF \
+              -DARIEC61850_BUILD_TOOLS=OFF \
+              -DARIEC61850_BUILD_EMBEDDED_PROFILE=ON
+            cmake --build "build-guarded-$tag" --target ariec61850_embedded_control_guarded_hard_profile --parallel 2
+            "./build-guarded-$tag/embedded/ariec61850_embedded_control_guarded_hard_profile"
+
+            CC=$CC_BIN CXX=$CXX_BIN cmake -S tests/control_mms_profile -B "build-control-mms-$tag" -G Ninja -DCMAKE_BUILD_TYPE=Release
+            cmake --build "build-control-mms-$tag" --parallel 2
+            ctest --test-dir "build-control-mms-$tag" --output-on-failure
+
+            CC=$CC_BIN CXX=$CXX_BIN cmake -S tests/control_session_profile -B "build-control-session-$tag" -G Ninja -DCMAKE_BUILD_TYPE=Release
+            cmake --build "build-control-session-$tag" --parallel 2
+            ctest --test-dir "build-control-session-$tag" --output-on-failure
+
+            CC=$CC_BIN CXX=$CXX_BIN cmake -S tests/control_termination_profile -B "build-control-term-$tag" -G Ninja -DCMAKE_BUILD_TYPE=Release
+            cmake --build "build-control-term-$tag" --parallel 2
+            ctest --test-dir "build-control-term-$tag" --output-on-failure
+          done
+
+      - name: Embedded host-sim boundary GCC and Clang
+        run: |
+          set -euo pipefail
+          CC=gcc CXX=g++ cmake -S embedded -B build-embedded-gcc -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-embedded-gcc --parallel 2
+          ctest --test-dir build-embedded-gcc --output-on-failure
+          CC=clang CXX=clang++ cmake -S embedded -B build-embedded-clang -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-embedded-clang --parallel 2
+          ctest --test-dir build-embedded-clang --output-on-failure
+
+      - name: IEDScout parity server GCC and Clang
+        run: |
+          set -euo pipefail
+          CC=gcc CXX=g++ cmake -S tools/static_ied_server_iedsim -B build-parity-gcc -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-parity-gcc --parallel 2
+          ctest --test-dir build-parity-gcc --output-on-failure
+          CC=clang CXX=clang++ cmake -S tools/static_ied_server_iedsim -B build-parity-clang -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-parity-clang --parallel 2
+          ctest --test-dir build-parity-clang --output-on-failure
+
+  clean-windows-parity:
+    needs: clean-linux-gates
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.clean-linux-gates.outputs.clean_sha }}
+      - name: IEDScout parity server Windows
+        shell: pwsh
+        run: |
+          cmake -S tools/static_ied_server_iedsim -B build-parity -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-parity --config Release --parallel 2
+          ctest --test-dir build-parity -C Release --output-on-failure
+
+  publish-pr-head:
+    needs: [clean-linux-gates, clean-windows-parity]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.clean-linux-gates.outputs.clean_sha }}
+          fetch-depth: 0
+      - name: Atomic ref guard and publish
+        env:
+          CLEAN_SHA: ${{ needs.clean-linux-gates.outputs.clean_sha }}
+        run: |
+          set -euo pipefail
+          EXPECTED_MAIN=75df1edbf631c7e3f67318bfc56cdcaf1c504c05
+          EXPECTED_TARGET=4e243e9abeef812859203de664738e6a3110597c
+          MAIN=$(git ls-remote origin refs/heads/main | awk '{print $1}')
+          TARGET=$(git ls-remote origin refs/heads/agent/iedsim-full-scl-live-store | awk '{print $1}')
+          STAGING=$(git ls-remote origin refs/heads/agent/p3-clean-staging | awk '{print $1}')
+          test "$MAIN" = "$EXPECTED_MAIN"
+          test "$TARGET" = "$EXPECTED_TARGET"
+          test "$STAGING" = "$CLEAN_SHA"
+          git push origin \
+            "$CLEAN_SHA:refs/heads/agent/iedsim-full-scl-live-store" \
+            --force-with-lease=refs/heads/agent/iedsim-full-scl-live-store:$EXPECTED_TARGET
+          echo "IEDSIM_P3_CLEAN_HEAD_PUBLISHED sha=$CLEAN_SHA"
