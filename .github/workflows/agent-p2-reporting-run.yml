@@ -7,6 +7,7 @@ on:
     paths:
       - .github/scripts/agent_p2_reporting_patch.py
       - .github/scripts/agent_p2_reporting_repair.py
+      - .github/scripts/agent_p2_cleanup_diag.py
       - .github/workflows/agent-p2-reporting-run.yml
 
 permissions:
@@ -25,12 +26,14 @@ jobs:
         run: |
           cp .github/scripts/agent_p2_reporting_patch.py /tmp/agent_p2_reporting_patch.py
           cp .github/scripts/agent_p2_reporting_repair.py /tmp/agent_p2_reporting_repair.py
+          cp .github/scripts/agent_p2_cleanup_diag.py /tmp/agent_p2_cleanup_diag.py
           git checkout -B agent/iedsim-full-scl-live-store origin/agent/iedsim-full-scl-live-store
 
       - name: Apply P2 reporting patch
         run: |
           python3 /tmp/agent_p2_reporting_patch.py
           python3 /tmp/agent_p2_reporting_repair.py
+          python3 /tmp/agent_p2_cleanup_diag.py
 
       - name: Diff sanity
         run: |
