@@ -34,6 +34,26 @@ using Clock = std::chrono::steady_clock;
     return {identity(suffix), number};
 }
 
+[[nodiscard]] PtpFrame announce_frame(const PtpPortIdentity& source) {
+    PtpFrame frame;
+    frame.header.message_type = PtpMessageType::announce;
+    frame.header.domain_number = 0U;
+    frame.header.transport_specific = 0U;
+    frame.header.source_port_identity = source;
+
+    PtpAnnounceMessage announce;
+    announce.priority1 = 128U;
+    announce.priority2 = 128U;
+    announce.clock_class = 248U;
+    announce.clock_accuracy = PtpClockAccuracy::unknown;
+    announce.offset_scaled_log_variance = 0xFFFFU;
+    announce.grandmaster_identity = source.clock_identity;
+    announce.steps_removed = 0U;
+    announce.time_source = PtpTimeSource::internal_oscillator;
+    frame.announce = announce;
+    return frame;
+}
+
 void cold_epoch_can_acquire_once_then_lock() {
     PtpDisciplineOptions options;
     options.lock_required_samples = 2U;
@@ -114,6 +134,41 @@ void large_epoch_step_is_one_shot_and_never_allowed_post_lock() {
     CHECK(!discipline.measured_smp_synch().has_value());
 }
 
+void fault_is_latched_until_explicit_reset() {
+    PtpDisciplineOptions options;
+    options.lock_required_samples = 1U;
+    PtpClockDiscipline discipline(options);
+    const auto t0 = Clock::time_point{};
+
+    static_cast<void>(discipline.observe(
+        PtpOffsetMeasurement{port(0x73U), 1U, 500LL, 500LL, false},
+        t0));
+    CHECK(discipline.status().state == PtpDisciplineState::locked);
+
+    constexpr std::int64_t huge = -1'700'000'000'000'000'000LL;
+    static_cast<void>(discipline.observe(
+        PtpOffsetMeasurement{port(0x73U), 2U, huge, 500LL, false},
+        t0 + std::chrono::milliseconds{10}));
+    CHECK(discipline.status().state == PtpDisciplineState::fault);
+
+    const auto phase_steps_before = discipline.status().phase_steps;
+    const auto frequency_updates_before = discipline.status().frequency_updates;
+    const auto while_faulted = discipline.observe(
+        PtpOffsetMeasurement{port(0x73U), 3U, 2'000'000LL, 500LL, false},
+        t0 + std::chrono::milliseconds{20});
+    CHECK(while_faulted.kind == PtpClockCommandKind::none);
+    CHECK(discipline.status().state == PtpDisciplineState::fault);
+    CHECK(discipline.status().phase_steps == phase_steps_before);
+    CHECK(discipline.status().frequency_updates == frequency_updates_before);
+
+    discipline.reset();
+    const auto after_reset = discipline.observe(
+        PtpOffsetMeasurement{port(0x73U), 4U, 2'000'000LL, 500LL, false},
+        t0 + std::chrono::milliseconds{30});
+    CHECK(after_reset.kind == PtpClockCommandKind::step_phase);
+    CHECK(discipline.status().state == PtpDisciplineState::acquiring);
+}
+
 void global_provenance_revokes_immediately_and_requires_new_measurement() {
     PtpDisciplineOptions options;
     options.lock_required_samples = 1U;
@@ -145,6 +200,32 @@ void global_provenance_revokes_immediately_and_requires_new_measurement() {
           SmpSynchValue::global_synchronized);
 }
 
+void stale_same_source_announce_forces_reselection() {
+    using namespace std::chrono_literals;
+    const auto local = port(0x74U, 2U);
+    const auto master = port(0x75U, 1U);
+    PtpTimeReceiver receiver(PtpTimeReceiverOptions{
+        0U,
+        0U,
+        local,
+        100ms,
+        50ms,
+    });
+    const auto t0 = Clock::time_point{};
+    const auto announce = announce_frame(master);
+
+    CHECK(receiver.observe_announce(announce, t0));
+    CHECK(!receiver.observe_announce(announce, t0 + 50ms));
+    CHECK(receiver.status().selected_source == master);
+
+    // The source identity is unchanged, but its Announce provenance was absent
+    // for longer than source_timeout. Treat the returning Announce as a fresh
+    // reselection so the ESP adapter resets discipline/path-delay evidence.
+    CHECK(receiver.observe_announce(announce, t0 + 151ms));
+    CHECK(receiver.status().selected_source == master);
+    CHECK(!receiver.observe_announce(announce, t0 + 152ms));
+}
+
 void path_delay_lifetime_tracks_configured_exchange_cadence() {
     using namespace std::chrono_literals;
     const PtpTimeReceiverOptions slow_profile{
@@ -173,7 +254,9 @@ int main() {
     const std::vector<std::pair<std::string, std::function<void()>>> tests{
         {"cold epoch acquisition", cold_epoch_can_acquire_once_then_lock},
         {"one-shot and post-lock guard", large_epoch_step_is_one_shot_and_never_allowed_post_lock},
+        {"fault latch", fault_is_latched_until_explicit_reset},
         {"global provenance revoke", global_provenance_revokes_immediately_and_requires_new_measurement},
+        {"stale same-source reselection", stale_same_source_announce_forces_reselection},
         {"path-delay cadence", path_delay_lifetime_tracks_configured_exchange_cadence},
     };
 
