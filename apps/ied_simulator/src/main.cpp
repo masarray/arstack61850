@@ -44,6 +44,14 @@ int main(int argc, char* argv[]) {
         QStringLiteral("set-first-value"),
         QStringLiteral("QA: apply a value to the first runtime point after start."),
         QStringLiteral("value")};
+    const QCommandLineOption undoAfterOption{
+        QStringLiteral("undo-after-ms"),
+        QStringLiteral("QA: invoke live-value undo after the specified delay."),
+        QStringLiteral("milliseconds")};
+    const QCommandLineOption stateDumpOption{
+        QStringLiteral("state-dump"),
+        QStringLiteral("Write the final Qt live-state mirror to JSON on exit."),
+        QStringLiteral("path")};
     const QCommandLineOption exitAfterOption{
         QStringLiteral("exit-after-ms"),
         QStringLiteral("QA: exit after the specified runtime duration."),
@@ -55,6 +63,8 @@ int main(int argc, char* argv[]) {
         smokeOption,
         portOption,
         setFirstValueOption,
+        undoAfterOption,
+        stateDumpOption,
         exitAfterOption});
     parser.process(app);
 
@@ -103,6 +113,28 @@ int main(int argc, char* argv[]) {
                 applyTimer->deleteLater();
             });
             applyTimer->start();
+        }
+        if (backend != nullptr && parser.isSet(undoAfterOption)) {
+            bool valid{};
+            const auto milliseconds = parser.value(undoAfterOption).toInt(&valid);
+            if (valid && milliseconds > 0) {
+                QTimer::singleShot(milliseconds, backend, [backend] {
+                    QMetaObject::invokeMethod(backend, "undoLastChange");
+                });
+            }
+        }
+        if (backend != nullptr && parser.isSet(stateDumpOption)) {
+            const auto stateDumpPath = parser.value(stateDumpOption);
+            QObject::connect(
+                &app,
+                &QCoreApplication::aboutToQuit,
+                backend,
+                [backend, stateDumpPath] {
+                    QMetaObject::invokeMethod(
+                        backend,
+                        "writeLiveStateSnapshot",
+                        Q_ARG(QString, stateDumpPath));
+                });
         }
         if (parser.isSet(screenshotOption)) {
             const auto outputPath = parser.value(screenshotOption);

@@ -33,6 +33,7 @@
     <LNodeType id="XCBRType" lnClass="XCBR">
       <DO name="Pos" type="PosType" />
       <DO name="Health" type="HealthType" />
+      <DO name="SimCfg" type="SimCfgType" />
     </LNodeType>
     <DOType id="PosType" cdc="DPC">
       <DA name="stVal" bType="BOOLEAN" fc="ST" />
@@ -42,6 +43,9 @@
     <DOType id="HealthType" cdc="SPS">
       <DA name="stVal" bType="BOOLEAN" fc="ST" />
       <DA name="q" bType="Quality" fc="ST" />
+    </DOType>
+    <DOType id="SimCfgType" cdc="SPG">
+      <DA name="setVal" bType="BOOLEAN" fc="SP" />
     </DOType>
   </DataTypeTemplates>
 </SCL>

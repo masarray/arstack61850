@@ -95,6 +95,7 @@ public:
     Q_INVOKABLE void clearActivity();
     Q_INVOKABLE void copyDiagnostics();
     Q_INVOKABLE QString diagnosticsText() const;
+    Q_INVOKABLE bool writeLiveStateSnapshot(const QString& path) const;
 
 signals:
     void modelChanged();
@@ -115,6 +116,7 @@ private:
         int iedIndex{-1};
         int valueIndex{-1};
         QVariantMap value;
+        quint64 appliedRevision{};
     };
 
     bool importFile(const QUrl& fileUrl, bool append);
@@ -128,6 +130,14 @@ private:
     void setRuntimeState(bool running, bool starting);
     void consumeServerOutput(QByteArray& buffer, const QByteArray& bytes, bool standardError);
     void processServerLine(const QString& line, bool standardError);
+    void applyServerValueState(const QVariantMap& fields);
+    [[nodiscard]] bool sendLiveMutation(
+        const QVariantMap& item,
+        const QString& value,
+        const QString& quality,
+        const QString& origin,
+        quint64 requestId,
+        std::optional<quint64> expectedRevision);
     [[nodiscard]] bool writeModelManifest();
     void removeModelManifest();
     [[nodiscard]] QString serverExecutable() const;
@@ -160,6 +170,9 @@ private:
     int gooseCount_{};
     quint64 serverStartGeneration_{};
     quint64 modelRevision_{};
+    quint64 nextMutationRequest_{1U};
+    quint64 pendingMutationRequest_{};
+    bool pendingUndo_{};
     bool running_{};
     bool starting_{};
     bool gooseEnabled_{};

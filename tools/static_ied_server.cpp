@@ -7,6 +7,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <deque>
 #include <climits>
 #include <csignal>
 #include <cctype>
@@ -18,6 +19,7 @@
 #include <map>
 #include <iostream>
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <span>
@@ -50,6 +52,30 @@ namespace mms = ar::iec61850::mms;
 namespace wire = ar::iec61850::wire;
 
 std::atomic_bool g_stop{false};
+std::mutex g_live_command_mutex;
+std::deque<std::string> g_live_commands;
+
+void start_live_command_reader() {
+    std::thread([] {
+        std::string line;
+        while (std::getline(std::cin, line)) {
+            if (!line.starts_with("IEDSIM_CMD ")) continue;
+            std::lock_guard lock{g_live_command_mutex};
+            g_live_commands.push_back(std::move(line));
+        }
+    }).detach();
+}
+
+[[nodiscard]] std::vector<std::string> take_live_commands() {
+    std::lock_guard lock{g_live_command_mutex};
+    std::vector<std::string> result;
+    result.reserve(g_live_commands.size());
+    while (!g_live_commands.empty()) {
+        result.push_back(std::move(g_live_commands.front()));
+        g_live_commands.pop_front();
+    }
+    return result;
+}
 
 // Desktop/lab simulator profile. These bounds are deliberately local to this
 // host executable; the strict embedded MmsStaticObjectTable/DataSetTable limits
@@ -593,6 +619,11 @@ struct ManifestValue final {
     std::optional<mms::MmsDataValue> data;
     std::vector<std::uint8_t> type_specification;
     std::vector<std::uint8_t> encoded;
+    std::string quality{"Good"};
+    std::string origin{"scl"};
+    std::uint64_t timestamp_ms{};
+    std::uint64_t live_revision{};
+    bool mms_writable{};
     bool root{};
 };
 
@@ -629,8 +660,12 @@ struct ManifestModel final {
     std::unordered_map<std::string, std::size_t> value_indices;
     std::vector<ManifestDataSetStorage> data_set_storage;
     std::vector<mms::MmsStaticDataSetEntry> data_sets;
+    std::uint64_t live_revision{};
+    std::uint64_t logical_time_ms{};
     std::size_t declared_entries{};
 };
+
+ManifestModel* g_active_manifest_model{};
 
 [[nodiscard]] std::vector<std::string> split_fields(
     const std::string_view text,
@@ -644,6 +679,39 @@ struct ManifestModel final {
             end == std::string_view::npos ? text.size() - offset : end - offset));
         if (end == std::string_view::npos) break;
         offset = end + 1U;
+    }
+    return result;
+}
+
+[[nodiscard]] char hex_digit(const std::uint8_t value) noexcept {
+    return static_cast<char>(value < 10U ? '0' + value : 'a' + (value - 10U));
+}
+
+[[nodiscard]] std::string hex_encode(const std::string_view text) {
+    std::string result;
+    result.reserve(text.size() * 2U);
+    for (const auto ch : text) {
+        const auto byte = static_cast<std::uint8_t>(static_cast<unsigned char>(ch));
+        result.push_back(hex_digit(static_cast<std::uint8_t>((byte >> 4U) & 0x0FU)));
+        result.push_back(hex_digit(static_cast<std::uint8_t>(byte & 0x0FU)));
+    }
+    return result;
+}
+
+[[nodiscard]] std::uint8_t hex_value(const char ch) {
+    if (ch >= '0' && ch <= '9') return static_cast<std::uint8_t>(ch - '0');
+    if (ch >= 'a' && ch <= 'f') return static_cast<std::uint8_t>(10 + ch - 'a');
+    if (ch >= 'A' && ch <= 'F') return static_cast<std::uint8_t>(10 + ch - 'A');
+    throw std::runtime_error("Invalid live-state hex field.");
+}
+
+[[nodiscard]] std::string hex_decode(const std::string_view text) {
+    if ((text.size() % 2U) != 0U) throw std::runtime_error("Odd live-state hex field.");
+    std::string result;
+    result.reserve(text.size() / 2U);
+    for (std::size_t index = 0U; index < text.size(); index += 2U) {
+        result.push_back(static_cast<char>(
+            (hex_value(text[index]) << 4U) | hex_value(text[index + 1U])));
     }
     return result;
 }
@@ -944,6 +1012,266 @@ void rebuild_manifest_roots(ManifestModel& model) {
     return result;
 }
 
+[[nodiscard]] bool integer_text_valid(
+    const std::string& text,
+    const std::optional<std::uint32_t> bits,
+    const bool is_unsigned) noexcept {
+    const auto upper = upper_copy(text);
+    if (!is_unsigned &&
+        (upper == "INTERMEDIATE-STATE" || upper == "OFF" || upper == "ON" ||
+         upper == "OPEN" || upper == "CLOSED" || upper == "BAD-STATE")) {
+        return true;
+    }
+    try {
+        std::size_t consumed{};
+        if (is_unsigned) {
+            if (!text.empty() && text.front() == '-') return false;
+            const auto value = std::stoull(text, &consumed, 10);
+            if (consumed != text.size()) return false;
+            if (bits.has_value() && *bits < 64U) {
+                const auto maximum = (std::uint64_t{1U} << *bits) - 1U;
+                return value <= maximum;
+            }
+            return true;
+        }
+        const auto value = std::stoll(text, &consumed, 10);
+        if (consumed != text.size()) return false;
+        if (bits.has_value() && *bits > 0U && *bits < 64U) {
+            const auto magnitude = std::int64_t{1} << (*bits - 1U);
+            return value >= -magnitude && value <= magnitude - 1;
+        }
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+[[nodiscard]] bool live_text_valid(
+    const mms::MmsTypeSpecification& type,
+    const std::string& text) noexcept {
+    switch (type.kind) {
+    case mms::MmsTypeKind::boolean: {
+        const auto upper = upper_copy(text);
+        return upper == "TRUE" || upper == "FALSE" || upper == "1" || upper == "0" ||
+            upper == "ON" || upper == "OFF" || upper == "OPEN" || upper == "CLOSED";
+    }
+    case mms::MmsTypeKind::integer:
+        return integer_text_valid(text, type.size, false);
+    case mms::MmsTypeKind::unsigned_integer:
+        return integer_text_valid(text, type.size, true);
+    case mms::MmsTypeKind::floating_point:
+        try {
+            std::size_t consumed{};
+            static_cast<void>(std::stod(text, &consumed));
+            return consumed == text.size();
+        } catch (...) {
+            return false;
+        }
+    case mms::MmsTypeKind::visible_string:
+    case mms::MmsTypeKind::mms_string:
+        return !type.size.has_value() || text.size() <= *type.size;
+    default:
+        return false;
+    }
+}
+
+[[nodiscard]] bool live_data_compatible(
+    const mms::MmsTypeSpecification& type,
+    const mms::MmsDataValue& data) noexcept {
+    switch (type.kind) {
+    case mms::MmsTypeKind::boolean: return data.kind() == mms::MmsDataKind::boolean;
+    case mms::MmsTypeKind::integer: return data.kind() == mms::MmsDataKind::integer;
+    case mms::MmsTypeKind::unsigned_integer:
+        return data.kind() == mms::MmsDataKind::unsigned_integer;
+    case mms::MmsTypeKind::floating_point:
+        return data.kind() == mms::MmsDataKind::floating_point;
+    case mms::MmsTypeKind::visible_string:
+        return data.kind() == mms::MmsDataKind::visible_string;
+    case mms::MmsTypeKind::mms_string: return data.kind() == mms::MmsDataKind::mms_string;
+    case mms::MmsTypeKind::bit_string: return data.kind() == mms::MmsDataKind::bit_string;
+    case mms::MmsTypeKind::octet_string:
+        return data.kind() == mms::MmsDataKind::octet_string;
+    case mms::MmsTypeKind::utc_time: return data.kind() == mms::MmsDataKind::utc_time;
+    case mms::MmsTypeKind::array: return data.kind() == mms::MmsDataKind::array;
+    case mms::MmsTypeKind::structure: return data.kind() == mms::MmsDataKind::structure;
+    default: return false;
+    }
+}
+
+[[nodiscard]] std::string canonical_live_text(
+    const ManifestValue& value,
+    const mms::MmsDataValue& data,
+    const std::string_view preferred) {
+    if (!preferred.empty()) return std::string{preferred};
+    if (upper_copy(value.normalized_type) == "ENUMERATION" &&
+        data.kind() == mms::MmsDataKind::integer) {
+        if (const auto* integer = std::get_if<std::int64_t>(&data.value())) {
+            switch (*integer) {
+            case 0: return "intermediate-state";
+            case 1: return "off";
+            case 2: return "on";
+            case 3: return "bad-state";
+            default: break;
+            }
+        }
+    }
+    return mms::MmsDataCodec::to_display_string(data);
+}
+
+void emit_live_state(const ManifestValue& value, const std::uint64_t request_id) {
+    std::cout << "IEDSIM_EVENT kind=value_state request=" << request_id
+              << " domain=" << hex_encode(value.domain)
+              << " item=" << hex_encode(value.item)
+              << " value=" << hex_encode(value.text)
+              << " quality=" << hex_encode(value.quality)
+              << " origin=" << hex_encode(value.origin)
+              << " timestamp_ms=" << value.timestamp_ms
+              << " revision=" << value.live_revision << '\n';
+    std::cout.flush();
+}
+
+void emit_live_rejected(const std::uint64_t request_id, const std::string_view reason) {
+    std::cout << "IEDSIM_EVENT kind=value_rejected request=" << request_id
+              << " reason=" << hex_encode(reason) << '\n';
+    std::cout.flush();
+}
+
+[[nodiscard]] bool apply_live_data(
+    ManifestModel& model,
+    const std::size_t value_index,
+    mms::MmsDataValue data,
+    const std::string_view preferred_text,
+    std::string quality,
+    std::string origin,
+    const std::uint64_t request_id,
+    const std::optional<std::uint64_t> expected_revision) {
+    if (value_index >= model.values.size()) return false;
+    auto& value = model.values[value_index];
+    if (value.root || !live_data_compatible(value.type, data)) return false;
+    if (expected_revision.has_value() && value.live_revision != *expected_revision) return false;
+
+    ++model.live_revision;
+    ++model.logical_time_ms;
+    value.data = std::move(data);
+    value.encoded = mms::MmsDataCodec::encode(*value.data);
+    value.text = canonical_live_text(value, *value.data, preferred_text);
+    value.quality = std::move(quality);
+    value.origin = std::move(origin);
+    value.timestamp_ms = model.logical_time_ms;
+    value.live_revision = model.live_revision;
+    rebuild_manifest_roots(model);
+    for (const auto root_index : model.root_value_indices) {
+        model.objects[root_index].type_specification =
+            model.values[root_index].type_specification;
+    }
+    emit_live_state(value, request_id);
+    return true;
+}
+
+[[nodiscard]] mms::MmsStaticWriteResult write_manifest_value(
+    void* context,
+    const std::span<const std::uint8_t> encoded_data) noexcept {
+    if (context == nullptr || g_active_manifest_model == nullptr) return {false, 10U};
+    auto& value = *static_cast<ManifestValue*>(context);
+    if (!value.mms_writable) return {false, 3U};
+    try {
+        const auto decoded = mms::MmsDataCodec::decode_all(encoded_data);
+        if (decoded.size() != 1U || !live_data_compatible(value.type, decoded.front())) {
+            return {false, 3U};
+        }
+        const auto found = g_active_manifest_model->value_indices.find(
+            object_key(value.domain, value.item));
+        if (found == g_active_manifest_model->value_indices.end()) return {false, 10U};
+        if (!apply_live_data(
+                *g_active_manifest_model,
+                found->second,
+                decoded.front(),
+                {},
+                "Good",
+                "mms-write",
+                0U,
+                std::nullopt)) {
+            return {false, 10U};
+        }
+        return {true, 0U};
+    } catch (...) {
+        return {false, 10U};
+    }
+}
+
+struct LiveCommand final {
+    std::uint64_t request{};
+    std::string domain;
+    std::string item;
+    std::string value;
+    std::string quality{"Good"};
+    std::string origin{"gui"};
+    std::optional<std::uint64_t> expected_revision;
+};
+
+[[nodiscard]] LiveCommand parse_live_command(const std::string& line) {
+    if (!line.starts_with("IEDSIM_CMD ")) throw std::runtime_error("Invalid live command prefix.");
+    std::map<std::string, std::string> fields;
+    std::istringstream stream{line.substr(11U)};
+    std::string token;
+    while (stream >> token) {
+        const auto separator = token.find('=');
+        if (separator == std::string::npos || separator == 0U) continue;
+        fields.emplace(token.substr(0U, separator), token.substr(separator + 1U));
+    }
+    if (fields["kind"] != "set") throw std::runtime_error("Unsupported live command kind.");
+    LiveCommand command;
+    command.request = std::stoull(fields.at("request"));
+    command.domain = hex_decode(fields.at("domain"));
+    command.item = hex_decode(fields.at("item"));
+    command.value = hex_decode(fields.at("value"));
+    command.quality = hex_decode(fields.at("quality"));
+    command.origin = hex_decode(fields.at("origin"));
+    if (const auto expected = fields.find("expected"); expected != fields.end()) {
+        command.expected_revision = std::stoull(expected->second);
+    }
+    return command;
+}
+
+void drain_live_commands(ManifestModel& model) {
+    for (const auto& line : take_live_commands()) {
+        std::uint64_t request_id{};
+        try {
+            const auto command = parse_live_command(line);
+            request_id = command.request;
+            const auto found = model.value_indices.find(object_key(command.domain, command.item));
+            if (found == model.value_indices.end()) {
+                emit_live_rejected(request_id, "unknown-object");
+                continue;
+            }
+            auto& value = model.values[found->second];
+            if (command.expected_revision.has_value() &&
+                value.live_revision != *command.expected_revision) {
+                emit_live_rejected(request_id, "stale-revision");
+                continue;
+            }
+            if (!live_text_valid(value.type, command.value)) {
+                emit_live_rejected(request_id, "invalid-value");
+                continue;
+            }
+            auto data = manifest_data(value.type, command.value);
+            if (!apply_live_data(
+                    model,
+                    found->second,
+                    std::move(data),
+                    command.value,
+                    command.quality,
+                    command.origin,
+                    request_id,
+                    command.expected_revision)) {
+                emit_live_rejected(request_id, "mutation-failed");
+            }
+        } catch (const std::exception& exception) {
+            emit_live_rejected(request_id, exception.what());
+        }
+    }
+}
+
 [[nodiscard]] ManifestModel load_manifest_model(
     const std::string& path,
     const std::span<const std::uint8_t> fallback_type_specification,
@@ -988,6 +1316,7 @@ void rebuild_manifest_roots(ManifestModel& model) {
     std::vector<ParsedRcb> parsed_rcbs;
     std::set<std::pair<std::string, std::string>> unique_roots;
     std::set<std::pair<std::string, std::string>> unique_objects;
+    std::set<std::pair<std::string, std::string>> writable_objects;
     std::string line;
     std::uint32_t manifest_version{};
     if (std::getline(input, line)) {
@@ -1019,6 +1348,10 @@ void rebuild_manifest_roots(ManifestModel& model) {
             } else {
                 parsed_objects.push_back({
                     fields[1], fields[2], fields[3], fields[4], {}, fields[5]});
+            }
+        } else if (fields.size() >= 3U && fields[0] == "MUT") {
+            if (!fields[1].empty() && !fields[2].empty()) {
+                writable_objects.emplace(fields[1], fields[2]);
             }
         } else if (fields.size() >= 5U && fields[0] == "DS") {
             parsed_members.push_back({fields[1], fields[2], fields[3], fields[4]});
@@ -1117,6 +1450,7 @@ void rebuild_manifest_roots(ManifestModel& model) {
         value.normalized_type = parsed.normalized_type;
         value.type_signature = parsed.type_signature;
         value.text = parsed.text;
+        value.mms_writable = writable_objects.contains({parsed.domain, parsed.item});
         encode_manifest_value(value);
         const auto value_index = model.values.size();
         model.values.push_back(std::move(value));
@@ -1136,12 +1470,17 @@ void rebuild_manifest_roots(ManifestModel& model) {
 
     model.objects.reserve(model.values.size());
     for (auto& value : model.values) {
-        model.objects.push_back(mms::MmsStaticObjectEntry{
+        mms::MmsStaticObjectEntry entry{
             value.domain,
             value.item,
             value.type_specification,
             read_manifest_value,
-            &value});
+            &value};
+        if (value.mms_writable && !value.root) {
+            entry.write = write_manifest_value;
+            entry.write_context = &value;
+        }
+        model.objects.push_back(entry);
     }
 
     std::map<std::pair<std::string, std::string>, std::vector<std::pair<std::string, std::string>>>
@@ -1194,22 +1533,21 @@ void rebuild_manifest_roots(ManifestModel& model) {
         auto& value = model.values[found->second];
         const auto text_index = fields.size() >= 7U ? 6U : 5U;
         if (value.text == fields[text_index]) continue;
-        value.text = fields[text_index];
-        value.data = manifest_data(value.type, value.text);
-        value.encoded = mms::MmsDataCodec::encode(*value.data);
-        ++changed;
-    }
-    model.revision = revision;
-    if (changed != 0U) {
-        rebuild_manifest_roots(model);
-        // Re-encoding a root may reallocate its byte vector. Refresh the
-        // object-table spans so later attribute/root reads never retain
-        // storage from the previous manifest revision.
-        for (const auto value_index : model.root_value_indices) {
-            model.objects[value_index].type_specification =
-                model.values[value_index].type_specification;
+        if (!live_text_valid(value.type, fields[text_index])) continue;
+        auto data = manifest_data(value.type, fields[text_index]);
+        if (apply_live_data(
+                model,
+                found->second,
+                std::move(data),
+                fields[text_index],
+                "Good",
+                "manifest-sync",
+                0U,
+                std::nullopt)) {
+            ++changed;
         }
     }
+    model.revision = revision;
     return changed;
 }
 
@@ -1283,24 +1621,27 @@ void serve_connection(
         {buffers.receive, buffers.response, buffers.workspace}};
 
     auto previous_state = runtime.state();
-    auto next_model_refresh = std::chrono::steady_clock::now();
+    auto next_manifest_refresh = std::chrono::steady_clock::now();
     std::size_t total_received = 0U;
     std::size_t total_sent = 0U;
     while (!g_stop.load(std::memory_order_relaxed)) {
-        const auto now = std::chrono::steady_clock::now();
-        if (manifest_model != nullptr && now >= next_model_refresh) {
-            next_model_refresh = now + std::chrono::milliseconds{25};
-            try {
-                const auto changed = refresh_manifest_values(*manifest_model);
-                if (changed != 0U) {
-                    std::cout << "IEDSIM_EVENT kind=value_sync association="
-                              << association_id << " changed=" << changed
-                              << " revision=" << manifest_model->revision << '\n';
-                    std::cout.flush();
+        if (manifest_model != nullptr) {
+            drain_live_commands(*manifest_model);
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= next_manifest_refresh) {
+                next_manifest_refresh = now + std::chrono::milliseconds{25};
+                try {
+                    const auto changed = refresh_manifest_values(*manifest_model);
+                    if (changed != 0U) {
+                        std::cout << "IEDSIM_EVENT kind=value_sync association="
+                                  << association_id << " changed=" << changed
+                                  << " revision=" << manifest_model->revision << '\n';
+                        std::cout.flush();
+                    }
+                } catch (const std::exception& exception) {
+                    std::cerr << "IEDSIM_EVENT kind=value_sync_error association="
+                              << association_id << " message=" << exception.what() << '\n';
                 }
-            } catch (const std::exception& exception) {
-                std::cerr << "IEDSIM_EVENT kind=value_sync_error association="
-                          << association_id << " message=" << exception.what() << '\n';
             }
         }
         const auto result = session.poll_once();
@@ -1389,6 +1730,10 @@ int main(int argc, char** argv) {
         const EncodedValue manifest_value{healthy_ln_data};
         auto manifest_model = load_manifest_model(
             options.model_manifest, manifest_type, manifest_value);
+        if (!manifest_model.objects.empty()) {
+            g_active_manifest_model = &manifest_model;
+            start_live_command_reader();
+        }
 
         std::array<mms::MmsStaticObjectEntry, 13U> objects{};
         objects[0] = mms::MmsStaticObjectEntry{
@@ -1480,12 +1825,21 @@ int main(int argc, char** argv) {
                   << " truncated=" << truncated
                   << " profile=iedscout" << '\n';
         std::cout.flush();
+        if (g_active_manifest_model != nullptr) {
+            std::cout << "IEDSIM_EVENT kind=state_ready values="
+                      << manifest_model.value_indices.size()
+                      << " revision=" << manifest_model.live_revision
+                      << " clock_ms=" << manifest_model.logical_time_ms << '\n';
+            std::cout.flush();
+        }
 
         std::size_t connection_count = 0U;
         while (!g_stop.load(std::memory_order_relaxed) &&
                (options.maximum_connections == 0U ||
                 connection_count < options.maximum_connections)) {
-            const auto readiness = wait_socket(listener, true, 200U);
+            if (g_active_manifest_model != nullptr) drain_live_commands(manifest_model);
+            const auto readiness = wait_socket(
+                listener, true, g_active_manifest_model != nullptr ? 25U : 200U);
             if (readiness == SocketWaitStatus::timeout ||
                 readiness == SocketWaitStatus::interrupted) {
                 continue;
