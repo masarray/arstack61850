@@ -31,4 +31,42 @@ replace_once(
     "QVariantMap materializedValueMap(const arstack::iedsim::MaterializedSclValue& value) {\n",
 )
 
+# Surface child-server protocol events in the host process log as well as the
+# GUI activity model. This makes CI/runtime failures diagnosable without
+# changing the wire protocol or the simulator state semantics.
+replace_once(cpp, "#include <QDateTime>\n", "#include <QDateTime>\n#include <QDebug>\n")
+replace_once(
+    cpp,
+    "void IedSimulatorController::processServerLine(\n"
+    "    const QString& line,\n"
+    "    const bool standardError) {\n",
+    "void IedSimulatorController::processServerLine(\n"
+    "    const QString& line,\n"
+    "    const bool standardError) {\n"
+    "    if (standardError) {\n"
+    "        qWarning().noquote() << \"[IEDSIM server]\" << line;\n"
+    "    } else {\n"
+    "        qInfo().noquote() << \"[IEDSIM server]\" << line;\n"
+    "    }\n",
+)
+
+server = "tools/static_ied_server.cpp"
+# Rebuilding aggregate LN values can reallocate root TypeSpecification byte
+# vectors. MmsStaticObjectTable stores a span over ManifestModel::objects, so
+# refresh those entry spans after every mutation exactly as the old manifest
+# refresh path did.
+replace_once(
+    server,
+    "    rebuild_manifest_roots(model);\n"
+    "    emit_live_state(value, request_id);\n"
+    "    return true;\n",
+    "    rebuild_manifest_roots(model);\n"
+    "    for (const auto root_index : model.root_value_indices) {\n"
+    "        model.objects[root_index].type_specification =\n"
+    "            model.values[root_index].type_specification;\n"
+    "    }\n"
+    "    emit_live_state(value, request_id);\n"
+    "    return true;\n",
+)
+
 print("P1 generated-source repair applied")
