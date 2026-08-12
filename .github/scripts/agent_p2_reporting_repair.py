@@ -32,6 +32,34 @@ replace_once(
     "    ariec61850_apply_sanitizers(ariec61850_static_rcb_trial)\n\n",
 )
 
+# The portable URCB runtime delegates DataSet snapshot encoding to the existing
+# static information-report encoder. Wire that implementation into every host
+# server-core profile that now builds the URCB runtime.
+replace_once(
+    "CMakeLists.txt",
+    "    src/mms/information_report_span.cpp\n"
+    "    src/mms/static_urcb_runtime.cpp\n",
+    "    src/mms/information_report_span.cpp\n"
+    "    src/mms/static_information_report.cpp\n"
+    "    src/mms/static_urcb_runtime.cpp\n",
+)
+replace_once(
+    "apps/ied_simulator/CMakeLists.txt",
+    "    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/information_report_span.cpp\n"
+    "    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_urcb_runtime.cpp\n",
+    "    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/information_report_span.cpp\n"
+    "    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_information_report.cpp\n"
+    "    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_urcb_runtime.cpp\n",
+)
+replace_once(
+    "tools/static_ied_server_iedsim/CMakeLists.txt",
+    "    \"${ARSTACK_ROOT}/src/mms/information_report_span.cpp\"\n"
+    "    \"${ARSTACK_ROOT}/src/mms/static_urcb_runtime.cpp\"\n",
+    "    \"${ARSTACK_ROOT}/src/mms/information_report_span.cpp\"\n"
+    "    \"${ARSTACK_ROOT}/src/mms/static_information_report.cpp\"\n"
+    "    \"${ARSTACK_ROOT}/src/mms/static_urcb_runtime.cpp\"\n",
+)
+
 # The persistent manifest report definition replaces P0's local ParsedRcb type.
 replace_once(
     "tools/static_ied_server.cpp",
