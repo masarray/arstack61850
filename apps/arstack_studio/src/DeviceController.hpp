@@ -96,6 +96,24 @@ public:
     Q_INVOKABLE bool startPtp();
     Q_INVOKABLE bool stopPtp();
     Q_INVOKABLE bool configurePtp(const QVariantMap& profile);
+
+    // P1.75 laboratory SV synchronization stimulus. These commands are
+    // intentionally separate from PTP lock detection: AUTO remains conservative,
+    // while 0/1/2 are explicit simulated wire states for relay testing.
+    Q_INVOKABLE bool sendSmpSynchShow() {
+        return sendCommand(QStringLiteral("PROFILE SHOW"));
+    }
+    Q_INVOKABLE bool setSmpSynchPolicy(const QString& requestedMode) {
+        const QString mode = requestedMode.trimmed().toUpper();
+        static const QStringList validModes{
+            QStringLiteral("AUTO"), QStringLiteral("0"), QStringLiteral("1"), QStringLiteral("2")};
+        if (!validModes.contains(mode)) {
+            setError(QStringLiteral("smpSynch policy must be AUTO, 0, 1, or 2."));
+            return false;
+        }
+        return sendCommand(QStringLiteral("PROFILE SMPSYNCH %1").arg(mode));
+    }
+
     Q_INVOKABLE void clearLog();
 
 signals:
