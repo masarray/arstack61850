@@ -67,6 +67,18 @@ replace_once(
     "    const auto add_rcb_object = [&](const ManifestReportControl& rcb,\n",
 )
 
+# Host interoperability discovery needs the exact flattened RCB attributes in
+# GetNameList. The dispatcher deliberately keeps root-only discovery as its
+# strict default; enable aliases only for the manifest-backed desktop simulator.
+replace_once(
+    "tools/static_ied_server.cpp",
+    "    mms::MmsStaticDispatchPolicy dispatch_policy;\n"
+    "    const mms::MmsStaticApplicationDispatcher dispatcher{\n",
+    "    mms::MmsStaticDispatchPolicy dispatch_policy;\n"
+    "    dispatch_policy.advertise_flattened_child_aliases = manifest_model != nullptr;\n"
+    "    const mms::MmsStaticApplicationDispatcher dispatcher{\n",
+)
+
 # Let the static-session selector discover the only URCB naturally. The test
 # then verifies the selected RCB/DataSet binding from STATIC_PLAN rather than
 # steering selection with a pre-filter.
