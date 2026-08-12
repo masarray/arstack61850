@@ -125,12 +125,17 @@ public:
         }
 
         ++status_.accepted_samples;
-        status_.consecutive_bad_samples = 0U;
         status_.globally_traceable = measurement.globally_traceable;
         if (status_.state == PtpDisciplineState::unlocked ||
             status_.state == PtpDisciplineState::holdover) {
             status_.state = PtpDisciplineState::acquiring;
             status_.consecutive_qualified_samples = 0U;
+        }
+        // Unlock evidence is meaningful only while LOCKED. Do not clear it
+        // before the locked-state branch has a chance to accumulate the
+        // configured number of consecutive out-of-tolerance measurements.
+        if (status_.state != PtpDisciplineState::locked) {
+            status_.consecutive_bad_samples = 0U;
         }
 
         if (status_.state != PtpDisciplineState::locked &&
