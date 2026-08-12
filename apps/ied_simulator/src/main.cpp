@@ -42,8 +42,12 @@ int main(int argc, char* argv[]) {
         QStringLiteral("number")};
     const QCommandLineOption setFirstValueOption{
         QStringLiteral("set-first-value"),
-        QStringLiteral("QA: apply a value to the first runtime point after start."),
+        QStringLiteral("QA: apply a value to a runtime point after start."),
         QStringLiteral("value")};
+    const QCommandLineOption setValueItemOption{
+        QStringLiteral("set-value-item"),
+        QStringLiteral("QA: select the runtime point by exact MMS item before applying --set-first-value."),
+        QStringLiteral("mms-item")};
     const QCommandLineOption undoAfterOption{
         QStringLiteral("undo-after-ms"),
         QStringLiteral("QA: invoke live-value undo after the specified delay."),
@@ -63,6 +67,7 @@ int main(int argc, char* argv[]) {
         smokeOption,
         portOption,
         setFirstValueOption,
+        setValueItemOption,
         undoAfterOption,
         stateDumpOption,
         exitAfterOption});
@@ -98,20 +103,35 @@ int main(int argc, char* argv[]) {
         }
         if (backend != nullptr && parser.isSet(setFirstValueOption)) {
             const auto value = parser.value(setFirstValueOption);
+            const auto targetItem = parser.value(setValueItemOption);
             auto* const applyTimer = new QTimer{backend};
             applyTimer->setInterval(100);
-            QObject::connect(applyTimer, &QTimer::timeout, backend, [backend, applyTimer, value] {
-                if (!backend->property("running").toBool()) return;
-                QMetaObject::invokeMethod(backend, "selectValue", Q_ARG(int, 0));
-                QMetaObject::invokeMethod(
-                    backend,
-                    "applySelectedValue",
-                    Q_ARG(QString, value),
-                    Q_ARG(QString, QStringLiteral("Good")),
-                    Q_ARG(QString, QStringLiteral("Simulator QA")));
-                applyTimer->stop();
-                applyTimer->deleteLater();
-            });
+            QObject::connect(
+                applyTimer,
+                &QTimer::timeout,
+                backend,
+                [backend, applyTimer, value, targetItem] {
+                    if (!backend->property("running").toBool()) return;
+                    if (!targetItem.isEmpty()) {
+                        bool selected = false;
+                        QMetaObject::invokeMethod(
+                            backend,
+                            "selectValueByMmsItem",
+                            Q_RETURN_ARG(bool, selected),
+                            Q_ARG(QString, targetItem));
+                        if (!selected) return;
+                    } else {
+                        QMetaObject::invokeMethod(backend, "selectValue", Q_ARG(int, 0));
+                    }
+                    QMetaObject::invokeMethod(
+                        backend,
+                        "applySelectedValue",
+                        Q_ARG(QString, value),
+                        Q_ARG(QString, QStringLiteral("Good")),
+                        Q_ARG(QString, QStringLiteral("Simulator QA")));
+                    applyTimer->stop();
+                    applyTimer->deleteLater();
+                });
             applyTimer->start();
         }
         if (backend != nullptr && parser.isSet(undoAfterOption)) {

@@ -12,6 +12,7 @@
 #include "ariec61850/osi/cotp_span.hpp"
 #include "ariec61850/osi/tpkt_span.hpp"
 #include "ariec61850/mms/data_codec.hpp"
+#include "ariec61850/mms/reporting.hpp"
 #include "ariec61850/mms/services.hpp"
 
 #include <algorithm>
@@ -2102,7 +2103,7 @@ struct HostControlRuntime final {
 };
 
 struct HostControlObjectContext final {
-    HostControlRuntime* runtime{};
+    ManifestModel* model{};
     HostControl* control{};
     enum class Service : std::uint8_t { oper, sbo, sbow, cancel } service{Service::oper};
 };
@@ -2129,8 +2130,8 @@ static std::vector<std::unique_ptr<HostControlObjectContext>> g_control_object_c
     mms::MmsTypeSpecification origin;
     origin.name = "origin";
     origin.kind = mms::MmsTypeKind::structure;
-    origin.children.push_back(field("orCat", mms::MmsTypeKind::integer, 8U));
-    origin.children.push_back(field("orIdent", mms::MmsTypeKind::octet_string, 8U));
+    origin.children.push_back(field("orCat", mms::MmsTypeKind::unsigned_integer, 8U));
+    origin.children.push_back(field("orIdent", mms::MmsTypeKind::octet_string, 64U));
     root.children.push_back(std::move(origin));
     root.children.push_back(field("ctlNum", mms::MmsTypeKind::unsigned_integer, 8U));
     root.children.push_back(field("T", mms::MmsTypeKind::utc_time));
@@ -2175,12 +2176,12 @@ static std::vector<std::unique_ptr<HostControlObjectContext>> g_control_object_c
 }
 
 [[nodiscard]] bool apply_host_control(
-    HostControlRuntime& runtime,
+    ManifestModel& model,
     HostControl& ctl,
     const mms::MmsStaticDirectBooleanOperate& decoded) {
-    if (runtime.model == nullptr || decoded.test) return true;
+    if (decoded.test) return true;
     return apply_live_data(
-        *runtime.model,
+        model,
         ctl.status_index,
         mms::MmsDataValue::boolean(decoded.control_value),
         decoded.control_value ? "true" : "false",
@@ -2195,7 +2196,7 @@ static std::vector<std::unique_ptr<HostControlObjectContext>> g_control_object_c
     const std::span<const std::uint8_t> encoded,
     const mms::MmsStaticRequestAccessContext& access) noexcept {
     auto* ctx = static_cast<HostControlObjectContext*>(raw);
-    if (ctx == nullptr || ctx->runtime == nullptr || ctx->control == nullptr ||
+    if (ctx == nullptr || ctx->model == nullptr || ctx->control == nullptr ||
         access.association_id == 0U) return {false, 3U};
     auto& host = *ctx->control;
     const auto now = host_control_now_ms();
@@ -2249,6 +2250,12 @@ static std::vector<std::unique_ptr<HostControlObjectContext>> g_control_object_c
 
         if (ctx->service == HostControlObjectContext::Service::sbow) {
             const auto decision = host.planner->select_with_value(client, sequence, now);
+            if (decision.accepted()) {
+                std::cout << "IEDSIM_EVENT kind=control_select association=" << access.association_id
+                          << " object=" << host.manifest->domain << '/' << host.manifest->logical_node
+                          << '.' << host.manifest->data_object << " model=4\n";
+                std::cout.flush();
+            }
             return {decision.accepted(), decision.accepted() ? 0U : 3U};
         }
 
@@ -2266,7 +2273,7 @@ static std::vector<std::unique_ptr<HostControlObjectContext>> g_control_object_c
             if (!decision.accepted()) return {false, 3U};
         }
 
-        if (!apply_host_control(*ctx->runtime, host, decoded)) return {false, 10U};
+        if (!apply_host_control(*ctx->model, host, decoded)) return {false, 10U};
         host.last_oper.assign(encoded.begin(), encoded.end());
         if (host.manifest->model == 3U || host.manifest->model == 4U) {
             host.termination_pending = true;
@@ -2367,7 +2374,7 @@ static std::vector<std::unique_ptr<HostControlObjectContext>> g_control_object_c
                               const bool contextual_read,
                               const bool writable) {
             auto ctx = std::make_unique<HostControlObjectContext>();
-            ctx->runtime = &runtime;
+            ctx->model = &model;
             ctx->control = host.get();
             ctx->service = service;
             mms::MmsStaticObjectEntry entry{
@@ -2427,26 +2434,24 @@ void host_control_association_closed(
     bytes_written = 0U;
     if (connection.state() != mms::MmsStaticConnectionState::established ||
         connection.mms_presentation_context_id() == 0U || host.last_oper.empty()) return false;
-    const std::array<std::uint8_t, 2U> opt{{0x04U, 0x00U}}; // dataRef
-    const std::array<mms::MmsInformationReportReferenceInput, 1U> refs{{
-        {host.manifest->domain, host.oper_item}}};
-    const std::array<mms::MmsReadAccessResultInput, 1U> results{{
-        {true, host.last_oper, 0U}}};
-    mms::MmsInformationReportSnapshotInput report;
-    report.report_id = "CommandTermination";
-    report.optional_fields = opt;
-    report.conf_revision = 1U;
-    report.member_references = refs;
-    report.member_results = results;
-    report.reason_for_inclusion = 0x40U;
-    const auto raw = mms::MmsInformationReportSpanCodec::encode_snapshot_into(
-        report, buffers.report_response);
-    if (!raw.success()) return false;
-    const auto p_data = ar::iec61850::osi::PresentationSpanCodec::encode_p_data_into(
-        std::span<const std::uint8_t>{buffers.report_response.data(), raw.bytes_written},
-        buffers.report_workspace,
-        connection.mms_presentation_context_id(),
-        true);
+    try {
+        const auto values = mms::MmsDataCodec::decode_all(host.last_oper);
+        if (values.size() != 1U) return false;
+        mms::MmsInformationReport report;
+        report.variable_references.push_back(
+            mms::MmsObjectName::domain_specific(host.manifest->domain, host.oper_item));
+        mms::MmsInformationReportItem item;
+        item.index = 0U;
+        item.value = values.front();
+        report.items.push_back(std::move(item));
+        const auto raw = mms::MmsInformationReportCodec::encode_pdu(report);
+        if (raw.empty() || raw.size() > buffers.report_response.size()) return false;
+        std::copy(raw.begin(), raw.end(), buffers.report_response.begin());
+        const auto p_data = ar::iec61850::osi::PresentationSpanCodec::encode_p_data_into(
+            std::span<const std::uint8_t>{buffers.report_response.data(), raw.size()},
+            buffers.report_workspace,
+            connection.mms_presentation_context_id(),
+            true);
     if (!p_data.success()) return false;
     const auto cotp = ar::iec61850::osi::CotpSpanCodec::encode_data_into(
         std::span<const std::uint8_t>{buffers.report_workspace.data(), p_data.bytes_written},
@@ -2458,8 +2463,11 @@ void host_control_association_closed(
     if (!tpkt.success()) return false;
     std::copy_n(buffers.report_workspace.begin(), tpkt.bytes_written,
                 buffers.report_response.begin());
-    bytes_written = tpkt.bytes_written;
-    return true;
+        bytes_written = tpkt.bytes_written;
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 [[nodiscard]] bool poll_host_control_terminations(

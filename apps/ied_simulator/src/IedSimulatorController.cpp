@@ -149,7 +149,13 @@ QVariantMap materializedValueMap(const arstack::iedsim::MaterializedSclValue& va
     item.insert(QStringLiteral("value"), value.initialValue);
     item.insert(QStringLiteral("quality"), QStringLiteral("Good"));
     item.insert(QStringLiteral("origin"), QStringLiteral("scl"));
-    item.insert(QStringLiteral("writable"), !value.quality && !value.timestamp);
+    const auto controlMetadata =
+        value.dataAttribute.compare(QStringLiteral("ctlModel"), Qt::CaseInsensitive) == 0 ||
+        value.dataAttribute.compare(QStringLiteral("sboTimeout"), Qt::CaseInsensitive) == 0 ||
+        value.dataAttribute.compare(QStringLiteral("operTimeout"), Qt::CaseInsensitive) == 0;
+    item.insert(
+        QStringLiteral("writable"),
+        !value.quality && !value.timestamp && !controlMetadata);
     item.insert(QStringLiteral("mmsWritable"), value.mmsWritable);
     item.insert(QStringLiteral("changed"), false);
     item.insert(QStringLiteral("timestamp"), deterministicTimestamp(0U));
@@ -480,6 +486,16 @@ void IedSimulatorController::selectValue(const int index) {
     if (selectedValueIndex_ == normalized) return;
     selectedValueIndex_ = normalized;
     emit selectionChanged();
+}
+
+bool IedSimulatorController::selectValueByMmsItem(const QString& mmsItem) {
+    for (qsizetype index = 0; index < values_.size(); ++index) {
+        if (values_.at(index).toMap().value(QStringLiteral("mmsItem")).toString() == mmsItem) {
+            selectValue(static_cast<int>(index));
+            return true;
+        }
+    }
+    return false;
 }
 
 bool IedSimulatorController::startSimulation() {
