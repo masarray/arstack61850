@@ -11,6 +11,7 @@ on:
       - 'tools/ptp_analyze.cpp'
       - 'tests/test_ptp.cpp'
       - 'tests/test_ptp_runtime.cpp'
+      - 'tests/test_smp_synch_policy.cpp'
       - 'tests/ptp_profile/**'
       - '.github/workflows/ptp-core-ci.yml'
   pull_request:
@@ -23,6 +24,7 @@ on:
       - 'tools/ptp_analyze.cpp'
       - 'tests/test_ptp.cpp'
       - 'tests/test_ptp_runtime.cpp'
+      - 'tests/test_smp_synch_policy.cpp'
       - 'tests/ptp_profile/**'
       - '.github/workflows/ptp-core-ci.yml'
 
@@ -74,19 +76,34 @@ jobs:
             -o ptp-runtime-tests \
             >ptp-runtime-build.log 2>&1
           runtime_status=$?
+
+          "$CXX" \
+            -std=c++20 \
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Werror \
+            -pthread \
+            -Iinclude \
+            src/ethernet/ethernet.cpp \
+            src/time_sync/ptp.cpp \
+            src/time_sync/ptp_monitor.cpp \
+            tests/test_smp_synch_policy.cpp \
+            -o smp-synch-policy-tests \
+            >smp-synch-policy-build.log 2>&1
+          policy_status=$?
           set -e
 
           cat ptp-build.log
           cat ptp-runtime-build.log
-          if [ "$core_status" -ne 0 ] || [ "$runtime_status" -ne 0 ]; then
-            cat ptp-build.log ptp-runtime-build.log | grep -Ei 'error:|fatal error:|undefined reference|collect2: error|ld: error' | while IFS= read -r line; do
+          cat smp-synch-policy-build.log
+          if [ "$core_status" -ne 0 ] || [ "$runtime_status" -ne 0 ] || [ "$policy_status" -ne 0 ]; then
+            cat ptp-build.log ptp-runtime-build.log smp-synch-policy-build.log | grep -Ei 'error:|fatal error:|undefined reference|collect2: error|ld: error' | while IFS= read -r line; do
               escaped=${line//'%'/'%25'}
               escaped=${escaped//$'\r'/'%0D'}
               escaped=${escaped//$'\n'/'%0A'}
               echo "::error::$escaped"
             done || true
             [ "$core_status" -ne 0 ] && exit "$core_status"
-            exit "$runtime_status"
+            [ "$runtime_status" -ne 0 ] && exit "$runtime_status"
+            exit "$policy_status"
           fi
 
       - name: Run PTP regression tests
@@ -97,18 +114,22 @@ jobs:
           core_status=$?
           ./ptp-runtime-tests >ptp-runtime-test.log 2>&1
           runtime_status=$?
+          ./smp-synch-policy-tests >smp-synch-policy-test.log 2>&1
+          policy_status=$?
           set -e
           cat ptp-test.log
           cat ptp-runtime-test.log
-          if [ "$core_status" -ne 0 ] || [ "$runtime_status" -ne 0 ]; then
-            cat ptp-test.log ptp-runtime-test.log | grep -E '\[FAIL\]|CHECK failed|error' | while IFS= read -r line; do
+          cat smp-synch-policy-test.log
+          if [ "$core_status" -ne 0 ] || [ "$runtime_status" -ne 0 ] || [ "$policy_status" -ne 0 ]; then
+            cat ptp-test.log ptp-runtime-test.log smp-synch-policy-test.log | grep -E '\[FAIL\]|CHECK failed|FAILED:|error' | while IFS= read -r line; do
               escaped=${line//'%'/'%25'}
               escaped=${escaped//$'\r'/'%0D'}
               escaped=${escaped//$'\n'/'%0A'}
               echo "::error::$escaped"
             done || true
             [ "$core_status" -ne 0 ] && exit "$core_status"
-            exit "$runtime_status"
+            [ "$runtime_status" -ne 0 ] && exit "$runtime_status"
+            exit "$policy_status"
           fi
 
   portable-ptp-msvc:
@@ -148,6 +169,7 @@ jobs:
           Build-Target 'ptp_profile_core'
           Build-Target 'ptp_profile_tests'
           Build-Target 'ptp_runtime_tests'
+          Build-Target 'smp_synch_policy_tests'
           Build-Target 'ptp_profile_analyze'
 
       - name: Run PTP regression and analyzer smoke tests on MSVC
