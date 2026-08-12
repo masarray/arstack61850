@@ -108,6 +108,7 @@ private:
     struct LoadedDocument final {
         QString path;
         ar::iec61850::scl::SclDocument document;
+        QVariantList materializedValues;
     };
 
     struct ValueSnapshot final {

@@ -41,6 +41,7 @@ void print_usage() {
     std::cout
         << "Usage: ariec61850_mms_read_probe <host> [port] --domain NAME --item NAME [options]\n\n"
         << "Options:\n"
+        << "  --type          Read GetVariableAccessAttributes instead of the value.\n"
         << "  --count N       Read repeatedly on one MMS association (default 1).\n"
         << "  --delay-ms N    Delay between reads (default 500).\n"
         << "  --timeout-ms N  Connect/request timeout (default 5000).\n"
@@ -69,11 +70,16 @@ int main(const int argc, char** argv) {
         std::size_t count{1U};
         std::chrono::milliseconds delay{500};
         std::chrono::milliseconds timeout{5'000};
+        bool type_only{};
         while (argument < argc) {
             const std::string option = argv[argument++];
             if (option == "--help" || option == "-h") {
                 print_usage();
                 return 0;
+            }
+            if (option == "--type") {
+                type_only = true;
+                continue;
             }
             if (argument >= argc) throw std::invalid_argument(option + " requires a value.");
             const std::string value = argv[argument++];
@@ -96,12 +102,45 @@ int main(const int argc, char** argv) {
         if (domain.empty() || item.empty()) {
             throw std::invalid_argument("--domain and --item are required.");
         }
+        if (type_only && count != 1U) {
+            throw std::invalid_argument("--type cannot be combined with --count.");
+        }
 
         mms::MmsAssociationOptions association_options;
         association_options.connect_timeout = timeout;
         association_options.request_timeout = timeout;
         mms::MmsTcpLiveDiscoverySession session{{}, association_options};
         session.connect(endpoint);
+
+        if (type_only) {
+            const auto invoke_id = session.association().next_invoke_id();
+            mms::MmsVariableAccessAttributesRequest request;
+            request.invoke_id = invoke_id;
+            request.name = mms::MmsObjectName::domain_specific(domain, item);
+            const auto encoded =
+                mms::MmsServiceCodec::encode_variable_access_attributes_request_p_data(
+                    request, session.association().negotiated().presentation_context_id);
+            const auto exchange = session.association().exchange_confirmed(encoded, invoke_id);
+            if (exchange.envelope.kind != mms::MmsPduKind::confirmed_response) {
+                throw std::runtime_error(
+                    "GetVariableAccessAttributes did not return Confirmed-Response.");
+            }
+            const auto response =
+                mms::MmsServiceCodec::decode_variable_access_attributes_response(
+                    response_payload(exchange), invoke_id);
+            std::cout << "MMS_TYPE reference=" << domain << '/' << item
+                      << " kind=" << response.type.mms_type_name()
+                      << " size=";
+            if (response.type.size) std::cout << *response.type.size;
+            else std::cout << "none";
+            std::cout << " exponent=";
+            if (response.type.exponent_width) std::cout << *response.type.exponent_width;
+            else std::cout << "none";
+            std::cout << " signature=" << response.type.signature() << '\n';
+            session.disconnect();
+            return 0;
+        }
+
         for (std::size_t index = 0U; index < count; ++index) {
             const auto invoke_id = session.association().next_invoke_id();
             mms::MmsReadRequest request;
