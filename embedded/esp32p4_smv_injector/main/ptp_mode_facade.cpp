@@ -188,21 +188,21 @@ extern "C" bool ar_ptp_lab_get_config(ar_ptp_lab_config_t* config) {
     return true;
 }
 
-extern "C" bool ar_ptp_lab_start(const esp_eth_handle_t eth_handle) {
-    if (eth_handle == nullptr || ar_ptp_lab_is_running()) return false;
+extern "C" void ar_ptp_lab_start(const esp_eth_handle_t eth_handle) {
+    if (eth_handle == nullptr || ar_ptp_lab_is_running()) return;
     const auto config = ar::esp32p4::smv::selected_config();
     if (!ar::esp32p4::smv::valid_public_config(config)) {
         ESP_LOGE(ar::esp32p4::smv::kTag,
                  "PTP start rejected: invalid role/cadence/discipline threshold combination");
-        return false;
+        return;
     }
     ar::esp32p4::smv::g_active_role.store(static_cast<int>(config.role), std::memory_order_release);
     if (config.role == AR_PTP_ROLE_LAB_SOURCE) {
-        if (!ar_ptp_source_configure(&config)) return false;
+        if (!ar_ptp_source_configure(&config)) return;
         ar_ptp_source_start(eth_handle);
-        return ar_ptp_source_is_running();
+        return;
     }
-    return ar::esp32p4::smv::ptp_receiver_start(eth_handle, config);
+    static_cast<void>(ar::esp32p4::smv::ptp_receiver_start(eth_handle, config));
 }
 
 extern "C" void ar_ptp_lab_stop(void) {
