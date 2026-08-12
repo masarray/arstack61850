@@ -652,7 +652,9 @@ void receiver_task(void* argument) {
         vTaskDelete(nullptr);
         return;
     }
-    seed_hardware_clock(context.eth_handle);
+    if (context.config.role == AR_PTP_ROLE_TIME_RECEIVER) {
+        seed_hardware_clock(context.eth_handle);
+    }
 
     const auto mac_result = esp_eth_ioctl(
         context.eth_handle,
