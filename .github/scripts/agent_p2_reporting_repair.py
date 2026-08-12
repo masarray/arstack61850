@@ -67,17 +67,23 @@ replace_once(
     "    const auto add_rcb_object = [&](const ManifestReportControl& rcb,\n",
 )
 
-# static_rcb_trial filters use IEC-facing inventory references, not raw MMS
-# variable/list names. Keep the acceptance contract aligned with discovery.
+# Let the static-session selector discover the only URCB naturally. The test
+# then verifies the selected RCB/DataSet binding from STATIC_PLAN rather than
+# steering selection with a pre-filter.
 replace_once(
     "apps/ied_simulator/test_gui_live_value.py",
-    '                    "MU01LD0/LLN0$RP$urcb01",\n',
-    '                    "MU01LD0/LLN0.urcb01",\n',
+    '                    "--preferred-rcb",\n'
+    '                    "MU01LD0/LLN0$RP$urcb01",\n'
+    '                    "--dataset-ref",\n'
+    '                    "MU01LD0/LLN0$dsSV",\n',
+    "",
 )
 replace_once(
     "apps/ied_simulator/test_gui_live_value.py",
-    '                    "MU01LD0/LLN0$dsSV",\n',
-    '                    "MU01LD0/LLN0.dsSV",\n',
+    '            evidence = re.search(r"REPORT_EVIDENCE received=(\\d+) decodeFailures=(\\d+)", report_trial.stdout)\n',
+    '            if "STATIC_PLAN selectedRcb=MU01LD0/LLN0.urcb01 mode=URCB dataSet=MU01LD0/LLN0.dsSV" not in report_trial.stdout:\n'
+    '                raise RuntimeError(f"P2 static RCB/DataSet binding mismatch: {report_trial.stdout}")\n'
+    '            evidence = re.search(r"REPORT_EVIDENCE received=(\\d+) decodeFailures=(\\d+)", report_trial.stdout)\n',
 )
 
 print("P2 reporting repair applied")
