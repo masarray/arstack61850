@@ -109,19 +109,24 @@ bool ar_ptp_lab_configure(const ar_ptp_lab_config_t* config);
 bool ar_ptp_lab_get_config(ar_ptp_lab_config_t* config);
 
 /**
- * Start the optional PTPv2 Layer-2 timing task.
+ * Checked control-path start.
  *
- * LAB_SOURCE is an isolated interoperability helper, TIME_RECEIVER disciplines
- * the ESP32-P4 IEEE1588 clock from an external PTP source, and MONITOR remains
- * passive. None of these modes is a GPS-backed or certified grandmaster claim.
- * Callers that need an acceptance result should verify ar_ptp_lab_is_running().
+ * Returns true only when this call accepted and established the selected
+ * runtime. Returns false for invalid configuration, a runtime already active,
+ * a receiver stop still being cleaned up, or hardware/task startup failure.
+ */
+bool ar_ptp_lab_try_start(esp_eth_handle_t eth_handle);
+
+/**
+ * Legacy start entry point retained for P1.5 source ABI compatibility.
+ * New user-facing control paths should call ar_ptp_lab_try_start().
  */
 void ar_ptp_lab_start(esp_eth_handle_t eth_handle);
 
 /** Request a clean stop of the PTP task without touching the SV hot path. */
 void ar_ptp_lab_stop(void);
 
-/** Return whether the PTP task currently owns an active runtime. */
+/** Return whether the selected PTP runtime is currently ready/running. */
 bool ar_ptp_lab_is_running(void);
 
 /** Obtain a coherent live status snapshot for serial/GUI observability. */
