@@ -367,6 +367,44 @@ void passive_sync_observation_does_not_create_false_rejections() {
     CHECK(receiver.status().rejected_exchanges == 0U);
 }
 
+void rejected_measurements_preserve_qualified_telemetry() {
+    PtpDisciplineOptions options;
+    options.lock_required_samples = 1U;
+    options.maximum_path_delay_ns = 2'000LL;
+    options.maximum_path_delay_jitter_ns = 100LL;
+    PtpClockDiscipline discipline(options);
+    const auto t0 = Clock::time_point{};
+
+    static_cast<void>(discipline.observe(
+        PtpOffsetMeasurement{port(0x7EU), 1U, 500LL, 500LL, true}, t0));
+    CHECK(discipline.status().offset_from_master_ns == 500LL);
+    CHECK(discipline.status().mean_path_delay_ns == 500LL);
+    CHECK(discipline.status().path_delay_jitter_ns == 0LL);
+    CHECK(discipline.status().accepted_samples == 1U);
+
+    // This sample passes path bounds but fails jitter qualification. None of
+    // its timing values may replace the last accepted telemetry.
+    static_cast<void>(discipline.observe(
+        PtpOffsetMeasurement{port(0x7EU), 2U, 9'999LL, 900LL, false},
+        t0 + std::chrono::milliseconds{10}));
+    CHECK(discipline.status().offset_from_master_ns == 500LL);
+    CHECK(discipline.status().mean_path_delay_ns == 500LL);
+    CHECK(discipline.status().path_delay_jitter_ns == 0LL);
+    CHECK(discipline.status().accepted_samples == 1U);
+    CHECK(discipline.status().rejected_samples == 1U);
+
+    // Excessive path delay is rejected even earlier and likewise cannot become
+    // user-visible valid timing telemetry.
+    static_cast<void>(discipline.observe(
+        PtpOffsetMeasurement{port(0x7EU), 3U, 8'888LL, 5'000LL, false},
+        t0 + std::chrono::milliseconds{20}));
+    CHECK(discipline.status().offset_from_master_ns == 500LL);
+    CHECK(discipline.status().mean_path_delay_ns == 500LL);
+    CHECK(discipline.status().path_delay_jitter_ns == 0LL);
+    CHECK(discipline.status().accepted_samples == 1U);
+    CHECK(discipline.status().rejected_samples == 2U);
+}
+
 } // namespace
 
 int main() {
@@ -382,6 +420,7 @@ int main() {
         {"path-delay cadence", path_delay_lifetime_tracks_configured_exchange_cadence},
         {"active Sync replacement rejection", active_receiver_counts_replaced_pending_sync},
         {"passive Sync observation", passive_sync_observation_does_not_create_false_rejections},
+        {"qualified telemetry survives rejects", rejected_measurements_preserve_qualified_telemetry},
     };
 
     std::size_t passed = 0U;
