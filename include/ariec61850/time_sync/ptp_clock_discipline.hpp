@@ -50,6 +50,7 @@ public:
         previous_servo_offset_ns_.reset();
         filtered_path_delay_ns_.reset();
         frequency_bias_ppb_ = 0.0;
+        consecutive_invalid_samples_ = 0U;
         large_acquisition_phase_step_used_ = false;
         lock_achieved_since_reset_ = false;
         static_cast<void>(now);
@@ -107,6 +108,11 @@ public:
             reject_sample();
             return {};
         }
+
+        // Any qualified measurement breaks the invalid-sample fault streak.
+        // The public consecutive_bad_samples field is reserved exclusively for
+        // consecutive valid high-offset measurements used by unlock hysteresis.
+        consecutive_invalid_samples_ = 0U;
 
         // Only measurements that pass all qualification gates are published as
         // valid timing telemetry. Rejected observations remain visible through
@@ -227,6 +233,7 @@ public:
             status_.state = PtpDisciplineState::holdover;
             status_.globally_traceable = false;
             status_.consecutive_qualified_samples = 0U;
+            status_.consecutive_bad_samples = 0U;
         }
         if (status_.state == PtpDisciplineState::holdover &&
             age > options_.sync_timeout + options_.holdover_timeout) {
@@ -239,6 +246,7 @@ public:
             status_.state = PtpDisciplineState::unlocked;
             status_.globally_traceable = false;
             status_.consecutive_qualified_samples = 0U;
+            status_.consecutive_bad_samples = 0U;
         }
     }
 
@@ -247,6 +255,7 @@ public:
         status_.globally_traceable = false;
         ++status_.rejected_samples;
         status_.consecutive_qualified_samples = 0U;
+        status_.consecutive_bad_samples = 0U;
     }
 
     /**
@@ -331,8 +340,11 @@ private:
     void reject_sample() noexcept {
         ++status_.rejected_samples;
         status_.consecutive_qualified_samples = 0U;
-        ++status_.consecutive_bad_samples;
-        if (status_.consecutive_bad_samples >= options_.invalid_samples_before_fault) {
+        // Invalid path/jitter/fault evidence breaks the consecutive valid
+        // high-offset streak used for unlock hysteresis.
+        status_.consecutive_bad_samples = 0U;
+        ++consecutive_invalid_samples_;
+        if (consecutive_invalid_samples_ >= options_.invalid_samples_before_fault) {
             status_.state = PtpDisciplineState::fault;
             status_.globally_traceable = false;
         }
@@ -345,6 +357,7 @@ private:
     std::optional<std::int64_t> previous_servo_offset_ns_;
     std::optional<double> filtered_path_delay_ns_;
     double frequency_bias_ppb_{};
+    std::uint32_t consecutive_invalid_samples_{};
     bool large_acquisition_phase_step_used_{};
     bool lock_achieved_since_reset_{};
 };
