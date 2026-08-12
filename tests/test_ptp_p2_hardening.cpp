@@ -64,15 +64,7 @@ void cold_epoch_can_acquire_once_then_lock() {
     constexpr std::int64_t cold_epoch_offset_ns =
         -1'800'000'000'000'000'000LL;
     const auto acquisition = discipline.observe(
-        PtpOffsetMeasurement{
-            port(0x70U),
-            1U,
-            cold_epoch_offset_ns,
-            500LL,
-            true,
-        },
-        t0);
-
+        PtpOffsetMeasurement{port(0x70U), 1U, cold_epoch_offset_ns, 500LL, true}, t0);
     CHECK(acquisition.kind == PtpClockCommandKind::step_phase);
     CHECK(acquisition.phase_step_ns == 1'800'000'000'000'000'000LL);
     CHECK(discipline.status().state == PtpDisciplineState::acquiring);
@@ -83,21 +75,12 @@ void cold_epoch_can_acquire_once_then_lock() {
 
     for (std::uint16_t sequence = 2U; sequence <= 3U; ++sequence) {
         const auto command = discipline.observe(
-            PtpOffsetMeasurement{
-                port(0x70U),
-                sequence,
-                500LL,
-                500LL,
-                true,
-            },
-            t0 + std::chrono::milliseconds{
-                100LL * static_cast<long long>(sequence - 1U)});
+            PtpOffsetMeasurement{port(0x70U), sequence, 500LL, 500LL, true},
+            t0 + std::chrono::milliseconds{100LL * static_cast<long long>(sequence - 1U)});
         CHECK(command.kind == PtpClockCommandKind::set_frequency);
     }
-
     CHECK(discipline.status().state == PtpDisciplineState::locked);
-    CHECK(discipline.measured_smp_synch() ==
-          SmpSynchValue::global_synchronized);
+    CHECK(discipline.measured_smp_synch() == SmpSynchValue::global_synchronized);
 }
 
 void large_epoch_step_is_one_shot_and_never_allowed_post_lock() {
@@ -108,11 +91,8 @@ void large_epoch_step_is_one_shot_and_never_allowed_post_lock() {
     constexpr std::int64_t huge = -1'700'000'000'000'000'000LL;
 
     CHECK(discipline.observe(
-              PtpOffsetMeasurement{port(0x71U), 1U, huge, 500LL, false},
-              t0).kind == PtpClockCommandKind::step_phase);
-
-    // A second epoch-sized correction before a qualified normal sample is not
-    // accepted silently. The acquisition escape hatch is intentionally one-shot.
+              PtpOffsetMeasurement{port(0x71U), 1U, huge, 500LL, false}, t0).kind ==
+          PtpClockCommandKind::step_phase);
     const auto repeated = discipline.observe(
         PtpOffsetMeasurement{port(0x71U), 2U, huge, 500LL, false},
         t0 + std::chrono::milliseconds{1});
@@ -125,7 +105,6 @@ void large_epoch_step_is_one_shot_and_never_allowed_post_lock() {
               t0 + std::chrono::milliseconds{10}).kind ==
           PtpClockCommandKind::set_frequency);
     CHECK(discipline.status().state == PtpDisciplineState::locked);
-
     const auto post_lock = discipline.observe(
         PtpOffsetMeasurement{port(0x71U), 4U, huge, 500LL, false},
         t0 + std::chrono::milliseconds{20});
@@ -139,10 +118,8 @@ void fault_is_latched_until_explicit_reset() {
     options.lock_required_samples = 1U;
     PtpClockDiscipline discipline(options);
     const auto t0 = Clock::time_point{};
-
     static_cast<void>(discipline.observe(
-        PtpOffsetMeasurement{port(0x73U), 1U, 500LL, 500LL, false},
-        t0));
+        PtpOffsetMeasurement{port(0x73U), 1U, 500LL, 500LL, false}, t0));
     CHECK(discipline.status().state == PtpDisciplineState::locked);
 
     constexpr std::int64_t huge = -1'700'000'000'000'000'000LL;
@@ -150,7 +127,6 @@ void fault_is_latched_until_explicit_reset() {
         PtpOffsetMeasurement{port(0x73U), 2U, huge, 500LL, false},
         t0 + std::chrono::milliseconds{10}));
     CHECK(discipline.status().state == PtpDisciplineState::fault);
-
     const auto phase_steps_before = discipline.status().phase_steps;
     const auto frequency_updates_before = discipline.status().frequency_updates;
     const auto while_faulted = discipline.observe(
@@ -175,25 +151,18 @@ void consecutive_unlock_samples_leave_locked_state() {
     options.unlock_required_samples = 3U;
     PtpClockDiscipline discipline(options);
     const auto t0 = Clock::time_point{};
-
     static_cast<void>(discipline.observe(
-        PtpOffsetMeasurement{port(0x76U), 1U, 500LL, 500LL, true},
-        t0));
+        PtpOffsetMeasurement{port(0x76U), 1U, 500LL, 500LL, true}, t0));
     CHECK(discipline.status().state == PtpDisciplineState::locked);
-    CHECK(discipline.measured_smp_synch() ==
-          SmpSynchValue::global_synchronized);
 
     constexpr std::int64_t out_of_tolerance_ns = 50'000LL;
     for (std::uint16_t sequence = 2U; sequence <= 3U; ++sequence) {
         static_cast<void>(discipline.observe(
-            PtpOffsetMeasurement{
-                port(0x76U), sequence, out_of_tolerance_ns, 500LL, true},
-            t0 + std::chrono::milliseconds{
-                10LL * static_cast<long long>(sequence - 1U)}));
+            PtpOffsetMeasurement{port(0x76U), sequence, out_of_tolerance_ns, 500LL, true},
+            t0 + std::chrono::milliseconds{10LL * static_cast<long long>(sequence - 1U)}));
         CHECK(discipline.status().state == PtpDisciplineState::locked);
         CHECK(discipline.status().consecutive_bad_samples == sequence - 1U);
     }
-
     static_cast<void>(discipline.observe(
         PtpOffsetMeasurement{port(0x76U), 4U, out_of_tolerance_ns, 500LL, true},
         t0 + std::chrono::milliseconds{30}));
@@ -203,58 +172,83 @@ void consecutive_unlock_samples_leave_locked_state() {
     CHECK(!discipline.measured_smp_synch().has_value());
 }
 
+void phase_step_stays_disabled_after_lock_until_reset() {
+    PtpDisciplineOptions options;
+    options.lock_required_samples = 1U;
+    options.unlock_required_samples = 3U;
+    options.sync_timeout = std::chrono::milliseconds{100};
+    options.holdover_timeout = std::chrono::milliseconds{500};
+    PtpClockDiscipline discipline(options);
+    const auto t0 = Clock::time_point{};
+
+    static_cast<void>(discipline.observe(
+        PtpOffsetMeasurement{port(0x77U), 1U, 500LL, 500LL, false}, t0));
+    CHECK(discipline.status().state == PtpDisciplineState::locked);
+    const auto initial_steps = discipline.status().phase_steps;
+
+    for (std::uint16_t sequence = 2U; sequence <= 4U; ++sequence) {
+        static_cast<void>(discipline.observe(
+            PtpOffsetMeasurement{port(0x77U), sequence, 50'000LL, 500LL, false},
+            t0 + std::chrono::milliseconds{10LL * static_cast<long long>(sequence - 1U)}));
+    }
+    CHECK(discipline.status().state == PtpDisciplineState::acquiring);
+    const auto after_unlock = discipline.observe(
+        PtpOffsetMeasurement{port(0x77U), 5U, 2'000'000LL, 500LL, false},
+        t0 + std::chrono::milliseconds{40});
+    CHECK(after_unlock.kind == PtpClockCommandKind::set_frequency);
+    CHECK(discipline.status().phase_steps == initial_steps);
+
+    discipline.reset();
+    static_cast<void>(discipline.observe(
+        PtpOffsetMeasurement{port(0x77U), 6U, 500LL, 500LL, false},
+        t0 + std::chrono::milliseconds{100}));
+    CHECK(discipline.status().state == PtpDisciplineState::locked);
+    discipline.tick(t0 + std::chrono::milliseconds{201});
+    CHECK(discipline.status().state == PtpDisciplineState::holdover);
+    const auto holdover_steps = discipline.status().phase_steps;
+    const auto after_holdover = discipline.observe(
+        PtpOffsetMeasurement{port(0x77U), 7U, 2'000'000LL, 500LL, false},
+        t0 + std::chrono::milliseconds{210});
+    CHECK(after_holdover.kind == PtpClockCommandKind::set_frequency);
+    CHECK(discipline.status().phase_steps == holdover_steps);
+
+    discipline.reset();
+    const auto after_explicit_reset = discipline.observe(
+        PtpOffsetMeasurement{port(0x77U), 8U, 2'000'000LL, 500LL, false},
+        t0 + std::chrono::milliseconds{300});
+    CHECK(after_explicit_reset.kind == PtpClockCommandKind::step_phase);
+}
+
 void global_provenance_revokes_immediately_and_requires_new_measurement() {
     PtpDisciplineOptions options;
     options.lock_required_samples = 1U;
     PtpClockDiscipline discipline(options);
     const auto t0 = Clock::time_point{};
-
     CHECK(discipline.observe(
-              PtpOffsetMeasurement{port(0x72U), 1U, 500LL, 500LL, true},
-              t0).kind == PtpClockCommandKind::set_frequency);
+              PtpOffsetMeasurement{port(0x72U), 1U, 500LL, 500LL, true}, t0).kind ==
+          PtpClockCommandKind::set_frequency);
     CHECK(discipline.status().state == PtpDisciplineState::locked);
-    CHECK(discipline.measured_smp_synch() ==
-          SmpSynchValue::global_synchronized);
+    CHECK(discipline.measured_smp_synch() == SmpSynchValue::global_synchronized);
 
     discipline.revoke_global_traceability();
     CHECK(discipline.status().state == PtpDisciplineState::locked);
-    CHECK(discipline.measured_smp_synch() ==
-          SmpSynchValue::local_synchronized);
-
-    // Fresh Announce evidence alone is intentionally not enough to promote 2;
-    // the discipline receives no API to restore global provenance except a
-    // subsequent qualified timing measurement carrying that fresh evidence.
-    CHECK(discipline.measured_smp_synch() ==
-          SmpSynchValue::local_synchronized);
-
+    CHECK(discipline.measured_smp_synch() == SmpSynchValue::local_synchronized);
     static_cast<void>(discipline.observe(
         PtpOffsetMeasurement{port(0x72U), 2U, 400LL, 500LL, true},
         t0 + std::chrono::milliseconds{100}));
-    CHECK(discipline.measured_smp_synch() ==
-          SmpSynchValue::global_synchronized);
+    CHECK(discipline.measured_smp_synch() == SmpSynchValue::global_synchronized);
 }
 
 void stale_same_source_announce_forces_reselection() {
     using namespace std::chrono_literals;
     const auto local = port(0x74U, 2U);
     const auto master = port(0x75U, 1U);
-    PtpTimeReceiver receiver(PtpTimeReceiverOptions{
-        0U,
-        0U,
-        local,
-        100ms,
-        50ms,
-    });
+    PtpTimeReceiver receiver(PtpTimeReceiverOptions{0U, 0U, local, 100ms, 50ms});
     const auto t0 = Clock::time_point{};
     const auto announce = announce_frame(master);
-
     CHECK(receiver.observe_announce(announce, t0));
     CHECK(!receiver.observe_announce(announce, t0 + 50ms));
     CHECK(receiver.status().selected_source == master);
-
-    // The source identity is unchanged, but its Announce provenance was absent
-    // for longer than source_timeout. Treat the returning Announce as a fresh
-    // reselection so the ESP adapter resets discipline/path-delay evidence.
     CHECK(receiver.observe_announce(announce, t0 + 151ms));
     CHECK(receiver.status().selected_source == master);
     CHECK(!receiver.observe_announce(announce, t0 + 152ms));
@@ -262,23 +256,10 @@ void stale_same_source_announce_forces_reselection() {
 
 void path_delay_lifetime_tracks_configured_exchange_cadence() {
     using namespace std::chrono_literals;
-    const PtpTimeReceiverOptions slow_profile{
-        0U,
-        0U,
-        {},
-        3000ms,
-        7500ms,
-    };
+    const PtpTimeReceiverOptions slow_profile{0U, 0U, {}, 3000ms, 7500ms};
     CHECK(slow_profile.path_delay_timeout == 15000ms);
     CHECK(slow_profile.path_delay_timeout > 10000ms);
-
-    const PtpTimeReceiverOptions fast_profile{
-        0U,
-        0U,
-        {},
-        3000ms,
-        75ms,
-    };
+    const PtpTimeReceiverOptions fast_profile{0U, 0U, {}, 3000ms, 75ms};
     CHECK(fast_profile.path_delay_timeout == 150ms);
 }
 
@@ -290,6 +271,7 @@ int main() {
         {"one-shot and post-lock guard", large_epoch_step_is_one_shot_and_never_allowed_post_lock},
         {"fault latch", fault_is_latched_until_explicit_reset},
         {"consecutive unlock", consecutive_unlock_samples_leave_locked_state},
+        {"no phase step after lock", phase_step_stays_disabled_after_lock_until_reset},
         {"global provenance revoke", global_provenance_revokes_immediately_and_requires_new_measurement},
         {"stale same-source reselection", stale_same_source_announce_forces_reselection},
         {"path-delay cadence", path_delay_lifetime_tracks_configured_exchange_cadence},
@@ -306,7 +288,6 @@ int main() {
             return 1;
         }
     }
-
     std::cout << "Passed " << passed << '/' << tests.size()
               << " PTP-P2 hardening tests.\n";
     return 0;
