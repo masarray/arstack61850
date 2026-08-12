@@ -480,12 +480,14 @@ void update_status(ReceiverContext& context) noexcept {
     snapshot.tx_failure_count =
         g_receiver_tx_failures.load(std::memory_order_relaxed);
 
+    std::uint64_t receiver_rejected_exchanges = 0U;
     if (context.receiver.has_value()) {
         const auto& receiver = context.receiver->status();
         snapshot.announce_received = receiver.announce_frames;
         snapshot.sync_received = receiver.sync_frames;
         snapshot.follow_up_received = receiver.follow_up_frames;
         snapshot.peer_delay_responses_received = receiver.pdelay_responses;
+        receiver_rejected_exchanges = receiver.rejected_exchanges;
         if (receiver.selected_source.has_value()) {
             snapshot.source_selected = true;
             std::copy(
@@ -495,12 +497,16 @@ void update_status(ReceiverContext& context) noexcept {
             snapshot.selected_source_port_number =
                 receiver.selected_source->port_number;
         }
+        // The receiver owns path-delay evidence lifetime. If it has expired,
+        // leave validity false instead of resurrecting the discipline's cached
+        // value from the last accepted offset measurement.
         if (receiver.mean_path_delay_ns.has_value()) {
             snapshot.mean_path_delay_valid = true;
             snapshot.mean_path_delay_ns = *receiver.mean_path_delay_ns;
         }
     }
 
+    snapshot.rejected_discipline_samples = receiver_rejected_exchanges;
     if (context.discipline.has_value()) {
         const auto& discipline = context.discipline->status();
         snapshot.discipline_state = static_cast<ar_ptp_discipline_state_t>(discipline.state);
@@ -508,17 +514,21 @@ void update_status(ReceiverContext& context) noexcept {
             snapshot.offset_valid = true;
             snapshot.offset_from_master_ns = *discipline.offset_from_master_ns;
         }
-        if (discipline.mean_path_delay_ns.has_value()) {
-            snapshot.mean_path_delay_valid = true;
-            snapshot.mean_path_delay_ns = *discipline.mean_path_delay_ns;
-        }
-        if (discipline.path_delay_jitter_ns.has_value()) {
+        // Do not set mean_path_delay_valid from discipline cache; validity is
+        // authoritative only while PtpTimeReceiver still owns fresh Pdelay evidence.
+        if (snapshot.mean_path_delay_valid && discipline.path_delay_jitter_ns.has_value()) {
             snapshot.path_delay_jitter_valid = true;
             snapshot.path_delay_jitter_ns = *discipline.path_delay_jitter_ns;
         }
         snapshot.frequency_adjustment_ppb = discipline.frequency_adjustment_ppb;
         snapshot.accepted_discipline_samples = discipline.accepted_samples;
-        snapshot.rejected_discipline_samples = discipline.rejected_samples;
+        if (std::numeric_limits<std::uint64_t>::max() -
+                snapshot.rejected_discipline_samples < discipline.rejected_samples) {
+            snapshot.rejected_discipline_samples =
+                std::numeric_limits<std::uint64_t>::max();
+        } else {
+            snapshot.rejected_discipline_samples += discipline.rejected_samples;
+        }
         snapshot.globally_traceable = discipline.globally_traceable;
         const auto measured = context.discipline->measured_smp_synch();
         if (measured.has_value()) {
