@@ -24,6 +24,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          echo "aligned-run-6"
           python3 tools/agent_p0_patch_launcher.py 2>&1 | tee p0-patch.log
       - name: Upload patch diagnostics
         if: always()
