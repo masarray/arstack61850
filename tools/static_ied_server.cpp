@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ariec61850/mms/static_server_session.hpp"
+#include "ariec61850/mms/data_codec.hpp"
+#include "ariec61850/mms/services.hpp"
 
 #include <algorithm>
 #include <array>
@@ -7,13 +9,16 @@
 #include <chrono>
 #include <climits>
 #include <csignal>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <fstream>
+#include <map>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <set>
 #include <span>
 #include <sstream>
@@ -21,6 +26,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #if defined(_WIN32)
@@ -527,70 +533,424 @@ struct ConnectionBuffers final {
     std::array<std::uint8_t, 8'192U> workspace{};
 };
 
+struct ManifestValue final {
+    std::string domain;
+    std::string item;
+    std::string raw_type;
+    std::string normalized_type;
+    std::string text;
+    mms::MmsTypeSpecification type;
+    std::optional<mms::MmsDataValue> data;
+    std::vector<std::uint8_t> type_specification;
+    std::vector<std::uint8_t> encoded;
+    bool root{};
+};
+
+struct ManifestTypeNode final {
+    std::map<std::string, ManifestTypeNode> children;
+    std::optional<std::size_t> value_index;
+};
+
+struct ManifestDataSetStorage final {
+    std::string domain;
+    std::string item;
+    std::vector<std::pair<std::string, std::string>> member_names;
+    std::vector<mms::MmsStaticDataSetMember> members;
+};
+
 struct ManifestModel final {
-    std::vector<std::string> domains;
-    std::vector<std::string> items;
+    std::string path;
+    std::uint64_t revision{};
+    std::vector<ManifestValue> values;
     std::vector<mms::MmsStaticObjectEntry> objects;
+    std::vector<ManifestTypeNode> root_trees;
+    std::vector<std::size_t> root_value_indices;
+    std::unordered_map<std::string, std::size_t> value_indices;
+    std::vector<ManifestDataSetStorage> data_set_storage;
+    std::vector<mms::MmsStaticDataSetEntry> data_sets;
     std::size_t declared_entries{};
 };
 
+[[nodiscard]] std::vector<std::string> split_fields(
+    const std::string_view text,
+    const char delimiter) {
+    std::vector<std::string> result;
+    std::size_t offset{};
+    while (offset <= text.size()) {
+        const auto end = text.find(delimiter, offset);
+        result.emplace_back(text.substr(
+            offset,
+            end == std::string_view::npos ? text.size() - offset : end - offset));
+        if (end == std::string_view::npos) break;
+        offset = end + 1U;
+    }
+    return result;
+}
+
+[[nodiscard]] std::string upper_copy(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](const unsigned char ch) {
+        return static_cast<char>(std::toupper(ch));
+    });
+    return value;
+}
+
+[[nodiscard]] bool text_boolean(const std::string_view text) noexcept {
+    return text == "1" || text == "true" || text == "TRUE" ||
+           text == "on" || text == "ON" || text == "closed" || text == "CLOSED";
+}
+
+[[nodiscard]] std::int64_t text_integer(const std::string& text) noexcept {
+    const auto upper = upper_copy(text);
+    if (upper == "INTERMEDIATE-STATE") return 0;
+    if (upper == "OFF" || upper == "OPEN") return 1;
+    if (upper == "ON" || upper == "CLOSED") return 2;
+    if (upper == "BAD-STATE") return 3;
+    try {
+        return std::stoll(text);
+    } catch (...) {
+        return 0;
+    }
+}
+
+[[nodiscard]] mms::MmsTypeSpecification manifest_type(
+    const std::string& raw_type,
+    const std::string& normalized_type,
+    std::string name = {}) {
+    const auto raw = upper_copy(raw_type);
+    const auto normalized = upper_copy(normalized_type);
+    mms::MmsTypeSpecification result;
+    result.name = std::move(name);
+    if (normalized == "ENUMERATION" || raw.find("ENUM") != std::string::npos) {
+        result.kind = mms::MmsTypeKind::integer;
+        result.size = 32U;
+    } else if (normalized == "BOOLEAN" || raw.find("BOOL") != std::string::npos) {
+        result.kind = mms::MmsTypeKind::boolean;
+    } else if (normalized == "QUALITY") {
+        result.kind = mms::MmsTypeKind::bit_string;
+        result.size = 13U;
+    } else if (normalized == "TIMESTAMP") {
+        result.kind = mms::MmsTypeKind::utc_time;
+    } else if (raw.find("FLOAT64") != std::string::npos) {
+        result.kind = mms::MmsTypeKind::floating_point;
+        result.size = 64U;
+        result.exponent_width = 11U;
+    } else if (raw.find("FLOAT") != std::string::npos) {
+        result.kind = mms::MmsTypeKind::floating_point;
+        result.size = 32U;
+        result.exponent_width = 8U;
+    } else if (raw.find("INT") != std::string::npos &&
+               (raw.ends_with('U') || raw.find("UINT") != std::string::npos)) {
+        result.kind = mms::MmsTypeKind::unsigned_integer;
+        result.size = 32U;
+    } else if (normalized == "NUMBER" || raw.find("INT") != std::string::npos) {
+        result.kind = mms::MmsTypeKind::integer;
+        result.size = 32U;
+    } else {
+        result.kind = mms::MmsTypeKind::visible_string;
+        result.size = 255U;
+    }
+    return result;
+}
+
+[[nodiscard]] mms::MmsDataValue manifest_data(
+    const mms::MmsTypeSpecification& type,
+    const std::string& text) {
+    switch (type.kind) {
+    case mms::MmsTypeKind::boolean:
+        return mms::MmsDataValue::boolean(text_boolean(text));
+    case mms::MmsTypeKind::bit_string: {
+        constexpr std::array<std::uint8_t, 2U> good_quality{};
+        return mms::MmsDataValue::bit_string(3U, good_quality);
+    }
+    case mms::MmsTypeKind::integer:
+        return mms::MmsDataValue::integer(text_integer(text));
+    case mms::MmsTypeKind::unsigned_integer:
+        return mms::MmsDataValue::unsigned_integer(
+            static_cast<std::uint64_t>(std::max<std::int64_t>(0, text_integer(text))));
+    case mms::MmsTypeKind::floating_point:
+        try {
+            return type.size.value_or(32U) == 64U
+                ? mms::MmsDataValue::floating_point(std::stod(text))
+                : mms::MmsDataValue::floating_point(std::stof(text));
+        } catch (...) {
+            return mms::MmsDataValue::floating_point(0.0F);
+        }
+    case mms::MmsTypeKind::utc_time:
+        return mms::MmsDataValue::utc_time(
+            mms::Iec61850UtcTime{std::chrono::system_clock::now(), 0U});
+    default:
+        return mms::MmsDataValue::visible_string(text == "---" ? std::string{} : text);
+    }
+}
+
+void encode_manifest_value(ManifestValue& value) {
+    value.type = manifest_type(value.raw_type, value.normalized_type);
+    value.data = manifest_data(value.type, value.text);
+    value.type_specification = mms::MmsServiceCodec::encode_type_specification(value.type);
+    value.encoded = mms::MmsDataCodec::encode(*value.data);
+}
+
+[[nodiscard]] wire::EncodeResult read_manifest_value(
+    const void* context,
+    const std::span<std::uint8_t> destination) noexcept {
+    if (context == nullptr) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    const auto& value = *static_cast<const ManifestValue*>(context);
+    if (destination.size() < value.encoded.size()) {
+        return {
+            wire::EncodeStatus::buffer_too_small,
+            0U,
+            value.encoded.size()};
+    }
+    std::copy(value.encoded.begin(), value.encoded.end(), destination.begin());
+    return {wire::EncodeStatus::ok, value.encoded.size(), value.encoded.size()};
+}
+
+[[nodiscard]] mms::MmsTypeSpecification node_type(
+    const ManifestTypeNode& node,
+    const ManifestModel& model,
+    std::string name) {
+    if (node.children.empty() && node.value_index.has_value()) {
+        auto result = model.values[*node.value_index].type;
+        result.name = std::move(name);
+        return result;
+    }
+    mms::MmsTypeSpecification result;
+    result.kind = mms::MmsTypeKind::structure;
+    result.name = std::move(name);
+    result.children.reserve(node.children.size());
+    for (const auto& [child_name, child] : node.children) {
+        result.children.push_back(node_type(child, model, child_name));
+    }
+    return result;
+}
+
+[[nodiscard]] mms::MmsDataValue node_data(
+    const ManifestTypeNode& node,
+    const ManifestModel& model) {
+    if (node.children.empty() && node.value_index.has_value()) {
+        return *model.values[*node.value_index].data;
+    }
+    std::vector<mms::MmsDataValue> children;
+    children.reserve(node.children.size());
+    for (const auto& [name, child] : node.children) {
+        static_cast<void>(name);
+        children.push_back(node_data(child, model));
+    }
+    return mms::MmsDataValue::structure(std::move(children));
+}
+
+void rebuild_manifest_roots(ManifestModel& model) {
+    for (std::size_t index = 0U; index < model.root_trees.size(); ++index) {
+        const auto value_index = model.root_value_indices[index];
+        const auto& tree = model.root_trees[index];
+        if (tree.children.empty()) continue;
+        auto& root = model.values[value_index];
+        root.type = node_type(tree, model, {});
+        root.data = node_data(tree, model);
+        root.type_specification = mms::MmsServiceCodec::encode_type_specification(root.type);
+        root.encoded = mms::MmsDataCodec::encode(*root.data);
+    }
+}
+
+[[nodiscard]] std::uint64_t manifest_revision(const std::string& header) noexcept {
+    const auto fields = split_fields(header, '\t');
+    if (fields.size() < 3U || fields[0] != "ARSTACK_IED_MODEL") return 0U;
+    try {
+        return std::stoull(fields[2]);
+    } catch (...) {
+        return 0U;
+    }
+}
+
+[[nodiscard]] std::string object_key(
+    const std::string_view domain,
+    const std::string_view item) {
+    std::string result;
+    result.reserve(domain.size() + item.size() + 1U);
+    result.append(domain);
+    result.push_back('\n');
+    result.append(item);
+    return result;
+}
+
 [[nodiscard]] ManifestModel load_manifest_model(
     const std::string& path,
-    const std::span<const std::uint8_t> type_specification,
-    const EncodedValue& value) {
+    const std::span<const std::uint8_t> fallback_type_specification,
+    const EncodedValue& fallback_value) {
     ManifestModel model;
-    if (path.empty()) {
-        return model;
-    }
-    std::ifstream input{path};
-    if (!input) {
-        throw std::runtime_error("Could not open model manifest: " + path);
-    }
+    model.path = path;
+    if (path.empty()) return model;
 
-    std::vector<std::pair<std::string, std::string>> names;
-    std::set<std::pair<std::string, std::string>> unique_names;
-    std::string line;
-    while (std::getline(input, line)) {
-        if (line.rfind("LN\t", 0U) != 0U) {
-            continue;
-        }
-        std::istringstream fields{line};
-        std::string kind;
+    std::ifstream input{path};
+    if (!input) throw std::runtime_error("Could not open model manifest: " + path);
+
+    struct ParsedObject final {
         std::string domain;
         std::string item;
-        std::getline(fields, kind, '\t');
-        std::getline(fields, domain, '\t');
-        std::getline(fields, item, '\t');
-        if (domain.empty() || item.empty()) {
-            continue;
-        }
-        ++model.declared_entries;
-        if (unique_names.emplace(domain, item).second &&
-            names.size() < mms::MmsStaticObjectTable::maximum_objects) {
-            names.emplace_back(std::move(domain), std::move(item));
+        std::string raw_type;
+        std::string normalized_type;
+        std::string text;
+    };
+    struct ParsedDataSetMember final {
+        std::string domain;
+        std::string item;
+        std::string member_domain;
+        std::string member_item;
+    };
+    std::vector<std::pair<std::string, std::string>> roots;
+    std::vector<ParsedObject> parsed_objects;
+    std::vector<ParsedDataSetMember> parsed_members;
+    std::set<std::pair<std::string, std::string>> unique_roots;
+    std::set<std::pair<std::string, std::string>> unique_objects;
+    std::string line;
+    if (std::getline(input, line)) model.revision = manifest_revision(line);
+    while (std::getline(input, line)) {
+        const auto fields = split_fields(line, '\t');
+        if (fields.size() >= 3U && fields[0] == "LN") {
+            ++model.declared_entries;
+            if (!fields[1].empty() && !fields[2].empty() &&
+                unique_roots.emplace(fields[1], fields[2]).second) {
+                roots.emplace_back(fields[1], fields[2]);
+            }
+        } else if (fields.size() >= 6U && fields[0] == "OBJ") {
+            ++model.declared_entries;
+            if (!fields[1].empty() && !fields[2].empty() &&
+                unique_objects.emplace(fields[1], fields[2]).second) {
+                parsed_objects.push_back({fields[1], fields[2], fields[3], fields[4], fields[5]});
+            }
+        } else if (fields.size() >= 5U && fields[0] == "DS") {
+            parsed_members.push_back({fields[1], fields[2], fields[3], fields[4]});
         }
     }
-    if (names.empty()) {
-        throw std::runtime_error(
-            "Model manifest contains no usable logical-node entries.");
+    if (roots.empty()) {
+        throw std::runtime_error("Model manifest contains no usable logical-node entries.");
     }
 
-    model.domains.reserve(names.size());
-    model.items.reserve(names.size());
-    for (const auto& [domain, item] : names) {
-        model.domains.push_back(domain);
-        model.items.push_back(item);
+    model.values.reserve(mms::MmsStaticObjectTable::maximum_objects);
+    model.root_trees.reserve(roots.size());
+    model.root_value_indices.reserve(roots.size());
+    std::unordered_map<std::string, std::size_t> root_indices;
+    for (const auto& [domain, item] : roots) {
+        if (model.values.size() >= mms::MmsStaticObjectTable::maximum_objects) break;
+        ManifestValue root;
+        root.domain = domain;
+        root.item = item;
+        root.root = true;
+        root.type_specification.assign(
+            fallback_type_specification.begin(), fallback_type_specification.end());
+        root.encoded.assign(fallback_value.bytes.begin(), fallback_value.bytes.end());
+        const auto value_index = model.values.size();
+        model.values.push_back(std::move(root));
+        root_indices.emplace(object_key(domain, item), model.root_trees.size());
+        model.root_value_indices.push_back(value_index);
+        model.root_trees.emplace_back();
     }
-    model.objects.reserve(names.size());
-    for (std::size_t index = 0U; index < names.size(); ++index) {
+
+    for (const auto& parsed : parsed_objects) {
+        if (model.values.size() >= mms::MmsStaticObjectTable::maximum_objects) break;
+        const auto key = object_key(parsed.domain, parsed.item);
+        if (model.value_indices.contains(key)) continue;
+        ManifestValue value;
+        value.domain = parsed.domain;
+        value.item = parsed.item;
+        value.raw_type = parsed.raw_type;
+        value.normalized_type = parsed.normalized_type;
+        value.text = parsed.text;
+        encode_manifest_value(value);
+        const auto value_index = model.values.size();
+        model.values.push_back(std::move(value));
+        model.value_indices.emplace(key, value_index);
+
+        const auto parts = split_fields(parsed.item, '$');
+        if (parts.size() < 2U) continue;
+        const auto found_root = root_indices.find(object_key(parsed.domain, parts[0]));
+        if (found_root == root_indices.end()) continue;
+        auto* node = &model.root_trees[found_root->second];
+        for (std::size_t part = 1U; part < parts.size(); ++part) {
+            node = &node->children[parts[part]];
+        }
+        node->value_index = value_index;
+    }
+    rebuild_manifest_roots(model);
+
+    model.objects.reserve(model.values.size());
+    for (auto& value : model.values) {
         model.objects.push_back(mms::MmsStaticObjectEntry{
-            model.domains[index],
-            model.items[index],
-            type_specification,
-            read_encoded,
+            value.domain,
+            value.item,
+            value.type_specification,
+            read_manifest_value,
             &value});
     }
+
+    std::map<std::pair<std::string, std::string>, std::vector<std::pair<std::string, std::string>>>
+        grouped_members;
+    for (const auto& member : parsed_members) {
+        if (!model.value_indices.contains(object_key(member.member_domain, member.member_item))) {
+            continue;
+        }
+        grouped_members[{member.domain, member.item}].emplace_back(
+            member.member_domain, member.member_item);
+    }
+    model.data_set_storage.reserve(std::min<std::size_t>(
+        grouped_members.size(), mms::MmsStaticDataSetTable::maximum_data_sets));
+    for (auto& [name, members] : grouped_members) {
+        if (model.data_set_storage.size() >= mms::MmsStaticDataSetTable::maximum_data_sets) break;
+        if (members.empty()) continue;
+        ManifestDataSetStorage storage;
+        storage.domain = std::move(name.first);
+        storage.item = std::move(name.second);
+        storage.member_names = std::move(members);
+        model.data_set_storage.push_back(std::move(storage));
+    }
+    model.data_sets.reserve(model.data_set_storage.size());
+    for (auto& storage : model.data_set_storage) {
+        storage.members.reserve(storage.member_names.size());
+        for (const auto& [domain, item] : storage.member_names) {
+            storage.members.push_back({domain, item});
+        }
+        model.data_sets.push_back({
+            storage.domain, storage.item, storage.members, false});
+    }
     return model;
+}
+
+[[nodiscard]] std::size_t refresh_manifest_values(ManifestModel& model) {
+    if (model.path.empty()) return 0U;
+    std::ifstream input{model.path};
+    if (!input) return 0U;
+    std::string line;
+    if (!std::getline(input, line)) return 0U;
+    const auto revision = manifest_revision(line);
+    if (revision == 0U || revision == model.revision) return 0U;
+
+    std::size_t changed{};
+    while (std::getline(input, line)) {
+        const auto fields = split_fields(line, '\t');
+        if (fields.size() < 6U || fields[0] != "OBJ") continue;
+        const auto found = model.value_indices.find(object_key(fields[1], fields[2]));
+        if (found == model.value_indices.end()) continue;
+        auto& value = model.values[found->second];
+        if (value.text == fields[5]) continue;
+        value.text = fields[5];
+        value.data = manifest_data(value.type, value.text);
+        value.encoded = mms::MmsDataCodec::encode(*value.data);
+        ++changed;
+    }
+    model.revision = revision;
+    if (changed != 0U) {
+        rebuild_manifest_roots(model);
+        // Re-encoding a root may reallocate its byte vector. Refresh the
+        // object-table spans so later attribute/root reads never retain
+        // storage from the previous manifest revision.
+        for (const auto value_index : model.root_value_indices) {
+            model.objects[value_index].type_specification =
+                model.values[value_index].type_specification;
+        }
+    }
+    return changed;
 }
 
 [[nodiscard]] std::string_view connection_state_text(
@@ -634,6 +994,7 @@ void serve_connection(
     const NativeSocket socket,
     const mms::MmsStaticObjectTable& object_table,
     const mms::MmsStaticDataSetTable& data_sets,
+    ManifestModel* const manifest_model,
     const std::uint64_t association_id,
     const std::string_view remote) {
     mms::MmsStaticDispatchPolicy dispatch_policy;
@@ -662,9 +1023,26 @@ void serve_connection(
         {buffers.receive, buffers.response, buffers.workspace}};
 
     auto previous_state = runtime.state();
+    auto next_model_refresh = std::chrono::steady_clock::now();
     std::size_t total_received = 0U;
     std::size_t total_sent = 0U;
     while (!g_stop.load(std::memory_order_relaxed)) {
+        const auto now = std::chrono::steady_clock::now();
+        if (manifest_model != nullptr && now >= next_model_refresh) {
+            next_model_refresh = now + std::chrono::milliseconds{25};
+            try {
+                const auto changed = refresh_manifest_values(*manifest_model);
+                if (changed != 0U) {
+                    std::cout << "IEDSIM_EVENT kind=value_sync association="
+                              << association_id << " changed=" << changed
+                              << " revision=" << manifest_model->revision << '\n';
+                    std::cout.flush();
+                }
+            } catch (const std::exception& exception) {
+                std::cerr << "IEDSIM_EVENT kind=value_sync_error association="
+                          << association_id << " message=" << exception.what() << '\n';
+            }
+        }
         const auto result = session.poll_once();
         total_received += result.bytes_received;
         total_sent += result.bytes_sent;
@@ -818,7 +1196,7 @@ int main(int argc, char** argv) {
             : std::span<const mms::MmsStaticObjectEntry>{manifest_model.objects};
         const auto data_set_span = manifest_model.objects.empty()
             ? std::span<const mms::MmsStaticDataSetEntry>{data_set_entries}
-            : std::span<const mms::MmsStaticDataSetEntry>{};
+            : std::span<const mms::MmsStaticDataSetEntry>{manifest_model.data_sets};
         const mms::MmsStaticObjectTable object_table{object_span};
         const mms::MmsStaticDataSetTable data_sets{data_set_span};
         if (!object_table.valid() ||
@@ -882,6 +1260,7 @@ int main(int argc, char** argv) {
                 client,
                 object_table,
                 data_sets,
+                manifest_model.objects.empty() ? nullptr : &manifest_model,
                 static_cast<std::uint64_t>(connection_count),
                 remote);
             close_socket(client);

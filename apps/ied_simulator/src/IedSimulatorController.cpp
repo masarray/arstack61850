@@ -12,6 +12,7 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QNetworkInterface>
+#include <QSaveFile>
 #include <QSet>
 #include <QTimer>
 #include <QXmlStreamReader>
@@ -86,10 +87,38 @@ QString referenceFor(const ar::iec61850::scl::SclDataSetEntry& entry) {
     if (!entry.da_name.empty()) parts.push_back(qstring(entry.da_name));
     return parts.join(QLatin1Char('/'));
 }
+
+QString mmsDomainFor(const ar::iec61850::scl::SclDataSetEntry& entry) {
+    return qstring(entry.ied_name) + qstring(entry.ld_inst);
+}
+
+QString mmsItemFor(const ar::iec61850::scl::SclDataSetEntry& entry) {
+    auto attribute = qstring(entry.da_name);
+    attribute.replace(QLatin1Char('.'), QLatin1Char('$'));
+    QStringList parts{
+        qstring(entry.prefix) + qstring(entry.ln_class) + qstring(entry.ln_inst),
+        qstring(entry.functional_constraint),
+        qstring(entry.do_name)};
+    if (!attribute.isEmpty()) parts.push_back(attribute);
+    parts.removeAll(QString{});
+    return parts.join(QLatin1Char('$'));
+}
+
+QByteArray manifestField(QString value) {
+    value.replace(QLatin1Char('\t'), QLatin1Char(' '));
+    value.replace(QLatin1Char('\r'), QLatin1Char(' '));
+    value.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    return value.toUtf8();
+}
 } // namespace
 
 IedSimulatorController::IedSimulatorController(QObject* parent)
     : QObject(parent) {
+    connect(
+        QCoreApplication::instance(),
+        &QCoreApplication::aboutToQuit,
+        this,
+        [this] { stopSimulation(); });
     connect(
         &serverProcess_,
         &QProcess::started,
@@ -275,6 +304,7 @@ bool IedSimulatorController::importFile(const QUrl& fileUrl, const bool append) 
         if (!append) {
             if (running_ || starting_) stopSimulation();
             documents_.clear();
+            runtimeValues_.clear();
         }
         documents_.push_back(LoadedDocument{path, std::move(document)});
         sourcePath_ = path;
@@ -300,6 +330,7 @@ void IedSimulatorController::clear() {
     documents_.clear();
     ieds_.clear();
     values_.clear();
+    runtimeValues_.clear();
     previousValue_.reset();
     sourceName_.clear();
     sourcePath_.clear();
@@ -392,6 +423,17 @@ bool IedSimulatorController::applySelectedValue(
         QStringLiteral("updated"),
         QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss.zzz")));
     values_[selectedValueIndex_] = item;
+    runtimeValues_.insert(item.value(QStringLiteral("reference")).toString(), item);
+    if (!writeModelManifest()) {
+        values_[selectedValueIndex_] = previousValue_->value;
+        runtimeValues_.insert(
+            previousValue_->value.value(QStringLiteral("reference")).toString(),
+            previousValue_->value);
+        previousValue_.reset();
+        emit valuesChanged();
+        emit selectionChanged();
+        return false;
+    }
     emit valuesChanged();
     emit selectionChanged();
     appendActivity(
@@ -409,7 +451,14 @@ bool IedSimulatorController::undoLastChange() {
     }
     const int index = previousValue_->valueIndex;
     const auto reference = previousValue_->value.value(QStringLiteral("reference")).toString();
+    const auto current = values_[index].toMap();
     values_[index] = previousValue_->value;
+    runtimeValues_.insert(reference, previousValue_->value);
+    if (!writeModelManifest()) {
+        values_[index] = current;
+        runtimeValues_.insert(reference, current);
+        return false;
+    }
     selectedValueIndex_ = index;
     previousValue_.reset();
     emit valuesChanged();
@@ -515,7 +564,7 @@ void IedSimulatorController::processServerLine(
         appendActivity(
             QStringLiteral("Server"),
             QStringLiteral(
-                "MMS listener ready on %1:%2; %3 domains, %4 logical-node roots; profile %5.")
+                "MMS listener ready on %1:%2; %3 domains, %4 MMS objects; profile %5.")
                 .arg(fields.value(QStringLiteral("bind")).toString())
                 .arg(fields.value(QStringLiteral("port")).toString())
                 .arg(fields.value(QStringLiteral("domains")).toString())
@@ -578,11 +627,15 @@ void IedSimulatorController::processServerLine(
 }
 
 bool IedSimulatorController::writeModelManifest() {
-    removeModelManifest();
-    serverModelManifestPath_ = QDir::temp().filePath(
-        QStringLiteral("arstack-ied-simulator-%1.model")
-            .arg(QCoreApplication::applicationPid()));
-    QByteArray manifest{"ARSTACK_IED_MODEL\t1\n"};
+    if (serverModelManifestPath_.isEmpty()) {
+        serverModelManifestPath_ = QDir::temp().filePath(
+            QStringLiteral("arstack-ied-simulator-%1.model")
+                .arg(QCoreApplication::applicationPid()));
+    }
+    seedRuntimeValues();
+    ++modelRevision_;
+    QByteArray manifest = "ARSTACK_IED_MODEL\t2\t" +
+        QByteArray::number(modelRevision_) + "\n";
     QSet<QString> uniqueRoots;
     for (const auto& loaded : documents_) {
         QFile input{loaded.path};
@@ -634,6 +687,45 @@ bool IedSimulatorController::writeModelManifest() {
             return false;
         }
     }
+
+    QSet<QString> emittedObjects;
+    for (auto it = runtimeValues_.cbegin(); it != runtimeValues_.cend(); ++it) {
+        const auto item = it.value();
+        const auto domain = item.value(QStringLiteral("mmsDomain")).toString();
+        const auto mmsItem = item.value(QStringLiteral("mmsItem")).toString();
+        if (domain.isEmpty() || mmsItem.isEmpty()) continue;
+        const auto key = domain + QLatin1Char('\n') + mmsItem;
+        if (emittedObjects.contains(key)) continue;
+        emittedObjects.insert(key);
+        manifest += "OBJ\t" + manifestField(domain) + "\t" +
+            manifestField(mmsItem) + "\t" +
+            manifestField(item.value(QStringLiteral("rawType")).toString()) + "\t" +
+            manifestField(item.value(QStringLiteral("type")).toString()) + "\t" +
+            manifestField(item.value(QStringLiteral("value")).toString()) + "\n";
+    }
+
+    QSet<QString> emittedDataSetMembers;
+    for (const auto& loaded : documents_) {
+        for (const auto& dataSet : loaded.document.data_sets) {
+            const auto dataSetDomain = qstring(dataSet.ied_name) + qstring(dataSet.ld_inst);
+            auto dataSetItem = qstring(dataSet.logical_node_path) + QLatin1Char('$') +
+                qstring(dataSet.name);
+            dataSetItem.replace(QLatin1Char('.'), QLatin1Char('$'));
+            for (const auto& entry : dataSet.entries) {
+                const auto memberDomain = mmsDomainFor(entry);
+                const auto memberItem = mmsItemFor(entry);
+                const auto memberKey = dataSetDomain + QLatin1Char('\n') + dataSetItem +
+                    QLatin1Char('\n') + memberDomain + QLatin1Char('\n') + memberItem;
+                if (dataSetDomain.isEmpty() || dataSetItem.isEmpty() ||
+                    memberDomain.isEmpty() || memberItem.isEmpty() ||
+                    emittedDataSetMembers.contains(memberKey)) continue;
+                emittedDataSetMembers.insert(memberKey);
+                manifest += "DS\t" + manifestField(dataSetDomain) + "\t" +
+                    manifestField(dataSetItem) + "\t" + manifestField(memberDomain) +
+                    "\t" + manifestField(memberItem) + "\n";
+            }
+        }
+    }
     if (uniqueRoots.isEmpty()) {
         appendActivity(
             QStringLiteral("Model"),
@@ -641,17 +733,22 @@ bool IedSimulatorController::writeModelManifest() {
             QStringLiteral("Error"));
         return false;
     }
-    QFile output{serverModelManifestPath_};
+    QSaveFile output{serverModelManifestPath_};
     if (!output.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
         output.write(manifest) != manifest.size()) {
         appendActivity(
             QStringLiteral("Model"),
             QStringLiteral("Could not create the temporary MMS model manifest."),
             QStringLiteral("Error"));
-        removeModelManifest();
         return false;
     }
-    output.close();
+    if (!output.commit()) {
+        appendActivity(
+            QStringLiteral("Model"),
+            QStringLiteral("Could not publish the MMS model manifest atomically."),
+            QStringLiteral("Error"));
+        return false;
+    }
     return true;
 }
 
@@ -729,6 +826,7 @@ void IedSimulatorController::rebuildPresentation() {
         ? -1
         : std::clamp(selectedIedIndex_, 0, maximumIedIndex);
     if (selectedIedIndex_ < 0 && !ieds_.isEmpty()) selectedIedIndex_ = 0;
+    seedRuntimeValues();
     rebuildValues();
     emit modelChanged();
     emit selectionChanged();
@@ -754,7 +852,9 @@ void IedSimulatorController::rebuildValues() {
         if (!entry.ied_name.empty() && qstring(entry.ied_name) != selectedName) return;
         const auto reference = referenceFor(entry).toStdString();
         if (!seen.insert(reference).second) return;
-        values_.push_back(valueMap(entry));
+        const auto key = referenceFor(entry);
+        if (!runtimeValues_.contains(key)) runtimeValues_.insert(key, valueMap(entry));
+        values_.push_back(runtimeValues_.value(key));
     };
     for (const auto& dataSet : document.data_sets) {
         for (const auto& entry : dataSet.entries) appendEntry(entry);
@@ -767,6 +867,26 @@ void IedSimulatorController::rebuildValues() {
     }
     selectedValueIndex_ = values_.isEmpty() ? -1 : 0;
     emit valuesChanged();
+}
+
+void IedSimulatorController::seedRuntimeValues() {
+    const auto seedEntry = [this](const ar::iec61850::scl::SclDataSetEntry& entry) {
+        const auto key = referenceFor(entry);
+        if (!key.isEmpty() && !runtimeValues_.contains(key)) {
+            runtimeValues_.insert(key, valueMap(entry));
+        }
+    };
+    for (const auto& loaded : documents_) {
+        for (const auto& dataSet : loaded.document.data_sets) {
+            for (const auto& entry : dataSet.entries) seedEntry(entry);
+        }
+        for (const auto& stream : loaded.document.goose_streams) {
+            for (const auto& entry : stream.entries) seedEntry(entry);
+        }
+        for (const auto& report : loaded.document.report_controls) {
+            for (const auto& entry : report.entries) seedEntry(entry);
+        }
+    }
 }
 
 QVariantMap IedSimulatorController::valueMap(
@@ -785,6 +905,9 @@ QVariantMap IedSimulatorController::valueMap(
     item.insert(QStringLiteral("cdc"), qstring(entry.cdc));
     item.insert(QStringLiteral("type"), type);
     item.insert(QStringLiteral("rawType"), qstring(entry.basic_type));
+    item.insert(QStringLiteral("iedName"), qstring(entry.ied_name));
+    item.insert(QStringLiteral("mmsDomain"), mmsDomainFor(entry));
+    item.insert(QStringLiteral("mmsItem"), mmsItemFor(entry));
     item.insert(QStringLiteral("value"), initialValue(type, qstring(entry.da_name)));
     item.insert(QStringLiteral("quality"), QStringLiteral("Good"));
     item.insert(QStringLiteral("origin"), QStringLiteral("Simulator"));

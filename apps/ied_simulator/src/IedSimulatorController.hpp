@@ -4,6 +4,7 @@
 #include "ariec61850/scl/model.hpp"
 
 #include <QObject>
+#include <QHash>
 #include <QProcess>
 #include <QUrl>
 #include <QVariantList>
@@ -118,6 +119,7 @@ private:
     bool importFile(const QUrl& fileUrl, bool append);
     void rebuildPresentation();
     void rebuildValues();
+    void seedRuntimeValues();
     void appendActivity(
         const QString& category,
         const QString& message,
@@ -135,6 +137,7 @@ private:
     QVariantList ieds_;
     QVariantList values_;
     QVariantList activity_;
+    QHash<QString, QVariantMap> runtimeValues_;
     std::optional<ValueSnapshot> previousValue_;
     QProcess serverProcess_;
     QByteArray standardOutputBuffer_;
@@ -155,6 +158,7 @@ private:
     int reportCount_{};
     int gooseCount_{};
     quint64 serverStartGeneration_{};
+    quint64 modelRevision_{};
     bool running_{};
     bool starting_{};
     bool gooseEnabled_{};

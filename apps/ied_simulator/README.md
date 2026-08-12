@@ -14,11 +14,18 @@ one executable while reusing the repository SCL parser and MMS server.
    DataSet/report/GOOSE members with type-aware controls, quality, origin, and
    undo history.
 
-The desktop server projects the imported SCL logical-device and logical-node
-roots into a bounded host MMS model (up to 128 objects), binds the selected
-IPv4 interface, and reports TCP/COTP/ACSE/MMS activity back to the GUI. GOOSE
-transmission, host file-service mapping, and complete leaf-value materialization
-remain explicit follow-up work and are not claimed here.
+The desktop server projects the imported SCL logical-device, logical-node, and
+resolved leaf-value hierarchy into a bounded host MMS model (up to 128 objects).
+Static DataSets retain their ordered SCL member references. While an association
+is open, a value applied in the runtime editor is atomically published to the
+server backing model and is visible to a subsequent MMS Read without forcing the
+client to reconnect. TCP/COTP/ACSE/MMS activity and value synchronization are
+reported back to the GUI.
+
+This phase does not claim dynamic DataSet creation/deletion, URCB/BRCB report
+delivery, client-originated control/write handling, GOOSE transmission, or host
+file-service transfer. Those services stay disabled or diagnostic-only until
+their protocol paths have independent interoperability coverage.
 
 ## Windows build
 
@@ -35,6 +42,19 @@ executables beside each other when packaging.
 The discovery status becomes green only after the server emits listener-ready
 evidence. Use **Copy diagnostics** to capture the endpoint, IEDScout association
 profile, process state, model counts, and recent protocol activity.
+
+## Runtime interoperability test
+
+The integration test starts the real Qt controller, imports the fixture SCL,
+starts its child MMS server, applies a value in the runtime editor, and reads
+that value through an independent MMS association:
+
+```powershell
+python apps/ied_simulator/test_gui_live_value.py `
+  --app build-ied-simulator-qt/arstack_ied_simulator.exe `
+  --read-probe build-ied-simulator-qt/ariec61850_mms_read_probe.exe `
+  --scl tests/fixtures/scl/minimal-station.scd
+```
 
 ## Deterministic UI smoke test
 
