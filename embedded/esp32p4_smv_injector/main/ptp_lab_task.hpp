@@ -114,8 +114,9 @@ bool ar_ptp_lab_get_config(ar_ptp_lab_config_t* config);
  * LAB_SOURCE is an isolated interoperability helper, TIME_RECEIVER disciplines
  * the ESP32-P4 IEEE1588 clock from an external PTP source, and MONITOR remains
  * passive. None of these modes is a GPS-backed or certified grandmaster claim.
+ * Returns false if startup is rejected or the selected runtime cannot start.
  */
-void ar_ptp_lab_start(esp_eth_handle_t eth_handle);
+bool ar_ptp_lab_start(esp_eth_handle_t eth_handle);
 
 /** Request a clean stop of the PTP task without touching the SV hot path. */
 void ar_ptp_lab_stop(void);
