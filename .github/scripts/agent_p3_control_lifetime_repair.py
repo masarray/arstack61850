@@ -96,21 +96,94 @@ once(
 ''',
 'enhanced select evidence')
 
-# MmsInformationReportSpanCodec validates data_set_reference even when the
-# DataSetName optional field is not selected. Supply a valid internal reference;
-# it is not emitted on the wire because OptFlds keeps DataSetName disabled.
+# CommandTermination is an ordinary MMS InformationReport with an explicit
+# variable-access reference to CO$...$Oper. RCB report framing is valid MMS but
+# does not populate MmsInformationReport::variable_references, so the command
+# decoder cannot correlate it to a pending enhanced-security Oper.
 once(
-'''    report.report_id = "CommandTermination";
+'''#include "ariec61850/mms/data_codec.hpp"
+#include "ariec61850/mms/services.hpp"
+''',
+'''#include "ariec61850/mms/data_codec.hpp"
+#include "ariec61850/mms/reporting.hpp"
+#include "ariec61850/mms/services.hpp"
+''',
+'control report codec include')
+
+once(
+'''[[nodiscard]] bool encode_host_control_termination(
+    const mms::MmsStaticConnectionRuntime& connection,
+    HostControl& host,
+    ConnectionBuffers& buffers,
+    std::size_t& bytes_written) noexcept {
+    bytes_written = 0U;
+    if (connection.state() != mms::MmsStaticConnectionState::established ||
+        connection.mms_presentation_context_id() == 0U || host.last_oper.empty()) return false;
+    const std::array<std::uint8_t, 2U> opt{{0x04U, 0x00U}}; // dataRef
+    const std::array<mms::MmsInformationReportReferenceInput, 1U> refs{{
+        {host.manifest->domain, host.oper_item}}};
+    const std::array<mms::MmsReadAccessResultInput, 1U> results{{
+        {true, host.last_oper, 0U}}};
+    mms::MmsInformationReportSnapshotInput report;
+    report.report_id = "CommandTermination";
     report.optional_fields = opt;
     report.conf_revision = 1U;
+    report.member_references = refs;
+    report.member_results = results;
+    report.reason_for_inclusion = 0x40U;
+    const auto raw = mms::MmsInformationReportSpanCodec::encode_snapshot_into(
+        report, buffers.report_response);
+    if (!raw.success()) return false;
+    const auto p_data = ar::iec61850::osi::PresentationSpanCodec::encode_p_data_into(
+        std::span<const std::uint8_t>{buffers.report_response.data(), raw.bytes_written},
+        buffers.report_workspace,
+        connection.mms_presentation_context_id(),
+        true);
 ''',
-'''    report.report_id = "CommandTermination";
-    report.optional_fields = opt;
-    report.data_set_reference = mms::MmsInformationReportReferenceInput{
-        host.manifest->domain, host.oper_item};
-    report.conf_revision = 1U;
+'''[[nodiscard]] bool encode_host_control_termination(
+    const mms::MmsStaticConnectionRuntime& connection,
+    HostControl& host,
+    ConnectionBuffers& buffers,
+    std::size_t& bytes_written) noexcept {
+    bytes_written = 0U;
+    if (connection.state() != mms::MmsStaticConnectionState::established ||
+        connection.mms_presentation_context_id() == 0U || host.last_oper.empty()) return false;
+    try {
+        mms::MmsInformationReport report;
+        report.variable_references.push_back(
+            mms::MmsObjectName::domain_specific(host.manifest->domain, host.oper_item));
+        report.items.push_back({
+            0U,
+            mms::MmsDataCodec::decode(host.last_oper),
+            std::nullopt});
+        const auto raw = mms::MmsInformationReportCodec::encode_pdu(report);
+        if (raw.empty() || raw.size() > buffers.report_response.size()) return false;
+        std::copy(raw.begin(), raw.end(), buffers.report_response.begin());
+        const auto p_data = ar::iec61850::osi::PresentationSpanCodec::encode_p_data_into(
+            std::span<const std::uint8_t>{buffers.report_response.data(), raw.size()},
+            buffers.report_workspace,
+            connection.mms_presentation_context_id(),
+            true);
 ''',
-'command termination internal reference')
+'command termination report shape')
+
+once(
+'''    bytes_written = tpkt.bytes_written;
+    return true;
+}
+
+[[nodiscard]] bool poll_host_control_terminations(
+''',
+'''        bytes_written = tpkt.bytes_written;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+[[nodiscard]] bool poll_host_control_terminations(
+''',
+'command termination exception boundary')
 
 p.write_text(s, encoding='utf-8')
-print('P3 lifetime/exact-type/termination repair applied')
+print('P3 lifetime/exact-type/control-termination repair applied')
