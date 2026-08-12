@@ -1,19 +1,18 @@
-name: Agent P2 Reporting Runner
+name: Agent P2 Final Clean-Head Runner
 
 on:
   push:
     branches:
       - agent/p2-reporting-run
     paths:
-      - .github/scripts/agent_p2_brcb_patch.py
-      - .github/scripts/agent_p2_brcb_repair.py
+      - .github/scripts/agent_p2_finalize.sh
       - .github/workflows/agent-p2-reporting-run.yml
 
 permissions:
   contents: write
 
 jobs:
-  brcb-integration:
+  clean-head:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -21,22 +20,8 @@ jobs:
           ref: agent/p2-reporting-run
           fetch-depth: 0
 
-      - name: Preserve BRCB patchers and checkout validated URCB target
-        run: |
-          cp .github/scripts/agent_p2_brcb_patch.py /tmp/agent_p2_brcb_patch.py
-          cp .github/scripts/agent_p2_brcb_repair.py /tmp/agent_p2_brcb_repair.py
-          git checkout -B agent/iedsim-full-scl-live-store origin/agent/iedsim-full-scl-live-store
-
-      - name: Apply BRCB R1-R3 integration
-        run: |
-          python3 /tmp/agent_p2_brcb_patch.py
-          python3 /tmp/agent_p2_brcb_repair.py
-
-      - name: Diff sanity
-        run: |
-          git diff --check
-          python3 -m py_compile apps/ied_simulator/test_gui_live_value.py
-          git status --short
+      - name: Prepare rebased and squashed P2 locally
+        run: bash .github/scripts/agent_p2_finalize.sh
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
@@ -44,78 +29,103 @@ jobs:
           version: '6.8.3'
           cache: true
 
-      - name: Configure Qt simulator
+      - name: Configure clean-head Qt simulator
         run: >-
-          cmake -S apps/ied_simulator -B build-p2 -G Ninja
+          cmake -S apps/ied_simulator -B build-p2-final -G Ninja
           -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build Qt simulator and probes
+      - name: Build clean-head Qt simulator and probes
         run: >-
-          cmake --build build-p2
+          cmake --build build-p2-final
           --target arstack_ied_simulator ariec61850_mms_read_probe ariec61850_static_rcb_trial
           --parallel 2
 
-      - name: QML smoke
+      - name: Clean-head QML smoke
         env:
           QT_QPA_PLATFORM: offscreen
-        run: ./build-p2/arstack_ied_simulator --smoke-test
+        run: ./build-p2-final/arstack_ied_simulator --smoke-test
 
-      - name: P2 URCB plus BRCB end-to-end gate
+      - name: Clean-head P2 end-to-end gate
         run: >-
           python3 apps/ied_simulator/test_gui_live_value.py
-          --app ./build-p2/arstack_ied_simulator
-          --read-probe ./build-p2
-          --report-probe ./build-p2
+          --app ./build-p2-final/arstack_ied_simulator
+          --read-probe ./build-p2-final
+          --report-probe ./build-p2-final
           --scl ./tests/fixtures/scl/iedsim-full-model.scd
 
-      - name: Configure Clang parity target
+      - name: Configure clean-head Clang parity
         env:
           CC: clang
           CXX: clang++
-        run: cmake -S tools/static_ied_server_iedsim -B build-p2-clang -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S tools/static_ied_server_iedsim -B build-p2-final-clang -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build and test Clang parity target
+      - name: Build and test clean-head Clang parity
         run: |
-          cmake --build build-p2-clang --parallel 2
-          ctest --test-dir build-p2-clang --output-on-failure
+          cmake --build build-p2-final-clang --parallel 2
+          ctest --test-dir build-p2-final-clang --output-on-failure
 
-      - name: Configure focused root build
+      - name: Configure clean-head focused root build
         run: >-
-          cmake -S . -B build-p2-root -G Ninja
+          cmake -S . -B build-p2-final-root -G Ninja
           -DCMAKE_BUILD_TYPE=Release
           -DARIEC61850_BUILD_TESTS=ON
           -DARIEC61850_BUILD_TOOLS=ON
 
-      - name: Build focused root targets
+      - name: Build clean-head focused root targets
         run: >-
-          cmake --build build-p2-root
+          cmake --build build-p2-final-root
           --target ariec61850_scl_tests ariec61850_reporting_tests ariec61850_mms_runtime_tests ariec61850_static_ied_server ariec61850_static_rcb_trial
           --parallel 2
 
-      - name: Run reporting, transport-routing and SCL regressions
+      - name: Run clean-head reporting, transport-routing and SCL regressions
         run: |
-          ./build-p2-root/ariec61850_reporting_tests
-          ./build-p2-root/ariec61850_mms_runtime_tests
-          ./build-p2-root/ariec61850_scl_tests
+          ./build-p2-final-root/ariec61850_reporting_tests
+          ./build-p2-final-root/ariec61850_mms_runtime_tests
+          ./build-p2-final-root/ariec61850_scl_tests
 
-      - name: Configure BRCB R1-R3 hard profile
-        run: cmake -S embedded/brcb_hard_profile -B build-brcb-hard -G Ninja
+      - name: Configure clean-head BRCB R1-R3 hard profile
+        run: cmake -S embedded/brcb_hard_profile -B build-p2-final-brcb -G Ninja
 
-      - name: Build and run BRCB hard profile
+      - name: Build and run clean-head BRCB hard profile
         run: |
-          cmake --build build-brcb-hard --parallel 2
-          ctest --test-dir build-brcb-hard --output-on-failure
+          cmake --build build-p2-final-brcb --parallel 2
+          ctest --test-dir build-p2-final-brcb --output-on-failure
 
-      - name: Commit validated complete P2 source to target branch
+      - name: Configure and test embedded host-sim GCC boundary
+        env:
+          CC: gcc
+          CXX: g++
         run: |
-          git config user.name openai-agent
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add \
-            apps/ied_simulator/CMakeLists.txt \
-            apps/ied_simulator/test_gui_live_value.py \
-            tests/fixtures/scl/iedsim-full-model.scd \
-            tools/static_ied_server.cpp \
-            tools/static_ied_server_iedsim/CMakeLists.txt \
-            tools/static_rcb_trial.cpp
-          git commit -m 'feat(iedsim): integrate buffered reporting R1-R3'
-          git push origin HEAD:agent/iedsim-full-scl-live-store
+          cmake -S embedded -B build-p2-final-embedded-gcc -G Ninja \
+            -DARIEC61850_EMBEDDED_NO_RTTI=ON \
+            -DARIEC61850_EMBEDDED_NO_EXCEPTIONS=OFF \
+            -DARIEC61850_EMBEDDED_WARNINGS_AS_ERRORS=ON
+          cmake --build build-p2-final-embedded-gcc --parallel 2
+          ctest --test-dir build-p2-final-embedded-gcc --output-on-failure
+
+      - name: Configure and test embedded host-sim Clang boundary
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S embedded -B build-p2-final-embedded-clang -G Ninja \
+            -DARIEC61850_EMBEDDED_NO_RTTI=ON \
+            -DARIEC61850_EMBEDDED_NO_EXCEPTIONS=OFF \
+            -DARIEC61850_EMBEDDED_WARNINGS_AS_ERRORS=ON
+          cmake --build build-p2-final-embedded-clang --parallel 2
+          ctest --test-dir build-p2-final-embedded-clang --output-on-failure
+
+      - name: Verify source refs did not move during validation
+        run: |
+          TARGET_BRANCH='agent/iedsim-full-scl-live-store'
+          OLD_HEAD="$(cat /tmp/p2_old_head)"
+          MAIN_HEAD="$(cat /tmp/p2_main_head)"
+          git fetch origin main "${TARGET_BRANCH}"
+          test "$(git rev-parse origin/main)" = "${MAIN_HEAD}"
+          test "$(git rev-parse origin/${TARGET_BRANCH})" = "${OLD_HEAD}"
+          echo "P2_FINAL_REF_GUARD main=${MAIN_HEAD} target=${OLD_HEAD}"
+
+      - name: Publish validated clean head to staging ref
+        run: |
+          git push --force origin HEAD:refs/heads/agent/p2-final-staging
+          echo "P2_FINAL_STAGING_SHA=$(git rev-parse HEAD)"
