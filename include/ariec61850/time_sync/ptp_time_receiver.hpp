@@ -44,6 +44,7 @@ struct PtpTimeReceiverOptions final {
     PtpPortIdentity local_port_identity{};
     std::chrono::milliseconds source_timeout{3000};
     std::chrono::milliseconds exchange_timeout{2000};
+    std::chrono::milliseconds path_delay_timeout{3000};
 };
 
 struct PtpTimeReceiverStatus final {
@@ -60,13 +61,6 @@ struct PtpTimeReceiverStatus final {
     std::uint64_t rejected_exchanges{};
 };
 
-/**
- * Bounded single-port time-receiver correlator.
- *
- * Source eligibility is refreshed by Announce only. Sync/Follow_Up/Pdelay
- * activity deliberately cannot keep stale Announce quality or traceability
- * evidence alive after source_timeout.
- */
 class PtpTimeReceiver final {
 public:
     explicit PtpTimeReceiver(PtpTimeReceiverOptions options = {}) noexcept
@@ -76,6 +70,7 @@ public:
         status_ = {};
         selected_quality_.reset();
         selected_announce_last_seen_.reset();
+        last_path_delay_at_.reset();
         clear_exchanges();
     }
 
@@ -125,6 +120,7 @@ public:
         selected_announce_last_seen_ = now;
         if (changed) {
             status_.mean_path_delay_ns.reset();
+            last_path_delay_at_.reset();
             clear_exchanges();
         }
         return changed;
@@ -214,6 +210,7 @@ public:
             return std::nullopt;
         }
         status_.mean_path_delay_ns = measurement->mean_path_delay_ns;
+        last_path_delay_at_ = now;
         ++status_.completed_pdelay_exchanges;
         return measurement;
     }
@@ -226,7 +223,8 @@ public:
         if (!profile_matches(frame) ||
             frame.header.message_type != PtpMessageType::sync ||
             !source_matches_selected(frame.header.source_port_identity) ||
-            selected_announce_stale(now)) {
+            selected_announce_stale(now) ||
+            path_delay_stale(now)) {
             return std::nullopt;
         }
         ++status_.sync_frames;
@@ -254,7 +252,8 @@ public:
             frame.header.message_type != PtpMessageType::follow_up ||
             !source_matches_selected(frame.header.source_port_identity) ||
             !frame.timestamp.has_value() ||
-            selected_announce_stale(now)) {
+            selected_announce_stale(now) ||
+            path_delay_stale(now)) {
             return std::nullopt;
         }
         ++status_.follow_up_frames;
@@ -280,10 +279,16 @@ public:
             status_.selected_source_globally_traceable = false;
             selected_quality_.reset();
             selected_announce_last_seen_.reset();
+            last_path_delay_at_.reset();
             clear_exchanges();
             return true;
         }
 
+        if (path_delay_stale(now)) {
+            status_.mean_path_delay_ns.reset();
+            last_path_delay_at_.reset();
+            pending_sync_.reset();
+        }
         if (pending_sync_.has_value() &&
             now > pending_sync_->observed_at &&
             now - pending_sync_->observed_at > options_.exchange_timeout) {
@@ -350,6 +355,14 @@ private:
                now - *selected_announce_last_seen_ > options_.source_timeout;
     }
 
+    [[nodiscard]] bool path_delay_stale(
+        const std::chrono::steady_clock::time_point now) const noexcept {
+        return status_.mean_path_delay_ns.has_value() &&
+               last_path_delay_at_.has_value() &&
+               now > *last_path_delay_at_ &&
+               now - *last_path_delay_at_ > options_.path_delay_timeout;
+    }
+
     [[nodiscard]] static bool better_quality(
         const AnnounceQuality& left,
         const AnnounceQuality& right) noexcept {
@@ -414,6 +427,7 @@ private:
     PtpTimeReceiverStatus status_{};
     std::optional<AnnounceQuality> selected_quality_;
     std::optional<std::chrono::steady_clock::time_point> selected_announce_last_seen_;
+    std::optional<std::chrono::steady_clock::time_point> last_path_delay_at_;
     std::optional<PendingSync> pending_sync_;
     std::optional<PendingPdelay> pending_pdelay_;
 };
