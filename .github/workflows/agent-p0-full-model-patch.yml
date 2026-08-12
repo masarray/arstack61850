@@ -25,27 +25,19 @@ jobs:
           from pathlib import Path
           p = Path('tools/static_ied_server.cpp')
           s = p.read_text(encoding='utf-8')
-          old = '''struct ManifestTypeNode final {
-              std::vector<std::pair<std::string, ManifestTypeNode>> children;
-              std::optional<std::size_t> value_index;
-          };
 
-          [[nodiscard]] ManifestTypeNode& manifest_child(
-              ManifestTypeNode& node, const std::string& name) {
-              for (auto& [child_name, child] : node.children) {
-                  if (child_name == name) return child;
-              }
-              node.children.emplace_back(name, ManifestTypeNode{});
-              return node.children.back().second;
-          };
-          '''
-          new = '''struct ManifestTypeNode final {
-              std::vector<std::string> child_names;
-              std::vector<ManifestTypeNode> children;
-              std::optional<std::size_t> value_index;
-          };
+          needle = '    std::vector<std::pair<std::string, ManifestTypeNode>> children;\n'
+          replacement = (
+              '    std::vector<std::string> child_names;\n'
+              '    std::vector<ManifestTypeNode> children;\n'
+          )
+          if s.count(needle) != 1:
+              raise SystemExit(f'children declaration matches={s.count(needle)}')
+          s = s.replace(needle, replacement, 1)
 
-          [[nodiscard]] ManifestTypeNode& manifest_child(
+          start = s.index('[[nodiscard]] ManifestTypeNode& manifest_child(')
+          end = s.index('\n\nstruct ManifestDataSetStorage final', start)
+          s = s[:start] + '''[[nodiscard]] ManifestTypeNode& manifest_child(
               ManifestTypeNode& node, const std::string& name) {
               for (std::size_t index = 0U; index < node.child_names.size(); ++index) {
                   if (node.child_names[index] == name) return node.children[index];
@@ -53,40 +45,34 @@ jobs:
               node.child_names.push_back(name);
               node.children.emplace_back();
               return node.children.back();
-          };
-          '''
-          if s.count(old) != 1:
-              raise SystemExit('ManifestTypeNode guard mismatch')
-          s = s.replace(old, new, 1)
+          }''' + s[end:]
+
           old = '''    result.children.reserve(node.children.size());
               for (const auto& [child_name, child] : node.children) {
                   result.children.push_back(node_type(child, model, child_name));
-              }
-          '''
+              }'''
           new = '''    result.children.reserve(node.children.size());
               for (std::size_t index = 0U; index < node.children.size(); ++index) {
                   result.children.push_back(
                       node_type(node.children[index], model, node.child_names[index]));
-              }
-          '''
+              }'''
           if s.count(old) != 1:
-              raise SystemExit('node_type guard mismatch')
+              raise SystemExit(f'node_type matches={s.count(old)}')
           s = s.replace(old, new, 1)
+
           old = '''    std::vector<mms::MmsDataValue> children;
               children.reserve(node.children.size());
               for (const auto& [name, child] : node.children) {
                   static_cast<void>(name);
                   children.push_back(node_data(child, model));
-              }
-          '''
+              }'''
           new = '''    std::vector<mms::MmsDataValue> children;
               children.reserve(node.children.size());
               for (const auto& child : node.children) {
                   children.push_back(node_data(child, model));
-              }
-          '''
+              }'''
           if s.count(old) != 1:
-              raise SystemExit('node_data guard mismatch')
+              raise SystemExit(f'node_data matches={s.count(old)}')
           s = s.replace(old, new, 1)
           p.write_text(s, encoding='utf-8')
           PY
