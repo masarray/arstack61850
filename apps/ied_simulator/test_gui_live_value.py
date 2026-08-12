@@ -124,6 +124,8 @@ def main() -> int:
                 "--runtime",
                 "--set-first-value",
                 "42",
+                "--set-value-item",
+                "TCTR1$MX$Amp$instMag$i",
                 "--undo-after-ms",
                 "15000",
                 "--state-dump",

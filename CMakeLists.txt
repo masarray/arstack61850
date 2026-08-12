@@ -88,6 +88,7 @@ add_library(ariec61850_mms_server_core
     src/mms/static_write.cpp
     src/mms/static_data_set_table.cpp
     src/mms/static_dispatcher.cpp
+    src/mms/static_direct_control.cpp
     src/mms/connection_runtime.cpp
     src/mms/static_server_session.cpp
     src/mms/static_brcb_runtime.cpp

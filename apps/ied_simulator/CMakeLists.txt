@@ -91,6 +91,7 @@ add_library(ariec61850_ied_simulator_server_core STATIC
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_write.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_data_set_table.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_dispatcher.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_direct_control.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/connection_runtime_iedsim.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_server_session.cpp)
 target_include_directories(ariec61850_ied_simulator_server_core PUBLIC

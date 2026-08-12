@@ -47,6 +47,7 @@ struct DaDecl final {
     QString bType;
     QString type;
     QString fc;
+    QString defaultValue;
     int count{1};
 };
 
@@ -219,6 +220,7 @@ inline SclMmsMaterialization materializeSclMmsModel(const QString& path) {
     QString currentLnType;
     QString currentDoType;
     QString currentDaType;
+    std::optional<int> currentDaIndex;
 
     QXmlStreamReader xml{&input};
     while (!xml.atEnd()) {
@@ -254,12 +256,19 @@ inline SclMmsMaterialization materializeSclMmsModel(const QString& path) {
                     decl.cdc = a.value(QStringLiteral("cdc")).toString();
                 }
             } else if (name == QStringLiteral("DA") && !currentDoType.isEmpty()) {
-                doTypes[currentDoType].dataAttributes.push_back(DaDecl{
+                auto& attributes = doTypes[currentDoType].dataAttributes;
+                attributes.push_back(DaDecl{
                     a.value(QStringLiteral("name")).toString(),
                     a.value(QStringLiteral("bType")).toString(),
                     a.value(QStringLiteral("type")).toString(),
                     a.value(QStringLiteral("fc")).toString(),
+                    {},
                     elementCount(a.value(QStringLiteral("count")).toString())});
+                currentDaIndex = static_cast<int>(attributes.size() - 1U);
+            } else if (name == QStringLiteral("Val") && !currentDoType.isEmpty() &&
+                       currentDaIndex.has_value()) {
+                doTypes[currentDoType].dataAttributes[static_cast<std::size_t>(*currentDaIndex)]
+                    .defaultValue = xml.readElementText().trimmed();
             } else if (name == QStringLiteral("SDO") && !currentDoType.isEmpty()) {
                 doTypes[currentDoType].subDataObjects.push_back(SdoDecl{
                     a.value(QStringLiteral("name")).toString(),
@@ -278,7 +287,11 @@ inline SclMmsMaterialization materializeSclMmsModel(const QString& path) {
         } else if (xml.isEndElement()) {
             const auto name = xml.name();
             if (name == QStringLiteral("LNodeType")) currentLnType.clear();
-            else if (name == QStringLiteral("DOType")) currentDoType.clear();
+            else if (name == QStringLiteral("DA")) currentDaIndex.reset();
+            else if (name == QStringLiteral("DOType")) {
+                currentDaIndex.reset();
+                currentDoType.clear();
+            }
             else if (name == QStringLiteral("DAType")) currentDaType.clear();
             else if (name == QStringLiteral("LDevice")) currentLd.clear();
             else if (name == QStringLiteral("IED")) currentIed.clear();
@@ -297,7 +310,8 @@ inline SclMmsMaterialization materializeSclMmsModel(const QString& path) {
                              const QString& fc,
                              const QString& cdc,
                              const QString& rawType,
-                             const int count) {
+                             const int count,
+                             const QString& declaredValue = {}) {
         if (fc.isEmpty() || doPath.isEmpty() || daPath.isEmpty()) return;
         const auto ln = instance.prefix + instance.lnClass + instance.lnInst;
         if (ln.isEmpty()) return;
@@ -313,7 +327,9 @@ inline SclMmsMaterialization materializeSclMmsModel(const QString& path) {
         value.rawType = rawType;
         value.normalizedType = normalized;
         value.mmsTypeSignature = sclMmsTypeSignature(rawType, count);
-        value.initialValue = initialValue(normalized, daPath);
+        value.initialValue = declaredValue.isEmpty()
+            ? initialValue(normalized, daPath)
+            : declaredValue;
         value.mmsDomain = instance.iedName + instance.ldInst;
         value.mmsItem = ln + QLatin1Char('$') + fc + QLatin1Char('$') +
             mmsPath(doPath) + QLatin1Char('$') + mmsPath(daPath);
@@ -321,7 +337,12 @@ inline SclMmsMaterialization materializeSclMmsModel(const QString& path) {
             doPath + QLatin1Char('.') + daPath;
         value.quality = normalized == QStringLiteral("Quality");
         value.timestamp = normalized == QStringLiteral("Timestamp");
-        value.mmsWritable = mmsWritableFc(fc) && !value.quality && !value.timestamp;
+        const auto controlMetadata =
+            daPath.compare(QStringLiteral("ctlModel"), Qt::CaseInsensitive) == 0 ||
+            daPath.compare(QStringLiteral("sboTimeout"), Qt::CaseInsensitive) == 0 ||
+            daPath.compare(QStringLiteral("operTimeout"), Qt::CaseInsensitive) == 0;
+        value.mmsWritable = mmsWritableFc(fc) && !value.quality && !value.timestamp &&
+            !controlMetadata;
         result.values.push_back(std::move(value));
     };
 
@@ -368,7 +389,8 @@ inline SclMmsMaterialization materializeSclMmsModel(const QString& path) {
                     if (result.values[index].cdc.isEmpty()) result.values[index].cdc = cdc;
                 }
             } else {
-                addLeaf(instance, doPath, da.name, da.fc, cdc, da.bType, da.count);
+                addLeaf(instance, doPath, da.name, da.fc, cdc, da.bType, da.count,
+                        da.defaultValue);
             }
         }
         for (const auto& sdo : it->subDataObjects) {
