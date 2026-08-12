@@ -6,6 +6,7 @@
 #include <cmath>
 #include <limits>
 #include <tuple>
+#include <utility>
 
 namespace ar::iec61850::time_sync {
 namespace {
@@ -49,6 +50,26 @@ constexpr std::int64_t kNanosecondsPerSecond = 1'000'000'000LL;
     return std::all_of(identity.begin(), identity.end(), [](const std::uint8_t value) {
         return value == 0U;
     });
+}
+
+[[nodiscard]] bool parse_pdelay_body(
+    const PtpFrame& frame,
+    PtpTimestamp& timestamp,
+    PtpPortIdentity& requesting_port_identity) noexcept {
+    if (frame.body.size() < 20U ||
+        !PtpTimestamp::try_read(
+            std::span<const std::uint8_t>{frame.body}.first(10U),
+            timestamp)) {
+        return false;
+    }
+    std::copy_n(
+        frame.body.begin() + 10,
+        8,
+        requesting_port_identity.clock_identity.begin());
+    requesting_port_identity.port_number = static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(frame.body[18]) << 8U) |
+        static_cast<std::uint16_t>(frame.body[19]));
+    return true;
 }
 
 } // namespace
@@ -459,8 +480,7 @@ bool PtpTimeReceiver::observe_announce(
     const bool current_is_same = source_matches_selected(frame.header.source_port_identity);
     bool selected_is_stale = false;
     if (selected_source_last_seen_.has_value() && now > *selected_source_last_seen_) {
-        selected_is_stale =
-            now - *selected_source_last_seen_ > options_.source_timeout;
+        selected_is_stale = now - *selected_source_last_seen_ > options_.source_timeout;
     }
     const bool should_select =
         !status_.selected_source.has_value() ||
@@ -501,10 +521,15 @@ bool PtpTimeReceiver::observe_pdelay_response(
     const PtpFrame& frame,
     const PtpTimestamp& local_rx_timestamp,
     const std::chrono::steady_clock::time_point now) noexcept {
+    PtpTimestamp peer_request_rx{};
+    PtpPortIdentity requesting_port_identity{};
+    const bool body_valid = parse_pdelay_body(
+        frame,
+        peer_request_rx,
+        requesting_port_identity);
     if (!profile_matches(frame) || frame.header.message_type != PtpMessageType::pdelay_resp ||
-        !pending_pdelay_.has_value() || !frame.timestamp.has_value() ||
-        !frame.requesting_port_identity.has_value() ||
-        *frame.requesting_port_identity != options_.local_port_identity ||
+        !pending_pdelay_.has_value() || !body_valid ||
+        requesting_port_identity != options_.local_port_identity ||
         frame.header.sequence_id != pending_pdelay_->sequence_id ||
         !source_matches_selected(frame.header.source_port_identity)) {
         ++status_.rejected_exchanges;
@@ -512,7 +537,7 @@ bool PtpTimeReceiver::observe_pdelay_response(
     }
     ++status_.pdelay_responses;
     selected_source_last_seen_ = now;
-    pending_pdelay_->t2 = *frame.timestamp;
+    pending_pdelay_->t2 = peer_request_rx;
     pending_pdelay_->t4 = local_rx_timestamp;
     pending_pdelay_->response_correction_field = frame.header.correction_field;
     pending_pdelay_->response_received = true;
@@ -522,11 +547,16 @@ bool PtpTimeReceiver::observe_pdelay_response(
 std::optional<PtpPeerDelayMeasurement> PtpTimeReceiver::observe_pdelay_response_follow_up(
     const PtpFrame& frame,
     const std::chrono::steady_clock::time_point now) noexcept {
+    PtpTimestamp peer_response_tx{};
+    PtpPortIdentity requesting_port_identity{};
+    const bool body_valid = parse_pdelay_body(
+        frame,
+        peer_response_tx,
+        requesting_port_identity);
     if (!profile_matches(frame) ||
         frame.header.message_type != PtpMessageType::pdelay_resp_follow_up ||
         !pending_pdelay_.has_value() || !pending_pdelay_->response_received ||
-        !frame.timestamp.has_value() || !frame.requesting_port_identity.has_value() ||
-        *frame.requesting_port_identity != options_.local_port_identity ||
+        !body_valid || requesting_port_identity != options_.local_port_identity ||
         frame.header.sequence_id != pending_pdelay_->sequence_id ||
         !source_matches_selected(frame.header.source_port_identity)) {
         ++status_.rejected_exchanges;
@@ -536,7 +566,7 @@ std::optional<PtpPeerDelayMeasurement> PtpTimeReceiver::observe_pdelay_response_
     const PtpPeerDelayExchange exchange{
         pending_pdelay_->t1,
         pending_pdelay_->t2,
-        *frame.timestamp,
+        peer_response_tx,
         pending_pdelay_->t4,
         pending_pdelay_->response_correction_field,
         frame.header.correction_field,
