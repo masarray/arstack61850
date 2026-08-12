@@ -62,5 +62,5 @@ jobs:
         run: >-
           python3 apps/ied_simulator/test_gui_live_value.py
           --app ./build-ied-simulator-qt/arstack_ied_simulator
-          --read-probe ./build-ied-simulator-qt/ariec61850_mms_read_probe
+          --read-probe ./build-ied-simulator-qt
           --scl ./tests/fixtures/scl/minimal-station.scd

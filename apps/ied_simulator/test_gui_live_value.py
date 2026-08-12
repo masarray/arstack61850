@@ -22,12 +22,28 @@ def creation_flags() -> int:
     return subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
+def resolve_read_probe(argument: str) -> str:
+    path = Path(argument)
+    if path.is_file():
+        return str(path)
+    if path.is_dir():
+        names = {"ariec61850_mms_read_probe", "ariec61850_mms_read_probe.exe"}
+        matches = sorted(
+            candidate for candidate in path.rglob("ariec61850_mms_read_probe*")
+            if candidate.is_file() and candidate.name in names
+        )
+        if matches:
+            return str(matches[0])
+    raise FileNotFoundError(f"MMS read probe not found under {path}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--app", required=True)
     parser.add_argument("--read-probe", required=True)
     parser.add_argument("--scl", required=True)
     args = parser.parse_args()
+    read_probe = resolve_read_probe(args.read_probe)
 
     port = free_port()
     environment = dict(os.environ)
@@ -82,7 +98,7 @@ def main() -> int:
                 time.sleep(0.25)
                 probe = subprocess.run(
                     [
-                        args.read_probe,
+                        read_probe,
                         "127.0.0.1",
                         str(port),
                         "--domain",

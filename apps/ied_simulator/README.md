@@ -52,7 +52,7 @@ that value through an independent MMS association:
 ```powershell
 python apps/ied_simulator/test_gui_live_value.py `
   --app build-ied-simulator-qt/arstack_ied_simulator.exe `
-  --read-probe build-ied-simulator-qt/ariec61850_mms_read_probe.exe `
+  --read-probe build-ied-simulator-qt `
   --scl tests/fixtures/scl/minimal-station.scd
 ```
 
