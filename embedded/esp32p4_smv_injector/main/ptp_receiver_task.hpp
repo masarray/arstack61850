@@ -19,13 +19,6 @@ void ptp_receiver_stop() noexcept;
 /** True only after hardware PTP + RX timestamp callback readiness completes. */
 [[nodiscard]] bool ptp_receiver_is_running() noexcept;
 
-/**
- * True while a receiver/monitor worker still exists, including startup and
- * asynchronous stop cleanup. Used to reject a new start until the old worker
- * has fully released its runtime state.
- */
-[[nodiscard]] bool ptp_receiver_is_active() noexcept;
-
 [[nodiscard]] bool ptp_receiver_get_status(ar_ptp_lab_status_t& status) noexcept;
 
 } // namespace ar::esp32p4::smv
