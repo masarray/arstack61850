@@ -224,7 +224,24 @@ void receiver_prefers_better_source_and_drops_stale_source() {
         announce_frame(better, 100U, true),
         t0 + std::chrono::milliseconds{10}));
     CHECK(receiver.status().selected_source == better);
-    CHECK(receiver.tick(t0 + std::chrono::milliseconds{111}));
+
+    // Keep both exchange optionals engaged so the timeout path also proves that
+    // source loss atomically discards pending Sync and Pdelay correlation state.
+    receiver.note_pdelay_request(
+        9U,
+        ts(1U, 0U),
+        t0 + std::chrono::milliseconds{20});
+    PtpFrame pending_sync;
+    pending_sync.header.message_type = PtpMessageType::sync;
+    pending_sync.header.source_port_identity = better;
+    pending_sync.header.sequence_id = 10U;
+    pending_sync.header.flags = 0x0200U;
+    static_cast<void>(receiver.observe_sync(
+        pending_sync,
+        ts(1U, 100U),
+        t0 + std::chrono::milliseconds{20}));
+
+    CHECK(receiver.tick(t0 + std::chrono::milliseconds{121}));
     CHECK(!receiver.status().selected_source.has_value());
     CHECK(!receiver.status().mean_path_delay_ns.has_value());
 }
