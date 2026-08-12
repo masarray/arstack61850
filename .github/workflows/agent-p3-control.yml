@@ -1,0 +1,59 @@
+name: Agent P3 Control Executor
+
+on:
+  push:
+    branches:
+      - agent/p3-control-run
+    paths:
+      - '.github/scripts/agent_p3_control_patch.py'
+      - '.github/workflows/agent-p3-control.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/p3-control-run
+          fetch-depth: 0
+
+      - name: Apply P3 patch
+        run: python3 .github/scripts/agent_p3_control_patch.py
+
+      - name: Diff sanity
+        run: |
+          git diff --check
+          git status --short
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
+
+      - name: Configure IED Simulator
+        run: cmake -S apps/ied_simulator -B build-p3-qt -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build IED Simulator server and GUI
+        run: cmake --build build-p3-qt --target arstack_ied_simulator ariec61850_mms_read_probe ariec61850_static_rcb_trial --parallel 2
+
+      - name: Configure control client profile
+        run: cmake -S tools/mms_direct_control_server -B build-p3-control -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build control probe and focused tests
+        run: cmake --build build-p3-control --target ariec61850_mms_control_interop_client ariec61850_mms_direct_control_tests --parallel 2
+
+      - name: Run focused static control unit
+        run: ctest --test-dir build-p3-control -R mms_direct_control_unit --output-on-failure
+
+      - name: Commit compiled P3 source to executor branch
+        run: |
+          git config user.name openai-agent
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add CMakeLists.txt apps/ied_simulator tools/static_ied_server.cpp tools/static_ied_server_iedsim include/ariec61850/mms/static_object_table.hpp src/mms/static_object_table.cpp src/mms/static_dispatcher.cpp tests/fixtures/scl/iedsim-full-model.scd
+          git commit -m 'feat(iedsim): integrate guarded MMS control runtime'
+          git push origin HEAD:agent/p3-control-run
