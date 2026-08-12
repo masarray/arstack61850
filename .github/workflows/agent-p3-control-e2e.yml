@@ -1,0 +1,78 @@
+name: Agent P3 Live Control E2E
+
+on:
+  push:
+    branches:
+      - agent/p3-control-e2e
+    paths:
+      - '.github/scripts/agent_p3_control_lifetime_repair.py'
+      - '.github/workflows/agent-p3-control-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  p3-live-control:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/p3-control-e2e
+          fetch-depth: 0
+
+      - name: Apply lifetime hardening
+        run: python3 .github/scripts/agent_p3_control_lifetime_repair.py
+
+      - name: Diff sanity
+        run: |
+          git diff --check
+          python3 -m py_compile apps/ied_simulator/test_control_live.py
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
+
+      - name: Configure simulator
+        run: cmake -S apps/ied_simulator -B build-p3e-qt -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build simulator and probes
+        run: cmake --build build-p3e-qt --target arstack_ied_simulator ariec61850_mms_read_probe ariec61850_static_rcb_trial --parallel 2
+
+      - name: Configure control profile
+        run: cmake -S tools/mms_direct_control_server -B build-p3e-control -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build control probe and unit
+        run: cmake --build build-p3e-control --target ariec61850_mms_control_interop_client ariec61850_mms_direct_control_tests --parallel 2
+
+      - name: Static direct control unit
+        run: ctest --test-dir build-p3e-control -R mms_direct_control_unit --output-on-failure
+
+      - name: P3 live four-model control matrix
+        run: |
+          APP=$(find build-p3e-qt -type f -name arstack_ied_simulator -perm -111 | head -1)
+          test -n "$APP"
+          python3 apps/ied_simulator/test_control_live.py \
+            --app "$APP" \
+            --read-probe build-p3e-qt \
+            --control-probe build-p3e-control \
+            --scl tests/fixtures/scl/iedsim-full-model.scd
+
+      - name: P0-P2 regression on same source
+        run: |
+          APP=$(find build-p3e-qt -type f -name arstack_ied_simulator -perm -111 | head -1)
+          python3 apps/ied_simulator/test_gui_live_value.py \
+            --app "$APP" \
+            --read-probe build-p3e-qt \
+            --report-probe build-p3e-qt \
+            --scl tests/fixtures/scl/iedsim-full-model.scd
+
+      - name: Commit lifetime hardening after E2E
+        run: |
+          git config user.name openai-agent
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tools/static_ied_server.cpp
+          git commit -m 'fix(iedsim): stabilize hosted control service contexts'
+          git push origin HEAD:agent/p3-control-e2e
