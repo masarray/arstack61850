@@ -225,8 +225,6 @@ void receiver_prefers_better_source_and_drops_stale_source() {
         t0 + std::chrono::milliseconds{10}));
     CHECK(receiver.status().selected_source == better);
 
-    // Keep both exchange optionals engaged so the timeout path also proves that
-    // source loss atomically discards pending Sync and Pdelay correlation state.
     receiver.note_pdelay_request(
         9U,
         ts(1U, 0U),
@@ -244,6 +242,34 @@ void receiver_prefers_better_source_and_drops_stale_source() {
     CHECK(receiver.tick(t0 + std::chrono::milliseconds{121}));
     CHECK(!receiver.status().selected_source.has_value());
     CHECK(!receiver.status().mean_path_delay_ns.has_value());
+}
+
+void sync_traffic_does_not_extend_announce_evidence() {
+    const auto local = port(0x43U, 2U);
+    const auto master = port(0x44U);
+    PtpTimeReceiver receiver(PtpTimeReceiverOptions{
+        0U,
+        0U,
+        local,
+        std::chrono::milliseconds{100},
+        std::chrono::milliseconds{50},
+    });
+    const auto t0 = Clock::time_point{};
+    CHECK(receiver.observe_announce(announce_frame(master, 100U, true), t0));
+
+    PtpFrame sync;
+    sync.header.message_type = PtpMessageType::sync;
+    sync.header.source_port_identity = master;
+    sync.header.sequence_id = 1U;
+    sync.header.flags = 0x0200U;
+    static_cast<void>(receiver.observe_sync(
+        sync,
+        ts(1U, 100U),
+        t0 + std::chrono::milliseconds{90}));
+
+    CHECK(receiver.tick(t0 + std::chrono::milliseconds{101}));
+    CHECK(!receiver.status().selected_source.has_value());
+    CHECK(!receiver.status().selected_source_globally_traceable);
 }
 
 void discipline_steps_then_locks_and_promotes_measured_sync() {
@@ -285,6 +311,36 @@ void discipline_steps_then_locks_and_promotes_measured_sync() {
     CHECK(!discipline.measured_smp_synch().has_value());
 }
 
+void rejected_measurements_do_not_extend_lock_evidence() {
+    PtpDisciplineOptions options;
+    options.lock_required_samples = 2U;
+    options.sync_timeout = std::chrono::milliseconds{100};
+    options.holdover_timeout = std::chrono::milliseconds{500};
+    PtpClockDiscipline discipline(options);
+    const auto t0 = Clock::time_point{};
+
+    static_cast<void>(discipline.observe(
+        PtpOffsetMeasurement{port(0x51U), 1U, 500LL, 500LL, true},
+        t0));
+    static_cast<void>(discipline.observe(
+        PtpOffsetMeasurement{port(0x51U), 2U, 500LL, 500LL, true},
+        t0 + std::chrono::milliseconds{10}));
+    CHECK(discipline.status().state == PtpDisciplineState::locked);
+    CHECK(discipline.measured_smp_synch() == SmpSynchValue::global_synchronized);
+
+    const auto rejected_before = discipline.status().rejected_samples;
+    static_cast<void>(discipline.observe(
+        PtpOffsetMeasurement{port(0x51U), 3U, 500LL, 10'000'000LL, true},
+        t0 + std::chrono::milliseconds{90}));
+    CHECK(discipline.status().rejected_samples == rejected_before + 1U);
+    CHECK(discipline.status().state == PtpDisciplineState::locked);
+
+    // 101 ms since the last accepted measurement, despite an invalid frame at 90 ms.
+    discipline.tick(t0 + std::chrono::milliseconds{111});
+    CHECK(discipline.status().state == PtpDisciplineState::holdover);
+    CHECK(discipline.measured_smp_synch() == SmpSynchValue::local_synchronized);
+}
+
 void discipline_rejects_bad_path_and_faults_on_actuation_failure() {
     PtpDisciplineOptions options;
     options.invalid_samples_before_fault = 2U;
@@ -312,7 +368,9 @@ int main() {
         {"traceability evidence", traceability_requires_real_announce_evidence},
         {"receiver correlation", receiver_correlates_pdelay_and_two_step_sync},
         {"source selection and timeout", receiver_prefers_better_source_and_drops_stale_source},
+        {"Announce evidence lifetime", sync_traffic_does_not_extend_announce_evidence},
         {"discipline lock and holdover", discipline_steps_then_locks_and_promotes_measured_sync},
+        {"accepted measurement lifetime", rejected_measurements_do_not_extend_lock_evidence},
         {"discipline fault", discipline_rejects_bad_path_and_faults_on_actuation_failure},
     };
 
