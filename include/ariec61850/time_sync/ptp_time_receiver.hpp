@@ -115,7 +115,10 @@ public:
              better_quality(quality, *selected_quality_));
         if (!should_select) return false;
 
-        const bool changed = !current_is_same;
+        // A same-port Announce arriving after the source evidence timeout is a
+        // fresh selection event, not a continuation. This forces dependent
+        // path-delay/exchange state and the adapter discipline to reacquire.
+        const bool changed = !current_is_same || selected_is_stale;
         status_.selected_source = frame.header.source_port_identity;
         status_.selected_grandmaster = announce.grandmaster_identity;
         status_.selected_source_globally_traceable =
