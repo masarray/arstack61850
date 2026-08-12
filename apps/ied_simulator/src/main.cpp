@@ -36,7 +36,26 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption smokeOption{
         QStringLiteral("smoke-test"),
         QStringLiteral("Load the QML scene, wait briefly, and exit.")};
-    parser.addOptions({sclOption, runtimeOption, screenshotOption, smokeOption});
+    const QCommandLineOption portOption{
+        QStringLiteral("port"),
+        QStringLiteral("Override the MMS listen port."),
+        QStringLiteral("number")};
+    const QCommandLineOption setFirstValueOption{
+        QStringLiteral("set-first-value"),
+        QStringLiteral("QA: apply a value to the first runtime point after start."),
+        QStringLiteral("value")};
+    const QCommandLineOption exitAfterOption{
+        QStringLiteral("exit-after-ms"),
+        QStringLiteral("QA: exit after the specified runtime duration."),
+        QStringLiteral("milliseconds")};
+    parser.addOptions({
+        sclOption,
+        runtimeOption,
+        screenshotOption,
+        smokeOption,
+        portOption,
+        setFirstValueOption,
+        exitAfterOption});
     parser.process(app);
 
     QQmlApplicationEngine engine;
@@ -51,6 +70,11 @@ int main(int argc, char* argv[]) {
     if (!engine.rootObjects().isEmpty()) {
         auto* const rootObject = engine.rootObjects().constFirst();
         auto* const backend = rootObject->findChild<QObject*>(QStringLiteral("simulatorBackend"));
+        if (backend != nullptr && parser.isSet(portOption)) {
+            bool valid{};
+            const auto port = parser.value(portOption).toInt(&valid);
+            if (valid && port >= 1 && port <= 65'535) backend->setProperty("port", port);
+        }
         if (backend != nullptr && parser.isSet(sclOption)) {
             QMetaObject::invokeMethod(
                 backend,
@@ -61,6 +85,24 @@ int main(int argc, char* argv[]) {
             QTimer::singleShot(150, backend, [backend] {
                 QMetaObject::invokeMethod(backend, "startSimulation");
             });
+        }
+        if (backend != nullptr && parser.isSet(setFirstValueOption)) {
+            const auto value = parser.value(setFirstValueOption);
+            auto* const applyTimer = new QTimer{backend};
+            applyTimer->setInterval(100);
+            QObject::connect(applyTimer, &QTimer::timeout, backend, [backend, applyTimer, value] {
+                if (!backend->property("running").toBool()) return;
+                QMetaObject::invokeMethod(backend, "selectValue", Q_ARG(int, 0));
+                QMetaObject::invokeMethod(
+                    backend,
+                    "applySelectedValue",
+                    Q_ARG(QString, value),
+                    Q_ARG(QString, QStringLiteral("Good")),
+                    Q_ARG(QString, QStringLiteral("Simulator QA")));
+                applyTimer->stop();
+                applyTimer->deleteLater();
+            });
+            applyTimer->start();
         }
         if (parser.isSet(screenshotOption)) {
             const auto outputPath = parser.value(screenshotOption);
@@ -74,6 +116,13 @@ int main(int argc, char* argv[]) {
             });
         } else if (parser.isSet(smokeOption)) {
             QTimer::singleShot(1200, &app, &QCoreApplication::quit);
+        }
+        if (parser.isSet(exitAfterOption)) {
+            bool valid{};
+            const auto milliseconds = parser.value(exitAfterOption).toInt(&valid);
+            if (valid && milliseconds > 0) {
+                QTimer::singleShot(milliseconds, &app, &QCoreApplication::quit);
+            }
         }
     }
 

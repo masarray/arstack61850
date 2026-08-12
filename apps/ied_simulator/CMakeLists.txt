@@ -92,7 +92,8 @@ add_executable(ariec61850_ied_simulator_server
     ${CMAKE_CURRENT_LIST_DIR}/../../tools/static_ied_server.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../tools/static_ied_server_sigpipe.cpp)
 target_link_libraries(ariec61850_ied_simulator_server PRIVATE
-    ariec61850_ied_simulator_server_core)
+    ariec61850_ied_simulator_server_core
+    ARIEC61850::core)
 if(WIN32)
     target_link_libraries(ariec61850_ied_simulator_server PRIVATE ws2_32)
 endif()

@@ -52,7 +52,8 @@ add_executable(ariec61850_static_ied_server_iedsim
     "${ARSTACK_ROOT}/tools/static_ied_server.cpp"
     "${ARSTACK_ROOT}/tools/static_ied_server_sigpipe.cpp")
 target_link_libraries(ariec61850_static_ied_server_iedsim PRIVATE
-    ariec61850_iedscout_parity_server_core)
+    ariec61850_iedscout_parity_server_core
+    ARIEC61850::core)
 if(WIN32)
     target_link_libraries(ariec61850_static_ied_server_iedsim PRIVATE ws2_32)
 endif()
@@ -66,6 +67,13 @@ target_link_libraries(ariec61850_iedscout_parity_live_discover PRIVATE
 target_compile_features(ariec61850_iedscout_parity_live_discover PRIVATE cxx_std_20)
 parity_strict_warnings(ariec61850_iedscout_parity_live_discover)
 
+add_executable(ariec61850_iedscout_parity_read_probe
+    "${ARSTACK_ROOT}/tools/mms_read_probe.cpp")
+target_link_libraries(ariec61850_iedscout_parity_read_probe PRIVATE
+    ARIEC61850::core)
+target_compile_features(ariec61850_iedscout_parity_read_probe PRIVATE cxx_std_20)
+parity_strict_warnings(ariec61850_iedscout_parity_read_probe)
+
 enable_testing()
 add_test(NAME iedscout_parity_server_help
     COMMAND ariec61850_static_ied_server_iedsim --help)
@@ -78,3 +86,12 @@ add_test(
         "${CMAKE_CURRENT_LIST_DIR}/test_loopback.py"
         --server $<TARGET_FILE:ariec61850_static_ied_server_iedsim>
         --client $<TARGET_FILE:ariec61850_iedscout_parity_live_discover>)
+
+add_test(
+    NAME iedscout_parity_runtime_model
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_LIST_DIR}/test_runtime_model.py"
+        --server $<TARGET_FILE:ariec61850_static_ied_server_iedsim>
+        --discovery $<TARGET_FILE:ariec61850_iedscout_parity_live_discover>
+        --read-probe $<TARGET_FILE:ariec61850_iedscout_parity_read_probe>)

@@ -169,6 +169,12 @@ if(ARIEC61850_BUILD_TOOLS)
     ariec61850_apply_warnings(ariec61850_live_discover)
     ariec61850_apply_sanitizers(ariec61850_live_discover)
 
+    add_executable(ariec61850_mms_read_probe tools/mms_read_probe.cpp)
+    target_link_libraries(ariec61850_mms_read_probe PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_mms_read_probe PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_mms_read_probe)
+    ariec61850_apply_sanitizers(ariec61850_mms_read_probe)
+
     add_executable(ariec61850_rcb_contention_probe tools/rcb_contention_probe.cpp)
     target_link_libraries(ariec61850_rcb_contention_probe PRIVATE ARIEC61850::core)
     target_compile_features(ariec61850_rcb_contention_probe PRIVATE cxx_std_20)
@@ -199,7 +205,7 @@ if(ARIEC61850_BUILD_TOOLS)
         tools/static_ied_server_sigpipe.cpp)
     target_link_libraries(
         ariec61850_static_ied_server
-        PRIVATE ARIEC61850::mms_server_core)
+        PRIVATE ARIEC61850::mms_server_core ARIEC61850::core)
     if(WIN32)
         target_link_libraries(ariec61850_static_ied_server PRIVATE ws2_32)
     endif()

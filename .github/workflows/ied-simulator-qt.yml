@@ -8,6 +8,11 @@ on:
       - 'src/scl/**'
       - 'include/ariec61850/mms/**'
       - 'src/mms/**'
+      - 'tools/static_ied_server.cpp'
+      - 'tools/mms_read_probe.cpp'
+      - 'tools/static_ied_server_iedsim/**'
+      - 'tests/fixtures/scl/**'
+      - 'CMakeLists.txt'
       - '.github/workflows/ied-simulator-qt.yml'
   pull_request:
     paths:
@@ -16,6 +21,11 @@ on:
       - 'src/scl/**'
       - 'include/ariec61850/mms/**'
       - 'src/mms/**'
+      - 'tools/static_ied_server.cpp'
+      - 'tools/mms_read_probe.cpp'
+      - 'tools/static_ied_server_iedsim/**'
+      - 'tests/fixtures/scl/**'
+      - 'CMakeLists.txt'
       - '.github/workflows/ied-simulator-qt.yml'
 
 permissions:
@@ -39,9 +49,18 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build build-ied-simulator-qt --target arstack_ied_simulator --parallel 2
+        run: >-
+          cmake --build build-ied-simulator-qt
+          --target arstack_ied_simulator ariec61850_mms_read_probe --parallel 2
 
       - name: QML smoke test
         env:
           QT_QPA_PLATFORM: offscreen
         run: ./build-ied-simulator-qt/arstack_ied_simulator --smoke-test
+
+      - name: Prove GUI value is visible through MMS
+        run: >-
+          python3 apps/ied_simulator/test_gui_live_value.py
+          --app ./build-ied-simulator-qt/arstack_ied_simulator
+          --read-probe ./build-ied-simulator-qt
+          --scl ./tests/fixtures/scl/minimal-station.scd
