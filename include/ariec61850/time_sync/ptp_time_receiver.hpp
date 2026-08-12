@@ -95,6 +95,7 @@ public:
         selected_announce_last_seen_valid_ = false;
         selected_source_timeout_ = options_.source_timeout;
         last_path_delay_at_valid_ = false;
+        receiver_correlation_enabled_ = false;
         clear_exchanges();
     }
 
@@ -162,6 +163,11 @@ public:
         const PtpTimestamp& request_tx_timestamp,
         const std::chrono::steady_clock::time_point now =
             std::chrono::steady_clock::now()) noexcept {
+        // A caller that owns a Pdelay request is an active time receiver. From
+        // this point, missing/mismatched Sync correlation is actionable timing
+        // evidence and is counted as rejected. Passive MONITOR never calls this
+        // method, so observed Sync/FU traffic remains telemetry, not a failure.
+        receiver_correlation_enabled_ = true;
         pending_pdelay_ = PendingPdelay{
             sequence_id,
             request_tx_timestamp,
@@ -261,6 +267,15 @@ public:
             return std::nullopt;
         }
         ++status_.sync_frames;
+
+        // A new Sync supersedes any still-pending two-step exchange. Active
+        // receivers must count that abandoned correlation so a stream of Sync
+        // frames without Follow_Up cannot keep rejection telemetry at zero.
+        if (pending_sync_valid_) {
+            record_sync_rejection();
+            pending_sync_valid_ = false;
+        }
+
         pending_sync_ = PendingSync{
             frame.header.source_port_identity,
             frame.header.sequence_id,
@@ -271,7 +286,7 @@ public:
         pending_sync_valid_ = true;
         if (frame.header.is_two_step()) return std::nullopt;
         if (!frame.timestamp.has_value()) {
-            ++status_.rejected_exchanges;
+            record_sync_rejection();
             pending_sync_valid_ = false;
             return std::nullopt;
         }
@@ -294,7 +309,7 @@ public:
         if (!pending_sync_valid_ ||
             pending_sync_.source != frame.header.source_port_identity ||
             pending_sync_.sequence_id != frame.header.sequence_id) {
-            ++status_.rejected_exchanges;
+            record_sync_rejection();
             return std::nullopt;
         }
         return complete_sync(
@@ -329,7 +344,7 @@ public:
             if (now > observed_at &&
                 now - observed_at > options_.exchange_timeout) {
                 pending_sync_valid_ = false;
-                ++status_.rejected_exchanges;
+                record_sync_rejection();
             }
         }
         if (pending_pdelay_valid_) {
@@ -351,8 +366,8 @@ private:
     struct AnnounceQuality final {
         std::uint8_t priority1{255U};
         std::uint8_t clock_class{255U};
-        std::uint8_t clock_accuracy{255U};
         std::uint16_t variance{0xFFFFU};
+        std::uint8_t clock_accuracy{255U};
         std::uint8_t priority2{255U};
         PtpClockIdentity grandmaster_identity{};
         std::uint16_t steps_removed{0xFFFFU};
@@ -430,14 +445,28 @@ private:
         pending_pdelay_valid_ = false;
     }
 
+    void record_sync_rejection() noexcept {
+        if (receiver_correlation_enabled_) {
+            ++status_.rejected_exchanges;
+        }
+    }
+
     [[nodiscard]] std::optional<PtpOffsetMeasurement> complete_sync(
         const PtpTimestamp& origin,
         const std::int64_t follow_up_correction_field,
         const std::uint16_t sequence_id) noexcept {
         if (!pending_sync_valid_ ||
-            pending_sync_.sequence_id != sequence_id ||
-            !status_.mean_path_delay_ns.has_value()) {
-            ++status_.rejected_exchanges;
+            pending_sync_.sequence_id != sequence_id) {
+            record_sync_rejection();
+            return std::nullopt;
+        }
+        if (!status_.mean_path_delay_ns.has_value()) {
+            // Passive observation intentionally has no peer-delay evidence.
+            // Consume the correlated pair without treating that absence as a
+            // receiver failure. Active TIME_RECEIVER enables rejection counting
+            // when it owns Pdelay requests.
+            pending_sync_valid_ = false;
+            record_sync_rejection();
             return std::nullopt;
         }
         const PtpSyncExchange exchange{
@@ -451,7 +480,7 @@ private:
         pending_sync_valid_ = false;
         const auto offset = calculate_offset_from_master(exchange);
         if (!offset.has_value()) {
-            ++status_.rejected_exchanges;
+            record_sync_rejection();
             return std::nullopt;
         }
         ++status_.completed_sync_exchanges;
@@ -476,6 +505,7 @@ private:
     bool pending_sync_valid_{false};
     PendingPdelay pending_pdelay_{};
     bool pending_pdelay_valid_{false};
+    bool receiver_correlation_enabled_{false};
 };
 
 } // namespace ar::iec61850::time_sync
