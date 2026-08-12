@@ -1,0 +1,245 @@
+name: Agent P3 Clean Head Finalizer
+
+on:
+  push:
+    branches:
+      - agent/p3-control-e2e
+    paths:
+      - 'tools/static_ied_server.cpp'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  construct-clean:
+    runs-on: ubuntu-24.04
+    outputs:
+      clean_sha: ${{ steps.clean.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/p3-control-e2e
+          fetch-depth: 0
+
+      - name: Guard source refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_MAIN=75df1edbf631c7e3f67318bfc56cdcaf1c504c05
+          EXPECTED_TARGET=4e243e9abeef812859203de664738e6a3110597c
+          MAIN=$(git ls-remote origin refs/heads/main | awk '{print $1}')
+          TARGET=$(git ls-remote origin refs/heads/agent/iedsim-full-scl-live-store | awk '{print $1}')
+          test "$MAIN" = "$EXPECTED_MAIN"
+          test "$TARGET" = "$EXPECTED_TARGET"
+
+      - name: Construct one clean P3 commit on P2
+        id: clean
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE=$(git rev-parse HEAD)
+          BASE=4e243e9abeef812859203de664738e6a3110597c
+          git switch --detach "$BASE"
+          git switch -C agent/p3-clean-staging
+          files=(
+            CMakeLists.txt
+            apps/ied_simulator/CMakeLists.txt
+            apps/ied_simulator/src/IedSimulatorController.cpp
+            apps/ied_simulator/src/SclMmsMaterializer.hpp
+            apps/ied_simulator/test_control_live.py
+            include/ariec61850/mms/static_object_table.hpp
+            src/mms/static_object_table.cpp
+            src/mms/static_dispatcher.cpp
+            tests/fixtures/scl/iedsim-full-model.scd
+            tools/static_ied_server.cpp
+            tools/static_ied_server_iedsim/CMakeLists.txt
+          )
+          git checkout "$SOURCE" -- "${files[@]}"
+          git diff --check
+          git config user.name openai-agent
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "${files[@]}"
+          git commit -m 'feat(iedsim): integrate guarded IEC 61850 controls'
+          CLEAN=$(git rev-parse HEAD)
+          git push --force origin HEAD:refs/heads/agent/p3-clean-staging
+          echo "sha=$CLEAN" >> "$GITHUB_OUTPUT"
+          echo "P3_CLEAN_SHA=$CLEAN"
+
+  live-e2e:
+    needs: construct-clean
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.construct-clean.outputs.clean_sha }}
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
+      - name: Build simulator
+        run: |
+          cmake -S apps/ied_simulator -B build-final-qt -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-final-qt --target arstack_ied_simulator ariec61850_mms_read_probe ariec61850_static_rcb_trial --parallel 2
+      - name: Build control client
+        run: |
+          cmake -S tools/mms_direct_control_server -B build-final-control -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-final-control --target ariec61850_mms_control_interop_client ariec61850_mms_direct_control_tests --parallel 2
+          ctest --test-dir build-final-control -R mms_direct_control_unit --output-on-failure
+      - name: P3 live control matrix
+        run: |
+          APP=$(find build-final-qt -type f -name arstack_ied_simulator -perm -111 | head -1)
+          python3 apps/ied_simulator/test_control_live.py \
+            --app "$APP" \
+            --read-probe build-final-qt \
+            --control-probe build-final-control \
+            --scl tests/fixtures/scl/iedsim-full-model.scd
+      - name: P0-P2 regression
+        run: |
+          APP=$(find build-final-qt -type f -name arstack_ied_simulator -perm -111 | head -1)
+          python3 apps/ied_simulator/test_gui_live_value.py \
+            --app "$APP" \
+            --read-probe build-final-qt \
+            --report-probe build-final-qt \
+            --scl tests/fixtures/scl/iedsim-full-model.scd
+
+  control-profiles:
+    needs: construct-clean
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.construct-clean.outputs.clean_sha }}
+      - name: Select compiler
+        shell: bash
+        run: |
+          if [ "${{ matrix.compiler }}" = clang ]; then
+            echo CC=clang >> "$GITHUB_ENV"
+            echo CXX=clang++ >> "$GITHUB_ENV"
+          else
+            echo CC=gcc >> "$GITHUB_ENV"
+            echo CXX=g++ >> "$GITHUB_ENV"
+          fi
+      - name: Guarded-control hard profile
+        run: |
+          cmake -S . -B build-guarded -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DARIEC61850_BUILD_TESTS=OFF \
+            -DARIEC61850_BUILD_TOOLS=OFF \
+            -DARIEC61850_BUILD_EMBEDDED_PROFILE=ON
+          cmake --build build-guarded --target ariec61850_embedded_control_guarded_hard_profile --parallel 2
+          ./build-guarded/embedded/ariec61850_embedded_control_guarded_hard_profile
+      - name: MMS control profile
+        run: |
+          cmake -S tests/control_mms_profile -B build-control-mms -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-control-mms --parallel 2
+          ctest --test-dir build-control-mms --output-on-failure
+      - name: Control session profile
+        run: |
+          cmake -S tests/control_session_profile -B build-control-session -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-control-session --parallel 2
+          ctest --test-dir build-control-session --output-on-failure
+      - name: Command termination profile
+        run: |
+          cmake -S tests/control_termination_profile -B build-control-term -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-control-term --parallel 2
+          ctest --test-dir build-control-term --output-on-failure
+
+  embedded-boundary:
+    needs: construct-clean
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.construct-clean.outputs.clean_sha }}
+      - name: Select compiler
+        shell: bash
+        run: |
+          if [ "${{ matrix.compiler }}" = clang ]; then
+            echo CC=clang >> "$GITHUB_ENV"
+            echo CXX=clang++ >> "$GITHUB_ENV"
+          else
+            echo CC=gcc >> "$GITHUB_ENV"
+            echo CXX=g++ >> "$GITHUB_ENV"
+          fi
+      - name: Embedded host-sim boundary
+        run: |
+          cmake -S embedded -B build-embedded -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-embedded --parallel 2
+          ctest --test-dir build-embedded --output-on-failure
+
+  parity-linux:
+    needs: construct-clean
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.construct-clean.outputs.clean_sha }}
+      - name: Select compiler
+        shell: bash
+        run: |
+          if [ "${{ matrix.compiler }}" = clang ]; then
+            echo CC=clang >> "$GITHUB_ENV"
+            echo CXX=clang++ >> "$GITHUB_ENV"
+          else
+            echo CC=gcc >> "$GITHUB_ENV"
+            echo CXX=g++ >> "$GITHUB_ENV"
+          fi
+      - name: IEDScout parity server
+        run: |
+          cmake -S tools/static_ied_server_iedsim -B build-parity -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-parity --parallel 2
+          ctest --test-dir build-parity --output-on-failure
+
+  parity-windows:
+    needs: construct-clean
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.construct-clean.outputs.clean_sha }}
+      - name: IEDScout parity server Windows
+        shell: pwsh
+        run: |
+          cmake -S tools/static_ied_server_iedsim -B build-parity -A x64 -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-parity --config Release --parallel 2
+          ctest --test-dir build-parity -C Release --output-on-failure
+
+  publish-pr-head:
+    needs: [construct-clean, live-e2e, control-profiles, embedded-boundary, parity-linux, parity-windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.construct-clean.outputs.clean_sha }}
+          fetch-depth: 0
+      - name: Atomic ref guard and publish
+        shell: bash
+        env:
+          CLEAN_SHA: ${{ needs.construct-clean.outputs.clean_sha }}
+        run: |
+          set -euo pipefail
+          EXPECTED_MAIN=75df1edbf631c7e3f67318bfc56cdcaf1c504c05
+          EXPECTED_TARGET=4e243e9abeef812859203de664738e6a3110597c
+          MAIN=$(git ls-remote origin refs/heads/main | awk '{print $1}')
+          TARGET=$(git ls-remote origin refs/heads/agent/iedsim-full-scl-live-store | awk '{print $1}')
+          STAGING=$(git ls-remote origin refs/heads/agent/p3-clean-staging | awk '{print $1}')
+          test "$MAIN" = "$EXPECTED_MAIN"
+          test "$TARGET" = "$EXPECTED_TARGET"
+          test "$STAGING" = "$CLEAN_SHA"
+          git push origin \
+            "$CLEAN_SHA:refs/heads/agent/iedsim-full-scl-live-store" \
+            --force-with-lease=refs/heads/agent/iedsim-full-scl-live-store:$EXPECTED_TARGET
+          echo "IEDSIM_P3_CLEAN_HEAD_PUBLISHED sha=$CLEAN_SHA"
