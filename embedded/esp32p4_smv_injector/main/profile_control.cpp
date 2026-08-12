@@ -7,6 +7,11 @@
 #include "smp_synch_lab.hpp"
 
 #include "esp_log.h"
+#include "sdkconfig.h"
+
+#if CONFIG_AR_PTP_LAB_TX
+#include "ptp_lab_task.hpp"
+#endif
 
 #include <array>
 #include <cerrno>
@@ -120,6 +125,54 @@ void print_smp_synch_policy() noexcept {
              status.measured_input_valid ? 1U : 0U);
 }
 
+#if CONFIG_AR_PTP_LAB_TX
+[[nodiscard]] const char* ptp_role_name(const ar_ptp_role_t role) noexcept {
+    switch (role) {
+    case AR_PTP_ROLE_LAB_SOURCE:
+        return "SOURCE";
+    case AR_PTP_ROLE_TIME_RECEIVER:
+        return "RECEIVER";
+    case AR_PTP_ROLE_MONITOR:
+        return "MONITOR";
+    }
+    return "UNKNOWN";
+}
+
+[[nodiscard]] bool parse_ptp_role(char* text, ar_ptp_role_t& role) noexcept {
+    if (text == nullptr) return false;
+    uppercase_ascii(text);
+    if (std::strcmp(text, "0") == 0 || std::strcmp(text, "SOURCE") == 0 ||
+        std::strcmp(text, "LAB_SOURCE") == 0) {
+        role = AR_PTP_ROLE_LAB_SOURCE;
+        return true;
+    }
+    if (std::strcmp(text, "1") == 0 || std::strcmp(text, "RECEIVER") == 0 ||
+        std::strcmp(text, "TIME_RECEIVER") == 0) {
+        role = AR_PTP_ROLE_TIME_RECEIVER;
+        return true;
+    }
+    if (std::strcmp(text, "2") == 0 || std::strcmp(text, "MONITOR") == 0 ||
+        std::strcmp(text, "MONITOR_ONLY") == 0) {
+        role = AR_PTP_ROLE_MONITOR;
+        return true;
+    }
+    return false;
+}
+
+void print_ptp_role() noexcept {
+    ar_ptp_lab_config_t config{};
+    if (!ar_ptp_lab_get_config(&config)) {
+        ESP_LOGE(kTag, "PTPROLE unavailable");
+        return;
+    }
+    ESP_LOGI(kTag,
+             "PTPROLE role=%s value=%u running=%u",
+             ptp_role_name(config.role),
+             static_cast<unsigned>(config.role),
+             ar_ptp_lab_is_running() ? 1U : 0U);
+}
+#endif
+
 void print_profile(const RuntimePublisherProfile& profile) noexcept {
     ESP_LOGI(kTag,
              "PROFILE generation=%llu svID=%s APPID=0x%04X rate=%lu wrap=%u confRev=%lu VLAN=%u/%u/%u dataSetField=%u sampleRateField=%u",
@@ -154,6 +207,9 @@ void handle_profile_command(char* arguments) noexcept {
         }
         print_profile(runtime_profile_snapshot());
         print_smp_synch_policy();
+#if CONFIG_AR_PTP_LAB_TX
+        print_ptp_role();
+#endif
         return;
     }
 
@@ -171,6 +227,36 @@ void handle_profile_command(char* arguments) noexcept {
         print_smp_synch_policy();
         return;
     }
+
+#if CONFIG_AR_PTP_LAB_TX
+    // PTP role is timing-subsystem ownership, not SV stream layout. It can be
+    // changed while SV is running, but never while the PTP task itself is active.
+    if (std::strcmp(subcommand, "PTPROLE") == 0) {
+        char* value = strtok_r(nullptr, kDelimiters, &save);
+        ar_ptp_role_t role{};
+        if (!parse_ptp_role(value, role) || !no_extra(&save)) {
+            ESP_LOGE(kTag, "Usage: PROFILE PTPROLE <SOURCE|RECEIVER|MONITOR>");
+            return;
+        }
+        if (ar_ptp_lab_is_running()) {
+            ESP_LOGE(kTag, "PTPROLE rejected: stop PTP before changing operating role");
+            return;
+        }
+        ar_ptp_lab_config_t config{};
+        if (!ar_ptp_lab_get_config(&config)) {
+            ESP_LOGE(kTag, "PTPROLE configuration unavailable");
+            return;
+        }
+        config.role = role;
+        if (!ar_ptp_lab_configure(&config)) {
+            ESP_LOGE(kTag, "PTPROLE rejected by timing profile validation");
+            return;
+        }
+        ESP_LOGI(kTag, "PTPROLE accepted");
+        print_ptp_role();
+        return;
+    }
+#endif
 
     if (live_tx_running()) {
         ESP_LOGE(kTag, "PROFILE rejected: stop the publisher before changing stream identity/layout");
