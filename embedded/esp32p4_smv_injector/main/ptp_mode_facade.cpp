@@ -35,6 +35,7 @@ portMUX_TYPE g_ptp_facade_mux = portMUX_INITIALIZER_UNLOCKED;
 ar_ptp_lab_config_t g_facade_override{};
 bool g_facade_override_valid = false;
 std::atomic<int> g_active_role{static_cast<int>(AR_PTP_ROLE_LAB_SOURCE)};
+std::atomic_bool g_receiver_stop_pending{false};
 
 void fill_p2_defaults(ar_ptp_lab_config_t& config) noexcept {
     config.role = static_cast<ar_ptp_role_t>(CONFIG_AR_PTP_OPERATING_ROLE);
@@ -90,6 +91,13 @@ void fill_p2_defaults(ar_ptp_lab_config_t& config) noexcept {
 
 [[nodiscard]] ar_ptp_role_t active_role() noexcept {
     return static_cast<ar_ptp_role_t>(g_active_role.load(std::memory_order_acquire));
+}
+
+[[nodiscard]] bool receiver_stop_cleanup_pending() noexcept {
+    if (!g_receiver_stop_pending.load(std::memory_order_acquire)) return false;
+    if (ptp_receiver_is_running()) return true;
+    g_receiver_stop_pending.store(false, std::memory_order_release);
+    return false;
 }
 
 [[nodiscard]] const char* role_name(const ar_ptp_role_t role) noexcept {
@@ -169,10 +177,10 @@ extern "C" void ar_ptp_lab_get_default_config(ar_ptp_lab_config_t* config) {
 }
 
 extern "C" bool ar_ptp_lab_configure(const ar_ptp_lab_config_t* config) {
-    if (config == nullptr || ar_ptp_source_is_running() || ar::esp32p4::smv::ptp_receiver_is_running() || !ar::esp32p4::smv::valid_public_config(*config)) return false;
+    if (config == nullptr || ar_ptp_source_is_running() || ar::esp32p4::smv::ptp_receiver_is_running() || ar::esp32p4::smv::receiver_stop_cleanup_pending() || !ar::esp32p4::smv::valid_public_config(*config)) return false;
     if (!ar_ptp_source_configure(config)) return false;
     portENTER_CRITICAL(&ar::esp32p4::smv::g_ptp_facade_mux);
-    if (ar_ptp_source_is_running() || ar::esp32p4::smv::ptp_receiver_is_running()) {
+    if (ar_ptp_source_is_running() || ar::esp32p4::smv::ptp_receiver_is_running() || ar::esp32p4::smv::g_receiver_stop_pending.load(std::memory_order_acquire)) {
         portEXIT_CRITICAL(&ar::esp32p4::smv::g_ptp_facade_mux);
         return false;
     }
@@ -188,26 +196,48 @@ extern "C" bool ar_ptp_lab_get_config(ar_ptp_lab_config_t* config) {
     return true;
 }
 
-extern "C" void ar_ptp_lab_start(const esp_eth_handle_t eth_handle) {
-    if (eth_handle == nullptr || ar_ptp_lab_is_running()) return;
+extern "C" bool ar_ptp_lab_try_start(const esp_eth_handle_t eth_handle) {
+    if (eth_handle == nullptr || ar_ptp_source_is_running()) return false;
+
+    // A STOP request for receiver/monitor is asynchronous. Never interpret the
+    // still-ready old runtime as acceptance of a new START. Reject until the
+    // worker has completed cleanup, then clear the facade stop gate.
+    if (ar::esp32p4::smv::receiver_stop_cleanup_pending() ||
+        ar::esp32p4::smv::ptp_receiver_is_running()) {
+        return false;
+    }
+
     const auto config = ar::esp32p4::smv::selected_config();
     if (!ar::esp32p4::smv::valid_public_config(config)) {
         ESP_LOGE(ar::esp32p4::smv::kTag,
                  "PTP start rejected: invalid role/cadence/discipline threshold combination");
-        return;
+        return false;
     }
-    ar::esp32p4::smv::g_active_role.store(static_cast<int>(config.role), std::memory_order_release);
+
+    ar::esp32p4::smv::g_active_role.store(
+        static_cast<int>(config.role), std::memory_order_release);
     if (config.role == AR_PTP_ROLE_LAB_SOURCE) {
-        if (!ar_ptp_source_configure(&config)) return;
+        if (!ar_ptp_source_configure(&config)) return false;
         ar_ptp_source_start(eth_handle);
-        return;
+        return ar_ptp_source_is_running();
     }
-    static_cast<void>(ar::esp32p4::smv::ptp_receiver_start(eth_handle, config));
+
+    return ar::esp32p4::smv::ptp_receiver_start(eth_handle, config);
+}
+
+extern "C" void ar_ptp_lab_start(const esp_eth_handle_t eth_handle) {
+    static_cast<void>(ar_ptp_lab_try_start(eth_handle));
 }
 
 extern "C" void ar_ptp_lab_stop(void) {
-    if (ar::esp32p4::smv::active_role() == AR_PTP_ROLE_LAB_SOURCE) ar_ptp_source_stop();
-    else ar::esp32p4::smv::ptp_receiver_stop();
+    if (ar::esp32p4::smv::active_role() == AR_PTP_ROLE_LAB_SOURCE) {
+        ar_ptp_source_stop();
+        return;
+    }
+    if (ar::esp32p4::smv::ptp_receiver_is_running()) {
+        ar::esp32p4::smv::g_receiver_stop_pending.store(true, std::memory_order_release);
+    }
+    ar::esp32p4::smv::ptp_receiver_stop();
 }
 
 extern "C" bool ar_ptp_lab_is_running(void) {
