@@ -8,7 +8,6 @@ add_library(ptp_profile_core STATIC
     "${ARSTACK_ROOT}/src/ethernet/ethernet.cpp"
     "${ARSTACK_ROOT}/src/time_sync/ptp.cpp"
     "${ARSTACK_ROOT}/src/time_sync/ptp_monitor.cpp"
-    "${ARSTACK_ROOT}/src/time_sync/ptp_discipline.cpp"
     "${ARSTACK_ROOT}/src/capture/pcap.cpp")
 
 target_include_directories(ptp_profile_core PUBLIC
