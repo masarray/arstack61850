@@ -1,0 +1,89 @@
+name: Agent P1 Live Store Runner
+
+on:
+  push:
+    branches:
+      - agent/p1-live-store-run
+    paths:
+      - .github/scripts/agent_p1_live_store_patch.py
+      - .github/workflows/agent-p1-live-store-run.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/p1-live-store-run
+          fetch-depth: 0
+
+      - name: Preserve patcher and checkout P1 target
+        run: |
+          cp .github/scripts/agent_p1_live_store_patch.py /tmp/agent_p1_live_store_patch.py
+          git checkout -B agent/iedsim-full-scl-live-store origin/agent/iedsim-full-scl-live-store
+
+      - name: Apply P1 patch
+        run: python3 /tmp/agent_p1_live_store_patch.py
+
+      - name: Diff sanity
+        run: |
+          git diff --check
+          git status --short
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
+
+      - name: Configure Qt simulator
+        run: >-
+          cmake -S apps/ied_simulator -B build-p1 -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Qt simulator and probe
+        run: >-
+          cmake --build build-p1
+          --target arstack_ied_simulator ariec61850_mms_read_probe --parallel 2
+
+      - name: QML smoke
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ./build-p1/arstack_ied_simulator --smoke-test
+
+      - name: P1 end-to-end gate
+        run: >-
+          python3 apps/ied_simulator/test_gui_live_value.py
+          --app ./build-p1/arstack_ied_simulator
+          --read-probe ./build-p1
+          --scl ./tests/fixtures/scl/iedsim-full-model.scd
+
+      - name: Configure Clang parity target
+        env:
+          CC: clang
+          CXX: clang++
+        run: cmake -S tools/static_ied_server_iedsim -B build-p1-clang -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build and test Clang parity target
+        run: |
+          cmake --build build-p1-clang --parallel 2
+          ctest --test-dir build-p1-clang --output-on-failure
+
+      - name: Commit validated P1 source to target branch
+        run: |
+          git config user.name openai-agent
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add \
+            .github/workflows/ied-simulator-qt.yml \
+            apps/ied_simulator/src/IedSimulatorController.cpp \
+            apps/ied_simulator/src/IedSimulatorController.hpp \
+            apps/ied_simulator/src/main.cpp \
+            apps/ied_simulator/test_gui_live_value.py \
+            tests/fixtures/scl/iedsim-full-model.scd \
+            tools/mms_read_probe.cpp \
+            tools/static_ied_server.cpp
+          git commit -m 'feat(iedsim): add server-authoritative unified live values'
+          git push origin HEAD:agent/iedsim-full-scl-live-store
