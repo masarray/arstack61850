@@ -291,11 +291,12 @@ void seed_hardware_clock(const esp_eth_handle_t handle) noexcept {
     const ar_ptp_role_t role,
     const PtpMessageType type) noexcept {
     if (role == AR_PTP_ROLE_MONITOR) {
+        // Peer-delay frames are counted raw before this queue decision. Do not
+        // feed them into exchange correlation in passive MONITOR, otherwise a
+        // response with no owned request would be mislabeled as rejected.
         return type == PtpMessageType::announce ||
                type == PtpMessageType::sync ||
-               type == PtpMessageType::follow_up ||
-               type == PtpMessageType::pdelay_resp ||
-               type == PtpMessageType::pdelay_resp_follow_up;
+               type == PtpMessageType::follow_up;
     }
     return role == AR_PTP_ROLE_TIME_RECEIVER &&
            (type == PtpMessageType::announce ||
