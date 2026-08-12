@@ -90,7 +90,12 @@ def main() -> int:
             f"parity discovery mismatch={mismatches} warnings={document.get('warnings')}\n"
             f"client stdout:\n{client.stdout}"
         )
-    if "CONNECTION_ACCEPTED" not in server_stdout or "CONNECTION_CLOSED" not in server_stdout:
+    if (
+        "kind=client_connected" not in server_stdout
+        or "kind=client_closed" not in server_stdout
+        or "stage=cotp" not in server_stdout
+        or "stage=mms" not in server_stdout
+    ):
         raise RuntimeError(f"server lifecycle evidence missing:\n{server_stdout}")
 
     print("IEDSCOUT_PARITY_LOOPBACK_PASS domain=ESP32S3IOLD0 dataset=EventData")

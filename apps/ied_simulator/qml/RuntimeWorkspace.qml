@@ -56,10 +56,12 @@ Item {
                     color: theme.accentSoft; border.width: 1; border.color: theme.accent
                     Image { anchors.centerIn: parent; width: 17; height: 17; source: "qrc:/iedsim/assets/radio-tower.svg" }
                 }
-                Column {
-                    spacing: 1
-                    Label { text: "ARSTACK61850"; color: theme.muted; font.pixelSize: 10; font.weight: Font.DemiBold; font.letterSpacing: 1.0 }
-                    Label { text: "IED Simulator"; color: theme.text; font.pixelSize: theme.subtitleSize; font.weight: Font.DemiBold }
+                Label {
+                    text: "ARSTACK61850  /  IED Simulator"
+                    color: theme.text
+                    font.pixelSize: theme.subtitleSize
+                    font.weight: Font.Medium
+                    Layout.alignment: Qt.AlignVCenter
                 }
                 Rectangle { width: 1; height: 26; color: theme.line; Layout.leftMargin: 6; Layout.rightMargin: 6 }
                 ActionButton { theme: root.theme; text: "Add IED"; iconSource: "qrc:/iedsim/assets/upload.svg"; onClicked: root.addIedRequested() }
@@ -272,7 +274,7 @@ Item {
                         model: backend.selectedValue.options || []
                         currentIndex: Math.max(0, model.indexOf(root.pendingValue))
                         onActivated: root.pendingValue = currentText
-                        contentItem: Label { leftPadding: 10; text: optionEditor.displayText; color: theme.text; verticalAlignment: Text.AlignVCenter; font.pixelSize: theme.labelSize }
+                        contentItem: Label { leftPadding: 10; rightPadding: 28; text: optionEditor.displayText; color: theme.text; verticalAlignment: Text.AlignVCenter; font.pixelSize: theme.labelSize }
                         background: Rectangle { radius: theme.controlRadius; color: theme.surfaceRaised; border.width: 1; border.color: optionEditor.activeFocus ? theme.accent : theme.line }
                     }
                     TextField {
@@ -295,7 +297,7 @@ Item {
                             model: ["Good", "Invalid", "Questionable", "Reserved"]
                             currentIndex: Math.max(0, model.indexOf(root.pendingQuality))
                             onActivated: root.pendingQuality = currentText
-                            contentItem: Label { leftPadding: 9; text: qualityBox.displayText; color: theme.text; verticalAlignment: Text.AlignVCenter; font.pixelSize: 10 }
+                            contentItem: Label { leftPadding: 9; rightPadding: 26; text: qualityBox.displayText; color: theme.text; verticalAlignment: Text.AlignVCenter; font.pixelSize: 10 }
                             background: Rectangle { radius: theme.controlRadius; color: theme.surfaceRaised; border.width: 1; border.color: theme.line }
                         }
                     }
@@ -308,7 +310,7 @@ Item {
                             model: ["Simulator", "Process", "Operator", "Test"]
                             currentIndex: Math.max(0, model.indexOf(root.pendingOrigin))
                             onActivated: root.pendingOrigin = currentText
-                            contentItem: Label { leftPadding: 9; text: originBox.displayText; color: theme.text; verticalAlignment: Text.AlignVCenter; font.pixelSize: 10 }
+                            contentItem: Label { leftPadding: 9; rightPadding: 26; text: originBox.displayText; color: theme.text; verticalAlignment: Text.AlignVCenter; font.pixelSize: 10 }
                             background: Rectangle { radius: theme.controlRadius; color: theme.surfaceRaised; border.width: 1; border.color: theme.line }
                         }
                     }
@@ -329,7 +331,7 @@ Item {
                             Label { text: "✓ Previous value can be restored with Undo"; color: theme.textSoft; font.pixelSize: 9 }
                         }
                     }
-                    Item { Layout.fillHeight: true }
+                    Item { Layout.preferredHeight: 4 }
                     RowLayout {
                         Layout.fillWidth: true; spacing: 8
                         ActionButton { theme: root.theme; Layout.fillWidth: true; text: "Undo"; enabled: backend.running; onClicked: backend.undoLastChange() }
@@ -365,10 +367,11 @@ Item {
                         StatusPill { theme: root.theme; text: "MMS online"; tone: theme.green; fill: theme.greenSoft }
                         Item { Layout.fillWidth: true }
                         Label { text: backend.activity.length + " events"; color: theme.muted; font.pixelSize: 10 }
+                        ActionButton { theme: root.theme; text: "Copy diagnostics"; implicitHeight: 28; onClicked: backend.copyDiagnostics() }
                         ActionButton { theme: root.theme; text: "Clear"; implicitHeight: 28; onClicked: backend.clearActivity() }
                         Image { width: 15; height: 15; source: root.activityExpanded ? "qrc:/iedsim/assets/chevron-down.svg" : "qrc:/iedsim/assets/chevron-up.svg" }
                     }
-                    MouseArea { anchors.fill: parent; acceptedButtons: Qt.LeftButton; onClicked: root.activityExpanded = !root.activityExpanded }
+                    TapHandler { onTapped: root.activityExpanded = !root.activityExpanded }
                 }
                 Rectangle { visible: root.activityExpanded; Layout.fillWidth: true; height: 1; color: theme.lineSoft }
                 ListView {
