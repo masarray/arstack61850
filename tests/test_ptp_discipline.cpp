@@ -152,6 +152,7 @@ void receiver_correlates_pdelay_and_two_step_sync() {
         local,
         std::chrono::milliseconds{3000},
         std::chrono::milliseconds{2000},
+        std::chrono::milliseconds{3000},
     });
     const auto t0 = Clock::time_point{};
     CHECK(receiver.observe_announce(announce_frame(master, 128U, true), t0));
@@ -216,6 +217,7 @@ void receiver_prefers_better_source_and_drops_stale_source() {
         local,
         std::chrono::milliseconds{100},
         std::chrono::milliseconds{50},
+        std::chrono::milliseconds{100},
     });
     const auto t0 = Clock::time_point{};
     CHECK(receiver.observe_announce(announce_frame(worse, 200U, false), t0));
@@ -253,6 +255,7 @@ void sync_traffic_does_not_extend_announce_evidence() {
         local,
         std::chrono::milliseconds{100},
         std::chrono::milliseconds{50},
+        std::chrono::milliseconds{100},
     });
     const auto t0 = Clock::time_point{};
     CHECK(receiver.observe_announce(announce_frame(master, 100U, true), t0));
@@ -270,6 +273,66 @@ void sync_traffic_does_not_extend_announce_evidence() {
     CHECK(receiver.tick(t0 + std::chrono::milliseconds{101}));
     CHECK(!receiver.status().selected_source.has_value());
     CHECK(!receiver.status().selected_source_globally_traceable);
+}
+
+void peer_delay_evidence_expires_independently() {
+    const auto local = port(0x45U, 2U);
+    const auto master = port(0x46U);
+    PtpTimeReceiver receiver(PtpTimeReceiverOptions{
+        0U,
+        0U,
+        local,
+        std::chrono::milliseconds{1000},
+        std::chrono::milliseconds{50},
+        std::chrono::milliseconds{100},
+    });
+    const auto t0 = Clock::time_point{};
+    CHECK(receiver.observe_announce(announce_frame(master, 100U, true), t0));
+
+    receiver.note_pdelay_request(5U, ts(5U, 0U), t0 + std::chrono::milliseconds{1});
+    PtpFrame response;
+    response.header.message_type = PtpMessageType::pdelay_resp;
+    response.header.source_port_identity = master;
+    response.header.sequence_id = 5U;
+    response.body = pdelay_body(ts(5U, 500U), local);
+    CHECK(receiver.observe_pdelay_response(
+        response,
+        ts(5U, 1'200U),
+        t0 + std::chrono::milliseconds{2}));
+
+    PtpFrame response_follow_up;
+    response_follow_up.header.message_type = PtpMessageType::pdelay_resp_follow_up;
+    response_follow_up.header.source_port_identity = master;
+    response_follow_up.header.sequence_id = 5U;
+    response_follow_up.body = pdelay_body(ts(5U, 700U), local);
+    CHECK(receiver.observe_pdelay_response_follow_up(
+        response_follow_up,
+        t0 + std::chrono::milliseconds{3}).has_value());
+    CHECK(receiver.status().mean_path_delay_ns == 500LL);
+
+    CHECK(!receiver.tick(t0 + std::chrono::milliseconds{104}));
+    CHECK(receiver.status().selected_source == master);
+    CHECK(!receiver.status().mean_path_delay_ns.has_value());
+
+    PtpFrame sync;
+    sync.header.message_type = PtpMessageType::sync;
+    sync.header.source_port_identity = master;
+    sync.header.sequence_id = 6U;
+    sync.header.flags = 0x0200U;
+    CHECK(!receiver.observe_sync(
+        sync,
+        ts(6U, 1'000U),
+        t0 + std::chrono::milliseconds{105}).has_value());
+
+    PtpFrame follow_up;
+    follow_up.header.message_type = PtpMessageType::follow_up;
+    follow_up.header.source_port_identity = master;
+    follow_up.header.sequence_id = 6U;
+    follow_up.timestamp = ts(6U, 0U);
+    CHECK(!receiver.observe_follow_up(
+        follow_up,
+        t0 + std::chrono::milliseconds{106}).has_value());
+    CHECK(receiver.status().completed_sync_exchanges == 0U);
 }
 
 void discipline_steps_then_locks_and_promotes_measured_sync() {
@@ -311,6 +374,32 @@ void discipline_steps_then_locks_and_promotes_measured_sync() {
     CHECK(!discipline.measured_smp_synch().has_value());
 }
 
+void global_traceability_can_be_revoked_without_losing_local_lock() {
+    PtpDisciplineOptions options;
+    options.lock_required_samples = 2U;
+    PtpClockDiscipline discipline(options);
+    const auto t0 = Clock::time_point{};
+
+    static_cast<void>(discipline.observe(
+        PtpOffsetMeasurement{port(0x52U), 1U, 500LL, 500LL, true},
+        t0));
+    static_cast<void>(discipline.observe(
+        PtpOffsetMeasurement{port(0x52U), 2U, 500LL, 500LL, true},
+        t0 + std::chrono::milliseconds{10}));
+    CHECK(discipline.status().state == PtpDisciplineState::locked);
+    CHECK(discipline.measured_smp_synch() == SmpSynchValue::global_synchronized);
+
+    discipline.revoke_global_traceability();
+    CHECK(discipline.status().state == PtpDisciplineState::locked);
+    CHECK(!discipline.status().globally_traceable);
+    CHECK(discipline.measured_smp_synch() == SmpSynchValue::local_synchronized);
+
+    static_cast<void>(discipline.observe(
+        PtpOffsetMeasurement{port(0x52U), 3U, 500LL, 500LL, true},
+        t0 + std::chrono::milliseconds{20}));
+    CHECK(discipline.measured_smp_synch() == SmpSynchValue::global_synchronized);
+}
+
 void rejected_measurements_do_not_extend_lock_evidence() {
     PtpDisciplineOptions options;
     options.lock_required_samples = 2U;
@@ -335,7 +424,6 @@ void rejected_measurements_do_not_extend_lock_evidence() {
     CHECK(discipline.status().rejected_samples == rejected_before + 1U);
     CHECK(discipline.status().state == PtpDisciplineState::locked);
 
-    // 101 ms since the last accepted measurement, despite an invalid frame at 90 ms.
     discipline.tick(t0 + std::chrono::milliseconds{111});
     CHECK(discipline.status().state == PtpDisciplineState::holdover);
     CHECK(discipline.measured_smp_synch() == SmpSynchValue::local_synchronized);
@@ -369,7 +457,9 @@ int main() {
         {"receiver correlation", receiver_correlates_pdelay_and_two_step_sync},
         {"source selection and timeout", receiver_prefers_better_source_and_drops_stale_source},
         {"Announce evidence lifetime", sync_traffic_does_not_extend_announce_evidence},
+        {"peer-delay evidence lifetime", peer_delay_evidence_expires_independently},
         {"discipline lock and holdover", discipline_steps_then_locks_and_promotes_measured_sync},
+        {"global traceability revoke", global_traceability_can_be_revoked_without_losing_local_lock},
         {"accepted measurement lifetime", rejected_measurements_do_not_extend_lock_evidence},
         {"discipline fault", discipline_rejects_bad_path_and_faults_on_actuation_failure},
     };
