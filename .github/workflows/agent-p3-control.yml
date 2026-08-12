@@ -6,6 +6,7 @@ on:
       - agent/p3-control-run
     paths:
       - '.github/scripts/agent_p3_control_patch.py'
+      - '.github/scripts/agent_p3_control_repair.py'
       - '.github/workflows/agent-p3-control.yml'
   workflow_dispatch:
 
@@ -22,7 +23,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply P3 patch
-        run: python3 .github/scripts/agent_p3_control_patch.py
+        run: |
+          python3 .github/scripts/agent_p3_control_patch.py
+          python3 .github/scripts/agent_p3_control_repair.py
 
       - name: Diff sanity
         run: |
