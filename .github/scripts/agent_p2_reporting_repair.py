@@ -86,4 +86,49 @@ replace_once(
     '            evidence = re.search(r"REPORT_EVIDENCE received=(\\d+) decodeFailures=(\\d+)", report_trial.stdout)\n',
 )
 
+# Diagnostic inventory is intentionally part of the trial output. It makes a
+# failed interoperability selection actionable: whether NameList inventory,
+# RptEna/DatSet reads, or DataSet directory evidence is incomplete is visible
+# before the selector makes a decision.
+replace_once(
+    "tools/static_rcb_trial.cpp",
+    "        auto discovery = live_session.discover(discovery_options);\n\n"
+    "        mms::MmsStaticReportSessionOptions session_options;\n",
+    "        auto discovery = live_session.discover(discovery_options);\n"
+    "        std::cout << \"DISCOVERY_REPORTING inventoryRcb=\"\n"
+    "                  << discovery.report_inventory.report_controls.size()\n"
+    "                  << \" probedRcb=\" << discovery.report_controls.size()\n"
+    "                  << \" inventoryDataSet=\" << discovery.report_inventory.data_sets.size()\n"
+    "                  << \" directoryDataSet=\" << discovery.data_set_directories.size() << '\\n';\n"
+    "        for (const auto& evidence : discovery.report_controls) {\n"
+    "            std::cout << \"DISCOVERY_RCB ref=\" << evidence.candidate.reference\n"
+    "                      << \" mode=\" << evidence.candidate.mode()\n"
+    "                      << \" success=\" << (evidence.success() ? \"true\" : \"false\");\n"
+    "            if (evidence.state) {\n"
+    "                const auto& state = *evidence.state;\n"
+    "                std::cout << \" rptEna=\"\n"
+    "                          << (state.report_enabled ? (*state.report_enabled ? \"true\" : \"false\") : \"unset\")\n"
+    "                          << \" datSet=\" << state.data_set_reference\n"
+    "                          << \" resv=\"\n"
+    "                          << (state.reserved ? (*state.reserved ? \"true\" : \"false\") : \"unset\")\n"
+    "                          << \" diagnostics=\" << state.diagnostics.size();\n"
+    "                for (const auto& diagnostic : state.diagnostics) {\n"
+    "                    std::cout << \" [\" << diagnostic << ']';\n"
+    "                }\n"
+    "            } else {\n"
+    "                std::cout << \" error=\" << evidence.error;\n"
+    "            }\n"
+    "            std::cout << '\\n';\n"
+    "        }\n"
+    "        for (const auto& evidence : discovery.data_set_directories) {\n"
+    "            std::cout << \"DISCOVERY_DATASET ref=\" << evidence.candidate.reference\n"
+    "                      << \" success=\" << (evidence.success() ? \"true\" : \"false\")\n"
+    "                      << \" members=\"\n"
+    "                      << (evidence.directory ? evidence.directory->members.size() : 0U)\n"
+    "                      << \" error=\" << evidence.error << '\\n';\n"
+    "        }\n"
+    "        std::cout.flush();\n\n"
+    "        mms::MmsStaticReportSessionOptions session_options;\n",
+)
+
 print("P2 reporting repair applied")
