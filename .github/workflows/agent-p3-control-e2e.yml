@@ -22,8 +22,14 @@ jobs:
           ref: agent/p3-control-e2e
           fetch-depth: 0
 
-      - name: Apply P3 runtime and GUI consistency repair
-        run: python3 .github/scripts/agent_p3_control_lifetime_repair.py
+      - name: Reconstruct validated P3 repair inputs deterministically
+        run: |
+          git checkout 4fece69f3ca81b0b616c2c543cf2dc1f2b5ea002 -- \
+            tools/static_ied_server.cpp \
+            apps/ied_simulator/src/IedSimulatorController.cpp \
+            apps/ied_simulator/src/main.cpp \
+            apps/ied_simulator/test_gui_live_value.py
+          python3 .github/scripts/agent_p3_control_lifetime_repair.py
 
       - name: Diff sanity
         run: |
@@ -80,5 +86,9 @@ jobs:
             apps/ied_simulator/src/IedSimulatorController.hpp \
             apps/ied_simulator/src/main.cpp \
             apps/ied_simulator/test_gui_live_value.py
-          git commit -m 'fix(iedsim): harden hosted control runtime and QA selection'
-          git push origin HEAD:agent/p3-control-e2e
+          if git diff --cached --quiet; then
+            echo 'Validated product source already persisted.'
+          else
+            git commit -m 'fix(iedsim): harden hosted control runtime and QA selection'
+            git push origin HEAD:agent/p3-control-e2e
+          fi
