@@ -47,15 +47,23 @@ config AR_SMV_DIAGNOSTIC_PROBES
         disabled while measuring realtime timing unless it is needed.
 
 config AR_PTP_LAB_TX
-    bool "Enable PTPv2 Layer-2 lab timing companion"
+    bool "Enable PTPv2 Layer-2 timing task"
     default n
     help
-        Enables a low-rate PTPv2 Layer-2 laboratory broadcaster for isolated
-        troubleshooting, internal testing and interoperability work when a
-        normal station PTP/GPS time server is unavailable. On ESP32-P4 with
-        ESP-IDF 5.x the two-step Sync/Follow_Up and Pdelay response paths use
-        EMAC hardware timestamps. This feature is not a GPS-backed or certified
-        grandmaster.
+        Enables the isolated PTP timing subsystem. Role 0 is a lab source,
+        role 1 is a measured external-time receiver with clock discipline, and
+        role 2 is passive monitor-only. This feature is not a GPS-backed or
+        certified grandmaster claim.
+
+config AR_PTP_OPERATING_ROLE
+    int "PTP operating role (0=lab source, 1=time receiver, 2=monitor)"
+    range 0 2
+    default 0
+    depends on AR_PTP_LAB_TX
+    help
+        LAB_SOURCE sends Announce/Sync and can answer Pdelay. TIME_RECEIVER
+        listens to an external PTP source, performs hardware-timestamped peer
+        delay, and disciplines the ESP32-P4 IEEE1588 clock. MONITOR is passive.
 
 config AR_PTP_DOMAIN
     int "PTP domain number"
@@ -87,7 +95,7 @@ config AR_PTP_PORT_NUMBER
     depends on AR_PTP_LAB_TX
 
 config AR_PTP_VLAN
-    bool "Tag PTP lab traffic with IEEE 802.1Q VLAN"
+    bool "Tag PTP traffic with IEEE 802.1Q VLAN"
     default n
     depends on AR_PTP_LAB_TX
 
@@ -115,16 +123,22 @@ config AR_PTP_SYNC_INTERVAL_MS
     default 250
     depends on AR_PTP_LAB_TX
     help
-        ESP32-P4 uses two-step Sync/Follow_Up so Follow_Up can carry the exact
+        LAB_SOURCE uses two-step Sync/Follow_Up so Follow_Up can carry the exact
         EMAC transmit timestamp rather than a software send-time estimate.
 
 config AR_PTP_RESPOND_PDELAY
-    bool "Respond to peer-delay requests"
+    bool "Respond to peer-delay requests in LAB_SOURCE"
     default y
     depends on AR_PTP_LAB_TX
     help
         Uses the ESP32-P4 RX descriptor timestamp as t2 and the Pdelay_Resp TX
         descriptor timestamp as t3 for Pdelay_Resp_Follow_Up.
+
+config AR_PTP_PDELAY_REQUEST_INTERVAL_MS
+    int "TIME_RECEIVER peer-delay request interval (ms)"
+    range 100 10000
+    default 1000
+    depends on AR_PTP_LAB_TX
 
 config AR_PTP_PRIORITY1
     int "PTP priority1"
@@ -167,13 +181,67 @@ config AR_PTP_TIME_SOURCE
     default 160
     depends on AR_PTP_LAB_TX
     help
-        160 (0xA0) is Internal Oscillator. Do not select GPS unless a future
-        disciplined external time source actually provides that evidence.
+        160 (0xA0) is Internal Oscillator. Do not select GPS unless an external
+        disciplined source actually provides that evidence.
 
 config AR_PTP_CURRENT_UTC_OFFSET
     int "PTP currentUtcOffset"
     range -32768 32767
     default 37
+    depends on AR_PTP_LAB_TX
+
+config AR_PTP_MAX_PATH_DELAY_NS
+    int "TIME_RECEIVER maximum accepted peer path delay (ns)"
+    range 1000 100000000
+    default 5000000
+    depends on AR_PTP_LAB_TX
+
+config AR_PTP_MAX_PATH_JITTER_NS
+    int "TIME_RECEIVER maximum accepted path-delay jitter (ns)"
+    range 0 10000000
+    default 100000
+    depends on AR_PTP_LAB_TX
+
+config AR_PTP_LOCK_OFFSET_NS
+    int "TIME_RECEIVER LOCKED offset threshold (ns)"
+    range 100 1000000
+    default 2000
+    depends on AR_PTP_LAB_TX
+
+config AR_PTP_UNLOCK_OFFSET_NS
+    int "TIME_RECEIVER unlock offset threshold (ns)"
+    range 100 10000000
+    default 20000
+    depends on AR_PTP_LAB_TX
+
+config AR_PTP_PHASE_STEP_THRESHOLD_NS
+    int "TIME_RECEIVER phase-step threshold while acquiring (ns)"
+    range 1000 1000000000
+    default 1000000
+    depends on AR_PTP_LAB_TX
+
+config AR_PTP_LOCK_REQUIRED_SAMPLES
+    int "TIME_RECEIVER consecutive qualified samples required for LOCKED"
+    range 2 100
+    default 8
+    depends on AR_PTP_LAB_TX
+
+config AR_PTP_SYNC_TIMEOUT_MS
+    int "TIME_RECEIVER Sync timeout before HOLDOVER/UNLOCKED (ms)"
+    range 100 10000
+    default 1000
+    depends on AR_PTP_LAB_TX
+
+config AR_PTP_HOLDOVER_TIMEOUT_MS
+    int "TIME_RECEIVER bounded HOLDOVER duration (ms)"
+    range 100 60000
+    default 5000
+    depends on AR_PTP_LAB_TX
+
+config AR_PTP_MAX_FREQ_ADJ_PPB
+    int "TIME_RECEIVER maximum absolute frequency correction (ppb)"
+    range 1000 1000000
+    default 100000
     depends on AR_PTP_LAB_TX
 
 config AR_SMV_CURRENT_RMS_MA

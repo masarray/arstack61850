@@ -97,6 +97,25 @@ public:
     Q_INVOKABLE bool stopPtp();
     Q_INVOKABLE bool configurePtp(const QVariantMap& profile);
 
+    // P2 timing role selection is stopped-only for PTP, but independent of the
+    // SV publisher. The firmware owns validation and refuses live role mutation.
+    Q_INVOKABLE bool setPtpRole(const QString& requestedRole) {
+        const QString role = requestedRole.trimmed().toUpper();
+        static const QStringList validRoles{
+            QStringLiteral("SOURCE"),
+            QStringLiteral("RECEIVER"),
+            QStringLiteral("MONITOR")};
+        if (!validRoles.contains(role)) {
+            setError(QStringLiteral("PTP role must be SOURCE, RECEIVER, or MONITOR."));
+            return false;
+        }
+        if (ptpRunning_) {
+            setError(QStringLiteral("Stop PTP before changing its operating role."));
+            return false;
+        }
+        return sendCommand(QStringLiteral("PROFILE PTPROLE %1").arg(role));
+    }
+
     // P1.75 laboratory SV synchronization stimulus. These commands are
     // intentionally separate from PTP lock detection: AUTO remains conservative,
     // while 0/1/2 are explicit simulated wire states for relay testing.
