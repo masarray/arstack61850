@@ -176,10 +176,12 @@ void seed_hardware_clock(const esp_eth_handle_t handle) noexcept {
     PtpTimestamp& timestamp) noexcept {
     if (frame.empty()) return false;
     eth_mac_time_t tx_timestamp{};
+    // esp_eth_transmit_ctrl_vargs argc counts buffer/length pairs. One PTP
+    // Ethernet frame is exactly one pair.
     const auto result = esp_eth_transmit_ctrl_vargs(
         handle,
         &tx_timestamp,
-        2U,
+        1U,
         frame.data(),
         frame.size());
     if (result != ESP_OK || !valid_hw_timestamp(tx_timestamp)) return false;
