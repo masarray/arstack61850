@@ -1,0 +1,57 @@
+name: SMV Injector Slint Shell
+
+on:
+  push:
+    paths:
+      - 'apps/smv_injector_slint/**'
+      - '.github/workflows/smv-injector-slint.yml'
+  pull_request:
+    paths:
+      - 'apps/smv_injector_slint/**'
+      - '.github/workflows/smv-injector-slint.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  native-shell-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Slint build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxkbcommon-dev \
+            libfontconfig-dev \
+            libssl-dev
+
+      - name: Select Rust 1.92
+        shell: bash
+        run: |
+          rustup toolchain install 1.92.0 --profile minimal
+          rustup default 1.92.0
+          rustc --version
+
+      - name: Configure native Slint shell
+        shell: bash
+        run: |
+          cmake -S apps/smv_injector_slint \
+            -B build-smv-slint \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build native Slint shell
+        shell: bash
+        run: |
+          cmake --build build-smv-slint \
+            --target arstack_smv_slint_shell \
+            --parallel 2

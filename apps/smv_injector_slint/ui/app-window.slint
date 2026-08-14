@@ -1,0 +1,832 @@
+global Theme {
+    out property <color> window: #f2f6fa;
+    out property <color> surface: #ffffff;
+    out property <color> surface-soft: #f8fafc;
+    out property <color> ink: #132238;
+    out property <color> ink-soft: #60718a;
+    out property <color> line: #d8e2ee;
+    out property <color> line-strong: #c6d4e4;
+    out property <color> blue: #2563eb;
+    out property <color> cyan: #14b8d4;
+    out property <color> green: #0d9b68;
+    out property <color> red: #e4556b;
+    out property <color> phase-a: #ef3340;
+    out property <color> phase-b: #e78300;
+    out property <color> phase-c: #2563eb;
+    out property <color> neutral: #64748b;
+}
+
+component RibbonAction inherits Rectangle {
+    in property <image> icon;
+    in property <string> text;
+    in property <string> hint;
+    in property <bool> active: false;
+    in property <bool> primary: false;
+    in property <bool> danger: false;
+    in property <bool> success: false;
+    in property <bool> enabled: true;
+    callback clicked;
+
+    width: 76px;
+    height: 64px;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: !root.enabled ? #e1e7ed
+        : root.success ? #54c99a
+        : root.primary ? #6aa4ff
+        : root.danger ? #f1a3b1
+        : root.active ? #8fdcff
+        : touch.has-hover ? #bdd0e4
+        : #d9e4ef;
+    background: !root.enabled ? #f5f7f9
+        : touch.pressed ? (root.success ? #087f56 : root.primary ? #1f56c5 : root.danger ? #cf4057 : #eaf2fa)
+        : root.success ? @linear-gradient(180deg, #45d39b, #0d9b68)
+        : root.primary ? @linear-gradient(180deg, #55a3ff, #2563eb)
+        : root.danger ? @linear-gradient(180deg, #ffd8df, #f49bad)
+        : root.active ? #eefaff
+        : touch.has-hover ? #f7fbff
+        : Theme.surface;
+    drop-shadow-blur: root.primary || root.danger || root.success ? 7px : 4px;
+    drop-shadow-offset-y: 2px;
+    drop-shadow-color: root.success ? #0d9b6838 : root.primary ? #2563eb38 : root.danger ? #d94e6530 : #14304a18;
+    animate background { duration: 100ms; }
+
+    VerticalLayout {
+        padding-top: 7px;
+        padding-bottom: 6px;
+        spacing: 2px;
+        Image {
+            source: root.icon;
+            width: 23px;
+            height: 23px;
+            image-fit: contain;
+            colorize: !root.enabled ? #a9b4bf : (root.primary || root.danger || root.success) ? #ffffff : root.active ? #1676c6 : #384c64;
+        }
+        Text {
+            text: root.text;
+            color: !root.enabled ? #9aa7b4 : (root.primary || root.danger || root.success) ? #ffffff : Theme.ink;
+            font-size: 10px;
+            font-weight: 600;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.hint;
+            color: !root.enabled ? #b5bec7 : (root.primary || root.danger || root.success) ? #eaf2ff : Theme.ink-soft;
+            font-size: 7px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component Toggle inherits Rectangle {
+    in-out property <bool> checked: true;
+    callback toggled(bool);
+    width: 34px;
+    height: 18px;
+    border-radius: 9px;
+    background: root.checked ? Theme.green : #c6d1dc;
+    animate background { duration: 110ms; }
+    Rectangle {
+        x: root.checked ? parent.width - self.width - 3px : 3px;
+        y: 3px;
+        width: 12px;
+        height: 12px;
+        border-radius: 6px;
+        background: #ffffff;
+        drop-shadow-blur: 2px;
+        drop-shadow-offset-y: 1px;
+        drop-shadow-color: #00000030;
+        animate x { duration: 120ms; easing: ease-in-out; }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.checked = !root.checked; root.toggled(root.checked); }
+    }
+}
+
+component PanelHeader inherits Rectangle {
+    in property <string> title;
+    in property <string> meta;
+    height: 31px;
+    background: @linear-gradient(90deg, Theme.cyan, Theme.blue);
+    HorizontalLayout {
+        padding-left: 11px;
+        padding-right: 10px;
+        Text { text: root.title; color: #ffffff; font-size: 11px; font-weight: 600; vertical-alignment: center; horizontal-stretch: 1; }
+        Text { text: root.meta; color: #e7f4ff; font-size: 8px; vertical-alignment: center; }
+    }
+}
+
+component DockTab inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+    callback selected;
+    width: 126px;
+    height: 25px;
+    background: root.active ? #ffffff : touch.has-hover ? #eef4fa : #00000000;
+    border-width: root.active ? 1px : 0px;
+    border-color: Theme.line-strong;
+    Text {
+        text: root.label;
+        color: root.active ? Theme.ink : Theme.ink-soft;
+        font-size: 8px;
+        font-weight: root.active ? 600 : 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { root.selected(); } }
+}
+
+component MiniField inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    height: 28px;
+    background: #00000000;
+    HorizontalLayout {
+        spacing: 7px;
+        Text { text: root.label; color: Theme.ink-soft; font-size: 9px; min-width: 76px; vertical-alignment: center; }
+        Rectangle {
+            horizontal-stretch: 1;
+            height: 27px;
+            border-radius: 5px;
+            border-width: 1px;
+            border-color: Theme.line-strong;
+            background: #fbfdff;
+            Text { text: root.value; color: Theme.ink; font-size: 10px; font-weight: 500; x: 8px; width: parent.width - 16px; vertical-alignment: center; }
+        }
+    }
+}
+
+component EnableCell inherits Rectangle {
+    in-out property <bool> checked: true;
+    callback toggled(bool);
+    width: 34px;
+    height: 34px;
+    background: touch.has-hover ? #edf5ff : #00000000;
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 15px;
+        height: 15px;
+        border-radius: 3px;
+        border-width: 1px;
+        border-color: root.checked ? Theme.blue : #a8b7c6;
+        background: root.checked ? Theme.blue : #ffffff;
+        Image {
+            visible: root.checked;
+            x: 2px; y: 2px; width: 11px; height: 11px;
+            source: @image-url("../assets/lucide/check.svg");
+            image-fit: contain;
+            colorize: #ffffff;
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.checked = !root.checked; root.toggled(root.checked); }
+    }
+}
+
+component NumericCell inherits Rectangle {
+    in-out property <float> value;
+    in property <int> row-index;
+    in property <int> column;
+    in property <string> unit;
+    callback commit(int, int, float, bool) -> bool;
+    callback navigate(int, int);
+    private property <bool> invalid: false;
+    private property <bool> focused: editor.has-focus;
+
+    height: 34px;
+    border-width: 1px;
+    border-color: root.invalid ? Theme.red : root.focused ? Theme.blue : #00000000;
+    background: root.invalid ? #fff1f3 : root.focused ? #f5f9ff : #00000000;
+
+    public function focus-editor() {
+        editor.focus();
+        editor.select-all();
+    }
+
+    function commit-and-move(next-row: int, next-column: int) {
+        if (root.commit(root.row-index, root.column, root.value, true)) {
+            root.invalid = false;
+            root.navigate(next-row, next-column);
+        } else {
+            root.invalid = true;
+            editor.focus();
+            editor.select-all();
+        }
+    }
+
+    changed focused => {
+        if (root.focused) { editor.select-all(); }
+    }
+
+    delayed-preview := Timer {
+        interval: 140ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            root.invalid = !root.commit(root.row-index, root.column, root.value, false);
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 3px;
+        padding-right: 4px;
+        spacing: 2px;
+        editor := TextInput {
+            horizontal-stretch: 1;
+            height: 28px;
+            text: root.value;
+            color: Theme.ink;
+            selection-foreground-color: #ffffff;
+            selection-background-color: Theme.blue;
+            font-size: 10px;
+            font-weight: 500;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            single-line: true;
+            input-type: decimal;
+            edited => {
+                if (self.text != "" && self.text != "-" && self.text != "+" && self.text != ".") {
+                    root.value = self.text.to-float();
+                    delayed-preview.running = false;
+                    delayed-preview.running = true;
+                }
+            }
+            accepted => {
+                if (self.text != "") { root.value = self.text.to-float(); }
+                root.commit-and-move(min(7, root.row-index + 1), root.column);
+            }
+            key-pressed(event) => {
+                if (event.text == Key.UpArrow) {
+                    root.commit-and-move(max(0, root.row-index - 1), root.column);
+                    return accept;
+                }
+                if (event.text == Key.DownArrow) {
+                    root.commit-and-move(min(7, root.row-index + 1), root.column);
+                    return accept;
+                }
+                if (event.text == Key.LeftArrow) {
+                    root.commit-and-move(root.row-index, max(0, root.column - 1));
+                    return accept;
+                }
+                if (event.text == Key.RightArrow) {
+                    root.commit-and-move(root.row-index, min(2, root.column + 1));
+                    return accept;
+                }
+                return reject;
+            }
+        }
+        Text { text: root.unit; color: Theme.ink-soft; font-size: 8px; min-width: root.unit == "" ? 0px : 18px; vertical-alignment: center; }
+    }
+}
+
+component SignalGridRow inherits Rectangle {
+    in property <int> row-index;
+    in property <string> channel;
+    in property <string> signal;
+    in property <color> signal-color;
+    in-out property <bool> enabled: true;
+    in-out property <float> magnitude;
+    in-out property <float> phase;
+    in-out property <float> frequency;
+    in property <string> magnitude-unit;
+    in property <bool> alternate: false;
+    callback commit(string, int, int, float, bool) -> bool;
+    callback navigate(int, int);
+    callback enabled-changed(string, bool);
+
+    height: 36px;
+    background: root.alternate ? #f7faff : Theme.surface;
+    border-width: 1px;
+    border-color: #e4ebf3;
+
+    public function focus-column(column: int) {
+        if (column == 0) { magnitude-cell.focus-editor(); }
+        else if (column == 1) { phase-cell.focus-editor(); }
+        else { frequency-cell.focus-editor(); }
+    }
+
+    HorizontalLayout {
+        spacing: 0px;
+        EnableCell { checked <=> root.enabled; toggled(value) => { root.enabled-changed(root.channel, value); } }
+        Rectangle {
+            width: 91px;
+            background: #00000000;
+            HorizontalLayout {
+                padding-left: 8px;
+                spacing: 7px;
+                Rectangle { width: 3px; height: 19px; border-radius: 2px; background: root.signal-color; }
+                Text { text: root.signal; color: root.enabled ? Theme.ink : #98a5b3; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+            }
+        }
+        magnitude-cell := NumericCell { horizontal-stretch: 1; min-width: 91px; row-index: root.row-index; column: 0; value <=> root.magnitude; unit: root.magnitude-unit; commit(r, c, value, force) => { root.commit(root.channel, r, c, value, force) } navigate(r, c) => { root.navigate(r, c); } }
+        phase-cell := NumericCell { width: 91px; row-index: root.row-index; column: 1; value <=> root.phase; unit: "deg"; commit(r, c, value, force) => { root.commit(root.channel, r, c, value, force) } navigate(r, c) => { root.navigate(r, c); } }
+        frequency-cell := NumericCell { width: 89px; row-index: root.row-index; column: 2; value <=> root.frequency; unit: "Hz"; commit(r, c, value, force) => { root.commit(root.channel, r, c, value, force) } navigate(r, c) => { root.navigate(r, c); } }
+    }
+}
+
+component LegendRow inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <color> swatch;
+    height: 18px;
+    background: #00000000;
+    HorizontalLayout {
+        spacing: 6px;
+        Rectangle { width: 13px; height: 2px; border-radius: 1px; background: root.swatch; }
+        Text { text: root.label; color: Theme.ink-soft; font-size: 8px; horizontal-stretch: 1; vertical-alignment: center; }
+        Text { text: root.value; color: Theme.ink; font-size: 8px; font-weight: 500; vertical-alignment: center; horizontal-alignment: right; }
+    }
+}
+
+component PhasorPanel inherits Rectangle {
+    in property <bool> running;
+    in property <string> ia-path;
+    in property <string> ib-path;
+    in property <string> ic-path;
+    in property <string> ua-path;
+    in property <string> ub-path;
+    in property <string> uc-path;
+    in property <float> ia;
+    in property <float> ib;
+    in property <float> ic;
+    in property <float> ua;
+    in property <float> ub;
+    in property <float> uc;
+    border-radius: 9px;
+    border-width: 1px;
+    border-color: Theme.line;
+    background: Theme.surface;
+    clip: true;
+    drop-shadow-blur: 5px;
+    drop-shadow-offset-y: 2px;
+    drop-shadow-color: #10243a18;
+    VerticalLayout {
+        spacing: 0px;
+        PanelHeader { title: "Phasor View"; meta: root.running ? "INJECTION LIVE" : "Effective SV outputs"; }
+        Rectangle {
+            vertical-stretch: 1;
+            background: #fcfdff;
+            plot := Rectangle {
+                width: min(parent.width - 24px, parent.height - 20px);
+                height: self.width;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                background: #00000000;
+                Path {
+                    commands: "M 50 5 A 45 45 0 1 0 50 95 A 45 45 0 1 0 50 5 M 50 18 A 32 32 0 1 0 50 82 A 32 32 0 1 0 50 18 M 50 31 A 19 19 0 1 0 50 69 A 19 19 0 1 0 50 31 M 5 50 L 95 50 M 50 5 L 50 95 M 18.2 18.2 L 81.8 81.8 M 81.8 18.2 L 18.2 81.8";
+                    stroke: #d6e0eb;
+                    stroke-width: 0.7px;
+                    viewbox-width: 100;
+                    viewbox-height: 100;
+                }
+                Path { commands: root.ia-path; stroke: Theme.phase-a; stroke-width: 2px; viewbox-width: 100; viewbox-height: 100; }
+                Path { commands: root.ib-path; stroke: Theme.phase-b; stroke-width: 2px; viewbox-width: 100; viewbox-height: 100; }
+                Path { commands: root.ic-path; stroke: Theme.phase-c; stroke-width: 2px; viewbox-width: 100; viewbox-height: 100; }
+                Path { commands: root.ua-path; stroke: Theme.phase-a; stroke-width: 1.25px; opacity: 0.58; viewbox-width: 100; viewbox-height: 100; }
+                Path { commands: root.ub-path; stroke: Theme.phase-b; stroke-width: 1.25px; opacity: 0.58; viewbox-width: 100; viewbox-height: 100; }
+                Path { commands: root.uc-path; stroke: Theme.phase-c; stroke-width: 1.25px; opacity: 0.58; viewbox-width: 100; viewbox-height: 100; }
+                Rectangle { x: parent.width / 2 - 2px; y: parent.height / 2 - 2px; width: 4px; height: 4px; border-radius: 2px; background: #334155; }
+                Text { x: parent.width - 23px; y: parent.height / 2 - 15px; text: "0"; color: Theme.ink-soft; font-size: 8px; }
+                Text { x: parent.width / 2 + 4px; y: 6px; text: "+90"; color: Theme.ink-soft; font-size: 8px; }
+                Text { x: 5px; y: parent.height / 2 - 15px; text: "180"; color: Theme.ink-soft; font-size: 8px; }
+                Text { x: parent.width / 2 + 4px; y: parent.height - 18px; text: "-90"; color: Theme.ink-soft; font-size: 8px; }
+            }
+        }
+        Rectangle {
+            height: 76px;
+            background: #f8fbff;
+            border-width: 1px;
+            border-color: Theme.line;
+            HorizontalLayout {
+                padding: 8px;
+                spacing: 14px;
+                VerticalLayout {
+                    spacing: 1px;
+                    Text { text: "VOLTAGE RMS"; color: Theme.ink-soft; font-size: 7px; font-weight: 600; }
+                    LegendRow { label: "L1-E"; value: root.ua + " V"; swatch: Theme.phase-a; }
+                    LegendRow { label: "L2-E"; value: root.ub + " V"; swatch: Theme.phase-b; }
+                    LegendRow { label: "L3-E"; value: root.uc + " V"; swatch: Theme.phase-c; }
+                }
+                VerticalLayout {
+                    spacing: 1px;
+                    Text { text: "CURRENT RMS"; color: Theme.ink-soft; font-size: 7px; font-weight: 600; }
+                    LegendRow { label: "L1"; value: root.ia + " A"; swatch: Theme.phase-a; }
+                    LegendRow { label: "L2"; value: root.ib + " A"; swatch: Theme.phase-b; }
+                    LegendRow { label: "L3"; value: root.ic + " A"; swatch: Theme.phase-c; }
+                }
+            }
+        }
+    }
+}
+
+component WaveformPanel inherits Rectangle {
+    in property <bool> running;
+    in property <string> ia-path;
+    in property <string> ib-path;
+    in property <string> ic-path;
+    in property <string> ua-path;
+    in property <string> ub-path;
+    in property <string> uc-path;
+    in property <float> frequency;
+    border-radius: 9px;
+    border-width: 1px;
+    border-color: Theme.line;
+    background: Theme.surface;
+    clip: true;
+    drop-shadow-blur: 5px;
+    drop-shadow-offset-y: 2px;
+    drop-shadow-color: #10243a18;
+    VerticalLayout {
+        spacing: 0px;
+        PanelHeader { title: "Waveform Monitor"; meta: root.running ? "LIVE / " + root.frequency + " Hz" : root.frequency + " Hz / 40 ms"; }
+        Rectangle {
+            vertical-stretch: 1;
+            background: #fcfdff;
+            Path {
+                x: 28px; y: 18px; width: parent.width - 44px; height: parent.height - 36px;
+                commands: "M 0 25 L 200 25 M 0 50 L 200 50 M 0 75 L 200 75 M 50 0 L 50 100 M 100 0 L 100 100 M 150 0 L 150 100 M 200 0 L 200 100";
+                stroke: #dfe7f0;
+                stroke-width: 0.6px;
+                viewbox-width: 200;
+                viewbox-height: 100;
+            }
+            Path { x: 28px; y: 18px; width: parent.width - 44px; height: parent.height - 36px; commands: root.ua-path; stroke: Theme.phase-a; stroke-width: 1.6px; viewbox-width: 200; viewbox-height: 100; }
+            Path { x: 28px; y: 18px; width: parent.width - 44px; height: parent.height - 36px; commands: root.ub-path; stroke: Theme.phase-b; stroke-width: 1.6px; viewbox-width: 200; viewbox-height: 100; }
+            Path { x: 28px; y: 18px; width: parent.width - 44px; height: parent.height - 36px; commands: root.uc-path; stroke: Theme.phase-c; stroke-width: 1.6px; viewbox-width: 200; viewbox-height: 100; }
+            Path { x: 28px; y: 18px; width: parent.width - 44px; height: parent.height - 36px; commands: root.ia-path; stroke: Theme.phase-a; stroke-width: 1.6px; viewbox-width: 200; viewbox-height: 100; }
+            Path { x: 28px; y: 18px; width: parent.width - 44px; height: parent.height - 36px; commands: root.ib-path; stroke: Theme.phase-b; stroke-width: 1.6px; viewbox-width: 200; viewbox-height: 100; }
+            Path { x: 28px; y: 18px; width: parent.width - 44px; height: parent.height - 36px; commands: root.ic-path; stroke: Theme.phase-c; stroke-width: 1.6px; viewbox-width: 200; viewbox-height: 100; }
+            Text { x: 8px; y: parent.height * 0.21; text: "V"; color: Theme.ink-soft; font-size: 9px; }
+            Text { x: 8px; y: parent.height * 0.70; text: "A"; color: Theme.ink-soft; font-size: 9px; }
+            Text { x: 34px; y: 22px; text: "Voltage"; color: Theme.ink-soft; font-size: 8px; }
+            Text { x: 34px; y: parent.height / 2 + 22px; text: "Current"; color: Theme.ink-soft; font-size: 8px; }
+        }
+        Rectangle {
+            height: 76px;
+            background: #f8fbff;
+            border-width: 1px;
+            border-color: Theme.line;
+            HorizontalLayout {
+                padding-left: 11px;
+                padding-right: 11px;
+                spacing: 12px;
+                Text { text: "L1"; color: Theme.phase-a; font-size: 9px; font-weight: 600; vertical-alignment: center; }
+                Text { text: "L2"; color: Theme.phase-b; font-size: 9px; font-weight: 600; vertical-alignment: center; }
+                Text { text: "L3"; color: Theme.phase-c; font-size: 9px; font-weight: 600; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; background: #00000000; }
+                VerticalLayout {
+                    spacing: 3px;
+                    Text { text: "PUBLISH MONITOR"; color: Theme.ink-soft; font-size: 7px; font-weight: 600; horizontal-alignment: right; }
+                    Text { text: "4800 fps  |  Class A"; color: Theme.ink; font-size: 9px; font-weight: 500; horizontal-alignment: right; }
+                    Text { text: "Missed 0  |  TX failures 0"; color: Theme.green; font-size: 8px; horizontal-alignment: right; }
+                }
+            }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "ARStack61850 - SMV Injection Studio";
+    preferred-width: 1480px;
+    preferred-height: 900px;
+    min-width: 1280px;
+    min-height: 800px;
+    background: Theme.window;
+    default-font-family: "Segoe UI Variable";
+
+    callback action-requested(string);
+    callback cell-commit-requested(string, int, float, bool) -> bool;
+    callback channel-enabled-requested(string, bool);
+
+    in-out property <bool> connected: false;
+    in-out property <bool> running: false;
+    in-out property <int> run-elapsed-seconds: 0;
+    in-out property <bool> live-apply-enabled: true;
+    in-out property <bool> bottom-dock-expanded: true;
+    in-out property <int> bottom-dock-tab: 0;
+    in-out property <string> serial-port: "COM3";
+    in-out property <string> status-message: "Ready. Arrow keys move between numeric cells; Enter validates and commits.";
+    in-out property <bool> status-error: false;
+    in-out property <string> last-command: "No command transmitted";
+    in-out property <int> tx-sequence: 0;
+    in-out property <float> frequency-hz: 50;
+
+    in-out property <bool> ia-enabled: true;
+    in-out property <bool> ib-enabled: true;
+    in-out property <bool> ic-enabled: true;
+    in-out property <bool> in-enabled: false;
+    in-out property <bool> ua-enabled: true;
+    in-out property <bool> ub-enabled: true;
+    in-out property <bool> uc-enabled: true;
+    in-out property <bool> un-enabled: false;
+    in-out property <float> ia-magnitude: 1;
+    in-out property <float> ib-magnitude: 1;
+    in-out property <float> ic-magnitude: 1;
+    in-out property <float> in-magnitude: 0;
+    in-out property <float> ua-magnitude: 57.74;
+    in-out property <float> ub-magnitude: 57.74;
+    in-out property <float> uc-magnitude: 57.74;
+    in-out property <float> un-magnitude: 0;
+    in-out property <float> ia-phase: 0;
+    in-out property <float> ib-phase: -120;
+    in-out property <float> ic-phase: 120;
+    in-out property <float> in-phase: 0;
+    in-out property <float> ua-phase: 0;
+    in-out property <float> ub-phase: -120;
+    in-out property <float> uc-phase: 120;
+    in-out property <float> un-phase: 0;
+
+    in-out property <string> ia-wave-path;
+    in-out property <string> ib-wave-path;
+    in-out property <string> ic-wave-path;
+    in-out property <string> ua-wave-path;
+    in-out property <string> ub-wave-path;
+    in-out property <string> uc-wave-path;
+    in-out property <string> ia-phasor-path;
+    in-out property <string> ib-phasor-path;
+    in-out property <string> ic-phasor-path;
+    in-out property <string> ua-phasor-path;
+    in-out property <string> ub-phasor-path;
+    in-out property <string> uc-phasor-path;
+
+    run-clock := Timer {
+        interval: 1s;
+        running: root.running;
+        triggered => { root.run-elapsed-seconds += 1; }
+    }
+
+    public function focus-cell(row: int, column: int) {
+        if (row == 0) { ua-row.focus-column(column); }
+        else if (row == 1) { ub-row.focus-column(column); }
+        else if (row == 2) { uc-row.focus-column(column); }
+        else if (row == 3) { un-row.focus-column(column); }
+        else if (row == 4) { ia-row.focus-column(column); }
+        else if (row == 5) { ib-row.focus-column(column); }
+        else if (row == 6) { ic-row.focus-column(column); }
+        else { in-row.focus-column(column); }
+    }
+
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle {
+            height: 32px;
+            background: #ffffff;
+            border-width: 1px;
+            border-color: Theme.line;
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 8px;
+                Rectangle { width: 20px; height: 20px; border-radius: 4px; background: @linear-gradient(135deg, Theme.cyan, Theme.blue); Text { text: "AR"; color: #ffffff; font-size: 8px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; } }
+                Text { text: "ARStack61850"; color: Theme.ink; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+                Text { text: "SMV Injection Studio"; color: Theme.ink-soft; font-size: 9px; vertical-alignment: center; horizontal-stretch: 1; }
+                Rectangle { width: 7px; height: 7px; border-radius: 4px; background: root.connected ? Theme.green : #9aa8b6; }
+                Text { text: root.running ? "INJECTION LIVE" : root.connected ? "DEVICE READY" : "OFFLINE"; color: root.running ? Theme.green : Theme.ink-soft; font-size: 9px; font-weight: 600; vertical-alignment: center; }
+            }
+        }
+
+        Rectangle {
+            height: 88px;
+            background: #fbfdff;
+            border-width: 1px;
+            border-color: Theme.line;
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                padding-top: 10px;
+                padding-bottom: 10px;
+                spacing: 7px;
+                RibbonAction { icon: @image-url("../assets/lucide/settings.svg"); text: "Config"; hint: "Profile"; clicked => { root.action-requested("config"); } }
+                RibbonAction { icon: @image-url("../assets/lucide/orbit.svg"); text: "Manual"; hint: "Quick set"; active: true; clicked => { root.action-requested("manual"); } }
+                RibbonAction { icon: @image-url("../assets/lucide/chart-no-axes-combined.svg"); text: "Ramp"; hint: "Transition"; clicked => { root.action-requested("ramp"); } }
+                RibbonAction { icon: @image-url("../assets/lucide/list-tree.svg"); text: "Sequence"; hint: "States"; clicked => { root.action-requested("sequence"); } }
+                RibbonAction { icon: @image-url("../assets/lucide/undo-2.svg"); text: "Prefault"; hint: "Nominal"; clicked => { root.action-requested("prefault"); } }
+                RibbonAction { icon: @image-url("../assets/lucide/circle-slash-2.svg"); text: "Zero"; hint: "All output"; clicked => { root.action-requested("zero-output"); } }
+                RibbonAction { icon: @image-url("../assets/lucide/panels-top-left.svg"); text: "Views"; hint: "Dock panels"; active: root.bottom-dock-expanded; clicked => { root.bottom-dock-expanded = !root.bottom-dock-expanded; } }
+                Rectangle { width: 1px; background: Theme.line; }
+                RibbonAction { icon: @image-url("../assets/lucide/file-play.svg"); text: "Import SCL"; hint: "Compile"; clicked => { root.action-requested("import-scl"); } }
+                RibbonAction { icon: @image-url("../assets/lucide/circle-check-big.svg"); text: "Apply all"; hint: "Validate"; clicked => { root.action-requested("apply-all"); } }
+                Rectangle { width: 1px; background: Theme.line; }
+                RibbonAction { icon: @image-url("../assets/lucide/plug-zap.svg"); text: root.connected ? "Disconnect" : "Connect"; hint: root.serial-port; active: root.connected; clicked => { root.action-requested(root.connected ? "disconnect-device" : "connect-device"); } }
+                RibbonAction { icon: @image-url("../assets/lucide/play.svg"); text: root.running ? "Running" : "Start"; hint: root.running ? root.run-elapsed-seconds + " s" : "Publisher"; primary: !root.running; active: root.running; enabled: root.connected; clicked => { if (!root.running) { root.action-requested("start-injection"); } } }
+                RibbonAction { icon: @image-url("../assets/lucide/square.svg"); text: "Stop"; hint: "Safe stop"; danger: true; enabled: root.connected && root.running; clicked => { root.action-requested("stop-injection"); } }
+                Rectangle { horizontal-stretch: 1; background: #00000000; }
+                Rectangle {
+                    width: 246px;
+                    border-radius: 9px;
+                    border-width: 1px;
+                    border-color: Theme.line;
+                    background: Theme.surface;
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 5px;
+                        HorizontalLayout {
+                            Text { text: "IED / MU PUBLISHER"; color: Theme.ink-soft; font-size: 7px; font-weight: 600; horizontal-stretch: 1; vertical-alignment: center; }
+                            Text { text: "4800 fps"; color: Theme.green; font-size: 8px; font-weight: 600; vertical-alignment: center; }
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Rectangle {
+                                width: 62px; height: 27px; border-radius: 5px; border-width: 1px; border-color: Theme.line-strong; background: #fbfdff;
+                                TextInput { x: 7px; y: 2px; width: parent.width - 14px; height: parent.height - 4px; text <=> root.serial-port; color: Theme.ink; selection-foreground-color: #ffffff; selection-background-color: Theme.blue; font-size: 10px; font-weight: 500; horizontal-alignment: center; vertical-alignment: center; single-line: true; }
+                            }
+                            Rectangle {
+                                horizontal-stretch: 1; height: 27px; border-radius: 5px; border-width: 1px; border-color: Theme.line-strong; background: #fbfdff;
+                                Text { x: 8px; width: parent.width - 16px; text: "MU01 / MSVCB01"; color: Theme.ink; font-size: 9px; vertical-alignment: center; overflow: elide; }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            vertical-stretch: 1;
+            padding-left: 10px;
+            padding-right: 10px;
+            padding-top: 10px;
+            padding-bottom: 10px;
+            spacing: 9px;
+
+            Rectangle {
+                horizontal-stretch: 34;
+                min-width: 400px;
+                border-radius: 9px;
+                border-width: 1px;
+                border-color: Theme.line;
+                background: Theme.surface;
+                clip: true;
+                drop-shadow-blur: 5px;
+                drop-shadow-offset-y: 2px;
+                drop-shadow-color: #10243a18;
+                VerticalLayout {
+                    spacing: 0px;
+                    PanelHeader { title: "Test View: Quick Manual"; meta: root.running ? "INJECTION LIVE" : root.live-apply-enabled ? "LIVE APPLY" : "STAGED"; }
+                    Rectangle {
+                        height: 121px;
+                        background: Theme.surface;
+                        VerticalLayout {
+                            padding: 10px;
+                            spacing: 5px;
+                            HorizontalLayout {
+                                spacing: 12px;
+                                MiniField { label: "Set mode"; value: "Direct"; horizontal-stretch: 1; }
+                                MiniField { label: "Sample rate"; value: "4800 fps"; horizontal-stretch: 1; }
+                            }
+                            HorizontalLayout {
+                                spacing: 12px;
+                                MiniField { label: "SV quality"; value: "Good quality"; horizontal-stretch: 1; }
+                                MiniField { label: "Nominal"; value: root.frequency-hz + " Hz"; horizontal-stretch: 1; }
+                            }
+                            HorizontalLayout {
+                                spacing: 7px;
+                                Toggle { checked <=> root.live-apply-enabled; toggled(value) => { root.status-message = value ? "Live Apply enabled. Valid edits transmit after 140 ms." : "Live Apply paused. Use Apply all to transmit staged values."; } }
+                                Text { text: "Live Apply"; color: Theme.ink; font-size: 9px; font-weight: 600; vertical-alignment: center; }
+                                Text { text: "Validation engine active"; color: Theme.green; font-size: 8px; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: right; }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        height: 29px;
+                        background: #405f86;
+                        HorizontalLayout {
+                            spacing: 0px;
+                            Text { text: "ON"; width: 34px; color: #ffffff; font-size: 8px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: "SIGNAL"; width: 91px; color: #ffffff; font-size: 8px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: "VALUE"; horizontal-stretch: 1; min-width: 91px; color: #ffffff; font-size: 8px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: "ANGLE"; width: 91px; color: #ffffff; font-size: 8px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: "FREQ"; width: 89px; color: #ffffff; font-size: 8px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                    }
+                    ua-row := SignalGridRow { row-index: 0; channel: "UA"; signal: "V L1-E"; signal-color: Theme.phase-a; enabled <=> root.ua-enabled; magnitude <=> root.ua-magnitude; phase <=> root.ua-phase; frequency <=> root.frequency-hz; magnitude-unit: "V"; commit(ch, r, c, value, force) => { root.cell-commit-requested(ch, c, value, force) } navigate(r, c) => { root.focus-cell(r, c); } enabled-changed(ch, value) => { root.channel-enabled-requested(ch, value); } }
+                    ub-row := SignalGridRow { row-index: 1; channel: "UB"; signal: "V L2-E"; signal-color: Theme.phase-b; enabled <=> root.ub-enabled; magnitude <=> root.ub-magnitude; phase <=> root.ub-phase; frequency <=> root.frequency-hz; magnitude-unit: "V"; alternate: true; commit(ch, r, c, value, force) => { root.cell-commit-requested(ch, c, value, force) } navigate(r, c) => { root.focus-cell(r, c); } enabled-changed(ch, value) => { root.channel-enabled-requested(ch, value); } }
+                    uc-row := SignalGridRow { row-index: 2; channel: "UC"; signal: "V L3-E"; signal-color: Theme.phase-c; enabled <=> root.uc-enabled; magnitude <=> root.uc-magnitude; phase <=> root.uc-phase; frequency <=> root.frequency-hz; magnitude-unit: "V"; commit(ch, r, c, value, force) => { root.cell-commit-requested(ch, c, value, force) } navigate(r, c) => { root.focus-cell(r, c); } enabled-changed(ch, value) => { root.channel-enabled-requested(ch, value); } }
+                    un-row := SignalGridRow { row-index: 3; channel: "UN"; signal: "V N"; signal-color: Theme.neutral; enabled <=> root.un-enabled; magnitude <=> root.un-magnitude; phase <=> root.un-phase; frequency <=> root.frequency-hz; magnitude-unit: "V"; alternate: true; commit(ch, r, c, value, force) => { root.cell-commit-requested(ch, c, value, force) } navigate(r, c) => { root.focus-cell(r, c); } enabled-changed(ch, value) => { root.channel-enabled-requested(ch, value); } }
+                    ia-row := SignalGridRow { row-index: 4; channel: "IA"; signal: "I L1"; signal-color: Theme.phase-a; enabled <=> root.ia-enabled; magnitude <=> root.ia-magnitude; phase <=> root.ia-phase; frequency <=> root.frequency-hz; magnitude-unit: "A"; commit(ch, r, c, value, force) => { root.cell-commit-requested(ch, c, value, force) } navigate(r, c) => { root.focus-cell(r, c); } enabled-changed(ch, value) => { root.channel-enabled-requested(ch, value); } }
+                    ib-row := SignalGridRow { row-index: 5; channel: "IB"; signal: "I L2"; signal-color: Theme.phase-b; enabled <=> root.ib-enabled; magnitude <=> root.ib-magnitude; phase <=> root.ib-phase; frequency <=> root.frequency-hz; magnitude-unit: "A"; alternate: true; commit(ch, r, c, value, force) => { root.cell-commit-requested(ch, c, value, force) } navigate(r, c) => { root.focus-cell(r, c); } enabled-changed(ch, value) => { root.channel-enabled-requested(ch, value); } }
+                    ic-row := SignalGridRow { row-index: 6; channel: "IC"; signal: "I L3"; signal-color: Theme.phase-c; enabled <=> root.ic-enabled; magnitude <=> root.ic-magnitude; phase <=> root.ic-phase; frequency <=> root.frequency-hz; magnitude-unit: "A"; commit(ch, r, c, value, force) => { root.cell-commit-requested(ch, c, value, force) } navigate(r, c) => { root.focus-cell(r, c); } enabled-changed(ch, value) => { root.channel-enabled-requested(ch, value); } }
+                    in-row := SignalGridRow { row-index: 7; channel: "IN"; signal: "I N"; signal-color: Theme.neutral; enabled <=> root.in-enabled; magnitude <=> root.in-magnitude; phase <=> root.in-phase; frequency <=> root.frequency-hz; magnitude-unit: "A"; alternate: true; commit(ch, r, c, value, force) => { root.cell-commit-requested(ch, c, value, force) } navigate(r, c) => { root.focus-cell(r, c); } enabled-changed(ch, value) => { root.channel-enabled-requested(ch, value); } }
+                    Rectangle {
+                        vertical-stretch: 1;
+                        background: Theme.surface;
+                        VerticalLayout {
+                            padding: 11px;
+                            spacing: 8px;
+                            Rectangle { height: 1px; background: Theme.line; }
+                            Text { text: "FAST WORKFLOW"; color: Theme.ink-soft; font-size: 7px; font-weight: 600; }
+                            Text { text: "Arrow keys move  |  Enter commits  |  Focus selects the full value"; color: Theme.ink; font-size: 9px; }
+                            Text { text: "Invalid values stay selected and are rejected before device transmit."; color: Theme.green; font-size: 8px; }
+                            Rectangle { vertical-stretch: 1; background: #00000000; }
+                            HorizontalLayout {
+                                Text { text: "Last TX"; color: Theme.ink-soft; font-size: 8px; vertical-alignment: center; }
+                                Text { text: root.last-command; color: Theme.ink; font-size: 8px; font-weight: 500; horizontal-stretch: 1; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                            }
+                        }
+                    }
+                }
+            }
+
+            PhasorPanel {
+                horizontal-stretch: 33;
+                running: root.running;
+                ia-path: root.ia-phasor-path; ib-path: root.ib-phasor-path; ic-path: root.ic-phasor-path;
+                ua-path: root.ua-phasor-path; ub-path: root.ub-phasor-path; uc-path: root.uc-phasor-path;
+                ia: root.ia-magnitude; ib: root.ib-magnitude; ic: root.ic-magnitude;
+                ua: root.ua-magnitude; ub: root.ub-magnitude; uc: root.uc-magnitude;
+            }
+
+            WaveformPanel {
+                horizontal-stretch: 33;
+                running: root.running;
+                frequency: root.frequency-hz;
+                ia-path: root.ia-wave-path; ib-path: root.ib-wave-path; ic-path: root.ic-wave-path;
+                ua-path: root.ua-wave-path; ub-path: root.ub-wave-path; uc-path: root.uc-wave-path;
+            }
+        }
+
+        Rectangle {
+            height: root.bottom-dock-expanded ? 108px : 29px;
+            background: #f7f9fc;
+            border-width: 1px;
+            border-color: Theme.line-strong;
+            animate height { duration: 120ms; easing: ease-in-out; }
+            VerticalLayout {
+                spacing: 0px;
+                Rectangle {
+                    height: 28px;
+                    background: #e9eff6;
+                    HorizontalLayout {
+                        padding-left: 6px;
+                        padding-right: 8px;
+                        spacing: 3px;
+                        DockTab { label: "Status History"; active: root.bottom-dock-tab == 0; selected => { root.bottom-dock-tab = 0; root.bottom-dock-expanded = true; } }
+                        DockTab { label: "Overload Monitor"; active: root.bottom-dock-tab == 1; selected => { root.bottom-dock-tab = 1; root.bottom-dock-expanded = true; } }
+                        Rectangle { horizontal-stretch: 1; background: #00000000; }
+                        Text { text: root.bottom-dock-expanded ? "COLLAPSE" : "EXPAND"; color: Theme.ink-soft; font-size: 7px; font-weight: 600; vertical-alignment: center; }
+                        Rectangle {
+                            width: 26px;
+                            background: #00000000;
+                            Image { source: @image-url("../assets/lucide/chevron-down.svg"); width: 15px; height: 15px; x: 5px; y: 6px; image-fit: contain; colorize: Theme.ink-soft; transform-rotation: root.bottom-dock-expanded ? 180deg : 0deg; animate transform-rotation { duration: 120ms; } }
+                            TouchArea { mouse-cursor: pointer; clicked => { root.bottom-dock-expanded = !root.bottom-dock-expanded; } }
+                        }
+                    }
+                }
+                if root.bottom-dock-expanded: Rectangle {
+                    vertical-stretch: 1;
+                    background: Theme.surface;
+                    if root.bottom-dock-tab == 0: HorizontalLayout {
+                        padding-left: 11px;
+                        padding-right: 11px;
+                        spacing: 10px;
+                        Text { text: root.running ? "Injection session active" : "Ready for injection"; color: root.running ? Theme.green : Theme.ink; font-size: 9px; font-weight: 600; vertical-alignment: center; }
+                        Rectangle { width: 1px; height: 32px; background: Theme.line; }
+                        Text { text: root.status-message; color: root.status-error ? #bd3048 : Theme.ink-soft; font-size: 8px; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                        Text { text: "Last TX  " + root.last-command; color: Theme.ink-soft; font-size: 8px; vertical-alignment: center; horizontal-alignment: right; }
+                    }
+                    if root.bottom-dock-tab == 1: HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        spacing: 25px;
+                        for phase[index] in ["V L1-E", "V L2-E", "V L3-E", "I L1", "I L2", "I L3"]: VerticalLayout {
+                            alignment: center;
+                            spacing: 4px;
+                            Rectangle { width: 11px; height: 11px; border-radius: 6px; background: Theme.green; border-width: 1px; border-color: #087d55; }
+                            Text { text: phase; color: Theme.ink-soft; font-size: 8px; horizontal-alignment: center; }
+                        }
+                        Rectangle { horizontal-stretch: 1; background: #00000000; }
+                        Text { text: "6 channels within configured limits"; color: Theme.green; font-size: 8px; font-weight: 600; vertical-alignment: center; }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 26px;
+            background: #ffffff;
+            border-width: 1px;
+            border-color: Theme.line;
+            HorizontalLayout {
+                padding-left: 11px;
+                padding-right: 11px;
+                spacing: 9px;
+                Rectangle { width: 7px; height: 7px; border-radius: 4px; background: root.status-error ? Theme.red : root.connected ? Theme.green : #96a5b4; }
+                Text { text: root.status-message; color: root.status-error ? #bd3048 : Theme.ink-soft; font-size: 8px; font-weight: root.status-error ? 600 : 400; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                Text { text: "TX " + root.tx-sequence; color: Theme.ink-soft; font-size: 8px; vertical-alignment: center; }
+                Text { text: root.running ? "RUN " + root.run-elapsed-seconds + " s" : "RUN --"; color: root.running ? Theme.green : Theme.ink-soft; font-size: 8px; font-weight: 600; vertical-alignment: center; }
+                Text { text: "Publisher " + (root.running ? "RUNNING" : "STOPPED"); color: root.running ? Theme.green : Theme.ink-soft; font-size: 8px; font-weight: 600; vertical-alignment: center; }
+                Text { text: "Slint 1.17.1"; color: #9aa7b4; font-size: 8px; vertical-alignment: center; }
+            }
+        }
+    }
+}
