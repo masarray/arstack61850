@@ -1,0 +1,118 @@
+name: IED Simulator P4 Focused Third-Party Interop
+
+on:
+  push:
+    branches: [agent/p4-thirdparty-interop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  libiec61850-focused-interop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      LIBIEC_COMMIT: 664aa00b447292afdf86330745df1b25328aa98f
+      PORT: '18103'
+    steps:
+      - name: Checkout ARStack61850
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
+
+      - name: Build materialized IED Simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          cmake -S apps/ied_simulator -B build-p4-discovery -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-p4-discovery --target arstack_ied_simulator --parallel 2
+          APP=$(find build-p4-discovery -type f -name arstack_ied_simulator -perm -111 | head -1)
+          test -n "$APP"
+          echo "APP=$APP" >> "$GITHUB_ENV"
+
+      - name: Build pinned libiec61850 client
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/mz-automation/libiec61850.git vendor/libiec61850
+          git -C vendor/libiec61850 checkout --quiet "$LIBIEC_COMMIT"
+          test "$(git -C vendor/libiec61850 rev-parse HEAD)" = "$LIBIEC_COMMIT"
+          make -C vendor/libiec61850 -j2
+          gcc -std=c11 -Wall -Wextra -Wpedantic -Werror \
+            -Ivendor/libiec61850/config \
+            -Ivendor/libiec61850/hal/inc \
+            -Ivendor/libiec61850/src/common/inc \
+            -Ivendor/libiec61850/src/mms/inc \
+            -Ivendor/libiec61850/src/mms/inc_private \
+            -Ivendor/libiec61850/src/mms/asn1 \
+            -Ivendor/libiec61850/src/iec61850/inc \
+            -Ivendor/libiec61850/src/iec61850/inc_private \
+            -Ivendor/libiec61850/src/goose \
+            -Ivendor/libiec61850/src/sampled_values \
+            -Ivendor/libiec61850/src/logging \
+            -Ivendor/libiec61850/src/tls \
+            -Ivendor/libiec61850/src/r_session \
+            tests/interop/libiec61850_p4_client.c \
+            vendor/libiec61850/build/libiec61850.a \
+            -lpthread -lm -o p4-libiec61850-client
+
+      - name: Run materialized live third-party chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p p4-focused-evidence
+          export QT_QPA_PLATFORM=offscreen
+          "$APP" --scl tests/fixtures/scl/iedsim-full-model.scd --port "$PORT" --runtime \
+            --set-first-value 42 --set-value-item 'TCTR1$MX$Amp$instMag$i' \
+            --state-dump p4-focused-evidence/live-state.json --exit-after-ms 26000 \
+            >p4-focused-evidence/server.log 2>&1 &
+          APP_PID=$!
+          cleanup() {
+            if [ "${APP_PID:-0}" != 0 ] && kill -0 "$APP_PID" 2>/dev/null; then
+              kill "$APP_PID" || true
+              wait "$APP_PID" || true
+            fi
+          }
+          trap cleanup EXIT
+          for _ in $(seq 1 120); do
+            grep -q 'kind=server_ready' p4-focused-evidence/server.log 2>/dev/null && break
+            kill -0 "$APP_PID" 2>/dev/null || { cat p4-focused-evidence/server.log >&2; exit 1; }
+            sleep 0.1
+          done
+          grep -q 'kind=server_ready' p4-focused-evidence/server.log
+          for _ in $(seq 1 120); do
+            grep -q 'kind=value_state request=1 .*value=3432' p4-focused-evidence/server.log 2>/dev/null && break
+            kill -0 "$APP_PID" 2>/dev/null || { cat p4-focused-evidence/server.log >&2; exit 1; }
+            sleep 0.1
+          done
+          grep -q 'kind=value_state request=1 .*value=3432' p4-focused-evidence/server.log
+          echo 'P4_LIVE_VALUE_READY value=42'
+          set +e
+          timeout 20s ./p4-libiec61850-client 127.0.0.1 "$PORT" \
+            >p4-focused-evidence/client.log 2>&1
+          CLIENT_RC=$?
+          set -e
+          wait "$APP_PID" || true
+          APP_PID=0
+          trap - EXIT
+          cat p4-focused-evidence/client.log
+          cat p4-focused-evidence/server.log
+          grep 'kind=model_validation' p4-focused-evidence/server.log
+          grep -q 'IEDSIM_P4_THIRDPARTY_INTEROP_PASS' p4-focused-evidence/client.log
+          echo 'P4_MATERIALIZED_SOURCE_INTEROP_PASS full-chain=true'
+          exit "$CLIENT_RC"
+
+      - name: Upload focused evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p4-focused-interop-${{ github.sha }}
+          path: p4-focused-evidence/
+          if-no-files-found: warn
+          retention-days: 30

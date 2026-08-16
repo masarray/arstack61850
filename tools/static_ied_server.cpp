@@ -7,6 +7,7 @@
 #include "ariec61850/mms/static_urcb_objects.hpp"
 #include "ariec61850/mms/static_urcb_runtime.hpp"
 #include "ariec61850/mms/static_direct_control.hpp"
+#include "iedsim_rcb_composite.hpp"
 #include "ariec61850/control/guarded_control.hpp"
 #include "ariec61850/osi/presentation_span.hpp"
 #include "ariec61850/osi/cotp_span.hpp"
@@ -1596,6 +1597,7 @@ struct HostUrcbControl final {
         mms::MmsStaticUrcbObjectBank::attributes_per_control_block> bank_contexts{};
     std::array<char, 4'096U> bank_names{};
     std::unique_ptr<mms::MmsStaticUrcbObjectBank> bank;
+    ar::iec61850::iedsim_rcb::HostUrcbCompositeContext composite_context{};
 };
 
 struct HostUrcbReporting final {
@@ -1734,6 +1736,32 @@ struct HostUrcbReporting final {
                 *existing = dynamic;
             }
         }
+        control->composite_context.state = control->runtime->state(0U);
+        if (control->composite_context.state == nullptr) {
+            throw std::runtime_error("URCB composite parent has no runtime state.");
+        }
+        const mms::MmsStaticObjectEntry parent{
+            report.domain,
+            report.item,
+            ar::iec61850::iedsim_rcb::parent_structure_type(),
+            ar::iec61850::iedsim_rcb::read_urcb_parent,
+            &control->composite_context,
+            false,
+            nullptr,
+            nullptr};
+        const auto parent_existing = std::find_if(
+            model.objects.begin(), model.objects.end(), [&](const auto& candidate) {
+                return candidate.domain == parent.domain && candidate.item == parent.item;
+            });
+        if (parent_existing == model.objects.end()) {
+            if (model.objects.size() >= kHostMaximumManifestObjects) {
+                throw std::runtime_error("Structured URCB parent exceeds host object bound.");
+            }
+            model.objects.push_back(parent);
+        } else {
+            *parent_existing = parent;
+        }
+
         reporting.controls.push_back(std::move(control));
     }
     return reporting;
@@ -1841,6 +1869,7 @@ struct HostBrcbControl final {
         mms::MmsStaticBrcbObjectBank::attributes_per_control_block> bank_contexts{};
     std::array<char, 4'096U> bank_names{};
     std::unique_ptr<mms::MmsStaticBrcbObjectBank> bank;
+    ar::iec61850::iedsim_rcb::HostBrcbCompositeContext composite_context{};
 };
 
 struct HostBrcbReporting final {
@@ -1954,6 +1983,35 @@ HostBrcbReporting* g_active_brcb_reporting{};
                 *existing = dynamic;
             }
         }
+        host->composite_context = ar::iec61850::iedsim_rcb::HostBrcbCompositeContext{
+            &host->definition,
+            host->runtime.get(),
+            host->control.get(),
+            report.integrity_period_ms,
+            brcb_now_ms,
+            nullptr};
+        const mms::MmsStaticObjectEntry parent{
+            report.domain,
+            report.item,
+            ar::iec61850::iedsim_rcb::parent_structure_type(),
+            ar::iec61850::iedsim_rcb::read_brcb_parent,
+            &host->composite_context,
+            false,
+            nullptr,
+            nullptr};
+        const auto parent_existing = std::find_if(
+            model.objects.begin(), model.objects.end(), [&](const auto& candidate) {
+                return candidate.domain == parent.domain && candidate.item == parent.item;
+            });
+        if (parent_existing == model.objects.end()) {
+            if (model.objects.size() >= kHostMaximumManifestObjects) {
+                throw std::runtime_error("Structured BRCB parent exceeds host object bound.");
+            }
+            model.objects.push_back(parent);
+        } else {
+            *parent_existing = parent;
+        }
+
         reporting.controls.push_back(std::move(host));
     }
     return reporting;
@@ -2088,9 +2146,13 @@ struct HostControl final {
     std::string sbo_item;
     std::string sbow_item;
     std::string cancel_item;
+    // Structured CO parent entries store string_view/span fields. Keep their
+    // backing name/type bytes owned by HostControl for the full server lifetime.
+    std::string parent_item;
     std::vector<std::uint8_t> oper_type;
     std::vector<std::uint8_t> cancel_type;
     std::vector<std::uint8_t> sbo_type;
+    std::vector<std::uint8_t> parent_type;
     std::vector<std::uint8_t> last_oper;
     std::uint64_t normal_sbo_owner{};
     std::uint64_t normal_sbo_expires{};
@@ -2116,7 +2178,7 @@ static std::vector<std::unique_ptr<HostControlObjectContext>> g_control_object_c
     return true;
 }
 
-[[nodiscard]] std::vector<std::uint8_t> host_boolean_oper_type(const bool cancel) {
+[[nodiscard]] mms::MmsTypeSpecification host_boolean_oper_type_spec(const bool cancel) {
     mms::MmsTypeSpecification root;
     root.kind = mms::MmsTypeKind::structure;
     auto field = [](std::string name, mms::MmsTypeKind kind, std::optional<std::uint32_t> size = {}) {
@@ -2137,14 +2199,51 @@ static std::vector<std::unique_ptr<HostControlObjectContext>> g_control_object_c
     root.children.push_back(field("T", mms::MmsTypeKind::utc_time));
     root.children.push_back(field("Test", mms::MmsTypeKind::boolean));
     if (!cancel) root.children.push_back(field("Check", mms::MmsTypeKind::bit_string, 2U));
-    return mms::MmsServiceCodec::encode_type_specification(root);
+    return root;
 }
 
-[[nodiscard]] std::vector<std::uint8_t> host_visible_string_type() {
+[[nodiscard]] std::vector<std::uint8_t> host_boolean_oper_type(const bool cancel) {
+    return mms::MmsServiceCodec::encode_type_specification(
+        host_boolean_oper_type_spec(cancel));
+}
+
+[[nodiscard]] mms::MmsTypeSpecification host_visible_string_type_spec() {
     mms::MmsTypeSpecification type;
     type.kind = mms::MmsTypeKind::visible_string;
     type.size = 129U;
-    return mms::MmsServiceCodec::encode_type_specification(type);
+    return type;
+}
+
+[[nodiscard]] std::vector<std::uint8_t> host_visible_string_type() {
+    return mms::MmsServiceCodec::encode_type_specification(
+        host_visible_string_type_spec());
+}
+
+[[nodiscard]] std::vector<std::uint8_t> host_control_parent_type(const std::uint8_t model) {
+    mms::MmsTypeSpecification root;
+    root.kind = mms::MmsTypeKind::structure;
+
+    auto oper = host_boolean_oper_type_spec(false);
+    oper.name = "Oper";
+    root.children.push_back(std::move(oper));
+
+    if (model == 2U) {
+        auto sbo = host_visible_string_type_spec();
+        sbo.name = "SBO";
+        root.children.push_back(std::move(sbo));
+        auto cancel = host_boolean_oper_type_spec(true);
+        cancel.name = "Cancel";
+        root.children.push_back(std::move(cancel));
+    } else if (model == 4U) {
+        auto sbow = host_boolean_oper_type_spec(false);
+        sbow.name = "SBOw";
+        root.children.push_back(std::move(sbow));
+        auto cancel = host_boolean_oper_type_spec(true);
+        cancel.name = "Cancel";
+        root.children.push_back(std::move(cancel));
+    }
+
+    return mms::MmsServiceCodec::encode_type_specification(root);
 }
 
 [[nodiscard]] control::ControlModel host_control_model(const std::uint8_t model) noexcept {
@@ -2408,6 +2507,28 @@ static std::vector<std::unique_ptr<HostControlObjectContext>> g_control_object_c
             add_object(host->cancel_item, host->cancel_type,
                        HostControlObjectContext::Service::cancel, false, true);
         }
+
+        host->parent_item = definition.logical_node + "$CO$" + definition.data_object;
+        host->parent_type = host_control_parent_type(definition.model);
+        mms::MmsStaticObjectEntry parent{
+            definition.domain,
+            host->parent_item,
+            host->parent_type,
+            host_control_unreadable,
+            nullptr};
+        const auto parent_existing = std::find_if(
+            model.objects.begin(), model.objects.end(), [&](const auto& candidate) {
+                return candidate.domain == parent.domain && candidate.item == parent.item;
+            });
+        if (parent_existing == model.objects.end()) {
+            if (model.objects.size() >= kHostMaximumManifestObjects) {
+                throw std::runtime_error("Structured control parent exceeds host object bound.");
+            }
+            model.objects.push_back(std::move(parent));
+        } else {
+            *parent_existing = std::move(parent);
+        }
+
         runtime.controls.push_back(std::move(host));
     }
     return runtime;
@@ -2690,6 +2811,16 @@ void serve_connection(
             return;
         }
         if (result.terminal()) {
+            std::cout << "IEDSIM_EVENT kind=session_terminal association="
+                      << association_id
+                      << " session_status=" << static_cast<unsigned>(result.status)
+                      << " connection_status=" << static_cast<unsigned>(result.connection_status)
+                      << " application_status=" << static_cast<unsigned>(result.application_status)
+                      << " application_service=" << static_cast<unsigned>(result.application_service)
+                      << " invoke=" << result.invoke_id
+                      << " buffered_input=" << result.buffered_input_bytes
+                      << " pending_output=" << result.pending_output_bytes << '\n';
+            std::cout.flush();
             host_control_association_closed(controls, association_id);
             reset_host_urcb_connection(reporting);
             std::cout << "IEDSIM_EVENT kind=client_closed association="
@@ -2836,8 +2967,19 @@ int main(int argc, char** argv) {
             : std::span<const mms::MmsStaticDataSetEntry>{manifest_model.data_sets};
         const mms::MmsStaticObjectTable object_table{object_span};
         const mms::MmsStaticDataSetTable data_sets{data_set_span};
+        const auto strict_objects_valid = object_table.valid();
+        const auto strict_data_sets_valid = data_sets.valid();
+        const auto strict_data_sets_against = data_sets.valid_against(object_table);
+        std::cout << "IEDSIM_EVENT kind=model_validation host="
+                  << (host_manifest_tables_valid(object_table, data_sets) ? "true" : "false")
+                  << " strict_objects=" << (strict_objects_valid ? "true" : "false")
+                  << " strict_datasets=" << (strict_data_sets_valid ? "true" : "false")
+                  << " strict_against=" << (strict_data_sets_against ? "true" : "false")
+                  << " objects=" << object_span.size()
+                  << " datasets=" << data_set_span.size() << '\n';
+        std::cout.flush();
         const bool model_valid = manifest_model.objects.empty()
-            ? (object_table.valid() && data_sets.valid() && data_sets.valid_against(object_table))
+            ? (strict_objects_valid && strict_data_sets_valid && strict_data_sets_against)
             : host_manifest_tables_valid(object_table, data_sets);
         if (!model_valid) {
             throw std::runtime_error("Static MMS server model is invalid.");
