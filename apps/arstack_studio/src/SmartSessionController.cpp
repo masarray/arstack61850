@@ -36,6 +36,8 @@ void SmartSessionController::setDevice(QObject* object) {
     if (device_ == next) return;
     if (device_ != nullptr) disconnect(device_, nullptr, this, nullptr);
     device_ = next;
+    needsProfileSync_ = true;
+    profileSyncInFlight_ = false;
     reconnectDeviceSignals();
     emit dependenciesChanged();
     reconcile();
@@ -46,6 +48,8 @@ void SmartSessionController::setProfiles(QObject* object) {
     if (profiles_ == next) return;
     if (profiles_ != nullptr) disconnect(profiles_, nullptr, this, nullptr);
     profiles_ = next;
+    needsProfileSync_ = true;
+    profileSyncInFlight_ = false;
     reconnectProfileSignals();
     emit dependenciesChanged();
     reconcile();
@@ -64,10 +68,15 @@ void SmartSessionController::reconnectDeviceSignals() {
 
     connect(device_, &DeviceController::deviceVerifiedChanged, this, [this] {
         if (device_ != nullptr && device_->deviceVerified()) {
+            needsProfileSync_ = true;
+            profileSyncInFlight_ = false;
             // Allow the already-requested SHOW / PROFILE SHOW replies to settle
             // before changing a stopped profile. This avoids racing a reconnect
             // against a publisher that was already running on the device.
             prepareTimer_.start();
+        } else {
+            needsProfileSync_ = true;
+            profileSyncInFlight_ = false;
         }
         reconcile();
     });
@@ -75,13 +84,28 @@ void SmartSessionController::reconnectDeviceSignals() {
     connect(device_, &DeviceController::discoveryChanged, this, &SmartSessionController::reconcile);
     connect(device_, &DeviceController::portsChanged, this, &SmartSessionController::reconcile);
     connect(device_, &DeviceController::runningChanged, this, &SmartSessionController::reconcile);
-    connect(device_, &DeviceController::profileStateChanged, this, &SmartSessionController::reconcile);
+    connect(device_, &DeviceController::profileStateChanged, this, [this] {
+        if (device_ != nullptr && profileSyncInFlight_ &&
+            device_->profileArmed() && !device_->profileDeploying()) {
+            profileSyncInFlight_ = false;
+            needsProfileSync_ = false;
+        }
+        reconcile();
+    });
 }
 
 void SmartSessionController::reconnectProfileSignals() {
     if (profiles_ == nullptr) return;
-    connect(profiles_, &SclProfileModel::sourceChanged, this, &SmartSessionController::reconcile);
-    connect(profiles_, &SclProfileModel::selectedProfileChanged, this, &SmartSessionController::reconcile);
+    connect(profiles_, &SclProfileModel::sourceChanged, this, [this] {
+        needsProfileSync_ = true;
+        profileSyncInFlight_ = false;
+        reconcile();
+    });
+    connect(profiles_, &SclProfileModel::selectedProfileChanged, this, [this] {
+        needsProfileSync_ = true;
+        profileSyncInFlight_ = false;
+        reconcile();
+    });
 }
 
 bool SmartSessionController::ensureDefaultProfile() {
@@ -189,13 +213,28 @@ void SmartSessionController::reconcile() {
         return;
     }
 
-    if (!device_->profileArmed()) {
+    if (needsProfileSync_) {
         setPresentation(
             QStringLiteral("PREPARING 4I+4V"),
             QStringLiteral("Synchronizing the default 4I+4V profile…"),
             false,
             false);
-        static_cast<void>(device_->deployProfile(profile));
+        if (!profileSyncInFlight_) {
+            profileSyncInFlight_ = device_->deployProfile(profile);
+        }
+        return;
+    }
+
+    if (!device_->profileArmed()) {
+        // An unexpected de-arm after a successful session-owned sync must be
+        // recovered by another controlled sync before START can unlock.
+        needsProfileSync_ = true;
+        profileSyncInFlight_ = false;
+        setPresentation(
+            QStringLiteral("PREPARING 4I+4V"),
+            QStringLiteral("Restoring the default 4I+4V profile…"),
+            false,
+            false);
         return;
     }
 
