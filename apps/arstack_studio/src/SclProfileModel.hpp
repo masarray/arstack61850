@@ -21,6 +21,7 @@ class SclProfileModel : public QAbstractListModel {
     Q_PROPERTY(int selectedIndex READ selectedIndex WRITE selectStream NOTIFY selectedIndexChanged)
     Q_PROPERTY(QVariantMap selectedProfile READ selectedProfile NOTIFY selectedProfileChanged)
     Q_PROPERTY(bool hasProfiles READ hasProfiles NOTIFY sourceChanged)
+    Q_PROPERTY(bool referenceTemplateActive READ referenceTemplateActive NOTIFY sourceChanged)
 
 public:
     enum Roles {
@@ -53,8 +54,10 @@ public:
     [[nodiscard]] int selectedIndex() const noexcept;
     [[nodiscard]] QVariantMap selectedProfile() const;
     [[nodiscard]] bool hasProfiles() const noexcept;
+    [[nodiscard]] bool referenceTemplateActive() const noexcept;
 
     Q_INVOKABLE bool loadFile(const QUrl& fileUrl);
+    Q_INVOKABLE bool loadReferenceTemplate();
     Q_INVOKABLE void clear();
     Q_INVOKABLE void selectStream(int row);
     Q_INVOKABLE bool confirmCounterModulus(int modulus);
@@ -78,6 +81,7 @@ private:
         std::optional<ar::iec61850::sampled_values::SvPublisherProfile> profile;
     };
 
+    void installDocument(ar::iec61850::scl::SclDocument document, bool referenceTemplate);
     void rebuildRows();
     [[nodiscard]] QVariantMap profileToVariantMap(
         const ar::iec61850::sampled_values::SvPublisherProfile& profile) const;
@@ -87,4 +91,5 @@ private:
     std::vector<Row> rows_;
     int selectedIndex_{-1};
     QString fatalError_;
+    bool referenceTemplateActive_{false};
 };
