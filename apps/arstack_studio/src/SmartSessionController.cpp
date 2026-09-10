@@ -16,8 +16,6 @@
 #endif
 
 SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent) {
-    firmware_ = new FirmwareManager(this);
-
     discoveryTimer_.setInterval(2500);
     discoveryTimer_.setSingleShot(false);
     connect(&discoveryTimer_, &QTimer::timeout, this, [this] {
@@ -38,80 +36,11 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
         static_cast<void>(device_->autoDetectAndConnect());
         reconcile();
     });
-
-    connect(firmware_, &FirmwareManager::stateChanged, this, [this] {
-        if (!updateRequested_) {
-            reconcile();
-            return;
-        }
-
-        if (updateStage_ == UpdateStage::probing && !firmware_->busy()) {
-            if (firmware_->targetVerified()) {
-                updateStage_ = UpdateStage::flashing;
-                setPresentation(
-                    QStringLiteral("UPDATING FIRMWARE"),
-                    QStringLiteral("Installing verified ARStack firmware…"),
-                    false,
-                    false);
-                QTimer::singleShot(0, this, [this] {
-                    if (!firmware_->installFirmware(updatePort_)) {
-                        if (firmware_->bootloaderHelpNeeded()) {
-                            updateStage_ = UpdateStage::waitingForBootloader;
-                        } else {
-                            updateRequested_ = false;
-                            updateStage_ = UpdateStage::idle;
-                            emit firmwareUpdateFinished(false);
-                        }
-                        reconcile();
-                    }
-                });
-                return;
-            }
-
-            if (firmware_->bootloaderHelpNeeded()) {
-                updateStage_ = UpdateStage::waitingForBootloader;
-            } else {
-                updateRequested_ = false;
-                updateStage_ = UpdateStage::idle;
-                emit firmwareUpdateFinished(false);
-            }
-        } else if (updateStage_ == UpdateStage::flashing && !firmware_->busy() &&
-                   firmware_->bootloaderHelpNeeded()) {
-            updateStage_ = UpdateStage::waitingForBootloader;
-        }
-        reconcile();
-    });
-
-    connect(firmware_, &FirmwareManager::installationFinished, this, [this](const bool resetSucceeded) {
-        if (!updateRequested_) return;
-
-        if (resetSucceeded) {
-            updateStage_ = UpdateStage::reconnecting;
-            setPresentation(
-                QStringLiteral("UPDATING FIRMWARE"),
-                QStringLiteral("Firmware installed. Reconnecting to ESP32-P4…"),
-                false,
-                false);
-            reconnectTimer_.start();
-            return;
-        }
-
-        if (firmware_->bootloaderHelpNeeded()) {
-            updateStage_ = UpdateStage::waitingForBootloader;
-            reconcile();
-            return;
-        }
-
-        // The flash itself succeeded but automatic reset did not. Give the board
-        // one reconnect window before surfacing a recovery failure.
-        updateStage_ = UpdateStage::reconnecting;
-        reconnectTimer_.start();
-        reconcile();
-    });
 }
 
 QObject* SmartSessionController::device() const noexcept { return device_; }
 QObject* SmartSessionController::profiles() const noexcept { return profiles_; }
+QObject* SmartSessionController::firmware() const noexcept { return firmware_; }
 QString SmartSessionController::state() const { return state_; }
 QString SmartSessionController::statusText() const { return statusText_; }
 bool SmartSessionController::startReady() const noexcept { return startReady_; }
@@ -164,6 +93,16 @@ void SmartSessionController::setProfiles(QObject* object) {
     needsProfileSync_ = true;
     profileSyncInFlight_ = false;
     reconnectProfileSignals();
+    emit dependenciesChanged();
+    reconcile();
+}
+
+void SmartSessionController::setFirmware(QObject* object) {
+    auto* next = qobject_cast<FirmwareManager*>(object);
+    if (firmware_ == next) return;
+    if (firmware_ != nullptr) disconnect(firmware_, nullptr, this, nullptr);
+    firmware_ = next;
+    reconnectFirmwareSignals();
     emit dependenciesChanged();
     reconcile();
 }
@@ -301,6 +240,78 @@ void SmartSessionController::reconnectProfileSignals() {
     });
 }
 
+void SmartSessionController::reconnectFirmwareSignals() {
+    if (firmware_ == nullptr) return;
+
+    connect(firmware_, &FirmwareManager::stateChanged, this, [this] {
+        if (!updateRequested_) {
+            reconcile();
+            return;
+        }
+
+        if (updateStage_ == UpdateStage::probing && !firmware_->busy()) {
+            if (firmware_->targetVerified()) {
+                updateStage_ = UpdateStage::flashing;
+                setPresentation(
+                    QStringLiteral("UPDATING FIRMWARE"),
+                    QStringLiteral("Installing verified ARStack firmware…"),
+                    false,
+                    false);
+                QTimer::singleShot(0, this, [this] {
+                    if (!firmware_->installFirmware(updatePort_)) {
+                        if (firmware_->bootloaderHelpNeeded()) {
+                            updateStage_ = UpdateStage::waitingForBootloader;
+                        } else {
+                            updateRequested_ = false;
+                            updateStage_ = UpdateStage::idle;
+                            emit firmwareUpdateFinished(false);
+                        }
+                        reconcile();
+                    }
+                });
+                return;
+            }
+
+            if (firmware_->bootloaderHelpNeeded()) {
+                updateStage_ = UpdateStage::waitingForBootloader;
+            } else {
+                updateRequested_ = false;
+                updateStage_ = UpdateStage::idle;
+                emit firmwareUpdateFinished(false);
+            }
+        } else if (updateStage_ == UpdateStage::flashing && !firmware_->busy() &&
+                   firmware_->bootloaderHelpNeeded()) {
+            updateStage_ = UpdateStage::waitingForBootloader;
+        }
+        reconcile();
+    });
+
+    connect(firmware_, &FirmwareManager::installationFinished, this, [this](const bool resetSucceeded) {
+        if (!updateRequested_) return;
+
+        if (resetSucceeded) {
+            updateStage_ = UpdateStage::reconnecting;
+            setPresentation(
+                QStringLiteral("UPDATING FIRMWARE"),
+                QStringLiteral("Firmware installed. Reconnecting to ESP32-P4…"),
+                false,
+                false);
+            reconnectTimer_.start();
+            return;
+        }
+
+        if (firmware_->bootloaderHelpNeeded()) {
+            updateStage_ = UpdateStage::waitingForBootloader;
+            reconcile();
+            return;
+        }
+
+        updateStage_ = UpdateStage::reconnecting;
+        reconnectTimer_.start();
+        reconcile();
+    });
+}
+
 bool SmartSessionController::ensureDefaultProfile() {
     if (profiles_ == nullptr) return false;
     if (profiles_->hasProfiles()) return true;
@@ -348,7 +359,7 @@ bool SmartSessionController::firmwareIsCurrent() const {
 }
 
 void SmartSessionController::reconcile() {
-    if (device_ == nullptr || profiles_ == nullptr) {
+    if (device_ == nullptr || profiles_ == nullptr || firmware_ == nullptr) {
         setPresentation(
             QStringLiteral("INITIALIZING"),
             QStringLiteral("Preparing ARStack Studio…"),
@@ -383,8 +394,6 @@ void SmartSessionController::reconcile() {
                 false);
             return;
         }
-        // Reconnecting + verified intentionally falls through so the new
-        // semantic firmware identity is verified before declaring success.
     }
 
     if (device_->discovering() || (device_->connected() && !device_->deviceVerified())) {
@@ -406,8 +415,6 @@ void SmartSessionController::reconcile() {
     refreshFirmwareIdentity();
     if (!firmwareIsCurrent()) {
         if (updateRequested_ && updateStage_ == UpdateStage::reconnecting) {
-            // Reconnected, but the semantic identity is still not the bundled
-            // release. Fail closed instead of looping or claiming success.
             updateRequested_ = false;
             updateStage_ = UpdateStage::idle;
             emit firmwareUpdateFinished(false);
