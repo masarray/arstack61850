@@ -66,6 +66,7 @@ private:
     QString targetChip_{QStringLiteral("Not probed")};
     QString firmwareVersion_{QStringLiteral("-")};
     QString expectedProtocol_{QStringLiteral("-")};
+    QString revisionPolicy_;
     QString firmwareSha256_;
     QString firmwareImagePath_;
     QString status_{QStringLiteral("Firmware Manager ready")};
