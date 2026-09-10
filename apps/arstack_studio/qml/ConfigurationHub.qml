@@ -17,14 +17,15 @@ Item {
     function showRecovery() { expertTabs.currentIndex = 1 }
 
     Component.onCompleted: {
+        // Recovery is the only advanced page an unconfigured board should need.
         if (!hub.device.deviceVerified)
             expertTabs.currentIndex = 1
     }
 
     component ExpertTab: TabButton {
-        implicitHeight: 38
+        implicitHeight: 42
         font.family: hub.uiFont
-        font.pixelSize: 10
+        font.pixelSize: 11
         font.weight: checked ? Font.DemiBold : Font.Medium
         contentItem: Label {
             text: parent.text
@@ -34,16 +35,17 @@ Item {
             verticalAlignment: Text.AlignVCenter
         }
         background: Rectangle {
-            color: parent.checked ? hub.theme.raised : hub.theme.surface2
-            border.width: 1
-            border.color: parent.checked ? hub.theme.line : hub.theme.lineSoft
+            color: parent.checked ? hub.theme.raised : "transparent"
+            radius: 6
+            border.width: parent.checked ? 1 : 0
+            border.color: hub.theme.line
             Rectangle {
                 visible: parent.parent.checked
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                anchors.leftMargin: 24
-                anchors.rightMargin: 24
+                anchors.leftMargin: 26
+                anchors.rightMargin: 26
                 height: 2
                 color: hub.theme.accent
             }
@@ -52,52 +54,76 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        spacing: 10
+        spacing: 12
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.leftMargin: 6
-            Layout.rightMargin: 6
+            Layout.leftMargin: 8
+            Layout.rightMargin: 8
+            Layout.topMargin: 4
             spacing: 12
+
             ColumnLayout {
                 Layout.fillWidth: true
-                spacing: 1
+                spacing: 2
                 Label {
-                    text: "ADVANCED"
-                    color: hub.theme.muted
-                    font.family: hub.uiFont
-                    font.pixelSize: 9
-                    font.weight: Font.Bold
-                    font.letterSpacing: 0.9
-                }
-                Label {
-                    text: "Device & engineering settings"
+                    text: "Advanced settings"
                     color: hub.theme.text
                     font.family: hub.uiFont
-                    font.pixelSize: 16
+                    font.pixelSize: 18
                     font.weight: Font.DemiBold
                 }
+                Label {
+                    text: "Firmware recovery, engineering profile, waveform and timing tools"
+                    color: hub.theme.muted
+                    font.family: hub.uiFont
+                    font.pixelSize: 11
+                }
             }
-            Label {
-                text: hub.device.deviceVerified
-                    ? "ESP32-P4 · protocol v" + hub.device.protocolVersion + " · ID " + hub.device.deviceId.slice(-6)
-                    : "Recovery available"
-                color: hub.device.deviceVerified ? hub.theme.green : hub.theme.amber
-                font.family: hub.uiFont
-                font.pixelSize: 10
-                font.weight: Font.DemiBold
+
+            Rectangle {
+                implicitWidth: 112
+                implicitHeight: 30
+                radius: 15
+                color: hub.device.deviceVerified ? "#10251d" : "#261f13"
+                border.width: 1
+                border.color: hub.device.deviceVerified ? "#347a59" : "#705827"
+
+                RowLayout {
+                    anchors.centerIn: parent
+                    spacing: 6
+                    Rectangle {
+                        width: 7
+                        height: 7
+                        radius: 4
+                        color: hub.device.deviceVerified ? hub.theme.green : hub.theme.amber
+                    }
+                    Label {
+                        text: hub.device.deviceVerified ? "Device ready" : "Setup mode"
+                        color: hub.device.deviceVerified ? hub.theme.green : hub.theme.amber
+                        font.family: hub.uiFont
+                        font.pixelSize: 10
+                        font.weight: Font.DemiBold
+                    }
+                }
             }
         }
 
         TabBar {
             id: expertTabs
             Layout.fillWidth: true
-            implicitHeight: 38
-            background: Rectangle { color: hub.theme.surface2; radius: 7 }
-            ExpertTab { text: "SV Setup" }
+            implicitHeight: 42
+            spacing: 4
+            background: Rectangle {
+                color: hub.theme.surface2
+                radius: 8
+                border.width: 1
+                border.color: hub.theme.lineSoft
+            }
+            ExpertTab { text: "Injection" }
             ExpertTab { text: "Firmware" }
             ExpertTab { text: "Waveform" }
-            ExpertTab { text: "PTP Lab" }
+            ExpertTab { text: "Timing" }
             ExpertTab { text: "Device" }
         }
 
