@@ -7,6 +7,8 @@
 
 #include <QVariantMap>
 
+#include <utility>
+
 SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent) {
     discoveryTimer_.setInterval(2500);
     discoveryTimer_.setSingleShot(false);
