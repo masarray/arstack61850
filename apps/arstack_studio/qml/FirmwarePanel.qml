@@ -19,7 +19,7 @@ SurfacePanel {
 
     Timer {
         id: reconnectTimer
-        interval: 1600
+        interval: 1800
         repeat: false
         onTriggered: panel.device.autoDetectAndConnect()
     }
@@ -35,9 +35,9 @@ SurfacePanel {
     component StepBadge: Rectangle {
         property string stepText: "1"
         property bool complete: false
-        implicitWidth: 28
-        implicitHeight: 28
-        radius: 14
+        implicitWidth: 30
+        implicitHeight: 30
+        radius: 15
         color: complete ? "#173c2c" : panel.theme.accentSoft
         border.width: 1
         border.color: complete ? "#347a59" : "#315f8d"
@@ -53,9 +53,9 @@ SurfacePanel {
 
     component DarkComboBox: ComboBox {
         id: combo
-        implicitHeight: 38
+        implicitHeight: 40
         font.family: panel.uiFont
-        font.pixelSize: 10
+        font.pixelSize: 11
         leftPadding: 12
         rightPadding: 34
         contentItem: Text {
@@ -99,7 +99,7 @@ SurfacePanel {
                     text: "FIRMWARE RECOVERY"
                     color: panel.theme.muted
                     font.family: panel.uiFont
-                    font.pixelSize: 8
+                    font.pixelSize: 9
                     font.weight: Font.Bold
                     font.letterSpacing: 0.9
                 }
@@ -113,8 +113,8 @@ SurfacePanel {
                 Label {
                     Layout.fillWidth: true
                     text: panel.device.deviceVerified
-                        ? "The connected injector is recognized. Use this page to reinstall or recover firmware when required."
-                        : "Use this when the board is new, blank, or still running older firmware. It does not need to identify as an ARStack injector first."
+                        ? "The injector is recognized. Reinstall firmware here only when recovery or update is required."
+                        : "For a new board, blank board, or older firmware. The board does not need to identify as ARStack before recovery."
                     color: panel.theme.textSoft
                     font.family: panel.uiFont
                     font.pixelSize: 10
@@ -163,16 +163,18 @@ SurfacePanel {
                     spacing: 1
                     Label {
                         text: panel.firmware.bundleReady
-                            ? "ARStack firmware v" + panel.firmware.firmwareVersion + " is bundled and verified"
+                            ? "ARStack firmware v" + panel.firmware.firmwareVersion + " is already included"
                             : "Firmware package is not ready"
                         color: panel.theme.text
                         font.family: panel.uiFont
-                        font.pixelSize: 10
+                        font.pixelSize: 11
                         font.weight: Font.DemiBold
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: panel.firmware.bundleStatus
+                        text: panel.firmware.bundleReady
+                            ? "No firmware download or .bin selection is required."
+                            : panel.firmware.bundleStatus
                         color: panel.theme.muted
                         font.family: panel.uiFont
                         font.pixelSize: 9
@@ -184,11 +186,11 @@ SurfacePanel {
 
         Rectangle {
             Layout.fillWidth: true
-            implicitHeight: 122
+            implicitHeight: panel.firmware.bootloaderHelpNeeded ? 146 : 126
             radius: 9
             color: panel.theme.surface2
             border.width: 1
-            border.color: panel.firmware.targetVerified ? "#2c674e" : panel.theme.lineSoft
+            border.color: panel.firmware.targetVerified ? "#2c674e" : (panel.firmware.bootloaderHelpNeeded ? "#705827" : panel.theme.lineSoft)
 
             RowLayout {
                 anchors.fill: parent
@@ -205,7 +207,7 @@ SurfacePanel {
                     Layout.fillWidth: true
                     spacing: 7
                     Label {
-                        text: "Choose the ESP32-P4 board"
+                        text: "Connect and check the board"
                         color: panel.theme.text
                         font.family: panel.uiFont
                         font.pixelSize: 12
@@ -215,18 +217,32 @@ SurfacePanel {
                         Layout.fillWidth: true
                         text: panel.firmware.targetVerified
                             ? panel.firmware.targetChip + " verified on " + panel.firmware.selectedPort
-                            : "Select the USB COM port, then check the chip directly through its ROM bootloader. Old ARStack firmware is not required for this check."
+                            : (panel.hasPort
+                                ? firmwarePort.currentText + " is visible in Windows. Check the chip through the ESP32-P4 ROM bootloader."
+                                : "Connect the ESP32-P4 programming USB cable, then click Refresh.")
                         color: panel.firmware.targetVerified ? panel.theme.green : panel.theme.muted
                         font.family: panel.uiFont
-                        font.pixelSize: 9
+                        font.pixelSize: 10
                         wrapMode: Text.WordWrap
                     }
+
+                    Label {
+                        visible: panel.firmware.bootloaderHelpNeeded
+                        Layout.fillWidth: true
+                        text: "ROM not responding: hold BOOT → press and release RESET → release BOOT → click Check board again."
+                        color: panel.theme.amber
+                        font.family: panel.uiFont
+                        font.pixelSize: 10
+                        font.weight: Font.DemiBold
+                        wrapMode: Text.WordWrap
+                    }
+
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 8
                         DarkComboBox {
                             id: firmwarePort
-                            Layout.preferredWidth: 190
+                            Layout.preferredWidth: 205
                             model: panel.device.ports
                             enabled: !panel.firmware.busy
                             onPressedChanged: if (pressed) panel.device.refreshPorts()
@@ -241,10 +257,12 @@ SurfacePanel {
                         CalmButton {
                             theme: panel.theme
                             uiFont: panel.uiFont
-                            text: panel.firmware.busy ? "Checking…" : (panel.firmware.targetVerified ? "Board verified" : "Check board")
+                            text: panel.firmware.busy
+                                ? "Checking…"
+                                : (panel.firmware.targetVerified ? "Board verified" : (panel.firmware.bootloaderHelpNeeded ? "Retry check" : "Check board"))
                             tone: panel.firmware.targetVerified ? "success" : "accent"
                             enabled: !panel.firmware.busy && panel.hasPort
-                            toolTipText: "Read ESP32-P4 chip identity and silicon revision from the selected USB port"
+                            toolTipText: "Read ESP32-P4 chip identity and silicon revision from the selected COM port"
                             onClicked: {
                                 if (panel.device.connected)
                                     panel.device.disconnectPort()
@@ -289,11 +307,11 @@ SurfacePanel {
                     Label {
                         Layout.fillWidth: true
                         text: panel.canInstall
-                            ? "Board safety check passed. Install the bundled ARStack firmware, then Studio will reset and reconnect automatically."
-                            : "Check the board first. Installation stays locked until an ESP32-P4 target allowed by this release is verified."
+                            ? "Board check passed. Install the bundled firmware; Studio will reset and reconnect automatically."
+                            : "Installation unlocks only after the selected COM port is verified as an allowed ESP32-P4."
                         color: panel.canInstall ? panel.theme.textSoft : panel.theme.muted
                         font.family: panel.uiFont
-                        font.pixelSize: 9
+                        font.pixelSize: 10
                         wrapMode: Text.WordWrap
                     }
                 }
@@ -301,13 +319,13 @@ SurfacePanel {
                 CalmButton {
                     theme: panel.theme
                     uiFont: panel.uiFont
-                    implicitWidth: 178
+                    implicitWidth: 190
                     implicitHeight: 42
                     text: panel.firmware.busy ? "Working…" : "Install ARStack v" + panel.firmware.firmwareVersion
                     tone: "success"
                     enabled: panel.canInstall
                     toolTipText: panel.canInstall
-                        ? "Flash the verified ARStack recovery image to " + firmwarePort.currentText
+                        ? "Flash the verified bundled ARStack firmware to " + firmwarePort.currentText
                         : "Complete Check board first"
                     onClicked: panel.firmware.installFirmware(firmwarePort.currentText)
                 }
@@ -316,19 +334,19 @@ SurfacePanel {
 
         Rectangle {
             Layout.fillWidth: true
-            implicitHeight: panel.firmware.status.length > 0 ? 50 : 0
+            implicitHeight: panel.firmware.status.length > 0 ? 52 : 0
             visible: panel.firmware.status.length > 0
             radius: 7
-            color: panel.firmware.targetVerified ? "#10251d" : "#171d25"
+            color: panel.firmware.targetVerified ? "#10251d" : (panel.firmware.bootloaderHelpNeeded ? "#261f13" : "#171d25")
             border.width: 1
-            border.color: panel.firmware.targetVerified ? "#2c674e" : panel.theme.lineSoft
+            border.color: panel.firmware.targetVerified ? "#2c674e" : (panel.firmware.bootloaderHelpNeeded ? "#705827" : panel.theme.lineSoft)
             Label {
                 anchors.fill: parent
                 anchors.margins: 11
                 text: panel.firmware.status
-                color: panel.firmware.targetVerified ? panel.theme.green : panel.theme.textSoft
+                color: panel.firmware.targetVerified ? panel.theme.green : (panel.firmware.bootloaderHelpNeeded ? panel.theme.amber : panel.theme.textSoft)
                 font.family: panel.uiFont
-                font.pixelSize: 9
+                font.pixelSize: 10
                 wrapMode: Text.WordWrap
                 verticalAlignment: Text.AlignVCenter
             }
@@ -345,7 +363,7 @@ SurfacePanel {
             }
             Label {
                 Layout.fillWidth: true
-                text: "Protocol, SHA-256 and raw flash log"
+                text: "Protocol, target revision, SHA-256 and flash log"
                 color: panel.theme.muted
                 font.family: panel.uiFont
                 font.pixelSize: 9
@@ -404,7 +422,7 @@ SurfacePanel {
                     color: panel.theme.textSoft
                     selectionColor: panel.theme.accent
                     font.family: panel.monoFont
-                    font.pixelSize: 8
+                    font.pixelSize: 9
                     wrapMode: TextEdit.WrapAnywhere
                     background: Rectangle { color: "#090e14"; radius: 6; border.width: 1; border.color: panel.theme.lineSoft }
                 }
