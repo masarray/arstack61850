@@ -9,6 +9,13 @@ SurfacePanel {
     property var firmware
     property string uiFont: "Inter"
     property string monoFont: "Inter"
+    property bool technicalDetailsVisible: false
+
+    readonly property bool hasPort: firmwarePort.currentText.length > 0
+    readonly property bool canInstall:
+        panel.firmware.bundleReady && panel.firmware.targetVerified &&
+        !panel.firmware.busy && panel.hasPort &&
+        firmwarePort.currentText === panel.firmware.selectedPort
 
     Timer {
         id: reconnectTimer
@@ -25,121 +32,323 @@ SurfacePanel {
         }
     }
 
+    component StepBadge: Rectangle {
+        property string stepText: "1"
+        property bool complete: false
+        implicitWidth: 28
+        implicitHeight: 28
+        radius: 14
+        color: complete ? "#173c2c" : panel.theme.accentSoft
+        border.width: 1
+        border.color: complete ? "#347a59" : "#315f8d"
+        Label {
+            anchors.centerIn: parent
+            text: parent.complete ? "✓" : parent.stepText
+            color: parent.complete ? panel.theme.green : panel.theme.text
+            font.family: panel.uiFont
+            font.pixelSize: 11
+            font.weight: Font.Bold
+        }
+    }
+
+    component DarkComboBox: ComboBox {
+        id: combo
+        implicitHeight: 38
+        font.family: panel.uiFont
+        font.pixelSize: 10
+        leftPadding: 12
+        rightPadding: 34
+        contentItem: Text {
+            leftPadding: 2
+            rightPadding: 2
+            text: combo.displayText
+            color: combo.enabled ? panel.theme.text : panel.theme.muted2
+            font: combo.font
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+        indicator: Label {
+            x: combo.width - width - 12
+            y: (combo.height - height) / 2
+            text: "⌄"
+            color: combo.enabled ? panel.theme.textSoft : panel.theme.muted2
+            font.family: panel.uiFont
+            font.pixelSize: 13
+        }
+        background: Rectangle {
+            radius: 7
+            color: combo.hovered ? panel.theme.raisedHover : panel.theme.surface2
+            border.width: 1
+            border.color: combo.activeFocus ? panel.theme.accent : panel.theme.line
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 16
-        spacing: 10
+        anchors.margins: 18
+        spacing: 12
 
         RowLayout {
             Layout.fillWidth: true
+            spacing: 12
+
             ColumnLayout {
-                spacing: 1
-                Label { text: "FIRMWARE MANAGER"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 7; font.weight: Font.Bold; font.letterSpacing: 0.9 }
-                Label { text: "ESP32-P4-ETH install & recovery"; color: panel.theme.text; font.family: panel.uiFont; font.pixelSize: 15; font.weight: Font.DemiBold }
+                Layout.fillWidth: true
+                spacing: 2
+                Label {
+                    text: "FIRMWARE RECOVERY"
+                    color: panel.theme.muted
+                    font.family: panel.uiFont
+                    font.pixelSize: 8
+                    font.weight: Font.Bold
+                    font.letterSpacing: 0.9
+                }
+                Label {
+                    text: "Install ARStack firmware"
+                    color: panel.theme.text
+                    font.family: panel.uiFont
+                    font.pixelSize: 18
+                    font.weight: Font.DemiBold
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: panel.device.deviceVerified
+                        ? "The connected injector is recognized. Use this page to reinstall or recover firmware when required."
+                        : "Use this when the board is new, blank, or still running older firmware. It does not need to identify as an ARStack injector first."
+                    color: panel.theme.textSoft
+                    font.family: panel.uiFont
+                    font.pixelSize: 10
+                    wrapMode: Text.WordWrap
+                }
             }
-            Item { Layout.fillWidth: true }
+
             Rectangle {
-                implicitWidth: 108
-                implicitHeight: 24
-                radius: 5
+                implicitWidth: 126
+                implicitHeight: 30
+                radius: 7
                 color: panel.firmware.bundleReady ? "#112a20" : "#2a2112"
                 border.width: 1
                 border.color: panel.firmware.bundleReady ? "#2c674e" : "#705827"
                 Label {
                     anchors.centerIn: parent
-                    text: panel.firmware.bundleReady ? "BUNDLE VERIFIED" : "BUNDLE BLOCKED"
+                    text: panel.firmware.bundleReady ? "PACKAGE READY" : "PACKAGE BLOCKED"
                     color: panel.firmware.bundleReady ? panel.theme.green : panel.theme.amber
                     font.family: panel.uiFont
-                    font.pixelSize: 7
+                    font.pixelSize: 8
                     font.weight: Font.Bold
                 }
             }
         }
 
-        Label {
+        Rectangle {
             Layout.fillWidth: true
-            text: "Safe flow: verify the ROM target first, validate the bundled firmware SHA-256, flash only an ESP32-P4, reset, then let Studio verify ARSTACK IDENTIFY. No ESP-IDF or Python is required on the operator PC."
-            wrapMode: Text.WordWrap
-            color: panel.theme.textSoft
-            font.family: panel.uiFont
-            font.pixelSize: 9
-            lineHeight: 1.35
+            implicitHeight: 62
+            radius: 8
+            color: panel.theme.surface2
+            border.width: 1
+            border.color: panel.theme.lineSoft
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 12
+                spacing: 11
+                Rectangle {
+                    width: 8
+                    height: 8
+                    radius: 4
+                    color: panel.firmware.bundleReady ? panel.theme.green : panel.theme.amber
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 1
+                    Label {
+                        text: panel.firmware.bundleReady
+                            ? "ARStack firmware v" + panel.firmware.firmwareVersion + " is bundled and verified"
+                            : "Firmware package is not ready"
+                        color: panel.theme.text
+                        font.family: panel.uiFont
+                        font.pixelSize: 10
+                        font.weight: Font.DemiBold
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: panel.firmware.bundleStatus
+                        color: panel.theme.muted
+                        font.family: panel.uiFont
+                        font.pixelSize: 9
+                        wrapMode: Text.WordWrap
+                    }
+                }
+            }
         }
 
         Rectangle {
             Layout.fillWidth: true
-            implicitHeight: 92
-            radius: 7
+            implicitHeight: 122
+            radius: 9
             color: panel.theme.surface2
             border.width: 1
-            border.color: panel.theme.lineSoft
-            GridLayout {
+            border.color: panel.firmware.targetVerified ? "#2c674e" : panel.theme.lineSoft
+
+            RowLayout {
                 anchors.fill: parent
-                anchors.margins: 11
-                columns: 4
-                columnSpacing: 12
-                rowSpacing: 6
-                Label { text: "Package"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-                Label { text: panel.firmware.firmwareVersion === "-" ? "Not installed" : "v" + panel.firmware.firmwareVersion; color: panel.theme.text; font.family: panel.uiFont; font.pixelSize: 9; font.weight: Font.DemiBold }
-                Label { text: "Protocol"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-                Label { text: panel.firmware.expectedProtocol === "-" ? "-" : "v" + panel.firmware.expectedProtocol; color: panel.theme.text; font.family: panel.uiFont; font.pixelSize: 9 }
-                Label { text: "Target"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-                Label { text: panel.firmware.targetChip; color: panel.firmware.targetVerified ? panel.theme.green : panel.theme.textSoft; font.family: panel.uiFont; font.pixelSize: 9; font.weight: Font.DemiBold }
-                Label { text: "SHA-256"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-                Label { text: panel.firmware.firmwareSha256.length ? panel.firmware.firmwareSha256.slice(0, 12) + "…" : "-"; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: 8 }
+                anchors.margins: 14
+                spacing: 13
+
+                StepBadge {
+                    stepText: "1"
+                    complete: panel.firmware.targetVerified
+                    Layout.alignment: Qt.AlignTop
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 7
+                    Label {
+                        text: "Choose the ESP32-P4 board"
+                        color: panel.theme.text
+                        font.family: panel.uiFont
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: panel.firmware.targetVerified
+                            ? panel.firmware.targetChip + " verified on " + panel.firmware.selectedPort
+                            : "Select the USB COM port, then check the chip directly through its ROM bootloader. Old ARStack firmware is not required for this check."
+                        color: panel.firmware.targetVerified ? panel.theme.green : panel.theme.muted
+                        font.family: panel.uiFont
+                        font.pixelSize: 9
+                        wrapMode: Text.WordWrap
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        DarkComboBox {
+                            id: firmwarePort
+                            Layout.preferredWidth: 190
+                            model: panel.device.ports
+                            enabled: !panel.firmware.busy
+                            onPressedChanged: if (pressed) panel.device.refreshPorts()
+                        }
+                        CalmButton {
+                            theme: panel.theme
+                            uiFont: panel.uiFont
+                            text: "Refresh"
+                            enabled: !panel.firmware.busy
+                            onClicked: panel.device.refreshPorts()
+                        }
+                        CalmButton {
+                            theme: panel.theme
+                            uiFont: panel.uiFont
+                            text: panel.firmware.busy ? "Checking…" : (panel.firmware.targetVerified ? "Board verified" : "Check board")
+                            tone: panel.firmware.targetVerified ? "success" : "accent"
+                            enabled: !panel.firmware.busy && panel.hasPort
+                            toolTipText: "Read ESP32-P4 chip identity and silicon revision from the selected USB port"
+                            onClicked: {
+                                if (panel.device.connected)
+                                    panel.device.disconnectPort()
+                                panel.firmware.probeTarget(firmwarePort.currentText)
+                            }
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+                }
             }
         }
 
-        Label {
+        Rectangle {
             Layout.fillWidth: true
-            text: panel.firmware.bundleStatus
-            color: panel.firmware.bundleReady ? panel.theme.green : panel.theme.amber
-            font.family: panel.uiFont
-            font.pixelSize: 8
-            wrapMode: Text.WordWrap
+            implicitHeight: 118
+            radius: 9
+            color: panel.canInstall ? "#10251d" : panel.theme.surface2
+            border.width: 1
+            border.color: panel.canInstall ? "#347a59" : panel.theme.lineSoft
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 14
+                spacing: 13
+
+                StepBadge {
+                    stepText: "2"
+                    complete: panel.device.deviceVerified && panel.device.protocolVersion === panel.firmware.expectedProtocol
+                    Layout.alignment: Qt.AlignTop
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 5
+                    Label {
+                        text: "Install firmware"
+                        color: panel.theme.text
+                        font.family: panel.uiFont
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: panel.canInstall
+                            ? "Board safety check passed. Install the bundled ARStack firmware, then Studio will reset and reconnect automatically."
+                            : "Check the board first. Installation stays locked until an ESP32-P4 target allowed by this release is verified."
+                        color: panel.canInstall ? panel.theme.textSoft : panel.theme.muted
+                        font.family: panel.uiFont
+                        font.pixelSize: 9
+                        wrapMode: Text.WordWrap
+                    }
+                }
+
+                CalmButton {
+                    theme: panel.theme
+                    uiFont: panel.uiFont
+                    implicitWidth: 178
+                    implicitHeight: 42
+                    text: panel.firmware.busy ? "Working…" : "Install ARStack v" + panel.firmware.firmwareVersion
+                    tone: "success"
+                    enabled: panel.canInstall
+                    toolTipText: panel.canInstall
+                        ? "Flash the verified ARStack recovery image to " + firmwarePort.currentText
+                        : "Complete Check board first"
+                    onClicked: panel.firmware.installFirmware(firmwarePort.currentText)
+                }
+            }
         }
 
-        Rectangle { Layout.fillWidth: true; height: 1; color: panel.theme.lineSoft }
+        Rectangle {
+            Layout.fillWidth: true
+            implicitHeight: panel.firmware.status.length > 0 ? 50 : 0
+            visible: panel.firmware.status.length > 0
+            radius: 7
+            color: panel.firmware.targetVerified ? "#10251d" : "#171d25"
+            border.width: 1
+            border.color: panel.firmware.targetVerified ? "#2c674e" : panel.theme.lineSoft
+            Label {
+                anchors.fill: parent
+                anchors.margins: 11
+                text: panel.firmware.status
+                color: panel.firmware.targetVerified ? panel.theme.green : panel.theme.textSoft
+                font.family: panel.uiFont
+                font.pixelSize: 9
+                wrapMode: Text.WordWrap
+                verticalAlignment: Text.AlignVCenter
+            }
+        }
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: 7
-            ComboBox {
-                id: firmwarePort
-                Layout.preferredWidth: 170
-                model: panel.device.ports
-                enabled: !panel.firmware.busy
+            spacing: 8
+            CalmButton {
+                theme: panel.theme
+                uiFont: panel.uiFont
+                text: panel.technicalDetailsVisible ? "Hide technical details" : "Technical details"
+                onClicked: panel.technicalDetailsVisible = !panel.technicalDetailsVisible
+            }
+            Label {
+                Layout.fillWidth: true
+                text: "Protocol, SHA-256 and raw flash log"
+                color: panel.theme.muted
                 font.family: panel.uiFont
                 font.pixelSize: 9
-                onPressedChanged: if (pressed) panel.device.refreshPorts()
-            }
-            CalmButton {
-                theme: panel.theme
-                uiFont: panel.uiFont
-                text: "Refresh ports"
-                enabled: !panel.firmware.busy
-                onClicked: panel.device.refreshPorts()
-            }
-            CalmButton {
-                theme: panel.theme
-                uiFont: panel.uiFont
-                text: panel.firmware.busy ? "Working…" : "1 · Verify ESP32-P4"
-                tone: panel.firmware.targetVerified ? "success" : "accent"
-                enabled: !panel.firmware.busy && firmwarePort.currentText.length > 0
-                onClicked: {
-                    if (panel.device.connected)
-                        panel.device.disconnectPort()
-                    panel.firmware.probeTarget(firmwarePort.currentText)
-                }
-            }
-            CalmButton {
-                theme: panel.theme
-                uiFont: panel.uiFont
-                text: "2 · Install / Recover"
-                tone: "success"
-                enabled: panel.firmware.bundleReady && panel.firmware.targetVerified && !panel.firmware.busy && firmwarePort.currentText === panel.firmware.selectedPort
-                toolTipText: enabled ? "Flash the verified ARStack merged firmware image" : "Verify the ESP32-P4 target and firmware bundle first"
-                onClicked: panel.firmware.installFirmware(firmwarePort.currentText)
             }
             CalmButton {
                 visible: panel.firmware.busy
@@ -149,38 +358,63 @@ SurfacePanel {
                 tone: "danger"
                 onClicked: panel.firmware.cancel()
             }
-            Item { Layout.fillWidth: true }
         }
 
-        Label {
+        Rectangle {
+            visible: panel.technicalDetailsVisible
             Layout.fillWidth: true
-            text: panel.firmware.status
-            color: panel.firmware.targetVerified ? panel.theme.green : panel.theme.textSoft
-            font.family: panel.uiFont
-            font.pixelSize: 9
-            wrapMode: Text.WordWrap
+            implicitHeight: 64
+            radius: 7
+            color: panel.theme.surface2
+            border.width: 1
+            border.color: panel.theme.lineSoft
+            GridLayout {
+                anchors.fill: parent
+                anchors.margins: 10
+                columns: 4
+                columnSpacing: 12
+                rowSpacing: 4
+                Label { text: "Protocol"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
+                Label { text: panel.firmware.expectedProtocol === "-" ? "-" : "v" + panel.firmware.expectedProtocol; color: panel.theme.text; font.family: panel.uiFont; font.pixelSize: 9 }
+                Label { text: "Target"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
+                Label { text: panel.firmware.targetChip; color: panel.theme.textSoft; font.family: panel.uiFont; font.pixelSize: 9 }
+                Label { text: "SHA-256"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
+                Label { Layout.columnSpan: 3; text: panel.firmware.firmwareSha256.length ? panel.firmware.firmwareSha256 : "-"; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: 8; elide: Text.ElideMiddle }
+            }
         }
 
-        RowLayout {
-            Layout.fillWidth: true
-            Label { text: "FLASH LOG"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 7; font.weight: Font.Bold; font.letterSpacing: 0.8 }
-            Item { Layout.fillWidth: true }
-            CalmButton { theme: panel.theme; uiFont: panel.uiFont; text: "Clear"; onClicked: panel.firmware.clearLog() }
-        }
-
-        ScrollView {
+        ColumnLayout {
+            visible: panel.technicalDetailsVisible
             Layout.fillWidth: true
             Layout.fillHeight: true
-            TextArea {
-                readOnly: true
-                text: panel.firmware.logText
-                color: panel.theme.textSoft
-                selectionColor: panel.theme.accent
-                font.family: panel.monoFont
-                font.pixelSize: 8
-                wrapMode: TextEdit.WrapAnywhere
-                background: Rectangle { color: "#090e14"; radius: 6; border.width: 1; border.color: panel.theme.lineSoft }
+            spacing: 6
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: "FLASH LOG"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8; font.weight: Font.Bold; font.letterSpacing: 0.7 }
+                Item { Layout.fillWidth: true }
+                CalmButton { theme: panel.theme; uiFont: panel.uiFont; text: "Clear"; onClicked: panel.firmware.clearLog() }
             }
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.minimumHeight: 120
+                TextArea {
+                    readOnly: true
+                    text: panel.firmware.logText
+                    color: panel.theme.textSoft
+                    selectionColor: panel.theme.accent
+                    font.family: panel.monoFont
+                    font.pixelSize: 8
+                    wrapMode: TextEdit.WrapAnywhere
+                    background: Rectangle { color: "#090e14"; radius: 6; border.width: 1; border.color: panel.theme.lineSoft }
+                }
+            }
+        }
+
+        Item {
+            visible: !panel.technicalDetailsVisible
+            Layout.fillWidth: true
+            Layout.fillHeight: true
         }
     }
 }
