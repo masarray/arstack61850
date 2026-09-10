@@ -24,12 +24,44 @@ SurfacePanel {
         onTriggered: panel.device.autoDetectAndConnect()
     }
 
+    Timer {
+        id: autoProbeTimer
+        interval: 550
+        repeat: false
+        onTriggered: {
+            if (panel.firmware.busy || panel.firmware.targetVerified)
+                return
+            if (panel.device.ports.length !== 1)
+                return
+            var port = panel.device.ports[0]
+            if (!port || port.length === 0)
+                return
+            if (panel.device.connected)
+                panel.device.disconnectPort()
+            panel.firmware.probeTarget(port)
+        }
+    }
+
     Connections {
         target: panel.firmware
         function onInstallationFinished(resetSucceeded) {
             if (resetSucceeded)
                 reconnectTimer.restart()
         }
+    }
+
+    Connections {
+        target: panel.device
+        function onPortsChanged() {
+            if (!panel.firmware.targetVerified && !panel.firmware.busy && panel.device.ports.length === 1)
+                autoProbeTimer.restart()
+        }
+    }
+
+    Component.onCompleted: {
+        panel.device.refreshPorts()
+        if (panel.device.ports.length === 1)
+            autoProbeTimer.restart()
     }
 
     component StepBadge: Rectangle {
@@ -218,7 +250,7 @@ SurfacePanel {
                         text: panel.firmware.targetVerified
                             ? panel.firmware.targetChip + " verified on " + panel.firmware.selectedPort
                             : (panel.hasPort
-                                ? firmwarePort.currentText + " is visible in Windows. Check the chip through the ESP32-P4 ROM bootloader."
+                                ? firmwarePort.currentText + " is visible in Windows. Studio will check the ESP32-P4 automatically."
                                 : "Connect the ESP32-P4 programming USB cable, then click Refresh.")
                         color: panel.firmware.targetVerified ? panel.theme.green : panel.theme.muted
                         font.family: panel.uiFont
@@ -229,7 +261,7 @@ SurfacePanel {
                     Label {
                         visible: panel.firmware.bootloaderHelpNeeded
                         Layout.fillWidth: true
-                        text: "ROM not responding: hold BOOT → press and release RESET → release BOOT → click Check board again."
+                        text: "ROM not responding: hold BOOT → press and release RESET → release BOOT → click Retry check."
                         color: panel.theme.amber
                         font.family: panel.uiFont
                         font.pixelSize: 10
