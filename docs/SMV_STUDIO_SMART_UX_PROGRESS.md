@@ -2,32 +2,33 @@
 
 Target operator experience:
 
-`Plug ESP32-P4 -> Studio detects/connects -> current firmware/default 4I+4V prepared -> READY -> edit values -> START/STOP`
+`Plug ESP32-P4 -> Studio detects/connects -> firmware checked -> default 4I+4V prepared -> READY -> edit values -> START/STOP`
 
 The normal operator must not need to understand SCL Class A, profile deployment, APPID/MAC/VLAN, firmware files, SHA-256, espflash, COM-port internals, or PTP unless an exceptional condition requires it.
 
 ## Status legend
 
 - ✅ implemented in branch
-- 🟡 implemented but hardware/UX acceptance still required
+- 🟡 implemented but CI/hardware/UX acceptance still required
 - ⬜ not implemented yet
 
 ## Smart workflow
 
 - ✅ Built-in 4I+4V / 4000 fps / 9-2LE reference profile loads automatically.
-- ✅ Existing startup device discovery remains automatic.
+- ✅ Startup device discovery is automatic.
 - ✅ Hot-plug/replug watchdog retries discovery while the device is genuinely offline.
 - ✅ After a compatible injector is verified, the default 4I+4V profile is synchronized/deployed automatically while output is stopped.
+- ✅ Session-owned profile sync is required before READY; a stale `profileArmed` state from an earlier session is never trusted.
 - ✅ `Deploy`, `Check`, `Quick Start`, and normal Engineering tabs are removed from the primary operator workflow.
 - ✅ START remains an explicit operator action; the application never auto-starts SV output.
 - ✅ Normal workflow exposes one large START or STOP action, not both competing at once.
 - ✅ Phasor and waveform views start collapsed; operator can opt in when useful.
-- ✅ Normal session orchestration now lives in native `SmartSessionController` instead of ribbon timing logic.
-- 🟡 Automatic profile preparation must be hardware-tested across app launch, USB replug, STOP/START, and ESP power-cycle.
+- ✅ Normal session orchestration lives in native `SmartSessionController` instead of ribbon timing logic.
+- 🟡 Zero-configuration preparation must still be hardware-tested across app launch, USB replug, STOP/START, and ESP power-cycle.
 
 ## Live values / responsiveness
 
-- ✅ Current and voltage edits already apply to the connected firmware live.
+- ✅ Current and voltage edits apply to connected firmware live.
 - ✅ Magnitude and phase text edits are coalesced with a 90 ms debounce to avoid serial command storms while preserving immediate-feeling operation.
 - ⬜ Frequency editing still needs the same coalescing policy.
 - ⬜ Add bounded native command queue / last-value-wins protection so correctness does not depend on QML timing.
@@ -37,12 +38,15 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 - ✅ Firmware image, manifest, SHA-256 contract, and `espflash` are bundled with the application package.
 - ✅ Recovery can probe and flash ESP32-P4 without ESP-IDF/Python on the operator PC.
 - ✅ ROM/download-mode recovery has guided BOOT/RESET fallback.
-- 🟡 ESP-IDF project version is now pinned to 0.1.0 as the basis for semantic firmware identity.
-- ⬜ Firmware `IDENTIFY` response still needs to expose semantic firmware version/capabilities.
-- ⬜ DeviceController still needs to parse/store semantic firmware version.
-- ⬜ Current-vs-outdated firmware comparison is not implemented yet.
-- ⬜ Friendly `Firmware update available -> Update now?` notification is not implemented yet.
-- ⬜ One-click update needs automatic transition to ROM flashing, visible progress, verify/reset/reconnect, and fallback only when automatic bootloader entry fails.
+- ✅ ESP-IDF project version is pinned to `0.1.0` for deterministic semantic firmware identity.
+- ✅ New firmware `IDENTIFY` appends `firmware=<version>` and `capabilities=SMV-4I4V,LIVE-SETPOINTS` while preserving the older identity prefix for backwards compatibility.
+- ✅ Smart session distinguishes current firmware from legacy/outdated firmware. Missing semantic version is treated as legacy rather than silently accepted.
+- ✅ Friendly `Firmware update -> Update now?` operator prompt is implemented.
+- 🟡 One-click update coordinator is implemented: safe STOP if required -> release serial -> ROM probe -> verified bundled flash -> reset -> reconnect -> verify semantic identity -> prepare 4I+4V.
+- 🟡 If automatic ROM entry fails, normal UI falls back to BOOT + RESET guidance and `Retry update`.
+- 🟡 Update UI currently uses an indeterminate progress bar. Actual numeric flash percentage is not parsed yet.
+- ⬜ Hardware acceptance of legacy-firmware -> one-click update -> reconnect -> READY is still required.
+- ⬜ Centralize the Firmware Manager instance used by Smart Session and Advanced configuration to avoid duplicate package validation objects.
 
 ## Operator UI simplification
 
@@ -50,6 +54,7 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 - ✅ Low-level profile deployment is hidden from normal operation.
 - ✅ Advanced/recovery functionality remains available rather than being deleted.
 - ✅ Phasor/waveform visual noise is opt-in at startup rather than occupying the default workspace.
+- ✅ Firmware internals remain hidden during the normal update path; only exceptional BOOT/RESET recovery is surfaced.
 - ⬜ Main workspace title and legacy header/footer language still need simplification.
 - ⬜ Remove duplicate device/status indicators and legacy keyboard-help noise from normal view.
 - ⬜ Advanced window needs final progressive-disclosure cleanup and larger minimum typography.
@@ -61,8 +66,10 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 - ✅ Profile deployment remains stopped-only and fail-closed.
 - ✅ Firmware package/target/hash checks remain fail-closed.
 - ✅ Startup discovery race was removed; initial probe and hot-plug watchdog are serialized by state.
-- ✅ Smart-session orchestration moved into one native C++ state machine (`WAITING FOR DEVICE / DEVICE FOUND / CONNECTING / FIRMWARE UPDATE / PREPARING 4I+4V / READY / RUNNING / ERROR`).
-- ✅ Reconnect preparation is delayed briefly after identity verification so existing SHOW / PROFILE SHOW responses can settle before an automatic deploy.
+- ✅ Smart-session orchestration moved into one native C++ state machine (`WAITING FOR DEVICE / DEVICE FOUND / CONNECTING / FIRMWARE UPDATE / UPDATING FIRMWARE / UPDATE NEEDS BOOT / PREPARING 4I+4V / READY / RUNNING / ERROR`).
+- ✅ Reconnect preparation is delayed briefly after identity verification so existing SHOW / PROFILE SHOW responses can settle before automatic profile synchronization.
+- ✅ Firmware update completion is not trusted until the newly reconnected firmware reports the expected semantic version.
+- ✅ Firmware update state exits deterministically on probe rejection/failure instead of hanging indefinitely.
 - ⬜ Add bounded retry/backoff for disconnect/reconnect and serial errors.
 - ⬜ Add regression tests for USB removal during READY and RUNNING.
 - ⬜ Add regression tests for malformed/slow serial responses and command timeouts.
@@ -70,6 +77,8 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 
 ## Current checkpoint
 
-Checkpoint A — **zero-configuration normal path + native smart-session orchestration** is implemented in the branch and awaiting CI + hardware acceptance.
+Checkpoint B — **zero-configuration normal path + native smart-session orchestration + semantic firmware update flow** is implemented in the branch.
 
-Next implementation checkpoint: **semantic firmware identity + automatic update UX**, followed by native command-queue hardening and final visual cleanup.
+Current validation state: **CI and hardware acceptance pending for the newest Smart UX head.** Do not treat this checkpoint as release-ready until those gates pass.
+
+Next implementation checkpoint after CI: native command-queue hardening, frequency coalescing, final main-window visual cleanup, then hardware acceptance of both current-firmware and legacy-firmware paths.
