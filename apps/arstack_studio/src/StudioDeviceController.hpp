@@ -3,6 +3,7 @@
 
 #include "DeviceController.hpp"
 
+#include <QCoreApplication>
 #include <QHash>
 #include <QRegularExpression>
 #include <QTimer>
@@ -30,6 +31,16 @@ public:
         connect(this, &DeviceController::deviceVerifiedChanged, this, [this] {
             if (!deviceVerified()) clearPendingLiveCommands();
         });
+        if (auto* app = QCoreApplication::instance(); app != nullptr) {
+            connect(app, &QCoreApplication::aboutToQuit, this, [this] {
+                clearPendingLiveCommands();
+                if (connected() && running()) {
+                    // Best-effort graceful shutdown. A firmware-side session lease
+                    // is still required for hard crashes/power loss of the control PC.
+                    static_cast<void>(DeviceController::stop());
+                }
+            });
+        }
     }
 
     [[nodiscard]] bool currentFirmwareIdentitySeen() const {
