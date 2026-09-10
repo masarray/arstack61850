@@ -96,6 +96,28 @@ SurfacePanel {
                 spacing: 6
 
                 RibbonAction {
+                    text: ribbon.profiles.referenceTemplateActive ? "4I+4V Ready" : "4I+4V Quick Start"
+                    iconSource: Qt.resolvedUrl("../assets/lucide/radio-tower.svg")
+                    tone: ribbon.profiles.referenceTemplateActive ? "accent" : "neutral"
+                    enabled: !ribbon.device.running && !ribbon.device.profileDeploying
+                    toolTipText: "Load the bundled ARStack 4I+4V 9-2LE reference profile at 4000 fps"
+                    onClicked: {
+                        if (ribbon.profiles.loadReferenceTemplate()) {
+                            ribbon.controller.profileDirty = true
+                            ribbon.controller.showMessage(
+                                "4I+4V 9-2LE reference loaded · Class A · 4000 fps · smpCnt 0..3999.",
+                                false)
+                        } else {
+                            ribbon.controller.showMessage(
+                                ribbon.profiles.fatalError || "Unable to load the bundled reference profile.",
+                                true)
+                        }
+                    }
+                }
+
+                RibbonDivider {}
+
+                RibbonAction {
                     text: "Balanced"
                     iconSource: Qt.resolvedUrl("../assets/lucide/scale.svg")
                     toolTipText: "Apply a balanced three-phase setpoint"
@@ -238,6 +260,20 @@ SurfacePanel {
                     text: "Open SCL"
                     iconSource: Qt.resolvedUrl("../assets/lucide/folder-open.svg")
                     onClicked: ribbon.controller.openEngineeringFile()
+                }
+                RibbonAction {
+                    text: "4I+4V Reference"
+                    iconSource: Qt.resolvedUrl("../assets/lucide/radio-tower.svg")
+                    tone: ribbon.profiles.referenceTemplateActive ? "accent" : "neutral"
+                    enabled: !ribbon.device.running && !ribbon.device.profileDeploying
+                    onClicked: {
+                        if (ribbon.profiles.loadReferenceTemplate()) {
+                            ribbon.controller.profileDirty = true
+                            ribbon.controller.showMessage("ARStack 4I+4V reference engineering profile loaded.", false)
+                        } else {
+                            ribbon.controller.showMessage(ribbon.profiles.fatalError, true)
+                        }
+                    }
                 }
                 RibbonAction {
                     text: "Detect device"
