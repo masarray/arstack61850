@@ -17,6 +17,7 @@ namespace {
 constexpr auto kManifestName = "firmware-manifest.json";
 constexpr auto kManifestSchema = "arstack.studio.firmware.v1";
 constexpr auto kExpectedChip = "esp32p4";
+constexpr auto kPreV3Policy = "pre-v3";
 
 QString normalizedHash(const QString& text) {
     QString hash = text.trimmed().toLower();
@@ -63,6 +64,7 @@ void FirmwareManager::refreshBundle() {
     bundleReady_ = false;
     firmwareVersion_ = QStringLiteral("-");
     expectedProtocol_ = QStringLiteral("-");
+    revisionPolicy_.clear();
     firmwareSha256_.clear();
     firmwareImagePath_.clear();
 
@@ -78,7 +80,8 @@ void FirmwareManager::refreshBundle() {
         return;
     }
     bundleReady_ = true;
-    bundleStatus_ = QStringLiteral("Ready · firmware v%1 · SHA-256 verified").arg(firmwareVersion_);
+    bundleStatus_ = QStringLiteral("Ready · firmware v%1 · ESP32-P4 pre-v3 · SHA-256 verified")
+        .arg(firmwareVersion_);
     emit stateChanged();
 }
 
@@ -107,10 +110,12 @@ bool FirmwareManager::loadManifest() {
     const QString expectedHash = normalizedHash(object.value(QStringLiteral("sha256")).toString());
     const int protocol = object.value(QStringLiteral("protocol")).toInt(-1);
     const QString version = object.value(QStringLiteral("version")).toString().trimmed();
+    const QString revisionPolicy = object.value(QStringLiteral("chipRevisionPolicy")).toString().trimmed().toLower();
     const qint64 flashOffset = object.value(QStringLiteral("flashOffset")).toVariant().toLongLong();
 
     if (imageName.isEmpty() || QFileInfo(imageName).fileName() != imageName ||
-        expectedHash.size() != 64 || version.isEmpty() || protocol < 1 || flashOffset != 0) {
+        expectedHash.size() != 64 || version.isEmpty() || protocol < 1 || flashOffset != 0 ||
+        revisionPolicy != QString::fromLatin1(kPreV3Policy)) {
         bundleStatus_ = QStringLiteral("Firmware manifest fields are incomplete or unsafe.");
         return false;
     }
@@ -135,6 +140,7 @@ bool FirmwareManager::loadManifest() {
 
     firmwareVersion_ = version;
     expectedProtocol_ = QString::number(protocol);
+    revisionPolicy_ = revisionPolicy;
     firmwareSha256_ = actualHash;
     firmwareImagePath_ = QDir::cleanPath(imagePath);
     return true;
@@ -157,9 +163,12 @@ bool FirmwareManager::probeTarget(const QString& portName) {
     targetVerified_ = false;
     targetChip_ = QStringLiteral("Probing...");
     busy_ = true;
-    setStatus(QStringLiteral("Reading target identity from %1...").arg(port));
+    setStatus(QStringLiteral("Reading target identity and silicon revision from %1...").arg(port));
     emit stateChanged();
-    return startEspflash({QStringLiteral("--skip-update-check"), QStringLiteral("board-info")}, Operation::probe);
+    return startEspflash({
+        QStringLiteral("--skip-update-check"),
+        QStringLiteral("board-info"),
+        QStringLiteral("--non-interactive")}, Operation::probe);
 }
 
 bool FirmwareManager::installFirmware(const QString& portName) {
@@ -171,7 +180,7 @@ bool FirmwareManager::installFirmware(const QString& portName) {
         return false;
     }
     if (!targetVerified_ || port.isEmpty() || port != selectedPort_) {
-        fail(QStringLiteral("Probe and verify this ESP32-P4 port before flashing."));
+        fail(QStringLiteral("Probe and verify a supported ESP32-P4 pre-v3 target before flashing."));
         return false;
     }
 
@@ -183,6 +192,7 @@ bool FirmwareManager::installFirmware(const QString& portName) {
         QStringLiteral("write-bin"),
         QStringLiteral("--chip"),
         QStringLiteral("esp32p4"),
+        QStringLiteral("--non-interactive"),
         QStringLiteral("0x0"),
         firmwareImagePath_}, Operation::flash);
 }
@@ -236,14 +246,31 @@ void FirmwareManager::finishOperation(const int exitCode, const QProcess::ExitSt
 
     if (completed == Operation::probe) {
         busy_ = false;
-        const QString lower = operationOutput_.toLower();
-        const bool p4 = success && (lower.contains(QStringLiteral("esp32-p4")) ||
-                                    lower.contains(QStringLiteral("esp32p4")));
-        targetVerified_ = p4;
-        targetChip_ = p4 ? QStringLiteral("ESP32-P4") : QStringLiteral("Unsupported / unknown target");
-        setStatus(p4
-            ? QStringLiteral("ESP32-P4 verified on %1. Firmware installation is unlocked.").arg(selectedPort_)
-            : QStringLiteral("Target verification failed. Only ESP32-P4 is accepted."));
+        const QRegularExpression identityExpression{
+            QStringLiteral(R"(Chip\s+type:\s*ESP32-P4\s*\(revision\s+v(\d+)\.(\d+)\))"),
+            QRegularExpression::CaseInsensitiveOption};
+        const auto identity = identityExpression.match(operationOutput_);
+        const bool p4WithRevision = success && identity.hasMatch();
+        const int major = p4WithRevision ? identity.captured(1).toInt() : -1;
+        const int minor = p4WithRevision ? identity.captured(2).toInt() : -1;
+        const bool supportedRevision = p4WithRevision && revisionPolicy_ == QString::fromLatin1(kPreV3Policy) && major < 3;
+
+        targetVerified_ = supportedRevision;
+        if (p4WithRevision) {
+            targetChip_ = QStringLiteral("ESP32-P4 · revision v%1.%2").arg(major).arg(minor);
+        } else {
+            targetChip_ = QStringLiteral("Unsupported / unknown target");
+        }
+
+        if (supportedRevision) {
+            setStatus(QStringLiteral("ESP32-P4 revision v%1.%2 verified on %3. Firmware installation is unlocked.")
+                .arg(major).arg(minor).arg(selectedPort_));
+        } else if (p4WithRevision) {
+            setStatus(QStringLiteral("ESP32-P4 revision v%1.%2 is outside this P0 firmware policy (pre-v3). Flash is blocked.")
+                .arg(major).arg(minor));
+        } else {
+            setStatus(QStringLiteral("Target/revision verification failed. Only a confirmed ESP32-P4 pre-v3 target is accepted."));
+        }
         emit stateChanged();
         return;
     }
@@ -257,7 +284,10 @@ void FirmwareManager::finishOperation(const int exitCode, const QProcess::ExitSt
         }
         setStatus(QStringLiteral("Flash completed. Resetting ESP32-P4..."));
         emit stateChanged();
-        if (!startEspflash({QStringLiteral("--skip-update-check"), QStringLiteral("reset")}, Operation::reset)) {
+        if (!startEspflash({
+                QStringLiteral("--skip-update-check"),
+                QStringLiteral("reset"),
+                QStringLiteral("--non-interactive")}, Operation::reset)) {
             busy_ = false;
             emit installationFinished(false);
         }
