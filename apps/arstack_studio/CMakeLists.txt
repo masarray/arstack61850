@@ -23,6 +23,7 @@ qt_add_executable(arstack_studio
     src/SclProfileModel.hpp
     src/DeviceController.cpp
     src/DeviceController.hpp
+    src/StudioDeviceController.hpp
     src/FirmwareManager.cpp
     src/FirmwareManager.hpp
 )
