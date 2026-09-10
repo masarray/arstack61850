@@ -9,11 +9,16 @@
 #include <QRegularExpression>
 #include <QVariantMap>
 
+#include <algorithm>
 #include <utility>
 
 #ifndef ARSTACK_STUDIO_VERSION
 #define ARSTACK_STUDIO_VERSION "0.1.0"
 #endif
+
+namespace {
+constexpr int kMaxUpdateReconnectAttempts = 6;
+}
 
 SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent) {
     discoveryTimer_.setInterval(2500);
@@ -29,11 +34,28 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
     prepareTimer_.setSingleShot(true);
     connect(&prepareTimer_, &QTimer::timeout, this, &SmartSessionController::reconcile);
 
-    reconnectTimer_.setInterval(1800);
+    reconnectTimer_.setInterval(3000);
     reconnectTimer_.setSingleShot(true);
     connect(&reconnectTimer_, &QTimer::timeout, this, [this] {
         if (device_ == nullptr || !updateRequested_ || updateStage_ != UpdateStage::reconnecting) return;
+        if (device_->deviceVerified()) {
+            reconcile();
+            return;
+        }
+        if (device_->discovering() || device_->connected()) {
+            reconnectTimer_.start();
+            return;
+        }
+        if (updateReconnectAttempts_ >= kMaxUpdateReconnectAttempts) {
+            updateRequested_ = false;
+            updateStage_ = UpdateStage::idle;
+            emit firmwareUpdateFinished(false);
+            reconcile();
+            return;
+        }
+        ++updateReconnectAttempts_;
         static_cast<void>(device_->autoDetectAndConnect());
+        reconnectTimer_.start();
         reconcile();
     });
 }
@@ -61,7 +83,9 @@ QString SmartSessionController::updateStatus() const {
     case UpdateStage::flashing:
         return firmware_->status();
     case UpdateStage::reconnecting:
-        return QStringLiteral("Firmware installed. Waiting for ESP32-P4 to reconnect…");
+        return QStringLiteral("Firmware installed. Reconnecting to ESP32-P4… %1/%2")
+            .arg(std::min(updateReconnectAttempts_ + 1, kMaxUpdateReconnectAttempts))
+            .arg(kMaxUpdateReconnectAttempts);
     case UpdateStage::waitingForBootloader:
         return QStringLiteral("Hold BOOT, press and release RESET, release BOOT, then Retry update.");
     case UpdateStage::idle:
@@ -125,6 +149,7 @@ bool SmartSessionController::beginFirmwareUpdate() {
     if (updatePort_.isEmpty()) return false;
 
     updateRequested_ = true;
+    updateReconnectAttempts_ = 0;
     needsProfileSync_ = true;
     profileSyncInFlight_ = false;
 
@@ -151,6 +176,7 @@ bool SmartSessionController::beginFirmwareUpdate() {
 bool SmartSessionController::retryFirmwareUpdate() {
     if (firmware_ == nullptr || updatePort_.isEmpty() || firmware_->busy()) return false;
     updateRequested_ = true;
+    updateReconnectAttempts_ = 0;
     updateStage_ = UpdateStage::probing;
     if (device_ != nullptr && device_->connected()) device_->disconnectPort();
     setPresentation(
@@ -289,6 +315,7 @@ void SmartSessionController::reconnectFirmwareSignals() {
     connect(firmware_, &FirmwareManager::installationFinished, this, [this](const bool resetSucceeded) {
         if (!updateRequested_) return;
 
+        updateReconnectAttempts_ = 0;
         if (resetSucceeded) {
             updateStage_ = UpdateStage::reconnecting;
             setPresentation(
