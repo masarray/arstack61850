@@ -13,6 +13,8 @@
 #include <QProcessEnvironment>
 #include <QRegularExpression>
 
+#include <algorithm>
+
 namespace {
 constexpr auto kManifestName = "firmware-manifest.json";
 constexpr auto kManifestSchema = "arstack.studio.firmware.v1";
@@ -31,11 +33,13 @@ FirmwareManager::FirmwareManager(QObject* parent) : QObject(parent) {
     connect(&process_, &QProcess::readyReadStandardOutput, this, [this] {
         const QString text = QString::fromUtf8(process_.readAllStandardOutput());
         operationOutput_ += text;
+        updateProgressFromOutput(text);
         appendLog(text);
     });
     connect(&process_, &QProcess::readyReadStandardError, this, [this] {
         const QString text = QString::fromUtf8(process_.readAllStandardError());
         operationOutput_ += text;
+        updateProgressFromOutput(text);
         appendLog(text);
     });
     connect(&process_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
@@ -44,9 +48,6 @@ FirmwareManager::FirmwareManager(QObject* parent) : QObject(parent) {
 }
 
 bool FirmwareManager::parseEsp32P4Revision(const QString& output, int& major, int& minor) {
-    // espflash 4.x prints Chip::Display as "esp32p4". Espressif/esptool and
-    // older logs commonly use "ESP32-P4". Accept both spellings, but still
-    // require an explicit revision before the P0 flash gate can open.
     static const QRegularExpression expression{
         QStringLiteral(R"(Chip\s+type:\s*ESP32[-_ ]?P4\s*\(revision\s+v(\d+)\.(\d+)\))"),
         QRegularExpression::CaseInsensitiveOption};
@@ -85,6 +86,7 @@ void FirmwareManager::refreshBundle() {
     revisionPolicy_.clear();
     firmwareSha256_.clear();
     firmwareImagePath_.clear();
+    flashProgress_ = -1;
 
     const QFileInfo flasherInfo{flasherPath()};
     flasherAvailable_ = flasherInfo.exists() && flasherInfo.isFile() && flasherInfo.isExecutable();
@@ -180,6 +182,7 @@ bool FirmwareManager::probeTarget(const QString& portName) {
     selectedPort_ = port;
     targetVerified_ = false;
     bootloaderHelpNeeded_ = false;
+    flashProgress_ = -1;
     targetChip_ = QStringLiteral("Checking %1...").arg(port);
     busy_ = true;
     setStatus(QStringLiteral("Checking ESP32-P4 ROM identity on %1...").arg(port));
@@ -203,6 +206,7 @@ bool FirmwareManager::installFirmware(const QString& portName) {
     }
 
     bootloaderHelpNeeded_ = false;
+    flashProgress_ = 0;
     busy_ = true;
     setStatus(QStringLiteral("Installing ARStack firmware v%1 on %2...").arg(firmwareVersion_, port));
     emit stateChanged();
@@ -221,6 +225,7 @@ void FirmwareManager::cancel() {
     process_.waitForFinished(1200);
     operation_ = Operation::none;
     busy_ = false;
+    flashProgress_ = -1;
     setStatus(QStringLiteral("Firmware operation cancelled."));
     emit stateChanged();
 }
@@ -241,8 +246,6 @@ bool FirmwareManager::startEspflash(const QStringList& arguments, const Operatio
     operationOutput_.clear();
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("ESPFLASH_PORT"), selectedPort_);
-    // espflash 4.x parses this environment setting as a strict boolean.
-    // "1" is rejected; use the documented textual boolean instead.
     environment.insert(QStringLiteral("ESPFLASH_SKIP_UPDATE_CHECK"), QStringLiteral("true"));
     process_.setProcessEnvironment(environment);
     process_.setProgram(flasherPath());
@@ -254,6 +257,7 @@ bool FirmwareManager::startEspflash(const QStringList& arguments, const Operatio
         fail(QStringLiteral("Unable to start bundled espflash."));
         operation_ = Operation::none;
         busy_ = false;
+        flashProgress_ = -1;
         emit stateChanged();
         return false;
     }
@@ -305,10 +309,15 @@ void FirmwareManager::finishOperation(const int exitCode, const QProcess::ExitSt
     if (completed == Operation::flash) {
         if (!success) {
             busy_ = false;
+            flashProgress_ = -1;
             bootloaderHelpNeeded_ = true;
             fail(QStringLiteral("Firmware flash failed. Keep the board in Download mode and retry. Device contents were not trusted."));
             emit stateChanged();
             return;
+        }
+        if (flashProgress_ != 100) {
+            flashProgress_ = 100;
+            emit stateChanged();
         }
         bootloaderHelpNeeded_ = false;
         setStatus(QStringLiteral("Flash completed. Resetting ESP32-P4..."));
@@ -336,6 +345,22 @@ void FirmwareManager::finishOperation(const int exitCode, const QProcess::ExitSt
         emit stateChanged();
         emit installationFinished(success);
     }
+}
+
+void FirmwareManager::updateProgressFromOutput(const QString& text) {
+    if (operation_ != Operation::flash || text.isEmpty()) return;
+    static const QRegularExpression expression{QStringLiteral(R"((\d{1,3})\s*%)")};
+    auto matches = expression.globalMatch(text);
+    int latest = -1;
+    while (matches.hasNext()) {
+        const int value = matches.next().captured(1).toInt();
+        if (value >= 0 && value <= 100) latest = value;
+    }
+    if (latest < 0) return;
+    latest = std::clamp(latest, 0, 100);
+    if (flashProgress_ == latest) return;
+    flashProgress_ = latest;
+    emit stateChanged();
 }
 
 void FirmwareManager::appendLog(const QString& text) {
