@@ -22,8 +22,8 @@ SurfacePanel {
     function deployReason() {
         if (device.running) return "Stop SMV output before deploying a profile."
         if (device.profileDeploying) return "Profile deployment is already in progress."
-        if (!device.deviceVerified) return "Connect and verify an ARStack ESP32-P4 first."
-        if (!p0FirmwareCompatible) return "Firmware protocol mismatch. Open Configuration → Firmware to install the P0 firmware."
+        if (!device.deviceVerified) return "Install or recover ARStack firmware, then verify the ESP32-P4."
+        if (!p0FirmwareCompatible) return "Firmware protocol mismatch. Open Firmware setup to install the P0 firmware."
         if (!profiles.hasProfiles) return "Load 4I+4V Quick Start or a compatible SCL first."
         if (!controller.selectedProfileDeployable) return "The selected SCL stream is outside the P0 4I+4V device boundary."
         return "Deploy the validated 4I+4V SV profile to the injector."
@@ -31,7 +31,7 @@ SurfacePanel {
 
     function startReason() {
         if (device.running) return "SMV output is already running."
-        if (!device.deviceVerified) return "Connect and verify an ARStack ESP32-P4 first."
+        if (!device.deviceVerified) return "Install or recover ARStack firmware first."
         if (!p0FirmwareCompatible) return "Firmware protocol mismatch. Install the P0 firmware first."
         if (!profiles.hasProfiles) return "Load 4I+4V Quick Start or a compatible SCL first."
         if (!controller.selectedProfileDeployable) return "Selected profile is not deployable on the P0 4I+4V runtime."
@@ -122,13 +122,13 @@ SurfacePanel {
                 visible: !ribbon.compact
                 spacing: 9
                 RailLabel {
-                    text: ribbon.device.deviceVerified ? "DEVICE · VERIFIED" : "DEVICE · OFFLINE"
-                    color: ribbon.device.deviceVerified ? ribbon.theme.green : ribbon.theme.muted
+                    text: ribbon.device.deviceVerified ? "DEVICE · VERIFIED" : "DEVICE · SETUP"
+                    color: ribbon.device.deviceVerified ? ribbon.theme.green : ribbon.theme.amber
                 }
                 Rectangle { width: 1; height: 11; color: ribbon.theme.lineSoft }
                 RailLabel {
-                    text: ribbon.device.deviceVerified ? "FW · P" + ribbon.device.protocolVersion : "FW · —"
-                    color: ribbon.p0FirmwareCompatible ? ribbon.theme.green : ribbon.theme.muted
+                    text: ribbon.device.deviceVerified ? "FW · P" + ribbon.device.protocolVersion : "FW · INSTALL"
+                    color: ribbon.p0FirmwareCompatible ? ribbon.theme.green : ribbon.theme.amber
                 }
                 Rectangle { width: 1; height: 11; color: ribbon.theme.lineSoft }
                 RailLabel {
@@ -209,9 +209,14 @@ SurfacePanel {
                     onClicked: ribbon.controller.runReadinessCheck()
                 }
                 RibbonAction {
-                    text: "Configuration"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/settings-2.svg")
-                    toolTipText: "Open profile, firmware and expert configuration"
+                    text: ribbon.device.deviceVerified ? "Configuration" : "Install Firmware"
+                    iconSource: ribbon.device.deviceVerified
+                        ? Qt.resolvedUrl("../assets/lucide/settings-2.svg")
+                        : Qt.resolvedUrl("../assets/lucide/download.svg")
+                    tone: ribbon.device.deviceVerified ? "neutral" : "accent"
+                    toolTipText: ribbon.device.deviceVerified
+                        ? "Open profile, firmware and expert configuration"
+                        : "Open guided firmware setup for a blank or old-firmware ESP32-P4"
                     onClicked: ribbon.controller.openConfiguration()
                 }
 
@@ -312,8 +317,11 @@ SurfacePanel {
                 spacing: 6
 
                 RibbonAction {
-                    text: "Configuration"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/settings-2.svg")
+                    text: ribbon.device.deviceVerified ? "Configuration" : "Firmware Setup"
+                    iconSource: ribbon.device.deviceVerified
+                        ? Qt.resolvedUrl("../assets/lucide/settings-2.svg")
+                        : Qt.resolvedUrl("../assets/lucide/download.svg")
+                    tone: ribbon.device.deviceVerified ? "neutral" : "accent"
                     onClicked: ribbon.controller.openConfiguration()
                 }
                 RibbonAction {
