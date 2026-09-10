@@ -133,10 +133,12 @@ int main(int argc, char* argv[]) {
     QCoreApplication::setApplicationName(QStringLiteral("ARStack Studio"));
     QCoreApplication::setApplicationVersion(QStringLiteral(ARSTACK_STUDIO_VERSION));
 
+    FirmwareManager firmwareService;
+
     qmlRegisterType<SclProfileModel>("ARStack.Studio", 1, 0, "SclProfileModel");
     qmlRegisterType<StudioDeviceController>("ARStack.Studio", 1, 0, "DeviceController");
-    qmlRegisterType<FirmwareManager>("ARStack.Studio", 1, 0, "FirmwareManager");
     qmlRegisterType<SmartSessionController>("ARStack.Studio", 1, 0, "SmartSessionController");
+    qmlRegisterSingletonInstance("ARStack.Studio", 1, 0, "FirmwareService", &firmwareService);
 
     QQmlApplicationEngine engine;
     QObject::connect(
