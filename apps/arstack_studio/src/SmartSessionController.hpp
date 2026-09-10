@@ -53,4 +53,6 @@ private:
     bool firmwareUpdateRequired_{false};
     bool started_{false};
     bool wasReady_{false};
+    bool needsProfileSync_{true};
+    bool profileSyncInFlight_{false};
 };
