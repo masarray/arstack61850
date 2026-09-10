@@ -69,6 +69,17 @@ bool heartbeat_is_fresh() noexcept {
     return static_cast<std::uint32_t>(now - last) <= kControlLeaseTimeoutMs;
 }
 
+bool start_control_lease_timer(const std::uint64_t delay_us) noexcept {
+    if (g_control_lease_timer == nullptr) return false;
+    static_cast<void>(esp_timer_stop(g_control_lease_timer));
+    const auto result = esp_timer_start_once(g_control_lease_timer, delay_us == 0U ? 1U : delay_us);
+    if (result != ESP_OK) {
+        ESP_LOGE(kTag, "Unable to arm control-session lease timer: %d", static_cast<int>(result));
+        return false;
+    }
+    return true;
+}
+
 void disarm_control_lease() noexcept {
     g_control_lease_active.store(false, std::memory_order_release);
     if (g_control_lease_timer != nullptr) {
@@ -82,6 +93,16 @@ void clear_control_session() noexcept {
     g_last_heartbeat_ms.store(0U, std::memory_order_release);
 }
 
+void stop_for_lease_failure(const char* reason) noexcept {
+    bool expected = true;
+    if (g_running.compare_exchange_strong(expected, false, std::memory_order_acq_rel)) {
+        g_start_request.store(false, std::memory_order_release);
+        g_control_lease_active.store(false, std::memory_order_release);
+        wake_publisher();
+        ESP_LOGW(kTag, "%s; SV transmission stopped", reason);
+    }
+}
+
 void enforce_control_lease() noexcept {
     if (!g_running.load(std::memory_order_acquire) ||
         !g_control_lease_active.load(std::memory_order_acquire)) {
@@ -91,12 +112,19 @@ void enforce_control_lease() noexcept {
     const auto now = monotonic_ms();
     const auto last = g_last_heartbeat_ms.load(std::memory_order_acquire);
     const auto elapsed = static_cast<std::uint32_t>(now - last);
-    if (elapsed <= kControlLeaseTimeoutMs) return;
+    if (elapsed < kControlLeaseTimeoutMs) {
+        const auto remaining_us =
+            static_cast<std::uint64_t>(kControlLeaseTimeoutMs - elapsed) * 1000ULL;
+        if (!start_control_lease_timer(remaining_us)) {
+            stop_for_lease_failure("Control session lease timer failed");
+        }
+        return;
+    }
 
-    bool expected = true;
-    if (g_running.compare_exchange_strong(expected, false, std::memory_order_acq_rel)) {
-        g_start_request.store(false, std::memory_order_release);
-        g_control_lease_active.store(false, std::memory_order_release);
+    g_control_lease_active.store(false, std::memory_order_release);
+    g_start_request.store(false, std::memory_order_release);
+    const bool was_running = g_running.exchange(false, std::memory_order_acq_rel);
+    if (was_running) {
         wake_publisher();
         ESP_LOGW(kTag,
                  "Control session lease expired after %lu ms; SV transmission stopped",
@@ -108,28 +136,31 @@ void control_lease_timer_callback(void*) noexcept {
     enforce_control_lease();
 }
 
-void rearm_control_lease_timer() noexcept {
-    if (g_control_lease_timer == nullptr) return;
-    static_cast<void>(esp_timer_stop(g_control_lease_timer));
-    const auto result = esp_timer_start_once(g_control_lease_timer, kControlLeaseTimeoutUs);
-    if (result != ESP_OK) {
-        ESP_LOGE(kTag, "Unable to arm control-session lease timer: %d", static_cast<int>(result));
-    }
-}
-
 void record_control_heartbeat() noexcept {
     g_last_heartbeat_ms.store(monotonic_ms(), std::memory_order_release);
     g_control_heartbeat_seen.store(true, std::memory_order_release);
-    if (g_running.load(std::memory_order_acquire)) {
-        g_control_lease_active.store(true, std::memory_order_release);
-        rearm_control_lease_timer();
+    if (!g_running.load(std::memory_order_acquire)) return;
+
+    if (!start_control_lease_timer(kControlLeaseTimeoutUs)) {
+        stop_for_lease_failure("Control session heartbeat could not rearm the lease timer");
+        return;
     }
+    g_control_lease_active.store(true, std::memory_order_release);
 }
 
-void arm_control_lease_if_fresh() noexcept {
-    const bool active = heartbeat_is_fresh();
-    g_control_lease_active.store(active, std::memory_order_release);
-    if (active) rearm_control_lease_timer();
+bool arm_control_lease_if_fresh() noexcept {
+    if (!heartbeat_is_fresh()) {
+        // No current Studio heartbeat: preserve the legacy bench/manual START
+        // behavior. Only a Studio-owned session is required to carry a lease.
+        g_control_lease_active.store(false, std::memory_order_release);
+        return true;
+    }
+    if (!start_control_lease_timer(kControlLeaseTimeoutUs)) {
+        g_control_lease_active.store(false, std::memory_order_release);
+        return false;
+    }
+    g_control_lease_active.store(true, std::memory_order_release);
+    return true;
 }
 
 void uppercase_ascii(char* text) noexcept {
@@ -205,12 +236,16 @@ void print_identity() noexcept {
     }
     const esp_app_desc_t* app = esp_app_get_description();
     const char* version = app != nullptr ? app->version : "unknown";
+    const char* capabilities = g_control_lease_timer != nullptr
+        ? "SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE"
+        : "SMV-4I4V,LIVE-SETPOINTS";
     ESP_LOGI(kTag,
-             "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 device_id=%02X%02X%02X%02X%02X%02X firmware=%s capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE",
+             "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 device_id=%02X%02X%02X%02X%02X%02X firmware=%s capabilities=%s",
              static_cast<unsigned>(device_id[0]), static_cast<unsigned>(device_id[1]),
              static_cast<unsigned>(device_id[2]), static_cast<unsigned>(device_id[3]),
              static_cast<unsigned>(device_id[4]), static_cast<unsigned>(device_id[5]),
-             version);
+             version,
+             capabilities);
 }
 
 void print_ptp_state() noexcept {
@@ -384,7 +419,10 @@ void handle_line(char* line) noexcept {
             ESP_LOGE(kTag, "Usage: START");
             return;
         }
-        arm_control_lease_if_fresh();
+        if (!arm_control_lease_if_fresh()) {
+            ESP_LOGE(kTag, "START rejected: Studio control-session lease is unavailable");
+            return;
+        }
         g_start_request.store(true, std::memory_order_release);
         g_running.store(true, std::memory_order_release);
         wake_publisher();
