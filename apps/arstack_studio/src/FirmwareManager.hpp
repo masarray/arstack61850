@@ -12,6 +12,7 @@ class FirmwareManager : public QObject {
     Q_PROPERTY(bool busy READ busy NOTIFY stateChanged)
     Q_PROPERTY(bool targetVerified READ targetVerified NOTIFY stateChanged)
     Q_PROPERTY(bool bootloaderHelpNeeded READ bootloaderHelpNeeded NOTIFY stateChanged)
+    Q_PROPERTY(int flashProgress READ flashProgress NOTIFY stateChanged)
     Q_PROPERTY(QString selectedPort READ selectedPort NOTIFY stateChanged)
     Q_PROPERTY(QString targetChip READ targetChip NOTIFY stateChanged)
     Q_PROPERTY(QString firmwareVersion READ firmwareVersion NOTIFY stateChanged)
@@ -29,6 +30,7 @@ public:
     [[nodiscard]] bool busy() const noexcept { return busy_; }
     [[nodiscard]] bool targetVerified() const noexcept { return targetVerified_; }
     [[nodiscard]] bool bootloaderHelpNeeded() const noexcept { return bootloaderHelpNeeded_; }
+    [[nodiscard]] int flashProgress() const noexcept { return flashProgress_; }
     [[nodiscard]] QString selectedPort() const { return selectedPort_; }
     [[nodiscard]] QString targetChip() const { return targetChip_; }
     [[nodiscard]] QString firmwareVersion() const { return firmwareVersion_; }
@@ -62,6 +64,7 @@ private:
     bool loadManifest();
     bool startEspflash(const QStringList& arguments, Operation operation);
     void finishOperation(int exitCode, QProcess::ExitStatus exitStatus);
+    void updateProgressFromOutput(const QString& text);
     void appendLog(const QString& text);
     void setStatus(const QString& text);
     void fail(const QString& text);
@@ -79,6 +82,7 @@ private:
     QString status_{QStringLiteral("Firmware setup ready")};
     QString bundleStatus_{QStringLiteral("Checking firmware package...")};
     QString logText_;
+    int flashProgress_{-1};
     bool bundleReady_{false};
     bool flasherAvailable_{false};
     bool busy_{false};
