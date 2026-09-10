@@ -43,7 +43,8 @@ SvLiveSignalBank g_signal_bank;
 std::atomic<bool> g_running{false};
 std::atomic<bool> g_start_request{false};
 std::atomic<TaskHandle_t> g_publisher_task{nullptr};
-std::atomic<bool> g_control_lease_seen{false};
+std::atomic<bool> g_control_heartbeat_seen{false};
+std::atomic<bool> g_control_lease_active{false};
 std::atomic<std::uint32_t> g_last_heartbeat_ms{0U};
 
 void wake_publisher() noexcept {
@@ -58,19 +59,38 @@ std::uint32_t monotonic_ms() noexcept {
         static_cast<std::uint64_t>(esp_timer_get_time()) / 1000ULL);
 }
 
-void record_control_heartbeat() noexcept {
-    g_last_heartbeat_ms.store(monotonic_ms(), std::memory_order_release);
-    g_control_lease_seen.store(true, std::memory_order_release);
+bool heartbeat_is_fresh() noexcept {
+    if (!g_control_heartbeat_seen.load(std::memory_order_acquire)) return false;
+    const auto now = monotonic_ms();
+    const auto last = g_last_heartbeat_ms.load(std::memory_order_acquire);
+    return static_cast<std::uint32_t>(now - last) <= kControlLeaseTimeoutMs;
 }
 
-void clear_control_lease() noexcept {
-    g_control_lease_seen.store(false, std::memory_order_release);
+void record_control_heartbeat() noexcept {
+    g_last_heartbeat_ms.store(monotonic_ms(), std::memory_order_release);
+    g_control_heartbeat_seen.store(true, std::memory_order_release);
+    if (g_running.load(std::memory_order_acquire)) {
+        g_control_lease_active.store(true, std::memory_order_release);
+    }
+}
+
+void disarm_control_lease() noexcept {
+    g_control_lease_active.store(false, std::memory_order_release);
+}
+
+void clear_control_session() noexcept {
+    g_control_lease_active.store(false, std::memory_order_release);
+    g_control_heartbeat_seen.store(false, std::memory_order_release);
     g_last_heartbeat_ms.store(0U, std::memory_order_release);
+}
+
+void arm_control_lease_if_fresh() noexcept {
+    g_control_lease_active.store(heartbeat_is_fresh(), std::memory_order_release);
 }
 
 void enforce_control_lease() noexcept {
     if (!g_running.load(std::memory_order_acquire) ||
-        !g_control_lease_seen.load(std::memory_order_acquire)) {
+        !g_control_lease_active.load(std::memory_order_acquire)) {
         return;
     }
 
@@ -82,7 +102,7 @@ void enforce_control_lease() noexcept {
     bool expected = true;
     if (g_running.compare_exchange_strong(expected, false, std::memory_order_acq_rel)) {
         g_start_request.store(false, std::memory_order_release);
-        clear_control_lease();
+        disarm_control_lease();
         wake_publisher();
         ESP_LOGW(kTag,
                  "Control session lease expired after %lu ms; SV transmission stopped",
@@ -342,6 +362,7 @@ void handle_line(char* line) noexcept {
             ESP_LOGE(kTag, "Usage: START");
             return;
         }
+        arm_control_lease_if_fresh();
         g_start_request.store(true, std::memory_order_release);
         g_running.store(true, std::memory_order_release);
         wake_publisher();
@@ -354,7 +375,7 @@ void handle_line(char* line) noexcept {
             return;
         }
         g_running.store(false, std::memory_order_release);
-        clear_control_lease();
+        disarm_control_lease();
         wake_publisher();
         ESP_LOGI(kTag, "STOP accepted: SV transmission suppressed");
         return;
@@ -530,7 +551,7 @@ void live_control_initialize(
     static_cast<void>(g_signal_bank.publish(initial));
     g_running.store(false, std::memory_order_release);
     g_start_request.store(false, std::memory_order_release);
-    clear_control_lease();
+    clear_control_session();
 }
 
 void live_control_bind_publisher_task(const TaskHandle_t task) noexcept {
@@ -540,7 +561,7 @@ void live_control_bind_publisher_task(const TaskHandle_t task) noexcept {
 void live_control_force_stop() noexcept {
     g_running.store(false, std::memory_order_release);
     g_start_request.store(false, std::memory_order_release);
-    clear_control_lease();
+    clear_control_session();
     wake_publisher();
 }
 
