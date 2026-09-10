@@ -2,6 +2,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import ARStack.Studio 1.0
 
 SurfacePanel {
     id: ribbon
@@ -13,111 +14,41 @@ SurfacePanel {
     property string monoFont: "Inter"
     property bool compact: false
 
-    readonly property bool p0FirmwareCompatible: device.deviceVerified && device.protocolVersion === "1"
-    readonly property bool startReady:
-        p0FirmwareCompatible && profiles.hasProfiles && controller.selectedProfileDeployable &&
-        device.profileArmed && !controller.profileDirty && !device.running && !device.profileDeploying
+    SmartSessionController {
+        id: smartSession
+        device: ribbon.device
+        profiles: ribbon.profiles
+    }
 
-    readonly property string smartState: {
-        if (device.running) return "RUNNING"
-        if (device.discovering || (device.connected && !device.deviceVerified)) return "CONNECTING"
-        if (!device.deviceVerified) return device.ports.length > 0 ? "DEVICE FOUND" : "WAITING FOR DEVICE"
-        if (!p0FirmwareCompatible) return "FIRMWARE UPDATE"
-        if (device.profileDeploying || controller.profileDirty || !device.profileArmed) return "PREPARING 4I+4V"
-        return "READY"
+    Component.onCompleted: {
+        controller.phasorDockVisible = false
+        controller.waveformDockVisible = false
+        smartSession.start()
+    }
+
+    Connections {
+        target: smartSession
+        function onReadyForLiveApply() {
+            controller.profileDirty = false
+            controller.applyAllSignals()
+        }
     }
 
     readonly property color smartStateColor: {
-        if (smartState === "RUNNING" || smartState === "READY") return theme.green
-        if (smartState === "CONNECTING" || smartState === "PREPARING 4I+4V" || smartState === "FIRMWARE UPDATE") return theme.amber
-        if (smartState === "DEVICE FOUND") return theme.accent
+        if (smartSession.state === "RUNNING" || smartSession.state === "READY") return theme.green
+        if (smartSession.state === "CONNECTING" || smartSession.state === "PREPARING 4I+4V" || smartSession.state === "FIRMWARE UPDATE") return theme.amber
+        if (smartSession.state === "DEVICE FOUND") return theme.accent
+        if (smartSession.state === "PROFILE BLOCKED" || smartSession.state === "SETUP ERROR") return theme.red
         return theme.muted
-    }
-
-    function ensureDefaultProfile() {
-        if (profiles.referenceTemplateActive)
-            return true
-        if (!profiles.loadReferenceTemplate()) {
-            controller.showMessage(profiles.fatalError || "Unable to load the built-in 4I+4V profile.", true)
-            return false
-        }
-        controller.profileDirty = true
-        return true
-    }
-
-    function prepareSmartSession() {
-        if (!device.deviceVerified || device.protocolVersion !== "1")
-            return
-        if (!ensureDefaultProfile())
-            return
-        if (device.running)
-            return
-        if (!controller.selectedProfileDeployable) {
-            controller.showMessage("Built-in 4I+4V profile failed the device compatibility gate.", true)
-            return
-        }
-        if (controller.profileDirty || !device.profileArmed) {
-            controller.deploySelectedProfile()
-            return
-        }
-        controller.applyAllSignals()
     }
 
     function startReason() {
         if (device.running) return "SMV output is already running."
-        if (!device.deviceVerified) return device.ports.length > 0
-            ? "Device detected. ARStack Studio is connecting automatically."
-            : "Connect the ESP32-P4; ARStack Studio will detect it automatically."
-        if (!p0FirmwareCompatible) return "Firmware update is required before injection."
-        if (device.profileDeploying || controller.profileDirty || !device.profileArmed) return "Preparing the default 4I+4V profile automatically…"
-        if (!controller.selectedProfileDeployable) return "The active profile is not compatible with this injector."
-        return "Start 4I+4V Sampled Values output."
-    }
-
-    Component.onCompleted: {
-        // The application owns the normal profile and quiet default layout.
-        // Initial USB discovery remains serialized by Main's startup timer;
-        // the watchdog below only handles later hot-plug/replug events.
-        ensureDefaultProfile()
-        controller.phasorDockVisible = false
-        controller.waveformDockVisible = false
-    }
-
-    Connections {
-        target: device
-        function onDeviceVerifiedChanged() {
-            if (device.deviceVerified)
-                prepareTimer.restart()
-        }
-        function onProfileStateChanged() {
-            if (device.profileArmed && !device.profileDeploying) {
-                controller.profileDirty = false
-                controller.applyAllSignals()
-            }
-        }
-        function onRunningChanged() {
-            if (!device.running && device.deviceVerified && !device.profileArmed)
-                prepareTimer.restart()
-        }
-    }
-
-    Timer {
-        id: prepareTimer
-        interval: 600
-        repeat: false
-        onTriggered: ribbon.prepareSmartSession()
-    }
-
-    // Hot-plug/replug recovery. This never starts output automatically; it only
-    // discovers and verifies the device. START remains an explicit operator action.
-    Timer {
-        interval: 2500
-        repeat: true
-        running: true
-        onTriggered: {
-            if (!device.deviceVerified && !device.discovering && !device.connected)
-                device.autoDetectAndConnect()
-        }
+        if (smartSession.firmwareUpdateRequired) return "Firmware update is required before injection."
+        if (smartSession.state === "CONNECTING") return "ARStack Studio is connecting automatically."
+        if (smartSession.state === "PREPARING 4I+4V") return "Preparing the default 4I+4V profile automatically…"
+        if (smartSession.state === "WAITING FOR DEVICE") return "Connect the ESP32-P4; ARStack Studio will detect it automatically."
+        return smartSession.statusText
     }
 
     implicitHeight: 94
@@ -152,7 +83,7 @@ SurfacePanel {
                 color: ribbon.smartStateColor
             }
             Label {
-                text: ribbon.smartState
+                text: smartSession.state
                 color: ribbon.smartStateColor
                 font.family: ribbon.uiFont
                 font.pixelSize: 10
@@ -161,9 +92,7 @@ SurfacePanel {
             }
             Label {
                 visible: !ribbon.compact
-                text: ribbon.smartState === "READY" || ribbon.smartState === "RUNNING"
-                    ? "4I + 4V · 4000 samples/s · live value apply"
-                    : (device.discoveryStatus.length ? device.discoveryStatus : "ARStack Studio is preparing the injector automatically")
+                text: smartSession.statusText
                 color: ribbon.theme.muted
                 font.family: ribbon.uiFont
                 font.pixelSize: 9
@@ -226,8 +155,8 @@ SurfacePanel {
             Item { Layout.fillWidth: true }
 
             Label {
-                visible: ribbon.smartState === "PREPARING 4I+4V"
-                text: "Preparing…"
+                visible: smartSession.state === "CONNECTING" || smartSession.state === "PREPARING 4I+4V"
+                text: smartSession.state === "CONNECTING" ? "Connecting…" : "Preparing…"
                 color: ribbon.theme.amber
                 font.family: ribbon.uiFont
                 font.pixelSize: 10
@@ -239,7 +168,7 @@ SurfacePanel {
                 iconSource: Qt.resolvedUrl("../assets/lucide/play.svg")
                 tone: "success"
                 implicitWidth: 132
-                enabled: ribbon.startReady
+                enabled: smartSession.startReady
                 toolTipText: ribbon.startReason()
                 onClicked: device.start()
             }
