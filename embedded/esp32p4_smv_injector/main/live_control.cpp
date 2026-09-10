@@ -38,6 +38,8 @@ constexpr std::array<std::string_view, 8> kChannelNames{
     "IA", "IB", "IC", "IN", "UA", "UB", "UC", "UN"};
 constexpr std::string_view kTokenDelimiters{" \t\r\n"};
 constexpr std::uint32_t kControlLeaseTimeoutMs = 2500U;
+constexpr std::uint64_t kControlLeaseTimeoutUs =
+    static_cast<std::uint64_t>(kControlLeaseTimeoutMs) * 1000ULL;
 
 SvLiveSignalBank g_signal_bank;
 std::atomic<bool> g_running{false};
@@ -46,6 +48,7 @@ std::atomic<TaskHandle_t> g_publisher_task{nullptr};
 std::atomic<bool> g_control_heartbeat_seen{false};
 std::atomic<bool> g_control_lease_active{false};
 std::atomic<std::uint32_t> g_last_heartbeat_ms{0U};
+esp_timer_handle_t g_control_lease_timer{nullptr};
 
 void wake_publisher() noexcept {
     const auto task = g_publisher_task.load(std::memory_order_acquire);
@@ -66,26 +69,17 @@ bool heartbeat_is_fresh() noexcept {
     return static_cast<std::uint32_t>(now - last) <= kControlLeaseTimeoutMs;
 }
 
-void record_control_heartbeat() noexcept {
-    g_last_heartbeat_ms.store(monotonic_ms(), std::memory_order_release);
-    g_control_heartbeat_seen.store(true, std::memory_order_release);
-    if (g_running.load(std::memory_order_acquire)) {
-        g_control_lease_active.store(true, std::memory_order_release);
+void disarm_control_lease() noexcept {
+    g_control_lease_active.store(false, std::memory_order_release);
+    if (g_control_lease_timer != nullptr) {
+        static_cast<void>(esp_timer_stop(g_control_lease_timer));
     }
 }
 
-void disarm_control_lease() noexcept {
-    g_control_lease_active.store(false, std::memory_order_release);
-}
-
 void clear_control_session() noexcept {
-    g_control_lease_active.store(false, std::memory_order_release);
+    disarm_control_lease();
     g_control_heartbeat_seen.store(false, std::memory_order_release);
     g_last_heartbeat_ms.store(0U, std::memory_order_release);
-}
-
-void arm_control_lease_if_fresh() noexcept {
-    g_control_lease_active.store(heartbeat_is_fresh(), std::memory_order_release);
 }
 
 void enforce_control_lease() noexcept {
@@ -102,12 +96,40 @@ void enforce_control_lease() noexcept {
     bool expected = true;
     if (g_running.compare_exchange_strong(expected, false, std::memory_order_acq_rel)) {
         g_start_request.store(false, std::memory_order_release);
-        disarm_control_lease();
+        g_control_lease_active.store(false, std::memory_order_release);
         wake_publisher();
         ESP_LOGW(kTag,
                  "Control session lease expired after %lu ms; SV transmission stopped",
                  static_cast<unsigned long>(elapsed));
     }
+}
+
+void control_lease_timer_callback(void*) noexcept {
+    enforce_control_lease();
+}
+
+void rearm_control_lease_timer() noexcept {
+    if (g_control_lease_timer == nullptr) return;
+    static_cast<void>(esp_timer_stop(g_control_lease_timer));
+    const auto result = esp_timer_start_once(g_control_lease_timer, kControlLeaseTimeoutUs);
+    if (result != ESP_OK) {
+        ESP_LOGE(kTag, "Unable to arm control-session lease timer: %d", static_cast<int>(result));
+    }
+}
+
+void record_control_heartbeat() noexcept {
+    g_last_heartbeat_ms.store(monotonic_ms(), std::memory_order_release);
+    g_control_heartbeat_seen.store(true, std::memory_order_release);
+    if (g_running.load(std::memory_order_acquire)) {
+        g_control_lease_active.store(true, std::memory_order_release);
+        rearm_control_lease_timer();
+    }
+}
+
+void arm_control_lease_if_fresh() noexcept {
+    const bool active = heartbeat_is_fresh();
+    g_control_lease_active.store(active, std::memory_order_release);
+    if (active) rearm_control_lease_timer();
 }
 
 void uppercase_ascii(char* text) noexcept {
@@ -552,6 +574,17 @@ void live_control_initialize(
     g_running.store(false, std::memory_order_release);
     g_start_request.store(false, std::memory_order_release);
     clear_control_session();
+
+    if (g_control_lease_timer == nullptr) {
+        esp_timer_create_args_t timer_args{};
+        timer_args.callback = &control_lease_timer_callback;
+        timer_args.name = "ar_ctrl_lease";
+        const auto result = esp_timer_create(&timer_args, &g_control_lease_timer);
+        if (result != ESP_OK) {
+            g_control_lease_timer = nullptr;
+            ESP_LOGE(kTag, "Unable to create control-session lease timer: %d", static_cast<int>(result));
+        }
+    }
 }
 
 void live_control_bind_publisher_task(const TaskHandle_t task) noexcept {
@@ -588,8 +621,6 @@ void live_control_task(void*) noexcept {
     bool discard_until_eol = false;
 
     while (true) {
-        enforce_control_lease();
-
         const int input = std::fgetc(stdin);
         if (input == EOF) {
             std::clearerr(stdin);
