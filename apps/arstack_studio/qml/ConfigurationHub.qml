@@ -13,14 +13,10 @@ Item {
     property string uiFont: "Inter"
     property string monoFont: "Inter"
 
-    FirmwareManager { id: firmwareManager }
-
     function openEngineeringFile() { profileInspector.openEngineeringFile() }
     function showRecovery() { expertTabs.currentIndex = 1 }
 
     Component.onCompleted: {
-        // A blank/old-firmware board cannot identify as an ARStack injector yet.
-        // Make recovery the first screen operators see while offline.
         if (!hub.device.deviceVerified)
             expertTabs.currentIndex = 1
     }
@@ -67,15 +63,15 @@ Item {
                 Layout.fillWidth: true
                 spacing: 1
                 Label {
-                    text: "SETUP & RECOVERY"
+                    text: "ADVANCED"
                     color: hub.theme.muted
                     font.family: hub.uiFont
-                    font.pixelSize: 8
+                    font.pixelSize: 9
                     font.weight: Font.Bold
                     font.letterSpacing: 0.9
                 }
                 Label {
-                    text: "Device, firmware & engineering"
+                    text: "Device & engineering settings"
                     color: hub.theme.text
                     font.family: hub.uiFont
                     font.pixelSize: 16
@@ -88,7 +84,7 @@ Item {
                     : "Recovery available"
                 color: hub.device.deviceVerified ? hub.theme.green : hub.theme.amber
                 font.family: hub.uiFont
-                font.pixelSize: 9
+                font.pixelSize: 10
                 font.weight: Font.DemiBold
             }
         }
@@ -123,7 +119,7 @@ Item {
             FirmwarePanel {
                 theme: hub.theme
                 device: hub.device
-                firmware: firmwareManager
+                firmware: FirmwareService
                 uiFont: hub.uiFont
                 monoFont: hub.monoFont
             }
