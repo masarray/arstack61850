@@ -110,25 +110,20 @@ jobs:
           Invoke-WebRequest -Uri "https://raw.githubusercontent.com/esp-rs/espflash/v$env:ESPFLASH_VERSION/LICENSE-APACHE" -OutFile (Join-Path $licenses 'LICENSE-APACHE')
           Invoke-WebRequest -Uri "https://raw.githubusercontent.com/esp-rs/espflash/v$env:ESPFLASH_VERSION/LICENSE-MIT" -OutFile (Join-Path $licenses 'LICENSE-MIT')
 
-      - name: Clean-package software acceptance
+      - name: Package contract acceptance
         shell: powershell
         run: |
           $stage = Join-Path $PWD 'dist\ARStack-Studio'
+          $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $stage 'firmware'
+          $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $stage 'tools\espflash.exe'
           & (Join-Path $stage 'ARStackStudio.exe') --check-reference-template
           if ($LASTEXITCODE -ne 0) { throw 'Packaged reference-template regression failed' }
+          & (Join-Path $stage 'ARStackStudio.exe') --check-firmware-contract
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged firmware contract failed' }
+          & (Join-Path $stage 'ARStackStudio.exe') --check-p0-policy
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged native policy check failed' }
           & (Join-Path $stage 'tools\espflash.exe') --version
           if ($LASTEXITCODE -ne 0) { throw 'Bundled espflash failed to execute' }
-
-          $manifestPath = Join-Path $stage 'firmware\firmware-manifest.json'
-          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
-          if ($manifest.schema -ne 'arstack.studio.firmware.v1') { throw 'Bad firmware manifest schema' }
-          if ($manifest.chip -ne 'esp32p4') { throw 'Bad firmware target' }
-          if ([int]$manifest.protocol -ne 1) { throw 'Bad firmware protocol' }
-          if ([int64]$manifest.flashOffset -ne 0) { throw 'Bad firmware flash offset' }
-          $imagePath = Join-Path (Split-Path $manifestPath) $manifest.image
-          $actual = (Get-FileHash $imagePath -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actual -ne $manifest.sha256.ToLowerInvariant()) { throw 'Packaged firmware SHA-256 mismatch' }
-          Write-Host "Clean package contract: PASS · Qt runtime + firmware + espflash present"
 
       - name: Build portable ZIP
         shell: powershell
@@ -148,21 +143,6 @@ jobs:
           $script = (Resolve-Path 'apps\arstack_studio\packaging\ARStackStudio.nsi').Path
           & makensis "/DSOURCE_DIR=$stage" "/DOUTPUT_FILE=$out" "/DAPP_VERSION=$env:ARSTACK_VERSION" $script
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path $out)) { throw 'NSIS installer build failed' }
-
-      - name: Silent installer smoke test
-        shell: powershell
-        run: |
-          $installer = (Resolve-Path "dist\ARStack-Studio-$env:ARSTACK_VERSION-win-x64-setup.exe").Path
-          $installDir = Join-Path $env:RUNNER_TEMP 'ARStackStudioCleanInstall'
-          & $installer /S "/D=$installDir"
-          if ($LASTEXITCODE -ne 0) { throw 'Silent installer failed' }
-          $installedExe = Join-Path $installDir 'ARStackStudio.exe'
-          if (-not (Test-Path $installedExe)) { throw 'Installer did not deploy ARStackStudio.exe' }
-          & $installedExe --check-reference-template
-          if ($LASTEXITCODE -ne 0) { throw 'Installed application regression failed' }
-          if (-not (Test-Path (Join-Path $installDir 'firmware\firmware-manifest.json'))) { throw 'Installer omitted firmware bundle' }
-          if (-not (Test-Path (Join-Path $installDir 'tools\espflash.exe'))) { throw 'Installer omitted espflash' }
-          & (Join-Path $installDir 'Uninstall.exe') /S
 
       - name: Generate release checksums
         shell: powershell
@@ -189,10 +169,87 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  clean-windows-smoke:
+    name: Fresh Windows package smoke
+    needs: windows-package
+    runs-on: windows-2022
+    steps:
+      - name: Download release candidates only
+        uses: actions/download-artifact@v4
+        with:
+          name: arstack-studio-windows-x64
+          path: release-candidates
+
+      - name: Verify release checksums
+        shell: powershell
+        run: |
+          $expected = @{}
+          Get-Content 'release-candidates\SHA256SUMS.txt' | ForEach-Object {
+            if ($_ -match '^([0-9a-f]{64})\s+(.+)$') { $expected[$Matches[2]] = $Matches[1] }
+          }
+          foreach ($name in @(
+            "ARStack-Studio-$env:ARSTACK_VERSION-win-x64-portable.zip",
+            "ARStack-Studio-$env:ARSTACK_VERSION-win-x64-setup.exe")) {
+            $path = Join-Path 'release-candidates' $name
+            if (-not (Test-Path $path)) { throw "Missing release candidate: $name" }
+            $actual = (Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($expected[$name] -ne $actual) { throw "Release checksum mismatch: $name" }
+          }
+
+      - name: Portable package smoke with restricted PATH
+        shell: powershell
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'ARStackPortable'
+          Expand-Archive -Path "release-candidates\ARStack-Studio-$env:ARSTACK_VERSION-win-x64-portable.zip" -DestinationPath $root -Force
+          $exe = Join-Path $root 'ARStackStudio.exe'
+          $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $root 'firmware'
+          $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $root 'tools\espflash.exe'
+          $savedPath = $env:PATH
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          try {
+            & $exe --check-reference-template
+            if ($LASTEXITCODE -ne 0) { throw 'Portable reference-template check failed' }
+            & $exe --check-firmware-contract
+            if ($LASTEXITCODE -ne 0) { throw 'Portable firmware contract failed' }
+            & $exe --check-p0-policy
+            if ($LASTEXITCODE -ne 0) { throw 'Portable P0 policy failed' }
+            & (Join-Path $root 'tools\espflash.exe') --version
+            if ($LASTEXITCODE -ne 0) { throw 'Portable espflash failed' }
+          } finally {
+            $env:PATH = $savedPath
+          }
+
+      - name: Installer smoke with restricted PATH
+        shell: powershell
+        run: |
+          $installer = (Resolve-Path "release-candidates\ARStack-Studio-$env:ARSTACK_VERSION-win-x64-setup.exe").Path
+          $installDir = Join-Path $env:RUNNER_TEMP 'ARStackStudioInstall'
+          $savedPath = $env:PATH
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          try {
+            & $installer /S "/D=$installDir"
+            if ($LASTEXITCODE -ne 0) { throw 'Silent installer failed' }
+            $exe = Join-Path $installDir 'ARStackStudio.exe'
+            if (-not (Test-Path $exe)) { throw 'Installer did not deploy ARStackStudio.exe' }
+            $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $installDir 'firmware'
+            $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $installDir 'tools\espflash.exe'
+            & $exe --check-reference-template
+            if ($LASTEXITCODE -ne 0) { throw 'Installed reference-template check failed' }
+            & $exe --check-firmware-contract
+            if ($LASTEXITCODE -ne 0) { throw 'Installed firmware contract failed' }
+            & $exe --check-p0-policy
+            if ($LASTEXITCODE -ne 0) { throw 'Installed P0 policy failed' }
+            & (Join-Path $installDir 'tools\espflash.exe') --version
+            if ($LASTEXITCODE -ne 0) { throw 'Installed espflash failed' }
+            & (Join-Path $installDir 'Uninstall.exe') /S
+          } finally {
+            $env:PATH = $savedPath
+          }
+
   github-release:
     name: Publish tagged release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: windows-package
+    needs: clean-windows-smoke
     runs-on: ubuntu-latest
     permissions:
       contents: write
