@@ -2,6 +2,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import ARStack.Studio 1.0
 
 Item {
     id: hub
@@ -11,6 +12,8 @@ Item {
     property var profiles
     property string uiFont: "Inter"
     property string monoFont: "Inter"
+
+    FirmwareManager { id: firmwareManager }
 
     function openEngineeringFile() { profileInspector.openEngineeringFile() }
 
@@ -53,14 +56,14 @@ Item {
             Layout.rightMargin: 4
             ColumnLayout {
                 spacing: 0
-                Label { text: "EXPERT CONFIGURATION"; color: hub.theme.muted; font.family: hub.uiFont; font.pixelSize: 7; font.weight: Font.Bold; font.letterSpacing: 0.9 }
-                Label { text: "Protocol & timing setup"; color: hub.theme.text; font.family: hub.uiFont; font.pixelSize: 14; font.weight: Font.DemiBold }
+                Label { text: "CONFIGURATION & RECOVERY"; color: hub.theme.muted; font.family: hub.uiFont; font.pixelSize: 7; font.weight: Font.Bold; font.letterSpacing: 0.9 }
+                Label { text: "Protocol, firmware & timing"; color: hub.theme.text; font.family: hub.uiFont; font.pixelSize: 14; font.weight: Font.DemiBold }
             }
             Item { Layout.fillWidth: true }
             Label {
                 text: hub.device.deviceVerified
-                    ? "ESP32-P4 · ID " + hub.device.deviceId.slice(-6)
-                    : "Offline editing"
+                    ? "ESP32-P4 · protocol v" + hub.device.protocolVersion + " · ID " + hub.device.deviceId.slice(-6)
+                    : "Offline / recovery"
                 color: hub.device.deviceVerified ? hub.theme.green : hub.theme.muted
                 font.family: hub.uiFont
                 font.pixelSize: 8
@@ -74,6 +77,7 @@ Item {
             implicitHeight: 36
             background: Rectangle { color: hub.theme.surface2; radius: 6 }
             ExpertTab { text: "SV Profile" }
+            ExpertTab { text: "Firmware" }
             ExpertTab { text: "Waveform" }
             ExpertTab { text: "PTP Lab" }
             ExpertTab { text: "Device Protocol" }
@@ -93,6 +97,13 @@ Item {
                 uiFont: hub.uiFont
                 monoFont: hub.monoFont
                 compact: false
+            }
+            FirmwarePanel {
+                theme: hub.theme
+                device: hub.device
+                firmware: firmwareManager
+                uiFont: hub.uiFont
+                monoFont: hub.monoFont
             }
             WaveformExpertPanel {
                 theme: hub.theme
