@@ -30,7 +30,7 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 
 - ✅ Current and voltage edits apply to connected firmware live.
 - ✅ Magnitude and phase text edits are coalesced with a 90 ms UI debounce to avoid serial command storms while preserving immediate-feeling operation.
-- ✅ Frequency and signal writes now pass through a bounded native last-value-wins queue in `StudioDeviceController`.
+- ✅ Frequency and signal writes pass through a bounded native last-value-wins queue in `StudioDeviceController`.
 - ✅ Native queue capacity is bounded by design to one pending frequency plus the eight fixed 4I+4V channel IDs; it cannot grow with repeated typing.
 - ✅ Native live writes flush on a short timer, and START forces the newest queued values to the device before enabling output.
 - ✅ Disconnect/unverify clears pending live writes; ZERO cancels pending channel writes so an old queued value cannot reappear after zeroing.
@@ -47,9 +47,11 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 - ✅ Friendly `Firmware update -> Update now?` operator prompt is implemented.
 - 🟡 One-click update coordinator is implemented: safe STOP if required -> release serial -> ROM probe -> verified bundled flash -> reset -> reconnect -> verify semantic identity -> prepare 4I+4V.
 - 🟡 If automatic ROM entry fails, normal UI falls back to BOOT + RESET guidance and `Retry update`.
-- 🟡 Update UI currently uses an indeterminate progress bar. Actual numeric flash percentage is not parsed yet.
+- ✅ Smart Session and Advanced now share one application-wide `FirmwareService`; package/probe/progress state has a single authority.
+- ✅ Firmware Manager parses real espflash percentage tokens when available and exposes `flashProgress` 0..100; unknown formats safely remain indeterminate.
+- ✅ Packaged firmware contract now regression-checks progress parsing, including safe fallback for missing/invalid percentages.
+- 🟡 Firmware update UI shows numeric progress when espflash emits percentages and automatically falls back to indeterminate during probe/reset or unknown output.
 - ⬜ Hardware acceptance of legacy-firmware -> one-click update -> reconnect -> READY is still required.
-- ⬜ Centralize the Firmware Manager instance used by Smart Session and Advanced configuration to avoid duplicate package validation objects.
 
 ## Operator UI simplification
 
@@ -58,6 +60,7 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 - ✅ Advanced/recovery functionality remains available rather than being deleted.
 - ✅ Phasor/waveform visual noise is opt-in at startup rather than occupying the default workspace.
 - ✅ Firmware internals remain hidden during the normal update path; only exceptional BOOT/RESET recovery is surfaced.
+- ✅ Firmware update failure now surfaces a concise operator message instead of silently dropping back to an idle state.
 - ⬜ Main workspace title and legacy header/footer language still need simplification.
 - ⬜ Remove duplicate device/status indicators and legacy keyboard-help noise from normal view.
 - ⬜ Advanced window needs final progressive-disclosure cleanup and larger minimum typography.
@@ -74,16 +77,17 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 - ✅ Reconnect preparation is delayed briefly after identity verification so existing SHOW / PROFILE SHOW responses can settle before automatic profile synchronization.
 - ✅ Firmware update completion is not trusted until the newly reconnected firmware reports the expected semantic version.
 - ✅ Firmware update state exits deterministically on probe rejection/failure instead of hanging indefinitely.
+- ✅ Post-flash reconnect is bounded to six retry windows and waits for active discovery/verification instead of launching overlapping probes.
 - ✅ Live-edit write backlog is bounded and last-value-wins instead of growing with operator keystrokes.
-- ⬜ Add bounded retry/backoff for disconnect/reconnect and serial errors.
+- 🟡 General hot-plug discovery remains periodic and lightweight; hardware acceptance is still needed for repeated unplug/replug cycles.
 - ⬜ Add regression tests for USB removal during READY and RUNNING.
 - ⬜ Add regression tests for malformed/slow serial responses and command timeouts.
 - ⬜ Add soak test for continuous 4000 fps operation plus repeated live edits.
 
 ## Current checkpoint
 
-Checkpoint C — **zero-configuration workflow + semantic firmware update + bounded native live-write coalescing** is implemented in the branch.
+Checkpoint D — **zero-configuration workflow + semantic firmware update + shared firmware authority + bounded native live writes + bounded post-flash reconnect + numeric flash progress** is implemented in the branch.
 
 Current validation state: **CI and hardware acceptance pending for the newest Smart UX head.** Do not treat this checkpoint as release-ready until those gates pass.
 
-Next implementation checkpoint after CI: final main-window visual cleanup, centralize firmware-manager ownership, bounded reconnect/backoff, then hardware acceptance of both current-firmware and legacy-firmware paths.
+Next implementation checkpoint after CI: final main-window visual cleanup and failure-path regression coverage, then hardware acceptance of both current-firmware and legacy-firmware paths.
