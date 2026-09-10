@@ -111,6 +111,8 @@ Rectangle {
                 property bool selected: matrix.controller.activeSignal === signalRow.sid
                 property alias magnitudeEditor: magnitudeField
                 property alias phaseEditor: phaseField
+                property real pendingMagnitude: mag
+                property real pendingPhase: angle
 
                 Layout.fillWidth: true
                 Layout.preferredHeight: matrix.compact ? 50 : 54
@@ -120,6 +122,19 @@ Rectangle {
                 Behavior on color { ColorAnimation { duration: 90 } }
 
                 HoverHandler { id: rowHover }
+
+                Timer {
+                    id: magnitudeApplyTimer
+                    interval: 90
+                    repeat: false
+                    onTriggered: matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "magnitude", signalRow.pendingMagnitude)
+                }
+                Timer {
+                    id: phaseApplyTimer
+                    interval: 90
+                    repeat: false
+                    onTriggered: matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "phase", signalRow.pendingPhase)
+                }
 
                 onMagChanged: if (!magnitudeField.activeFocus) magnitudeField.text = mag.toFixed(3)
                 onAngleChanged: if (!phaseField.activeFocus) phaseField.text = angle.toFixed(2)
@@ -156,12 +171,7 @@ Rectangle {
                         Layout.preferredWidth: 34
                         Layout.alignment: Qt.AlignVCenter
                         spacing: 5
-                        Rectangle {
-                            width: 7
-                            height: 7
-                            radius: 3.5
-                            color: signalRow.phaseColor
-                        }
+                        Rectangle { width: 7; height: 7; radius: 3.5; color: signalRow.phaseColor }
                         Label {
                             text: signalRow.sid
                             color: signalRow.selected ? matrix.theme.text : matrix.theme.textSoft
@@ -192,7 +202,8 @@ Rectangle {
                             var value = matrix.controller.parseOperatorNumber(text)
                             if (matrix.controller.validMagnitude(matrix.groupIndex, value)) {
                                 invalidInput = false
-                                matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "magnitude", value)
+                                signalRow.pendingMagnitude = value
+                                magnitudeApplyTimer.restart()
                             } else {
                                 invalidInput = true
                             }
@@ -200,10 +211,14 @@ Rectangle {
                         onEditingFinished: {
                             var value = matrix.controller.parseOperatorNumber(text)
                             if (!matrix.controller.validMagnitude(matrix.groupIndex, value)) {
+                                magnitudeApplyTimer.stop()
                                 text = signalRow.mag.toFixed(3)
                                 invalidInput = false
                                 matrix.controller.showMessage(signalRow.sid + " magnitude is outside the valid wire/scaling range.", true)
                             } else {
+                                signalRow.pendingMagnitude = value
+                                magnitudeApplyTimer.stop()
+                                matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "magnitude", value)
                                 text = value.toFixed(3)
                             }
                         }
@@ -239,7 +254,8 @@ Rectangle {
                             var value = matrix.controller.parseOperatorNumber(text)
                             if (matrix.controller.validPhase(value)) {
                                 invalidInput = false
-                                matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "phase", value)
+                                signalRow.pendingPhase = value
+                                phaseApplyTimer.restart()
                             } else {
                                 invalidInput = true
                             }
@@ -247,10 +263,14 @@ Rectangle {
                         onEditingFinished: {
                             var value = matrix.controller.parseOperatorNumber(text)
                             if (!matrix.controller.validPhase(value)) {
+                                phaseApplyTimer.stop()
                                 text = signalRow.angle.toFixed(2)
                                 invalidInput = false
                                 matrix.controller.showMessage(signalRow.sid + " phase must stay within ±360000°.", true)
                             } else {
+                                signalRow.pendingPhase = value
+                                phaseApplyTimer.stop()
+                                matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "phase", value)
                                 text = value.toFixed(2)
                             }
                         }
