@@ -166,7 +166,6 @@ bool FirmwareManager::probeTarget(const QString& portName) {
     setStatus(QStringLiteral("Reading target identity and silicon revision from %1...").arg(port));
     emit stateChanged();
     return startEspflash({
-        QStringLiteral("--skip-update-check"),
         QStringLiteral("board-info"),
         QStringLiteral("--non-interactive")}, Operation::probe);
 }
@@ -188,7 +187,6 @@ bool FirmwareManager::installFirmware(const QString& portName) {
     setStatus(QStringLiteral("Installing ARStack firmware v%1...").arg(firmwareVersion_));
     emit stateChanged();
     return startEspflash({
-        QStringLiteral("--skip-update-check"),
         QStringLiteral("write-bin"),
         QStringLiteral("--chip"),
         QStringLiteral("esp32p4"),
@@ -223,7 +221,9 @@ bool FirmwareManager::startEspflash(const QStringList& arguments, const Operatio
     operationOutput_.clear();
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("ESPFLASH_PORT"), selectedPort_);
-    environment.insert(QStringLiteral("ESPFLASH_SKIP_UPDATE_CHECK"), QStringLiteral("1"));
+    // espflash 4.x parses this environment setting as a strict boolean.
+    // "1" is rejected; use the documented textual boolean instead.
+    environment.insert(QStringLiteral("ESPFLASH_SKIP_UPDATE_CHECK"), QStringLiteral("true"));
     process_.setProcessEnvironment(environment);
     process_.setProgram(flasherPath());
     process_.setArguments(arguments);
@@ -285,7 +285,6 @@ void FirmwareManager::finishOperation(const int exitCode, const QProcess::ExitSt
         setStatus(QStringLiteral("Flash completed. Resetting ESP32-P4..."));
         emit stateChanged();
         if (!startEspflash({
-                QStringLiteral("--skip-update-check"),
                 QStringLiteral("reset"),
                 QStringLiteral("--non-interactive")}, Operation::reset)) {
             busy_ = false;
