@@ -129,11 +129,15 @@ jobs:
           $espflash = Join-Path $stage 'tools\espflash.exe'
           $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $stage 'firmware'
           $env:ARSTACK_STUDIO_ESPFLASH = $espflash
+          $env:ESPFLASH_SKIP_UPDATE_CHECK = 'true'
 
           Assert-ExitZero $studio @('--check-reference-template') 'Packaged reference-template regression'
           Assert-ExitZero $studio @('--check-firmware-contract') 'Packaged firmware contract'
           Assert-ExitZero $studio @('--check-p0-policy') 'Packaged native policy check'
           Assert-ExitZero $espflash @('--version') 'Bundled espflash execution'
+          Assert-ExitZero $espflash @('board-info', '--non-interactive', '--help') 'espflash board-info recovery CLI contract'
+          Assert-ExitZero $espflash @('write-bin', '--chip', 'esp32p4', '--non-interactive', '--help') 'espflash write-bin recovery CLI contract'
+          Assert-ExitZero $espflash @('reset', '--non-interactive', '--help') 'espflash reset recovery CLI contract'
 
       - name: Build portable ZIP
         shell: powershell
@@ -222,6 +226,7 @@ jobs:
           $espflash = Join-Path $root 'tools\espflash.exe'
           $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $root 'firmware'
           $env:ARSTACK_STUDIO_ESPFLASH = $espflash
+          $env:ESPFLASH_SKIP_UPDATE_CHECK = 'true'
           $savedPath = $env:PATH
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
           try {
@@ -254,6 +259,7 @@ jobs:
             $espflash = Join-Path $installDir 'tools\espflash.exe'
             $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $installDir 'firmware'
             $env:ARSTACK_STUDIO_ESPFLASH = $espflash
+            $env:ESPFLASH_SKIP_UPDATE_CHECK = 'true'
             Assert-ExitZero $exe @('--check-reference-template') 'Installed reference-template check'
             Assert-ExitZero $exe @('--check-firmware-contract') 'Installed firmware contract'
             Assert-ExitZero $exe @('--check-p0-policy') 'Installed P0 policy'
