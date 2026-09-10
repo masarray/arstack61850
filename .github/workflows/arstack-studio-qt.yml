@@ -107,6 +107,7 @@ jobs:
             "schema": "arstack.studio.firmware.v1",
             "product": "ARStack ESP32-P4 SMV Injector",
             "chip": "esp32p4",
+            "chipRevisionPolicy": "pre-v3",
             "version": "0.1.0",
             "protocol": 1,
             "flashOffset": 0,
