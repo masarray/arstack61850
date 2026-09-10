@@ -211,7 +211,23 @@ For ESP32 targets:
 - reconnect/network failures must not wedge the main application loop;
 - firmware loading/update paths must validate image metadata, size, target compatibility, integrity where available, and failure recovery before replacing working firmware.
 
-## 15. Regression prevention
+## 15. Exception-free hot paths, explicit Result/status, and async diagnostics
+
+Expected/recoverable failures must not use exceptions as normal control flow in protocol, parsing, generator, capture, callback, or embedded timing-critical paths. Use explicit status/result contracts such as project-defined `Result<T, E>`, `std::expected` where the configured C++ standard/library supports it, compact status enums/structs, or `std::optional` only when detailed failure information is unnecessary.
+
+Normal conditions such as malformed length, unsupported tag/value, timeout, disconnect, buffer exhaustion, invalid configuration, missing optional data, or rejected frame must return a deterministic status rather than throw through the hot path.
+
+Exceptions from host OS, filesystem/network wrappers, STL/third-party desktop libraries, or integration code may still occur. Catch them at the nearest meaningful platform/infrastructure boundary and convert them to the same structured status/error model. Never allow exception unwinding through SV/GOOSE transmit loops, receive/decode callbacks, ISR-adjacent code, or deterministic embedded tasks. Use `noexcept` only when every reachable operation actually honors the contract; do not add it merely to hide unsafe code.
+
+Hot-path diagnostics must enqueue only compact structured events, for example `{errorCode, subsystem, numericContext, timestamp/counter}`. Do not allocate/format strings, write files, print console logs, serialize JSON, perform network telemetry, or block while reporting an error from a timing-critical path.
+
+The diagnostic transport must be bounded and non-blocking for real-time producers. Prefer a fixed-capacity/SPSC ring buffer where the producer/consumer topology allows it, or another bounded queue with a documented overload policy. When full, aggregate/deduplicate/rate-limit repeated events, increment dropped-event counters, and preserve high-severity/latest information according to policy; never stall SV/GOOSE timing or packet processing because diagnostics are slow.
+
+Human-readable formatting, persistence, telemetry, and GUI display belong on a lower-priority background consumer. The diagnostic subsystem is observational: its own failure must not deadlock, reset, or corrupt the protocol stack.
+
+Do not create multiple incompatible result/error frameworks. Reuse one lightweight machine-readable error-code model across related protocol/core subsystems, with contextual formatting outside hot paths.
+
+## 16. Regression prevention
 
 Every protocol bug fix should add/update a deterministic regression test whenever technically practical.
 
@@ -219,7 +235,7 @@ Test the exact failure mode: malformed lengths, disconnect timing, sequence/orde
 
 Before changing public structs/APIs, binary/wire formats, config semantics, timing defaults, or supported behavior, evaluate compatibility with existing consumers and tests.
 
-## 16. Change discipline
+## 17. Change discipline
 
 Prefer the smallest coherent root-cause fix.
 
@@ -230,7 +246,7 @@ Do not:
 - add dependencies without evaluating size, portability, security, maintenance, and runtime impact;
 - add background workers/caches merely as generic performance patterns.
 
-## 17. Definition of done
+## 18. Definition of done
 
 A task is not complete because it compiles.
 
@@ -248,7 +264,7 @@ BUILD
 
 Never claim a validation step was run when it was not.
 
-## 18. Agent completion report
+## 19. Agent completion report
 
 Report:
 - Changed;
