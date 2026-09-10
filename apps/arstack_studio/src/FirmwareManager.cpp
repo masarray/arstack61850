@@ -62,6 +62,17 @@ bool FirmwareManager::parseEsp32P4Revision(const QString& output, int& major, in
     return true;
 }
 
+int FirmwareManager::parseFlashProgress(const QString& output) {
+    static const QRegularExpression expression{QStringLiteral(R"((\d{1,3})\s*%)")};
+    auto matches = expression.globalMatch(output);
+    int latest = -1;
+    while (matches.hasNext()) {
+        const int value = matches.next().captured(1).toInt();
+        if (value >= 0 && value <= 100) latest = value;
+    }
+    return latest;
+}
+
 QString FirmwareManager::bundleRoot() const {
     const QString overridePath = qEnvironmentVariable("ARSTACK_STUDIO_FIRMWARE_DIR").trimmed();
     if (!overridePath.isEmpty()) return QDir::cleanPath(overridePath);
@@ -349,17 +360,9 @@ void FirmwareManager::finishOperation(const int exitCode, const QProcess::ExitSt
 
 void FirmwareManager::updateProgressFromOutput(const QString& text) {
     if (operation_ != Operation::flash || text.isEmpty()) return;
-    static const QRegularExpression expression{QStringLiteral(R"((\d{1,3})\s*%)")};
-    auto matches = expression.globalMatch(text);
-    int latest = -1;
-    while (matches.hasNext()) {
-        const int value = matches.next().captured(1).toInt();
-        if (value >= 0 && value <= 100) latest = value;
-    }
-    if (latest < 0) return;
-    latest = std::clamp(latest, 0, 100);
-    if (flashProgress_ == latest) return;
-    flashProgress_ = latest;
+    const int latest = parseFlashProgress(text);
+    if (latest < 0 || flashProgress_ == latest) return;
+    flashProgress_ = std::clamp(latest, 0, 100);
     emit stateChanged();
 }
 
