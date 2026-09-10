@@ -148,6 +148,20 @@ signals:
     void ptpStateChanged();
     void deviceMessage(const QString& message);
 
+protected:
+    // Keep high-rate/session-control traffic out of the human diagnostics log.
+    // This is intentionally protected so StudioDeviceController can maintain a
+    // firmware session lease without making the generic controller API public.
+    bool sendQuietCommand(const QString& command) {
+        if (!serial_.isOpen()) return false;
+        const QByteArray bytes = command.toUtf8() + '\n';
+        if (serial_.write(bytes) < 0) {
+            setError(serial_.errorString());
+            return false;
+        }
+        return true;
+    }
+
 private:
     bool connectPortInternal(const QString& portName, bool automatic);
     bool tryNextProbe();
