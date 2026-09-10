@@ -75,8 +75,12 @@ SurfacePanel {
     }
 
     Component.onCompleted: {
+        // The application owns the normal profile and quiet default layout.
+        // Initial USB discovery remains serialized by Main's startup timer;
+        // the watchdog below only handles later hot-plug/replug events.
         ensureDefaultProfile()
-        Qt.callLater(device.autoDetectAndConnect)
+        controller.phasorDockVisible = false
+        controller.waveformDockVisible = false
     }
 
     Connections {
