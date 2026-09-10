@@ -58,15 +58,45 @@ int checkReferenceTemplate(int argc, char* argv[]) {
 int checkFirmwareContract(int argc, char* argv[]) {
     QCoreApplication app(argc, argv);
     FirmwareManager firmware;
+
+    int espflashMajor = -1;
+    int espflashMinor = -1;
+    const bool realEspflashFormat = FirmwareManager::parseEsp32P4Revision(
+        QStringLiteral("Chip type:         esp32p4 (revision v1.3)\n"),
+        espflashMajor,
+        espflashMinor) && espflashMajor == 1 && espflashMinor == 3;
+
+    int esptoolMajor = -1;
+    int esptoolMinor = -1;
+    const bool dashedFormat = FirmwareManager::parseEsp32P4Revision(
+        QStringLiteral("Chip type:          ESP32-P4 (revision v1.0)\n"),
+        esptoolMajor,
+        esptoolMinor) && esptoolMajor == 1 && esptoolMinor == 0;
+
+    int wrongMajor = -1;
+    int wrongMinor = -1;
+    const bool rejectsWrongChip = !FirmwareManager::parseEsp32P4Revision(
+        QStringLiteral("Chip type:         esp32s3 (revision v0.2)\n"),
+        wrongMajor,
+        wrongMinor);
+
     const bool valid = firmware.bundleReady() && firmware.flasherAvailable() &&
         firmware.firmwareVersion() == QStringLiteral(ARSTACK_STUDIO_VERSION) &&
         firmware.expectedProtocol() == QStringLiteral("1") &&
-        firmware.firmwareSha256().size() == 64;
+        firmware.firmwareSha256().size() == 64 &&
+        realEspflashFormat && dashedFormat && rejectsWrongChip;
     if (!valid) {
-        qCritical().noquote() << "Firmware bundle contract: FAIL ·" << firmware.bundleStatus();
+        qCritical().noquote()
+            << "Firmware bundle/probe contract: FAIL ·"
+            << firmware.bundleStatus()
+            << "espflash-format=" << realEspflashFormat
+            << "dashed-format=" << dashedFormat
+            << "wrong-chip-rejected=" << rejectsWrongChip;
         return 4;
     }
-    qInfo().noquote() << "Firmware bundle contract: PASS ·" << firmware.bundleStatus();
+    qInfo().noquote()
+        << "Firmware bundle/probe contract: PASS · real espflash P4 revision format accepted ·"
+        << firmware.bundleStatus();
     return 0;
 }
 
