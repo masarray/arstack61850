@@ -43,6 +43,24 @@ FirmwareManager::FirmwareManager(QObject* parent) : QObject(parent) {
     refreshBundle();
 }
 
+bool FirmwareManager::parseEsp32P4Revision(const QString& output, int& major, int& minor) {
+    // espflash 4.x prints Chip::Display as "esp32p4". Espressif/esptool and
+    // older logs commonly use "ESP32-P4". Accept both spellings, but still
+    // require an explicit revision before the P0 flash gate can open.
+    static const QRegularExpression expression{
+        QStringLiteral(R"(Chip\s+type:\s*ESP32[-_ ]?P4\s*\(revision\s+v(\d+)\.(\d+)\))"),
+        QRegularExpression::CaseInsensitiveOption};
+    const auto match = expression.match(output);
+    if (!match.hasMatch()) {
+        major = -1;
+        minor = -1;
+        return false;
+    }
+    major = match.captured(1).toInt();
+    minor = match.captured(2).toInt();
+    return true;
+}
+
 QString FirmwareManager::bundleRoot() const {
     const QString overridePath = qEnvironmentVariable("ARSTACK_STUDIO_FIRMWARE_DIR").trimmed();
     if (!overridePath.isEmpty()) return QDir::cleanPath(overridePath);
@@ -161,9 +179,10 @@ bool FirmwareManager::probeTarget(const QString& portName) {
 
     selectedPort_ = port;
     targetVerified_ = false;
-    targetChip_ = QStringLiteral("Probing...");
+    bootloaderHelpNeeded_ = false;
+    targetChip_ = QStringLiteral("Checking %1...").arg(port);
     busy_ = true;
-    setStatus(QStringLiteral("Reading target identity and silicon revision from %1...").arg(port));
+    setStatus(QStringLiteral("Checking ESP32-P4 ROM identity on %1...").arg(port));
     emit stateChanged();
     return startEspflash({
         QStringLiteral("board-info"),
@@ -179,12 +198,13 @@ bool FirmwareManager::installFirmware(const QString& portName) {
         return false;
     }
     if (!targetVerified_ || port.isEmpty() || port != selectedPort_) {
-        fail(QStringLiteral("Probe and verify a supported ESP32-P4 pre-v3 target before flashing."));
+        fail(QStringLiteral("Check and verify a supported ESP32-P4 pre-v3 board before flashing."));
         return false;
     }
 
+    bootloaderHelpNeeded_ = false;
     busy_ = true;
-    setStatus(QStringLiteral("Installing ARStack firmware v%1...").arg(firmwareVersion_));
+    setStatus(QStringLiteral("Installing ARStack firmware v%1 on %2...").arg(firmwareVersion_, port));
     emit stateChanged();
     return startEspflash({
         QStringLiteral("write-bin"),
@@ -227,7 +247,8 @@ bool FirmwareManager::startEspflash(const QStringList& arguments, const Operatio
     process_.setProcessEnvironment(environment);
     process_.setProgram(flasherPath());
     process_.setArguments(arguments);
-    appendLog(QStringLiteral("$ espflash %1\n").arg(arguments.join(QLatin1Char(' '))));
+    appendLog(QStringLiteral("$ ESPFLASH_PORT=%1 espflash %2\n")
+        .arg(selectedPort_, arguments.join(QLatin1Char(' '))));
     process_.start();
     if (!process_.waitForStarted(2500)) {
         fail(QStringLiteral("Unable to start bundled espflash."));
@@ -246,30 +267,36 @@ void FirmwareManager::finishOperation(const int exitCode, const QProcess::ExitSt
 
     if (completed == Operation::probe) {
         busy_ = false;
-        const QRegularExpression identityExpression{
-            QStringLiteral(R"(Chip\s+type:\s*ESP32-P4\s*\(revision\s+v(\d+)\.(\d+)\))"),
-            QRegularExpression::CaseInsensitiveOption};
-        const auto identity = identityExpression.match(operationOutput_);
-        const bool p4WithRevision = success && identity.hasMatch();
-        const int major = p4WithRevision ? identity.captured(1).toInt() : -1;
-        const int minor = p4WithRevision ? identity.captured(2).toInt() : -1;
-        const bool supportedRevision = p4WithRevision && revisionPolicy_ == QString::fromLatin1(kPreV3Policy) && major < 3;
+        int major = -1;
+        int minor = -1;
+        const bool p4WithRevision = success && parseEsp32P4Revision(operationOutput_, major, minor);
+        const bool anyChipAnswered = success && operationOutput_.contains(
+            QRegularExpression{QStringLiteral(R"(Chip\s+type:)"), QRegularExpression::CaseInsensitiveOption});
+        const bool supportedRevision = p4WithRevision &&
+            revisionPolicy_ == QString::fromLatin1(kPreV3Policy) && major < 3;
 
         targetVerified_ = supportedRevision;
+        bootloaderHelpNeeded_ = !success;
         if (p4WithRevision) {
             targetChip_ = QStringLiteral("ESP32-P4 · revision v%1.%2").arg(major).arg(minor);
+        } else if (anyChipAnswered) {
+            targetChip_ = QStringLiteral("Different ESP chip detected");
         } else {
-            targetChip_ = QStringLiteral("Unsupported / unknown target");
+            targetChip_ = QStringLiteral("%1 · ROM not responding").arg(selectedPort_);
         }
 
         if (supportedRevision) {
-            setStatus(QStringLiteral("ESP32-P4 revision v%1.%2 verified on %3. Firmware installation is unlocked.")
+            setStatus(QStringLiteral("ESP32-P4 revision v%1.%2 verified on %3. Ready to install ARStack firmware.")
                 .arg(major).arg(minor).arg(selectedPort_));
         } else if (p4WithRevision) {
-            setStatus(QStringLiteral("ESP32-P4 revision v%1.%2 is outside this P0 firmware policy (pre-v3). Flash is blocked.")
+            setStatus(QStringLiteral("ESP32-P4 revision v%1.%2 is outside this firmware package (pre-v3). Installation is blocked.")
                 .arg(major).arg(minor));
+        } else if (anyChipAnswered) {
+            setStatus(QStringLiteral("A chip answered on %1, but it is not an ESP32-P4. Installation is blocked.")
+                .arg(selectedPort_));
         } else {
-            setStatus(QStringLiteral("Target/revision verification failed. Only a confirmed ESP32-P4 pre-v3 target is accepted."));
+            setStatus(QStringLiteral("%1 is visible in Windows, but the ESP32-P4 ROM did not answer. Put the board in Download mode, then click Check board again.")
+                .arg(selectedPort_));
         }
         emit stateChanged();
         return;
@@ -278,10 +305,12 @@ void FirmwareManager::finishOperation(const int exitCode, const QProcess::ExitSt
     if (completed == Operation::flash) {
         if (!success) {
             busy_ = false;
-            fail(QStringLiteral("Firmware flash failed. Device contents were not trusted."));
+            bootloaderHelpNeeded_ = true;
+            fail(QStringLiteral("Firmware flash failed. Keep the board in Download mode and retry. Device contents were not trusted."));
             emit stateChanged();
             return;
         }
+        bootloaderHelpNeeded_ = false;
         setStatus(QStringLiteral("Flash completed. Resetting ESP32-P4..."));
         emit stateChanged();
         if (!startEspflash({
@@ -297,10 +326,12 @@ void FirmwareManager::finishOperation(const int exitCode, const QProcess::ExitSt
         busy_ = false;
         if (success) {
             targetVerified_ = false;
-            targetChip_ = QStringLiteral("Awaiting firmware IDENTIFY");
-            setStatus(QStringLiteral("Firmware installed and reset. ARStack Studio will verify IDENTIFY next."));
+            bootloaderHelpNeeded_ = false;
+            targetChip_ = QStringLiteral("Awaiting ARStack firmware");
+            setStatus(QStringLiteral("Firmware installed. The board was reset; Studio is reconnecting and verifying ARStack identity."));
         } else {
-            setStatus(QStringLiteral("Flash succeeded, but automatic reset failed. Replug the board and verify it."));
+            bootloaderHelpNeeded_ = false;
+            setStatus(QStringLiteral("Flash succeeded, but automatic reset failed. Press RESET once or reconnect USB; Studio will then verify the board."));
         }
         emit stateChanged();
         emit installationFinished(success);
