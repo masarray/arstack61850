@@ -44,6 +44,10 @@ public:
     // Espressif tooling prints "ESP32-P4". Keep one parser for both forms and
     // regression-test it from the packaged application contract.
     [[nodiscard]] static bool parseEsp32P4Revision(const QString& output, int& major, int& minor);
+    // Returns the newest valid 0..100 percentage in a chunk, or -1 when the
+    // flasher output carries no usable progress token. Cosmetic parsing must
+    // never decide whether a flash succeeds or fails.
+    [[nodiscard]] static int parseFlashProgress(const QString& output);
 
     Q_INVOKABLE void refreshBundle();
     Q_INVOKABLE bool probeTarget(const QString& portName);
