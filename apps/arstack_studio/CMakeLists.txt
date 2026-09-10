@@ -23,6 +23,8 @@ qt_add_executable(arstack_studio
     src/SclProfileModel.hpp
     src/DeviceController.cpp
     src/DeviceController.hpp
+    src/FirmwareManager.cpp
+    src/FirmwareManager.hpp
 )
 
 qt_add_qml_module(arstack_studio
@@ -43,6 +45,7 @@ qt_add_qml_module(arstack_studio
         qml/ConfigurationHub.qml
         qml/PtpExpertPanel.qml
         qml/DeviceExpertPanel.qml
+        qml/FirmwarePanel.qml
         qml/WaveformExpertPanel.qml
         qml/SignalMatrix.qml
         qml/QualityEditor.qml
@@ -88,6 +91,9 @@ target_link_libraries(arstack_studio PRIVATE
 )
 
 target_compile_features(arstack_studio PRIVATE cxx_std_20)
+target_compile_definitions(arstack_studio PRIVATE
+    ARSTACK_STUDIO_VERSION="${PROJECT_VERSION}"
+)
 
 if(WIN32)
     set_target_properties(arstack_studio PROPERTIES WIN32_EXECUTABLE TRUE)
