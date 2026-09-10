@@ -117,17 +117,23 @@ jobs:
       - name: Package contract acceptance
         shell: powershell
         run: |
+          function Assert-ExitZero([string]$FilePath, [string[]]$Arguments, [string]$Label) {
+            $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -Wait -PassThru
+            if ($process.ExitCode -ne 0) {
+              throw "$Label failed with exit code $($process.ExitCode)"
+            }
+          }
+
           $stage = Join-Path $PWD 'dist\ARStack-Studio'
+          $studio = Join-Path $stage 'ARStackStudio.exe'
+          $espflash = Join-Path $stage 'tools\espflash.exe'
           $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $stage 'firmware'
-          $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $stage 'tools\espflash.exe'
-          & (Join-Path $stage 'ARStackStudio.exe') --check-reference-template
-          if ($LASTEXITCODE -ne 0) { throw 'Packaged reference-template regression failed' }
-          & (Join-Path $stage 'ARStackStudio.exe') --check-firmware-contract
-          if ($LASTEXITCODE -ne 0) { throw 'Packaged firmware contract failed' }
-          & (Join-Path $stage 'ARStackStudio.exe') --check-p0-policy
-          if ($LASTEXITCODE -ne 0) { throw 'Packaged native policy check failed' }
-          & (Join-Path $stage 'tools\espflash.exe') --version
-          if ($LASTEXITCODE -ne 0) { throw 'Bundled espflash failed to execute' }
+          $env:ARSTACK_STUDIO_ESPFLASH = $espflash
+
+          Assert-ExitZero $studio @('--check-reference-template') 'Packaged reference-template regression'
+          Assert-ExitZero $studio @('--check-firmware-contract') 'Packaged firmware contract'
+          Assert-ExitZero $studio @('--check-p0-policy') 'Packaged native policy check'
+          Assert-ExitZero $espflash @('--version') 'Bundled espflash execution'
 
       - name: Build portable ZIP
         shell: powershell
@@ -203,22 +209,26 @@ jobs:
       - name: Portable package smoke with restricted PATH
         shell: powershell
         run: |
+          function Assert-ExitZero([string]$FilePath, [string[]]$Arguments, [string]$Label) {
+            $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -Wait -PassThru
+            if ($process.ExitCode -ne 0) {
+              throw "$Label failed with exit code $($process.ExitCode)"
+            }
+          }
+
           $root = Join-Path $env:RUNNER_TEMP 'ARStackPortable'
           Expand-Archive -Path "release-candidates\ARStack-Studio-$env:ARSTACK_VERSION-win-x64-portable.zip" -DestinationPath $root -Force
           $exe = Join-Path $root 'ARStackStudio.exe'
+          $espflash = Join-Path $root 'tools\espflash.exe'
           $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $root 'firmware'
-          $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $root 'tools\espflash.exe'
+          $env:ARSTACK_STUDIO_ESPFLASH = $espflash
           $savedPath = $env:PATH
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
           try {
-            & $exe --check-reference-template
-            if ($LASTEXITCODE -ne 0) { throw 'Portable reference-template check failed' }
-            & $exe --check-firmware-contract
-            if ($LASTEXITCODE -ne 0) { throw 'Portable firmware contract failed' }
-            & $exe --check-p0-policy
-            if ($LASTEXITCODE -ne 0) { throw 'Portable P0 policy failed' }
-            & (Join-Path $root 'tools\espflash.exe') --version
-            if ($LASTEXITCODE -ne 0) { throw 'Portable espflash failed' }
+            Assert-ExitZero $exe @('--check-reference-template') 'Portable reference-template check'
+            Assert-ExitZero $exe @('--check-firmware-contract') 'Portable firmware contract'
+            Assert-ExitZero $exe @('--check-p0-policy') 'Portable P0 policy'
+            Assert-ExitZero $espflash @('--version') 'Portable espflash'
           } finally {
             $env:PATH = $savedPath
           }
@@ -226,26 +236,32 @@ jobs:
       - name: Installer smoke with restricted PATH
         shell: powershell
         run: |
+          function Assert-ExitZero([string]$FilePath, [string[]]$Arguments, [string]$Label) {
+            $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -Wait -PassThru
+            if ($process.ExitCode -ne 0) {
+              throw "$Label failed with exit code $($process.ExitCode)"
+            }
+          }
+
           $installer = (Resolve-Path "release-candidates\ARStack-Studio-$env:ARSTACK_VERSION-win-x64-setup.exe").Path
           $installDir = Join-Path $env:RUNNER_TEMP 'ARStackStudioInstall'
           $savedPath = $env:PATH
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
           try {
-            & $installer /S "/D=$installDir"
-            if ($LASTEXITCODE -ne 0) { throw 'Silent installer failed' }
+            Assert-ExitZero $installer @('/S', "/D=$installDir") 'Silent installer'
             $exe = Join-Path $installDir 'ARStackStudio.exe'
             if (-not (Test-Path $exe)) { throw 'Installer did not deploy ARStackStudio.exe' }
+            $espflash = Join-Path $installDir 'tools\espflash.exe'
             $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $installDir 'firmware'
-            $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $installDir 'tools\espflash.exe'
-            & $exe --check-reference-template
-            if ($LASTEXITCODE -ne 0) { throw 'Installed reference-template check failed' }
-            & $exe --check-firmware-contract
-            if ($LASTEXITCODE -ne 0) { throw 'Installed firmware contract failed' }
-            & $exe --check-p0-policy
-            if ($LASTEXITCODE -ne 0) { throw 'Installed P0 policy failed' }
-            & (Join-Path $installDir 'tools\espflash.exe') --version
-            if ($LASTEXITCODE -ne 0) { throw 'Installed espflash failed' }
-            & (Join-Path $installDir 'Uninstall.exe') /S
+            $env:ARSTACK_STUDIO_ESPFLASH = $espflash
+            Assert-ExitZero $exe @('--check-reference-template') 'Installed reference-template check'
+            Assert-ExitZero $exe @('--check-firmware-contract') 'Installed firmware contract'
+            Assert-ExitZero $exe @('--check-p0-policy') 'Installed P0 policy'
+            Assert-ExitZero $espflash @('--version') 'Installed espflash'
+            $uninstaller = Join-Path $installDir 'Uninstall.exe'
+            if (Test-Path $uninstaller) {
+              Assert-ExitZero $uninstaller @('/S') 'Silent uninstaller'
+            }
           } finally {
             $env:PATH = $savedPath
           }
