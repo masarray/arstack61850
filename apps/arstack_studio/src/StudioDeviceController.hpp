@@ -3,7 +3,7 @@
 
 #include "DeviceController.hpp"
 
-class StudioDeviceController final : public DeviceController {
+class StudioDeviceController : public DeviceController {
     Q_OBJECT
 
 public:
