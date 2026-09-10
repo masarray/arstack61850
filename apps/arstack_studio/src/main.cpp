@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "DeviceController.hpp"
 #include "FirmwareManager.hpp"
 #include "SclProfileModel.hpp"
+#include "StudioDeviceController.hpp"
 
 #include <QCoreApplication>
 #include <QDebug>
@@ -67,7 +67,7 @@ int main(int argc, char* argv[]) {
     QCoreApplication::setApplicationVersion(QStringLiteral(ARSTACK_STUDIO_VERSION));
 
     qmlRegisterType<SclProfileModel>("ARStack.Studio", 1, 0, "SclProfileModel");
-    qmlRegisterType<DeviceController>("ARStack.Studio", 1, 0, "DeviceController");
+    qmlRegisterType<StudioDeviceController>("ARStack.Studio", 1, 0, "DeviceController");
     qmlRegisterType<FirmwareManager>("ARStack.Studio", 1, 0, "FirmwareManager");
 
     QQmlApplicationEngine engine;
