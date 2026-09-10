@@ -12,73 +12,115 @@ SurfacePanel {
     property string uiFont: "Inter"
     property string monoFont: "Inter"
     property bool compact: false
-    property int activeTab: 0
+
     readonly property bool p0FirmwareCompatible: device.deviceVerified && device.protocolVersion === "1"
-    readonly property bool deployReady: controller.canDeploy && p0FirmwareCompatible
     readonly property bool startReady:
         p0FirmwareCompatible && profiles.hasProfiles && controller.selectedProfileDeployable &&
         device.profileArmed && !controller.profileDirty && !device.running && !device.profileDeploying
 
-    function deployReason() {
-        if (device.running) return "Stop SMV output before deploying a profile."
-        if (device.profileDeploying) return "Profile deployment is already in progress."
-        if (!device.deviceVerified) return "Install or recover ARStack firmware, then verify the ESP32-P4."
-        if (!p0FirmwareCompatible) return "Firmware protocol mismatch. Open Firmware setup to install the P0 firmware."
-        if (!profiles.hasProfiles) return "Load 4I+4V Quick Start or a compatible SCL first."
-        if (!controller.selectedProfileDeployable) return "The selected SCL stream is outside the P0 4I+4V device boundary."
-        return "Deploy the validated 4I+4V SV profile to the injector."
+    readonly property string smartState: {
+        if (device.running) return "RUNNING"
+        if (device.discovering || (device.connected && !device.deviceVerified)) return "CONNECTING"
+        if (!device.deviceVerified) return device.ports.length > 0 ? "DEVICE FOUND" : "WAITING FOR DEVICE"
+        if (!p0FirmwareCompatible) return "FIRMWARE UPDATE"
+        if (device.profileDeploying || controller.profileDirty || !device.profileArmed) return "PREPARING 4I+4V"
+        return "READY"
+    }
+
+    readonly property color smartStateColor: {
+        if (smartState === "RUNNING" || smartState === "READY") return theme.green
+        if (smartState === "CONNECTING" || smartState === "PREPARING 4I+4V" || smartState === "FIRMWARE UPDATE") return theme.amber
+        if (smartState === "DEVICE FOUND") return theme.accent
+        return theme.muted
+    }
+
+    function ensureDefaultProfile() {
+        if (profiles.referenceTemplateActive)
+            return true
+        if (!profiles.loadReferenceTemplate()) {
+            controller.showMessage(profiles.fatalError || "Unable to load the built-in 4I+4V profile.", true)
+            return false
+        }
+        controller.profileDirty = true
+        return true
+    }
+
+    function prepareSmartSession() {
+        if (!device.deviceVerified || device.protocolVersion !== "1")
+            return
+        if (!ensureDefaultProfile())
+            return
+        if (device.running)
+            return
+        if (!controller.selectedProfileDeployable) {
+            controller.showMessage("Built-in 4I+4V profile failed the device compatibility gate.", true)
+            return
+        }
+        if (controller.profileDirty || !device.profileArmed) {
+            controller.deploySelectedProfile()
+            return
+        }
+        controller.applyAllSignals()
     }
 
     function startReason() {
         if (device.running) return "SMV output is already running."
-        if (!device.deviceVerified) return "Install or recover ARStack firmware first."
-        if (!p0FirmwareCompatible) return "Firmware protocol mismatch. Install the P0 firmware first."
-        if (!profiles.hasProfiles) return "Load 4I+4V Quick Start or a compatible SCL first."
-        if (!controller.selectedProfileDeployable) return "Selected profile is not deployable on the P0 4I+4V runtime."
-        if (controller.profileDirty) return "Profile changed. Deploy it again before Start."
-        if (!device.profileArmed) return "Deploy the validated profile before Start."
-        if (device.profileDeploying) return "Wait for profile deployment to finish."
+        if (!device.deviceVerified) return device.ports.length > 0
+            ? "Device detected. ARStack Studio is connecting automatically."
+            : "Connect the ESP32-P4; ARStack Studio will detect it automatically."
+        if (!p0FirmwareCompatible) return "Firmware update is required before injection."
+        if (device.profileDeploying || controller.profileDirty || !device.profileArmed) return "Preparing the default 4I+4V profile automatically…"
+        if (!controller.selectedProfileDeployable) return "The active profile is not compatible with this injector."
         return "Start 4I+4V Sampled Values output."
+    }
+
+    Component.onCompleted: {
+        ensureDefaultProfile()
+        Qt.callLater(device.autoDetectAndConnect)
+    }
+
+    Connections {
+        target: device
+        function onDeviceVerifiedChanged() {
+            if (device.deviceVerified)
+                prepareTimer.restart()
+        }
+        function onProfileStateChanged() {
+            if (device.profileArmed && !device.profileDeploying) {
+                controller.profileDirty = false
+                controller.applyAllSignals()
+            }
+        }
+        function onRunningChanged() {
+            if (!device.running && device.deviceVerified && !device.profileArmed)
+                prepareTimer.restart()
+        }
+    }
+
+    Timer {
+        id: prepareTimer
+        interval: 600
+        repeat: false
+        onTriggered: ribbon.prepareSmartSession()
+    }
+
+    // Hot-plug/replug recovery. This never starts output automatically; it only
+    // discovers and verifies the device. START remains an explicit operator action.
+    Timer {
+        interval: 2500
+        repeat: true
+        running: true
+        onTriggered: {
+            if (!device.deviceVerified && !device.discovering && !device.connected)
+                device.autoDetectAndConnect()
+        }
     }
 
     implicitHeight: 94
     color: theme.surface2
     border.color: theme.line
 
-    component RibbonTab: TabButton {
-        implicitWidth: text === "Engineering" ? 112 : 88
-        implicitHeight: 31
-        hoverEnabled: true
-        font.family: ribbon.uiFont
-        font.pixelSize: 10
-        font.weight: checked ? Font.DemiBold : Font.Medium
-        contentItem: Label {
-            text: parent.text
-            color: parent.checked ? ribbon.theme.text : (parent.hovered ? ribbon.theme.textSoft : ribbon.theme.muted)
-            font: parent.font
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            Behavior on color { ColorAnimation { duration: 90 } }
-        }
-        background: Rectangle {
-            color: parent.hovered || parent.checked ? "#121b25" : "transparent"
-            radius: 6
-            Behavior on color { ColorAnimation { duration: 90 } }
-            Rectangle {
-                visible: parent.parent.checked
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                anchors.leftMargin: 12
-                anchors.rightMargin: 12
-                height: 2
-                radius: 1
-                color: ribbon.theme.accent
-            }
-        }
-    }
-
-    component RibbonAction: CalmButton {
+    component ActionButton: CalmButton {
         theme: ribbon.theme
         uiFont: ribbon.uiFont
         implicitHeight: 40
@@ -86,279 +128,126 @@ SurfacePanel {
         font.pixelSize: 10
     }
 
-    component RibbonDivider: Rectangle {
-        width: 1
-        height: 28
-        color: ribbon.theme.lineSoft
-        Layout.alignment: Qt.AlignVCenter
-    }
-
-    component RailLabel: Label {
-        color: ribbon.theme.muted
-        font.family: ribbon.uiFont
-        font.pixelSize: 7
-        font.weight: Font.DemiBold
-        font.letterSpacing: 0.35
-        verticalAlignment: Text.AlignVCenter
-    }
-
     ColumnLayout {
         anchors.fill: parent
-        spacing: 0
+        anchors.leftMargin: 11
+        anchors.rightMargin: 11
+        anchors.topMargin: 8
+        anchors.bottomMargin: 8
+        spacing: 7
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 32
-            Layout.leftMargin: 9
-            Layout.rightMargin: 9
-            spacing: 2
+            Layout.preferredHeight: 24
+            spacing: 8
 
-            RibbonTab { text: "Home"; checked: ribbon.activeTab === 0; onClicked: ribbon.activeTab = 0 }
-            RibbonTab { text: "View"; checked: ribbon.activeTab === 1; onClicked: ribbon.activeTab = 1 }
-            RibbonTab { text: "Engineering"; checked: ribbon.activeTab === 2; onClicked: ribbon.activeTab = 2 }
-            Item { Layout.fillWidth: true }
-
-            RowLayout {
+            Rectangle {
+                width: 8
+                height: 8
+                radius: 4
+                color: ribbon.smartStateColor
+            }
+            Label {
+                text: ribbon.smartState
+                color: ribbon.smartStateColor
+                font.family: ribbon.uiFont
+                font.pixelSize: 10
+                font.weight: Font.Bold
+                font.letterSpacing: 0.45
+            }
+            Label {
                 visible: !ribbon.compact
-                spacing: 9
-                RailLabel {
-                    text: ribbon.device.deviceVerified ? "DEVICE · VERIFIED" : "DEVICE · SETUP"
-                    color: ribbon.device.deviceVerified ? ribbon.theme.green : ribbon.theme.amber
-                }
-                Rectangle { width: 1; height: 11; color: ribbon.theme.lineSoft }
-                RailLabel {
-                    text: ribbon.device.deviceVerified ? "FW · P" + ribbon.device.protocolVersion : "FW · INSTALL"
-                    color: ribbon.p0FirmwareCompatible ? ribbon.theme.green : ribbon.theme.amber
-                }
-                Rectangle { width: 1; height: 11; color: ribbon.theme.lineSoft }
-                RailLabel {
-                    text: ribbon.profiles.referenceTemplateActive ? "PROFILE · 4I+4V" : (ribbon.profiles.hasProfiles ? "PROFILE · SCL" : "PROFILE · —")
-                    color: ribbon.profiles.hasProfiles ? ribbon.theme.textSoft : ribbon.theme.muted
-                }
-                Rectangle { width: 1; height: 11; color: ribbon.theme.lineSoft }
-                RailLabel {
-                    text: ribbon.device.running ? "OUTPUT · RUNNING" : (ribbon.device.profileArmed && !ribbon.controller.profileDirty ? "OUTPUT · ARMED" : "OUTPUT · SAFE")
-                    color: ribbon.device.running ? ribbon.theme.green : (ribbon.device.profileArmed ? ribbon.theme.accent : ribbon.theme.muted)
-                }
+                text: ribbon.smartState === "READY" || ribbon.smartState === "RUNNING"
+                    ? "4I + 4V · 4000 samples/s · live value apply"
+                    : (device.discoveryStatus.length ? device.discoveryStatus : "ARStack Studio is preparing the injector automatically")
+                color: ribbon.theme.muted
+                font.family: ribbon.uiFont
+                font.pixelSize: 9
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+            }
+            Item { Layout.fillWidth: ribbon.compact }
+            CalmButton {
+                theme: ribbon.theme
+                uiFont: ribbon.uiFont
+                text: "Advanced…"
+                implicitHeight: 28
+                font.pixelSize: 9
+                toolTipText: "Firmware, SCL, waveform stress, PTP and diagnostics"
+                onClicked: ribbon.controller.openConfiguration()
             }
         }
 
-        Rectangle { Layout.fillWidth: true; height: 1; color: ribbon.theme.lineSoft }
-
-        StackLayout {
+        RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            currentIndex: ribbon.activeTab
+            spacing: 6
 
-            RowLayout {
-                Layout.leftMargin: 10
-                Layout.rightMargin: 10
-                spacing: 6
+            ActionButton {
+                text: "Balanced"
+                iconSource: Qt.resolvedUrl("../assets/lucide/scale.svg")
+                toolTipText: "Apply balanced three-phase values"
+                onClicked: ribbon.controller.balanced()
+            }
+            ActionButton {
+                text: "Zero"
+                iconSource: Qt.resolvedUrl("../assets/lucide/circle-off.svg")
+                toolTipText: "Set every current and voltage magnitude to zero"
+                onClicked: ribbon.controller.zeroAll()
+            }
 
-                RibbonAction {
-                    text: ribbon.profiles.referenceTemplateActive ? "4I+4V Ready" : "4I+4V Quick Start"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/radio-tower.svg")
-                    tone: ribbon.profiles.referenceTemplateActive ? "accent" : "neutral"
-                    enabled: !ribbon.device.running && !ribbon.device.profileDeploying
-                    toolTipText: "Load the bundled ARStack 4I+4V 9-2LE reference profile at 4000 fps"
-                    onClicked: {
-                        if (ribbon.profiles.loadReferenceTemplate()) {
-                            ribbon.controller.profileDirty = true
-                            ribbon.controller.showMessage(
-                                "4I+4V 9-2LE reference loaded · Class A · 4000 fps · smpCnt 0..3999.",
-                                false)
-                        } else {
-                            ribbon.controller.showMessage(
-                                ribbon.profiles.fatalError || "Unable to load the bundled reference profile.",
-                                true)
-                        }
-                    }
+            Rectangle { width: 1; height: 28; color: ribbon.theme.lineSoft }
+
+            ActionButton {
+                visible: !ribbon.compact
+                text: "Phasor"
+                iconSource: Qt.resolvedUrl("../assets/lucide/panels-top-left.svg")
+                tone: ribbon.controller.phasorDockVisible || ribbon.controller.phasorDetached ? "accent" : "neutral"
+                onClicked: {
+                    ribbon.controller.phasorDetached = false
+                    ribbon.controller.phasorDockVisible = !ribbon.controller.phasorDockVisible
                 }
-
-                RibbonDivider {}
-
-                RibbonAction {
-                    text: "Balanced"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/scale.svg")
-                    toolTipText: "Apply a balanced three-phase setpoint"
-                    onClicked: ribbon.controller.balanced()
-                }
-                RibbonAction {
-                    text: "Zero"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/circle-off.svg")
-                    toolTipText: "Set all magnitudes to zero"
-                    onClicked: ribbon.controller.zeroAll()
-                }
-                RibbonAction {
-                    visible: !ribbon.compact
-                    text: "CT Saturation"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/activity.svg")
-                    tone: ribbon.controller.ctSaturationEnabled ? "accent" : "neutral"
-                    enabled: ribbon.controller.signalFrequency > 0
-                    toolTipText: ribbon.controller.ctSaturationEnabled ? "Disable CT saturation stress" : "Enable CT saturation stress"
-                    onClicked: ribbon.controller.setCtSaturation(!ribbon.controller.ctSaturationEnabled)
-                }
-
-                RibbonDivider {}
-
-                RibbonAction {
-                    visible: !ribbon.compact
-                    text: "Check"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/circle-check.svg")
-                    toolTipText: "Run readiness checks"
-                    onClicked: ribbon.controller.runReadinessCheck()
-                }
-                RibbonAction {
-                    text: ribbon.device.deviceVerified ? "Configuration" : "Install Firmware"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/upload.svg")
-                    tone: ribbon.device.deviceVerified ? "neutral" : "accent"
-                    toolTipText: ribbon.device.deviceVerified
-                        ? "Open profile, firmware and expert configuration"
-                        : "Open guided firmware setup for a blank or old-firmware ESP32-P4"
-                    onClicked: ribbon.controller.openConfiguration()
-                }
-
-                Item { Layout.fillWidth: true }
-
-                RibbonDivider {}
-
-                RibbonAction {
-                    visible: !ribbon.compact
-                    text: ribbon.device.profileDeploying ? "Deploying…" : "Deploy"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/upload.svg")
-                    implicitWidth: 86
-                    enabled: ribbon.deployReady
-                    toolTipText: ribbon.deployReason()
-                    onClicked: ribbon.controller.deploySelectedProfile()
-                }
-                RibbonAction {
-                    tone: "danger"
-                    text: "Stop"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/square.svg")
-                    implicitWidth: 82
-                    enabled: ribbon.device.deviceVerified && ribbon.device.running
-                    toolTipText: ribbon.device.running ? "Stop SMV output" : "Output is already stopped"
-                    onClicked: ribbon.device.stop()
-                }
-                RibbonAction {
-                    tone: "success"
-                    text: "Start"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/play.svg")
-                    implicitWidth: 92
-                    enabled: ribbon.startReady
-                    toolTipText: ribbon.startReason()
-                    onClicked: ribbon.device.start()
+            }
+            ActionButton {
+                visible: !ribbon.compact
+                text: "Waveform"
+                iconSource: Qt.resolvedUrl("../assets/lucide/activity.svg")
+                tone: ribbon.controller.waveformDockVisible || ribbon.controller.waveformDetached ? "accent" : "neutral"
+                onClicked: {
+                    ribbon.controller.waveformDetached = false
+                    ribbon.controller.waveformDockVisible = !ribbon.controller.waveformDockVisible
                 }
             }
 
-            RowLayout {
-                Layout.leftMargin: 10
-                Layout.rightMargin: 10
-                spacing: 6
+            Item { Layout.fillWidth: true }
 
-                RibbonAction {
-                    text: "Phasor"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/panels-top-left.svg")
-                    tone: ribbon.controller.phasorDockVisible || ribbon.controller.phasorDetached ? "accent" : "neutral"
-                    onClicked: {
-                        ribbon.controller.phasorDetached = false
-                        ribbon.controller.phasorDockVisible = !ribbon.controller.phasorDockVisible
-                    }
-                }
-                RibbonAction {
-                    text: "Waveform"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/activity.svg")
-                    tone: ribbon.controller.waveformDockVisible || ribbon.controller.waveformDetached ? "accent" : "neutral"
-                    onClicked: {
-                        ribbon.controller.waveformDetached = false
-                        ribbon.controller.waveformDockVisible = !ribbon.controller.waveformDockVisible
-                    }
-                }
-                RibbonAction {
-                    text: "Monitor"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/panels-top-left.svg")
-                    tone: ribbon.controller.telemetryDockVisible ? "accent" : "neutral"
-                    onClicked: ribbon.controller.telemetryDockVisible = !ribbon.controller.telemetryDockVisible
-                }
-
-                RibbonDivider {}
-
-                RibbonAction {
-                    visible: !ribbon.compact
-                    text: "Detach phasor"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/external-link.svg")
-                    enabled: ribbon.controller.phasorDockVisible && !ribbon.controller.phasorDetached
-                    onClicked: ribbon.controller.detachPhasor()
-                }
-                RibbonAction {
-                    visible: !ribbon.compact
-                    text: "Detach waveform"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/external-link.svg")
-                    enabled: ribbon.controller.waveformDockVisible && !ribbon.controller.waveformDetached
-                    onClicked: ribbon.controller.detachWaveform()
-                }
-
-                Item { Layout.fillWidth: true }
-
-                RibbonAction {
-                    text: ribbon.controller.telemetryExpanded ? "Collapse monitor" : "Expand monitor"
-                    iconSource: ribbon.controller.telemetryExpanded
-                        ? Qt.resolvedUrl("../assets/lucide/chevron-down.svg")
-                        : Qt.resolvedUrl("../assets/lucide/chevron-up.svg")
-                    onClicked: ribbon.controller.telemetryExpanded = !ribbon.controller.telemetryExpanded
-                }
+            Label {
+                visible: ribbon.smartState === "PREPARING 4I+4V"
+                text: "Preparing…"
+                color: ribbon.theme.amber
+                font.family: ribbon.uiFont
+                font.pixelSize: 10
             }
 
-            RowLayout {
-                Layout.leftMargin: 10
-                Layout.rightMargin: 10
-                spacing: 6
-
-                RibbonAction {
-                    text: ribbon.device.deviceVerified ? "Configuration" : "Firmware Setup"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/upload.svg")
-                    tone: ribbon.device.deviceVerified ? "neutral" : "accent"
-                    onClicked: ribbon.controller.openConfiguration()
-                }
-                RibbonAction {
-                    text: "Open SCL"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/folder-open.svg")
-                    onClicked: ribbon.controller.openEngineeringFile()
-                }
-                RibbonAction {
-                    text: "4I+4V Reference"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/radio-tower.svg")
-                    tone: ribbon.profiles.referenceTemplateActive ? "accent" : "neutral"
-                    enabled: !ribbon.device.running && !ribbon.device.profileDeploying
-                    onClicked: {
-                        if (ribbon.profiles.loadReferenceTemplate()) {
-                            ribbon.controller.profileDirty = true
-                            ribbon.controller.showMessage("ARStack 4I+4V reference engineering profile loaded.", false)
-                        } else {
-                            ribbon.controller.showMessage(ribbon.profiles.fatalError, true)
-                        }
-                    }
-                }
-                RibbonAction {
-                    text: "Detect device"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/scan-search.svg")
-                    enabled: !ribbon.device.connected
-                    onClicked: ribbon.device.autoDetectAndConnect()
-                }
-                RibbonAction {
-                    text: "Refresh PTP"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/clock-3.svg")
-                    enabled: ribbon.device.deviceVerified
-                    onClicked: ribbon.device.sendPtpShow()
-                }
-
-                Item { Layout.fillWidth: true }
-
-                RibbonAction {
-                    text: "Diagnostics"
-                    iconSource: Qt.resolvedUrl("../assets/lucide/activity.svg")
-                    onClicked: ribbon.controller.openDiagnostics()
-                }
+            ActionButton {
+                visible: !device.running
+                text: "Start"
+                iconSource: Qt.resolvedUrl("../assets/lucide/play.svg")
+                tone: "success"
+                implicitWidth: 132
+                enabled: ribbon.startReady
+                toolTipText: ribbon.startReason()
+                onClicked: device.start()
+            }
+            ActionButton {
+                visible: device.running
+                text: "Stop"
+                iconSource: Qt.resolvedUrl("../assets/lucide/square.svg")
+                tone: "danger"
+                implicitWidth: 132
+                enabled: device.deviceVerified
+                toolTipText: "Stop Sampled Values output"
+                onClicked: device.stop()
             }
         }
     }
