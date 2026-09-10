@@ -71,6 +71,12 @@ qt_add_qml_module(arstack_studio
         assets/lucide/clock-3.svg
 )
 
+qt_add_resources(arstack_studio "reference_templates"
+    PREFIX "/arstack"
+    FILES
+        templates/arstack_4i4v_9-2le_reference.scd
+)
+
 target_link_libraries(arstack_studio PRIVATE
     Qt6::Core
     Qt6::Gui
