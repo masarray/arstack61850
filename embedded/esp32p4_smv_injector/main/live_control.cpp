@@ -4,6 +4,7 @@
 #include "ethernet_port.h"
 #include "profile_control.hpp"
 
+#include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "freertos/FreeRTOS.h"
@@ -119,11 +120,14 @@ void print_identity() noexcept {
         ESP_LOGE(kTag, "ARSTACK identity unavailable: factory device ID read failed");
         return;
     }
+    const esp_app_desc_t* app = esp_app_get_description();
+    const char* version = app != nullptr ? app->version : "unknown";
     ESP_LOGI(kTag,
-             "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 device_id=%02X%02X%02X%02X%02X%02X",
+             "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 device_id=%02X%02X%02X%02X%02X%02X firmware=%s capabilities=SMV-4I4V,LIVE-SETPOINTS",
              static_cast<unsigned>(device_id[0]), static_cast<unsigned>(device_id[1]),
              static_cast<unsigned>(device_id[2]), static_cast<unsigned>(device_id[3]),
-             static_cast<unsigned>(device_id[4]), static_cast<unsigned>(device_id[5]));
+             static_cast<unsigned>(device_id[4]), static_cast<unsigned>(device_id[5]),
+             version);
 }
 
 void print_ptp_state() noexcept {
