@@ -13,6 +13,7 @@ SurfacePanel {
     property string uiFont: "Inter"
     property string monoFont: "Inter"
     property bool compact: false
+    property bool updatePromptDeferred: false
 
     SmartSessionController {
         id: smartSession
@@ -32,11 +33,106 @@ SurfacePanel {
             controller.profileDirty = false
             controller.applyAllSignals()
         }
+        function onStateChanged() {
+            if (smartSession.firmwareUpdateRequired && !ribbon.updatePromptDeferred && !updateDialog.opened)
+                Qt.callLater(updateDialog.open)
+        }
+        function onFirmwareUpdateFinished(success) {
+            if (success) {
+                ribbon.updatePromptDeferred = false
+                controller.showMessage("Firmware updated. ARStack Studio is preparing 4I+4V injection.", false)
+            }
+        }
+    }
+
+    Connections {
+        target: device
+        function onDeviceVerifiedChanged() {
+            if (!device.deviceVerified)
+                ribbon.updatePromptDeferred = false
+        }
+    }
+
+    Dialog {
+        id: updateDialog
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        width: 430
+        title: "Firmware update"
+        closePolicy: Popup.NoAutoClose
+
+        background: Rectangle {
+            color: ribbon.theme.surface
+            radius: 10
+            border.width: 1
+            border.color: ribbon.theme.line
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 12
+            Label {
+                Layout.fillWidth: true
+                text: smartSession.deviceFirmwareVersion.length
+                    ? "ESP32-P4 is running ARStack firmware v" + smartSession.deviceFirmwareVersion + "."
+                    : "ESP32-P4 is running legacy ARStack firmware."
+                color: ribbon.theme.text
+                font.family: ribbon.uiFont
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+                wrapMode: Text.WordWrap
+            }
+            Label {
+                Layout.fillWidth: true
+                text: "Update to v" + smartSession.expectedFirmwareVersion + " now? The firmware is already included with ARStack Studio."
+                color: ribbon.theme.textSoft
+                font.family: ribbon.uiFont
+                font.pixelSize: 11
+                wrapMode: Text.WordWrap
+            }
+            Label {
+                Layout.fillWidth: true
+                text: "SMV output will be stopped safely if required. Studio will flash, reset, reconnect, and prepare the default 4I+4V profile automatically."
+                color: ribbon.theme.muted
+                font.family: ribbon.uiFont
+                font.pixelSize: 10
+                wrapMode: Text.WordWrap
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                CalmButton {
+                    theme: ribbon.theme
+                    uiFont: ribbon.uiFont
+                    text: "Later"
+                    onClicked: {
+                        ribbon.updatePromptDeferred = true
+                        updateDialog.close()
+                    }
+                }
+                CalmButton {
+                    theme: ribbon.theme
+                    uiFont: ribbon.uiFont
+                    text: "Update now"
+                    tone: "accent"
+                    implicitWidth: 118
+                    onClicked: {
+                        if (smartSession.beginFirmwareUpdate()) {
+                            ribbon.updatePromptDeferred = false
+                            updateDialog.close()
+                        } else {
+                            controller.showMessage("Firmware update could not start. Open Advanced for recovery details.", true)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     readonly property color smartStateColor: {
         if (smartSession.state === "RUNNING" || smartSession.state === "READY") return theme.green
-        if (smartSession.state === "CONNECTING" || smartSession.state === "PREPARING 4I+4V" || smartSession.state === "FIRMWARE UPDATE") return theme.amber
+        if (smartSession.state === "CONNECTING" || smartSession.state === "PREPARING 4I+4V" ||
+            smartSession.state === "FIRMWARE UPDATE" || smartSession.state === "UPDATING FIRMWARE" ||
+            smartSession.state === "UPDATE NEEDS BOOT") return theme.amber
         if (smartSession.state === "DEVICE FOUND") return theme.accent
         if (smartSession.state === "PROFILE BLOCKED" || smartSession.state === "SETUP ERROR") return theme.red
         return theme.muted
@@ -45,6 +141,7 @@ SurfacePanel {
     function startReason() {
         if (device.running) return "SMV output is already running."
         if (smartSession.firmwareUpdateRequired) return "Firmware update is required before injection."
+        if (smartSession.updatingFirmware) return "Firmware update is in progress."
         if (smartSession.state === "CONNECTING") return "ARStack Studio is connecting automatically."
         if (smartSession.state === "PREPARING 4I+4V") return "Preparing the default 4I+4V profile automatically…"
         if (smartSession.state === "WAITING FOR DEVICE") return "Connect the ESP32-P4; ARStack Studio will detect it automatically."
@@ -120,19 +217,21 @@ SurfacePanel {
                 text: "Balanced"
                 iconSource: Qt.resolvedUrl("../assets/lucide/scale.svg")
                 toolTipText: "Apply balanced three-phase values"
+                enabled: !smartSession.updatingFirmware
                 onClicked: ribbon.controller.balanced()
             }
             ActionButton {
                 text: "Zero"
                 iconSource: Qt.resolvedUrl("../assets/lucide/circle-off.svg")
                 toolTipText: "Set every current and voltage magnitude to zero"
+                enabled: !smartSession.updatingFirmware
                 onClicked: ribbon.controller.zeroAll()
             }
 
             Rectangle { width: 1; height: 28; color: ribbon.theme.lineSoft }
 
             ActionButton {
-                visible: !ribbon.compact
+                visible: !ribbon.compact && !smartSession.updatingFirmware && !smartSession.updateNeedsBootloaderHelp
                 text: "Phasor"
                 iconSource: Qt.resolvedUrl("../assets/lucide/panels-top-left.svg")
                 tone: ribbon.controller.phasorDockVisible || ribbon.controller.phasorDetached ? "accent" : "neutral"
@@ -142,7 +241,7 @@ SurfacePanel {
                 }
             }
             ActionButton {
-                visible: !ribbon.compact
+                visible: !ribbon.compact && !smartSession.updatingFirmware && !smartSession.updateNeedsBootloaderHelp
                 text: "Waveform"
                 iconSource: Qt.resolvedUrl("../assets/lucide/activity.svg")
                 tone: ribbon.controller.waveformDockVisible || ribbon.controller.waveformDetached ? "accent" : "neutral"
@@ -154,16 +253,44 @@ SurfacePanel {
 
             Item { Layout.fillWidth: true }
 
+            ProgressBar {
+                visible: smartSession.updatingFirmware
+                indeterminate: true
+                Layout.preferredWidth: ribbon.compact ? 130 : 210
+                Layout.alignment: Qt.AlignVCenter
+            }
+
             Label {
-                visible: smartSession.state === "CONNECTING" || smartSession.state === "PREPARING 4I+4V"
-                text: smartSession.state === "CONNECTING" ? "Connecting…" : "Preparing…"
+                visible: smartSession.updateNeedsBootloaderHelp
+                text: "BOOT + RESET required"
                 color: ribbon.theme.amber
                 font.family: ribbon.uiFont
                 font.pixelSize: 10
+                font.weight: Font.DemiBold
+            }
+            ActionButton {
+                visible: smartSession.updateNeedsBootloaderHelp
+                text: "Retry update"
+                tone: "accent"
+                implicitWidth: 118
+                toolTipText: smartSession.updateStatus
+                onClicked: smartSession.retryFirmwareUpdate()
             }
 
             ActionButton {
-                visible: !device.running
+                visible: smartSession.firmwareUpdateRequired && !smartSession.updatingFirmware && !smartSession.updateNeedsBootloaderHelp
+                text: "Update firmware"
+                tone: "accent"
+                implicitWidth: 132
+                onClicked: {
+                    ribbon.updatePromptDeferred = false
+                    updateDialog.open()
+                }
+            }
+
+            ActionButton {
+                visible: !device.running && !smartSession.firmwareUpdateRequired &&
+                    !smartSession.updatingFirmware && !smartSession.updateNeedsBootloaderHelp
                 text: "Start"
                 iconSource: Qt.resolvedUrl("../assets/lucide/play.svg")
                 tone: "success"
@@ -173,7 +300,7 @@ SurfacePanel {
                 onClicked: device.start()
             }
             ActionButton {
-                visible: device.running
+                visible: device.running && !smartSession.updatingFirmware
                 text: "Stop"
                 iconSource: Qt.resolvedUrl("../assets/lucide/square.svg")
                 tone: "danger"
