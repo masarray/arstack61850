@@ -96,11 +96,16 @@ public:
             emit deviceMessage(QStringLiteral("ARStack Studio is still preparing the 4I+4V profile."));
             return false;
         }
-        ensureSessionHeartbeat();
-        if (!sessionHeartbeatTimer_.isActive()) {
+
+        // Refresh the firmware lease synchronously so a STOP -> immediate START
+        // cannot have a short unprotected RUN window while waiting for the next
+        // periodic heartbeat tick.
+        if (!sendQuietCommand(QStringLiteral("HEARTBEAT"))) {
             emit deviceMessage(QStringLiteral("Control session could not be established before Start."));
             return false;
         }
+        if (!sessionHeartbeatTimer_.isActive()) sessionHeartbeatTimer_.start();
+
         if (!flushLiveCommands()) {
             emit deviceMessage(QStringLiteral("Latest injection values could not be sent before Start."));
             return false;
