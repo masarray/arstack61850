@@ -75,6 +75,13 @@ jobs:
           cmake --build build-arstack-studio --target arstack_studio --parallel 2 \
             2>&1 | tee /tmp/arstack-studio-build.log
 
+      - name: 4I+4V reference template regression
+        shell: bash
+        run: |
+          set -o pipefail
+          ./build-arstack-studio/arstack_studio --check-reference-template \
+            2>&1 | tee /tmp/arstack-studio-reference-template.log
+
       - name: Headless QML launch smoke
         shell: bash
         run: |
@@ -97,6 +104,7 @@ jobs:
           path: |
             /tmp/arstack-studio-configure.log
             /tmp/arstack-studio-build.log
+            /tmp/arstack-studio-reference-template.log
             /tmp/arstack-studio-launch.log
           if-no-files-found: ignore
           retention-days: 7
