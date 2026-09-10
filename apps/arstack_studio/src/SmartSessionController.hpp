@@ -12,6 +12,7 @@ class SmartSessionController : public QObject {
     Q_OBJECT
     Q_PROPERTY(QObject* device READ device WRITE setDevice NOTIFY dependenciesChanged)
     Q_PROPERTY(QObject* profiles READ profiles WRITE setProfiles NOTIFY dependenciesChanged)
+    Q_PROPERTY(QObject* firmware READ firmware WRITE setFirmware NOTIFY dependenciesChanged)
     Q_PROPERTY(QString state READ state NOTIFY stateChanged)
     Q_PROPERTY(QString statusText READ statusText NOTIFY stateChanged)
     Q_PROPERTY(bool startReady READ startReady NOTIFY stateChanged)
@@ -27,6 +28,7 @@ public:
 
     [[nodiscard]] QObject* device() const noexcept;
     [[nodiscard]] QObject* profiles() const noexcept;
+    [[nodiscard]] QObject* firmware() const noexcept;
     [[nodiscard]] QString state() const;
     [[nodiscard]] QString statusText() const;
     [[nodiscard]] bool startReady() const noexcept;
@@ -39,6 +41,7 @@ public:
 
     void setDevice(QObject* object);
     void setProfiles(QObject* object);
+    void setFirmware(QObject* object);
 
     Q_INVOKABLE void start();
     Q_INVOKABLE void reconcile();
@@ -56,6 +59,7 @@ private:
 
     void reconnectDeviceSignals();
     void reconnectProfileSignals();
+    void reconnectFirmwareSignals();
     bool ensureDefaultProfile();
     void setPresentation(QString state, QString status, bool startReady, bool firmwareUpdateRequired);
     void refreshFirmwareIdentity();
