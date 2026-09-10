@@ -164,6 +164,23 @@ int SclProfileModel::selectedIndex() const noexcept { return selectedIndex_; }
 bool SclProfileModel::hasProfiles() const noexcept { return !rows_.empty(); }
 bool SclProfileModel::referenceTemplateActive() const noexcept { return referenceTemplateActive_; }
 
+QVariantMap SclProfileModel::selectedProfile() const {
+    if (selectedIndex_ < 0 || selectedIndex_ >= rowCount()) return {};
+    const auto& row = rows_[static_cast<std::size_t>(selectedIndex_)];
+    QVariantMap out;
+    out.insert(QStringLiteral("compatibilityClass"), row.compatibilityClass);
+    out.insert(QStringLiteral("deviceSupport"), row.deviceSupport);
+    out.insert(QStringLiteral("warnings"), row.warnings);
+    out.insert(QStringLiteral("errors"), row.errors);
+    if (row.profile.has_value()) {
+        const auto profileMap = profileToVariantMap(*row.profile);
+        for (auto it = profileMap.cbegin(); it != profileMap.cend(); ++it) {
+            out.insert(it.key(), it.value());
+        }
+    }
+    return out;
+}
+
 void SclProfileModel::installDocument(
     ar::iec61850::scl::SclDocument document,
     const bool referenceTemplate) {
