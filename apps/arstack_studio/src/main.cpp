@@ -81,22 +81,28 @@ int checkFirmwareContract(int argc, char* argv[]) {
         wrongMajor,
         wrongMinor);
 
+    const bool flashProgressFormat =
+        FirmwareManager::parseFlashProgress(QStringLiteral("Writing 7%\rWriting 64%\r")) == 64 &&
+        FirmwareManager::parseFlashProgress(QStringLiteral("no progress token")) == -1 &&
+        FirmwareManager::parseFlashProgress(QStringLiteral("Writing 104%")) == -1;
+
     const bool valid = firmware.bundleReady() && firmware.flasherAvailable() &&
         firmware.firmwareVersion() == QStringLiteral(ARSTACK_STUDIO_VERSION) &&
         firmware.expectedProtocol() == QStringLiteral("1") &&
         firmware.firmwareSha256().size() == 64 &&
-        realEspflashFormat && dashedFormat && rejectsWrongChip;
+        realEspflashFormat && dashedFormat && rejectsWrongChip && flashProgressFormat;
     if (!valid) {
         qCritical().noquote()
             << "Firmware bundle/probe contract: FAIL ·"
             << firmware.bundleStatus()
             << "espflash-format=" << realEspflashFormat
             << "dashed-format=" << dashedFormat
-            << "wrong-chip-rejected=" << rejectsWrongChip;
+            << "wrong-chip-rejected=" << rejectsWrongChip
+            << "progress-format=" << flashProgressFormat;
         return 4;
     }
     qInfo().noquote()
-        << "Firmware bundle/probe contract: PASS · real espflash P4 revision format accepted ·"
+        << "Firmware bundle/probe contract: PASS · P4 revision + flash progress formats accepted ·"
         << firmware.bundleStatus();
     return 0;
 }
