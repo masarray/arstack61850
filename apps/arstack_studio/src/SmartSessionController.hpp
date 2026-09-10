@@ -83,5 +83,6 @@ private:
     bool needsProfileSync_{true};
     bool profileSyncInFlight_{false};
     bool updateRequested_{false};
+    int updateReconnectAttempts_{0};
     UpdateStage updateStage_{UpdateStage::idle};
 };
