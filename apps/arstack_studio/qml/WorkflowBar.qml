@@ -19,6 +19,7 @@ SurfacePanel {
         id: smartSession
         device: ribbon.device
         profiles: ribbon.profiles
+        firmware: FirmwareService
     }
 
     Component.onCompleted: {
@@ -200,7 +201,7 @@ SurfacePanel {
             CalmButton {
                 theme: ribbon.theme
                 uiFont: ribbon.uiFont
-                text: "Advanced…"
+                text: "Advanced"
                 implicitHeight: 28
                 font.pixelSize: 9
                 toolTipText: "Firmware, SCL, waveform stress, PTP and diagnostics"
