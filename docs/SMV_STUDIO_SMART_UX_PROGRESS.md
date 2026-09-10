@@ -34,8 +34,8 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 - ✅ Native queue capacity is bounded by design to one pending frequency plus the eight fixed 4I+4V channel IDs; it cannot grow with repeated typing.
 - ✅ Native live writes flush on a short timer, and START forces the newest queued values to the device before enabling output.
 - ✅ Disconnect/unverify clears pending live writes; ZERO cancels pending channel writes so an old queued value cannot reappear after zeroing.
-- ✅ Numeric controls now use a stronger visual hierarchy (larger value text, clearer focus state, larger suffixes) because injection values are the primary operator task.
-- ✅ Current/voltage matrices use larger channel labels, roomier rows, simpler `Channel / Value / Phase` headings, and clearer operator-facing validation messages.
+- ✅ Numeric controls use a stronger visual hierarchy because injection values are the primary operator task.
+- ✅ Current/voltage matrices use larger channel labels, roomier rows, simple `Channel / Value / Phase` headings, and clearer validation messages.
 - 🟡 Native live-write coalescing still needs hardware feel/latency acceptance during rapid edits.
 
 ## Firmware intelligence
@@ -44,7 +44,8 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 - ✅ Recovery can probe and flash ESP32-P4 without ESP-IDF/Python on the operator PC.
 - ✅ ROM/download-mode recovery has guided BOOT/RESET fallback.
 - ✅ ESP-IDF project version is pinned to `0.1.0` for deterministic semantic firmware identity.
-- ✅ New firmware `IDENTIFY` appends `firmware=<version>` and `capabilities=SMV-4I4V,LIVE-SETPOINTS` while preserving the older identity prefix for backwards compatibility.
+- ✅ New firmware `IDENTIFY` appends `firmware=<version>` while preserving the older identity prefix for backwards compatibility.
+- ✅ Firmware capabilities now advertise `SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE` when the independent lease timer is available.
 - ✅ Smart session distinguishes current firmware from legacy/outdated firmware. Missing semantic version is treated as legacy rather than silently accepted.
 - ✅ Friendly firmware-update prompt is implemented with concise operator wording.
 - 🟡 One-click update coordinator is implemented: safe STOP if required -> release serial -> ROM probe -> verified bundled flash -> reset -> reconnect -> verify semantic identity -> prepare 4I+4V.
@@ -67,9 +68,9 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 - ✅ Firmware update failure surfaces a concise operator message instead of silently dropping back to an idle state.
 - ✅ Advanced configuration header/typography is simplified and enlarged; tabs are `Injection / Firmware / Waveform / Timing / Device` with one `Device ready / Setup mode` status pill.
 - ✅ Telemetry is collapsed by default and reduced to one quiet status line; expanded mode contains only `Recent activity` and `Transmission` instead of duplicating channel state.
-- ✅ Main action ribbon now uses human-readable state labels instead of raw state-machine names and keeps Ready/Running copy intentionally short.
-- ✅ Injection value fields and current/voltage matrices were visually promoted above chrome/status elements.
-- ⬜ Main workspace title and the remaining legacy top-level header/footer language still need simplification in `Main.qml`.
+- ✅ Main action ribbon uses human-readable state labels instead of raw state-machine names and keeps Ready/Running copy intentionally short.
+- ✅ Injection value fields and current/voltage matrices are visually promoted above chrome/status elements.
+- ⬜ Main workspace title and remaining legacy top-level header/footer language still need simplification in `Main.qml`.
 - ⬜ Remove the remaining duplicate top-level device indicator and keyboard-help noise from `Main.qml` normal view.
 - ⬜ Review default window density at 100%, 125%, 150%, and laptop resolutions after a packaged build is available.
 
@@ -80,23 +81,28 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 - ✅ Profile deployment remains stopped-only and fail-closed.
 - ✅ Firmware package/target/hash checks remain fail-closed.
 - ✅ Startup discovery race was removed; initial probe and hot-plug watchdog are serialized by state.
-- ✅ Smart-session orchestration moved into one native C++ state machine (`WAITING FOR DEVICE / DEVICE FOUND / CONNECTING / FIRMWARE UPDATE / UPDATING FIRMWARE / UPDATE NEEDS BOOT / PREPARING 4I+4V / READY / RUNNING / ERROR`).
-- ✅ Reconnect preparation is delayed briefly after identity verification so existing SHOW / PROFILE SHOW responses can settle before automatic profile synchronization.
+- ✅ Smart-session orchestration is centralized in native C++.
 - ✅ Firmware update completion is not trusted until the newly reconnected firmware reports the expected semantic version.
 - ✅ Firmware update state exits deterministically on probe rejection/failure instead of hanging indefinitely.
 - ✅ Post-flash reconnect is bounded to six retry windows and waits for active discovery/verification instead of launching overlapping probes.
 - ✅ Live-edit write backlog is bounded and last-value-wins instead of growing with operator keystrokes.
 - ✅ Normal application shutdown performs a best-effort STOP before the control process exits while output is RUNNING.
+- 🟡 Studio now maintains a silent 700 ms control heartbeat only for current semantic firmware; legacy firmware is not spammed with an unknown command.
+- 🟡 Studio sends a fresh heartbeat synchronously before START; a Studio-owned START fails closed if that control-session write cannot be established.
+- 🟡 Firmware implements a 2.5 s session lease using an independent one-shot `esp_timer`, so lease expiry does not depend on serial input continuing after a GUI crash.
+- 🟡 Lease timeout handles millisecond-boundary rounding by rearming the remaining interval rather than silently losing the one-shot.
+- 🟡 If the firmware lease timer cannot be created/rearmed, a fresh Studio-owned START is rejected or an already-running Studio session is fail-stopped.
+- ✅ Manual/bench START remains backwards compatible: without a fresh Studio heartbeat, the firmware does not force a session lease.
 - 🟡 General hot-plug discovery remains periodic and lightweight; hardware acceptance is still needed for repeated unplug/replug cycles.
-- ⬜ Add a firmware session lease/watchdog so a hard GUI crash or control-link loss cannot leave an operator-owned RUN session transmitting indefinitely.
-- ⬜ Add regression tests for USB removal during READY and RUNNING.
-- ⬜ Add regression tests for malformed/slow serial responses and command timeouts.
-- ⬜ Add soak test for continuous 4000 fps operation plus repeated live edits.
+- ⬜ Hardware kill test: terminate Studio while RUNNING and verify external SMV capture stops within approximately 2.5–3 s.
+- ⬜ Hardware USB-removal tests during READY and RUNNING.
+- ⬜ Regression tests for malformed/slow serial responses and command timeouts.
+- ⬜ Soak test for continuous 4000 fps operation plus repeated live edits.
 
 ## Current checkpoint
 
-Checkpoint F — **zero-configuration workflow + semantic firmware update + bounded live writes/reconnect + numeric firmware progress + operator-first visual hierarchy + graceful STOP on normal exit** is implemented in the branch.
+Checkpoint G — **zero-configuration workflow + semantic firmware update + bounded live writes/reconnect + numeric firmware progress + operator-first visual hierarchy + Studio/firmware control-session lease** is implemented in the branch.
 
-Current validation state: **CI and hardware acceptance pending for the newest Smart UX head.** Do not treat this checkpoint as release-ready until those gates pass.
+Current validation state: **latest-head CI and hardware acceptance are pending.** Do not describe the session lease or this checkpoint as hardware-proven until the ESP32 build passes and the hard-kill/USB tests are completed.
 
-Next implementation checkpoint after CI: remaining top-level `Main.qml` chrome cleanup and failure-path regression coverage. A firmware session lease/watchdog is still required before claiming hard-crash-safe RUN behavior, followed by hardware acceptance of both current-firmware and legacy-firmware paths.
+Next checkpoint after CI: finish the remaining `Main.qml` top-level chrome cleanup without disturbing injection logic, build a new Windows RC, then run current-firmware, legacy-update, hard-kill, USB-replug, and sustained 4000 fps hardware acceptance.
