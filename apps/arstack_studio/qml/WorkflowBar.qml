@@ -210,9 +210,7 @@ SurfacePanel {
                 }
                 RibbonAction {
                     text: ribbon.device.deviceVerified ? "Configuration" : "Install Firmware"
-                    iconSource: ribbon.device.deviceVerified
-                        ? Qt.resolvedUrl("../assets/lucide/settings-2.svg")
-                        : Qt.resolvedUrl("../assets/lucide/download.svg")
+                    iconSource: Qt.resolvedUrl("../assets/lucide/upload.svg")
                     tone: ribbon.device.deviceVerified ? "neutral" : "accent"
                     toolTipText: ribbon.device.deviceVerified
                         ? "Open profile, firmware and expert configuration"
@@ -318,9 +316,7 @@ SurfacePanel {
 
                 RibbonAction {
                     text: ribbon.device.deviceVerified ? "Configuration" : "Firmware Setup"
-                    iconSource: ribbon.device.deviceVerified
-                        ? Qt.resolvedUrl("../assets/lucide/settings-2.svg")
-                        : Qt.resolvedUrl("../assets/lucide/download.svg")
+                    iconSource: Qt.resolvedUrl("../assets/lucide/upload.svg")
                     tone: ribbon.device.deviceVerified ? "neutral" : "accent"
                     onClicked: ribbon.controller.openConfiguration()
                 }
