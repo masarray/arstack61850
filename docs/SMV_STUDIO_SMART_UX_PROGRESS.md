@@ -62,7 +62,8 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 
 ## Robustness / crash resistance
 
-- ✅ Native START policy still fails closed unless verified protocol/profile state is safe.
+- ✅ Native START policy fails closed unless the device is verified, protocol is supported, semantic firmware identity matches the Studio build, and a profile is armed.
+- ✅ Hidden/legacy Start and Deploy shortcuts cannot bypass a required firmware update merely because an older firmware still reports protocol v1.
 - ✅ Profile deployment remains stopped-only and fail-closed.
 - ✅ Firmware package/target/hash checks remain fail-closed.
 - ✅ Startup discovery race was removed; initial probe and hot-plug watchdog are serialized by state.
@@ -77,7 +78,7 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 
 ## Current checkpoint
 
-Checkpoint B — **zero-configuration normal path + native smart-session orchestration + semantic firmware update flow** is implemented in the branch.
+Checkpoint B — **zero-configuration normal path + native smart-session orchestration + semantic firmware update flow + native semantic safety gate** is implemented in the branch.
 
 Current validation state: **CI and hardware acceptance pending for the newest Smart UX head.** Do not treat this checkpoint as release-ready until those gates pass.
 
