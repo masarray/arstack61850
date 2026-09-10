@@ -40,6 +40,14 @@ namespace detail {
     return result;
 }
 
+[[nodiscard]] inline bool sv_reference_matches_either(
+    const std::string_view reference,
+    const std::string_view canonical,
+    const std::string_view legacy_9_2le) {
+    return reference.find(canonical) != std::string_view::npos ||
+           reference.find(legacy_9_2le) != std::string_view::npos;
+}
+
 [[nodiscard]] inline bool esp32p4_4i4v_layout_matches(
     const SvPublisherProfile& profile) {
     if (profile.no_asdu != 1U || profile.payload_size_bytes != 64U ||
@@ -56,6 +64,10 @@ namespace detail {
     // IA, IB, IC, IN, UA, UB, UC, UN, with one Quality word after each value.
     // Do not accept a merely shape-compatible DataSet: that would silently map
     // unrelated INT32 members onto the fixed injector channels.
+    //
+    // Both Amp/Vol and the 9-2LE-style AmpSv/VolSv DO naming are accepted only
+    // when the LN class/instance, order, width, basic type and Quality pairing
+    // all match the same proven 4I+4V runtime layout.
     constexpr std::array<std::string_view, 8> expected_values{
         "tctr1.amp.instmag.i",
         "tctr2.amp.instmag.i",
@@ -66,6 +78,16 @@ namespace detail {
         "tvtr3.vol.instmag.i",
         "tvtr4.vol.instmag.i",
     };
+    constexpr std::array<std::string_view, 8> expected_values_9_2le{
+        "tctr1.ampsv.instmag.i",
+        "tctr2.ampsv.instmag.i",
+        "tctr3.ampsv.instmag.i",
+        "tctr4.ampsv.instmag.i",
+        "tvtr1.volsv.instmag.i",
+        "tvtr2.volsv.instmag.i",
+        "tvtr3.volsv.instmag.i",
+        "tvtr4.volsv.instmag.i",
+    };
     constexpr std::array<std::string_view, 8> expected_qualities{
         "tctr1.amp.q",
         "tctr2.amp.q",
@@ -75,6 +97,16 @@ namespace detail {
         "tvtr2.vol.q",
         "tvtr3.vol.q",
         "tvtr4.vol.q",
+    };
+    constexpr std::array<std::string_view, 8> expected_qualities_9_2le{
+        "tctr1.ampsv.q",
+        "tctr2.ampsv.q",
+        "tctr3.ampsv.q",
+        "tctr4.ampsv.q",
+        "tvtr1.volsv.q",
+        "tvtr2.volsv.q",
+        "tvtr3.volsv.q",
+        "tvtr4.volsv.q",
     };
 
     for (std::size_t i = 0U; i < profile.channels.size(); ++i) {
@@ -94,8 +126,14 @@ namespace detail {
             sv_support_lower_copy(profile.channels[signal * 2U].signal_reference);
         const auto quality_reference =
             sv_support_lower_copy(profile.channels[signal * 2U + 1U].signal_reference);
-        if (value_reference.find(expected_values[signal]) == std::string::npos ||
-            quality_reference.find(expected_qualities[signal]) == std::string::npos) {
+        if (!sv_reference_matches_either(
+                value_reference,
+                expected_values[signal],
+                expected_values_9_2le[signal]) ||
+            !sv_reference_matches_either(
+                quality_reference,
+                expected_qualities[signal],
+                expected_qualities_9_2le[signal])) {
             return false;
         }
     }
