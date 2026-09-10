@@ -1,6 +1,7 @@
 name: ESP32-P4 SMV Injector
 
 on:
+  workflow_call:
   push:
     paths:
       - 'embedded/esp32p4_smv_injector/**'
