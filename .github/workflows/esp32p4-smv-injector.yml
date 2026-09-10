@@ -63,7 +63,9 @@ jobs:
           set -euo pipefail
           source /opt/esp/idf/export.sh
           image="arstack-esp32p4-smv-${ARSTACK_FIRMWARE_VERSION}.bin"
-          idf.py merge-bin -o "build/${image}" -f raw
+          # idf.py runs esptool's merge_bin from inside the build directory.
+          # Passing build/<name> therefore resolves to build/build/<name> and fails.
+          idf.py merge-bin -o "${image}" -f raw
           test -s "build/${image}"
 
       - name: Create release manifest and SHA-256 contract
