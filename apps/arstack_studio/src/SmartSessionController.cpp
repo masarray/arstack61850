@@ -3,17 +3,25 @@
 #include "SmartSessionController.hpp"
 
 #include "DeviceController.hpp"
+#include "FirmwareManager.hpp"
 #include "SclProfileModel.hpp"
 
+#include <QRegularExpression>
 #include <QVariantMap>
 
 #include <utility>
 
+#ifndef ARSTACK_STUDIO_VERSION
+#define ARSTACK_STUDIO_VERSION "0.1.0"
+#endif
+
 SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent) {
+    firmware_ = new FirmwareManager(this);
+
     discoveryTimer_.setInterval(2500);
     discoveryTimer_.setSingleShot(false);
     connect(&discoveryTimer_, &QTimer::timeout, this, [this] {
-        if (!started_ || device_ == nullptr) return;
+        if (!started_ || device_ == nullptr || updateRequested_) return;
         if (!device_->deviceVerified() && !device_->discovering() && !device_->connected()) {
             static_cast<void>(device_->autoDetectAndConnect());
         }
@@ -22,6 +30,68 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
     prepareTimer_.setInterval(650);
     prepareTimer_.setSingleShot(true);
     connect(&prepareTimer_, &QTimer::timeout, this, &SmartSessionController::reconcile);
+
+    reconnectTimer_.setInterval(1800);
+    reconnectTimer_.setSingleShot(true);
+    connect(&reconnectTimer_, &QTimer::timeout, this, [this] {
+        if (device_ == nullptr || updateStage_ != UpdateStage::reconnecting) return;
+        static_cast<void>(device_->autoDetectAndConnect());
+        reconcile();
+    });
+
+    connect(firmware_, &FirmwareManager::stateChanged, this, [this] {
+        if (!updateRequested_) {
+            reconcile();
+            return;
+        }
+
+        if (updateStage_ == UpdateStage::probing && !firmware_->busy()) {
+            if (firmware_->targetVerified()) {
+                updateStage_ = UpdateStage::flashing;
+                setPresentation(
+                    QStringLiteral("UPDATING FIRMWARE"),
+                    QStringLiteral("Installing verified ARStack firmware…"),
+                    false,
+                    false);
+                QTimer::singleShot(0, this, [this] {
+                    if (!firmware_->installFirmware(updatePort_)) {
+                        updateStage_ = firmware_->bootloaderHelpNeeded()
+                            ? UpdateStage::waitingForBootloader
+                            : UpdateStage::idle;
+                        if (updateStage_ == UpdateStage::idle) updateRequested_ = false;
+                        reconcile();
+                    }
+                });
+                return;
+            }
+            if (firmware_->bootloaderHelpNeeded()) {
+                updateStage_ = UpdateStage::waitingForBootloader;
+            }
+        } else if (updateStage_ == UpdateStage::flashing && !firmware_->busy() &&
+                   firmware_->bootloaderHelpNeeded()) {
+            updateStage_ = UpdateStage::waitingForBootloader;
+        }
+        reconcile();
+    });
+
+    connect(firmware_, &FirmwareManager::installationFinished, this, [this](const bool resetSucceeded) {
+        if (!updateRequested_) return;
+        if (resetSucceeded) {
+            updateStage_ = UpdateStage::reconnecting;
+            setPresentation(
+                QStringLiteral("UPDATING FIRMWARE"),
+                QStringLiteral("Firmware installed. Reconnecting to ESP32-P4…"),
+                false,
+                false);
+            reconnectTimer_.start();
+        } else if (firmware_->bootloaderHelpNeeded()) {
+            updateStage_ = UpdateStage::waitingForBootloader;
+            reconcile();
+        } else {
+            updateStage_ = UpdateStage::reconnecting;
+            reconnectTimer_.start();
+        }
+    });
 }
 
 QObject* SmartSessionController::device() const noexcept { return device_; }
@@ -30,12 +100,40 @@ QString SmartSessionController::state() const { return state_; }
 QString SmartSessionController::statusText() const { return statusText_; }
 bool SmartSessionController::startReady() const noexcept { return startReady_; }
 bool SmartSessionController::firmwareUpdateRequired() const noexcept { return firmwareUpdateRequired_; }
+bool SmartSessionController::updatingFirmware() const noexcept {
+    return updateStage_ == UpdateStage::stopping || updateStage_ == UpdateStage::probing ||
+        updateStage_ == UpdateStage::flashing || updateStage_ == UpdateStage::reconnecting;
+}
+bool SmartSessionController::updateNeedsBootloaderHelp() const noexcept {
+    return updateStage_ == UpdateStage::waitingForBootloader;
+}
+QString SmartSessionController::updateStatus() const {
+    if (firmware_ == nullptr) return {};
+    switch (updateStage_) {
+    case UpdateStage::stopping:
+        return QStringLiteral("Stopping SMV output safely…");
+    case UpdateStage::probing:
+        return firmware_->status();
+    case UpdateStage::flashing:
+        return firmware_->status();
+    case UpdateStage::reconnecting:
+        return QStringLiteral("Firmware installed. Waiting for ESP32-P4 to reconnect…");
+    case UpdateStage::waitingForBootloader:
+        return QStringLiteral("Hold BOOT, press and release RESET, release BOOT, then Retry update.");
+    case UpdateStage::idle:
+        return {};
+    }
+    return {};
+}
+QString SmartSessionController::expectedFirmwareVersion() const { return QStringLiteral(ARSTACK_STUDIO_VERSION); }
+QString SmartSessionController::deviceFirmwareVersion() const { return deviceFirmwareVersion_; }
 
 void SmartSessionController::setDevice(QObject* object) {
     auto* next = qobject_cast<DeviceController*>(object);
     if (device_ == next) return;
     if (device_ != nullptr) disconnect(device_, nullptr, this, nullptr);
     device_ = next;
+    deviceFirmwareVersion_.clear();
     needsProfileSync_ = true;
     profileSyncInFlight_ = false;
     reconnectDeviceSignals();
@@ -63,18 +161,88 @@ void SmartSessionController::start() {
     reconcile();
 }
 
+bool SmartSessionController::beginFirmwareUpdate() {
+    if (device_ == nullptr || firmware_ == nullptr || !device_->deviceVerified() ||
+        !firmware_->bundleReady() || firmware_->busy()) {
+        return false;
+    }
+    const QString port = device_->portName().trimmed();
+    if (port.isEmpty()) return false;
+
+    updatePort_ = port;
+    updateRequested_ = true;
+    needsProfileSync_ = true;
+    profileSyncInFlight_ = false;
+
+    if (device_->running()) {
+        updateStage_ = UpdateStage::stopping;
+        setPresentation(
+            QStringLiteral("UPDATING FIRMWARE"),
+            QStringLiteral("Stopping SMV output before firmware update…"),
+            false,
+            false);
+        if (!device_->stop()) {
+            updateRequested_ = false;
+            updateStage_ = UpdateStage::idle;
+            reconcile();
+            return false;
+        }
+        return true;
+    }
+
+    continueFirmwareUpdate();
+    return true;
+}
+
+bool SmartSessionController::retryFirmwareUpdate() {
+    if (firmware_ == nullptr || updatePort_.isEmpty() || firmware_->busy()) return false;
+    updateRequested_ = true;
+    if (device_ != nullptr && device_->connected()) device_->disconnectPort();
+    updateStage_ = UpdateStage::probing;
+    setPresentation(
+        QStringLiteral("UPDATING FIRMWARE"),
+        QStringLiteral("Checking ESP32-P4 bootloader…"),
+        false,
+        false);
+    if (!firmware_->probeTarget(updatePort_)) {
+        updateStage_ = UpdateStage::waitingForBootloader;
+        reconcile();
+        return false;
+    }
+    return true;
+}
+
+void SmartSessionController::continueFirmwareUpdate() {
+    if (!updateRequested_ || device_ == nullptr || firmware_ == nullptr) return;
+    if (device_->running()) {
+        updateStage_ = UpdateStage::stopping;
+        return;
+    }
+
+    if (device_->connected()) device_->disconnectPort();
+    updateStage_ = UpdateStage::probing;
+    setPresentation(
+        QStringLiteral("UPDATING FIRMWARE"),
+        QStringLiteral("Checking ESP32-P4 and preparing firmware…"),
+        false,
+        false);
+    if (!firmware_->probeTarget(updatePort_)) {
+        updateStage_ = UpdateStage::waitingForBootloader;
+        reconcile();
+    }
+}
+
 void SmartSessionController::reconnectDeviceSignals() {
     if (device_ == nullptr) return;
 
     connect(device_, &DeviceController::deviceVerifiedChanged, this, [this] {
+        refreshFirmwareIdentity();
         if (device_ != nullptr && device_->deviceVerified()) {
             needsProfileSync_ = true;
             profileSyncInFlight_ = false;
-            // Allow the already-requested SHOW / PROFILE SHOW replies to settle
-            // before changing a stopped profile. This avoids racing a reconnect
-            // against a publisher that was already running on the device.
             prepareTimer_.start();
         } else {
+            deviceFirmwareVersion_.clear();
             needsProfileSync_ = true;
             profileSyncInFlight_ = false;
         }
@@ -83,7 +251,17 @@ void SmartSessionController::reconnectDeviceSignals() {
     connect(device_, &DeviceController::connectedChanged, this, &SmartSessionController::reconcile);
     connect(device_, &DeviceController::discoveryChanged, this, &SmartSessionController::reconcile);
     connect(device_, &DeviceController::portsChanged, this, &SmartSessionController::reconcile);
-    connect(device_, &DeviceController::runningChanged, this, &SmartSessionController::reconcile);
+    connect(device_, &DeviceController::logTextChanged, this, [this] {
+        refreshFirmwareIdentity();
+        reconcile();
+    });
+    connect(device_, &DeviceController::runningChanged, this, [this] {
+        if (updateRequested_ && updateStage_ == UpdateStage::stopping &&
+            device_ != nullptr && !device_->running()) {
+            QTimer::singleShot(0, this, [this] { continueFirmwareUpdate(); });
+        }
+        reconcile();
+    });
     connect(device_, &DeviceController::profileStateChanged, this, [this] {
         if (device_ != nullptr && profileSyncInFlight_ &&
             device_->profileArmed() && !device_->profileDeploying()) {
@@ -99,12 +277,12 @@ void SmartSessionController::reconnectProfileSignals() {
     connect(profiles_, &SclProfileModel::sourceChanged, this, [this] {
         needsProfileSync_ = true;
         profileSyncInFlight_ = false;
-        reconcile();
+        QTimer::singleShot(0, this, &SmartSessionController::reconcile);
     });
     connect(profiles_, &SclProfileModel::selectedProfileChanged, this, [this] {
         needsProfileSync_ = true;
         profileSyncInFlight_ = false;
-        reconcile();
+        QTimer::singleShot(0, this, &SmartSessionController::reconcile);
     });
 }
 
@@ -133,6 +311,30 @@ void SmartSessionController::setPresentation(
     wasReady_ = readyNow;
 }
 
+void SmartSessionController::refreshFirmwareIdentity() {
+    if (device_ == nullptr || !device_->deviceVerified()) return;
+    const QString log = device_->logText();
+    const qsizetype identityPos = log.lastIndexOf(QStringLiteral("ARSTACK identity"), -1, Qt::CaseInsensitive);
+    if (identityPos < 0) return;
+    qsizetype lineEnd = log.indexOf(QLatin1Char('\n'), identityPos);
+    if (lineEnd < 0) lineEnd = log.size();
+    const QString identityLine = log.mid(identityPos, lineEnd - identityPos);
+    static const QRegularExpression versionExpression{
+        QStringLiteral(R"(\bfirmware=([0-9A-Za-z._+\-]+))"),
+        QRegularExpression::CaseInsensitiveOption};
+    const auto match = versionExpression.match(identityLine);
+    const QString version = match.hasMatch() ? match.captured(1) : QString{};
+    if (deviceFirmwareVersion_ != version) {
+        deviceFirmwareVersion_ = version;
+        emit stateChanged();
+    }
+}
+
+bool SmartSessionController::firmwareIsCurrent() const {
+    return device_ != nullptr && device_->protocolVersion() == QStringLiteral("1") &&
+        !deviceFirmwareVersion_.isEmpty() && deviceFirmwareVersion_ == expectedFirmwareVersion();
+}
+
 void SmartSessionController::reconcile() {
     if (device_ == nullptr || profiles_ == nullptr) {
         setPresentation(
@@ -152,6 +354,25 @@ void SmartSessionController::reconcile() {
             false,
             false);
         return;
+    }
+
+    if (updateRequested_) {
+        if (updateStage_ == UpdateStage::waitingForBootloader) {
+            setPresentation(
+                QStringLiteral("UPDATE NEEDS BOOT"),
+                updateStatus(),
+                false,
+                false);
+            return;
+        }
+        if (updateStage_ != UpdateStage::idle) {
+            setPresentation(
+                QStringLiteral("UPDATING FIRMWARE"),
+                updateStatus().isEmpty() ? QStringLiteral("Updating firmware…") : updateStatus(),
+                false,
+                false);
+            return;
+        }
     }
 
     if (device_->running()) {
@@ -183,13 +404,24 @@ void SmartSessionController::reconcile() {
         return;
     }
 
-    if (device_->protocolVersion() != QStringLiteral("1")) {
+    refreshFirmwareIdentity();
+    if (!firmwareIsCurrent()) {
+        const QString versionText = deviceFirmwareVersion_.isEmpty()
+            ? QStringLiteral("legacy firmware")
+            : QStringLiteral("firmware v%1").arg(deviceFirmwareVersion_);
         setPresentation(
             QStringLiteral("FIRMWARE UPDATE"),
-            QStringLiteral("The connected board needs compatible ARStack firmware before injection."),
+            QStringLiteral("%1 detected. ARStack Studio v%2 is ready to update it.")
+                .arg(versionText, expectedFirmwareVersion()),
             false,
             true);
         return;
+    }
+
+    if (updateRequested_ && updateStage_ == UpdateStage::reconnecting) {
+        updateRequested_ = false;
+        updateStage_ = UpdateStage::idle;
+        emit firmwareUpdateFinished(true);
     }
 
     const QVariantMap profile = profiles_->selectedProfile();
@@ -226,8 +458,6 @@ void SmartSessionController::reconcile() {
     }
 
     if (!device_->profileArmed()) {
-        // An unexpected de-arm after a successful session-owned sync must be
-        // recovered by another controlled sync before START can unlock.
         needsProfileSync_ = true;
         profileSyncInFlight_ = false;
         setPresentation(
