@@ -11,6 +11,7 @@ class FirmwareManager : public QObject {
     Q_PROPERTY(bool flasherAvailable READ flasherAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY stateChanged)
     Q_PROPERTY(bool targetVerified READ targetVerified NOTIFY stateChanged)
+    Q_PROPERTY(bool bootloaderHelpNeeded READ bootloaderHelpNeeded NOTIFY stateChanged)
     Q_PROPERTY(QString selectedPort READ selectedPort NOTIFY stateChanged)
     Q_PROPERTY(QString targetChip READ targetChip NOTIFY stateChanged)
     Q_PROPERTY(QString firmwareVersion READ firmwareVersion NOTIFY stateChanged)
@@ -27,6 +28,7 @@ public:
     [[nodiscard]] bool flasherAvailable() const noexcept { return flasherAvailable_; }
     [[nodiscard]] bool busy() const noexcept { return busy_; }
     [[nodiscard]] bool targetVerified() const noexcept { return targetVerified_; }
+    [[nodiscard]] bool bootloaderHelpNeeded() const noexcept { return bootloaderHelpNeeded_; }
     [[nodiscard]] QString selectedPort() const { return selectedPort_; }
     [[nodiscard]] QString targetChip() const { return targetChip_; }
     [[nodiscard]] QString firmwareVersion() const { return firmwareVersion_; }
@@ -35,6 +37,11 @@ public:
     [[nodiscard]] QString status() const { return status_; }
     [[nodiscard]] QString bundleStatus() const { return bundleStatus_; }
     [[nodiscard]] QString logText() const { return logText_; }
+
+    // espflash 4.x prints its Chip Display value as "esp32p4", while some
+    // Espressif tooling prints "ESP32-P4". Keep one parser for both forms and
+    // regression-test it from the packaged application contract.
+    [[nodiscard]] static bool parseEsp32P4Revision(const QString& output, int& major, int& minor);
 
     Q_INVOKABLE void refreshBundle();
     Q_INVOKABLE bool probeTarget(const QString& portName);
@@ -63,17 +70,18 @@ private:
     Operation operation_{Operation::none};
     QString operationOutput_;
     QString selectedPort_;
-    QString targetChip_{QStringLiteral("Not probed")};
+    QString targetChip_{QStringLiteral("Not checked")};
     QString firmwareVersion_{QStringLiteral("-")};
     QString expectedProtocol_{QStringLiteral("-")};
     QString revisionPolicy_;
     QString firmwareSha256_;
     QString firmwareImagePath_;
-    QString status_{QStringLiteral("Firmware Manager ready")};
+    QString status_{QStringLiteral("Firmware setup ready")};
     QString bundleStatus_{QStringLiteral("Checking firmware package...")};
     QString logText_;
     bool bundleReady_{false};
     bool flasherAvailable_{false};
     bool busy_{false};
     bool targetVerified_{false};
+    bool bootloaderHelpNeeded_{false};
 };
