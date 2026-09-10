@@ -13,6 +13,33 @@ SurfacePanel {
     property string monoFont: "Inter"
     property bool compact: false
     property int activeTab: 0
+    readonly property bool p0FirmwareCompatible: device.deviceVerified && device.protocolVersion === "1"
+    readonly property bool deployReady: controller.canDeploy && p0FirmwareCompatible
+    readonly property bool startReady:
+        p0FirmwareCompatible && profiles.hasProfiles && controller.selectedProfileDeployable &&
+        device.profileArmed && !controller.profileDirty && !device.running && !device.profileDeploying
+
+    function deployReason() {
+        if (device.running) return "Stop SMV output before deploying a profile."
+        if (device.profileDeploying) return "Profile deployment is already in progress."
+        if (!device.deviceVerified) return "Connect and verify an ARStack ESP32-P4 first."
+        if (!p0FirmwareCompatible) return "Firmware protocol mismatch. Open Configuration → Firmware to install the P0 firmware."
+        if (!profiles.hasProfiles) return "Load 4I+4V Quick Start or a compatible SCL first."
+        if (!controller.selectedProfileDeployable) return "The selected SCL stream is outside the P0 4I+4V device boundary."
+        return "Deploy the validated 4I+4V SV profile to the injector."
+    }
+
+    function startReason() {
+        if (device.running) return "SMV output is already running."
+        if (!device.deviceVerified) return "Connect and verify an ARStack ESP32-P4 first."
+        if (!p0FirmwareCompatible) return "Firmware protocol mismatch. Install the P0 firmware first."
+        if (!profiles.hasProfiles) return "Load 4I+4V Quick Start or a compatible SCL first."
+        if (!controller.selectedProfileDeployable) return "Selected profile is not deployable on the P0 4I+4V runtime."
+        if (controller.profileDirty) return "Profile changed. Deploy it again before Start."
+        if (!device.profileArmed) return "Deploy the validated profile before Start."
+        if (device.profileDeploying) return "Wait for profile deployment to finish."
+        return "Start 4I+4V Sampled Values output."
+    }
 
     implicitHeight: 94
     color: theme.surface2
@@ -66,6 +93,15 @@ SurfacePanel {
         Layout.alignment: Qt.AlignVCenter
     }
 
+    component RailLabel: Label {
+        color: ribbon.theme.muted
+        font.family: ribbon.uiFont
+        font.pixelSize: 7
+        font.weight: Font.DemiBold
+        font.letterSpacing: 0.35
+        verticalAlignment: Text.AlignVCenter
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -81,6 +117,30 @@ SurfacePanel {
             RibbonTab { text: "View"; checked: ribbon.activeTab === 1; onClicked: ribbon.activeTab = 1 }
             RibbonTab { text: "Engineering"; checked: ribbon.activeTab === 2; onClicked: ribbon.activeTab = 2 }
             Item { Layout.fillWidth: true }
+
+            RowLayout {
+                visible: !ribbon.compact
+                spacing: 9
+                RailLabel {
+                    text: ribbon.device.deviceVerified ? "DEVICE · VERIFIED" : "DEVICE · OFFLINE"
+                    color: ribbon.device.deviceVerified ? ribbon.theme.green : ribbon.theme.muted
+                }
+                Rectangle { width: 1; height: 11; color: ribbon.theme.lineSoft }
+                RailLabel {
+                    text: ribbon.device.deviceVerified ? "FW · P" + ribbon.device.protocolVersion : "FW · —"
+                    color: ribbon.p0FirmwareCompatible ? ribbon.theme.green : ribbon.theme.muted
+                }
+                Rectangle { width: 1; height: 11; color: ribbon.theme.lineSoft }
+                RailLabel {
+                    text: ribbon.profiles.referenceTemplateActive ? "PROFILE · 4I+4V" : (ribbon.profiles.hasProfiles ? "PROFILE · SCL" : "PROFILE · —")
+                    color: ribbon.profiles.hasProfiles ? ribbon.theme.textSoft : ribbon.theme.muted
+                }
+                Rectangle { width: 1; height: 11; color: ribbon.theme.lineSoft }
+                RailLabel {
+                    text: ribbon.device.running ? "OUTPUT · RUNNING" : (ribbon.device.profileArmed && !ribbon.controller.profileDirty ? "OUTPUT · ARMED" : "OUTPUT · SAFE")
+                    color: ribbon.device.running ? ribbon.theme.green : (ribbon.device.profileArmed ? ribbon.theme.accent : ribbon.theme.muted)
+                }
+            }
         }
 
         Rectangle { Layout.fillWidth: true; height: 1; color: ribbon.theme.lineSoft }
@@ -149,9 +209,9 @@ SurfacePanel {
                     onClicked: ribbon.controller.runReadinessCheck()
                 }
                 RibbonAction {
-                    text: "Configure"
+                    text: "Configuration"
                     iconSource: Qt.resolvedUrl("../assets/lucide/settings-2.svg")
-                    toolTipText: "Open Smart and Expert configuration"
+                    toolTipText: "Open profile, firmware and expert configuration"
                     onClicked: ribbon.controller.openConfiguration()
                 }
 
@@ -164,8 +224,8 @@ SurfacePanel {
                     text: ribbon.device.profileDeploying ? "Deploying…" : "Deploy"
                     iconSource: Qt.resolvedUrl("../assets/lucide/upload.svg")
                     implicitWidth: 86
-                    enabled: ribbon.controller.canDeploy
-                    toolTipText: "Deploy the validated SV profile"
+                    enabled: ribbon.deployReady
+                    toolTipText: ribbon.deployReason()
                     onClicked: ribbon.controller.deploySelectedProfile()
                 }
                 RibbonAction {
@@ -174,7 +234,7 @@ SurfacePanel {
                     iconSource: Qt.resolvedUrl("../assets/lucide/square.svg")
                     implicitWidth: 82
                     enabled: ribbon.device.deviceVerified && ribbon.device.running
-                    toolTipText: "Stop SMV output"
+                    toolTipText: ribbon.device.running ? "Stop SMV output" : "Output is already stopped"
                     onClicked: ribbon.device.stop()
                 }
                 RibbonAction {
@@ -182,8 +242,8 @@ SurfacePanel {
                     text: "Start"
                     iconSource: Qt.resolvedUrl("../assets/lucide/play.svg")
                     implicitWidth: 92
-                    enabled: ribbon.controller.canStart
-                    toolTipText: "Start validated SMV output"
+                    enabled: ribbon.startReady
+                    toolTipText: ribbon.startReason()
                     onClicked: ribbon.device.start()
                 }
             }
