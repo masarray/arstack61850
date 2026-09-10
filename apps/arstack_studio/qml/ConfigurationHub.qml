@@ -16,11 +16,19 @@ Item {
     FirmwareManager { id: firmwareManager }
 
     function openEngineeringFile() { profileInspector.openEngineeringFile() }
+    function showRecovery() { expertTabs.currentIndex = 1 }
+
+    Component.onCompleted: {
+        // A blank/old-firmware board cannot identify as an ARStack injector yet.
+        // Make recovery the first screen operators see while offline.
+        if (!hub.device.deviceVerified)
+            expertTabs.currentIndex = 1
+    }
 
     component ExpertTab: TabButton {
-        implicitHeight: 36
+        implicitHeight: 38
         font.family: hub.uiFont
-        font.pixelSize: 9
+        font.pixelSize: 10
         font.weight: checked ? Font.DemiBold : Font.Medium
         contentItem: Label {
             text: parent.text
@@ -38,8 +46,8 @@ Item {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                anchors.leftMargin: 28
-                anchors.rightMargin: 28
+                anchors.leftMargin: 24
+                anchors.rightMargin: 24
                 height: 2
                 color: hub.theme.accent
             }
@@ -48,25 +56,39 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        spacing: 8
+        spacing: 10
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.leftMargin: 4
-            Layout.rightMargin: 4
+            Layout.leftMargin: 6
+            Layout.rightMargin: 6
+            spacing: 12
             ColumnLayout {
-                spacing: 0
-                Label { text: "CONFIGURATION & RECOVERY"; color: hub.theme.muted; font.family: hub.uiFont; font.pixelSize: 7; font.weight: Font.Bold; font.letterSpacing: 0.9 }
-                Label { text: "Protocol, firmware & timing"; color: hub.theme.text; font.family: hub.uiFont; font.pixelSize: 14; font.weight: Font.DemiBold }
+                Layout.fillWidth: true
+                spacing: 1
+                Label {
+                    text: "SETUP & RECOVERY"
+                    color: hub.theme.muted
+                    font.family: hub.uiFont
+                    font.pixelSize: 8
+                    font.weight: Font.Bold
+                    font.letterSpacing: 0.9
+                }
+                Label {
+                    text: "Device, firmware & engineering"
+                    color: hub.theme.text
+                    font.family: hub.uiFont
+                    font.pixelSize: 16
+                    font.weight: Font.DemiBold
+                }
             }
-            Item { Layout.fillWidth: true }
             Label {
                 text: hub.device.deviceVerified
                     ? "ESP32-P4 · protocol v" + hub.device.protocolVersion + " · ID " + hub.device.deviceId.slice(-6)
-                    : "Offline / recovery"
-                color: hub.device.deviceVerified ? hub.theme.green : hub.theme.muted
+                    : "Recovery available"
+                color: hub.device.deviceVerified ? hub.theme.green : hub.theme.amber
                 font.family: hub.uiFont
-                font.pixelSize: 8
+                font.pixelSize: 9
                 font.weight: Font.DemiBold
             }
         }
@@ -74,13 +96,13 @@ Item {
         TabBar {
             id: expertTabs
             Layout.fillWidth: true
-            implicitHeight: 36
-            background: Rectangle { color: hub.theme.surface2; radius: 6 }
-            ExpertTab { text: "SV Profile" }
+            implicitHeight: 38
+            background: Rectangle { color: hub.theme.surface2; radius: 7 }
+            ExpertTab { text: "SV Setup" }
             ExpertTab { text: "Firmware" }
             ExpertTab { text: "Waveform" }
             ExpertTab { text: "PTP Lab" }
-            ExpertTab { text: "Device Protocol" }
+            ExpertTab { text: "Device" }
         }
 
         StackLayout {
