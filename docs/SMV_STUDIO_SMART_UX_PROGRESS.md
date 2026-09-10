@@ -65,10 +65,12 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 - ✅ Phasor/waveform visual noise is opt-in at startup rather than occupying the default workspace.
 - ✅ Firmware internals remain hidden during the normal update path; only exceptional BOOT/RESET recovery is surfaced.
 - ✅ Firmware update failure surfaces a concise operator message instead of silently dropping back to an idle state.
-- ✅ Advanced configuration header/typography is simplified and enlarged; tabs are now `Injection / Firmware / Waveform / Timing / Device` with a single `Device ready / Setup mode` status pill.
+- ✅ Advanced configuration header/typography is simplified and enlarged; tabs are `Injection / Firmware / Waveform / Timing / Device` with one `Device ready / Setup mode` status pill.
 - ✅ Telemetry is collapsed by default and reduced to one quiet status line; expanded mode contains only `Recent activity` and `Transmission` instead of duplicating channel state.
-- ⬜ Main workspace title and legacy top-level header/footer language still need simplification.
-- ⬜ Remove the remaining duplicate top-level device indicator and legacy keyboard-help noise from `Main.qml` normal view.
+- ✅ Main action ribbon now uses human-readable state labels instead of raw state-machine names and keeps Ready/Running copy intentionally short.
+- ✅ Injection value fields and current/voltage matrices were visually promoted above chrome/status elements.
+- ⬜ Main workspace title and the remaining legacy top-level header/footer language still need simplification in `Main.qml`.
+- ⬜ Remove the remaining duplicate top-level device indicator and keyboard-help noise from `Main.qml` normal view.
 - ⬜ Review default window density at 100%, 125%, 150%, and laptop resolutions after a packaged build is available.
 
 ## Robustness / crash resistance
@@ -84,16 +86,17 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 - ✅ Firmware update state exits deterministically on probe rejection/failure instead of hanging indefinitely.
 - ✅ Post-flash reconnect is bounded to six retry windows and waits for active discovery/verification instead of launching overlapping probes.
 - ✅ Live-edit write backlog is bounded and last-value-wins instead of growing with operator keystrokes.
+- ✅ Normal application shutdown performs a best-effort STOP before the control process exits while output is RUNNING.
 - 🟡 General hot-plug discovery remains periodic and lightweight; hardware acceptance is still needed for repeated unplug/replug cycles.
-- ⬜ Add a firmware session lease/watchdog so a GUI crash or control-link loss cannot leave an operator-owned RUN session transmitting indefinitely.
+- ⬜ Add a firmware session lease/watchdog so a hard GUI crash or control-link loss cannot leave an operator-owned RUN session transmitting indefinitely.
 - ⬜ Add regression tests for USB removal during READY and RUNNING.
 - ⬜ Add regression tests for malformed/slow serial responses and command timeouts.
 - ⬜ Add soak test for continuous 4000 fps operation plus repeated live edits.
 
 ## Current checkpoint
 
-Checkpoint E — **zero-configuration workflow + semantic firmware update + bounded live writes/reconnect + numeric firmware progress + operator-first visual hierarchy** is implemented in the branch.
+Checkpoint F — **zero-configuration workflow + semantic firmware update + bounded live writes/reconnect + numeric firmware progress + operator-first visual hierarchy + graceful STOP on normal exit** is implemented in the branch.
 
 Current validation state: **CI and hardware acceptance pending for the newest Smart UX head.** Do not treat this checkpoint as release-ready until those gates pass.
 
-Next implementation checkpoint after CI: top-level `Main.qml` chrome cleanup and failure-path regression coverage. The firmware session lease/watchdog should be implemented before claiming crash-safe RUN behavior, then both current-firmware and legacy-firmware paths need hardware acceptance.
+Next implementation checkpoint after CI: remaining top-level `Main.qml` chrome cleanup and failure-path regression coverage. A firmware session lease/watchdog is still required before claiming hard-crash-safe RUN behavior, followed by hardware acceptance of both current-firmware and legacy-firmware paths.
