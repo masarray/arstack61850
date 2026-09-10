@@ -54,11 +54,47 @@ int checkReferenceTemplate(int argc, char* argv[]) {
         << "ARStack 4I+4V 9-2LE reference template: PASS · Class A · ready · 4000 fps · 64 B";
     return 0;
 }
+
+int checkFirmwareContract(int argc, char* argv[]) {
+    QCoreApplication app(argc, argv);
+    FirmwareManager firmware;
+    const bool valid = firmware.bundleReady() && firmware.flasherAvailable() &&
+        firmware.firmwareVersion() == QStringLiteral(ARSTACK_STUDIO_VERSION) &&
+        firmware.expectedProtocol() == QStringLiteral("1") &&
+        firmware.firmwareSha256().size() == 64;
+    if (!valid) {
+        qCritical().noquote() << "Firmware bundle contract: FAIL ·" << firmware.bundleStatus();
+        return 4;
+    }
+    qInfo().noquote() << "Firmware bundle contract: PASS ·" << firmware.bundleStatus();
+    return 0;
+}
+
+int checkP0ControllerPolicy(int argc, char* argv[]) {
+    QCoreApplication app(argc, argv);
+    StudioDeviceController device;
+    if (device.start()) {
+        qCritical().noquote() << "P0 controller policy: FAIL · unverified device was allowed to START";
+        return 5;
+    }
+    if (device.deployProfile({})) {
+        qCritical().noquote() << "P0 controller policy: FAIL · incompatible/unverified device accepted deploy";
+        return 6;
+    }
+    qInfo().noquote() << "P0 controller policy: PASS · unverified START/DEPLOY fail closed";
+    return 0;
+}
 } // namespace
 
 int main(int argc, char* argv[]) {
     if (hasArgument(argc, argv, "--check-reference-template")) {
         return checkReferenceTemplate(argc, argv);
+    }
+    if (hasArgument(argc, argv, "--check-firmware-contract")) {
+        return checkFirmwareContract(argc, argv);
+    }
+    if (hasArgument(argc, argv, "--check-p0-policy")) {
+        return checkP0ControllerPolicy(argc, argv);
     }
 
     QGuiApplication app(argc, argv);
