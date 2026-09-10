@@ -41,9 +41,9 @@ SurfacePanel {
         function onFirmwareUpdateFinished(success) {
             if (success) {
                 ribbon.updatePromptDeferred = false
-                controller.showMessage("Firmware updated. ARStack Studio is preparing 4I+4V injection.", false)
+                controller.showMessage("Firmware updated. Preparing injection…", false)
             } else {
-                controller.showMessage("Firmware update did not complete. Open Advanced only if recovery help is needed.", true)
+                controller.showMessage("Firmware update did not complete. Open Advanced if recovery help is needed.", true)
             }
         }
     }
@@ -56,11 +56,45 @@ SurfacePanel {
         }
     }
 
+    readonly property string displayState: {
+        if (smartSession.state === "WAITING FOR DEVICE") return "Connect device"
+        if (smartSession.state === "DEVICE FOUND" || smartSession.state === "CONNECTING") return "Connecting"
+        if (smartSession.state === "FIRMWARE UPDATE") return "Firmware update available"
+        if (smartSession.state === "UPDATING FIRMWARE") return "Updating firmware"
+        if (smartSession.state === "UPDATE NEEDS BOOT") return "Download mode required"
+        if (smartSession.state === "PREPARING 4I+4V") return "Preparing"
+        if (smartSession.state === "READY") return "Ready"
+        if (smartSession.state === "RUNNING") return "Running"
+        if (smartSession.state === "PROFILE BLOCKED") return "Profile unavailable"
+        if (smartSession.state === "SETUP ERROR") return "Setup issue"
+        return smartSession.state
+    }
+
+    readonly property color smartStateColor: {
+        if (smartSession.state === "RUNNING" || smartSession.state === "READY") return theme.green
+        if (smartSession.state === "CONNECTING" || smartSession.state === "PREPARING 4I+4V" ||
+            smartSession.state === "FIRMWARE UPDATE" || smartSession.state === "UPDATING FIRMWARE" ||
+            smartSession.state === "UPDATE NEEDS BOOT") return theme.amber
+        if (smartSession.state === "DEVICE FOUND") return theme.accent
+        if (smartSession.state === "PROFILE BLOCKED" || smartSession.state === "SETUP ERROR") return theme.red
+        return theme.muted
+    }
+
+    function startReason() {
+        if (device.running) return "SMV output is already running."
+        if (smartSession.firmwareUpdateRequired) return "Update firmware before starting injection."
+        if (smartSession.updatingFirmware) return "Firmware update is in progress."
+        if (smartSession.state === "CONNECTING") return "Connecting to the device automatically."
+        if (smartSession.state === "PREPARING 4I+4V") return "Preparing the default 4I+4V injection automatically."
+        if (smartSession.state === "WAITING FOR DEVICE") return "Connect ESP32-P4; Studio will detect it automatically."
+        return smartSession.statusText
+    }
+
     Dialog {
         id: updateDialog
         modal: true
         anchors.centerIn: Overlay.overlay
-        width: 430
+        width: 400
         title: "Firmware update"
         closePolicy: Popup.NoAutoClose
 
@@ -75,9 +109,7 @@ SurfacePanel {
             spacing: 12
             Label {
                 Layout.fillWidth: true
-                text: smartSession.deviceFirmwareVersion.length
-                    ? "ESP32-P4 is running ARStack firmware v" + smartSession.deviceFirmwareVersion + "."
-                    : "ESP32-P4 is running legacy ARStack firmware."
+                text: "A newer ARStack firmware is included with this Studio build."
                 color: ribbon.theme.text
                 font.family: ribbon.uiFont
                 font.pixelSize: 13
@@ -86,18 +118,10 @@ SurfacePanel {
             }
             Label {
                 Layout.fillWidth: true
-                text: "Update to v" + smartSession.expectedFirmwareVersion + " now? The firmware is already included with ARStack Studio."
+                text: "Update now? Studio will install it, restart the board, reconnect, and return to Ready automatically."
                 color: ribbon.theme.textSoft
                 font.family: ribbon.uiFont
                 font.pixelSize: 11
-                wrapMode: Text.WordWrap
-            }
-            Label {
-                Layout.fillWidth: true
-                text: "SMV output will be stopped safely if required. Studio will flash, reset, reconnect, and prepare the default 4I+4V profile automatically."
-                color: ribbon.theme.muted
-                font.family: ribbon.uiFont
-                font.pixelSize: 10
                 wrapMode: Text.WordWrap
             }
             RowLayout {
@@ -115,15 +139,15 @@ SurfacePanel {
                 CalmButton {
                     theme: ribbon.theme
                     uiFont: ribbon.uiFont
-                    text: "Update now"
+                    text: "Update"
                     tone: "accent"
-                    implicitWidth: 118
+                    implicitWidth: 110
                     onClicked: {
                         if (smartSession.beginFirmwareUpdate()) {
                             ribbon.updatePromptDeferred = false
                             updateDialog.close()
                         } else {
-                            controller.showMessage("Firmware update could not start. Open Advanced for recovery details.", true)
+                            controller.showMessage("Firmware update could not start. Open Advanced for recovery help.", true)
                         }
                     }
                 }
@@ -131,27 +155,7 @@ SurfacePanel {
         }
     }
 
-    readonly property color smartStateColor: {
-        if (smartSession.state === "RUNNING" || smartSession.state === "READY") return theme.green
-        if (smartSession.state === "CONNECTING" || smartSession.state === "PREPARING 4I+4V" ||
-            smartSession.state === "FIRMWARE UPDATE" || smartSession.state === "UPDATING FIRMWARE" ||
-            smartSession.state === "UPDATE NEEDS BOOT") return theme.amber
-        if (smartSession.state === "DEVICE FOUND") return theme.accent
-        if (smartSession.state === "PROFILE BLOCKED" || smartSession.state === "SETUP ERROR") return theme.red
-        return theme.muted
-    }
-
-    function startReason() {
-        if (device.running) return "SMV output is already running."
-        if (smartSession.firmwareUpdateRequired) return "Firmware update is required before injection."
-        if (smartSession.updatingFirmware) return "Firmware update is in progress."
-        if (smartSession.state === "CONNECTING") return "ARStack Studio is connecting automatically."
-        if (smartSession.state === "PREPARING 4I+4V") return "Preparing the default 4I+4V profile automatically…"
-        if (smartSession.state === "WAITING FOR DEVICE") return "Connect the ESP32-P4; ARStack Studio will detect it automatically."
-        return smartSession.statusText
-    }
-
-    implicitHeight: 94
+    implicitHeight: 88
     color: theme.surface2
     border.color: theme.line
 
@@ -165,11 +169,11 @@ SurfacePanel {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.leftMargin: 11
-        anchors.rightMargin: 11
+        anchors.leftMargin: 12
+        anchors.rightMargin: 12
         anchors.topMargin: 8
         anchors.bottomMargin: 8
-        spacing: 7
+        spacing: 6
 
         RowLayout {
             Layout.fillWidth: true
@@ -183,20 +187,29 @@ SurfacePanel {
                 color: ribbon.smartStateColor
             }
             Label {
-                text: smartSession.state
+                text: ribbon.displayState
                 color: ribbon.smartStateColor
                 font.family: ribbon.uiFont
-                font.pixelSize: 10
-                font.weight: Font.Bold
-                font.letterSpacing: 0.45
+                font.pixelSize: 11
+                font.weight: Font.DemiBold
             }
             Label {
-                visible: !ribbon.compact
+                visible: !ribbon.compact && smartSession.state !== "READY" && smartSession.state !== "RUNNING"
                 text: smartSession.statusText
                 color: ribbon.theme.muted
                 font.family: ribbon.uiFont
-                font.pixelSize: 9
+                font.pixelSize: 10
                 elide: Text.ElideRight
+                Layout.fillWidth: true
+            }
+            Label {
+                visible: !ribbon.compact && (smartSession.state === "READY" || smartSession.state === "RUNNING")
+                text: smartSession.state === "RUNNING"
+                    ? "4I + 4V · 4000 samples/s · live"
+                    : "4I + 4V · 4000 samples/s"
+                color: ribbon.theme.muted
+                font.family: ribbon.uiFont
+                font.pixelSize: 10
                 Layout.fillWidth: true
             }
             Item { Layout.fillWidth: ribbon.compact }
@@ -205,8 +218,8 @@ SurfacePanel {
                 uiFont: ribbon.uiFont
                 text: "Advanced"
                 implicitHeight: 28
-                font.pixelSize: 9
-                toolTipText: "Firmware, SCL, waveform stress, PTP and diagnostics"
+                font.pixelSize: 10
+                toolTipText: "Firmware, engineering profile, waveform and timing tools"
                 onClicked: ribbon.controller.openConfiguration()
             }
         }
@@ -217,21 +230,26 @@ SurfacePanel {
             spacing: 6
 
             ActionButton {
+                visible: !smartSession.updatingFirmware && !smartSession.updateNeedsBootloaderHelp
                 text: "Balanced"
                 iconSource: Qt.resolvedUrl("../assets/lucide/scale.svg")
                 toolTipText: "Apply balanced three-phase values"
-                enabled: !smartSession.updatingFirmware
                 onClicked: ribbon.controller.balanced()
             }
             ActionButton {
+                visible: !smartSession.updatingFirmware && !smartSession.updateNeedsBootloaderHelp
                 text: "Zero"
                 iconSource: Qt.resolvedUrl("../assets/lucide/circle-off.svg")
-                toolTipText: "Set every current and voltage magnitude to zero"
-                enabled: !smartSession.updatingFirmware
+                toolTipText: "Set all current and voltage magnitudes to zero"
                 onClicked: ribbon.controller.zeroAll()
             }
 
-            Rectangle { width: 1; height: 28; color: ribbon.theme.lineSoft }
+            Rectangle {
+                visible: !ribbon.compact && !smartSession.updatingFirmware && !smartSession.updateNeedsBootloaderHelp
+                width: 1
+                height: 28
+                color: ribbon.theme.lineSoft
+            }
 
             ActionButton {
                 visible: !ribbon.compact && !smartSession.updatingFirmware && !smartSession.updateNeedsBootloaderHelp
@@ -259,14 +277,19 @@ SurfacePanel {
             RowLayout {
                 visible: smartSession.updatingFirmware
                 spacing: 8
+                Label {
+                    visible: !ribbon.compact
+                    text: "Updating firmware"
+                    color: ribbon.theme.textSoft
+                    font.family: ribbon.uiFont
+                    font.pixelSize: 10
+                }
                 ProgressBar {
-                    id: firmwareProgress
                     indeterminate: FirmwareService.flashProgress < 0
                     from: 0
                     to: 100
                     value: FirmwareService.flashProgress < 0 ? 0 : FirmwareService.flashProgress
                     Layout.preferredWidth: ribbon.compact ? 125 : 190
-                    Layout.alignment: Qt.AlignVCenter
                 }
                 Label {
                     visible: FirmwareService.flashProgress >= 0
@@ -282,7 +305,7 @@ SurfacePanel {
 
             Label {
                 visible: smartSession.updateNeedsBootloaderHelp
-                text: "BOOT + RESET required"
+                text: ribbon.compact ? "BOOT + RESET" : "Put the board in Download mode"
                 color: ribbon.theme.amber
                 font.family: ribbon.uiFont
                 font.pixelSize: 10
@@ -290,9 +313,9 @@ SurfacePanel {
             }
             ActionButton {
                 visible: smartSession.updateNeedsBootloaderHelp
-                text: "Retry update"
+                text: "Retry"
                 tone: "accent"
-                implicitWidth: 118
+                implicitWidth: 96
                 toolTipText: smartSession.updateStatus
                 onClicked: smartSession.retryFirmwareUpdate()
             }
@@ -301,7 +324,7 @@ SurfacePanel {
                 visible: smartSession.firmwareUpdateRequired && !smartSession.updatingFirmware && !smartSession.updateNeedsBootloaderHelp
                 text: "Update firmware"
                 tone: "accent"
-                implicitWidth: 132
+                implicitWidth: 136
                 onClicked: {
                     ribbon.updatePromptDeferred = false
                     updateDialog.open()
@@ -314,7 +337,7 @@ SurfacePanel {
                 text: "Start"
                 iconSource: Qt.resolvedUrl("../assets/lucide/play.svg")
                 tone: "success"
-                implicitWidth: 132
+                implicitWidth: 140
                 enabled: smartSession.startReady
                 toolTipText: ribbon.startReason()
                 onClicked: device.start()
@@ -324,7 +347,7 @@ SurfacePanel {
                 text: "Stop"
                 iconSource: Qt.resolvedUrl("../assets/lucide/square.svg")
                 tone: "danger"
-                implicitWidth: 132
+                implicitWidth: 140
                 enabled: device.deviceVerified
                 toolTipText: "Stop Sampled Values output"
                 onClicked: device.stop()
