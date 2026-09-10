@@ -26,6 +26,8 @@ qt_add_executable(arstack_studio
     src/StudioDeviceController.hpp
     src/FirmwareManager.cpp
     src/FirmwareManager.hpp
+    src/SmartSessionController.cpp
+    src/SmartSessionController.hpp
 )
 
 qt_add_qml_module(arstack_studio
