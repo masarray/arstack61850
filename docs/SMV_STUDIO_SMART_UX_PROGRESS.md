@@ -29,9 +29,12 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 ## Live values / responsiveness
 
 - ✅ Current and voltage edits apply to connected firmware live.
-- ✅ Magnitude and phase text edits are coalesced with a 90 ms debounce to avoid serial command storms while preserving immediate-feeling operation.
-- ⬜ Frequency editing still needs the same coalescing policy.
-- ⬜ Add bounded native command queue / last-value-wins protection so correctness does not depend on QML timing.
+- ✅ Magnitude and phase text edits are coalesced with a 90 ms UI debounce to avoid serial command storms while preserving immediate-feeling operation.
+- ✅ Frequency and signal writes now pass through a bounded native last-value-wins queue in `StudioDeviceController`.
+- ✅ Native queue capacity is bounded by design to one pending frequency plus the eight fixed 4I+4V channel IDs; it cannot grow with repeated typing.
+- ✅ Native live writes flush on a short timer, and START forces the newest queued values to the device before enabling output.
+- ✅ Disconnect/unverify clears pending live writes; ZERO cancels pending channel writes so an old queued value cannot reappear after zeroing.
+- 🟡 Native live-write coalescing still needs hardware feel/latency acceptance during rapid edits.
 
 ## Firmware intelligence
 
@@ -71,6 +74,7 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 - ✅ Reconnect preparation is delayed briefly after identity verification so existing SHOW / PROFILE SHOW responses can settle before automatic profile synchronization.
 - ✅ Firmware update completion is not trusted until the newly reconnected firmware reports the expected semantic version.
 - ✅ Firmware update state exits deterministically on probe rejection/failure instead of hanging indefinitely.
+- ✅ Live-edit write backlog is bounded and last-value-wins instead of growing with operator keystrokes.
 - ⬜ Add bounded retry/backoff for disconnect/reconnect and serial errors.
 - ⬜ Add regression tests for USB removal during READY and RUNNING.
 - ⬜ Add regression tests for malformed/slow serial responses and command timeouts.
@@ -78,8 +82,8 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 
 ## Current checkpoint
 
-Checkpoint B — **zero-configuration normal path + native smart-session orchestration + semantic firmware update flow + native semantic safety gate** is implemented in the branch.
+Checkpoint C — **zero-configuration workflow + semantic firmware update + bounded native live-write coalescing** is implemented in the branch.
 
 Current validation state: **CI and hardware acceptance pending for the newest Smart UX head.** Do not treat this checkpoint as release-ready until those gates pass.
 
-Next implementation checkpoint after CI: native command-queue hardening, frequency coalescing, final main-window visual cleanup, then hardware acceptance of both current-firmware and legacy-firmware paths.
+Next implementation checkpoint after CI: final main-window visual cleanup, centralize firmware-manager ownership, bounded reconnect/backoff, then hardware acceptance of both current-firmware and legacy-firmware paths.
