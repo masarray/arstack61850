@@ -17,6 +17,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: arstack-studio-release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   ARSTACK_VERSION: '0.1.0'
   QT_VERSION: '6.10.3'
