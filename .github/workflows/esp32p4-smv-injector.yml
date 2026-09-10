@@ -49,6 +49,12 @@ jobs:
       - name: Select ESP32-P4 target
         run: source /opt/esp/idf/export.sh && idf.py set-target esp32p4
 
+      - name: Verify P0 pre-v3 silicon policy
+        run: |
+          set -euo pipefail
+          grep -qx 'CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y' sdkconfig
+          echo 'ESP32-P4 pre-v3 build policy: PASS'
+
       - name: Build firmware
         run: source /opt/esp/idf/export.sh && idf.py build
 
@@ -74,6 +80,7 @@ jobs:
               "schema": "arstack.studio.firmware.v1",
               "product": "ARStack ESP32-P4 SMV Injector",
               "chip": "esp32p4",
+              "chipRevisionPolicy": "pre-v3",
               "version": os.environ["ARSTACK_FIRMWARE_VERSION"],
               "protocol": int(os.environ["ARSTACK_PROTOCOL_VERSION"]),
               "capabilities": ["SMV-4I4V", "PROFILE", "LIVE-SETPOINTS"],
@@ -95,10 +102,11 @@ jobs:
           actual = hashlib.sha256(payload).hexdigest()
           assert manifest['schema'] == 'arstack.studio.firmware.v1'
           assert manifest['chip'] == 'esp32p4'
+          assert manifest['chipRevisionPolicy'] == 'pre-v3'
           assert manifest['flashOffset'] == 0
           assert manifest['protocol'] == 1
           assert actual == manifest['sha256']
-          print(f"Firmware package: PASS · {manifest['image']} · SHA-256 {actual}")
+          print(f"Firmware package: PASS · {manifest['image']} · pre-v3 · SHA-256 {actual}")
           PY
 
       - name: Stage Studio firmware package
