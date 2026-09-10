@@ -7,6 +7,7 @@
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
@@ -36,16 +37,56 @@ constexpr char kTag[] = "ar_smv_ctrl";
 constexpr std::array<std::string_view, 8> kChannelNames{
     "IA", "IB", "IC", "IN", "UA", "UB", "UC", "UN"};
 constexpr std::string_view kTokenDelimiters{" \t\r\n"};
+constexpr std::uint32_t kControlLeaseTimeoutMs = 2500U;
 
 SvLiveSignalBank g_signal_bank;
 std::atomic<bool> g_running{false};
 std::atomic<bool> g_start_request{false};
 std::atomic<TaskHandle_t> g_publisher_task{nullptr};
+std::atomic<bool> g_control_lease_seen{false};
+std::atomic<std::uint32_t> g_last_heartbeat_ms{0U};
 
 void wake_publisher() noexcept {
     const auto task = g_publisher_task.load(std::memory_order_acquire);
     if (task != nullptr) {
         xTaskNotifyGive(task);
+    }
+}
+
+std::uint32_t monotonic_ms() noexcept {
+    return static_cast<std::uint32_t>(
+        static_cast<std::uint64_t>(esp_timer_get_time()) / 1000ULL);
+}
+
+void record_control_heartbeat() noexcept {
+    g_last_heartbeat_ms.store(monotonic_ms(), std::memory_order_release);
+    g_control_lease_seen.store(true, std::memory_order_release);
+}
+
+void clear_control_lease() noexcept {
+    g_control_lease_seen.store(false, std::memory_order_release);
+    g_last_heartbeat_ms.store(0U, std::memory_order_release);
+}
+
+void enforce_control_lease() noexcept {
+    if (!g_running.load(std::memory_order_acquire) ||
+        !g_control_lease_seen.load(std::memory_order_acquire)) {
+        return;
+    }
+
+    const auto now = monotonic_ms();
+    const auto last = g_last_heartbeat_ms.load(std::memory_order_acquire);
+    const auto elapsed = static_cast<std::uint32_t>(now - last);
+    if (elapsed <= kControlLeaseTimeoutMs) return;
+
+    bool expected = true;
+    if (g_running.compare_exchange_strong(expected, false, std::memory_order_acq_rel)) {
+        g_start_request.store(false, std::memory_order_release);
+        clear_control_lease();
+        wake_publisher();
+        ESP_LOGW(kTag,
+                 "Control session lease expired after %lu ms; SV transmission stopped",
+                 static_cast<unsigned long>(elapsed));
     }
 }
 
@@ -123,7 +164,7 @@ void print_identity() noexcept {
     const esp_app_desc_t* app = esp_app_get_description();
     const char* version = app != nullptr ? app->version : "unknown";
     ESP_LOGI(kTag,
-             "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 device_id=%02X%02X%02X%02X%02X%02X firmware=%s capabilities=SMV-4I4V,LIVE-SETPOINTS",
+             "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 device_id=%02X%02X%02X%02X%02X%02X firmware=%s capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE",
              static_cast<unsigned>(device_id[0]), static_cast<unsigned>(device_id[1]),
              static_cast<unsigned>(device_id[2]), static_cast<unsigned>(device_id[3]),
              static_cast<unsigned>(device_id[4]), static_cast<unsigned>(device_id[5]),
@@ -279,6 +320,17 @@ void handle_line(char* line) noexcept {
     if (command == nullptr) return;
     uppercase_ascii(command);
 
+    if (std::strcmp(command, "HEARTBEAT") == 0) {
+        if (has_extra_token(&save)) {
+            ESP_LOGE(kTag, "Usage: HEARTBEAT");
+        } else {
+            // Intentionally silent: Studio sends this frequently while it owns
+            // the control session, so it must not create serial/log noise.
+            record_control_heartbeat();
+        }
+        return;
+    }
+
     if (std::strcmp(command, "IDENTIFY") == 0) {
         if (has_extra_token(&save)) ESP_LOGE(kTag, "Usage: IDENTIFY");
         else print_identity();
@@ -302,6 +354,7 @@ void handle_line(char* line) noexcept {
             return;
         }
         g_running.store(false, std::memory_order_release);
+        clear_control_lease();
         wake_publisher();
         ESP_LOGI(kTag, "STOP accepted: SV transmission suppressed");
         return;
@@ -477,6 +530,7 @@ void live_control_initialize(
     static_cast<void>(g_signal_bank.publish(initial));
     g_running.store(false, std::memory_order_release);
     g_start_request.store(false, std::memory_order_release);
+    clear_control_lease();
 }
 
 void live_control_bind_publisher_task(const TaskHandle_t task) noexcept {
@@ -486,6 +540,7 @@ void live_control_bind_publisher_task(const TaskHandle_t task) noexcept {
 void live_control_force_stop() noexcept {
     g_running.store(false, std::memory_order_release);
     g_start_request.store(false, std::memory_order_release);
+    clear_control_lease();
     wake_publisher();
 }
 
@@ -512,6 +567,8 @@ void live_control_task(void*) noexcept {
     bool discard_until_eol = false;
 
     while (true) {
+        enforce_control_lease();
+
         const int input = std::fgetc(stdin);
         if (input == EOF) {
             std::clearerr(stdin);
