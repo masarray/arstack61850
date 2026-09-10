@@ -22,6 +22,7 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 - ✅ START remains an explicit operator action; the application never auto-starts SV output.
 - ✅ Normal workflow exposes one large START or STOP action, not both competing at once.
 - ✅ Phasor and waveform views start collapsed; operator can opt in when useful.
+- ✅ Normal session orchestration now lives in native `SmartSessionController` instead of ribbon timing logic.
 - 🟡 Automatic profile preparation must be hardware-tested across app launch, USB replug, STOP/START, and ESP power-cycle.
 
 ## Live values / responsiveness
@@ -48,6 +49,7 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 - ✅ Primary ribbon reduced to smart state + Balanced + Zero + optional views + Advanced + START/STOP.
 - ✅ Low-level profile deployment is hidden from normal operation.
 - ✅ Advanced/recovery functionality remains available rather than being deleted.
+- ✅ Phasor/waveform visual noise is opt-in at startup rather than occupying the default workspace.
 - ⬜ Main workspace title and legacy header/footer language still need simplification.
 - ⬜ Remove duplicate device/status indicators and legacy keyboard-help noise from normal view.
 - ⬜ Advanced window needs final progressive-disclosure cleanup and larger minimum typography.
@@ -59,7 +61,8 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 - ✅ Profile deployment remains stopped-only and fail-closed.
 - ✅ Firmware package/target/hash checks remain fail-closed.
 - ✅ Startup discovery race was removed; initial probe and hot-plug watchdog are serialized by state.
-- ⬜ Move smart-session orchestration from QML into one C++ state machine (`NO_DEVICE / CONNECTING / UPDATE_REQUIRED / PREPARING / READY / RUNNING / ERROR`).
+- ✅ Smart-session orchestration moved into one native C++ state machine (`WAITING FOR DEVICE / DEVICE FOUND / CONNECTING / FIRMWARE UPDATE / PREPARING 4I+4V / READY / RUNNING / ERROR`).
+- ✅ Reconnect preparation is delayed briefly after identity verification so existing SHOW / PROFILE SHOW responses can settle before an automatic deploy.
 - ⬜ Add bounded retry/backoff for disconnect/reconnect and serial errors.
 - ⬜ Add regression tests for USB removal during READY and RUNNING.
 - ⬜ Add regression tests for malformed/slow serial responses and command timeouts.
@@ -67,6 +70,6 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 
 ## Current checkpoint
 
-Checkpoint A — **zero-configuration normal path** is implemented in the branch and awaiting CI + hardware acceptance.
+Checkpoint A — **zero-configuration normal path + native smart-session orchestration** is implemented in the branch and awaiting CI + hardware acceptance.
 
-Next implementation checkpoint: **semantic firmware identity + automatic update UX**, followed by moving session orchestration into native C++ and final visual cleanup.
+Next implementation checkpoint: **semantic firmware identity + automatic update UX**, followed by native command-queue hardening and final visual cleanup.
