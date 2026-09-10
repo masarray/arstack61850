@@ -42,6 +42,8 @@ SurfacePanel {
             if (success) {
                 ribbon.updatePromptDeferred = false
                 controller.showMessage("Firmware updated. ARStack Studio is preparing 4I+4V injection.", false)
+            } else {
+                controller.showMessage("Firmware update did not complete. Open Advanced only if recovery help is needed.", true)
             }
         }
     }
@@ -254,11 +256,28 @@ SurfacePanel {
 
             Item { Layout.fillWidth: true }
 
-            ProgressBar {
+            RowLayout {
                 visible: smartSession.updatingFirmware
-                indeterminate: true
-                Layout.preferredWidth: ribbon.compact ? 130 : 210
-                Layout.alignment: Qt.AlignVCenter
+                spacing: 8
+                ProgressBar {
+                    id: firmwareProgress
+                    indeterminate: FirmwareService.flashProgress < 0
+                    from: 0
+                    to: 100
+                    value: FirmwareService.flashProgress < 0 ? 0 : FirmwareService.flashProgress
+                    Layout.preferredWidth: ribbon.compact ? 125 : 190
+                    Layout.alignment: Qt.AlignVCenter
+                }
+                Label {
+                    visible: FirmwareService.flashProgress >= 0
+                    text: FirmwareService.flashProgress + "%"
+                    color: ribbon.theme.textSoft
+                    font.family: ribbon.monoFont
+                    font.pixelSize: 10
+                    font.weight: Font.DemiBold
+                    Layout.preferredWidth: 36
+                    horizontalAlignment: Text.AlignRight
+                }
             }
 
             Label {
