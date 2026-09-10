@@ -2,6 +2,7 @@
 
 #include "FirmwareManager.hpp"
 #include "SclProfileModel.hpp"
+#include "SmartSessionController.hpp"
 #include "StudioDeviceController.hpp"
 
 #include <QCoreApplication>
@@ -135,6 +136,7 @@ int main(int argc, char* argv[]) {
     qmlRegisterType<SclProfileModel>("ARStack.Studio", 1, 0, "SclProfileModel");
     qmlRegisterType<StudioDeviceController>("ARStack.Studio", 1, 0, "DeviceController");
     qmlRegisterType<FirmwareManager>("ARStack.Studio", 1, 0, "FirmwareManager");
+    qmlRegisterType<SmartSessionController>("ARStack.Studio", 1, 0, "SmartSessionController");
 
     QQmlApplicationEngine engine;
     QObject::connect(
