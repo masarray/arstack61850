@@ -34,6 +34,8 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 - ✅ Native queue capacity is bounded by design to one pending frequency plus the eight fixed 4I+4V channel IDs; it cannot grow with repeated typing.
 - ✅ Native live writes flush on a short timer, and START forces the newest queued values to the device before enabling output.
 - ✅ Disconnect/unverify clears pending live writes; ZERO cancels pending channel writes so an old queued value cannot reappear after zeroing.
+- ✅ Numeric controls now use a stronger visual hierarchy (larger value text, clearer focus state, larger suffixes) because injection values are the primary operator task.
+- ✅ Current/voltage matrices use larger channel labels, roomier rows, simpler `Channel / Value / Phase` headings, and clearer operator-facing validation messages.
 - 🟡 Native live-write coalescing still needs hardware feel/latency acceptance during rapid edits.
 
 ## Firmware intelligence
@@ -44,27 +46,30 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 - ✅ ESP-IDF project version is pinned to `0.1.0` for deterministic semantic firmware identity.
 - ✅ New firmware `IDENTIFY` appends `firmware=<version>` and `capabilities=SMV-4I4V,LIVE-SETPOINTS` while preserving the older identity prefix for backwards compatibility.
 - ✅ Smart session distinguishes current firmware from legacy/outdated firmware. Missing semantic version is treated as legacy rather than silently accepted.
-- ✅ Friendly `Firmware update -> Update now?` operator prompt is implemented.
+- ✅ Friendly firmware-update prompt is implemented with concise operator wording.
 - 🟡 One-click update coordinator is implemented: safe STOP if required -> release serial -> ROM probe -> verified bundled flash -> reset -> reconnect -> verify semantic identity -> prepare 4I+4V.
-- 🟡 If automatic ROM entry fails, normal UI falls back to BOOT + RESET guidance and `Retry update`.
-- ✅ Smart Session and Advanced now share one application-wide `FirmwareService`; package/probe/progress state has a single authority.
+- 🟡 If automatic ROM entry fails, normal UI falls back to BOOT + RESET guidance and `Retry`.
+- ✅ Smart Session and Advanced share one application-wide `FirmwareService`; package/probe/progress state has a single authority.
 - ✅ Firmware Manager parses real espflash percentage tokens when available and exposes `flashProgress` 0..100; unknown formats safely remain indeterminate.
-- ✅ Packaged firmware contract now regression-checks progress parsing, including safe fallback for missing/invalid percentages.
+- ✅ Packaged firmware contract regression-checks progress parsing, including safe fallback for missing/invalid percentages.
 - 🟡 Firmware update UI shows numeric progress when espflash emits percentages and automatically falls back to indeterminate during probe/reset or unknown output.
 - ⬜ Hardware acceptance of legacy-firmware -> one-click update -> reconnect -> READY is still required.
 
 ## Operator UI simplification
 
 - ✅ Primary ribbon reduced to smart state + Balanced + Zero + optional views + Advanced + START/STOP.
+- ✅ Smart-session enum names are translated to operator-facing states such as `Connect device`, `Connecting`, `Preparing`, `Ready`, `Running`, and `Firmware update available`.
+- ✅ Firmware update dialog is shortened to one decision and hides bootloader/SHA/protocol details unless recovery fails.
 - ✅ Low-level profile deployment is hidden from normal operation.
 - ✅ Advanced/recovery functionality remains available rather than being deleted.
 - ✅ Phasor/waveform visual noise is opt-in at startup rather than occupying the default workspace.
 - ✅ Firmware internals remain hidden during the normal update path; only exceptional BOOT/RESET recovery is surfaced.
-- ✅ Firmware update failure now surfaces a concise operator message instead of silently dropping back to an idle state.
-- ⬜ Main workspace title and legacy header/footer language still need simplification.
-- ⬜ Remove duplicate device/status indicators and legacy keyboard-help noise from normal view.
-- ⬜ Advanced window needs final progressive-disclosure cleanup and larger minimum typography.
-- ⬜ Review default window density at 100%, 125%, 150%, and laptop resolutions.
+- ✅ Firmware update failure surfaces a concise operator message instead of silently dropping back to an idle state.
+- ✅ Advanced configuration header/typography is simplified and enlarged; tabs are now `Injection / Firmware / Waveform / Timing / Device` with a single `Device ready / Setup mode` status pill.
+- ✅ Telemetry is collapsed by default and reduced to one quiet status line; expanded mode contains only `Recent activity` and `Transmission` instead of duplicating channel state.
+- ⬜ Main workspace title and legacy top-level header/footer language still need simplification.
+- ⬜ Remove the remaining duplicate top-level device indicator and legacy keyboard-help noise from `Main.qml` normal view.
+- ⬜ Review default window density at 100%, 125%, 150%, and laptop resolutions after a packaged build is available.
 
 ## Robustness / crash resistance
 
@@ -80,14 +85,15 @@ The normal operator must not need to understand SCL Class A, profile deployment,
 - ✅ Post-flash reconnect is bounded to six retry windows and waits for active discovery/verification instead of launching overlapping probes.
 - ✅ Live-edit write backlog is bounded and last-value-wins instead of growing with operator keystrokes.
 - 🟡 General hot-plug discovery remains periodic and lightweight; hardware acceptance is still needed for repeated unplug/replug cycles.
+- ⬜ Add a firmware session lease/watchdog so a GUI crash or control-link loss cannot leave an operator-owned RUN session transmitting indefinitely.
 - ⬜ Add regression tests for USB removal during READY and RUNNING.
 - ⬜ Add regression tests for malformed/slow serial responses and command timeouts.
 - ⬜ Add soak test for continuous 4000 fps operation plus repeated live edits.
 
 ## Current checkpoint
 
-Checkpoint D — **zero-configuration workflow + semantic firmware update + shared firmware authority + bounded native live writes + bounded post-flash reconnect + numeric flash progress** is implemented in the branch.
+Checkpoint E — **zero-configuration workflow + semantic firmware update + bounded live writes/reconnect + numeric firmware progress + operator-first visual hierarchy** is implemented in the branch.
 
 Current validation state: **CI and hardware acceptance pending for the newest Smart UX head.** Do not treat this checkpoint as release-ready until those gates pass.
 
-Next implementation checkpoint after CI: final main-window visual cleanup and failure-path regression coverage, then hardware acceptance of both current-firmware and legacy-firmware paths.
+Next implementation checkpoint after CI: top-level `Main.qml` chrome cleanup and failure-path regression coverage. The firmware session lease/watchdog should be implemented before claiming crash-safe RUN behavior, then both current-firmware and legacy-firmware paths need hardware acceptance.
