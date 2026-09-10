@@ -34,7 +34,7 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
     reconnectTimer_.setInterval(1800);
     reconnectTimer_.setSingleShot(true);
     connect(&reconnectTimer_, &QTimer::timeout, this, [this] {
-        if (device_ == nullptr || updateStage_ != UpdateStage::reconnecting) return;
+        if (device_ == nullptr || !updateRequested_ || updateStage_ != UpdateStage::reconnecting) return;
         static_cast<void>(device_->autoDetectAndConnect());
         reconcile();
     });
@@ -55,17 +55,25 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
                     false);
                 QTimer::singleShot(0, this, [this] {
                     if (!firmware_->installFirmware(updatePort_)) {
-                        updateStage_ = firmware_->bootloaderHelpNeeded()
-                            ? UpdateStage::waitingForBootloader
-                            : UpdateStage::idle;
-                        if (updateStage_ == UpdateStage::idle) updateRequested_ = false;
+                        if (firmware_->bootloaderHelpNeeded()) {
+                            updateStage_ = UpdateStage::waitingForBootloader;
+                        } else {
+                            updateRequested_ = false;
+                            updateStage_ = UpdateStage::idle;
+                            emit firmwareUpdateFinished(false);
+                        }
                         reconcile();
                     }
                 });
                 return;
             }
+
             if (firmware_->bootloaderHelpNeeded()) {
                 updateStage_ = UpdateStage::waitingForBootloader;
+            } else {
+                updateRequested_ = false;
+                updateStage_ = UpdateStage::idle;
+                emit firmwareUpdateFinished(false);
             }
         } else if (updateStage_ == UpdateStage::flashing && !firmware_->busy() &&
                    firmware_->bootloaderHelpNeeded()) {
@@ -76,6 +84,7 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
 
     connect(firmware_, &FirmwareManager::installationFinished, this, [this](const bool resetSucceeded) {
         if (!updateRequested_) return;
+
         if (resetSucceeded) {
             updateStage_ = UpdateStage::reconnecting;
             setPresentation(
@@ -84,13 +93,20 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
                 false,
                 false);
             reconnectTimer_.start();
-        } else if (firmware_->bootloaderHelpNeeded()) {
+            return;
+        }
+
+        if (firmware_->bootloaderHelpNeeded()) {
             updateStage_ = UpdateStage::waitingForBootloader;
             reconcile();
-        } else {
-            updateStage_ = UpdateStage::reconnecting;
-            reconnectTimer_.start();
+            return;
         }
+
+        // The flash itself succeeded but automatic reset did not. Give the board
+        // one reconnect window before surfacing a recovery failure.
+        updateStage_ = UpdateStage::reconnecting;
+        reconnectTimer_.start();
+        reconcile();
     });
 }
 
@@ -113,7 +129,6 @@ QString SmartSessionController::updateStatus() const {
     case UpdateStage::stopping:
         return QStringLiteral("Stopping SMV output safely…");
     case UpdateStage::probing:
-        return firmware_->status();
     case UpdateStage::flashing:
         return firmware_->status();
     case UpdateStage::reconnecting:
@@ -166,10 +181,10 @@ bool SmartSessionController::beginFirmwareUpdate() {
         !firmware_->bundleReady() || firmware_->busy()) {
         return false;
     }
-    const QString port = device_->portName().trimmed();
-    if (port.isEmpty()) return false;
 
-    updatePort_ = port;
+    updatePort_ = device_->portName().trimmed();
+    if (updatePort_.isEmpty()) return false;
+
     updateRequested_ = true;
     needsProfileSync_ = true;
     profileSyncInFlight_ = false;
@@ -197,8 +212,8 @@ bool SmartSessionController::beginFirmwareUpdate() {
 bool SmartSessionController::retryFirmwareUpdate() {
     if (firmware_ == nullptr || updatePort_.isEmpty() || firmware_->busy()) return false;
     updateRequested_ = true;
-    if (device_ != nullptr && device_->connected()) device_->disconnectPort();
     updateStage_ = UpdateStage::probing;
+    if (device_ != nullptr && device_->connected()) device_->disconnectPort();
     setPresentation(
         QStringLiteral("UPDATING FIRMWARE"),
         QStringLiteral("Checking ESP32-P4 bootloader…"),
@@ -219,8 +234,8 @@ void SmartSessionController::continueFirmwareUpdate() {
         return;
     }
 
-    if (device_->connected()) device_->disconnectPort();
     updateStage_ = UpdateStage::probing;
+    if (device_->connected()) device_->disconnectPort();
     setPresentation(
         QStringLiteral("UPDATING FIRMWARE"),
         QStringLiteral("Checking ESP32-P4 and preparing firmware…"),
@@ -236,8 +251,8 @@ void SmartSessionController::reconnectDeviceSignals() {
     if (device_ == nullptr) return;
 
     connect(device_, &DeviceController::deviceVerifiedChanged, this, [this] {
-        refreshFirmwareIdentity();
         if (device_ != nullptr && device_->deviceVerified()) {
+            refreshFirmwareIdentity();
             needsProfileSync_ = true;
             profileSyncInFlight_ = false;
             prepareTimer_.start();
@@ -316,6 +331,7 @@ void SmartSessionController::refreshFirmwareIdentity() {
     const QString log = device_->logText();
     const qsizetype identityPos = log.lastIndexOf(QStringLiteral("ARSTACK identity"), -1, Qt::CaseInsensitive);
     if (identityPos < 0) return;
+
     qsizetype lineEnd = log.indexOf(QLatin1Char('\n'), identityPos);
     if (lineEnd < 0) lineEnd = log.size();
     const QString identityLine = log.mid(identityPos, lineEnd - identityPos);
@@ -323,11 +339,7 @@ void SmartSessionController::refreshFirmwareIdentity() {
         QStringLiteral(R"(\bfirmware=([0-9A-Za-z._+\-]+))"),
         QRegularExpression::CaseInsensitiveOption};
     const auto match = versionExpression.match(identityLine);
-    const QString version = match.hasMatch() ? match.captured(1) : QString{};
-    if (deviceFirmwareVersion_ != version) {
-        deviceFirmwareVersion_ = version;
-        emit stateChanged();
-    }
+    deviceFirmwareVersion_ = match.hasMatch() ? match.captured(1) : QString{};
 }
 
 bool SmartSessionController::firmwareIsCurrent() const {
@@ -358,14 +370,12 @@ void SmartSessionController::reconcile() {
 
     if (updateRequested_) {
         if (updateStage_ == UpdateStage::waitingForBootloader) {
-            setPresentation(
-                QStringLiteral("UPDATE NEEDS BOOT"),
-                updateStatus(),
-                false,
-                false);
+            setPresentation(QStringLiteral("UPDATE NEEDS BOOT"), updateStatus(), false, false);
             return;
         }
-        if (updateStage_ != UpdateStage::idle) {
+        if (updateStage_ == UpdateStage::stopping || updateStage_ == UpdateStage::probing ||
+            updateStage_ == UpdateStage::flashing ||
+            (updateStage_ == UpdateStage::reconnecting && !device_->deviceVerified())) {
             setPresentation(
                 QStringLiteral("UPDATING FIRMWARE"),
                 updateStatus().isEmpty() ? QStringLiteral("Updating firmware…") : updateStatus(),
@@ -373,23 +383,12 @@ void SmartSessionController::reconcile() {
                 false);
             return;
         }
-    }
-
-    if (device_->running()) {
-        setPresentation(
-            QStringLiteral("RUNNING"),
-            QStringLiteral("4I + 4V · 4000 samples/s · live value apply"),
-            false,
-            false);
-        return;
+        // Reconnecting + verified intentionally falls through so the new
+        // semantic firmware identity is verified before declaring success.
     }
 
     if (device_->discovering() || (device_->connected() && !device_->deviceVerified())) {
-        setPresentation(
-            QStringLiteral("CONNECTING"),
-            device_->discoveryStatus(),
-            false,
-            false);
+        setPresentation(QStringLiteral("CONNECTING"), device_->discoveryStatus(), false, false);
         return;
     }
 
@@ -406,6 +405,13 @@ void SmartSessionController::reconcile() {
 
     refreshFirmwareIdentity();
     if (!firmwareIsCurrent()) {
+        if (updateRequested_ && updateStage_ == UpdateStage::reconnecting) {
+            // Reconnected, but the semantic identity is still not the bundled
+            // release. Fail closed instead of looping or claiming success.
+            updateRequested_ = false;
+            updateStage_ = UpdateStage::idle;
+            emit firmwareUpdateFinished(false);
+        }
         const QString versionText = deviceFirmwareVersion_.isEmpty()
             ? QStringLiteral("legacy firmware")
             : QStringLiteral("firmware v%1").arg(deviceFirmwareVersion_);
@@ -422,6 +428,15 @@ void SmartSessionController::reconcile() {
         updateRequested_ = false;
         updateStage_ = UpdateStage::idle;
         emit firmwareUpdateFinished(true);
+    }
+
+    if (device_->running()) {
+        setPresentation(
+            QStringLiteral("RUNNING"),
+            QStringLiteral("4I + 4V · 4000 samples/s · live value apply"),
+            false,
+            false);
+        return;
     }
 
     const QVariantMap profile = profiles_->selectedProfile();
@@ -465,6 +480,7 @@ void SmartSessionController::reconcile() {
             QStringLiteral("Restoring the default 4I+4V profile…"),
             false,
             false);
+        QTimer::singleShot(0, this, &SmartSessionController::reconcile);
         return;
     }
 
