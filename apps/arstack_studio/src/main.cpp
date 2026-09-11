@@ -5,9 +5,9 @@
 #include "SmartSessionController.hpp"
 #include "StudioDeviceController.hpp"
 
-#include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDebug>
+#include <QEvent>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QTimer>
@@ -28,6 +28,26 @@ bool hasArgument(const int argc, char* argv[], const std::string_view wanted) {
     }
     return false;
 }
+
+class PrimaryWindowCloseFilter final : public QObject {
+public:
+    explicit PrimaryWindowCloseFilter(QCoreApplication* app)
+        : QObject(app), app_(app) {}
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        if (event != nullptr && event->type() == QEvent::Close && app_ != nullptr) {
+            // The close event is the authoritative lifetime boundary. Let QML
+            // finish its own onClosing handler (including best-effort STOP),
+            // then retire the process regardless of auxiliary dock windows.
+            QTimer::singleShot(0, app_, &QCoreApplication::quit);
+        }
+        return QObject::eventFilter(watched, event);
+    }
+
+private:
+    QCoreApplication* app_{nullptr};
+};
 
 int checkReferenceTemplate(int argc, char* argv[]) {
     QCoreApplication app(argc, argv);
@@ -200,19 +220,9 @@ int main(int argc, char* argv[]) {
         mainWindow = qobject_cast<QWindow*>(engine.rootObjects().constFirst());
     }
 
-    // The primary window owns application lifetime. Auxiliary QML windows can
-    // remain instantiated/hidden for fast dock reuse, but they must never keep
-    // ARStackStudio.exe alive after the operator closes the main window. Bind
-    // directly to the native close event rather than visibility, which is not
-    // a reliable process-lifetime boundary on Windows.
+    PrimaryWindowCloseFilter primaryCloseFilter{&app};
     if (mainWindow != nullptr) {
-        QObject::connect(
-            mainWindow,
-            &QWindow::closing,
-            &app,
-            [&app](QCloseEvent*) {
-                QTimer::singleShot(0, &app, &QCoreApplication::quit);
-            });
+        mainWindow->installEventFilter(&primaryCloseFilter);
     }
 
     if (lifecycleCheck) {
