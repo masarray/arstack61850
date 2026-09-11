@@ -9,6 +9,8 @@
 #include <QDebug>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
+#include <QTimer>
+#include <QWindow>
 #include <QtQml/qqml.h>
 
 #include <algorithm>
@@ -123,8 +125,14 @@ int checkFirmwareContract(int argc, char* argv[]) {
             << "recovery-selection=" << recoverySelection;
         return 4;
     }
+
+    // Shutdown must be safe and idempotent; this catches lifecycle regressions
+    // in every package-contract run without launching external firmware tools.
+    firmware.shutdown();
+    firmware.shutdown();
+
     qInfo().noquote()
-        << "Firmware bundle/probe contract: PASS · target/revision/progress/hash/recovery policy locked ·"
+        << "Firmware bundle/probe contract: PASS · target/revision/progress/hash/recovery/shutdown policy locked ·"
         << firmware.bundleStatus();
     return 0;
 }
@@ -157,11 +165,18 @@ int main(int argc, char* argv[]) {
     }
 
     QGuiApplication app(argc, argv);
+    app.setQuitOnLastWindowClosed(true);
     QCoreApplication::setOrganizationName(QStringLiteral("ARStack61850"));
     QCoreApplication::setApplicationName(QStringLiteral("ARStack Studio"));
     QCoreApplication::setApplicationVersion(QStringLiteral(ARSTACK_STUDIO_VERSION));
 
     FirmwareManager firmwareService;
+    QObject::connect(
+        &app,
+        &QCoreApplication::aboutToQuit,
+        &firmwareService,
+        &FirmwareManager::shutdown,
+        Qt::DirectConnection);
 
     qmlRegisterType<SclProfileModel>("ARStack.Studio", 1, 0, "SclProfileModel");
     qmlRegisterType<StudioDeviceController>("ARStack.Studio", 1, 0, "DeviceController");
@@ -176,6 +191,18 @@ int main(int argc, char* argv[]) {
         [] { QCoreApplication::exit(-1); },
         Qt::QueuedConnection);
     engine.loadFromModule("ARStack.Studio", "Main");
+
+    // Main.qml owns auxiliary transient windows (Advanced / detached docks).
+    // Explicitly retire the event loop when the primary window is closed so a
+    // hidden auxiliary QWindow can never leave ARStackStudio.exe orphaned in
+    // the background. Main.qml's onClosing still sends best-effort STOP first.
+    if (!engine.rootObjects().isEmpty()) {
+        if (auto* mainWindow = qobject_cast<QWindow*>(engine.rootObjects().constFirst())) {
+            QObject::connect(mainWindow, &QWindow::visibleChanged, &app, [&app](const bool visible) {
+                if (!visible) QTimer::singleShot(0, &app, &QCoreApplication::quit);
+            });
+        }
+    }
 
     return app.exec();
 }
