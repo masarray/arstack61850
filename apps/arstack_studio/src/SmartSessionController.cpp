@@ -20,11 +20,21 @@ namespace {
 constexpr int kMaxUpdateReconnectAttempts = 6;
 }
 
+QString SmartSessionController::chooseRecoveryPort(
+    const QString& recommendedPort,
+    const QStringList& visiblePorts) {
+    const QString recommended = recommendedPort.trimmed();
+    if (!recommended.isEmpty()) return recommended;
+    if (visiblePorts.size() != 1) return {};
+    return visiblePorts.front().trimmed();
+}
+
 SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent) {
     discoveryTimer_.setInterval(2500);
     discoveryTimer_.setSingleShot(false);
     connect(&discoveryTimer_, &QTimer::timeout, this, [this] {
-        if (!started_ || device_ == nullptr || updateRequested_ || blankProbeInFlight_ || blankBoardDetected_) return;
+        if (!started_ || device_ == nullptr || updateRequested_ || blankProbeInFlight_ ||
+            blankBoardDetected_ || setupError_) return;
         if (firmware_ != nullptr && firmware_->busy()) return;
         if (!device_->deviceVerified() && !device_->discovering() && !device_->connected()) {
             static_cast<void>(device_->autoDetectAndConnect());
@@ -40,11 +50,12 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
     connect(&blankProbeTimer_, &QTimer::timeout, this, [this] {
         if (!started_ || device_ == nullptr || firmware_ == nullptr || updateRequested_ ||
             device_->deviceVerified() || device_->discovering() || device_->connected() ||
-            firmware_->busy() || !firmware_->bundleReady() || blankBoardDetected_ || blankProbeInFlight_) {
+            firmware_->busy() || !firmware_->bundleReady() || blankBoardDetected_ ||
+            blankProbeInFlight_ || setupError_) {
             return;
         }
 
-        const QString port = device_->recommendedPort().trimmed();
+        const QString port = chooseRecoveryPort(device_->recommendedPort(), device_->ports());
         if (port.isEmpty() || port == blankProbeAttemptedPort_) return;
 
         blankProbeAttemptedPort_ = port;
@@ -52,12 +63,16 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
         blankProbeInFlight_ = true;
         setPresentation(
             QStringLiteral("CHECKING DEVICE"),
-            QStringLiteral("Checking whether the connected ESP32-P4 needs ARStack firmware…"),
+            QStringLiteral("Checking the connected board and firmware state…"),
             false,
             false);
 
         if (!firmware_->probeTarget(port)) {
             blankProbeInFlight_ = false;
+            setupError_ = true;
+            setupErrorStatus_ = firmware_->status().isEmpty()
+                ? QStringLiteral("Studio could not start the firmware recovery check on %1.").arg(port)
+                : firmware_->status();
             reconcile();
         }
     });
@@ -173,19 +188,18 @@ void SmartSessionController::start() {
     if (started_) return;
     started_ = true;
     if (profiles_ != nullptr) static_cast<void>(ensureDefaultProfile());
-
-    // SmartSessionController is the single owner of automatic discovery. Do the
-    // initial probe immediately, then use the bounded periodic watchdog only
-    // while the device is genuinely offline. The QML shell must not run a
-    // second startup probe/timer in parallel.
-    if (device_ != nullptr && !device_->deviceVerified() &&
-        !device_->discovering() && !device_->connected()) {
-        static_cast<void>(device_->autoDetectAndConnect());
-    }
-
     discoveryTimer_.start();
-    reconcile();
-    maybeScheduleBlankBoardProbe();
+
+    // Do not make the operator wait for the periodic hot-plug watchdog. The
+    // first identity attempt starts as soon as the QML component is complete.
+    QTimer::singleShot(0, this, [this] {
+        if (!started_ || device_ == nullptr || updateRequested_) return;
+        if (!device_->deviceVerified() && !device_->discovering() && !device_->connected()) {
+            static_cast<void>(device_->autoDetectAndConnect());
+        }
+        reconcile();
+        maybeScheduleBlankBoardProbe();
+    });
 }
 
 bool SmartSessionController::beginFirmwareUpdate() {
@@ -215,6 +229,8 @@ bool SmartSessionController::beginFirmwareOperation(const QString& portName) {
     profileSyncInFlight_ = false;
     blankProbeTimer_.stop();
     blankProbeInFlight_ = false;
+    setupError_ = false;
+    setupErrorStatus_.clear();
 
     if (device_->running()) {
         updateStage_ = UpdateStage::stopping;
@@ -310,6 +326,8 @@ void SmartSessionController::reconnectDeviceSignals() {
             clearBlankBoardContext();
         } else if (!blankProbeAttemptedPort_.isEmpty() && !device_->ports().contains(blankProbeAttemptedPort_)) {
             blankProbeAttemptedPort_.clear();
+            setupError_ = false;
+            setupErrorStatus_.clear();
         }
         reconcile();
         maybeScheduleBlankBoardProbe();
@@ -360,9 +378,29 @@ void SmartSessionController::reconnectFirmwareSignals() {
             }
 
             blankProbeInFlight_ = false;
-            blankBoardDetected_ = firmware_->targetVerified() &&
-                firmware_->selectedPort() == blankBoardPort_;
-            if (!blankBoardDetected_) blankBoardPort_.clear();
+            const bool samePort = firmware_->selectedPort() == blankBoardPort_;
+            if (samePort && firmware_->targetVerified()) {
+                // Read-only ROM identity proved a supported P4. The user still
+                // explicitly approves installation in the normal setup dialog.
+                blankBoardDetected_ = true;
+                setupError_ = false;
+                setupErrorStatus_.clear();
+            } else if (samePort && firmware_->bootloaderHelpNeeded()) {
+                // A unique serial candidate exists but ROM did not answer yet.
+                // Treat this as a firmware-setup candidate, not as verified P4;
+                // beginFirmwareInstall() re-probes and cannot write until target
+                // verification succeeds. This keeps novice recovery actionable
+                // without weakening the flash safety boundary.
+                blankBoardDetected_ = true;
+                setupError_ = false;
+                setupErrorStatus_.clear();
+            } else {
+                blankBoardDetected_ = false;
+                setupError_ = true;
+                setupErrorStatus_ = firmware_->status().isEmpty()
+                    ? QStringLiteral("The connected serial device is not a supported ESP32-P4 target.")
+                    : firmware_->status();
+            }
             reconcile();
             return;
         }
@@ -412,6 +450,12 @@ void SmartSessionController::reconnectFirmwareSignals() {
     connect(firmware_, &FirmwareManager::operationFailed, this,
             [this](const QString&, const bool bootloaderHelpNeeded) {
         if (!updateRequested_) {
+            if (blankProbeInFlight_) {
+                blankProbeInFlight_ = false;
+                blankBoardDetected_ = bootloaderHelpNeeded;
+                setupError_ = !bootloaderHelpNeeded;
+                setupErrorStatus_ = firmware_ != nullptr ? firmware_->status() : QString{};
+            }
             reconcile();
             return;
         }
@@ -455,12 +499,12 @@ void SmartSessionController::reconnectFirmwareSignals() {
 void SmartSessionController::maybeScheduleBlankBoardProbe() {
     if (!started_ || device_ == nullptr || firmware_ == nullptr || updateRequested_ ||
         blankProbeInFlight_ || blankBoardDetected_ || blankProbeTimer_.isActive() ||
-        device_->deviceVerified() || device_->discovering() || device_->connected() ||
+        setupError_ || device_->deviceVerified() || device_->discovering() || device_->connected() ||
         firmware_->busy() || !firmware_->bundleReady()) {
         return;
     }
 
-    const QString port = device_->recommendedPort().trimmed();
+    const QString port = chooseRecoveryPort(device_->recommendedPort(), device_->ports());
     if (port.isEmpty() || port == blankProbeAttemptedPort_) return;
     blankProbeTimer_.start();
 }
@@ -471,6 +515,8 @@ void SmartSessionController::clearBlankBoardContext() {
     blankBoardDetected_ = false;
     blankBoardPort_.clear();
     blankProbeAttemptedPort_.clear();
+    setupError_ = false;
+    setupErrorStatus_.clear();
 }
 
 bool SmartSessionController::ensureDefaultProfile() {
@@ -566,7 +612,7 @@ void SmartSessionController::reconcile() {
         if (blankProbeInFlight_) {
             setPresentation(
                 QStringLiteral("CHECKING DEVICE"),
-                QStringLiteral("Checking the ESP32-P4 firmware state…"),
+                QStringLiteral("Checking the connected board and firmware state…"),
                 false,
                 false);
             return;
@@ -575,8 +621,19 @@ void SmartSessionController::reconcile() {
         if (blankBoardDetected_) {
             setPresentation(
                 QStringLiteral("FIRMWARE REQUIRED"),
-                QStringLiteral("ESP32-P4 detected on %1. ARStack firmware is not installed or is not responding.")
+                QStringLiteral("Firmware setup is required on %1. Studio will verify ESP32-P4 before writing anything.")
                     .arg(blankBoardPort_),
+                false,
+                false);
+            return;
+        }
+
+        if (setupError_) {
+            setPresentation(
+                QStringLiteral("SETUP ERROR"),
+                setupErrorStatus_.isEmpty()
+                    ? QStringLiteral("Studio could not identify a supported ESP32-P4 on the connected serial device.")
+                    : setupErrorStatus_,
                 false,
                 false);
             return;
