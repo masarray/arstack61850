@@ -26,6 +26,11 @@ SurfacePanel {
         firmware: FirmwareService
     }
 
+    readonly property bool firmwareGateActive:
+        smartSession.firmwareInstallRequired || smartSession.firmwareUpdateRequired ||
+        smartSession.updatingFirmware || smartSession.updateNeedsBootloaderHelp
+    readonly property bool runGateReady: smartSession.startReady
+
     Component.onCompleted: {
         controller.phasorDockVisible = false
         controller.waveformDockVisible = false
@@ -39,6 +44,12 @@ SurfacePanel {
             controller.applyAllSignals()
         }
         function onStateChanged() {
+            // Main.qml still exposes the legacy F5 shortcut through profileDirty.
+            // Keep that path fail-closed while firmware is missing/outdated so the
+            // keyboard cannot bypass Smart Session's firmware gate.
+            if (ribbon.firmwareGateActive)
+                controller.profileDirty = true
+
             if (smartSession.updatingFirmware || smartSession.updateNeedsBootloaderHelp) {
                 if (installDialog.opened)
                     installDialog.close()
@@ -91,6 +102,18 @@ SurfacePanel {
                 ribbon.installPromptDeferred = false
                 ribbon.updatePromptDeferred = false
             }
+        }
+        function onProfileStateChanged() {
+            if (!ribbon.firmwareGateActive)
+                return
+            controller.profileDirty = true
+            // Main.qml also reacts to the same signal and may clear profileDirty
+            // when a legacy board reports PROFILE armed. Reassert the firmware
+            // gate after all synchronous signal handlers have completed.
+            Qt.callLater(function() {
+                if (ribbon.firmwareGateActive)
+                    controller.profileDirty = true
+            })
         }
     }
 
