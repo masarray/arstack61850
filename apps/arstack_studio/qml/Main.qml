@@ -47,6 +47,13 @@ ApplicationWindow {
 
     font.family: root.uiFont
 
+    // Graceful window close is still a safety boundary. The firmware session
+    // lease covers hard crashes; a normal close should explicitly request STOP.
+    onClosing: function(close) {
+        if (device.running)
+            device.stop()
+    }
+
     FontLoader {
         id: interFont
         source: Qt.resolvedUrl("../assets/InterVariable.ttf")
@@ -76,13 +83,6 @@ ApplicationWindow {
         function onDeviceMessage(message) {
             root.showMessage(message, false)
         }
-    }
-
-    Timer {
-        interval: 650
-        running: true
-        repeat: false
-        onTriggered: device.autoDetectAndConnect()
     }
 
     Timer {
@@ -143,7 +143,7 @@ ApplicationWindow {
     }
 
     function openEngineeringFile() {
-        profilePanel.openEngineeringFile()
+        workflowBar.openEngineeringDialog()
     }
 
     function openConfiguration() {
