@@ -150,6 +150,14 @@ jobs:
           fi
           echo 'Wrong-chip firmware manifest: correctly blocked' | tee -a /tmp/arstack-studio-firmware-contract.log
 
+      - name: Primary-window shutdown regression
+        shell: bash
+        run: |
+          set -o pipefail
+          timeout 5s env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+            ./build-arstack-studio/arstack_studio --check-app-lifecycle \
+            2>&1 | tee /tmp/arstack-studio-lifecycle.log
+
       - name: Headless QML launch smoke
         shell: bash
         run: |
@@ -189,6 +197,7 @@ jobs:
             /tmp/arstack-studio-reference-template.log
             /tmp/arstack-studio-p0-policy.log
             /tmp/arstack-studio-firmware-contract.log
+            /tmp/arstack-studio-lifecycle.log
             /tmp/arstack-studio-launch.log
             /tmp/arstack-studio-hidpi.log
           if-no-files-found: ignore
