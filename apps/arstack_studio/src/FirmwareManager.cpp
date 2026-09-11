@@ -20,6 +20,8 @@ constexpr auto kManifestName = "firmware-manifest.json";
 constexpr auto kManifestSchema = "arstack.studio.firmware.v1";
 constexpr auto kExpectedChip = "esp32p4";
 constexpr auto kPreV3Policy = "pre-v3";
+constexpr qsizetype kMaxOperationOutput = 65536;
+constexpr qsizetype kTrimmedOperationOutput = 49152;
 
 QString normalizedHash(const QString& text) {
     QString hash = text.trimmed().toLower();
@@ -30,15 +32,36 @@ QString normalizedHash(const QString& text) {
 
 FirmwareManager::FirmwareManager(QObject* parent) : QObject(parent) {
     process_.setProcessChannelMode(QProcess::SeparateChannels);
+
+    startupTimer_.setSingleShot(true);
+    startupTimer_.setInterval(2500);
+    connect(&startupTimer_, &QTimer::timeout, this, [this] {
+        if (!busy_ || operation_ == Operation::none || process_.state() == QProcess::NotRunning) return;
+
+        const Operation failedOperation = operation_;
+        operation_ = Operation::none;
+        busy_ = false;
+        flashProgress_ = -1;
+        process_.kill();
+        fail(QStringLiteral("Firmware tool did not start within 2.5 seconds."));
+        if (failedOperation == Operation::probe) bootloaderHelpNeeded_ = false;
+        emit stateChanged();
+    });
+
+    connect(&process_, &QProcess::started, this, [this] {
+        startupTimer_.stop();
+    });
+    connect(&process_, &QProcess::errorOccurred,
+            this, &FirmwareManager::handleProcessError);
     connect(&process_, &QProcess::readyReadStandardOutput, this, [this] {
         const QString text = QString::fromUtf8(process_.readAllStandardOutput());
-        operationOutput_ += text;
+        appendOperationOutput(text);
         updateProgressFromOutput(text);
         appendLog(text);
     });
     connect(&process_, &QProcess::readyReadStandardError, this, [this] {
         const QString text = QString::fromUtf8(process_.readAllStandardError());
-        operationOutput_ += text;
+        appendOperationOutput(text);
         updateProgressFromOutput(text);
         appendLog(text);
     });
@@ -179,7 +202,7 @@ bool FirmwareManager::loadManifest() {
 
 bool FirmwareManager::probeTarget(const QString& portName) {
     if (busy_) return false;
-    refreshBundle();
+    if (!bundleReady_ || !flasherAvailable_) refreshBundle();
     if (!flasherAvailable_) {
         fail(QStringLiteral("Bundled espflash executable is unavailable."));
         return false;
@@ -196,6 +219,7 @@ bool FirmwareManager::probeTarget(const QString& portName) {
     flashProgress_ = -1;
     targetChip_ = QStringLiteral("Checking %1...").arg(port);
     busy_ = true;
+    cancelRequested_ = false;
     setStatus(QStringLiteral("Checking ESP32-P4 ROM identity on %1...").arg(port));
     emit stateChanged();
     return startEspflash({
@@ -205,7 +229,7 @@ bool FirmwareManager::probeTarget(const QString& portName) {
 
 bool FirmwareManager::installFirmware(const QString& portName) {
     if (busy_) return false;
-    refreshBundle();
+    if (!bundleReady_ || !flasherAvailable_) refreshBundle();
     const QString port = portName.trimmed();
     if (!bundleReady_) {
         fail(bundleStatus_);
@@ -219,6 +243,7 @@ bool FirmwareManager::installFirmware(const QString& portName) {
     bootloaderHelpNeeded_ = false;
     flashProgress_ = 0;
     busy_ = true;
+    cancelRequested_ = false;
     setStatus(QStringLiteral("Installing ARStack firmware v%1 on %2...").arg(firmwareVersion_, port));
     emit stateChanged();
     return startEspflash({
@@ -232,13 +257,21 @@ bool FirmwareManager::installFirmware(const QString& portName) {
 
 void FirmwareManager::cancel() {
     if (!busy_) return;
-    process_.kill();
-    process_.waitForFinished(1200);
-    operation_ = Operation::none;
-    busy_ = false;
-    flashProgress_ = -1;
-    setStatus(QStringLiteral("Firmware operation cancelled."));
+    cancelRequested_ = true;
+    startupTimer_.stop();
+    setStatus(QStringLiteral("Cancelling firmware operation..."));
     emit stateChanged();
+
+    if (process_.state() == QProcess::NotRunning) {
+        cancelRequested_ = false;
+        operation_ = Operation::none;
+        busy_ = false;
+        flashProgress_ = -1;
+        setStatus(QStringLiteral("Firmware operation cancelled."));
+        emit stateChanged();
+        return;
+    }
+    process_.kill();
 }
 
 void FirmwareManager::clearLog() {
@@ -263,22 +296,40 @@ bool FirmwareManager::startEspflash(const QStringList& arguments, const Operatio
     process_.setArguments(arguments);
     appendLog(QStringLiteral("$ ESPFLASH_PORT=%1 espflash %2\n")
         .arg(selectedPort_, arguments.join(QLatin1Char(' '))));
+
     process_.start();
-    if (!process_.waitForStarted(2500)) {
-        fail(QStringLiteral("Unable to start bundled espflash."));
-        operation_ = Operation::none;
-        busy_ = false;
-        flashProgress_ = -1;
-        emit stateChanged();
-        return false;
-    }
+    startupTimer_.start();
     return true;
 }
 
+void FirmwareManager::handleProcessError(const QProcess::ProcessError error) {
+    if (error != QProcess::FailedToStart || operation_ == Operation::none) return;
+
+    startupTimer_.stop();
+    operation_ = Operation::none;
+    busy_ = false;
+    flashProgress_ = -1;
+    cancelRequested_ = false;
+    fail(QStringLiteral("Unable to start bundled espflash: %1").arg(process_.errorString()));
+    emit stateChanged();
+}
+
 void FirmwareManager::finishOperation(const int exitCode, const QProcess::ExitStatus exitStatus) {
-    const bool success = exitStatus == QProcess::NormalExit && exitCode == 0;
+    startupTimer_.stop();
     const Operation completed = operation_;
     operation_ = Operation::none;
+    if (completed == Operation::none) return;
+
+    if (cancelRequested_) {
+        cancelRequested_ = false;
+        busy_ = false;
+        flashProgress_ = -1;
+        setStatus(QStringLiteral("Firmware operation cancelled."));
+        emit stateChanged();
+        return;
+    }
+
+    const bool success = exitStatus == QProcess::NormalExit && exitCode == 0;
 
     if (completed == Operation::probe) {
         busy_ = false;
@@ -310,7 +361,7 @@ void FirmwareManager::finishOperation(const int exitCode, const QProcess::ExitSt
             setStatus(QStringLiteral("A chip answered on %1, but it is not an ESP32-P4. Installation is blocked.")
                 .arg(selectedPort_));
         } else {
-            setStatus(QStringLiteral("%1 is visible in Windows, but the ESP32-P4 ROM did not answer. Put the board in Download mode, then click Check board again.")
+            setStatus(QStringLiteral("%1 is visible in Windows, but the ESP32-P4 ROM did not answer. Put the board in Download mode, then retry.")
                 .arg(selectedPort_));
         }
         emit stateChanged();
@@ -322,7 +373,7 @@ void FirmwareManager::finishOperation(const int exitCode, const QProcess::ExitSt
             busy_ = false;
             flashProgress_ = -1;
             bootloaderHelpNeeded_ = true;
-            fail(QStringLiteral("Firmware flash failed. Keep the board in Download mode and retry. Device contents were not trusted."));
+            fail(QStringLiteral("Firmware installation failed. Put the board in Download mode and retry. The device is not considered ready."));
             emit stateChanged();
             return;
         }
@@ -348,10 +399,10 @@ void FirmwareManager::finishOperation(const int exitCode, const QProcess::ExitSt
             targetVerified_ = false;
             bootloaderHelpNeeded_ = false;
             targetChip_ = QStringLiteral("Awaiting ARStack firmware");
-            setStatus(QStringLiteral("Firmware installed. The board was reset; Studio is reconnecting and verifying ARStack identity."));
+            setStatus(QStringLiteral("Firmware written successfully. Studio is reconnecting and verifying the board."));
         } else {
             bootloaderHelpNeeded_ = false;
-            setStatus(QStringLiteral("Flash succeeded, but automatic reset failed. Press RESET once or reconnect USB; Studio will then verify the board."));
+            setStatus(QStringLiteral("Firmware was written, but automatic reset failed. Press RESET once or reconnect USB; Studio will verify the board."));
         }
         emit stateChanged();
         emit installationFinished(success);
@@ -364,6 +415,14 @@ void FirmwareManager::updateProgressFromOutput(const QString& text) {
     if (latest < 0 || flashProgress_ == latest) return;
     flashProgress_ = std::clamp(latest, 0, 100);
     emit stateChanged();
+}
+
+void FirmwareManager::appendOperationOutput(const QString& text) {
+    if (text.isEmpty()) return;
+    operationOutput_ += text;
+    if (operationOutput_.size() > kMaxOperationOutput) {
+        operationOutput_ = operationOutput_.right(kTrimmedOperationOutput);
+    }
 }
 
 void FirmwareManager::appendLog(const QString& text) {
