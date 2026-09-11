@@ -588,8 +588,9 @@ SurfacePanel {
             }
 
             ActionButton {
-                visible: !device.running && !smartSession.firmwareInstallRequired && !smartSession.firmwareUpdateRequired &&
-                    !smartSession.updatingFirmware && !smartSession.updateNeedsBootloaderHelp
+                // Keep the primary run affordance stable even when firmware gates execution.
+                // Safety still comes from startReady=false; the tooltip explains the blocker.
+                visible: !device.running && !smartSession.updatingFirmware && !smartSession.updateNeedsBootloaderHelp
                 text: "Start"
                 iconSource: Qt.resolvedUrl("../assets/lucide/play.svg")
                 tone: "success"
