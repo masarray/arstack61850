@@ -10,6 +10,7 @@
 #include <QDebug>
 #include <QEvent>
 #include <QGuiApplication>
+#include <QPointer>
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
 #include <QTimer>
@@ -35,19 +36,24 @@ public:
     explicit PrimaryWindowCloseFilter(QCoreApplication* app)
         : QObject(app), app_(app) {}
 
+    [[nodiscard]] bool closeObserved() const noexcept { return closeObserved_; }
+
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override {
         if (event != nullptr && event->type() == QEvent::Close && app_ != nullptr) {
-            // The primary QML window owns process lifetime. Defer quit by one
-            // event-loop turn so Main.qml's onClosing handler can still issue
-            // its best-effort STOP before auxiliary windows are torn down.
-            QTimer::singleShot(0, app_, &QCoreApplication::quit);
+            closeObserved_ = true;
+            // quit() marks the running event loop for termination; it does not
+            // destroy the window synchronously. Returning false therefore still
+            // lets Main.qml's onClosing handler issue its best-effort STOP.
+            // Auxiliary QML windows can no longer keep the process alive.
+            app_->quit();
         }
         return QObject::eventFilter(watched, event);
     }
 
 private:
     QCoreApplication* app_{nullptr};
+    bool closeObserved_{false};
 };
 
 int checkReferenceTemplate(int argc, char* argv[]) {
@@ -234,16 +240,27 @@ int main(int argc, char* argv[]) {
             qCritical().noquote() << "Application lifecycle regression: main window was not created.";
             return 7;
         }
-        QTimer::singleShot(600, mainWindow, [mainWindow] {
-            // Windows GitHub runners have no normal interactive desktop. Send
-            // the same Qt close event synchronously so this regression validates
-            // primary-window ownership without relying on native WM_CLOSE
-            // synthesis or posted-event scheduling on a headless desktop.
+
+        const QPointer<QQuickWindow> lifecycleTarget{mainWindow};
+        QTimer::singleShot(600, &app, [&app, &primaryCloseFilter, lifecycleTarget] {
+            if (lifecycleTarget.isNull()) {
+                qCritical().noquote() << "Application lifecycle regression: primary window disappeared before close exercise.";
+                QCoreApplication::exit(9);
+                return;
+            }
+
+            // Windows hosted runners have no interactive desktop. Deliver the
+            // authoritative Qt close event directly instead of depending on a
+            // native WM_CLOSE round trip that the runner cannot guarantee.
             QCloseEvent closeEvent;
-            QCoreApplication::sendEvent(mainWindow, &closeEvent);
+            QCoreApplication::sendEvent(lifecycleTarget.data(), &closeEvent);
+            if (!primaryCloseFilter.closeObserved()) {
+                qCritical().noquote() << "Application lifecycle regression: primary QEvent::Close bypassed the lifetime filter.";
+                QCoreApplication::exit(10);
+            }
         });
         QTimer::singleShot(3500, &app, [] {
-            qCritical().noquote() << "Application lifecycle regression: primary window close did not terminate the event loop.";
+            qCritical().noquote() << "Application lifecycle regression: observed close did not terminate the event loop.";
             QCoreApplication::exit(8);
         });
     }
