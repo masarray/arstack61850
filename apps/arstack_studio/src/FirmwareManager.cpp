@@ -192,7 +192,7 @@ bool FirmwareManager::loadManifest() {
 
     QCryptographicHash hasher{QCryptographicHash::Sha256};
     if (!hasher.addData(&image)) {
-        bundleStatus_ = QStringLiteral("Unable to hash the firmware image."));
+        bundleStatus_ = QStringLiteral("Unable to hash the firmware image.");
         return false;
     }
     const QString actualHash = QString::fromLatin1(hasher.result().toHex()).toLower();
