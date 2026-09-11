@@ -5,6 +5,7 @@
 #include "SmartSessionController.hpp"
 #include "StudioDeviceController.hpp"
 
+#include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDebug>
 #include <QGuiApplication>
@@ -199,14 +200,19 @@ int main(int argc, char* argv[]) {
         mainWindow = qobject_cast<QWindow*>(engine.rootObjects().constFirst());
     }
 
-    // Main.qml owns auxiliary transient windows (Advanced / detached docks).
-    // Explicitly retire the event loop when the primary window is closed so a
-    // hidden auxiliary QWindow can never leave ARStackStudio.exe orphaned in
-    // the background. Main.qml's onClosing still sends best-effort STOP first.
+    // The primary window owns application lifetime. Auxiliary QML windows can
+    // remain instantiated/hidden for fast dock reuse, but they must never keep
+    // ARStackStudio.exe alive after the operator closes the main window. Bind
+    // directly to the native close event rather than visibility, which is not
+    // a reliable process-lifetime boundary on Windows.
     if (mainWindow != nullptr) {
-        QObject::connect(mainWindow, &QWindow::visibleChanged, &app, [&app](const bool visible) {
-            if (!visible) QTimer::singleShot(0, &app, &QCoreApplication::quit);
-        });
+        QObject::connect(
+            mainWindow,
+            &QWindow::closing,
+            &app,
+            [&app](QCloseEvent*) {
+                QTimer::singleShot(0, &app, &QCoreApplication::quit);
+            });
     }
 
     if (lifecycleCheck) {
