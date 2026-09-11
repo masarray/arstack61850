@@ -43,9 +43,18 @@ FirmwareManager::FirmwareManager(QObject* parent) : QObject(parent) {
         busy_ = false;
         flashProgress_ = -1;
         process_.kill();
+
+        if (failedOperation == Operation::reset) {
+            setStatus(QStringLiteral("Firmware was written, but the reset tool did not start. Press RESET once or reconnect USB; Studio will verify the board."));
+            emit stateChanged();
+            emit installationFinished(false);
+            return;
+        }
+
         fail(QStringLiteral("Firmware tool did not start within 2.5 seconds."));
-        if (failedOperation == Operation::probe) bootloaderHelpNeeded_ = false;
+        bootloaderHelpNeeded_ = false;
         emit stateChanged();
+        emit operationFailed(status_, false);
     });
 
     connect(&process_, &QProcess::started, this, [this] {
@@ -183,7 +192,7 @@ bool FirmwareManager::loadManifest() {
 
     QCryptographicHash hasher{QCryptographicHash::Sha256};
     if (!hasher.addData(&image)) {
-        bundleStatus_ = QStringLiteral("Unable to hash the firmware image.");
+        bundleStatus_ = QStringLiteral("Unable to hash the firmware image."));
         return false;
     }
     const QString actualHash = QString::fromLatin1(hasher.result().toHex()).toLower();
@@ -263,12 +272,15 @@ void FirmwareManager::cancel() {
     emit stateChanged();
 
     if (process_.state() == QProcess::NotRunning) {
+        const Operation cancelledOperation = operation_;
         cancelRequested_ = false;
         operation_ = Operation::none;
         busy_ = false;
         flashProgress_ = -1;
         setStatus(QStringLiteral("Firmware operation cancelled."));
         emit stateChanged();
+        if (cancelledOperation == Operation::reset) emit installationFinished(false);
+        else emit operationFailed(status_, false);
         return;
     }
     process_.kill();
@@ -306,12 +318,23 @@ void FirmwareManager::handleProcessError(const QProcess::ProcessError error) {
     if (error != QProcess::FailedToStart || operation_ == Operation::none) return;
 
     startupTimer_.stop();
+    const Operation failedOperation = operation_;
     operation_ = Operation::none;
     busy_ = false;
     flashProgress_ = -1;
     cancelRequested_ = false;
+
+    if (failedOperation == Operation::reset) {
+        setStatus(QStringLiteral("Firmware was written, but the reset tool could not start. Press RESET once or reconnect USB; Studio will verify the board."));
+        emit stateChanged();
+        emit installationFinished(false);
+        return;
+    }
+
     fail(QStringLiteral("Unable to start bundled espflash: %1").arg(process_.errorString()));
+    bootloaderHelpNeeded_ = false;
     emit stateChanged();
+    emit operationFailed(status_, false);
 }
 
 void FirmwareManager::finishOperation(const int exitCode, const QProcess::ExitStatus exitStatus) {
@@ -326,6 +349,8 @@ void FirmwareManager::finishOperation(const int exitCode, const QProcess::ExitSt
         flashProgress_ = -1;
         setStatus(QStringLiteral("Firmware operation cancelled."));
         emit stateChanged();
+        if (completed == Operation::reset) emit installationFinished(false);
+        else emit operationFailed(status_, false);
         return;
     }
 
