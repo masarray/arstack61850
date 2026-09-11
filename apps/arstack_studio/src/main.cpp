@@ -164,6 +164,8 @@ int main(int argc, char* argv[]) {
         return checkP0ControllerPolicy(argc, argv);
     }
 
+    const bool lifecycleCheck = hasArgument(argc, argv, "--check-app-lifecycle");
+
     QGuiApplication app(argc, argv);
     app.setQuitOnLastWindowClosed(true);
     QCoreApplication::setOrganizationName(QStringLiteral("ARStack61850"));
@@ -192,17 +194,38 @@ int main(int argc, char* argv[]) {
         Qt::QueuedConnection);
     engine.loadFromModule("ARStack.Studio", "Main");
 
+    QWindow* mainWindow = nullptr;
+    if (!engine.rootObjects().isEmpty()) {
+        mainWindow = qobject_cast<QWindow*>(engine.rootObjects().constFirst());
+    }
+
     // Main.qml owns auxiliary transient windows (Advanced / detached docks).
     // Explicitly retire the event loop when the primary window is closed so a
     // hidden auxiliary QWindow can never leave ARStackStudio.exe orphaned in
     // the background. Main.qml's onClosing still sends best-effort STOP first.
-    if (!engine.rootObjects().isEmpty()) {
-        if (auto* mainWindow = qobject_cast<QWindow*>(engine.rootObjects().constFirst())) {
-            QObject::connect(mainWindow, &QWindow::visibleChanged, &app, [&app](const bool visible) {
-                if (!visible) QTimer::singleShot(0, &app, &QCoreApplication::quit);
-            });
-        }
+    if (mainWindow != nullptr) {
+        QObject::connect(mainWindow, &QWindow::visibleChanged, &app, [&app](const bool visible) {
+            if (!visible) QTimer::singleShot(0, &app, &QCoreApplication::quit);
+        });
     }
 
-    return app.exec();
+    if (lifecycleCheck) {
+        if (mainWindow == nullptr) {
+            qCritical().noquote() << "Application lifecycle regression: main window was not created.";
+            return 7;
+        }
+        QTimer::singleShot(600, mainWindow, [mainWindow] {
+            mainWindow->close();
+        });
+        QTimer::singleShot(3500, &app, [] {
+            qCritical().noquote() << "Application lifecycle regression: primary window close did not terminate the event loop.";
+            QCoreApplication::exit(8);
+        });
+    }
+
+    const int result = app.exec();
+    if (lifecycleCheck && result == 0) {
+        qInfo().noquote() << "Application lifecycle regression: PASS · primary window close terminated cleanly";
+    }
+    return result;
 }
