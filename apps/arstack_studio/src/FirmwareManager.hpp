@@ -25,6 +25,7 @@ class FirmwareManager : public QObject {
 
 public:
     explicit FirmwareManager(QObject* parent = nullptr);
+    ~FirmwareManager() override;
 
     [[nodiscard]] bool bundleReady() const noexcept { return bundleReady_; }
     [[nodiscard]] bool flasherAvailable() const noexcept { return flasherAvailable_; }
@@ -49,6 +50,7 @@ public:
     Q_INVOKABLE bool probeTarget(const QString& portName);
     Q_INVOKABLE bool installFirmware(const QString& portName);
     Q_INVOKABLE void cancel();
+    Q_INVOKABLE void shutdown();
     Q_INVOKABLE void clearLog();
 
 signals:
@@ -64,8 +66,10 @@ private:
     [[nodiscard]] QString flasherPath() const;
     bool loadManifest();
     bool startEspflash(const QStringList& arguments, Operation operation);
+    void startOperationDeadline(Operation operation);
     void finishOperation(int exitCode, QProcess::ExitStatus exitStatus);
     void handleProcessError(QProcess::ProcessError error);
+    void handleOperationTimeout();
     void updateProgressFromOutput(const QString& text);
     void appendOperationOutput(const QString& text);
     void appendLog(const QString& text);
@@ -74,6 +78,7 @@ private:
 
     QProcess process_;
     QTimer startupTimer_;
+    QTimer operationTimer_;
     Operation operation_{Operation::none};
     QString operationOutput_;
     QString selectedPort_;
@@ -93,4 +98,5 @@ private:
     bool targetVerified_{false};
     bool bootloaderHelpNeeded_{false};
     bool cancelRequested_{false};
+    bool shuttingDown_{false};
 };
