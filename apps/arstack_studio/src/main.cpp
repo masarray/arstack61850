@@ -94,11 +94,23 @@ int checkFirmwareContract(int argc, char* argv[]) {
         FirmwareManager::parseFlashProgress(QStringLiteral("no progress token")) == -1 &&
         FirmwareManager::parseFlashProgress(QStringLiteral("Writing 104%")) == -1;
 
+    const bool recoverySelection =
+        SmartSessionController::chooseRecoveryPort(
+            QStringLiteral("COM7"),
+            {QStringLiteral("COM3"), QStringLiteral("COM7")}) == QStringLiteral("COM7") &&
+        SmartSessionController::chooseRecoveryPort(
+            QString{},
+            {QStringLiteral("COM3")}) == QStringLiteral("COM3") &&
+        SmartSessionController::chooseRecoveryPort(
+            QString{},
+            {QStringLiteral("COM3"), QStringLiteral("COM4")}).isEmpty();
+
     const bool valid = firmware.bundleReady() && firmware.flasherAvailable() &&
         firmware.firmwareVersion() == QStringLiteral(ARSTACK_STUDIO_VERSION) &&
         firmware.expectedProtocol() == QStringLiteral("1") &&
         firmware.firmwareSha256().size() == 64 &&
-        realEspflashFormat && dashedFormat && rejectsWrongChip && revisionPolicy && flashProgressFormat;
+        realEspflashFormat && dashedFormat && rejectsWrongChip && revisionPolicy &&
+        flashProgressFormat && recoverySelection;
     if (!valid) {
         qCritical().noquote()
             << "Firmware bundle/probe contract: FAIL ·"
@@ -107,11 +119,12 @@ int checkFirmwareContract(int argc, char* argv[]) {
             << "dashed-format=" << dashedFormat
             << "wrong-chip-rejected=" << rejectsWrongChip
             << "revision-policy=" << revisionPolicy
-            << "progress-format=" << flashProgressFormat;
+            << "progress-format=" << flashProgressFormat
+            << "recovery-selection=" << recoverySelection;
         return 4;
     }
     qInfo().noquote()
-        << "Firmware bundle/probe contract: PASS · target/revision/progress/hash policy locked ·"
+        << "Firmware bundle/probe contract: PASS · target/revision/progress/hash/recovery policy locked ·"
         << firmware.bundleStatus();
     return 0;
 }
