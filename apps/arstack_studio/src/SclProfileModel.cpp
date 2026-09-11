@@ -5,12 +5,14 @@
 #include "ariec61850/sampled_values/esp32p4_profile_support.hpp"
 #include "ariec61850/scl/parser.hpp"
 
+#include <QFile>
 #include <QStringList>
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <string_view>
 
 namespace {
 using ar::iec61850::sampled_values::Esp32P4SvProfileSupport;
@@ -21,6 +23,10 @@ using ar::iec61850::sampled_values::SvSampleCounterPolicy;
 using ar::iec61850::sampled_values::SvSampleMode;
 using ar::iec61850::sampled_values::classify_esp32p4_sv_profile;
 using ar::iec61850::sampled_values::esp32p4_sv_profile_support_name;
+
+constexpr std::uint16_t kReferenceCounterModulus = 4000;
+constexpr auto kReferenceResource = ":/arstack/templates/arstack_4i4v_9-2le_reference.scd";
+constexpr auto kReferenceSourceName = "ARStack 4I+4V 9-2LE Reference";
 
 QString qstring(const std::string& value) {
     return QString::fromStdString(value);
@@ -134,6 +140,11 @@ QString SclProfileModel::sourceName() const {
 
 QString SclProfileModel::documentStatus() const {
     if (!document_.has_value()) return QStringLiteral("No engineering file loaded");
+    if (referenceTemplateActive_) {
+        return QStringLiteral("4I+4V 9-2LE reference · %1 resolved SV stream%2")
+            .arg(static_cast<qulonglong>(rows_.size()))
+            .arg(rows_.size() == 1U ? QString{} : QStringLiteral("s"));
+    }
     return QStringLiteral("%1 resolved SV stream%2")
         .arg(static_cast<qulonglong>(rows_.size()))
         .arg(rows_.size() == 1U ? QString{} : QStringLiteral("s"));
@@ -151,6 +162,7 @@ QStringList SclProfileModel::documentWarnings() const {
 QString SclProfileModel::fatalError() const { return fatalError_; }
 int SclProfileModel::selectedIndex() const noexcept { return selectedIndex_; }
 bool SclProfileModel::hasProfiles() const noexcept { return !rows_.empty(); }
+bool SclProfileModel::referenceTemplateActive() const noexcept { return referenceTemplateActive_; }
 
 QVariantMap SclProfileModel::selectedProfile() const {
     if (selectedIndex_ < 0 || selectedIndex_ >= rowCount()) return {};
@@ -169,6 +181,24 @@ QVariantMap SclProfileModel::selectedProfile() const {
     return out;
 }
 
+void SclProfileModel::installDocument(
+    ar::iec61850::scl::SclDocument document,
+    const bool referenceTemplate) {
+    beginResetModel();
+    document_ = std::move(document);
+    confirmedCounterModulus_ = referenceTemplate
+        ? std::optional<std::uint16_t>{kReferenceCounterModulus}
+        : std::nullopt;
+    rows_.clear();
+    selectedIndex_ = -1;
+    fatalError_.clear();
+    referenceTemplateActive_ = referenceTemplate;
+    endResetModel();
+    rebuildRows();
+    emit fatalErrorChanged();
+    emit sourceChanged();
+}
+
 bool SclProfileModel::loadFile(const QUrl& fileUrl) {
     const auto localPath = fileUrl.toLocalFile();
     if (localPath.isEmpty()) {
@@ -180,20 +210,36 @@ bool SclProfileModel::loadFile(const QUrl& fileUrl) {
     try {
         auto loaded = ar::iec61850::scl::SclParser{}.load(
             std::filesystem::path{localPath.toStdWString()});
-        beginResetModel();
-        document_ = std::move(loaded);
-        confirmedCounterModulus_.reset();
-        rows_.clear();
-        selectedIndex_ = -1;
-        fatalError_.clear();
-        endResetModel();
-        rebuildRows();
-        emit fatalErrorChanged();
-        emit sourceChanged();
+        installDocument(std::move(loaded), false);
         return true;
     } catch (const std::exception& error) {
         clear();
         fatalError_ = QString::fromUtf8(error.what());
+        emit fatalErrorChanged();
+        return false;
+    }
+}
+
+bool SclProfileModel::loadReferenceTemplate() {
+    QFile file(QString::fromLatin1(kReferenceResource));
+    if (!file.open(QIODevice::ReadOnly)) {
+        clear();
+        fatalError_ = QStringLiteral("Bundled 4I+4V reference template is unavailable.");
+        emit fatalErrorChanged();
+        return false;
+    }
+
+    const QByteArray xml = file.readAll();
+    try {
+        auto loaded = ar::iec61850::scl::SclParser{}.parse(
+            std::string_view{xml.constData(), static_cast<std::size_t>(xml.size())},
+            kReferenceSourceName);
+        installDocument(std::move(loaded), true);
+        return true;
+    } catch (const std::exception& error) {
+        clear();
+        fatalError_ = QStringLiteral("Built-in reference profile failed validation: %1")
+            .arg(QString::fromUtf8(error.what()));
         emit fatalErrorChanged();
         return false;
     }
@@ -206,6 +252,7 @@ void SclProfileModel::clear() {
     rows_.clear();
     selectedIndex_ = -1;
     fatalError_.clear();
+    referenceTemplateActive_ = false;
     endResetModel();
     emit selectedIndexChanged();
     emit selectedProfileChanged();

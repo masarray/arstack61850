@@ -23,6 +23,11 @@ qt_add_executable(arstack_studio
     src/SclProfileModel.hpp
     src/DeviceController.cpp
     src/DeviceController.hpp
+    src/StudioDeviceController.hpp
+    src/FirmwareManager.cpp
+    src/FirmwareManager.hpp
+    src/SmartSessionController.cpp
+    src/SmartSessionController.hpp
 )
 
 qt_add_qml_module(arstack_studio
@@ -43,6 +48,7 @@ qt_add_qml_module(arstack_studio
         qml/ConfigurationHub.qml
         qml/PtpExpertPanel.qml
         qml/DeviceExpertPanel.qml
+        qml/FirmwarePanel.qml
         qml/WaveformExpertPanel.qml
         qml/SignalMatrix.qml
         qml/QualityEditor.qml
@@ -71,6 +77,12 @@ qt_add_qml_module(arstack_studio
         assets/lucide/clock-3.svg
 )
 
+qt_add_resources(arstack_studio "reference_templates"
+    PREFIX "/arstack"
+    FILES
+        templates/arstack_4i4v_9-2le_reference.scd
+)
+
 target_link_libraries(arstack_studio PRIVATE
     Qt6::Core
     Qt6::Gui
@@ -82,6 +94,9 @@ target_link_libraries(arstack_studio PRIVATE
 )
 
 target_compile_features(arstack_studio PRIVATE cxx_std_20)
+target_compile_definitions(arstack_studio PRIVATE
+    ARSTACK_STUDIO_VERSION="${PROJECT_VERSION}"
+)
 
 if(WIN32)
     set_target_properties(arstack_studio PROPERTIES WIN32_EXECUTABLE TRUE)

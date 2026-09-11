@@ -19,6 +19,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: arstack-studio-qt-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows-launcher-parse:
     runs-on: windows-latest
@@ -75,6 +79,85 @@ jobs:
           cmake --build build-arstack-studio --target arstack_studio --parallel 2 \
             2>&1 | tee /tmp/arstack-studio-build.log
 
+      - name: 4I+4V reference template regression
+        shell: bash
+        run: |
+          set -o pipefail
+          ./build-arstack-studio/arstack_studio --check-reference-template \
+            2>&1 | tee /tmp/arstack-studio-reference-template.log
+
+      - name: Native P0 controller policy regression
+        shell: bash
+        run: |
+          set -o pipefail
+          ./build-arstack-studio/arstack_studio --check-p0-policy \
+            2>&1 | tee /tmp/arstack-studio-p0-policy.log
+
+      - name: Firmware bundle contract regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/arstack-firmware-contract
+          rm -rf "$root"
+          mkdir -p "$root/firmware" "$root/tools"
+          printf 'ARStack-P0-firmware-contract\n' > "$root/firmware/arstack-esp32p4-smv-0.1.0.bin"
+          sha="$(sha256sum "$root/firmware/arstack-esp32p4-smv-0.1.0.bin" | awk '{print $1}')"
+          cat > "$root/firmware/firmware-manifest.json" <<EOF
+          {
+            "schema": "arstack.studio.firmware.v1",
+            "product": "ARStack ESP32-P4 SMV Injector",
+            "chip": "esp32p4",
+            "chipRevisionPolicy": "pre-v3",
+            "version": "0.1.0",
+            "protocol": 1,
+            "flashOffset": 0,
+            "image": "arstack-esp32p4-smv-0.1.0.bin",
+            "sha256": "$sha"
+          }
+          EOF
+          cat > "$root/tools/espflash" <<'EOF'
+          #!/bin/sh
+          echo 'espflash contract stub'
+          EOF
+          chmod +x "$root/tools/espflash"
+
+          ARSTACK_STUDIO_FIRMWARE_DIR="$root/firmware" \
+          ARSTACK_STUDIO_ESPFLASH="$root/tools/espflash" \
+            ./build-arstack-studio/arstack_studio --check-firmware-contract \
+            2>&1 | tee /tmp/arstack-studio-firmware-contract.log
+
+          cp "$root/firmware/firmware-manifest.json" "$root/firmware/firmware-manifest.valid.json"
+
+          zeros=0000000000000000000000000000000000000000000000000000000000000000
+          sed -i "s/\"sha256\": \"$sha\"/\"sha256\": \"$zeros\"/" "$root/firmware/firmware-manifest.json"
+          if ARSTACK_STUDIO_FIRMWARE_DIR="$root/firmware" \
+             ARSTACK_STUDIO_ESPFLASH="$root/tools/espflash" \
+             ./build-arstack-studio/arstack_studio --check-firmware-contract \
+             >> /tmp/arstack-studio-firmware-contract.log 2>&1; then
+            echo 'Corrupted firmware hash was incorrectly accepted.' | tee -a /tmp/arstack-studio-firmware-contract.log
+            exit 1
+          fi
+          echo 'Corrupted firmware hash: correctly blocked' | tee -a /tmp/arstack-studio-firmware-contract.log
+
+          cp "$root/firmware/firmware-manifest.valid.json" "$root/firmware/firmware-manifest.json"
+          sed -i 's/"chip": "esp32p4"/"chip": "esp32s3"/' "$root/firmware/firmware-manifest.json"
+          if ARSTACK_STUDIO_FIRMWARE_DIR="$root/firmware" \
+             ARSTACK_STUDIO_ESPFLASH="$root/tools/espflash" \
+             ./build-arstack-studio/arstack_studio --check-firmware-contract \
+             >> /tmp/arstack-studio-firmware-contract.log 2>&1; then
+            echo 'Wrong-chip firmware manifest was incorrectly accepted.' | tee -a /tmp/arstack-studio-firmware-contract.log
+            exit 1
+          fi
+          echo 'Wrong-chip firmware manifest: correctly blocked' | tee -a /tmp/arstack-studio-firmware-contract.log
+
+      - name: Primary-window shutdown regression
+        shell: bash
+        run: |
+          set -o pipefail
+          timeout 5s env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+            ./build-arstack-studio/arstack_studio --check-app-lifecycle \
+            2>&1 | tee /tmp/arstack-studio-lifecycle.log
+
       - name: Headless QML launch smoke
         shell: bash
         run: |
@@ -89,6 +172,20 @@ jobs:
             exit "$status"
           fi
 
+      - name: High-DPI QML launch smoke
+        shell: bash
+        run: |
+          set +e
+          timeout 6s env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software QT_SCALE_FACTOR=1.75 \
+            ./build-arstack-studio/arstack_studio > /tmp/arstack-studio-hidpi.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/arstack-studio-hidpi.log
+          if [ "$status" -ne 124 ]; then
+            echo "ARStack Studio high-DPI launch exited early (status=$status)."
+            exit "$status"
+          fi
+
       - name: Retain Qt smoke logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -97,6 +194,11 @@ jobs:
           path: |
             /tmp/arstack-studio-configure.log
             /tmp/arstack-studio-build.log
+            /tmp/arstack-studio-reference-template.log
+            /tmp/arstack-studio-p0-policy.log
+            /tmp/arstack-studio-firmware-contract.log
+            /tmp/arstack-studio-lifecycle.log
             /tmp/arstack-studio-launch.log
+            /tmp/arstack-studio-hidpi.log
           if-no-files-found: ignore
           retention-days: 7

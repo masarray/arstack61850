@@ -77,11 +77,11 @@ public:
     Q_INVOKABLE bool connectPort(const QString& portName);
     Q_INVOKABLE void disconnectPort();
     Q_INVOKABLE bool sendShow();
-    Q_INVOKABLE bool start();
+    Q_INVOKABLE virtual bool start();
     Q_INVOKABLE bool stop();
-    Q_INVOKABLE bool zero();
-    Q_INVOKABLE bool setFrequency(double hz);
-    Q_INVOKABLE bool setSignal(
+    Q_INVOKABLE virtual bool zero();
+    Q_INVOKABLE virtual bool setFrequency(double hz);
+    Q_INVOKABLE virtual bool setSignal(
         const QString& signalId,
         double magnitude,
         double phaseDegrees,
@@ -91,7 +91,7 @@ public:
     Q_INVOKABLE bool setEnabled(const QString& signalId, bool enabled);
     Q_INVOKABLE bool setQuality(const QString& signalId, quint32 quality);
     Q_INVOKABLE bool setCtSaturation(bool enabled, double dcOffsetPercent, double harmonicPercent, int harmonicOrder, double clipPercent);
-    Q_INVOKABLE bool deployProfile(const QVariantMap& profile);
+    Q_INVOKABLE virtual bool deployProfile(const QVariantMap& profile);
     Q_INVOKABLE bool sendPtpShow();
     Q_INVOKABLE bool startPtp();
     Q_INVOKABLE bool stopPtp();
@@ -147,6 +147,20 @@ signals:
     void profileStateChanged();
     void ptpStateChanged();
     void deviceMessage(const QString& message);
+
+protected:
+    // Keep high-rate/session-control traffic out of the human diagnostics log.
+    // This is intentionally protected so StudioDeviceController can maintain a
+    // firmware session lease without making the generic controller API public.
+    bool sendQuietCommand(const QString& command) {
+        if (!serial_.isOpen()) return false;
+        const QByteArray bytes = command.toUtf8() + '\n';
+        if (serial_.write(bytes) < 0) {
+            setError(serial_.errorString());
+            return false;
+        }
+        return true;
+    }
 
 private:
     bool connectPortInternal(const QString& portName, bool automatic);

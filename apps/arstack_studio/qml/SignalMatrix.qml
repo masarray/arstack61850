@@ -18,7 +18,7 @@ Rectangle {
     property bool compact: false
 
     color: theme.surface2
-    radius: 8
+    radius: 9
     border.width: 1
     border.color: theme.lineSoft
 
@@ -41,15 +41,15 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 40
-            Layout.leftMargin: 10
-            Layout.rightMargin: 10
-            spacing: 8
+            Layout.preferredHeight: 44
+            Layout.leftMargin: 12
+            Layout.rightMargin: 12
+            spacing: 9
 
             Rectangle {
-                width: 20
-                height: 20
-                radius: 5
+                width: 23
+                height: 23
+                radius: 6
                 color: "#122033"
                 border.width: 1
                 border.color: "#223955"
@@ -58,7 +58,7 @@ Rectangle {
                     text: matrix.symbolText
                     color: matrix.theme.accent
                     font.family: matrix.monoFont
-                    font.pixelSize: 9
+                    font.pixelSize: 11
                     font.weight: Font.Bold
                 }
             }
@@ -66,7 +66,7 @@ Rectangle {
                 text: matrix.titleText
                 color: matrix.theme.text
                 font.family: matrix.uiFont
-                font.pixelSize: 11
+                font.pixelSize: 13
                 font.weight: Font.DemiBold
                 verticalAlignment: Text.AlignVCenter
             }
@@ -75,7 +75,7 @@ Rectangle {
                 text: matrix.unitText
                 color: matrix.theme.muted
                 font.family: matrix.uiFont
-                font.pixelSize: 9
+                font.pixelSize: 10
                 font.weight: Font.Medium
                 verticalAlignment: Text.AlignVCenter
             }
@@ -85,14 +85,14 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 26
-            Layout.leftMargin: 9
-            Layout.rightMargin: 9
-            spacing: 7
-            Label { text: "ON"; Layout.preferredWidth: 28; Layout.alignment: Qt.AlignVCenter; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: matrix.theme.captionSize - 1; font.weight: Font.DemiBold; verticalAlignment: Text.AlignVCenter }
-            Label { text: "CH"; Layout.preferredWidth: 34; Layout.alignment: Qt.AlignVCenter; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: matrix.theme.captionSize - 1; font.weight: Font.DemiBold; verticalAlignment: Text.AlignVCenter }
-            Label { text: "MAGNITUDE"; Layout.fillWidth: true; Layout.alignment: Qt.AlignVCenter; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: matrix.theme.captionSize - 1; font.weight: Font.DemiBold; verticalAlignment: Text.AlignVCenter }
-            Label { text: "PHASE"; Layout.preferredWidth: matrix.compact ? 82 : 98; Layout.alignment: Qt.AlignVCenter; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: matrix.theme.captionSize - 1; font.weight: Font.DemiBold; verticalAlignment: Text.AlignVCenter }
+            Layout.preferredHeight: 28
+            Layout.leftMargin: 10
+            Layout.rightMargin: 10
+            spacing: 8
+            Item { Layout.preferredWidth: 28 }
+            Label { text: "Channel"; Layout.preferredWidth: 46; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: 9; font.weight: Font.DemiBold; verticalAlignment: Text.AlignVCenter }
+            Label { text: "Value"; Layout.fillWidth: true; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: 9; font.weight: Font.DemiBold; verticalAlignment: Text.AlignVCenter }
+            Label { text: "Phase"; Layout.preferredWidth: matrix.compact ? 92 : 108; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: 9; font.weight: Font.DemiBold; verticalAlignment: Text.AlignVCenter }
         }
 
         Repeater {
@@ -111,15 +111,30 @@ Rectangle {
                 property bool selected: matrix.controller.activeSignal === signalRow.sid
                 property alias magnitudeEditor: magnitudeField
                 property alias phaseEditor: phaseField
+                property real pendingMagnitude: mag
+                property real pendingPhase: angle
 
                 Layout.fillWidth: true
-                Layout.preferredHeight: matrix.compact ? 50 : 54
+                Layout.preferredHeight: matrix.compact ? 54 : 60
                 color: signalRow.selected ? "#111c27"
                     : (magnitudeField.activeFocus || phaseField.activeFocus) ? "#131f2b"
                     : rowHover.hovered ? "#101820" : "transparent"
                 Behavior on color { ColorAnimation { duration: 90 } }
 
                 HoverHandler { id: rowHover }
+
+                Timer {
+                    id: magnitudeApplyTimer
+                    interval: 90
+                    repeat: false
+                    onTriggered: matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "magnitude", signalRow.pendingMagnitude)
+                }
+                Timer {
+                    id: phaseApplyTimer
+                    interval: 90
+                    repeat: false
+                    onTriggered: matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "phase", signalRow.pendingPhase)
+                }
 
                 onMagChanged: if (!magnitudeField.activeFocus) magnitudeField.text = mag.toFixed(3)
                 onAngleChanged: if (!phaseField.activeFocus) phaseField.text = angle.toFixed(2)
@@ -135,14 +150,16 @@ Rectangle {
 
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: 9
-                    anchors.rightMargin: 9
-                    spacing: 7
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 10
+                    spacing: 8
 
                     CheckBox {
                         Layout.preferredWidth: 28
                         Layout.alignment: Qt.AlignVCenter
                         checked: signalRow.channelEnabled
+                        ToolTip.visible: hovered
+                        ToolTip.text: checked ? "Channel enabled" : "Channel disabled"
                         onToggled: {
                             matrix.sourceModel.setProperty(signalRow.rowIndex, "enabled", checked)
                             matrix.controller.selectSignal(matrix.groupIndex, signalRow.rowIndex)
@@ -153,20 +170,15 @@ Rectangle {
                     }
 
                     RowLayout {
-                        Layout.preferredWidth: 34
+                        Layout.preferredWidth: 46
                         Layout.alignment: Qt.AlignVCenter
-                        spacing: 5
-                        Rectangle {
-                            width: 7
-                            height: 7
-                            radius: 3.5
-                            color: signalRow.phaseColor
-                        }
+                        spacing: 6
+                        Rectangle { width: 8; height: 8; radius: 4; color: signalRow.phaseColor }
                         Label {
                             text: signalRow.sid
                             color: signalRow.selected ? matrix.theme.text : matrix.theme.textSoft
                             font.family: matrix.monoFont
-                            font.pixelSize: 9
+                            font.pixelSize: 11
                             font.weight: Font.Bold
                             verticalAlignment: Text.AlignVCenter
                         }
@@ -192,7 +204,8 @@ Rectangle {
                             var value = matrix.controller.parseOperatorNumber(text)
                             if (matrix.controller.validMagnitude(matrix.groupIndex, value)) {
                                 invalidInput = false
-                                matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "magnitude", value)
+                                signalRow.pendingMagnitude = value
+                                magnitudeApplyTimer.restart()
                             } else {
                                 invalidInput = true
                             }
@@ -200,10 +213,14 @@ Rectangle {
                         onEditingFinished: {
                             var value = matrix.controller.parseOperatorNumber(text)
                             if (!matrix.controller.validMagnitude(matrix.groupIndex, value)) {
+                                magnitudeApplyTimer.stop()
                                 text = signalRow.mag.toFixed(3)
                                 invalidInput = false
-                                matrix.controller.showMessage(signalRow.sid + " magnitude is outside the valid wire/scaling range.", true)
+                                matrix.controller.showMessage(signalRow.sid + " value is outside the supported range.", true)
                             } else {
+                                signalRow.pendingMagnitude = value
+                                magnitudeApplyTimer.stop()
+                                matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "magnitude", value)
                                 text = value.toFixed(3)
                             }
                         }
@@ -221,7 +238,7 @@ Rectangle {
                     NumericField {
                         id: phaseField
                         enabled: matrix.controller.signalFrequency > 0
-                        Layout.preferredWidth: matrix.compact ? 82 : 98
+                        Layout.preferredWidth: matrix.compact ? 92 : 108
                         theme: matrix.theme
                         monoFont: matrix.monoFont
                         compact: matrix.compact
@@ -239,7 +256,8 @@ Rectangle {
                             var value = matrix.controller.parseOperatorNumber(text)
                             if (matrix.controller.validPhase(value)) {
                                 invalidInput = false
-                                matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "phase", value)
+                                signalRow.pendingPhase = value
+                                phaseApplyTimer.restart()
                             } else {
                                 invalidInput = true
                             }
@@ -247,10 +265,14 @@ Rectangle {
                         onEditingFinished: {
                             var value = matrix.controller.parseOperatorNumber(text)
                             if (!matrix.controller.validPhase(value)) {
+                                phaseApplyTimer.stop()
                                 text = signalRow.angle.toFixed(2)
                                 invalidInput = false
-                                matrix.controller.showMessage(signalRow.sid + " phase must stay within ±360000°.", true)
+                                matrix.controller.showMessage(signalRow.sid + " phase is outside the supported range.", true)
                             } else {
+                                signalRow.pendingPhase = value
+                                phaseApplyTimer.stop()
+                                matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "phase", value)
                                 text = value.toFixed(2)
                             }
                         }
