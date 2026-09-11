@@ -90,8 +90,8 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
             return;
         }
         if (updateReconnectAttempts_ >= kMaxUpdateReconnectAttempts) {
-            updateRequested_ = false;
-            updateStage_ = UpdateStage::idle;
+            latchFirmwareFailure(QStringLiteral(
+                "Firmware was written, but Studio could not reconnect and verify the ESP32-P4. Reconnect USB and retry firmware setup."));
             emit firmwareUpdateFinished(false);
             reconcile();
             return;
@@ -112,6 +112,9 @@ bool SmartSessionController::startReady() const noexcept { return startReady_; }
 bool SmartSessionController::firmwareUpdateRequired() const noexcept { return firmwareUpdateRequired_; }
 bool SmartSessionController::firmwareInstallRequired() const noexcept {
     return blankBoardDetected_ && !updateRequested_;
+}
+bool SmartSessionController::firmwareRetryAvailable() const noexcept {
+    return setupError_ && !updatePort_.trimmed().isEmpty() && firmware_ != nullptr && !firmware_->busy();
 }
 bool SmartSessionController::updatingFirmware() const noexcept {
     return updateStage_ == UpdateStage::stopping || updateStage_ == UpdateStage::probing ||
@@ -254,6 +257,9 @@ bool SmartSessionController::beginFirmwareOperation(const QString& portName) {
 
 bool SmartSessionController::retryFirmwareUpdate() {
     if (firmware_ == nullptr || updatePort_.isEmpty() || firmware_->busy()) return false;
+    setupError_ = false;
+    setupErrorStatus_.clear();
+    blankBoardDetected_ = false;
     updateRequested_ = true;
     updateReconnectAttempts_ = 0;
     updateStage_ = UpdateStage::probing;
@@ -264,13 +270,17 @@ bool SmartSessionController::retryFirmwareUpdate() {
         false,
         false);
     if (!firmware_->probeTarget(updatePort_)) {
-        updateRequested_ = false;
-        updateStage_ = UpdateStage::idle;
+        latchFirmwareFailure(firmware_->status());
         emit firmwareUpdateFinished(false);
         reconcile();
         return false;
     }
     return true;
+}
+
+bool SmartSessionController::retryFirmwareSetup() {
+    if (!firmwareRetryAvailable()) return false;
+    return retryFirmwareUpdate();
 }
 
 void SmartSessionController::continueFirmwareUpdate() {
@@ -288,8 +298,7 @@ void SmartSessionController::continueFirmwareUpdate() {
         false,
         false);
     if (!firmware_->probeTarget(updatePort_)) {
-        updateRequested_ = false;
-        updateStage_ = UpdateStage::idle;
+        latchFirmwareFailure(firmware_->status());
         emit firmwareUpdateFinished(false);
         reconcile();
     }
@@ -423,8 +432,7 @@ void SmartSessionController::reconnectFirmwareSignals() {
                         if (firmware_->bootloaderHelpNeeded()) {
                             updateStage_ = UpdateStage::waitingForBootloader;
                         } else {
-                            updateRequested_ = false;
-                            updateStage_ = UpdateStage::idle;
+                            latchFirmwareFailure(firmware_->status());
                             emit firmwareUpdateFinished(false);
                         }
                         reconcile();
@@ -436,8 +444,7 @@ void SmartSessionController::reconnectFirmwareSignals() {
             if (firmware_->bootloaderHelpNeeded()) {
                 updateStage_ = UpdateStage::waitingForBootloader;
             } else {
-                updateRequested_ = false;
-                updateStage_ = UpdateStage::idle;
+                latchFirmwareFailure(firmware_->status());
                 emit firmwareUpdateFinished(false);
             }
         } else if (updateStage_ == UpdateStage::flashing && !firmware_->busy() &&
@@ -448,7 +455,7 @@ void SmartSessionController::reconnectFirmwareSignals() {
     });
 
     connect(firmware_, &FirmwareManager::operationFailed, this,
-            [this](const QString&, const bool bootloaderHelpNeeded) {
+            [this](const QString& message, const bool bootloaderHelpNeeded) {
         if (!updateRequested_) {
             if (blankProbeInFlight_) {
                 blankProbeInFlight_ = false;
@@ -462,8 +469,7 @@ void SmartSessionController::reconnectFirmwareSignals() {
         if (bootloaderHelpNeeded) {
             updateStage_ = UpdateStage::waitingForBootloader;
         } else {
-            updateRequested_ = false;
-            updateStage_ = UpdateStage::idle;
+            latchFirmwareFailure(message);
             emit firmwareUpdateFinished(false);
         }
         reconcile();
@@ -517,6 +523,21 @@ void SmartSessionController::clearBlankBoardContext() {
     blankProbeAttemptedPort_.clear();
     setupError_ = false;
     setupErrorStatus_.clear();
+}
+
+void SmartSessionController::latchFirmwareFailure(QString message) {
+    reconnectTimer_.stop();
+    updateRequested_ = false;
+    updateStage_ = UpdateStage::idle;
+    updateReconnectAttempts_ = 0;
+    blankProbeTimer_.stop();
+    blankProbeInFlight_ = false;
+    blankBoardDetected_ = false;
+    setupError_ = true;
+    message = message.trimmed();
+    setupErrorStatus_ = message.isEmpty()
+        ? QStringLiteral("Firmware setup did not complete. Retry explicitly when the board is ready.")
+        : std::move(message);
 }
 
 bool SmartSessionController::ensureDefaultProfile() {
@@ -653,9 +674,15 @@ void SmartSessionController::reconcile() {
     refreshFirmwareIdentity();
     if (!firmwareIsCurrent()) {
         if (updateRequested_ && updateStage_ == UpdateStage::reconnecting) {
-            updateRequested_ = false;
-            updateStage_ = UpdateStage::idle;
+            const QString observed = deviceFirmwareVersion_.isEmpty()
+                ? QStringLiteral("legacy/unknown firmware")
+                : QStringLiteral("firmware v%1").arg(deviceFirmwareVersion_);
+            latchFirmwareFailure(QStringLiteral(
+                "Firmware was written, but reconnect verification reported %1 instead of v%2. Retry firmware setup explicitly.")
+                .arg(observed, expectedFirmwareVersion()));
             emit firmwareUpdateFinished(false);
+            setPresentation(QStringLiteral("SETUP ERROR"), setupErrorStatus_, false, false);
+            return;
         }
         const QString versionText = deviceFirmwareVersion_.isEmpty()
             ? QStringLiteral("legacy firmware")
