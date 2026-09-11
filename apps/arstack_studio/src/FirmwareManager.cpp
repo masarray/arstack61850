@@ -94,6 +94,10 @@ bool FirmwareManager::parseEsp32P4Revision(const QString& output, int& major, in
     return true;
 }
 
+bool FirmwareManager::supportsEsp32P4Revision(const int major, const int minor) noexcept {
+    return major >= 0 && major < 3 && minor >= 0;
+}
+
 int FirmwareManager::parseFlashProgress(const QString& output) {
     static const QRegularExpression expression{QStringLiteral(R"((\d{1,3})\s*%)")};
     auto matches = expression.globalMatch(output);
@@ -364,7 +368,8 @@ void FirmwareManager::finishOperation(const int exitCode, const QProcess::ExitSt
         const bool anyChipAnswered = success && operationOutput_.contains(
             QRegularExpression{QStringLiteral(R"(Chip\s+type:)"), QRegularExpression::CaseInsensitiveOption});
         const bool supportedRevision = p4WithRevision &&
-            revisionPolicy_ == QString::fromLatin1(kPreV3Policy) && major < 3;
+            revisionPolicy_ == QString::fromLatin1(kPreV3Policy) &&
+            supportsEsp32P4Revision(major, minor);
 
         targetVerified_ = supportedRevision;
         bootloaderHelpNeeded_ = !success;
