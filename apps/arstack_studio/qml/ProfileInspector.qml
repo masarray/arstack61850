@@ -2,7 +2,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Dialogs
 
 SurfacePanel {
     id: panel
@@ -35,24 +34,7 @@ SurfacePanel {
     }
 
     function openEngineeringFile() {
-        engineeringFileDialog.open()
-    }
-
-    FileDialog {
-        id: engineeringFileDialog
-        title: "Open IEC 61850 engineering file"
-        nameFilters: [
-            "IEC 61850 SCL (*.scd *.cid *.icd *.iid *.ssd *.xml)",
-            "All files (*)"
-        ]
-        onAccepted: {
-            if (panel.profiles.loadFile(selectedFile)) {
-                panel.controller.profileDirty = true
-                panel.controller.showMessage(panel.profiles.documentStatus, false)
-            } else {
-                panel.controller.showMessage(panel.profiles.fatalError || "Unable to load engineering file.", true)
-            }
-        }
+        panel.controller.openEngineeringFile()
     }
 
     ColumnLayout {
@@ -117,7 +99,7 @@ SurfacePanel {
             uiFont: panel.uiFont
             text: "Open SCL / CID"
             enabled: !panel.device.running
-            onClicked: engineeringFileDialog.open()
+            onClicked: panel.controller.openEngineeringFile()
         }
 
         ColumnLayout {
