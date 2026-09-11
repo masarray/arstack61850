@@ -23,6 +23,16 @@ constexpr auto kPreV3Policy = "pre-v3";
 constexpr qsizetype kMaxOperationOutput = 65536;
 constexpr qsizetype kTrimmedOperationOutput = 49152;
 
+// QProcess::started is the authoritative launch signal. The launch deadline is
+// only a bounded backstop for machines where Windows Defender / endpoint
+// security performs a cold scan of the bundled executable. The previous 2.5 s
+// deadline was short enough to create false failures on real Windows systems.
+constexpr int kLaunchTimeoutMs = 15000;
+constexpr int kProbeTimeoutMs = 30000;
+constexpr int kFlashTimeoutMs = 180000;
+constexpr int kResetTimeoutMs = 20000;
+constexpr int kShutdownWaitMs = 1500;
+
 QString normalizedHash(const QString& text) {
     QString hash = text.trimmed().toLower();
     hash.remove(QLatin1Char(' '));
@@ -34,31 +44,40 @@ FirmwareManager::FirmwareManager(QObject* parent) : QObject(parent) {
     process_.setProcessChannelMode(QProcess::SeparateChannels);
 
     startupTimer_.setSingleShot(true);
-    startupTimer_.setInterval(2500);
     connect(&startupTimer_, &QTimer::timeout, this, [this] {
-        if (!busy_ || operation_ == Operation::none || process_.state() == QProcess::NotRunning) return;
+        if (shuttingDown_ || !busy_ || operation_ == Operation::none) return;
+        // Never classify a running child as a launch failure. If started() was
+        // delayed in the event queue, the operation deadline owns it instead.
+        if (process_.state() != QProcess::Starting) return;
 
         const Operation failedOperation = operation_;
         operation_ = Operation::none;
         busy_ = false;
         flashProgress_ = -1;
+        operationTimer_.stop();
         process_.kill();
 
         if (failedOperation == Operation::reset) {
-            setStatus(QStringLiteral("Firmware was written, but the reset tool did not start. Press RESET once or reconnect USB; Studio will verify the board."));
+            bootloaderHelpNeeded_ = false;
+            setStatus(QStringLiteral("Firmware was written, but the reset tool did not launch. Press RESET once or reconnect USB; Studio will verify the board."));
             emit stateChanged();
             emit installationFinished(false);
             return;
         }
 
-        fail(QStringLiteral("Firmware tool did not start within 2.5 seconds."));
         bootloaderHelpNeeded_ = false;
+        fail(QStringLiteral("Bundled firmware tool did not launch within 15 seconds. Windows security may be delaying or blocking it."));
         emit stateChanged();
         emit operationFailed(status_, false);
     });
 
+    operationTimer_.setSingleShot(true);
+    connect(&operationTimer_, &QTimer::timeout, this, &FirmwareManager::handleOperationTimeout);
+
     connect(&process_, &QProcess::started, this, [this] {
         startupTimer_.stop();
+        if (shuttingDown_ || operation_ == Operation::none) return;
+        startOperationDeadline(operation_);
     });
     connect(&process_, &QProcess::errorOccurred,
             this, &FirmwareManager::handleProcessError);
@@ -77,6 +96,10 @@ FirmwareManager::FirmwareManager(QObject* parent) : QObject(parent) {
     connect(&process_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
             this, &FirmwareManager::finishOperation);
     refreshBundle();
+}
+
+FirmwareManager::~FirmwareManager() {
+    shutdown();
 }
 
 bool FirmwareManager::parseEsp32P4Revision(const QString& output, int& major, int& minor) {
@@ -126,7 +149,7 @@ QString FirmwareManager::flasherPath() const {
 }
 
 void FirmwareManager::refreshBundle() {
-    if (busy_) return;
+    if (busy_ || shuttingDown_) return;
     bundleReady_ = false;
     firmwareVersion_ = QStringLiteral("-");
     expectedProtocol_ = QStringLiteral("-");
@@ -214,7 +237,7 @@ bool FirmwareManager::loadManifest() {
 }
 
 bool FirmwareManager::probeTarget(const QString& portName) {
-    if (busy_) return false;
+    if (busy_ || shuttingDown_) return false;
     if (!bundleReady_ || !flasherAvailable_) refreshBundle();
     if (!flasherAvailable_) {
         fail(QStringLiteral("Bundled espflash executable is unavailable."));
@@ -241,7 +264,7 @@ bool FirmwareManager::probeTarget(const QString& portName) {
 }
 
 bool FirmwareManager::installFirmware(const QString& portName) {
-    if (busy_) return false;
+    if (busy_ || shuttingDown_) return false;
     if (!bundleReady_ || !flasherAvailable_) refreshBundle();
     const QString port = portName.trimmed();
     if (!bundleReady_) {
@@ -269,9 +292,10 @@ bool FirmwareManager::installFirmware(const QString& portName) {
 }
 
 void FirmwareManager::cancel() {
-    if (!busy_) return;
+    if (!busy_ || shuttingDown_) return;
     cancelRequested_ = true;
     startupTimer_.stop();
+    operationTimer_.stop();
     setStatus(QStringLiteral("Cancelling firmware operation..."));
     emit stateChanged();
 
@@ -290,6 +314,23 @@ void FirmwareManager::cancel() {
     process_.kill();
 }
 
+void FirmwareManager::shutdown() {
+    if (shuttingDown_) return;
+    shuttingDown_ = true;
+    startupTimer_.stop();
+    operationTimer_.stop();
+    cancelRequested_ = true;
+    operation_ = Operation::none;
+    busy_ = false;
+
+    if (process_.state() != QProcess::NotRunning) {
+        QObject::disconnect(&process_, nullptr, this, nullptr);
+        process_.kill();
+        static_cast<void>(process_.waitForFinished(kShutdownWaitMs));
+    }
+    process_.close();
+}
+
 void FirmwareManager::clearLog() {
     if (logText_.isEmpty()) return;
     logText_.clear();
@@ -297,6 +338,7 @@ void FirmwareManager::clearLog() {
 }
 
 bool FirmwareManager::startEspflash(const QStringList& arguments, const Operation operation) {
+    if (shuttingDown_) return false;
     if (process_.state() != QProcess::NotRunning) {
         fail(QStringLiteral("Another firmware process is already running."));
         return false;
@@ -304,6 +346,7 @@ bool FirmwareManager::startEspflash(const QStringList& arguments, const Operatio
 
     operation_ = operation;
     operationOutput_.clear();
+    operationTimer_.stop();
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("ESPFLASH_PORT"), selectedPort_);
     environment.insert(QStringLiteral("ESPFLASH_SKIP_UPDATE_CHECK"), QStringLiteral("true"));
@@ -314,14 +357,33 @@ bool FirmwareManager::startEspflash(const QStringList& arguments, const Operatio
         .arg(selectedPort_, arguments.join(QLatin1Char(' '))));
 
     process_.start();
-    startupTimer_.start();
+    startupTimer_.start(kLaunchTimeoutMs);
     return true;
 }
 
+void FirmwareManager::startOperationDeadline(const Operation operation) {
+    int timeoutMs = 0;
+    switch (operation) {
+    case Operation::probe:
+        timeoutMs = kProbeTimeoutMs;
+        break;
+    case Operation::flash:
+        timeoutMs = kFlashTimeoutMs;
+        break;
+    case Operation::reset:
+        timeoutMs = kResetTimeoutMs;
+        break;
+    case Operation::none:
+        return;
+    }
+    operationTimer_.start(timeoutMs);
+}
+
 void FirmwareManager::handleProcessError(const QProcess::ProcessError error) {
-    if (error != QProcess::FailedToStart || operation_ == Operation::none) return;
+    if (shuttingDown_ || error != QProcess::FailedToStart || operation_ == Operation::none) return;
 
     startupTimer_.stop();
+    operationTimer_.stop();
     const Operation failedOperation = operation_;
     operation_ = Operation::none;
     busy_ = false;
@@ -329,23 +391,53 @@ void FirmwareManager::handleProcessError(const QProcess::ProcessError error) {
     cancelRequested_ = false;
 
     if (failedOperation == Operation::reset) {
-        setStatus(QStringLiteral("Firmware was written, but the reset tool could not start. Press RESET once or reconnect USB; Studio will verify the board."));
+        bootloaderHelpNeeded_ = false;
+        setStatus(QStringLiteral("Firmware was written, but the reset tool could not launch. Press RESET once or reconnect USB; Studio will verify the board."));
         emit stateChanged();
         emit installationFinished(false);
         return;
     }
 
-    fail(QStringLiteral("Unable to start bundled espflash: %1").arg(process_.errorString()));
     bootloaderHelpNeeded_ = false;
+    fail(QStringLiteral("Unable to launch bundled firmware tool: %1").arg(process_.errorString()));
     emit stateChanged();
     emit operationFailed(status_, false);
 }
 
+void FirmwareManager::handleOperationTimeout() {
+    if (shuttingDown_ || !busy_ || operation_ == Operation::none) return;
+
+    const Operation timedOut = operation_;
+    operation_ = Operation::none;
+    busy_ = false;
+    flashProgress_ = -1;
+    startupTimer_.stop();
+    process_.kill();
+
+    if (timedOut == Operation::reset) {
+        bootloaderHelpNeeded_ = false;
+        setStatus(QStringLiteral("Firmware was written, but automatic reset timed out. Press RESET once or reconnect USB; Studio will verify the board."));
+        emit stateChanged();
+        emit installationFinished(false);
+        return;
+    }
+
+    bootloaderHelpNeeded_ = true;
+    if (timedOut == Operation::probe) {
+        fail(QStringLiteral("ESP32-P4 did not answer the ROM check within 30 seconds. Put the board in Download mode and retry."));
+    } else {
+        fail(QStringLiteral("Firmware writing did not complete within 180 seconds. The device is not considered ready; put it in Download mode and retry."));
+    }
+    emit stateChanged();
+    emit operationFailed(status_, true);
+}
+
 void FirmwareManager::finishOperation(const int exitCode, const QProcess::ExitStatus exitStatus) {
     startupTimer_.stop();
+    operationTimer_.stop();
     const Operation completed = operation_;
     operation_ = Operation::none;
-    if (completed == Operation::none) return;
+    if (completed == Operation::none || shuttingDown_) return;
 
     if (cancelRequested_) {
         cancelRequested_ = false;
@@ -405,6 +497,7 @@ void FirmwareManager::finishOperation(const int exitCode, const QProcess::ExitSt
             bootloaderHelpNeeded_ = true;
             fail(QStringLiteral("Firmware installation failed. Put the board in Download mode and retry. The device is not considered ready."));
             emit stateChanged();
+            emit operationFailed(status_, true);
             return;
         }
         if (flashProgress_ != 100) {
