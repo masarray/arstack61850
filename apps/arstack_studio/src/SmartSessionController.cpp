@@ -173,6 +173,16 @@ void SmartSessionController::start() {
     if (started_) return;
     started_ = true;
     if (profiles_ != nullptr) static_cast<void>(ensureDefaultProfile());
+
+    // SmartSessionController is the single owner of automatic discovery. Do the
+    // initial probe immediately, then use the bounded periodic watchdog only
+    // while the device is genuinely offline. The QML shell must not run a
+    // second startup probe/timer in parallel.
+    if (device_ != nullptr && !device_->deviceVerified() &&
+        !device_->discovering() && !device_->connected()) {
+        static_cast<void>(device_->autoDetectAndConnect());
+    }
+
     discoveryTimer_.start();
     reconcile();
     maybeScheduleBlankBoardProbe();
