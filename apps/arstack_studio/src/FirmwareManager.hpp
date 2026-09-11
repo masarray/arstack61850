@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QProcess>
 #include <QString>
+#include <QTimer>
 
 class FirmwareManager : public QObject {
     Q_OBJECT
@@ -68,12 +69,15 @@ private:
     bool loadManifest();
     bool startEspflash(const QStringList& arguments, Operation operation);
     void finishOperation(int exitCode, QProcess::ExitStatus exitStatus);
+    void handleProcessError(QProcess::ProcessError error);
     void updateProgressFromOutput(const QString& text);
+    void appendOperationOutput(const QString& text);
     void appendLog(const QString& text);
     void setStatus(const QString& text);
     void fail(const QString& text);
 
     QProcess process_;
+    QTimer startupTimer_;
     Operation operation_{Operation::none};
     QString operationOutput_;
     QString selectedPort_;
@@ -92,4 +96,5 @@ private:
     bool busy_{false};
     bool targetVerified_{false};
     bool bootloaderHelpNeeded_{false};
+    bool cancelRequested_{false};
 };
