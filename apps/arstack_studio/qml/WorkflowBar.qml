@@ -30,6 +30,7 @@ SurfacePanel {
         id: operatorSettings
         category: "operator-ui"
         property string lastEngineeringUrl: ""
+        property int lastSelectedIndex: 0
         property bool phasorVisible: false
         property bool waveformVisible: false
         property bool telemetryVisible: true
@@ -55,10 +56,12 @@ SurfacePanel {
 
         if (operatorSettings.lastEngineeringUrl.length > 0) {
             if (profiles.loadFile(operatorSettings.lastEngineeringUrl)) {
+                profiles.selectStream(operatorSettings.lastSelectedIndex)
                 controller.profileDirty = false
                 controller.showMessage("Last engineering configuration restored.", false)
             } else {
                 operatorSettings.lastEngineeringUrl = ""
+                operatorSettings.lastSelectedIndex = 0
                 controller.showMessage("The previous engineering file is no longer available; using the built-in 4I+4V profile.", false)
             }
         }
@@ -76,14 +79,20 @@ SurfacePanel {
     }
 
     Connections {
+        target: profiles
+        function onSelectedIndexChanged() {
+            if (profiles.selectedIndex >= 0)
+                operatorSettings.lastSelectedIndex = profiles.selectedIndex
+        }
+    }
+
+    Connections {
         target: smartSession
         function onReadyForLiveApply() {
             controller.profileDirty = false
             controller.applyAllSignals()
         }
         function onStateChanged() {
-            // Main.qml still exposes legacy keyboard shortcuts. Keep those paths
-            // fail-closed while firmware is missing or outdated.
             if (ribbon.firmwareGateActive)
                 controller.profileDirty = true
 
@@ -209,6 +218,11 @@ SurfacePanel {
         if (device.running) device.stop()
     }
 
+    function openEngineeringDialog() {
+        if (!device.running) engineeringFileDialog.open()
+        else controller.showMessage("Stop injection before changing the engineering configuration.", true)
+    }
+
     function loadEngineeringFile(url) {
         if (device.running) {
             controller.showMessage("Stop injection before changing the engineering configuration.", true)
@@ -219,6 +233,7 @@ SurfacePanel {
             return false
         }
         operatorSettings.lastEngineeringUrl = url.toString()
+        operatorSettings.lastSelectedIndex = profiles.selectedIndex >= 0 ? profiles.selectedIndex : 0
         controller.profileDirty = false
         controller.showMessage(profiles.documentStatus, false)
         return true
@@ -231,6 +246,7 @@ SurfacePanel {
         }
         if (profiles.loadReferenceTemplate()) {
             operatorSettings.lastEngineeringUrl = ""
+            operatorSettings.lastSelectedIndex = 0
             controller.profileDirty = false
             controller.showMessage("Built-in 4I+4V / 4000 fps reference profile selected.", false)
         } else {
@@ -511,7 +527,7 @@ SurfacePanel {
                 Menu {
                     id: fileMenu
                     y: parent.height
-                    MenuItem { text: "Open Engineering File…"; enabled: !device.running; onTriggered: engineeringFileDialog.open() }
+                    MenuItem { text: "Open Engineering File…"; enabled: !device.running; onTriggered: ribbon.openEngineeringDialog() }
                     MenuItem {
                         text: "Reopen Last Configuration"
                         enabled: !device.running && operatorSettings.lastEngineeringUrl.length > 0
