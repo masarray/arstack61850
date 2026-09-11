@@ -392,14 +392,25 @@ void SmartSessionController::reconnectFirmwareSignals() {
                 updateStage_ = UpdateStage::idle;
                 emit firmwareUpdateFinished(false);
             }
-        } else if (updateStage_ == UpdateStage::flashing && !firmware_->busy()) {
-            if (firmware_->bootloaderHelpNeeded()) {
-                updateStage_ = UpdateStage::waitingForBootloader;
-            } else {
-                updateRequested_ = false;
-                updateStage_ = UpdateStage::idle;
-                emit firmwareUpdateFinished(false);
-            }
+        } else if (updateStage_ == UpdateStage::flashing && !firmware_->busy() &&
+                   firmware_->bootloaderHelpNeeded()) {
+            updateStage_ = UpdateStage::waitingForBootloader;
+        }
+        reconcile();
+    });
+
+    connect(firmware_, &FirmwareManager::operationFailed, this,
+            [this](const QString&, const bool bootloaderHelpNeeded) {
+        if (!updateRequested_) {
+            reconcile();
+            return;
+        }
+        if (bootloaderHelpNeeded) {
+            updateStage_ = UpdateStage::waitingForBootloader;
+        } else {
+            updateRequested_ = false;
+            updateStage_ = UpdateStage::idle;
+            emit firmwareUpdateFinished(false);
         }
         reconcile();
     });
