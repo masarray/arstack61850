@@ -14,6 +14,10 @@ SurfacePanel {
     property string monoFont: "Inter"
     property bool compact: false
     property bool updatePromptDeferred: false
+    property bool installPromptDeferred: false
+    property bool firmwareResultSuccess: false
+    property string firmwareResultTitle: ""
+    property string firmwareResultMessage: ""
 
     SmartSessionController {
         id: smartSession
@@ -35,16 +39,44 @@ SurfacePanel {
             controller.applyAllSignals()
         }
         function onStateChanged() {
-            if (smartSession.firmwareUpdateRequired && !ribbon.updatePromptDeferred && !updateDialog.opened)
+            if (smartSession.updatingFirmware || smartSession.updateNeedsBootloaderHelp) {
+                if (installDialog.opened)
+                    installDialog.close()
+                if (updateDialog.opened)
+                    updateDialog.close()
+                if (!progressDialog.opened)
+                    Qt.callLater(progressDialog.open)
+                return
+            }
+            if (smartSession.firmwareInstallRequired && !ribbon.installPromptDeferred &&
+                    !installDialog.opened && !progressDialog.opened) {
+                Qt.callLater(installDialog.open)
+                return
+            }
+            if (smartSession.firmwareUpdateRequired && !ribbon.updatePromptDeferred &&
+                    !updateDialog.opened && !progressDialog.opened) {
                 Qt.callLater(updateDialog.open)
+            }
         }
         function onFirmwareUpdateFinished(success) {
+            if (progressDialog.opened)
+                progressDialog.close()
+
+            ribbon.firmwareResultSuccess = success
             if (success) {
                 ribbon.updatePromptDeferred = false
-                controller.showMessage("Firmware updated. Preparing injection…", false)
+                ribbon.installPromptDeferred = false
+                ribbon.firmwareResultTitle = "Firmware installed successfully"
+                ribbon.firmwareResultMessage = "ESP32-P4 restarted and ARStack firmware was verified. Studio is preparing the 4I+4V injector."
+                controller.showMessage("Firmware installed and verified successfully.", false)
             } else {
-                controller.showMessage("Firmware update did not complete. Open Advanced if recovery help is needed.", true)
+                ribbon.firmwareResultTitle = "Firmware installation not completed"
+                ribbon.firmwareResultMessage = FirmwareService.status.length > 0
+                    ? FirmwareService.status
+                    : "Studio could not verify the firmware installation. Keep the board connected and try again."
+                controller.showMessage("Firmware installation was not verified.", true)
             }
+            Qt.callLater(resultDialog.open)
         }
     }
 
@@ -54,13 +86,21 @@ SurfacePanel {
             if (!device.deviceVerified)
                 ribbon.updatePromptDeferred = false
         }
+        function onPortsChanged() {
+            if (device.ports.length === 0) {
+                ribbon.installPromptDeferred = false
+                ribbon.updatePromptDeferred = false
+            }
+        }
     }
 
     readonly property string displayState: {
         if (smartSession.state === "WAITING FOR DEVICE") return "Connect device"
         if (smartSession.state === "DEVICE FOUND" || smartSession.state === "CONNECTING") return "Connecting"
+        if (smartSession.state === "CHECKING DEVICE") return "Checking device"
+        if (smartSession.state === "FIRMWARE REQUIRED") return "Firmware required"
         if (smartSession.state === "FIRMWARE UPDATE") return "Firmware update available"
-        if (smartSession.state === "UPDATING FIRMWARE") return "Updating firmware"
+        if (smartSession.state === "UPDATING FIRMWARE") return "Installing firmware"
         if (smartSession.state === "UPDATE NEEDS BOOT") return "Download mode required"
         if (smartSession.state === "PREPARING 4I+4V") return "Preparing"
         if (smartSession.state === "READY") return "Ready"
@@ -72,7 +112,8 @@ SurfacePanel {
 
     readonly property color smartStateColor: {
         if (smartSession.state === "RUNNING" || smartSession.state === "READY") return theme.green
-        if (smartSession.state === "CONNECTING" || smartSession.state === "PREPARING 4I+4V" ||
+        if (smartSession.state === "CONNECTING" || smartSession.state === "CHECKING DEVICE" ||
+            smartSession.state === "FIRMWARE REQUIRED" || smartSession.state === "PREPARING 4I+4V" ||
             smartSession.state === "FIRMWARE UPDATE" || smartSession.state === "UPDATING FIRMWARE" ||
             smartSession.state === "UPDATE NEEDS BOOT") return theme.amber
         if (smartSession.state === "DEVICE FOUND") return theme.accent
@@ -82,12 +123,85 @@ SurfacePanel {
 
     function startReason() {
         if (device.running) return "SMV output is already running."
+        if (smartSession.firmwareInstallRequired) return "Install ARStack firmware before starting injection."
         if (smartSession.firmwareUpdateRequired) return "Update firmware before starting injection."
-        if (smartSession.updatingFirmware) return "Firmware update is in progress."
-        if (smartSession.state === "CONNECTING") return "Connecting to the device automatically."
+        if (smartSession.updatingFirmware) return "Firmware installation is in progress."
+        if (smartSession.state === "CONNECTING" || smartSession.state === "CHECKING DEVICE") return "Studio is identifying the device automatically."
         if (smartSession.state === "PREPARING 4I+4V") return "Preparing the default 4I+4V injection automatically."
         if (smartSession.state === "WAITING FOR DEVICE") return "Connect ESP32-P4; Studio will detect it automatically."
         return smartSession.statusText
+    }
+
+    Dialog {
+        id: installDialog
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        width: 420
+        title: "Set up ESP32-P4"
+        closePolicy: Popup.NoAutoClose
+
+        background: Rectangle {
+            color: ribbon.theme.surface
+            radius: 10
+            border.width: 1
+            border.color: ribbon.theme.line
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 12
+            Label {
+                Layout.fillWidth: true
+                text: "ESP32-P4 detected"
+                color: ribbon.theme.text
+                font.family: ribbon.uiFont
+                font.pixelSize: 15
+                font.weight: Font.DemiBold
+            }
+            Label {
+                Layout.fillWidth: true
+                text: "ARStack firmware is not installed or is not responding on this board. Studio can install the correct firmware automatically."
+                color: ribbon.theme.textSoft
+                font.family: ribbon.uiFont
+                font.pixelSize: 11
+                wrapMode: Text.WordWrap
+            }
+            Label {
+                Layout.fillWidth: true
+                text: "No firmware file, ESP-IDF, Python, or command line is required. Keep the USB cable connected until Studio confirms success."
+                color: ribbon.theme.muted
+                font.family: ribbon.uiFont
+                font.pixelSize: 10
+                wrapMode: Text.WordWrap
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                CalmButton {
+                    theme: ribbon.theme
+                    uiFont: ribbon.uiFont
+                    text: "Later"
+                    onClicked: {
+                        ribbon.installPromptDeferred = true
+                        installDialog.close()
+                    }
+                }
+                CalmButton {
+                    theme: ribbon.theme
+                    uiFont: ribbon.uiFont
+                    text: "Install firmware"
+                    tone: "accent"
+                    implicitWidth: 142
+                    onClicked: {
+                        if (smartSession.beginFirmwareInstall()) {
+                            ribbon.installPromptDeferred = false
+                            installDialog.close()
+                        } else {
+                            controller.showMessage("Firmware installation could not start. Open Advanced for recovery details.", true)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     Dialog {
@@ -118,7 +232,7 @@ SurfacePanel {
             }
             Label {
                 Layout.fillWidth: true
-                text: "Update now? Studio will install it, restart the board, reconnect, and return to Ready automatically."
+                text: "Update now? Studio will install it, restart the board, reconnect, and verify the result automatically."
                 color: ribbon.theme.textSoft
                 font.family: ribbon.uiFont
                 font.pixelSize: 11
@@ -151,6 +265,137 @@ SurfacePanel {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    Dialog {
+        id: progressDialog
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        width: 450
+        title: smartSession.updateNeedsBootloaderHelp ? "Device needs Download mode" : "Installing firmware"
+        closePolicy: Popup.NoAutoClose
+
+        background: Rectangle {
+            color: ribbon.theme.surface
+            radius: 10
+            border.width: 1
+            border.color: smartSession.updateNeedsBootloaderHelp ? ribbon.theme.amber : ribbon.theme.line
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 12
+            Label {
+                Layout.fillWidth: true
+                text: smartSession.updateNeedsBootloaderHelp
+                    ? "Studio cannot reach the ESP32-P4 bootloader yet."
+                    : "Keep the USB cable connected. Studio will verify the board before reporting success."
+                color: smartSession.updateNeedsBootloaderHelp ? ribbon.theme.amber : ribbon.theme.text
+                font.family: ribbon.uiFont
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+                wrapMode: Text.WordWrap
+            }
+            Label {
+                Layout.fillWidth: true
+                text: smartSession.updateStatus.length > 0 ? smartSession.updateStatus : "Preparing firmware installation…"
+                color: ribbon.theme.textSoft
+                font.family: ribbon.uiFont
+                font.pixelSize: 10
+                wrapMode: Text.WordWrap
+            }
+            ProgressBar {
+                visible: !smartSession.updateNeedsBootloaderHelp
+                Layout.fillWidth: true
+                from: 0
+                to: 100
+                indeterminate: smartSession.firmwareProgress < 0
+                value: smartSession.firmwareProgress < 0 ? 0 : smartSession.firmwareProgress
+            }
+            Label {
+                visible: !smartSession.updateNeedsBootloaderHelp && smartSession.firmwareProgress >= 0
+                Layout.fillWidth: true
+                text: smartSession.firmwareProgress + "%"
+                color: ribbon.theme.text
+                font.family: ribbon.monoFont
+                font.pixelSize: 12
+                font.weight: Font.DemiBold
+                horizontalAlignment: Text.AlignHCenter
+            }
+            RowLayout {
+                visible: smartSession.updateNeedsBootloaderHelp
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                CalmButton {
+                    theme: ribbon.theme
+                    uiFont: ribbon.uiFont
+                    text: "Retry"
+                    tone: "accent"
+                    implicitWidth: 110
+                    onClicked: smartSession.retryFirmwareUpdate()
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: resultDialog
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        width: 430
+        title: ribbon.firmwareResultSuccess ? "Success" : "Firmware result"
+        closePolicy: Popup.NoAutoClose
+
+        background: Rectangle {
+            color: ribbon.theme.surface
+            radius: 10
+            border.width: 1
+            border.color: ribbon.firmwareResultSuccess ? ribbon.theme.green : ribbon.theme.red
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 12
+            Label {
+                Layout.fillWidth: true
+                text: ribbon.firmwareResultSuccess ? "✓" : "!"
+                color: ribbon.firmwareResultSuccess ? ribbon.theme.green : ribbon.theme.red
+                font.family: ribbon.uiFont
+                font.pixelSize: 30
+                font.weight: Font.Bold
+                horizontalAlignment: Text.AlignHCenter
+            }
+            Label {
+                Layout.fillWidth: true
+                text: ribbon.firmwareResultTitle
+                color: ribbon.firmwareResultSuccess ? ribbon.theme.green : ribbon.theme.text
+                font.family: ribbon.uiFont
+                font.pixelSize: 17
+                font.weight: Font.DemiBold
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+            }
+            Label {
+                Layout.fillWidth: true
+                text: ribbon.firmwareResultMessage
+                color: ribbon.theme.textSoft
+                font.family: ribbon.uiFont
+                font.pixelSize: 11
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                CalmButton {
+                    theme: ribbon.theme
+                    uiFont: ribbon.uiFont
+                    text: "OK"
+                    tone: ribbon.firmwareResultSuccess ? "success" : "normal"
+                    implicitWidth: 100
+                    onClicked: resultDialog.close()
+                }
+                Item { Layout.fillWidth: true }
             }
         }
     }
@@ -279,21 +524,21 @@ SurfacePanel {
                 spacing: 8
                 Label {
                     visible: !ribbon.compact
-                    text: "Updating firmware"
+                    text: "Installing firmware"
                     color: ribbon.theme.textSoft
                     font.family: ribbon.uiFont
                     font.pixelSize: 10
                 }
                 ProgressBar {
-                    indeterminate: FirmwareService.flashProgress < 0
+                    indeterminate: smartSession.firmwareProgress < 0
                     from: 0
                     to: 100
-                    value: FirmwareService.flashProgress < 0 ? 0 : FirmwareService.flashProgress
+                    value: smartSession.firmwareProgress < 0 ? 0 : smartSession.firmwareProgress
                     Layout.preferredWidth: ribbon.compact ? 125 : 190
                 }
                 Label {
-                    visible: FirmwareService.flashProgress >= 0
-                    text: FirmwareService.flashProgress + "%"
+                    visible: smartSession.firmwareProgress >= 0
+                    text: smartSession.firmwareProgress + "%"
                     color: ribbon.theme.textSoft
                     font.family: ribbon.monoFont
                     font.pixelSize: 10
@@ -321,6 +566,17 @@ SurfacePanel {
             }
 
             ActionButton {
+                visible: smartSession.firmwareInstallRequired && !smartSession.updatingFirmware && !smartSession.updateNeedsBootloaderHelp
+                text: "Install firmware"
+                tone: "accent"
+                implicitWidth: 142
+                onClicked: {
+                    ribbon.installPromptDeferred = false
+                    installDialog.open()
+                }
+            }
+
+            ActionButton {
                 visible: smartSession.firmwareUpdateRequired && !smartSession.updatingFirmware && !smartSession.updateNeedsBootloaderHelp
                 text: "Update firmware"
                 tone: "accent"
@@ -332,7 +588,7 @@ SurfacePanel {
             }
 
             ActionButton {
-                visible: !device.running && !smartSession.firmwareUpdateRequired &&
+                visible: !device.running && !smartSession.firmwareInstallRequired && !smartSession.firmwareUpdateRequired &&
                     !smartSession.updatingFirmware && !smartSession.updateNeedsBootloaderHelp
                 text: "Start"
                 iconSource: Qt.resolvedUrl("../assets/lucide/play.svg")
