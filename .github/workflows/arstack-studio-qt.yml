@@ -126,6 +126,8 @@ jobs:
             ./build-arstack-studio/arstack_studio --check-firmware-contract \
             2>&1 | tee /tmp/arstack-studio-firmware-contract.log
 
+          cp "$root/firmware/firmware-manifest.json" "$root/firmware/firmware-manifest.valid.json"
+
           zeros=0000000000000000000000000000000000000000000000000000000000000000
           sed -i "s/\"sha256\": \"$sha\"/\"sha256\": \"$zeros\"/" "$root/firmware/firmware-manifest.json"
           if ARSTACK_STUDIO_FIRMWARE_DIR="$root/firmware" \
@@ -136,6 +138,17 @@ jobs:
             exit 1
           fi
           echo 'Corrupted firmware hash: correctly blocked' | tee -a /tmp/arstack-studio-firmware-contract.log
+
+          cp "$root/firmware/firmware-manifest.valid.json" "$root/firmware/firmware-manifest.json"
+          sed -i 's/"chip": "esp32p4"/"chip": "esp32s3"/' "$root/firmware/firmware-manifest.json"
+          if ARSTACK_STUDIO_FIRMWARE_DIR="$root/firmware" \
+             ARSTACK_STUDIO_ESPFLASH="$root/tools/espflash" \
+             ./build-arstack-studio/arstack_studio --check-firmware-contract \
+             >> /tmp/arstack-studio-firmware-contract.log 2>&1; then
+            echo 'Wrong-chip firmware manifest was incorrectly accepted.' | tee -a /tmp/arstack-studio-firmware-contract.log
+            exit 1
+          fi
+          echo 'Wrong-chip firmware manifest: correctly blocked' | tee -a /tmp/arstack-studio-firmware-contract.log
 
       - name: Headless QML launch smoke
         shell: bash
