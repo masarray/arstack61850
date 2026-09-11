@@ -7,11 +7,10 @@
 
 #include <QCoreApplication>
 #include <QDebug>
-#include <QEvent>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
+#include <QQuickWindow>
 #include <QTimer>
-#include <QWindow>
 #include <QtQml/qqml.h>
 
 #include <algorithm>
@@ -28,26 +27,6 @@ bool hasArgument(const int argc, char* argv[], const std::string_view wanted) {
     }
     return false;
 }
-
-class PrimaryWindowCloseFilter final : public QObject {
-public:
-    explicit PrimaryWindowCloseFilter(QCoreApplication* app)
-        : QObject(app), app_(app) {}
-
-protected:
-    bool eventFilter(QObject* watched, QEvent* event) override {
-        if (event != nullptr && event->type() == QEvent::Close && app_ != nullptr) {
-            // The close event is the authoritative lifetime boundary. Let QML
-            // finish its own onClosing handler (including best-effort STOP),
-            // then retire the process regardless of auxiliary dock windows.
-            QTimer::singleShot(0, app_, &QCoreApplication::quit);
-        }
-        return QObject::eventFilter(watched, event);
-    }
-
-private:
-    QCoreApplication* app_{nullptr};
-};
 
 int checkReferenceTemplate(int argc, char* argv[]) {
     QCoreApplication app(argc, argv);
@@ -215,14 +194,23 @@ int main(int argc, char* argv[]) {
         Qt::QueuedConnection);
     engine.loadFromModule("ARStack.Studio", "Main");
 
-    QWindow* mainWindow = nullptr;
+    QQuickWindow* mainWindow = nullptr;
     if (!engine.rootObjects().isEmpty()) {
-        mainWindow = qobject_cast<QWindow*>(engine.rootObjects().constFirst());
+        mainWindow = qobject_cast<QQuickWindow*>(engine.rootObjects().constFirst());
     }
 
-    PrimaryWindowCloseFilter primaryCloseFilter{&app};
     if (mainWindow != nullptr) {
-        mainWindow->installEventFilter(&primaryCloseFilter);
+        // QQuickWindow::closing is the same authoritative boundary used by
+        // QML onClosing. QQuickCloseEvent is intentionally a private Qt type,
+        // so the string-based meta-object connection avoids private headers
+        // while still binding primary-window close directly to application
+        // lifetime. Auxiliary dock windows therefore cannot orphan the process.
+        QObject::connect(
+            mainWindow,
+            SIGNAL(closing(QQuickCloseEvent*)),
+            &app,
+            SLOT(quit()),
+            Qt::DirectConnection);
     }
 
     if (lifecycleCheck) {
