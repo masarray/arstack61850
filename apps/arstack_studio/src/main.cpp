@@ -265,8 +265,7 @@ int main(int argc, char* argv[]) {
             // requested from the production filter. Once the authoritative
             // filter has observed the close, explicitly finish only the test
             // harness. Production still relies on the same filter's quit().
-            if (lifecycleCheck)
-                QCoreApplication::exit(0);
+            QCoreApplication::exit(0);
         });
         QTimer::singleShot(3500, &app, [] {
             qCritical().noquote() << "Application lifecycle regression: primary close was not observed in time.";
