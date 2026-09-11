@@ -81,6 +81,14 @@ int checkFirmwareContract(int argc, char* argv[]) {
         wrongMajor,
         wrongMinor);
 
+    const bool revisionPolicy =
+        FirmwareManager::supportsEsp32P4Revision(0, 0) &&
+        FirmwareManager::supportsEsp32P4Revision(1, 3) &&
+        FirmwareManager::supportsEsp32P4Revision(2, 99) &&
+        !FirmwareManager::supportsEsp32P4Revision(3, 0) &&
+        !FirmwareManager::supportsEsp32P4Revision(-1, 0) &&
+        !FirmwareManager::supportsEsp32P4Revision(1, -1);
+
     const bool flashProgressFormat =
         FirmwareManager::parseFlashProgress(QStringLiteral("Writing 7%\rWriting 64%\r")) == 64 &&
         FirmwareManager::parseFlashProgress(QStringLiteral("no progress token")) == -1 &&
@@ -90,7 +98,7 @@ int checkFirmwareContract(int argc, char* argv[]) {
         firmware.firmwareVersion() == QStringLiteral(ARSTACK_STUDIO_VERSION) &&
         firmware.expectedProtocol() == QStringLiteral("1") &&
         firmware.firmwareSha256().size() == 64 &&
-        realEspflashFormat && dashedFormat && rejectsWrongChip && flashProgressFormat;
+        realEspflashFormat && dashedFormat && rejectsWrongChip && revisionPolicy && flashProgressFormat;
     if (!valid) {
         qCritical().noquote()
             << "Firmware bundle/probe contract: FAIL ·"
@@ -98,11 +106,12 @@ int checkFirmwareContract(int argc, char* argv[]) {
             << "espflash-format=" << realEspflashFormat
             << "dashed-format=" << dashedFormat
             << "wrong-chip-rejected=" << rejectsWrongChip
+            << "revision-policy=" << revisionPolicy
             << "progress-format=" << flashProgressFormat;
         return 4;
     }
     qInfo().noquote()
-        << "Firmware bundle/probe contract: PASS · P4 revision + flash progress formats accepted ·"
+        << "Firmware bundle/probe contract: PASS · target/revision/progress/hash policy locked ·"
         << firmware.bundleStatus();
     return 0;
 }
