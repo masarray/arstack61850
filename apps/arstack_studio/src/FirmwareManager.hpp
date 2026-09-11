@@ -42,6 +42,7 @@ public:
     [[nodiscard]] QString logText() const { return logText_; }
 
     [[nodiscard]] static bool parseEsp32P4Revision(const QString& output, int& major, int& minor);
+    [[nodiscard]] static bool supportsEsp32P4Revision(int major, int minor) noexcept;
     [[nodiscard]] static int parseFlashProgress(const QString& output);
 
     Q_INVOKABLE void refreshBundle();
