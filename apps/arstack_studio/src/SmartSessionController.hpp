@@ -2,6 +2,7 @@
 #pragma once
 
 #include <QObject>
+#include <QStringList>
 #include <QTimer>
 
 class DeviceController;
@@ -44,6 +45,14 @@ public:
     [[nodiscard]] QString firmwareSetupPort() const;
     [[nodiscard]] QString expectedFirmwareVersion() const;
     [[nodiscard]] QString deviceFirmwareVersion() const;
+
+    // Recovery selection is intentionally conservative: prefer the device
+    // classifier's recommended port; otherwise a single visible serial port is
+    // safe to ROM-probe because FirmwareManager performs a read-only chip check
+    // and refuses to write until ESP32-P4 pre-v3 is proven and the user approves.
+    [[nodiscard]] static QString chooseRecoveryPort(
+        const QString& recommendedPort,
+        const QStringList& visiblePorts);
 
     void setDevice(QObject* object);
     void setProfiles(QObject* object);
@@ -89,6 +98,7 @@ private:
     QString updatePort_;
     QString blankBoardPort_;
     QString blankProbeAttemptedPort_;
+    QString setupErrorStatus_;
     bool startReady_{false};
     bool firmwareUpdateRequired_{false};
     bool started_{false};
@@ -98,6 +108,7 @@ private:
     bool updateRequested_{false};
     bool blankProbeInFlight_{false};
     bool blankBoardDetected_{false};
+    bool setupError_{false};
     int updateReconnectAttempts_{0};
     UpdateStage updateStage_{UpdateStage::idle};
 };
