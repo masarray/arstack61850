@@ -33,6 +33,7 @@ qt_add_qml_module(arstack_ied_simulator
     VERSION 1.0
     SOURCES
         src/IedFleetController.cpp
+        src/IedFleetControllerAsync.cpp
         src/IedFleetController.hpp
         src/IedNavigationModel.cpp
         src/IedNavigationModel.hpp

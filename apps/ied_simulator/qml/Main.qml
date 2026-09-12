@@ -31,7 +31,7 @@ ApplicationWindow {
         id: sclDialog
         title: "Open IEC 61850 engineering model"
         nameFilters: ["IEC 61850 engineering files (*.scl *.cid *.scd *.iid *.icd)", "All files (*)"]
-        onAccepted: simulator.loadFile(selectedFile)
+        onAccepted: simulator.loadFileAsync(selectedFile)
     }
 
     function importModel() {

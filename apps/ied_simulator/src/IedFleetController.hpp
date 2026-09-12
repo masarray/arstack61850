@@ -7,6 +7,7 @@
 #include <QHash>
 #include <QObject>
 #include <QProcess>
+#include <QThreadPool>
 #include <QUrl>
 #include <QVariantList>
 #include <QtQmlIntegration/qqmlintegration.h>
@@ -20,6 +21,7 @@ class IedFleetController : public QObject {
     QML_ELEMENT
 
     Q_PROPERTY(bool imported READ imported NOTIFY modelChanged)
+    Q_PROPERTY(bool importing READ importing NOTIFY modelChanged)
     Q_PROPERTY(bool running READ running NOTIFY runtimeChanged)
     Q_PROPERTY(bool starting READ starting NOTIFY runtimeChanged)
     Q_PROPERTY(bool anyRunning READ anyRunning NOTIFY runtimeChanged)
@@ -63,6 +65,7 @@ public:
     ~IedFleetController() override;
 
     [[nodiscard]] bool imported() const noexcept;
+    [[nodiscard]] bool importing() const noexcept;
     [[nodiscard]] bool running() const noexcept;
     [[nodiscard]] bool starting() const noexcept;
     [[nodiscard]] bool anyRunning() const noexcept;
@@ -100,6 +103,7 @@ public:
     void setFileFolder(const QString& value);
 
     Q_INVOKABLE bool loadFile(const QUrl& fileUrl);
+    Q_INVOKABLE bool loadFileAsync(const QUrl& fileUrl);
     Q_INVOKABLE bool addFile(const QUrl& fileUrl);
     Q_INVOKABLE void clear();
     Q_INVOKABLE void selectIed(int index);
@@ -143,6 +147,19 @@ private:
         ar::iec61850::scl::SclDocument document;
     };
 
+    struct PendingAsyncImport final {
+        QString path;
+        quint64 generation{};
+    };
+
+    struct AsyncImportResult final {
+        QString path;
+        quint64 generation{};
+        std::optional<ar::iec61850::scl::SclDocument> document;
+        QString error;
+        qint64 elapsedMilliseconds{};
+    };
+
     struct RuntimeInstance final {
         QString key;
         QString listenAddress;
@@ -164,6 +181,8 @@ private:
     };
 
     bool importFile(const QUrl& fileUrl, bool append);
+    void launchAsyncImport(PendingAsyncImport request);
+    void finishAsyncImport(const std::shared_ptr<AsyncImportResult>& result);
     void rebuildPresentation();
     void rebuildRuntimeInstances(const QHash<QString, QVariantMap>& previousConfigurations);
     void rebuildValues();
@@ -207,11 +226,14 @@ private:
     QVariantList activity_;
     QHash<QString, QVariantMap> runtimeValues_;
     std::optional<ValueSnapshot> previousValue_;
+    QThreadPool importPool_;
+    std::optional<PendingAsyncImport> pendingAsyncImport_;
     QString sourceName_;
     QString sourcePath_;
     QString fatalError_;
     QString defaultListenAddress_{QStringLiteral("0.0.0.0")};
     QString fileFolder_;
+    quint64 asyncImportGeneration_{};
     int defaultPort_{102};
     int selectedIedIndex_{-1};
     int selectedValueIndex_{-1};
@@ -221,6 +243,7 @@ private:
     int dataSetCount_{};
     int reportCount_{};
     int gooseCount_{};
+    bool asyncImportRunning_{};
     bool gooseEnabled_{};
     bool fileServiceEnabled_{};
 };

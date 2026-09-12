@@ -16,7 +16,7 @@ This plan applies the repository `AGENTS.md` production contract to the desktop 
 
 ## UX architecture
 
-### Stage A - model/view foundation
+### Stage A - model/view foundation — implemented
 
 - `IedNavigationModel`: compact C++ navigation index for LD/LN selection.
 - `IedSignalModel`: C++ signal table projection with static roles and coalesced filtering/refresh.
@@ -24,12 +24,15 @@ This plan applies the repository `AGENTS.md` production contract to the desktop 
 - Replace the four-panel workspace with a two-pane navigation/details layout.
 - Start is a deliberate server-settings dialog; editing is a deliberate Set Values dialog.
 
-### Stage B - asynchronous import/indexing
+### Stage B - asynchronous import/indexing — parser path implemented, indexing follow-up pending
 
-- Move SCL parse/profile construction off the GUI thread using one bounded worker.
-- Apply completed model snapshots on the GUI thread with queued delivery.
-- Generation/cancellation token prevents an older import from replacing a newer request.
-- Progress/cancel state is explicit; no arbitrary sleeps.
+- Interactive Open SCL now parses on one bounded `QThreadPool` worker instead of the GUI thread.
+- Only one parse runs at a time; repeated Open SCL requests are coalesced to one newest pending request instead of creating an unbounded worker queue.
+- A monotonically increasing generation token plus source-path ownership prevents an older import, a cleared workspace, or an older request from replacing newer state.
+- Parsed `SclDocument` ownership is transferred back to the GUI thread through queued delivery before presentation models are rebuilt.
+- The synchronous `loadFile()` path remains for deterministic CLI/CI automation, while the desktop FileDialog uses `loadFileAsync()`.
+- Import while a simulator endpoint is active is rejected instead of blocking the GUI on process shutdown.
+- Still pending in Stage B: move profile construction / large value-index construction off the GUI thread and add explicit progress/cancel UI for very large files.
 
 ### Stage C - incremental live updates
 
