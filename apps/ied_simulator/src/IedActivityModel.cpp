@@ -21,9 +21,9 @@ IedActivityModel::IedActivityModel(QObject* parent)
 QString IedActivityModel::filterText() const { return filterText_; }
 QString IedActivityModel::severityFilter() const { return severityFilter_; }
 int IedActivityModel::retainedCount() const noexcept {
-    return std::min(
-        maxRetainedEvents_,
-        events_.size() + pendingEvents_.size() + (droppedPendingEvents_ > 0 ? 1 : 0));
+    const qsizetype stagedCount =
+        events_.size() + pendingEvents_.size() + (droppedPendingEvents_ > 0 ? 1 : 0);
+    return static_cast<int>(std::min<qsizetype>(maxRetainedEvents_, stagedCount));
 }
 int IedActivityModel::visibleCount() const noexcept { return visibleIndices_.size(); }
 
