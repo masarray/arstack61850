@@ -1,0 +1,180 @@
++    visibleIndices_.clear();
++    droppedPendingEvents_ = 0;
++    endResetModel();
++    if (previousRetained != 0) emit retainedCountChanged();
++    if (previousVisible != 0) emit visibleCountChanged();
++}
++
++int IedActivityModel::size() const noexcept { return retainedCount(); }
++
++QVariantList IedActivityModel::snapshot() const {
++    QVariantList result;
++    result.reserve(retainedCount());
++
++    if (droppedPendingEvents_ > 0) {
++        QVariantMap summary;
++        summary.insert(
++            QStringLiteral("time"),
++            QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss.zzz")));
++        summary.insert(QStringLiteral("category"), QStringLiteral("Diagnostics"));
++        summary.insert(
++            QStringLiteral("message"),
++            QStringLiteral("%1 high-rate activity events were coalesced to protect the UI event loop.")
++                .arg(droppedPendingEvents_));
++        summary.insert(QStringLiteral("severity"), QStringLiteral("Warning"));
++        summary.insert(QStringLiteral("ied"), QString{});
++        result.push_back(summary);
++    }
++    for (auto it = pendingEvents_.crbegin(); it != pendingEvents_.crend(); ++it) {
++        if (result.size() >= maxRetainedEvents_) break;
++        result.push_back(*it);
++    }
++    for (const auto& event : events_) {
++        if (result.size() >= maxRetainedEvents_) break;
++        result.push_back(event);
++    }
++    return result;
++}
++
++bool IedActivityModel::matches(const QVariantMap& event) const {
++    if (severityFilter_ != QStringLiteral("All") &&
++        event.value(QStringLiteral("severity"), QStringLiteral("Info")).toString() != severityFilter_) {
++        return false;
++    }
++
++    const auto query = filterText_.trimmed();
++    if (query.isEmpty()) return true;
++    const QStringList fields{
++        event.value(QStringLiteral("time")).toString(),
++        event.value(QStringLiteral("severity")).toString(),
++        event.value(QStringLiteral("ied")).toString(),
++        event.value(QStringLiteral("category")).toString(),
++        event.value(QStringLiteral("message")).toString(),
++    };
++    for (const auto& field : fields) {
++        if (field.contains(query, Qt::CaseInsensitive)) return true;
++    }
++    return false;
++}
++
++QVector<int> IedActivityModel::buildVisibleIndices(const QVariantList& events) const {
++    QVector<int> result;
++    result.reserve(events.size());
++    for (int index = 0; index < events.size(); ++index) {
++        if (matches(events.at(index).toMap())) result.push_back(index);
++    }
++    return result;
++}
++
++void IedActivityModel::schedulePublish() {
++    if (!publishTimer_.isActive()) publishTimer_.start();
++}
++
++void IedActivityModel::publishPending() {
++    if (pendingEvents_.isEmpty() && droppedPendingEvents_ == 0) return;
++    const int previousRetained = events_.size();
++    const int previousVisible = visibleIndices_.size();
++
++    auto next = snapshot();
++    auto nextVisible = buildVisibleIndices(next);
++    beginResetModel();
++    events_ = std::move(next);
++    pendingEvents_.clear();
++    droppedPendingEvents_ = 0;
++    visibleIndices_ = std::move(nextVisible);
++    endResetModel();
++
++    if (previousRetained != events_.size()) emit retainedCountChanged();
++    if (previousVisible != visibleIndices_.size()) emit visibleCountChanged();
++}
++
++void IedActivityModel::scheduleFilterRebuild() {
++    if (!filterTimer_.isActive()) filterTimer_.start();
++}
++
++void IedActivityModel::rebuildVisible() {
++    // Publish staged events first so a filter change never reveals a stale row
++    // mapping. publishPending() already performs the reset in that case.
++    if (!pendingEvents_.isEmpty() || droppedPendingEvents_ > 0) {
++        publishTimer_.stop();
++        publishPending();
++        return;
++    }
++
++    const auto nextVisible = buildVisibleIndices(events_);
++    if (nextVisible == visibleIndices_) return;
++    const int previousVisible = visibleIndices_.size();
++    beginResetModel();
++    visibleIndices_ = nextVisible;
++    endResetModel();
++    if (previousVisible != visibleIndices_.size()) emit visibleCountChanged();
++}
++diff -ruN '--exclude=__pycache__' iedsim-pristine/apps/ied_simulator/src/IedActivityModel.hpp iedsim-src/apps/ied_simulator/src/IedActivityModel.hpp
++--- iedsim-pristine/apps/ied_simulator/src/IedActivityModel.hpp	1970-01-01 00:00:00.000000000 +0000
+++++ iedsim-src/apps/ied_simulator/src/IedActivityModel.hpp	2026-09-12 21:40:16.883989256 +0000
++@@ -0,0 +1,79 @@
+++// SPDX-License-Identifier: GPL-3.0-or-later
+++#pragma once
+++
+++#include <QAbstractListModel>
+++#include <QTimer>
+++#include <QVariantList>
+++#include <QtQmlIntegration/qqmlintegration.h>
+++
+++class IedActivityModel : public QAbstractListModel {
+++    Q_OBJECT
+++    QML_ANONYMOUS
+++    Q_PROPERTY(QString filterText READ filterText WRITE setFilterText NOTIFY filterTextChanged)
+++    Q_PROPERTY(QString severityFilter READ severityFilter WRITE setSeverityFilter NOTIFY severityFilterChanged)
+++    Q_PROPERTY(int retainedCount READ retainedCount NOTIFY retainedCountChanged)
+++    Q_PROPERTY(int visibleCount READ visibleCount NOTIFY visibleCountChanged)
+++
+++public:
+++    enum Role {
+++        TimeRole = Qt::UserRole + 1,
+++        CategoryRole,
+++        MessageRole,
+++        SeverityRole,
+++        IedRole,
+++    };
+++    Q_ENUM(Role)
+++
+++    explicit IedActivityModel(QObject* parent = nullptr);
+++
+++    [[nodiscard]] QString filterText() const;
+++    [[nodiscard]] QString severityFilter() const;
+++    [[nodiscard]] int retainedCount() const noexcept;
+++    [[nodiscard]] int visibleCount() const noexcept;
+++
+++    void setFilterText(const QString& value);
+++    void setSeverityFilter(const QString& value);
+++
+++    [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex{}) const override;
+++    [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
+++    [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
+++
+++    // Compatibility surface for the controller's existing bounded activity
+++    // append path. Events are staged for at most one UI frame, then published
+++    // as one model reset instead of one QML list rebuild per child-process line.
+++    void push_front(const QVariant& value);
+++    void removeLast();
+++    void clear();
+++    [[nodiscard]] int size() const noexcept;
+++    [[nodiscard]] QVariantList snapshot() const;
+++    operator QVariantList() const { return snapshot(); }
+++
+++    [[nodiscard]] QVariantList::const_iterator begin() const noexcept { return events_.cbegin(); }
+++    [[nodiscard]] QVariantList::const_iterator end() const noexcept { return events_.cend(); }
+++
+++signals:
+++    void filterTextChanged();
+++    void severityFilterChanged();
+++    void retainedCountChanged();
+++    void visibleCountChanged();
+++
+++private:
+++    static constexpr int maxRetainedEvents_ = 300;
+++    static constexpr int maxPendingEvents_ = 128;
+++
+++    [[nodiscard]] bool matches(const QVariantMap& event) const;
+++    [[nodiscard]] QVector<int> buildVisibleIndices(const QVariantList& events) const;
