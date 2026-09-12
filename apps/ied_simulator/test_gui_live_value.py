@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch the Qt simulator and prove GUI-applied state is visible over MMS."""
+"""Launch the Qt simulator and prove GUI state plus full SCL model are visible over MMS."""
 
 from __future__ import annotations
 
@@ -35,6 +35,27 @@ def resolve_read_probe(argument: str) -> str:
         if matches:
             return str(matches[0])
     raise FileNotFoundError(f"MMS read probe not found under {path}")
+
+
+def run_probe(read_probe: str, port: int, item: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            read_probe,
+            "127.0.0.1",
+            str(port),
+            "--domain",
+            "MU01LD0",
+            "--item",
+            item,
+            "--timeout-ms",
+            "3000",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=6,
+        check=False,
+        creationflags=creation_flags(),
+    )
 
 
 def main() -> int:
@@ -82,13 +103,22 @@ def main() -> int:
                     manifest_text = manifest_path.read_text(encoding="utf-8")
                 except (FileNotFoundError, PermissionError, UnicodeDecodeError):
                     manifest_text = ""
-                if manifest_text.startswith("ARSTACK_IED_MODEL\t2\t2\n") and (
-                    "TCTR1$MX$Amp$instMag$i\tINT32\tNumber\t42" in manifest_text
+                mapped_value = "TCTR1$MX$Amp$instMag$i\tINT32\tNumber\t42"
+                structural_only_value = (
+                    "TCTR1$MX$AmpUnmapped$instMag$i\tINT32\tNumber\t0"
+                )
+                if (
+                    manifest_text.startswith("ARSTACK_IED_MODEL\t2\t2\n")
+                    and mapped_value in manifest_text
+                    and structural_only_value in manifest_text
                 ):
                     break
                 time.sleep(0.1)
             else:
-                raise RuntimeError("GUI did not publish manifest revision 2 with value 42")
+                raise RuntimeError(
+                    "GUI did not publish revision 2 with both the edited DataSet leaf "
+                    "and the structural-only leaf"
+                )
 
             deadline = time.monotonic() + 10.0
             while time.monotonic() < deadline:
@@ -96,33 +126,37 @@ def main() -> int:
                     last_error = f"application exited early with code {app.returncode}"
                     break
                 time.sleep(0.25)
-                probe = subprocess.run(
-                    [
-                        read_probe,
-                        "127.0.0.1",
-                        str(port),
-                        "--domain",
-                        "MU01LD0",
-                        "--item",
-                        "TCTR1$MX$Amp$instMag$i",
-                        "--timeout-ms",
-                        "3000",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=6,
-                    check=False,
-                    creationflags=creation_flags(),
+                mapped_probe = run_probe(
+                    read_probe,
+                    port,
+                    "TCTR1$MX$Amp$instMag$i",
                 )
-                if probe.returncode == 0 and "value=42" in probe.stdout:
+                if mapped_probe.returncode != 0 or "value=42" not in mapped_probe.stdout:
+                    last_error = (
+                        "mapped leaf: "
+                        f"exit={mapped_probe.returncode} stdout={mapped_probe.stdout} "
+                        f"stderr={mapped_probe.stderr}"
+                    )
+                    time.sleep(0.2)
+                    continue
+
+                structural_probe = run_probe(
+                    read_probe,
+                    port,
+                    "TCTR1$MX$AmpUnmapped$instMag$i",
+                )
+                if structural_probe.returncode == 0 and "value=0" in structural_probe.stdout:
                     app.wait(timeout=14)
                     print(
                         "IEDSIM_GUI_LIVE_VALUE_PASS "
-                        "reference=MU01LD0/TCTR1$MX$Amp$instMag$i value=42"
+                        "edited=MU01LD0/TCTR1$MX$Amp$instMag$i:42 "
+                        "structural=MU01LD0/TCTR1$MX$AmpUnmapped$instMag$i:0"
                     )
                     return 0
                 last_error = (
-                    f"exit={probe.returncode} stdout={probe.stdout} stderr={probe.stderr}"
+                    "structural-only leaf: "
+                    f"exit={structural_probe.returncode} stdout={structural_probe.stdout} "
+                    f"stderr={structural_probe.stderr}"
                 )
                 time.sleep(0.2)
             raise RuntimeError(last_error)
