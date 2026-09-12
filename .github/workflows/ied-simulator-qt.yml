@@ -1,6 +1,5 @@
 name: IED Simulator Qt
 
-# Milestone G bootstrap trigger: runtime diagnostics, restart lifecycle, and bounded output.
 on:
   push:
     paths:
@@ -34,36 +33,13 @@ on:
       - '.github/workflows/ied-simulator-qt.yml'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-and-smoke:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-
-      - name: Apply milestone G source patch
-        if: github.event_name == 'pull_request' && github.head_ref == 'feat/ied-sim-ux-performance-foundation'
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "ARStack CI"
-          git config user.email "actions@users.noreply.github.com"
-          git fetch origin feat/ied-sim-ux-performance-foundation 4225202bcbfcfa71a0d4499d9412f7ac2be2cc0e --depth=1
-          git checkout -B feat/ied-sim-ux-performance-foundation origin/feat/ied-sim-ux-performance-foundation
-          git show 4225202bcbfcfa71a0d4499d9412f7ac2be2cc0e:.github/workflows/ied-simulator-qt.yml > .github/workflows/ied-simulator-qt.yml
-          cat .milestone-g/part*.patch > /tmp/milestone-g.patch
-          patch -p1 --forward < /tmp/milestone-g.patch
-          # GitHub Actions' token may update source but cannot update workflow files.
-          # Restore this bootstrap workflow so the pushed source commit contains no
-          # workflow mutation; the final workflow is installed separately via the
-          # connected GitHub integration after the source commit lands.
-          git checkout HEAD -- .github/workflows/ied-simulator-qt.yml
-          git rm -r .milestone-g
-          git add apps/ied_simulator
-          git diff --cached --check
-          git commit -m "feat(ied-sim): bound runtime diagnostics and restart lifecycle"
-          git push origin HEAD:feat/ied-sim-ux-performance-foundation
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
@@ -79,19 +55,10 @@ jobs:
       - name: Build
         run: >-
           cmake --build build-ied-simulator-qt
-          --target arstack_ied_simulator ariec61850_mms_read_probe --parallel 2
+          --target arstack_ied_simulator ariec61850_mms_read_probe ied_simulator_guardrails_qa --parallel 2
 
-      - name: Export simulator source snapshot
-        uses: actions/upload-artifact@v4
-        with:
-          name: ied-simulator-source
-          path: |
-            apps/ied_simulator/src
-            apps/ied_simulator/qml
-            apps/ied_simulator/CMakeLists.txt
-            .github/workflows/ied-simulator-qt.yml
-          if-no-files-found: error
-          retention-days: 1
+      - name: Bounded activity and child-output guardrails
+        run: ./build-ied-simulator-qt/ied_simulator_guardrails_qa
 
       - name: QML smoke test
         env:
