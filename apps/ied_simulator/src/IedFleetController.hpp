@@ -12,6 +12,7 @@
 #include <QThreadPool>
 #include <QUrl>
 #include <QVariantList>
+#include <QVector>
 #include <QtQmlIntegration/qqmlintegration.h>
 
 #include <memory>
@@ -95,6 +96,21 @@ public:
     // Internal model-view fast path: avoid copying the full QVariantList on
     // every 16 ms live refresh. QML keeps using the value-returning property.
     [[nodiscard]] const QVariantList& valuesView() const noexcept { return values_; }
+    [[nodiscard]] bool hasPreparedValueIndex() const noexcept {
+        return preparedValueIndexIed_ == selectedIedIndex_;
+    }
+    [[nodiscard]] const QVariantList& navigationIndexView() const noexcept {
+        return navigationIndex_;
+    }
+    [[nodiscard]] const QVector<int>& valueScopeIndices(
+        const QString& logicalDevice,
+        const QString& logicalNode) const noexcept {
+        static const QVector<int> empty;
+        if (!hasPreparedValueIndex()) return empty;
+        const auto found = valueScopeIndex_.constFind(
+            logicalDevice + QLatin1Char('\x1f') + logicalNode);
+        return found == valueScopeIndex_.cend() ? empty : found.value();
+    }
     [[nodiscard]] int selectedValueIndex() const noexcept;
     [[nodiscard]] QVariantMap selectedValue() const;
     [[nodiscard]] QVariantList activity() const;
@@ -176,6 +192,8 @@ private:
         std::optional<ar::iec61850::scl::SclDocument> document;
         QVariantList ieds;
         QVariantList selectedValues;
+        QVariantList navigationIndex;
+        QHash<QString, QVector<int>> valueScopeIndex;
         QHash<QString, QVariantMap> runtimeValues;
         QString error;
         qint64 parserMilliseconds{};
@@ -257,6 +275,8 @@ private:
     std::vector<std::unique_ptr<RuntimeInstance>> runtimes_;
     QVariantList ieds_;
     QVariantList values_;
+    QVariantList navigationIndex_;
+    QHash<QString, QVector<int>> valueScopeIndex_;
     IedActivityModel activity_;
     QHash<QString, QVariantMap> runtimeValues_;
     std::optional<ValueSnapshot> previousValue_;
@@ -271,6 +291,7 @@ private:
     qint64 lastImportWorkerMilliseconds_{};
     qint64 lastGuiApplyMilliseconds_{};
     int preparedPointCount_{};
+    int preparedValueIndexIed_{-1};
     int defaultPort_{102};
     int selectedIedIndex_{-1};
     int selectedValueIndex_{-1};
