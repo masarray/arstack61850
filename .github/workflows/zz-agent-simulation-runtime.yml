@@ -33,6 +33,9 @@ jobs:
       - name: Preserve configured-control MMS type lifetime
         run: python3 scripts/agent_fix_control_type_lifetime.py
 
+      - name: Share simulated control state across associations
+        run: python3 scripts/agent_fix_cross_association_control_state.py
+
       - name: Add BRCB invariant diagnostics
         run: python3 scripts/agent_diagnose_iedsim_brcb.py
 
