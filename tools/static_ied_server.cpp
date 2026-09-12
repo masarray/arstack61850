@@ -3,6 +3,9 @@
 #include "ariec61850/mms/data_codec.hpp"
 #include "ariec61850/mms/services.hpp"
 #include "ariec61850/mms/simulator_manifest_codec.hpp"
+#include "ariec61850/mms/static_report_connection.hpp"
+#include "ariec61850/mms/static_urcb_objects.hpp"
+#include "ariec61850/mms/static_urcb_runtime.hpp"
 
 #include <algorithm>
 #include <array>
@@ -313,6 +316,61 @@ struct SocketStreamContext final {
     return {embedded::IoStatus::io_error, 0U};
 }
 
+[[nodiscard]] bool send_all(
+    const NativeSocket socket,
+    const std::span<const std::uint8_t> bytes) noexcept {
+    SocketStreamContext context{socket};
+    std::size_t offset{};
+    std::size_t consecutive_waits{};
+    while (offset < bytes.size() && !g_stop.load(std::memory_order_relaxed)) {
+        const auto result = socket_send(&context, bytes.subspan(offset));
+        if (result.status == embedded::IoStatus::ok && result.transferred != 0U) {
+            offset += result.transferred;
+            consecutive_waits = 0U;
+            continue;
+        }
+        if (result.status == embedded::IoStatus::timeout ||
+            result.status == embedded::IoStatus::would_block) {
+            if (++consecutive_waits <= 50U) continue;
+        }
+        return false;
+    }
+    return offset == bytes.size();
+}
+
+[[nodiscard]] std::uint64_t monotonic_ms() noexcept {
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+[[nodiscard]] std::uint64_t report_now_ms(const void*) noexcept {
+    return monotonic_ms();
+}
+
+[[nodiscard]] std::array<std::uint8_t, 6U> report_binary_time() noexcept {
+    constexpr std::int64_t milliseconds_per_day = 86'400'000LL;
+    constexpr std::int64_t unix_days_to_1984 = 5'113LL;
+    auto unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    std::int64_t unix_days = unix_ms / milliseconds_per_day;
+    std::int64_t day_ms = unix_ms % milliseconds_per_day;
+    if (day_ms < 0) {
+        day_ms += milliseconds_per_day;
+        --unix_days;
+    }
+    const auto days_since_1984 = std::clamp<std::int64_t>(
+        unix_days - unix_days_to_1984, 0LL, 65'535LL);
+    const auto millis = static_cast<std::uint32_t>(day_ms);
+    const auto days = static_cast<std::uint16_t>(days_since_1984);
+    return {
+        static_cast<std::uint8_t>((millis >> 24U) & 0xFFU),
+        static_cast<std::uint8_t>((millis >> 16U) & 0xFFU),
+        static_cast<std::uint8_t>((millis >> 8U) & 0xFFU),
+        static_cast<std::uint8_t>(millis & 0xFFU),
+        static_cast<std::uint8_t>((days >> 8U) & 0xFFU),
+        static_cast<std::uint8_t>(days & 0xFFU)};
+}
+
 struct CliOptions final {
     std::string bind_address{"0.0.0.0"};
     std::string model_manifest;
@@ -511,6 +569,8 @@ struct ConnectionBuffers final {
     std::array<std::uint8_t, 32'768U> receive{};
     std::array<std::uint8_t, 32'768U> response{};
     std::array<std::uint8_t, 8'192U> workspace{};
+    std::array<std::uint8_t, 65'535U> report_frame{};
+    std::array<std::uint8_t, 65'535U> report_workspace{};
 };
 
 struct ManifestValue final {
@@ -538,6 +598,19 @@ struct ManifestDataSetStorage final {
     std::vector<mms::MmsStaticDataSetMember> members;
 };
 
+struct ManifestReportControlStorage final {
+    std::string domain;
+    std::string item;
+    std::string report_id;
+    std::string data_set_domain;
+    std::string data_set_item;
+    std::uint32_t conf_revision{1U};
+    std::array<std::uint8_t, 2U> optional_fields{};
+    std::uint32_t buffer_time_ms{};
+    std::uint8_t trigger_options{};
+    std::uint32_t integrity_period_ms{};
+};
+
 struct ManifestModel final {
     std::string path;
     std::uint64_t revision{};
@@ -548,6 +621,10 @@ struct ManifestModel final {
     std::unordered_map<std::string, std::size_t> value_indices;
     std::vector<ManifestDataSetStorage> data_set_storage;
     std::vector<mms::MmsStaticDataSetEntry> data_sets;
+    std::vector<ManifestReportControlStorage> report_control_storage;
+    std::vector<mms::MmsStaticUrcbDefinition> urcb_definitions;
+    std::size_t buffered_report_controls{};
+    std::size_t omitted_urcbs{};
     std::size_t declared_entries{};
 };
 
@@ -685,9 +762,23 @@ void rebuild_manifest_roots(ManifestModel& model) {
         std::string member_domain;
         std::string member_item;
     };
+    struct ParsedReportControl final {
+        std::string domain;
+        std::string item;
+        bool buffered{};
+        std::string report_id;
+        std::string data_set_domain;
+        std::string data_set_item;
+        std::uint32_t conf_revision{};
+        std::uint32_t buffer_time_ms{};
+        std::uint32_t integrity_period_ms{};
+        std::uint8_t trigger_options{};
+        std::array<std::uint8_t, 2U> optional_fields{};
+    };
     std::vector<std::pair<std::string, std::string>> roots;
     std::vector<ParsedObject> parsed_objects;
     std::vector<ParsedDataSetMember> parsed_members;
+    std::vector<ParsedReportControl> parsed_reports;
     std::set<std::pair<std::string, std::string>> unique_roots;
     std::set<std::pair<std::string, std::string>> unique_objects;
     std::string line;
@@ -708,6 +799,32 @@ void rebuild_manifest_roots(ManifestModel& model) {
             }
         } else if (fields.size() >= 5U && fields[0] == "DS") {
             parsed_members.push_back({fields[1], fields[2], fields[3], fields[4]});
+        } else if (fields.size() >= 13U && fields[0] == "RCB") {
+            if (fields[1].empty() || fields[2].empty() || fields[4].empty() ||
+                fields[5].empty() || fields[6].empty() ||
+                (fields[3] != "0" && fields[3] != "1")) {
+                throw std::runtime_error("Model manifest contains a malformed RCB entry.");
+            }
+            ParsedReportControl report;
+            report.domain = fields[1];
+            report.item = fields[2];
+            report.buffered = fields[3] == "1";
+            report.report_id = fields[4];
+            report.data_set_domain = fields[5];
+            report.data_set_item = fields[6];
+            report.conf_revision = parse_u32("RCB ConfRev", fields[7],
+                std::numeric_limits<std::uint32_t>::max());
+            report.buffer_time_ms = parse_u32("RCB BufTm", fields[8],
+                std::numeric_limits<std::uint32_t>::max());
+            report.integrity_period_ms = parse_u32("RCB IntgPd", fields[9],
+                std::numeric_limits<std::uint32_t>::max());
+            report.trigger_options = static_cast<std::uint8_t>(
+                parse_u32("RCB TrgOps", fields[10], 0xFFU));
+            report.optional_fields[0] = static_cast<std::uint8_t>(
+                parse_u32("RCB OptFlds[0]", fields[11], 0xFFU));
+            report.optional_fields[1] = static_cast<std::uint8_t>(
+                parse_u32("RCB OptFlds[1]", fields[12], 0xFFU));
+            parsed_reports.push_back(std::move(report));
         }
     }
     if (roots.empty()) {
@@ -800,6 +917,53 @@ void rebuild_manifest_roots(ManifestModel& model) {
         model.data_sets.push_back({
             storage.domain, storage.item, storage.members, false});
     }
+
+    std::set<std::pair<std::string, std::string>> available_data_sets;
+    for (const auto& data_set : model.data_sets) {
+        available_data_sets.emplace(data_set.domain, data_set.item);
+    }
+    const auto available_urcb_slots = std::min<std::size_t>(
+        mms::MmsStaticUrcbRuntime::maximum_control_blocks,
+        (mms::MmsStaticObjectTable::maximum_objects - model.objects.size()) /
+            mms::MmsStaticUrcbObjectBank::attributes_per_control_block);
+    model.report_control_storage.reserve(available_urcb_slots);
+    for (auto& report : parsed_reports) {
+        if (report.buffered) {
+            ++model.buffered_report_controls;
+            continue;
+        }
+        if (!available_data_sets.contains({report.data_set_domain, report.data_set_item}) ||
+            model.report_control_storage.size() >= available_urcb_slots) {
+            ++model.omitted_urcbs;
+            continue;
+        }
+        ManifestReportControlStorage storage;
+        storage.domain = std::move(report.domain);
+        storage.item = std::move(report.item);
+        storage.report_id = std::move(report.report_id);
+        storage.data_set_domain = std::move(report.data_set_domain);
+        storage.data_set_item = std::move(report.data_set_item);
+        storage.conf_revision = report.conf_revision;
+        storage.optional_fields = report.optional_fields;
+        storage.buffer_time_ms = report.buffer_time_ms;
+        storage.trigger_options = report.trigger_options;
+        storage.integrity_period_ms = report.integrity_period_ms;
+        model.report_control_storage.push_back(std::move(storage));
+    }
+    model.urcb_definitions.reserve(model.report_control_storage.size());
+    for (const auto& storage : model.report_control_storage) {
+        model.urcb_definitions.push_back(mms::MmsStaticUrcbDefinition{
+            storage.domain,
+            storage.item,
+            storage.report_id,
+            storage.data_set_domain,
+            storage.data_set_item,
+            storage.conf_revision,
+            storage.optional_fields,
+            storage.buffer_time_ms,
+            storage.trigger_options,
+            storage.integrity_period_ms});
+    }
     return model;
 }
 
@@ -881,9 +1045,63 @@ void serve_connection(
     ManifestModel* const manifest_model,
     const std::uint64_t association_id,
     const std::string_view remote) {
+    std::vector<mms::MmsStaticUrcbState> urcb_states;
+    std::vector<mms::MmsStaticObjectEntry> urcb_object_storage;
+    std::vector<mms::MmsStaticUrcbObjectContext> urcb_context_storage;
+    std::vector<char> urcb_name_storage;
+    std::unique_ptr<mms::MmsStaticUrcbRuntime> urcb_runtime;
+    std::unique_ptr<mms::MmsStaticUrcbObjectBank> urcb_bank;
+
     mms::MmsStaticDispatchPolicy dispatch_policy;
+    dispatch_policy.maximum_write_variables = 1U;
+    const mms::MmsStaticObjectTable* dispatch_objects = &object_table;
+    if (manifest_model != nullptr && !manifest_model->urcb_definitions.empty()) {
+        urcb_states.resize(manifest_model->urcb_definitions.size());
+        urcb_runtime = std::make_unique<mms::MmsStaticUrcbRuntime>(
+            std::span<const mms::MmsStaticUrcbDefinition>{manifest_model->urcb_definitions},
+            std::span<mms::MmsStaticUrcbState>{urcb_states},
+            object_table,
+            data_sets);
+        if (!urcb_runtime->initialize()) {
+            throw std::runtime_error("Could not initialize per-association URCB runtime.");
+        }
+
+        mms::MmsStaticUrcbObjectBank sizing_bank{
+            *urcb_runtime,
+            object_table.objects(),
+            std::span<mms::MmsStaticObjectEntry>{},
+            std::span<mms::MmsStaticUrcbObjectContext>{},
+            std::span<char>{},
+            report_now_ms,
+            nullptr};
+        const auto required_objects = sizing_bank.required_object_capacity();
+        const auto required_contexts = sizing_bank.required_context_capacity();
+        const auto required_names = sizing_bank.required_name_bytes();
+        if (required_objects == std::numeric_limits<std::size_t>::max() ||
+            required_contexts == std::numeric_limits<std::size_t>::max() ||
+            required_names == std::numeric_limits<std::size_t>::max()) {
+            throw std::runtime_error("URCB object-bank capacity calculation failed.");
+        }
+        urcb_object_storage.resize(required_objects);
+        urcb_context_storage.resize(required_contexts);
+        urcb_name_storage.resize(required_names);
+        urcb_bank = std::make_unique<mms::MmsStaticUrcbObjectBank>(
+            *urcb_runtime,
+            object_table.objects(),
+            std::span<mms::MmsStaticObjectEntry>{urcb_object_storage},
+            std::span<mms::MmsStaticUrcbObjectContext>{urcb_context_storage},
+            std::span<char>{urcb_name_storage},
+            report_now_ms,
+            nullptr);
+        if (!urcb_bank->initialize()) {
+            throw std::runtime_error("Could not expose URCB MMS attribute objects.");
+        }
+        dispatch_objects = &urcb_bank->table();
+        dispatch_policy.advertise_flattened_child_aliases = true;
+    }
+
     const mms::MmsStaticApplicationDispatcher dispatcher{
-        object_table, data_sets, dispatch_policy};
+        *dispatch_objects, data_sets, dispatch_policy};
 
     mms::MmsStaticConnectionPolicy policy;
     policy.association_id = association_id;
@@ -917,6 +1135,10 @@ void serve_connection(
             try {
                 const auto changed = refresh_manifest_values(*manifest_model);
                 if (changed != 0U) {
+                    if (urcb_bank != nullptr && !urcb_bank->initialize()) {
+                        throw std::runtime_error(
+                            "URCB object bank could not refresh its base model views.");
+                    }
                     std::osyncstream{std::cout}
                         << "IEDSIM_EVENT kind=value_sync association="
                         << association_id << " changed=" << changed
@@ -958,6 +1180,49 @@ void serve_connection(
                 << " state=" << connection_state_text(runtime.state()) << '\n';
             return;
         }
+
+        if (urcb_runtime != nullptr && session.pending_output_bytes() == 0U) {
+            const auto binary_time = report_binary_time();
+            const auto report = mms::MmsStaticReportConnection::poll(
+                runtime,
+                *urcb_runtime,
+                monotonic_ms(),
+                binary_time,
+                buffers.report_frame,
+                buffers.report_workspace);
+            if (report.response_ready()) {
+                if (!send_all(
+                        socket,
+                        std::span<const std::uint8_t>{buffers.report_frame}.first(
+                            report.bytes_written))) {
+                    std::osyncstream{std::cerr}
+                        << "IEDSIM_EVENT kind=report_send_error association="
+                        << association_id << " remote=" << remote << '\n';
+                    return;
+                }
+                total_sent += report.bytes_written;
+                const auto* definition = urcb_runtime->definition(report.control_block_index);
+                std::osyncstream{std::cout}
+                    << "IEDSIM_EVENT kind=report_sent association="
+                    << association_id
+                    << " rcb="
+                    << (definition == nullptr ? std::string_view{"unknown"} : definition->item)
+                    << " sqnum=" << static_cast<unsigned>(report.sequence_number)
+                    << " reason=" << static_cast<unsigned>(report.reason)
+                    << " bytes=" << report.bytes_written << '\n';
+            } else if (
+                report.status == mms::MmsStaticReportConnectionStatus::response_buffer_too_small ||
+                report.status == mms::MmsStaticReportConnectionStatus::workspace_too_small ||
+                report.status == mms::MmsStaticReportConnectionStatus::report_encode_failed) {
+                std::osyncstream{std::cerr}
+                    << "IEDSIM_EVENT kind=report_error association="
+                    << association_id
+                    << " status=" << static_cast<unsigned>(report.status)
+                    << " urcb_status=" << static_cast<unsigned>(report.urcb_status)
+                    << '\n';
+            }
+        }
+
         if (result.status == mms::MmsStaticServerSessionStatus::would_block ||
             result.status == mms::MmsStaticServerSessionStatus::timed_out) {
             std::this_thread::sleep_for(std::chrono::milliseconds{1});
@@ -1093,12 +1358,18 @@ int main(int argc, char** argv) {
         const auto truncated = manifest_model.declared_entries > object_span.size()
             ? manifest_model.declared_entries - object_span.size()
             : 0U;
+        const auto exposed_objects = object_span.size() +
+            manifest_model.urcb_definitions.size() *
+                mms::MmsStaticUrcbObjectBank::attributes_per_control_block;
         std::osyncstream{std::cout}
             << "IEDSIM_EVENT kind=server_ready bind="
             << options.bind_address << " port=" << options.port
-            << " objects=" << object_span.size()
+            << " objects=" << exposed_objects
             << " domains=" << domain_names.size()
             << " datasets=" << data_set_span.size()
+            << " urcbs=" << manifest_model.urcb_definitions.size()
+            << " brcbs=" << manifest_model.buffered_report_controls
+            << " omitted_urcbs=" << manifest_model.omitted_urcbs
             << " truncated=" << truncated
             << " max_active=" << options.maximum_active_connections
             << " profile=iedscout" << '\n';
