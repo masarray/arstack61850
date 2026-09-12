@@ -83,12 +83,14 @@ private:
     void refreshSnapshot();
     void refreshSelectedRole();
     void emitRowsChanged(QVector<int> rows, const QList<int>& roles);
-    [[nodiscard]] bool rowMatches(const QVariantMap& item, const QString& query) const;
+    [[nodiscard]] bool rowMatches(
+        const IedPointStore::PointRecord& item,
+        const QString& query) const;
     [[nodiscard]] Row makeRow(
         RowKind kind,
         int sourceIndex,
         const QString& name,
-        const QVariantMap& item) const;
+        const IedPointStore::PointRecord& item) const;
 
     IedFleetController* backend_{};
     QTimer rebuildTimer_;
