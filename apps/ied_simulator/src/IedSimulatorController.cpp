@@ -55,10 +55,10 @@ QString normalizedType(const ar::iec61850::scl::SclDataSetEntry& entry) {
 
 QString initialValue(const QString& type, const QString& dataAttribute) {
     if (type == QStringLiteral("Boolean")) return QStringLiteral("false");
-    if (type == QStringLiteral("Enumeration")) return QStringLiteral("intermediate-state");
-    if (type == QStringLiteral("Quality")) return QStringLiteral("Good");
+    if (type == QStringLiteral("Enumeration")) return QStringLiteral("0");
+    if (type == QStringLiteral("Quality")) return QStringLiteral("good");
     if (type == QStringLiteral("Timestamp")) {
-        return QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"));
+        return QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
     }
     if (type == QStringLiteral("Number")) return QStringLiteral("0");
     if (dataAttribute.compare(QStringLiteral("stVal"), Qt::CaseInsensitive) == 0) {
@@ -93,12 +93,14 @@ QString mmsDomainFor(const ar::iec61850::scl::SclDataSetEntry& entry) {
 }
 
 QString mmsItemFor(const ar::iec61850::scl::SclDataSetEntry& entry) {
+    auto dataObject = qstring(entry.do_name);
+    dataObject.replace(QLatin1Char('.'), QLatin1Char('$'));
     auto attribute = qstring(entry.da_name);
     attribute.replace(QLatin1Char('.'), QLatin1Char('$'));
     QStringList parts{
         qstring(entry.prefix) + qstring(entry.ln_class) + qstring(entry.ln_inst),
         qstring(entry.functional_constraint),
-        qstring(entry.do_name)};
+        dataObject};
     if (!attribute.isEmpty()) parts.push_back(attribute);
     parts.removeAll(QString{});
     return parts.join(QLatin1Char('$'));
@@ -351,6 +353,7 @@ void IedSimulatorController::clear() {
 void IedSimulatorController::selectIed(const int index) {
     const int normalized = index >= 0 && index < ieds_.size() ? index : -1;
     if (selectedIedIndex_ == normalized) return;
+    if (running_ || starting_) stopSimulation();
     selectedIedIndex_ = normalized;
     rebuildValues();
     emit selectionChanged();
@@ -364,7 +367,7 @@ void IedSimulatorController::selectValue(const int index) {
 }
 
 bool IedSimulatorController::startSimulation() {
-    if (!imported() || running_ || starting_) return false;
+    if (!imported() || running_ || starting_ || selectedIedIndex_ < 0) return false;
     const auto executable = serverExecutable();
     if (executable.isEmpty()) {
         appendActivity(
@@ -386,8 +389,8 @@ bool IedSimulatorController::startSimulation() {
     serverProcess_.start();
     appendActivity(
         QStringLiteral("Server"),
-        QStringLiteral("Starting IEDScout-compatible MMS endpoint on %1:%2.")
-            .arg(listenAddress_)
+        QStringLiteral("Starting IEDScout-compatible MMS endpoint for %1 on %2:%3.")
+            .arg(selectedIed().value(QStringLiteral("name")).toString(), listenAddress_)
             .arg(port_));
     return true;
 }
@@ -495,7 +498,7 @@ QString IedSimulatorController::diagnosticsText() const {
         "IEDScout profile: Authentication=None; AP-title=1,1,1,999,1; "
         "AE-qualifier=12; P-selector=00 00 00 01; S-selector=00 01; T-selector=00 01\n");
     text += QStringLiteral(
-        "Counts: IED=%1; LD=%2; referenced DO=%3; referenced DA=%4; "
+        "Counts: IED=%1; LD=%2; DO=%3; DA/BDA=%4; "
         "DataSet=%5; Report=%6; GOOSE=%7\n")
         .arg(ieds_.size())
         .arg(logicalDeviceCount_)
@@ -575,7 +578,7 @@ void IedSimulatorController::processServerLine(
         if (truncated > 0) {
             appendActivity(
                 QStringLiteral("Model"),
-                QStringLiteral("%1 logical-node roots exceeded the bounded host profile and were omitted.")
+                QStringLiteral("%1 model objects exceeded the bounded host profile and were omitted.")
                     .arg(truncated),
                 QStringLiteral("Warning"));
         }
@@ -632,65 +635,80 @@ bool IedSimulatorController::writeModelManifest() {
             QStringLiteral("arstack-ied-simulator-%1.model")
                 .arg(QCoreApplication::applicationPid()));
     }
+    const auto activeIed = selectedIed();
+    const auto activeIedName = activeIed.value(QStringLiteral("name")).toString();
+    const auto activeDocumentIndex = activeIed.value(QStringLiteral("documentIndex")).toInt(-1);
+    if (activeIedName.isEmpty() || activeDocumentIndex < 0 ||
+        activeDocumentIndex >= static_cast<int>(documents_.size())) {
+        appendActivity(
+            QStringLiteral("Model"),
+            QStringLiteral("Select a valid IED before starting the simulator."),
+            QStringLiteral("Error"));
+        return false;
+    }
+
     seedRuntimeValues();
     ++modelRevision_;
     QByteArray manifest = "ARSTACK_IED_MODEL\t2\t" +
         QByteArray::number(modelRevision_) + "\n";
     QSet<QString> uniqueRoots;
-    for (const auto& loaded : documents_) {
-        QFile input{loaded.path};
-        if (!input.open(QIODevice::ReadOnly)) {
-            appendActivity(
-                QStringLiteral("Model"),
-                QStringLiteral("Could not reopen %1 for runtime model projection.").arg(loaded.path),
-                QStringLiteral("Error"));
-            return false;
-        }
-        QXmlStreamReader xml{&input};
-        QString currentIed;
-        QString currentDomain;
-        while (!xml.atEnd()) {
-            xml.readNext();
-            if (xml.isStartElement()) {
-                const auto element = xml.name();
-                const auto attributes = xml.attributes();
-                if (element == QStringLiteral("IED")) {
-                    currentIed = attributes.value(QStringLiteral("name")).toString();
-                } else if (element == QStringLiteral("LDevice")) {
-                    currentDomain = currentIed + attributes.value(QStringLiteral("inst")).toString();
-                } else if ((element == QStringLiteral("LN") ||
-                            element == QStringLiteral("LN0")) &&
-                           !currentDomain.isEmpty()) {
-                    const auto logicalNode =
-                        attributes.value(QStringLiteral("prefix")).toString() +
-                        attributes.value(QStringLiteral("lnClass")).toString() +
-                        attributes.value(QStringLiteral("inst")).toString();
-                    if (!logicalNode.isEmpty()) {
-                        const auto key = currentDomain + QLatin1Char('\n') + logicalNode;
-                        if (!uniqueRoots.contains(key)) {
-                            uniqueRoots.insert(key);
-                            manifest += "LN\t" + currentDomain.toUtf8() + "\t" +
-                                logicalNode.toUtf8() + "\n";
-                        }
+    const auto& loaded = documents_[static_cast<std::size_t>(activeDocumentIndex)];
+    QFile input{loaded.path};
+    if (!input.open(QIODevice::ReadOnly)) {
+        appendActivity(
+            QStringLiteral("Model"),
+            QStringLiteral("Could not reopen %1 for runtime model projection.").arg(loaded.path),
+            QStringLiteral("Error"));
+        return false;
+    }
+    QXmlStreamReader xml{&input};
+    QString currentIed;
+    QString currentDomain;
+    while (!xml.atEnd()) {
+        xml.readNext();
+        if (xml.isStartElement()) {
+            const auto element = xml.name();
+            const auto attributes = xml.attributes();
+            if (element == QStringLiteral("IED")) {
+                currentIed = attributes.value(QStringLiteral("name")).toString();
+                currentDomain.clear();
+            } else if (element == QStringLiteral("LDevice")) {
+                currentDomain = currentIed == activeIedName
+                    ? currentIed + attributes.value(QStringLiteral("inst")).toString()
+                    : QString{};
+            } else if ((element == QStringLiteral("LN") ||
+                        element == QStringLiteral("LN0")) &&
+                       !currentDomain.isEmpty()) {
+                const auto logicalNode =
+                    attributes.value(QStringLiteral("prefix")).toString() +
+                    attributes.value(QStringLiteral("lnClass")).toString() +
+                    attributes.value(QStringLiteral("inst")).toString();
+                if (!logicalNode.isEmpty()) {
+                    const auto key = currentDomain + QLatin1Char('\n') + logicalNode;
+                    if (!uniqueRoots.contains(key)) {
+                        uniqueRoots.insert(key);
+                        manifest += "LN\t" + currentDomain.toUtf8() + "\t" +
+                            logicalNode.toUtf8() + "\n";
                     }
                 }
-            } else if (xml.isEndElement()) {
-                if (xml.name() == QStringLiteral("LDevice")) currentDomain.clear();
-                if (xml.name() == QStringLiteral("IED")) currentIed.clear();
             }
+        } else if (xml.isEndElement()) {
+            if (xml.name() == QStringLiteral("LDevice")) currentDomain.clear();
+            if (xml.name() == QStringLiteral("IED")) currentIed.clear();
         }
-        if (xml.hasError()) {
-            appendActivity(
-                QStringLiteral("Model"),
-                QStringLiteral("Runtime model projection failed: %1").arg(xml.errorString()),
-                QStringLiteral("Error"));
-            return false;
-        }
+    }
+    if (xml.hasError()) {
+        appendActivity(
+            QStringLiteral("Model"),
+            QStringLiteral("Runtime model projection failed: %1").arg(xml.errorString()),
+            QStringLiteral("Error"));
+        return false;
     }
 
     QSet<QString> emittedObjects;
     for (auto it = runtimeValues_.cbegin(); it != runtimeValues_.cend(); ++it) {
         const auto item = it.value();
+        if (item.value(QStringLiteral("iedName")).toString() != activeIedName) continue;
         const auto domain = item.value(QStringLiteral("mmsDomain")).toString();
         const auto mmsItem = item.value(QStringLiteral("mmsItem")).toString();
         if (domain.isEmpty() || mmsItem.isEmpty()) continue;
@@ -705,31 +723,37 @@ bool IedSimulatorController::writeModelManifest() {
     }
 
     QSet<QString> emittedDataSetMembers;
-    for (const auto& loaded : documents_) {
-        for (const auto& dataSet : loaded.document.data_sets) {
-            const auto dataSetDomain = qstring(dataSet.ied_name) + qstring(dataSet.ld_inst);
-            auto dataSetItem = qstring(dataSet.logical_node_path) + QLatin1Char('$') +
-                qstring(dataSet.name);
-            dataSetItem.replace(QLatin1Char('.'), QLatin1Char('$'));
-            for (const auto& entry : dataSet.entries) {
-                const auto memberDomain = mmsDomainFor(entry);
-                const auto memberItem = mmsItemFor(entry);
-                const auto memberKey = dataSetDomain + QLatin1Char('\n') + dataSetItem +
-                    QLatin1Char('\n') + memberDomain + QLatin1Char('\n') + memberItem;
-                if (dataSetDomain.isEmpty() || dataSetItem.isEmpty() ||
-                    memberDomain.isEmpty() || memberItem.isEmpty() ||
-                    emittedDataSetMembers.contains(memberKey)) continue;
-                emittedDataSetMembers.insert(memberKey);
-                manifest += "DS\t" + manifestField(dataSetDomain) + "\t" +
-                    manifestField(dataSetItem) + "\t" + manifestField(memberDomain) +
-                    "\t" + manifestField(memberItem) + "\n";
-            }
+    for (const auto& dataSet : loaded.document.data_sets) {
+        if (qstring(dataSet.ied_name) != activeIedName) continue;
+        const auto dataSetDomain = qstring(dataSet.ied_name) + qstring(dataSet.ld_inst);
+        auto dataSetItem = qstring(dataSet.logical_node_path) + QLatin1Char('$') +
+            qstring(dataSet.name);
+        dataSetItem.replace(QLatin1Char('.'), QLatin1Char('$'));
+        for (const auto& entry : dataSet.entries) {
+            const auto memberDomain = mmsDomainFor(entry);
+            const auto memberItem = mmsItemFor(entry);
+            const auto memberKey = dataSetDomain + QLatin1Char('\n') + dataSetItem +
+                QLatin1Char('\n') + memberDomain + QLatin1Char('\n') + memberItem;
+            if (dataSetDomain.isEmpty() || dataSetItem.isEmpty() ||
+                memberDomain.isEmpty() || memberItem.isEmpty() ||
+                emittedDataSetMembers.contains(memberKey)) continue;
+            emittedDataSetMembers.insert(memberKey);
+            manifest += "DS\t" + manifestField(dataSetDomain) + "\t" +
+                manifestField(dataSetItem) + "\t" + manifestField(memberDomain) +
+                "\t" + manifestField(memberItem) + "\n";
         }
     }
     if (uniqueRoots.isEmpty()) {
         appendActivity(
             QStringLiteral("Model"),
-            QStringLiteral("The imported SCL contains no discoverable logical-node roots."),
+            QStringLiteral("The selected IED contains no discoverable logical-node roots."),
+            QStringLiteral("Error"));
+        return false;
+    }
+    if (emittedObjects.isEmpty()) {
+        appendActivity(
+            QStringLiteral("Model"),
+            QStringLiteral("The selected IED contains no typed structural data-attribute leaves."),
             QStringLiteral("Error"));
         return false;
     }
@@ -792,19 +816,24 @@ void IedSimulatorController::rebuildPresentation() {
         const auto collectEntry = [&](const ar::iec61850::scl::SclDataSetEntry& entry) {
             const auto ld = qstring(entry.ied_name) + QLatin1Char('/') + qstring(entry.ld_inst);
             logicalDevices.insert(ld);
-            const auto object = ld + QLatin1Char('/') + qstring(entry.ln_class) + qstring(entry.ln_inst) +
+            const auto logicalNode = qstring(entry.prefix) + qstring(entry.ln_class) + qstring(entry.ln_inst);
+            const auto object = ld + QLatin1Char('/') + logicalNode +
                 QLatin1Char('/') + qstring(entry.do_name);
             dataObjects.insert(object);
             dataAttributes.insert(object + QLatin1Char('/') + qstring(entry.da_name));
         };
-        for (const auto& dataSet : document.data_sets) {
-            for (const auto& entry : dataSet.entries) collectEntry(entry);
-        }
-        for (const auto& stream : document.goose_streams) {
-            for (const auto& entry : stream.entries) collectEntry(entry);
-        }
-        for (const auto& report : document.report_controls) {
-            for (const auto& entry : report.entries) collectEntry(entry);
+        if (!document.model_entries.empty()) {
+            for (const auto& entry : document.model_entries) collectEntry(entry);
+        } else {
+            for (const auto& dataSet : document.data_sets) {
+                for (const auto& entry : dataSet.entries) collectEntry(entry);
+            }
+            for (const auto& stream : document.goose_streams) {
+                for (const auto& entry : stream.entries) collectEntry(entry);
+            }
+            for (const auto& report : document.report_controls) {
+                for (const auto& entry : report.entries) collectEntry(entry);
+            }
         }
     }
     if (ieds_.isEmpty()) {
@@ -856,14 +885,18 @@ void IedSimulatorController::rebuildValues() {
         if (!runtimeValues_.contains(key)) runtimeValues_.insert(key, valueMap(entry));
         values_.push_back(runtimeValues_.value(key));
     };
-    for (const auto& dataSet : document.data_sets) {
-        for (const auto& entry : dataSet.entries) appendEntry(entry);
-    }
-    for (const auto& stream : document.goose_streams) {
-        for (const auto& entry : stream.entries) appendEntry(entry);
-    }
-    for (const auto& report : document.report_controls) {
-        for (const auto& entry : report.entries) appendEntry(entry);
+    if (!document.model_entries.empty()) {
+        for (const auto& entry : document.model_entries) appendEntry(entry);
+    } else {
+        for (const auto& dataSet : document.data_sets) {
+            for (const auto& entry : dataSet.entries) appendEntry(entry);
+        }
+        for (const auto& stream : document.goose_streams) {
+            for (const auto& entry : stream.entries) appendEntry(entry);
+        }
+        for (const auto& report : document.report_controls) {
+            for (const auto& entry : report.entries) appendEntry(entry);
+        }
     }
     selectedValueIndex_ = values_.isEmpty() ? -1 : 0;
     emit valuesChanged();
@@ -877,6 +910,10 @@ void IedSimulatorController::seedRuntimeValues() {
         }
     };
     for (const auto& loaded : documents_) {
+        if (!loaded.document.model_entries.empty()) {
+            for (const auto& entry : loaded.document.model_entries) seedEntry(entry);
+            continue;
+        }
         for (const auto& dataSet : loaded.document.data_sets) {
             for (const auto& entry : dataSet.entries) seedEntry(entry);
         }
@@ -911,10 +948,14 @@ QVariantMap IedSimulatorController::valueMap(
     item.insert(QStringLiteral("value"), initialValue(type, qstring(entry.da_name)));
     item.insert(QStringLiteral("quality"), QStringLiteral("Good"));
     item.insert(QStringLiteral("origin"), QStringLiteral("Simulator"));
-    item.insert(QStringLiteral("writable"), !entry.is_quality && !entry.is_timestamp);
+    // Simulator values are local runtime state, not client-side writable
+    // semantics. Every resolved leaf, including q and t, is intentionally
+    // editable so test engineers can inject arbitrary IED states.
+    item.insert(QStringLiteral("writable"), true);
     item.insert(QStringLiteral("changed"), false);
     item.insert(QStringLiteral("updated"), QStringLiteral("—"));
-    if (type == QStringLiteral("Enumeration")) {
+    if (type == QStringLiteral("Enumeration") &&
+        qstring(entry.cdc).compare(QStringLiteral("DPC"), Qt::CaseInsensitive) == 0) {
         item.insert(
             QStringLiteral("options"),
             QStringList{
