@@ -62,6 +62,13 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: ./build-ied-simulator-qt/arstack_ied_simulator --smoke-test
 
+      - name: Prove interactive SCL import uses bounded async path
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          ./build-ied-simulator-qt/arstack_ied_simulator
+          --qa-async-import ./tests/fixtures/scl/minimal-station-brcb.scd
+
       - name: Capture workbench visual regression
         env:
           QT_QPA_PLATFORM: offscreen

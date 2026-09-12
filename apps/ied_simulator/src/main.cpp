@@ -62,6 +62,10 @@ int main(int argc, char* argv[]) {
         QStringLiteral("scl"),
         QStringLiteral("Import an engineering file before showing the window."),
         QStringLiteral("path")};
+    const QCommandLineOption qaAsyncImportOption{
+        QStringLiteral("qa-async-import"),
+        QStringLiteral("QA: import one engineering file through the interactive bounded worker and exit."),
+        QStringLiteral("path")};
     const QCommandLineOption runtimeOption{
         QStringLiteral("runtime"),
         QStringLiteral("Start the selected MMS runtime after importing the model.")};
@@ -95,6 +99,7 @@ int main(int argc, char* argv[]) {
         QStringLiteral("milliseconds")};
     parser.addOptions({
         sclOption,
+        qaAsyncImportOption,
         runtimeOption,
         iedEndpointOption,
         startIedOption,
@@ -131,6 +136,43 @@ int main(int argc, char* argv[]) {
                 backend,
                 "loadFile",
                 Q_ARG(QUrl, QUrl::fromLocalFile(parser.value(sclOption))));
+        }
+        if (backend != nullptr && parser.isSet(qaAsyncImportOption)) {
+            bool accepted{};
+            const bool invoked = QMetaObject::invokeMethod(
+                backend,
+                "loadFileAsync",
+                Q_RETURN_ARG(bool, accepted),
+                Q_ARG(QUrl, QUrl::fromLocalFile(parser.value(qaAsyncImportOption))));
+            if (!invoked || !accepted) {
+                qWarning().noquote() << "Async import request was rejected.";
+                QTimer::singleShot(0, &app, [] { QCoreApplication::exit(5); });
+            } else {
+                auto* const importTimer = new QTimer{backend};
+                importTimer->setInterval(25);
+                QObject::connect(importTimer, &QTimer::timeout, backend, [&app, backend, importTimer] {
+                    if (backend->property("importing").toBool()) return;
+                    importTimer->stop();
+                    importTimer->deleteLater();
+                    if (backend->property("imported").toBool()) {
+                        qInfo().noquote() << "ASYNC_IMPORT_OK" << backend->property("sourceName").toString();
+                        app.exit(0);
+                        return;
+                    }
+                    qWarning().noquote()
+                        << "Async import failed:"
+                        << backend->property("fatalError").toString();
+                    app.exit(6);
+                });
+                importTimer->start();
+                QTimer::singleShot(10'000, backend, [&app, importTimer] {
+                    if (!importTimer->isActive()) return;
+                    importTimer->stop();
+                    importTimer->deleteLater();
+                    qWarning().noquote() << "Async import timed out.";
+                    app.exit(7);
+                });
+            }
         }
 
         bool fleetConfigurationValid = true;
