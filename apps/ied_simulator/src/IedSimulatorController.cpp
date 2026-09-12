@@ -623,6 +623,17 @@ void IedSimulatorController::processServerLine(
                 .arg(fields.value(QStringLiteral("state")).toString()));
         return;
     }
+    if (kind == QStringLiteral("report_sent")) {
+        appendActivity(
+            QStringLiteral("Report"),
+            QStringLiteral("Association %1 sent report %2 (SqNum %3, reason %4).")
+                .arg(fields.value(QStringLiteral("association")).toString())
+                .arg(fields.value(QStringLiteral("rcb")).toString())
+                .arg(fields.value(QStringLiteral("sqnum")).toString())
+                .arg(fields.value(QStringLiteral("reason")).toString()),
+            QStringLiteral("Success"));
+        return;
+    }
     if (kind != QStringLiteral("server_stopped")) {
         appendActivity(QStringLiteral("MMS"), line);
     }
@@ -703,6 +714,46 @@ bool IedSimulatorController::writeModelManifest() {
                 "\t" + manifestField(memberItem) + "\n";
         }
     }
+
+    // Preserve the simulator profile already established by ARIEC61850 C#.
+    // The C# profile builder enables dchg/qchg/GI for URCBs, adds integrity for
+    // BRCBs, and exposes SeqNum/Timestamp/Reason/DataSet/ConfRev (plus EntryID
+    // for BRCB). SCL-specific TrgOps/OptFields parsing can enrich this later;
+    // these values deliberately match the source implementation being ported.
+    QSet<QString> emittedReportControls;
+    for (const auto& report : loaded.document.report_controls) {
+        if (qstring(report.ied_name) != activeIedName) continue;
+        const auto domain = qstring(report.ied_name) + qstring(report.ld_inst);
+        auto logicalNode = qstring(report.logical_node_path);
+        logicalNode.replace(QLatin1Char('.'), QLatin1Char('$'));
+        const auto name = qstring(report.name);
+        auto dataSetItem = logicalNode + QLatin1Char('$') + qstring(report.data_set_name);
+        dataSetItem.replace(QLatin1Char('.'), QLatin1Char('$'));
+        const auto item = logicalNode +
+            (report.buffered ? QStringLiteral("$BR$") : QStringLiteral("$RP$")) + name;
+        if (domain.isEmpty() || logicalNode.isEmpty() || name.isEmpty() ||
+            dataSetItem.isEmpty()) continue;
+        const auto key = domain + QLatin1Char('\n') + item;
+        if (emittedReportControls.contains(key)) continue;
+        emittedReportControls.insert(key);
+
+        auto reportId = qstring(report.report_id);
+        if (reportId.isEmpty()) reportId = domain + QLatin1Char('/') + item;
+        const auto triggerOptions = report.buffered ? 0x6CU : 0x64U;
+        const auto optionalFields0 = report.buffered ? 0x79U : 0x78U;
+        constexpr auto optionalFields1 = 0x80U;
+        manifest += "RCB\t" + manifestField(domain) + "\t" + manifestField(item) + "\t" +
+            QByteArray::number(report.buffered ? 1 : 0) + "\t" +
+            manifestField(reportId) + "\t" + manifestField(domain) + "\t" +
+            manifestField(dataSetItem) + "\t" +
+            QByteArray::number(report.configuration_revision) + "\t" +
+            QByteArray::number(report.buffer_time_milliseconds) + "\t" +
+            QByteArray::number(report.integrity_period_milliseconds) + "\t" +
+            QByteArray::number(triggerOptions) + "\t" +
+            QByteArray::number(optionalFields0) + "\t" +
+            QByteArray::number(optionalFields1) + "\n";
+    }
+
     if (uniqueRoots.isEmpty()) {
         appendActivity(
             QStringLiteral("Model"),
