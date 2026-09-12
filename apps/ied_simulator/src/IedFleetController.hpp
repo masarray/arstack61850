@@ -86,6 +86,9 @@ public:
     [[nodiscard]] QVariantMap selectedIed() const;
     [[nodiscard]] QString endpointConflict() const;
     [[nodiscard]] QVariantList values() const;
+    // Internal model-view fast path: avoid copying the full QVariantList on
+    // every 16 ms live refresh. QML keeps using the value-returning property.
+    [[nodiscard]] const QVariantList& valuesView() const noexcept { return values_; }
     [[nodiscard]] int selectedValueIndex() const noexcept;
     [[nodiscard]] QVariantMap selectedValue() const;
     [[nodiscard]] QVariantList activity() const;
