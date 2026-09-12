@@ -591,8 +591,6 @@ MmsReportFrame MmsReportFrameMapper::map(
     }
 
     const auto included_count = frame.included_data_set_indexes.size();
-    std::vector<MmsInformationReportItem> value_items;
-    for (std::size_t i = 0U; i < included_count; ++i) value_items.push_back(require_item(report, cursor++));
     std::vector<std::string> data_references(included_count);
     if (frame.header.optional_fields.has("data-reference")) {
         for (auto& reference : data_references) {
@@ -601,6 +599,8 @@ MmsReportFrame MmsReportFrameMapper::map(
             reference = *value;
         }
     }
+    std::vector<MmsInformationReportItem> value_items;
+    for (std::size_t i = 0U; i < included_count; ++i) value_items.push_back(require_item(report, cursor++));
     std::vector<MmsReportBitField> reasons(included_count);
     if (frame.header.optional_fields.has("reason-for-inclusion")) {
         for (auto& reason : reasons) reason = decode_bit_field(require_value(report, cursor++, "reason-for-inclusion"), reason_names);

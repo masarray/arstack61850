@@ -1,6 +1,26 @@
                     report.configuration_revision = uint_attribute(*control, "confRev");
                     report.buffer_time_milliseconds = uint_attribute(*control, "bufTime");
                     report.integrity_period_milliseconds = uint_attribute(*control, "intgPd");
+                    if (const auto* trigger = first_child(*control, "TrgOps"); trigger != nullptr) {
+                        report.trigger_options.element_present = true;
+                        report.trigger_options.data_change = bool_attribute(*trigger, "dchg");
+                        report.trigger_options.quality_change = bool_attribute(*trigger, "qchg");
+                        report.trigger_options.data_update = bool_attribute(*trigger, "dupd");
+                        report.trigger_options.integrity = bool_attribute(*trigger, "period");
+                        report.trigger_options.general_interrogation = bool_attribute(*trigger, "gi");
+                    }
+                    if (const auto* optional = first_child(*control, "OptFields"); optional != nullptr) {
+                        report.optional_fields.element_present = true;
+                        report.optional_fields.sequence_number = bool_attribute(*optional, "seqNum");
+                        report.optional_fields.report_timestamp = bool_attribute(*optional, "timeStamp");
+                        report.optional_fields.reason_code = bool_attribute(*optional, "reasonCode");
+                        report.optional_fields.data_set = bool_attribute(*optional, "dataSet");
+                        report.optional_fields.data_reference = bool_attribute(*optional, "dataRef");
+                        report.optional_fields.buffer_overflow = bool_attribute(*optional, "bufOvfl");
+                        report.optional_fields.entry_id = bool_attribute(*optional, "entryID");
+                        report.optional_fields.configuration_revision = bool_attribute(*optional, "configRef");
+                        report.optional_fields.segmentation = bool_attribute(*optional, "segmentation");
+                    }
                     if (binding.data_set != nullptr) {
                         report.entries = binding.data_set->entries;
                     }

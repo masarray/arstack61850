@@ -58,9 +58,9 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: ./build-ied-simulator-qt/arstack_ied_simulator --smoke-test
 
-      - name: Prove GUI value is visible through MMS
+      - name: Prove P0 model and P1 unified live-value store end to end
         run: >-
           python3 apps/ied_simulator/test_gui_live_value.py
           --app ./build-ied-simulator-qt/arstack_ied_simulator
           --read-probe ./build-ied-simulator-qt
-          --scl ./tests/fixtures/scl/minimal-station.scd
+          --scl ./tests/fixtures/scl/iedsim-full-model.scd

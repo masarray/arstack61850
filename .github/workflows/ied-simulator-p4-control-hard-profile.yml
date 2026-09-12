@@ -1,0 +1,69 @@
+name: IED Simulator P4 Control Hard Profile
+
+on:
+  push:
+    branches: [agent/p4-thirdparty-interop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  control-hard-profile:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: gcc
+            cc: gcc
+            cxx: g++
+          - name: clang
+            cc: clang
+            cxx: clang++
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout ARStack61850
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
+
+      - name: Install Ninja
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+
+      - name: Build and test P4 control decoder
+        shell: bash
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          set -euo pipefail
+          cmake -S apps/ied_simulator -B build-p4-control-hard -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX"
+          cmake --build build-p4-control-hard --target arstack_ied_simulator --parallel 2
+          SERVER_CORE=$(find build-p4-control-hard -type f -name libariec61850_ied_simulator_server_core.a | head -1)
+          ARSTACK_CORE=$(find build-p4-control-hard -type f -name libariec61850_core.a | head -1)
+          test -n "$SERVER_CORE"
+          test -n "$ARSTACK_CORE"
+          "$CXX" -std=c++20 -Wall -Wextra -Wpedantic -Werror -Iinclude \
+            tests/interop/p4_libiec61850_control_oper_decode.cpp \
+            -Wl,--start-group "$SERVER_CORE" "$ARSTACK_CORE" -Wl,--end-group \
+            -lpthread -o p4-control-orcat-hard
+          ./p4-control-orcat-hard
+
+          cmake -S tools/mms_direct_control_server -B build-p4-direct-control -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX"
+          cmake --build build-p4-direct-control --target ariec61850_mms_direct_control_tests --parallel 2
+          ctest --test-dir build-p4-direct-control -R mms_direct_control_unit --output-on-failure
+          echo "IEDSIM_P4_CONTROL_HARD_PROFILE_PASS compiler=${{ matrix.name }}"

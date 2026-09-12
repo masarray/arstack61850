@@ -292,7 +292,8 @@ namespace {
     const MmsStaticDispatchPolicy& policy,
     const MmsConfirmedPduView& confirmed,
     const std::span<std::uint8_t> response,
-    const std::span<std::uint8_t> workspace) noexcept {
+    const std::span<std::uint8_t> workspace,
+    const MmsStaticRequestAccessContext& access) noexcept {
     MmsReadRequestView request;
     if (!MmsServiceSpanCodec::try_decode_read_request(confirmed, request)) {
         return make_status(MmsStaticDispatchStatus::malformed_request, confirmed);
@@ -319,7 +320,9 @@ namespace {
         }
 
         const auto remaining = workspace.subspan(workspace_offset);
-        const auto read = object->read(object->context, remaining);
+        const auto read = object->contextual_read != nullptr
+            ? object->contextual_read(object->context, remaining, access)
+            : object->read(object->context, remaining);
         if (read.status == wire::EncodeStatus::buffer_too_small) {
             return make_status(
                 MmsStaticDispatchStatus::workspace_too_small,
@@ -442,7 +445,7 @@ MmsStaticDispatchResult MmsStaticApplicationDispatcher::dispatch(
     case MmsWireConfirmedService::get_named_variable_list_attributes:
         return dispatch_data_set_attributes(data_sets_, request, response);
     case MmsWireConfirmedService::read:
-        return dispatch_read(objects_, policy_, request, response, workspace);
+        return dispatch_read(objects_, policy_, request, response, workspace, access);
     case MmsWireConfirmedService::write:
         return dispatch_write(objects_, policy_, request, response, access);
     default:

@@ -127,6 +127,32 @@ enum class SclDataSetBindingStatus {
     resolved,
 };
 
+struct SclReportTriggerOptions final {
+    bool element_present{};
+    bool data_change{};
+    bool quality_change{};
+    bool data_update{};
+    bool integrity{};
+    bool general_interrogation{};
+
+    friend bool operator==(const SclReportTriggerOptions&, const SclReportTriggerOptions&) = default;
+};
+
+struct SclReportOptionalFields final {
+    bool element_present{};
+    bool sequence_number{};
+    bool report_timestamp{};
+    bool reason_code{};
+    bool data_set{};
+    bool data_reference{};
+    bool buffer_overflow{};
+    bool entry_id{};
+    bool configuration_revision{};
+    bool segmentation{};
+
+    friend bool operator==(const SclReportOptionalFields&, const SclReportOptionalFields&) = default;
+};
+
 struct SclReportControl final {
     std::string ied_name;
     std::string ld_inst;
@@ -142,6 +168,8 @@ struct SclReportControl final {
     std::uint32_t configuration_revision{};
     std::uint32_t buffer_time_milliseconds{};
     std::uint32_t integrity_period_milliseconds{};
+    SclReportTriggerOptions trigger_options;
+    SclReportOptionalFields optional_fields;
     std::vector<SclDataSetEntry> entries;
 
     friend bool operator==(const SclReportControl&, const SclReportControl&) = default;

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ariec61850/mms/live_discovery.hpp"
+#include "ariec61850/mms/data_codec.hpp"
 #include "ariec61850/mms/services.hpp"
 #include "ariec61850/mms/static_report_session.hpp"
 
@@ -40,6 +41,10 @@ struct CliOptions final {
     bool allow_urcb_fallback{true};
     bool trigger_gi{true};
     bool armed{};
+    bool exercise_write_bool{};
+    bool exercise_write_value{};
+    std::string exercise_write_domain;
+    std::string exercise_write_item;
 };
 
 [[nodiscard]] std::size_t parse_positive(
@@ -83,6 +88,8 @@ void print_usage() {
         << "  --probe-delay-ms N       Delay between confirmation reads (default 150).\n"
         << "  --timeout-ms N           Connect/request timeout (default 5000).\n"
         << "  --no-gi                  Do not request GI after enabling.\n"
+        << "  --exercise-write-bool DOMAIN/ITEM=VALUE\n"
+        << "                            Same-association bounded Boolean write after enable.\n"
         << "  --arm " << k_arm_token << "\n"
         << "                            Enable the selected static RCB, observe reports,\n"
         << "                            then disable/release only state touched here.\n"
@@ -118,7 +125,8 @@ void print_usage() {
                    option == "--contention-cooldown" ||
                    option == "--probe-cycles" ||
                    option == "--probe-delay-ms" ||
-                   option == "--timeout-ms" || option == "--arm") {
+                   option == "--timeout-ms" ||
+                   option == "--exercise-write-bool" || option == "--arm") {
             if (index >= argc) {
                 throw std::invalid_argument(option + " requires a value.");
             }
@@ -154,6 +162,20 @@ void print_usage() {
             } else if (option == "--timeout-ms") {
                 options.timeout = std::chrono::milliseconds{
                     static_cast<std::int64_t>(parse_positive(option, value))};
+            } else if (option == "--exercise-write-bool") {
+                const auto equals = value.rfind('=');
+                const auto slash = value.find('/');
+                if (equals == std::string::npos || slash == std::string::npos ||
+                    slash == 0U || slash >= equals || equals + 1U >= value.size()) {
+                    throw std::invalid_argument("--exercise-write-bool expects DOMAIN/ITEM=true|false.");
+                }
+                options.exercise_write_domain = value.substr(0U, slash);
+                options.exercise_write_item = value.substr(slash + 1U, equals - slash - 1U);
+                const auto boolean = value.substr(equals + 1U);
+                if (boolean == "true" || boolean == "1") options.exercise_write_value = true;
+                else if (boolean == "false" || boolean == "0") options.exercise_write_value = false;
+                else throw std::invalid_argument("--exercise-write-bool expects true/false.");
+                options.exercise_write_bool = true;
             } else if (option == "--arm") {
                 if (value != k_arm_token) {
                     throw std::invalid_argument("invalid --arm token.");
@@ -173,6 +195,34 @@ void print_usage() {
         return exchange.presentation_payload;
     }
     return exchange.envelope.mms_payload;
+}
+
+
+void exercise_same_association_boolean_write(
+    mms::MmsAssociationRuntime& association,
+    const CliOptions& cli) {
+    if (!cli.exercise_write_bool) return;
+    const auto invoke_id = association.next_invoke_id();
+    mms::MmsWriteRequest request;
+    request.invoke_id = invoke_id;
+    request.variables.push_back(mms::MmsObjectName::domain_specific(
+        cli.exercise_write_domain, cli.exercise_write_item));
+    request.values.push_back(mms::MmsDataValue::boolean(cli.exercise_write_value));
+    const auto encoded = mms::MmsServiceCodec::encode_write_request_p_data(
+        request, association.negotiated().presentation_context_id);
+    const auto exchange = association.exchange_confirmed(encoded, invoke_id);
+    if (exchange.envelope.kind != mms::MmsPduKind::confirmed_response) {
+        throw std::runtime_error("BRCB exercise Write did not return Confirmed-Response.");
+    }
+    const auto response = mms::MmsServiceCodec::decode_write_response(
+        response_payload(exchange), invoke_id);
+    if (!response.all_success()) {
+        throw std::runtime_error("BRCB exercise Write returned a failed AccessResult.");
+    }
+    std::cout << "EXERCISE_MMS_WRITE reference="
+              << cli.exercise_write_domain << '/' << cli.exercise_write_item
+              << " value=" << (cli.exercise_write_value ? "true" : "false") << '\n';
+    std::cout.flush();
 }
 
 void confirmation_read(
@@ -245,6 +295,39 @@ int main(const int argc, char** argv) {
         discovery_options.probe_report_controls = true;
         discovery_options.maximum_report_control_probes = cli.maximum_rcb_probes;
         auto discovery = live_session.discover(discovery_options);
+        std::cout << "DISCOVERY_REPORTING inventoryRcb="
+                  << discovery.report_inventory.report_controls.size()
+                  << " probedRcb=" << discovery.report_controls.size()
+                  << " inventoryDataSet=" << discovery.report_inventory.data_sets.size()
+                  << " directoryDataSet=" << discovery.data_set_directories.size() << '\n';
+        for (const auto& evidence : discovery.report_controls) {
+            std::cout << "DISCOVERY_RCB ref=" << evidence.candidate.reference
+                      << " mode=" << evidence.candidate.mode()
+                      << " success=" << (evidence.success() ? "true" : "false");
+            if (evidence.state) {
+                const auto& state = *evidence.state;
+                std::cout << " rptEna="
+                          << (state.report_enabled ? (*state.report_enabled ? "true" : "false") : "unset")
+                          << " datSet=" << state.data_set_reference
+                          << " resv="
+                          << (state.reserved ? (*state.reserved ? "true" : "false") : "unset")
+                          << " diagnostics=" << state.diagnostics.size();
+                for (const auto& diagnostic : state.diagnostics) {
+                    std::cout << " [" << diagnostic << ']';
+                }
+            } else {
+                std::cout << " error=" << evidence.error;
+            }
+            std::cout << '\n';
+        }
+        for (const auto& evidence : discovery.data_set_directories) {
+            std::cout << "DISCOVERY_DATASET ref=" << evidence.candidate.reference
+                      << " success=" << (evidence.success() ? "true" : "false")
+                      << " members="
+                      << (evidence.directory ? evidence.directory->members.size() : 0U)
+                      << " error=" << evidence.error << '\n';
+        }
+        std::cout.flush();
 
         mms::MmsStaticReportSessionOptions session_options;
         session_options.selection.preferred_rcb_reference =
@@ -292,6 +375,8 @@ int main(const int argc, char** argv) {
             std::cout << "STATIC_RCB_ENABLE_OK gi="
                       << (cli.trigger_gi ? "requested" : "not-requested")
                       << '\n';
+            exercise_same_association_boolean_write(
+                live_session.association(), cli);
             for (std::size_t cycle = 0U;
                  cycle < cli.confirmation_cycles; ++cycle) {
                 std::this_thread::sleep_for(cli.confirmation_delay);
@@ -312,9 +397,38 @@ int main(const int argc, char** argv) {
                       << active.subscription->decode_failures
                       << " streams=" << active.subscription->streams.size()
                       << '\n';
+            for (const auto& stream : active.subscription->streams) {
+                if (stream.recent_frames.empty()) continue;
+                const auto& frame = stream.recent_frames.back();
+                for (const auto& report_value : frame.values) {
+                    if (!report_value.value.has_value()) continue;
+                    std::cout << "REPORT_VALUE dataSetIndex="
+                              << report_value.data_set_index
+                              << " ref=" << report_value.data_reference
+                              << " value="
+                              << mms::MmsDataCodec::to_display_string(*report_value.value)
+                              << '\n';
+                }
+            }
 
             report_session.stop();
             const auto stopped = report_session.snapshot();
+            if (stopped.subscription) {
+                std::cout << "STOP_STATE cleanupRequired="
+                          << (stopped.subscription->cleanup_required ? "true" : "false")
+                          << " enabledByRuntime="
+                          << (stopped.subscription->enabled_by_runtime ? "true" : "false")
+                          << " reservationTouched="
+                          << (stopped.subscription->reservation_touched ? "true" : "false")
+                          << " state=" << static_cast<unsigned>(stopped.subscription->state)
+                          << '\n';
+                for (const auto& event : stopped.subscription->events) {
+                    std::cout << "STOP_EVENT kind=" << static_cast<unsigned>(event.kind)
+                              << " state=" << static_cast<unsigned>(event.state)
+                              << " message=" << event.message << '\n';
+                }
+            }
+            std::cout.flush();
             if (!stopped.subscription || stopped.subscription->cleanup_required) {
                 throw std::runtime_error(
                     "Static RCB stop left cleanup_required=true.");
