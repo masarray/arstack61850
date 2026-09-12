@@ -2,31 +2,40 @@
 import QtQuick
 
 QtObject {
-    readonly property color background: "#090e14"
-    readonly property color chrome: "#0c1219"
-    readonly property color surface: "#101821"
-    readonly property color surfaceRaised: "#141e28"
-    readonly property color surfaceSoft: "#18232e"
-    readonly property color line: "#273440"
-    readonly property color lineSoft: "#1c2833"
-    readonly property color text: "#f2f6fa"
-    readonly property color textSoft: "#c5d0da"
-    readonly property color muted: "#7f91a3"
-    readonly property color accent: "#3f91f7"
-    readonly property color accentHover: "#5aa4ff"
-    readonly property color accentSoft: "#162c45"
-    readonly property color green: "#49c875"
-    readonly property color greenSoft: "#153323"
-    readonly property color amber: "#e9ad4d"
-    readonly property color amberSoft: "#372b18"
-    readonly property color red: "#ee6c75"
-    readonly property color redSoft: "#3b1e25"
-    readonly property int panelRadius: 8
-    readonly property int controlRadius: 6
-    readonly property int controlHeight: 36
+    // Dense engineering-workbench palette.  The simulator intentionally uses
+    // a light data canvas with a strong navigation blue so long IEC 61850
+    // references remain readable during commissioning sessions.
+    readonly property color background: "#e7ebef"
+    readonly property color chrome: "#f4f6f8"
+    readonly property color surface: "#ffffff"
+    readonly property color surfaceRaised: "#eef1f4"
+    readonly property color surfaceSoft: "#e3e7eb"
+    readonly property color line: "#b8c0c8"
+    readonly property color lineSoft: "#d4d9de"
+    readonly property color text: "#17212b"
+    readonly property color textSoft: "#3e4b57"
+    readonly property color muted: "#6d7984"
+    readonly property color accent: "#1769aa"
+    readonly property color accentHover: "#0f5c99"
+    readonly property color accentSoft: "#dbeaf7"
+    readonly property color navigation: "#155f9f"
+    readonly property color navigationDark: "#0f4f87"
+    readonly property color navigationText: "#f7fbff"
+    readonly property color navigationMuted: "#c5ddf1"
+    readonly property color green: "#17864b"
+    readonly property color greenSoft: "#e0f3e8"
+    readonly property color amber: "#b77800"
+    readonly property color amberSoft: "#fff1cf"
+    readonly property color red: "#c63d48"
+    readonly property color redSoft: "#fbe3e6"
+    readonly property color statusChrome: "#2b2d2f"
+    readonly property color statusText: "#f7f7f7"
+    readonly property int panelRadius: 3
+    readonly property int controlRadius: 2
+    readonly property int controlHeight: 32
     readonly property int captionSize: 11
     readonly property int labelSize: 12
-    readonly property int bodySize: 14
-    readonly property int subtitleSize: 16
-    readonly property int titleSize: 21
+    readonly property int bodySize: 13
+    readonly property int subtitleSize: 15
+    readonly property int titleSize: 20
 }
