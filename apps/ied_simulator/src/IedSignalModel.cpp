@@ -174,8 +174,7 @@ void IedSignalModel::scheduleRebuild() {
 void IedSignalModel::scheduleRefresh() {
     // This timer is intentionally the latest-state accumulator for the UI.
     // Any number of valuesChanged bursts inside one frame collapse into one
-    // read of the authoritative backend state; protocol/runtime state itself
-    // is never queued or reordered by this presentation model.
+    // read of authoritative state. Protocol/runtime state is not reordered.
     if (!rebuildTimer_.isActive() && !refreshTimer_.isActive()) refreshTimer_.start();
 }
 
@@ -209,15 +208,16 @@ void IedSignalModel::rebuild() {
     QHash<QString, int> groupIndex;
     const auto query = filterText_.trimmed();
 
-    for (int sourceIndex = 0; sourceIndex < sourceValues.size(); ++sourceIndex) {
+    const auto consumeSource = [&](const int sourceIndex) {
+        if (sourceIndex < 0 || sourceIndex >= sourceValues.size()) return;
         const auto item = sourceValues.at(sourceIndex).toMap();
         if (item.value(QStringLiteral("logicalDevice")).toString() != logicalDevice_ ||
             item.value(QStringLiteral("logicalNode")).toString() != logicalNode_) {
-            continue;
+            return;
         }
 
         const auto objectName = item.value(QStringLiteral("dataObject")).toString();
-        if (objectName.isEmpty()) continue;
+        if (objectName.isEmpty()) return;
         auto found = groupIndex.constFind(objectName);
         int index{};
         if (found == groupIndex.cend()) {
@@ -237,12 +237,26 @@ void IedSignalModel::rebuild() {
             attribute == QStringLiteral("mag.f")) {
             group.preferred = sourceIndex;
         }
+    };
+
+    if (backend_ != nullptr && backend_->hasPreparedValueIndex()) {
+        // Worker-side indexing makes the hot rebuild proportional to the
+        // selected LN, not to the complete 20k/50k IED point catalog.
+        const auto& scopeIndices = backend_->valueScopeIndices(logicalDevice_, logicalNode_);
+        groups.reserve(scopeIndices.size() > 0 ? 16 : 0);
+        for (const auto sourceIndex : scopeIndices) consumeSource(sourceIndex);
+    } else {
+        // Legacy synchronous/multi-IED selection fallback remains correct while
+        // avoiding an extra full QVariantList copy.
+        for (int sourceIndex = 0; sourceIndex < sourceValues.size(); ++sourceIndex) {
+            consumeSource(sourceIndex);
+        }
     }
 
     std::vector<Row> nextRows;
-    // The projection only stores the currently scoped LD/LN rows. It no longer
-    // holds a second full QVariantList of a 20k/50k-point IED.
-    nextRows.reserve(static_cast<std::size_t>(groups.size()) * 4U);
+    std::size_t scopedMemberCount{};
+    for (const auto& group : groups) scopedMemberCount += static_cast<std::size_t>(group.members.size());
+    nextRows.reserve(scopedMemberCount + static_cast<std::size_t>(groups.size()));
     for (const auto& group : groups) {
         QVector<int> visibleMembers;
         visibleMembers.reserve(group.members.size());
@@ -318,7 +332,6 @@ void IedSignalModel::refreshSnapshot() {
         const bool writable = after.value(QStringLiteral("writable")).toBool();
         const bool changed = after.value(QStringLiteral("changed")).toBool();
 
-        bool sourceChanged{};
         for (const int rowIndex : it.value()) {
             if (rowIndex < 0 || rowIndex >= rowCount()) {
                 scheduleRebuild();
@@ -338,9 +351,7 @@ void IedSignalModel::refreshSnapshot() {
             row.writable = writable;
             row.changed = changed;
             changedRows.push_back(rowIndex);
-            sourceChanged = true;
         }
-        Q_UNUSED(sourceChanged);
     }
 
     emitRowsChanged(
