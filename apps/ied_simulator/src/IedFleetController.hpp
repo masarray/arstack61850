@@ -2,13 +2,14 @@
 #pragma once
 
 #include "IedActivityModel.hpp"
+#include "IedPointStore.hpp"
 
 #include "ariec61850/scl/model.hpp"
-#include "ariec61850/simulation/ied_simulator_profile.hpp"
 
 #include <QHash>
 #include <QObject>
 #include <QProcess>
+#include <QSet>
 #include <QThreadPool>
 #include <QUrl>
 #include <QVariantList>
@@ -93,11 +94,17 @@ public:
     [[nodiscard]] QVariantMap selectedIed() const;
     [[nodiscard]] QString endpointConflict() const;
     [[nodiscard]] QVariantList values() const;
-    // Internal model-view fast path: avoid copying the full QVariantList on
-    // every 16 ms live refresh. QML keeps using the value-returning property.
-    [[nodiscard]] const QVariantList& valuesView() const noexcept { return values_; }
+
+    // C++ model/view fast path. The canonical high-cardinality state is typed;
+    // QVariant maps are materialized only for compatibility/QML boundaries.
+    [[nodiscard]] int valueCount() const noexcept { return selectedPointIndices_.size(); }
+    [[nodiscard]] const IedPointStore::PointRecord* valueRecord(const int sourceIndex) const noexcept {
+        if (sourceIndex < 0 || sourceIndex >= selectedPointIndices_.size()) return nullptr;
+        return pointStore_.at(selectedPointIndices_.at(sourceIndex));
+    }
     [[nodiscard]] bool hasPreparedValueIndex() const noexcept {
-        return preparedValueIndexIed_ == selectedIedIndex_;
+        return preparedValueIndexIed_ == selectedIedIndex_ &&
+            preparedPointCount_ == selectedPointIndices_.size();
     }
     [[nodiscard]] const QVariantList& navigationIndexView() const noexcept {
         return navigationIndex_;
@@ -191,10 +198,9 @@ private:
         quint64 generation{};
         std::optional<ar::iec61850::scl::SclDocument> document;
         QVariantList ieds;
-        QVariantList selectedValues;
+        QVector<IedPointStore::PointRecord> selectedPoints;
         QVariantList navigationIndex;
         QHash<QString, QVector<int>> valueScopeIndex;
-        QHash<QString, QVariantMap> runtimeValues;
         QString error;
         qint64 parserMilliseconds{};
         qint64 preparationMilliseconds{};
@@ -267,18 +273,16 @@ private:
     [[nodiscard]] RuntimeInstance* runtimeAt(int index) noexcept;
     [[nodiscard]] const RuntimeInstance* runtimeAt(int index) const noexcept;
     [[nodiscard]] QString runtimeStateText(RuntimeState state) const;
-    [[nodiscard]] static QString runtimeValueKey(const QString& iedName, const QString& reference);
-    [[nodiscard]] static QVariantMap valueMap(
-        const ar::iec61850::simulation::IedSimulatorPoint& point);
 
     std::vector<LoadedDocument> documents_;
     std::vector<std::unique_ptr<RuntimeInstance>> runtimes_;
     QVariantList ieds_;
-    QVariantList values_;
+    IedPointStore pointStore_;
+    QVector<int> selectedPointIndices_;
     QVariantList navigationIndex_;
     QHash<QString, QVector<int>> valueScopeIndex_;
+    QSet<QString> seededRuntimeIeds_;
     IedActivityModel activity_;
-    QHash<QString, QVariantMap> runtimeValues_;
     std::optional<ValueSnapshot> previousValue_;
     QThreadPool importPool_;
     std::optional<PendingAsyncImport> pendingAsyncImport_;
