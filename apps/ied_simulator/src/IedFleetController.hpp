@@ -51,6 +51,14 @@ class IedFleetController final : public QObject {
     Q_PROPERTY(int gooseCount READ gooseCount NOTIFY modelChanged)
 
 public:
+    enum class RuntimeState {
+        ready,
+        starting,
+        running,
+        stopping,
+        failed,
+    };
+
     explicit IedFleetController(QObject* parent = nullptr);
     ~IedFleetController() override;
 
@@ -130,14 +138,6 @@ signals:
     void activityChanged();
 
 private:
-    enum class RuntimeState {
-        ready,
-        starting,
-        running,
-        stopping,
-        failed,
-    };
-
     struct LoadedDocument final {
         QString path;
         ar::iec61850::scl::SclDocument document;
