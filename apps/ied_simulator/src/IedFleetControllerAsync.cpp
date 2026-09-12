@@ -110,6 +110,9 @@ bool IedFleetController::loadFileAsync(const QUrl& fileUrl) {
     sourcePath_ = path;
     sourceName_ = QFileInfo(path).fileName();
     fatalError_.clear();
+    navigationIndex_.clear();
+    valueScopeIndex_.clear();
+    preparedValueIndexIed_ = -1;
     lastImportWorkerMilliseconds_ = 0;
     lastGuiApplyMilliseconds_ = 0;
     preparedPointCount_ = 0;
@@ -143,9 +146,9 @@ void IedFleetController::launchAsyncImport(PendingAsyncImport request) {
             result->parserMilliseconds = parserTimer.elapsed();
 
             // The high-cardinality simulator profile, ordered point projection,
-            // value maps and structural counts are all prepared on this one
-            // bounded worker. GUI-thread completion only adopts implicitly
-            // shared containers and creates the small per-IED runtime objects.
+            // navigation/scope indexes, value maps and structural counts are
+            // all prepared on this one bounded worker. GUI completion only
+            // adopts implicitly shared containers and creates per-IED runtimes.
             QElapsedTimer preparationTimer;
             preparationTimer.start();
             const auto& document = *result->document;
@@ -239,12 +242,29 @@ void IedFleetController::launchAsyncImport(PendingAsyncImport request) {
 
                 result->selectedValues.reserve(static_cast<qsizetype>(points.size()));
                 result->runtimeValues.reserve(static_cast<qsizetype>(points.size()));
+                result->valueScopeIndex.reserve(
+                    static_cast<qsizetype>(built.profile.logical_node_count()));
+                std::set<QString> seenScopes;
+                int sourceIndex{};
                 for (const auto* point : points) {
+                    const auto logicalDevice = qstring(point->logical_device);
+                    const auto logicalNode = qstring(point->logical_node);
+                    const auto scopeKey =
+                        logicalDevice + QLatin1Char('\x1f') + logicalNode;
+                    result->valueScopeIndex[scopeKey].push_back(sourceIndex);
+                    if (seenScopes.insert(scopeKey).second) {
+                        QVariantMap navigationEntry;
+                        navigationEntry.insert(QStringLiteral("logicalDevice"), logicalDevice);
+                        navigationEntry.insert(QStringLiteral("logicalNode"), logicalNode);
+                        result->navigationIndex.push_back(std::move(navigationEntry));
+                    }
+
                     auto item = preparedValueMap(*point);
                     result->selectedValues.push_back(item);
                     const auto key = qstring(point->ied_name) + QLatin1Char('\x1f') +
                         qstring(point->reference);
                     result->runtimeValues.insert(key, std::move(item));
+                    ++sourceIndex;
                 }
                 result->preparedPointCount = static_cast<int>(points.size());
             }
@@ -289,11 +309,12 @@ void IedFleetController::finishAsyncImport(
             previousValue_.reset();
 
             // Adopt the worker-prepared projection. This deliberately bypasses
-            // rebuildPresentation()/rebuildValues() for the interactive Open
-            // path so IedSimulatorProfileBuilder and the O(N) point-index build
-            // never execute on the GUI thread during a large import.
+            // rebuildPresentation()/rebuildValues() for interactive Open SCL,
+            // keeping profile/index construction outside the GUI thread.
             ieds_ = std::move(result->ieds);
             values_ = std::move(result->selectedValues);
+            navigationIndex_ = std::move(result->navigationIndex);
+            valueScopeIndex_ = std::move(result->valueScopeIndex);
             runtimeValues_ = std::move(result->runtimeValues);
             logicalDeviceCount_ = result->logicalDeviceCount;
             dataObjectCount_ = result->dataObjectCount;
@@ -303,6 +324,7 @@ void IedFleetController::finishAsyncImport(
             gooseCount_ = result->gooseCount;
             selectedIedIndex_ = ieds_.isEmpty() ? -1 : 0;
             selectedValueIndex_ = values_.isEmpty() ? -1 : 0;
+            preparedValueIndexIed_ = selectedIedIndex_;
             rebuildRuntimeInstances({});
 
             lastImportWorkerMilliseconds_ = result->elapsedMilliseconds;
@@ -316,12 +338,13 @@ void IedFleetController::finishAsyncImport(
             emit runtimeChanged();
 
             qInfo().noquote() << QStringLiteral(
-                "IEDSIM_IMPORT_PATH worker_ms=%1 parser_ms=%2 prepare_ms=%3 gui_apply_ms=%4 points=%5")
+                "IEDSIM_IMPORT_PATH worker_ms=%1 parser_ms=%2 prepare_ms=%3 gui_apply_ms=%4 points=%5 scopes=%6")
                 .arg(lastImportWorkerMilliseconds_)
                 .arg(result->parserMilliseconds)
                 .arg(result->preparationMilliseconds)
                 .arg(lastGuiApplyMilliseconds_)
-                .arg(preparedPointCount_);
+                .arg(preparedPointCount_)
+                .arg(valueScopeIndex_.size());
             appendActivity(
                 QStringLiteral("Importer"),
                 QStringLiteral(
