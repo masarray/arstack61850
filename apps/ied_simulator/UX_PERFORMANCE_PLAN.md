@@ -30,7 +30,7 @@ This plan applies the repository `AGENTS.md` production contract to the desktop 
 - Only one import runs at a time; repeated Open SCL requests are coalesced to one newest pending request instead of creating an unbounded worker queue.
 - A monotonically increasing generation token plus source-path ownership prevents an older import, a cleared workspace, or an older request from replacing newer state.
 - The same bounded worker now builds the selected IED simulator profile, source-ordered point projection, structural counts, LD/LN navigation index, and per-LN source-index lookup before handing ownership to the GUI thread.
-- GUI completion adopts implicitly shared Qt containers and creates the small per-IED runtime objects; it no longer calls `rebuildPresentation()` / `rebuildValues()` on the interactive import path.
+- GUI completion adopts the prepared containers and creates the small per-IED runtime objects; it no longer calls `rebuildPresentation()` / `rebuildValues()` on the interactive import path.
 - The synchronous `loadFile()` path remains for deterministic CLI/CI automation and compatibility; the desktop FileDialog uses `loadFileAsync()`.
 - Import while a simulator endpoint is active is rejected instead of blocking the GUI on process shutdown.
 - Remaining follow-up: cache/prebuild profiles for non-selected IEDs and remove legacy synchronous/start-path profile rebuilding where compatibility permits.
@@ -42,10 +42,10 @@ This plan applies the repository `AGENTS.md` production contract to the desktop 
 - `dataChanged()` is emitted only for contiguous rows whose value/quality/writable/changed roles actually changed.
 - Selected-row invalidation targets only the previous/new source rows.
 - Active value-based search deliberately falls back to the existing coalesced rebuild because a live value can change filtered membership.
-- `IedSignalModel` no longer retains a second full `QVariantList` snapshot; it retains compact typed rows for the active LD/LN only.
+- `IedSignalModel` retains only compact typed rows for the active LD/LN; it does not retain a second complete point snapshot.
 - On the async import path, signal rebuild uses the worker-built per-LN source-index vector, making scope changes proportional to the selected LN instead of the entire 20k/50k-point catalog.
-- The 16 ms refresh timer is the latest-state presentation accumulator: multiple `valuesChanged` bursts collapse into one read of authoritative backend state while protocol/runtime state remains ordered and lossless.
-- Remaining follow-up: replace the compatibility `IedFleetController::values_` / `runtimeValues_` high-cardinality `QVariantList/QVariantMap` canonical backing store with a typed point store and add explicit burst/coalescing-ratio evidence.
+- The 16 ms refresh timer is the latest-state presentation accumulator: multiple `valuesChanged` bursts collapse into one read of authoritative typed point state while protocol/runtime state remains ordered and lossless.
+- Remaining follow-up: add explicit live-update burst latency/coalescing-ratio evidence at scale.
 
 ### Stage D - diagnostics and lifecycle hardening — first production slice implemented
 
@@ -64,16 +64,19 @@ This plan applies the repository `AGENTS.md` production contract to the desktop 
 - The one-process 20k reload soak continues to guard against obvious ownership/memory-slope regressions.
 - Remaining follow-up: full GUI event-loop stall heartbeat, delegate-instantiation count, search/filter latency at scale, and live-update burst latency/coalescing ratio.
 
-### Stage H - Core Data Path Performance — implemented first production slice
+### Stage H - Core Data Path Performance — implemented
 
-- High-cardinality interactive import preparation now stays on the bounded worker: parse -> profile build -> source ordering -> value projection -> runtime seed -> navigation/scope indexes.
+- High-cardinality interactive import preparation stays on the one bounded worker: parse -> profile build -> source ordering -> typed point construction -> navigation/scope indexes.
+- `IedPointStore` is now the canonical high-cardinality point state: compact `PointRecord` storage plus a stable IED/reference index replaces canonical per-point `QVariantMap` containers.
+- The QML-facing `values()` API is retained only as a compatibility boundary and materializes maps on demand; C++ navigation and signal hot paths do not call it.
 - GUI-thread import completion is an ownership/adoption step instead of a second profile/index construction pass.
-- Navigation consumes the worker-built compact LD/LN index and no longer rebuilds for ordinary live value changes.
-- Signal-table rebuild consumes the worker-built selected-LN index instead of rescanning the complete IED value catalog.
-- Signal presentation storage is typed and scoped; the previous duplicate complete `QVariantList` presentation snapshot is removed.
-- Live UI notification keeps only the latest presentation state inside a ~16 ms window and emits targeted row changes.
-- CI records `IEDSIM_IMPORT_PATH worker_ms=... parser_ms=... prepare_ms=... gui_apply_ms=... points=... scopes=...` and fails if direct GUI adoption exceeds 50 ms.
-- This stage intentionally does **not** claim that the backend canonical store is fully typed yet. The remaining `values_` and `runtimeValues_` QVariant containers are the next memory-reduction target, especially because 50k-import RSS remains material.
+- Navigation consumes the worker-built compact LD/LN index; its synchronous fallback also reads typed records directly and no longer materializes a complete QVariant point list.
+- Signal-table rebuild consumes the worker-built selected-LN index and reads `PointRecord` fields directly; filter/rebuild and 16 ms refresh paths avoid QVariant-map conversion.
+- Signal presentation storage is typed and scoped; the previous duplicate complete presentation snapshot is removed.
+- Live UI notification keeps only the latest presentation state inside a ~16 ms window and emits targeted row changes while protocol/runtime state remains authoritative.
+- CI records `IEDSIM_IMPORT_PATH worker_ms=... parser_ms=... prepare_ms=... gui_apply_ms=... points=... scopes=... typed_store=1` and fails if direct GUI adoption exceeds 50 ms.
+- Remaining Milestone H evidence work is measurement rather than architecture: explicit burst/coalescing-ratio and GUI-heartbeat tests, plus optional metadata string interning only if measured RSS justifies the complexity.
+- Multi-IED non-selected profiles remain lazily built by the compatibility path; prebuilding/caching those profiles is a follow-up so ordinary single-IED import does not pay unused fleet cost.
 
 ## Initial budgets
 
