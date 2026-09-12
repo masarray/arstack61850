@@ -12,6 +12,7 @@
 #include <QTimer>
 #include <QUrl>
 
+#include <algorithm>
 #include <memory>
 
 namespace {
