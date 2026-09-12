@@ -69,6 +69,18 @@ jobs:
           ./build-ied-simulator-qt/arstack_ied_simulator
           --qa-async-import ./tests/fixtures/scl/minimal-station-brcb.scd
 
+      - name: Prove malformed SCL fails closed
+        run: >-
+          python3 apps/ied_simulator/test_malformed_import.py
+          --app ./build-ied-simulator-qt/arstack_ied_simulator
+
+      - name: Start stop restart lifecycle soak
+        run: >-
+          python3 apps/ied_simulator/test_runtime_lifecycle.py
+          --app ./build-ied-simulator-qt/arstack_ied_simulator
+          --scl ./tests/fixtures/scl/minimal-station-brcb.scd
+          --cycles 12
+
       - name: Large SCL import performance gates
         run: >-
           python3 apps/ied_simulator/benchmark_large_scl.py
