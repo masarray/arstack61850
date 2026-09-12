@@ -58,6 +58,48 @@
         return {true, resolved_fc, cdc, basic_type, current_type_id, enum_type};
     }
 
+    // Return an explicitly configured instance value for a structural leaf.
+    // The first control slice needs the common DOI/DAI/Val form used for
+    // ctlModel. Structured BDA instance values remain runtime/profile work and
+    // deliberately do not fall back to a guessed template value.
+    [[nodiscard]] std::string configured_value(
+        const std::string& ied_name,
+        const std::string& ld_inst,
+        const std::string& prefix,
+        const std::string& ln_class,
+        const std::string& ln_inst,
+        const std::string& do_name,
+        const std::string& da_name) const {
+        const auto* logical_node = find_logical_node(
+            ied_name, ld_inst, prefix, ln_class, ln_inst);
+        if (logical_node == nullptr) return {};
+
+        const auto do_segments = split_name(do_name);
+        if (do_segments.empty()) return {};
+        const XmlNode* instance = logical_node;
+        for (std::size_t index = 0U; index < do_segments.size(); ++index) {
+            const auto tag = index == 0U ? std::string_view{"DOI"} : std::string_view{"SDI"};
+            const XmlNode* next{};
+            for (const auto* candidate : direct_children(*instance, tag)) {
+                if (same(attribute(candidate, "name"), do_segments[index])) {
+                    next = candidate;
+                    break;
+                }
+            }
+            if (next == nullptr) return {};
+            instance = next;
+        }
+
+        const auto da_segments = split_name(da_name);
+        if (da_segments.size() != 1U) return {};
+        for (const auto* dai : direct_children(*instance, "DAI")) {
+            if (!same(attribute(dai, "name"), da_segments.front())) continue;
+            const auto* value = first_child(*dai, "Val");
+            return value == nullptr ? std::string{} : trim_copy(value->text);
+        }
+        return {};
+    }
+
 private:
     std::unordered_map<std::string, const XmlNode*> ieds_;
     std::unordered_map<std::string, const XmlNode*> logical_node_types_;

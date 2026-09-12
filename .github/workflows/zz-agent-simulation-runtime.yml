@@ -1,0 +1,121 @@
+name: Agent Simulator Runtime Port
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/complete-ariec61850-simulator-parity
+    paths:
+      - '.github/workflows/zz-agent-simulation-runtime.yml'
+      - 'scripts/agent_*.py'
+
+permissions:
+  contents: write
+
+jobs:
+  port-and-validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/complete-ariec61850-simulator-parity
+          fetch-depth: 0
+
+      - name: Integrate native simulator runtime
+        run: python3 scripts/agent_integrate_simulation_runtime.py
+
+      - name: Finalize milestone metadata
+        run: python3 scripts/agent_finalize_simulation_runtime_port.py
+
+      - name: Repair control and URCB object-bank composition
+        run: python3 scripts/agent_fix_iedsim_urcb_control_composition.py
+
+      - name: Preserve configured-control MMS type lifetime
+        run: python3 scripts/agent_fix_control_type_lifetime.py
+
+      - name: Share simulated control state across associations
+        run: python3 scripts/agent_fix_cross_association_control_state.py
+
+      - name: Keep report banks stable during live edits
+        run: python3 scripts/agent_fix_report_bank_live_refresh.py
+
+      - name: Add BRCB invariant diagnostics
+        run: python3 scripts/agent_diagnose_iedsim_brcb.py
+
+      - name: Enable headless child-server tracing
+        run: python3 scripts/agent_trace_iedsim_server.py
+
+      - name: Check patch hygiene
+        run: git diff --check
+
+      - name: Configure strict root build
+        run: >-
+          cmake -S . -B build-sim-runtime -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DARIEC61850_BUILD_TESTS=ON
+          -DARIEC61850_BUILD_TOOLS=ON
+
+      - name: Build native simulator and protocol regressions
+        run: >-
+          cmake --build build-sim-runtime
+          --target ariec61850_simulation_tests ariec61850_scl_tests
+          ariec61850_static_ied_server ariec61850_control_interop_probe
+          --parallel 2
+
+      - name: Run native simulator runtime regression
+        run: ./build-sim-runtime/ariec61850_simulation_tests
+
+      - name: Run SCL regression
+        run: ./build-sim-runtime/ariec61850_scl_tests
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
+
+      - name: Configure Qt simulator
+        run: >-
+          cmake -S apps/ied_simulator -B build-ied-simulator-qt -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Qt simulator and external probes
+        run: >-
+          cmake --build build-ied-simulator-qt
+          --target arstack_ied_simulator ariec61850_mms_read_probe
+          ariec61850_mms_urcb_gi_probe ariec61850_mms_brcb_event_probe
+          ariec61850_control_interop_probe
+          --parallel 2
+
+      - name: QML smoke test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ./build-ied-simulator-qt/arstack_ied_simulator --smoke-test
+
+      - name: Prove portable profile adapter over external MMS wire
+        env:
+          ARSTACK_IEDSIM_TRACE_SERVER: '1'
+        run: >-
+          python3 apps/ied_simulator/test_gui_live_value.py
+          --app ./build-ied-simulator-qt/arstack_ied_simulator
+          --read-probe ./build-ied-simulator-qt
+          --scl ./tests/fixtures/scl/minimal-station-brcb.scd
+
+      - name: Commit validated Phase 5A source
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            CMakeLists.txt \
+            MIGRATION_CHECKLIST.md \
+            include/ariec61850/simulation/ied_simulator_profile.hpp \
+            src/simulation/ied_simulator_profile.cpp \
+            src/simulation/ied_simulator_engine.cpp \
+            tests/test_simulation.cpp \
+            apps/ied_simulator/src/IedSimulatorController.hpp \
+            apps/ied_simulator/src/IedSimulatorController.cpp \
+            tools/static_ied_server.cpp
+          git diff --cached --quiet && exit 0
+          git commit -m 'feat(simulation): complete native simulator runtime core milestone'
+          git push origin HEAD:feat/complete-ariec61850-simulator-parity

@@ -2,6 +2,7 @@
 #pragma once
 
 #include "ariec61850/scl/model.hpp"
+#include "ariec61850/simulation/ied_simulator_profile.hpp"
 
 #include <QObject>
 #include <QHash>
@@ -131,7 +132,7 @@ private:
     void removeModelManifest();
     [[nodiscard]] QString serverExecutable() const;
     [[nodiscard]] static QVariantMap valueMap(
-        const ar::iec61850::scl::SclDataSetEntry& entry);
+        const ar::iec61850::simulation::IedSimulatorPoint& point);
 
     std::vector<LoadedDocument> documents_;
     QVariantList ieds_;

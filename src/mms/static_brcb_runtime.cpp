@@ -18,14 +18,16 @@ namespace {
 constexpr std::uint8_t kTriggerDataChange = 0x40U;
 constexpr std::uint8_t kTriggerQualityChange = 0x20U;
 constexpr std::uint8_t kTriggerDataUpdate = 0x10U;
-constexpr std::uint8_t kAllowedTriggers = 0x70U;
+// Carry all standard SCL TrgOps bits accepted by the ARIEC simulator profile.
+// Event capture below currently maps dchg/qchg/dupd; integrity/GI scheduling is
+// handled separately by the reporting application layer as those paths land.
+constexpr std::uint8_t kAllowedTriggers = 0x7CU;
 
 constexpr std::uint8_t kReasonDataChange = 0x80U;
 constexpr std::uint8_t kReasonQualityChange = 0x40U;
 constexpr std::uint8_t kReasonDataUpdate = 0x20U;
 
 constexpr std::uint8_t kOptReasonForInclusion = 0x10U;
-constexpr std::uint8_t kOptBufferOverflow = 0x02U;
 constexpr std::uint8_t kOptEntryId = 0x01U;
 constexpr std::uint8_t kAllowedOptionalFirst = 0x7FU;
 constexpr std::uint8_t kAllowedOptionalSecond = 0x80U;
@@ -166,9 +168,11 @@ bool MmsStaticBrcbRuntime::initialize() noexcept {
             static_cast<std::uint8_t>(~kAllowedOptionalFirst)) != 0U ||
         (definition_->optional_fields[1] &
             static_cast<std::uint8_t>(~kAllowedOptionalSecond)) != 0U ||
-        (definition_->optional_fields[0] &
-            static_cast<std::uint8_t>(kOptBufferOverflow | kOptEntryId)) !=
-            static_cast<std::uint8_t>(kOptBufferOverflow | kOptEntryId) ||
+        // EntryID is the only BRCB-specific optional field required for retained
+        // history/replay. BufOvfl itself is optional in IEC 61850 and in the
+        // ARIEC C# simulator profile, so do not synthesize it just to satisfy a
+        // native hard-profile policy.
+        (definition_->optional_fields[0] & kOptEntryId) == 0U ||
         definition_->trigger_options == 0U ||
         (definition_->trigger_options & static_cast<std::uint8_t>(~kAllowedTriggers)) != 0U) {
         return false;
