@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "IedSimulatorController.hpp"
+#include "IedFleetController.hpp"
 
 #include <QCommandLineOption>
 #include <QCommandLineParser>
@@ -15,11 +15,11 @@ int main(int argc, char* argv[]) {
     QQuickStyle::setStyle(QStringLiteral("Basic"));
     QGuiApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("ARStack61850"));
-    QCoreApplication::setApplicationName(QStringLiteral("ARStack IED Simulator"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+    QCoreApplication::setApplicationName(QStringLiteral("ARStack IED Lab"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("0.2.0"));
 
     QCommandLineParser parser;
-    parser.setApplicationDescription(QStringLiteral("ARStack IEC 61850 IED Simulator"));
+    parser.setApplicationDescription(QStringLiteral("ARStack IEC 61850 multi-IED simulation lab"));
     parser.addHelpOption();
     parser.addVersionOption();
     const QCommandLineOption sclOption{
@@ -28,7 +28,7 @@ int main(int argc, char* argv[]) {
         QStringLiteral("path")};
     const QCommandLineOption runtimeOption{
         QStringLiteral("runtime"),
-        QStringLiteral("Start the MMS runtime after importing the model.")};
+        QStringLiteral("Start the selected MMS runtime after importing the model.")};
     const QCommandLineOption screenshotOption{
         QStringLiteral("screenshot"),
         QStringLiteral("Capture the rendered window and exit."),
@@ -38,7 +38,7 @@ int main(int argc, char* argv[]) {
         QStringLiteral("Load the QML scene, wait briefly, and exit.")};
     const QCommandLineOption portOption{
         QStringLiteral("port"),
-        QStringLiteral("Override the MMS listen port."),
+        QStringLiteral("Override the default MMS listen port."),
         QStringLiteral("number")};
     const QCommandLineOption setFirstValueOption{
         QStringLiteral("set-first-value"),
