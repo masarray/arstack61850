@@ -54,8 +54,13 @@ jobs:
           git show 4225202bcbfcfa71a0d4499d9412f7ac2be2cc0e:.github/workflows/ied-simulator-qt.yml > .github/workflows/ied-simulator-qt.yml
           cat .milestone-g/part*.patch > /tmp/milestone-g.patch
           patch -p1 --forward < /tmp/milestone-g.patch
+          # GitHub Actions' token may update source but cannot update workflow files.
+          # Restore this bootstrap workflow so the pushed source commit contains no
+          # workflow mutation; the final workflow is installed separately via the
+          # connected GitHub integration after the source commit lands.
+          git checkout HEAD -- .github/workflows/ied-simulator-qt.yml
           git rm -r .milestone-g
-          git add .github/workflows/ied-simulator-qt.yml apps/ied_simulator
+          git add apps/ied_simulator
           git diff --cached --check
           git commit -m "feat(ied-sim): bound runtime diagnostics and restart lifecycle"
           git push origin HEAD:feat/ied-sim-ux-performance-foundation
