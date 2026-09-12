@@ -165,7 +165,7 @@ int main(int argc, char* argv[]) {
                     app.exit(6);
                 });
                 importTimer->start();
-                QTimer::singleShot(10'000, backend, [&app, importTimer] {
+                QTimer::singleShot(60'000, backend, [&app, importTimer] {
                     if (!importTimer->isActive()) return;
                     importTimer->stop();
                     importTimer->deleteLater();
