@@ -46,6 +46,10 @@ def resolve_urcb_probe(argument: str) -> str:
     return resolve_named_probe(argument, "ariec61850_mms_urcb_gi_probe", "MMS URCB GI probe")
 
 
+def resolve_brcb_probe(argument: str) -> str:
+    return resolve_named_probe(argument, "ariec61850_mms_brcb_event_probe", "MMS BRCB event probe")
+
+
 def probe_command(read_probe: str, port: int, item: str) -> list[str]:
     return [
         read_probe,
@@ -125,6 +129,56 @@ def update_manifest_value(manifest_path: Path, item: str, new_value: str) -> int
     temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
     os.replace(temporary, manifest_path)
     return revision
+
+
+def run_brcb_event_probe(
+    brcb_probe: str,
+    port: int,
+    manifest_path: Path,
+) -> str:
+    """Enable BRCB, mutate one DataSet member, and require buffered report delivery."""
+    process = subprocess.Popen(
+        [
+            brcb_probe,
+            "127.0.0.1",
+            str(port),
+            "--domain",
+            "MU01LD0",
+            "--rcb",
+            "LLN0$BR$BRCB01",
+            "--timeout-ms",
+            "6000",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        creationflags=creation_flags(),
+    )
+    try:
+        if process.stdout is None:
+            raise RuntimeError("BRCB probe stdout pipe was not created")
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            ready = executor.submit(process.stdout.readline).result(timeout=6).strip()
+        if "MMS_BRCB_EVENT_READY" not in ready:
+            stderr = process.stderr.read() if process.stderr is not None else ""
+            raise RuntimeError(
+                "BRCB did not become ready after RptEna=true: "
+                f"stdout={ready!r} stderr={stderr!r}"
+            )
+
+        update_manifest_value(manifest_path, "XCBR1$ST$Pos$stVal", "true")
+        remaining_stdout, stderr = process.communicate(timeout=9)
+        output = ready + "\n" + remaining_stdout
+        if process.returncode != 0 or "MMS_BRCB_EVENT_PASS" not in output:
+            raise RuntimeError(
+                "BRCB buffered InformationReport regression failed: "
+                f"exit={process.returncode} stdout={output!r} stderr={stderr!r}"
+            )
+        return output.strip()
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=3)
 
 
 def prove_concurrent_associations(read_probe: str, port: int, item: str) -> float:
@@ -255,6 +309,7 @@ def main() -> int:
     args = parser.parse_args()
     read_probe = resolve_read_probe(args.read_probe)
     urcb_probe = resolve_urcb_probe(args.read_probe)
+    brcb_probe = resolve_brcb_probe(args.read_probe)
 
     port = free_port()
     environment = dict(os.environ)
@@ -301,6 +356,10 @@ def main() -> int:
                     "RCB\tMU01LD0\tLLN0$RP$URCB01\t0\t"
                     "MU01LD0/LLN0$RP$URCB01\tMU01LD0\tLLN0$dsGO\t1\t100\t1000\t100\t120\t128"
                 )
+                brcb_manifest = (
+                    "RCB\tMU01LD0\tLLN0$BR$BRCB01\t1\t"
+                    "MU01LD0/LLN0$BR$BRCB01\tMU01LD0\tLLN0$dsGO\t2\t75\t1000\t108\t121\t128"
+                )
                 if (
                     manifest_text.startswith("ARSTACK_IED_MODEL\t2\t2\n")
                     and mapped_value in manifest_text
@@ -308,12 +367,13 @@ def main() -> int:
                     and "XCBR1$ST$Pos$q\tQuality\tQuality\tgood" in manifest_text
                     and "XCBR1$ST$Pos$t\tTimestamp\tTimestamp\t" in manifest_text
                     and urcb_manifest in manifest_text
+                    and brcb_manifest in manifest_text
                 ):
                     break
                 time.sleep(0.1)
             else:
                 raise RuntimeError(
-                    "GUI did not publish revision 2 with edited/full model leaves and URCB metadata"
+                    "GUI did not publish revision 2 with edited/full model leaves and URCB/BRCB metadata"
                 )
 
             deadline = time.monotonic() + 10.0
@@ -358,6 +418,11 @@ def main() -> int:
                 "TCTR1$MX$Amp$instMag$i",
             )
             urcb_output = run_urcb_gi_probe(urcb_probe, port)
+            brcb_output = run_brcb_event_probe(
+                brcb_probe,
+                port,
+                manifest_path,
+            )
             quality_output = prove_same_association_refresh(
                 read_probe,
                 port,
@@ -384,10 +449,12 @@ def main() -> int:
                 "structural=MU01LD0/TCTR1$MX$AmpUnmapped$instMag$i:0 "
                 f"concurrent_association_seconds={concurrent_seconds:.3f} "
                 "urcb_gi=pass "
+                "brcb_event=pass "
                 "quality=same-association:030000->03C110 "
                 "timestamp=same-association:0->1700000000123"
             )
             print(urcb_output)
+            print(brcb_output)
             print(quality_output.strip())
             print(timestamp_output.strip())
             return 0
