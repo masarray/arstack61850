@@ -10,7 +10,7 @@
 
 #include <vector>
 
-class IedNavigationModel final : public QAbstractListModel {
+class IedNavigationModel : public QAbstractListModel {
     Q_OBJECT
     QML_ELEMENT
 
