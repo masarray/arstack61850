@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Deterministic large-SCL import benchmark for the desktop simulator.
+"""Deterministic large-SCL import + reload-soak benchmark.
 
 Generates compact SCL sources whose reusable type templates expand to roughly
 5k/20k/50k data attributes, then drives the same bounded async import path used
-by the FileDialog.  The harness records wall time and Linux peak RSS and applies
-intentionally generous regression budgets: the goal is to catch catastrophic
-O(N^2), runaway-memory, deadlock, and crash regressions, not micro-benchmark CI.
+by the FileDialog.  The harness records wall time and Linux peak RSS, and keeps
+one process alive across repeated 20k reloads to detect obvious ownership/leak
+regressions. Budgets are deliberately generous: this is a catastrophic
+regression tripwire, not a CI micro-benchmark.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import argparse
 import math
 import os
 from pathlib import Path
+import select
 import subprocess
 import tempfile
 import time
@@ -128,6 +130,93 @@ def run_case(app: Path, target: int, timeout_s: float) -> tuple[float, float, st
         return elapsed_s, peak_rss_mib, summary
 
 
+def run_reload_soak(
+    app: Path,
+    target: int,
+    repeats: int,
+    timeout_s: float,
+) -> tuple[list[float], float]:
+    xml, generated_points = build_scl(target)
+    with tempfile.TemporaryDirectory(prefix="arstack-scl-soak-") as temporary:
+        scl_path = Path(temporary) / f"synthetic-soak-{target}.scd"
+        scl_path.write_text(xml, encoding="utf-8")
+
+        env = os.environ.copy()
+        env["QT_QPA_PLATFORM"] = "offscreen"
+        process = subprocess.Popen(
+            [
+                str(app),
+                "--qa-async-import",
+                str(scl_path),
+                "--qa-async-import-repeat",
+                str(repeats),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env=env,
+        )
+        assert process.stdout is not None
+
+        started = time.perf_counter()
+        interval_peak_kib = 0
+        iteration_peaks_mib: list[float] = []
+        output_lines: list[str] = []
+        try:
+            while True:
+                interval_peak_kib = max(interval_peak_kib, read_rss_kib(process.pid))
+                readable, _, _ = select.select([process.stdout], [], [], 0.02)
+                if readable:
+                    line = process.stdout.readline()
+                    if line:
+                        output_lines.append(line)
+                        if "ASYNC_IMPORT_ITERATION" in line:
+                            iteration_peaks_mib.append(interval_peak_kib / 1024.0)
+                            interval_peak_kib = read_rss_kib(process.pid)
+
+                if process.poll() is not None:
+                    remainder = process.stdout.read()
+                    if remainder:
+                        output_lines.append(remainder)
+                    break
+                if time.perf_counter() - started > timeout_s:
+                    process.kill()
+                    raise RuntimeError(
+                        f"reload soak exceeded hard timeout {timeout_s:.0f}s"
+                    )
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=2)
+
+        output = "".join(output_lines)
+        elapsed_s = time.perf_counter() - started
+        if process.returncode != 0:
+            raise RuntimeError(
+                f"reload soak exited {process.returncode}; output={output[-4000:]}"
+            )
+        if "ASYNC_IMPORT_OK" not in output:
+            raise RuntimeError(
+                f"reload soak never reported completion; output={output[-4000:]}"
+            )
+        if len(iteration_peaks_mib) != repeats:
+            raise RuntimeError(
+                f"reload soak reported {len(iteration_peaks_mib)} iterations; expected {repeats}; "
+                f"output={output[-4000:]}"
+            )
+
+        growth_mib = iteration_peaks_mib[-1] - iteration_peaks_mib[0]
+        print(
+            f"SCL_RELOAD_SOAK target={target} generated={generated_points} repeats={repeats} "
+            f"elapsed_ms={elapsed_s * 1000:.0f} first_peak_mib={iteration_peaks_mib[0]:.1f} "
+            f"last_peak_mib={iteration_peaks_mib[-1]:.1f} growth_mib={growth_mib:.1f} "
+            f"max_peak_mib={max(iteration_peaks_mib):.1f}",
+            flush=True,
+        )
+        return iteration_peaks_mib, growth_mib
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--app", required=True, type=Path)
@@ -135,6 +224,12 @@ def main() -> int:
         "--targets",
         default="5000,20000,50000",
         help="Comma-separated expanded data-attribute targets.",
+    )
+    parser.add_argument(
+        "--reload-soak-repeats",
+        type=int,
+        default=10,
+        help="Repeated 20k async imports in one process for memory-slope evidence; 0 disables.",
     )
     args = parser.parse_args()
 
@@ -160,6 +255,22 @@ def main() -> int:
         if peak_rss > rss_budget:
             failures.append(
                 f"{target}: {peak_rss:.1f} MiB > {rss_budget:.1f} MiB RSS budget"
+            )
+
+    if args.reload_soak_repeats > 0:
+        peaks, growth = run_reload_soak(
+            app,
+            target=20_000,
+            repeats=args.reload_soak_repeats,
+            timeout_s=60.0,
+        )
+        if max(peaks) > 768.0:
+            failures.append(
+                f"reload soak: {max(peaks):.1f} MiB > 768.0 MiB peak RSS budget"
+            )
+        if growth > 96.0:
+            failures.append(
+                f"reload soak: +{growth:.1f} MiB first-to-last growth > 96.0 MiB budget"
             )
 
     if failures:
