@@ -38,10 +38,75 @@ ApplicationWindow {
         sclDialog.open()
     }
 
+    Shortcut {
+        sequence: "Ctrl+Shift+A"
+        onActivated: activityMonitor.open()
+    }
+
     IedScoutWorkspace {
         anchors.fill: parent
         theme: appTheme
         backend: simulator
         onOpenSclRequested: root.importModel()
+    }
+
+    Rectangle {
+        id: activityLauncher
+        z: 20
+        visible: !activityMonitor.opened
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.rightMargin: 12
+        anchors.bottomMargin: 38
+        width: 116
+        height: 27
+        radius: 5
+        color: launcherMouse.containsMouse ? appTheme.surfaceRaised : appTheme.statusChrome
+        border.width: 1
+        border.color: appTheme.line
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 9
+            anchors.rightMargin: 8
+            spacing: 6
+            Rectangle {
+                width: 6
+                height: 6
+                radius: 3
+                color: simulator.running ? appTheme.green
+                                         : simulator.fatalError.length ? appTheme.red
+                                                                       : appTheme.accent
+            }
+            Label {
+                Layout.fillWidth: true
+                text: "Activity"
+                color: appTheme.statusText
+                font.pixelSize: 9
+                font.weight: Font.DemiBold
+            }
+            Label {
+                text: String(simulator.activity.length)
+                color: appTheme.navigationMuted
+                font.pixelSize: 8
+            }
+        }
+
+        MouseArea {
+            id: launcherMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            onClicked: activityMonitor.open()
+        }
+
+        ToolTip.visible: launcherMouse.containsMouse
+        ToolTip.text: "Activity Monitor · Ctrl+Shift+A"
+    }
+
+    ActivityMonitor {
+        id: activityMonitor
+        z: 50
+        theme: appTheme
+        backend: simulator
     }
 }
