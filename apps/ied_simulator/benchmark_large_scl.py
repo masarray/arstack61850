@@ -28,7 +28,8 @@ ATTRIBUTES_PER_LN = DO_PER_LN * ATTRIBUTES_PER_DO
 IMPORT_PATH_RE = re.compile(
     r"IEDSIM_IMPORT_PATH\s+worker_ms=(?P<worker>\d+)\s+"
     r"parser_ms=(?P<parser>\d+)\s+prepare_ms=(?P<prepare>\d+)\s+"
-    r"gui_apply_ms=(?P<gui>\d+)\s+points=(?P<points>\d+)"
+    r"gui_apply_ms=(?P<gui>\d+)\s+points=(?P<points>\d+)\s+"
+    r"scopes=(?P<scopes>\d+)\s+typed_store=(?P<typed_store>[01])"
 )
 
 
@@ -88,10 +89,15 @@ def parse_import_path(output: str, target: int) -> dict[str, int]:
     matches = list(IMPORT_PATH_RE.finditer(output))
     if not matches:
         raise RuntimeError(
-            f"{target} point import did not emit IEDSIM_IMPORT_PATH evidence; "
+            f"{target} point import did not emit typed IEDSIM_IMPORT_PATH evidence; "
             f"output={output[-4000:]}"
         )
-    return {key: int(value) for key, value in matches[-1].groupdict().items()}
+    metrics = {key: int(value) for key, value in matches[-1].groupdict().items()}
+    if metrics["typed_store"] != 1:
+        raise RuntimeError(f"{target} point import did not use the typed canonical point store")
+    if metrics["points"] > 0 and metrics["scopes"] <= 0:
+        raise RuntimeError(f"{target} point import prepared points without a worker-built scope index")
+    return metrics
 
 
 def run_case(
@@ -152,7 +158,8 @@ def run_case(
             f"SCL_PERF target={target} generated={generated_points} "
             f"elapsed_ms={elapsed_s * 1000:.0f} peak_rss_mib={peak_rss_mib:.1f} "
             f"worker_ms={path_metrics['worker']} parser_ms={path_metrics['parser']} "
-            f"prepare_ms={path_metrics['prepare']} gui_apply_ms={path_metrics['gui']}"
+            f"prepare_ms={path_metrics['prepare']} gui_apply_ms={path_metrics['gui']} "
+            f"scopes={path_metrics['scopes']} typed_store={path_metrics['typed_store']}"
         )
         print(summary, flush=True)
         return elapsed_s, peak_rss_mib, path_metrics["gui"], path_metrics, summary
@@ -202,7 +209,15 @@ def run_reload_soak(
                         output_lines.append(line)
                         path_match = IMPORT_PATH_RE.search(line)
                         if path_match:
-                            gui_apply_samples_ms.append(int(path_match.group("gui")))
+                            metrics = {
+                                key: int(value)
+                                for key, value in path_match.groupdict().items()
+                            }
+                            if metrics["typed_store"] != 1:
+                                raise RuntimeError(
+                                    "reload soak iteration left the typed canonical point-store path"
+                                )
+                            gui_apply_samples_ms.append(metrics["gui"])
                         if "ASYNC_IMPORT_ITERATION" in line:
                             iteration_peaks_mib.append(interval_peak_kib / 1024.0)
                             interval_peak_kib = read_rss_kib(process.pid)
@@ -212,7 +227,15 @@ def run_reload_soak(
                     if remainder:
                         output_lines.append(remainder)
                         for match in IMPORT_PATH_RE.finditer(remainder):
-                            gui_apply_samples_ms.append(int(match.group("gui")))
+                            metrics = {
+                                key: int(value)
+                                for key, value in match.groupdict().items()
+                            }
+                            if metrics["typed_store"] != 1:
+                                raise RuntimeError(
+                                    "reload soak iteration left the typed canonical point-store path"
+                                )
+                            gui_apply_samples_ms.append(metrics["gui"])
                     break
                 if time.perf_counter() - started > timeout_s:
                     process.kill()
@@ -241,7 +264,7 @@ def run_reload_soak(
             )
         if len(gui_apply_samples_ms) != repeats:
             raise RuntimeError(
-                f"reload soak reported {len(gui_apply_samples_ms)} GUI adoption samples; "
+                f"reload soak reported {len(gui_apply_samples_ms)} typed GUI adoption samples; "
                 f"expected {repeats}; output={output[-4000:]}"
             )
 
@@ -251,7 +274,7 @@ def run_reload_soak(
             f"elapsed_ms={elapsed_s * 1000:.0f} first_peak_mib={iteration_peaks_mib[0]:.1f} "
             f"last_peak_mib={iteration_peaks_mib[-1]:.1f} growth_mib={growth_mib:.1f} "
             f"max_peak_mib={max(iteration_peaks_mib):.1f} "
-            f"max_gui_apply_ms={max(gui_apply_samples_ms)}",
+            f"max_gui_apply_ms={max(gui_apply_samples_ms)} typed_store=1",
             flush=True,
         )
         if max(gui_apply_samples_ms) > 50:
