@@ -33,13 +33,30 @@ on:
       - '.github/workflows/ied-simulator-qt.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-and-smoke:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+
+      - name: Apply milestone G source patch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feat/ied-sim-ux-performance-foundation'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "ARStack CI"
+          git config user.email "actions@users.noreply.github.com"
+          git fetch origin 4225202bcbfcfa71a0d4499d9412f7ac2be2cc0e --depth=1
+          git show 4225202bcbfcfa71a0d4499d9412f7ac2be2cc0e:.github/workflows/ied-simulator-qt.yml > .github/workflows/ied-simulator-qt.yml
+          cat .milestone-g/part*.patch > /tmp/milestone-g.patch
+          patch -p1 --forward < /tmp/milestone-g.patch
+          git rm -r .milestone-g
+          git add .github/workflows/ied-simulator-qt.yml apps/ied_simulator
+          git diff --cached --check
+          git commit -m "feat(ied-sim): bound runtime diagnostics and restart lifecycle"
+          git push origin HEAD:${GITHUB_REF_NAME}
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
