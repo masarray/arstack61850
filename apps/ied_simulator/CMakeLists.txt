@@ -63,7 +63,9 @@ target_compile_features(arstack_ied_simulator PRIVATE cxx_std_20)
 # The regular library intentionally keeps a strict portable connection runtime.
 # The desktop simulator needs the separate compatibility runtime validated
 # against IEDScout-style AARQ, selector, browse, Identify and FileDirectory
-# traffic.  Keep the two runtimes isolated so the embedded core is unchanged.
+# traffic. Keep the two runtimes isolated so the embedded core is unchanged.
+# Reporting is wired here as an application feature over the same bounded
+# per-association server rather than by launching a second protocol endpoint.
 add_library(ariec61850_ied_simulator_server_core STATIC
     ${CMAKE_CURRENT_LIST_DIR}/../../src/asn1/ber_span_reader.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/osi/tpkt_span.cpp
@@ -83,7 +85,11 @@ add_library(ariec61850_ied_simulator_server_core STATIC
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_data_set_table.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_dispatcher.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/connection_runtime_iedsim.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_server_session.cpp)
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_server_session.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_information_report.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_report_connection.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_urcb_objects.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_urcb_runtime.cpp)
 target_include_directories(ariec61850_ied_simulator_server_core PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/../../include)
 target_compile_features(ariec61850_ied_simulator_server_core PUBLIC cxx_std_20)
@@ -99,7 +105,18 @@ if(WIN32)
 endif()
 target_compile_features(ariec61850_ied_simulator_server PRIVATE cxx_std_20)
 
-add_dependencies(arstack_ied_simulator ariec61850_ied_simulator_server)
+# End-to-end reporting regression client. It uses the normal host-side MMS
+# association runtime and therefore proves that the simulator is interoperable
+# through its public wire contract, not through an in-process shortcut.
+add_executable(ariec61850_mms_urcb_gi_probe
+    ${CMAKE_CURRENT_LIST_DIR}/../../tools/mms_urcb_gi_probe.cpp)
+target_link_libraries(ariec61850_mms_urcb_gi_probe PRIVATE ARIEC61850::core)
+target_compile_features(ariec61850_mms_urcb_gi_probe PRIVATE cxx_std_20)
+
+add_dependencies(
+    arstack_ied_simulator
+    ariec61850_ied_simulator_server
+    ariec61850_mms_urcb_gi_probe)
 
 if(WIN32)
     set_target_properties(arstack_ied_simulator PROPERTIES WIN32_EXECUTABLE TRUE)
