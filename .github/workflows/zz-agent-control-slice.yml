@@ -19,6 +19,9 @@ jobs:
           ref: feat/complete-ariec61850-simulator-parity
           fetch-depth: 0
 
+      - name: Adjust patch driver anchors
+        run: python3 scripts/agent_apply_control_slice_fix.py
+
       - name: Apply configured Direct-Normal vertical slice
         run: python3 scripts/agent_apply_control_slice.py
 
