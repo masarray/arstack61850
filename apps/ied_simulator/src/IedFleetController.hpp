@@ -54,6 +54,9 @@ class IedFleetController : public QObject {
     Q_PROPERTY(int dataSetCount READ dataSetCount NOTIFY modelChanged)
     Q_PROPERTY(int reportCount READ reportCount NOTIFY modelChanged)
     Q_PROPERTY(int gooseCount READ gooseCount NOTIFY modelChanged)
+    Q_PROPERTY(qint64 lastImportWorkerMilliseconds READ lastImportWorkerMilliseconds NOTIFY modelChanged)
+    Q_PROPERTY(qint64 lastGuiApplyMilliseconds READ lastGuiApplyMilliseconds NOTIFY modelChanged)
+    Q_PROPERTY(int preparedPointCount READ preparedPointCount NOTIFY modelChanged)
 
 public:
     enum class RuntimeState {
@@ -103,6 +106,13 @@ public:
     [[nodiscard]] int dataSetCount() const noexcept;
     [[nodiscard]] int reportCount() const noexcept;
     [[nodiscard]] int gooseCount() const noexcept;
+    [[nodiscard]] qint64 lastImportWorkerMilliseconds() const noexcept {
+        return lastImportWorkerMilliseconds_;
+    }
+    [[nodiscard]] qint64 lastGuiApplyMilliseconds() const noexcept {
+        return lastGuiApplyMilliseconds_;
+    }
+    [[nodiscard]] int preparedPointCount() const noexcept { return preparedPointCount_; }
 
     void setListenAddress(const QString& value);
     void setPort(int value);
@@ -164,8 +174,20 @@ private:
         QString path;
         quint64 generation{};
         std::optional<ar::iec61850::scl::SclDocument> document;
+        QVariantList ieds;
+        QVariantList selectedValues;
+        QHash<QString, QVariantMap> runtimeValues;
         QString error;
+        qint64 parserMilliseconds{};
+        qint64 preparationMilliseconds{};
         qint64 elapsedMilliseconds{};
+        int logicalDeviceCount{};
+        int dataObjectCount{};
+        int dataAttributeCount{};
+        int dataSetCount{};
+        int reportCount{};
+        int gooseCount{};
+        int preparedPointCount{};
     };
 
     struct RuntimeInstance final {
@@ -246,6 +268,9 @@ private:
     QString defaultListenAddress_{QStringLiteral("0.0.0.0")};
     QString fileFolder_;
     quint64 asyncImportGeneration_{};
+    qint64 lastImportWorkerMilliseconds_{};
+    qint64 lastGuiApplyMilliseconds_{};
+    int preparedPointCount_{};
     int defaultPort_{102};
     int selectedIedIndex_{-1};
     int selectedValueIndex_{-1};
