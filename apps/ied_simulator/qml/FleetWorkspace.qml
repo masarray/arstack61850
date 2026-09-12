@@ -159,13 +159,6 @@ Item {
         return theme.accent
     }
 
-    function statusColor(status) {
-        if (status === "Running") return theme.green
-        if (status === "Starting" || status === "Stopping") return theme.amber
-        if (status === "Failed") return theme.red
-        return theme.muted
-    }
-
     function selectedOptions() {
         return backend.selectedValue.options || []
     }
@@ -182,10 +175,7 @@ Item {
 
     Component.onCompleted: refreshNavigation()
 
-    Shortcut {
-        sequence: "Ctrl+O"
-        onActivated: root.openSclRequested()
-    }
+    Shortcut { sequence: "Ctrl+O"; onActivated: root.openSclRequested() }
     Shortcut {
         sequence: "F5"
         enabled: backend.imported && !backend.running && !backend.starting
@@ -202,17 +192,15 @@ Item {
         onActivated: backend.stopAllSimulations()
     }
 
-    Rectangle {
-        anchors.fill: parent
-        color: theme.background
-    }
+    Rectangle { anchors.fill: parent; color: theme.background }
 
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
 
-        // Original ARStack command bar: compact, fleet-oriented and deliberately
-        // different from vendor ribbon/tab metaphors.
+        // Compact original ARStack command bar.  ARSAS contributes the IED
+        // Explorer interaction/identity below, while this app keeps its own
+        // fleet-oriented workflow and visual hierarchy.
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 64
@@ -224,19 +212,29 @@ Item {
                 anchors.rightMargin: 18
                 spacing: 10
 
-                ColumnLayout {
-                    Layout.preferredWidth: 240
-                    spacing: 1
-                    Label {
-                        text: "ARStack IED Lab"
-                        color: theme.navigationText
-                        font.pixelSize: 17
-                        font.weight: Font.DemiBold
+                RowLayout {
+                    Layout.preferredWidth: 258
+                    spacing: 10
+                    Image {
+                        width: 34
+                        height: 34
+                        source: "qrc:/iedsim/assets/black-fascia-ied.svg"
+                        sourceSize: Qt.size(68, 68)
+                        fillMode: Image.PreserveAspectFit
                     }
-                    Label {
-                        text: "Multi-IED IEC 61850 simulation workspace"
-                        color: theme.navigationMuted
-                        font.pixelSize: 10
+                    ColumnLayout {
+                        spacing: 0
+                        Label {
+                            text: "ARStack IED Lab"
+                            color: theme.navigationText
+                            font.pixelSize: 17
+                            font.weight: Font.DemiBold
+                        }
+                        Label {
+                            text: "Multi-IED simulation workspace"
+                            color: theme.navigationMuted
+                            font.pixelSize: 9
+                        }
                     }
                 }
 
@@ -270,7 +268,8 @@ Item {
                     iconSource: "qrc:/iedsim/assets/play.svg"
                     primary: true
                     enabled: backend.imported && !backend.running && !backend.starting &&
-                             backend.selectedIed.enabled && backend.endpointConflict.length === 0
+                             backend.selectedIed.enabled && backend.endpointConflict.length === 0 &&
+                             backend.listenAddress.length > 0
                     onClicked: backend.startSimulation()
                 }
                 IconAction {
@@ -311,7 +310,6 @@ Item {
                 anchors.leftMargin: 16
                 anchors.rightMargin: 16
                 spacing: 12
-
                 Rectangle {
                     width: 8
                     height: 8
@@ -319,7 +317,7 @@ Item {
                     color: backend.runningCount > 0 ? theme.green : theme.muted
                 }
                 Label {
-                    text: backend.imported ? backend.modelStatus : "Open a model to create a simulation fleet"
+                    text: backend.imported ? backend.modelStatus : "Open a model to build the IED Explorer"
                     color: theme.textSoft
                     font.pixelSize: 11
                     elide: Text.ElideRight
@@ -338,6 +336,8 @@ Item {
                     text: ""
                     iconSource: "qrc:/iedsim/assets/activity.svg"
                     onClicked: root.eventStreamVisible = !root.eventStreamVisible
+                    ToolTip.visible: hovered
+                    ToolTip.text: root.eventStreamVisible ? "Hide event stream" : "Show event stream"
                 }
             }
         }
@@ -347,232 +347,17 @@ Item {
             Layout.fillHeight: true
             spacing: 0
 
-            // Fleet panel: every IED is a first-class runtime with its own
-            // endpoint instead of a single global simulator state.
-            Rectangle {
-                Layout.preferredWidth: 258
+            // Ported from ARSAS: relay-fascia IED cards, live/ready badge,
+            // per-IED fast actions, and a fixed endpoint workflow below the list.
+            IedExplorer {
+                Layout.preferredWidth: root.width >= 1360 ? 286 : 262
                 Layout.fillHeight: true
-                color: theme.surface
-                border.width: 1
-                border.color: theme.lineSoft
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 0
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 48
-                        Layout.leftMargin: 14
-                        Layout.rightMargin: 10
-                        Label {
-                            text: "SIMULATION FLEET"
-                            color: theme.text
-                            font.pixelSize: 11
-                            font.weight: Font.Bold
-                            Layout.fillWidth: true
-                        }
-                        Label {
-                            text: backend.runningCount + "/" + backend.ieds.length
-                            color: backend.runningCount > 0 ? theme.green : theme.muted
-                            font.pixelSize: 11
-                            font.weight: Font.DemiBold
-                        }
-                    }
-
-                    Rectangle { Layout.fillWidth: true; height: 1; color: theme.lineSoft }
-
-                    ListView {
-                        id: iedList
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        clip: true
-                        model: backend.ieds
-                        spacing: 4
-                        topMargin: 8
-                        bottomMargin: 8
-                        leftMargin: 8
-                        rightMargin: 8
-                        ScrollBar.vertical: ScrollBar { }
-
-                        delegate: Rectangle {
-                            required property var modelData
-                            required property int index
-                            width: iedList.width - iedList.leftMargin - iedList.rightMargin
-                            height: 72
-                            radius: 9
-                            color: backend.selectedIedIndex === index ? theme.accentSoft : theme.surface
-                            border.width: 1
-                            border.color: backend.selectedIedIndex === index ? theme.accent : theme.lineSoft
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.margins: 10
-                                spacing: 9
-
-                                Rectangle {
-                                    width: 30
-                                    height: 30
-                                    radius: 8
-                                    color: modelData.status === "Running" ? theme.greenSoft : theme.surfaceRaised
-                                    Image {
-                                        anchors.centerIn: parent
-                                        width: 16
-                                        height: 16
-                                        source: "qrc:/iedsim/assets/radio-tower.svg"
-                                        opacity: modelData.enabled ? 0.9 : 0.35
-                                    }
-                                }
-
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 2
-                                    Label {
-                                        text: modelData.name || "Unnamed IED"
-                                        color: theme.text
-                                        font.pixelSize: 12
-                                        font.weight: Font.DemiBold
-                                        elide: Text.ElideRight
-                                        Layout.fillWidth: true
-                                    }
-                                    Label {
-                                        text: modelData.endpoint || "Assign IP"
-                                        color: modelData.endpoint === "Assign IP" ? theme.amber : theme.muted
-                                        font.pixelSize: 10
-                                        elide: Text.ElideRight
-                                        Layout.fillWidth: true
-                                    }
-                                    RowLayout {
-                                        spacing: 5
-                                        Rectangle {
-                                            width: 7
-                                            height: 7
-                                            radius: 4
-                                            color: root.statusColor(modelData.status)
-                                        }
-                                        Label {
-                                            text: modelData.status
-                                            color: root.statusColor(modelData.status)
-                                            font.pixelSize: 9
-                                        }
-                                    }
-                                }
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: backend.selectIed(index)
-                            }
-                        }
-
-                        Label {
-                            anchors.centerIn: parent
-                            visible: backend.ieds.length === 0
-                            text: "No IEDs loaded"
-                            color: theme.muted
-                            font.pixelSize: 11
-                        }
-                    }
-
-                    Rectangle { Layout.fillWidth: true; height: 1; color: theme.lineSoft }
-
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: backend.imported ? 214 : 0
-                        Layout.leftMargin: 12
-                        Layout.rightMargin: 12
-                        Layout.topMargin: 10
-                        Layout.bottomMargin: 10
-                        spacing: 7
-                        visible: backend.imported
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Label {
-                                text: "Selected endpoint"
-                                color: theme.text
-                                font.pixelSize: 11
-                                font.weight: Font.DemiBold
-                                Layout.fillWidth: true
-                            }
-                            Switch {
-                                checked: backend.selectedIed.enabled === undefined ? true : backend.selectedIed.enabled
-                                enabled: !backend.running && !backend.starting
-                                onToggled: backend.setIedEnabled(backend.selectedIedIndex, checked)
-                                scale: 0.78
-                            }
-                        }
-
-                        ComboBox {
-                            id: addressBox
-                            Layout.fillWidth: true
-                            enabled: !backend.running && !backend.starting
-                            model: backend.availableAddresses
-                            currentIndex: Math.max(0, backend.availableAddresses.indexOf(backend.listenAddress))
-                            onActivated: backend.listenAddress = currentText
-                            font.pixelSize: 11
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Label { text: "Port"; color: theme.muted; font.pixelSize: 10 }
-                            SpinBox {
-                                Layout.fillWidth: true
-                                from: 1
-                                to: 65535
-                                editable: true
-                                value: backend.port
-                                enabled: !backend.running && !backend.starting
-                                onValueModified: backend.port = value
-                                font.pixelSize: 11
-                            }
-                        }
-
-                        Label {
-                            Layout.fillWidth: true
-                            visible: backend.endpointConflict.length > 0
-                            text: backend.endpointConflict
-                            color: theme.red
-                            font.pixelSize: 9
-                            wrapMode: Text.WordWrap
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 6
-                            IconAction {
-                                theme: root.theme
-                                text: "Auto assign"
-                                iconSource: "qrc:/iedsim/assets/radio-tower.svg"
-                                compact: true
-                                enabled: !backend.anyRunning
-                                Layout.fillWidth: true
-                                onClicked: backend.autoAssignIedAddresses()
-                            }
-                            IconAction {
-                                theme: root.theme
-                                text: ""
-                                iconSource: "qrc:/iedsim/assets/scan-search.svg"
-                                compact: true
-                                enabled: !backend.anyRunning
-                                onClicked: backend.refreshNetworkInterfaces()
-                            }
-                        }
-
-                        Label {
-                            Layout.fillWidth: true
-                            text: backend.networkAddresses.length + " IPv4 address entries detected. Secondary Ethernet IPs appear here automatically."
-                            color: theme.muted
-                            font.pixelSize: 9
-                            wrapMode: Text.WordWrap
-                        }
-                    }
-                }
+                theme: root.theme
+                backend: root.backend
             }
 
-            // Model navigator is intentionally separate from the IED fleet.
             Rectangle {
-                Layout.preferredWidth: 204
+                Layout.preferredWidth: 194
                 Layout.fillHeight: true
                 color: theme.chrome
                 border.width: 1
@@ -582,22 +367,33 @@ Item {
                     anchors.fill: parent
                     spacing: 0
 
-                    Label {
+                    RowLayout {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 38
-                        Layout.leftMargin: 12
-                        text: "MODEL NAVIGATOR"
-                        verticalAlignment: Text.AlignVCenter
-                        color: theme.text
-                        font.pixelSize: 10
-                        font.weight: Font.Bold
+                        Layout.preferredHeight: 42
+                        Layout.leftMargin: 10
+                        Layout.rightMargin: 8
+                        spacing: 7
+                        Image {
+                            width: 21
+                            height: 21
+                            source: "qrc:/iedsim/assets/black-fascia-ied.svg"
+                            sourceSize: Qt.size(42, 42)
+                            fillMode: Image.PreserveAspectFit
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: "MODEL TREE"
+                            color: theme.text
+                            font.pixelSize: 10
+                            font.weight: Font.Bold
+                        }
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: theme.lineSoft }
 
                     Label {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 30
-                        Layout.leftMargin: 12
+                        Layout.preferredHeight: 29
+                        Layout.leftMargin: 11
                         text: "Logical devices"
                         verticalAlignment: Text.AlignVCenter
                         color: theme.muted
@@ -607,7 +403,7 @@ Item {
                     ListView {
                         id: ldList
                         Layout.fillWidth: true
-                        Layout.preferredHeight: Math.min(230, contentHeight + 2)
+                        Layout.preferredHeight: Math.min(220, contentHeight + 2)
                         clip: true
                         model: root.logicalDevices
                         ScrollBar.vertical: ScrollBar { }
@@ -616,16 +412,27 @@ Item {
                             width: ldList.width
                             height: 31
                             color: root.selectedLd === modelData ? theme.accentSoft : "transparent"
-                            Label {
+                            Row {
                                 anchors.fill: parent
-                                anchors.leftMargin: 14
-                                anchors.rightMargin: 6
-                                text: modelData
-                                verticalAlignment: Text.AlignVCenter
-                                color: root.selectedLd === modelData ? theme.accent : theme.textSoft
-                                font.pixelSize: 10
-                                font.weight: root.selectedLd === modelData ? Font.DemiBold : Font.Normal
-                                elide: Text.ElideRight
+                                anchors.leftMargin: 11
+                                spacing: 6
+                                Label {
+                                    text: "LD"
+                                    color: root.selectedLd === modelData ? theme.accent : theme.muted
+                                    font.pixelSize: 8
+                                    font.weight: Font.Bold
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                Label {
+                                    width: parent.width - 34
+                                    text: modelData
+                                    verticalAlignment: Text.AlignVCenter
+                                    color: root.selectedLd === modelData ? theme.accent : theme.textSoft
+                                    font.pixelSize: 9
+                                    font.weight: root.selectedLd === modelData ? Font.DemiBold : Font.Normal
+                                    elide: Text.ElideRight
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
                             }
                             MouseArea { anchors.fill: parent; onClicked: root.chooseLogicalDevice(modelData) }
                         }
@@ -634,8 +441,8 @@ Item {
                     Rectangle { Layout.fillWidth: true; height: 1; color: theme.lineSoft }
                     Label {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 30
-                        Layout.leftMargin: 12
+                        Layout.preferredHeight: 29
+                        Layout.leftMargin: 11
                         text: "Logical nodes"
                         verticalAlignment: Text.AlignVCenter
                         color: theme.muted
@@ -654,16 +461,26 @@ Item {
                             width: lnList.width
                             height: 31
                             color: root.selectedLn === modelData ? theme.accentSoft : "transparent"
-                            Label {
+                            Row {
                                 anchors.fill: parent
-                                anchors.leftMargin: 14
-                                anchors.rightMargin: 6
-                                text: modelData
-                                verticalAlignment: Text.AlignVCenter
-                                color: root.selectedLn === modelData ? theme.accent : theme.textSoft
-                                font.pixelSize: 10
-                                font.weight: root.selectedLn === modelData ? Font.DemiBold : Font.Normal
-                                elide: Text.ElideRight
+                                anchors.leftMargin: 11
+                                spacing: 6
+                                Label {
+                                    text: "LN"
+                                    color: root.selectedLn === modelData ? theme.accent : theme.muted
+                                    font.pixelSize: 8
+                                    font.weight: Font.Bold
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                Label {
+                                    width: parent.width - 34
+                                    text: modelData
+                                    color: root.selectedLn === modelData ? theme.accent : theme.textSoft
+                                    font.pixelSize: 9
+                                    font.weight: root.selectedLn === modelData ? Font.DemiBold : Font.Normal
+                                    elide: Text.ElideRight
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
                             }
                             MouseArea { anchors.fill: parent; onClicked: root.chooseLogicalNode(modelData) }
                         }
@@ -671,7 +488,6 @@ Item {
                 }
             }
 
-            // Main data canvas.
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -687,14 +503,12 @@ Item {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 54
                         color: theme.surface
-                        border.width: 0
 
                         RowLayout {
                             anchors.fill: parent
-                            anchors.leftMargin: 14
-                            anchors.rightMargin: 14
+                            anchors.leftMargin: 13
+                            anchors.rightMargin: 13
                             spacing: 10
-
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 1
@@ -702,22 +516,22 @@ Item {
                                     text: (backend.selectedIed.name || "IED") + "  /  " +
                                           (root.selectedLd || "—") + "  /  " + (root.selectedLn || "—")
                                     color: theme.text
-                                    font.pixelSize: 13
+                                    font.pixelSize: 12
                                     font.weight: Font.DemiBold
                                     elide: Text.ElideMiddle
                                     Layout.fillWidth: true
                                 }
                                 Label {
-                                    text: backend.selectedIed.manufacturer || "IEC 61850 data model"
-                                    color: theme.muted
+                                    text: (backend.selectedIed.manufacturer || "IEC 61850") +
+                                          (backend.running ? "  ·  LIVE MMS" : "  ·  model view")
+                                    color: backend.running ? theme.green : theme.muted
                                     font.pixelSize: 9
                                 }
                             }
-
                             TextField {
                                 id: searchField
-                                Layout.preferredWidth: 238
-                                placeholderText: "Find DO, DA, FC or value"
+                                Layout.preferredWidth: 226
+                                placeholderText: "Search signal / value / FC"
                                 text: root.searchText
                                 onTextChanged: {
                                     root.searchText = text
@@ -725,8 +539,6 @@ Item {
                                 }
                                 selectByMouse: true
                                 font.pixelSize: 10
-                                leftPadding: 10
-                                rightPadding: 10
                             }
                         }
                     }
@@ -737,25 +549,26 @@ Item {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 30
                         color: theme.surfaceRaised
-
                         RowLayout {
                             anchors.fill: parent
-                            anchors.leftMargin: 12
-                            anchors.rightMargin: 12
+                            anchors.leftMargin: 11
+                            anchors.rightMargin: 11
                             spacing: 0
                             Label { Layout.fillWidth: true; text: "Object / attribute"; color: theme.muted; font.pixelSize: 9; font.weight: Font.DemiBold }
-                            Label { Layout.preferredWidth: 78; text: "FC"; color: theme.muted; font.pixelSize: 9; font.weight: Font.DemiBold }
-                            Label { Layout.preferredWidth: 120; text: "Type"; color: theme.muted; font.pixelSize: 9; font.weight: Font.DemiBold }
-                            Label { Layout.preferredWidth: 180; text: "Value"; color: theme.muted; font.pixelSize: 9; font.weight: Font.DemiBold }
+                            Label { Layout.preferredWidth: 66; text: "FC"; color: theme.muted; font.pixelSize: 9; font.weight: Font.DemiBold }
+                            Label { Layout.preferredWidth: 105; text: "Type"; color: theme.muted; font.pixelSize: 9; font.weight: Font.DemiBold }
+                            Label { Layout.preferredWidth: 148; text: "Value"; color: theme.muted; font.pixelSize: 9; font.weight: Font.DemiBold }
                         }
                     }
 
                     ListView {
                         id: dataList
+                        objectName: "iedLiveSignalTable"
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
                         model: root.tableRows
+                        boundsBehavior: Flickable.StopAtBounds
                         ScrollBar.vertical: ScrollBar { }
 
                         delegate: Rectangle {
@@ -768,18 +581,16 @@ Item {
                                 if (modelData.kind === "DO") return theme.chrome
                                 return index % 2 === 0 ? theme.surface : "#fbfcfc"
                             }
-                            border.width: 0
 
                             RowLayout {
                                 anchors.fill: parent
-                                anchors.leftMargin: 12
-                                anchors.rightMargin: 12
+                                anchors.leftMargin: 11
+                                anchors.rightMargin: 11
                                 spacing: 0
-
                                 RowLayout {
                                     Layout.fillWidth: true
                                     spacing: 6
-                                    Item { Layout.preferredWidth: modelData.kind === "DO" ? 0 : 17 }
+                                    Item { Layout.preferredWidth: modelData.kind === "DO" ? 0 : 16 }
                                     Label {
                                         visible: modelData.kind === "DO"
                                         text: root.collapsedObjects[modelData.name] === true ? "›" : "⌄"
@@ -808,21 +619,10 @@ Item {
                                         elide: Text.ElideRight
                                     }
                                 }
+                                Label { Layout.preferredWidth: 66; text: modelData.fc ? "[" + modelData.fc + "]" : ""; color: theme.muted; font.pixelSize: 9 }
+                                Label { Layout.preferredWidth: 105; text: modelData.type; color: theme.muted; font.pixelSize: 9; elide: Text.ElideRight }
                                 Label {
-                                    Layout.preferredWidth: 78
-                                    text: modelData.fc ? "[" + modelData.fc + "]" : ""
-                                    color: theme.muted
-                                    font.pixelSize: 9
-                                }
-                                Label {
-                                    Layout.preferredWidth: 120
-                                    text: modelData.type
-                                    color: theme.muted
-                                    font.pixelSize: 9
-                                    elide: Text.ElideRight
-                                }
-                                Label {
-                                    Layout.preferredWidth: 180
+                                    Layout.preferredWidth: 148
                                     text: modelData.value
                                     color: modelData.kind === "DA" ? theme.text : theme.textSoft
                                     font.pixelSize: 10
@@ -831,23 +631,12 @@ Item {
                                 }
                             }
 
-                            Rectangle {
-                                anchors.left: parent.left
-                                anchors.right: parent.right
-                                anchors.bottom: parent.bottom
-                                height: 1
-                                color: theme.lineSoft
-                            }
-
+                            Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: theme.lineSoft }
                             MouseArea {
                                 anchors.fill: parent
-                                acceptedButtons: Qt.LeftButton
                                 onClicked: {
                                     if (modelData.kind === "DO") root.toggleObject(modelData.name)
                                     else backend.selectValue(modelData.sourceIndex)
-                                }
-                                onDoubleClicked: {
-                                    if (modelData.kind === "DA") backend.selectValue(modelData.sourceIndex)
                                 }
                             }
                         }
@@ -855,7 +644,7 @@ Item {
                         Label {
                             anchors.centerIn: parent
                             visible: root.tableRows.length === 0
-                            text: backend.imported ? "No matching leaves" : "Open an engineering model"
+                            text: backend.imported ? "No matching IEC 61850 leaves" : "Open an engineering model"
                             color: theme.muted
                             font.pixelSize: 11
                         }
@@ -863,10 +652,8 @@ Item {
                 }
             }
 
-            // Context inspector makes the common operation (edit a DA) one click
-            // faster than opening a separate modal for every change.
             Rectangle {
-                Layout.preferredWidth: root.width >= 1280 ? 298 : 260
+                Layout.preferredWidth: root.width >= 1360 ? 288 : 256
                 Layout.fillHeight: true
                 color: theme.chrome
                 border.width: 1
@@ -874,8 +661,8 @@ Item {
 
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 12
-                    spacing: 9
+                    anchors.margins: 11
+                    spacing: 8
 
                     RowLayout {
                         Layout.fillWidth: true
@@ -886,27 +673,17 @@ Item {
                             font.weight: Font.Bold
                             Layout.fillWidth: true
                         }
-                        Rectangle {
-                            width: 8
-                            height: 8
-                            radius: 4
-                            color: backend.running ? theme.green : theme.muted
-                        }
+                        Rectangle { width: 8; height: 8; radius: 4; color: backend.running ? theme.green : theme.muted }
                     }
 
                     Label {
                         Layout.fillWidth: true
                         text: backend.selectedValue.reference || "Select a data attribute"
                         color: backend.selectedValue.reference ? theme.textSoft : theme.muted
-                        font.pixelSize: 10
+                        font.pixelSize: 9
                         wrapMode: Text.WrapAnywhere
                     }
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 1
-                        color: theme.lineSoft
-                    }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: theme.lineSoft }
 
                     GridLayout {
                         Layout.fillWidth: true
@@ -922,12 +699,10 @@ Item {
                     }
 
                     Label { text: "Value"; color: theme.muted; font.pixelSize: 9 }
-
                     Loader {
                         Layout.fillWidth: true
                         sourceComponent: root.selectedOptions().length > 0 ? optionEditor : textEditor
                     }
-
                     Component {
                         id: textEditor
                         TextField {
@@ -938,7 +713,6 @@ Item {
                             onTextEdited: root.pendingValue = text
                         }
                     }
-
                     Component {
                         id: optionEditor
                         ComboBox {
@@ -991,53 +765,22 @@ Item {
                         }
                     }
 
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 1
-                        color: theme.lineSoft
-                        Layout.topMargin: 4
-                    }
-
-                    Label {
-                        text: "SERVICES"
-                        color: theme.text
-                        font.pixelSize: 10
-                        font.weight: Font.Bold
-                    }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: theme.lineSoft; Layout.topMargin: 4 }
+                    Label { text: "SERVICES"; color: theme.text; font.pixelSize: 10; font.weight: Font.Bold }
                     RowLayout {
                         Layout.fillWidth: true
-                        spacing: 6
-                        StatusPill {
-                            theme: root.theme
-                            text: backend.reportCount + " Reports"
-                            tone: theme.accent
-                            fill: theme.accentSoft
-                        }
-                        StatusPill {
-                            theme: root.theme
-                            text: backend.dataSetCount + " DataSets"
-                            tone: theme.textSoft
-                            fill: theme.surfaceRaised
-                        }
+                        spacing: 5
+                        StatusPill { theme: root.theme; text: backend.reportCount + " Reports"; tone: theme.accent; fill: theme.accentSoft }
+                        StatusPill { theme: root.theme; text: backend.dataSetCount + " DataSets"; tone: theme.textSoft; fill: theme.surfaceRaised }
                     }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 6
-                        StatusPill {
-                            theme: root.theme
-                            text: backend.gooseCount + " GOOSE"
-                            tone: theme.muted
-                            fill: theme.surfaceRaised
-                        }
-                    }
+                    StatusPill { theme: root.theme; text: backend.gooseCount + " GOOSE"; tone: theme.muted; fill: theme.surfaceRaised }
 
                     Item { Layout.fillHeight: true }
-
                     Label {
                         Layout.fillWidth: true
-                        text: "Tip: add secondary IPv4 addresses in the laptop Ethernet adapter, then Auto assign. Each IED can keep TCP/102 because it binds to a different local IP."
+                        text: "Explorer identity is shared with ARSAS; runtime state remains isolated per simulated IED."
                         color: theme.muted
-                        font.pixelSize: 9
+                        font.pixelSize: 8
                         wrapMode: Text.WordWrap
                     }
                 }
@@ -1046,7 +789,7 @@ Item {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: root.eventStreamVisible ? 156 : 0
+            Layout.preferredHeight: root.eventStreamVisible ? 150 : 0
             visible: root.eventStreamVisible
             color: theme.navigationDark
             clip: true
@@ -1054,24 +797,13 @@ Item {
             ColumnLayout {
                 anchors.fill: parent
                 spacing: 0
-
                 RowLayout {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 34
+                    Layout.preferredHeight: 33
                     Layout.leftMargin: 14
                     Layout.rightMargin: 10
-                    Label {
-                        text: "EVENT STREAM"
-                        color: theme.navigationText
-                        font.pixelSize: 10
-                        font.weight: Font.Bold
-                        Layout.fillWidth: true
-                    }
-                    Label {
-                        text: backend.activity.length + " events"
-                        color: theme.navigationMuted
-                        font.pixelSize: 9
-                    }
+                    Label { text: "EVENT STREAM"; color: theme.navigationText; font.pixelSize: 10; font.weight: Font.Bold; Layout.fillWidth: true }
+                    Label { text: backend.activity.length + " events"; color: theme.navigationMuted; font.pixelSize: 9 }
                     IconAction {
                         theme: root.theme
                         compact: true
@@ -1095,49 +827,18 @@ Item {
                     Layout.fillHeight: true
                     clip: true
                     model: backend.activity
+                    boundsBehavior: Flickable.StopAtBounds
                     ScrollBar.vertical: ScrollBar { }
-
                     delegate: RowLayout {
                         required property var modelData
                         width: activityList.width
                         height: 27
                         spacing: 8
-
-                        Rectangle {
-                            Layout.leftMargin: 14
-                            width: 6
-                            height: 6
-                            radius: 3
-                            color: root.severityColor(modelData.severity || "Info")
-                        }
-                        Label {
-                            Layout.preferredWidth: 76
-                            text: modelData.time || ""
-                            color: theme.navigationMuted
-                            font.pixelSize: 9
-                        }
-                        Label {
-                            Layout.preferredWidth: 112
-                            text: modelData.ied || modelData.category || "Workspace"
-                            color: theme.navigationText
-                            font.pixelSize: 9
-                            font.weight: Font.DemiBold
-                            elide: Text.ElideRight
-                        }
-                        Label {
-                            Layout.preferredWidth: 76
-                            text: modelData.category || ""
-                            color: root.severityColor(modelData.severity || "Info")
-                            font.pixelSize: 9
-                        }
-                        Label {
-                            Layout.fillWidth: true
-                            Layout.rightMargin: 12
-                            text: modelData.message || ""
-                            color: theme.navigationMuted
-                            font.pixelSize: 9
-                            elide: Text.ElideRight
-                        }
+                        Rectangle { Layout.leftMargin: 14; width: 6; height: 6; radius: 3; color: root.severityColor(modelData.severity || "Info") }
+                        Label { Layout.preferredWidth: 76; text: modelData.time || ""; color: theme.navigationMuted; font.pixelSize: 9 }
+                        Label { Layout.preferredWidth: 112; text: modelData.ied || modelData.category || "Workspace"; color: theme.navigationText; font.pixelSize: 9; font.weight: Font.DemiBold; elide: Text.ElideRight }
+                        Label { Layout.preferredWidth: 76; text: modelData.category || ""; color: root.severityColor(modelData.severity || "Info"); font.pixelSize: 9 }
+                        Label { Layout.fillWidth: true; Layout.rightMargin: 12; text: modelData.message || ""; color: theme.navigationMuted; font.pixelSize: 9; elide: Text.ElideRight }
                     }
                 }
             }
