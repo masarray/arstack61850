@@ -266,7 +266,11 @@ void IedSignalModel::refreshSnapshot() {
         scheduleRebuild();
         return;
     }
-    const auto next = backend_->values();
+
+    // Read the controller's authoritative list by reference. The QML property
+    // intentionally remains value-returning, but C++ presentation models should
+    // not duplicate tens of thousands of QVariant entries at every UI frame.
+    const auto& next = backend_->valuesView();
     const bool sameStructure = backend_->selectedIedIndex() == observedIedIndex_ &&
         next.size() == sourceValues_.size() &&
         referenceAt(next, 0) == observedFirstReference_ &&
@@ -286,6 +290,8 @@ void IedSignalModel::refreshSnapshot() {
     }
 
     QVector<int> changedRows;
+    QVector<int> changedSources;
+    changedSources.reserve(sourceRows_.size());
     for (auto it = sourceRows_.cbegin(); it != sourceRows_.cend(); ++it) {
         const int sourceIndex = it.key();
         if (sourceIndex < 0 || sourceIndex >= sourceValues_.size() || sourceIndex >= next.size()) {
@@ -300,9 +306,15 @@ void IedSignalModel::refreshSnapshot() {
         }
         if (!liveRolesChanged(before, after)) continue;
         changedRows += it.value();
+        changedSources.push_back(sourceIndex);
     }
 
-    sourceValues_ = next;
+    // Keep only the rows represented by this projection in sync. This avoids a
+    // second full-list copy on every valuesChanged burst while preserving the
+    // complete snapshot rebuild whenever scope/filter/structure changes.
+    for (const int sourceIndex : changedSources) {
+        sourceValues_[sourceIndex] = next.at(sourceIndex);
+    }
     emitRowsChanged(
         std::move(changedRows),
         {ValueRole, QualityRole, WritableRole, ChangedRole});
