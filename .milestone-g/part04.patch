@@ -1,0 +1,180 @@
+     Q_PROPERTY(int dataObjectCount READ dataObjectCount NOTIFY modelChanged)
+     Q_PROPERTY(int dataAttributeCount READ dataAttributeCount NOTIFY modelChanged)
+@@ -92,6 +95,8 @@
+     [[nodiscard]] int selectedValueIndex() const noexcept;
+     [[nodiscard]] QVariantMap selectedValue() const;
+     [[nodiscard]] QVariantList activity() const;
++    [[nodiscard]] IedActivityModel* activityModel() noexcept { return &activity_; }
++    [[nodiscard]] const IedActivityModel* activityModel() const noexcept { return &activity_; }
+     [[nodiscard]] int logicalDeviceCount() const noexcept;
+     [[nodiscard]] int dataObjectCount() const noexcept;
+     [[nodiscard]] int dataAttributeCount() const noexcept;
+@@ -172,6 +177,10 @@
+         std::unique_ptr<QProcess> process;
+         QByteArray standardOutputBuffer;
+         QByteArray standardErrorBuffer;
++        bool standardOutputDrainScheduled{};
++        bool standardErrorDrainScheduled{};
++        bool standardOutputOverflowReported{};
++        bool standardErrorOverflowReported{};
+         QString modelManifestPath;
+         quint64 startGeneration{};
+         quint64 modelRevision{};
+@@ -226,7 +235,7 @@
+     std::vector<std::unique_ptr<RuntimeInstance>> runtimes_;
+     QVariantList ieds_;
+     QVariantList values_;
+-    QVariantList activity_;
++    IedActivityModel activity_;
+     QHash<QString, QVariantMap> runtimeValues_;
+     std::optional<ValueSnapshot> previousValue_;
+     QThreadPool importPool_;
+diff -ruN '--exclude=__pycache__' iedsim-pristine/apps/ied_simulator/src/IedRuntimeGuardrails.cpp iedsim-src/apps/ied_simulator/src/IedRuntimeGuardrails.cpp
+--- iedsim-pristine/apps/ied_simulator/src/IedRuntimeGuardrails.cpp	1970-01-01 00:00:00.000000000 +0000
++++ iedsim-src/apps/ied_simulator/src/IedRuntimeGuardrails.cpp	2026-09-12 21:40:16.890343399 +0000
+@@ -0,0 +1,64 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++#include "IedRuntimeGuardrails.hpp"
++
++#include <algorithm>
++
++namespace ar::iedsim::runtime_guardrails {
++namespace {
++QByteArray boundedLine(const QByteArray& line, int& truncatedLines) {
++    if (line.size() <= kMaxProcessLineBytes) return line;
++    ++truncatedLines;
++    auto result = line.left(kMaxProcessLineBytes);
++    result += " …[truncated]";
++    return result;
++}
++} // namespace
++
++DrainResult appendAndDrain(QByteArray& buffer, const QByteArray& bytes) {
++    DrainResult result;
++
++    if (!bytes.isEmpty()) {
++        const qsizetype combinedSize = buffer.size() + bytes.size();
++        if (combinedSize > kMaxBufferedProcessBytes) {
++            const qsizetype overflow = combinedSize - kMaxBufferedProcessBytes;
++            result.droppedBytes += overflow;
++
++            if (overflow >= buffer.size()) {
++                const qsizetype dropFromBytes = overflow - buffer.size();
++                buffer.clear();
++                buffer += bytes.mid(std::min(dropFromBytes, bytes.size()));
++            } else {
++                buffer.remove(0, overflow);
++                buffer += bytes;
++            }
++        } else {
++            buffer += bytes;
++        }
++    }
++
++    result.lines.reserve(kMaxLinesPerDrain);
++    for (int count = 0; count < kMaxLinesPerDrain; ++count) {
++        const auto newline = buffer.indexOf('\n');
++        if (newline < 0) break;
++        auto line = buffer.left(newline);
++        buffer.remove(0, newline + 1);
++        if (!line.isEmpty() && line.endsWith('\r')) line.chop(1);
++        if (!line.trimmed().isEmpty()) {
++            result.lines.push_back(boundedLine(line, result.truncatedLines));
++        }
++    }
++    result.moreCompleteLines = buffer.indexOf('\n') >= 0;
++    return result;
++}
++
++QByteArray boundedTail(const QByteArray& buffer, bool* truncated) {
++    const bool didTruncate = buffer.size() > kMaxProcessLineBytes;
++    if (truncated != nullptr) *truncated = didTruncate;
++    if (!didTruncate) return buffer;
++    auto result = buffer.left(kMaxProcessLineBytes);
++    result += " …[truncated]";
++    return result;
++}
++
++} // namespace ar::iedsim::runtime_guardrails
+diff -ruN '--exclude=__pycache__' iedsim-pristine/apps/ied_simulator/src/IedRuntimeGuardrails.hpp iedsim-src/apps/ied_simulator/src/IedRuntimeGuardrails.hpp
+--- iedsim-pristine/apps/ied_simulator/src/IedRuntimeGuardrails.hpp	1970-01-01 00:00:00.000000000 +0000
++++ iedsim-src/apps/ied_simulator/src/IedRuntimeGuardrails.hpp	2026-09-12 21:40:16.888261413 +0000
+@@ -0,0 +1,30 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#pragma once
++
++#include <QByteArray>
++#include <QVector>
++
++namespace ar::iedsim::runtime_guardrails {
++
++inline constexpr qsizetype kMaxBufferedProcessBytes = 64 * 1024;
++inline constexpr qsizetype kMaxProcessLineBytes = 8 * 1024;
++inline constexpr int kMaxLinesPerDrain = 64;
++
++struct DrainResult final {
++    QVector<QByteArray> lines;
++    qsizetype droppedBytes{};
++    int truncatedLines{};
++    bool moreCompleteLines{};
++};
++
++// Appends child-process bytes into a bounded framing buffer and drains at most
++// kMaxLinesPerDrain complete lines. Oversized unterminated output cannot grow
++// memory without bound, and oversized individual lines are truncated before
++// conversion to QString / activity events.
++[[nodiscard]] DrainResult appendAndDrain(QByteArray& buffer, const QByteArray& bytes);
++
++// Flushes an unterminated tail at process exit while preserving the same line
++// cap used by normal drains.
++[[nodiscard]] QByteArray boundedTail(const QByteArray& buffer, bool* truncated = nullptr);
++
++} // namespace ar::iedsim::runtime_guardrails
+diff -ruN '--exclude=__pycache__' iedsim-pristine/apps/ied_simulator/src/ied_simulator_guardrails_qa.cpp iedsim-src/apps/ied_simulator/src/ied_simulator_guardrails_qa.cpp
+--- iedsim-pristine/apps/ied_simulator/src/ied_simulator_guardrails_qa.cpp	1970-01-01 00:00:00.000000000 +0000
++++ iedsim-src/apps/ied_simulator/src/ied_simulator_guardrails_qa.cpp	2026-09-12 21:40:16.892268119 +0000
+@@ -0,0 +1,91 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++#include "IedActivityModel.hpp"
++#include "IedRuntimeGuardrails.hpp"
++
++#include <QCoreApplication>
++#include <QEventLoop>
++#include <QTimer>
++
++#include <iostream>
++
++namespace {
++void spin(const int milliseconds) {
++    QEventLoop loop;
++    QTimer::singleShot(milliseconds, &loop, &QEventLoop::quit);
++    loop.exec();
++}
++
++int fail(const char* message) {
++    std::cerr << "IEDSIM_GUARDRAILS_FAIL " << message << '\n';
++    return 1;
++}
++} // namespace
++
++int main(int argc, char** argv) {
++    QCoreApplication app(argc, argv);
++
++    QByteArray unterminated;
++    const QByteArray flood(2 * 1024 * 1024, 'x');
++    const auto floodResult = ar::iedsim::runtime_guardrails::appendAndDrain(unterminated, flood);
++    if (unterminated.size() > ar::iedsim::runtime_guardrails::kMaxBufferedProcessBytes) {
++        return fail("unterminated child output exceeded hard buffer cap");
++    }
++    if (floodResult.droppedBytes <= 0) return fail("flood did not report discarded bytes");
++
++    QByteArray burst;
++    QByteArray manyLines;
++    for (int index = 0; index < 200; ++index) {
++        manyLines += "IEDSIM_EVENT kind=test index=" + QByteArray::number(index) + '\n';
++    }
++    const auto firstDrain = ar::iedsim::runtime_guardrails::appendAndDrain(burst, manyLines);
++    if (firstDrain.lines.size() != ar::iedsim::runtime_guardrails::kMaxLinesPerDrain) {
++        return fail("per-turn line drain budget is not enforced");
