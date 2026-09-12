@@ -11,16 +11,16 @@
 #include <chrono>
 #include <cctype>
 #include <cstdint>
-#include <limits>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace ar::iec61850::mms {
 
 // Host-side bridge from the SCL bType text carried by the simulator manifest
-// to exact MMS TypeSpecification/Data values.  This deliberately lives beside
+// to exact MMS TypeSpecification/Data values. This deliberately lives beside
 // the protocol types instead of in the Qt shell so every desktop simulator
 // adapter uses the same wire mapping.
 class MmsSimulatorManifestCodec final {
@@ -123,8 +123,6 @@ public:
             return result;
         }
 
-        // Preserve legacy simulator manifests which only carried the UI's
-        // coarse "Number" classification.  New manifests always retain bType.
         if (normalized == "NUMBER") {
             result.kind = MmsTypeKind::integer;
             result.size = 32U;
@@ -216,7 +214,7 @@ private:
         if (!starts_with(value, prefix) || value.size() == prefix.size()) return fallback;
         std::uint32_t width{};
         const auto suffix = value.substr(prefix.size());
-        const auto result = std::from_chars(suffix.data(), suffix.data() + suffix.size(), width);
+        const auto result = std::from_chars(suffix.data(), suffix.data() + suffix.size(), width, 10);
         return result.ec == std::errc{} && result.ptr == suffix.data() + suffix.size() && width != 0U
             ? width
             : fallback;
@@ -267,12 +265,19 @@ private:
         if (token == "BADSTATE") return 3;
 
         const auto text = trim_copy(value);
+        if (text.empty()) return 0;
         std::int64_t result{};
-        const auto parsed = std::from_chars(text.data(), text.data() + text.size(), result, 0);
+        const auto parsed = std::from_chars(text.data(), text.data() + text.size(), result, 10);
         return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size() ? result : 0;
     }
 
     [[nodiscard]] static std::uint64_t unsigned_text(const std::string_view value) noexcept {
+        const auto text = trim_copy(value);
+        if (!text.empty() && text.front() != '-') {
+            std::uint64_t result{};
+            const auto parsed = std::from_chars(text.data(), text.data() + text.size(), result, 10);
+            if (parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size()) return result;
+        }
         const auto signed_value = signed_text(value);
         return signed_value < 0 ? 0U : static_cast<std::uint64_t>(signed_value);
     }
@@ -352,13 +357,8 @@ private:
     [[nodiscard]] static std::chrono::system_clock::time_point timestamp(
         const std::string_view value) noexcept {
         auto text = trim_copy(value);
-        constexpr std::array<std::string_view, 3U> prefixes{
-            "unix-ms:", "unix-ms=", "UNIXMS:"};
-        for (const auto prefix : prefixes) {
-            if (text.size() >= prefix.size() && text.substr(0U, prefix.size()) == prefix) {
-                text.erase(0U, prefix.size());
-                break;
-            }
+        if (starts_with(text, "unix-ms:") || starts_with(text, "unix-ms=")) {
+            text.erase(0U, 8U);
         }
         std::int64_t milliseconds{};
         const auto parsed = std::from_chars(
