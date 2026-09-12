@@ -29,8 +29,9 @@ void IedNavigationModel::setBackend(IedFleetController* backend) {
     observedIedIndex_ = -1;
 
     if (backend_ != nullptr) {
-        connect(backend_, &IedFleetController::valuesChanged,
-                this, &IedNavigationModel::scheduleRebuild);
+        // Value edits do not change LD/LN topology. Rebuilding navigation for
+        // every live valuesChanged burst used to rescan tens of thousands of
+        // point maps on the GUI thread for no structural benefit.
         connect(backend_, &IedFleetController::modelChanged,
                 this, &IedNavigationModel::scheduleRebuild);
         connect(backend_, &IedFleetController::selectionChanged, this, [this] {
@@ -145,27 +146,47 @@ void IedNavigationModel::rebuild() {
 
     QVector<DeviceGroup> groups;
     QHash<QString, int> deviceIndex;
-    if (backend_ != nullptr) {
-        const auto values = backend_->values();
-        groups.reserve(values.size() > 0 ? 16 : 0);
-        for (const auto& value : values) {
-            const auto item = value.toMap();
-            const auto logicalDevice = item.value(QStringLiteral("logicalDevice")).toString();
-            const auto logicalNode = item.value(QStringLiteral("logicalNode")).toString();
-            if (logicalDevice.isEmpty() || logicalNode.isEmpty()) continue;
+    const auto appendScope = [&groups, &deviceIndex](
+        const QString& logicalDevice,
+        const QString& logicalNode) {
+        if (logicalDevice.isEmpty() || logicalNode.isEmpty()) return;
+        auto found = deviceIndex.constFind(logicalDevice);
+        int index{};
+        if (found == deviceIndex.cend()) {
+            index = groups.size();
+            deviceIndex.insert(logicalDevice, index);
+            groups.push_back(DeviceGroup{logicalDevice, {}});
+        } else {
+            index = found.value();
+        }
+        auto& nodes = groups[index].logicalNodes;
+        if (nodes.isEmpty() || nodes.constLast() != logicalNode) {
+            if (!nodes.contains(logicalNode)) nodes.push_back(logicalNode);
+        }
+    };
 
-            auto found = deviceIndex.constFind(logicalDevice);
-            int index{};
-            if (found == deviceIndex.cend()) {
-                index = groups.size();
-                deviceIndex.insert(logicalDevice, index);
-                groups.push_back(DeviceGroup{logicalDevice, {}});
-            } else {
-                index = found.value();
+    if (backend_ != nullptr) {
+        if (backend_->hasPreparedValueIndex()) {
+            // Interactive Open SCL has already reduced tens of thousands of
+            // points to this tiny ordered LD/LN index on the bounded worker.
+            const auto& navigation = backend_->navigationIndexView();
+            groups.reserve(navigation.size() > 0 ? 16 : 0);
+            for (const auto& value : navigation) {
+                const auto item = value.toMap();
+                appendScope(
+                    item.value(QStringLiteral("logicalDevice")).toString(),
+                    item.value(QStringLiteral("logicalNode")).toString());
             }
-            auto& nodes = groups[index].logicalNodes;
-            if (nodes.isEmpty() || nodes.constLast() != logicalNode) {
-                if (!nodes.contains(logicalNode)) nodes.push_back(logicalNode);
+        } else {
+            // Synchronous/legacy automation keeps the compatibility path, but
+            // read it by const reference so there is no duplicate full list.
+            const auto& values = backend_->valuesView();
+            groups.reserve(values.size() > 0 ? 16 : 0);
+            for (const auto& value : values) {
+                const auto item = value.toMap();
+                appendScope(
+                    item.value(QStringLiteral("logicalDevice")).toString(),
+                    item.value(QStringLiteral("logicalNode")).toString());
             }
         }
     }
