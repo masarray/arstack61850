@@ -66,6 +66,7 @@ jobs:
           Copy-Item 'build-ied-simulator-win/arstack_ied_simulator.exe' $package
           Copy-Item 'build-ied-simulator-win/ariec61850_ied_simulator_server.exe' $package
           Copy-Item 'tests/fixtures/scl/minimal-station-brcb.scd' $package
+          Copy-Item 'tests/fixtures/scl/compact-multi-stream.scd' $package
           Copy-Item 'apps/ied_simulator/IEDSCOUT_MANUAL_TEST.md' $package
           Copy-Item 'apps/arstack_studio/assets/LUCIDE_LICENSE.txt' $package
 
