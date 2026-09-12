@@ -1,0 +1,81 @@
+name: IED Simulator Windows Package
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/complete-ariec61850-simulator-parity
+    paths:
+      - 'apps/ied_simulator/**'
+      - 'include/ariec61850/**'
+      - 'src/**'
+      - 'tools/static_ied_server.cpp'
+      - 'tools/static_ied_server_sigpipe.cpp'
+      - 'tests/fixtures/scl/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/ied-simulator-windows-package.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  package-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
+
+      - name: Configure Release build
+        shell: pwsh
+        run: >-
+          cmake -S apps/ied_simulator -B build-ied-simulator-win -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build GUI and bundled MMS server
+        shell: pwsh
+        run: >-
+          cmake --build build-ied-simulator-win
+          --target arstack_ied_simulator ariec61850_ied_simulator_server
+          --parallel 2
+
+      - name: Assemble portable IEDScout test package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $package = Join-Path $PWD 'package/ARStack-IED-Simulator-Windows'
+          New-Item -ItemType Directory -Force -Path $package | Out-Null
+
+          Copy-Item 'build-ied-simulator-win/arstack_ied_simulator.exe' $package
+          Copy-Item 'build-ied-simulator-win/ariec61850_ied_simulator_server.exe' $package
+          Copy-Item 'tests/fixtures/scl/minimal-station-brcb.scd' $package
+          Copy-Item 'apps/ied_simulator/IEDSCOUT_MANUAL_TEST.md' $package
+
+          $windeployqt = Get-Command windeployqt.exe -ErrorAction Stop
+          & $windeployqt.Source `
+            --release `
+            --compiler-runtime `
+            --qmldir (Join-Path $PWD 'apps/ied_simulator/qml') `
+            (Join-Path $package 'arstack_ied_simulator.exe')
+          if ($LASTEXITCODE -ne 0) {
+            throw "windeployqt failed with exit code $LASTEXITCODE"
+          }
+
+          if (-not (Test-Path (Join-Path $package 'ariec61850_ied_simulator_server.exe'))) {
+            throw 'Bundled MMS server is missing from package.'
+          }
+          if (-not (Test-Path (Join-Path $package 'Qt6Core.dll'))) {
+            throw 'Qt runtime deployment is incomplete.'
+          }
+
+      - name: Upload portable Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ARStack-IED-Simulator-Windows-${{ github.sha }}
+          path: package/ARStack-IED-Simulator-Windows
+          if-no-files-found: error
+          compression-level: 6
