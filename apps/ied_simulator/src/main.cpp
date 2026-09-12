@@ -12,6 +12,8 @@
 #include <QTimer>
 #include <QUrl>
 
+#include <memory>
+
 namespace {
 bool configureEndpoint(QObject* backend, const QString& specification, const int defaultPort) {
     const auto equals = specification.indexOf(QLatin1Char('='));
@@ -66,6 +68,11 @@ int main(int argc, char* argv[]) {
         QStringLiteral("qa-async-import"),
         QStringLiteral("QA: import one engineering file through the interactive bounded worker and exit."),
         QStringLiteral("path")};
+    const QCommandLineOption qaAsyncImportRepeatOption{
+        QStringLiteral("qa-async-import-repeat"),
+        QStringLiteral("QA: repeat the bounded async import in one process for lifecycle/leak soak."),
+        QStringLiteral("count"),
+        QStringLiteral("1")};
     const QCommandLineOption runtimeOption{
         QStringLiteral("runtime"),
         QStringLiteral("Start the selected MMS runtime after importing the model.")};
@@ -100,6 +107,7 @@ int main(int argc, char* argv[]) {
     parser.addOptions({
         sclOption,
         qaAsyncImportOption,
+        qaAsyncImportRepeatOption,
         runtimeOption,
         iedEndpointOption,
         startIedOption,
@@ -138,32 +146,69 @@ int main(int argc, char* argv[]) {
                 Q_ARG(QUrl, QUrl::fromLocalFile(parser.value(sclOption))));
         }
         if (backend != nullptr && parser.isSet(qaAsyncImportOption)) {
+            bool repeatOk{};
+            const auto parsedRepeat = parser.value(qaAsyncImportRepeatOption).toInt(&repeatOk);
+            const int repeatCount = repeatOk ? std::clamp(parsedRepeat, 1, 100) : 1;
+            const auto importUrl = QUrl::fromLocalFile(parser.value(qaAsyncImportOption));
+            auto iteration = std::make_shared<int>(0);
+
             bool accepted{};
             const bool invoked = QMetaObject::invokeMethod(
                 backend,
                 "loadFileAsync",
                 Q_RETURN_ARG(bool, accepted),
-                Q_ARG(QUrl, QUrl::fromLocalFile(parser.value(qaAsyncImportOption))));
+                Q_ARG(QUrl, importUrl));
             if (!invoked || !accepted) {
                 qWarning().noquote() << "Async import request was rejected.";
                 QTimer::singleShot(0, &app, [] { QCoreApplication::exit(5); });
             } else {
                 auto* const importTimer = new QTimer{backend};
                 importTimer->setInterval(25);
-                QObject::connect(importTimer, &QTimer::timeout, backend, [&app, backend, importTimer] {
-                    if (backend->property("importing").toBool()) return;
-                    importTimer->stop();
-                    importTimer->deleteLater();
-                    if (backend->property("imported").toBool()) {
-                        qInfo().noquote() << "ASYNC_IMPORT_OK" << backend->property("sourceName").toString();
+                QObject::connect(
+                    importTimer,
+                    &QTimer::timeout,
+                    backend,
+                    [&app, backend, importTimer, importUrl, repeatCount, iteration] {
+                        if (backend->property("importing").toBool()) return;
+                        if (!backend->property("imported").toBool()) {
+                            importTimer->stop();
+                            importTimer->deleteLater();
+                            qWarning().noquote()
+                                << "Async import failed:"
+                                << backend->property("fatalError").toString();
+                            app.exit(6);
+                            return;
+                        }
+
+                        ++(*iteration);
+                        qInfo().noquote()
+                            << "ASYNC_IMPORT_ITERATION"
+                            << *iteration
+                            << backend->property("sourceName").toString();
+                        if (*iteration < repeatCount) {
+                            bool nextAccepted{};
+                            const bool nextInvoked = QMetaObject::invokeMethod(
+                                backend,
+                                "loadFileAsync",
+                                Q_RETURN_ARG(bool, nextAccepted),
+                                Q_ARG(QUrl, importUrl));
+                            if (nextInvoked && nextAccepted) return;
+
+                            importTimer->stop();
+                            importTimer->deleteLater();
+                            qWarning().noquote() << "Repeated async import request was rejected.";
+                            app.exit(5);
+                            return;
+                        }
+
+                        importTimer->stop();
+                        importTimer->deleteLater();
+                        qInfo().noquote()
+                            << "ASYNC_IMPORT_OK"
+                            << backend->property("sourceName").toString()
+                            << "iterations=" << *iteration;
                         app.exit(0);
-                        return;
-                    }
-                    qWarning().noquote()
-                        << "Async import failed:"
-                        << backend->property("fatalError").toString();
-                    app.exit(6);
-                });
+                    });
                 importTimer->start();
                 QTimer::singleShot(60'000, backend, [&app, importTimer] {
                     if (!importTimer->isActive()) return;
