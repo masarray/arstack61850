@@ -179,6 +179,18 @@ if(ARIEC61850_BUILD_TOOLS)
     ariec61850_apply_warnings(ariec61850_mms_read_probe)
     ariec61850_apply_sanitizers(ariec61850_mms_read_probe)
 
+    add_executable(ariec61850_mms_urcb_gi_probe tools/mms_urcb_gi_probe.cpp)
+    target_link_libraries(ariec61850_mms_urcb_gi_probe PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_mms_urcb_gi_probe PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_mms_urcb_gi_probe)
+    ariec61850_apply_sanitizers(ariec61850_mms_urcb_gi_probe)
+
+    add_executable(ariec61850_mms_brcb_event_probe tools/mms_brcb_event_probe.cpp)
+    target_link_libraries(ariec61850_mms_brcb_event_probe PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_mms_brcb_event_probe PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_mms_brcb_event_probe)
+    ariec61850_apply_sanitizers(ariec61850_mms_brcb_event_probe)
+
     add_executable(ariec61850_rcb_contention_probe tools/rcb_contention_probe.cpp)
     target_link_libraries(ariec61850_rcb_contention_probe PRIVATE ARIEC61850::core)
     target_compile_features(ariec61850_rcb_contention_probe PRIVATE cxx_std_20)
@@ -466,6 +478,12 @@ if(ARIEC61850_BUILD_TESTS)
         add_test(
             NAME ariec61850_file_transfer_help
             COMMAND ariec61850_file_transfer --help)
+        add_test(
+            NAME ariec61850_mms_urcb_gi_probe_help
+            COMMAND ariec61850_mms_urcb_gi_probe --help)
+        add_test(
+            NAME ariec61850_mms_brcb_event_probe_help
+            COMMAND ariec61850_mms_brcb_event_probe --help)
         add_test(
             NAME ariec61850_static_ied_server_help
             COMMAND ariec61850_static_ied_server --help)
