@@ -15,7 +15,7 @@
 #include <optional>
 #include <vector>
 
-class IedFleetController final : public QObject {
+class IedFleetController : public QObject {
     Q_OBJECT
     QML_ELEMENT
 
