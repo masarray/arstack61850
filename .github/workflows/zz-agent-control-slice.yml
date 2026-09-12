@@ -1,4 +1,4 @@
-name: Agent Configured Control Slice
+name: Agent SBO Enhanced Control Slice
 
 on:
   push:
@@ -19,11 +19,11 @@ jobs:
           ref: feat/complete-ariec61850-simulator-parity
           fetch-depth: 0
 
-      - name: Adjust patch driver anchors and strict aggregates
-        run: python3 scripts/agent_apply_control_slice_fix.py
+      - name: Normalize previous configured-control source
+        run: python3 scripts/agent_fix_control_slice_source.py
 
-      - name: Apply configured Direct-Normal vertical slice
-        run: python3 scripts/agent_apply_control_slice.py
+      - name: Apply SBO and enhanced control slice
+        run: python3 scripts/agent_apply_sbo_enhanced_slice.py
 
       - name: Check patch hygiene
         run: git diff --check
@@ -35,7 +35,7 @@ jobs:
           -DARIEC61850_BUILD_TESTS=ON
           -DARIEC61850_BUILD_TOOLS=ON
 
-      - name: Build focused targets
+      - name: Build root focused targets
         run: >-
           cmake --build build-control-slice
           --target ariec61850_scl_tests ariec61850_static_ied_server ariec61850_control_interop_probe
@@ -44,23 +44,27 @@ jobs:
       - name: Run SCL regression
         run: ./build-control-slice/ariec61850_scl_tests
 
+      - name: Configure static-control regression profile
+        run: >-
+          cmake -S tools/mms_direct_control_server -B build-direct-control -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build and run static-control regression
+        run: |
+          cmake --build build-direct-control --target ariec61850_mms_direct_control_tests --parallel 2
+          ctest --test-dir build-direct-control --output-on-failure
+
       - name: Commit validated source slice
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add \
-            include/ariec61850/scl/model.hpp \
-            src/scl/parser_part_03_01.inc \
-            src/scl/parser_part_04.inc \
-            src/scl/parser_part_05_00.inc \
+            apps/ied_simulator/src/IedSimulatorController.cpp \
+            apps/ied_simulator/test_gui_live_value.py \
             tests/fixtures/scl/minimal-station-brcb.scd \
             tests/test_scl.cpp \
-            apps/ied_simulator/src/IedSimulatorController.cpp \
-            apps/ied_simulator/CMakeLists.txt \
-            apps/ied_simulator/test_gui_live_value.py \
-            tools/static_ied_server.cpp \
-            tools/control_interop_probe/CMakeLists.txt \
-            CMakeLists.txt
-          git commit -m 'feat(simulator): wire SCL Direct-Normal control'
+            tests/test_mms_static_direct_control.cpp \
+            tools/static_ied_server.cpp
+          git commit -m 'feat(simulator): add SBO and enhanced command controls'
           git push origin HEAD:feat/complete-ariec61850-simulator-parity
