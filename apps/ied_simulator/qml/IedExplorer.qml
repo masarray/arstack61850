@@ -138,7 +138,7 @@ Rectangle {
                                 radius: 5
                                 color: root.statusFill(modelData.status)
                                 border.width: 1
-                                border.color: Qt.alpha(root.statusColor(modelData.status), 0.35)
+                                border.color: root.statusColor(modelData.status)
                                 Row {
                                     anchors.centerIn: parent
                                     spacing: 3
