@@ -36,5 +36,34 @@ server = server.replace(
 '''
 if text.count(old) != 1:
     raise SystemExit(f"control patch driver anchor mismatch: {text.count(old)}")
-p.write_text(text.replace(old, new, 1), encoding="utf-8")
-print("Adjusted URCB/BRCB runtime anchors in patch driver.")
+text = text.replace(old, new, 1)
+
+marker = "# 2) Extend the E2E fixture with one SCL-configured SPC control.\n"
+if text.count(marker) != 1:
+    raise SystemExit(f"control patch driver parser marker mismatch: {text.count(marker)}")
+aggregate_patch = '''# Keep strict -Wmissing-field-initializers builds explicit for the new field.
+replace_once(
+    "src/scl/parser_part_04.inc",
+    "        is_quality_attribute(da_name),\\n"
+    "        is_timestamp_attribute(da_name),\\n"
+    "    };\\n",
+    "        is_quality_attribute(da_name),\\n"
+    "        is_timestamp_attribute(da_name),\\n"
+    "        {},\\n"
+    "    };\\n",
+)
+replace_once(
+    "src/scl/parser_part_04.inc",
+    "            is_quality_attribute(leaf.da_name),\\n"
+    "            is_timestamp_attribute(leaf.da_name),\\n"
+    "        });\\n",
+    "            is_quality_attribute(leaf.da_name),\\n"
+    "            is_timestamp_attribute(leaf.da_name),\\n"
+    "            {},\\n"
+    "        });\\n",
+)
+
+'''
+text = text.replace(marker, aggregate_patch + marker, 1)
+p.write_text(text, encoding="utf-8")
+print("Adjusted report-runtime anchors and strict SCL aggregate initializers in patch driver.")
