@@ -64,104 +64,6 @@ QVariantMap preparedValueMap(
     }
     return item;
 }
-
-void prepareAsyncProjection(IedFleetController::AsyncImportResult& result) {
-    if (!result.document.has_value()) return;
-    const auto& document = *result.document;
-
-    result.dataSetCount = static_cast<int>(document.data_sets.size());
-    result.reportCount = static_cast<int>(document.report_controls.size());
-    result.gooseCount = static_cast<int>(document.goose_streams.size());
-
-    std::set<QString> logicalDevices;
-    std::set<QString> dataObjects;
-    std::set<QString> dataAttributes;
-    const auto collectEntry = [&](const ar::iec61850::scl::SclDataSetEntry& entry) {
-        const auto ld = qstring(entry.ied_name) + QLatin1Char('/') + qstring(entry.ld_inst);
-        logicalDevices.insert(ld);
-        const auto logicalNode = qstring(entry.prefix) + qstring(entry.ln_class) + qstring(entry.ln_inst);
-        const auto object = ld + QLatin1Char('/') + logicalNode +
-            QLatin1Char('/') + qstring(entry.do_name);
-        dataObjects.insert(object);
-        dataAttributes.insert(object + QLatin1Char('/') + qstring(entry.da_name));
-    };
-    if (!document.model_entries.empty()) {
-        for (const auto& entry : document.model_entries) collectEntry(entry);
-    } else {
-        for (const auto& dataSet : document.data_sets) {
-            for (const auto& entry : dataSet.entries) collectEntry(entry);
-        }
-        for (const auto& stream : document.goose_streams) {
-            for (const auto& entry : stream.entries) collectEntry(entry);
-        }
-        for (const auto& report : document.report_controls) {
-            for (const auto& entry : report.entries) collectEntry(entry);
-        }
-    }
-    result.logicalDeviceCount = static_cast<int>(logicalDevices.size());
-    result.dataObjectCount = static_cast<int>(dataObjects.size());
-    result.dataAttributeCount = static_cast<int>(dataAttributes.size());
-
-    for (const auto& ied : document.ieds) {
-        const auto name = qstring(ied.name);
-        QVariantMap item;
-        item.insert(QStringLiteral("name"), name);
-        item.insert(QStringLiteral("manufacturer"), qstring(ied.manufacturer));
-        item.insert(QStringLiteral("type"), qstring(ied.type));
-        item.insert(QStringLiteral("configVersion"), qstring(ied.config_version));
-        item.insert(QStringLiteral("documentIndex"), 0);
-        item.insert(QStringLiteral("sourcePath"), result.path);
-        item.insert(QStringLiteral("sessionKey"), result.path + QLatin1Char('\x1f') + name);
-        result.ieds.push_back(item);
-    }
-
-    if (result.ieds.isEmpty()) {
-        QVariantMap fallback;
-        const auto name = QFileInfo(result.path).completeBaseName();
-        fallback.insert(QStringLiteral("name"), name);
-        fallback.insert(QStringLiteral("manufacturer"), QStringLiteral("SCL model"));
-        fallback.insert(QStringLiteral("type"), QStringLiteral("IED"));
-        fallback.insert(QStringLiteral("configVersion"), QString{});
-        fallback.insert(QStringLiteral("documentIndex"), 0);
-        fallback.insert(QStringLiteral("sourcePath"), result.path);
-        fallback.insert(
-            QStringLiteral("sessionKey"),
-            result.path + QLatin1Char('\x1f') + name);
-        result.ieds.push_back(fallback);
-    }
-
-    if (result.ieds.isEmpty()) return;
-    const auto selectedIed = result.ieds.constFirst().toMap();
-    const auto selectedName = selectedIed.value(QStringLiteral("name")).toString();
-
-    ar::iec61850::simulation::IedSimulatorProfileFromSclOptions options;
-    options.ied_name = selectedName.toStdString();
-    options.runtime_ied_name = options.ied_name;
-    const auto built = ar::iec61850::simulation::IedSimulatorProfileBuilder::build(document, options);
-
-    std::vector<const ar::iec61850::simulation::IedSimulatorPoint*> points;
-    points.reserve(built.profile.point_count());
-    for (const auto& device : built.profile.logical_devices) {
-        for (const auto& node : device.logical_nodes) {
-            for (const auto& point : node.points) points.push_back(&point);
-        }
-    }
-    std::stable_sort(
-        points.begin(), points.end(),
-        [](const auto* left, const auto* right) {
-            return left->source_order < right->source_order;
-        });
-
-    result.selectedValues.reserve(static_cast<qsizetype>(points.size()));
-    result.runtimeValues.reserve(static_cast<qsizetype>(points.size()));
-    for (const auto* point : points) {
-        auto item = preparedValueMap(*point);
-        result.selectedValues.push_back(item);
-        const auto key = qstring(point->ied_name) + QLatin1Char('\x1f') + qstring(point->reference);
-        result.runtimeValues.insert(key, std::move(item));
-    }
-    result.preparedPointCount = static_cast<int>(points.size());
-}
 } // namespace
 
 bool IedFleetController::importing() const noexcept {
@@ -246,7 +148,106 @@ void IedFleetController::launchAsyncImport(PendingAsyncImport request) {
             // shared containers and creates the small per-IED runtime objects.
             QElapsedTimer preparationTimer;
             preparationTimer.start();
-            prepareAsyncProjection(*result);
+            const auto& document = *result->document;
+
+            result->dataSetCount = static_cast<int>(document.data_sets.size());
+            result->reportCount = static_cast<int>(document.report_controls.size());
+            result->gooseCount = static_cast<int>(document.goose_streams.size());
+
+            std::set<QString> logicalDevices;
+            std::set<QString> dataObjects;
+            std::set<QString> dataAttributes;
+            const auto collectEntry = [&](const ar::iec61850::scl::SclDataSetEntry& entry) {
+                const auto ld = qstring(entry.ied_name) + QLatin1Char('/') + qstring(entry.ld_inst);
+                logicalDevices.insert(ld);
+                const auto logicalNode =
+                    qstring(entry.prefix) + qstring(entry.ln_class) + qstring(entry.ln_inst);
+                const auto object = ld + QLatin1Char('/') + logicalNode +
+                    QLatin1Char('/') + qstring(entry.do_name);
+                dataObjects.insert(object);
+                dataAttributes.insert(object + QLatin1Char('/') + qstring(entry.da_name));
+            };
+            if (!document.model_entries.empty()) {
+                for (const auto& entry : document.model_entries) collectEntry(entry);
+            } else {
+                for (const auto& dataSet : document.data_sets) {
+                    for (const auto& entry : dataSet.entries) collectEntry(entry);
+                }
+                for (const auto& stream : document.goose_streams) {
+                    for (const auto& entry : stream.entries) collectEntry(entry);
+                }
+                for (const auto& report : document.report_controls) {
+                    for (const auto& entry : report.entries) collectEntry(entry);
+                }
+            }
+            result->logicalDeviceCount = static_cast<int>(logicalDevices.size());
+            result->dataObjectCount = static_cast<int>(dataObjects.size());
+            result->dataAttributeCount = static_cast<int>(dataAttributes.size());
+
+            for (const auto& ied : document.ieds) {
+                const auto name = qstring(ied.name);
+                QVariantMap item;
+                item.insert(QStringLiteral("name"), name);
+                item.insert(QStringLiteral("manufacturer"), qstring(ied.manufacturer));
+                item.insert(QStringLiteral("type"), qstring(ied.type));
+                item.insert(QStringLiteral("configVersion"), qstring(ied.config_version));
+                item.insert(QStringLiteral("documentIndex"), 0);
+                item.insert(QStringLiteral("sourcePath"), result->path);
+                item.insert(
+                    QStringLiteral("sessionKey"),
+                    result->path + QLatin1Char('\x1f') + name);
+                result->ieds.push_back(item);
+            }
+
+            if (result->ieds.isEmpty()) {
+                QVariantMap fallback;
+                const auto name = QFileInfo(result->path).completeBaseName();
+                fallback.insert(QStringLiteral("name"), name);
+                fallback.insert(QStringLiteral("manufacturer"), QStringLiteral("SCL model"));
+                fallback.insert(QStringLiteral("type"), QStringLiteral("IED"));
+                fallback.insert(QStringLiteral("configVersion"), QString{});
+                fallback.insert(QStringLiteral("documentIndex"), 0);
+                fallback.insert(QStringLiteral("sourcePath"), result->path);
+                fallback.insert(
+                    QStringLiteral("sessionKey"),
+                    result->path + QLatin1Char('\x1f') + name);
+                result->ieds.push_back(fallback);
+            }
+
+            if (!result->ieds.isEmpty()) {
+                const auto selectedIed = result->ieds.constFirst().toMap();
+                const auto selectedName = selectedIed.value(QStringLiteral("name")).toString();
+
+                ar::iec61850::simulation::IedSimulatorProfileFromSclOptions options;
+                options.ied_name = selectedName.toStdString();
+                options.runtime_ied_name = options.ied_name;
+                const auto built = ar::iec61850::simulation::IedSimulatorProfileBuilder::build(
+                    document, options);
+
+                std::vector<const ar::iec61850::simulation::IedSimulatorPoint*> points;
+                points.reserve(built.profile.point_count());
+                for (const auto& device : built.profile.logical_devices) {
+                    for (const auto& node : device.logical_nodes) {
+                        for (const auto& point : node.points) points.push_back(&point);
+                    }
+                }
+                std::stable_sort(
+                    points.begin(), points.end(),
+                    [](const auto* left, const auto* right) {
+                        return left->source_order < right->source_order;
+                    });
+
+                result->selectedValues.reserve(static_cast<qsizetype>(points.size()));
+                result->runtimeValues.reserve(static_cast<qsizetype>(points.size()));
+                for (const auto* point : points) {
+                    auto item = preparedValueMap(*point);
+                    result->selectedValues.push_back(item);
+                    const auto key = qstring(point->ied_name) + QLatin1Char('\x1f') +
+                        qstring(point->reference);
+                    result->runtimeValues.insert(key, std::move(item));
+                }
+                result->preparedPointCount = static_cast<int>(points.size());
+            }
             result->preparationMilliseconds = preparationTimer.elapsed();
         } catch (const std::exception& error) {
             result->document.reset();
