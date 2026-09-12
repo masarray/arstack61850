@@ -44,6 +44,7 @@ qt_add_qml_module(arstack_ied_simulator
         qml/ToggleSwitch.qml
         qml/LaunchWorkspace.qml
         qml/RuntimeWorkspace.qml
+        qml/IedExplorer.qml
         qml/FleetWorkspace.qml
 )
 
