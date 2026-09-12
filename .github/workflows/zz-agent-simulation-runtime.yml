@@ -28,6 +28,9 @@ jobs:
       - name: Repair control and URCB object-bank composition
         run: python3 scripts/agent_fix_iedsim_urcb_control_composition.py
 
+      - name: Add BRCB invariant diagnostics
+        run: python3 scripts/agent_diagnose_iedsim_brcb.py
+
       - name: Enable headless child-server tracing
         run: python3 scripts/agent_trace_iedsim_server.py
 
