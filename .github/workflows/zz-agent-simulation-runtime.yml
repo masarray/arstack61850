@@ -25,6 +25,9 @@ jobs:
       - name: Finalize milestone metadata
         run: python3 scripts/agent_finalize_simulation_runtime_port.py
 
+      - name: Repair control and URCB object-bank composition
+        run: python3 scripts/agent_fix_iedsim_urcb_control_composition.py
+
       - name: Check patch hygiene
         run: git diff --check
 
@@ -91,6 +94,7 @@ jobs:
             src/simulation/ied_simulator_profile.cpp \
             tests/test_simulation.cpp \
             apps/ied_simulator/src/IedSimulatorController.hpp \
-            apps/ied_simulator/src/IedSimulatorController.cpp
+            apps/ied_simulator/src/IedSimulatorController.cpp \
+            tools/static_ied_server.cpp
           git commit -m 'feat(simulation): complete native simulator runtime core milestone'
           git push origin HEAD:feat/complete-ariec61850-simulator-parity
