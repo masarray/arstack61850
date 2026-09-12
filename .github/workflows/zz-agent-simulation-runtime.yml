@@ -28,6 +28,9 @@ jobs:
       - name: Repair control and URCB object-bank composition
         run: python3 scripts/agent_fix_iedsim_urcb_control_composition.py
 
+      - name: Enable headless child-server tracing
+        run: python3 scripts/agent_trace_iedsim_server.py
+
       - name: Check patch hygiene
         run: git diff --check
 
@@ -76,6 +79,8 @@ jobs:
         run: ./build-ied-simulator-qt/arstack_ied_simulator --smoke-test
 
       - name: Prove portable profile adapter over external MMS wire
+        env:
+          ARSTACK_IEDSIM_TRACE_SERVER: '1'
         run: >-
           python3 apps/ied_simulator/test_gui_live_value.py
           --app ./build-ied-simulator-qt/arstack_ied_simulator
@@ -92,6 +97,7 @@ jobs:
             MIGRATION_CHECKLIST.md \
             include/ariec61850/simulation/ied_simulator_profile.hpp \
             src/simulation/ied_simulator_profile.cpp \
+            src/simulation/ied_simulator_engine.cpp \
             tests/test_simulation.cpp \
             apps/ied_simulator/src/IedSimulatorController.hpp \
             apps/ied_simulator/src/IedSimulatorController.cpp \
