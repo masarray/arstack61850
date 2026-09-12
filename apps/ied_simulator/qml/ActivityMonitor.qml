@@ -16,23 +16,6 @@ Drawer {
     height: parent ? parent.height : 760
     padding: 0
 
-    property string searchText: ""
-    property string severityFilter: "All"
-
-    function eventMatches(item) {
-        if (!item)
-            return false
-        if (severityFilter !== "All" && String(item.severity || "Info") !== severityFilter)
-            return false
-        var query = searchText.trim().toLowerCase()
-        if (query.length === 0)
-            return true
-        var haystack = [item.time, item.severity, item.ied, item.category, item.message]
-                .map(function(value) { return String(value || "").toLowerCase() })
-                .join(" ")
-        return haystack.indexOf(query) >= 0
-    }
-
     background: Rectangle {
         color: root.theme.chrome
         border.width: 1
@@ -78,7 +61,7 @@ Drawer {
                 }
                 ToolButton {
                     text: "Clear"
-                    enabled: root.backend.activity.length > 0
+                    enabled: root.backend.activityModel.retainedCount > 0
                     onClicked: root.backend.clearActivity()
                 }
                 ToolButton {
@@ -108,15 +91,16 @@ Drawer {
                     placeholderText: "Filter IED, service, report or message"
                     selectByMouse: true
                     font.pixelSize: 9
-                    onTextChanged: root.searchText = text
+                    onTextChanged: root.backend.activityModel.filterText = text
                 }
 
                 ComboBox {
+                    id: severityBox
                     Layout.preferredWidth: 105
                     Layout.preferredHeight: 31
                     model: ["All", "Info", "Success", "Warning", "Error"]
                     font.pixelSize: 9
-                    onCurrentTextChanged: root.severityFilter = currentText
+                    onCurrentTextChanged: root.backend.activityModel.severityFilter = currentText
                 }
             }
         }
@@ -127,7 +111,7 @@ Drawer {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            model: root.opened ? root.backend.activity : []
+            model: root.opened ? root.backend.activityModel : null
             reuseItems: true
             cacheBuffer: 0
             boundsBehavior: Flickable.StopAtBounds
@@ -135,12 +119,14 @@ Drawer {
 
             delegate: Rectangle {
                 id: eventRow
-                required property var modelData
+                required property string time
+                required property string category
+                required property string message
+                required property string severity
+                required property string ied
 
-                readonly property bool matches: root.eventMatches(modelData)
                 width: activityList.width
-                height: matches ? 70 : 0
-                visible: matches
+                height: 70
                 color: rowMouse.containsMouse ? root.theme.surfaceRaised : root.theme.surface
 
                 Rectangle {
@@ -149,10 +135,9 @@ Drawer {
                     anchors.bottom: parent.bottom
                     width: 3
                     color: {
-                        var severity = String(eventRow.modelData.severity || "Info")
-                        if (severity === "Error") return root.theme.red
-                        if (severity === "Warning") return root.theme.amber
-                        if (severity === "Success") return root.theme.green
+                        if (eventRow.severity === "Error") return root.theme.red
+                        if (eventRow.severity === "Warning") return root.theme.amber
+                        if (eventRow.severity === "Success") return root.theme.green
                         return root.theme.accent
                     }
                 }
@@ -169,7 +154,7 @@ Drawer {
                         Layout.fillWidth: true
                         spacing: 7
                         Label {
-                            text: String(eventRow.modelData.time || "")
+                            text: eventRow.time
                             color: root.theme.muted
                             font.pixelSize: 8
                         }
@@ -181,7 +166,7 @@ Drawer {
                             Label {
                                 id: categoryLabel
                                 anchors.centerIn: parent
-                                text: String(eventRow.modelData.category || "Event")
+                                text: eventRow.category.length ? eventRow.category : "Event"
                                 color: root.theme.textSoft
                                 font.pixelSize: 7
                                 font.weight: Font.DemiBold
@@ -189,7 +174,7 @@ Drawer {
                         }
                         Label {
                             Layout.fillWidth: true
-                            text: String(eventRow.modelData.ied || "")
+                            text: eventRow.ied
                             color: root.theme.accent
                             font.pixelSize: 8
                             font.weight: Font.DemiBold
@@ -200,7 +185,7 @@ Drawer {
 
                     Label {
                         Layout.fillWidth: true
-                        text: String(eventRow.modelData.message || "")
+                        text: eventRow.message
                         color: root.theme.textSoft
                         font.pixelSize: 9
                         wrapMode: Text.Wrap
@@ -227,8 +212,10 @@ Drawer {
 
             Label {
                 anchors.centerIn: parent
-                visible: root.backend.activity.length === 0
-                text: "No activity yet"
+                visible: root.opened && root.backend.activityModel.visibleCount === 0
+                text: root.backend.activityModel.retainedCount === 0
+                      ? "No activity yet"
+                      : "No activity matches this filter"
                 color: root.theme.muted
                 font.pixelSize: 11
             }
@@ -245,7 +232,13 @@ Drawer {
                 anchors.rightMargin: 10
                 Label {
                     Layout.fillWidth: true
-                    text: root.backend.activity.length + " retained events · newest first"
+                    text: {
+                        var retained = root.backend.activityModel.retainedCount
+                        var visible = root.backend.activityModel.visibleCount
+                        return visible === retained
+                               ? retained + " retained events · newest first"
+                               : visible + " shown · " + retained + " retained"
+                    }
                     color: root.theme.statusText
                     font.pixelSize: 8
                 }
@@ -259,13 +252,15 @@ Drawer {
     }
 
     onOpened: {
+        root.backend.activityModel.filterText = searchField.text
+        root.backend.activityModel.severityFilter = severityBox.currentText
         searchField.forceActiveFocus()
         activityList.positionViewAtBeginning()
     }
 
     Connections {
-        target: root.backend
-        function onActivityChanged() {
+        target: root.backend.activityModel
+        function onRetainedCountChanged() {
             if (root.opened)
                 activityList.positionViewAtBeginning()
         }

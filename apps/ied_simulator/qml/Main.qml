@@ -86,7 +86,7 @@ ApplicationWindow {
                 font.weight: Font.DemiBold
             }
             Label {
-                text: String(simulator.activity.length)
+                text: String(simulator.activityModel.retainedCount)
                 color: appTheme.navigationMuted
                 font.pixelSize: 8
             }

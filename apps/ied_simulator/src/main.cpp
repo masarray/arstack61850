@@ -278,6 +278,41 @@ int main(int argc, char* argv[]) {
                         if (*phase == 1) {
                             if (!backend->property("running").toBool()) return;
                             qInfo().noquote() << "RUNTIME_CYCLE_STARTED" << (*cycle + 1);
+
+                            // Hold the second restarted process beyond the 900 ms
+                            // delayed-kill grace period. A stale timer from the
+                            // first stop must not be able to kill this generation.
+                            if (*cycle == 1) {
+                                *phase = 3;
+                                QTimer::singleShot(1'100, backend, [phase] { *phase = 4; });
+                                return;
+                            }
+
+                            QMetaObject::invokeMethod(backend, "stopSimulation");
+                            *phase = 2;
+                            return;
+                        }
+
+                        if (*phase == 3) {
+                            if (backend->property("running").toBool()) return;
+                            cycleTimer->stop();
+                            cycleTimer->deleteLater();
+                            qWarning().noquote()
+                                << "Runtime died inside the delayed-kill restart guard window.";
+                            app.exit(11);
+                            return;
+                        }
+
+                        if (*phase == 4) {
+                            if (!backend->property("running").toBool()) {
+                                cycleTimer->stop();
+                                cycleTimer->deleteLater();
+                                qWarning().noquote()
+                                    << "Runtime was not alive after the delayed-kill restart guard window.";
+                                app.exit(11);
+                                return;
+                            }
+                            qInfo().noquote() << "RUNTIME_RESTART_GUARD_PASS cycle=" << (*cycle + 1);
                             QMetaObject::invokeMethod(backend, "stopSimulation");
                             *phase = 2;
                             return;

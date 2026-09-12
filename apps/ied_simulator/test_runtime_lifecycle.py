@@ -67,10 +67,15 @@ def main() -> int:
             f"expected {args.cycles} complete cycles; started={started} finished={finished}; "
             f"output={output[-6000:]}"
         )
+    if args.cycles >= 2 and "RUNTIME_RESTART_GUARD_PASS" not in output:
+        raise RuntimeError(
+            "restart generation guard was not exercised beyond the delayed-kill window; "
+            f"output={output[-6000:]}"
+        )
 
     print(
         f"RUNTIME_LIFECYCLE_PASS cycles={args.cycles} port={port} "
-        f"started={started} finished={finished}",
+        f"started={started} finished={finished} delayed_kill_guard=pass",
         flush=True,
     )
     return 0

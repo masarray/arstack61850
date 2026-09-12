@@ -32,6 +32,10 @@ qt_add_qml_module(arstack_ied_simulator
     URI ARStack.IedSimulator
     VERSION 1.0
     SOURCES
+        src/IedActivityModel.cpp
+        src/IedActivityModel.hpp
+        src/IedRuntimeGuardrails.cpp
+        src/IedRuntimeGuardrails.hpp
         src/IedFleetController.cpp
         src/IedFleetControllerAsync.cpp
         src/IedFleetController.hpp
@@ -69,6 +73,20 @@ target_include_directories(arstack_ied_simulator PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src)
 
 target_compile_features(arstack_ied_simulator PRIVATE cxx_std_20)
+
+
+add_executable(ied_simulator_guardrails_qa
+    src/ied_simulator_guardrails_qa.cpp
+    src/IedActivityModel.cpp
+    src/IedActivityModel.hpp
+    src/IedRuntimeGuardrails.cpp
+    src/IedRuntimeGuardrails.hpp)
+target_link_libraries(ied_simulator_guardrails_qa PRIVATE
+    Qt6::Core
+    Qt6::Qml)
+target_include_directories(ied_simulator_guardrails_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_simulator_guardrails_qa PRIVATE cxx_std_20)
 
 # The regular library intentionally keeps a strict portable connection runtime.
 # The desktop simulator needs the separate compatibility runtime validated

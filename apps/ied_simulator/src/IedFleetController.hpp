@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "IedActivityModel.hpp"
+
 #include "ariec61850/scl/model.hpp"
 #include "ariec61850/simulation/ied_simulator_profile.hpp"
 
@@ -45,6 +47,7 @@ class IedFleetController : public QObject {
     Q_PROPERTY(int selectedValueIndex READ selectedValueIndex WRITE selectValue NOTIFY selectionChanged)
     Q_PROPERTY(QVariantMap selectedValue READ selectedValue NOTIFY selectionChanged)
     Q_PROPERTY(QVariantList activity READ activity NOTIFY activityChanged)
+    Q_PROPERTY(IedActivityModel* activityModel READ activityModel CONSTANT)
     Q_PROPERTY(int logicalDeviceCount READ logicalDeviceCount NOTIFY modelChanged)
     Q_PROPERTY(int dataObjectCount READ dataObjectCount NOTIFY modelChanged)
     Q_PROPERTY(int dataAttributeCount READ dataAttributeCount NOTIFY modelChanged)
@@ -92,6 +95,8 @@ public:
     [[nodiscard]] int selectedValueIndex() const noexcept;
     [[nodiscard]] QVariantMap selectedValue() const;
     [[nodiscard]] QVariantList activity() const;
+    [[nodiscard]] IedActivityModel* activityModel() noexcept { return &activity_; }
+    [[nodiscard]] const IedActivityModel* activityModel() const noexcept { return &activity_; }
     [[nodiscard]] int logicalDeviceCount() const noexcept;
     [[nodiscard]] int dataObjectCount() const noexcept;
     [[nodiscard]] int dataAttributeCount() const noexcept;
@@ -172,6 +177,10 @@ private:
         std::unique_ptr<QProcess> process;
         QByteArray standardOutputBuffer;
         QByteArray standardErrorBuffer;
+        bool standardOutputDrainScheduled{};
+        bool standardErrorDrainScheduled{};
+        bool standardOutputOverflowReported{};
+        bool standardErrorOverflowReported{};
         QString modelManifestPath;
         quint64 startGeneration{};
         quint64 modelRevision{};
@@ -226,7 +235,7 @@ private:
     std::vector<std::unique_ptr<RuntimeInstance>> runtimes_;
     QVariantList ieds_;
     QVariantList values_;
-    QVariantList activity_;
+    IedActivityModel activity_;
     QHash<QString, QVariantMap> runtimeValues_;
     std::optional<ValueSnapshot> previousValue_;
     QThreadPool importPool_;

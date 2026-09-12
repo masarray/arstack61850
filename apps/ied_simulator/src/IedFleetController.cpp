@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "IedFleetController.hpp"
+#include "IedRuntimeGuardrails.hpp"
 
 #include "ariec61850/scl/parser.hpp"
 
@@ -423,6 +424,10 @@ bool IedFleetController::startIed(const int index) {
     }
     runtime->standardOutputBuffer.clear();
     runtime->standardErrorBuffer.clear();
+    runtime->standardOutputDrainScheduled = false;
+    runtime->standardErrorDrainScheduled = false;
+    runtime->standardOutputOverflowReported = false;
+    runtime->standardErrorOverflowReported = false;
     ++runtime->startGeneration;
     const auto generation = runtime->startGeneration;
     setRuntimeState(index, RuntimeState::starting);
@@ -473,9 +478,19 @@ void IedFleetController::stopIed(const int index) {
         QStringLiteral("Stopping MMS endpoint…"),
         QStringLiteral("Info"),
         ieds_.at(index).toMap().value(QStringLiteral("name")).toString());
+    // Invalidate all start/readiness timers from the current generation. The
+    // delayed hard-kill is tied to this stop generation so it can never kill a
+    // freshly restarted server that reuses the same QProcess object.
+    const auto stopGeneration = ++runtime->startGeneration;
     auto* const process = runtime->process.get();
     process->terminate();
-    QTimer::singleShot(900, process, [process] {
+    QTimer::singleShot(900, this, [this, index, process, stopGeneration] {
+        auto* current = runtimeAt(index);
+        if (current == nullptr || current->process.get() != process ||
+            current->startGeneration != stopGeneration ||
+            current->state != RuntimeState::stopping) {
+            return;
+        }
         if (process->state() != QProcess::NotRunning) process->kill();
     });
 }
@@ -1066,11 +1081,31 @@ void IedFleetController::connectRuntimeSignals(const int index) {
                 current->process->readAllStandardError(),
                 true);
             if (!current->standardOutputBuffer.isEmpty()) {
-                processServerLine(index, QString::fromUtf8(current->standardOutputBuffer), false);
+                bool truncated{};
+                const auto tail = ar::iedsim::runtime_guardrails::boundedTail(
+                    current->standardOutputBuffer, &truncated);
+                processServerLine(index, QString::fromUtf8(tail).trimmed(), false);
+                if (truncated) {
+                    appendActivity(
+                        QStringLiteral("Diagnostics"),
+                        QStringLiteral("Final child-process stdout line was truncated at the safety limit."),
+                        QStringLiteral("Warning"),
+                        ieds_.at(index).toMap().value(QStringLiteral("name")).toString());
+                }
                 current->standardOutputBuffer.clear();
             }
             if (!current->standardErrorBuffer.isEmpty()) {
-                processServerLine(index, QString::fromUtf8(current->standardErrorBuffer), true);
+                bool truncated{};
+                const auto tail = ar::iedsim::runtime_guardrails::boundedTail(
+                    current->standardErrorBuffer, &truncated);
+                processServerLine(index, QString::fromUtf8(tail).trimmed(), true);
+                if (truncated) {
+                    appendActivity(
+                        QStringLiteral("Diagnostics"),
+                        QStringLiteral("Final child-process stderr line was truncated at the safety limit."),
+                        QStringLiteral("Warning"),
+                        ieds_.at(index).toMap().value(QStringLiteral("name")).toString());
+                }
                 current->standardErrorBuffer.clear();
             }
             const bool wasActive = isActiveState(current->state);
@@ -1184,14 +1219,64 @@ void IedFleetController::consumeServerOutput(
     QByteArray& buffer,
     const QByteArray& bytes,
     const bool standardError) {
-    buffer += bytes;
-    while (true) {
-        const auto newline = buffer.indexOf('\n');
-        if (newline < 0) break;
-        const auto line = QString::fromUtf8(buffer.left(newline)).trimmed();
-        buffer.remove(0, newline + 1);
+    const auto drained = ar::iedsim::runtime_guardrails::appendAndDrain(buffer, bytes);
+    auto* current = runtimeAt(index);
+
+    if (drained.droppedBytes > 0 && current != nullptr) {
+        bool& reported = standardError
+            ? current->standardErrorOverflowReported
+            : current->standardOutputOverflowReported;
+        if (!reported) {
+            reported = true;
+            appendActivity(
+                QStringLiteral("Diagnostics"),
+                QStringLiteral(
+                    "Child-process %1 exceeded the %2 KiB framing buffer; excess bytes are discarded "
+                    "to keep simulator memory bounded.")
+                    .arg(standardError ? QStringLiteral("stderr") : QStringLiteral("stdout"))
+                    .arg(ar::iedsim::runtime_guardrails::kMaxBufferedProcessBytes / 1024),
+                QStringLiteral("Warning"),
+                index >= 0 && index < ieds_.size()
+                    ? ieds_.at(index).toMap().value(QStringLiteral("name")).toString()
+                    : QString{});
+        }
+    }
+
+    for (const auto& rawLine : drained.lines) {
+        const auto line = QString::fromUtf8(rawLine).trimmed();
         if (!line.isEmpty()) processServerLine(index, line, standardError);
     }
+    if (drained.truncatedLines > 0 && current != nullptr) {
+        appendActivity(
+            QStringLiteral("Diagnostics"),
+            QStringLiteral("%1 child-process line%2 truncated at %3 KiB.")
+                .arg(drained.truncatedLines)
+                .arg(drained.truncatedLines == 1 ? QString{} : QStringLiteral("s"))
+                .arg(ar::iedsim::runtime_guardrails::kMaxProcessLineBytes / 1024),
+            QStringLiteral("Warning"),
+            index >= 0 && index < ieds_.size()
+                ? ieds_.at(index).toMap().value(QStringLiteral("name")).toString()
+                : QString{});
+    }
+
+    if (!drained.moreCompleteLines || current == nullptr) return;
+    bool& scheduled = standardError
+        ? current->standardErrorDrainScheduled
+        : current->standardOutputDrainScheduled;
+    if (scheduled) return;
+    scheduled = true;
+    QTimer::singleShot(0, this, [this, index, standardError] {
+        auto* runtime = runtimeAt(index);
+        if (runtime == nullptr) return;
+        bool& pending = standardError
+            ? runtime->standardErrorDrainScheduled
+            : runtime->standardOutputDrainScheduled;
+        pending = false;
+        auto& pendingBuffer = standardError
+            ? runtime->standardErrorBuffer
+            : runtime->standardOutputBuffer;
+        consumeServerOutput(index, pendingBuffer, QByteArray{}, standardError);
+    });
 }
 
 void IedFleetController::processServerLine(
