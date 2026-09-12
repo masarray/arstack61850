@@ -15,7 +15,6 @@
 #include <QSaveFile>
 #include <QSet>
 #include <QTimer>
-#include <QXmlStreamReader>
 
 #include <algorithm>
 #include <filesystem>
@@ -654,56 +653,16 @@ bool IedSimulatorController::writeModelManifest() {
         QByteArray::number(modelRevision_) + "\n";
     QSet<QString> uniqueRoots;
     const auto& loaded = documents_[static_cast<std::size_t>(activeDocumentIndex)];
-    QFile input{loaded.path};
-    if (!input.open(QIODevice::ReadOnly)) {
-        appendActivity(
-            QStringLiteral("Model"),
-            QStringLiteral("Could not reopen %1 for runtime model projection.").arg(loaded.path),
-            QStringLiteral("Error"));
-        return false;
-    }
-    QXmlStreamReader xml{&input};
-    QString currentIed;
-    QString currentDomain;
-    while (!xml.atEnd()) {
-        xml.readNext();
-        if (xml.isStartElement()) {
-            const auto element = xml.name();
-            const auto attributes = xml.attributes();
-            if (element == QStringLiteral("IED")) {
-                currentIed = attributes.value(QStringLiteral("name")).toString();
-                currentDomain.clear();
-            } else if (element == QStringLiteral("LDevice")) {
-                currentDomain = currentIed == activeIedName
-                    ? currentIed + attributes.value(QStringLiteral("inst")).toString()
-                    : QString{};
-            } else if ((element == QStringLiteral("LN") ||
-                        element == QStringLiteral("LN0")) &&
-                       !currentDomain.isEmpty()) {
-                const auto logicalNode =
-                    attributes.value(QStringLiteral("prefix")).toString() +
-                    attributes.value(QStringLiteral("lnClass")).toString() +
-                    attributes.value(QStringLiteral("inst")).toString();
-                if (!logicalNode.isEmpty()) {
-                    const auto key = currentDomain + QLatin1Char('\n') + logicalNode;
-                    if (!uniqueRoots.contains(key)) {
-                        uniqueRoots.insert(key);
-                        manifest += "LN\t" + currentDomain.toUtf8() + "\t" +
-                            logicalNode.toUtf8() + "\n";
-                    }
-                }
-            }
-        } else if (xml.isEndElement()) {
-            if (xml.name() == QStringLiteral("LDevice")) currentDomain.clear();
-            if (xml.name() == QStringLiteral("IED")) currentIed.clear();
-        }
-    }
-    if (xml.hasError()) {
-        appendActivity(
-            QStringLiteral("Model"),
-            QStringLiteral("Runtime model projection failed: %1").arg(xml.errorString()),
-            QStringLiteral("Error"));
-        return false;
+    for (const auto& logicalNode : loaded.document.logical_nodes) {
+        if (qstring(logicalNode.ied_name) != activeIedName) continue;
+        const auto domain = qstring(logicalNode.mms_domain());
+        const auto item = qstring(logicalNode.name);
+        if (domain.isEmpty() || item.isEmpty()) continue;
+        const auto key = domain + QLatin1Char('\n') + item;
+        if (uniqueRoots.contains(key)) continue;
+        uniqueRoots.insert(key);
+        manifest += "LN\t" + manifestField(domain) + "\t" +
+            manifestField(item) + "\n";
     }
 
     QSet<QString> emittedObjects;
