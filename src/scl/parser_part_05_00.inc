@@ -63,6 +63,14 @@
                         leaf.resolution.enum_type,
                         is_quality_attribute(leaf.da_name),
                         is_timestamp_attribute(leaf.da_name),
+                        type_index.configured_value(
+                            ied_name,
+                            ld_inst,
+                            prefix,
+                            ln_class,
+                            ln_inst,
+                            leaf.do_name,
+                            leaf.da_name),
                     });
                 }
             }

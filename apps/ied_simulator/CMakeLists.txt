@@ -84,6 +84,7 @@ add_library(ariec61850_ied_simulator_server_core STATIC
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_object_table.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_write.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_data_set_table.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_direct_control.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_dispatcher.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/connection_runtime_iedsim.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_server_session.cpp
@@ -117,7 +118,8 @@ add_dependencies(
     arstack_ied_simulator
     ariec61850_ied_simulator_server
     ariec61850_mms_urcb_gi_probe
-    ariec61850_mms_brcb_event_probe)
+    ariec61850_mms_brcb_event_probe
+    ariec61850_control_interop_probe)
 
 if(WIN32)
     set_target_properties(arstack_ied_simulator PROPERTIES WIN32_EXECUTABLE TRUE)

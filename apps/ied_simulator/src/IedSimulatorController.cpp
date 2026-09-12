@@ -52,7 +52,44 @@ QString normalizedType(const ar::iec61850::scl::SclDataSetEntry& entry) {
     return basic.isEmpty() ? QStringLiteral("Text") : basic;
 }
 
-QString initialValue(const QString& type, const QString& dataAttribute) {
+std::optional<int> controlModelCode(QString value) {
+    value = value.trimmed();
+    bool numericOk{};
+    const auto numeric = value.toInt(&numericOk);
+    if (numericOk && numeric >= 0 && numeric <= 4) return numeric;
+
+    QString token;
+    token.reserve(value.size());
+    for (const auto character : value.toLower()) {
+        if (character.isLetterOrNumber()) token.append(character);
+    }
+    if (token == QStringLiteral("statusonly")) return 0;
+    if (token == QStringLiteral("directwithnormalsecurity") ||
+        token == QStringLiteral("directnormal")) return 1;
+    if (token == QStringLiteral("sbowithnormalsecurity") ||
+        token == QStringLiteral("selectbeforeoperatewithnormalsecurity") ||
+        token == QStringLiteral("sbonormal")) return 2;
+    if (token == QStringLiteral("directwithenhancedsecurity") ||
+        token == QStringLiteral("directenhanced")) return 3;
+    if (token == QStringLiteral("sbowithenhancedsecurity") ||
+        token == QStringLiteral("selectbeforeoperatewithenhancedsecurity") ||
+        token == QStringLiteral("sboenhanced")) return 4;
+    return std::nullopt;
+}
+
+QString initialValue(
+    const ar::iec61850::scl::SclDataSetEntry& entry,
+    const QString& type) {
+    const auto configured = qstring(entry.configured_value).trimmed();
+    const auto dataAttribute = qstring(entry.da_name);
+    if (!configured.isEmpty()) {
+        if (dataAttribute.compare(QStringLiteral("ctlModel"), Qt::CaseInsensitive) == 0) {
+            if (const auto model = controlModelCode(configured); model.has_value()) {
+                return QString::number(*model);
+            }
+        }
+        return configured;
+    }
     if (type == QStringLiteral("Boolean")) return QStringLiteral("false");
     if (type == QStringLiteral("Enumeration")) return QStringLiteral("0");
     if (type == QStringLiteral("Quality")) return QStringLiteral("good");
@@ -693,6 +730,34 @@ bool IedSimulatorController::writeModelManifest() {
             manifestField(item.value(QStringLiteral("value")).toString()) + "\n";
     }
 
+    // Control service objects are virtual MMS objects. Preserve the configured
+    // SCL ctlModel explicitly instead of pretending CO$Oper is a structural DA.
+    QSet<QString> emittedControls;
+    for (const auto& entry : loaded.document.model_entries) {
+        if (qstring(entry.ied_name) != activeIedName ||
+            qstring(entry.functional_constraint).compare(QStringLiteral("CF"), Qt::CaseInsensitive) != 0 ||
+            qstring(entry.da_name).compare(QStringLiteral("ctlModel"), Qt::CaseInsensitive) != 0) {
+            continue;
+        }
+        const auto model = controlModelCode(qstring(entry.configured_value));
+        if (!model.has_value()) continue;
+        const auto domain = mmsDomainFor(entry);
+        const auto logicalNode = qstring(entry.prefix) + qstring(entry.ln_class) + qstring(entry.ln_inst);
+        auto dataObject = qstring(entry.do_name);
+        dataObject.replace(QLatin1Char('.'), QLatin1Char('$'));
+        const auto cdc = qstring(entry.cdc).trimmed().toUpper();
+        if (domain.isEmpty() || logicalNode.isEmpty() || dataObject.isEmpty() || cdc.isEmpty()) continue;
+        const auto key = domain + QLatin1Char('
+') + logicalNode + QLatin1Char('
+') + dataObject;
+        if (emittedControls.contains(key)) continue;
+        emittedControls.insert(key);
+        manifest += "CTL	" + manifestField(domain) + "	" + manifestField(logicalNode) +
+            "	" + manifestField(dataObject) + "	" + manifestField(cdc) + "	" +
+            QByteArray::number(*model) + "
+";
+    }
+
     QSet<QString> emittedDataSetMembers;
     for (const auto& dataSet : loaded.document.data_sets) {
         if (qstring(dataSet.ied_name) != activeIedName) continue;
@@ -956,7 +1021,7 @@ QVariantMap IedSimulatorController::valueMap(
     item.insert(QStringLiteral("iedName"), qstring(entry.ied_name));
     item.insert(QStringLiteral("mmsDomain"), mmsDomainFor(entry));
     item.insert(QStringLiteral("mmsItem"), mmsItemFor(entry));
-    item.insert(QStringLiteral("value"), initialValue(type, qstring(entry.da_name)));
+    item.insert(QStringLiteral("value"), initialValue(entry, type));
     item.insert(QStringLiteral("quality"), QStringLiteral("Good"));
     item.insert(QStringLiteral("origin"), QStringLiteral("Simulator"));
     // Simulator values are local runtime state, not client-side writable

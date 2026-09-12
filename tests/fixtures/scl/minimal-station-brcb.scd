@@ -44,6 +44,11 @@
           </LN0>
           <LN lnClass="TCTR" inst="1" lnType="TCTRType" />
           <LN lnClass="XCBR" inst="1" lnType="XCBRType" />
+          <LN lnClass="GGIO" inst="1" lnType="GGIOType">
+            <DOI name="SPCSO1">
+              <DAI name="ctlModel"><Val>direct-with-normal-security</Val></DAI>
+            </DOI>
+          </LN>
         </LDevice>
       </Server>
     </AccessPoint>
@@ -69,5 +74,21 @@
       <DA name="q" bType="Quality" fc="ST" />
       <DA name="t" bType="Timestamp" fc="ST" />
     </DOType>
+    <LNodeType id="GGIOType" lnClass="GGIO">
+      <DO name="SPCSO1" type="SPCType" />
+    </LNodeType>
+    <DOType id="SPCType" cdc="SPC">
+      <DA name="stVal" bType="BOOLEAN" fc="ST" />
+      <DA name="q" bType="Quality" fc="ST" />
+      <DA name="t" bType="Timestamp" fc="ST" />
+      <DA name="ctlModel" bType="Enum" type="CtlModelKind" fc="CF" />
+    </DOType>
+    <EnumType id="CtlModelKind">
+      <EnumVal ord="0">status-only</EnumVal>
+      <EnumVal ord="1">direct-with-normal-security</EnumVal>
+      <EnumVal ord="2">sbo-with-normal-security</EnumVal>
+      <EnumVal ord="3">direct-with-enhanced-security</EnumVal>
+      <EnumVal ord="4">sbo-with-enhanced-security</EnumVal>
+    </EnumType>
   </DataTypeTemplates>
 </SCL>

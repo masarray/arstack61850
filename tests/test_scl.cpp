@@ -268,6 +268,24 @@ void dataset_reference_resolver_accepts_canonical_and_local_forms() {
     CHECK(not_specified.status == SclDataSetBindingStatus::not_specified);
 }
 
+void parser_preserves_configured_control_model_value() {
+    using namespace ar::iec61850::scl;
+
+    const auto document = SclParser{}.load(fixture("minimal-station-brcb.scd"));
+    const auto configured = std::find_if(
+        document.model_entries.begin(),
+        document.model_entries.end(),
+        [](const SclDataSetEntry& entry) {
+            return entry.ln_class == "GGIO" && entry.ln_inst == "1" &&
+                entry.do_name == "SPCSO1" && entry.da_name == "ctlModel";
+        });
+    CHECK(configured != document.model_entries.end());
+    CHECK(configured->functional_constraint == "CF");
+    CHECK(configured->cdc == "SPC");
+    CHECK(configured->basic_type == "Enum");
+    CHECK(configured->configured_value == "direct-with-normal-security");
+}
+
 void parser_detects_duplicate_ieds_and_missing_dataset_references() {
     using namespace ar::iec61850::scl;
 
@@ -361,6 +379,7 @@ int main() {
         {"SCL multi-stream", parser_extracts_multiple_sampled_values_streams_and_conflicts},
         {"SCL structured 4800 SV profile", parser_compiles_structured_4800_sv_profile_without_drift},
         {"SCL dataset references", dataset_reference_resolver_accepts_canonical_and_local_forms},
+        {"SCL configured control model", parser_preserves_configured_control_model_value},
         {"SCL conflicts and warnings", parser_detects_duplicate_ieds_and_missing_dataset_references},
         {"SCL edition detection", parser_detects_editions_from_root_metadata},
         {"SCL prefixed namespace", parser_supports_prefixed_namespaces_and_predefined_entities},

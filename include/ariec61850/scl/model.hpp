@@ -60,6 +60,11 @@ struct SclDataSetEntry final {
     bool is_quality{};
     bool is_timestamp{};
 
+    // Instance-level DAI/Val value from SCL when one is explicitly configured.
+    // This is intentionally separate from runtime state: simulator adapters use it
+    // to seed configured semantics such as CF$...$ctlModel without inventing defaults.
+    std::string configured_value;
+
     friend bool operator==(const SclDataSetEntry&, const SclDataSetEntry&) = default;
 };
 

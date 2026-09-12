@@ -3,6 +3,7 @@
 #include "ariec61850/mms/data_codec.hpp"
 #include "ariec61850/mms/services.hpp"
 #include "ariec61850/mms/simulator_manifest_codec.hpp"
+#include "ariec61850/mms/static_direct_control.hpp"
 #include "ariec61850/mms/static_brcb_connection.hpp"
 #include "ariec61850/mms/static_brcb_control.hpp"
 #include "ariec61850/mms/static_brcb_objects.hpp"
@@ -500,6 +501,31 @@ struct EncodedValue final {
     return {wire::EncodeStatus::ok, required, required};
 }
 
+[[nodiscard]] wire::EncodeResult read_atomic_boolean(
+    const void* context,
+    const std::span<std::uint8_t> destination) noexcept {
+    constexpr std::size_t required = 3U;
+    if (context == nullptr) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, required};
+    }
+    if (destination.size() < required) {
+        return {wire::EncodeStatus::buffer_too_small, 0U, required};
+    }
+    const auto value = static_cast<const std::atomic<std::uint8_t>*>(context)->load(
+        std::memory_order_relaxed) != 0U;
+    destination[0] = 0x83U;
+    destination[1] = 0x01U;
+    destination[2] = value ? 0xFFU : 0x00U;
+    return {wire::EncodeStatus::ok, required, required};
+}
+
+[[nodiscard]] bool apply_atomic_boolean(void* context, const bool value) noexcept {
+    if (context == nullptr) return false;
+    static_cast<std::atomic<std::uint8_t>*>(context)->store(
+        value ? 1U : 0U, std::memory_order_relaxed);
+    return true;
+}
+
 [[nodiscard]] std::vector<std::uint8_t> encode_ber_length(
     const std::size_t length) {
     if (length < 0x80U) return {static_cast<std::uint8_t>(length)};
@@ -569,6 +595,41 @@ struct EncodedValue final {
     return make_tlv(0xA2U, make_tlv(0xA1U, do_entries));
 }
 
+[[nodiscard]] mms::MmsTypeSpecification control_scalar(
+    const mms::MmsTypeKind kind,
+    std::string name,
+    const std::optional<std::uint32_t> size = std::nullopt) {
+    mms::MmsTypeSpecification result;
+    result.kind = kind;
+    result.name = std::move(name);
+    result.size = size;
+    return result;
+}
+
+[[nodiscard]] mms::MmsTypeSpecification control_structure(
+    std::string name,
+    std::vector<mms::MmsTypeSpecification> children) {
+    mms::MmsTypeSpecification result;
+    result.kind = mms::MmsTypeKind::structure;
+    result.name = std::move(name);
+    result.children = std::move(children);
+    return result;
+}
+
+[[nodiscard]] std::vector<std::uint8_t> direct_boolean_oper_type_specification() {
+    return mms::MmsServiceCodec::encode_type_specification(control_structure("Oper", {
+        control_scalar(mms::MmsTypeKind::boolean, "ctlVal"),
+        control_structure("origin", {
+            control_scalar(mms::MmsTypeKind::unsigned_integer, "orCat"),
+            control_scalar(mms::MmsTypeKind::octet_string, "orIdent", 64U),
+        }),
+        control_scalar(mms::MmsTypeKind::unsigned_integer, "ctlNum"),
+        control_scalar(mms::MmsTypeKind::utc_time, "T"),
+        control_scalar(mms::MmsTypeKind::boolean, "Test"),
+        control_scalar(mms::MmsTypeKind::bit_string, "Check", 2U),
+    }));
+}
+
 struct ConnectionBuffers final {
     std::array<std::uint8_t, 32'768U> receive{};
     std::array<std::uint8_t, 32'768U> response{};
@@ -615,6 +676,20 @@ struct ManifestReportControlStorage final {
     std::uint32_t integrity_period_ms{};
 };
 
+struct ManifestDirectControlStorage final {
+    std::string domain;
+    std::string logical_node;
+    std::string data_object;
+    std::string cdc;
+    std::uint8_t control_model{};
+    std::string status_item;
+    std::string ctl_model_item;
+    std::string oper_item;
+    std::vector<std::uint8_t> oper_type_specification;
+    std::shared_ptr<std::atomic<std::uint8_t>> process_value;
+};
+
+constexpr std::size_t kMaximumSimulatorDirectControls = 64U;
 constexpr std::size_t kMaximumSimulatorBrcbs = 16U;
 constexpr std::size_t kBrcbRetainedEntries = 4U;
 constexpr std::size_t kBrcbSlotBytes = 32U * 1024U;
@@ -627,6 +702,8 @@ struct ManifestModel final {
     std::vector<ManifestTypeNode> root_trees;
     std::vector<std::size_t> root_value_indices;
     std::unordered_map<std::string, std::size_t> value_indices;
+    std::vector<ManifestDirectControlStorage> direct_control_storage;
+    std::size_t omitted_direct_controls{};
     std::vector<ManifestDataSetStorage> data_set_storage;
     std::vector<mms::MmsStaticDataSetEntry> data_sets;
     std::vector<ManifestReportControlStorage> report_control_storage;
@@ -783,6 +860,13 @@ void rebuild_manifest_roots(ManifestModel& model) {
         std::string normalized_type;
         std::string text;
     };
+    struct ParsedControl final {
+        std::string domain;
+        std::string logical_node;
+        std::string data_object;
+        std::string cdc;
+        std::uint8_t control_model{};
+    };
     struct ParsedDataSetMember final {
         std::string domain;
         std::string item;
@@ -804,6 +888,7 @@ void rebuild_manifest_roots(ManifestModel& model) {
     };
     std::vector<std::pair<std::string, std::string>> roots;
     std::vector<ParsedObject> parsed_objects;
+    std::vector<ParsedControl> parsed_controls;
     std::vector<ParsedDataSetMember> parsed_members;
     std::vector<ParsedReportControl> parsed_reports;
     std::set<std::pair<std::string, std::string>> unique_roots;
@@ -824,6 +909,17 @@ void rebuild_manifest_roots(ManifestModel& model) {
                 unique_objects.emplace(fields[1], fields[2]).second) {
                 parsed_objects.push_back({fields[1], fields[2], fields[3], fields[4], fields[5]});
             }
+        } else if (fields.size() >= 6U && fields[0] == "CTL") {
+            ++model.declared_entries;
+            if (fields[1].empty() || fields[2].empty() || fields[3].empty() || fields[4].empty()) {
+                throw std::runtime_error("Model manifest contains a malformed CTL entry.");
+            }
+            parsed_controls.push_back({
+                fields[1],
+                fields[2],
+                fields[3],
+                fields[4],
+                static_cast<std::uint8_t>(parse_u32("CTL ctlModel", fields[5], 4U))});
         } else if (fields.size() >= 5U && fields[0] == "DS") {
             parsed_members.push_back({fields[1], fields[2], fields[3], fields[4]});
         } else if (fields.size() >= 13U && fields[0] == "RCB") {
@@ -915,6 +1011,49 @@ void rebuild_manifest_roots(ManifestModel& model) {
             &value});
     }
 
+    // Compile virtual service objects from SCL configured ctlModel metadata.
+    // Phase one intentionally exposes only SPC Direct-with-normal-security;
+    // other configured models remain visible as structural CF data but are not
+    // falsely advertised as executable server controls.
+    const auto oper_type = direct_boolean_oper_type_specification();
+    std::set<std::pair<std::string, std::string>> unique_direct_controls;
+    for (const auto& parsed : parsed_controls) {
+        if (parsed.control_model != 1U || parsed.cdc != "SPC") {
+            ++model.omitted_direct_controls;
+            continue;
+        }
+        if (model.direct_control_storage.size() >= kMaximumSimulatorDirectControls) {
+            ++model.omitted_direct_controls;
+            continue;
+        }
+        const auto status_item = parsed.logical_node + "$ST$" + parsed.data_object + "$stVal";
+        const auto ctl_model_item = parsed.logical_node + "$CF$" + parsed.data_object + "$ctlModel";
+        const auto oper_item = parsed.logical_node + "$CO$" + parsed.data_object + "$Oper";
+        if (!unique_direct_controls.emplace(parsed.domain, oper_item).second) continue;
+        const auto status = model.value_indices.find(object_key(parsed.domain, status_item));
+        const auto ctl_model = model.value_indices.find(object_key(parsed.domain, ctl_model_item));
+        if (status == model.value_indices.end() || ctl_model == model.value_indices.end() ||
+            model.values[status->second].type.kind != mms::MmsTypeKind::boolean) {
+            ++model.omitted_direct_controls;
+            continue;
+        }
+        const auto& encoded_status = model.values[status->second].encoded;
+        const auto initial = encoded_status.size() >= 3U && encoded_status[0] == 0x83U &&
+            encoded_status.back() != 0U;
+        ManifestDirectControlStorage control;
+        control.domain = parsed.domain;
+        control.logical_node = parsed.logical_node;
+        control.data_object = parsed.data_object;
+        control.cdc = parsed.cdc;
+        control.control_model = parsed.control_model;
+        control.status_item = status_item;
+        control.ctl_model_item = ctl_model_item;
+        control.oper_item = oper_item;
+        control.oper_type_specification = oper_type;
+        control.process_value = std::make_shared<std::atomic<std::uint8_t>>(initial ? 1U : 0U);
+        model.direct_control_storage.push_back(std::move(control));
+    }
+
     std::map<std::pair<std::string, std::string>, std::vector<std::pair<std::string, std::string>>>
         grouped_members;
     for (const auto& member : parsed_members) {
@@ -950,8 +1089,12 @@ void rebuild_manifest_roots(ManifestModel& model) {
         available_data_sets.emplace(data_set.domain, data_set.item);
     }
 
-    auto remaining_object_slots =
-        mms::MmsStaticObjectTable::maximum_objects - model.objects.size();
+    if (model.objects.size() + model.direct_control_storage.size() >
+        mms::MmsStaticObjectTable::maximum_objects) {
+        throw std::runtime_error("Configured Direct-Normal controls exceed MMS object capacity.");
+    }
+    auto remaining_object_slots = mms::MmsStaticObjectTable::maximum_objects -
+        model.objects.size() - model.direct_control_storage.size();
     const auto available_urcb_slots = std::min<std::size_t>(
         mms::MmsStaticUrcbRuntime::maximum_control_blocks,
         remaining_object_slots /
@@ -1177,16 +1320,79 @@ void serve_connection(
     std::unique_ptr<mms::MmsStaticUrcbRuntime> urcb_runtime;
     std::unique_ptr<mms::MmsStaticUrcbObjectBank> urcb_bank;
     std::vector<std::unique_ptr<BrcbAssociationRuntime>> brcb_runtimes;
+    std::vector<mms::MmsStaticDirectBooleanControlState> direct_control_states;
+    std::vector<mms::MmsStaticDirectBooleanControlBinding> direct_control_bindings;
+    std::vector<mms::MmsStaticObjectEntry> direct_control_objects;
+    std::unique_ptr<mms::MmsStaticObjectTable> direct_control_table;
 
     mms::MmsStaticDispatchPolicy dispatch_policy;
     dispatch_policy.maximum_write_variables = 1U;
     const mms::MmsStaticObjectTable* dispatch_objects = &object_table;
+    if (manifest_model != nullptr && !manifest_model->direct_control_storage.empty()) {
+        direct_control_states.resize(manifest_model->direct_control_storage.size());
+        direct_control_bindings.resize(manifest_model->direct_control_storage.size());
+        direct_control_objects.assign(object_table.objects().begin(), object_table.objects().end());
+        constexpr std::array<std::uint8_t, 2U> unsigned_type{0x86U, 0x00U};
+
+        for (std::size_t index = 0U; index < manifest_model->direct_control_storage.size(); ++index) {
+            auto& control = manifest_model->direct_control_storage[index];
+            auto& state = direct_control_states[index];
+            auto& binding = direct_control_bindings[index];
+            state.value = control.process_value->load(std::memory_order_relaxed);
+            binding.state = &state;
+            binding.apply = apply_atomic_boolean;
+            binding.apply_context = control.process_value.get();
+
+            bool status_found{};
+            bool ctl_model_found{};
+            for (auto& object : direct_control_objects) {
+                if (object.domain != control.domain) continue;
+                if (object.item == control.status_item) {
+                    object.read = read_atomic_boolean;
+                    object.context = control.process_value.get();
+                    object.write = nullptr;
+                    object.write_context = nullptr;
+                    object.contextual_write = nullptr;
+                    status_found = true;
+                } else if (object.item == control.ctl_model_item) {
+                    object.type_specification = std::span<const std::uint8_t>{unsigned_type};
+                    object.read = mms::mms_static_direct_normal_read_ctl_model;
+                    object.context = nullptr;
+                    object.write = nullptr;
+                    object.write_context = nullptr;
+                    object.contextual_write = nullptr;
+                    ctl_model_found = true;
+                }
+            }
+            if (!status_found || !ctl_model_found) {
+                throw std::runtime_error("Configured Direct-Normal control is missing ST/CF backing objects.");
+            }
+            direct_control_objects.push_back(mms::MmsStaticObjectEntry{
+                control.domain,
+                control.oper_item,
+                control.oper_type_specification,
+                mms::mms_static_control_read_unavailable,
+                nullptr,
+                false,
+                mms::mms_static_direct_boolean_write_oper,
+                &binding,
+                nullptr});
+        }
+        direct_control_table = std::make_unique<mms::MmsStaticObjectTable>(
+            std::span<const mms::MmsStaticObjectEntry>{direct_control_objects});
+        if (!direct_control_table->valid()) {
+            throw std::runtime_error("Configured Direct-Normal MMS object table is invalid.");
+        }
+        dispatch_objects = direct_control_table.get();
+        dispatch_policy.advertise_flattened_child_aliases = true;
+    }
+    const auto* process_objects = dispatch_objects;
     if (manifest_model != nullptr && !manifest_model->urcb_definitions.empty()) {
         urcb_states.resize(manifest_model->urcb_definitions.size());
         urcb_runtime = std::make_unique<mms::MmsStaticUrcbRuntime>(
             std::span<const mms::MmsStaticUrcbDefinition>{manifest_model->urcb_definitions},
             std::span<mms::MmsStaticUrcbState>{urcb_states},
-            object_table,
+            *process_objects,
             data_sets);
         if (!urcb_runtime->initialize()) {
             throw std::runtime_error("Could not initialize per-association URCB runtime.");
@@ -1213,7 +1419,7 @@ void serve_connection(
         urcb_name_storage.resize(required_names);
         urcb_bank = std::make_unique<mms::MmsStaticUrcbObjectBank>(
             *urcb_runtime,
-            object_table.objects(),
+            process_objects->objects(),
             std::span<mms::MmsStaticObjectEntry>{urcb_object_storage},
             std::span<mms::MmsStaticUrcbObjectContext>{urcb_context_storage},
             std::span<char>{urcb_name_storage},
@@ -1243,7 +1449,7 @@ void serve_connection(
                 definition,
                 brcb->pending,
                 std::span<mms::MmsStaticBrcbSlot>{brcb->slots},
-                object_table,
+                *process_objects,
                 data_sets);
             if (!brcb->reports->initialize()) {
                 throw std::runtime_error("Could not initialize per-association BRCB runtime.");

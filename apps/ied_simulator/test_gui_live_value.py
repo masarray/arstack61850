@@ -181,6 +181,119 @@ def run_brcb_event_probe(
             process.wait(timeout=3)
 
 
+def resolve_control_probe(argument: str) -> str:
+    return resolve_named_probe(argument, "ariec61850_control_interop_probe", "control interoperability probe")
+
+
+def run_direct_normal_control_regression(
+    control_probe: str,
+    read_probe: str,
+    port: int,
+) -> str:
+    common = [
+        control_probe,
+        "127.0.0.1",
+        str(port),
+        "--object",
+        "MU01LD0/GGIO1.SPCSO1",
+        "--timeout-ms",
+        "5000",
+    ]
+    discovery = subprocess.run(
+        common,
+        capture_output=True,
+        text=True,
+        timeout=8,
+        check=False,
+        creationflags=creation_flags(),
+    )
+    if (
+        discovery.returncode != 0
+        or "ctlModel=direct-normal" not in discovery.stdout
+        or "cdc=SPC" not in discovery.stdout
+        or "STATUS_BEFORE false" not in discovery.stdout
+        or "status=DISCOVERY_PASS" not in discovery.stdout
+    ):
+        raise RuntimeError(
+            "configured Direct-Normal discovery failed: "
+            f"exit={discovery.returncode} stdout={discovery.stdout!r} stderr={discovery.stderr!r}"
+        )
+
+    # Prove fail-closed Check handling before the accepted command.
+    rejected = subprocess.run(
+        common
+        + [
+            "--action",
+            "operate",
+            "--value",
+            "on",
+            "--value-kind",
+            "bool",
+            "--arm",
+            "IEC61850-LAB-CONTROL",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=8,
+        check=False,
+        creationflags=creation_flags(),
+    )
+    if (
+        rejected.returncode != 4
+        or "accepted=false" not in rejected.stdout
+        or "mmsFailure=11:object-value-invalid" not in rejected.stdout
+        or "STATUS_AFTER false" not in rejected.stdout
+    ):
+        raise RuntimeError(
+            "Direct-Normal fail-closed check-bit regression failed: "
+            f"exit={rejected.returncode} stdout={rejected.stdout!r} stderr={rejected.stderr!r}"
+        )
+
+    accepted = subprocess.run(
+        common
+        + [
+            "--action",
+            "operate",
+            "--value",
+            "on",
+            "--value-kind",
+            "bool",
+            "--interlock-check",
+            "off",
+            "--synchro-check",
+            "off",
+            "--arm",
+            "IEC61850-LAB-CONTROL",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=8,
+        check=False,
+        creationflags=creation_flags(),
+    )
+    if (
+        accepted.returncode != 0
+        or "completion=accepted" not in accepted.stdout
+        or "accepted=true" not in accepted.stdout
+        or "STATUS_AFTER true" not in accepted.stdout
+        or "NO_RETRY_EVIDENCE controlWrites=1" not in accepted.stdout
+    ):
+        raise RuntimeError(
+            "Direct-Normal Oper wire regression failed: "
+            f"exit={accepted.returncode} stdout={accepted.stdout!r} stderr={accepted.stderr!r}"
+        )
+
+    status = run_probe(read_probe, port, "GGIO1$ST$SPCSO1$stVal")
+    if status.returncode != 0 or "value=true" not in status.stdout:
+        raise RuntimeError(
+            "Direct-Normal process status did not persist for a second external association: "
+            f"exit={status.returncode} stdout={status.stdout!r} stderr={status.stderr!r}"
+        )
+    return discovery.stdout.strip() + "
+" + rejected.stdout.strip() + "
+" + accepted.stdout.strip()
+
+
 def prove_concurrent_associations(read_probe: str, port: int, item: str) -> float:
     """Keep association A open and require association B to finish meanwhile."""
     holder = subprocess.Popen(
@@ -310,6 +423,7 @@ def main() -> int:
     read_probe = resolve_read_probe(args.read_probe)
     urcb_probe = resolve_urcb_probe(args.read_probe)
     brcb_probe = resolve_brcb_probe(args.read_probe)
+    control_probe = resolve_control_probe(args.read_probe)
 
     port = free_port()
     environment = dict(os.environ)
@@ -326,7 +440,7 @@ def main() -> int:
                 "--set-first-value",
                 "42",
                 "--exit-after-ms",
-                "30000",
+                "45000",
             ],
             stdout=app_log,
             stderr=subprocess.STDOUT,
@@ -360,6 +474,7 @@ def main() -> int:
                     "RCB\tMU01LD0\tLLN0$BR$BRCB01\t1\t"
                     "MU01LD0/LLN0$BR$BRCB01\tMU01LD0\tLLN0$dsGO\t2\t75\t1000\t108\t121\t128"
                 )
+                direct_control_manifest = "CTL\tMU01LD0\tGGIO1\tSPCSO1\tSPC\t1"
                 if (
                     manifest_text.startswith("ARSTACK_IED_MODEL\t2\t2\n")
                     and mapped_value in manifest_text
@@ -368,12 +483,14 @@ def main() -> int:
                     and "XCBR1$ST$Pos$t\tTimestamp\tTimestamp\t" in manifest_text
                     and urcb_manifest in manifest_text
                     and brcb_manifest in manifest_text
+                    and direct_control_manifest in manifest_text
+                    and "GGIO1$CF$SPCSO1$ctlModel\tEnum\tEnumeration\t1" in manifest_text
                 ):
                     break
                 time.sleep(0.1)
             else:
                 raise RuntimeError(
-                    "GUI did not publish revision 2 with edited/full model leaves and URCB/BRCB metadata"
+                    "GUI did not publish revision 2 with edited/full model leaves, reporting metadata, and configured control metadata"
                 )
 
             deadline = time.monotonic() + 10.0
@@ -412,6 +529,11 @@ def main() -> int:
             else:
                 raise RuntimeError(last_error)
 
+            control_output = run_direct_normal_control_regression(
+                control_probe,
+                read_probe,
+                port,
+            )
             concurrent_seconds = prove_concurrent_associations(
                 read_probe,
                 port,
@@ -442,17 +564,19 @@ def main() -> int:
                 "value=unix-ms=1700000000123 UTC",
             )
 
-            app.wait(timeout=32)
+            app.wait(timeout=47)
             print(
                 "IEDSIM_GUI_LIVE_VALUE_PASS "
                 "edited=MU01LD0/TCTR1$MX$Amp$instMag$i:42 "
                 "structural=MU01LD0/TCTR1$MX$AmpUnmapped$instMag$i:0 "
                 f"concurrent_association_seconds={concurrent_seconds:.3f} "
+                "control_direct_normal=pass "
                 "urcb_gi=pass "
                 "brcb_event=pass "
                 "quality=same-association:030000->03C110 "
                 "timestamp=same-association:0->1700000000123"
             )
+            print(control_output)
             print(urcb_output)
             print(brcb_output)
             print(quality_output.strip())

@@ -22,6 +22,7 @@
         type.enum_type,
         is_quality_attribute(da_name),
         is_timestamp_attribute(da_name),
+        {},
     };
 }
 
@@ -116,6 +117,7 @@ std::vector<SclDataSetEntry> build_data_set_entries(
             leaf.resolution.enum_type,
             is_quality_attribute(leaf.da_name),
             is_timestamp_attribute(leaf.da_name),
+            {},
         });
     }
     return result;
