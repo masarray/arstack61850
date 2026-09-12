@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prove SCL-style static DataSets and live values on one MMS association."""
+"""Prove structured SCL-style static DataSets and live values on one MMS association."""
 
 from __future__ import annotations
 
@@ -31,9 +31,14 @@ def manifest(revision: int, value: bool) -> str:
             "LN\tTESTIEDLD0\tLLN0",
             "LN\tTESTIEDLD0\tGGIO1",
             f"OBJ\tTESTIEDLD0\tGGIO1$ST$Ind1$stVal\tBOOLEAN\tBoolean\t{text}",
+            "OBJ\tTESTIEDLD0\tGGIO1$ST$Ind1$q\tBOOLEAN\tBoolean\tfalse",
             "OBJ\tTESTIEDLD0\tGGIO1$ST$Ind2$stVal\tBOOLEAN\tBoolean\tfalse",
-            "DS\tTESTIEDLD0\tLLN0$Status\tTESTIEDLD0\tGGIO1$ST$Ind1$stVal",
-            "DS\tTESTIEDLD0\tLLN0$Status\tTESTIEDLD0\tGGIO1$ST$Ind2$stVal",
+            "OBJ\tTESTIEDLD0\tGGIO1$ST$Ind2$q\tBOOLEAN\tBoolean\tfalse",
+            # These are configured whole-DataObject FCDA members.  The static
+            # server must synthesize GGIO1$ST$Ind1 / Ind2 as MMS STRUCTURE
+            # objects instead of requiring an exact scalar OBJ leaf.
+            "DS\tTESTIEDLD0\tLLN0$Status\tTESTIEDLD0\tGGIO1$ST$Ind1",
+            "DS\tTESTIEDLD0\tLLN0$Status\tTESTIEDLD0\tGGIO1$ST$Ind2",
             "",
         ]
     )
@@ -43,6 +48,39 @@ def atomic_write(path: Path, text: str) -> None:
     replacement = path.with_suffix(".next")
     replacement.write_text(text, encoding="utf-8", newline="\n")
     os.replace(replacement, path)
+
+
+def run_read_probe(
+    executable: str,
+    port: int,
+    item: str,
+    *,
+    count: int = 1,
+    delay_ms: int = 0,
+) -> subprocess.CompletedProcess[str]:
+    command = [
+        executable,
+        "127.0.0.1",
+        str(port),
+        "--domain",
+        "TESTIEDLD0",
+        "--item",
+        item,
+        "--count",
+        str(count),
+        "--timeout-ms",
+        "3000",
+    ]
+    if delay_ms:
+        command.extend(["--delay-ms", str(delay_ms)])
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+        creationflags=creation_flags(),
+    )
 
 
 def main() -> int:
@@ -66,7 +104,7 @@ def main() -> int:
                 "--model-manifest",
                 str(model),
                 "--max-connections",
-                "2",
+                "3",
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -98,6 +136,21 @@ def main() -> int:
             data_sets = document.get("dataSets", [])
             if len(data_sets) != 1 or data_sets[0].get("memberCount") != 2:
                 raise RuntimeError(f"static DataSet members mismatch: {data_sets}")
+
+            # A whole-DO FCDA must be exposed as a readable MMS STRUCTURE.  A
+            # successful external read proves the synthesized object is present
+            # in the static object table instead of being silently dropped.
+            structured = run_read_probe(
+                args.read_probe,
+                port,
+                "GGIO1$ST$Ind1",
+            )
+            if structured.returncode != 0 or "value=" not in structured.stdout:
+                raise RuntimeError(
+                    "whole-DO MMS STRUCTURE read failed: "
+                    f"exit={structured.returncode} stdout={structured.stdout!r} "
+                    f"stderr={structured.stderr!r}"
+                )
 
             probe = subprocess.Popen(
                 [
@@ -139,14 +192,19 @@ def main() -> int:
             server_stdout, server_stderr = server.communicate()
             raise
 
-    if server.returncode != 0 or "kind=value_sync" not in server_stdout:
+    if (
+        server.returncode != 0
+        or "kind=server_ready" not in server_stdout
+        or "kind=value_sync" not in server_stdout
+    ):
         raise RuntimeError(
-            f"server live-value evidence missing (exit={server.returncode}):\n"
+            f"server structured/live-value evidence missing (exit={server.returncode}):\n"
             f"{server_stdout}\n{server_stderr}"
         )
     print(
-        "IEDSIM_RUNTIME_MODEL_PASS datasets=1 members=2 "
-        "valueTransition=false->true associationPreserved=true"
+        "IEDSIM_RUNTIME_MODEL_PASS datasets=1 configuredMembers=2 "
+        "wholeDoStructureReadable=true valueTransition=false->true "
+        "associationPreserved=true"
     )
     return 0
 
