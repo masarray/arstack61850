@@ -163,6 +163,13 @@ struct SclDocument final {
     std::string header_revision;
     SclEdition edition{SclEdition::unknown};
     std::vector<SclIed> ieds;
+
+    // Complete structural LD/LN/DO/DA(BDA) leaf projection derived from
+    // DataTypeTemplates. Unlike DataSet entries this inventory is not reduced
+    // to signals referenced by service bindings; simulator/server consumers
+    // use it as the authoritative SCL data-model leaf catalog.
+    std::vector<SclDataSetEntry> model_entries;
+
     std::vector<SclDataSet> data_sets;
     std::vector<SclGooseStream> goose_streams;
     std::vector<SclSampledValuesStream> sampled_values_streams;
