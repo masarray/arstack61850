@@ -38,19 +38,22 @@ def resolve_read_probe(argument: str) -> str:
     raise FileNotFoundError(f"MMS read probe not found under {path}")
 
 
+def probe_command(read_probe: str, port: int, item: str) -> list[str]:
+    return [
+        read_probe,
+        "127.0.0.1",
+        str(port),
+        "--domain",
+        "MU01LD0",
+        "--item",
+        item,
+    ]
+
+
 def run_probe(read_probe: str, port: int, item: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [
-            read_probe,
-            "127.0.0.1",
-            str(port),
-            "--domain",
-            "MU01LD0",
-            "--item",
-            item,
-            "--timeout-ms",
-            "3000",
-        ],
+        probe_command(read_probe, port, item)
+        + ["--timeout-ms", "3000"],
         capture_output=True,
         text=True,
         timeout=6,
@@ -89,6 +92,75 @@ def update_manifest_value(manifest_path: Path, item: str, new_value: str) -> int
     return revision
 
 
+def prove_concurrent_associations(read_probe: str, port: int, item: str) -> float:
+    """Keep association A open and require association B to finish meanwhile."""
+    holder = subprocess.Popen(
+        probe_command(read_probe, port, item)
+        + [
+            "--count",
+            "2",
+            "--delay-ms",
+            "4000",
+            "--timeout-ms",
+            "3000",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        creationflags=creation_flags(),
+    )
+    try:
+        if holder.stdout is None:
+            raise RuntimeError("concurrency holder stdout pipe was not created")
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            first_line = executor.submit(holder.stdout.readline).result(timeout=5).strip()
+        if "value=42" not in first_line:
+            stderr = holder.stderr.read() if holder.stderr is not None else ""
+            raise RuntimeError(
+                "first concurrent association did not establish: "
+                f"stdout={first_line!r} stderr={stderr!r}"
+            )
+
+        started = time.monotonic()
+        try:
+            second = subprocess.run(
+                probe_command(read_probe, port, item)
+                + ["--timeout-ms", "1500"],
+                capture_output=True,
+                text=True,
+                timeout=2.5,
+                check=False,
+                creationflags=creation_flags(),
+            )
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError(
+                "second MMS association was blocked by the first association"
+            ) from error
+        elapsed = time.monotonic() - started
+        if second.returncode != 0 or "value=42" not in second.stdout:
+            raise RuntimeError(
+                "second concurrent association failed: "
+                f"exit={second.returncode} stdout={second.stdout!r} stderr={second.stderr!r}"
+            )
+        if elapsed >= 2.5:
+            raise RuntimeError(
+                f"second association completed too slowly for concurrency proof: {elapsed:.3f}s"
+            )
+
+        remaining_stdout, stderr = holder.communicate(timeout=7)
+        holder_output = first_line + "\n" + remaining_stdout
+        if holder.returncode != 0 or holder_output.count("value=42") < 2:
+            raise RuntimeError(
+                "held association did not remain healthy: "
+                f"exit={holder.returncode} stdout={holder_output!r} stderr={stderr!r}"
+            )
+        return elapsed
+    finally:
+        if holder.poll() is None:
+            holder.kill()
+            holder.wait(timeout=3)
+
+
 def prove_same_association_refresh(
     read_probe: str,
     port: int,
@@ -99,14 +171,8 @@ def prove_same_association_refresh(
     updated_fragment: str,
 ) -> str:
     process = subprocess.Popen(
-        [
-            read_probe,
-            "127.0.0.1",
-            str(port),
-            "--domain",
-            "MU01LD0",
-            "--item",
-            item,
+        probe_command(read_probe, port, item)
+        + [
             "--count",
             "2",
             "--delay-ms",
@@ -169,7 +235,7 @@ def main() -> int:
                 "--set-first-value",
                 "42",
                 "--exit-after-ms",
-                "22000",
+                "30000",
             ],
             stdout=app_log,
             stderr=subprocess.STDOUT,
@@ -246,6 +312,11 @@ def main() -> int:
             else:
                 raise RuntimeError(last_error)
 
+            concurrent_seconds = prove_concurrent_associations(
+                read_probe,
+                port,
+                "TCTR1$MX$Amp$instMag$i",
+            )
             quality_output = prove_same_association_refresh(
                 read_probe,
                 port,
@@ -265,11 +336,12 @@ def main() -> int:
                 "value=unix-ms=1700000000123 UTC",
             )
 
-            app.wait(timeout=24)
+            app.wait(timeout=32)
             print(
                 "IEDSIM_GUI_LIVE_VALUE_PASS "
                 "edited=MU01LD0/TCTR1$MX$Amp$instMag$i:42 "
                 "structural=MU01LD0/TCTR1$MX$AmpUnmapped$instMag$i:0 "
+                f"concurrent_association_seconds={concurrent_seconds:.3f} "
                 "quality=same-association:030000->03C110 "
                 "timestamp=same-association:0->1700000000123"
             )
