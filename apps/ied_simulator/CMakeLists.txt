@@ -110,19 +110,9 @@ if(WIN32)
 endif()
 target_compile_features(ariec61850_ied_simulator_server PRIVATE cxx_std_20)
 
-# End-to-end reporting regression clients use the normal host-side MMS
-# association runtime. They prove interoperability through the public wire
-# contract instead of through an in-process shortcut.
-add_executable(ariec61850_mms_urcb_gi_probe
-    ${CMAKE_CURRENT_LIST_DIR}/../../tools/mms_urcb_gi_probe.cpp)
-target_link_libraries(ariec61850_mms_urcb_gi_probe PRIVATE ARIEC61850::core)
-target_compile_features(ariec61850_mms_urcb_gi_probe PRIVATE cxx_std_20)
-
-add_executable(ariec61850_mms_brcb_event_probe
-    ${CMAKE_CURRENT_LIST_DIR}/../../tools/mms_brcb_event_probe.cpp)
-target_link_libraries(ariec61850_mms_brcb_event_probe PRIVATE ARIEC61850::core)
-target_compile_features(ariec61850_mms_brcb_event_probe PRIVATE cxx_std_20)
-
+# The public-wire URCB/BRCB regression clients are root ARIEC61850 tool targets.
+# Reuse them here instead of defining GUI-local copies so the same sources are
+# compiled by the normal GCC/Clang/MSVC toolchain matrix and by the Qt harness.
 add_dependencies(
     arstack_ied_simulator
     ariec61850_ied_simulator_server
