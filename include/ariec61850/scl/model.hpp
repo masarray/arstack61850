@@ -27,6 +27,21 @@ struct SclIed final {
     friend bool operator==(const SclIed&, const SclIed&) = default;
 };
 
+struct SclLogicalNode final {
+    std::string ied_name;
+    std::string ld_inst;
+    std::string prefix;
+    std::string ln_class;
+    std::string ln_inst;
+    std::string name;
+
+    [[nodiscard]] std::string mms_domain() const {
+        return ied_name + ld_inst;
+    }
+
+    friend bool operator==(const SclLogicalNode&, const SclLogicalNode&) = default;
+};
+
 struct SclDataSetEntry final {
     std::size_t index{};
     std::string signal_reference;
@@ -163,6 +178,11 @@ struct SclDocument final {
     std::string header_revision;
     SclEdition edition{SclEdition::unknown};
     std::vector<SclIed> ieds;
+
+    // Structural logical-node inventory from the same bounded parser used for
+    // all other SCL data. UI/server layers must consume this instead of
+    // reparsing the source XML independently.
+    std::vector<SclLogicalNode> logical_nodes;
 
     // Complete structural LD/LN/DO/DA(BDA) leaf projection derived from
     // DataTypeTemplates. Unlike DataSet entries this inventory is not reduced
