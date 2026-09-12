@@ -55,7 +55,7 @@ jobs:
       - name: Build and run static-control regression
         run: |
           cmake --build build-direct-control --target ariec61850_mms_direct_control_tests --parallel 2
-          ctest --test-dir build-direct-control --output-on-failure
+          ./build-direct-control/ariec61850_mms_direct_control_tests
 
       - name: Commit validated source slice
         shell: bash
