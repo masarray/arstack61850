@@ -22,48 +22,6 @@ namespace {
 QString qstring(const std::string& value) {
     return QString::fromStdString(value);
 }
-
-QVariantMap preparedValueMap(
-    const ar::iec61850::simulation::IedSimulatorPoint& point) {
-    QVariantMap item;
-    const auto dataObject = qstring(point.data_object);
-    const auto dataAttribute = qstring(point.data_attribute);
-    item.insert(
-        QStringLiteral("name"),
-        dataAttribute.isEmpty() ? dataObject : dataObject + QLatin1Char('.') + dataAttribute);
-    item.insert(QStringLiteral("reference"), qstring(point.reference));
-    item.insert(QStringLiteral("logicalDevice"), qstring(point.logical_device));
-    item.insert(QStringLiteral("logicalNode"), qstring(point.logical_node));
-    item.insert(QStringLiteral("dataObject"), dataObject);
-    item.insert(QStringLiteral("dataAttribute"), dataAttribute);
-    item.insert(QStringLiteral("fc"), qstring(point.functional_constraint));
-    item.insert(QStringLiteral("cdc"), qstring(point.cdc));
-    item.insert(QStringLiteral("type"), qstring(point.display_type));
-    item.insert(QStringLiteral("rawType"), qstring(point.basic_type));
-    item.insert(QStringLiteral("iedName"), qstring(point.ied_name));
-    item.insert(QStringLiteral("mmsDomain"), qstring(point.mms_domain));
-    item.insert(QStringLiteral("mmsItem"), qstring(point.mms_item));
-    item.insert(QStringLiteral("value"), qstring(point.initial_value));
-    item.insert(QStringLiteral("quality"), QStringLiteral("Good"));
-    item.insert(QStringLiteral("origin"), QStringLiteral("Simulator"));
-    item.insert(QStringLiteral("writable"), true);
-    item.insert(QStringLiteral("changed"), false);
-    item.insert(QStringLiteral("updated"), QStringLiteral("—"));
-    if (point.display_type == "Enumeration" && point.cdc == "DPC") {
-        item.insert(
-            QStringLiteral("options"),
-            QStringList{
-                QStringLiteral("intermediate-state"),
-                QStringLiteral("off"),
-                QStringLiteral("on"),
-                QStringLiteral("bad-state")});
-    } else if (point.display_type == "Boolean") {
-        item.insert(
-            QStringLiteral("options"),
-            QStringList{QStringLiteral("false"), QStringLiteral("true")});
-    }
-    return item;
-}
 } // namespace
 
 bool IedFleetController::importing() const noexcept {
@@ -145,10 +103,9 @@ void IedFleetController::launchAsyncImport(PendingAsyncImport request) {
                 std::filesystem::path{request.path.toStdWString()}));
             result->parserMilliseconds = parserTimer.elapsed();
 
-            // The high-cardinality simulator profile, ordered point projection,
-            // navigation/scope indexes, value maps and structural counts are
-            // all prepared on this one bounded worker. GUI completion only
-            // adopts implicitly shared containers and creates per-IED runtimes.
+            // Parser output, profile expansion, typed canonical points, LD/LN
+            // navigation and per-LN source indexes are built on the one bounded
+            // worker. GUI completion only moves ownership of these containers.
             QElapsedTimer preparationTimer;
             preparationTimer.start();
             const auto& document = *result->document;
@@ -240,8 +197,8 @@ void IedFleetController::launchAsyncImport(PendingAsyncImport request) {
                         return left->source_order < right->source_order;
                     });
 
-                result->selectedValues.reserve(static_cast<qsizetype>(points.size()));
-                result->runtimeValues.reserve(static_cast<qsizetype>(points.size()));
+                result->pointStore.reserve(static_cast<qsizetype>(points.size()));
+                result->selectedPointIndices.reserve(static_cast<qsizetype>(points.size()));
                 result->valueScopeIndex.reserve(
                     static_cast<qsizetype>(built.profile.logical_node_count()));
                 std::set<QString> seenScopes;
@@ -259,11 +216,9 @@ void IedFleetController::launchAsyncImport(PendingAsyncImport request) {
                         result->navigationIndex.push_back(std::move(navigationEntry));
                     }
 
-                    auto item = preparedValueMap(*point);
-                    result->selectedValues.push_back(item);
-                    const auto key = qstring(point->ied_name) + QLatin1Char('\x1f') +
-                        qstring(point->reference);
-                    result->runtimeValues.insert(key, std::move(item));
+                    const auto pointIndex = result->pointStore.insertIfMissing(
+                        IedPointStore::fromSimulatorPoint(*point));
+                    result->selectedPointIndices.push_back(pointIndex);
                     ++sourceIndex;
                 }
                 result->preparedPointCount = static_cast<int>(points.size());
@@ -308,14 +263,13 @@ void IedFleetController::finishAsyncImport(
             fatalError_.clear();
             previousValue_.reset();
 
-            // Adopt the worker-prepared projection. This deliberately bypasses
-            // rebuildPresentation()/rebuildValues() for interactive Open SCL,
-            // keeping profile/index construction outside the GUI thread.
+            // These are move/adoption operations. No per-point QVariant map is
+            // reconstructed on the GUI thread for the interactive Open path.
             ieds_ = std::move(result->ieds);
-            values_ = std::move(result->selectedValues);
+            pointStore_ = std::move(result->pointStore);
+            selectedPointIndices_ = std::move(result->selectedPointIndices);
             navigationIndex_ = std::move(result->navigationIndex);
             valueScopeIndex_ = std::move(result->valueScopeIndex);
-            runtimeValues_ = std::move(result->runtimeValues);
             logicalDeviceCount_ = result->logicalDeviceCount;
             dataObjectCount_ = result->dataObjectCount;
             dataAttributeCount_ = result->dataAttributeCount;
@@ -323,8 +277,13 @@ void IedFleetController::finishAsyncImport(
             reportCount_ = result->reportCount;
             gooseCount_ = result->gooseCount;
             selectedIedIndex_ = ieds_.isEmpty() ? -1 : 0;
-            selectedValueIndex_ = values_.isEmpty() ? -1 : 0;
+            selectedValueIndex_ = selectedPointIndices_.isEmpty() ? -1 : 0;
             preparedValueIndexIed_ = selectedIedIndex_;
+            seededRuntimeIeds_.clear();
+            if (selectedIedIndex_ >= 0) {
+                seededRuntimeIeds_.insert(
+                    ieds_.at(selectedIedIndex_).toMap().value(QStringLiteral("sessionKey")).toString());
+            }
             rebuildRuntimeInstances({});
 
             lastImportWorkerMilliseconds_ = result->elapsedMilliseconds;
@@ -338,7 +297,7 @@ void IedFleetController::finishAsyncImport(
             emit runtimeChanged();
 
             qInfo().noquote() << QStringLiteral(
-                "IEDSIM_IMPORT_PATH worker_ms=%1 parser_ms=%2 prepare_ms=%3 gui_apply_ms=%4 points=%5 scopes=%6")
+                "IEDSIM_IMPORT_PATH worker_ms=%1 parser_ms=%2 prepare_ms=%3 gui_apply_ms=%4 points=%5 scopes=%6 typed_store=1")
                 .arg(lastImportWorkerMilliseconds_)
                 .arg(result->parserMilliseconds)
                 .arg(result->preparationMilliseconds)
@@ -348,7 +307,7 @@ void IedFleetController::finishAsyncImport(
             appendActivity(
                 QStringLiteral("Importer"),
                 QStringLiteral(
-                    "%1 parsed and indexed on the bounded worker in %2 ms; GUI adoption took %3 ms.")
+                    "%1 parsed and indexed into typed point storage on the bounded worker in %2 ms; GUI adoption took %3 ms.")
                     .arg(sourceName_)
                     .arg(lastImportWorkerMilliseconds_)
                     .arg(lastGuiApplyMilliseconds_),
