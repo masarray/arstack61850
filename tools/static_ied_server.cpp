@@ -2,6 +2,7 @@
 #include "ariec61850/mms/static_server_session.hpp"
 #include "ariec61850/mms/data_codec.hpp"
 #include "ariec61850/mms/services.hpp"
+#include "ariec61850/mms/simulator_manifest_codec.hpp"
 
 #include <algorithm>
 #include <array>
@@ -9,7 +10,6 @@
 #include <chrono>
 #include <climits>
 #include <csignal>
-#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -518,8 +518,6 @@ struct EncodedValue final {
     for (std::size_t index = 1U; index <= 8U; ++index) {
         const auto do_name = std::string{"Ind"} + std::to_string(index);
         const auto encoded = build_single_status_ln_type(do_name);
-        // A single-status LN is A2/A1/SEQUENCE. Reuse the complete named DO
-        // component while building the GGIO structure component list.
         const auto structure_fields = std::span<const std::uint8_t>{encoded}.subspan(2U);
         const auto component_list = structure_fields.subspan(2U);
         do_entries.insert(do_entries.end(), component_list.begin(), component_list.end());
@@ -587,105 +585,11 @@ struct ManifestModel final {
     return result;
 }
 
-[[nodiscard]] std::string upper_copy(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](const unsigned char ch) {
-        return static_cast<char>(std::toupper(ch));
-    });
-    return value;
-}
-
-[[nodiscard]] bool text_boolean(const std::string_view text) noexcept {
-    return text == "1" || text == "true" || text == "TRUE" ||
-           text == "on" || text == "ON" || text == "closed" || text == "CLOSED";
-}
-
-[[nodiscard]] std::int64_t text_integer(const std::string& text) noexcept {
-    const auto upper = upper_copy(text);
-    if (upper == "INTERMEDIATE-STATE") return 0;
-    if (upper == "OFF" || upper == "OPEN") return 1;
-    if (upper == "ON" || upper == "CLOSED") return 2;
-    if (upper == "BAD-STATE") return 3;
-    try {
-        return std::stoll(text);
-    } catch (...) {
-        return 0;
-    }
-}
-
-[[nodiscard]] mms::MmsTypeSpecification manifest_type(
-    const std::string& raw_type,
-    const std::string& normalized_type,
-    std::string name = {}) {
-    const auto raw = upper_copy(raw_type);
-    const auto normalized = upper_copy(normalized_type);
-    mms::MmsTypeSpecification result;
-    result.name = std::move(name);
-    if (normalized == "ENUMERATION" || raw.find("ENUM") != std::string::npos) {
-        result.kind = mms::MmsTypeKind::integer;
-        result.size = 32U;
-    } else if (normalized == "BOOLEAN" || raw.find("BOOL") != std::string::npos) {
-        result.kind = mms::MmsTypeKind::boolean;
-    } else if (normalized == "QUALITY") {
-        result.kind = mms::MmsTypeKind::bit_string;
-        result.size = 13U;
-    } else if (normalized == "TIMESTAMP") {
-        result.kind = mms::MmsTypeKind::utc_time;
-    } else if (raw.find("FLOAT64") != std::string::npos) {
-        result.kind = mms::MmsTypeKind::floating_point;
-        result.size = 64U;
-        result.exponent_width = 11U;
-    } else if (raw.find("FLOAT") != std::string::npos) {
-        result.kind = mms::MmsTypeKind::floating_point;
-        result.size = 32U;
-        result.exponent_width = 8U;
-    } else if (raw.find("INT") != std::string::npos &&
-               (raw.ends_with('U') || raw.find("UINT") != std::string::npos)) {
-        result.kind = mms::MmsTypeKind::unsigned_integer;
-        result.size = 32U;
-    } else if (normalized == "NUMBER" || raw.find("INT") != std::string::npos) {
-        result.kind = mms::MmsTypeKind::integer;
-        result.size = 32U;
-    } else {
-        result.kind = mms::MmsTypeKind::visible_string;
-        result.size = 255U;
-    }
-    return result;
-}
-
-[[nodiscard]] mms::MmsDataValue manifest_data(
-    const mms::MmsTypeSpecification& type,
-    const std::string& text) {
-    switch (type.kind) {
-    case mms::MmsTypeKind::boolean:
-        return mms::MmsDataValue::boolean(text_boolean(text));
-    case mms::MmsTypeKind::bit_string: {
-        constexpr std::array<std::uint8_t, 2U> good_quality{};
-        return mms::MmsDataValue::bit_string(3U, good_quality);
-    }
-    case mms::MmsTypeKind::integer:
-        return mms::MmsDataValue::integer(text_integer(text));
-    case mms::MmsTypeKind::unsigned_integer:
-        return mms::MmsDataValue::unsigned_integer(
-            static_cast<std::uint64_t>(std::max<std::int64_t>(0, text_integer(text))));
-    case mms::MmsTypeKind::floating_point:
-        try {
-            return type.size.value_or(32U) == 64U
-                ? mms::MmsDataValue::floating_point(std::stod(text))
-                : mms::MmsDataValue::floating_point(std::stof(text));
-        } catch (...) {
-            return mms::MmsDataValue::floating_point(0.0F);
-        }
-    case mms::MmsTypeKind::utc_time:
-        return mms::MmsDataValue::utc_time(
-            mms::Iec61850UtcTime{std::chrono::system_clock::now(), 0U});
-    default:
-        return mms::MmsDataValue::visible_string(text == "---" ? std::string{} : text);
-    }
-}
-
 void encode_manifest_value(ManifestValue& value) {
-    value.type = manifest_type(value.raw_type, value.normalized_type);
-    value.data = manifest_data(value.type, value.text);
+    value.type = mms::MmsSimulatorManifestCodec::type(
+        value.raw_type, value.normalized_type);
+    value.data = mms::MmsSimulatorManifestCodec::data(
+        value.type, value.raw_type, value.normalized_type, value.text);
     value.type_specification = mms::MmsServiceCodec::encode_type_specification(value.type);
     value.encoded = mms::MmsDataCodec::encode(*value.data);
 }
@@ -935,16 +839,14 @@ void rebuild_manifest_roots(ManifestModel& model) {
         auto& value = model.values[found->second];
         if (value.text == fields[5]) continue;
         value.text = fields[5];
-        value.data = manifest_data(value.type, value.text);
+        value.data = mms::MmsSimulatorManifestCodec::data(
+            value.type, value.raw_type, value.normalized_type, value.text);
         value.encoded = mms::MmsDataCodec::encode(*value.data);
         ++changed;
     }
     model.revision = revision;
     if (changed != 0U) {
         rebuild_manifest_roots(model);
-        // Re-encoding a root may reallocate its byte vector. Refresh the
-        // object-table spans so later attribute/root reads never retain
-        // storage from the previous manifest revision.
         for (const auto value_index : model.root_value_indices) {
             model.objects[value_index].type_specification =
                 model.values[value_index].type_specification;
