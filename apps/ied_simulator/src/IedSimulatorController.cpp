@@ -637,7 +637,8 @@ bool IedSimulatorController::writeModelManifest() {
     }
     const auto activeIed = selectedIed();
     const auto activeIedName = activeIed.value(QStringLiteral("name")).toString();
-    const auto activeDocumentIndex = activeIed.value(QStringLiteral("documentIndex")).toInt(-1);
+    const auto activeDocumentIndex =
+        activeIed.value(QStringLiteral("documentIndex"), -1).toInt();
     if (activeIedName.isEmpty() || activeDocumentIndex < 0 ||
         activeDocumentIndex >= static_cast<int>(documents_.size())) {
         appendActivity(
