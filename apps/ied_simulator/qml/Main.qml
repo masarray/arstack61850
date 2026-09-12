@@ -7,10 +7,10 @@ import ARStack.IedSimulator 1.0
 
 ApplicationWindow {
     id: root
-    width: 1480
-    height: 1000
-    minimumWidth: 1180
-    minimumHeight: 820
+    width: 1360
+    height: 860
+    minimumWidth: 1080
+    minimumHeight: 680
     visible: true
     title: "ARStack IED Simulator"
     color: appTheme.background
@@ -31,14 +31,14 @@ ApplicationWindow {
 
     FileDialog {
         id: sclDialog
-        title: appendImport ? "Add an IED engineering file" : "Import an engineering file"
+        title: appendImport ? "Add IEC 61850 engineering file" : "Open IEC 61850 engineering file"
         nameFilters: ["IEC 61850 engineering files (*.scl *.cid *.scd *.iid *.icd)", "All files (*)"]
         onAccepted: appendImport ? simulator.addFile(selectedFile) : simulator.loadFile(selectedFile)
     }
 
     FolderDialog {
         id: folderDialog
-        title: "Choose the file-service folder"
+        title: "Choose file-service folder"
         onAccepted: simulator.fileFolder = selectedFolder.toString().replace("file:///", "")
     }
 
@@ -47,30 +47,12 @@ ApplicationWindow {
         sclDialog.open()
     }
 
-    Loader {
+    RuntimeWorkspace {
         anchors.fill: parent
-        sourceComponent: simulator.running ? runtimeComponent : launchComponent
-    }
-
-    Component {
-        id: launchComponent
-        LaunchWorkspace {
-            anchors.fill: parent
-            theme: appTheme
-            backend: simulator
-            onImportRequested: root.importModel(false)
-            onFolderRequested: folderDialog.open()
-        }
-    }
-
-    Component {
-        id: runtimeComponent
-        RuntimeWorkspace {
-            anchors.fill: parent
-            theme: appTheme
-            backend: simulator
-            onAddIedRequested: root.importModel(true)
-            onFolderRequested: folderDialog.open()
-        }
+        theme: appTheme
+        backend: simulator
+        onOpenSclRequested: root.importModel(false)
+        onAddIedRequested: root.importModel(true)
+        onFolderRequested: folderDialog.open()
     }
 }
