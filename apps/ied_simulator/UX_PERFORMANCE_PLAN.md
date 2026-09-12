@@ -24,38 +24,56 @@ This plan applies the repository `AGENTS.md` production contract to the desktop 
 - Replace the four-panel workspace with a two-pane navigation/details layout.
 - Start is a deliberate server-settings dialog; editing is a deliberate Set Values dialog.
 
-### Stage B - asynchronous import/indexing — parser path implemented, indexing follow-up pending
+### Stage B - asynchronous import/indexing — implemented for interactive Open SCL
 
-- Interactive Open SCL now parses on one bounded `QThreadPool` worker instead of the GUI thread.
-- Only one parse runs at a time; repeated Open SCL requests are coalesced to one newest pending request instead of creating an unbounded worker queue.
+- Interactive Open SCL parses on one bounded `QThreadPool` worker instead of the GUI thread.
+- Only one import runs at a time; repeated Open SCL requests are coalesced to one newest pending request instead of creating an unbounded worker queue.
 - A monotonically increasing generation token plus source-path ownership prevents an older import, a cleared workspace, or an older request from replacing newer state.
-- Parsed `SclDocument` ownership is transferred back to the GUI thread through queued delivery before presentation models are rebuilt.
-- The synchronous `loadFile()` path remains for deterministic CLI/CI automation, while the desktop FileDialog uses `loadFileAsync()`.
+- The same bounded worker now builds the selected IED simulator profile, source-ordered point projection, structural counts, LD/LN navigation index, and per-LN source-index lookup before handing ownership to the GUI thread.
+- GUI completion adopts implicitly shared Qt containers and creates the small per-IED runtime objects; it no longer calls `rebuildPresentation()` / `rebuildValues()` on the interactive import path.
+- The synchronous `loadFile()` path remains for deterministic CLI/CI automation and compatibility; the desktop FileDialog uses `loadFileAsync()`.
 - Import while a simulator endpoint is active is rejected instead of blocking the GUI on process shutdown.
-- Still pending in Stage B: move profile construction / large value-index construction off the GUI thread and add explicit progress/cancel UI for very large files.
+- Remaining follow-up: cache/prebuild profiles for non-selected IEDs and remove legacy synchronous/start-path profile rebuilding where compatibility permits.
 
-### Stage C - incremental live updates — first slice implemented
+### Stage C - incremental live updates — hot presentation path implemented
 
 - Signal projection keeps a source-index -> visible-row routing table.
-- Live refreshes are coalesced to ~16 ms and compare only source rows represented by the visible projection.
+- Live refreshes are coalesced to ~16 ms and compare only source rows represented by the active projection.
 - `dataChanged()` is emitted only for contiguous rows whose value/quality/writable/changed roles actually changed.
 - Selected-row invalidation targets only the previous/new source rows.
 - Active value-based search deliberately falls back to the existing coalesced rebuild because a live value can change filtered membership.
-- Still pending in Stage C: replace high-cardinality `QVariantList/QVariantMap` canonical backing storage with typed low/zero-copy storage and add a latest-value-per-point burst accumulator.
+- `IedSignalModel` no longer retains a second full `QVariantList` snapshot; it retains compact typed rows for the active LD/LN only.
+- On the async import path, signal rebuild uses the worker-built per-LN source-index vector, making scope changes proportional to the selected LN instead of the entire 20k/50k-point catalog.
+- The 16 ms refresh timer is the latest-state presentation accumulator: multiple `valuesChanged` bursts collapse into one read of authoritative backend state while protocol/runtime state remains ordered and lossless.
+- Remaining follow-up: replace the compatibility `IedFleetController::values_` / `runtimeValues_` high-cardinality `QVariantList/QVariantMap` canonical backing store with a typed point store and add explicit burst/coalescing-ratio evidence.
 
-### Stage D - diagnostics and lifecycle hardening
+### Stage D - diagnostics and lifecycle hardening — first production slice implemented
 
-- Convert activity presentation to a bounded C++ model with duplicate-event coalescing and counters.
-- Add hard cap and recovery policy for unterminated child-process output lines.
-- Remove user-visible blocking waits from the GUI thread; blocking shutdown remains only at final process teardown when unavoidable.
-- Add negative tests for malformed/oversized SCL, child-process crash, rapid start/stop, repeated model reload, and large update bursts.
+- Activity presentation is a bounded/coalesced C++ model instead of QML-side list filtering.
+- Child stdout/stderr framing has bounded buffers, bounded line length, and bounded per-turn drain work.
+- Generation-safe delayed-kill semantics prevent an old stop timer from killing a restarted endpoint.
+- Negative/lifecycle CI covers malformed SCL, child-output flooding, and repeated start/stop/restart.
+- Remaining follow-up: remove user-visible blocking waits from destructive/synchronous GUI lifecycle paths and broaden bind/fleet-partial-start failure tests.
 
-### Stage E - performance evidence — large-import gate first slice implemented
+### Stage E - performance evidence — large import and GUI-adoption gates implemented
 
 - `benchmark_large_scl.py` generates deterministic engineering models that expand to about 5k, 20k, and 50k data attributes using reusable SCL type templates.
 - The benchmark drives the same `loadFileAsync()` path used by interactive Open SCL, records end-to-end wall time and Linux peak RSS, and fails on crash/deadlock/non-completion.
-- CI now enforces deliberately generous wall-time/RSS ceilings so catastrophic O(N^2), runaway-memory, deadlock, and crash regressions become visible immediately without pretending CI is a laboratory micro-benchmark.
-- Still pending in Stage E: GUI-thread stall heartbeat, delegate-instantiation count, search/filter latency at scale, repeated-open/close memory slope, update-burst coalescing ratio, and start/stop/reload soak evidence.
+- Import tracing separates parser time, worker-side profile/index preparation time, and GUI adoption time.
+- CI enforces a **<=50 ms GUI-adoption budget** for 5k/20k/50k imports and every iteration of the repeated 20k reload soak. This proves the direct worker-result adoption boundary is bounded; it is not yet a full event-loop heartbeat measurement.
+- The one-process 20k reload soak continues to guard against obvious ownership/memory-slope regressions.
+- Remaining follow-up: full GUI event-loop stall heartbeat, delegate-instantiation count, search/filter latency at scale, and live-update burst latency/coalescing ratio.
+
+### Stage H - Core Data Path Performance — implemented first production slice
+
+- High-cardinality interactive import preparation now stays on the bounded worker: parse -> profile build -> source ordering -> value projection -> runtime seed -> navigation/scope indexes.
+- GUI-thread import completion is an ownership/adoption step instead of a second profile/index construction pass.
+- Navigation consumes the worker-built compact LD/LN index and no longer rebuilds for ordinary live value changes.
+- Signal-table rebuild consumes the worker-built selected-LN index instead of rescanning the complete IED value catalog.
+- Signal presentation storage is typed and scoped; the previous duplicate complete `QVariantList` presentation snapshot is removed.
+- Live UI notification keeps only the latest presentation state inside a ~16 ms window and emits targeted row changes.
+- CI records `IEDSIM_IMPORT_PATH worker_ms=... parser_ms=... prepare_ms=... gui_apply_ms=... points=... scopes=...` and fails if direct GUI adoption exceeds 50 ms.
+- This stage intentionally does **not** claim that the backend canonical store is fully typed yet. The remaining `values_` and `runtimeValues_` QVariant containers are the next memory-reduction target, especially because 50k-import RSS remains material.
 
 ## Initial budgets
 
@@ -65,6 +83,7 @@ This plan applies the repository `AGENTS.md` production contract to the desktop 
 - Presentation/event queues are explicitly bounded.
 - Repeated open/start/stop/close stress must show no monotonically growing owned worker/process/timer count.
 - CI large-import guardrails: 5k <= 15 s / 512 MiB, 20k <= 30 s / 768 MiB, 50k <= 55 s / 1024 MiB. These are regression tripwires, not claimed product targets.
+- Direct async-import GUI adoption is gated at <=50 ms for each 5k/20k/50k case and each repeated 20k reload iteration.
 
 ## Definition of done for the redesign
 
