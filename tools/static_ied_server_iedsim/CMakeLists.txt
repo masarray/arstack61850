@@ -37,6 +37,7 @@ add_library(ariec61850_iedscout_parity_server_core STATIC
     "${ARSTACK_ROOT}/src/mms/write_span.cpp"
     "${ARSTACK_ROOT}/src/mms/data_set_span.cpp"
     "${ARSTACK_ROOT}/src/mms/information_report_span.cpp"
+    "${ARSTACK_ROOT}/src/mms/buffered_selective_information_report_span.cpp"
     "${ARSTACK_ROOT}/src/mms/static_object_table.cpp"
     "${ARSTACK_ROOT}/src/mms/static_write.cpp"
     "${ARSTACK_ROOT}/src/mms/static_data_set_table.cpp"
@@ -46,7 +47,11 @@ add_library(ariec61850_iedscout_parity_server_core STATIC
     "${ARSTACK_ROOT}/src/mms/static_information_report.cpp"
     "${ARSTACK_ROOT}/src/mms/static_report_connection.cpp"
     "${ARSTACK_ROOT}/src/mms/static_urcb_objects.cpp"
-    "${ARSTACK_ROOT}/src/mms/static_urcb_runtime.cpp")
+    "${ARSTACK_ROOT}/src/mms/static_urcb_runtime.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_brcb_runtime.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_brcb_control.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_brcb_objects.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_brcb_connection.cpp")
 target_include_directories(ariec61850_iedscout_parity_server_core PUBLIC
     "${ARSTACK_ROOT}/include")
 target_compile_features(ariec61850_iedscout_parity_server_core PUBLIC cxx_std_20)
