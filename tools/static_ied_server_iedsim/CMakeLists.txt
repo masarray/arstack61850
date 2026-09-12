@@ -42,7 +42,11 @@ add_library(ariec61850_iedscout_parity_server_core STATIC
     "${ARSTACK_ROOT}/src/mms/static_data_set_table.cpp"
     "${ARSTACK_ROOT}/src/mms/static_dispatcher.cpp"
     "${ARSTACK_ROOT}/src/mms/connection_runtime_iedsim.cpp"
-    "${ARSTACK_ROOT}/src/mms/static_server_session.cpp")
+    "${ARSTACK_ROOT}/src/mms/static_server_session.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_information_report.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_report_connection.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_urcb_objects.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_urcb_runtime.cpp")
 target_include_directories(ariec61850_iedscout_parity_server_core PUBLIC
     "${ARSTACK_ROOT}/include")
 target_compile_features(ariec61850_iedscout_parity_server_core PUBLIC cxx_std_20)
