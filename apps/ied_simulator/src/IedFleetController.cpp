@@ -25,6 +25,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace {
 QString qstring(const std::string& value) {
@@ -199,9 +200,11 @@ bool IedFleetController::fileServiceEnabled() const noexcept { return fileServic
 QString IedFleetController::fileFolder() const { return fileFolder_; }
 QVariantList IedFleetController::ieds() const { return ieds_; }
 int IedFleetController::selectedIedIndex() const noexcept { return selectedIedIndex_; }
-QVariantList IedFleetController::values() const { return values_; }
+QVariantList IedFleetController::values() const {
+    return pointStore_.toVariantList(selectedPointIndices_);
+}
 int IedFleetController::selectedValueIndex() const noexcept { return selectedValueIndex_; }
-QVariantList IedFleetController::activity() const { return activity_; }
+QVariantList IedFleetController::activity() const { return activity_.snapshot(); }
 int IedFleetController::logicalDeviceCount() const noexcept { return logicalDeviceCount_; }
 int IedFleetController::dataObjectCount() const noexcept { return dataObjectCount_; }
 int IedFleetController::dataAttributeCount() const noexcept { return dataAttributeCount_; }
@@ -215,8 +218,8 @@ QVariantMap IedFleetController::selectedIed() const {
 }
 
 QVariantMap IedFleetController::selectedValue() const {
-    if (selectedValueIndex_ < 0 || selectedValueIndex_ >= values_.size()) return {};
-    return values_.at(selectedValueIndex_).toMap();
+    const auto* point = valueRecord(selectedValueIndex_);
+    return point == nullptr ? QVariantMap{} : IedPointStore::toVariantMap(*point);
 }
 
 QString IedFleetController::endpointConflict() const {
@@ -303,8 +306,14 @@ bool IedFleetController::importFile(const QUrl& fileUrl, const bool append) {
             runtimes_.clear();
             ieds_.clear();
             documents_.clear();
-            runtimeValues_.clear();
+            pointStore_.clear();
+            selectedPointIndices_.clear();
+            seededRuntimeIeds_.clear();
         }
+        navigationIndex_.clear();
+        valueScopeIndex_.clear();
+        preparedValueIndexIed_ = -1;
+        preparedPointCount_ = 0;
         documents_.push_back(LoadedDocument{path, std::move(document)});
         sourcePath_ = path;
         sourceName_ = QFileInfo(path).fileName();
@@ -330,14 +339,19 @@ void IedFleetController::clear() {
     runtimes_.clear();
     documents_.clear();
     ieds_.clear();
-    values_.clear();
-    runtimeValues_.clear();
+    pointStore_.clear();
+    selectedPointIndices_.clear();
+    navigationIndex_.clear();
+    valueScopeIndex_.clear();
+    seededRuntimeIeds_.clear();
     previousValue_.reset();
     sourceName_.clear();
     sourcePath_.clear();
     fatalError_.clear();
     selectedIedIndex_ = -1;
     selectedValueIndex_ = -1;
+    preparedValueIndexIed_ = -1;
+    preparedPointCount_ = 0;
     logicalDeviceCount_ = 0;
     dataObjectCount_ = 0;
     dataAttributeCount_ = 0;
@@ -363,7 +377,7 @@ void IedFleetController::selectIed(const int index) {
 }
 
 void IedFleetController::selectValue(const int index) {
-    const int normalized = index >= 0 && index < values_.size() ? index : -1;
+    const int normalized = index >= 0 && index < selectedPointIndices_.size() ? index : -1;
     if (selectedValueIndex_ == normalized) return;
     selectedValueIndex_ = normalized;
     emit selectionChanged();
@@ -478,9 +492,6 @@ void IedFleetController::stopIed(const int index) {
         QStringLiteral("Stopping MMS endpoint…"),
         QStringLiteral("Info"),
         ieds_.at(index).toMap().value(QStringLiteral("name")).toString());
-    // Invalidate all start/readiness timers from the current generation. The
-    // delayed hard-kill is tied to this stop generation so it can never kill a
-    // freshly restarted server that reuses the same QProcess object.
     const auto stopGeneration = ++runtime->startGeneration;
     auto* const process = runtime->process.get();
     process->terminate();
@@ -633,30 +644,25 @@ bool IedFleetController::applySelectedValue(
     const QString& value,
     const QString& quality,
     const QString& origin) {
-    if (!running() || selectedValueIndex_ < 0 || selectedValueIndex_ >= values_.size()) {
+    if (!running() || selectedValueIndex_ < 0 ||
+        selectedValueIndex_ >= selectedPointIndices_.size()) {
         return false;
     }
-    auto item = values_.at(selectedValueIndex_).toMap();
-    previousValue_ = ValueSnapshot{selectedIedIndex_, selectedValueIndex_, item};
-    const auto before = item.value(QStringLiteral("value")).toString();
-    item.insert(QStringLiteral("value"), value);
-    item.insert(QStringLiteral("quality"), quality);
-    item.insert(QStringLiteral("origin"), origin);
-    item.insert(QStringLiteral("changed"), true);
-    item.insert(
-        QStringLiteral("updated"),
-        QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss.zzz")));
-    values_[selectedValueIndex_] = item;
-    const auto key = runtimeValueKey(
-        item.value(QStringLiteral("iedName")).toString(),
-        item.value(QStringLiteral("reference")).toString());
-    runtimeValues_.insert(key, item);
+    const auto pointIndex = selectedPointIndices_.at(selectedValueIndex_);
+    auto* point = pointStore_.atMutable(pointIndex);
+    if (point == nullptr || !point->writable) return false;
+
+    previousValue_ = ValueSnapshot{
+        selectedIedIndex_, selectedValueIndex_, IedPointStore::toVariantMap(*point)};
+    const auto before = point->value;
+    point->value = value;
+    point->quality = quality;
+    point->origin = origin;
+    point->changed = true;
+    point->updated = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss.zzz"));
+
     if (!writeModelManifest(selectedIedIndex_)) {
-        values_[selectedValueIndex_] = previousValue_->value;
-        const auto previousKey = runtimeValueKey(
-            previousValue_->value.value(QStringLiteral("iedName")).toString(),
-            previousValue_->value.value(QStringLiteral("reference")).toString());
-        runtimeValues_.insert(previousKey, previousValue_->value);
+        *point = IedPointStore::fromVariantMap(previousValue_->value);
         previousValue_.reset();
         emit valuesChanged();
         emit selectionChanged();
@@ -667,33 +673,27 @@ bool IedFleetController::applySelectedValue(
     appendActivity(
         QStringLiteral("Value"),
         QStringLiteral("%1 changed from %2 to %3 · quality %4 · origin %5")
-            .arg(item.value(QStringLiteral("reference")).toString(), before, value, quality, origin),
+            .arg(point->reference, before, value, quality, origin),
         QStringLiteral("Success"),
-        item.value(QStringLiteral("iedName")).toString());
+        point->iedName);
     return true;
 }
 
 bool IedFleetController::undoLastChange() {
     if (!previousValue_.has_value() || previousValue_->iedIndex != selectedIedIndex_ ||
-        previousValue_->valueIndex < 0 || previousValue_->valueIndex >= values_.size()) {
+        previousValue_->valueIndex < 0 ||
+        previousValue_->valueIndex >= selectedPointIndices_.size()) {
         return false;
     }
     const int index = previousValue_->valueIndex;
-    const auto current = values_[index].toMap();
-    const auto previous = previousValue_->value;
-    values_[index] = previous;
-    runtimeValues_.insert(
-        runtimeValueKey(
-            previous.value(QStringLiteral("iedName")).toString(),
-            previous.value(QStringLiteral("reference")).toString()),
-        previous);
+    const auto pointIndex = selectedPointIndices_.at(index);
+    auto* point = pointStore_.atMutable(pointIndex);
+    if (point == nullptr) return false;
+    const auto current = *point;
+    const auto previous = IedPointStore::fromVariantMap(previousValue_->value);
+    *point = previous;
     if (!writeModelManifest(selectedIedIndex_)) {
-        values_[index] = current;
-        runtimeValues_.insert(
-            runtimeValueKey(
-                current.value(QStringLiteral("iedName")).toString(),
-                current.value(QStringLiteral("reference")).toString()),
-            current);
+        *point = current;
         return false;
     }
     selectedValueIndex_ = index;
@@ -702,10 +702,9 @@ bool IedFleetController::undoLastChange() {
     emit selectionChanged();
     appendActivity(
         QStringLiteral("Value"),
-        QStringLiteral("Last change to %1 was reverted.")
-            .arg(previous.value(QStringLiteral("reference")).toString()),
+        QStringLiteral("Last change to %1 was reverted.").arg(previous.reference),
         QStringLiteral("Info"),
-        previous.value(QStringLiteral("iedName")).toString());
+        previous.iedName);
     return true;
 }
 
@@ -738,16 +737,17 @@ QString IedFleetController::diagnosticsText() const {
         "MMS association profile: Authentication=None; AP-title=1,1,1,999,1; "
         "AE-qualifier=12; P-selector=00 00 00 01; S-selector=00 01; T-selector=00 01\n");
     text += QStringLiteral(
-        "Counts: IED=%1; LD=%2; DO=%3; DA/BDA=%4; DataSet=%5; Report=%6; GOOSE=%7\n")
+        "Counts: IED=%1; LD=%2; DO=%3; DA/BDA=%4; DataSet=%5; Report=%6; GOOSE=%7; TypedPoints=%8\n")
         .arg(ieds_.size())
         .arg(logicalDeviceCount_)
         .arg(dataObjectCount_)
         .arg(dataAttributeCount_)
         .arg(dataSetCount_)
         .arg(reportCount_)
-        .arg(gooseCount_);
+        .arg(gooseCount_)
+        .arg(pointStore_.size());
     text += QStringLiteral("\nRecent activity (newest first):\n");
-    for (const auto& item : activity_) {
+    for (const auto& item : activity_.snapshot()) {
         const auto event = item.toMap();
         text += QStringLiteral("%1 | %2 | %3 | %4 | %5\n")
             .arg(
@@ -900,9 +900,6 @@ void IedFleetController::rebuildRuntimeInstances(
             ? (multiIed ? QString{} : defaultListenAddress_)
             : previous.value(QStringLiteral("address")).toString();
 
-        // A wildcard listener consumes the port on all local interfaces. It is
-        // convenient for one IED but fundamentally incompatible with a fleet
-        // that wants the same IEC 61850 port on several specific laptop IPs.
         if (multiIed && runtime->listenAddress == QStringLiteral("0.0.0.0")) {
             runtime->listenAddress.clear();
         }
@@ -947,7 +944,7 @@ void IedFleetController::rebuildRuntimeInstances(
 }
 
 void IedFleetController::rebuildValues() {
-    values_.clear();
+    selectedPointIndices_.clear();
     selectedValueIndex_ = -1;
     if (selectedIedIndex_ < 0 || selectedIedIndex_ >= ieds_.size()) {
         emit valuesChanged();
@@ -980,20 +977,24 @@ void IedFleetController::rebuildValues() {
             return left->source_order < right->source_order;
         });
 
-    const auto iedName = ied.value(QStringLiteral("name")).toString();
+    selectedPointIndices_.reserve(static_cast<qsizetype>(points.size()));
     for (const auto* point : points) {
-        const auto key = runtimeValueKey(iedName, qstring(point->reference));
-        if (!runtimeValues_.contains(key)) runtimeValues_.insert(key, valueMap(*point));
-        values_.push_back(runtimeValues_.value(key));
+        const int pointIndex = pointStore_.insertIfMissing(
+            IedPointStore::fromSimulatorPoint(*point));
+        selectedPointIndices_.push_back(pointIndex);
     }
+    seededRuntimeIeds_.insert(ied.value(QStringLiteral("sessionKey")).toString());
 
-    selectedValueIndex_ = values_.isEmpty() ? -1 : 0;
+    selectedValueIndex_ = selectedPointIndices_.isEmpty() ? -1 : 0;
     emit valuesChanged();
 }
 
 void IedFleetController::seedRuntimeValues(const int iedIndex) {
     if (iedIndex < 0 || iedIndex >= ieds_.size()) return;
     const auto ied = ieds_.at(iedIndex).toMap();
+    const auto sessionKey = ied.value(QStringLiteral("sessionKey")).toString();
+    if (!sessionKey.isEmpty() && seededRuntimeIeds_.contains(sessionKey)) return;
+
     const int documentIndex = ied.value(QStringLiteral("documentIndex")).toInt();
     if (documentIndex < 0 || documentIndex >= static_cast<int>(documents_.size())) return;
 
@@ -1003,15 +1004,15 @@ void IedFleetController::seedRuntimeValues(const int iedIndex) {
     const auto built = ar::iec61850::simulation::IedSimulatorProfileBuilder::build(
         documents_[static_cast<std::size_t>(documentIndex)].document,
         options);
-    const auto iedName = ied.value(QStringLiteral("name")).toString();
+    pointStore_.reserve(pointStore_.size() + static_cast<qsizetype>(built.profile.point_count()));
     for (const auto& device : built.profile.logical_devices) {
         for (const auto& node : device.logical_nodes) {
             for (const auto& point : node.points) {
-                const auto key = runtimeValueKey(iedName, qstring(point.reference));
-                if (!runtimeValues_.contains(key)) runtimeValues_.insert(key, valueMap(point));
+                pointStore_.insertIfMissing(IedPointStore::fromSimulatorPoint(point));
             }
         }
     }
+    if (!sessionKey.isEmpty()) seededRuntimeIeds_.insert(sessionKey);
 }
 
 void IedFleetController::updateIedRuntimePresentation(const int index) {
@@ -1210,7 +1211,6 @@ void IedFleetController::appendActivity(
     event.insert(QStringLiteral("severity"), severity);
     event.insert(QStringLiteral("ied"), iedName);
     activity_.push_front(event);
-    while (activity_.size() > 300) activity_.removeLast();
     emit activityChanged();
 }
 
@@ -1411,6 +1411,9 @@ bool IedFleetController::writeModelManifest(const int iedIndex) {
         return false;
     }
 
+    // For an interactive async import the selected IED was already seeded on
+    // the worker, so this is a constant-time guard instead of a second profile
+    // build on Start. Other IEDs are lazily seeded for compatibility.
     seedRuntimeValues(iedIndex);
     ++runtime->modelRevision;
     QByteArray manifest = "ARSTACK_IED_MODEL\t2\t" +
@@ -1429,20 +1432,17 @@ bool IedFleetController::writeModelManifest(const int iedIndex) {
     }
 
     QSet<QString> emittedObjects;
-    for (auto it = runtimeValues_.cbegin(); it != runtimeValues_.cend(); ++it) {
-        const auto item = it.value();
-        if (item.value(QStringLiteral("iedName")).toString() != activeIedName) continue;
-        const auto domain = item.value(QStringLiteral("mmsDomain")).toString();
-        const auto mmsItem = item.value(QStringLiteral("mmsItem")).toString();
-        if (domain.isEmpty() || mmsItem.isEmpty()) continue;
-        const auto key = domain + QLatin1Char('\n') + mmsItem;
+    for (const auto& point : pointStore_.records()) {
+        if (point.iedName != activeIedName) continue;
+        if (point.mmsDomain.isEmpty() || point.mmsItem.isEmpty()) continue;
+        const auto key = point.mmsDomain + QLatin1Char('\n') + point.mmsItem;
         if (emittedObjects.contains(key)) continue;
         emittedObjects.insert(key);
-        manifest += "OBJ\t" + manifestField(domain) + "\t" +
-            manifestField(mmsItem) + "\t" +
-            manifestField(item.value(QStringLiteral("rawType")).toString()) + "\t" +
-            manifestField(item.value(QStringLiteral("type")).toString()) + "\t" +
-            manifestField(item.value(QStringLiteral("value")).toString()) + "\n";
+        manifest += "OBJ\t" + manifestField(point.mmsDomain) + "\t" +
+            manifestField(point.mmsItem) + "\t" +
+            manifestField(point.rawType) + "\t" +
+            manifestField(point.type) + "\t" +
+            manifestField(point.value) + "\n";
     }
 
     QSet<QString> emittedControls;
@@ -1572,8 +1572,6 @@ void IedFleetController::removeModelManifests() {
 QString IedFleetController::manifestPathFor(const int iedIndex) const {
     const auto pid = QCoreApplication::applicationPid();
     if (iedIndex == 0) {
-        // Preserve the long-standing QA path for the first IED while giving
-        // every additional simulated IED its own atomically updated manifest.
         return QDir::temp().filePath(
             QStringLiteral("arstack-ied-simulator-%1.model").arg(pid));
     }
@@ -1695,50 +1693,4 @@ QString IedFleetController::runtimeStateText(const RuntimeState state) const {
     case RuntimeState::failed: return QStringLiteral("Failed");
     }
     return QStringLiteral("Ready");
-}
-
-QString IedFleetController::runtimeValueKey(const QString& iedName, const QString& reference) {
-    return iedName + QLatin1Char('\x1f') + reference;
-}
-
-QVariantMap IedFleetController::valueMap(
-    const ar::iec61850::simulation::IedSimulatorPoint& point) {
-    QVariantMap item;
-    const auto dataObject = qstring(point.data_object);
-    const auto dataAttribute = qstring(point.data_attribute);
-    item.insert(
-        QStringLiteral("name"),
-        dataAttribute.isEmpty() ? dataObject : dataObject + QLatin1Char('.') + dataAttribute);
-    item.insert(QStringLiteral("reference"), qstring(point.reference));
-    item.insert(QStringLiteral("logicalDevice"), qstring(point.logical_device));
-    item.insert(QStringLiteral("logicalNode"), qstring(point.logical_node));
-    item.insert(QStringLiteral("dataObject"), dataObject);
-    item.insert(QStringLiteral("dataAttribute"), dataAttribute);
-    item.insert(QStringLiteral("fc"), qstring(point.functional_constraint));
-    item.insert(QStringLiteral("cdc"), qstring(point.cdc));
-    item.insert(QStringLiteral("type"), qstring(point.display_type));
-    item.insert(QStringLiteral("rawType"), qstring(point.basic_type));
-    item.insert(QStringLiteral("iedName"), qstring(point.ied_name));
-    item.insert(QStringLiteral("mmsDomain"), qstring(point.mms_domain));
-    item.insert(QStringLiteral("mmsItem"), qstring(point.mms_item));
-    item.insert(QStringLiteral("value"), qstring(point.initial_value));
-    item.insert(QStringLiteral("quality"), QStringLiteral("Good"));
-    item.insert(QStringLiteral("origin"), QStringLiteral("Simulator"));
-    item.insert(QStringLiteral("writable"), true);
-    item.insert(QStringLiteral("changed"), false);
-    item.insert(QStringLiteral("updated"), QStringLiteral("—"));
-    if (point.display_type == "Enumeration" && point.cdc == "DPC") {
-        item.insert(
-            QStringLiteral("options"),
-            QStringList{
-                QStringLiteral("intermediate-state"),
-                QStringLiteral("off"),
-                QStringLiteral("on"),
-                QStringLiteral("bad-state")});
-    } else if (point.display_type == "Boolean") {
-        item.insert(
-            QStringLiteral("options"),
-            QStringList{QStringLiteral("false"), QStringLiteral("true")});
-    }
-    return item;
 }
