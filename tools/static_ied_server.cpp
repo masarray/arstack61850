@@ -15,9 +15,10 @@
 #include <cstdlib>
 #include <exception>
 #include <fstream>
-#include <map>
 #include <iostream>
 #include <limits>
+#include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <span>
@@ -25,8 +26,10 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <syncstream>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #if defined(_WIN32)
@@ -85,9 +88,7 @@ enum class SocketWaitStatus : std::uint8_t {
 };
 
 void close_socket(const NativeSocket socket) noexcept {
-    if (socket == kInvalidSocket) {
-        return;
-    }
+    if (socket == kInvalidSocket) return;
 #if defined(_WIN32)
     static_cast<void>(::closesocket(socket));
 #else
@@ -119,11 +120,8 @@ void close_socket(const NativeSocket socket) noexcept {
     fd_set write_set;
     FD_ZERO(&read_set);
     FD_ZERO(&write_set);
-    if (for_read) {
-        FD_SET(socket, &read_set);
-    } else {
-        FD_SET(socket, &write_set);
-    }
+    if (for_read) FD_SET(socket, &read_set);
+    else FD_SET(socket, &write_set);
 
     timeval timeout{};
     timeout.tv_sec = static_cast<long>(timeout_ms / 1'000U);
@@ -143,12 +141,8 @@ void close_socket(const NativeSocket socket) noexcept {
         nullptr,
         &timeout);
 #endif
-    if (result > 0) {
-        return SocketWaitStatus::ready;
-    }
-    if (result == 0) {
-        return SocketWaitStatus::timeout;
-    }
+    if (result > 0) return SocketWaitStatus::ready;
+    if (result == 0) return SocketWaitStatus::timeout;
     return socket_interrupted()
         ? SocketWaitStatus::interrupted
         : SocketWaitStatus::error;
@@ -201,7 +195,7 @@ void close_socket(const NativeSocket socket) noexcept {
         close_socket(listener);
         throw std::runtime_error("bind() failed: " + error);
     }
-    if (::listen(listener, 4) != 0) {
+    if (::listen(listener, 16) != 0) {
         const auto error = socket_error_text();
         close_socket(listener);
         throw std::runtime_error("listen() failed: " + error);
@@ -246,30 +240,22 @@ struct SocketStreamContext final {
     if (count > 0) {
         return {embedded::IoStatus::ok, static_cast<std::size_t>(count)};
     }
-    if (count == 0) {
-        return {embedded::IoStatus::closed, 0U};
-    }
+    if (count == 0) return {embedded::IoStatus::closed, 0U};
     const auto error = ::WSAGetLastError();
     if (error == WSAEWOULDBLOCK || error == WSAEINTR) {
         return {embedded::IoStatus::would_block, 0U};
     }
-    if (error == WSAETIMEDOUT) {
-        return {embedded::IoStatus::timeout, 0U};
-    }
+    if (error == WSAETIMEDOUT) return {embedded::IoStatus::timeout, 0U};
 #else
     const auto count = ::recv(stream.socket, destination.data(), destination.size(), 0);
     if (count > 0) {
         return {embedded::IoStatus::ok, static_cast<std::size_t>(count)};
     }
-    if (count == 0) {
-        return {embedded::IoStatus::closed, 0U};
-    }
+    if (count == 0) return {embedded::IoStatus::closed, 0U};
     if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
         return {embedded::IoStatus::would_block, 0U};
     }
-    if (errno == ETIMEDOUT) {
-        return {embedded::IoStatus::timeout, 0U};
-    }
+    if (errno == ETIMEDOUT) return {embedded::IoStatus::timeout, 0U};
 #endif
     return {embedded::IoStatus::io_error, 0U};
 }
@@ -307,30 +293,22 @@ struct SocketStreamContext final {
     if (count > 0) {
         return {embedded::IoStatus::ok, static_cast<std::size_t>(count)};
     }
-    if (count == 0) {
-        return {embedded::IoStatus::closed, 0U};
-    }
+    if (count == 0) return {embedded::IoStatus::closed, 0U};
     const auto error = ::WSAGetLastError();
     if (error == WSAEWOULDBLOCK || error == WSAEINTR) {
         return {embedded::IoStatus::would_block, 0U};
     }
-    if (error == WSAETIMEDOUT) {
-        return {embedded::IoStatus::timeout, 0U};
-    }
+    if (error == WSAETIMEDOUT) return {embedded::IoStatus::timeout, 0U};
 #else
     const auto count = ::send(stream.socket, bytes.data(), bytes.size(), 0);
     if (count > 0) {
         return {embedded::IoStatus::ok, static_cast<std::size_t>(count)};
     }
-    if (count == 0) {
-        return {embedded::IoStatus::closed, 0U};
-    }
+    if (count == 0) return {embedded::IoStatus::closed, 0U};
     if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
         return {embedded::IoStatus::would_block, 0U};
     }
-    if (errno == ETIMEDOUT) {
-        return {embedded::IoStatus::timeout, 0U};
-    }
+    if (errno == ETIMEDOUT) return {embedded::IoStatus::timeout, 0U};
 #endif
     return {embedded::IoStatus::io_error, 0U};
 }
@@ -341,6 +319,7 @@ struct CliOptions final {
     std::uint16_t port{102U};
     std::uint8_t digital_input_mask{};
     std::size_t maximum_connections{};
+    std::size_t maximum_active_connections{8U};
 };
 
 [[nodiscard]] std::uint32_t parse_u32(
@@ -364,6 +343,7 @@ void print_usage() {
         << "  --model-manifest PATH     Host model manifest emitted by the Qt simulator.\n"
         << "  --digital-input-mask N    GGIO1 Ind1..Ind8 bit mask (default 0).\n"
         << "  --max-connections N       Exit after N accepted TCP connections (default unlimited).\n"
+        << "  --max-active N            Maximum concurrent associations (default 8, max 64).\n"
         << "  -h, --help                Show this help.\n\n"
         << "Portable bounded static IEC 61850 MMS server for lab/interoperability work.\n"
         << "The tool exposes a fixed static object model; it does not claim IEC 61850 conformance.\n";
@@ -379,7 +359,7 @@ void print_usage() {
         }
         if (option == "--host" || option == "--model-manifest" ||
             option == "--port" || option == "--digital-input-mask" ||
-            option == "--max-connections") {
+            option == "--max-connections" || option == "--max-active") {
             if (++index >= argc) {
                 throw std::invalid_argument(option + " requires a value.");
             }
@@ -397,6 +377,12 @@ void print_usage() {
             } else if (option == "--digital-input-mask") {
                 options.digital_input_mask =
                     static_cast<std::uint8_t>(parse_u32(option, value, 0xFFU));
+            } else if (option == "--max-active") {
+                const auto parsed = parse_u32(option, value, 64U);
+                if (parsed == 0U) {
+                    throw std::invalid_argument("--max-active must be 1..64.");
+                }
+                options.maximum_active_connections = static_cast<std::size_t>(parsed);
             } else {
                 options.maximum_connections = static_cast<std::size_t>(
                     parse_u32(
@@ -454,9 +440,7 @@ struct EncodedValue final {
 
 [[nodiscard]] std::vector<std::uint8_t> encode_ber_length(
     const std::size_t length) {
-    if (length < 0x80U) {
-        return {static_cast<std::uint8_t>(length)};
-    }
+    if (length < 0x80U) return {static_cast<std::uint8_t>(length)};
     if (length <= 0xFFU) {
         return {0x81U, static_cast<std::uint8_t>(length)};
     }
@@ -481,9 +465,7 @@ struct EncodedValue final {
 [[nodiscard]] std::vector<std::uint8_t> concat(
     const std::initializer_list<std::span<const std::uint8_t>> parts) {
     std::size_t total = 0U;
-    for (const auto part : parts) {
-        total += part.size();
-    }
+    for (const auto part : parts) total += part.size();
     std::vector<std::uint8_t> result;
     result.reserve(total);
     for (const auto part : parts) {
@@ -935,14 +917,15 @@ void serve_connection(
             try {
                 const auto changed = refresh_manifest_values(*manifest_model);
                 if (changed != 0U) {
-                    std::cout << "IEDSIM_EVENT kind=value_sync association="
-                              << association_id << " changed=" << changed
-                              << " revision=" << manifest_model->revision << '\n';
-                    std::cout.flush();
+                    std::osyncstream{std::cout}
+                        << "IEDSIM_EVENT kind=value_sync association="
+                        << association_id << " changed=" << changed
+                        << " revision=" << manifest_model->revision << '\n';
                 }
             } catch (const std::exception& exception) {
-                std::cerr << "IEDSIM_EVENT kind=value_sync_error association="
-                          << association_id << " message=" << exception.what() << '\n';
+                std::osyncstream{std::cerr}
+                    << "IEDSIM_EVENT kind=value_sync_error association="
+                    << association_id << " message=" << exception.what() << '\n';
             }
         }
         const auto result = session.poll_once();
@@ -950,29 +933,29 @@ void serve_connection(
         total_sent += result.bytes_sent;
         const auto current_state = runtime.state();
         if (current_state != previous_state) {
-            std::cout << "IEDSIM_EVENT kind=protocol_stage association="
-                      << association_id << " remote=" << remote
-                      << " stage=" << connection_state_text(current_state) << '\n';
-            std::cout.flush();
+            std::osyncstream{std::cout}
+                << "IEDSIM_EVENT kind=protocol_stage association="
+                << association_id << " remote=" << remote
+                << " stage=" << connection_state_text(current_state) << '\n';
             previous_state = current_state;
         }
         if (result.application_service != mms::MmsWireConfirmedService::unknown) {
-            std::cout << "IEDSIM_EVENT kind=mms_service association="
-                      << association_id << " remote=" << remote
-                      << " service=" << service_text(result.application_service)
-                      << " invoke=" << result.invoke_id
-                      << " accepted="
-                      << (result.status == mms::MmsStaticServerSessionStatus::application_rejected
-                              ? "false" : "true")
-                      << '\n';
-            std::cout.flush();
+            std::osyncstream{std::cout}
+                << "IEDSIM_EVENT kind=mms_service association="
+                << association_id << " remote=" << remote
+                << " service=" << service_text(result.application_service)
+                << " invoke=" << result.invoke_id
+                << " accepted="
+                << (result.status == mms::MmsStaticServerSessionStatus::application_rejected
+                        ? "false" : "true")
+                << '\n';
         }
         if (result.terminal()) {
-            std::cout << "IEDSIM_EVENT kind=client_closed association="
-                      << association_id << " remote=" << remote
-                      << " rx=" << total_received << " tx=" << total_sent
-                      << " state=" << connection_state_text(runtime.state()) << '\n';
-            std::cout.flush();
+            std::osyncstream{std::cout}
+                << "IEDSIM_EVENT kind=client_closed association="
+                << association_id << " remote=" << remote
+                << " rx=" << total_received << " tx=" << total_sent
+                << " state=" << connection_state_text(runtime.state()) << '\n';
             return;
         }
         if (result.status == mms::MmsStaticServerSessionStatus::would_block ||
@@ -981,6 +964,23 @@ void serve_connection(
         }
     }
     runtime.close_transport();
+}
+
+struct WorkerSlot final {
+    std::jthread thread;
+    std::shared_ptr<std::atomic_bool> done;
+};
+
+[[nodiscard]] WorkerSlot* available_worker(std::vector<WorkerSlot>& workers) {
+    for (auto& worker : workers) {
+        if (!worker.thread.joinable()) return &worker;
+        if (worker.done != nullptr && worker.done->load(std::memory_order_acquire)) {
+            worker.thread.join();
+            worker.done.reset();
+            return &worker;
+        }
+    }
+    return nullptr;
 }
 
 } // namespace
@@ -1034,35 +1034,15 @@ int main(int argc, char** argv) {
 
         std::array<mms::MmsStaticObjectEntry, 13U> objects{};
         objects[0] = mms::MmsStaticObjectEntry{
-            "ESP32S3IOLD0",
-            "LLN0",
-            lln0_type,
-            read_encoded,
-            &root_values[0]};
+            "ESP32S3IOLD0", "LLN0", lln0_type, read_encoded, &root_values[0]};
         objects[1] = mms::MmsStaticObjectEntry{
-            "ESP32S3IOLD0",
-            "LPHD1",
-            lphd1_type,
-            read_encoded,
-            &root_values[1]};
+            "ESP32S3IOLD0", "LPHD1", lphd1_type, read_encoded, &root_values[1]};
         objects[2] = mms::MmsStaticObjectEntry{
-            "ESP32S3IOLD0",
-            "GGIO1",
-            ggio1_type,
-            read_encoded,
-            &root_values[2]};
+            "ESP32S3IOLD0", "GGIO1", ggio1_type, read_encoded, &root_values[2]};
         objects[3] = mms::MmsStaticObjectEntry{
-            "ESP32S3IOLD0",
-            "LLN0$ST$Mod$stVal",
-            boolean_type,
-            read_boolean,
-            &values[0]};
+            "ESP32S3IOLD0", "LLN0$ST$Mod$stVal", boolean_type, read_boolean, &values[0]};
         objects[4] = mms::MmsStaticObjectEntry{
-            "ESP32S3IOLD0",
-            "LPHD1$ST$PhyHealth$stVal",
-            boolean_type,
-            read_boolean,
-            &values[1]};
+            "ESP32S3IOLD0", "LPHD1$ST$PhyHealth$stVal", boolean_type, read_boolean, &values[1]};
         constexpr std::array<std::string_view, 8U> leaf_items{
             "GGIO1$ST$Ind1$stVal",
             "GGIO1$ST$Ind2$stVal",
@@ -1113,19 +1093,27 @@ int main(int argc, char** argv) {
         const auto truncated = manifest_model.declared_entries > object_span.size()
             ? manifest_model.declared_entries - object_span.size()
             : 0U;
-        std::cout << "IEDSIM_EVENT kind=server_ready bind="
-                  << options.bind_address << " port=" << options.port
-                  << " objects=" << object_span.size()
-                  << " domains=" << domain_names.size()
-                  << " datasets=" << data_set_span.size()
-                  << " truncated=" << truncated
-                  << " profile=iedscout" << '\n';
-        std::cout.flush();
+        std::osyncstream{std::cout}
+            << "IEDSIM_EVENT kind=server_ready bind="
+            << options.bind_address << " port=" << options.port
+            << " objects=" << object_span.size()
+            << " domains=" << domain_names.size()
+            << " datasets=" << data_set_span.size()
+            << " truncated=" << truncated
+            << " max_active=" << options.maximum_active_connections
+            << " profile=iedscout" << '\n';
 
+        std::vector<WorkerSlot> workers(options.maximum_active_connections);
         std::size_t connection_count = 0U;
         while (!g_stop.load(std::memory_order_relaxed) &&
                (options.maximum_connections == 0U ||
                 connection_count < options.maximum_connections)) {
+            auto* worker = available_worker(workers);
+            if (worker == nullptr) {
+                std::this_thread::sleep_for(std::chrono::milliseconds{2});
+                continue;
+            }
+
             const auto readiness = wait_socket(listener, true, 200U);
             if (readiness == SocketWaitStatus::timeout ||
                 readiness == SocketWaitStatus::interrupted) {
@@ -1147,30 +1135,81 @@ int main(int argc, char** argv) {
                 reinterpret_cast<sockaddr*>(&peer),
                 &peer_size);
             if (client == kInvalidSocket) {
-                if (g_stop.load(std::memory_order_relaxed) || socket_interrupted()) {
-                    continue;
-                }
-                std::cerr << "accept() failed: " << socket_error_text() << '\n';
+                if (g_stop.load(std::memory_order_relaxed) || socket_interrupted()) continue;
+                std::osyncstream{std::cerr}
+                    << "accept() failed: " << socket_error_text() << '\n';
                 continue;
             }
+
             ++connection_count;
+            const auto association_id = static_cast<std::uint64_t>(connection_count);
             const auto remote = peer_address(peer);
-            std::cout << "IEDSIM_EVENT kind=client_connected association="
-                      << connection_count << " remote=" << remote << '\n';
-            std::cout.flush();
-            serve_connection(
+            std::osyncstream{std::cout}
+                << "IEDSIM_EVENT kind=client_connected association="
+                << association_id << " remote=" << remote << '\n';
+
+            worker->done = std::make_shared<std::atomic_bool>(false);
+            const auto done = worker->done;
+            worker->thread = std::jthread([
+                &options,
+                &manifest_type,
+                &manifest_value,
+                &object_table,
+                &data_sets,
                 client,
-                object_table,
-                data_sets,
-                manifest_model.objects.empty() ? nullptr : &manifest_model,
-                static_cast<std::uint64_t>(connection_count),
-                remote);
-            close_socket(client);
+                association_id,
+                remote,
+                done] {
+                try {
+                    if (!options.model_manifest.empty()) {
+                        auto local_model = load_manifest_model(
+                            options.model_manifest, manifest_type, manifest_value);
+                        const auto local_object_span =
+                            std::span<const mms::MmsStaticObjectEntry>{local_model.objects};
+                        const auto local_data_set_span =
+                            std::span<const mms::MmsStaticDataSetEntry>{local_model.data_sets};
+                        const mms::MmsStaticObjectTable local_object_table{local_object_span};
+                        const mms::MmsStaticDataSetTable local_data_sets{local_data_set_span};
+                        if (!local_object_table.valid() ||
+                            !local_data_sets.valid() ||
+                            !local_data_sets.valid_against(local_object_table)) {
+                            throw std::runtime_error(
+                                "Per-association MMS manifest model is invalid.");
+                        }
+                        serve_connection(
+                            client,
+                            local_object_table,
+                            local_data_sets,
+                            &local_model,
+                            association_id,
+                            remote);
+                    } else {
+                        serve_connection(
+                            client,
+                            object_table,
+                            data_sets,
+                            nullptr,
+                            association_id,
+                            remote);
+                    }
+                } catch (const std::exception& exception) {
+                    std::osyncstream{std::cerr}
+                        << "IEDSIM_EVENT kind=client_error association="
+                        << association_id << " remote=" << remote
+                        << " message=" << exception.what() << '\n';
+                }
+                close_socket(client);
+                done->store(true, std::memory_order_release);
+            });
         }
 
         close_socket(listener);
-        std::cout << "IEDSIM_EVENT kind=server_stopped connections="
-                  << connection_count << '\n';
+        for (auto& worker : workers) {
+            if (worker.thread.joinable()) worker.thread.join();
+        }
+        std::osyncstream{std::cout}
+            << "IEDSIM_EVENT kind=server_stopped connections="
+            << connection_count << '\n';
         return 0;
     } catch (const std::exception& exception) {
         std::cerr << "Static IED server failed: " << exception.what() << '\n';
