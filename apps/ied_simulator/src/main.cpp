@@ -74,6 +74,10 @@ int main(int argc, char* argv[]) {
         QStringLiteral("QA: repeat the bounded async import in one process for lifecycle/leak soak."),
         QStringLiteral("count"),
         QStringLiteral("1")};
+    const QCommandLineOption qaRuntimeCyclesOption{
+        QStringLiteral("qa-runtime-cycles"),
+        QStringLiteral("QA: repeatedly start and stop the selected MMS runtime in one GUI process."),
+        QStringLiteral("count")};
     const QCommandLineOption runtimeOption{
         QStringLiteral("runtime"),
         QStringLiteral("Start the selected MMS runtime after importing the model.")};
@@ -109,6 +113,7 @@ int main(int argc, char* argv[]) {
         sclOption,
         qaAsyncImportOption,
         qaAsyncImportRepeatOption,
+        qaRuntimeCyclesOption,
         runtimeOption,
         iedEndpointOption,
         startIedOption,
@@ -230,9 +235,80 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        bool qaRuntimeCycleScheduled = false;
+        if (backend != nullptr && fleetConfigurationValid && parser.isSet(qaRuntimeCyclesOption)) {
+            bool countOk{};
+            const auto requested = parser.value(qaRuntimeCyclesOption).toInt(&countOk);
+            const int cycleCount = countOk ? std::clamp(requested, 1, 100) : 0;
+            if (cycleCount <= 0 || !backend->property("imported").toBool()) {
+                fleetConfigurationValid = false;
+                qWarning().noquote()
+                    << "--qa-runtime-cycles requires a positive count and a successfully loaded --scl model.";
+                QTimer::singleShot(0, &app, [] { QCoreApplication::exit(8); });
+            } else {
+                qaRuntimeCycleScheduled = true;
+                auto cycle = std::make_shared<int>(0);
+                auto phase = std::make_shared<int>(0);
+                auto* const cycleTimer = new QTimer{backend};
+                cycleTimer->setInterval(25);
+                QObject::connect(
+                    cycleTimer,
+                    &QTimer::timeout,
+                    backend,
+                    [&app, backend, cycleTimer, cycleCount, cycle, phase] {
+                        if (*phase == 0) {
+                            bool started{};
+                            const bool invoked = QMetaObject::invokeMethod(
+                                backend,
+                                "startSimulation",
+                                Q_RETURN_ARG(bool, started));
+                            if (!invoked || !started) {
+                                cycleTimer->stop();
+                                cycleTimer->deleteLater();
+                                qWarning().noquote()
+                                    << "Runtime lifecycle soak could not start cycle"
+                                    << (*cycle + 1);
+                                app.exit(9);
+                                return;
+                            }
+                            *phase = 1;
+                            return;
+                        }
+
+                        if (*phase == 1) {
+                            if (!backend->property("running").toBool()) return;
+                            qInfo().noquote() << "RUNTIME_CYCLE_STARTED" << (*cycle + 1);
+                            QMetaObject::invokeMethod(backend, "stopSimulation");
+                            *phase = 2;
+                            return;
+                        }
+
+                        if (backend->property("anyRunning").toBool()) return;
+                        ++(*cycle);
+                        qInfo().noquote() << "RUNTIME_CYCLE_FINISHED" << *cycle;
+                        if (*cycle >= cycleCount) {
+                            cycleTimer->stop();
+                            cycleTimer->deleteLater();
+                            qInfo().noquote() << "RUNTIME_CYCLE_SOAK_PASS cycles=" << *cycle;
+                            app.exit(0);
+                            return;
+                        }
+                        *phase = 0;
+                    });
+                cycleTimer->start();
+                QTimer::singleShot(45'000, backend, [&app, cycleTimer] {
+                    if (!cycleTimer->isActive()) return;
+                    cycleTimer->stop();
+                    cycleTimer->deleteLater();
+                    qWarning().noquote() << "Runtime lifecycle soak timed out.";
+                    app.exit(10);
+                });
+            }
+        }
+
         if (!fleetConfigurationValid) {
             QTimer::singleShot(0, &app, [] { QCoreApplication::exit(2); });
-        } else if (backend != nullptr) {
+        } else if (backend != nullptr && !qaRuntimeCycleScheduled) {
             if (parser.isSet(runtimeOption)) {
                 QTimer::singleShot(150, backend, [backend] {
                     QMetaObject::invokeMethod(backend, "startSimulation");
