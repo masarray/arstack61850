@@ -80,6 +80,7 @@ add_library(ariec61850_ied_simulator_server_core STATIC
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/write_span.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/data_set_span.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/information_report_span.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/buffered_selective_information_report_span.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_object_table.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_write.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_data_set_table.cpp
@@ -89,7 +90,11 @@ add_library(ariec61850_ied_simulator_server_core STATIC
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_information_report.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_report_connection.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_urcb_objects.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_urcb_runtime.cpp)
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_urcb_runtime.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_brcb_runtime.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_brcb_control.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_brcb_objects.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_brcb_connection.cpp)
 target_include_directories(ariec61850_ied_simulator_server_core PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/../../include)
 target_compile_features(ariec61850_ied_simulator_server_core PUBLIC cxx_std_20)
@@ -105,18 +110,24 @@ if(WIN32)
 endif()
 target_compile_features(ariec61850_ied_simulator_server PRIVATE cxx_std_20)
 
-# End-to-end reporting regression client. It uses the normal host-side MMS
-# association runtime and therefore proves that the simulator is interoperable
-# through its public wire contract, not through an in-process shortcut.
+# End-to-end reporting regression clients use the normal host-side MMS
+# association runtime. They prove interoperability through the public wire
+# contract instead of through an in-process shortcut.
 add_executable(ariec61850_mms_urcb_gi_probe
     ${CMAKE_CURRENT_LIST_DIR}/../../tools/mms_urcb_gi_probe.cpp)
 target_link_libraries(ariec61850_mms_urcb_gi_probe PRIVATE ARIEC61850::core)
 target_compile_features(ariec61850_mms_urcb_gi_probe PRIVATE cxx_std_20)
 
+add_executable(ariec61850_mms_brcb_event_probe
+    ${CMAKE_CURRENT_LIST_DIR}/../../tools/mms_brcb_event_probe.cpp)
+target_link_libraries(ariec61850_mms_brcb_event_probe PRIVATE ARIEC61850::core)
+target_compile_features(ariec61850_mms_brcb_event_probe PRIVATE cxx_std_20)
+
 add_dependencies(
     arstack_ied_simulator
     ariec61850_ied_simulator_server
-    ariec61850_mms_urcb_gi_probe)
+    ariec61850_mms_urcb_gi_probe
+    ariec61850_mms_brcb_event_probe)
 
 if(WIN32)
     set_target_properties(arstack_ied_simulator PROPERTIES WIN32_EXECUTABLE TRUE)
