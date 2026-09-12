@@ -62,7 +62,11 @@ struct MmsStaticObjectEntry final {
 
 class MmsStaticObjectTable final {
 public:
-    static constexpr std::size_t maximum_objects = 128U;
+    // Validation ceiling only: the table owns a span and does not allocate this
+    // capacity. A production desktop simulator needs room for complete SCL
+    // models containing thousands of leaf objects; embedded users still choose
+    // the actual backing storage and therefore retain deterministic memory use.
+    static constexpr std::size_t maximum_objects = 8'192U;
 
     explicit constexpr MmsStaticObjectTable(
         const std::span<const MmsStaticObjectEntry> objects) noexcept
