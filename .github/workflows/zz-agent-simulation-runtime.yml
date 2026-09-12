@@ -1,11 +1,13 @@
 name: Agent Simulator Runtime Port
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - feat/complete-ariec61850-simulator-parity
     paths:
       - '.github/workflows/zz-agent-simulation-runtime.yml'
+      - 'scripts/agent_*.py'
 
 permissions:
   contents: write
@@ -108,5 +110,6 @@ jobs:
             apps/ied_simulator/src/IedSimulatorController.hpp \
             apps/ied_simulator/src/IedSimulatorController.cpp \
             tools/static_ied_server.cpp
+          git diff --cached --quiet && exit 0
           git commit -m 'feat(simulation): complete native simulator runtime core milestone'
           git push origin HEAD:feat/complete-ariec61850-simulator-parity
