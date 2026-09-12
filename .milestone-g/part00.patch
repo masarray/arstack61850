@@ -1,0 +1,180 @@
+diff -ruN '--exclude=__pycache__' iedsim-pristine/.github/workflows/ied-simulator-qt.yml iedsim-src/.github/workflows/ied-simulator-qt.yml
+--- iedsim-pristine/.github/workflows/ied-simulator-qt.yml	2026-09-12 21:37:38.000000000 +0000
++++ iedsim-src/.github/workflows/ied-simulator-qt.yml	2026-09-12 21:42:24.521718766 +0000
+@@ -55,19 +55,10 @@
+       - name: Build
+         run: >-
+           cmake --build build-ied-simulator-qt
+-          --target arstack_ied_simulator ariec61850_mms_read_probe --parallel 2
++          --target arstack_ied_simulator ariec61850_mms_read_probe ied_simulator_guardrails_qa --parallel 2
+ 
+-      - name: Export simulator source snapshot
+-        uses: actions/upload-artifact@v4
+-        with:
+-          name: ied-simulator-source
+-          path: |
+-            apps/ied_simulator/src
+-            apps/ied_simulator/qml
+-            apps/ied_simulator/CMakeLists.txt
+-            .github/workflows/ied-simulator-qt.yml
+-          if-no-files-found: error
+-          retention-days: 1
++      - name: Bounded activity and child-output guardrails
++        run: ./build-ied-simulator-qt/ied_simulator_guardrails_qa
+ 
+       - name: QML smoke test
+         env:
+diff -ruN '--exclude=__pycache__' iedsim-pristine/apps/ied_simulator/CMakeLists.txt iedsim-src/apps/ied_simulator/CMakeLists.txt
+--- iedsim-pristine/apps/ied_simulator/CMakeLists.txt	2026-09-12 21:37:38.000000000 +0000
++++ iedsim-src/apps/ied_simulator/CMakeLists.txt	2026-09-12 21:41:10.828963864 +0000
+@@ -32,6 +32,10 @@
+     URI ARStack.IedSimulator
+     VERSION 1.0
+     SOURCES
++        src/IedActivityModel.cpp
++        src/IedActivityModel.hpp
++        src/IedRuntimeGuardrails.cpp
++        src/IedRuntimeGuardrails.hpp
+         src/IedFleetController.cpp
+         src/IedFleetControllerAsync.cpp
+         src/IedFleetController.hpp
+@@ -70,6 +74,20 @@
+ 
+ target_compile_features(arstack_ied_simulator PRIVATE cxx_std_20)
+ 
++
++add_executable(ied_simulator_guardrails_qa
++    src/ied_simulator_guardrails_qa.cpp
++    src/IedActivityModel.cpp
++    src/IedActivityModel.hpp
++    src/IedRuntimeGuardrails.cpp
++    src/IedRuntimeGuardrails.hpp)
++target_link_libraries(ied_simulator_guardrails_qa PRIVATE
++    Qt6::Core
++    Qt6::Qml)
++target_include_directories(ied_simulator_guardrails_qa PRIVATE
++    ${CMAKE_CURRENT_LIST_DIR}/src)
++target_compile_features(ied_simulator_guardrails_qa PRIVATE cxx_std_20)
++
+ # The regular library intentionally keeps a strict portable connection runtime.
+ # The desktop simulator needs the separate compatibility runtime validated
+ # against common engineering-client AARQ, selector, browse, Identify and
+diff -ruN '--exclude=__pycache__' iedsim-pristine/apps/ied_simulator/qml/ActivityMonitor.qml iedsim-src/apps/ied_simulator/qml/ActivityMonitor.qml
+--- iedsim-pristine/apps/ied_simulator/qml/ActivityMonitor.qml	2026-09-12 21:37:38.000000000 +0000
++++ iedsim-src/apps/ied_simulator/qml/ActivityMonitor.qml	2026-09-12 21:41:30.410868539 +0000
+@@ -16,23 +16,6 @@
+     height: parent ? parent.height : 760
+     padding: 0
+ 
+-    property string searchText: ""
+-    property string severityFilter: "All"
+-
+-    function eventMatches(item) {
+-        if (!item)
+-            return false
+-        if (severityFilter !== "All" && String(item.severity || "Info") !== severityFilter)
+-            return false
+-        var query = searchText.trim().toLowerCase()
+-        if (query.length === 0)
+-            return true
+-        var haystack = [item.time, item.severity, item.ied, item.category, item.message]
+-                .map(function(value) { return String(value || "").toLowerCase() })
+-                .join(" ")
+-        return haystack.indexOf(query) >= 0
+-    }
+-
+     background: Rectangle {
+         color: root.theme.chrome
+         border.width: 1
+@@ -78,7 +61,7 @@
+                 }
+                 ToolButton {
+                     text: "Clear"
+-                    enabled: root.backend.activity.length > 0
++                    enabled: root.backend.activityModel.retainedCount > 0
+                     onClicked: root.backend.clearActivity()
+                 }
+                 ToolButton {
+@@ -108,15 +91,16 @@
+                     placeholderText: "Filter IED, service, report or message"
+                     selectByMouse: true
+                     font.pixelSize: 9
+-                    onTextChanged: root.searchText = text
++                    onTextChanged: root.backend.activityModel.filterText = text
+                 }
+ 
+                 ComboBox {
++                    id: severityBox
+                     Layout.preferredWidth: 105
+                     Layout.preferredHeight: 31
+                     model: ["All", "Info", "Success", "Warning", "Error"]
+                     font.pixelSize: 9
+-                    onCurrentTextChanged: root.severityFilter = currentText
++                    onCurrentTextChanged: root.backend.activityModel.severityFilter = currentText
+                 }
+             }
+         }
+@@ -127,7 +111,7 @@
+             Layout.fillWidth: true
+             Layout.fillHeight: true
+             clip: true
+-            model: root.opened ? root.backend.activity : []
++            model: root.opened ? root.backend.activityModel : null
+             reuseItems: true
+             cacheBuffer: 0
+             boundsBehavior: Flickable.StopAtBounds
+@@ -135,12 +119,14 @@
+ 
+             delegate: Rectangle {
+                 id: eventRow
+-                required property var modelData
++                required property string time
++                required property string category
++                required property string message
++                required property string severity
++                required property string ied
+ 
+-                readonly property bool matches: root.eventMatches(modelData)
+                 width: activityList.width
+-                height: matches ? 70 : 0
+-                visible: matches
++                height: 70
+                 color: rowMouse.containsMouse ? root.theme.surfaceRaised : root.theme.surface
+ 
+                 Rectangle {
+@@ -149,10 +135,9 @@
+                     anchors.bottom: parent.bottom
+                     width: 3
+                     color: {
+-                        var severity = String(eventRow.modelData.severity || "Info")
+-                        if (severity === "Error") return root.theme.red
+-                        if (severity === "Warning") return root.theme.amber
+-                        if (severity === "Success") return root.theme.green
++                        if (eventRow.severity === "Error") return root.theme.red
++                        if (eventRow.severity === "Warning") return root.theme.amber
++                        if (eventRow.severity === "Success") return root.theme.green
+                         return root.theme.accent
+                     }
+                 }
+@@ -169,7 +154,7 @@
+                         Layout.fillWidth: true
+                         spacing: 7
+                         Label {
+-                            text: String(eventRow.modelData.time || "")
++                            text: eventRow.time
+                             color: root.theme.muted
+                             font.pixelSize: 8
+                         }
+@@ -181,7 +166,7 @@
+                             Label {
+                                 id: categoryLabel
+                                 anchors.centerIn: parent
+-                                text: String(eventRow.modelData.category || "Event")
++                                text: eventRow.category.length ? eventRow.category : "Event"
+                                 color: root.theme.textSoft
+                                 font.pixelSize: 7
+                                 font.weight: Font.DemiBold
+@@ -189,7 +174,7 @@
+                         }
+                         Label {
+                             Layout.fillWidth: true
