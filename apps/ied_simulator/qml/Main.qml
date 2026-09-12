@@ -7,17 +7,17 @@ import ARStack.IedSimulator 1.0
 
 ApplicationWindow {
     id: root
-    width: 1360
-    height: 860
-    minimumWidth: 1080
-    minimumHeight: 680
+    width: 1440
+    height: 900
+    minimumWidth: 1120
+    minimumHeight: 700
     visible: true
-    title: "ARStack IED Simulator"
+    title: "ARStack IED Lab"
     color: appTheme.background
     font.family: interFont.status === FontLoader.Ready ? interFont.name : "Segoe UI"
 
     AppTheme { id: appTheme }
-    IedSimulatorController {
+    IedFleetController {
         id: simulator
         objectName: "simulatorBackend"
     }
@@ -31,7 +31,7 @@ ApplicationWindow {
 
     FileDialog {
         id: sclDialog
-        title: appendImport ? "Add IEC 61850 engineering file" : "Open IEC 61850 engineering file"
+        title: appendImport ? "Add IEC 61850 engineering model" : "Open IEC 61850 engineering model"
         nameFilters: ["IEC 61850 engineering files (*.scl *.cid *.scd *.iid *.icd)", "All files (*)"]
         onAccepted: appendImport ? simulator.addFile(selectedFile) : simulator.loadFile(selectedFile)
     }
@@ -47,7 +47,7 @@ ApplicationWindow {
         sclDialog.open()
     }
 
-    RuntimeWorkspace {
+    FleetWorkspace {
         anchors.fill: parent
         theme: appTheme
         backend: simulator
