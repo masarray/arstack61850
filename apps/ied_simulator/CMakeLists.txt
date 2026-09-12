@@ -36,6 +36,8 @@ qt_add_qml_module(arstack_ied_simulator
         src/IedActivityModel.hpp
         src/IedRuntimeGuardrails.cpp
         src/IedRuntimeGuardrails.hpp
+        src/IedPointStore.cpp
+        src/IedPointStore.hpp
         src/IedFleetController.cpp
         src/IedFleetControllerAsync.cpp
         src/IedFleetController.hpp
