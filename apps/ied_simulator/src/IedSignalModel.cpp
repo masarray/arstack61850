@@ -3,7 +3,6 @@
 #include "IedSignalModel.hpp"
 
 #include <QHash>
-#include <QVariantMap>
 #include <QVector>
 
 #include <algorithm>
@@ -16,9 +15,10 @@ struct ObjectGroup final {
     bool objectMatches{};
 };
 
-QString referenceAt(const QVariantList& values, const int index) {
-    if (index < 0 || index >= values.size()) return {};
-    return values.at(index).toMap().value(QStringLiteral("reference")).toString();
+QString referenceAt(const IedFleetController* backend, const int index) {
+    if (backend == nullptr) return {};
+    const auto* point = backend->valueRecord(index);
+    return point == nullptr ? QString{} : point->reference;
 }
 } // namespace
 
@@ -101,21 +101,19 @@ IedSignalModel::Row IedSignalModel::makeRow(
     const RowKind kind,
     const int sourceIndex,
     const QString& name,
-    const QVariantMap& item) const {
+    const IedPointStore::PointRecord& item) const {
     const bool objectRow = kind == RowKind::dataObject;
     Row row;
     row.kind = kind;
     row.sourceIndex = sourceIndex;
     row.name = name;
-    row.functionalConstraint = objectRow
-        ? QString{}
-        : item.value(QStringLiteral("fc")).toString();
-    row.type = item.value(objectRow ? QStringLiteral("cdc") : QStringLiteral("type")).toString();
-    row.reference = item.value(QStringLiteral("reference")).toString();
-    row.value = item.value(QStringLiteral("value")).toString();
-    row.quality = item.value(QStringLiteral("quality")).toString();
-    row.writable = item.value(QStringLiteral("writable")).toBool();
-    row.changed = item.value(QStringLiteral("changed")).toBool();
+    row.functionalConstraint = objectRow ? QString{} : item.functionalConstraint;
+    row.type = objectRow ? item.cdc : item.type;
+    row.reference = item.reference;
+    row.value = item.value;
+    row.quality = item.quality;
+    row.writable = item.writable;
+    row.changed = item.changed;
     return row;
 }
 
@@ -172,21 +170,23 @@ void IedSignalModel::scheduleRebuild() {
 }
 
 void IedSignalModel::scheduleRefresh() {
-    // This timer is intentionally the latest-state accumulator for the UI.
-    // Any number of valuesChanged bursts inside one frame collapse into one
-    // read of authoritative state. Protocol/runtime state is not reordered.
+    // Latest-state presentation accumulator: any number of valuesChanged bursts
+    // inside one frame collapse into one scan of only the currently projected
+    // source rows. Protocol/runtime state remains ordered and authoritative.
     if (!rebuildTimer_.isActive() && !refreshTimer_.isActive()) refreshTimer_.start();
 }
 
-bool IedSignalModel::rowMatches(const QVariantMap& item, const QString& query) const {
+bool IedSignalModel::rowMatches(
+    const IedPointStore::PointRecord& item,
+    const QString& query) const {
     if (query.isEmpty()) return true;
     const QStringList fields{
-        item.value(QStringLiteral("dataObject")).toString(),
-        item.value(QStringLiteral("dataAttribute")).toString(),
-        item.value(QStringLiteral("value")).toString(),
-        item.value(QStringLiteral("fc")).toString(),
-        item.value(QStringLiteral("type")).toString(),
-        item.value(QStringLiteral("reference")).toString(),
+        item.dataObject,
+        item.dataAttribute,
+        item.value,
+        item.functionalConstraint,
+        item.type,
+        item.reference,
     };
     for (const auto& field : fields) {
         if (field.contains(query, Qt::CaseInsensitive)) return true;
@@ -198,25 +198,23 @@ void IedSignalModel::rebuild() {
     const int previousCount = rowCount();
     observedIedIndex_ = backend_ != nullptr ? backend_->selectedIedIndex() : -1;
     observedSelectedSourceIndex_ = backend_ != nullptr ? backend_->selectedValueIndex() : -1;
-    const QVariantList emptyValues;
-    const auto& sourceValues = backend_ != nullptr ? backend_->valuesView() : emptyValues;
-    observedSourceCount_ = sourceValues.size();
-    observedFirstReference_ = referenceAt(sourceValues, 0);
-    observedLastReference_ = referenceAt(sourceValues, sourceValues.size() - 1);
+    observedSourceCount_ = backend_ != nullptr ? backend_->valueCount() : 0;
+    observedFirstReference_ = referenceAt(backend_, 0);
+    observedLastReference_ = referenceAt(backend_, observedSourceCount_ - 1);
 
     QVector<ObjectGroup> groups;
     QHash<QString, int> groupIndex;
     const auto query = filterText_.trimmed();
 
     const auto consumeSource = [&](const int sourceIndex) {
-        if (sourceIndex < 0 || sourceIndex >= sourceValues.size()) return;
-        const auto item = sourceValues.at(sourceIndex).toMap();
-        if (item.value(QStringLiteral("logicalDevice")).toString() != logicalDevice_ ||
-            item.value(QStringLiteral("logicalNode")).toString() != logicalNode_) {
+        if (backend_ == nullptr || sourceIndex < 0 || sourceIndex >= backend_->valueCount()) return;
+        const auto* item = backend_->valueRecord(sourceIndex);
+        if (item == nullptr || item->logicalDevice != logicalDevice_ ||
+            item->logicalNode != logicalNode_) {
             return;
         }
 
-        const auto objectName = item.value(QStringLiteral("dataObject")).toString();
+        const auto& objectName = item->dataObject;
         if (objectName.isEmpty()) return;
         auto found = groupIndex.constFind(objectName);
         int index{};
@@ -231,7 +229,7 @@ void IedSignalModel::rebuild() {
 
         auto& group = groups[index];
         group.members.push_back(sourceIndex);
-        const auto attribute = item.value(QStringLiteral("dataAttribute")).toString();
+        const auto& attribute = item->dataAttribute;
         if (group.preferred < 0 || attribute == QStringLiteral("stVal") ||
             attribute.endsWith(QStringLiteral(".stVal")) ||
             attribute == QStringLiteral("mag.f")) {
@@ -245,10 +243,10 @@ void IedSignalModel::rebuild() {
         const auto& scopeIndices = backend_->valueScopeIndices(logicalDevice_, logicalNode_);
         groups.reserve(scopeIndices.size() > 0 ? 16 : 0);
         for (const auto sourceIndex : scopeIndices) consumeSource(sourceIndex);
-    } else {
-        // Legacy synchronous/multi-IED selection fallback remains correct while
-        // avoiding an extra full QVariantList copy.
-        for (int sourceIndex = 0; sourceIndex < sourceValues.size(); ++sourceIndex) {
+    } else if (backend_ != nullptr) {
+        // Legacy synchronous/multi-IED selection fallback still reads the typed
+        // canonical store directly; it never materializes a full QVariant list.
+        for (int sourceIndex = 0; sourceIndex < backend_->valueCount(); ++sourceIndex) {
             consumeSource(sourceIndex);
         }
     }
@@ -264,22 +262,23 @@ void IedSignalModel::rebuild() {
             visibleMembers = group.members;
         } else {
             for (const auto sourceIndex : group.members) {
-                if (rowMatches(sourceValues.at(sourceIndex).toMap(), query)) {
-                    visibleMembers.push_back(sourceIndex);
-                }
+                const auto* item = backend_ != nullptr ? backend_->valueRecord(sourceIndex) : nullptr;
+                if (item != nullptr && rowMatches(*item, query)) visibleMembers.push_back(sourceIndex);
             }
         }
         if (visibleMembers.isEmpty()) continue;
 
         int preferred = group.preferred;
         if (preferred < 0 || !group.members.contains(preferred)) preferred = visibleMembers.constFirst();
-        const auto preferredItem = sourceValues.at(preferred).toMap();
-        nextRows.push_back(makeRow(RowKind::dataObject, preferred, group.name, preferredItem));
+        const auto* preferredItem = backend_ != nullptr ? backend_->valueRecord(preferred) : nullptr;
+        if (preferredItem == nullptr) continue;
+        nextRows.push_back(makeRow(RowKind::dataObject, preferred, group.name, *preferredItem));
         for (const auto sourceIndex : visibleMembers) {
-            const auto item = sourceValues.at(sourceIndex).toMap();
-            auto attribute = item.value(QStringLiteral("dataAttribute")).toString();
+            const auto* item = backend_ != nullptr ? backend_->valueRecord(sourceIndex) : nullptr;
+            if (item == nullptr) continue;
+            auto attribute = item->dataAttribute;
             if (attribute.isEmpty()) attribute = group.name;
-            nextRows.push_back(makeRow(RowKind::dataAttribute, sourceIndex, attribute, item));
+            nextRows.push_back(makeRow(RowKind::dataAttribute, sourceIndex, attribute, *item));
         }
     }
 
@@ -299,11 +298,11 @@ void IedSignalModel::refreshSnapshot() {
         return;
     }
 
-    const auto& next = backend_->valuesView();
+    const int nextCount = backend_->valueCount();
     const bool sameStructure = backend_->selectedIedIndex() == observedIedIndex_ &&
-        next.size() == observedSourceCount_ &&
-        referenceAt(next, 0) == observedFirstReference_ &&
-        referenceAt(next, next.size() - 1) == observedLastReference_;
+        nextCount == observedSourceCount_ &&
+        referenceAt(backend_, 0) == observedFirstReference_ &&
+        referenceAt(backend_, nextCount - 1) == observedLastReference_;
 
     if (!sameStructure) {
         scheduleRebuild();
@@ -321,16 +320,11 @@ void IedSignalModel::refreshSnapshot() {
     QVector<int> changedRows;
     for (auto it = sourceRows_.cbegin(); it != sourceRows_.cend(); ++it) {
         const int sourceIndex = it.key();
-        if (sourceIndex < 0 || sourceIndex >= next.size()) {
+        const auto* after = backend_->valueRecord(sourceIndex);
+        if (after == nullptr) {
             scheduleRebuild();
             return;
         }
-        const auto after = next.at(sourceIndex).toMap();
-        const auto reference = after.value(QStringLiteral("reference")).toString();
-        const auto value = after.value(QStringLiteral("value")).toString();
-        const auto quality = after.value(QStringLiteral("quality")).toString();
-        const bool writable = after.value(QStringLiteral("writable")).toBool();
-        const bool changed = after.value(QStringLiteral("changed")).toBool();
 
         for (const int rowIndex : it.value()) {
             if (rowIndex < 0 || rowIndex >= rowCount()) {
@@ -338,18 +332,18 @@ void IedSignalModel::refreshSnapshot() {
                 return;
             }
             auto& row = rows_[static_cast<std::size_t>(rowIndex)];
-            if (row.reference != reference) {
+            if (row.reference != after->reference) {
                 scheduleRebuild();
                 return;
             }
-            if (row.value == value && row.quality == quality &&
-                row.writable == writable && row.changed == changed) {
+            if (row.value == after->value && row.quality == after->quality &&
+                row.writable == after->writable && row.changed == after->changed) {
                 continue;
             }
-            row.value = value;
-            row.quality = quality;
-            row.writable = writable;
-            row.changed = changed;
+            row.value = after->value;
+            row.quality = after->quality;
+            row.writable = after->writable;
+            row.changed = after->changed;
             changedRows.push_back(rowIndex);
         }
     }
