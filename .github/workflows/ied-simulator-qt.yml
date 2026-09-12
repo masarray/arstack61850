@@ -43,13 +43,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Apply milestone G source patch
-        if: github.event_name == 'push' && github.ref == 'refs/heads/feat/ied-sim-ux-performance-foundation'
+        if: github.event_name == 'pull_request' && github.head_ref == 'feat/ied-sim-ux-performance-foundation'
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "ARStack CI"
           git config user.email "actions@users.noreply.github.com"
-          git fetch origin 4225202bcbfcfa71a0d4499d9412f7ac2be2cc0e --depth=1
+          git fetch origin feat/ied-sim-ux-performance-foundation 4225202bcbfcfa71a0d4499d9412f7ac2be2cc0e --depth=1
+          git checkout -B feat/ied-sim-ux-performance-foundation origin/feat/ied-sim-ux-performance-foundation
           git show 4225202bcbfcfa71a0d4499d9412f7ac2be2cc0e:.github/workflows/ied-simulator-qt.yml > .github/workflows/ied-simulator-qt.yml
           cat .milestone-g/part*.patch > /tmp/milestone-g.patch
           patch -p1 --forward < /tmp/milestone-g.patch
@@ -57,7 +58,7 @@ jobs:
           git add .github/workflows/ied-simulator-qt.yml apps/ied_simulator
           git diff --cached --check
           git commit -m "feat(ied-sim): bound runtime diagnostics and restart lifecycle"
-          git push origin HEAD:${GITHUB_REF_NAME}
+          git push origin HEAD:feat/ied-sim-ux-performance-foundation
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
