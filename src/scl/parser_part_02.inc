@@ -208,6 +208,12 @@ public:
         Resolution resolution;
     };
 
+    struct ExpandedModelLeaf final {
+        std::string do_name;
+        std::string da_name;
+        Resolution resolution;
+    };
+
     explicit SclTypeIndex(const XmlNode& root) {
         for (const auto* ied : direct_children(root, "IED")) {
             add_first(ieds_, attribute(ied, "name"), ied);
@@ -372,5 +378,124 @@ public:
             append_leaf(name, resolved_fc, *data_attribute, true);
         }
 
+        return expanded;
+    }
+
+    // Project an entire logical node from DataTypeTemplates. This is the
+    // simulator/server structural source of truth and deliberately does not
+    // depend on DataSet, ReportControl, GSEControl, or SampledValueControl
+    // membership. Nested SDO and structured DA/BDA paths are flattened into
+    // canonical dotted DO/DA paths while preserving their FC/type semantics.
+    [[nodiscard]] std::vector<ExpandedModelLeaf> expand_logical_node(
+        const std::string& ied_name,
+        const std::string& ld_inst,
+        const std::string& prefix,
+        const std::string& ln_class,
+        const std::string& ln_inst) const {
+        std::vector<ExpandedModelLeaf> expanded;
+        const auto* logical_node = find_logical_node(
+            ied_name,
+            ld_inst,
+            prefix,
+            ln_class,
+            ln_inst);
+        if (logical_node == nullptr) {
+            return expanded;
+        }
+        const auto* logical_node_type = find(
+            logical_node_types_, attribute(logical_node, "lnType"));
+        if (logical_node_type == nullptr) {
+            return expanded;
+        }
+
+        const auto append_bdas = [this, &expanded](
+                                     auto&& self,
+                                     const XmlNode& container,
+                                     const std::string& do_path,
+                                     const std::string& da_path,
+                                     const std::string& fc,
+                                     const std::string& cdc) -> void {
+            for (const auto* bda : direct_children(container, "BDA")) {
+                const auto name = attribute(bda, "name");
+                if (name.empty()) continue;
+                const auto child_path = da_path.empty() ? name : da_path + "." + name;
+                const auto basic_type = attribute(bda, "bType");
+                const auto type_id = attribute(bda, "type");
+                if (same(basic_type, "Struct")) {
+                    const auto* nested = find(data_attribute_types_, type_id);
+                    if (nested == nullptr) {
+                        expanded.push_back({
+                            do_path,
+                            child_path,
+                            {false, fc, cdc, basic_type, type_id, {}}});
+                    } else {
+                        self(self, *nested, do_path, child_path, fc, cdc);
+                    }
+                    continue;
+                }
+                std::string enum_type;
+                if (same(basic_type, "Enum") &&
+                    enum_type_ids_.contains(normalized_key(type_id))) {
+                    enum_type = type_id;
+                }
+                expanded.push_back({
+                    do_path,
+                    child_path,
+                    {true, fc, cdc, basic_type, type_id, enum_type}});
+            }
+        };
+
+        const auto append_data_object = [this, &expanded, &append_bdas](
+                                            auto&& self,
+                                            const XmlNode& data_object_type,
+                                            const std::string& do_path) -> void {
+            const auto cdc = attribute(&data_object_type, "cdc");
+            for (const auto* data_attribute : direct_children(data_object_type, "DA")) {
+                const auto name = attribute(data_attribute, "name");
+                const auto fc = attribute(data_attribute, "fc");
+                if (name.empty() || fc.empty()) continue;
+                const auto basic_type = attribute(data_attribute, "bType");
+                const auto type_id = attribute(data_attribute, "type");
+                if (same(basic_type, "Struct")) {
+                    const auto* nested = find(data_attribute_types_, type_id);
+                    if (nested == nullptr) {
+                        expanded.push_back({
+                            do_path,
+                            name,
+                            {false, fc, cdc, basic_type, type_id, {}}});
+                    } else {
+                        append_bdas(append_bdas, *nested, do_path, name, fc, cdc);
+                    }
+                    continue;
+                }
+                std::string enum_type;
+                if (same(basic_type, "Enum") &&
+                    enum_type_ids_.contains(normalized_key(type_id))) {
+                    enum_type = type_id;
+                }
+                expanded.push_back({
+                    do_path,
+                    name,
+                    {true, fc, cdc, basic_type, type_id, enum_type}});
+            }
+
+            for (const auto* structured_object : direct_children(data_object_type, "SDO")) {
+                const auto name = attribute(structured_object, "name");
+                const auto type_id = attribute(structured_object, "type");
+                if (name.empty() || type_id.empty()) continue;
+                const auto* nested = find(data_object_types_, type_id);
+                if (nested == nullptr) continue;
+                self(self, *nested, do_path + "." + name);
+            }
+        };
+
+        for (const auto* data_object : direct_children(*logical_node_type, "DO")) {
+            const auto name = attribute(data_object, "name");
+            const auto type_id = attribute(data_object, "type");
+            if (name.empty() || type_id.empty()) continue;
+            const auto* data_object_type = find(data_object_types_, type_id);
+            if (data_object_type == nullptr) continue;
+            append_data_object(append_data_object, *data_object_type, name);
+        }
         return expanded;
     }
