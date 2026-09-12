@@ -1,5 +1,6 @@
 name: IED Simulator Qt
 
+# Milestone G bootstrap trigger: runtime diagnostics, restart lifecycle, and bounded output.
 on:
   push:
     paths:
