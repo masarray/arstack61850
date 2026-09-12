@@ -84,3 +84,10 @@ jobs:
           --app ./build-ied-simulator-qt/arstack_ied_simulator
           --read-probe ./build-ied-simulator-qt
           --scl ./tests/fixtures/scl/minimal-station-brcb.scd
+
+      - name: Prove two IEDs can share TCP port across distinct local IPs
+        run: >-
+          python3 apps/ied_simulator/test_gui_multi_ied.py
+          --app ./build-ied-simulator-qt/arstack_ied_simulator
+          --read-probe ./build-ied-simulator-qt
+          --scl ./tests/fixtures/scl/compact-multi-stream.scd
