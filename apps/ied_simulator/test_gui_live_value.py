@@ -23,19 +23,27 @@ def creation_flags() -> int:
     return subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
-def resolve_read_probe(argument: str) -> str:
+def resolve_named_probe(argument: str, stem: str, label: str) -> str:
     path = Path(argument)
-    if path.is_file():
+    names = {stem, f"{stem}.exe"}
+    if path.is_file() and path.name in names:
         return str(path)
     if path.is_dir():
-        names = {"ariec61850_mms_read_probe", "ariec61850_mms_read_probe.exe"}
         matches = sorted(
-            candidate for candidate in path.rglob("ariec61850_mms_read_probe*")
+            candidate for candidate in path.rglob(f"{stem}*")
             if candidate.is_file() and candidate.name in names
         )
         if matches:
             return str(matches[0])
-    raise FileNotFoundError(f"MMS read probe not found under {path}")
+    raise FileNotFoundError(f"{label} not found under {path}")
+
+
+def resolve_read_probe(argument: str) -> str:
+    return resolve_named_probe(argument, "ariec61850_mms_read_probe", "MMS read probe")
+
+
+def resolve_urcb_probe(argument: str) -> str:
+    return resolve_named_probe(argument, "ariec61850_mms_urcb_gi_probe", "MMS URCB GI probe")
 
 
 def probe_command(read_probe: str, port: int, item: str) -> list[str]:
@@ -60,6 +68,33 @@ def run_probe(read_probe: str, port: int, item: str) -> subprocess.CompletedProc
         check=False,
         creationflags=creation_flags(),
     )
+
+
+def run_urcb_gi_probe(urcb_probe: str, port: int) -> str:
+    result = subprocess.run(
+        [
+            urcb_probe,
+            "127.0.0.1",
+            str(port),
+            "--domain",
+            "MU01LD0",
+            "--rcb",
+            "LLN0$RP$URCB01",
+            "--timeout-ms",
+            "5000",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=9,
+        check=False,
+        creationflags=creation_flags(),
+    )
+    if result.returncode != 0 or "MMS_URCB_GI_PASS" not in result.stdout:
+        raise RuntimeError(
+            "URCB enable/GI/InformationReport regression failed: "
+            f"exit={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+    return result.stdout.strip()
 
 
 def update_manifest_value(manifest_path: Path, item: str, new_value: str) -> int:
@@ -219,6 +254,7 @@ def main() -> int:
     parser.add_argument("--scl", required=True)
     args = parser.parse_args()
     read_probe = resolve_read_probe(args.read_probe)
+    urcb_probe = resolve_urcb_probe(args.read_probe)
 
     port = free_port()
     environment = dict(os.environ)
@@ -261,19 +297,23 @@ def main() -> int:
                 structural_only_value = (
                     "TCTR1$MX$AmpUnmapped$instMag$i\tINT32\tNumber\t0"
                 )
+                urcb_manifest = (
+                    "RCB\tMU01LD0\tLLN0$RP$URCB01\t0\t"
+                    "MU01LD0/LLN0$RP$URCB01\tMU01LD0\tLLN0$dsGO\t1\t100\t1000\t100\t120\t128"
+                )
                 if (
                     manifest_text.startswith("ARSTACK_IED_MODEL\t2\t2\n")
                     and mapped_value in manifest_text
                     and structural_only_value in manifest_text
                     and "XCBR1$ST$Pos$q\tQuality\tQuality\tgood" in manifest_text
                     and "XCBR1$ST$Pos$t\tTimestamp\tTimestamp\t" in manifest_text
+                    and urcb_manifest in manifest_text
                 ):
                     break
                 time.sleep(0.1)
             else:
                 raise RuntimeError(
-                    "GUI did not publish revision 2 with the edited DataSet leaf, "
-                    "structural-only leaf, Quality, and Timestamp objects"
+                    "GUI did not publish revision 2 with edited/full model leaves and URCB metadata"
                 )
 
             deadline = time.monotonic() + 10.0
@@ -317,6 +357,7 @@ def main() -> int:
                 port,
                 "TCTR1$MX$Amp$instMag$i",
             )
+            urcb_output = run_urcb_gi_probe(urcb_probe, port)
             quality_output = prove_same_association_refresh(
                 read_probe,
                 port,
@@ -342,9 +383,11 @@ def main() -> int:
                 "edited=MU01LD0/TCTR1$MX$Amp$instMag$i:42 "
                 "structural=MU01LD0/TCTR1$MX$AmpUnmapped$instMag$i:0 "
                 f"concurrent_association_seconds={concurrent_seconds:.3f} "
+                "urcb_gi=pass "
                 "quality=same-association:030000->03C110 "
                 "timestamp=same-association:0->1700000000123"
             )
+            print(urcb_output)
             print(quality_output.strip())
             print(timestamp_output.strip())
             return 0
