@@ -62,6 +62,22 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: ./build-ied-simulator-qt/arstack_ied_simulator --smoke-test
 
+      - name: Capture workbench visual regression
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          ./build-ied-simulator-qt/arstack_ied_simulator
+          --scl ./tests/fixtures/scl/minimal-station-brcb.scd
+          --screenshot ./ied-simulator-workbench.png
+
+      - name: Upload workbench screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: ied-simulator-workbench
+          path: ied-simulator-workbench.png
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Prove GUI value is visible through MMS
         run: >-
           python3 apps/ied_simulator/test_gui_live_value.py
