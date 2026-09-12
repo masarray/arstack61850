@@ -279,6 +279,19 @@ SclDocument SclParser::parse(
                     continue;
                 }
                 const auto logical_node_path = build_logical_node_path(logical_node);
+                const auto prefix = attribute(&logical_node, "prefix");
+                const auto ln_class = is(logical_node, "LN0")
+                    ? std::string{"LLN0"}
+                    : attribute(&logical_node, "lnClass");
+                const auto ln_inst = attribute(&logical_node, "inst");
+                document.logical_nodes.push_back({
+                    ied_name,
+                    ld_inst,
+                    prefix,
+                    ln_class,
+                    ln_inst,
+                    logical_node_path,
+                });
                 for (const auto* data_set_node : direct_children(logical_node, "DataSet")) {
                     SclDataSet data_set;
                     data_set.ied_name = ied_name;
