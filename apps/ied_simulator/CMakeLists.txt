@@ -32,17 +32,19 @@ qt_add_qml_module(arstack_ied_simulator
     URI ARStack.IedSimulator
     VERSION 1.0
     SOURCES
-        src/IedSimulatorController.cpp
-        src/IedSimulatorController.hpp
+        src/IedFleetController.cpp
+        src/IedFleetController.hpp
     QML_FILES
         qml/Main.qml
         qml/AppTheme.qml
         qml/SurfaceCard.qml
         qml/ActionButton.qml
+        qml/IconAction.qml
         qml/StatusPill.qml
         qml/ToggleSwitch.qml
         qml/LaunchWorkspace.qml
         qml/RuntimeWorkspace.qml
+        qml/FleetWorkspace.qml
 )
 
 target_link_libraries(arstack_ied_simulator PRIVATE
@@ -62,10 +64,10 @@ target_compile_features(arstack_ied_simulator PRIVATE cxx_std_20)
 
 # The regular library intentionally keeps a strict portable connection runtime.
 # The desktop simulator needs the separate compatibility runtime validated
-# against IEDScout-style AARQ, selector, browse, Identify and FileDirectory
-# traffic. Keep the two runtimes isolated so the embedded core is unchanged.
-# Reporting is wired here as an application feature over the same bounded
-# per-association server rather than by launching a second protocol endpoint.
+# against common engineering-client AARQ, selector, browse, Identify and
+# FileDirectory traffic. Keep the two runtimes isolated so embedded behavior is
+# unchanged. Reporting is wired here as an application feature over the same
+# bounded per-association server rather than by launching another protocol fork.
 add_library(ariec61850_ied_simulator_server_core STATIC
     ${CMAKE_CURRENT_LIST_DIR}/../../src/asn1/ber_span_reader.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/osi/tpkt_span.cpp
