@@ -198,7 +198,8 @@ private:
         quint64 generation{};
         std::optional<ar::iec61850::scl::SclDocument> document;
         QVariantList ieds;
-        QVector<IedPointStore::PointRecord> selectedPoints;
+        IedPointStore pointStore;
+        QVector<int> selectedPointIndices;
         QVariantList navigationIndex;
         QHash<QString, QVector<int>> valueScopeIndex;
         QString error;
