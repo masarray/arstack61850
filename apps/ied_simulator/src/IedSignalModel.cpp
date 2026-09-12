@@ -20,7 +20,14 @@ QString referenceAt(const QVariantList& values, const int index) {
     if (index < 0 || index >= values.size()) return {};
     return values.at(index).toMap().value(QStringLiteral("reference")).toString();
 }
+
+bool liveRolesChanged(const QVariantMap& before, const QVariantMap& after) {
+    return before.value(QStringLiteral("value")) != after.value(QStringLiteral("value")) ||
+        before.value(QStringLiteral("quality")) != after.value(QStringLiteral("quality")) ||
+        before.value(QStringLiteral("writable")) != after.value(QStringLiteral("writable")) ||
+        before.value(QStringLiteral("changed")) != after.value(QStringLiteral("changed"));
 }
+} // namespace
 
 IedSignalModel::IedSignalModel(QObject* parent)
     : QAbstractListModel(parent) {
@@ -40,6 +47,7 @@ void IedSignalModel::setBackend(IedFleetController* backend) {
     if (backend_ != nullptr) disconnect(backend_, nullptr, this, nullptr);
     backend_ = backend;
     observedIedIndex_ = -1;
+    observedSelectedSourceIndex_ = -1;
 
     if (backend_ != nullptr) {
         connect(backend_, &IedFleetController::valuesChanged,
@@ -177,6 +185,7 @@ bool IedSignalModel::rowMatches(const QVariantMap& item, const QString& query) c
 void IedSignalModel::rebuild() {
     const int previousCount = rowCount();
     observedIedIndex_ = backend_ != nullptr ? backend_->selectedIedIndex() : -1;
+    observedSelectedSourceIndex_ = backend_ != nullptr ? backend_->selectedValueIndex() : -1;
     sourceValues_ = backend_ != nullptr ? backend_->values() : QVariantList{};
     observedFirstReference_ = referenceAt(sourceValues_, 0);
     observedLastReference_ = referenceAt(sourceValues_, sourceValues_.size() - 1);
@@ -244,6 +253,10 @@ void IedSignalModel::rebuild() {
 
     beginResetModel();
     rows_ = std::move(nextRows);
+    sourceRows_.clear();
+    for (int row = 0; row < rowCount(); ++row) {
+        sourceRows_[rows_[static_cast<std::size_t>(row)].sourceIndex].push_back(row);
+    }
     endResetModel();
     if (previousCount != rowCount()) emit visibleRowCountChanged();
 }
@@ -264,17 +277,73 @@ void IedSignalModel::refreshSnapshot() {
         return;
     }
 
-    sourceValues_ = next;
-    if (!rows_.empty()) {
-        emit dataChanged(
-            index(0, 0),
-            index(rowCount() - 1, 0),
-            {ValueRole, QualityRole, WritableRole, ChangedRole, SelectedRole});
+    // A live value can be part of the active search predicate. Rebuild at the
+    // existing 80 ms coalescing boundary so rows enter/leave the filtered view
+    // correctly instead of publishing stale membership.
+    if (!filterText_.trimmed().isEmpty()) {
+        scheduleRebuild();
+        return;
     }
+
+    QVector<int> changedRows;
+    for (auto it = sourceRows_.cbegin(); it != sourceRows_.cend(); ++it) {
+        const int sourceIndex = it.key();
+        if (sourceIndex < 0 || sourceIndex >= sourceValues_.size() || sourceIndex >= next.size()) {
+            scheduleRebuild();
+            return;
+        }
+        const auto before = sourceValues_.at(sourceIndex).toMap();
+        const auto after = next.at(sourceIndex).toMap();
+        if (before.value(QStringLiteral("reference")) != after.value(QStringLiteral("reference"))) {
+            scheduleRebuild();
+            return;
+        }
+        if (!liveRolesChanged(before, after)) continue;
+        changedRows += it.value();
+    }
+
+    sourceValues_ = next;
+    emitRowsChanged(
+        std::move(changedRows),
+        {ValueRole, QualityRole, WritableRole, ChangedRole});
 }
 
 void IedSignalModel::refreshSelectedRole() {
-    if (!rows_.empty()) {
-        emit dataChanged(index(0, 0), index(rowCount() - 1, 0), {SelectedRole});
+    const int nextSelected = backend_ != nullptr ? backend_->selectedValueIndex() : -1;
+    if (nextSelected == observedSelectedSourceIndex_) return;
+
+    QVector<int> changedRows = sourceRows_.value(observedSelectedSourceIndex_);
+    changedRows += sourceRows_.value(nextSelected);
+    observedSelectedSourceIndex_ = nextSelected;
+    emitRowsChanged(std::move(changedRows), {SelectedRole});
+}
+
+void IedSignalModel::emitRowsChanged(QVector<int> rows, const QList<int>& roles) {
+    if (rows.isEmpty() || rowCount() <= 0) return;
+    std::sort(rows.begin(), rows.end());
+    rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
+
+    int rangeStart = -1;
+    int previous = -2;
+    const auto flush = [this, &roles](const int first, const int last) {
+        if (first < 0 || last < first || last >= rowCount()) return;
+        emit dataChanged(index(first, 0), index(last, 0), roles);
+    };
+
+    for (const int row : rows) {
+        if (row < 0 || row >= rowCount()) continue;
+        if (rangeStart < 0) {
+            rangeStart = row;
+            previous = row;
+            continue;
+        }
+        if (row == previous + 1) {
+            previous = row;
+            continue;
+        }
+        flush(rangeStart, previous);
+        rangeStart = row;
+        previous = row;
     }
+    flush(rangeStart, previous);
 }

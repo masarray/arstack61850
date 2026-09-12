@@ -4,7 +4,9 @@
 #include "IedFleetController.hpp"
 
 #include <QAbstractListModel>
+#include <QHash>
 #include <QTimer>
+#include <QVector>
 #include <QtQmlIntegration/qqmlintegration.h>
 
 #include <vector>
@@ -73,6 +75,7 @@ private:
     void rebuild();
     void refreshSnapshot();
     void refreshSelectedRole();
+    void emitRowsChanged(QVector<int> rows, const QList<int>& roles);
     [[nodiscard]] QVariantMap sourceItem(int sourceIndex) const;
     [[nodiscard]] bool rowMatches(const QVariantMap& item, const QString& query) const;
 
@@ -81,10 +84,12 @@ private:
     QTimer refreshTimer_;
     QVariantList sourceValues_;
     std::vector<Row> rows_;
+    QHash<int, QVector<int>> sourceRows_;
     QString logicalDevice_;
     QString logicalNode_;
     QString filterText_;
     int observedIedIndex_{-1};
+    int observedSelectedSourceIndex_{-1};
     QString observedFirstReference_;
     QString observedLastReference_;
 };
