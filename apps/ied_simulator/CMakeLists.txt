@@ -52,6 +52,7 @@ qt_add_qml_module(arstack_ied_simulator
         qml/IedExplorer.qml
         qml/FleetWorkspace.qml
         qml/IedScoutWorkspace.qml
+        qml/ActivityMonitor.qml
 )
 
 target_link_libraries(arstack_ied_simulator PRIVATE
