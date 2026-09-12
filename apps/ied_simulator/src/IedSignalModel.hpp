@@ -9,7 +9,7 @@
 
 #include <vector>
 
-class IedSignalModel final : public QAbstractListModel {
+class IedSignalModel : public QAbstractListModel {
     Q_OBJECT
     QML_ELEMENT
 
