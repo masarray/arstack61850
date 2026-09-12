@@ -34,6 +34,10 @@ qt_add_qml_module(arstack_ied_simulator
     SOURCES
         src/IedFleetController.cpp
         src/IedFleetController.hpp
+        src/IedNavigationModel.cpp
+        src/IedNavigationModel.hpp
+        src/IedSignalModel.cpp
+        src/IedSignalModel.hpp
     QML_FILES
         qml/Main.qml
         qml/AppTheme.qml
@@ -46,6 +50,7 @@ qt_add_qml_module(arstack_ied_simulator
         qml/RuntimeWorkspace.qml
         qml/IedExplorer.qml
         qml/FleetWorkspace.qml
+        qml/IedScoutWorkspace.qml
 )
 
 target_link_libraries(arstack_ied_simulator PRIVATE

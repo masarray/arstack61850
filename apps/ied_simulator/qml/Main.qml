@@ -7,12 +7,12 @@ import ARStack.IedSimulator 1.0
 
 ApplicationWindow {
     id: root
-    width: 1440
-    height: 900
-    minimumWidth: 1120
-    minimumHeight: 700
+    width: 1360
+    height: 860
+    minimumWidth: 1024
+    minimumHeight: 680
     visible: true
-    title: "ARStack IED Lab"
+    title: "ARStack IED Simulator"
     color: appTheme.background
     font.family: interFont.status === FontLoader.Ready ? interFont.name : "Segoe UI"
 
@@ -27,32 +27,21 @@ ApplicationWindow {
         source: "qrc:/iedsim/assets/InterVariable.ttf"
     }
 
-    property bool appendImport: false
-
     FileDialog {
         id: sclDialog
-        title: appendImport ? "Add IEC 61850 engineering model" : "Open IEC 61850 engineering model"
+        title: "Open IEC 61850 engineering model"
         nameFilters: ["IEC 61850 engineering files (*.scl *.cid *.scd *.iid *.icd)", "All files (*)"]
-        onAccepted: appendImport ? simulator.addFile(selectedFile) : simulator.loadFile(selectedFile)
+        onAccepted: simulator.loadFile(selectedFile)
     }
 
-    FolderDialog {
-        id: folderDialog
-        title: "Choose file-service folder"
-        onAccepted: simulator.fileFolder = selectedFolder.toString().replace("file:///", "")
-    }
-
-    function importModel(append) {
-        appendImport = append === true
+    function importModel() {
         sclDialog.open()
     }
 
-    FleetWorkspace {
+    IedScoutWorkspace {
         anchors.fill: parent
         theme: appTheme
         backend: simulator
-        onOpenSclRequested: root.importModel(false)
-        onAddIedRequested: root.importModel(true)
-        onFolderRequested: folderDialog.open()
+        onOpenSclRequested: root.importModel()
     }
 }
