@@ -44,7 +44,7 @@ jobs:
       - name: Run SCL regression
         run: ./build-control-slice/ariec61850_scl_tests
 
-      - name: Commit validated slice
+      - name: Commit validated source slice
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
@@ -61,7 +61,6 @@ jobs:
             apps/ied_simulator/test_gui_live_value.py \
             tools/static_ied_server.cpp \
             tools/control_interop_probe/CMakeLists.txt \
-            CMakeLists.txt \
-            .github/workflows/ied-simulator-qt.yml
+            CMakeLists.txt
           git commit -m 'feat(simulator): wire SCL Direct-Normal control'
           git push origin HEAD:feat/complete-ariec61850-simulator-parity
