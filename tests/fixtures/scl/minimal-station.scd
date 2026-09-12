@@ -51,6 +51,9 @@
     <LNodeType id="LLN0Type" lnClass="LLN0" />
     <LNodeType id="TCTRType" lnClass="TCTR">
       <DO name="Amp" type="AmpType" />
+      <!-- Deliberately not referenced by any DataSet/report/GOOSE/SV binding.
+           Simulator parity requires this DO and all of its leaves to remain browsable. -->
+      <DO name="AmpUnmapped" type="AmpType" />
     </LNodeType>
     <DOType id="AmpType" cdc="SAV">
       <DA name="instMag" bType="Struct" type="AnalogueValue" fc="MX" />
