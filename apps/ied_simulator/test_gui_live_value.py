@@ -289,9 +289,147 @@ def run_direct_normal_control_regression(
             "Direct-Normal process status did not persist for a second external association: "
             f"exit={status.returncode} stdout={status.stdout!r} stderr={status.stderr!r}"
         )
-    return discovery.stdout.strip() + "
-" + rejected.stdout.strip() + "
-" + accepted.stdout.strip()
+    return discovery.stdout.strip() + "\n" + rejected.stdout.strip() + "\n" + accepted.stdout.strip()
+
+
+def run_control_action(
+    control_probe: str,
+    port: int,
+    object_reference: str,
+    action: str,
+    value: str,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            control_probe,
+            "127.0.0.1",
+            str(port),
+            "--object",
+            object_reference,
+            "--timeout-ms",
+            "5000",
+            "--termination-timeout-ms",
+            "5000",
+            "--action",
+            action,
+            "--value",
+            value,
+            "--value-kind",
+            "bool",
+            "--interlock-check",
+            "off",
+            "--synchro-check",
+            "off",
+            "--arm",
+            "IEC61850-LAB-CONTROL",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+        creationflags=creation_flags(),
+    )
+
+
+def run_sbo_enhanced_control_regressions(
+    control_probe: str,
+    read_probe: str,
+    port: int,
+) -> str:
+    outputs: list[str] = []
+
+    # SBO normal: Select/Cancel must be non-mutating; Select/Operate must mutate.
+    sbo_cancel = run_control_action(
+        control_probe, port, "MU01LD0/GGIO1.SPCSO2", "select-cancel", "on")
+    if (
+        sbo_cancel.returncode != 0
+        or "ctlModel=sbo-normal" not in sbo_cancel.stdout
+        or "completion=accepted" not in sbo_cancel.stdout
+        or "STATUS_AFTER false" not in sbo_cancel.stdout
+        or "write=MU01LD0/GGIO1$CO$SPCSO2$Cancel" not in sbo_cancel.stdout
+    ):
+        raise RuntimeError(
+            "SBO-normal Select/Cancel wire regression failed: "
+            f"exit={sbo_cancel.returncode} stdout={sbo_cancel.stdout!r} stderr={sbo_cancel.stderr!r}"
+        )
+    outputs.append(sbo_cancel.stdout.strip())
+
+    sbo_oper = run_control_action(
+        control_probe, port, "MU01LD0/GGIO1.SPCSO2", "select-operate", "on")
+    if (
+        sbo_oper.returncode != 0
+        or "ctlModel=sbo-normal" not in sbo_oper.stdout
+        or "completion=accepted" not in sbo_oper.stdout
+        or "STATUS_AFTER true" not in sbo_oper.stdout
+        or "write=MU01LD0/GGIO1$CO$SPCSO2$Oper" not in sbo_oper.stdout
+    ):
+        raise RuntimeError(
+            "SBO-normal Select/Operate wire regression failed: "
+            f"exit={sbo_oper.returncode} stdout={sbo_oper.stdout!r} stderr={sbo_oper.stderr!r}"
+        )
+    outputs.append(sbo_oper.stdout.strip())
+
+    # Direct enhanced: confirmed Write is not completion; positive correlated
+    # CommandTermination is mandatory and no automatic retry is allowed.
+    direct_enhanced = run_control_action(
+        control_probe, port, "MU01LD0/GGIO1.SPCSO3", "operate", "on")
+    if (
+        direct_enhanced.returncode != 0
+        or "ctlModel=direct-enhanced" not in direct_enhanced.stdout
+        or "completion=positive-termination" not in direct_enhanced.stdout
+        or "termination=true" not in direct_enhanced.stdout
+        or "STATUS_AFTER true" not in direct_enhanced.stdout
+        or "NO_RETRY_EVIDENCE controlWrites=1" not in direct_enhanced.stdout
+    ):
+        raise RuntimeError(
+            "Direct-enhanced CommandTermination regression failed: "
+            f"exit={direct_enhanced.returncode} stdout={direct_enhanced.stdout!r} stderr={direct_enhanced.stderr!r}"
+        )
+    outputs.append(direct_enhanced.stdout.strip())
+
+    # SBO enhanced: first prove SBOw/Cancel is non-mutating, then prove exact
+    # SBOw -> Oper -> positive CommandTermination sequence.
+    enhanced_cancel = run_control_action(
+        control_probe, port, "MU01LD0/GGIO1.SPCSO4", "select-cancel", "on")
+    if (
+        enhanced_cancel.returncode != 0
+        or "ctlModel=sbo-enhanced" not in enhanced_cancel.stdout
+        or "STATUS_AFTER false" not in enhanced_cancel.stdout
+        or "write=MU01LD0/GGIO1$CO$SPCSO4$SBOw" not in enhanced_cancel.stdout
+        or "write=MU01LD0/GGIO1$CO$SPCSO4$Cancel" not in enhanced_cancel.stdout
+    ):
+        raise RuntimeError(
+            "SBO-enhanced SBOw/Cancel regression failed: "
+            f"exit={enhanced_cancel.returncode} stdout={enhanced_cancel.stdout!r} stderr={enhanced_cancel.stderr!r}"
+        )
+    outputs.append(enhanced_cancel.stdout.strip())
+
+    enhanced_oper = run_control_action(
+        control_probe, port, "MU01LD0/GGIO1.SPCSO4", "select-operate", "on")
+    if (
+        enhanced_oper.returncode != 0
+        or "ctlModel=sbo-enhanced" not in enhanced_oper.stdout
+        or "completion=positive-termination" not in enhanced_oper.stdout
+        or "termination=true" not in enhanced_oper.stdout
+        or "STATUS_AFTER true" not in enhanced_oper.stdout
+        or "write=MU01LD0/GGIO1$CO$SPCSO4$SBOw" not in enhanced_oper.stdout
+        or "write=MU01LD0/GGIO1$CO$SPCSO4$Oper" not in enhanced_oper.stdout
+        or "NO_RETRY_EVIDENCE controlWrites=2" not in enhanced_oper.stdout
+    ):
+        raise RuntimeError(
+            "SBO-enhanced SBOw/Oper/CommandTermination regression failed: "
+            f"exit={enhanced_oper.returncode} stdout={enhanced_oper.stdout!r} stderr={enhanced_oper.stderr!r}"
+        )
+    outputs.append(enhanced_oper.stdout.strip())
+
+    for item in ("SPCSO2", "SPCSO3", "SPCSO4"):
+        status = run_probe(read_probe, port, f"GGIO1$ST${item}$stVal")
+        if status.returncode != 0 or "value=true" not in status.stdout:
+            raise RuntimeError(
+                f"{item} status was not persistent across a second association: "
+                f"exit={status.returncode} stdout={status.stdout!r} stderr={status.stderr!r}"
+            )
+    return "\n".join(outputs)
 
 
 def prove_concurrent_associations(read_probe: str, port: int, item: str) -> float:
@@ -474,7 +612,12 @@ def main() -> int:
                     "RCB\tMU01LD0\tLLN0$BR$BRCB01\t1\t"
                     "MU01LD0/LLN0$BR$BRCB01\tMU01LD0\tLLN0$dsGO\t2\t75\t1000\t108\t121\t128"
                 )
-                direct_control_manifest = "CTL\tMU01LD0\tGGIO1\tSPCSO1\tSPC\t1"
+                configured_controls = (
+                    "CTL\tMU01LD0\tGGIO1\tSPCSO1\tSPC\t1",
+                    "CTL\tMU01LD0\tGGIO1\tSPCSO2\tSPC\t2",
+                    "CTL\tMU01LD0\tGGIO1\tSPCSO3\tSPC\t3",
+                    "CTL\tMU01LD0\tGGIO1\tSPCSO4\tSPC\t4",
+                )
                 if (
                     manifest_text.startswith("ARSTACK_IED_MODEL\t2\t2\n")
                     and mapped_value in manifest_text
@@ -483,8 +626,11 @@ def main() -> int:
                     and "XCBR1$ST$Pos$t\tTimestamp\tTimestamp\t" in manifest_text
                     and urcb_manifest in manifest_text
                     and brcb_manifest in manifest_text
-                    and direct_control_manifest in manifest_text
+                    and all(control in manifest_text for control in configured_controls)
                     and "GGIO1$CF$SPCSO1$ctlModel\tEnum\tEnumeration\t1" in manifest_text
+                    and "GGIO1$CF$SPCSO2$ctlModel\tEnum\tEnumeration\t2" in manifest_text
+                    and "GGIO1$CF$SPCSO3$ctlModel\tEnum\tEnumeration\t3" in manifest_text
+                    and "GGIO1$CF$SPCSO4$ctlModel\tEnum\tEnumeration\t4" in manifest_text
                 ):
                     break
                 time.sleep(0.1)
@@ -534,6 +680,11 @@ def main() -> int:
                 read_probe,
                 port,
             )
+            sbo_enhanced_output = run_sbo_enhanced_control_regressions(
+                control_probe,
+                read_probe,
+                port,
+            )
             concurrent_seconds = prove_concurrent_associations(
                 read_probe,
                 port,
@@ -571,12 +722,16 @@ def main() -> int:
                 "structural=MU01LD0/TCTR1$MX$AmpUnmapped$instMag$i:0 "
                 f"concurrent_association_seconds={concurrent_seconds:.3f} "
                 "control_direct_normal=pass "
+                "control_sbo_normal=pass "
+                "control_direct_enhanced=pass "
+                "control_sbo_enhanced=pass "
                 "urcb_gi=pass "
                 "brcb_event=pass "
                 "quality=same-association:030000->03C110 "
                 "timestamp=same-association:0->1700000000123"
             )
             print(control_output)
+            print(sbo_enhanced_output)
             print(urcb_output)
             print(brcb_output)
             print(quality_output.strip())

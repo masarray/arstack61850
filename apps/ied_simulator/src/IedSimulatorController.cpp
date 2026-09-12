@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <optional>
 #include <set>
 #include <string>
 #include <unordered_set>
@@ -747,15 +748,12 @@ bool IedSimulatorController::writeModelManifest() {
         dataObject.replace(QLatin1Char('.'), QLatin1Char('$'));
         const auto cdc = qstring(entry.cdc).trimmed().toUpper();
         if (domain.isEmpty() || logicalNode.isEmpty() || dataObject.isEmpty() || cdc.isEmpty()) continue;
-        const auto key = domain + QLatin1Char('
-') + logicalNode + QLatin1Char('
-') + dataObject;
+        const auto key = domain + QLatin1Char('\n') + logicalNode + QLatin1Char('\n') + dataObject;
         if (emittedControls.contains(key)) continue;
         emittedControls.insert(key);
         manifest += "CTL	" + manifestField(domain) + "	" + manifestField(logicalNode) +
             "	" + manifestField(dataObject) + "	" + manifestField(cdc) + "	" +
-            QByteArray::number(*model) + "
-";
+            QByteArray::number(*model) + "\n";
     }
 
     QSet<QString> emittedDataSetMembers;

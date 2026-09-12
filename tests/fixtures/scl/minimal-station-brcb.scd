@@ -48,6 +48,15 @@
             <DOI name="SPCSO1">
               <DAI name="ctlModel"><Val>direct-with-normal-security</Val></DAI>
             </DOI>
+            <DOI name="SPCSO2">
+              <DAI name="ctlModel"><Val>sbo-with-normal-security</Val></DAI>
+            </DOI>
+            <DOI name="SPCSO3">
+              <DAI name="ctlModel"><Val>direct-with-enhanced-security</Val></DAI>
+            </DOI>
+            <DOI name="SPCSO4">
+              <DAI name="ctlModel"><Val>sbo-with-enhanced-security</Val></DAI>
+            </DOI>
           </LN>
         </LDevice>
       </Server>
@@ -76,6 +85,9 @@
     </DOType>
     <LNodeType id="GGIOType" lnClass="GGIO">
       <DO name="SPCSO1" type="SPCType" />
+      <DO name="SPCSO2" type="SPCType" />
+      <DO name="SPCSO3" type="SPCType" />
+      <DO name="SPCSO4" type="SPCType" />
     </LNodeType>
     <DOType id="SPCType" cdc="SPC">
       <DA name="stVal" bType="BOOLEAN" fc="ST" />

@@ -6,6 +6,7 @@
 #include "ariec61850/scl/parser.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -14,6 +15,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -272,18 +274,26 @@ void parser_preserves_configured_control_model_value() {
     using namespace ar::iec61850::scl;
 
     const auto document = SclParser{}.load(fixture("minimal-station-brcb.scd"));
-    const auto configured = std::find_if(
-        document.model_entries.begin(),
-        document.model_entries.end(),
-        [](const SclDataSetEntry& entry) {
-            return entry.ln_class == "GGIO" && entry.ln_inst == "1" &&
-                entry.do_name == "SPCSO1" && entry.da_name == "ctlModel";
-        });
-    CHECK(configured != document.model_entries.end());
-    CHECK(configured->functional_constraint == "CF");
-    CHECK(configured->cdc == "SPC");
-    CHECK(configured->basic_type == "Enum");
-    CHECK(configured->configured_value == "direct-with-normal-security");
+    const std::array expected{
+        std::pair<std::string_view, std::string_view>{"SPCSO1", "direct-with-normal-security"},
+        std::pair<std::string_view, std::string_view>{"SPCSO2", "sbo-with-normal-security"},
+        std::pair<std::string_view, std::string_view>{"SPCSO3", "direct-with-enhanced-security"},
+        std::pair<std::string_view, std::string_view>{"SPCSO4", "sbo-with-enhanced-security"},
+    };
+    for (const auto& [data_object, configured_value] : expected) {
+        const auto configured = std::find_if(
+            document.model_entries.begin(),
+            document.model_entries.end(),
+            [&](const SclDataSetEntry& entry) {
+                return entry.ln_class == "GGIO" && entry.ln_inst == "1" &&
+                    entry.do_name == data_object && entry.da_name == "ctlModel";
+            });
+        CHECK(configured != document.model_entries.end());
+        CHECK(configured->functional_constraint == "CF");
+        CHECK(configured->cdc == "SPC");
+        CHECK(configured->basic_type == "Enum");
+        CHECK(configured->configured_value == configured_value);
+    }
 }
 
 void parser_detects_duplicate_ieds_and_missing_dataset_references() {

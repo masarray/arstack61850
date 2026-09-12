@@ -2,6 +2,7 @@
 #include "ariec61850/mms/static_server_session.hpp"
 #include "ariec61850/mms/data_codec.hpp"
 #include "ariec61850/mms/services.hpp"
+#include "ariec61850/mms/reporting.hpp"
 #include "ariec61850/mms/simulator_manifest_codec.hpp"
 #include "ariec61850/mms/static_direct_control.hpp"
 #include "ariec61850/mms/static_brcb_connection.hpp"
@@ -11,6 +12,8 @@
 #include "ariec61850/mms/static_report_connection.hpp"
 #include "ariec61850/mms/static_urcb_objects.hpp"
 #include "ariec61850/mms/static_urcb_runtime.hpp"
+#include "ariec61850/osi/cotp.hpp"
+#include "ariec61850/osi/tpkt.hpp"
 
 #include <algorithm>
 #include <array>
@@ -519,13 +522,6 @@ struct EncodedValue final {
     return {wire::EncodeStatus::ok, required, required};
 }
 
-[[nodiscard]] bool apply_atomic_boolean(void* context, const bool value) noexcept {
-    if (context == nullptr) return false;
-    static_cast<std::atomic<std::uint8_t>*>(context)->store(
-        value ? 1U : 0U, std::memory_order_relaxed);
-    return true;
-}
-
 [[nodiscard]] std::vector<std::uint8_t> encode_ber_length(
     const std::size_t length) {
     if (length < 0x80U) return {static_cast<std::uint8_t>(length)};
@@ -616,18 +612,41 @@ struct EncodedValue final {
     return result;
 }
 
-[[nodiscard]] std::vector<std::uint8_t> direct_boolean_oper_type_specification() {
-    return mms::MmsServiceCodec::encode_type_specification(control_structure("Oper", {
-        control_scalar(mms::MmsTypeKind::boolean, "ctlVal"),
-        control_structure("origin", {
-            control_scalar(mms::MmsTypeKind::unsigned_integer, "orCat"),
-            control_scalar(mms::MmsTypeKind::octet_string, "orIdent", 64U),
-        }),
-        control_scalar(mms::MmsTypeKind::unsigned_integer, "ctlNum"),
-        control_scalar(mms::MmsTypeKind::utc_time, "T"),
-        control_scalar(mms::MmsTypeKind::boolean, "Test"),
-        control_scalar(mms::MmsTypeKind::bit_string, "Check", 2U),
+[[nodiscard]] std::vector<std::uint8_t> boolean_control_type_specification(
+    std::string name,
+    const bool include_check) {
+    std::vector<mms::MmsTypeSpecification> fields;
+    fields.reserve(include_check ? 6U : 5U);
+    fields.push_back(control_scalar(mms::MmsTypeKind::boolean, "ctlVal"));
+    fields.push_back(control_structure("origin", {
+        control_scalar(mms::MmsTypeKind::unsigned_integer, "orCat"),
+        control_scalar(mms::MmsTypeKind::octet_string, "orIdent", 64U),
     }));
+    fields.push_back(control_scalar(mms::MmsTypeKind::unsigned_integer, "ctlNum"));
+    fields.push_back(control_scalar(mms::MmsTypeKind::utc_time, "T"));
+    fields.push_back(control_scalar(mms::MmsTypeKind::boolean, "Test"));
+    if (include_check) {
+        fields.push_back(control_scalar(mms::MmsTypeKind::bit_string, "Check", 2U));
+    }
+    return mms::MmsServiceCodec::encode_type_specification(
+        control_structure(std::move(name), std::move(fields)));
+}
+
+[[nodiscard]] std::vector<std::uint8_t> direct_boolean_oper_type_specification() {
+    return boolean_control_type_specification("Oper", true);
+}
+
+[[nodiscard]] std::vector<std::uint8_t> direct_boolean_sbow_type_specification() {
+    return boolean_control_type_specification("SBOw", true);
+}
+
+[[nodiscard]] std::vector<std::uint8_t> direct_boolean_cancel_type_specification() {
+    return boolean_control_type_specification("Cancel", false);
+}
+
+[[nodiscard]] std::vector<std::uint8_t> sbo_reference_type_specification() {
+    return mms::MmsServiceCodec::encode_type_specification(
+        control_scalar(mms::MmsTypeKind::visible_string, "SBO", 129U));
 }
 
 struct ConnectionBuffers final {
@@ -684,9 +703,17 @@ struct ManifestDirectControlStorage final {
     std::uint8_t control_model{};
     std::string status_item;
     std::string ctl_model_item;
+    std::string sbo_item;
+    std::string sbow_item;
     std::string oper_item;
+    std::string cancel_item;
+    std::string selection_reference;
+    std::vector<std::uint8_t> sbo_type_specification;
+    std::vector<std::uint8_t> sbow_type_specification;
     std::vector<std::uint8_t> oper_type_specification;
-    std::shared_ptr<std::atomic<std::uint8_t>> process_value;
+    std::vector<std::uint8_t> cancel_type_specification;
+    std::shared_ptr<mms::MmsStaticDirectBooleanSharedState> shared_state;
+    std::size_t service_object_count{};
 };
 
 constexpr std::size_t kMaximumSimulatorDirectControls = 64U;
@@ -1011,14 +1038,16 @@ void rebuild_manifest_roots(ManifestModel& model) {
             &value});
     }
 
-    // Compile virtual service objects from SCL configured ctlModel metadata.
-    // Phase one intentionally exposes only SPC Direct-with-normal-security;
-    // other configured models remain visible as structural CF data but are not
-    // falsely advertised as executable server controls.
+    // Compile configured SPC command Data Objects into virtual IEC 61850
+    // control-service objects. Structural ST/CF leaves remain sourced from SCL;
+    // CO$SBO/SBOw/Oper/Cancel are service objects owned by the server runtime.
     const auto oper_type = direct_boolean_oper_type_specification();
+    const auto sbow_type = direct_boolean_sbow_type_specification();
+    const auto cancel_type = direct_boolean_cancel_type_specification();
+    const auto sbo_type = sbo_reference_type_specification();
     std::set<std::pair<std::string, std::string>> unique_direct_controls;
     for (const auto& parsed : parsed_controls) {
-        if (parsed.control_model != 1U || parsed.cdc != "SPC") {
+        if (parsed.control_model == 0U || parsed.control_model > 4U || parsed.cdc != "SPC") {
             ++model.omitted_direct_controls;
             continue;
         }
@@ -1028,7 +1057,10 @@ void rebuild_manifest_roots(ManifestModel& model) {
         }
         const auto status_item = parsed.logical_node + "$ST$" + parsed.data_object + "$stVal";
         const auto ctl_model_item = parsed.logical_node + "$CF$" + parsed.data_object + "$ctlModel";
+        const auto sbo_item = parsed.logical_node + "$CO$" + parsed.data_object + "$SBO";
+        const auto sbow_item = parsed.logical_node + "$CO$" + parsed.data_object + "$SBOw";
         const auto oper_item = parsed.logical_node + "$CO$" + parsed.data_object + "$Oper";
+        const auto cancel_item = parsed.logical_node + "$CO$" + parsed.data_object + "$Cancel";
         if (!unique_direct_controls.emplace(parsed.domain, oper_item).second) continue;
         const auto status = model.value_indices.find(object_key(parsed.domain, status_item));
         const auto ctl_model = model.value_indices.find(object_key(parsed.domain, ctl_model_item));
@@ -1048,9 +1080,24 @@ void rebuild_manifest_roots(ManifestModel& model) {
         control.control_model = parsed.control_model;
         control.status_item = status_item;
         control.ctl_model_item = ctl_model_item;
+        control.sbo_item = sbo_item;
+        control.sbow_item = sbow_item;
         control.oper_item = oper_item;
+        control.cancel_item = cancel_item;
+        control.selection_reference = parsed.domain + "/" + parsed.logical_node + "." + parsed.data_object;
+        std::replace(
+            control.selection_reference.begin(),
+            control.selection_reference.end(),
+            '$',
+            '.');
+        control.sbo_type_specification = sbo_type;
+        control.sbow_type_specification = sbow_type;
         control.oper_type_specification = oper_type;
-        control.process_value = std::make_shared<std::atomic<std::uint8_t>>(initial ? 1U : 0U);
+        control.cancel_type_specification = cancel_type;
+        control.shared_state = std::make_shared<mms::MmsStaticDirectBooleanSharedState>();
+        control.shared_state->value.store(initial ? 1U : 0U, std::memory_order_relaxed);
+        control.service_object_count =
+            (parsed.control_model == 2U || parsed.control_model == 4U) ? 3U : 1U;
         model.direct_control_storage.push_back(std::move(control));
     }
 
@@ -1089,12 +1136,19 @@ void rebuild_manifest_roots(ManifestModel& model) {
         available_data_sets.emplace(data_set.domain, data_set.item);
     }
 
-    if (model.objects.size() + model.direct_control_storage.size() >
-        mms::MmsStaticObjectTable::maximum_objects) {
-        throw std::runtime_error("Configured Direct-Normal controls exceed MMS object capacity.");
+    std::size_t control_service_objects{};
+    for (const auto& control : model.direct_control_storage) {
+        if (control.service_object_count >
+            mms::MmsStaticObjectTable::maximum_objects - control_service_objects) {
+            throw std::runtime_error("Configured controls exceed MMS object capacity.");
+        }
+        control_service_objects += control.service_object_count;
+    }
+    if (model.objects.size() > mms::MmsStaticObjectTable::maximum_objects - control_service_objects) {
+        throw std::runtime_error("Configured controls exceed MMS object capacity.");
     }
     auto remaining_object_slots = mms::MmsStaticObjectTable::maximum_objects -
-        model.objects.size() - model.direct_control_storage.size();
+        model.objects.size() - control_service_objects;
     const auto available_urcb_slots = std::min<std::size_t>(
         mms::MmsStaticUrcbRuntime::maximum_control_blocks,
         remaining_object_slots /
@@ -1338,10 +1392,15 @@ void serve_connection(
             auto& control = manifest_model->direct_control_storage[index];
             auto& state = direct_control_states[index];
             auto& binding = direct_control_bindings[index];
-            state.value = control.process_value->load(std::memory_order_relaxed);
+            state.value = control.shared_state->value.load(std::memory_order_relaxed);
             binding.state = &state;
-            binding.apply = apply_atomic_boolean;
-            binding.apply_context = control.process_value.get();
+            binding.shared_state = control.shared_state.get();
+            binding.model = static_cast<mms::MmsStaticControlModel>(control.control_model);
+            binding.association_id = association_id;
+            binding.selection_reference = control.selection_reference;
+            binding.sbo_timeout_ms = 10'000U;
+            binding.now_ms = report_now_ms;
+            binding.now_context = nullptr;
 
             bool status_found{};
             bool ctl_model_found{};
@@ -1349,15 +1408,15 @@ void serve_connection(
                 if (object.domain != control.domain) continue;
                 if (object.item == control.status_item) {
                     object.read = read_atomic_boolean;
-                    object.context = control.process_value.get();
+                    object.context = &control.shared_state->value;
                     object.write = nullptr;
                     object.write_context = nullptr;
                     object.contextual_write = nullptr;
                     status_found = true;
                 } else if (object.item == control.ctl_model_item) {
                     object.type_specification = std::span<const std::uint8_t>{unsigned_type};
-                    object.read = mms::mms_static_direct_normal_read_ctl_model;
-                    object.context = nullptr;
+                    object.read = mms::mms_static_control_read_ctl_model;
+                    object.context = &binding;
                     object.write = nullptr;
                     object.write_context = nullptr;
                     object.contextual_write = nullptr;
@@ -1365,8 +1424,29 @@ void serve_connection(
                 }
             }
             if (!status_found || !ctl_model_found) {
-                throw std::runtime_error("Configured Direct-Normal control is missing ST/CF backing objects.");
+                throw std::runtime_error("Configured command control is missing ST/CF backing objects.");
             }
+
+            if (control.control_model == 2U) {
+                direct_control_objects.push_back(mms::MmsStaticObjectEntry{
+                    control.domain,
+                    control.sbo_item,
+                    control.sbo_type_specification,
+                    mms::mms_static_sbo_normal_read,
+                    &binding});
+            } else if (control.control_model == 4U) {
+                direct_control_objects.push_back(mms::MmsStaticObjectEntry{
+                    control.domain,
+                    control.sbow_item,
+                    control.sbow_type_specification,
+                    mms::mms_static_control_read_unavailable,
+                    nullptr,
+                    false,
+                    nullptr,
+                    &binding,
+                    mms::mms_static_boolean_write_sbow_contextual});
+            }
+
             direct_control_objects.push_back(mms::MmsStaticObjectEntry{
                 control.domain,
                 control.oper_item,
@@ -1374,14 +1454,27 @@ void serve_connection(
                 mms::mms_static_control_read_unavailable,
                 nullptr,
                 false,
-                mms::mms_static_direct_boolean_write_oper,
+                nullptr,
                 &binding,
-                nullptr});
+                mms::mms_static_boolean_write_oper_contextual});
+
+            if (control.control_model == 2U || control.control_model == 4U) {
+                direct_control_objects.push_back(mms::MmsStaticObjectEntry{
+                    control.domain,
+                    control.cancel_item,
+                    control.cancel_type_specification,
+                    mms::mms_static_control_read_unavailable,
+                    nullptr,
+                    false,
+                    nullptr,
+                    &binding,
+                    mms::mms_static_boolean_write_cancel_contextual});
+            }
         }
         direct_control_table = std::make_unique<mms::MmsStaticObjectTable>(
             std::span<const mms::MmsStaticObjectEntry>{direct_control_objects});
         if (!direct_control_table->valid()) {
-            throw std::runtime_error("Configured Direct-Normal MMS object table is invalid.");
+            throw std::runtime_error("Configured command-control MMS object table is invalid.");
         }
         dispatch_objects = direct_control_table.get();
         dispatch_policy.advertise_flattened_child_aliases = true;
@@ -1524,6 +1617,9 @@ void serve_connection(
                 brcb->control->on_association_closed(association_id, now_ms);
             }
         }
+        for (auto& binding : direct_control_bindings) {
+            mms::mms_static_control_on_association_closed(binding);
+        }
     };
 
     std::vector<std::size_t> changed_value_indices;
@@ -1603,6 +1699,66 @@ void serve_connection(
         }
 
         const auto now_ms = monotonic_ms();
+        if (manifest_model != nullptr && session.pending_output_bytes() == 0U) {
+            for (std::size_t index = 0U; index < direct_control_bindings.size(); ++index) {
+                auto& binding = direct_control_bindings[index];
+                if (binding.state == nullptr || !binding.state->pending_termination) continue;
+                if (index >= manifest_model->direct_control_storage.size()) {
+                    std::osyncstream{std::cerr}
+                        << "IEDSIM_EVENT kind=command_termination_error association="
+                        << association_id << " message=control-index-mismatch\n";
+                    close_brcbs();
+                    return;
+                }
+                const auto& control = manifest_model->direct_control_storage[index];
+                const auto command = binding.state->termination_command;
+                try {
+                    const auto origin = std::span<const std::uint8_t>{
+                        command.origin_identifier.data(), command.origin_identifier_size};
+                    auto last_appl_error = mms::MmsDataValue::structure({
+                        mms::MmsDataValue::visible_string(control.selection_reference),
+                        mms::MmsDataValue::integer(0),
+                        mms::MmsDataValue::structure({
+                            mms::MmsDataValue::unsigned_integer(command.origin_category),
+                            mms::MmsDataValue::octet_string(origin),
+                        }),
+                        mms::MmsDataValue::unsigned_integer(command.control_number),
+                        mms::MmsDataValue::integer(25),
+                    });
+                    mms::MmsInformationReport report;
+                    report.variable_references.push_back(
+                        mms::MmsObjectName::domain_specific(control.domain, control.oper_item));
+                    report.items.push_back({0U, std::move(last_appl_error), std::nullopt});
+                    const auto p_data = mms::MmsInformationReportCodec::encode_p_data(
+                        report, runtime.mms_presentation_context_id());
+                    const auto cotp = ar::iec61850::osi::CotpFrameCodec::encode_data(p_data);
+                    const auto frame = ar::iec61850::osi::TpktFrameCodec::encode(cotp);
+                    if (!send_all(socket, frame)) {
+                        std::osyncstream{std::cerr}
+                            << "IEDSIM_EVENT kind=command_termination_send_error association="
+                            << association_id << " object=" << control.selection_reference << '\n';
+                        close_brcbs();
+                        return;
+                    }
+                    total_sent += frame.size();
+                    binding.state->pending_termination = false;
+                    binding.state->termination_command = {};
+                    std::osyncstream{std::cout}
+                        << "IEDSIM_EVENT kind=command_termination association="
+                        << association_id << " object=" << control.selection_reference
+                        << " ctlNum=" << static_cast<unsigned>(command.control_number)
+                        << " positive=true bytes=" << frame.size() << '\n';
+                } catch (const std::exception& exception) {
+                    std::osyncstream{std::cerr}
+                        << "IEDSIM_EVENT kind=command_termination_error association="
+                        << association_id << " object=" << control.selection_reference
+                        << " message=" << exception.what() << '\n';
+                    close_brcbs();
+                    return;
+                }
+                break;
+            }
+        }
         if (!brcb_runtimes.empty()) {
             const auto binary_time = report_binary_time();
             for (auto& brcb : brcb_runtimes) {
