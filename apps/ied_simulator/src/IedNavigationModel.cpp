@@ -178,15 +178,13 @@ void IedNavigationModel::rebuild() {
                     item.value(QStringLiteral("logicalNode")).toString());
             }
         } else {
-            // Synchronous/legacy automation keeps the compatibility path, but
-            // read it by const reference so there is no duplicate full list.
-            const auto& values = backend_->valuesView();
-            groups.reserve(values.size() > 0 ? 16 : 0);
-            for (const auto& value : values) {
-                const auto item = value.toMap();
-                appendScope(
-                    item.value(QStringLiteral("logicalDevice")).toString(),
-                    item.value(QStringLiteral("logicalNode")).toString());
+            // Synchronous/multi-IED selection fallback remains correct without
+            // rematerializing the typed canonical point store into QVariant maps.
+            groups.reserve(backend_->valueCount() > 0 ? 16 : 0);
+            for (int sourceIndex = 0; sourceIndex < backend_->valueCount(); ++sourceIndex) {
+                const auto* point = backend_->valueRecord(sourceIndex);
+                if (point == nullptr) continue;
+                appendScope(point->logicalDevice, point->logicalNode);
             }
         }
     }
