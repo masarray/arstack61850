@@ -40,6 +40,7 @@ add_library(ariec61850_iedscout_parity_server_core STATIC
     "${ARSTACK_ROOT}/src/mms/buffered_selective_information_report_span.cpp"
     "${ARSTACK_ROOT}/src/mms/static_object_table.cpp"
     "${ARSTACK_ROOT}/src/mms/static_write.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_direct_control.cpp"
     "${ARSTACK_ROOT}/src/mms/static_data_set_table.cpp"
     "${ARSTACK_ROOT}/src/mms/static_dispatcher.cpp"
     "${ARSTACK_ROOT}/src/mms/connection_runtime_iedsim.cpp"
