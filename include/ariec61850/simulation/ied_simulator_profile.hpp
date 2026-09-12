@@ -39,6 +39,7 @@ struct IedSimulatorPoint final {
     double base_value{};
     double amplitude{};
     double phase_degrees{};
+    std::size_t source_order{};
     bool dynamic{};
     SimulatorPointKind kind{SimulatorPointKind::status};
 

@@ -6,7 +6,9 @@
 #include <cctype>
 #include <cmath>
 #include <iomanip>
+#include <locale>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string_view>
@@ -519,6 +521,7 @@ IedSimulatorProfileFromSclResult IedSimulatorProfileBuilder::build(
     }
 
     std::set<std::string> point_keys;
+    std::size_t source_order{};
     const auto append_entry = [&](const scl::SclDataSetEntry& entry, const bool structural) {
         if (!matches_ied(entry.ied_name, source_ied)) return;
         if (!options.include_quality_and_timestamp_points &&
@@ -533,6 +536,7 @@ IedSimulatorProfileFromSclResult IedSimulatorProfileBuilder::build(
             return;
         }
         auto point = make_point(entry, source_ied, runtime_ied);
+        point.source_order = source_order++;
         const auto key = point.mms_domain + "\n" + point.mms_item;
         if (!point_keys.insert(key).second) return;
         ensure_node(

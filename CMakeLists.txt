@@ -55,6 +55,8 @@ add_library(ariec61850_core
     src/evidence/pcap_equivalence.cpp
     src/scl/dataset_reference.cpp
     src/scl/parser.cpp
+    src/simulation/ied_simulator_profile.cpp
+    src/simulation/ied_simulator_engine.cpp
     src/comtrade/model.cpp
     src/comtrade/reader.cpp
     src/comtrade/channel_mapper.cpp
@@ -288,6 +290,15 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_warnings(ariec61850_scl_tests)
     ariec61850_apply_sanitizers(ariec61850_scl_tests)
     add_test(NAME ariec61850_scl_tests COMMAND ariec61850_scl_tests)
+
+    add_executable(ariec61850_simulation_tests tests/test_simulation.cpp)
+    target_link_libraries(ariec61850_simulation_tests PRIVATE ARIEC61850::core)
+    target_compile_definitions(ariec61850_simulation_tests PRIVATE
+        ARIEC61850_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_features(ariec61850_simulation_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_simulation_tests)
+    ariec61850_apply_sanitizers(ariec61850_simulation_tests)
+    add_test(NAME ariec61850_simulation_tests COMMAND ariec61850_simulation_tests)
 
     add_executable(ariec61850_comtrade_tests tests/test_comtrade.cpp)
     target_link_libraries(ariec61850_comtrade_tests PRIVATE ARIEC61850::core)

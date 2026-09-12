@@ -7,6 +7,7 @@
 #include <QCoreApplication>
 #include <QClipboard>
 #include <QDateTime>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -21,36 +22,10 @@
 #include <optional>
 #include <set>
 #include <string>
-#include <unordered_set>
 
 namespace {
 QString qstring(const std::string& value) {
     return QString::fromStdString(value);
-}
-
-QString normalizedType(const ar::iec61850::scl::SclDataSetEntry& entry) {
-    const auto basic = qstring(entry.basic_type).trimmed();
-    const auto cdc = qstring(entry.cdc).trimmed();
-    const auto da = qstring(entry.da_name).trimmed();
-    if (entry.is_quality || da.compare(QStringLiteral("q"), Qt::CaseInsensitive) == 0) {
-        return QStringLiteral("Quality");
-    }
-    if (entry.is_timestamp || da.compare(QStringLiteral("t"), Qt::CaseInsensitive) == 0) {
-        return QStringLiteral("Timestamp");
-    }
-    if (!entry.enum_type.empty() || basic.contains(QStringLiteral("Enum"), Qt::CaseInsensitive) ||
-        cdc.compare(QStringLiteral("DPC"), Qt::CaseInsensitive) == 0) {
-        return QStringLiteral("Enumeration");
-    }
-    if (basic.contains(QStringLiteral("Bool"), Qt::CaseInsensitive)) {
-        return QStringLiteral("Boolean");
-    }
-    if (basic.contains(QStringLiteral("Float"), Qt::CaseInsensitive) ||
-        basic.contains(QStringLiteral("INT"), Qt::CaseInsensitive) ||
-        basic.contains(QStringLiteral("Integer"), Qt::CaseInsensitive)) {
-        return QStringLiteral("Number");
-    }
-    return basic.isEmpty() ? QStringLiteral("Text") : basic;
 }
 
 std::optional<int> controlModelCode(QString value) {
@@ -76,42 +51,6 @@ std::optional<int> controlModelCode(QString value) {
         token == QStringLiteral("selectbeforeoperatewithenhancedsecurity") ||
         token == QStringLiteral("sboenhanced")) return 4;
     return std::nullopt;
-}
-
-QString initialValue(
-    const ar::iec61850::scl::SclDataSetEntry& entry,
-    const QString& type) {
-    const auto configured = qstring(entry.configured_value).trimmed();
-    const auto dataAttribute = qstring(entry.da_name);
-    if (!configured.isEmpty()) {
-        if (dataAttribute.compare(QStringLiteral("ctlModel"), Qt::CaseInsensitive) == 0) {
-            if (const auto model = controlModelCode(configured); model.has_value()) {
-                return QString::number(*model);
-            }
-        }
-        return configured;
-    }
-    if (type == QStringLiteral("Boolean")) return QStringLiteral("false");
-    if (type == QStringLiteral("Enumeration")) return QStringLiteral("0");
-    if (type == QStringLiteral("Quality")) return QStringLiteral("good");
-    if (type == QStringLiteral("Timestamp")) {
-        return QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
-    }
-    if (type == QStringLiteral("Number")) return QStringLiteral("0");
-    if (dataAttribute.compare(QStringLiteral("stVal"), Qt::CaseInsensitive) == 0) {
-        return QStringLiteral("on");
-    }
-    return QStringLiteral("—");
-}
-
-QString displayName(const ar::iec61850::scl::SclDataSetEntry& entry) {
-    const auto dataObject = qstring(entry.do_name);
-    const auto attribute = qstring(entry.da_name);
-    if (!dataObject.isEmpty() && !attribute.isEmpty()) {
-        return dataObject + QLatin1Char('.') + attribute;
-    }
-    if (!dataObject.isEmpty()) return dataObject;
-    return qstring(entry.signal_reference);
 }
 
 QString referenceFor(const ar::iec61850::scl::SclDataSetEntry& entry) {
@@ -584,6 +523,17 @@ void IedSimulatorController::consumeServerOutput(
 void IedSimulatorController::processServerLine(
     const QString& line,
     const bool standardError) {
+    // The GUI normally turns child-server protocol events into activity rows.
+    // For deterministic CI/interoperability diagnostics, opt in to mirroring
+    // those exact child lines to the parent process log.  This keeps normal UI
+    // output quiet while making association failures observable in headless QA.
+    if (qEnvironmentVariableIsSet("ARSTACK_IEDSIM_TRACE_SERVER")) {
+        if (standardError) {
+            qWarning().noquote() << line;
+        } else {
+            qInfo().noquote() << line;
+        }
+    }
     if (!line.startsWith(QStringLiteral("IEDSIM_EVENT "))) {
         appendActivity(
             QStringLiteral("MMS"),
@@ -948,88 +898,86 @@ void IedSimulatorController::rebuildValues() {
         emit valuesChanged();
         return;
     }
-    const auto selectedName = ied.value(QStringLiteral("name")).toString();
-    const auto& document = documents_[static_cast<std::size_t>(documentIndex)].document;
-    std::unordered_set<std::string> seen;
-    const auto appendEntry = [&](const ar::iec61850::scl::SclDataSetEntry& entry) {
-        if (!entry.ied_name.empty() && qstring(entry.ied_name) != selectedName) return;
-        const auto reference = referenceFor(entry).toStdString();
-        if (!seen.insert(reference).second) return;
-        const auto key = referenceFor(entry);
-        if (!runtimeValues_.contains(key)) runtimeValues_.insert(key, valueMap(entry));
-        values_.push_back(runtimeValues_.value(key));
-    };
-    if (!document.model_entries.empty()) {
-        for (const auto& entry : document.model_entries) appendEntry(entry);
-    } else {
-        for (const auto& dataSet : document.data_sets) {
-            for (const auto& entry : dataSet.entries) appendEntry(entry);
-        }
-        for (const auto& stream : document.goose_streams) {
-            for (const auto& entry : stream.entries) appendEntry(entry);
-        }
-        for (const auto& report : document.report_controls) {
-            for (const auto& entry : report.entries) appendEntry(entry);
+
+    ar::iec61850::simulation::IedSimulatorProfileFromSclOptions options;
+    options.ied_name = ied.value(QStringLiteral("name")).toString().toStdString();
+    options.runtime_ied_name = options.ied_name;
+    const auto built = ar::iec61850::simulation::IedSimulatorProfileBuilder::build(
+        documents_[static_cast<std::size_t>(documentIndex)].document,
+        options);
+
+    std::vector<const ar::iec61850::simulation::IedSimulatorPoint*> points;
+    points.reserve(built.profile.point_count());
+    for (const auto& device : built.profile.logical_devices) {
+        for (const auto& node : device.logical_nodes) {
+            for (const auto& point : node.points) points.push_back(&point);
         }
     }
+    std::stable_sort(
+        points.begin(), points.end(),
+        [](const auto* left, const auto* right) {
+            return left->source_order < right->source_order;
+        });
+
+    for (const auto* point : points) {
+        const auto key = qstring(point->reference);
+        if (!runtimeValues_.contains(key)) runtimeValues_.insert(key, valueMap(*point));
+        values_.push_back(runtimeValues_.value(key));
+    }
+
     selectedValueIndex_ = values_.isEmpty() ? -1 : 0;
     emit valuesChanged();
 }
 
 void IedSimulatorController::seedRuntimeValues() {
-    const auto seedEntry = [this](const ar::iec61850::scl::SclDataSetEntry& entry) {
-        const auto key = referenceFor(entry);
-        if (!key.isEmpty() && !runtimeValues_.contains(key)) {
-            runtimeValues_.insert(key, valueMap(entry));
-        }
-    };
-    for (const auto& loaded : documents_) {
-        if (!loaded.document.model_entries.empty()) {
-            for (const auto& entry : loaded.document.model_entries) seedEntry(entry);
-            continue;
-        }
-        for (const auto& dataSet : loaded.document.data_sets) {
-            for (const auto& entry : dataSet.entries) seedEntry(entry);
-        }
-        for (const auto& stream : loaded.document.goose_streams) {
-            for (const auto& entry : stream.entries) seedEntry(entry);
-        }
-        for (const auto& report : loaded.document.report_controls) {
-            for (const auto& entry : report.entries) seedEntry(entry);
+    if (selectedIedIndex_ < 0 || selectedIedIndex_ >= ieds_.size()) return;
+    const auto ied = ieds_.at(selectedIedIndex_).toMap();
+    const int documentIndex = ied.value(QStringLiteral("documentIndex")).toInt();
+    if (documentIndex < 0 || documentIndex >= static_cast<int>(documents_.size())) return;
+
+    ar::iec61850::simulation::IedSimulatorProfileFromSclOptions options;
+    options.ied_name = ied.value(QStringLiteral("name")).toString().toStdString();
+    options.runtime_ied_name = options.ied_name;
+    const auto built = ar::iec61850::simulation::IedSimulatorProfileBuilder::build(
+        documents_[static_cast<std::size_t>(documentIndex)].document,
+        options);
+    for (const auto& device : built.profile.logical_devices) {
+        for (const auto& node : device.logical_nodes) {
+            for (const auto& point : node.points) {
+                const auto key = qstring(point.reference);
+                if (!runtimeValues_.contains(key)) runtimeValues_.insert(key, valueMap(point));
+            }
         }
     }
 }
 
 QVariantMap IedSimulatorController::valueMap(
-    const ar::iec61850::scl::SclDataSetEntry& entry) {
-    const auto type = normalizedType(entry);
+    const ar::iec61850::simulation::IedSimulatorPoint& point) {
     QVariantMap item;
-    item.insert(QStringLiteral("name"), displayName(entry));
-    item.insert(QStringLiteral("reference"), referenceFor(entry));
-    item.insert(QStringLiteral("logicalDevice"), qstring(entry.ld_inst));
+    const auto dataObject = qstring(point.data_object);
+    const auto dataAttribute = qstring(point.data_attribute);
     item.insert(
-        QStringLiteral("logicalNode"),
-        qstring(entry.prefix) + qstring(entry.ln_class) + qstring(entry.ln_inst));
-    item.insert(QStringLiteral("dataObject"), qstring(entry.do_name));
-    item.insert(QStringLiteral("dataAttribute"), qstring(entry.da_name));
-    item.insert(QStringLiteral("fc"), qstring(entry.functional_constraint));
-    item.insert(QStringLiteral("cdc"), qstring(entry.cdc));
-    item.insert(QStringLiteral("type"), type);
-    item.insert(QStringLiteral("rawType"), qstring(entry.basic_type));
-    item.insert(QStringLiteral("iedName"), qstring(entry.ied_name));
-    item.insert(QStringLiteral("mmsDomain"), mmsDomainFor(entry));
-    item.insert(QStringLiteral("mmsItem"), mmsItemFor(entry));
-    item.insert(QStringLiteral("value"), initialValue(entry, type));
+        QStringLiteral("name"),
+        dataAttribute.isEmpty() ? dataObject : dataObject + QLatin1Char('.') + dataAttribute);
+    item.insert(QStringLiteral("reference"), qstring(point.reference));
+    item.insert(QStringLiteral("logicalDevice"), qstring(point.logical_device));
+    item.insert(QStringLiteral("logicalNode"), qstring(point.logical_node));
+    item.insert(QStringLiteral("dataObject"), dataObject);
+    item.insert(QStringLiteral("dataAttribute"), dataAttribute);
+    item.insert(QStringLiteral("fc"), qstring(point.functional_constraint));
+    item.insert(QStringLiteral("cdc"), qstring(point.cdc));
+    item.insert(QStringLiteral("type"), qstring(point.display_type));
+    item.insert(QStringLiteral("rawType"), qstring(point.basic_type));
+    item.insert(QStringLiteral("iedName"), qstring(point.ied_name));
+    item.insert(QStringLiteral("mmsDomain"), qstring(point.mms_domain));
+    item.insert(QStringLiteral("mmsItem"), qstring(point.mms_item));
+    item.insert(QStringLiteral("value"), qstring(point.initial_value));
     item.insert(QStringLiteral("quality"), QStringLiteral("Good"));
     item.insert(QStringLiteral("origin"), QStringLiteral("Simulator"));
-    // Simulator values are local runtime state, not client-side writable
-    // semantics. Every resolved leaf, including q and t, is intentionally
-    // editable so test engineers can inject arbitrary IED states.
     item.insert(QStringLiteral("writable"), true);
     item.insert(QStringLiteral("changed"), false);
     item.insert(QStringLiteral("updated"), QStringLiteral("—"));
-    if (type == QStringLiteral("Enumeration") &&
-        qstring(entry.cdc).compare(QStringLiteral("DPC"), Qt::CaseInsensitive) == 0) {
+    if (point.display_type == "Enumeration" && point.cdc == "DPC") {
         item.insert(
             QStringLiteral("options"),
             QStringList{
@@ -1037,7 +985,7 @@ QVariantMap IedSimulatorController::valueMap(
                 QStringLiteral("off"),
                 QStringLiteral("on"),
                 QStringLiteral("bad-state")});
-    } else if (type == QStringLiteral("Boolean")) {
+    } else if (point.display_type == "Boolean") {
         item.insert(
             QStringLiteral("options"),
             QStringList{QStringLiteral("false"), QStringLiteral("true")});

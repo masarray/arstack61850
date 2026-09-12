@@ -848,6 +848,23 @@ void rebuild_manifest_roots(ManifestModel& model) {
     }
 }
 
+void rebuild_manifest_root_values(ManifestModel& model) {
+    // Runtime edits change only leaf values. Keep the structural MMS type and
+    // its encoded type-specification storage stable for the lifetime of every
+    // composed URCB/BRCB object table. Those tables intentionally copy object
+    // entries (including spans into type-specification storage), while their
+    // read callbacks retain pointers to ManifestValue and therefore observe
+    // freshly encoded data without rebuilding the table hierarchy.
+    for (std::size_t index = 0U; index < model.root_trees.size(); ++index) {
+        const auto value_index = model.root_value_indices[index];
+        const auto& tree = model.root_trees[index];
+        if (tree.children.empty()) continue;
+        auto& root = model.values[value_index];
+        root.data = node_data(tree, model);
+        root.encoded = mms::MmsDataCodec::encode(*root.data);
+    }
+}
+
 [[nodiscard]] std::uint64_t manifest_revision(const std::string& header) noexcept {
     const auto fields = split_fields(header, '\t');
     if (fields.size() < 3U || fields[0] != "ARSTACK_IED_MODEL") return 0U;
@@ -1264,11 +1281,10 @@ void rebuild_manifest_roots(ManifestModel& model) {
     }
     model.revision = revision;
     if (changed != 0U) {
-        rebuild_manifest_roots(model);
-        for (const auto value_index : model.root_value_indices) {
-            model.objects[value_index].type_specification =
-                model.values[value_index].type_specification;
-        }
+        // Value refresh is deliberately data-only. Re-encoding structural type
+        // specifications here can reallocate their backing vectors and leave
+        // the spans copied into composed control/URCB/BRCB tables dangling.
+        rebuild_manifest_root_values(model);
     }
     return changed;
 }
@@ -1386,7 +1402,7 @@ void serve_connection(
         direct_control_states.resize(manifest_model->direct_control_storage.size());
         direct_control_bindings.resize(manifest_model->direct_control_storage.size());
         direct_control_objects.assign(object_table.objects().begin(), object_table.objects().end());
-        constexpr std::array<std::uint8_t, 2U> unsigned_type{0x86U, 0x00U};
+        static constexpr std::array<std::uint8_t, 2U> unsigned_type{0x86U, 0x00U};
 
         for (std::size_t index = 0U; index < manifest_model->direct_control_storage.size(); ++index) {
             auto& control = manifest_model->direct_control_storage[index];
@@ -1471,6 +1487,19 @@ void serve_connection(
                     mms::mms_static_boolean_write_cancel_contextual});
             }
         }
+        // MmsStaticObjectTable requires strict (domain,item) ordering. The
+        // structural model is already sorted, but control-service aliases are
+        // appended above and can sort before ST/CF leaves (for example $CO$
+        // sorts before $ST$). Re-sort the composed per-association table before
+        // validating or exposing it to GetNameList/GVAA/Read/Write.
+        std::stable_sort(
+            direct_control_objects.begin(),
+            direct_control_objects.end(),
+            [](const mms::MmsStaticObjectEntry& left,
+               const mms::MmsStaticObjectEntry& right) noexcept {
+                if (left.domain != right.domain) return left.domain < right.domain;
+                return left.item < right.item;
+            });
         direct_control_table = std::make_unique<mms::MmsStaticObjectTable>(
             std::span<const mms::MmsStaticObjectEntry>{direct_control_objects});
         if (!direct_control_table->valid()) {
@@ -1491,9 +1520,14 @@ void serve_connection(
             throw std::runtime_error("Could not initialize per-association URCB runtime.");
         }
 
+        // Size the URCB object bank from the model that will actually be
+        // wrapped. Configured controls may already have extended the base
+        // object table with SBO/SBOw/Oper/Cancel objects. Sizing from the
+        // original table under-allocates the per-association bank and makes
+        // initialize() fail before the MMS association can be accepted.
         mms::MmsStaticUrcbObjectBank sizing_bank{
             *urcb_runtime,
-            object_table.objects(),
+            process_objects->objects(),
             std::span<mms::MmsStaticObjectEntry>{},
             std::span<mms::MmsStaticUrcbObjectContext>{},
             std::span<char>{},
@@ -1545,7 +1579,26 @@ void serve_connection(
                 *process_objects,
                 data_sets);
             if (!brcb->reports->initialize()) {
-                throw std::runtime_error("Could not initialize per-association BRCB runtime.");
+                std::ostringstream detail;
+                detail << "Could not initialize per-association BRCB runtime"
+                       << " objectsValid=" << (process_objects->valid() ? "true" : "false")
+                       << " dataSetsValid=" << (data_sets.valid() ? "true" : "false")
+                       << " dataSetsAgainstObjects="
+                       << (data_sets.valid_against(*process_objects) ? "true" : "false")
+                       << " domain='" << definition.domain << "'"
+                       << " item='" << definition.item << "'"
+                       << " rptId='" << definition.report_id << "'"
+                       << " dataSet='" << definition.data_set_domain << "/"
+                       << definition.data_set_item << "'"
+                       << " optFlds="
+                       << static_cast<unsigned>(definition.optional_fields[0]) << ','
+                       << static_cast<unsigned>(definition.optional_fields[1])
+                       << " trgOps=" << static_cast<unsigned>(definition.trigger_options)
+                       << " slots=" << brcb->slots.size()
+                       << " slot0Bytes="
+                       << (brcb->slots.empty() ? 0U : brcb->slots.front().storage.size())
+                       << " dsMembers=" << brcb->data_set->members.size();
+                throw std::runtime_error(detail.str());
             }
             brcb->control = std::make_unique<mms::MmsStaticBrcbControl>(*brcb->reports);
 
@@ -1638,17 +1691,13 @@ void serve_connection(
                 const auto changed = refresh_manifest_values(
                     *manifest_model, &changed_value_indices);
                 if (changed != 0U) {
-                    if (urcb_bank != nullptr && !urcb_bank->initialize()) {
-                        throw std::runtime_error(
-                            "URCB object bank could not refresh its base model views.");
-                    }
-                    for (auto& brcb : brcb_runtimes) {
-                        if (brcb != nullptr && brcb->bank != nullptr &&
-                            !brcb->bank->initialize()) {
-                            throw std::runtime_error(
-                                "BRCB object bank could not refresh its base model views.");
-                        }
-                    }
+                    // Object-bank topology, callback contexts and MMS type
+                    // specifications are structural and remain immutable after
+                    // association setup. ManifestValue callbacks read the
+                    // updated encoded payload directly, so reinitializing a
+                    // composed bank here is both unnecessary and unsafe: a
+                    // nested bank can copy aliases from its own storage while
+                    // it is being rebuilt. Notify report runtimes only.
                     notify_brcb_changes(
                         *manifest_model,
                         changed_value_indices,
@@ -2084,6 +2133,7 @@ int main(int argc, char** argv) {
                 &options,
                 &manifest_type,
                 &manifest_value,
+                &manifest_model,
                 &object_table,
                 &data_sets,
                 client,
@@ -2094,6 +2144,30 @@ int main(int argc, char** argv) {
                     if (!options.model_manifest.empty()) {
                         auto local_model = load_manifest_model(
                             options.model_manifest, manifest_type, manifest_value);
+
+                        // Process state belongs to the simulated IED, not to an MMS
+                        // association. Per-association model copies isolate mutable
+                        // report/control bookkeeping, but every configured control
+                        // must point at the canonical server-level process/selection
+                        // state so an Oper performed by one client is immediately
+                        // visible to a second client and SBO ownership is global.
+                        for (auto& local_control : local_model.direct_control_storage) {
+                            const auto shared = std::find_if(
+                                manifest_model.direct_control_storage.begin(),
+                                manifest_model.direct_control_storage.end(),
+                                [&](const auto& candidate) {
+                                    return candidate.domain == local_control.domain &&
+                                        candidate.status_item == local_control.status_item &&
+                                        candidate.control_model == local_control.control_model;
+                                });
+                            if (shared == manifest_model.direct_control_storage.end() ||
+                                shared->shared_state == nullptr) {
+                                throw std::runtime_error(
+                                    "Per-association control has no canonical shared state.");
+                            }
+                            local_control.shared_state = shared->shared_state;
+                        }
+
                         const auto local_object_span =
                             std::span<const mms::MmsStaticObjectEntry>{local_model.objects};
                         const auto local_data_set_span =
