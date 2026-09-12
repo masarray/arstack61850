@@ -68,6 +68,13 @@ private:
         RowKind kind{RowKind::dataAttribute};
         int sourceIndex{-1};
         QString name;
+        QString functionalConstraint;
+        QString type;
+        QString reference;
+        QString value;
+        QString quality;
+        bool writable{};
+        bool changed{};
     };
 
     void scheduleRebuild();
@@ -76,13 +83,16 @@ private:
     void refreshSnapshot();
     void refreshSelectedRole();
     void emitRowsChanged(QVector<int> rows, const QList<int>& roles);
-    [[nodiscard]] QVariantMap sourceItem(int sourceIndex) const;
     [[nodiscard]] bool rowMatches(const QVariantMap& item, const QString& query) const;
+    [[nodiscard]] Row makeRow(
+        RowKind kind,
+        int sourceIndex,
+        const QString& name,
+        const QVariantMap& item) const;
 
     IedFleetController* backend_{};
     QTimer rebuildTimer_;
     QTimer refreshTimer_;
-    QVariantList sourceValues_;
     std::vector<Row> rows_;
     QHash<int, QVector<int>> sourceRows_;
     QString logicalDevice_;
@@ -90,6 +100,7 @@ private:
     QString filterText_;
     int observedIedIndex_{-1};
     int observedSelectedSourceIndex_{-1};
+    int observedSourceCount_{};
     QString observedFirstReference_;
     QString observedLastReference_;
 };
