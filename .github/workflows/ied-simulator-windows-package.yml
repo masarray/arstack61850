@@ -24,10 +24,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Match the Qt msvc2022_64 binary package.  Without an initialized MSVC
+      # environment the hosted runner can discover C:\mingw64\bin\c++.exe
+      # first, which is both ABI-incompatible with this Qt build and exposes a
+      # different Winsock warning profile under the repository's -Werror gate.
+      - name: Initialize MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
+
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.3'
+          arch: 'win64_msvc2022_64'
           cache: true
 
       - name: Configure Release build
@@ -35,6 +45,7 @@ jobs:
         run: >-
           cmake -S apps/ied_simulator -B build-ied-simulator-win -G Ninja
           -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_COMPILER=cl.exe
 
       - name: Build GUI and bundled MMS server
         shell: pwsh
