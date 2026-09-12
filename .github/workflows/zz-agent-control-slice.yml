@@ -25,6 +25,9 @@ jobs:
       - name: Apply SBO and enhanced control slice
         run: python3 scripts/agent_apply_sbo_enhanced_slice.py
 
+      - name: Apply strict-build cleanup
+        run: python3 scripts/agent_fix_sbo_enhanced_build.py
+
       - name: Check patch hygiene
         run: git diff --check
 
