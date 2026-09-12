@@ -19,7 +19,7 @@ jobs:
           ref: feat/complete-ariec61850-simulator-parity
           fetch-depth: 0
 
-      - name: Adjust patch driver anchors
+      - name: Adjust patch driver anchors and strict aggregates
         run: python3 scripts/agent_apply_control_slice_fix.py
 
       - name: Apply configured Direct-Normal vertical slice
@@ -52,6 +52,7 @@ jobs:
           git add \
             include/ariec61850/scl/model.hpp \
             src/scl/parser_part_03_01.inc \
+            src/scl/parser_part_04.inc \
             src/scl/parser_part_05_00.inc \
             tests/fixtures/scl/minimal-station-brcb.scd \
             tests/test_scl.cpp \
