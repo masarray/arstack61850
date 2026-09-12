@@ -69,6 +69,12 @@ jobs:
           ./build-ied-simulator-qt/arstack_ied_simulator
           --qa-async-import ./tests/fixtures/scl/minimal-station-brcb.scd
 
+      - name: Large SCL import performance gates
+        run: >-
+          python3 apps/ied_simulator/benchmark_large_scl.py
+          --app ./build-ied-simulator-qt/arstack_ied_simulator
+          --targets 5000,20000,50000
+
       - name: Capture workbench visual regression
         env:
           QT_QPA_PLATFORM: offscreen

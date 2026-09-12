@@ -34,12 +34,14 @@ This plan applies the repository `AGENTS.md` production contract to the desktop 
 - Import while a simulator endpoint is active is rejected instead of blocking the GUI on process shutdown.
 - Still pending in Stage B: move profile construction / large value-index construction off the GUI thread and add explicit progress/cancel UI for very large files.
 
-### Stage C - incremental live updates
+### Stage C - incremental live updates — first slice implemented
 
-- Replace remaining `QVariantList` backing stores for high-cardinality values with typed storage + `QAbstractItemModel` access.
-- Emit `dataChanged()` only for affected source rows.
-- Coalesce presentation updates to one UI-frame window while preserving the latest value per point.
-- Keep report/control/MMS runtime state authoritative outside the GUI model.
+- Signal projection keeps a source-index -> visible-row routing table.
+- Live refreshes are coalesced to ~16 ms and compare only source rows represented by the visible projection.
+- `dataChanged()` is emitted only for contiguous rows whose value/quality/writable/changed roles actually changed.
+- Selected-row invalidation targets only the previous/new source rows.
+- Active value-based search deliberately falls back to the existing coalesced rebuild because a live value can change filtered membership.
+- Still pending in Stage C: replace high-cardinality `QVariantList/QVariantMap` canonical backing storage with typed low/zero-copy storage and add a latest-value-per-point burst accumulator.
 
 ### Stage D - diagnostics and lifecycle hardening
 
@@ -48,25 +50,21 @@ This plan applies the repository `AGENTS.md` production contract to the desktop 
 - Remove user-visible blocking waits from the GUI thread; blocking shutdown remains only at final process teardown when unavoidable.
 - Add negative tests for malformed/oversized SCL, child-process crash, rapid start/stop, repeated model reload, and large update bursts.
 
-### Stage E - performance evidence
+### Stage E - performance evidence — large-import gate first slice implemented
 
-Add deterministic synthetic fixtures and record:
+- `benchmark_large_scl.py` generates deterministic engineering models that expand to about 5k, 20k, and 50k data attributes using reusable SCL type templates.
+- The benchmark drives the same `loadFileAsync()` path used by interactive Open SCL, records end-to-end wall time and Linux peak RSS, and fails on crash/deadlock/non-completion.
+- CI now enforces deliberately generous wall-time/RSS ceilings so catastrophic O(N^2), runaway-memory, deadlock, and crash regressions become visible immediately without pretending CI is a laboratory micro-benchmark.
+- Still pending in Stage E: GUI-thread stall heartbeat, delegate-instantiation count, search/filter latency at scale, repeated-open/close memory slope, update-burst coalescing ratio, and start/stop/reload soak evidence.
 
-- import/index wall time and GUI-thread stall time;
-- model row count vs. instantiated delegates;
-- filter latency for 5k/20k/50k points;
-- steady-state memory and repeated-open/close memory slope;
-- update burst latency and coalescing ratio;
-- start/stop/reload lifecycle stress;
-- CI smoke + existing MMS/report/control interoperability regressions.
-
-## Initial budgets (targets, not current claims)
+## Initial budgets
 
 - No user interaction should block the GUI event loop for >50 ms under normal desktop load.
 - Search typing should coalesce within ~80 ms and never allocate a second complete SCL tree.
 - Large lists must instantiate approximately viewport-sized delegates, not one delegate per model row.
 - Presentation/event queues are explicitly bounded.
 - Repeated open/start/stop/close stress must show no monotonically growing owned worker/process/timer count.
+- CI large-import guardrails: 5k <= 15 s / 512 MiB, 20k <= 30 s / 768 MiB, 50k <= 55 s / 1024 MiB. These are regression tripwires, not claimed product targets.
 
 ## Definition of done for the redesign
 
