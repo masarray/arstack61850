@@ -152,6 +152,14 @@ void parser_compiles_structured_4800_sv_profile_without_drift() {
     CHECK(document.data_sets.size() == 1U);
     CHECK(document.warnings.empty());
 
+    const auto& configured_data_set = document.data_sets.front();
+    CHECK(configured_data_set.entries.size() == 8U);
+    CHECK(configured_data_set.expanded_entries.size() == 16U);
+    CHECK(std::all_of(
+        configured_data_set.entries.begin(),
+        configured_data_set.entries.end(),
+        [](const SclDataSetEntry& entry) { return entry.da_name.empty(); }));
+
     const auto& stream = document.sampled_values_streams.front();
     CHECK(stream.address.destination_mac_text == "01:0C:CD:04:00:00");
     CHECK(stream.address.app_id == std::optional<std::uint16_t>{

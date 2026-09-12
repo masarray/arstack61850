@@ -657,6 +657,8 @@ struct ConnectionBuffers final {
     std::array<std::uint8_t, 65'535U> report_workspace{};
 };
 
+struct ManifestTypeNode;
+
 struct ManifestValue final {
     std::string domain;
     std::string item;
@@ -667,6 +669,7 @@ struct ManifestValue final {
     std::optional<mms::MmsDataValue> data;
     std::vector<std::uint8_t> type_specification;
     std::vector<std::uint8_t> encoded;
+    const ManifestTypeNode* structured_node{};
     bool root{};
 };
 
@@ -863,6 +866,11 @@ void rebuild_manifest_root_values(ManifestModel& model) {
         root.data = node_data(tree, model);
         root.encoded = mms::MmsDataCodec::encode(*root.data);
     }
+    for (auto& value : model.values) {
+        if (value.structured_node == nullptr) continue;
+        value.data = node_data(*value.structured_node, model);
+        value.encoded = mms::MmsDataCodec::encode(*value.data);
+    }
 }
 
 [[nodiscard]] std::uint64_t manifest_revision(const std::string& header) noexcept {
@@ -884,6 +892,26 @@ void rebuild_manifest_root_values(ManifestModel& model) {
     result.push_back('\n');
     result.append(item);
     return result;
+}
+
+[[nodiscard]] const ManifestTypeNode* find_manifest_node(
+    const ManifestModel& model,
+    const std::unordered_map<std::string, std::size_t>& root_indices,
+    const std::string_view domain,
+    const std::string_view item) {
+    const auto parts = split_fields(item, '$');
+    if (parts.size() < 2U) return nullptr;
+    const auto root = root_indices.find(object_key(domain, parts.front()));
+    if (root == root_indices.end() || root->second >= model.root_trees.size()) {
+        return nullptr;
+    }
+    const auto* node = &model.root_trees[root->second];
+    for (std::size_t part = 1U; part < parts.size(); ++part) {
+        const auto child = node->children.find(parts[part]);
+        if (child == node->children.end()) return nullptr;
+        node = &child->second;
+    }
+    return node;
 }
 
 [[nodiscard]] ManifestModel load_manifest_model(
@@ -1118,12 +1146,42 @@ void rebuild_manifest_root_values(ManifestModel& model) {
         model.direct_control_storage.push_back(std::move(control));
     }
 
+    const auto ensure_data_set_member_object = [&](const ParsedDataSetMember& member) {
+        const auto key = object_key(member.member_domain, member.member_item);
+        if (model.value_indices.contains(key)) return true;
+        if (model.values.size() >= mms::MmsStaticObjectTable::maximum_objects) return false;
+
+        const auto* node = find_manifest_node(
+            model, root_indices, member.member_domain, member.member_item);
+        if (node == nullptr || node->children.empty()) return false;
+
+        const auto parts = split_fields(member.member_item, '$');
+        ManifestValue value;
+        value.domain = member.member_domain;
+        value.item = member.member_item;
+        value.structured_node = node;
+        value.type = node_type(*node, model, parts.empty() ? std::string{} : parts.back());
+        value.data = node_data(*node, model);
+        value.type_specification = mms::MmsServiceCodec::encode_type_specification(value.type);
+        value.encoded = mms::MmsDataCodec::encode(*value.data);
+
+        const auto value_index = model.values.size();
+        model.values.push_back(std::move(value));
+        model.value_indices.emplace(key, value_index);
+        auto& stored = model.values.back();
+        model.objects.push_back(mms::MmsStaticObjectEntry{
+            stored.domain,
+            stored.item,
+            stored.type_specification,
+            read_manifest_value,
+            &stored});
+        return true;
+    };
+
     std::map<std::pair<std::string, std::string>, std::vector<std::pair<std::string, std::string>>>
         grouped_members;
     for (const auto& member : parsed_members) {
-        if (!model.value_indices.contains(object_key(member.member_domain, member.member_item))) {
-            continue;
-        }
+        if (!ensure_data_set_member_object(member)) continue;
         grouped_members[{member.domain, member.item}].emplace_back(
             member.member_domain, member.member_item);
     }
@@ -1321,7 +1379,13 @@ void notify_brcb_changes(
                  member_index < brcb->data_set->members.size();
                  ++member_index) {
                 const auto& member = brcb->data_set->members[member_index];
-                if (member.domain != value.domain || member.item != value.item) continue;
+                const auto member_matches_value =
+                    member.domain == value.domain &&
+                    (member.item == value.item ||
+                     (value.item.size() > member.item.size() &&
+                      value.item.compare(0U, member.item.size(), member.item) == 0 &&
+                      value.item[member.item.size()] == '$'));
+                if (!member_matches_value) continue;
                 const auto status = brcb->reports->notify(member_index, reason, now_ms);
                 if (status != mms::MmsStaticBrcbStatus::ok &&
                     status != mms::MmsStaticBrcbStatus::trigger_not_selected &&

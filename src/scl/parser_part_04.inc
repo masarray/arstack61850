@@ -1,7 +1,10 @@
         da_name,
         functional_constraint);
 
-    if (!type.resolved && !signal_reference.empty()) {
+    // A configured FCDA may intentionally name the whole DataObject and leave
+    // daName empty. That is a valid IEC 61850 DataSet member, not an unresolved
+    // scalar leaf. Payload-oriented users can expand it separately below.
+    if (!type.resolved && !signal_reference.empty() && !da_name.empty()) {
         warnings.push_back("Type unresolved for " + signal_reference + ".");
     }
 
@@ -311,17 +314,39 @@ SclDocument SclParser::parse(
                         logical_node_path,
                         data_set.name);
 
-                    std::size_t entry_index = 1U;
+                    std::size_t configured_entry_index = 1U;
+                    std::size_t expanded_entry_index = 1U;
                     for (const auto* fcda : direct_children(*data_set_node, "FCDA")) {
-                        auto entries = build_data_set_entries(
+                        const auto explicit_da_name = attribute(fcda, "daName");
+                        if (!explicit_da_name.empty()) {
+                            auto configured = build_data_set_entry(
+                                ied_name,
+                                *fcda,
+                                configured_entry_index++,
+                                type_index,
+                                document.warnings);
+                            auto expanded = configured;
+                            expanded.index = expanded_entry_index++;
+                            data_set.entries.push_back(std::move(configured));
+                            data_set.expanded_entries.push_back(std::move(expanded));
+                            continue;
+                        }
+
+                        data_set.entries.push_back(build_data_set_entry(
                             ied_name,
                             *fcda,
-                            entry_index,
+                            configured_entry_index++,
+                            type_index,
+                            document.warnings));
+                        auto expanded = build_data_set_entries(
+                            ied_name,
+                            *fcda,
+                            expanded_entry_index,
                             type_index,
                             document.warnings);
-                        entry_index += entries.size();
-                        for (auto& entry : entries) {
-                            data_set.entries.push_back(std::move(entry));
+                        expanded_entry_index += expanded.size();
+                        for (auto& entry : expanded) {
+                            data_set.expanded_entries.push_back(std::move(entry));
                         }
                     }
                     document.data_sets.push_back(std::move(data_set));

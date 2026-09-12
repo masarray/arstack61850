@@ -75,7 +75,15 @@ struct SclDataSet final {
     std::string logical_node_path;
     std::string name;
     std::string reference;
+
+    // Canonical SCL FCDA membership. A whole-DataObject FCDA intentionally keeps
+    // da_name empty and therefore remains one MMS DataSet member.
     std::vector<SclDataSetEntry> entries;
+
+    // Ordered leaf projection used by payload-oriented profiles such as SV and
+    // the current GOOSE publisher path. This view may contain several entries
+    // for one configured whole-DataObject FCDA.
+    std::vector<SclDataSetEntry> expanded_entries;
 
     friend bool operator==(const SclDataSet&, const SclDataSet&) = default;
 };
