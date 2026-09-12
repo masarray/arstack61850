@@ -57,6 +57,18 @@ jobs:
           cmake --build build-ied-simulator-qt
           --target arstack_ied_simulator ariec61850_mms_read_probe --parallel 2
 
+      - name: Export simulator source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: ied-simulator-source
+          path: |
+            apps/ied_simulator/src
+            apps/ied_simulator/qml
+            apps/ied_simulator/CMakeLists.txt
+            .github/workflows/ied-simulator-qt.yml
+          if-no-files-found: error
+          retention-days: 1
+
       - name: QML smoke test
         env:
           QT_QPA_PLATFORM: offscreen
