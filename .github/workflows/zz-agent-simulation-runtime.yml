@@ -36,6 +36,9 @@ jobs:
       - name: Share simulated control state across associations
         run: python3 scripts/agent_fix_cross_association_control_state.py
 
+      - name: Keep report banks stable during live edits
+        run: python3 scripts/agent_fix_report_bank_live_refresh.py
+
       - name: Add BRCB invariant diagnostics
         run: python3 scripts/agent_diagnose_iedsim_brcb.py
 
