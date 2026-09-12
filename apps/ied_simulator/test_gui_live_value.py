@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Launch the Qt simulator and prove GUI state plus full SCL model are visible over MMS."""
+"""Launch the Qt simulator and prove GUI/live SCL model values are visible over MMS."""
 
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
 import socket
@@ -58,6 +59,93 @@ def run_probe(read_probe: str, port: int, item: str) -> subprocess.CompletedProc
     )
 
 
+def update_manifest_value(manifest_path: Path, item: str, new_value: str) -> int:
+    text = manifest_path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    if not lines or not lines[0].startswith("ARSTACK_IED_MODEL\t2\t"):
+        raise RuntimeError("simulator manifest header is missing")
+    header = lines[0].split("\t")
+    revision = int(header[2]) + 1
+    lines[0] = f"ARSTACK_IED_MODEL\t2\t{revision}"
+
+    prefix = f"OBJ\tMU01LD0\t{item}\t"
+    changed = False
+    for index, line in enumerate(lines[1:], start=1):
+        if not line.startswith(prefix):
+            continue
+        fields = line.split("\t")
+        if len(fields) < 6:
+            raise RuntimeError(f"malformed OBJ line for {item}: {line}")
+        fields[5] = new_value
+        lines[index] = "\t".join(fields)
+        changed = True
+        break
+    if not changed:
+        raise RuntimeError(f"manifest object not found: {item}")
+
+    temporary = manifest_path.with_suffix(manifest_path.suffix + ".test-new")
+    temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    os.replace(temporary, manifest_path)
+    return revision
+
+
+def prove_same_association_refresh(
+    read_probe: str,
+    port: int,
+    manifest_path: Path,
+    item: str,
+    initial_fragment: str,
+    updated_value: str,
+    updated_fragment: str,
+) -> str:
+    process = subprocess.Popen(
+        [
+            read_probe,
+            "127.0.0.1",
+            str(port),
+            "--domain",
+            "MU01LD0",
+            "--item",
+            item,
+            "--count",
+            "2",
+            "--delay-ms",
+            "1200",
+            "--timeout-ms",
+            "3000",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        creationflags=creation_flags(),
+    )
+    try:
+        if process.stdout is None:
+            raise RuntimeError("read probe stdout pipe was not created")
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            first_line = executor.submit(process.stdout.readline).result(timeout=5).strip()
+        if initial_fragment not in first_line:
+            stderr = process.stderr.read() if process.stderr is not None else ""
+            raise RuntimeError(
+                f"first read for {item} did not expose {initial_fragment!r}: "
+                f"stdout={first_line!r} stderr={stderr!r}"
+            )
+
+        update_manifest_value(manifest_path, item, updated_value)
+        remaining_stdout, stderr = process.communicate(timeout=7)
+        output = first_line + "\n" + remaining_stdout
+        if process.returncode != 0 or updated_fragment not in output:
+            raise RuntimeError(
+                f"same-association refresh failed for {item}: exit={process.returncode} "
+                f"stdout={output!r} stderr={stderr!r}"
+            )
+        return output
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=3)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--app", required=True)
@@ -81,7 +169,7 @@ def main() -> int:
                 "--set-first-value",
                 "42",
                 "--exit-after-ms",
-                "12000",
+                "22000",
             ],
             stdout=app_log,
             stderr=subprocess.STDOUT,
@@ -111,13 +199,15 @@ def main() -> int:
                     manifest_text.startswith("ARSTACK_IED_MODEL\t2\t2\n")
                     and mapped_value in manifest_text
                     and structural_only_value in manifest_text
+                    and "XCBR1$ST$Pos$q\tQuality\tQuality\tgood" in manifest_text
+                    and "XCBR1$ST$Pos$t\tTimestamp\tTimestamp\t" in manifest_text
                 ):
                     break
                 time.sleep(0.1)
             else:
                 raise RuntimeError(
-                    "GUI did not publish revision 2 with both the edited DataSet leaf "
-                    "and the structural-only leaf"
+                    "GUI did not publish revision 2 with the edited DataSet leaf, "
+                    "structural-only leaf, Quality, and Timestamp objects"
                 )
 
             deadline = time.monotonic() + 10.0
@@ -146,24 +236,49 @@ def main() -> int:
                     "TCTR1$MX$AmpUnmapped$instMag$i",
                 )
                 if structural_probe.returncode == 0 and "value=0" in structural_probe.stdout:
-                    app.wait(timeout=14)
-                    print(
-                        "IEDSIM_GUI_LIVE_VALUE_PASS "
-                        "edited=MU01LD0/TCTR1$MX$Amp$instMag$i:42 "
-                        "structural=MU01LD0/TCTR1$MX$AmpUnmapped$instMag$i:0"
-                    )
-                    return 0
+                    break
                 last_error = (
                     "structural-only leaf: "
                     f"exit={structural_probe.returncode} stdout={structural_probe.stdout} "
                     f"stderr={structural_probe.stderr}"
                 )
                 time.sleep(0.2)
-            raise RuntimeError(last_error)
+            else:
+                raise RuntimeError(last_error)
+
+            quality_output = prove_same_association_refresh(
+                read_probe,
+                port,
+                manifest_path,
+                "XCBR1$ST$Pos$q",
+                "value=030000",
+                "questionable,old-data,test",
+                "value=03C110",
+            )
+            timestamp_output = prove_same_association_refresh(
+                read_probe,
+                port,
+                manifest_path,
+                "XCBR1$ST$Pos$t",
+                "value=unix-ms=0 UTC",
+                "1700000000123",
+                "value=unix-ms=1700000000123 UTC",
+            )
+
+            app.wait(timeout=24)
+            print(
+                "IEDSIM_GUI_LIVE_VALUE_PASS "
+                "edited=MU01LD0/TCTR1$MX$Amp$instMag$i:42 "
+                "structural=MU01LD0/TCTR1$MX$AmpUnmapped$instMag$i:0 "
+                "quality=same-association:030000->03C110 "
+                "timestamp=same-association:0->1700000000123"
+            )
+            print(quality_output.strip())
+            print(timestamp_output.strip())
+            return 0
         except BaseException:
             if app.poll() is None:
                 try:
-                    # Let Qt destroy its QProcess child and release the listener.
                     app.wait(timeout=4)
                 except subprocess.TimeoutExpired:
                     app.kill()
