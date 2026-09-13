@@ -132,6 +132,17 @@ This plan applies the repository `AGENTS.md` production contract to the desktop 
 - Hosted CI does not claim a packet reached a physical station LAN; live publication requires the selected host adapter and the platform's raw-packet permission/Npcap runtime. Completion evidence is standards-wire encode/decode/PCAP plus fail-closed transport checks and cross-platform compilation.
 - CI gates: `GOOSE_WIRE_INTEROP_PASS` and `GOOSE_PUBLICATION_NEGATIVE_PASS`; artifact: `ied-simulator-goose-wire-evidence`.
 
+### Stage N - MMS Client & IED Discovery Workbench — implemented
+
+- The desktop shell now exposes an `IED Connection` workspace beside the existing simulator workspace. It connects to a user-selected hostname/IP and TCP port, performs a real MMS association, and builds the engineering tree from canonical `MmsTcpLiveDiscoverySession` / `MmsLiveModelBuilder` results instead of reparsing SCL or invoking a CLI subprocess.
+- `MmsLiveTreeModel` projects the live IED hierarchy as IED -> LD -> LN -> DO -> DA with typed C++ roles, virtualized QML delegates, expand/collapse, and search. Selection inspection exposes IEC 61850 reference, functional constraint, exact MMS type, SCL basic type, discovery status, current value, and sibling quality/timestamp when those attributes are available.
+- Discovery and subsequent Read/Write operations reuse one persistent association. `Read selected` includes the selected DA plus sibling `q`/`t` where available; `Refresh visible` is bounded to at most 64 live MMS variables per operator action rather than walking the full discovered model from QML.
+- Generic Write is deliberately fail-closed. Only exact scalar MMS types discovered for FC `SP`, `CF`, `DC`, or `SE` are writable through this workbench; `ST`, `MX`, `CO`, unknown types, structures, arrays, and unrepresentable values are rejected. A successful Write is followed by a verification Read on the same association and is never automatically retried.
+- Client network work runs on one bounded `QThreadPool` worker. A stop token plus monotonic session generation invalidates disconnect/reconnect completions so a stale discovery, Read, or Write cannot repopulate a newer or disconnected UI session. Diagnostic history is bounded to 128 entries.
+- The existing simulator A-M workflow remains intact under the `Simulator` workspace and command-line `--scl` automation still opens that path, so adding engineering-client capability does not fork or replace the validated simulator runtime.
+- Deterministic loopback QA starts the real simulator with `client-workbench.scd`, associates through the live client, discovers the live model, reads an exact `SP` integer, performs one guarded Write, verifies it by Read, then disconnects during a new Read and proves the stale generation cannot repopulate model state.
+- CI target `ied_mms_client_workbench_qa` is part of the normal `IED Simulator Qt` build and executes before all existing A-M regressions. Gates: `MMS_CLIENT_WORKBENCH_PASS` and `MMS_CLIENT_STALE_SESSION_NEGATIVE_PASS`.
+
 ## Initial budgets
 
 - No ordinary user interaction should create sustained GUI event-loop stalls; expensive construction remains off the GUI thread.
@@ -145,7 +156,8 @@ This plan applies the repository `AGENTS.md` production contract to the desktop 
 - Commissioning browsing must reuse parsed SCL ownership, virtualize lists, and fail closed on unresolved DataSet bindings rather than fabricating members or silently rebinding references.
 - Runtime commissioning behavior is capped at 16 slots with a >=100 ms interval and reuses the existing 256-pending / 256-in-flight live-delta bounds; it must never create unbounded per-point timers or a catch-up burst after GUI/event-loop delay.
 - GOOSE publication is capped at 16 active streams and 256 canonical members per stream; one transport/timer is shared for the commissioning model and a source notification may cause at most one state-change emission per active stream after snapshot comparison.
+- MMS client engineering actions use one I/O worker per controller, one persistent association per live session, at most 64 variables per explicit visible-range refresh, and at most 128 retained diagnostic entries. Disconnect/reconnect must invalidate stale queued completions before they can mutate the live tree.
 
 ## Definition of done for the redesign
 
-The redesign is complete only when the new workflow passes the existing simulator wire regressions, large-model UI tests, negative/failure tests, lifecycle stress, runtime-scale responsiveness gates, commissioning-depth positive/negative gates, runtime-commissioning action/behavior positive+negative gates, GOOSE wire-publication positive/negative gates with PCAP evidence, live-data-plane burst/negative gates, and measured performance checks. A visually improved screenshot alone is not completion evidence.
+The redesign is complete only when the new workflow passes the existing simulator wire regressions, large-model UI tests, negative/failure tests, lifecycle stress, runtime-scale responsiveness gates, commissioning-depth positive/negative gates, runtime-commissioning action/behavior positive+negative gates, GOOSE wire-publication positive/negative gates with PCAP evidence, live-data-plane burst/negative gates, MMS client discovery/read/write positive and stale-session negative gates, and measured performance checks. A visually improved screenshot alone is not completion evidence.
