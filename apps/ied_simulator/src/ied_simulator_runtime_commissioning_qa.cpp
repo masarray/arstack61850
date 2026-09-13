@@ -282,10 +282,57 @@ int main(int argc, char* argv[]) {
         return 25;
     }
 
+    // Lifecycle invariant: a stimulus must not survive a runtime stop and then
+    // silently become the next startup manifest baseline. The scheduler owns
+    // the driven value, so stopping the child restores that owned value locally
+    // before the slot is discarded. Newer external edits are never overwritten.
+    if (selectBufferedReport(model) < 0 || !model.focusBoundDataSet()) {
+        qCritical() << "RUNTIME_COMMISSIONING_FAIL lifecycle_dataset";
+        return 26;
+    }
+    const int lifecycleMember = model.firstDrivableMember();
+    if (lifecycleMember < 0 || !model.focusMemberValue(lifecycleMember)) {
+        qCritical() << "RUNTIME_COMMISSIONING_FAIL lifecycle_member";
+        return 27;
+    }
+    const auto lifecycleInitial = controller.selectedValue();
+    const auto lifecycleOriginal = lifecycleInitial.value(QStringLiteral("value")).toString();
+    const auto lifecycleDomain = lifecycleInitial.value(QStringLiteral("mmsDomain")).toString();
+    const auto lifecycleItem = lifecycleInitial.value(QStringLiteral("mmsItem")).toString();
+    const auto lifecycleTicksBefore = model.behaviorTickCount();
+    if (!model.startMemberBehavior(lifecycleMember, QStringLiteral("Toggle"), 100, 1.0) ||
+        !waitUntil([&] { return model.behaviorTickCount() > lifecycleTicksBefore; }, 1'000) ||
+        !model.focusMemberValue(lifecycleMember) ||
+        controller.selectedValue().value(QStringLiteral("value")).toString() == lifecycleOriginal) {
+        qCritical() << "RUNTIME_COMMISSIONING_FAIL lifecycle_drive";
+        return 28;
+    }
+
+    controller.stopSimulation();
+    if (!waitUntil([&controller] { return !controller.anyRunning(); }, 3'000) ||
+        !waitUntil([&model] { return model.behaviorCount() == 0; }, 1'500) ||
+        !model.focusMemberValue(lifecycleMember) ||
+        controller.selectedValue().value(QStringLiteral("value")).toString() != lifecycleOriginal) {
+        qCritical() << "RUNTIME_COMMISSIONING_FAIL lifecycle_stop_restore";
+        return 29;
+    }
+
+    if (!controller.startSimulation() ||
+        !waitUntil([&controller] { return controller.running(); }, 6'000)) {
+        qCritical() << "RUNTIME_COMMISSIONING_FAIL lifecycle_restart";
+        return 30;
+    }
+    QString restartRead;
+    if (!runReadProbe(readProbe, port, lifecycleDomain, lifecycleItem, &restartRead) ||
+        !restartRead.contains(QStringLiteral(" value=") + lifecycleOriginal)) {
+        qCritical().noquote() << "RUNTIME_COMMISSIONING_FAIL restart_baseline" << restartRead;
+        return 31;
+    }
+
     controller.stopSimulation();
     if (!waitUntil([&controller] { return !controller.anyRunning(); }, 3'000)) {
         qCritical() << "RUNTIME_COMMISSIONING_FAIL runtime_stop";
-        return 26;
+        return 32;
     }
     model.setKindFilter(QStringLiteral("DataSet"));
     if (model.itemCount() > 0) model.select(0);
@@ -293,7 +340,7 @@ int main(int argc, char* argv[]) {
     if (stoppedMember >= 0 &&
         model.startMemberBehavior(stoppedMember, QStringLiteral("Toggle"), 100, 1.0)) {
         qCritical() << "RUNTIME_COMMISSIONING_FAIL stopped_runtime_accepted";
-        return 27;
+        return 33;
     }
 
     qInfo().noquote()
@@ -306,7 +353,9 @@ int main(int argc, char* argv[]) {
         << "behavior_rejected=" + QString::number(model.behaviorRejectedCount())
         << "bounded_slots=" + QString::number(model.behaviorCapacity())
         << "mms_visibility=pass"
-        << "restore=pass";
+        << "restore=pass"
+        << "runtime_stop_restore=pass"
+        << "restart_baseline=pass";
     qInfo().noquote()
         << "RUNTIME_COMMISSIONING_NEGATIVE_PASS"
         << "stopped_runtime=rejected"
