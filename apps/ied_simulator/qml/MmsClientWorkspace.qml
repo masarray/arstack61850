@@ -357,14 +357,16 @@ Item {
         title: "Confirm guarded MMS Write"
         modal: true
         anchors.centerIn: Overlay.overlay
+        width: Math.min(480, Math.max(320, root.width - 32))
+        implicitWidth: 480
         standardButtons: Dialog.Ok | Dialog.Cancel
         onAccepted: client.writeSelected(root.pendingWrite)
         contentItem: ColumnLayout {
             spacing: 8
-            Label { text: root.text(root.selected.reference); color: theme.text; font.pixelSize: 10; wrapMode: Text.WrapAnywhere }
-            Label { text: "FC " + root.text(root.selected.functionalConstraint) + " · " + root.text(root.selected.mmsType); color: theme.muted; font.pixelSize: 9 }
-            Label { text: "Write value: " + root.pendingWrite; color: theme.textSoft; font.pixelSize: 10 }
-            Label { text: "No automatic retry is performed."; color: theme.muted; font.pixelSize: 8 }
+            Label { Layout.fillWidth: true; text: root.text(root.selected.reference); color: theme.text; font.pixelSize: 10; wrapMode: Text.WrapAnywhere }
+            Label { Layout.fillWidth: true; text: "FC " + root.text(root.selected.functionalConstraint) + " · " + root.text(root.selected.mmsType); color: theme.muted; font.pixelSize: 9 }
+            Label { Layout.fillWidth: true; text: "Write value: " + root.pendingWrite; color: theme.textSoft; font.pixelSize: 10 }
+            Label { Layout.fillWidth: true; text: "No automatic retry is performed."; color: theme.muted; font.pixelSize: 8 }
         }
     }
 }
