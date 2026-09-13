@@ -4,6 +4,7 @@
 
 #include "ariec61850/goose/frame_codec.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -99,9 +100,10 @@ GoosePublication GoosePublisherRuntime::start(
         throw std::logic_error("GOOSE publisher runtime is already running.");
     }
     schedule_.reset();
+    const auto delay = prepare_next_delay();
     auto publication = session_.publish_initial(values, timestamp, test, needs_commissioning);
     running_ = true;
-    schedule_next(now);
+    schedule_next(now, delay);
     return publication;
 }
 
@@ -112,10 +114,11 @@ GoosePublication GoosePublisherRuntime::state_change(
     const bool test,
     const bool needs_commissioning) {
     schedule_.reset();
+    const auto delay = prepare_next_delay();
     auto publication = session_.publish_state_change(
         values, timestamp, test, needs_commissioning);
     running_ = true;
-    schedule_next(now);
+    schedule_next(now, delay);
     return publication;
 }
 
@@ -123,8 +126,9 @@ std::optional<GoosePublication> GoosePublisherRuntime::poll(const clock::time_po
     if (!running_ || !next_due_.has_value() || now < *next_due_) {
         return std::nullopt;
     }
+    const auto delay = prepare_next_delay();
     auto publication = session_.publish_retransmission();
-    schedule_next(now);
+    schedule_next(now, delay);
     return publication;
 }
 
@@ -133,8 +137,22 @@ void GoosePublisherRuntime::stop() noexcept {
     next_due_.reset();
 }
 
-void GoosePublisherRuntime::schedule_next(const clock::time_point now) noexcept {
-    next_due_ = now + std::chrono::milliseconds{schedule_.next_delay_milliseconds()};
+std::uint32_t GoosePublisherRuntime::prepare_next_delay() noexcept {
+    const auto delay = static_cast<std::uint32_t>(
+        std::max(1, schedule_.next_delay_milliseconds()));
+    // IEC 61850 GOOSE timeAllowedToLive advertises the subscriber validity
+    // window. Keep it ahead of the next scheduled retransmission while
+    // saturating safely instead of wrapping for unusually large schedules.
+    const auto maximum = std::numeric_limits<std::uint32_t>::max();
+    const auto ttl = delay > maximum / 2U ? maximum : delay * 2U;
+    session_.set_time_allowed_to_live(std::max<std::uint32_t>(1U, ttl));
+    return delay;
+}
+
+void GoosePublisherRuntime::schedule_next(
+    const clock::time_point now,
+    const std::uint32_t delay_milliseconds) noexcept {
+    next_due_ = now + std::chrono::milliseconds{delay_milliseconds};
 }
 
 } // namespace ar::iec61850::goose
