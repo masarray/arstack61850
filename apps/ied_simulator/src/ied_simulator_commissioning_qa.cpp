@@ -107,7 +107,7 @@ int runPositive(const QString& path) {
     if (goose.value(QStringLiteral("name")).toString() != QStringLiteral("GCB01") ||
         goose.value(QStringLiteral("goId")).toString() != QStringLiteral("trip-goose") ||
         goose.value(QStringLiteral("memberCount")).toInt() != 3 ||
-        goose.value(QStringLiteral("appId")).toString() != QStringLiteral("1001") ||
+        goose.value(QStringLiteral("appId")).toString() != QStringLiteral("0x1001") ||
         goose.value(QStringLiteral("vlanId")).toInt() != 100 ||
         goose.value(QStringLiteral("minTimeMs")).toULongLong() != 4ULL ||
         goose.value(QStringLiteral("maxTimeMs")).toULongLong() != 1000ULL) {
@@ -140,7 +140,7 @@ int runPositive(const QString& path) {
 
     qInfo().noquote()
         << "COMMISSIONING_DEPTH_PASS datasets=2 reports=2 goose=1 controls=4"
-           " dataset_members=3 report_members=3 goose_members=3 appid=1001 vlan=100"
+           " dataset_members=3 report_members=3 goose_members=3 appid=0x1001 vlan=100"
            " virtualized_on_demand=1";
     return 0;
 }
