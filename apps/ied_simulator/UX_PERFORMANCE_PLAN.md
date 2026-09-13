@@ -12,7 +12,7 @@ This plan applies the repository `AGENTS.md` production contract to the desktop 
 - Expensive parse/index/filter work must not become a steady-state GUI-thread loop.
 - One data-value change should become a targeted model notification, not a full workspace rebuild.
 - Every worker/process/timer/model has explicit ownership and a deterministic shutdown path.
-- Failures in SCL input, server output, or a child process must not crash the GUI.
+- Failures in SCL input, server output, a child process, or a raw-network transport must not crash the GUI.
 
 ## UX architecture
 
@@ -114,10 +114,23 @@ This plan applies the repository `AGENTS.md` production contract to the desktop 
 - Supported behaviors are Pulse, Toggle, and numeric Ramp. Operator stop can restore the original value and metadata. If another edit replaces the behavior-owned value, the behavior stops rather than overwriting the newer external state.
 - Runtime stop also removes active behavior ownership and restores still-owned canonical values locally before the next startup manifest is built; CI restarts the simulator and verifies the baseline did not retain the temporary stimulus.
 - A Report source pulse is proven through the real MMS reporting path: an enabled BRCB receives an event caused by the commissioning stimulus.
-- GOOSE commissioning currently stimulates the configured source DataSet state through the runtime data plane. **Raw Ethernet GOOSE publication is not claimed by this milestone** because the desktop child does not yet own a tested raw-interface transport.
+- GOOSE commissioning in Stage L stimulates the configured source DataSet state through the runtime data plane. Raw Ethernet publication is intentionally outside Stage L and is supplied by Stage M below.
 - Control commissioning deliberately does not mutate control status as a shortcut. The explorer can focus the associated ST/stVal, while Direct/SBO normal/enhanced execution remains on the existing IEC 61850 MMS control-service path and its configured `ctlModel` semantics.
 - The behavior engine stays bound to the backend when the drawer closes, so UI visibility does not silently destroy active simulation ownership; runtime/session validity still governs execution and teardown.
 - CI target `ied_simulator_runtime_commissioning_qa` verifies BRCB event generation, GOOSE source stimulus/restore, periodic MMS visibility, control-status focus, explicit restore, runtime-stop auto-restore/restart baseline, and negative rejection of stopped-runtime, unknown-mode, and too-fast behavior requests. Gates: `RUNTIME_COMMISSIONING_ACTIONS_PASS` and `RUNTIME_COMMISSIONING_NEGATIVE_PASS`.
+
+### Stage M - GOOSE Runtime Publication & Network Commissioning — implemented
+
+- The commissioning runtime can publish the selected configured `GSEControl` as a real IEC 61850 Layer-2 GOOSE Ethernet stream. It consumes the canonical parsed `SclGooseStream` plus canonical `IedPointStore` values; it does not reparse SCL or create a second process-data store.
+- Publication requires an explicit, currently up/running non-loopback Ethernet interface. There is no adapter guessing and no IP/UDP fallback. Linux uses a bound `AF_PACKET/SOCK_RAW` transport and resolves the source MAC from the selected interface. Windows dynamically loads Npcap and resolves the selected Npcap adapter plus source MAC through the Windows IP Helper inventory; missing Npcap/interface/privilege fails closed.
+- Ethernet/PDU fields come from configured SCL and the selected adapter: destination MAC, APPID, optional VLAN ID/priority, `gocbRef`, DataSet reference, `goID`, `ConfRev`, and ordered DataSet payload.
+- `GoosePublisherRuntime` owns `stNum`/`sqNum` and retransmission sequencing. Initial publication starts at `stNum=1/sqNum=0`; retransmission keeps `stNum` and increments `sqNum`; a source-state change increments `stNum`, resets `sqNum=0`, and restarts the MinTime retransmission schedule.
+- `timeAllowedToLive` is derived from the next retransmission delay and saturates instead of overflowing; each emitted frame advertises a validity window ahead of its scheduled retransmission.
+- Runtime resources are bounded at 16 active publisher slots and 256 canonical members per stream. Publishers share one explicit raw-interface transport and one precise timer; value notifications are collapsed to a dirty flag and snapshots are compared before creating a state change.
+- Runtime/session invalidation, explicit stop, transport error, unrepresentable data, invalid SCL addressing/timing, or interface loss tears publication down deterministically and closes the raw transport when no publisher remains.
+- The wire QA decodes initial/retransmission/state-change Ethernet frames, validates SCL addressing and `stNum/sqNum/TTL`, and writes a three-packet PCAP artifact. Negative QA proves empty and nonexistent interface binding are rejected. The root GOOSE test includes the raw-publisher header so platform-specific transport code is compiled by the normal C++ CI matrix.
+- Hosted CI does not claim a packet reached a physical station LAN; live publication requires the selected host adapter and the platform's raw-packet permission/Npcap runtime. Completion evidence is standards-wire encode/decode/PCAP plus fail-closed transport checks and cross-platform compilation.
+- CI gates: `GOOSE_WIRE_INTEROP_PASS` and `GOOSE_PUBLICATION_NEGATIVE_PASS`; artifact: `ied-simulator-goose-wire-evidence`.
 
 ## Initial budgets
 
@@ -131,7 +144,8 @@ This plan applies the repository `AGENTS.md` production contract to the desktop 
 - Live ACK latency regression budget is <=1500 ms under the deterministic 1k/10k CI burst, with pending and in-flight tracking each <=256.
 - Commissioning browsing must reuse parsed SCL ownership, virtualize lists, and fail closed on unresolved DataSet bindings rather than fabricating members or silently rebinding references.
 - Runtime commissioning behavior is capped at 16 slots with a >=100 ms interval and reuses the existing 256-pending / 256-in-flight live-delta bounds; it must never create unbounded per-point timers or a catch-up burst after GUI/event-loop delay.
+- GOOSE publication is capped at 16 active streams and 256 canonical members per stream; one transport/timer is shared for the commissioning model and a source notification may cause at most one state-change emission per active stream after snapshot comparison.
 
 ## Definition of done for the redesign
 
-The redesign is complete only when the new workflow passes the existing simulator wire regressions, large-model UI tests, negative/failure tests, lifecycle stress, runtime-scale responsiveness gates, commissioning-depth positive/negative gates, runtime-commissioning action/behavior positive+negative gates, live-data-plane burst/negative gates, and measured performance checks. A visually improved screenshot alone is not completion evidence.
+The redesign is complete only when the new workflow passes the existing simulator wire regressions, large-model UI tests, negative/failure tests, lifecycle stress, runtime-scale responsiveness gates, commissioning-depth positive/negative gates, runtime-commissioning action/behavior positive+negative gates, GOOSE wire-publication positive/negative gates with PCAP evidence, live-data-plane burst/negative gates, and measured performance checks. A visually improved screenshot alone is not completion evidence.
