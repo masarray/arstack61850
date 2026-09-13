@@ -40,7 +40,7 @@ Do **not** make Sampled Values runtime simulation, PTP, ESP32/embedded work, or 
 
 The priority order is:
 
-**M GOOSE TX ✅ -> N MMS Client/Discovery ✅ -> O RCB/Reports -> P GOOSE Monitor/Publisher -> Q Files + Setting Groups -> R SCL Export/Ed1-Ed2 -> S Release Hardening**
+**M GOOSE TX ✅ -> N MMS Client/Discovery ✅ -> O RCB/Reports ✅ -> P GOOSE Monitor/Publisher ✅ -> Q Files + Setting Groups NEXT -> R SCL Export/Ed1-Ed2 -> S Release Hardening**
 
 ## Milestone M — Real GOOSE Publication — CLOSED
 
@@ -94,28 +94,46 @@ Milestone N implementation head `9cc87444c5c48c45785f401dbee490966558d8bf` passe
 
 Documentation-only closure commits after `9cc87444c5c48c45785f401dbee490966558d8bf` do not reopen the proven implementation claim unless they change executable/protocol behavior.
 
-## Milestone O — Report / RCB Commissioning — NEXT
+## Milestone O — Report / RCB Commissioning — CLOSED
 
 Turn the existing reporting capability into technician workflow rather than another protocol tranche.
 
-### Required surface
+### Closed capability
 
 - DataSet browser with ordered members and canonical references;
 - URCB/BRCB inventory and selected RCB inspector;
-- static and dynamic candidate paths surfaced explicitly;
-- reservation/ownership state, enable/disable, GI, trigger options, BufTm, IntgPd, RptID, ConfRev and DataSet binding;
-- received-report stream with reason-for-inclusion, sequence/EntryID/status where available;
-- BRCB replay/resume/rewind/overflow indicators where supported by the canonical runtime;
-- safe cleanup on disable/disconnect/association loss;
-- no automatic RCB mutation/failover after an ambiguous mutation failure.
+- static and dynamic candidate paths surfaced through the canonical `MmsRcbPoolSelector`;
+- reservation/ownership state plus explicit Enable, Enable + GI, Disable/Release and Retry Cleanup actions;
+- RptID, DatSet, ConfRev, BufTm, IntgPd, SqNum, RptEna, Resv/ResvTms/Owner, TrgOps and OptFlds inspection;
+- received-report stream with decoded values, reason-for-inclusion, sequence, EntryID, overflow and duplicate/gap/reset indicators;
+- BRCB EntryID/PurgeBuf capability and overflow indicators surfaced where present without claiming replay/rewind mutation support that is not exposed by the reusable client runtime;
+- bounded one-worker client I/O and non-fatal bounded idle polling through `MmsAssociationRuntime::try_poll_once_for()`;
+- strict single-candidate RCB policy, polling fallback disabled, and no automatic mutation/failover after ambiguous failure;
+- canonical URCB lifecycle reused end-to-end: probe, reserve, enable, GI, disable/release and cleanup-required handling;
+- active reconnect QA proving the previous RptEna/Resv ownership is cleaned before association replacement by reacquiring the same URCB and receiving GI again.
 
 ### Definition of Done
 
 A technician can discover, configure/enable an eligible report path, request GI, observe live reports, and cleanly release it from one Reports workspace, while the existing guarded static/dynamic RCB safety semantics remain intact.
 
-## Milestone P — GOOSE Workspace: Monitor + Publisher
+### Closure evidence
 
-Do not ship GOOSE TX and GOOSE sniffing as unrelated tools. Combine them into one workspace.
+Milestone O product implementation landed in `c8f33e1259cf066de3b359db30eda41726345292`; the strict explicit-URCB policy correction is `ceb5fd021523643b4ca63d197a8bb102b2a52993`, and the final lifecycle proof head is `f2cca6971e6697365e99535ad187a7dacc8e12a4`.
+
+That final head passed **IED Simulator Qt #531**, run `34786507802`, job `103802862092`:
+
+- `REPORTS_WORKBENCH_PASS datasets=2 rcbs=2 static_candidates=2 dynamic_candidates=2 members=3 gi_reports=1 urcb=pass brcb_inventory=pass entryid_indicator=pass cleanup=pass active_reconnect_cleanup=pass`
+- `REPORTS_WORKBENCH_NEGATIVE_PASS no_connection_enable=rejected inactive_disable=rejected invalid_selection=rejected strict_single_candidate=true idle_poll_nonfatal=true reconnect_reacquire=true`
+- Build, QML smoke, MMS client N, SCL import/fail-closed, lifecycle, large-SCL, responsiveness, commissioning K/L, GOOSE M/P, live-data, visual regression, direct/SBO normal/enhanced control, URCB/BRCB and multi-IED regressions all passed in the same Qt job.
+- The earlier Qt #529 SBO-enhanced timeout did not reproduce on the unchanged control harness; #531 completed the full control/MMS regression successfully.
+- **MMS R1-R2 Server CI #147** passed Linux GCC, Linux Clang and Windows MSVC.
+- All other final-head workflows were green: C++ CI #1483 (GCC/Clang/MSVC), Security and Evidence #1458, IEDScout Parity Server CI #445, Control Interop Harness CI #735, Dynamic RCB Trial Harness CI #774, BRCB Hard Profile CI #731, Embedded Profile CI #1128 and SMV Injector GUI #315.
+
+Documentation-only closure commits after `f2cca6971e6697365e99535ad187a7dacc8e12a4` do not reopen O unless executable/protocol behavior changes.
+
+## Milestone P — GOOSE Workspace: Monitor + Publisher — CLOSED
+
+Milestone P was implemented ahead of O at the user's request; closure is recorded here after final O validation so the roadmap history remains explicit.
 
 ### Monitor
 
@@ -137,7 +155,18 @@ Do not ship GOOSE TX and GOOSE sniffing as unrelated tools. Combine them into on
 
 A user can monitor real GOOSE traffic and operate configured test publishers from the same workspace, with independent capture/decode evidence and deterministic interface lifecycle.
 
-## Milestone Q — File Transfer + Setting Groups
+### Closure evidence
+
+Milestone P implementation head `94bbf0a707ace442da1f0c4b0c18ab806f873886` passed **IED Simulator Qt #523**, run `34759978848`, job `103730994758`, including the complete retained tail through MMS visibility and multi-IED coexistence.
+
+- `GOOSE_WORKSPACE_PASS pcap_packets=3 streams=256 appid=0x1001 values=decoded duplicate=pass gap=pass regression=pass state_jump=pass state_regression=pass timeout=pass pcap_export=pass`
+- `GOOSE_MONITOR_NEGATIVE_PASS malformed=rejected oversize=rejected capacity=rejected missing_interface=rejected explicit_binding=required bounded_streams=256 bounded_members=256 bounded_events=256 retained_packets=4096`
+- The Stage M wire gate remained green: `GOOSE_WIRE_INTEROP_PASS appid=4097 vlan=100 members=3 st_initial=1 sq_retx=1 st_change=2 ttl_initial=8 ttl_retx=16 pcap_packets=3` and `GOOSE_PUBLICATION_NEGATIVE_PASS empty_interface=rejected nonexistent_interface=rejected explicit_binding=required`.
+- Final O proof head `f2cca6971e6697365e99535ad187a7dacc8e12a4` reran the same GOOSE wire and workspace gates successfully in Qt #531, proving P remained green after the Reports work.
+
+Documentation-only closure commits after the proven P/O heads do not reopen P unless executable/protocol behavior changes.
+
+## Milestone Q — File Transfer + Setting Groups — NEXT
 
 ### Files
 
