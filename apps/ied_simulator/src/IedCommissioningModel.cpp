@@ -234,7 +234,7 @@ void IedCommissioningModel::rebuild() {
             }
         }
     }
-    applyFilter(false);
+    applyFilter(true);
 }
 
 void IedCommissioningModel::applyFilter(const bool preserveSelection) {
