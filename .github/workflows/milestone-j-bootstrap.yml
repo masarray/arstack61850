@@ -20,15 +20,14 @@ jobs:
           ref: feat/ied-sim-ux-performance-foundation
           fetch-depth: 0
 
-      - name: Apply pending Milestone J fixes
+      - name: Apply pending Milestone J test fix
         run: |
-          python3 .milestone-j/fix_compile.py
           python3 .milestone-j/fix_gui_live_test.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps/ied_simulator tools/static_ied_server.cpp
+          git add apps/ied_simulator/test_gui_live_value.py
           if git diff --cached --quiet; then
-            echo "Milestone J fixes already applied."
+            echo "Milestone J GUI live ACK fix already applied."
           else
             git commit -m "test(ied-sim): align GUI live ACK evidence"
             git push origin HEAD:feat/ied-sim-ux-performance-foundation
