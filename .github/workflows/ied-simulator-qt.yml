@@ -8,6 +8,8 @@ on:
       - 'src/scl/**'
       - 'include/ariec61850/mms/**'
       - 'src/mms/**'
+      - 'include/ariec61850/goose/**'
+      - 'src/goose/**'
       - 'tools/static_ied_server.cpp'
       - 'tools/mms_read_probe.cpp'
       - 'tools/mms_urcb_gi_probe.cpp'
@@ -23,6 +25,8 @@ on:
       - 'src/scl/**'
       - 'include/ariec61850/mms/**'
       - 'src/mms/**'
+      - 'include/ariec61850/goose/**'
+      - 'src/goose/**'
       - 'tools/static_ied_server.cpp'
       - 'tools/mms_read_probe.cpp'
       - 'tools/mms_urcb_gi_probe.cpp'
@@ -55,7 +59,7 @@ jobs:
       - name: Build
         run: >-
           cmake --build build-ied-simulator-qt
-          --target arstack_ied_simulator ariec61850_mms_read_probe ied_simulator_guardrails_qa ied_simulator_responsiveness_qa ied_simulator_commissioning_qa ied_simulator_runtime_commissioning_qa --parallel 2
+          --target arstack_ied_simulator ariec61850_mms_read_probe ied_simulator_guardrails_qa ied_simulator_responsiveness_qa ied_simulator_commissioning_qa ied_simulator_runtime_commissioning_qa ied_simulator_goose_publication_qa --parallel 2
 
       - name: Bounded activity and child-output guardrails
         run: ./build-ied-simulator-qt/ied_simulator_guardrails_qa
@@ -114,6 +118,20 @@ jobs:
           ./build-ied-simulator-qt/ied_simulator_runtime_commissioning_qa
           ./tests/fixtures/scl/minimal-station-brcb.scd
           ./build-ied-simulator-qt
+
+      - name: GOOSE wire publication and fail-closed gates
+        run: >-
+          ./build-ied-simulator-qt/ied_simulator_goose_publication_qa
+          ./tests/fixtures/scl/minimal-station-brcb.scd
+          ./goose-publication-evidence.pcap
+
+      - name: Upload GOOSE wire evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ied-simulator-goose-wire-evidence
+          path: goose-publication-evidence.pcap
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Live runtime data-plane burst gates
         env:
