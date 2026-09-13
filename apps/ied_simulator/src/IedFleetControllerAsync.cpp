@@ -299,8 +299,25 @@ void IedFleetController::finishAsyncImport(
 
             lastImportWorkerMilliseconds_ = result->elapsedMilliseconds;
             preparedPointCount_ = result->preparedPointCount;
-            if (selectedIedIndex_ >= 0) adoptPreparedIed(selectedIedIndex_);
+            const bool selectedProjectionReady =
+                selectedIedIndex_ < 0 || adoptPreparedIed(selectedIedIndex_);
             lastGuiApplyMilliseconds_ = applyTimer.elapsed();
+
+            if (!selectedProjectionReady) {
+                fatalError_ = QStringLiteral(
+                    "The bounded importer returned an incomplete prepared IED projection.");
+                selectedIedIndex_ = -1;
+                selectedValueIndex_ = -1;
+                selectedPointIndices_.clear();
+                navigationIndex_.clear();
+                valueScopeIndex_.clear();
+                preparedValueIndexIed_ = -1;
+                preparedPointCount_ = 0;
+                appendActivity(
+                    QStringLiteral("Importer"),
+                    fatalError_,
+                    QStringLiteral("Error"));
+            }
 
             emit valuesChanged();
             emit modelChanged();
@@ -308,25 +325,27 @@ void IedFleetController::finishAsyncImport(
             emit configurationChanged();
             emit runtimeChanged();
 
-            qInfo().noquote() << QStringLiteral(
-                "IEDSIM_IMPORT_PATH worker_ms=%1 parser_ms=%2 prepare_ms=%3 gui_apply_ms=%4 points=%5 scopes=%6 typed_store=1 prepared_ieds=%7")
-                .arg(lastImportWorkerMilliseconds_)
-                .arg(result->parserMilliseconds)
-                .arg(result->preparationMilliseconds)
-                .arg(lastGuiApplyMilliseconds_)
-                .arg(preparedPointCount_)
-                .arg(valueScopeIndex_.size())
-                .arg(result->preparedIedCount);
-            appendActivity(
-                QStringLiteral("Importer"),
-                QStringLiteral(
-                    "%1 parsed and prebuilt %4 IED profile%5 into typed point storage on the bounded worker in %2 ms; GUI adoption took %3 ms.")
-                    .arg(sourceName_)
+            if (selectedProjectionReady) {
+                qInfo().noquote() << QStringLiteral(
+                    "IEDSIM_IMPORT_PATH worker_ms=%1 parser_ms=%2 prepare_ms=%3 gui_apply_ms=%4 points=%5 scopes=%6 typed_store=1 prepared_ieds=%7")
                     .arg(lastImportWorkerMilliseconds_)
+                    .arg(result->parserMilliseconds)
+                    .arg(result->preparationMilliseconds)
                     .arg(lastGuiApplyMilliseconds_)
-                    .arg(result->preparedIedCount)
-                    .arg(result->preparedIedCount == 1 ? QString{} : QStringLiteral("s")),
-                QStringLiteral("Success"));
+                    .arg(preparedPointCount_)
+                    .arg(valueScopeIndex_.size())
+                    .arg(result->preparedIedCount);
+                appendActivity(
+                    QStringLiteral("Importer"),
+                    QStringLiteral(
+                        "%1 parsed and prebuilt %4 IED profile%5 into typed point storage on the bounded worker in %2 ms; GUI adoption took %3 ms.")
+                        .arg(sourceName_)
+                        .arg(lastImportWorkerMilliseconds_)
+                        .arg(lastGuiApplyMilliseconds_)
+                        .arg(result->preparedIedCount)
+                        .arg(result->preparedIedCount == 1 ? QString{} : QStringLiteral("s")),
+                    QStringLiteral("Success"));
+            }
         } else {
             fatalError_ = result->error.isEmpty()
                 ? QStringLiteral("The engineering model could not be parsed.")
