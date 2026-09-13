@@ -162,18 +162,23 @@ def run_case(app: Path, probe: str, scl: Path, updates: int) -> None:
                 raise RuntimeError(f"missing IEDSIM_LIVE_ACK evidence; output={output[-6000:]}")
             max_latency = max(int(match.group("latency")) for match in acks)
             max_inflight = max(int(match.group("inflight")) for match in acks)
+            max_revision = max(int(match.group("revision")) for match in acks)
+            generations = {int(match.group("generation")) for match in acks}
             if max_latency > 1500:
                 raise RuntimeError(f"live ACK latency exceeded 1500 ms: {max_latency}")
             if max_inflight > 256:
                 raise RuntimeError(f"live in-flight ACK tracking exceeded bound: {max_inflight}")
-            if "kind=live_update_ack" not in output or "accepted=true" not in output:
-                raise RuntimeError("server did not acknowledge the live update")
+            if max_revision <= 0 or any(generation <= 0 for generation in generations):
+                raise RuntimeError(
+                    f"invalid parsed live ACK evidence: revision={max_revision} generations={generations}"
+                )
 
             print(
                 "LIVE_HOT_UPDATE_CASE "
                 f"updates={updates} coalesced={metrics['coalesced']} "
                 f"pending_max={metrics['pending_max']} max_ack_ms={max_latency} "
-                f"max_inflight={max_inflight} manifest_revision=1 final={expected} "
+                f"max_inflight={max_inflight} max_ack_revision={max_revision} "
+                f"manifest_revision=1 final={expected} "
                 f"mms_read={read_output.splitlines()[0] if read_output else 'ok'}"
             )
         finally:
