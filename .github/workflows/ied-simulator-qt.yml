@@ -33,13 +33,32 @@ on:
       - '.github/workflows/ied-simulator-qt.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-and-smoke:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: feat/ied-sim-ux-performance-foundation
+          fetch-depth: 0
+
+      - name: Apply Milestone I source patch
+        run: |
+          if git apply --check .milestone-i/part1.patch; then
+            git apply .milestone-i/part1.patch
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add apps/ied_simulator
+            git commit -m "perf(ied-sim): harden runtime scale and responsiveness"
+            git push origin HEAD:feat/ied-sim-ux-performance-foundation
+          elif git apply --reverse --check .milestone-i/part1.patch; then
+            echo "Milestone I source patch already applied."
+          else
+            echo "Milestone I source patch no longer applies cleanly." >&2
+            exit 1
+          fi
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
