@@ -24,6 +24,7 @@ Drawer {
     }
     property bool selectedMemberDrivable: selectedMemberIndex >= 0
                                          && commissioningModel.canDriveMember(selectedMemberIndex)
+    property var selectedGooseRuntime: commissioningModel.selectedGooseRuntime
 
     edge: Qt.RightEdge
     modal: false
@@ -54,8 +55,8 @@ Drawer {
 
     IedCommissioningModel {
         id: commissioningModel
-        // Keep the commissioning behavior engine alive when the drawer closes;
-        // behavior ownership/lifecycle is bound to the backend runtime, not UI visibility.
+        // Keep commissioning behavior/publication ownership alive when the drawer closes;
+        // runtime/session validity, not UI visibility, owns deterministic teardown.
         backend: root.backend
     }
 
@@ -640,9 +641,65 @@ Drawer {
                             MetaRow { title: "Priority"; value: root.display(commissioningModel.selectedItem.vlanPriority) }
                             MetaRow { title: "Min/Max"; value: root.display(commissioningModel.selectedItem.minTimeMs) + " / " + root.display(commissioningModel.selectedItem.maxTimeMs) + " ms" }
                             MetaRow { title: "ConfRev"; value: root.display(commissioningModel.selectedItem.confRev) }
+
+                            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.theme.lineSoft }
+                            Label {
+                                text: "LAYER-2 PUBLICATION"
+                                color: root.theme.muted
+                                font.pixelSize: 8
+                                font.weight: Font.Bold
+                            }
+                            ComboBox {
+                                id: gooseInterfaceBox
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 30
+                                model: commissioningModel.gooseInterfaces
+                                font.pixelSize: 8
+                                enabled: !commissioningModel.goosePublishing
+                                currentIndex: commissioningModel.gooseInterfaces.indexOf(commissioningModel.gooseInterfaceName)
+                                displayText: currentIndex >= 0 ? currentText : "Select Ethernet interface"
+                                onActivated: commissioningModel.gooseInterfaceName = currentText
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Explicit Ethernet interface used for raw IEC 61850 GOOSE publication"
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 6
+                                SmallButton {
+                                    Layout.fillWidth: true
+                                    text: root.selectedGooseRuntime.active === true ? "Publishing" : "Start GOOSE"
+                                    primary: root.selectedGooseRuntime.active !== true
+                                    enabled: root.backend.running
+                                             && commissioningModel.selectedItem.status !== "Unresolved"
+                                             && commissioningModel.gooseInterfaceName.length > 0
+                                             && root.selectedGooseRuntime.active !== true
+                                    onClicked: commissioningModel.startSelectedGoosePublication()
+                                }
+                                SmallButton {
+                                    Layout.fillWidth: true
+                                    text: "Stop GOOSE"
+                                    enabled: root.selectedGooseRuntime.active === true
+                                    onClicked: commissioningModel.stopSelectedGoosePublication()
+                                }
+                            }
+                            MetaRow { title: "Publication"; value: commissioningModel.goosePublicationStatus }
+                            MetaRow {
+                                title: "Wire state"
+                                value: root.selectedGooseRuntime.active === true
+                                       ? "stNum " + root.display(root.selectedGooseRuntime.stNum)
+                                         + " · next sqNum " + root.display(root.selectedGooseRuntime.nextSqNum)
+                                       : "Idle"
+                            }
+                            MetaRow {
+                                title: "TX / changes"
+                                value: root.selectedGooseRuntime.active === true
+                                       ? root.display(root.selectedGooseRuntime.transmits) + " / "
+                                         + root.display(root.selectedGooseRuntime.stateChanges)
+                                       : "0 / 0"
+                            }
                             Label {
                                 Layout.fillWidth: true
-                                text: "Runtime stimulus below changes the bound source data through the MMS/live-state path. It does not claim raw Ethernet GOOSE publication."
+                                text: "Publishes the configured SCL APPID/MAC/VLAN/goID/DataSet as real Layer-2 GOOSE. Linux requires raw-socket permission; Windows requires Npcap. Interface, privilege or transport failures stop publication fail-closed."
                                 color: root.theme.muted
                                 font.pixelSize: 7
                                 wrapMode: Text.WordWrap
@@ -854,7 +911,7 @@ Drawer {
                             Layout.leftMargin: 12
                             Layout.rightMargin: 12
                             Layout.bottomMargin: 14
-                            text: "Member rows are materialized on demand from the canonical parsed SCL document. Simulation behavior uses one bounded scheduler (16 slots, minimum 100 ms) and the existing bounded runtime delta channel."
+                            text: "Member rows are materialized on demand from the canonical parsed SCL document. Simulation behavior uses one bounded scheduler (16 slots, minimum 100 ms); GOOSE publication uses one bounded transport/timer with at most 16 streams and 256 members per stream."
                             color: root.theme.muted
                             font.pixelSize: 7
                             wrapMode: Text.WordWrap
