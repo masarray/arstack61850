@@ -20,16 +20,15 @@ jobs:
           ref: feat/ied-sim-ux-performance-foundation
           fetch-depth: 0
 
-      - name: Apply Milestone J source changes
+      - name: Apply pending Milestone J compile fixes
         run: |
-          python3 .milestone-j/apply.py
           python3 .milestone-j/fix_compile.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add apps/ied_simulator tools/static_ied_server.cpp
           if git diff --cached --quiet; then
-            echo "Milestone J source changes already applied."
+            echo "Milestone J compile fixes already applied."
           else
-            git commit -m "perf(ied-sim): add bounded live runtime data plane"
+            git commit -m "fix(ied-sim): compile bounded live runtime data plane"
             git push origin HEAD:feat/ied-sim-ux-performance-foundation
           fi
