@@ -12,7 +12,7 @@
 
 #include <optional>
 
-class MmsLiveTreeModel final : public QAbstractListModel {
+class MmsLiveTreeModel : public QAbstractListModel {
     Q_OBJECT
     QML_ELEMENT
 
