@@ -9,6 +9,21 @@ Drawer {
 
     required property var theme
     required property var backend
+    property int selectedMemberIndex: -1
+    property var selectedMember: {
+        var revision = commissioningModel.revision
+        return selectedMemberIndex >= 0 && selectedMemberIndex < commissioningModel.memberCount
+                ? commissioningModel.member(selectedMemberIndex) : ({})
+    }
+    property var selectedBehavior: {
+        var activityRevision = commissioningModel.behaviorTickCount
+                             + commissioningModel.behaviorRejectedCount
+                             + commissioningModel.behaviorCount
+        return selectedMemberIndex >= 0
+                ? commissioningModel.memberBehavior(selectedMemberIndex) : ({"active": false})
+    }
+    property bool selectedMemberDrivable: selectedMemberIndex >= 0
+                                         && commissioningModel.canDriveMember(selectedMemberIndex)
 
     edge: Qt.RightEdge
     modal: false
@@ -22,6 +37,15 @@ Drawer {
         return String(value)
     }
 
+    function syncMemberSelection() {
+        if (commissioningModel.memberCount <= 0) {
+            selectedMemberIndex = -1
+            return
+        }
+        if (selectedMemberIndex < 0 || selectedMemberIndex >= commissioningModel.memberCount)
+            selectedMemberIndex = 0
+    }
+
     background: Rectangle {
         color: root.theme.chrome
         border.width: 1
@@ -30,7 +54,9 @@ Drawer {
 
     IedCommissioningModel {
         id: commissioningModel
-        backend: root.opened ? root.backend : null
+        // Keep the commissioning behavior engine alive when the drawer closes;
+        // behavior ownership/lifecycle is bound to the backend runtime, not UI visibility.
+        backend: root.backend
     }
 
     component MetaRow: RowLayout {
@@ -87,6 +113,8 @@ Drawer {
             kindBox.currentIndex = Math.max(0, kindBox.model.indexOf(wanted))
             if (commissioningModel.filterText.length === 0 && searchField.text.length > 0) searchField.clear()
         }
+        function onSelectionChanged() { root.syncMemberSelection() }
+        function onModelChanged() { root.syncMemberSelection() }
     }
 
     contentItem: ColumnLayout {
@@ -114,7 +142,7 @@ Drawer {
                     }
                     Label {
                         text: root.backend.imported
-                              ? (root.backend.selectedIed.name || "IED") + " · configured services and control semantics"
+                              ? (root.backend.selectedIed.name || "IED") + " · inspect, stimulate and verify runtime state"
                               : "DataSet, Report, GOOSE and control topology"
                         color: root.theme.navigationMuted
                         font.pixelSize: 8
@@ -129,6 +157,22 @@ Drawer {
                           + commissioningModel.controlCount + " CTRL"
                     color: root.theme.navigationMuted
                     font.pixelSize: 8
+                }
+
+                Rectangle {
+                    visible: commissioningModel.behaviorCount > 0
+                    implicitWidth: behaviorHeader.implicitWidth + 16
+                    implicitHeight: 24
+                    radius: 12
+                    color: root.theme.greenSoft
+                    Label {
+                        id: behaviorHeader
+                        anchors.centerIn: parent
+                        text: "SIM " + commissioningModel.behaviorCount + "/" + commissioningModel.behaviorCapacity
+                        color: root.theme.green
+                        font.pixelSize: 8
+                        font.weight: Font.Bold
+                    }
                 }
 
                 ToolButton {
@@ -214,8 +258,8 @@ Drawer {
                                 font.weight: Font.DemiBold
                             }
                             Label {
-                                text: "Selected IED"
-                                color: root.theme.muted
+                                text: root.backend.running ? "Runtime online" : "Runtime offline"
+                                color: root.backend.running ? root.theme.green : root.theme.muted
                                 font.pixelSize: 7
                             }
                         }
@@ -323,7 +367,10 @@ Drawer {
                                 id: serviceMouse
                                 anchors.fill: parent
                                 hoverEnabled: true
-                                onClicked: commissioningModel.select(serviceRow.index)
+                                onClicked: {
+                                    commissioningModel.select(serviceRow.index)
+                                    root.syncMemberSelection()
+                                }
                             }
                         }
 
@@ -407,10 +454,26 @@ Drawer {
                                 var version = commissioningModel.revision
                                 return commissioningModel.member(index)
                             }
+                            property bool drivable: commissioningModel.canDriveMember(index)
+                            property var behavior: {
+                                var tickVersion = commissioningModel.behaviorTickCount
+                                                + commissioningModel.behaviorCount
+                                return commissioningModel.memberBehavior(index)
+                            }
 
                             width: memberList.width
-                            height: 36
-                            color: memberMouse.containsMouse ? root.theme.surfaceRaised : root.theme.surface
+                            height: 38
+                            color: root.selectedMemberIndex === index ? root.theme.accentSoft
+                                 : memberMouse.containsMouse ? root.theme.surfaceRaised : root.theme.surface
+
+                            Rectangle {
+                                visible: root.selectedMemberIndex === memberRow.index
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                width: 2
+                                color: root.theme.accent
+                            }
 
                             RowLayout {
                                 anchors.fill: parent
@@ -437,7 +500,15 @@ Drawer {
                                         elide: Text.ElideMiddle
                                     }
                                 }
-                                Label { Layout.preferredWidth: 44; text: memberRow.entry.fc || ""; color: root.theme.muted; font.pixelSize: 8 }
+                                Label {
+                                    visible: memberRow.behavior.active === true
+                                    Layout.preferredWidth: 30
+                                    text: "SIM"
+                                    color: root.theme.green
+                                    font.pixelSize: 7
+                                    font.weight: Font.Bold
+                                }
+                                Label { Layout.preferredWidth: 44; text: memberRow.entry.fc || ""; color: memberRow.drivable ? root.theme.textSoft : root.theme.muted; font.pixelSize: 8 }
                                 Label { Layout.preferredWidth: 64; text: memberRow.entry.cdc || ""; color: root.theme.muted; font.pixelSize: 8 }
                                 Label { Layout.preferredWidth: 95; text: memberRow.entry.type || ""; color: root.theme.muted; font.pixelSize: 8; elide: Text.ElideRight }
                             }
@@ -453,7 +524,7 @@ Drawer {
                                 id: memberMouse
                                 anchors.fill: parent
                                 hoverEnabled: true
-                                acceptedButtons: Qt.NoButton
+                                onClicked: root.selectedMemberIndex = memberRow.index
                             }
                         }
 
@@ -484,8 +555,8 @@ Drawer {
             }
 
             Rectangle {
-                Layout.preferredWidth: 320
-                Layout.minimumWidth: 286
+                Layout.preferredWidth: 338
+                Layout.minimumWidth: 304
                 Layout.fillHeight: true
                 color: root.theme.chrome
                 border.width: 1
@@ -569,6 +640,13 @@ Drawer {
                             MetaRow { title: "Priority"; value: root.display(commissioningModel.selectedItem.vlanPriority) }
                             MetaRow { title: "Min/Max"; value: root.display(commissioningModel.selectedItem.minTimeMs) + " / " + root.display(commissioningModel.selectedItem.maxTimeMs) + " ms" }
                             MetaRow { title: "ConfRev"; value: root.display(commissioningModel.selectedItem.confRev) }
+                            Label {
+                                Layout.fillWidth: true
+                                text: "Runtime stimulus below changes the bound source data through the MMS/live-state path. It does not claim raw Ethernet GOOSE publication."
+                                color: root.theme.muted
+                                font.pixelSize: 7
+                                wrapMode: Text.WordWrap
+                            }
                         }
 
                         ColumnLayout {
@@ -583,10 +661,17 @@ Drawer {
                             MetaRow { title: "LN"; value: root.display(commissioningModel.selectedItem.logicalNode) }
                             Label {
                                 Layout.fillWidth: true
-                                text: "Configured semantics are shown here; live Operate/SBO execution remains on the simulator runtime path."
+                                text: "Operate/SBO execution stays on the IEC 61850 MMS control-service path; this workspace never bypasses configured control semantics."
                                 color: root.theme.muted
                                 font.pixelSize: 8
                                 wrapMode: Text.WordWrap
+                            }
+                            SmallButton {
+                                Layout.fillWidth: true
+                                text: "Open status in Values"
+                                primary: true
+                                enabled: root.backend.imported
+                                onClicked: commissioningModel.focusControlStatus()
                             }
                         }
 
@@ -610,7 +695,157 @@ Drawer {
                                      && String(commissioningModel.selectedItem.dataSetReference).length > 0
                                      && commissioningModel.selectedItem.status !== "Unresolved"
                             onClicked: {
-                                if (commissioningModel.focusBoundDataSet()) searchField.clear()
+                                if (commissioningModel.focusBoundDataSet()) {
+                                    searchField.clear()
+                                    root.syncMemberSelection()
+                                }
+                            }
+                        }
+
+                        ColumnLayout {
+                            visible: commissioningModel.selectedItem.kind !== "Control"
+                                     && commissioningModel.selectedItem.kind !== undefined
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 12
+                            Layout.rightMargin: 12
+                            spacing: 7
+
+                            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.theme.lineSoft }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: "RUNTIME ACTIONS"
+                                    color: root.theme.muted
+                                    font.pixelSize: 8
+                                    font.weight: Font.Bold
+                                }
+                                Label {
+                                    text: commissioningModel.behaviorCount + "/" + commissioningModel.behaviorCapacity + " active"
+                                    color: commissioningModel.behaviorCount > 0 ? root.theme.green : root.theme.muted
+                                    font.pixelSize: 7
+                                }
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: root.selectedMemberIndex >= 0
+                                      ? ((root.selectedMember.dataObject || "member")
+                                         + (root.selectedMember.dataAttribute ? "." + root.selectedMember.dataAttribute : ""))
+                                      : "Select a canonical member"
+                                color: root.theme.textSoft
+                                font.pixelSize: 9
+                                font.weight: Font.DemiBold
+                                elide: Text.ElideMiddle
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: root.selectedMemberDrivable
+                                      ? "Drivable ST/MX source · bounded live delta"
+                                      : "Select a writable ST/MX source value; quality/timestamp leaves are protected."
+                                color: root.selectedMemberDrivable ? root.theme.green : root.theme.muted
+                                font.pixelSize: 7
+                                wrapMode: Text.WordWrap
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 6
+                                SmallButton {
+                                    Layout.fillWidth: true
+                                    text: "Open in Values"
+                                    enabled: root.selectedMemberIndex >= 0
+                                             && commissioningModel.focusMemberValue !== undefined
+                                    onClicked: commissioningModel.focusMemberValue(root.selectedMemberIndex)
+                                }
+                                SmallButton {
+                                    Layout.fillWidth: true
+                                    text: "Pulse source"
+                                    primary: true
+                                    enabled: root.backend.running
+                                             && commissioningModel.firstDrivableMember() >= 0
+                                             && commissioningModel.selectedItem.status !== "Unresolved"
+                                    onClicked: commissioningModel.pulseSelectedService(intervalBox.value)
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 6
+                                ComboBox {
+                                    id: behaviorMode
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 30
+                                    model: ["Pulse", "Toggle", "Ramp"]
+                                    currentIndex: 1
+                                    font.pixelSize: 8
+                                }
+                                SpinBox {
+                                    id: intervalBox
+                                    Layout.preferredWidth: 92
+                                    from: 100
+                                    to: 10000
+                                    stepSize: 100
+                                    value: 500
+                                    editable: true
+                                    font.pixelSize: 8
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Behavior interval in milliseconds"
+                                }
+                                SpinBox {
+                                    id: stepBox
+                                    Layout.preferredWidth: 76
+                                    from: -100000
+                                    to: 100000
+                                    value: 1
+                                    editable: true
+                                    font.pixelSize: 8
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Ramp/toggle numeric step"
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 6
+                                SmallButton {
+                                    Layout.fillWidth: true
+                                    text: root.selectedBehavior.active === true ? "Behavior active" : "Start behavior"
+                                    primary: root.selectedBehavior.active !== true
+                                    enabled: root.backend.running
+                                             && root.selectedMemberDrivable
+                                             && root.selectedBehavior.active !== true
+                                             && commissioningModel.behaviorCount < commissioningModel.behaviorCapacity
+                                    onClicked: commissioningModel.startMemberBehavior(
+                                                   root.selectedMemberIndex,
+                                                   behaviorMode.currentText,
+                                                   intervalBox.value,
+                                                   stepBox.value)
+                                }
+                                SmallButton {
+                                    Layout.fillWidth: true
+                                    text: "Stop + restore"
+                                    enabled: root.selectedBehavior.active === true
+                                    onClicked: commissioningModel.stopMemberBehavior(root.selectedMemberIndex, true)
+                                }
+                            }
+
+                            MetaRow {
+                                title: "Behavior"
+                                value: root.selectedBehavior.active === true
+                                       ? root.display(root.selectedBehavior.mode) + " · "
+                                         + root.display(root.selectedBehavior.ticks) + " ticks"
+                                       : "Idle"
+                            }
+                            MetaRow { title: "Engine"; value: commissioningModel.behaviorTickCount + " ticks · " + commissioningModel.behaviorRejectedCount + " rejected" }
+
+                            SmallButton {
+                                visible: commissioningModel.behaviorCount > 0
+                                Layout.fillWidth: true
+                                text: "Stop all + restore owned values"
+                                onClicked: commissioningModel.stopAllBehaviors(true)
                             }
                         }
 
@@ -619,7 +854,7 @@ Drawer {
                             Layout.leftMargin: 12
                             Layout.rightMargin: 12
                             Layout.bottomMargin: 14
-                            text: "Member rows are materialized on demand from the canonical parsed SCL document; this drawer does not keep a second full FCDA catalog."
+                            text: "Member rows are materialized on demand from the canonical parsed SCL document. Simulation behavior uses one bounded scheduler (16 slots, minimum 100 ms) and the existing bounded runtime delta channel."
                             color: root.theme.muted
                             font.pixelSize: 7
                             wrapMode: Text.WordWrap
