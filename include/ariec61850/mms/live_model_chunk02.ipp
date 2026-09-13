@@ -299,6 +299,54 @@ inline void append_unique_ci(
     for (const auto& [domain, variables] : discovery.names.domain_variables) {
         for (const auto& variable : variables) add(MmsLiveReferenceParser::parse_variable(domain, variable));
     }
+
+    // IEC 61850 servers commonly advertise only one MMS NamedVariable per
+    // Logical Node and expose FC/DO/DA members through that root's hierarchical
+    // TypeSpecification.  A root name such as "GGIO1" is intentionally not a
+    // leaf reference and therefore cannot be parsed by parse_variable() alone.
+    // Expand successful GVAA evidence into bounded synthetic references so the
+    // canonical live model does not depend on a DataSet (or non-standard flat
+    // aliases) merely to discover ordinary process data.
+    for (const auto& evidence : discovery.variable_types) {
+        if (!evidence.success() ||
+            evidence.variable.kind != MmsObjectNameKind::domain_specific ||
+            evidence.variable.domain.empty() || evidence.variable.item.empty()) {
+            continue;
+        }
+
+        std::vector<std::string> path;
+        path.reserve(MmsServiceCodec::maximum_type_depth);
+        std::size_t projected_components{};
+        const auto expand = [&](auto&& self, const MmsTypeSpecification& parent) -> void {
+            if (projected_components >= MmsServiceCodec::maximum_type_components ||
+                path.size() >= MmsServiceCodec::maximum_type_depth) {
+                return;
+            }
+            for (const auto& child : parent.children) {
+                if (projected_components >= MmsServiceCodec::maximum_type_components) return;
+                if (child.name.empty()) continue;
+
+                path.push_back(child.name);
+                ++projected_components;
+
+                std::string item = evidence.variable.item;
+                for (const auto& segment : path) {
+                    item.push_back('$');
+                    item += segment;
+                }
+                add(MmsLiveReferenceParser::parse_variable(
+                    evidence.variable.domain,
+                    item,
+                    "GetVariableAccessAttributesLogicalNodeTree",
+                    100U));
+
+                if (!child.children.empty()) self(self, child);
+                path.pop_back();
+            }
+        };
+        expand(expand, evidence.attributes->type);
+    }
+
     for (const auto& evidence : discovery.data_set_directories) {
         if (!evidence.success()) continue;
         for (const auto& member : evidence.directory->members) {
