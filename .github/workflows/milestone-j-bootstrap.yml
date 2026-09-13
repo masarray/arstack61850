@@ -1,0 +1,30 @@
+name: Milestone J source bootstrap
+
+on:
+  push:
+    branches:
+      - feat/ied-sim-ux-performance-foundation
+    paths:
+      - '.milestone-j/**'
+      - '.github/workflows/milestone-j-bootstrap.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-source-patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/ied-sim-ux-performance-foundation
+          fetch-depth: 0
+
+      - name: Apply Milestone J source changes
+        run: |
+          python3 .milestone-j/apply.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/ied_simulator tools/static_ied_server.cpp
+          git commit -m "perf(ied-sim): add bounded live runtime data plane"
+          git push origin HEAD:feat/ied-sim-ux-performance-foundation
