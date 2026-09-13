@@ -7,12 +7,12 @@ import ARStack.IedSimulator 1.0
 
 ApplicationWindow {
     id: root
-    width: 1440
-    height: 900
-    minimumWidth: 1120
-    minimumHeight: 700
+    width: 1360
+    height: 860
+    minimumWidth: 1024
+    minimumHeight: 680
     visible: true
-    title: "ARStack IED Lab"
+    title: "ARStack IED Simulator"
     color: appTheme.background
     font.family: interFont.status === FontLoader.Ready ? interFont.name : "Segoe UI"
 
@@ -27,32 +27,149 @@ ApplicationWindow {
         source: "qrc:/iedsim/assets/InterVariable.ttf"
     }
 
-    property bool appendImport: false
-
     FileDialog {
         id: sclDialog
-        title: appendImport ? "Add IEC 61850 engineering model" : "Open IEC 61850 engineering model"
+        title: "Open IEC 61850 engineering model"
         nameFilters: ["IEC 61850 engineering files (*.scl *.cid *.scd *.iid *.icd)", "All files (*)"]
-        onAccepted: appendImport ? simulator.addFile(selectedFile) : simulator.loadFile(selectedFile)
+        onAccepted: simulator.loadFileAsync(selectedFile)
     }
 
-    FolderDialog {
-        id: folderDialog
-        title: "Choose file-service folder"
-        onAccepted: simulator.fileFolder = selectedFolder.toString().replace("file:///", "")
-    }
-
-    function importModel(append) {
-        appendImport = append === true
+    function importModel() {
         sclDialog.open()
     }
 
-    FleetWorkspace {
+    Shortcut {
+        sequence: "Ctrl+Shift+A"
+        onActivated: activityMonitor.opened ? activityMonitor.close() : activityMonitor.open()
+    }
+    Shortcut {
+        sequence: "Ctrl+Shift+C"
+        enabled: simulator.imported
+        onActivated: commissioningWorkspace.opened ? commissioningWorkspace.close() : commissioningWorkspace.open()
+    }
+
+    IedScoutWorkspace {
         anchors.fill: parent
         theme: appTheme
         backend: simulator
-        onOpenSclRequested: root.importModel(false)
-        onAddIedRequested: root.importModel(true)
-        onFolderRequested: folderDialog.open()
+        onOpenSclRequested: root.importModel()
+    }
+
+    Rectangle {
+        id: commissioningLauncher
+        z: 20
+        visible: simulator.imported && !commissioningWorkspace.opened
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.rightMargin: 12
+        anchors.bottomMargin: 72
+        width: 142
+        height: 27
+        radius: 5
+        color: commissioningMouse.containsMouse ? appTheme.surfaceRaised : appTheme.statusChrome
+        border.width: 1
+        border.color: appTheme.line
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 9
+            anchors.rightMargin: 8
+            spacing: 6
+            Rectangle {
+                width: 6
+                height: 6
+                radius: 3
+                color: simulator.reportCount > 0 || simulator.gooseCount > 0 ? appTheme.green : appTheme.accent
+            }
+            Label {
+                Layout.fillWidth: true
+                text: "Commissioning"
+                color: appTheme.statusText
+                font.pixelSize: 9
+                font.weight: Font.DemiBold
+            }
+            Label {
+                text: String(simulator.dataSetCount + simulator.reportCount + simulator.gooseCount)
+                color: appTheme.navigationMuted
+                font.pixelSize: 8
+            }
+        }
+
+        MouseArea {
+            id: commissioningMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            onClicked: commissioningWorkspace.open()
+        }
+
+        ToolTip.visible: commissioningMouse.containsMouse
+        ToolTip.text: "Commissioning Explorer · Ctrl+Shift+C"
+    }
+
+    Rectangle {
+        id: activityLauncher
+        z: 20
+        visible: !activityMonitor.opened
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.rightMargin: 12
+        anchors.bottomMargin: 38
+        width: 116
+        height: 27
+        radius: 5
+        color: launcherMouse.containsMouse ? appTheme.surfaceRaised : appTheme.statusChrome
+        border.width: 1
+        border.color: appTheme.line
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 9
+            anchors.rightMargin: 8
+            spacing: 6
+            Rectangle {
+                width: 6
+                height: 6
+                radius: 3
+                color: simulator.running ? appTheme.green
+                                         : simulator.fatalError.length ? appTheme.red
+                                                                       : appTheme.accent
+            }
+            Label {
+                Layout.fillWidth: true
+                text: "Activity"
+                color: appTheme.statusText
+                font.pixelSize: 9
+                font.weight: Font.DemiBold
+            }
+            Label {
+                text: String(simulator.activityModel.retainedCount)
+                color: appTheme.navigationMuted
+                font.pixelSize: 8
+            }
+        }
+
+        MouseArea {
+            id: launcherMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            onClicked: activityMonitor.open()
+        }
+
+        ToolTip.visible: launcherMouse.containsMouse
+        ToolTip.text: "Activity Monitor · Ctrl+Shift+A"
+    }
+
+    CommissioningWorkspace {
+        id: commissioningWorkspace
+        z: 45
+        theme: appTheme
+        backend: simulator
+    }
+
+    ActivityMonitor {
+        id: activityMonitor
+        z: 50
+        theme: appTheme
+        backend: simulator
     }
 }

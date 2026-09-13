@@ -55,12 +55,81 @@ jobs:
       - name: Build
         run: >-
           cmake --build build-ied-simulator-qt
-          --target arstack_ied_simulator ariec61850_mms_read_probe --parallel 2
+          --target arstack_ied_simulator ariec61850_mms_read_probe ied_simulator_guardrails_qa ied_simulator_responsiveness_qa ied_simulator_commissioning_qa ied_simulator_runtime_commissioning_qa --parallel 2
+
+      - name: Bounded activity and child-output guardrails
+        run: ./build-ied-simulator-qt/ied_simulator_guardrails_qa
 
       - name: QML smoke test
         env:
           QT_QPA_PLATFORM: offscreen
         run: ./build-ied-simulator-qt/arstack_ied_simulator --smoke-test
+
+      - name: Prove interactive SCL import uses bounded async path
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          ./build-ied-simulator-qt/arstack_ied_simulator
+          --qa-async-import ./tests/fixtures/scl/minimal-station-brcb.scd
+
+      - name: Prove malformed SCL fails closed
+        run: >-
+          python3 apps/ied_simulator/test_malformed_import.py
+          --app ./build-ied-simulator-qt/arstack_ied_simulator
+
+      - name: Start stop restart lifecycle soak
+        run: >-
+          python3 apps/ied_simulator/test_runtime_lifecycle.py
+          --app ./build-ied-simulator-qt/arstack_ied_simulator
+          --scl ./tests/fixtures/scl/minimal-station-brcb.scd
+          --cycles 12
+
+      - name: Large SCL import performance gates
+        run: >-
+          python3 apps/ied_simulator/benchmark_large_scl.py
+          --app ./build-ied-simulator-qt/arstack_ied_simulator
+          --targets 5000,20000,50000
+
+      - name: Runtime scale and responsiveness gates
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          python3 apps/ied_simulator/test_runtime_responsiveness.py
+          --qa ./build-ied-simulator-qt/ied_simulator_responsiveness_qa
+          --multi-scl ./tests/fixtures/scl/compact-multi-stream.scd
+          --single-scl ./tests/fixtures/scl/minimal-station-brcb.scd
+
+      - name: Commissioning feature depth gates
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          ./build-ied-simulator-qt/ied_simulator_commissioning_qa
+          ./tests/fixtures/scl/minimal-station-brcb.scd
+          ./tests/fixtures/scl/commissioning-unresolved.scd
+
+      - name: Runtime commissioning actions and behavior gates
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          ./build-ied-simulator-qt/ied_simulator_runtime_commissioning_qa
+          ./tests/fixtures/scl/minimal-station-brcb.scd
+          ./build-ied-simulator-qt
+
+      - name: Live runtime data-plane burst gates
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          python3 apps/ied_simulator/test_live_hot_updates.py
+          --app ./build-ied-simulator-qt/arstack_ied_simulator
+          --read-probe ./build-ied-simulator-qt
+          --scl ./tests/fixtures/scl/minimal-station-brcb.scd
+          --bursts 1000,10000
+
+      - name: Reject stale live runtime deltas
+        run: >-
+          python3 apps/ied_simulator/test_live_data_plane_negative.py
+          --server ./build-ied-simulator-qt
+          --read-probe ./build-ied-simulator-qt
 
       - name: Capture workbench visual regression
         env:

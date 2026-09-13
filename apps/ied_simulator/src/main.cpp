@@ -12,6 +12,9 @@
 #include <QTimer>
 #include <QUrl>
 
+#include <algorithm>
+#include <memory>
+
 namespace {
 bool configureEndpoint(QObject* backend, const QString& specification, const int defaultPort) {
     const auto equals = specification.indexOf(QLatin1Char('='));
@@ -62,6 +65,19 @@ int main(int argc, char* argv[]) {
         QStringLiteral("scl"),
         QStringLiteral("Import an engineering file before showing the window."),
         QStringLiteral("path")};
+    const QCommandLineOption qaAsyncImportOption{
+        QStringLiteral("qa-async-import"),
+        QStringLiteral("QA: import one engineering file through the interactive bounded worker and exit."),
+        QStringLiteral("path")};
+    const QCommandLineOption qaAsyncImportRepeatOption{
+        QStringLiteral("qa-async-import-repeat"),
+        QStringLiteral("QA: repeat the bounded async import in one process for lifecycle/leak soak."),
+        QStringLiteral("count"),
+        QStringLiteral("1")};
+    const QCommandLineOption qaRuntimeCyclesOption{
+        QStringLiteral("qa-runtime-cycles"),
+        QStringLiteral("QA: repeatedly start and stop the selected MMS runtime in one GUI process."),
+        QStringLiteral("count")};
     const QCommandLineOption runtimeOption{
         QStringLiteral("runtime"),
         QStringLiteral("Start the selected MMS runtime after importing the model.")};
@@ -89,12 +105,19 @@ int main(int argc, char* argv[]) {
         QStringLiteral("set-first-value"),
         QStringLiteral("QA: apply a value to the first runtime point after start."),
         QStringLiteral("value")};
+    const QCommandLineOption qaLiveBurstOption{
+        QStringLiteral("qa-live-burst"),
+        QStringLiteral("QA: enqueue a bounded burst through the live runtime data plane."),
+        QStringLiteral("count")};
     const QCommandLineOption exitAfterOption{
         QStringLiteral("exit-after-ms"),
         QStringLiteral("QA: exit after the specified runtime duration."),
         QStringLiteral("milliseconds")};
     parser.addOptions({
         sclOption,
+        qaAsyncImportOption,
+        qaAsyncImportRepeatOption,
+        qaRuntimeCyclesOption,
         runtimeOption,
         iedEndpointOption,
         startIedOption,
@@ -102,6 +125,7 @@ int main(int argc, char* argv[]) {
         smokeOption,
         portOption,
         setFirstValueOption,
+        qaLiveBurstOption,
         exitAfterOption});
     parser.process(app);
 
@@ -132,6 +156,80 @@ int main(int argc, char* argv[]) {
                 "loadFile",
                 Q_ARG(QUrl, QUrl::fromLocalFile(parser.value(sclOption))));
         }
+        if (backend != nullptr && parser.isSet(qaAsyncImportOption)) {
+            bool repeatOk{};
+            const auto parsedRepeat = parser.value(qaAsyncImportRepeatOption).toInt(&repeatOk);
+            const int repeatCount = repeatOk ? std::clamp(parsedRepeat, 1, 100) : 1;
+            const auto importUrl = QUrl::fromLocalFile(parser.value(qaAsyncImportOption));
+            auto iteration = std::make_shared<int>(0);
+
+            bool accepted{};
+            const bool invoked = QMetaObject::invokeMethod(
+                backend,
+                "loadFileAsync",
+                Q_RETURN_ARG(bool, accepted),
+                Q_ARG(QUrl, importUrl));
+            if (!invoked || !accepted) {
+                qWarning().noquote() << "Async import request was rejected.";
+                QTimer::singleShot(0, &app, [] { QCoreApplication::exit(5); });
+            } else {
+                auto* const importTimer = new QTimer{backend};
+                importTimer->setInterval(25);
+                QObject::connect(
+                    importTimer,
+                    &QTimer::timeout,
+                    backend,
+                    [&app, backend, importTimer, importUrl, repeatCount, iteration] {
+                        if (backend->property("importing").toBool()) return;
+                        if (!backend->property("imported").toBool()) {
+                            importTimer->stop();
+                            importTimer->deleteLater();
+                            qWarning().noquote()
+                                << "Async import failed:"
+                                << backend->property("fatalError").toString();
+                            app.exit(6);
+                            return;
+                        }
+
+                        ++(*iteration);
+                        qInfo().noquote()
+                            << "ASYNC_IMPORT_ITERATION"
+                            << *iteration
+                            << backend->property("sourceName").toString();
+                        if (*iteration < repeatCount) {
+                            bool nextAccepted{};
+                            const bool nextInvoked = QMetaObject::invokeMethod(
+                                backend,
+                                "loadFileAsync",
+                                Q_RETURN_ARG(bool, nextAccepted),
+                                Q_ARG(QUrl, importUrl));
+                            if (nextInvoked && nextAccepted) return;
+
+                            importTimer->stop();
+                            importTimer->deleteLater();
+                            qWarning().noquote() << "Repeated async import request was rejected.";
+                            app.exit(5);
+                            return;
+                        }
+
+                        importTimer->stop();
+                        importTimer->deleteLater();
+                        qInfo().noquote()
+                            << "ASYNC_IMPORT_OK"
+                            << backend->property("sourceName").toString()
+                            << "iterations=" << *iteration;
+                        app.exit(0);
+                    });
+                importTimer->start();
+                QTimer::singleShot(60'000, backend, [&app, importTimer] {
+                    if (!importTimer->isActive()) return;
+                    importTimer->stop();
+                    importTimer->deleteLater();
+                    qWarning().noquote() << "Async import timed out.";
+                    app.exit(7);
+                });
+            }
+        }
 
         bool fleetConfigurationValid = true;
         if (backend != nullptr) {
@@ -142,9 +240,115 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        bool qaRuntimeCycleScheduled = false;
+        if (backend != nullptr && fleetConfigurationValid && parser.isSet(qaRuntimeCyclesOption)) {
+            bool countOk{};
+            const auto requested = parser.value(qaRuntimeCyclesOption).toInt(&countOk);
+            const int cycleCount = countOk ? std::clamp(requested, 1, 100) : 0;
+            if (cycleCount <= 0 || !backend->property("imported").toBool()) {
+                fleetConfigurationValid = false;
+                qWarning().noquote()
+                    << "--qa-runtime-cycles requires a positive count and a successfully loaded --scl model.";
+                QTimer::singleShot(0, &app, [] { QCoreApplication::exit(8); });
+            } else {
+                qaRuntimeCycleScheduled = true;
+                auto cycle = std::make_shared<int>(0);
+                auto phase = std::make_shared<int>(0);
+                auto* const cycleTimer = new QTimer{backend};
+                cycleTimer->setInterval(25);
+                QObject::connect(
+                    cycleTimer,
+                    &QTimer::timeout,
+                    backend,
+                    [&app, backend, cycleTimer, cycleCount, cycle, phase] {
+                        if (*phase == 0) {
+                            bool started{};
+                            const bool invoked = QMetaObject::invokeMethod(
+                                backend,
+                                "startSimulation",
+                                Q_RETURN_ARG(bool, started));
+                            if (!invoked || !started) {
+                                cycleTimer->stop();
+                                cycleTimer->deleteLater();
+                                qWarning().noquote()
+                                    << "Runtime lifecycle soak could not start cycle"
+                                    << (*cycle + 1);
+                                app.exit(9);
+                                return;
+                            }
+                            *phase = 1;
+                            return;
+                        }
+
+                        if (*phase == 1) {
+                            if (!backend->property("running").toBool()) return;
+                            qInfo().noquote() << "RUNTIME_CYCLE_STARTED" << (*cycle + 1);
+
+                            // Hold the second restarted process beyond the 900 ms
+                            // delayed-kill grace period. A stale timer from the
+                            // first stop must not be able to kill this generation.
+                            if (*cycle == 1) {
+                                *phase = 3;
+                                QTimer::singleShot(1'100, backend, [phase] { *phase = 4; });
+                                return;
+                            }
+
+                            QMetaObject::invokeMethod(backend, "stopSimulation");
+                            *phase = 2;
+                            return;
+                        }
+
+                        if (*phase == 3) {
+                            if (backend->property("running").toBool()) return;
+                            cycleTimer->stop();
+                            cycleTimer->deleteLater();
+                            qWarning().noquote()
+                                << "Runtime died inside the delayed-kill restart guard window.";
+                            app.exit(11);
+                            return;
+                        }
+
+                        if (*phase == 4) {
+                            if (!backend->property("running").toBool()) {
+                                cycleTimer->stop();
+                                cycleTimer->deleteLater();
+                                qWarning().noquote()
+                                    << "Runtime was not alive after the delayed-kill restart guard window.";
+                                app.exit(11);
+                                return;
+                            }
+                            qInfo().noquote() << "RUNTIME_RESTART_GUARD_PASS cycle=" << (*cycle + 1);
+                            QMetaObject::invokeMethod(backend, "stopSimulation");
+                            *phase = 2;
+                            return;
+                        }
+
+                        if (backend->property("anyRunning").toBool()) return;
+                        ++(*cycle);
+                        qInfo().noquote() << "RUNTIME_CYCLE_FINISHED" << *cycle;
+                        if (*cycle >= cycleCount) {
+                            cycleTimer->stop();
+                            cycleTimer->deleteLater();
+                            qInfo().noquote() << "RUNTIME_CYCLE_SOAK_PASS cycles=" << *cycle;
+                            app.exit(0);
+                            return;
+                        }
+                        *phase = 0;
+                    });
+                cycleTimer->start();
+                QTimer::singleShot(45'000, backend, [&app, cycleTimer] {
+                    if (!cycleTimer->isActive()) return;
+                    cycleTimer->stop();
+                    cycleTimer->deleteLater();
+                    qWarning().noquote() << "Runtime lifecycle soak timed out.";
+                    app.exit(10);
+                });
+            }
+        }
+
         if (!fleetConfigurationValid) {
             QTimer::singleShot(0, &app, [] { QCoreApplication::exit(2); });
-        } else if (backend != nullptr) {
+        } else if (backend != nullptr && !qaRuntimeCycleScheduled) {
             if (parser.isSet(runtimeOption)) {
                 QTimer::singleShot(150, backend, [backend] {
                     QMetaObject::invokeMethod(backend, "startSimulation");
@@ -183,6 +387,34 @@ int main(int argc, char* argv[]) {
                 applyTimer->deleteLater();
             });
             applyTimer->start();
+        }
+        if (backend != nullptr && parser.isSet(qaLiveBurstOption)) {
+            bool countOk{};
+            const auto requested = parser.value(qaLiveBurstOption).toInt(&countOk);
+            const int count = countOk ? std::clamp(requested, 1, 100'000) : 0;
+            if (count <= 0) {
+                qWarning().noquote() << "--qa-live-burst requires a positive count.";
+                QTimer::singleShot(0, &app, [] { QCoreApplication::exit(12); });
+            } else {
+                auto* const liveTimer = new QTimer{backend};
+                liveTimer->setInterval(25);
+                QObject::connect(liveTimer, &QTimer::timeout, backend, [backend, liveTimer, count] {
+                    if (!backend->property("running").toBool()) return;
+                    int accepted{};
+                    const bool invoked = QMetaObject::invokeMethod(
+                        backend,
+                        "qaBurstLiveValues",
+                        Q_RETURN_ARG(int, accepted),
+                        Q_ARG(int, count));
+                    liveTimer->stop();
+                    liveTimer->deleteLater();
+                    if (!invoked || accepted != count) {
+                        qWarning().noquote()
+                            << "Live burst was not fully accepted" << accepted << "of" << count;
+                    }
+                });
+                liveTimer->start();
+            }
         }
         if (parser.isSet(screenshotOption)) {
             const auto outputPath = parser.value(screenshotOption);
