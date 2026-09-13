@@ -48,11 +48,12 @@ jobs:
         run: |
           sed -i 's/pattern.subn(replacement, text, count=1)/pattern.subn(lambda _: replacement, text, count=1)/g' .milestone-i/apply.py
           python3 .milestone-i/apply.py
+          python3 .milestone-i/apply2.py
           if ! git diff --quiet -- apps/ied_simulator; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add apps/ied_simulator
-            git commit -m "perf(ied-sim): harden runtime scale and responsiveness"
+            git commit -m "perf(ied-sim): instrument runtime responsiveness"
             git push origin HEAD:feat/ied-sim-ux-performance-foundation
           else
             echo "Milestone I source changes already applied."
@@ -72,7 +73,7 @@ jobs:
       - name: Build
         run: >-
           cmake --build build-ied-simulator-qt
-          --target arstack_ied_simulator ariec61850_mms_read_probe ied_simulator_guardrails_qa --parallel 2
+          --target arstack_ied_simulator ariec61850_mms_read_probe ied_simulator_guardrails_qa ied_simulator_responsiveness_qa --parallel 2
 
       - name: Bounded activity and child-output guardrails
         run: ./build-ied-simulator-qt/ied_simulator_guardrails_qa
@@ -106,6 +107,15 @@ jobs:
           python3 apps/ied_simulator/benchmark_large_scl.py
           --app ./build-ied-simulator-qt/arstack_ied_simulator
           --targets 5000,20000,50000
+
+      - name: Runtime scale and responsiveness gates
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          python3 apps/ied_simulator/test_runtime_responsiveness.py
+          --qa ./build-ied-simulator-qt/ied_simulator_responsiveness_qa
+          --multi-scl ./tests/fixtures/scl/compact-multi-stream.scd
+          --single-scl ./tests/fixtures/scl/minimal-station-brcb.scd
 
       - name: Capture workbench visual regression
         env:
