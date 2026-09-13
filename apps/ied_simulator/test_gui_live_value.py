@@ -719,7 +719,7 @@ def main() -> int:
             app_log.flush()
             app_log.seek(0)
             app_output = app_log.read()
-            if "kind=live_update_ack" not in app_output or "accepted=true" not in app_output:
+            if "IEDSIM_LIVE_ACK generation=" not in app_output:
                 raise RuntimeError("GUI edit was not acknowledged by the live runtime data plane")
             print(
                 "IEDSIM_GUI_LIVE_VALUE_PASS "
