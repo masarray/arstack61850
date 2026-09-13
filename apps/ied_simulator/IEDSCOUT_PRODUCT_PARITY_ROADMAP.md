@@ -40,7 +40,7 @@ Do **not** make Sampled Values runtime simulation, PTP, ESP32/embedded work, or 
 
 The priority order is:
 
-**M GOOSE TX -> N MMS Client/Discovery -> O RCB/Reports -> P GOOSE Monitor/Publisher -> Q Files + Setting Groups -> R SCL Export/Ed1-Ed2 -> S Release Hardening**
+**M GOOSE TX ✅ -> N MMS Client/Discovery ✅ -> O RCB/Reports -> P GOOSE Monitor/Publisher -> Q Files + Setting Groups -> R SCL Export/Ed1-Ed2 -> S Release Hardening**
 
 ## Milestone M — Real GOOSE Publication — CLOSED
 
@@ -58,41 +58,30 @@ Closed capability:
 
 No additional SV milestone follows M on this desktop product track.
 
-## Milestone N — MMS Client & IED Discovery Workbench
+## Milestone N — MMS Client & IED Discovery Workbench — CLOSED
 
-This is the highest-impact post-M milestone because it changes the application from a simulator-centric tool into an engineering client.
+This milestone changes the application from a simulator-centric tool into an engineering client while retaining the existing simulator as a peer workspace.
 
-### Product flow
+### Closed capability
 
-**Connect to IED -> IP/port -> Associate -> Discover -> browse `IED -> LD -> LN -> DO -> DA` -> Read / guarded Write / inspect live metadata.**
-
-### Required surface
-
-- connection profile with IP, port and explicit connect/disconnect/reconnect state;
-- association lifecycle and bounded diagnostics;
-- automatic live discovery into a typed Qt model;
-- one virtualized tree/projection for LD/LN/DO/DA browsing;
-- value, FC, exact type, quality/time where available, writability and reference inspection;
-- Read/refresh for selected item and bounded refresh for visible scope;
-- guarded Write using exact discovered type; unknown/unrepresentable types fail closed;
-- search/filter over reference/name/value/FC/type without rebuilding an unbounded UI tree;
-- session generation/revision ownership so stale async discovery/read results cannot overwrite a newer connection;
-- reconnect must invalidate old session state deterministically;
-- no duplicate complete live model in QML.
-
-### Reuse first
-
-Prefer integration of existing MMS transport/association, live discovery, type probing, Read and guarded Write code. Do not introduce a second protocol implementation for the GUI.
+- explicit IP/hostname + TCP port connection profile with Connect, Disconnect and Reconnect state;
+- persistent MMS association reused for live discovery and subsequent Read/Write operations;
+- canonical live discovery through `MmsTcpLiveDiscoverySession` and `MmsLiveModelBuilder`, with no GUI-specific protocol stack or CLI subprocess;
+- typed/virtualized `IED -> LD -> LN -> DO -> DA` tree with expand/collapse and search/filter;
+- selected DA inspection for reference, FC, exact MMS type, SCL type, type evidence, value, and sibling quality/timestamp when available;
+- selected Read plus bounded visible-range refresh capped at 64 MMS variables per operator action;
+- guarded exact-type scalar Write only for FC `SP`, `CF`, `DC`, and `SE`; `ST`, `MX`, `CO`, unknown, structured, array, and unrepresentable values fail closed;
+- no automatic Write retry; successful Write is followed by verification Read on the same association;
+- one bounded client I/O worker, stop-token cancellation, monotonic session generation, and stale-completion rejection across disconnect/reconnect;
+- diagnostic presentation bounded to 128 entries;
+- deterministic loopback QA against the real simulator proving discovery, exact-type Read, guarded Write + verification Read, and stale-session rejection;
+- the existing A-M simulator automation and `--scl` path remain intact under the `Simulator` workspace.
 
 ### Definition of Done
 
-- a user can connect to a real/vendor-simulator endpoint and browse the discovered model from the desktop GUI;
-- selected live values can be refreshed/read and supported writable values can be changed through the guarded exact-type path;
-- disconnect/reconnect and failed discovery do not leave stale UI state;
-- large-model navigation/search remains responsive and bounded;
-- independent CLI/core comparison or deterministic fixture evidence proves the GUI projection matches the canonical discovered model.
+Milestone N is closed only when the normal `IED Simulator Qt` workflow passes `MMS_CLIENT_WORKBENCH_PASS`, `MMS_CLIENT_STALE_SESSION_NEGATIVE_PASS`, QML smoke, and all retained simulator A-M regressions on the same final head. Closure evidence is recorded on PR #82.
 
-## Milestone O — Report / RCB Commissioning
+## Milestone O — Report / RCB Commissioning — NEXT
 
 Turn the existing reporting capability into technician workflow rather than another protocol tranche.
 
