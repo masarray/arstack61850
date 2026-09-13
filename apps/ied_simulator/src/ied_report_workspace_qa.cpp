@@ -172,18 +172,36 @@ int main(int argc, char* argv[]) {
         return 15;
     }
 
+    // Reconnect while the URCB is still active. The reconnect path must clean
+    // up RptEna/Resv before replacing the association. Reacquiring the same
+    // URCB and receiving a fresh GI is direct evidence that no zombie ownership
+    // was left on the server by the interrupted session.
+    if (!reports.reconnect() ||
+        !waitUntil([&reports] { return reports.connected() && !reports.busy(); }, 12'000) ||
+        reports.cleanupRequired()) {
+        qCritical().noquote() << "REPORTS_WORKBENCH_FAIL active_reconnect" << reports.lastError();
+        return 16;
+    }
+    if (selectEligibleUrcb(reports) < 0 ||
+        !reports.enableSelected(true) ||
+        !waitUntil([&reports] { return reports.active() && !reports.busy(); }, 8'000) ||
+        !waitUntil([&reports] { return reports.receivedReportCount() > 0; }, 5'000)) {
+        qCritical().noquote() << "REPORTS_WORKBENCH_FAIL reconnect_reacquire" << reports.lastError();
+        return 17;
+    }
+
     if (!reports.disableSelected() ||
         !waitUntil([&reports] { return !reports.active() && !reports.busy(); }, 6'000) ||
         reports.cleanupRequired()) {
         qCritical().noquote() << "REPORTS_WORKBENCH_FAIL cleanup" << reports.lastError();
-        return 16;
+        return 18;
     }
 
     reports.disconnectFromIed();
     simulator.stopSimulation();
     if (!waitUntil([&simulator] { return !simulator.anyRunning(); }, 4'000)) {
         qCritical() << "REPORTS_WORKBENCH_FAIL simulator_stop";
-        return 17;
+        return 19;
     }
 
     qInfo().noquote()
@@ -197,13 +215,15 @@ int main(int argc, char* argv[]) {
         << "urcb=pass"
         << "brcb_inventory=pass"
         << "entryid_indicator=pass"
-        << "cleanup=pass";
+        << "cleanup=pass"
+        << "active_reconnect_cleanup=pass";
     qInfo().noquote()
         << "REPORTS_WORKBENCH_NEGATIVE_PASS"
         << "no_connection_enable=rejected"
         << "inactive_disable=rejected"
         << "invalid_selection=rejected"
         << "strict_single_candidate=true"
-        << "idle_poll_nonfatal=true";
+        << "idle_poll_nonfatal=true"
+        << "reconnect_reacquire=true";
     return 0;
 }
