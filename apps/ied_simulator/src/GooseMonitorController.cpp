@@ -97,7 +97,7 @@ QVariant GooseMonitorController::data(const QModelIndex& index, const int role) 
     case PacketCountRole: return static_cast<qulonglong>(slot.packetCount);
     case LastSeenMsRole: return slot.lastSeenMilliseconds;
     case ValuesSummaryRole: return slot.valuesSummary;
-    case ValueCountRole: return slot.values.size();
+    case ValueCountRole: return static_cast<int>(slot.values.size());
     default: return {};
     }
 }
@@ -256,7 +256,7 @@ QVariantMap GooseMonitorController::streamMap(const StreamSlot& slot) const {
     result.insert(QStringLiteral("anomaly"), slot.anomaly);
     result.insert(QStringLiteral("packets"), static_cast<qulonglong>(slot.packetCount));
     result.insert(QStringLiteral("lastSeenMs"), slot.lastSeenMilliseconds);
-    result.insert(QStringLiteral("valueCount"), slot.values.size());
+    result.insert(QStringLiteral("valueCount"), static_cast<int>(slot.values.size()));
     result.insert(QStringLiteral("valuesSummary"), slot.valuesSummary);
     return result;
 }
@@ -314,7 +314,10 @@ QString GooseMonitorController::formatValue(const MmsDataValue& value, const int
         for (std::size_t index = 0; index < limit; ++index) {
             children.push_back(formatValue(values[index], depth + 1));
         }
-        if (values.size() > limit) children.push_back(QStringLiteral("… +%1").arg(values.size() - limit));
+        if (values.size() > limit) {
+            children.push_back(QStringLiteral("… +%1").arg(
+                static_cast<qulonglong>(values.size() - limit)));
+        }
         const bool array = value.kind() == MmsDataKind::array;
         return (array ? QStringLiteral("[") : QStringLiteral("{")) +
             children.join(QStringLiteral(", ")) +
@@ -436,13 +439,14 @@ bool GooseMonitorController::ingestFrameInternal(
     slot.values.reserve(static_cast<int>(slot.frame.pdu.values.size()));
     for (std::size_t index = 0; index < slot.frame.pdu.values.size(); ++index) {
         slot.values.push_back(
-            QStringLiteral("[%1] %2").arg(index).arg(formatValue(slot.frame.pdu.values[index])));
+            QStringLiteral("[%1] %2").arg(static_cast<qulonglong>(index)).arg(formatValue(slot.frame.pdu.values[index])));
     }
     QStringList summary;
-    const int summaryCount = std::min(3, slot.values.size());
+    const int summaryCount = std::min(3, static_cast<int>(slot.values.size()));
     for (int index = 0; index < summaryCount; ++index) summary.push_back(slot.values.at(index));
     if (slot.values.size() > summaryCount) {
-        summary.push_back(QStringLiteral("… +%1").arg(slot.values.size() - summaryCount));
+        summary.push_back(QStringLiteral("… +%1").arg(
+            static_cast<qlonglong>(slot.values.size() - summaryCount)));
     }
     slot.valuesSummary = summary.join(QStringLiteral("  "));
 
@@ -546,7 +550,7 @@ bool GooseMonitorController::exportPcap(const QUrl& fileUrl) {
         ar::iec61850::capture::PcapWriter::write_all(
             std::filesystem::path{localFile.toStdString()}, packets);
         statusText_ = QStringLiteral("Saved %1 GOOSE packets to %2")
-            .arg(packets.size())
+            .arg(static_cast<qulonglong>(packets.size()))
             .arg(localFile);
         appendEvent(statusText_);
         emit monitorChanged();
