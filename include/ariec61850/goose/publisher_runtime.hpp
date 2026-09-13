@@ -39,6 +39,10 @@ public:
 
     [[nodiscard]] GoosePublication publish_retransmission();
 
+    void set_time_allowed_to_live(std::uint32_t milliseconds) noexcept {
+        frame_template_.pdu.time_allowed_to_live_milliseconds = milliseconds;
+    }
+
     [[nodiscard]] bool has_state() const noexcept { return has_state_; }
     [[nodiscard]] std::uint32_t state_number() const noexcept { return state_number_; }
     [[nodiscard]] std::uint32_t next_sequence_number() const noexcept {
@@ -94,7 +98,8 @@ public:
     [[nodiscard]] const GoosePublisherSession& session() const noexcept { return session_; }
 
 private:
-    void schedule_next(clock::time_point now) noexcept;
+    [[nodiscard]] std::uint32_t prepare_next_delay() noexcept;
+    void schedule_next(clock::time_point now, std::uint32_t delay_milliseconds) noexcept;
 
     GoosePublisherSession session_;
     RetransmissionSchedule schedule_;
