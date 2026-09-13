@@ -301,6 +301,29 @@ bool IedCommissioningModel::applyBehaviorValue(
     return true;
 }
 
+bool IedCommissioningModel::restoreOwnedPointLocally(BehaviorSlot& slot) {
+    if (backend_ == nullptr || slot.iedIndex < 0 || slot.pointStoreIndex < 0 ||
+        iedSessionKey(slot.iedIndex) != slot.sessionKey) {
+        return false;
+    }
+    auto* point = backend_->pointStore_.atMutable(slot.pointStoreIndex);
+    // If another operator/editor has replaced the behavior-owned value, never
+    // overwrite that newer state during teardown.
+    if (point == nullptr || point->value != slot.lastAppliedValue) return false;
+
+    point->value = slot.originalValue;
+    point->quality = slot.originalQuality;
+    point->origin = slot.originalOrigin;
+    point->changed = slot.originalChanged;
+    point->updated = slot.originalUpdated;
+    slot.lastAppliedValue = slot.originalValue;
+    if (slot.iedIndex == backend_->selectedIedIndex_) {
+        emit backend_->valuesChanged();
+        emit backend_->selectionChanged();
+    }
+    return true;
+}
+
 void IedCommissioningModel::ensureBehaviorTimer() {
     if (!behaviorClock_.isValid()) behaviorClock_.start();
     if (behaviorTimer_ != nullptr) return;
@@ -314,13 +337,17 @@ void IedCommissioningModel::pruneBehaviors() {
     if (behaviors_.isEmpty()) return;
     bool changed{};
     for (int index = behaviors_.size() - 1; index >= 0; --index) {
-        const auto& slot = behaviors_.at(index);
+        auto& slot = behaviors_[index];
         const auto* runtime = backend_ == nullptr ? nullptr : backend_->runtimeAt(slot.iedIndex);
         const auto* point = backend_ == nullptr ? nullptr : backend_->pointStore_.at(slot.pointStoreIndex);
         if (backend_ != nullptr && point != nullptr && runtime != nullptr &&
             runtime->state == IedFleetController::RuntimeState::running &&
             iedSessionKey(slot.iedIndex) == slot.sessionKey) {
             continue;
+        }
+        if (backend_ != nullptr && point != nullptr &&
+            iedSessionKey(slot.iedIndex) == slot.sessionKey) {
+            static_cast<void>(restoreOwnedPointLocally(slot));
         }
         behaviors_.removeAt(index);
         changed = true;
@@ -349,6 +376,19 @@ void IedCommissioningModel::advanceBehaviors() {
         auto* point = backend_->pointStore_.atMutable(slot.pointStoreIndex);
         if (runtime == nullptr || runtime->state != IedFleetController::RuntimeState::running ||
             point == nullptr) {
+            const auto iedName = point == nullptr ? QString{} : point->iedName;
+            const bool restored = point != nullptr && restoreOwnedPointLocally(slot);
+            if (backend_ != nullptr && point != nullptr) {
+                backend_->appendActivity(
+                    QStringLiteral("Commissioning"),
+                    restored
+                        ? QStringLiteral("Runtime stopped; behavior on %1 was removed and its owned value restored locally before restart.")
+                              .arg(slot.reference)
+                        : QStringLiteral("Runtime stopped; behavior on %1 was removed without overwriting newer external state.")
+                              .arg(slot.reference),
+                    QStringLiteral("Info"),
+                    iedName);
+            }
             behaviors_.removeAt(index);
             changed = true;
             continue;
@@ -544,6 +584,7 @@ bool IedCommissioningModel::stopMemberBehavior(const int row, const bool restore
     bool restored = !restore || externallyOverridden;
     if (restore && !externallyOverridden) {
         restored = applyBehaviorValue(slot, slot.originalValue, true);
+        if (!restored) restored = restoreOwnedPointLocally(slot);
     }
     const auto reference = slot.reference;
     const auto iedName = point == nullptr ? QString{} : point->iedName;
@@ -572,7 +613,9 @@ void IedCommissioningModel::stopAllBehaviors(const bool restore) {
         auto* point = backend_ == nullptr ? nullptr : backend_->pointStore_.atMutable(slot.pointStoreIndex);
         const bool externallyOverridden = point != nullptr && point->value != slot.lastAppliedValue;
         if (restore && !externallyOverridden) {
-            static_cast<void>(applyBehaviorValue(slot, slot.originalValue, true));
+            if (!applyBehaviorValue(slot, slot.originalValue, true)) {
+                static_cast<void>(restoreOwnedPointLocally(slot));
+            }
         }
     }
     behaviors_.clear();
