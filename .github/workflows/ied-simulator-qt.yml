@@ -99,6 +99,22 @@ jobs:
           --multi-scl ./tests/fixtures/scl/compact-multi-stream.scd
           --single-scl ./tests/fixtures/scl/minimal-station-brcb.scd
 
+      - name: Live runtime data-plane burst gates
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          python3 apps/ied_simulator/test_live_hot_updates.py
+          --app ./build-ied-simulator-qt/arstack_ied_simulator
+          --read-probe ./build-ied-simulator-qt
+          --scl ./tests/fixtures/scl/minimal-station-brcb.scd
+          --bursts 1000,10000
+
+      - name: Reject stale live runtime deltas
+        run: >-
+          python3 apps/ied_simulator/test_live_data_plane_negative.py
+          --server ./build-ied-simulator-qt
+          --read-probe ./build-ied-simulator-qt
+
       - name: Capture workbench visual regression
         env:
           QT_QPA_PLATFORM: offscreen
