@@ -33,31 +33,13 @@ on:
       - '.github/workflows/ied-simulator-qt.yml'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-and-smoke:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: feat/ied-sim-ux-performance-foundation
-          fetch-depth: 0
-
-      - name: Apply Milestone I source changes
-        run: |
-          sed -i 's/pattern.subn(replacement, text, count=1)/pattern.subn(lambda _: replacement, text, count=1)/g' .milestone-i/apply.py
-          python3 .milestone-i/apply.py
-          python3 .milestone-i/apply2.py
-          if ! git diff --quiet -- apps/ied_simulator; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add apps/ied_simulator
-            git commit -m "perf(ied-sim): instrument runtime responsiveness"
-            git push origin HEAD:feat/ied-sim-ux-performance-foundation
-          else
-            echo "Milestone I source changes already applied."
-          fi
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
