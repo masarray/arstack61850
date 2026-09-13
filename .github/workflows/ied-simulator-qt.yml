@@ -46,6 +46,7 @@ jobs:
 
       - name: Apply Milestone I source changes
         run: |
+          sed -i 's/pattern.subn(replacement, text, count=1)/pattern.subn(lambda _: replacement, text, count=1)/g' .milestone-i/apply.py
           python3 .milestone-i/apply.py
           if ! git diff --quiet -- apps/ied_simulator; then
             git config user.name "github-actions[bot]"
