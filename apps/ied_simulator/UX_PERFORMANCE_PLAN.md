@@ -106,6 +106,19 @@ This plan applies the repository `AGENTS.md` production contract to the desktop 
 - Commissioning search/filtering covers service type, name/reference, DataSet reference, APPID/goID, and control model without disturbing the simulator runtime state.
 - CI target `ied_simulator_commissioning_qa` validates the positive inventory/metadata/member/navigation path and an unresolved-binding negative fixture. Gates: `COMMISSIONING_DEPTH_PASS` and `COMMISSIONING_NEGATIVE_PASS`.
 
+### Stage L - Runtime Commissioning Actions & Simulation Behavior — implemented
+
+- Runtime commissioning actions reuse the canonical `IedPointStore` and the existing bounded GUI/controller -> child live-delta channel; they do not create a second simulator state store or protocol path.
+- Configured DataSet/Report/GOOSE members are resolved back to canonical point records. Only writable ST/MX source values are drivable; quality/timestamp leaves remain protected.
+- Simulation behavior is intentionally bounded: one coarse scheduler owns at most 16 active slots, the minimum interval is 100 ms, and a scheduler turn emits at most one update per due slot rather than catching up missed intervals in a burst.
+- Supported behaviors are Pulse, Toggle, and numeric Ramp. Operator stop can restore the original value and metadata. If another edit replaces the behavior-owned value, the behavior stops rather than overwriting the newer external state.
+- Runtime stop also removes active behavior ownership and restores still-owned canonical values locally before the next startup manifest is built; CI restarts the simulator and verifies the baseline did not retain the temporary stimulus.
+- A Report source pulse is proven through the real MMS reporting path: an enabled BRCB receives an event caused by the commissioning stimulus.
+- GOOSE commissioning currently stimulates the configured source DataSet state through the runtime data plane. **Raw Ethernet GOOSE publication is not claimed by this milestone** because the desktop child does not yet own a tested raw-interface transport.
+- Control commissioning deliberately does not mutate control status as a shortcut. The explorer can focus the associated ST/stVal, while Direct/SBO normal/enhanced execution remains on the existing IEC 61850 MMS control-service path and its configured `ctlModel` semantics.
+- The behavior engine stays bound to the backend when the drawer closes, so UI visibility does not silently destroy active simulation ownership; runtime/session validity still governs execution and teardown.
+- CI target `ied_simulator_runtime_commissioning_qa` verifies BRCB event generation, GOOSE source stimulus/restore, periodic MMS visibility, control-status focus, explicit restore, runtime-stop auto-restore/restart baseline, and negative rejection of stopped-runtime, unknown-mode, and too-fast behavior requests. Gates: `RUNTIME_COMMISSIONING_ACTIONS_PASS` and `RUNTIME_COMMISSIONING_NEGATIVE_PASS`.
+
 ## Initial budgets
 
 - No ordinary user interaction should create sustained GUI event-loop stalls; expensive construction remains off the GUI thread.
@@ -117,7 +130,8 @@ This plan applies the repository `AGENTS.md` production contract to the desktop 
 - Direct async-import GUI adoption is gated at <=50 ms for each 5k/20k/50k case and each repeated 20k reload iteration.
 - Live ACK latency regression budget is <=1500 ms under the deterministic 1k/10k CI burst, with pending and in-flight tracking each <=256.
 - Commissioning browsing must reuse parsed SCL ownership, virtualize lists, and fail closed on unresolved DataSet bindings rather than fabricating members or silently rebinding references.
+- Runtime commissioning behavior is capped at 16 slots with a >=100 ms interval and reuses the existing 256-pending / 256-in-flight live-delta bounds; it must never create unbounded per-point timers or a catch-up burst after GUI/event-loop delay.
 
 ## Definition of done for the redesign
 
-The redesign is complete only when the new workflow passes the existing simulator wire regressions, large-model UI tests, negative/failure tests, lifecycle stress, runtime-scale responsiveness gates, commissioning-depth positive/negative gates, live-data-plane burst/negative gates, and measured performance checks. A visually improved screenshot alone is not completion evidence.
+The redesign is complete only when the new workflow passes the existing simulator wire regressions, large-model UI tests, negative/failure tests, lifecycle stress, runtime-scale responsiveness gates, commissioning-depth positive/negative gates, runtime-commissioning action/behavior positive+negative gates, live-data-plane burst/negative gates, and measured performance checks. A visually improved screenshot alone is not completion evidence.
