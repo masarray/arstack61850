@@ -570,7 +570,10 @@ bool MmsReportController::enableSelected(const bool requestGeneralInterrogation)
             mms::MmsStaticReportSessionOptions options;
             options.selection.preferred_rcb_reference = reference.toStdString();
             options.selection.strict_rcb = true;
-            options.selection.allow_urcb_fallback = false;
+            // Strict selection still pins the exact operator-selected RCB. This
+            // flag permits an explicitly selected URCB; it does not authorize
+            // fallback to another RCB because strict_rcb remains true.
+            options.selection.allow_urcb_fallback = true;
             options.selection.allow_polling_fallback = false;
             options.maximum_candidate_attempts = 1U;
             options.subscription.trigger_general_interrogation = requestGeneralInterrogation;
