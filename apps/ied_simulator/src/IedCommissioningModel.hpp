@@ -3,13 +3,18 @@
 
 #include "IedFleetController.hpp"
 
+#include "ariec61850/goose/publisher_runtime.hpp"
+#include "ariec61850/goose/raw_ethernet_publisher.hpp"
+
 #include <QElapsedTimer>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QVariantMap>
 #include <QVector>
 #include <QtQmlIntegration/qqmlintegration.h>
 
+#include <memory>
 #include <optional>
 
 class QTimer;
@@ -34,6 +39,14 @@ class IedCommissioningModel : public QObject {
     Q_PROPERTY(int behaviorCapacity READ behaviorCapacity CONSTANT)
     Q_PROPERTY(quint64 behaviorTickCount READ behaviorTickCount NOTIFY behaviorChanged)
     Q_PROPERTY(quint64 behaviorRejectedCount READ behaviorRejectedCount NOTIFY behaviorChanged)
+    Q_PROPERTY(QStringList gooseInterfaces READ gooseInterfaces NOTIFY goosePublicationChanged)
+    Q_PROPERTY(QString gooseInterfaceName READ gooseInterfaceName WRITE setGooseInterfaceName NOTIFY goosePublicationChanged)
+    Q_PROPERTY(bool goosePublishing READ goosePublishing NOTIFY goosePublicationChanged)
+    Q_PROPERTY(int goosePublisherCount READ goosePublisherCount NOTIFY goosePublicationChanged)
+    Q_PROPERTY(quint64 gooseTransmitCount READ gooseTransmitCount NOTIFY goosePublicationChanged)
+    Q_PROPERTY(quint64 gooseStateChangeCount READ gooseStateChangeCount NOTIFY goosePublicationChanged)
+    Q_PROPERTY(QString goosePublicationStatus READ goosePublicationStatus NOTIFY goosePublicationChanged)
+    Q_PROPERTY(QVariantMap selectedGooseRuntime READ selectedGooseRuntime NOTIFY goosePublicationChanged)
 
 public:
     explicit IedCommissioningModel(QObject* parent = nullptr);
@@ -60,6 +73,16 @@ public:
     [[nodiscard]] quint64 behaviorTickCount() const noexcept { return behaviorTickCount_; }
     [[nodiscard]] quint64 behaviorRejectedCount() const noexcept { return behaviorRejectedCount_; }
 
+    [[nodiscard]] QStringList gooseInterfaces() const;
+    [[nodiscard]] QString gooseInterfaceName() const { return gooseInterfaceName_; }
+    void setGooseInterfaceName(const QString& interfaceName);
+    [[nodiscard]] bool goosePublishing() const noexcept { return !goosePublishers_.isEmpty(); }
+    [[nodiscard]] int goosePublisherCount() const noexcept { return goosePublishers_.size(); }
+    [[nodiscard]] quint64 gooseTransmitCount() const noexcept { return gooseTransmitCount_; }
+    [[nodiscard]] quint64 gooseStateChangeCount() const noexcept { return gooseStateChangeCount_; }
+    [[nodiscard]] QString goosePublicationStatus() const { return goosePublicationStatus_; }
+    [[nodiscard]] QVariantMap selectedGooseRuntime() const;
+
     Q_INVOKABLE QVariantMap item(int visibleRow) const;
     Q_INVOKABLE QVariantMap member(int row) const;
     Q_INVOKABLE void select(int visibleRow);
@@ -81,12 +104,20 @@ public:
     Q_INVOKABLE bool stopMemberBehavior(int row, bool restore = true);
     Q_INVOKABLE void stopAllBehaviors(bool restore = true);
 
+    // Milestone M: standards-compliant GOOSE Ethernet publication for the
+    // currently selected configured GSEControl. Publication is explicit: an
+    // interface must be selected and the MMS simulator runtime must be online.
+    Q_INVOKABLE bool startSelectedGoosePublication();
+    Q_INVOKABLE bool stopSelectedGoosePublication();
+    Q_INVOKABLE void stopAllGoosePublication();
+
 signals:
     void backendChanged();
     void filterChanged();
     void modelChanged();
     void selectionChanged();
     void behaviorChanged();
+    void goosePublicationChanged();
 
 private:
     enum class Kind {
@@ -131,9 +162,26 @@ private:
         bool rejectionReported{};
     };
 
+    struct GoosePublisherSlot final {
+        int iedIndex{-1};
+        QString sessionKey;
+        QString identity;
+        QString controlReference;
+        QString dataSetReference;
+        QVector<int> pointStoreIndices;
+        QVector<QString> lastValues;
+        std::unique_ptr<ar::iec61850::goose::GoosePublisherRuntime> runtime;
+        quint64 transmitCount{};
+        quint64 stateChangeCount{};
+        qint64 lastTransmitMilliseconds{};
+        std::uint32_t minTimeMilliseconds{};
+    };
+
     static constexpr int kBehaviorCapacity = 16;
     static constexpr int kBehaviorMinimumIntervalMilliseconds = 100;
     static constexpr int kBehaviorMaximumIntervalMilliseconds = 60'000;
+    static constexpr int kGoosePublisherCapacity = 16;
+    static constexpr int kGooseMemberCapacity = 256;
 
     void synchronize();
     void rebuild();
@@ -164,13 +212,37 @@ private:
     void advanceBehaviors();
     void pruneBehaviors();
 
+    [[nodiscard]] std::optional<int> goosePointIndexFor(
+        int iedIndex,
+        const ar::iec61850::scl::SclDataSetEntry& entry) const;
+    [[nodiscard]] std::optional<ar::iec61850::mms::MmsDataValue> gooseValueForPoint(
+        const IedPointStore::PointRecord& point) const;
+    [[nodiscard]] bool buildGooseValues(
+        const GoosePublisherSlot& slot,
+        std::vector<ar::iec61850::mms::MmsDataValue>& values,
+        QVector<QString>* valueSnapshot = nullptr) const;
+    [[nodiscard]] int goosePublisherIndexForIdentity(const QString& identity) const noexcept;
+    [[nodiscard]] QString selectedGooseIdentity() const;
+    void ensureGooseTimer();
+    void markGooseValuesDirty();
+    void advanceGoosePublication();
+    void pruneGoosePublishers();
+    [[nodiscard]] bool transmitGoosePublication(
+        GoosePublisherSlot& slot,
+        const ar::iec61850::goose::GoosePublication& publication,
+        bool stateChange);
+    void failGoosePublication(const QString& reason);
+
     IedFleetController* backend_{};
     QVector<Handle> handles_;
     QVector<int> visibleHandles_;
     QVector<BehaviorSlot> behaviors_;
+    QVector<GoosePublisherSlot> goosePublishers_;
     QString kindFilter_{QStringLiteral("All")};
     QString filterText_;
     QString synchronizedSessionKey_;
+    QString gooseInterfaceName_;
+    QString goosePublicationStatus_{QStringLiteral("Stopped")};
     qsizetype synchronizedDocumentCount_{-1};
     int selectedHandleIndex_{-1};
     int dataSetCount_{};
@@ -180,6 +252,11 @@ private:
     quint64 revision_{};
     quint64 behaviorTickCount_{};
     quint64 behaviorRejectedCount_{};
+    quint64 gooseTransmitCount_{};
+    quint64 gooseStateChangeCount_{};
     QTimer* behaviorTimer_{};
+    QTimer* gooseTimer_{};
     QElapsedTimer behaviorClock_;
+    ar::iec61850::goose::RawEthernetPublisher gooseTransport_;
+    bool gooseValuesDirty_{};
 };
