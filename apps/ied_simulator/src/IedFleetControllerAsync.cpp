@@ -70,6 +70,7 @@ bool IedFleetController::loadFileAsync(const QUrl& fileUrl) {
     fatalError_.clear();
     navigationIndex_.clear();
     valueScopeIndex_.clear();
+    preparedIeds_.clear();
     preparedValueIndexIed_ = -1;
     lastImportWorkerMilliseconds_ = 0;
     lastGuiApplyMilliseconds_ = 0;
@@ -174,16 +175,18 @@ void IedFleetController::launchAsyncImport(PendingAsyncImport request) {
                 result->ieds.push_back(fallback);
             }
 
-            if (!result->ieds.isEmpty()) {
-                const auto selectedIed = result->ieds.constFirst().toMap();
-                const auto selectedName = selectedIed.value(QStringLiteral("name")).toString();
+            result->preparedIeds.resize(result->ieds.size());
+            for (int iedIndex = 0; iedIndex < result->ieds.size(); ++iedIndex) {
+                const auto preparedIed = result->ieds.at(iedIndex).toMap();
+                const auto preparedName = preparedIed.value(QStringLiteral("name")).toString();
 
                 ar::iec61850::simulation::IedSimulatorProfileFromSclOptions options;
-                options.ied_name = selectedName.toStdString();
+                options.ied_name = preparedName.toStdString();
                 options.runtime_ied_name = options.ied_name;
                 const auto built = ar::iec61850::simulation::IedSimulatorProfileBuilder::build(
                     document, options);
 
+                auto& projection = result->preparedIeds[iedIndex];
                 std::vector<const ar::iec61850::simulation::IedSimulatorPoint*> points;
                 points.reserve(built.profile.point_count());
                 for (const auto& device : built.profile.logical_devices) {
@@ -197,9 +200,10 @@ void IedFleetController::launchAsyncImport(PendingAsyncImport request) {
                         return left->source_order < right->source_order;
                     });
 
-                result->pointStore.reserve(static_cast<qsizetype>(points.size()));
-                result->selectedPointIndices.reserve(static_cast<qsizetype>(points.size()));
-                result->valueScopeIndex.reserve(
+                result->pointStore.reserve(
+                    result->pointStore.size() + static_cast<qsizetype>(points.size()));
+                projection.pointIndices.reserve(static_cast<qsizetype>(points.size()));
+                projection.valueScopeIndex.reserve(
                     static_cast<qsizetype>(built.profile.logical_node_count()));
                 std::set<QString> seenScopes;
                 int sourceIndex{};
@@ -208,21 +212,27 @@ void IedFleetController::launchAsyncImport(PendingAsyncImport request) {
                     const auto logicalNode = qstring(point->logical_node);
                     const auto scopeKey =
                         logicalDevice + QLatin1Char('\x1f') + logicalNode;
-                    result->valueScopeIndex[scopeKey].push_back(sourceIndex);
+                    projection.valueScopeIndex[scopeKey].push_back(sourceIndex);
                     if (seenScopes.insert(scopeKey).second) {
                         QVariantMap navigationEntry;
                         navigationEntry.insert(QStringLiteral("logicalDevice"), logicalDevice);
                         navigationEntry.insert(QStringLiteral("logicalNode"), logicalNode);
-                        result->navigationIndex.push_back(std::move(navigationEntry));
+                        projection.navigationIndex.push_back(std::move(navigationEntry));
                     }
 
                     const auto pointIndex = result->pointStore.insertIfMissing(
                         IedPointStore::fromSimulatorPoint(*point));
-                    result->selectedPointIndices.push_back(pointIndex);
+                    projection.pointIndices.push_back(pointIndex);
                     ++sourceIndex;
                 }
-                result->preparedPointCount = static_cast<int>(points.size());
+                if (iedIndex == 0) {
+                    result->selectedPointIndices = projection.pointIndices;
+                    result->navigationIndex = projection.navigationIndex;
+                    result->valueScopeIndex = projection.valueScopeIndex;
+                    result->preparedPointCount = static_cast<int>(points.size());
+                }
             }
+            result->preparedIedCount = static_cast<int>(result->preparedIeds.size());
             result->preparationMilliseconds = preparationTimer.elapsed();
         } catch (const std::exception& error) {
             result->document.reset();
@@ -270,6 +280,7 @@ void IedFleetController::finishAsyncImport(
             selectedPointIndices_ = std::move(result->selectedPointIndices);
             navigationIndex_ = std::move(result->navigationIndex);
             valueScopeIndex_ = std::move(result->valueScopeIndex);
+            preparedIeds_ = std::move(result->preparedIeds);
             logicalDeviceCount_ = result->logicalDeviceCount;
             dataObjectCount_ = result->dataObjectCount;
             dataAttributeCount_ = result->dataAttributeCount;
@@ -280,14 +291,15 @@ void IedFleetController::finishAsyncImport(
             selectedValueIndex_ = selectedPointIndices_.isEmpty() ? -1 : 0;
             preparedValueIndexIed_ = selectedIedIndex_;
             seededRuntimeIeds_.clear();
-            if (selectedIedIndex_ >= 0) {
+            for (int index = 0; index < preparedIeds_.size() && index < ieds_.size(); ++index) {
                 seededRuntimeIeds_.insert(
-                    ieds_.at(selectedIedIndex_).toMap().value(QStringLiteral("sessionKey")).toString());
+                    ieds_.at(index).toMap().value(QStringLiteral("sessionKey")).toString());
             }
             rebuildRuntimeInstances({});
 
             lastImportWorkerMilliseconds_ = result->elapsedMilliseconds;
             preparedPointCount_ = result->preparedPointCount;
+            if (selectedIedIndex_ >= 0) adoptPreparedIed(selectedIedIndex_);
             lastGuiApplyMilliseconds_ = applyTimer.elapsed();
 
             emit valuesChanged();
@@ -297,20 +309,23 @@ void IedFleetController::finishAsyncImport(
             emit runtimeChanged();
 
             qInfo().noquote() << QStringLiteral(
-                "IEDSIM_IMPORT_PATH worker_ms=%1 parser_ms=%2 prepare_ms=%3 gui_apply_ms=%4 points=%5 scopes=%6 typed_store=1")
+                "IEDSIM_IMPORT_PATH worker_ms=%1 parser_ms=%2 prepare_ms=%3 gui_apply_ms=%4 points=%5 scopes=%6 typed_store=1 prepared_ieds=%7")
                 .arg(lastImportWorkerMilliseconds_)
                 .arg(result->parserMilliseconds)
                 .arg(result->preparationMilliseconds)
                 .arg(lastGuiApplyMilliseconds_)
                 .arg(preparedPointCount_)
-                .arg(valueScopeIndex_.size());
+                .arg(valueScopeIndex_.size())
+                .arg(result->preparedIedCount);
             appendActivity(
                 QStringLiteral("Importer"),
                 QStringLiteral(
-                    "%1 parsed and indexed into typed point storage on the bounded worker in %2 ms; GUI adoption took %3 ms.")
+                    "%1 parsed and prebuilt %4 IED profile%5 into typed point storage on the bounded worker in %2 ms; GUI adoption took %3 ms.")
                     .arg(sourceName_)
                     .arg(lastImportWorkerMilliseconds_)
-                    .arg(lastGuiApplyMilliseconds_),
+                    .arg(lastGuiApplyMilliseconds_)
+                    .arg(result->preparedIedCount)
+                    .arg(result->preparedIedCount == 1 ? QString{} : QStringLiteral("s")),
                 QStringLiteral("Success"));
         } else {
             fatalError_ = result->error.isEmpty()

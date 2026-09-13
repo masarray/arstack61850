@@ -59,6 +59,9 @@ class IedFleetController : public QObject {
     Q_PROPERTY(qint64 lastImportWorkerMilliseconds READ lastImportWorkerMilliseconds NOTIFY modelChanged)
     Q_PROPERTY(qint64 lastGuiApplyMilliseconds READ lastGuiApplyMilliseconds NOTIFY modelChanged)
     Q_PROPERTY(int preparedPointCount READ preparedPointCount NOTIFY modelChanged)
+    Q_PROPERTY(int preparedIedCount READ preparedIedCount NOTIFY modelChanged)
+    Q_PROPERTY(int fleetStartRollbackCount READ fleetStartRollbackCount NOTIFY runtimeChanged)
+    Q_PROPERTY(bool clearPending READ clearPending NOTIFY modelChanged)
 
 public:
     enum class RuntimeState {
@@ -136,6 +139,11 @@ public:
         return lastGuiApplyMilliseconds_;
     }
     [[nodiscard]] int preparedPointCount() const noexcept { return preparedPointCount_; }
+    [[nodiscard]] int preparedIedCount() const noexcept {
+        return static_cast<int>(preparedIeds_.size());
+    }
+    [[nodiscard]] int fleetStartRollbackCount() const noexcept { return fleetStartRollbackCount_; }
+    [[nodiscard]] bool clearPending() const noexcept { return clearPending_; }
 
     void setListenAddress(const QString& value);
     void setPort(int value);
@@ -172,6 +180,7 @@ public:
     Q_INVOKABLE void clearActivity();
     Q_INVOKABLE void copyDiagnostics();
     Q_INVOKABLE QString diagnosticsText() const;
+    Q_INVOKABLE int qaBurstValues(int updates, int distinctPoints = 64);
 
 signals:
     void modelChanged();
@@ -193,6 +202,12 @@ private:
         quint64 generation{};
     };
 
+    struct PreparedIedProjection final {
+        QVector<int> pointIndices;
+        QVariantList navigationIndex;
+        QHash<QString, QVector<int>> valueScopeIndex;
+    };
+
     struct AsyncImportResult final {
         QString path;
         quint64 generation{};
@@ -202,6 +217,7 @@ private:
         QVector<int> selectedPointIndices;
         QVariantList navigationIndex;
         QHash<QString, QVector<int>> valueScopeIndex;
+        QVector<PreparedIedProjection> preparedIeds;
         QString error;
         qint64 parserMilliseconds{};
         qint64 preparationMilliseconds{};
@@ -213,6 +229,7 @@ private:
         int reportCount{};
         int gooseCount{};
         int preparedPointCount{};
+        int preparedIedCount{};
     };
 
     struct RuntimeInstance final {
@@ -245,10 +262,14 @@ private:
     void rebuildPresentation();
     void rebuildRuntimeInstances(const QHash<QString, QVariantMap>& previousConfigurations);
     void rebuildValues();
+    [[nodiscard]] bool adoptPreparedIed(int iedIndex);
     void seedRuntimeValues(int iedIndex);
     void updateIedRuntimePresentation(int index);
     void connectRuntimeSignals(int index);
     void setRuntimeState(int index, RuntimeState state);
+    void performClear();
+    void handleFleetStartReady(int index);
+    void handleFleetStartFailure(int index, const QString& reason);
     void stopAllProcessesBlocking();
 
     void appendActivity(
@@ -282,7 +303,10 @@ private:
     QVector<int> selectedPointIndices_;
     QVariantList navigationIndex_;
     QHash<QString, QVector<int>> valueScopeIndex_;
+    QVector<PreparedIedProjection> preparedIeds_;
     QSet<QString> seededRuntimeIeds_;
+    QSet<int> fleetStartMembers_;
+    QSet<int> fleetStartReady_;
     IedActivityModel activity_;
     std::optional<ValueSnapshot> previousValue_;
     QThreadPool importPool_;
@@ -297,6 +321,7 @@ private:
     qint64 lastGuiApplyMilliseconds_{};
     int preparedPointCount_{};
     int preparedValueIndexIed_{-1};
+    int fleetStartRollbackCount_{};
     int defaultPort_{102};
     int selectedIedIndex_{-1};
     int selectedValueIndex_{-1};
@@ -309,4 +334,6 @@ private:
     bool asyncImportRunning_{};
     bool gooseEnabled_{};
     bool fileServiceEnabled_{};
+    bool clearPending_{};
+    bool fleetStartPending_{};
 };
