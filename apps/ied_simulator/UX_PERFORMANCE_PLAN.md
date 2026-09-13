@@ -94,6 +94,18 @@ This plan applies the repository `AGENTS.md` production contract to the desktop 
 - Existing GUI -> MMS value, control-model, URCB/BRCB, quality/timestamp refresh, and multi-IED same-port regressions remain required after the new data plane is enabled.
 - CI gate `LIVE_RUNTIME_DATA_PLANE_PASS` requires `manifest_hot_rewrites=0`, `bounded_pending=256`, and `bounded_inflight=256`; `LIVE_DATA_PLANE_NEGATIVE_PASS` proves stale-state rejection.
 
+### Stage K - Commissioning Feature Depth — implemented
+
+- `CommissioningWorkspace` adds a dedicated right-edge commissioning explorer for the selected IED without replacing the normal live signal workspace.
+- `IedCommissioningModel` projects DataSet, Report, GOOSE, and control topology from the already parsed canonical `SclDocument`; it does not parse XML again or retain a second complete FCDA tree.
+- Service catalog and member views remain virtualized with delegate reuse and zero speculative cache; canonical FCDA member maps are materialized only for the visible/selected rows requested by QML or QA.
+- Report inspection exposes URCB/BRCB mode, RptID, ConfRev, BufTm, IntgPd, binding status, canonical DataSet reference, and member list.
+- GOOSE inspection exposes goID, canonical hexadecimal APPID text, destination MAC, VLAN ID/priority, Min/Max time, ConfRev, bound DataSet, and canonical members.
+- Control inspection exposes configured CDC and `ctlModel` semantics while live Direct/SBO normal/enhanced execution remains on the existing runtime/control path.
+- Report and GOOSE entries can navigate directly to their bound DataSet. Unresolved DataSet bindings remain visible as `Unresolved`, expose zero invented members, and reject the DataSet jump fail-closed.
+- Commissioning search/filtering covers service type, name/reference, DataSet reference, APPID/goID, and control model without disturbing the simulator runtime state.
+- CI target `ied_simulator_commissioning_qa` validates the positive inventory/metadata/member/navigation path and an unresolved-binding negative fixture. Gates: `COMMISSIONING_DEPTH_PASS` and `COMMISSIONING_NEGATIVE_PASS`.
+
 ## Initial budgets
 
 - No ordinary user interaction should create sustained GUI event-loop stalls; expensive construction remains off the GUI thread.
@@ -104,7 +116,8 @@ This plan applies the repository `AGENTS.md` production contract to the desktop 
 - CI large-import guardrails: 5k <= 15 s / 512 MiB, 20k <= 30 s / 768 MiB, 50k <= 55 s / 1024 MiB. These are regression tripwires, not claimed product targets.
 - Direct async-import GUI adoption is gated at <=50 ms for each 5k/20k/50k case and each repeated 20k reload iteration.
 - Live ACK latency regression budget is <=1500 ms under the deterministic 1k/10k CI burst, with pending and in-flight tracking each <=256.
+- Commissioning browsing must reuse parsed SCL ownership, virtualize lists, and fail closed on unresolved DataSet bindings rather than fabricating members or silently rebinding references.
 
 ## Definition of done for the redesign
 
-The redesign is complete only when the new workflow passes the existing simulator wire regressions, large-model UI tests, negative/failure tests, lifecycle stress, runtime-scale responsiveness gates, live-data-plane burst/negative gates, and measured performance checks. A visually improved screenshot alone is not completion evidence.
+The redesign is complete only when the new workflow passes the existing simulator wire regressions, large-model UI tests, negative/failure tests, lifecycle stress, runtime-scale responsiveness gates, commissioning-depth positive/negative gates, live-data-plane burst/negative gates, and measured performance checks. A visually improved screenshot alone is not completion evidence.
