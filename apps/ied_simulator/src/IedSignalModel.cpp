@@ -173,7 +173,22 @@ void IedSignalModel::scheduleRefresh() {
     // Latest-state presentation accumulator: any number of valuesChanged bursts
     // inside one frame collapse into one scan of only the currently projected
     // source rows. Protocol/runtime state remains ordered and authoritative.
-    if (!rebuildTimer_.isActive() && !refreshTimer_.isActive()) refreshTimer_.start();
+    ++refreshRequestCount_;
+    if (!rebuildTimer_.isActive() && !refreshTimer_.isActive()) {
+        refreshLatencyTimer_.restart();
+        refreshTimer_.start();
+    }
+}
+
+void IedSignalModel::resetPerformanceCounters() {
+    refreshRequestCount_ = 0;
+    refreshFlushCount_ = 0;
+    lastRefreshLatencyMilliseconds_ = 0;
+    maxRefreshLatencyMilliseconds_ = 0;
+    lastRebuildMilliseconds_ = 0;
+    maxRebuildMilliseconds_ = 0;
+    refreshLatencyTimer_.invalidate();
+    emit performanceCountersChanged();
 }
 
 bool IedSignalModel::rowMatches(
@@ -195,6 +210,8 @@ bool IedSignalModel::rowMatches(
 }
 
 void IedSignalModel::rebuild() {
+    QElapsedTimer rebuildElapsed;
+    rebuildElapsed.start();
     const int previousCount = rowCount();
     observedIedIndex_ = backend_ != nullptr ? backend_->selectedIedIndex() : -1;
     observedSelectedSourceIndex_ = backend_ != nullptr ? backend_->selectedValueIndex() : -1;
@@ -290,9 +307,21 @@ void IedSignalModel::rebuild() {
     }
     endResetModel();
     if (previousCount != rowCount()) emit visibleRowCountChanged();
+    lastRebuildMilliseconds_ = rebuildElapsed.elapsed();
+    maxRebuildMilliseconds_ = std::max(maxRebuildMilliseconds_, lastRebuildMilliseconds_);
+    emit performanceCountersChanged();
 }
 
 void IedSignalModel::refreshSnapshot() {
+    ++refreshFlushCount_;
+    if (refreshLatencyTimer_.isValid()) {
+        lastRefreshLatencyMilliseconds_ = refreshLatencyTimer_.elapsed();
+        maxRefreshLatencyMilliseconds_ =
+            std::max(maxRefreshLatencyMilliseconds_, lastRefreshLatencyMilliseconds_);
+        refreshLatencyTimer_.invalidate();
+    }
+    emit performanceCountersChanged();
+
     if (backend_ == nullptr) {
         scheduleRebuild();
         return;
