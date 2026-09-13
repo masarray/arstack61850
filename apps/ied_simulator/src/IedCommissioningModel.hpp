@@ -159,6 +159,7 @@ private:
         BehaviorSlot& slot,
         const QString& value,
         bool restoreOriginal = false);
+    [[nodiscard]] bool restoreOwnedPointLocally(BehaviorSlot& slot);
     void ensureBehaviorTimer();
     void advanceBehaviors();
     void pruneBehaviors();
