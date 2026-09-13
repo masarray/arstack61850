@@ -163,7 +163,7 @@ void MmsLiveTreeModel::applyDocument(const ar::iec61850::mms::MmsLiveModelDocume
                     da.typeStatus = q(attribute.type_discovery_status);
                     da.writable = isWritableAttribute(
                         da.functionalConstraint, da.typeStatus, da.mmsType);
-                    appendNode(std::move(da));
+                    (void)appendNode(std::move(da));
                 }
             }
         }
@@ -370,8 +370,9 @@ QVector<MmsLiveTreeModel::ReadTarget> MmsLiveTreeModel::readTargetsForVisibleRan
     int firstRow, int lastRow, const int maximumTargets) const {
     QVector<ReadTarget> result;
     if (visible_.isEmpty() || maximumTargets <= 0) return result;
-    firstRow = std::clamp(firstRow, 0, visible_.size() - 1);
-    lastRow = std::clamp(lastRow, firstRow, visible_.size() - 1);
+    const int lastVisibleRow = static_cast<int>(visible_.size() - 1);
+    firstRow = std::clamp(firstRow, 0, lastVisibleRow);
+    lastRow = std::clamp(lastRow, firstRow, lastVisibleRow);
     QSet<QString> seen;
     for (int row = firstRow; row <= lastRow && result.size() < maximumTargets; ++row) {
         const auto& node = nodes_.at(visible_.at(row));
