@@ -32,7 +32,7 @@ GoosePublication GoosePublisherSession::publish_initial(
     test_ = test;
     needs_commissioning_ = needs_commissioning;
     has_state_ = true;
-    return emit();
+    return emit_publication();
 }
 
 GoosePublication GoosePublisherSession::publish_state_change(
@@ -49,17 +49,17 @@ GoosePublication GoosePublisherSession::publish_state_change(
     state_timestamp_ = timestamp;
     test_ = test;
     needs_commissioning_ = needs_commissioning;
-    return emit();
+    return emit_publication();
 }
 
 GoosePublication GoosePublisherSession::publish_retransmission() {
     if (!has_state_) {
         throw std::logic_error("GOOSE publisher session must be started before retransmission.");
     }
-    return emit();
+    return emit_publication();
 }
 
-GoosePublication GoosePublisherSession::emit() {
+GoosePublication GoosePublisherSession::emit_publication() {
     auto frame = frame_template_;
     frame.pdu.values = values_;
     frame.pdu.timestamp = state_timestamp_;
