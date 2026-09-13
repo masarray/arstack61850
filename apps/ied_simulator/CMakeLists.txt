@@ -42,6 +42,7 @@ qt_add_qml_module(arstack_ied_simulator
         src/IedFleetControllerAsync.cpp
         src/IedFleetController.hpp
         src/IedCommissioningModel.cpp
+        src/IedCommissioningRuntime.cpp
         src/IedCommissioningModel.hpp
         src/IedNavigationModel.cpp
         src/IedNavigationModel.hpp
@@ -118,6 +119,7 @@ target_compile_features(ied_simulator_responsiveness_qa PRIVATE cxx_std_20)
 add_executable(ied_simulator_commissioning_qa
     src/ied_simulator_commissioning_qa.cpp
     src/IedCommissioningModel.cpp
+    src/IedCommissioningRuntime.cpp
     src/IedCommissioningModel.hpp
     src/IedActivityModel.cpp
     src/IedActivityModel.hpp
@@ -137,6 +139,30 @@ target_link_libraries(ied_simulator_commissioning_qa PRIVATE
 target_include_directories(ied_simulator_commissioning_qa PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(ied_simulator_commissioning_qa PRIVATE cxx_std_20)
+
+add_executable(ied_simulator_runtime_commissioning_qa
+    src/ied_simulator_runtime_commissioning_qa.cpp
+    src/IedCommissioningModel.cpp
+    src/IedCommissioningRuntime.cpp
+    src/IedCommissioningModel.hpp
+    src/IedActivityModel.cpp
+    src/IedActivityModel.hpp
+    src/IedRuntimeGuardrails.cpp
+    src/IedRuntimeGuardrails.hpp
+    src/IedPointStore.cpp
+    src/IedPointStore.hpp
+    src/IedFleetController.cpp
+    src/IedFleetControllerAsync.cpp
+    src/IedFleetController.hpp)
+target_link_libraries(ied_simulator_runtime_commissioning_qa PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Network
+    Qt6::Qml
+    ARIEC61850::core)
+target_include_directories(ied_simulator_runtime_commissioning_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_simulator_runtime_commissioning_qa PRIVATE cxx_std_20)
 
 # The regular library intentionally keeps a strict portable connection runtime.
 # The desktop simulator needs the separate compatibility runtime validated
@@ -189,6 +215,11 @@ if(WIN32)
 endif()
 target_compile_features(ariec61850_ied_simulator_server PRIVATE cxx_std_20)
 add_dependencies(ied_simulator_responsiveness_qa ariec61850_ied_simulator_server)
+add_dependencies(
+    ied_simulator_runtime_commissioning_qa
+    ariec61850_ied_simulator_server
+    ariec61850_mms_read_probe
+    ariec61850_mms_brcb_event_probe)
 
 # The public-wire URCB/BRCB regression clients are root ARIEC61850 tool targets.
 # Reuse them here instead of defining GUI-local copies so the same sources are
