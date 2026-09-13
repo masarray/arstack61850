@@ -5,10 +5,13 @@
 
 #include <QCoreApplication>
 #include <QDebug>
+#include <QDir>
 #include <QDirIterator>
 #include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QHostAddress>
 #include <QProcess>
 #include <QTcpServer>
 #include <QThread>
