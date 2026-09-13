@@ -1,0 +1,30 @@
+name: Milestone I source bootstrap
+
+on:
+  push:
+    branches:
+      - feat/ied-sim-ux-performance-foundation
+    paths:
+      - '.milestone-i/**'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-source-patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/ied-sim-ux-performance-foundation
+          fetch-depth: 0
+
+      - name: Apply Milestone I source patch
+        run: |
+          git apply --check .milestone-i/part1.patch
+          git apply .milestone-i/part1.patch
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/ied_simulator
+          git commit -m "perf(ied-sim): harden runtime scale and responsiveness"
+          git push origin HEAD:feat/ied-sim-ux-performance-foundation
