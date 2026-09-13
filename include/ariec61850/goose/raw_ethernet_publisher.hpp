@@ -3,15 +3,19 @@
 
 #include "ariec61850/ethernet/ethernet.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cctype>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #if defined(__linux__)
 #include <arpa/inet.h>
@@ -25,6 +29,9 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <iphlpapi.h>
 #include <windows.h>
 #endif
 
@@ -32,8 +39,9 @@ namespace ar::iec61850::goose {
 
 // Minimal RAII Layer-2 sender for IEC 61850 GOOSE. The caller must bind an
 // explicit interface; this class never guesses or falls back to another link.
-// Linux uses AF_PACKET. Windows dynamically loads Npcap (wpcap.dll), avoiding a
-// hard build-time dependency while still failing closed when Npcap is absent.
+// Linux uses AF_PACKET. Windows dynamically loads Npcap (wpcap.dll) and the
+// IP Helper adapter query, avoiding hard link dependencies while still failing
+// closed when Npcap, the requested adapter, or its source MAC is unavailable.
 class RawEthernetPublisher final {
 public:
     RawEthernetPublisher() = default;
@@ -114,10 +122,7 @@ public:
         }
         return true;
 #elif defined(_WIN32)
-        if (!configured_source_mac.has_value()) {
-            error = "Windows GOOSE publication requires the selected adapter source MAC.";
-            return false;
-        }
+        const std::string requested_name{interface_name};
         wpcap_module_ = ::LoadLibraryA("wpcap.dll");
         if (wpcap_module_ == nullptr) {
             error = "Npcap wpcap.dll was not found. Install Npcap to publish Layer-2 GOOSE on Windows.";
@@ -131,30 +136,62 @@ public:
             ::GetProcAddress(wpcap_module_, "pcap_close"));
         pcap_geterr_ = reinterpret_cast<PcapGetErr>(
             ::GetProcAddress(wpcap_module_, "pcap_geterr"));
-        if (pcap_open_live_ == nullptr || pcap_sendpacket_ == nullptr || pcap_close_ == nullptr) {
-            error = "Npcap is present but required packet-transmit exports are unavailable.";
+        pcap_findalldevs_ = reinterpret_cast<PcapFindAllDevs>(
+            ::GetProcAddress(wpcap_module_, "pcap_findalldevs"));
+        pcap_freealldevs_ = reinterpret_cast<PcapFreeAllDevs>(
+            ::GetProcAddress(wpcap_module_, "pcap_freealldevs"));
+        if (pcap_open_live_ == nullptr || pcap_sendpacket_ == nullptr || pcap_close_ == nullptr ||
+            pcap_findalldevs_ == nullptr || pcap_freealldevs_ == nullptr) {
+            error = "Npcap is present but required packet-transmit/adapter exports are unavailable.";
             close();
             return false;
         }
 
-        const std::string system_name{interface_name};
-        std::string pcap_name = system_name;
-        constexpr std::string_view prefix{"\\\\Device\\NPF_"};
-        if (pcap_name.rfind(prefix.data(), 0U) != 0U) {
-            const auto brace = pcap_name.find('{');
-            if (brace != std::string::npos) {
-                pcap_name = std::string{prefix} + pcap_name.substr(brace);
-            }
-        }
         std::array<char, 256> errbuf{};
-        pcap_handle_ = pcap_open_live_(pcap_name.c_str(), 65'535, 0, 1, errbuf.data());
-        if (pcap_handle_ == nullptr) {
-            error = "Npcap could not open adapter " + system_name + ": " + std::string{errbuf.data()};
+        PcapIf* devices{};
+        if (pcap_findalldevs_(&devices, errbuf.data()) != 0 || devices == nullptr) {
+            error = "Npcap could not enumerate Ethernet adapters";
+            if (errbuf.front() != '\0') error += ": " + std::string{errbuf.data()};
             close();
             return false;
         }
-        interface_name_ = system_name;
-        source_mac_ = configured_source_mac->bytes();
+
+        std::string pcap_name;
+        std::string adapter_token;
+        for (auto* device = devices; device != nullptr; device = device->next) {
+            const std::string device_name = device->name == nullptr ? std::string{} : device->name;
+            const std::string description =
+                device->description == nullptr ? std::string{} : device->description;
+            if (!windows_interface_matches(requested_name, device_name, description)) continue;
+            pcap_name = device_name;
+            adapter_token = adapter_token_from_pcap_name(device_name);
+            break;
+        }
+        pcap_freealldevs_(devices);
+        devices = nullptr;
+        if (pcap_name.empty()) {
+            error = "Npcap could not resolve the selected Ethernet interface: " + requested_name;
+            close();
+            return false;
+        }
+
+        std::array<std::uint8_t, 6> resolved_mac{};
+        if (configured_source_mac.has_value()) {
+            resolved_mac = configured_source_mac->bytes();
+        } else if (!resolve_windows_source_mac(adapter_token, resolved_mac, error)) {
+            close();
+            return false;
+        }
+
+        errbuf.fill('\0');
+        pcap_handle_ = pcap_open_live_(pcap_name.c_str(), 65'535, 0, 1, errbuf.data());
+        if (pcap_handle_ == nullptr) {
+            error = "Npcap could not open adapter " + requested_name + ": " + std::string{errbuf.data()};
+            close();
+            return false;
+        }
+        interface_name_ = requested_name;
+        source_mac_ = resolved_mac;
         return true;
 #else
         (void)interface_name;
@@ -236,6 +273,8 @@ public:
         pcap_sendpacket_ = nullptr;
         pcap_close_ = nullptr;
         pcap_geterr_ = nullptr;
+        pcap_findalldevs_ = nullptr;
+        pcap_freealldevs_ = nullptr;
         if (wpcap_module_ != nullptr) ::FreeLibrary(wpcap_module_);
         wpcap_module_ = nullptr;
 #endif
@@ -260,11 +299,114 @@ public:
 private:
 #if defined(_WIN32)
     struct pcap;
+    struct pcap_addr;
+    struct PcapIf final {
+        PcapIf* next;
+        char* name;
+        char* description;
+        pcap_addr* addresses;
+        unsigned int flags;
+    };
     using PcapHandle = pcap;
     using PcapOpenLive = PcapHandle* (__cdecl *)(const char*, int, int, int, char*);
     using PcapSendPacket = int (__cdecl *)(PcapHandle*, const unsigned char*, int);
     using PcapClose = void (__cdecl *)(PcapHandle*);
     using PcapGetErr = char* (__cdecl *)(PcapHandle*);
+    using PcapFindAllDevs = int (__cdecl *)(PcapIf**, char*);
+    using PcapFreeAllDevs = void (__cdecl *)(PcapIf*);
+    using GetAdaptersAddressesFn = ULONG (WINAPI *)(
+        ULONG, ULONG, PVOID, PIP_ADAPTER_ADDRESSES, PULONG);
+
+    [[nodiscard]] static std::string ascii_lower(std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(), [](const unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
+        return value;
+    }
+
+    [[nodiscard]] static std::string normalized_windows_interface(std::string value) {
+        value = ascii_lower(std::move(value));
+        constexpr std::string_view prefix{"\\\\device\\npf_"};
+        if (value.rfind(prefix.data(), 0U) == 0U) value.erase(0U, prefix.size());
+        return value;
+    }
+
+    [[nodiscard]] static std::string adapter_token_from_pcap_name(const std::string& value) {
+        constexpr std::string_view prefix{"\\\\Device\\NPF_"};
+        if (value.rfind(prefix.data(), 0U) == 0U) return value.substr(prefix.size());
+        const auto brace = value.find('{');
+        return brace == std::string::npos ? value : value.substr(brace);
+    }
+
+    [[nodiscard]] static bool windows_interface_matches(
+        const std::string& requested,
+        const std::string& pcap_name,
+        const std::string& description) {
+        const auto wanted = normalized_windows_interface(requested);
+        const auto device = normalized_windows_interface(pcap_name);
+        const auto label = ascii_lower(description);
+        if (wanted == device || ascii_lower(requested) == label) return true;
+        const auto brace = device.find('{');
+        if (brace != std::string::npos && wanted.find(device.substr(brace)) != std::string::npos) {
+            return true;
+        }
+        return false;
+    }
+
+    [[nodiscard]] static bool resolve_windows_source_mac(
+        const std::string& adapter_token,
+        std::array<std::uint8_t, 6>& mac,
+        std::string& error) {
+        HMODULE module = ::LoadLibraryA("iphlpapi.dll");
+        if (module == nullptr) {
+            error = "Windows IP Helper API is unavailable; source MAC cannot be resolved.";
+            return false;
+        }
+        const auto get_adapters = reinterpret_cast<GetAdaptersAddressesFn>(
+            ::GetProcAddress(module, "GetAdaptersAddresses"));
+        if (get_adapters == nullptr) {
+            error = "Windows IP Helper API does not expose GetAdaptersAddresses.";
+            ::FreeLibrary(module);
+            return false;
+        }
+
+        ULONG bytes{};
+        ULONG status = get_adapters(AF_UNSPEC, 0U, nullptr, nullptr, &bytes);
+        if (status != ERROR_BUFFER_OVERFLOW || bytes == 0U) {
+            error = "Windows adapter inventory size query failed.";
+            ::FreeLibrary(module);
+            return false;
+        }
+        std::vector<std::uint8_t> storage(bytes);
+        auto* addresses = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(storage.data());
+        status = get_adapters(AF_UNSPEC, 0U, nullptr, addresses, &bytes);
+        if (status != NO_ERROR) {
+            error = "Windows adapter inventory query failed with code " + std::to_string(status) + ".";
+            ::FreeLibrary(module);
+            return false;
+        }
+
+        const auto wanted = normalized_windows_interface(adapter_token);
+        bool found{};
+        for (auto* adapter = addresses; adapter != nullptr; adapter = adapter->Next) {
+            if (adapter->AdapterName == nullptr) continue;
+            if (normalized_windows_interface(adapter->AdapterName) != wanted) continue;
+            if (adapter->PhysicalAddressLength != mac.size()) {
+                error = "Selected Windows adapter does not expose a 6-byte Ethernet MAC address.";
+                ::FreeLibrary(module);
+                return false;
+            }
+            std::copy_n(adapter->PhysicalAddress, mac.size(), mac.begin());
+            found = true;
+            break;
+        }
+        ::FreeLibrary(module);
+        if (!found) {
+            error = "Could not resolve source MAC for selected Windows/Npcap adapter: " + adapter_token;
+            return false;
+        }
+        return true;
+    }
 #endif
 
     void move_from(RawEthernetPublisher& other) noexcept {
@@ -280,12 +422,16 @@ private:
         pcap_sendpacket_ = other.pcap_sendpacket_;
         pcap_close_ = other.pcap_close_;
         pcap_geterr_ = other.pcap_geterr_;
+        pcap_findalldevs_ = other.pcap_findalldevs_;
+        pcap_freealldevs_ = other.pcap_freealldevs_;
         other.wpcap_module_ = nullptr;
         other.pcap_handle_ = nullptr;
         other.pcap_open_live_ = nullptr;
         other.pcap_sendpacket_ = nullptr;
         other.pcap_close_ = nullptr;
         other.pcap_geterr_ = nullptr;
+        other.pcap_findalldevs_ = nullptr;
+        other.pcap_freealldevs_ = nullptr;
 #endif
         interface_name_ = std::move(other.interface_name_);
         source_mac_ = other.source_mac_;
@@ -303,6 +449,8 @@ private:
     PcapSendPacket pcap_sendpacket_{};
     PcapClose pcap_close_{};
     PcapGetErr pcap_geterr_{};
+    PcapFindAllDevs pcap_findalldevs_{};
+    PcapFreeAllDevs pcap_freealldevs_{};
 #endif
     std::string interface_name_;
     std::array<std::uint8_t, 6> source_mac_{};
