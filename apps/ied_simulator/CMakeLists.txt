@@ -198,6 +198,7 @@ target_link_libraries(ied_mms_client_workbench_qa PRIVATE
     Qt6::Gui
     Qt6::Network
     Qt6::Qml
+    ariec61850_ied_simulator_server_core
     ARIEC61850::core)
 target_include_directories(ied_mms_client_workbench_qa PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src)
