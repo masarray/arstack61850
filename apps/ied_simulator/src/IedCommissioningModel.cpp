@@ -472,12 +472,12 @@ bool IedCommissioningModel::focusBoundDataSet() {
     }
     if (targetIndex < 0) return false;
 
-    const bool filterChanged = kindFilter_ != QStringLiteral("DataSet") || !filterText_.isEmpty();
+    const bool filterStateChanged = kindFilter_ != QStringLiteral("DataSet") || !filterText_.isEmpty();
     kindFilter_ = QStringLiteral("DataSet");
     filterText_.clear();
     selectedHandleIndex_ = targetIndex;
     applyFilter(true);
-    if (filterChanged) emit filterChanged();
+    if (filterStateChanged) emit filterChanged();
     return true;
 }
 
