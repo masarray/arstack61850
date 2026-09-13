@@ -12,14 +12,20 @@ ApplicationWindow {
     minimumWidth: 1024
     minimumHeight: 680
     visible: true
-    title: "ARStack IED Simulator"
+    title: "ARStack IEC 61850 Workbench"
     color: appTheme.background
     font.family: interFont.status === FontLoader.Ready ? interFont.name : "Segoe UI"
+
+    property int workspaceIndex: simulator.imported ? 1 : 0
 
     AppTheme { id: appTheme }
     IedFleetController {
         id: simulator
         objectName: "simulatorBackend"
+    }
+    MmsClientController {
+        id: mmsClient
+        objectName: "mmsClientBackend"
     }
 
     FontLoader {
@@ -34,31 +40,111 @@ ApplicationWindow {
         onAccepted: simulator.loadFileAsync(selectedFile)
     }
 
-    function importModel() {
-        sclDialog.open()
-    }
+    function importModel() { sclDialog.open() }
 
     Shortcut {
+        sequence: "Ctrl+1"
+        onActivated: root.workspaceIndex = 0
+    }
+    Shortcut {
+        sequence: "Ctrl+2"
+        onActivated: root.workspaceIndex = 1
+    }
+    Shortcut {
         sequence: "Ctrl+Shift+A"
+        enabled: root.workspaceIndex === 1
         onActivated: activityMonitor.opened ? activityMonitor.close() : activityMonitor.open()
     }
     Shortcut {
         sequence: "Ctrl+Shift+C"
-        enabled: simulator.imported
+        enabled: root.workspaceIndex === 1 && simulator.imported
         onActivated: commissioningWorkspace.opened ? commissioningWorkspace.close() : commissioningWorkspace.open()
     }
 
-    IedScoutWorkspace {
+    component WorkspaceButton: Button {
+        id: control
+        required property int workspace
+        implicitHeight: 28
+        implicitWidth: Math.max(110, label.implicitWidth + 24)
+        checkable: true
+        checked: root.workspaceIndex === workspace
+        onClicked: root.workspaceIndex = workspace
+        contentItem: Label {
+            id: label
+            text: control.text
+            color: control.checked ? "#ffffff" : appTheme.navigationMuted
+            font.pixelSize: 9
+            font.weight: control.checked ? Font.DemiBold : Font.Normal
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+        background: Rectangle {
+            radius: 4
+            color: control.checked ? appTheme.accent : control.hovered ? "#263833" : "transparent"
+            border.width: 0
+        }
+    }
+
+    ColumnLayout {
         anchors.fill: parent
-        theme: appTheme
-        backend: simulator
-        onOpenSclRequested: root.importModel()
+        spacing: 0
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 38
+            color: appTheme.navigationDark
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
+                spacing: 4
+
+                Label {
+                    text: "ARStack IEC 61850"
+                    color: appTheme.navigationText
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    Layout.rightMargin: 12
+                }
+
+                WorkspaceButton { workspace: 0; text: "IED Connection" }
+                WorkspaceButton { workspace: 1; text: "Simulator" }
+                Item { Layout.fillWidth: true }
+                Label {
+                    text: root.workspaceIndex === 0 ? mmsClient.stateText : (simulator.running ? "SIMULATOR LIVE" : "SIMULATOR")
+                    color: root.workspaceIndex === 0 && mmsClient.connected ? "#9ff0c1" : appTheme.navigationMuted
+                    font.pixelSize: 8
+                    font.weight: Font.DemiBold
+                }
+            }
+        }
+
+        StackLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            currentIndex: root.workspaceIndex
+
+            MmsClientWorkspace {
+                theme: appTheme
+                client: mmsClient
+            }
+
+            Item {
+                IedScoutWorkspace {
+                    anchors.fill: parent
+                    theme: appTheme
+                    backend: simulator
+                    onOpenSclRequested: root.importModel()
+                }
+            }
+        }
     }
 
     Rectangle {
         id: commissioningLauncher
         z: 20
-        visible: simulator.imported && !commissioningWorkspace.opened
+        visible: root.workspaceIndex === 1 && simulator.imported && !commissioningWorkspace.opened
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.rightMargin: 12
@@ -109,7 +195,7 @@ ApplicationWindow {
     Rectangle {
         id: activityLauncher
         z: 20
-        visible: !activityMonitor.opened
+        visible: root.workspaceIndex === 1 && !activityMonitor.opened
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.rightMargin: 12
