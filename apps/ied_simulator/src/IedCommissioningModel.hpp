@@ -9,7 +9,7 @@
 #include <QVector>
 #include <QtQmlIntegration/qqmlintegration.h>
 
-class IedCommissioningModel final : public QObject {
+class IedCommissioningModel : public QObject {
     Q_OBJECT
     QML_ELEMENT
 
