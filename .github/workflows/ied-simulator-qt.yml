@@ -55,7 +55,7 @@ jobs:
       - name: Build
         run: >-
           cmake --build build-ied-simulator-qt
-          --target arstack_ied_simulator ariec61850_mms_read_probe ied_simulator_guardrails_qa ied_simulator_responsiveness_qa ied_simulator_commissioning_qa --parallel 2
+          --target arstack_ied_simulator ariec61850_mms_read_probe ied_simulator_guardrails_qa ied_simulator_responsiveness_qa ied_simulator_commissioning_qa ied_simulator_runtime_commissioning_qa --parallel 2
 
       - name: Bounded activity and child-output guardrails
         run: ./build-ied-simulator-qt/ied_simulator_guardrails_qa
@@ -106,6 +106,14 @@ jobs:
           ./build-ied-simulator-qt/ied_simulator_commissioning_qa
           ./tests/fixtures/scl/minimal-station-brcb.scd
           ./tests/fixtures/scl/commissioning-unresolved.scd
+
+      - name: Runtime commissioning actions and behavior gates
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          ./build-ied-simulator-qt/ied_simulator_runtime_commissioning_qa
+          ./tests/fixtures/scl/minimal-station-brcb.scd
+          ./build-ied-simulator-qt
 
       - name: Live runtime data-plane burst gates
         env:
