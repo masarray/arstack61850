@@ -43,6 +43,7 @@ qt_add_qml_module(arstack_ied_simulator
         src/IedFleetController.hpp
         src/IedCommissioningModel.cpp
         src/IedCommissioningRuntime.cpp
+        src/IedGoosePublication.cpp
         src/IedCommissioningModel.hpp
         src/IedNavigationModel.cpp
         src/IedNavigationModel.hpp
@@ -120,6 +121,7 @@ add_executable(ied_simulator_commissioning_qa
     src/ied_simulator_commissioning_qa.cpp
     src/IedCommissioningModel.cpp
     src/IedCommissioningRuntime.cpp
+    src/IedGoosePublication.cpp
     src/IedCommissioningModel.hpp
     src/IedActivityModel.cpp
     src/IedActivityModel.hpp
@@ -144,6 +146,7 @@ add_executable(ied_simulator_runtime_commissioning_qa
     src/ied_simulator_runtime_commissioning_qa.cpp
     src/IedCommissioningModel.cpp
     src/IedCommissioningRuntime.cpp
+    src/IedGoosePublication.cpp
     src/IedCommissioningModel.hpp
     src/IedActivityModel.cpp
     src/IedActivityModel.hpp
@@ -163,6 +166,12 @@ target_link_libraries(ied_simulator_runtime_commissioning_qa PRIVATE
 target_include_directories(ied_simulator_runtime_commissioning_qa PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(ied_simulator_runtime_commissioning_qa PRIVATE cxx_std_20)
+
+add_executable(ied_simulator_goose_publication_qa
+    src/ied_simulator_goose_publication_qa.cpp)
+target_link_libraries(ied_simulator_goose_publication_qa PRIVATE
+    ARIEC61850::core)
+target_compile_features(ied_simulator_goose_publication_qa PRIVATE cxx_std_20)
 
 # The regular library intentionally keeps a strict portable connection runtime.
 # The desktop simulator needs the separate compatibility runtime validated
