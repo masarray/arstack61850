@@ -76,7 +76,6 @@ target_include_directories(arstack_ied_simulator PRIVATE
 
 target_compile_features(arstack_ied_simulator PRIVATE cxx_std_20)
 
-
 add_executable(ied_simulator_guardrails_qa
     src/ied_simulator_guardrails_qa.cpp
     src/IedActivityModel.cpp
@@ -89,6 +88,29 @@ target_link_libraries(ied_simulator_guardrails_qa PRIVATE
 target_include_directories(ied_simulator_guardrails_qa PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(ied_simulator_guardrails_qa PRIVATE cxx_std_20)
+
+add_executable(ied_simulator_responsiveness_qa
+    src/ied_simulator_responsiveness_qa.cpp
+    src/IedActivityModel.cpp
+    src/IedActivityModel.hpp
+    src/IedRuntimeGuardrails.cpp
+    src/IedRuntimeGuardrails.hpp
+    src/IedPointStore.cpp
+    src/IedPointStore.hpp
+    src/IedFleetController.cpp
+    src/IedFleetControllerAsync.cpp
+    src/IedFleetController.hpp
+    src/IedSignalModel.cpp
+    src/IedSignalModel.hpp)
+target_link_libraries(ied_simulator_responsiveness_qa PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Network
+    Qt6::Qml
+    ARIEC61850::core)
+target_include_directories(ied_simulator_responsiveness_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_simulator_responsiveness_qa PRIVATE cxx_std_20)
 
 # The regular library intentionally keeps a strict portable connection runtime.
 # The desktop simulator needs the separate compatibility runtime validated
@@ -140,6 +162,7 @@ if(WIN32)
     target_link_libraries(ariec61850_ied_simulator_server PRIVATE ws2_32)
 endif()
 target_compile_features(ariec61850_ied_simulator_server PRIVATE cxx_std_20)
+add_dependencies(ied_simulator_responsiveness_qa ariec61850_ied_simulator_server)
 
 # The public-wire URCB/BRCB regression clients are root ARIEC61850 tool targets.
 # Reuse them here instead of defining GUI-local copies so the same sources are
