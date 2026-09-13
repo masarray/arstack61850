@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
 
-path = Path("tools/static_ied_server.cpp")
-text = path.read_text(encoding="utf-8")
+server = Path("tools/static_ied_server.cpp")
+text = server.read_text(encoding="utf-8")
 
 old = '''        const auto data = mms::MmsSimulatorManifestCodec::data(
             value.type, value.raw_type, value.normalized_type, update.value);
@@ -38,6 +38,14 @@ new = '''        const auto parsed = mms::MmsSimulatorManifestCodec::data(
 if old not in text:
     raise SystemExit("drain_live_stdin compile-fix anchor not found")
 text = text.replace(old, new, 1)
-
-path.write_text(text, encoding="utf-8")
+server.write_text(text, encoding="utf-8")
 print("tools/static_ied_server.cpp: fixed MmsDataValue usage")
+
+controller = Path("apps/ied_simulator/src/IedFleetController.cpp")
+text = controller.read_text(encoding="utf-8")
+old = "    sending.reserve(std::min(kLiveFlushBudget, candidates.size()));\n"
+new = "    sending.reserve(std::min(kLiveFlushBudget, static_cast<int>(candidates.size())));\n"
+if old not in text:
+    raise SystemExit("live flush reserve compile-fix anchor not found")
+controller.write_text(text.replace(old, new, 1), encoding="utf-8")
+print("apps/ied_simulator/src/IedFleetController.cpp: fixed Qt size type usage")
