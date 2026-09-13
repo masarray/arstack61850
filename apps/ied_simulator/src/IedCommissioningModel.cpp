@@ -86,6 +86,15 @@ void IedCommissioningModel::setBackend(IedFleetController* backend) {
             &IedFleetController::selectionChanged,
             this,
             &IedCommissioningModel::synchronize);
+        // Runtime state is the ownership boundary for commissioning behaviors.
+        // Prune synchronously on a Running -> Stopping/Ready/Failed transition so
+        // behavior-owned values are restored before a restart can snapshot them
+        // into the next startup manifest.
+        connect(
+            backend_,
+            &IedFleetController::runtimeChanged,
+            this,
+            &IedCommissioningModel::pruneBehaviors);
     }
     synchronizedSessionKey_.clear();
     synchronizedDocumentCount_ = -1;
