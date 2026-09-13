@@ -6,10 +6,15 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
 from benchmark_large_scl import build_scl
+
+RESPONSIVENESS_RE = re.compile(
+    r"IEDSIM_RESPONSIVENESS_PASS\s+ieds=(?P<ieds>\d+)\s+prepared=(?P<prepared>\d+)"
+)
 
 
 def run_checked(command: list[str], timeout_s: float, marker: str) -> str:
@@ -33,6 +38,14 @@ def run_checked(command: list[str], timeout_s: float, marker: str) -> str:
     if marker not in output:
         raise RuntimeError(f"missing {marker}; output={output[-5000:]}")
     return output
+
+
+def prepared_counts(output: str) -> tuple[int, int]:
+    matches = list(RESPONSIVENESS_RE.finditer(output))
+    if not matches:
+        raise RuntimeError(f"missing responsiveness profile counts; output={output[-5000:]}")
+    match = matches[-1]
+    return int(match.group("ieds")), int(match.group("prepared"))
 
 
 def main() -> int:
@@ -59,8 +72,11 @@ def main() -> int:
                 120.0,
                 "IEDSIM_RESPONSIVENESS_PASS",
             )
-            if f"prepared=1" not in output:
-                raise RuntimeError(f"{target} point run did not prove the profile was prebuilt")
+            ieds, prepared = prepared_counts(output)
+            if ieds != 1 or prepared != 1:
+                raise RuntimeError(
+                    f"{target} point run expected one fully prebuilt IED, got ieds={ieds} prepared={prepared}"
+                )
             print(f"RUNTIME_SCALE_CASE target={target} generated={generated} pass=true")
 
     multi_output = run_checked(
@@ -68,8 +84,11 @@ def main() -> int:
         30.0,
         "IEDSIM_RESPONSIVENESS_PASS",
     )
-    if "ieds=2 prepared=2" not in multi_output:
-        raise RuntimeError("multi-IED responsiveness run did not prove both profiles were prebuilt")
+    ieds, prepared = prepared_counts(multi_output)
+    if ieds < 2 or prepared != ieds:
+        raise RuntimeError(
+            f"multi-IED responsiveness run did not fully prebuild the fleet: ieds={ieds} prepared={prepared}"
+        )
 
     run_checked(
         [str(qa), "--fleet-rollback", str(multi_scl)],
@@ -82,7 +101,10 @@ def main() -> int:
         "NONBLOCKING_CLEAR_PASS",
     )
 
-    print("RUNTIME_SCALE_RESPONSIVENESS_PASS large=20000,50000 multi_ied=pass fleet_rollback=pass nonblocking_clear=pass")
+    print(
+        "RUNTIME_SCALE_RESPONSIVENESS_PASS large=20000,50000 "
+        f"multi_ied={ieds} fleet_rollback=pass nonblocking_clear=pass"
+    )
     return 0
 
 
