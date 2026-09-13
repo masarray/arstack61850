@@ -53,6 +53,8 @@ qt_add_qml_module(arstack_ied_simulator
         src/MmsLiveTreeModel.hpp
         src/MmsClientController.cpp
         src/MmsClientController.hpp
+        src/GooseMonitorController.cpp
+        src/GooseMonitorController.hpp
     QML_FILES
         qml/Main.qml
         qml/AppTheme.qml
@@ -67,6 +69,7 @@ qt_add_qml_module(arstack_ied_simulator
         qml/FleetWorkspace.qml
         qml/IedScoutWorkspace.qml
         qml/MmsClientWorkspace.qml
+        qml/GooseWorkspace.qml
         qml/ActivityMonitor.qml
         qml/CommissioningWorkspace.qml
 )
@@ -177,6 +180,20 @@ add_executable(ied_simulator_goose_publication_qa
 target_link_libraries(ied_simulator_goose_publication_qa PRIVATE
     ARIEC61850::core)
 target_compile_features(ied_simulator_goose_publication_qa PRIVATE cxx_std_20)
+
+add_executable(ied_goose_workspace_qa
+    src/ied_goose_workspace_qa.cpp
+    src/GooseMonitorController.cpp
+    src/GooseMonitorController.hpp)
+target_link_libraries(ied_goose_workspace_qa PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Network
+    Qt6::Qml
+    ARIEC61850::core)
+target_include_directories(ied_goose_workspace_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_goose_workspace_qa PRIVATE cxx_std_20)
 
 add_executable(ied_mms_client_workbench_qa
     src/ied_mms_client_workbench_qa.cpp

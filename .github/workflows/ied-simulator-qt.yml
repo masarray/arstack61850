@@ -59,7 +59,7 @@ jobs:
       - name: Build
         run: >-
           cmake --build build-ied-simulator-qt
-          --target arstack_ied_simulator ariec61850_mms_read_probe ied_simulator_guardrails_qa ied_simulator_responsiveness_qa ied_simulator_commissioning_qa ied_simulator_runtime_commissioning_qa ied_simulator_goose_publication_qa ied_mms_client_workbench_qa --parallel 2
+          --target arstack_ied_simulator ariec61850_mms_read_probe ied_simulator_guardrails_qa ied_simulator_responsiveness_qa ied_simulator_commissioning_qa ied_simulator_runtime_commissioning_qa ied_simulator_goose_publication_qa ied_goose_workspace_qa ied_mms_client_workbench_qa --parallel 2
 
       - name: Bounded activity and child-output guardrails
         run: ./build-ied-simulator-qt/ied_simulator_guardrails_qa
@@ -130,6 +130,11 @@ jobs:
         run: >-
           ./build-ied-simulator-qt/ied_simulator_goose_publication_qa
           ./tests/fixtures/scl/minimal-station-brcb.scd
+          ./goose-publication-evidence.pcap
+
+      - name: GOOSE monitor + publisher workspace gates
+        run: >-
+          ./build-ied-simulator-qt/ied_goose_workspace_qa
           ./goose-publication-evidence.pcap
 
       - name: Upload GOOSE wire evidence

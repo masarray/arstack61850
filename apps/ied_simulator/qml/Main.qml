@@ -27,6 +27,10 @@ ApplicationWindow {
         id: mmsClient
         objectName: "mmsClientBackend"
     }
+    GooseMonitorController {
+        id: gooseMonitor
+        objectName: "gooseMonitorBackend"
+    }
 
     FontLoader {
         id: interFont
@@ -49,6 +53,10 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+2"
         onActivated: root.workspaceIndex = 1
+    }
+    Shortcut {
+        sequence: "Ctrl+3"
+        onActivated: root.workspaceIndex = 2
     }
     Shortcut {
         sequence: "Ctrl+Shift+A"
@@ -110,10 +118,18 @@ ApplicationWindow {
 
                 WorkspaceButton { workspace: 0; text: "IED Connection" }
                 WorkspaceButton { workspace: 1; text: "Simulator" }
+                WorkspaceButton { workspace: 2; text: "GOOSE" }
                 Item { Layout.fillWidth: true }
                 Label {
-                    text: root.workspaceIndex === 0 ? mmsClient.stateText : (simulator.running ? "SIMULATOR LIVE" : "SIMULATOR")
-                    color: root.workspaceIndex === 0 && mmsClient.connected ? "#9ff0c1" : appTheme.navigationMuted
+                    text: root.workspaceIndex === 0
+                          ? mmsClient.stateText
+                          : root.workspaceIndex === 2
+                            ? (gooseMonitor.capturing ? "GOOSE MONITOR LIVE" : "GOOSE")
+                            : (simulator.running ? "SIMULATOR LIVE" : "SIMULATOR")
+                    color: root.workspaceIndex === 0 && mmsClient.connected
+                           ? "#9ff0c1"
+                           : root.workspaceIndex === 2 && gooseMonitor.capturing
+                             ? "#9ff0c1" : appTheme.navigationMuted
                     font.pixelSize: 8
                     font.weight: Font.DemiBold
                 }
@@ -137,6 +153,13 @@ ApplicationWindow {
                     backend: simulator
                     onOpenSclRequested: root.importModel()
                 }
+            }
+
+            GooseWorkspace {
+                theme: appTheme
+                simulator: simulator
+                monitor: gooseMonitor
+                onOpenSimulatorRequested: root.workspaceIndex = 1
             }
         }
     }
