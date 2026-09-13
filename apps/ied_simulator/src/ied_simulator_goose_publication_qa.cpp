@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
@@ -52,6 +53,36 @@ mms::MmsDataValue sample_value(const scl::SclDataSetEntry& entry, const std::siz
     return mms::MmsDataValue::visible_string("qa-" + std::to_string(index));
 }
 
+mms::MmsDataValue changed_sample_value(
+    const scl::SclDataSetEntry& entry,
+    const std::size_t index) {
+    if (entry.is_quality) {
+        const std::uint8_t quality[]{0U, 0x80U};
+        return mms::MmsDataValue::bit_string(3U, quality);
+    }
+    if (entry.is_timestamp) {
+        return mms::MmsDataValue::utc_time(mms::Iec61850UtcTime{
+            std::chrono::system_clock::time_point{std::chrono::seconds{1'700'000'001}}, 0U});
+    }
+    std::string type = entry.basic_type;
+    std::transform(type.begin(), type.end(), type.begin(), [](const unsigned char value) {
+        return static_cast<char>(std::toupper(value));
+    });
+    if (type.find("BOOLEAN") != std::string::npos || type == "BOOL") {
+        return mms::MmsDataValue::boolean((index & 1U) == 0U);
+    }
+    if (type.find("FLOAT") != std::string::npos || type.find("DOUBLE") != std::string::npos) {
+        return mms::MmsDataValue::floating_point(static_cast<double>(index) + 1.5);
+    }
+    if (type.find("UINT") != std::string::npos || type.find("UNSIGNED") != std::string::npos) {
+        return mms::MmsDataValue::unsigned_integer(static_cast<std::uint64_t>(index + 1U));
+    }
+    if (type.find("INT") != std::string::npos) {
+        return mms::MmsDataValue::integer(static_cast<std::int64_t>(index + 1U));
+    }
+    return mms::MmsDataValue::visible_string("qa-changed-" + std::to_string(index));
+}
+
 std::uint32_t doubled_ttl(const std::uint32_t delay) {
     return delay > std::numeric_limits<std::uint32_t>::max() / 2U
         ? std::numeric_limits<std::uint32_t>::max()
@@ -92,6 +123,8 @@ int main(int argc, char** argv) {
         frame.pdu.data_set_reference = stream.data_set_reference;
         frame.pdu.go_id = stream.go_id;
         frame.pdu.configuration_revision = stream.configuration_revision;
+        const auto expectedDestination = frame.destination;
+        const auto expectedSource = frame.source;
 
         std::vector<mms::MmsDataValue> values;
         values.reserve(stream.entries.size());
@@ -111,9 +144,8 @@ int main(int argc, char** argv) {
         goose::GooseFrame decodedInitial;
         REQUIRE(goose::GooseFrameCodec::try_decode(initial.ethernet_bytes, decodedInitial),
                 "initial GOOSE frame did not decode");
-        REQUIRE(decodedInitial.destination == frame.destination, "destination MAC mismatch");
-        REQUIRE(decodedInitial.source == ethernet::MacAddress::parse("02:00:00:00:00:4D"),
-                "source MAC mismatch");
+        REQUIRE(decodedInitial.destination == expectedDestination, "destination MAC mismatch");
+        REQUIRE(decodedInitial.source == expectedSource, "source MAC mismatch");
         REQUIRE(decodedInitial.app_id == *stream.address.app_id, "APPID mismatch");
         REQUIRE(decodedInitial.pdu.go_cb_ref == stream.control_block_reference, "gocbRef mismatch");
         REQUIRE(decodedInitial.pdu.data_set_reference == stream.data_set_reference, "DataSet mismatch");
@@ -144,7 +176,7 @@ int main(int argc, char** argv) {
                 "retransmission timeAllowedToLive mismatch");
 
         auto changedValues = values;
-        changedValues[0] = mms::MmsDataValue::visible_string("state-change");
+        changedValues[0] = changed_sample_value(stream.entries.front(), 0U);
         const auto changed = runtime.state_change(
             changedValues,
             timestamp,
