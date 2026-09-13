@@ -302,11 +302,9 @@ inline void append_unique_ci(
 
     // IEC 61850 servers commonly advertise only one MMS NamedVariable per
     // Logical Node and expose FC/DO/DA members through that root's hierarchical
-    // TypeSpecification.  A root name such as "GGIO1" is intentionally not a
-    // leaf reference and therefore cannot be parsed by parse_variable() alone.
-    // Expand successful GVAA evidence into bounded synthetic references so the
-    // canonical live model does not depend on a DataSet (or non-standard flat
-    // aliases) merely to discover ordinary process data.
+    // TypeSpecification. Project exactly FC -> DO -> DA here. Children below a
+    // structured DA are BDAs and must not inflate the model's DA coverage; the
+    // structured DA's own TypeSpecification still preserves those child types.
     for (const auto& evidence : discovery.variable_types) {
         if (!evidence.success() ||
             evidence.variable.kind != MmsObjectNameKind::domain_specific ||
@@ -314,37 +312,32 @@ inline void append_unique_ci(
             continue;
         }
 
-        std::vector<std::string> path;
-        path.reserve(MmsServiceCodec::maximum_type_depth);
+        const auto& root = evidence.attributes->type;
         std::size_t projected_components{};
-        const auto expand = [&](auto&& self, const MmsTypeSpecification& parent) -> void {
-            if (projected_components >= MmsServiceCodec::maximum_type_components ||
-                path.size() >= MmsServiceCodec::maximum_type_depth) {
-                return;
+        for (const auto& fc : root.children) {
+            if (projected_components >= MmsServiceCodec::maximum_type_components) break;
+            if (fc.name.empty() || !MmsLiveReferenceParser::known_functional_constraint(fc.name)) {
+                continue;
             }
-            for (const auto& child : parent.children) {
-                if (projected_components >= MmsServiceCodec::maximum_type_components) return;
-                if (child.name.empty()) continue;
-
-                path.push_back(child.name);
+            ++projected_components;
+            for (const auto& data_object : fc.children) {
+                if (projected_components >= MmsServiceCodec::maximum_type_components) break;
+                if (data_object.name.empty()) continue;
                 ++projected_components;
-
-                std::string item = evidence.variable.item;
-                for (const auto& segment : path) {
-                    item.push_back('$');
-                    item += segment;
+                for (const auto& data_attribute : data_object.children) {
+                    if (projected_components >= MmsServiceCodec::maximum_type_components) break;
+                    if (data_attribute.name.empty()) continue;
+                    ++projected_components;
+                    const auto item = evidence.variable.item + "$" + fc.name + "$" +
+                        data_object.name + "$" + data_attribute.name;
+                    add(MmsLiveReferenceParser::parse_variable(
+                        evidence.variable.domain,
+                        item,
+                        "GetVariableAccessAttributesLogicalNodeTree",
+                        100U));
                 }
-                add(MmsLiveReferenceParser::parse_variable(
-                    evidence.variable.domain,
-                    item,
-                    "GetVariableAccessAttributesLogicalNodeTree",
-                    100U));
-
-                if (!child.children.empty()) self(self, child);
-                path.pop_back();
             }
-        };
-        expand(expand, evidence.attributes->type);
+        }
     }
 
     for (const auto& evidence : discovery.data_set_directories) {
