@@ -899,7 +899,7 @@ void IedFleetController::flushLiveUpdates(const int index, const quint64 generat
 
     QByteArray payload;
     QVector<PendingLiveUpdate> sending;
-    sending.reserve(std::min(kLiveFlushBudget, candidates.size()));
+    sending.reserve(std::min(kLiveFlushBudget, static_cast<int>(candidates.size())));
     for (const auto& update : candidates) {
         if (sending.size() >= kLiveFlushBudget ||
             runtime->liveSentAtMilliseconds.size() + sending.size() >= kLiveInflightLimit) {

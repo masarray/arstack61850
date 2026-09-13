@@ -1490,7 +1490,6 @@ void rebuild_manifest_root_values(ManifestModel& model) {
         if (value.text == update.value) continue;
         const auto data = mms::MmsSimulatorManifestCodec::data(
             value.type, value.raw_type, value.normalized_type, update.value);
-        if (!data.has_value()) continue;
         value.text = update.value;
         value.data = data;
         value.encoded = mms::MmsDataCodec::encode(*value.data);
@@ -1621,10 +1620,6 @@ void drain_live_stdin(
         auto& target = model.values[found->second];
         const auto parsed = mms::MmsSimulatorManifestCodec::data(
             target.type, target.raw_type, target.normalized_type, *value);
-        if (!parsed.has_value()) {
-            reject_live_update(generation, revision, "invalid-value");
-            continue;
-        }
 
         LiveUpdate update;
         update.generation = generation;
