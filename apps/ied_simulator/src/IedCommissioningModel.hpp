@@ -16,6 +16,7 @@
 
 #include <memory>
 #include <optional>
+#include <vector>
 
 class QTimer;
 
@@ -76,8 +77,10 @@ public:
     [[nodiscard]] QStringList gooseInterfaces() const;
     [[nodiscard]] QString gooseInterfaceName() const { return gooseInterfaceName_; }
     void setGooseInterfaceName(const QString& interfaceName);
-    [[nodiscard]] bool goosePublishing() const noexcept { return !goosePublishers_.isEmpty(); }
-    [[nodiscard]] int goosePublisherCount() const noexcept { return goosePublishers_.size(); }
+    [[nodiscard]] bool goosePublishing() const noexcept { return !goosePublishers_.empty(); }
+    [[nodiscard]] int goosePublisherCount() const noexcept {
+        return static_cast<int>(goosePublishers_.size());
+    }
     [[nodiscard]] quint64 gooseTransmitCount() const noexcept { return gooseTransmitCount_; }
     [[nodiscard]] quint64 gooseStateChangeCount() const noexcept { return gooseStateChangeCount_; }
     [[nodiscard]] QString goosePublicationStatus() const { return goosePublicationStatus_; }
@@ -237,7 +240,7 @@ private:
     QVector<Handle> handles_;
     QVector<int> visibleHandles_;
     QVector<BehaviorSlot> behaviors_;
-    QVector<GoosePublisherSlot> goosePublishers_;
+    std::vector<GoosePublisherSlot> goosePublishers_;
     QString kindFilter_{QStringLiteral("All")};
     QString filterText_;
     QString synchronizedSessionKey_;
@@ -254,6 +257,7 @@ private:
     quint64 behaviorRejectedCount_{};
     quint64 gooseTransmitCount_{};
     quint64 gooseStateChangeCount_{};
+    qint64 gooseLastUiNotifyMilliseconds_{};
     QTimer* behaviorTimer_{};
     QTimer* gooseTimer_{};
     QElapsedTimer behaviorClock_;
