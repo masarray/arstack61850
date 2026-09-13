@@ -50,7 +50,10 @@ public:
     }
 
 private:
-    [[nodiscard]] GoosePublication emit();
+    // Do not call this member `emit`: Qt defines `emit` as a macro in QObject
+    // translation units, and the GOOSE runtime is intentionally reusable by Qt
+    // applications without requiring include-order tricks.
+    [[nodiscard]] GoosePublication emit_publication();
     static std::uint32_t increment_state_number(std::uint32_t current) noexcept;
     static std::uint32_t increment_sequence_number(std::uint32_t current) noexcept;
 
