@@ -41,6 +41,8 @@ qt_add_qml_module(arstack_ied_simulator
         src/IedFleetController.cpp
         src/IedFleetControllerAsync.cpp
         src/IedFleetController.hpp
+        src/IedCommissioningModel.cpp
+        src/IedCommissioningModel.hpp
         src/IedNavigationModel.cpp
         src/IedNavigationModel.hpp
         src/IedSignalModel.cpp
@@ -59,6 +61,7 @@ qt_add_qml_module(arstack_ied_simulator
         qml/FleetWorkspace.qml
         qml/IedScoutWorkspace.qml
         qml/ActivityMonitor.qml
+        qml/CommissioningWorkspace.qml
 )
 
 target_link_libraries(arstack_ied_simulator PRIVATE
@@ -111,6 +114,29 @@ target_link_libraries(ied_simulator_responsiveness_qa PRIVATE
 target_include_directories(ied_simulator_responsiveness_qa PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(ied_simulator_responsiveness_qa PRIVATE cxx_std_20)
+
+add_executable(ied_simulator_commissioning_qa
+    src/ied_simulator_commissioning_qa.cpp
+    src/IedCommissioningModel.cpp
+    src/IedCommissioningModel.hpp
+    src/IedActivityModel.cpp
+    src/IedActivityModel.hpp
+    src/IedRuntimeGuardrails.cpp
+    src/IedRuntimeGuardrails.hpp
+    src/IedPointStore.cpp
+    src/IedPointStore.hpp
+    src/IedFleetController.cpp
+    src/IedFleetControllerAsync.cpp
+    src/IedFleetController.hpp)
+target_link_libraries(ied_simulator_commissioning_qa PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Network
+    Qt6::Qml
+    ARIEC61850::core)
+target_include_directories(ied_simulator_commissioning_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_simulator_commissioning_qa PRIVATE cxx_std_20)
 
 # The regular library intentionally keeps a strict portable connection runtime.
 # The desktop simulator needs the separate compatibility runtime validated

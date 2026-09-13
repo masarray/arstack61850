@@ -40,7 +40,12 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+Shift+A"
-        onActivated: activityMonitor.open()
+        onActivated: activityMonitor.opened ? activityMonitor.close() : activityMonitor.open()
+    }
+    Shortcut {
+        sequence: "Ctrl+Shift+C"
+        enabled: simulator.imported
+        onActivated: commissioningWorkspace.opened ? commissioningWorkspace.close() : commissioningWorkspace.open()
     }
 
     IedScoutWorkspace {
@@ -48,6 +53,57 @@ ApplicationWindow {
         theme: appTheme
         backend: simulator
         onOpenSclRequested: root.importModel()
+    }
+
+    Rectangle {
+        id: commissioningLauncher
+        z: 20
+        visible: simulator.imported && !commissioningWorkspace.opened
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.rightMargin: 12
+        anchors.bottomMargin: 72
+        width: 142
+        height: 27
+        radius: 5
+        color: commissioningMouse.containsMouse ? appTheme.surfaceRaised : appTheme.statusChrome
+        border.width: 1
+        border.color: appTheme.line
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 9
+            anchors.rightMargin: 8
+            spacing: 6
+            Rectangle {
+                width: 6
+                height: 6
+                radius: 3
+                color: simulator.reportCount > 0 || simulator.gooseCount > 0 ? appTheme.green : appTheme.accent
+            }
+            Label {
+                Layout.fillWidth: true
+                text: "Commissioning"
+                color: appTheme.statusText
+                font.pixelSize: 9
+                font.weight: Font.DemiBold
+            }
+            Label {
+                text: String(simulator.dataSetCount + simulator.reportCount + simulator.gooseCount)
+                color: appTheme.navigationMuted
+                font.pixelSize: 8
+            }
+        }
+
+        MouseArea {
+            id: commissioningMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            onClicked: commissioningWorkspace.open()
+        }
+
+        ToolTip.visible: commissioningMouse.containsMouse
+        ToolTip.text: "Commissioning Explorer · Ctrl+Shift+C"
     }
 
     Rectangle {
@@ -101,6 +157,13 @@ ApplicationWindow {
 
         ToolTip.visible: launcherMouse.containsMouse
         ToolTip.text: "Activity Monitor · Ctrl+Shift+A"
+    }
+
+    CommissioningWorkspace {
+        id: commissioningWorkspace
+        z: 45
+        theme: appTheme
+        backend: simulator
     }
 
     ActivityMonitor {

@@ -194,6 +194,10 @@ signals:
     void activityChanged();
 
 private:
+    // Commissioning projections inspect the already parsed SCL document in place.
+    // They are UI/application views only and never own a second parser or protocol state.
+    friend class IedCommissioningModel;
+
     struct LoadedDocument final {
         QString path;
         ar::iec61850::scl::SclDocument document;
