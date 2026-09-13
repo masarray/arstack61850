@@ -74,12 +74,25 @@ This milestone changes the application from a simulator-centric tool into an eng
 - no automatic Write retry; successful Write is followed by verification Read on the same association;
 - one bounded client I/O worker, stop-token cancellation, monotonic session generation, and stale-completion rejection across disconnect/reconnect;
 - diagnostic presentation bounded to 128 entries;
-- deterministic loopback QA against the real simulator proving discovery, exact-type Read, guarded Write + verification Read, and stale-session rejection;
+- deterministic loopback QA using the real static MMS compatibility runtime (`MmsStaticConnectionRuntime` / `MmsStaticServerSession`) and an explicitly writable SP fixture, proving discovery, exact-type Read, guarded Write + verification Read, and stale-session rejection without making normal simulator manifest leaves globally writable;
 - the existing A-M simulator automation and `--scl` path remain intact under the `Simulator` workspace.
 
 ### Definition of Done
 
-Milestone N is closed only when the normal `IED Simulator Qt` workflow passes `MMS_CLIENT_WORKBENCH_PASS`, `MMS_CLIENT_STALE_SESSION_NEGATIVE_PASS`, QML smoke, and all retained simulator A-M regressions on the same final head. Closure evidence is recorded on PR #82.
+Milestone N is closed only when the normal `IED Simulator Qt` workflow passes `MMS_CLIENT_WORKBENCH_PASS`, `MMS_CLIENT_STALE_SESSION_NEGATIVE_PASS`, QML smoke, and all retained simulator A-M regressions on the same final implementation head. Closure evidence is recorded on PR #82.
+
+### Closure evidence
+
+Milestone N implementation head `9cc87444c5c48c45785f401dbee490966558d8bf` passed **IED Simulator Qt #515** on successful rerun attempt 2, run `34757769779`, job `103725871734`.
+
+- `MMS_CLIENT_WORKBENCH_PASS ld=1 ln=1 do=1 da=1 read=7 write_verified=9 exact_type=integer fc=SP persistent_association=pass`
+- `MMS_CLIENT_STALE_SESSION_NEGATIVE_PASS stale_generation=1 current_generation=2 stale_state_not_applied=true bounded_io_worker=1`
+- Build and QML smoke passed on the same implementation head.
+- The same successful rerun retained all A-M simulator regression gates: malformed-input fail-closed, lifecycle soak, 5k/20k/50k SCL performance, runtime responsiveness, commissioning K/L, GOOSE M wire/negative proof, live-data J positive/negative proof, visual regression, MMS-visible GUI state including direct/SBO normal/enhanced control, URCB/BRCB, and multi-IED coexistence.
+- **MMS R1-R2 Server CI #139**, run `34757769750`, passed Linux GCC, Linux Clang, and Windows MSVC on the same implementation head.
+- All other head workflows relevant to this branch were green at closure: C++ CI, Security and Evidence, IEDScout Parity Server, Control Interop, Dynamic RCB, BRCB hard profile, Embedded Profile, and SMV Injector GUI.
+
+Documentation-only closure commits after `9cc87444c5c48c45785f401dbee490966558d8bf` do not reopen the proven implementation claim unless they change executable/protocol behavior.
 
 ## Milestone O — Report / RCB Commissioning — NEXT
 
