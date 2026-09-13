@@ -105,6 +105,10 @@ int main(int argc, char* argv[]) {
         QStringLiteral("set-first-value"),
         QStringLiteral("QA: apply a value to the first runtime point after start."),
         QStringLiteral("value")};
+    const QCommandLineOption qaLiveBurstOption{
+        QStringLiteral("qa-live-burst"),
+        QStringLiteral("QA: enqueue a bounded burst through the live runtime data plane."),
+        QStringLiteral("count")};
     const QCommandLineOption exitAfterOption{
         QStringLiteral("exit-after-ms"),
         QStringLiteral("QA: exit after the specified runtime duration."),
@@ -121,6 +125,7 @@ int main(int argc, char* argv[]) {
         smokeOption,
         portOption,
         setFirstValueOption,
+        qaLiveBurstOption,
         exitAfterOption});
     parser.process(app);
 
@@ -382,6 +387,34 @@ int main(int argc, char* argv[]) {
                 applyTimer->deleteLater();
             });
             applyTimer->start();
+        }
+        if (backend != nullptr && parser.isSet(qaLiveBurstOption)) {
+            bool countOk{};
+            const auto requested = parser.value(qaLiveBurstOption).toInt(&countOk);
+            const int count = countOk ? std::clamp(requested, 1, 100'000) : 0;
+            if (count <= 0) {
+                qWarning().noquote() << "--qa-live-burst requires a positive count.";
+                QTimer::singleShot(0, &app, [] { QCoreApplication::exit(12); });
+            } else {
+                auto* const liveTimer = new QTimer{backend};
+                liveTimer->setInterval(25);
+                QObject::connect(liveTimer, &QTimer::timeout, backend, [backend, liveTimer, count] {
+                    if (!backend->property("running").toBool()) return;
+                    int accepted{};
+                    const bool invoked = QMetaObject::invokeMethod(
+                        backend,
+                        "qaBurstLiveValues",
+                        Q_RETURN_ARG(int, accepted),
+                        Q_ARG(int, count));
+                    liveTimer->stop();
+                    liveTimer->deleteLater();
+                    if (!invoked || accepted != count) {
+                        qWarning().noquote()
+                            << "Live burst was not fully accepted" << accepted << "of" << count;
+                    }
+                });
+                liveTimer->start();
+            }
         }
         if (parser.isSet(screenshotOption)) {
             const auto outputPath = parser.value(screenshotOption);

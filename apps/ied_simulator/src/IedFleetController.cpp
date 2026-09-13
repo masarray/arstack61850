@@ -87,6 +87,13 @@ bool isActiveState(const IedFleetController::RuntimeState state) {
         state == IedFleetController::RuntimeState::running ||
         state == IedFleetController::RuntimeState::stopping;
 }
+
+constexpr int kLivePendingLimit = 256;
+constexpr int kLiveInflightLimit = 256;
+constexpr int kLiveFlushBudget = 64;
+constexpr qint64 kLiveProcessBufferLimit = 64 * 1024;
+constexpr qsizetype kLivePayloadBudget = 32 * 1024;
+constexpr qsizetype kLiveValueByteLimit = 4 * 1024;
 } // namespace
 
 IedFleetController::IedFleetController(QObject* parent)
@@ -470,12 +477,27 @@ bool IedFleetController::startIed(const int index) {
     runtime->standardErrorOverflowReported = false;
     ++runtime->startGeneration;
     const auto generation = runtime->startGeneration;
+    runtime->liveGeneration = generation;
+    runtime->nextLiveRevision = 0;
+    runtime->lastLiveAckRevision = 0;
+    runtime->liveRequested = 0;
+    runtime->liveSent = 0;
+    runtime->liveCoalesced = 0;
+    runtime->liveRejected = 0;
+    runtime->liveLastAckLatencyMilliseconds = 0;
+    runtime->liveMaxAckLatencyMilliseconds = 0;
+    runtime->liveMaxPending = 0;
+    runtime->liveFlushScheduled = false;
+    runtime->pendingLiveUpdates.clear();
+    runtime->liveSentAtMilliseconds.clear();
     setRuntimeState(index, RuntimeState::starting);
     runtime->process->setProgram(executable);
     runtime->process->setArguments({
         QStringLiteral("--host"), runtime->listenAddress,
         QStringLiteral("--port"), QString::number(runtime->port),
-        QStringLiteral("--model-manifest"), runtime->modelManifestPath});
+        QStringLiteral("--model-manifest"), runtime->modelManifestPath,
+        QStringLiteral("--live-stdin"),
+        QStringLiteral("--live-generation"), QString::number(runtime->liveGeneration)});
     runtime->process->start();
 
     const auto iedName = ieds_.at(index).toMap().value(QStringLiteral("name")).toString();
@@ -703,7 +725,7 @@ bool IedFleetController::applySelectedValue(
     point->changed = true;
     point->updated = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss.zzz"));
 
-    if (!writeModelManifest(selectedIedIndex_)) {
+    if (!enqueueLiveUpdate(selectedIedIndex_, *point)) {
         *point = IedPointStore::fromVariantMap(previousValue_->value);
         previousValue_.reset();
         emit valuesChanged();
@@ -734,7 +756,7 @@ bool IedFleetController::undoLastChange() {
     const auto current = *point;
     const auto previous = IedPointStore::fromVariantMap(previousValue_->value);
     *point = previous;
-    if (!writeModelManifest(selectedIedIndex_)) {
+    if (running() && !enqueueLiveUpdate(selectedIedIndex_, *point)) {
         *point = current;
         return false;
     }
@@ -772,6 +794,225 @@ int IedFleetController::qaBurstValues(const int updates, const int distinctPoint
         emit valuesChanged();
     }
     return applied;
+}
+
+bool IedFleetController::enqueueLiveUpdate(
+    const int index,
+    const IedPointStore::PointRecord& point) {
+    auto* runtime = runtimeAt(index);
+    if (runtime == nullptr || runtime->state != RuntimeState::running ||
+        runtime->process == nullptr || runtime->process->state() != QProcess::Running ||
+        point.mmsDomain.isEmpty() || point.mmsItem.isEmpty()) {
+        return false;
+    }
+
+    const auto valueBytes = point.value.toUtf8();
+    if (valueBytes.size() > kLiveValueByteLimit) {
+        ++runtime->liveRejected;
+        appendActivity(
+            QStringLiteral("Live data"),
+            QStringLiteral("Value update exceeds the bounded 4 KiB live payload limit."),
+            QStringLiteral("Error"),
+            point.iedName);
+        return false;
+    }
+
+    ++runtime->liveRequested;
+    const auto revision = ++runtime->nextLiveRevision;
+    const auto key = point.mmsDomain + QLatin1Char('\x1f') + point.mmsItem;
+    const auto queuedAt = QDateTime::currentMSecsSinceEpoch();
+    auto existing = runtime->pendingLiveUpdates.find(key);
+    if (existing != runtime->pendingLiveUpdates.end()) {
+        existing->domain = point.mmsDomain;
+        existing->item = point.mmsItem;
+        existing->value = point.value;
+        existing->revision = revision;
+        existing->queuedAtMilliseconds = queuedAt;
+        ++runtime->liveCoalesced;
+    } else {
+        if (runtime->pendingLiveUpdates.size() >= kLivePendingLimit) {
+            ++runtime->liveRejected;
+            appendActivity(
+                QStringLiteral("Live data"),
+                QStringLiteral("Live update queue is saturated; the edit was rejected to keep memory bounded."),
+                QStringLiteral("Error"),
+                point.iedName);
+            return false;
+        }
+        PendingLiveUpdate update;
+        update.key = key;
+        update.domain = point.mmsDomain;
+        update.item = point.mmsItem;
+        update.value = point.value;
+        update.revision = revision;
+        update.queuedAtMilliseconds = queuedAt;
+        runtime->pendingLiveUpdates.insert(key, std::move(update));
+        runtime->liveMaxPending = std::max(
+            runtime->liveMaxPending,
+            static_cast<int>(runtime->pendingLiveUpdates.size()));
+    }
+    scheduleLiveFlush(index);
+    return true;
+}
+
+void IedFleetController::scheduleLiveFlush(const int index) {
+    auto* runtime = runtimeAt(index);
+    if (runtime == nullptr || runtime->liveFlushScheduled ||
+        runtime->pendingLiveUpdates.isEmpty()) {
+        return;
+    }
+    runtime->liveFlushScheduled = true;
+    const auto generation = runtime->liveGeneration;
+    QTimer::singleShot(4, this, [this, index, generation] {
+        auto* current = runtimeAt(index);
+        if (current == nullptr || current->liveGeneration != generation) return;
+        current->liveFlushScheduled = false;
+        flushLiveUpdates(index, generation);
+    });
+}
+
+void IedFleetController::flushLiveUpdates(const int index, const quint64 generation) {
+    auto* runtime = runtimeAt(index);
+    if (runtime == nullptr || runtime->liveGeneration != generation ||
+        runtime->state != RuntimeState::running || runtime->process == nullptr ||
+        runtime->process->state() != QProcess::Running) {
+        return;
+    }
+    if (runtime->pendingLiveUpdates.isEmpty()) return;
+    if (runtime->process->bytesToWrite() >= kLiveProcessBufferLimit ||
+        runtime->liveSentAtMilliseconds.size() >= kLiveInflightLimit) {
+        scheduleLiveFlush(index);
+        return;
+    }
+
+    QVector<PendingLiveUpdate> candidates;
+    candidates.reserve(runtime->pendingLiveUpdates.size());
+    for (auto it = runtime->pendingLiveUpdates.cbegin();
+         it != runtime->pendingLiveUpdates.cend(); ++it) {
+        candidates.push_back(it.value());
+    }
+    std::sort(
+        candidates.begin(), candidates.end(),
+        [](const PendingLiveUpdate& left, const PendingLiveUpdate& right) {
+            return left.revision < right.revision;
+        });
+
+    QByteArray payload;
+    QVector<PendingLiveUpdate> sending;
+    sending.reserve(std::min(kLiveFlushBudget, candidates.size()));
+    for (const auto& update : candidates) {
+        if (sending.size() >= kLiveFlushBudget ||
+            runtime->liveSentAtMilliseconds.size() + sending.size() >= kLiveInflightLimit) {
+            break;
+        }
+        const auto line = QByteArrayLiteral("ARSTACK_LIVE\t1\t") +
+            QByteArray::number(generation) + '\t' +
+            QByteArray::number(update.revision) + '\t' +
+            update.domain.toUtf8().toHex() + '\t' +
+            update.item.toUtf8().toHex() + '\t' +
+            update.value.toUtf8().toHex() + '\n';
+        if (!payload.isEmpty() && payload.size() + line.size() > kLivePayloadBudget) break;
+        payload += line;
+        sending.push_back(update);
+    }
+    if (sending.isEmpty()) {
+        scheduleLiveFlush(index);
+        return;
+    }
+
+    const auto written = runtime->process->write(payload);
+    if (written != payload.size()) {
+        ++runtime->liveRejected;
+        appendActivity(
+            QStringLiteral("Live data"),
+            QStringLiteral("Could not write the bounded live-update batch to the simulator process."),
+            QStringLiteral("Error"),
+            index >= 0 && index < ieds_.size()
+                ? ieds_.at(index).toMap().value(QStringLiteral("name")).toString()
+                : QString{});
+        stopIed(index);
+        return;
+    }
+
+    for (const auto& update : sending) {
+        runtime->pendingLiveUpdates.remove(update.key);
+        runtime->liveSentAtMilliseconds.insert(update.revision, update.queuedAtMilliseconds);
+    }
+    runtime->liveSent += static_cast<quint64>(sending.size());
+    if (!runtime->pendingLiveUpdates.isEmpty()) scheduleLiveFlush(index);
+}
+
+void IedFleetController::handleLiveUpdateAck(const int index, const QVariantMap& fields) {
+    auto* runtime = runtimeAt(index);
+    if (runtime == nullptr) return;
+    bool generationOk{};
+    bool revisionOk{};
+    const auto generation = fields.value(QStringLiteral("generation")).toString().toULongLong(&generationOk);
+    const auto revision = fields.value(QStringLiteral("revision")).toString().toULongLong(&revisionOk);
+    if (!generationOk || !revisionOk || generation != runtime->liveGeneration) return;
+
+    const bool accepted = fields.value(QStringLiteral("accepted")).toString() == QStringLiteral("true");
+    const auto sent = runtime->liveSentAtMilliseconds.find(revision);
+    qint64 latency{};
+    if (sent != runtime->liveSentAtMilliseconds.end()) {
+        latency = std::max<qint64>(0, QDateTime::currentMSecsSinceEpoch() - sent.value());
+        runtime->liveSentAtMilliseconds.erase(sent);
+        runtime->liveLastAckLatencyMilliseconds = latency;
+        runtime->liveMaxAckLatencyMilliseconds = std::max(
+            runtime->liveMaxAckLatencyMilliseconds, latency);
+    }
+    if (accepted) {
+        runtime->lastLiveAckRevision = std::max(runtime->lastLiveAckRevision, revision);
+        qInfo().noquote() << QStringLiteral(
+            "IEDSIM_LIVE_ACK generation=%1 revision=%2 latency_ms=%3 pending=%4 inflight=%5")
+            .arg(generation).arg(revision).arg(latency)
+            .arg(runtime->pendingLiveUpdates.size())
+            .arg(runtime->liveSentAtMilliseconds.size());
+    } else {
+        ++runtime->liveRejected;
+        appendActivity(
+            QStringLiteral("Live data"),
+            QStringLiteral("Server rejected live update revision %1 (%2).")
+                .arg(revision)
+                .arg(fields.value(QStringLiteral("reason")).toString()),
+            QStringLiteral("Error"),
+            index >= 0 && index < ieds_.size()
+                ? ieds_.at(index).toMap().value(QStringLiteral("name")).toString()
+                : QString{});
+    }
+    if (!runtime->pendingLiveUpdates.isEmpty()) scheduleLiveFlush(index);
+}
+
+int IedFleetController::qaBurstLiveValues(const int updates) {
+    if (!qEnvironmentVariableIsSet("ARSTACK_IEDSIM_QA") || updates <= 0 ||
+        !running() || selectedPointIndices_.isEmpty()) {
+        return 0;
+    }
+    const int bounded = std::min(updates, 100'000);
+    auto* runtime = runtimeAt(selectedIedIndex_);
+    auto* point = pointStore_.atMutable(selectedPointIndices_.constFirst());
+    if (runtime == nullptr || point == nullptr) return 0;
+
+    int accepted{};
+    const auto normalizedType = point->type.trimmed().toLower();
+    for (int iteration = 0; iteration < bounded; ++iteration) {
+        if (normalizedType.contains(QStringLiteral("bool"))) {
+            point->value = (iteration & 1) != 0 ? QStringLiteral("true") : QStringLiteral("false");
+        } else {
+            point->value = QString::number(iteration);
+        }
+        point->origin = QStringLiteral("Live data-plane QA");
+        point->changed = true;
+        point->updated = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss.zzz"));
+        if (!enqueueLiveUpdate(selectedIedIndex_, *point)) break;
+        ++accepted;
+        emit valuesChanged();
+    }
+    qInfo().noquote() << QStringLiteral(
+        "IEDSIM_LIVE_BURST requested=%1 accepted=%2 coalesced=%3 rejected=%4 pending=%5 pending_max=%6 final=%7")
+        .arg(bounded).arg(accepted).arg(runtime->liveCoalesced).arg(runtime->liveRejected)
+        .arg(runtime->pendingLiveUpdates.size()).arg(runtime->liveMaxPending).arg(point->value);
+    return accepted;
 }
 
 void IedFleetController::clearActivity() {
@@ -814,6 +1055,16 @@ QString IedFleetController::diagnosticsText() const {
         .arg(pointStore_.size());
     text += QStringLiteral("Prepared IED profiles: %1; fleet rollbacks: %2\n")
         .arg(preparedIeds_.size()).arg(fleetStartRollbackCount_);
+    for (int index = 0; index < static_cast<int>(runtimes_.size()); ++index) {
+        const auto* runtime = runtimeAt(index);
+        if (runtime == nullptr || runtime->liveGeneration == 0) continue;
+        text += QStringLiteral("  Live[%1]: gen=%2 requested=%3 sent=%4 coalesced=%5 rejected=%6 ack=%7 pending=%8 inflight=%9 maxPending=%10 maxAckMs=%11\n")
+            .arg(index).arg(runtime->liveGeneration).arg(runtime->liveRequested)
+            .arg(runtime->liveSent).arg(runtime->liveCoalesced).arg(runtime->liveRejected)
+            .arg(runtime->lastLiveAckRevision).arg(runtime->pendingLiveUpdates.size())
+            .arg(runtime->liveSentAtMilliseconds.size()).arg(runtime->liveMaxPending)
+            .arg(runtime->liveMaxAckLatencyMilliseconds);
+    }
     text += QStringLiteral("\nRecent activity (newest first):\n");
     for (const auto& item : activity_.snapshot()) {
         const auto event = item.toMap();
@@ -1452,6 +1703,10 @@ void IedFleetController::processServerLine(
         if (separator > 0) fields.insert(token.left(separator), token.mid(separator + 1));
     }
     const auto kind = fields.value(QStringLiteral("kind")).toString();
+    if (kind == QStringLiteral("live_update_ack")) {
+        handleLiveUpdateAck(index, fields);
+        return;
+    }
     if (kind == QStringLiteral("server_ready")) {
         setRuntimeState(index, RuntimeState::running);
         handleFleetStartReady(index);

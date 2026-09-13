@@ -6,6 +6,7 @@
 
 #include "ariec61850/scl/model.hpp"
 
+#include <QByteArray>
 #include <QHash>
 #include <QObject>
 #include <QProcess>
@@ -181,6 +182,7 @@ public:
     Q_INVOKABLE void copyDiagnostics();
     Q_INVOKABLE QString diagnosticsText() const;
     Q_INVOKABLE int qaBurstValues(int updates, int distinctPoints = 64);
+    Q_INVOKABLE int qaBurstLiveValues(int updates);
 
 signals:
     void modelChanged();
@@ -232,6 +234,15 @@ private:
         int preparedIedCount{};
     };
 
+    struct PendingLiveUpdate final {
+        QString key;
+        QString domain;
+        QString item;
+        QString value;
+        quint64 revision{};
+        qint64 queuedAtMilliseconds{};
+    };
+
     struct RuntimeInstance final {
         QString key;
         QString listenAddress;
@@ -248,6 +259,19 @@ private:
         QString modelManifestPath;
         quint64 startGeneration{};
         quint64 modelRevision{};
+        quint64 liveGeneration{};
+        quint64 nextLiveRevision{};
+        quint64 lastLiveAckRevision{};
+        quint64 liveRequested{};
+        quint64 liveSent{};
+        quint64 liveCoalesced{};
+        quint64 liveRejected{};
+        qint64 liveLastAckLatencyMilliseconds{};
+        qint64 liveMaxAckLatencyMilliseconds{};
+        int liveMaxPending{};
+        bool liveFlushScheduled{};
+        QHash<QString, PendingLiveUpdate> pendingLiveUpdates;
+        QHash<quint64, qint64> liveSentAtMilliseconds;
     };
 
     struct ValueSnapshot final {
@@ -283,6 +307,10 @@ private:
         const QByteArray& bytes,
         bool standardError);
     void processServerLine(int index, const QString& line, bool standardError);
+    [[nodiscard]] bool enqueueLiveUpdate(int index, const IedPointStore::PointRecord& point);
+    void scheduleLiveFlush(int index);
+    void flushLiveUpdates(int index, quint64 generation);
+    void handleLiveUpdateAck(int index, const QVariantMap& fields);
 
     [[nodiscard]] bool writeModelManifest(int iedIndex);
     void removeModelManifests();
