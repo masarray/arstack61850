@@ -3,11 +3,13 @@
 #include "ariec61850/mms/static_dispatcher.hpp"
 
 #include "ariec61850/asn1/ber_span_reader.hpp"
+#include "ariec61850/asn1/ber_span_writer.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string_view>
 
@@ -34,6 +36,13 @@ namespace {
     return {
         reinterpret_cast<const std::uint8_t*>(text.data()),
         text.size()};
+}
+
+[[nodiscard]] std::string_view as_text(
+    const std::span<const std::uint8_t> bytes) noexcept {
+    return {
+        reinterpret_cast<const char*>(bytes.data()),
+        bytes.size()};
 }
 
 [[nodiscard]] bool valid_mms_data(
@@ -529,6 +538,228 @@ struct ReadObjectResult final {
     std::size_t required_bytes{};
 };
 
+// IEDScout's SCL-assisted connection starts with a bulk Read of FC roots such
+// as LLN0$CF, LLN0$DC, LLN0$EX, LLN0$RP, LLN0$SP and LLN0$ST. The portable
+// object table intentionally stores exact leaves (and selected explicit roots)
+// rather than materializing every intermediate hierarchy node. Build a missing
+// intermediate object on demand from its exact descendants. This is generic MMS
+// hierarchy behavior, not a Siemens path special-case, and because leaf read
+// callbacks are invoked at request time the resulting structure also reflects
+// live per-association RCB/control state.
+constexpr std::size_t kMaximumSyntheticReadDepth = 16U;
+
+enum class SyntheticReadStatus : std::uint8_t {
+    ok,
+    not_found,
+    value_unavailable,
+    workspace_too_small,
+    backend_failure,
+};
+
+struct SyntheticReadResult final {
+    SyntheticReadStatus status{SyntheticReadStatus::not_found};
+    std::size_t bytes_written{};
+    std::size_t required_bytes{};
+};
+
+struct SyntheticMeasureResult final {
+    SyntheticReadStatus status{SyntheticReadStatus::not_found};
+    std::size_t content_bytes{};
+    std::size_t encoded_bytes{};
+};
+
+[[nodiscard]] bool is_descendant_item(
+    const std::string_view item,
+    const std::string_view prefix) noexcept {
+    return item.size() > prefix.size() &&
+        item.compare(0U, prefix.size(), prefix) == 0 &&
+        item[prefix.size()] == '$';
+}
+
+[[nodiscard]] std::string_view immediate_child_prefix(
+    const std::string_view item,
+    const std::string_view prefix) noexcept {
+    if (!is_descendant_item(item, prefix)) return {};
+    const auto next = item.find('$', prefix.size() + 1U);
+    return item.substr(
+        0U,
+        next == std::string_view::npos ? item.size() : next);
+}
+
+[[nodiscard]] SyntheticMeasureResult measure_exact_object(
+    const MmsStaticObjectEntry& object) noexcept {
+    const auto probe = object.read(object.context, {});
+    if (probe.status == wire::EncodeStatus::buffer_too_small &&
+        probe.required_bytes > 0U) {
+        return {SyntheticReadStatus::ok, 0U, probe.required_bytes};
+    }
+    if (probe.success() && probe.bytes_written > 0U) {
+        return {SyntheticReadStatus::ok, 0U, probe.bytes_written};
+    }
+    return {SyntheticReadStatus::value_unavailable, 0U, 0U};
+}
+
+[[nodiscard]] SyntheticMeasureResult measure_synthetic_subtree(
+    const MmsStaticObjectTable& objects,
+    const std::string_view domain,
+    const std::string_view prefix,
+    const std::size_t depth) noexcept {
+    if (depth >= kMaximumSyntheticReadDepth || domain.empty() || prefix.empty()) {
+        return {SyntheticReadStatus::backend_failure, 0U, 0U};
+    }
+
+    const auto entries = objects.objects();
+    std::size_t content_bytes = 0U;
+    bool found_child = false;
+    std::size_t index = 0U;
+    while (index < entries.size()) {
+        const auto& candidate = entries[index];
+        if (candidate.domain != domain ||
+            !is_descendant_item(candidate.item, prefix)) {
+            ++index;
+            continue;
+        }
+
+        const auto child_prefix = immediate_child_prefix(candidate.item, prefix);
+        if (child_prefix.empty()) {
+            return {SyntheticReadStatus::backend_failure, 0U, 0U};
+        }
+        found_child = true;
+        const MmsStaticObjectEntry* exact =
+            candidate.item == child_prefix ? &candidate : nullptr;
+
+        std::size_t next = index + 1U;
+        while (next < entries.size() && entries[next].domain == domain &&
+               (entries[next].item == child_prefix ||
+                is_descendant_item(entries[next].item, child_prefix))) {
+            ++next;
+        }
+
+        const auto measured = exact != nullptr
+            ? measure_exact_object(*exact)
+            : measure_synthetic_subtree(objects, domain, child_prefix, depth + 1U);
+        if (measured.status != SyntheticReadStatus::ok) {
+            return measured;
+        }
+        if (measured.encoded_bytes >
+            std::numeric_limits<std::size_t>::max() - content_bytes) {
+            return {SyntheticReadStatus::backend_failure, 0U, 0U};
+        }
+        content_bytes += measured.encoded_bytes;
+        index = next;
+    }
+
+    if (!found_child) {
+        return {SyntheticReadStatus::not_found, 0U, 0U};
+    }
+    const auto encoded = asn1::BerSpanWriter::tlv_size(2, content_bytes);
+    if (!encoded) {
+        return {SyntheticReadStatus::backend_failure, 0U, 0U};
+    }
+    return {SyntheticReadStatus::ok, content_bytes, *encoded};
+}
+
+[[nodiscard]] SyntheticReadResult encode_synthetic_subtree(
+    const MmsStaticObjectTable& objects,
+    const std::string_view domain,
+    const std::string_view prefix,
+    const std::span<std::uint8_t> destination,
+    const std::size_t depth) noexcept {
+    const auto measured = measure_synthetic_subtree(objects, domain, prefix, depth);
+    if (measured.status != SyntheticReadStatus::ok) {
+        return {measured.status, 0U, measured.encoded_bytes};
+    }
+    if (destination.size() < measured.encoded_bytes) {
+        return {
+            SyntheticReadStatus::workspace_too_small,
+            0U,
+            measured.encoded_bytes};
+    }
+
+    asn1::BerSpanWriter writer{destination.first(measured.encoded_bytes)};
+    if (!writer.write_tlv_header(
+            asn1::BerClass::context_specific,
+            true,
+            2,
+            measured.content_bytes)) {
+        return {SyntheticReadStatus::backend_failure, 0U, measured.encoded_bytes};
+    }
+    std::size_t offset = writer.size();
+
+    const auto entries = objects.objects();
+    std::size_t index = 0U;
+    while (index < entries.size()) {
+        const auto& candidate = entries[index];
+        if (candidate.domain != domain ||
+            !is_descendant_item(candidate.item, prefix)) {
+            ++index;
+            continue;
+        }
+
+        const auto child_prefix = immediate_child_prefix(candidate.item, prefix);
+        if (child_prefix.empty()) {
+            return {SyntheticReadStatus::backend_failure, 0U, measured.encoded_bytes};
+        }
+        const MmsStaticObjectEntry* exact =
+            candidate.item == child_prefix ? &candidate : nullptr;
+
+        std::size_t next = index + 1U;
+        while (next < entries.size() && entries[next].domain == domain &&
+               (entries[next].item == child_prefix ||
+                is_descendant_item(entries[next].item, child_prefix))) {
+            ++next;
+        }
+
+        if (exact != nullptr) {
+            const auto read = exact->read(
+                exact->context,
+                destination.subspan(offset, measured.encoded_bytes - offset));
+            if (read.status == wire::EncodeStatus::buffer_too_small) {
+                const auto required = read.required_bytes >
+                        std::numeric_limits<std::size_t>::max() - offset
+                    ? std::numeric_limits<std::size_t>::max()
+                    : offset + read.required_bytes;
+                return {SyntheticReadStatus::workspace_too_small, 0U, required};
+            }
+            if (!read.success()) {
+                return {SyntheticReadStatus::value_unavailable, 0U, 0U};
+            }
+            if (read.bytes_written == 0U ||
+                read.bytes_written > measured.encoded_bytes - offset ||
+                !valid_mms_data(destination.subspan(offset, read.bytes_written))) {
+                return {SyntheticReadStatus::backend_failure, 0U, measured.encoded_bytes};
+            }
+            offset += read.bytes_written;
+        } else {
+            const auto nested = encode_synthetic_subtree(
+                objects,
+                domain,
+                child_prefix,
+                destination.subspan(offset, measured.encoded_bytes - offset),
+                depth + 1U);
+            if (nested.status != SyntheticReadStatus::ok) {
+                if (nested.status == SyntheticReadStatus::workspace_too_small &&
+                    nested.required_bytes <=
+                        std::numeric_limits<std::size_t>::max() - offset) {
+                    return {
+                        nested.status,
+                        0U,
+                        offset + nested.required_bytes};
+                }
+                return nested;
+            }
+            offset += nested.bytes_written;
+        }
+        index = next;
+    }
+
+    if (offset != measured.encoded_bytes ||
+        !valid_mms_data(destination.first(offset))) {
+        return {SyntheticReadStatus::backend_failure, 0U, measured.encoded_bytes};
+    }
+    return {SyntheticReadStatus::ok, offset, offset};
+}
+
 [[nodiscard]] ReadObjectResult read_object_into_result(
     const MmsStaticObjectEntry* object,
     const MmsStaticDispatchPolicy& policy,
@@ -564,6 +795,65 @@ struct ReadObjectResult final {
         0U};
     workspace_offset += read.bytes_written;
     return {};
+}
+
+[[nodiscard]] ReadObjectResult read_name_into_result(
+    const MmsStaticObjectTable& objects,
+    const MmsObjectNameView& name,
+    const MmsStaticDispatchPolicy& policy,
+    const std::span<std::uint8_t> workspace,
+    std::size_t& workspace_offset,
+    MmsReadAccessResultInput& result) noexcept {
+    if (const auto* exact = objects.find(name); exact != nullptr) {
+        return read_object_into_result(
+            exact, policy, workspace, workspace_offset, result);
+    }
+    if (name.kind != MmsObjectNameViewKind::domain_specific ||
+        name.domain.empty() || name.item.empty()) {
+        result = MmsReadAccessResultInput{
+            false, {}, policy.missing_object_failure_code};
+        return {};
+    }
+
+    const auto remaining = workspace.subspan(workspace_offset);
+    const auto synthetic = encode_synthetic_subtree(
+        objects,
+        as_text(name.domain),
+        as_text(name.item),
+        remaining,
+        0U);
+    switch (synthetic.status) {
+    case SyntheticReadStatus::ok:
+        if (synthetic.bytes_written == 0U ||
+            synthetic.bytes_written > remaining.size() ||
+            !valid_mms_data(remaining.first(synthetic.bytes_written))) {
+            return {ReadObjectStatus::backend_failure, 0U};
+        }
+        result = MmsReadAccessResultInput{
+            true,
+            remaining.first(synthetic.bytes_written),
+            0U};
+        workspace_offset += synthetic.bytes_written;
+        return {};
+    case SyntheticReadStatus::not_found:
+        result = MmsReadAccessResultInput{
+            false, {}, policy.missing_object_failure_code};
+        return {};
+    case SyntheticReadStatus::value_unavailable:
+        result = MmsReadAccessResultInput{
+            false, {}, policy.backend_failure_code};
+        return {};
+    case SyntheticReadStatus::workspace_too_small:
+        return {
+            ReadObjectStatus::workspace_too_small,
+            synthetic.required_bytes >
+                    std::numeric_limits<std::size_t>::max() - workspace_offset
+                ? std::numeric_limits<std::size_t>::max()
+                : workspace_offset + synthetic.required_bytes};
+    case SyntheticReadStatus::backend_failure:
+        return {ReadObjectStatus::backend_failure, 0U};
+    }
+    return {ReadObjectStatus::backend_failure, 0U};
 }
 
 [[nodiscard]] MmsStaticDispatchResult dispatch_read(
@@ -602,8 +892,9 @@ struct ReadObjectResult final {
                     MmsObjectNameViewKind::domain_specific,
                     as_bytes(member.domain),
                     as_bytes(member.item)};
-                const auto read = read_object_into_result(
-                    objects.find(name),
+                const auto read = read_name_into_result(
+                    objects,
+                    name,
                     policy,
                     workspace,
                     workspace_offset,
@@ -623,14 +914,17 @@ struct ReadObjectResult final {
         result_count = request.variables.variable_count;
         for (std::size_t index = 0U; index < result_count; ++index) {
             MmsObjectNameView name;
-            const MmsStaticObjectEntry* object = nullptr;
-            if (request.variables.try_variable(index, name)) {
-                object = objects.find(name);
+            if (!request.variables.try_variable(index, name)) {
+                results[index] = MmsReadAccessResultInput{
+                    false, {}, policy.missing_object_failure_code};
+                continue;
             }
-            // Golden behavior keeps an AccessResult slot even when one variable
-            // specification cannot be resolved. This preserves decoder alignment.
-            const auto read = read_object_into_result(
-                object,
+            // Preserve one AccessResult per requested variable. If an exact
+            // object is absent, try the bounded intermediate-subtree synthesis
+            // used by IEDScout's initial FC-root Read before returning missing.
+            const auto read = read_name_into_result(
+                objects,
+                name,
                 policy,
                 workspace,
                 workspace_offset,
