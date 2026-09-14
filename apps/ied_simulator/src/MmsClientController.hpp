@@ -17,6 +17,8 @@ class MmsClientController : public QObject {
 
     Q_PROPERTY(QString host READ host WRITE setHost NOTIFY configurationChanged)
     Q_PROPERTY(int port READ port WRITE setPort NOTIFY configurationChanged)
+    Q_PROPERTY(QString trustedSclPath READ trustedSclPath WRITE setTrustedSclPath NOTIFY configurationChanged)
+    Q_PROPERTY(bool trustedSclAvailable READ trustedSclAvailable NOTIFY configurationChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY stateChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY stateChanged)
     Q_PROPERTY(bool operationBusy READ operationBusy NOTIFY stateChanged)
@@ -24,6 +26,7 @@ class MmsClientController : public QObject {
     Q_PROPERTY(QString endpoint READ endpoint NOTIFY stateChanged)
     Q_PROPERTY(QString iedName READ iedName NOTIFY modelChanged)
     Q_PROPERTY(QString modelSummary READ modelSummary NOTIFY modelChanged)
+    Q_PROPERTY(QString modelSource READ modelSource NOTIFY modelChanged)
     Q_PROPERTY(QString associationProfile READ associationProfile NOTIFY modelChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY stateChanged)
     Q_PROPERTY(QString lastDiagnostic READ lastDiagnostic NOTIFY diagnosticsChanged)
@@ -40,8 +43,11 @@ public:
 
     [[nodiscard]] QString host() const { return host_; }
     [[nodiscard]] int port() const noexcept { return port_; }
+    [[nodiscard]] QString trustedSclPath() const { return trustedSclPath_; }
+    [[nodiscard]] bool trustedSclAvailable() const noexcept { return !trustedSclPath_.isEmpty(); }
     void setHost(const QString& value);
     void setPort(int value);
+    void setTrustedSclPath(const QString& value);
 
     [[nodiscard]] bool connected() const noexcept;
     [[nodiscard]] bool busy() const noexcept;
@@ -50,6 +56,7 @@ public:
     [[nodiscard]] QString endpoint() const;
     [[nodiscard]] QString iedName() const { return iedName_; }
     [[nodiscard]] QString modelSummary() const { return modelSummary_; }
+    [[nodiscard]] QString modelSource() const { return modelSource_; }
     [[nodiscard]] QString associationProfile() const { return associationProfile_; }
     [[nodiscard]] QString lastError() const { return lastError_; }
     [[nodiscard]] QString lastDiagnostic() const;
@@ -86,10 +93,12 @@ private:
 
     QString host_{QStringLiteral("127.0.0.1")};
     int port_{102};
+    QString trustedSclPath_;
     State state_{State::disconnected};
     bool operationBusy_{};
     QString iedName_;
     QString modelSummary_;
+    QString modelSource_;
     QString associationProfile_;
     QString lastError_;
     QStringList diagnostics_;
