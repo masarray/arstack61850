@@ -75,7 +75,26 @@ jobs:
 
       - name: Build native Release
         shell: powershell
-        run: cmake --build build-arstack-studio --config Release --target arstack_studio --parallel
+        run: |
+          cmake --build build-arstack-studio --config Release `
+            --target arstack_studio arstack_session_harness arstack_windows_ownership_harness --parallel
+
+      - name: S8A/S8B native Windows integration gates
+        shell: powershell
+        run: |
+          function Assert-ExitZero([string]$FilePath, [string]$Label, [int]$TimeoutMs = 30000) {
+            $process = Start-Process -FilePath $FilePath -PassThru
+            if (-not $process.WaitForExit($TimeoutMs)) {
+              $process.Kill()
+              throw "$Label timed out after $TimeoutMs ms"
+            }
+            if ($process.ExitCode -ne 0) {
+              throw "$Label failed with exit code $($process.ExitCode)"
+            }
+          }
+
+          Assert-ExitZero (Join-Path $PWD 'build-arstack-studio\Release\arstack_session_harness.exe') 'S8A deterministic session harness on Windows'
+          Assert-ExitZero (Join-Path $PWD 'build-arstack-studio\Release\arstack_windows_ownership_harness.exe') 'S8B Windows ownership harness'
 
       - name: Stage Qt application
         shell: powershell
@@ -135,6 +154,7 @@ jobs:
           Assert-ExitZero $studio @('--check-firmware-contract') 'Packaged firmware contract'
           Assert-ExitZero $studio @('--check-p0-policy') 'Packaged native policy check'
           Assert-ExitZero $studio @('--check-app-lifecycle') 'Packaged primary-window shutdown check'
+          & "$PWD\apps\arstack_studio\packaging\verify-single-instance.ps1" -Executable $studio
           Assert-ExitZero $espflash @('--version') 'Bundled espflash execution'
           Assert-ExitZero $espflash @('board-info', '--non-interactive', '--help') 'espflash board-info recovery CLI contract'
           Assert-ExitZero $espflash @('write-bin', '--chip', 'esp32p4', '--non-interactive', '--help') 'espflash write-bin recovery CLI contract'
@@ -189,6 +209,9 @@ jobs:
     needs: windows-package
     runs-on: windows-2022
     steps:
+      - name: Checkout ownership probe
+        uses: actions/checkout@v4
+
       - name: Download release candidates only
         uses: actions/download-artifact@v4
         with:
@@ -235,6 +258,7 @@ jobs:
             Assert-ExitZero $exe @('--check-firmware-contract') 'Portable firmware contract'
             Assert-ExitZero $exe @('--check-p0-policy') 'Portable P0 policy'
             Assert-ExitZero $exe @('--check-app-lifecycle') 'Portable primary-window shutdown check'
+            & "$PWD\apps\arstack_studio\packaging\verify-single-instance.ps1" -Executable $exe
             Assert-ExitZero $espflash @('--version') 'Portable espflash'
           } finally {
             $env:PATH = $savedPath
@@ -266,6 +290,7 @@ jobs:
             Assert-ExitZero $exe @('--check-firmware-contract') 'Installed firmware contract'
             Assert-ExitZero $exe @('--check-p0-policy') 'Installed P0 policy'
             Assert-ExitZero $exe @('--check-app-lifecycle') 'Installed primary-window shutdown check'
+            & "$PWD\apps\arstack_studio\packaging\verify-single-instance.ps1" -Executable $exe
             Assert-ExitZero $espflash @('--version') 'Installed espflash'
             $uninstaller = Join-Path $installDir 'Uninstall.exe'
             if (Test-Path $uninstaller) {
