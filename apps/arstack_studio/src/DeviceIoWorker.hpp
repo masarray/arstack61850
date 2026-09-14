@@ -14,8 +14,9 @@ class QTimer;
 // Long-lived serial transport owner for ARStack Studio.
 //
 // S4 invariant: QSerialPort and every timer that directly drives serial I/O are
-// created only after this object has moved to its worker thread. The GUI-facing
-// DeviceController facade never opens, closes, reads, or writes a serial handle.
+// created only after this object has moved to its dedicated thread.
+// S5 invariant: every transport event carries the supervisor generation that
+// authorized the session; stale generations are rejected/ignored explicitly.
 class DeviceIoWorker final : public QObject {
     Q_OBJECT
 
@@ -28,40 +29,45 @@ public:
     [[nodiscard]] static constexpr int identityRetryIntervalMs() noexcept { return 650; }
     [[nodiscard]] static constexpr int heartbeatIntervalMs() noexcept { return 700; }
 
-    // Preserve the facade's two-argument transport call while recognizing the
-    // one multi-command transaction that must be exclusive in S4.
-    void enqueueCommands(const QStringList& commands, bool quiet) {
+    void enqueueCommands(
+        const QStringList& commands,
+        const bool quiet,
+        const quint64 generation) {
         const bool exclusive = commands.size() > 1 &&
             commands.front() == QStringLiteral("PROFILE BEGIN");
-        enqueueCommands(commands, quiet, exclusive);
+        enqueueCommands(commands, quiet, exclusive, generation);
     }
 
 public slots:
     void initialize();
     void shutdown(bool requestStop);
-    void refreshPorts();
-    void autoDetectAndConnect();
-    void connectPort(const QString& portName);
-    void disconnectPort();
-    void confirmIdentity();
-    void enqueueCommands(const QStringList& commands, bool quiet, bool exclusive);
-    void setHeartbeatEnabled(bool enabled);
+    void refreshPorts(quint64 generation);
+    void autoDetectAndConnect(quint64 generation);
+    void connectPort(const QString& portName, quint64 generation);
+    void disconnectPort(quint64 generation);
+    void confirmIdentity(quint64 generation);
+    void enqueueCommands(
+        const QStringList& commands,
+        bool quiet,
+        bool exclusive,
+        quint64 generation);
+    void setHeartbeatEnabled(bool enabled, quint64 generation);
 
 signals:
-    void ready(bool serialAffinityValid);
-    void portsObserved(const QStringList& ports, const QString& recommendedPort, int highConfidenceCount);
-    void openingPort(const QString& portName, bool automatic);
-    void portOpened(const QString& portName, bool automatic);
-    void portOpenFailed(const QString& portName, const QString& message, bool automatic);
-    void portClosed(const QString& portName);
-    void portReleased(const QString& portName);
-    void identificationAttempt(const QString& portName, int attempt, int maximum);
-    void identificationTimedOut(const QString& portName, int attempts, bool continuingProbe);
-    void automaticProbeExhausted();
-    void lineReceived(const QString& line);
-    void commandTransmitted(const QString& command, bool quiet);
-    void commandRejected(const QString& message);
-    void transportError(const QString& message, bool fatal);
+    void ready(quint64 generation, bool serialAffinityValid);
+    void portsObserved(quint64 generation, const QStringList& ports, const QString& recommendedPort, int highConfidenceCount);
+    void openingPort(quint64 generation, const QString& portName, bool automatic);
+    void portOpened(quint64 generation, const QString& portName, bool automatic);
+    void portOpenFailed(quint64 generation, const QString& portName, const QString& message, bool automatic);
+    void portClosed(quint64 generation, const QString& portName);
+    void portReleased(quint64 generation, const QString& portName);
+    void identificationAttempt(quint64 generation, const QString& portName, int attempt, int maximum);
+    void identificationTimedOut(quint64 generation, const QString& portName, int attempts, bool continuingProbe);
+    void automaticProbeExhausted(quint64 generation);
+    void lineReceived(quint64 generation, const QString& line);
+    void commandTransmitted(quint64 generation, const QString& command, bool quiet);
+    void commandRejected(quint64 generation, const QString& message);
+    void transportError(quint64 generation, const QString& message, bool fatal);
 
 private:
     struct PendingCommand final {
@@ -71,6 +77,7 @@ private:
         bool exclusive{false};
     };
 
+    bool adoptGeneration(quint64 generation, bool closeOldSession);
     void refreshPortsInternal(bool forceSignal);
     void tryNextProbe();
     bool openPortInternal(const QString& portName, bool automatic);
@@ -100,6 +107,7 @@ private:
     PendingCommand activeCommand_;
     QString lastPort_;
 
+    quint64 activeGeneration_{0};
     int highConfidenceCount_{0};
     int identifyAttempts_{0};
     int exclusiveCommandsRemaining_{0};
