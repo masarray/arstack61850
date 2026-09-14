@@ -3,15 +3,18 @@
 #include "DeviceIoWorker.hpp"
 #include "FirmwareManager.hpp"
 #include "SclProfileModel.hpp"
+#include "SingleInstanceGuard.hpp"
 #include "SmartSessionController.hpp"
 #include "StudioDeviceController.hpp"
 
 #include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDebug>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QEvent>
 #include <QEventLoop>
+#include <QFile>
 #include <QGuiApplication>
 #include <QPointer>
 #include <QQmlApplicationEngine>
@@ -295,12 +298,40 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         !SmartSessionController::firmwareOwnershipValid(
             SmartSessionController::PortOwner::none, false);
 
+    const bool s6RecoveryPolicy =
+        SmartSessionController::recoveryIdentityMatches(
+            QStringLiteral("A1B2C3D4E5F6"), QStringLiteral("a1b2c3d4e5f6")) &&
+        !SmartSessionController::recoveryIdentityMatches(
+            QStringLiteral("A1B2C3D4E5F6"), QStringLiteral("001122334455")) &&
+        !SmartSessionController::recoveryIdentityMatches(QString{}, QStringLiteral("A1B2C3D4E5F6")) &&
+        StudioDeviceController::controlHealthProbeIntervalMs() == 2000 &&
+        StudioDeviceController::controlHealthMaxMisses() == 2;
+
+    const QString lockTestPath = QDir(QDir::tempPath()).filePath(
+        QStringLiteral("arstack-studio-lock-regression-%1.lock")
+            .arg(static_cast<qulonglong>(QCoreApplication::applicationPid())));
+    QFile::remove(lockTestPath);
+    bool secondInstanceBlocked = false;
+    {
+        SingleInstanceGuard first{lockTestPath};
+        SingleInstanceGuard second{lockTestPath};
+        secondInstanceBlocked = first.tryAcquire() && !second.tryAcquire();
+    }
+    bool lockReacquiredAfterRelease = false;
+    {
+        SingleInstanceGuard third{lockTestPath};
+        lockReacquiredAfterRelease = third.tryAcquire();
+    }
+    QFile::remove(lockTestPath);
+    const bool singleInstancePolicy = secondInstanceBlocked && lockReacquiredAfterRelease;
+
     if (!currentAccepted || !legacyRejectedAsCurrent || !protocolLegacyParsed ||
         !capabilityFailClosed || !rejectsWrongTarget || !rejectsMissingFirmware ||
         !rejectsMalformedBoot || !boundedIdentifyPolicy || !boundedProfileSyncPolicy ||
-        !workerPolicyAligned || !generationPolicy || !portOwnershipPolicy) {
+        !workerPolicyAligned || !generationPolicy || !portOwnershipPolicy ||
+        !s6RecoveryPolicy || !singleInstancePolicy) {
         qCritical().noquote()
-            << "S1/S2/S3/S4/S5 control-plane contract: FAIL"
+            << "S1/S2/S3/S4/S5/S6 control-plane contract: FAIL"
             << "current=" << currentAccepted
             << "legacy=" << legacyRejectedAsCurrent
             << "protocol-legacy=" << protocolLegacyParsed
@@ -312,7 +343,9 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
             << "bounded-profile-sync=" << boundedProfileSyncPolicy
             << "worker-policy-aligned=" << workerPolicyAligned
             << "generation-policy=" << generationPolicy
-            << "port-owner-policy=" << portOwnershipPolicy;
+            << "port-owner-policy=" << portOwnershipPolicy
+            << "s6-recovery-health=" << s6RecoveryPolicy
+            << "single-instance=" << singleInstancePolicy;
         return 11;
     }
 
@@ -335,9 +368,11 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
     const bool startsIdle =
         device.identificationState() == DeviceController::IdentificationState::Idle &&
         device.identifyAttempts() == 0 &&
-        device.sessionGeneration() == 1;
+        device.sessionGeneration() == 1 &&
+        !device.controlResponsive() &&
+        device.missedHealthReplies() == 0;
     if (!startsIdle) {
-        qCritical().noquote() << "S5 generation-aware identification state: FAIL";
+        qCritical().noquote() << "S6 generation/health-aware identification state: FAIL";
         return 12;
     }
     if (device.start()) {
@@ -349,7 +384,7 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         return 6;
     }
     qInfo().noquote()
-        << "P0 controller policy: PASS · S1 typed identity + S2 bounded IDENTIFY + S3 bounded profile sync + S4 threaded DeviceIoWorker + S5 generation/PortOwner/FirmwareWorker boundaries + unverified START/DEPLOY fail closed";
+        << "P0 controller policy: PASS · S1 typed identity + S2 bounded IDENTIFY + S3 bounded profile sync + S4 threaded DeviceIoWorker + S5 generation/PortOwner/FirmwareWorker + S6 device-id recovery/health/single-instance boundaries + unverified START/DEPLOY fail closed";
     return 0;
 }
 } // namespace
@@ -372,6 +407,16 @@ int main(int argc, char* argv[]) {
     QCoreApplication::setOrganizationName(QStringLiteral("ARStack61850"));
     QCoreApplication::setApplicationName(QStringLiteral("ARStack Studio"));
     QCoreApplication::setApplicationVersion(QStringLiteral(ARSTACK_STUDIO_VERSION));
+
+    // S6 ownership starts before any firmware process, QML object, or serial
+    // worker exists. A second Studio process therefore cannot race for the
+    // injector COM handle or bypass the supervisor's in-process PortOwner.
+    SingleInstanceGuard instanceGuard;
+    if (!instanceGuard.tryAcquire()) {
+        qCritical().noquote()
+            << "ARStack Studio is already running. Close the existing instance before opening another.";
+        return SingleInstanceGuard::contentionExitCode();
+    }
 
     FirmwareManager firmwareService;
     QObject::connect(
