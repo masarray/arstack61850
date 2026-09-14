@@ -3,14 +3,11 @@
 #include "ariec61850/mms/static_dispatcher.hpp"
 
 #include "ariec61850/asn1/ber_span_reader.hpp"
-#include "ariec61850/asn1/ber_span_writer.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
-#include <optional>
 #include <span>
 #include <string_view>
 
@@ -43,154 +40,6 @@ namespace {
         return data.constructed;
     }
     return data.tag_number >= 3 && data.tag_number <= 17 && !data.constructed;
-}
-
-[[nodiscard]] std::size_t minimal_unsigned_size(std::uint32_t value) noexcept {
-    std::size_t bytes = 1U;
-    while (value > 0xFFU) {
-        ++bytes;
-        value >>= 8U;
-    }
-    return bytes;
-}
-
-[[nodiscard]] bool needs_positive_prefix(
-    const std::uint32_t value,
-    const std::size_t minimal_bytes) noexcept {
-    const auto shift = static_cast<unsigned>((minimal_bytes - 1U) * 8U);
-    return ((value >> shift) & 0x80U) != 0U;
-}
-
-[[nodiscard]] std::size_t positive_integer_size(const std::uint32_t value) noexcept {
-    const auto minimal = minimal_unsigned_size(value);
-    return minimal + (needs_positive_prefix(value, minimal) ? 1U : 0U);
-}
-
-[[nodiscard]] bool write_positive_integer(
-    asn1::BerSpanWriter& writer,
-    const std::uint32_t value) noexcept {
-    const auto minimal = minimal_unsigned_size(value);
-    if (needs_positive_prefix(value, minimal) && !writer.write_byte(0x00U)) {
-        return false;
-    }
-    for (std::size_t index = minimal; index-- > 0U;) {
-        const auto shift = static_cast<unsigned>(index * 8U);
-        if (!writer.write_byte(static_cast<std::uint8_t>((value >> shift) & 0xFFU))) {
-            return false;
-        }
-    }
-    return true;
-}
-
-[[nodiscard]] std::optional<std::size_t> add_size(
-    const std::optional<std::size_t> left,
-    const std::optional<std::size_t> right) noexcept {
-    if (!left || !right || *right > std::numeric_limits<std::size_t>::max() - *left) {
-        return std::nullopt;
-    }
-    return *left + *right;
-}
-
-[[nodiscard]] wire::EncodeResult encode_read_response_with_specification_into(
-    const MmsReadRequestView& request,
-    const std::span<const MmsReadAccessResultInput> results,
-    const std::span<std::uint8_t> destination) noexcept {
-    if (!request.specification_with_result || request.variable_list.empty() ||
-        results.empty() || results.size() != request.variable_count ||
-        results.size() > MmsServiceSpanCodec::maximum_variables ||
-        request.invoke_id > MmsPduSpanCodec::maximum_invoke_id) {
-        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
-    }
-
-    std::size_t access_list_content{};
-    for (const auto& result : results) {
-        std::size_t encoded_size{};
-        if (result.success) {
-            if (!valid_mms_data(result.encoded_data)) {
-                return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
-            }
-            encoded_size = result.encoded_data.size();
-        } else {
-            const auto failure_value = positive_integer_size(result.failure_code);
-            const auto failure_tlv = asn1::BerSpanWriter::tlv_size(0, failure_value);
-            if (!failure_tlv) {
-                return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
-            }
-            encoded_size = *failure_tlv;
-        }
-        if (encoded_size > std::numeric_limits<std::size_t>::max() - access_list_content) {
-            return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
-        }
-        access_list_content += encoded_size;
-    }
-
-    // Read-Response.variableAccessSpecification [0] carries the same
-    // VariableAccessSpecification requested by the client. The bounded span
-    // decoder currently accepts listOfVariable [0], so reconstruct that CHOICE
-    // exactly from the request's already-validated list content.
-    const auto variable_list_tlv = asn1::BerSpanWriter::tlv_size(
-        0, request.variable_list.size());
-    if (!variable_list_tlv) {
-        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
-    }
-    const auto specification_tlv = asn1::BerSpanWriter::tlv_size(0, *variable_list_tlv);
-    const auto access_list_tlv = asn1::BerSpanWriter::tlv_size(1, access_list_content);
-    const auto service_content = add_size(specification_tlv, access_list_tlv);
-    if (!service_content) {
-        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
-    }
-
-    const auto invoke_value = positive_integer_size(request.invoke_id);
-    const auto invoke_tlv = asn1::BerSpanWriter::tlv_size(2, invoke_value);
-    const auto service_tlv = asn1::BerSpanWriter::tlv_size(4, *service_content);
-    const auto outer_content = add_size(invoke_tlv, service_tlv);
-    if (!outer_content) {
-        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
-    }
-    const auto required = asn1::BerSpanWriter::tlv_size(1, *outer_content);
-    if (!required || *required > MmsPduSpanCodec::maximum_pdu_bytes) {
-        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
-    }
-    if (destination.size() < *required) {
-        return {wire::EncodeStatus::buffer_too_small, 0U, *required};
-    }
-
-    asn1::BerSpanWriter writer{destination.first(*required)};
-    if (!writer.write_tlv_header(
-            asn1::BerClass::context_specific, true, 1, *outer_content) ||
-        !writer.write_tlv_header(
-            asn1::BerClass::universal, false, 2, invoke_value) ||
-        !write_positive_integer(writer, request.invoke_id) ||
-        !writer.write_tlv_header(
-            asn1::BerClass::context_specific, true, 4, *service_content) ||
-        !writer.write_tlv_header(
-            asn1::BerClass::context_specific, true, 0, *variable_list_tlv) ||
-        !writer.write_tlv_header(
-            asn1::BerClass::context_specific, true, 0, request.variable_list.size()) ||
-        !writer.write_bytes(request.variable_list) ||
-        !writer.write_tlv_header(
-            asn1::BerClass::context_specific, true, 1, access_list_content)) {
-        return {wire::EncodeStatus::value_out_of_range, 0U, *required};
-    }
-
-    for (const auto& result : results) {
-        if (result.success) {
-            if (!writer.write_bytes(result.encoded_data)) {
-                return {wire::EncodeStatus::value_out_of_range, 0U, *required};
-            }
-        } else {
-            const auto failure_value = positive_integer_size(result.failure_code);
-            if (!writer.write_tlv_header(
-                    asn1::BerClass::context_specific, false, 0, failure_value) ||
-                !write_positive_integer(writer, result.failure_code)) {
-                return {wire::EncodeStatus::value_out_of_range, 0U, *required};
-            }
-        }
-    }
-    if (writer.size() != *required) {
-        return {wire::EncodeStatus::value_out_of_range, 0U, *required};
-    }
-    return {wire::EncodeStatus::ok, *required, *required};
 }
 
 [[nodiscard]] MmsStaticDispatchResult make_status(
@@ -449,6 +298,10 @@ namespace {
         return make_status(MmsStaticDispatchStatus::malformed_request, confirmed);
     }
 
+    // Proven IEDScout path from ARIEC61850: accept specificationWithResult during
+    // discovery, but keep the interoperable Read-Response shape to
+    // listOfAccessResult only. Do not reject the request and do not synthesize a
+    // variableAccessSpecification echo that the proven server does not emit.
     std::array<MmsReadAccessResultInput, MmsServiceSpanCodec::maximum_variables> results{};
     std::size_t workspace_offset = 0U;
     for (std::size_t index = 0U; index < request.variable_count; ++index) {
@@ -487,13 +340,12 @@ namespace {
         workspace_offset += read.bytes_written;
     }
 
-    const auto result_span =
-        std::span<const MmsReadAccessResultInput>{results}.first(request.variable_count);
-    const auto encoded = request.specification_with_result
-        ? encode_read_response_with_specification_into(request, result_span, response)
-        : MmsServiceSpanCodec::encode_read_response_into(
-              confirmed.invoke_id, result_span, response);
-    return make_encoded(confirmed, encoded);
+    return make_encoded(
+        confirmed,
+        MmsServiceSpanCodec::encode_read_response_into(
+            confirmed.invoke_id,
+            std::span<const MmsReadAccessResultInput>{results}.first(request.variable_count),
+            response));
 }
 
 [[nodiscard]] MmsStaticDispatchResult dispatch_write(
