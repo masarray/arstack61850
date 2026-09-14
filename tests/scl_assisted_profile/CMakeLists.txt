@@ -30,3 +30,6 @@ add_scl_profile_test(
 add_scl_profile_test(
     scl_sync_health_profile
     ${CMAKE_CURRENT_LIST_DIR}/../test_scl_sync_health.cpp)
+add_scl_profile_test(
+    scl_projection_health_profile
+    ${CMAKE_CURRENT_LIST_DIR}/../test_scl_projection_health.cpp)
