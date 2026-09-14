@@ -9,6 +9,7 @@
 #include <QVariantMap>
 
 #include <algorithm>
+#include <limits>
 #include <utility>
 
 #ifndef ARSTACK_STUDIO_VERSION
@@ -26,6 +27,11 @@ QString SmartSessionController::chooseRecoveryPort(
     if (!recommended.isEmpty()) return recommended;
     if (visiblePorts.size() != 1) return {};
     return visiblePorts.front().trimmed();
+}
+
+quint64 SmartSessionController::nextSessionGeneration(const quint64 current) noexcept {
+    if (current == std::numeric_limits<quint64>::max()) return 1;
+    return current + 1;
 }
 
 bool SmartSessionController::profileGenerationAdvanced(
@@ -49,7 +55,7 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
         if (firmware_ != nullptr && firmware_->busy()) return;
         if (device_->identificationState() == DeviceController::IdentificationState::Unidentified) return;
         if (!device_->deviceVerified() && !device_->discovering() && !device_->connected()) {
-            static_cast<void>(device_->autoDetectAndConnect());
+            static_cast<void>(startDeviceDiscovery());
         }
     });
 
@@ -86,7 +92,7 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
             return;
         }
         ++updateReconnectAttempts_;
-        static_cast<void>(device_->autoDetectAndConnect());
+        static_cast<void>(startDeviceDiscovery());
         reconnectTimer_.start();
         reconcile();
     });
@@ -107,11 +113,12 @@ bool SmartSessionController::firmwareRetryAvailable() const noexcept {
 }
 bool SmartSessionController::profileSyncRetryAvailable() const noexcept {
     return profileSyncStage_ == ProfileSyncStage::failed && device_ != nullptr &&
-        device_->deviceVerified() && !device_->running();
+        device_->deviceVerified() && !device_->running() && portOwner_ == PortOwner::deviceSession;
 }
 bool SmartSessionController::updatingFirmware() const noexcept {
-    return updateStage_ == UpdateStage::stopping || updateStage_ == UpdateStage::probing ||
-        updateStage_ == UpdateStage::flashing || updateStage_ == UpdateStage::reconnecting;
+    return updateStage_ == UpdateStage::stopping || updateStage_ == UpdateStage::releasingPort ||
+        updateStage_ == UpdateStage::probing || updateStage_ == UpdateStage::flashing ||
+        updateStage_ == UpdateStage::reconnecting;
 }
 bool SmartSessionController::updateNeedsBootloaderHelp() const noexcept {
     return updateStage_ == UpdateStage::waitingForBootloader;
@@ -125,6 +132,8 @@ QString SmartSessionController::updateStatus() const {
     switch (updateStage_) {
     case UpdateStage::stopping:
         return QStringLiteral("Stopping SMV output safely…");
+    case UpdateStage::releasingPort:
+        return QStringLiteral("Releasing the device serial session before firmware access…");
     case UpdateStage::probing:
     case UpdateStage::flashing:
         return firmware_->status();
@@ -143,6 +152,30 @@ QString SmartSessionController::firmwareSetupPort() const { return blankBoardPor
 QString SmartSessionController::expectedFirmwareVersion() const { return QStringLiteral(ARSTACK_STUDIO_VERSION); }
 QString SmartSessionController::deviceFirmwareVersion() const { return deviceFirmwareVersion_; }
 
+quint64 SmartSessionController::advanceSessionGeneration() {
+    sessionGeneration_ = nextSessionGeneration(sessionGeneration_);
+    if (device_ != nullptr) device_->setSessionGeneration(sessionGeneration_);
+    if (firmware_ != nullptr) firmware_->setSessionGeneration(sessionGeneration_);
+    emit stateChanged();
+    return sessionGeneration_;
+}
+
+void SmartSessionController::setPortOwner(const PortOwner owner) {
+    if (portOwner_ == owner) return;
+    portOwner_ = owner;
+    emit stateChanged();
+}
+
+bool SmartSessionController::startDeviceDiscovery() {
+    if (device_ == nullptr || portOwner_ == PortOwner::firmwareTool ||
+        device_->connected() || device_->discovering()) {
+        return false;
+    }
+    advanceSessionGeneration();
+    setPortOwner(PortOwner::deviceSession);
+    return device_->autoDetectAndConnect();
+}
+
 void SmartSessionController::setDevice(QObject* object) {
     auto* next = qobject_cast<DeviceController*>(object);
     if (device_ == next) return;
@@ -152,6 +185,9 @@ void SmartSessionController::setDevice(QObject* object) {
     profileSyncBootId_.clear();
     resetProfileSync(true);
     clearBlankBoardContext();
+    if (device_ != nullptr) {
+        advanceSessionGeneration();
+    }
     reconnectDeviceSignals();
     emit dependenciesChanged();
     reconcile();
@@ -173,6 +209,10 @@ void SmartSessionController::setFirmware(QObject* object) {
     if (firmware_ == next) return;
     if (firmware_ != nullptr) disconnect(firmware_, nullptr, this, nullptr);
     firmware_ = next;
+    if (firmware_ != nullptr) {
+        if (sessionGeneration_ == 0) advanceSessionGeneration();
+        else firmware_->setSessionGeneration(sessionGeneration_);
+    }
     clearBlankBoardContext();
     reconnectFirmwareSignals();
     emit dependenciesChanged();
@@ -188,7 +228,7 @@ void SmartSessionController::start() {
     QTimer::singleShot(0, this, [this] {
         if (!started_ || device_ == nullptr || updateRequested_) return;
         if (!device_->deviceVerified() && !device_->discovering() && !device_->connected()) {
-            static_cast<void>(device_->autoDetectAndConnect());
+            static_cast<void>(startDeviceDiscovery());
         }
         refreshRecoveryOfferFromIdentity();
         reconcile();
@@ -219,6 +259,7 @@ bool SmartSessionController::beginFirmwareOperation(const QString& portName) {
     updatePort_ = port;
     updateRequested_ = true;
     updateReconnectAttempts_ = 0;
+    pendingReleaseGeneration_ = 0;
     profileSyncBootId_.clear();
     resetProfileSync(true);
     setupError_ = false;
@@ -251,12 +292,7 @@ bool SmartSessionController::retryFirmwareUpdate() {
     blankBoardDetected_ = false;
     updateRequested_ = true;
     updateReconnectAttempts_ = 0;
-    updateStage_ = UpdateStage::probing;
-    setPresentation(
-        QStringLiteral("UPDATING FIRMWARE"),
-        QStringLiteral("Checking ESP32-P4 Download mode…"),
-        false,
-        false);
+    pendingReleaseGeneration_ = 0;
     continueFirmwareUpdate();
     return updateRequested_;
 }
@@ -273,7 +309,7 @@ bool SmartSessionController::retryIdentification() {
     }
 
     clearBlankBoardContext();
-    const bool started = device_->autoDetectAndConnect();
+    const bool started = startDeviceDiscovery();
     reconcile();
     return started;
 }
@@ -285,13 +321,17 @@ bool SmartSessionController::retryProfileSync() {
     return true;
 }
 
-void SmartSessionController::continueFirmwareUpdate() {
-    if (!updateRequested_ || device_ == nullptr || firmware_ == nullptr) return;
-    if (device_->running()) {
-        updateStage_ = UpdateStage::stopping;
-        return;
+bool SmartSessionController::startFirmwareProbe() {
+    if (!updateRequested_ || device_ == nullptr || firmware_ == nullptr ||
+        firmware_->busy() || device_->connected()) {
+        return false;
     }
 
+    // A new firmware attempt gets a fresh generation after the serial handle is
+    // proven released. This retires every late serial callback before espflash.
+    advanceSessionGeneration();
+    setPortOwner(PortOwner::firmwareTool);
+    firmware_->setSessionGeneration(sessionGeneration_);
     updateStage_ = UpdateStage::probing;
     setPresentation(
         QStringLiteral("UPDATING FIRMWARE"),
@@ -299,19 +339,49 @@ void SmartSessionController::continueFirmwareUpdate() {
         false,
         false);
 
-    // S4 serial close is asynchronous. Never let espflash race the worker's
-    // COM handle: wait for DeviceController::portReleased before ROM probing.
-    // S5 will add the explicit PortOwner/session-generation protocol.
-    if (device_->connected()) {
-        device_->disconnectPort();
-        return;
+    if (!firmwareOwnershipValid(portOwner_, device_->connected())) {
+        latchFirmwareFailure(QStringLiteral("Firmware tool ownership was not established after serial release."));
+        emit firmwareUpdateFinished(false);
+        reconcile();
+        return false;
     }
 
     if (!firmware_->probeTarget(updatePort_)) {
         latchFirmwareFailure(firmware_->status());
         emit firmwareUpdateFinished(false);
         reconcile();
+        return false;
     }
+    return true;
+}
+
+void SmartSessionController::continueFirmwareUpdate() {
+    if (!updateRequested_ || device_ == nullptr || firmware_ == nullptr) return;
+    if (device_->running()) {
+        updateStage_ = UpdateStage::stopping;
+        return;
+    }
+
+    if (portOwner_ == PortOwner::firmwareTool) {
+        static_cast<void>(startFirmwareProbe());
+        return;
+    }
+
+    if (device_->connected()) {
+        updateStage_ = UpdateStage::releasingPort;
+        pendingReleaseGeneration_ = sessionGeneration_;
+        setPresentation(
+            QStringLiteral("UPDATING FIRMWARE"),
+            QStringLiteral("Releasing the device serial session before firmware access…"),
+            false,
+            false);
+        device_->disconnectPort();
+        return;
+    }
+
+    pendingReleaseGeneration_ = 0;
+    setPortOwner(PortOwner::none);
+    static_cast<void>(startFirmwareProbe());
 }
 
 void SmartSessionController::reconnectDeviceSignals() {
@@ -319,6 +389,7 @@ void SmartSessionController::reconnectDeviceSignals() {
 
     connect(device_, &DeviceController::deviceVerifiedChanged, this, [this] {
         if (device_ != nullptr && device_->deviceVerified()) {
+            if (portOwner_ != PortOwner::firmwareTool) setPortOwner(PortOwner::deviceSession);
             clearBlankBoardContext();
             refreshFirmwareIdentity();
             profileSyncBootId_.clear();
@@ -341,6 +412,9 @@ void SmartSessionController::reconnectDeviceSignals() {
         reconcile();
     });
     connect(device_, &DeviceController::connectedChanged, this, [this] {
+        if (device_ != nullptr && device_->connected() && portOwner_ != PortOwner::firmwareTool) {
+            setPortOwner(PortOwner::deviceSession);
+        }
         refreshRecoveryOfferFromIdentity();
         reconcile();
     });
@@ -359,11 +433,16 @@ void SmartSessionController::reconnectDeviceSignals() {
         }
         reconcile();
     });
-    connect(device_, &DeviceController::portReleased, this, [this](const QString&) {
-        if (updateRequested_ && updateStage_ == UpdateStage::probing &&
-            firmware_ != nullptr && !firmware_->busy()) {
-            QTimer::singleShot(0, this, [this] { continueFirmwareUpdate(); });
+    connect(device_, &DeviceController::portReleased, this,
+            [this](const quint64 generation, const QString&) {
+        if (!updateRequested_ || updateStage_ != UpdateStage::releasingPort ||
+            !generationIsCurrent(sessionGeneration_, generation) ||
+            generation != pendingReleaseGeneration_) {
+            return;
         }
+        pendingReleaseGeneration_ = 0;
+        setPortOwner(PortOwner::none);
+        QTimer::singleShot(0, this, [this] { continueFirmwareUpdate(); });
     });
     connect(device_, &DeviceController::profileStateChanged, this, [this] {
         handleProfileStateChanged();
@@ -392,6 +471,11 @@ void SmartSessionController::reconnectFirmwareSignals() {
             return;
         }
 
+        if (firmware_->sessionGeneration() != sessionGeneration_ ||
+            portOwner_ != PortOwner::firmwareTool) {
+            return;
+        }
+
         if (updateStage_ == UpdateStage::probing && !firmware_->busy()) {
             if (firmware_->targetVerified()) {
                 updateStage_ = UpdateStage::flashing;
@@ -401,6 +485,14 @@ void SmartSessionController::reconnectFirmwareSignals() {
                     false,
                     false);
                 QTimer::singleShot(0, this, [this] {
+                    if (firmware_ == nullptr || device_ == nullptr ||
+                        firmware_->sessionGeneration() != sessionGeneration_ ||
+                        !firmwareOwnershipValid(portOwner_, device_->connected())) {
+                        latchFirmwareFailure(QStringLiteral("Firmware ownership changed before installation could start."));
+                        emit firmwareUpdateFinished(false);
+                        reconcile();
+                        return;
+                    }
                     if (!firmware_->installFirmware(updatePort_)) {
                         if (firmware_->bootloaderHelpNeeded()) {
                             updateStage_ = UpdateStage::waitingForBootloader;
@@ -429,7 +521,9 @@ void SmartSessionController::reconnectFirmwareSignals() {
 
     connect(firmware_, &FirmwareManager::operationFailed, this,
             [this](const QString& message, const bool bootloaderHelpNeeded) {
-        if (!updateRequested_) {
+        if (!updateRequested_ || firmware_ == nullptr ||
+            firmware_->sessionGeneration() != sessionGeneration_ ||
+            portOwner_ != PortOwner::firmwareTool) {
             reconcile();
             return;
         }
@@ -443,9 +537,14 @@ void SmartSessionController::reconnectFirmwareSignals() {
     });
 
     connect(firmware_, &FirmwareManager::installationFinished, this, [this](const bool resetSucceeded) {
-        if (!updateRequested_) return;
+        if (!updateRequested_ || firmware_ == nullptr ||
+            firmware_->sessionGeneration() != sessionGeneration_ ||
+            portOwner_ != PortOwner::firmwareTool) {
+            return;
+        }
 
         updateReconnectAttempts_ = 0;
+        setPortOwner(PortOwner::none);
         if (resetSucceeded) {
             updateStage_ = UpdateStage::reconnecting;
             setPresentation(
@@ -458,6 +557,7 @@ void SmartSessionController::reconnectFirmwareSignals() {
         }
 
         if (firmware_->bootloaderHelpNeeded()) {
+            setPortOwner(PortOwner::firmwareTool);
             updateStage_ = UpdateStage::waitingForBootloader;
             reconcile();
             return;
@@ -480,9 +580,6 @@ void SmartSessionController::refreshRecoveryOfferFromIdentity() {
         return;
     }
 
-    // Normal startup stops here: USB descriptor confidence is enough to offer
-    // recovery, but never enough to classify ROM silicon or authorize a write.
-    // beginFirmwareInstall() is the explicit boundary that runs probeTarget().
     const QString recommended = device_->recommendedPort().trimmed();
     if (recommended.isEmpty() || !device_->ports().contains(recommended)) {
         blankBoardDetected_ = false;
@@ -506,7 +603,9 @@ void SmartSessionController::latchFirmwareFailure(QString message) {
     updateRequested_ = false;
     updateStage_ = UpdateStage::idle;
     updateReconnectAttempts_ = 0;
+    pendingReleaseGeneration_ = 0;
     blankBoardDetected_ = false;
+    if (portOwner_ == PortOwner::firmwareTool) setPortOwner(PortOwner::none);
     setupError_ = true;
     message = message.trimmed();
     setupErrorStatus_ = message.isEmpty()
@@ -525,6 +624,7 @@ void SmartSessionController::resetProfileSync(const bool requireSync) {
 
 bool SmartSessionController::beginProfileSync(const QVariantMap& profile) {
     if (device_ == nullptr || !device_->deviceVerified() || device_->running() ||
+        portOwner_ != PortOwner::deviceSession ||
         profileSyncStage_ == ProfileSyncStage::failed ||
         !profileSyncRetryAllowed(profileSyncAttempts_)) {
         return false;
@@ -534,9 +634,6 @@ bool SmartSessionController::beginProfileSync(const QVariantMap& profile) {
     if (profileSyncBootId_ == currentBootId && !currentBootId.isEmpty()) {
         profileSyncBaselineGeneration_ = device_->profileGeneration().trimmed();
     } else {
-        // A profile generation only has meaning inside one firmware boot. Do
-        // not compare a fresh boot against a generation cached from an older
-        // boot/session; the first armed generation on this boot is authoritative.
         profileSyncBaselineGeneration_.clear();
         profileSyncBootId_ = currentBootId;
     }
@@ -566,12 +663,7 @@ void SmartSessionController::handleProfileStateChanged() {
 
     if (device_->profileArmed()) {
         const QString observedGeneration = device_->profileGeneration().trimmed();
-        if (!profileGenerationAdvanced(profileSyncBaselineGeneration_, observedGeneration)) {
-            // Ignore an out-of-order/stale arm indication. The bounded timer
-            // remains authoritative and will retry/fail if no new generation
-            // arrives for this transaction.
-            return;
-        }
+        if (!profileGenerationAdvanced(profileSyncBaselineGeneration_, observedGeneration)) return;
 
         profileSyncTimer_.stop();
         profileSyncStage_ = ProfileSyncStage::idle;
@@ -597,9 +689,6 @@ void SmartSessionController::handleProfileSyncAttemptFailure(QString reason) {
     if (reason.isEmpty()) reason = QStringLiteral("Profile synchronization did not complete.");
 
     if (profileSyncRetryAllowed(profileSyncAttempts_)) {
-        // Retire DeviceController's pending marker before retrying. Otherwise a
-        // silent peer can leave profileDeploying=true forever even though the
-        // supervisor transaction already timed out.
         profileSyncStage_ = ProfileSyncStage::idle;
         profileSyncError_ = reason;
         if (device_ != nullptr && device_->profileDeploying()) device_->abandonProfileDeployment();
@@ -685,8 +774,8 @@ void SmartSessionController::reconcile() {
             setPresentation(QStringLiteral("UPDATE NEEDS BOOT"), updateStatus(), false, false);
             return;
         }
-        if (updateStage_ == UpdateStage::stopping || updateStage_ == UpdateStage::probing ||
-            updateStage_ == UpdateStage::flashing ||
+        if (updateStage_ == UpdateStage::stopping || updateStage_ == UpdateStage::releasingPort ||
+            updateStage_ == UpdateStage::probing || updateStage_ == UpdateStage::flashing ||
             (updateStage_ == UpdateStage::reconnecting && !device_->deviceVerified())) {
             setPresentation(
                 QStringLiteral("UPDATING FIRMWARE"),
