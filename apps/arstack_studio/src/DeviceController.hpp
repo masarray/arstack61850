@@ -32,6 +32,8 @@ class DeviceController : public QObject {
     Q_PROPERTY(QString discoveryStatus READ discoveryStatus NOTIFY discoveryChanged)
     Q_PROPERTY(bool discovering READ discovering NOTIFY discoveryChanged)
     Q_PROPERTY(bool deviceVerified READ deviceVerified NOTIFY deviceVerifiedChanged)
+    Q_PROPERTY(IdentificationState identificationState READ identificationState NOTIFY identificationStateChanged)
+    Q_PROPERTY(int identifyAttempts READ identifyAttempts NOTIFY identificationStateChanged)
     Q_PROPERTY(QString deviceProduct READ deviceProduct NOTIFY deviceIdentityChanged)
     Q_PROPERTY(QString deviceTarget READ deviceTarget NOTIFY deviceIdentityChanged)
     Q_PROPERTY(QString deviceId READ deviceId NOTIFY deviceIdentityChanged)
@@ -62,6 +64,14 @@ class DeviceController : public QObject {
     Q_PROPERTY(QString ptpTxFailures READ ptpTxFailures NOTIFY ptpStateChanged)
 
 public:
+    enum class IdentificationState {
+        Idle,
+        Identifying,
+        Verified,
+        Unidentified,
+    };
+    Q_ENUM(IdentificationState)
+
     explicit DeviceController(QObject* parent = nullptr);
 
     [[nodiscard]] QStringList ports() const;
@@ -69,6 +79,8 @@ public:
     [[nodiscard]] QString discoveryStatus() const;
     [[nodiscard]] bool discovering() const noexcept;
     [[nodiscard]] bool deviceVerified() const noexcept;
+    [[nodiscard]] IdentificationState identificationState() const noexcept;
+    [[nodiscard]] int identifyAttempts() const noexcept;
     [[nodiscard]] QString deviceProduct() const;
     [[nodiscard]] QString deviceTarget() const;
     [[nodiscard]] QString deviceId() const;
@@ -107,6 +119,14 @@ public:
     [[nodiscard]] static bool identitySupportsCurrentContract(
         const DeviceIdentity& identity,
         const QString& expectedFirmwareVersion);
+
+    // S2 identification policy is deliberately small and deterministic. The
+    // same predicate drives production retry behavior and the CI regression.
+    [[nodiscard]] static constexpr int identityMaxAttempts() noexcept { return 3; }
+    [[nodiscard]] static constexpr int identityRetryIntervalMs() noexcept { return 650; }
+    [[nodiscard]] static constexpr bool identityRetryAllowed(const int attemptsSent) noexcept {
+        return attemptsSent >= 0 && attemptsSent < identityMaxAttempts();
+    }
 
     Q_INVOKABLE void refreshPorts();
     Q_INVOKABLE bool autoDetectAndConnect();
@@ -170,6 +190,7 @@ signals:
     void portsChanged();
     void discoveryChanged();
     void deviceVerifiedChanged();
+    void identificationStateChanged();
     void deviceIdentityChanged();
     void connectedChanged();
     void runningChanged();
@@ -194,10 +215,13 @@ protected:
 private:
     bool connectPortInternal(const QString& portName, bool automatic);
     bool tryNextProbe();
+    bool sendIdentifyProbe();
     bool sendCommand(const QString& command);
     void applyIdentity(DeviceIdentity identity);
     void clearIdentity();
     void markDeviceVerified();
+    void setIdentificationState(IdentificationState state);
+    void finishIdentificationTimeout();
     void setDiscoveryState(const QString& status, bool active);
     void setRunning(bool value);
     void setError(const QString& message);
@@ -223,6 +247,9 @@ private:
     QString txFailures_{QStringLiteral("—")};
     QString signalGeneration_{QStringLiteral("—")};
     QString profileGeneration_{QStringLiteral("—")};
+    QString lastIdentificationPort_;
+    IdentificationState identificationState_{IdentificationState::Idle};
+    int identifyAttempts_{0};
     bool running_{false};
     bool discovering_{false};
     bool deviceVerified_{false};
