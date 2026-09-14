@@ -160,13 +160,27 @@ namespace {
     }
 
     if (request.object_class == MmsNameListObjectClass::named_variable_list &&
+        (request.scope == MmsNameScopeKind::vmd_specific ||
+         request.scope == MmsNameScopeKind::aa_specific)) {
+        // Proven IEDScout discovery probes both VMD-specific and AA-specific
+        // NamedVariableList scopes before walking domain-specific DataSets.
+        // Return one deterministic item name per DataSet and de-duplicate names
+        // shared by multiple domains at this scope.
+        for (const auto& data_set : data_sets.data_sets()) {
+            if (!append_unique(names, count, data_set.item)) {
+                return names.size() + 1U;
+            }
+        }
+        return count;
+    }
+
+    if (request.object_class == MmsNameListObjectClass::named_variable_list &&
         request.scope == MmsNameScopeKind::domain_specific) {
         for (const auto& data_set : data_sets.data_sets()) {
             if (span_equals(request.domain_id, data_set.domain)) {
-                if (count >= names.size()) {
+                if (!append_unique(names, count, data_set.item)) {
                     return names.size() + 1U;
                 }
-                names[count++] = data_set.item;
             }
         }
         return count;
