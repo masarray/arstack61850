@@ -30,21 +30,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Parse Windows launcher
+      - name: Parse Windows PowerShell entrypoints
         shell: powershell
         run: |
-          $path = Resolve-Path '.\apps\arstack_studio\run-windows.ps1'
-          $tokens = $null
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            $path,
-            [ref]$tokens,
-            [ref]$errors) | Out-Null
-          if ($errors.Count -gt 0) {
-            $errors | Format-List *
-            throw "Windows launcher contains $($errors.Count) PowerShell parser error(s)."
+          $paths = @(
+            '.\apps\arstack_studio\run-windows.ps1',
+            '.\apps\arstack_studio\packaging\verify-single-instance.ps1'
+          )
+          foreach ($candidate in $paths) {
+            $path = Resolve-Path $candidate
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $path,
+              [ref]$tokens,
+              [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | Format-List *
+              throw "$candidate contains $($errors.Count) PowerShell parser error(s)."
+            }
           }
-          Write-Host 'Windows launcher PowerShell parse: PASS'
+          Write-Host 'Windows PowerShell parse: PASS · launcher + S8B packaged ownership probe'
 
   windows-ownership-integration:
     name: S8B Windows ownership integration
@@ -85,10 +91,13 @@ jobs:
             $process.Kill()
             throw 'S8A Windows deterministic harness timed out.'
           }
+          $process.WaitForExit()
+          $process.Refresh()
+          $exitCode = $process.ExitCode
           Get-Content $out -ErrorAction SilentlyContinue
           Get-Content $err -ErrorAction SilentlyContinue
-          if ($process.ExitCode -ne 0) {
-            throw "S8A Windows deterministic harness failed with exit code $($process.ExitCode)."
+          if ($exitCode -ne 0) {
+            throw "S8A Windows deterministic harness failed with exit code $exitCode."
           }
 
       - name: S8B cross-process ownership and serial-loss harness
@@ -103,10 +112,13 @@ jobs:
             $process.Kill()
             throw 'S8B Windows ownership harness timed out.'
           }
+          $process.WaitForExit()
+          $process.Refresh()
+          $exitCode = $process.ExitCode
           Get-Content $out -ErrorAction SilentlyContinue
           Get-Content $err -ErrorAction SilentlyContinue
-          if ($process.ExitCode -ne 0) {
-            throw "S8B Windows ownership harness failed with exit code $($process.ExitCode)."
+          if ($exitCode -ne 0) {
+            throw "S8B Windows ownership harness failed with exit code $exitCode."
           }
 
       - name: Retain Windows ownership logs
