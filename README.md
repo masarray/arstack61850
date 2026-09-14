@@ -12,11 +12,13 @@ For a new engineer or AI development thread, read these before making architectu
 
 1. [`NORTH_STAR.md`](NORTH_STAR.md) — product thesis, standards, hardware roadmap and definition of success.
 2. [`PROJECT_HANDOFF.md`](PROJECT_HANDOFF.md) — current ESP32-P4 bench status and immediate next work.
-3. [`embedded/esp32p4_smv_injector/ARCHITECTURE.md`](embedded/esp32p4_smv_injector/ARCHITECTURE.md) — embedded real-time architecture boundaries.
-4. [`docs/GLOBAL_BENCHMARK.md`](docs/GLOBAL_BENCHMARK.md) — vendor-neutral standards/industry research behind the direction.
-5. Issue #21 — deterministic SV timing-evidence gate.
-6. Issue #24 — standards-first SCL/profile/PTP roadmap.
-7. PR #19 — current ESP32-P4 hardware implementation under bench validation.
+3. [`docs/ONLINE_MODEL_CONNECT_DECISION.md`](docs/ONLINE_MODEL_CONNECT_DECISION.md) — short decision contract separating full live discovery from SCL-assisted online connect.
+4. [`LIVE_DISCOVERY_PROFILE.md`](LIVE_DISCOVERY_PROFILE.md) — detailed live-discovery and online-model interoperability boundary.
+5. [`embedded/esp32p4_smv_injector/ARCHITECTURE.md`](embedded/esp32p4_smv_injector/ARCHITECTURE.md) — embedded real-time architecture boundaries.
+6. [`docs/GLOBAL_BENCHMARK.md`](docs/GLOBAL_BENCHMARK.md) — vendor-neutral standards/industry research behind the direction.
+7. Issue #21 — deterministic SV timing-evidence gate.
+8. Issue #24 — standards-first SCL/profile/PTP roadmap.
+9. PR #19 — current ESP32-P4 hardware implementation under bench validation.
 
 The project deliberately separates **wire facts**, **configured expectations**, **profile claims**, and **synchronization evidence**. A packet that decodes in a host capture tool is not, by itself, a conformance or timing claim.
 
@@ -174,14 +176,15 @@ firmware changed.
 
 ### Phase 4A — offline DataSet and report monitoring
 
-- DataSet and buffered/unbuffered RCB inventory from supplied GetNameList evidence.
+- DataSet directory, InformationReport, and RCB state support.
+- DataSet directory from supplied GetNameList evidence.
 - GetNamedVariableListAttributes request/response and IEC reference normalization.
 - Strict InformationReport and OptFlds-driven report-frame decoding.
 - RCB attribute read-plan/state mapping with cautious availability confidence.
 - Sequence, configuration, DataSet, overflow, and segmentation continuity tracking.
 - Bounded offline report monitor and dedicated MMS-reporting fuzz corpus.
 
-### Hardware process-bus runtime — ESP32-P4 P0/P1/P2 foundation
+## Hardware process-bus runtime — ESP32-P4 P0/P1/P2 foundation
 
 The portable core still does not silently open raw sockets or physical IED sessions. **Active process-bus transmission exists only in explicitly enabled hardware/lab targets**, currently `embedded/esp32p4_smv_injector`, and is intended for isolated bench use.
 
@@ -365,4 +368,4 @@ The long-term product family — injector, process-bus analyzer, digital-substat
 
 ## Public-repository naming policy
 
-Public project documentation should remain vendor-neutral. Do not add commercial competitor names, product comparisons, logos, screenshots, or vendor marketing references. Standards, protocol identifiers, and technical platform/dependency names required to build or reproduce the project are allowed.
+Public project documentation should remain vendor-neutral. Do not add commercial competitor names, product comparisons, logos, screenshots, or vendor marketing references. Standards, protocol identifiers, and technical platform references are acceptable when they are relevant to implementation or interoperability.
