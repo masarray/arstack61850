@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2)
+
 # Reuse the exact desktop build graph so the P3 QA is linked against the same
 # core, compatibility server, Qt version and controller implementation as the
 # shipped workbench. The parent app target is configured but this QA target can
