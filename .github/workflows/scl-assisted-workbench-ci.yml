@@ -1,0 +1,70 @@
+name: SCL-Assisted Workbench CI
+
+on:
+  push:
+    paths:
+      - 'apps/ied_simulator/src/MmsClientController.*'
+      - 'apps/ied_simulator/src/MmsLiveTreeModel.*'
+      - 'apps/ied_simulator/src/MmsSclClientProjection.hpp'
+      - 'apps/ied_simulator/src/ied_mms_scl_assisted_workbench_qa.cpp'
+      - 'apps/ied_simulator/tests/scl_assisted_workbench/**'
+      - 'apps/ied_simulator/qml/Main.qml'
+      - 'apps/ied_simulator/qml/MmsClientWorkspace.qml'
+      - 'include/ariec61850/mms/**'
+      - 'src/mms/**'
+      - 'include/ariec61850/scl/**'
+      - 'src/scl/**'
+      - 'tests/fixtures/scl/client-workbench.scd'
+      - '.github/workflows/scl-assisted-workbench-ci.yml'
+  pull_request:
+    paths:
+      - 'apps/ied_simulator/src/MmsClientController.*'
+      - 'apps/ied_simulator/src/MmsLiveTreeModel.*'
+      - 'apps/ied_simulator/src/MmsSclClientProjection.hpp'
+      - 'apps/ied_simulator/src/ied_mms_scl_assisted_workbench_qa.cpp'
+      - 'apps/ied_simulator/tests/scl_assisted_workbench/**'
+      - 'apps/ied_simulator/qml/Main.qml'
+      - 'apps/ied_simulator/qml/MmsClientWorkspace.qml'
+      - 'include/ariec61850/mms/**'
+      - 'src/mms/**'
+      - 'include/ariec61850/scl/**'
+      - 'src/scl/**'
+      - 'tests/fixtures/scl/client-workbench.scd'
+      - '.github/workflows/scl-assisted-workbench-ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scl-assisted-workbench-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  product-path:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
+
+      - name: Configure P3 workbench gate
+        run: >-
+          cmake -S apps/ied_simulator/tests/scl_assisted_workbench
+          -B build-scl-assisted-workbench -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build P3 workbench gate
+        run: >-
+          cmake --build build-scl-assisted-workbench
+          --target ied_mms_scl_assisted_workbench_qa --parallel 2
+
+      - name: Run trusted-SCL product-path regression
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          ./build-scl-assisted-workbench/ied_mms_scl_assisted_workbench_qa
+          ./tests/fixtures/scl/client-workbench.scd
