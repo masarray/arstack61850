@@ -20,6 +20,19 @@ GetNamedVariableListAttributes, and Read. It does not construct Write, RCB enabl
 GI, control, dynamic DataSet mutation, or file-service requests. Regression tests decode every
 discovery request and reject service tag 5.
 
+## Observed discovery wire behavior
+
+A controlled loopback capture of an independent reference engineering client and MMS simulator
+is documented in [`docs/MMS_DISCOVERY_WIRE_PROFILE.md`](docs/MMS_DISCOVERY_WIRE_PROFILE.md).
+The capture records association parameters, monotonic invoke-ID behavior, GetNameList
+pagination, LN-root type probing, selective Reads, DataSet directory discovery, and the
+observed progressive interleaving of name, type, and semantic-read requests.
+
+That document is empirical interoperability evidence, not a normative IEC 61850 requirement.
+The current inventory-first discovery flow remains valid; a future optional progressive
+scheduler may use the evidence to improve time-to-first-model and behavioral compatibility
+without changing the canonical read-only service boundary.
+
 ## Live-model parity
 
 The C++ mapper normalizes `LN$FC$DO$DA...` into LD/LN/DO/DA hierarchy, preserves FC and MMS
