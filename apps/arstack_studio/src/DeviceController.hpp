@@ -62,7 +62,30 @@ class DeviceController : public QObject {
     Q_PROPERTY(QString ptpVlan READ ptpVlan NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpAnnounceSent READ ptpAnnounceSent NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpSyncSent READ ptpSyncSent NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpFollowUpSent READ ptpFollowUpSent NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpPdelayFrames READ ptpPdelayFrames NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpTxFailures READ ptpTxFailures NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpRole READ ptpRole NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpDiscipline READ ptpDiscipline NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpSource READ ptpSource NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpOffsetNs READ ptpOffsetNs NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpPathDelayNs READ ptpPathDelayNs NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpJitterNs READ ptpJitterNs NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpFrequencyPpb READ ptpFrequencyPpb NOTIFY ptpStateChanged)
+    Q_PROPERTY(bool ptpGlobalTraceable READ ptpGlobalTraceable NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpMeasuredSmpSynch READ ptpMeasuredSmpSynch NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpRxAnnounce READ ptpRxAnnounce NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpRxSync READ ptpRxSync NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpRxFollowUp READ ptpRxFollowUp NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpRxPdelay READ ptpRxPdelay NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpPdelayRequests READ ptpPdelayRequests NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpAccepted READ ptpAccepted NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpRejected READ ptpRejected NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString smpSynchMode READ smpSynchMode NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString smpSynchValue READ smpSynchValue NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString smpSynchSource READ smpSynchSource NOTIFY ptpStateChanged)
+    Q_PROPERTY(bool smpSynchSimulated READ smpSynchSimulated NOTIFY ptpStateChanged)
+    Q_PROPERTY(bool smpSynchMeasured READ smpSynchMeasured NOTIFY ptpStateChanged)
 
 public:
     enum class IdentificationState {
@@ -111,7 +134,30 @@ public:
     [[nodiscard]] QString ptpVlan() const;
     [[nodiscard]] QString ptpAnnounceSent() const;
     [[nodiscard]] QString ptpSyncSent() const;
+    [[nodiscard]] QString ptpFollowUpSent() const { return ptpFollowUpSent_; }
+    [[nodiscard]] QString ptpPdelayFrames() const { return ptpPdelayFrames_; }
     [[nodiscard]] QString ptpTxFailures() const;
+    [[nodiscard]] QString ptpRole() const { return ptpRole_; }
+    [[nodiscard]] QString ptpDiscipline() const { return ptpDiscipline_; }
+    [[nodiscard]] QString ptpSource() const { return ptpSource_; }
+    [[nodiscard]] QString ptpOffsetNs() const { return ptpOffsetNs_; }
+    [[nodiscard]] QString ptpPathDelayNs() const { return ptpPathDelayNs_; }
+    [[nodiscard]] QString ptpJitterNs() const { return ptpJitterNs_; }
+    [[nodiscard]] QString ptpFrequencyPpb() const { return ptpFrequencyPpb_; }
+    [[nodiscard]] bool ptpGlobalTraceable() const noexcept { return ptpGlobalTraceable_; }
+    [[nodiscard]] QString ptpMeasuredSmpSynch() const { return ptpMeasuredSmpSynch_; }
+    [[nodiscard]] QString ptpRxAnnounce() const { return ptpRxAnnounce_; }
+    [[nodiscard]] QString ptpRxSync() const { return ptpRxSync_; }
+    [[nodiscard]] QString ptpRxFollowUp() const { return ptpRxFollowUp_; }
+    [[nodiscard]] QString ptpRxPdelay() const { return ptpRxPdelay_; }
+    [[nodiscard]] QString ptpPdelayRequests() const { return ptpPdelayRequests_; }
+    [[nodiscard]] QString ptpAccepted() const { return ptpAccepted_; }
+    [[nodiscard]] QString ptpRejected() const { return ptpRejected_; }
+    [[nodiscard]] QString smpSynchMode() const { return smpSynchMode_; }
+    [[nodiscard]] QString smpSynchValue() const { return smpSynchValue_; }
+    [[nodiscard]] QString smpSynchSource() const { return smpSynchSource_; }
+    [[nodiscard]] bool smpSynchSimulated() const noexcept { return smpSynchSimulated_; }
+    [[nodiscard]] bool smpSynchMeasured() const noexcept { return smpSynchMeasured_; }
     [[nodiscard]] quint64 sessionGeneration() const noexcept { return sessionGeneration_; }
 
     [[nodiscard]] bool ioWorkerReady() const noexcept { return ioWorkerReady_; }
@@ -240,6 +286,7 @@ private:
     void appendLog(const QString& direction, const QString& line);
     void processLine(const QString& rawLine);
     void resetTelemetry();
+    void resetPtpState();
     static QString cleanLine(const QString& rawLine);
     static QString utf8Hex(const QString& text);
     static QString compactMac(const QString& text);
@@ -282,5 +329,28 @@ private:
     QString ptpVlan_{QStringLiteral("-")};
     QString ptpAnnounceSent_{QStringLiteral("-")};
     QString ptpSyncSent_{QStringLiteral("-")};
+    QString ptpFollowUpSent_{QStringLiteral("-")};
+    QString ptpPdelayFrames_{QStringLiteral("-")};
     QString ptpTxFailures_{QStringLiteral("-")};
+    QString ptpRole_{QStringLiteral("SOURCE")};
+    QString ptpDiscipline_{QStringLiteral("UNLOCKED")};
+    QString ptpSource_{QStringLiteral("NONE")};
+    QString ptpOffsetNs_{QStringLiteral("NA")};
+    QString ptpPathDelayNs_{QStringLiteral("NA")};
+    QString ptpJitterNs_{QStringLiteral("NA")};
+    QString ptpFrequencyPpb_{QStringLiteral("0")};
+    QString ptpMeasuredSmpSynch_{QStringLiteral("NA")};
+    QString ptpRxAnnounce_{QStringLiteral("0")};
+    QString ptpRxSync_{QStringLiteral("0")};
+    QString ptpRxFollowUp_{QStringLiteral("0")};
+    QString ptpRxPdelay_{QStringLiteral("0")};
+    QString ptpPdelayRequests_{QStringLiteral("0")};
+    QString ptpAccepted_{QStringLiteral("0")};
+    QString ptpRejected_{QStringLiteral("0")};
+    QString smpSynchMode_{QStringLiteral("AUTO")};
+    QString smpSynchValue_{QStringLiteral("0")};
+    QString smpSynchSource_{QStringLiteral("SAFE_DEFAULT")};
+    bool ptpGlobalTraceable_{false};
+    bool smpSynchSimulated_{false};
+    bool smpSynchMeasured_{false};
 };
