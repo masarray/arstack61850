@@ -6,6 +6,8 @@
 #include <QStandardPaths>
 #include <QString>
 
+#include <utility>
+
 // Process-level ownership barrier for the desktop instrument.
 //
 // The lock is intentionally acquired in main() before FirmwareManager, QML, or
