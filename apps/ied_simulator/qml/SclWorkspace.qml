@@ -26,16 +26,21 @@ Item {
 
     FileDialog {
         id: saveDialog
-        title: "Save verified SCL copy"
+        property bool canonicalRequested: false
+        title: canonicalRequested ? "Export canonical SCL" : "Save exact SCL copy"
         fileMode: FileDialog.SaveFile
-        nameFilters: ["IEC 61850 engineering files (*.scl *.cid *.scd *.iid *.icd)", "All files (*)"]
-        onAccepted: workspace.saveAs(selectedFile, root.targetEditionKey(editionPicker.currentIndex))
+        nameFilters: canonicalRequested
+                     ? ["Canonical SCL (*.scd *.icd *.cid)", "All files (*)"]
+                     : ["IEC 61850 engineering files (*.scl *.cid *.scd *.iid *.icd)", "All files (*)"]
+        onAccepted: {
+            if (canonicalRequested)
+                workspace.exportCanonical(selectedFile, root.targetEditionKey(editionPicker.currentIndex))
+            else
+                workspace.saveAs(selectedFile, "preserve")
+        }
     }
 
-    Rectangle {
-        anchors.fill: parent
-        color: theme.background
-    }
+    Rectangle { anchors.fill: parent; color: theme.background }
 
     ColumnLayout {
         anchors.fill: parent
@@ -65,7 +70,7 @@ Item {
                         Layout.fillWidth: true
                         text: workspace.loaded
                               ? workspace.sourceName + " · " + workspace.editionText
-                              : "Verified source preservation first; reconstruction/conversion remains fail-closed"
+                              : "Exact source preservation + verified canonical reconstruction/export"
                         color: theme.textSoft
                         font.pixelSize: theme.captionSize
                         elide: Text.ElideMiddle
@@ -87,7 +92,7 @@ Item {
                     onClicked: workspace.cancelOperation()
                 }
                 ColumnLayout {
-                    Layout.preferredWidth: 150
+                    Layout.preferredWidth: 160
                     spacing: 1
                     Label {
                         Layout.alignment: Qt.AlignRight
@@ -162,11 +167,7 @@ Item {
                                 required property var modelData
                                 Layout.fillWidth: true
                                 spacing: 1
-                                Label {
-                                    text: modelData.label
-                                    color: theme.muted
-                                    font.pixelSize: 9
-                                }
+                                Label { text: modelData.label; color: theme.muted; font.pixelSize: 9 }
                                 Label {
                                     text: String(modelData.value)
                                     color: theme.text
@@ -188,11 +189,21 @@ Item {
                         anchors.margins: 12
                         spacing: 8
 
-                        Label {
-                            text: "Preservation / reconstruction report"
-                            color: theme.text
-                            font.pixelSize: theme.labelSize
-                            font.weight: Font.DemiBold
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Label {
+                                text: "Preservation / reconstruction report"
+                                color: theme.text
+                                font.pixelSize: theme.labelSize
+                                font.weight: Font.DemiBold
+                            }
+                            Item { Layout.fillWidth: true }
+                            Label {
+                                text: workspace.reconstructionSupported ? "CANONICAL READY" : "CANONICAL GUARDED"
+                                color: workspace.reconstructionSupported ? theme.green : theme.amber
+                                font.pixelSize: 9
+                                font.weight: Font.Bold
+                            }
                         }
 
                         ListView {
@@ -207,7 +218,7 @@ Item {
                                 width: reportList.width
                                 height: reportText.implicitHeight + 14
                                 radius: 5
-                                color: modelData.indexOf("disabled") >= 0 || modelData.indexOf("fail-closed") >= 0
+                                color: modelData.indexOf("fail-closed") >= 0 || modelData.indexOf("not vendor-lossless") >= 0
                                        ? theme.amberSoft : theme.chrome
                                 border.width: 1
                                 border.color: theme.lineSoft
@@ -231,7 +242,7 @@ Item {
             }
 
             SurfaceCard {
-                Layout.preferredWidth: 390
+                Layout.preferredWidth: 410
                 Layout.fillHeight: true
                 theme: root.theme
 
@@ -241,7 +252,7 @@ Item {
                     spacing: 10
 
                     Label {
-                        text: "Save As policy"
+                        text: "Export policy"
                         color: theme.text
                         font.pixelSize: theme.subtitleSize
                         font.weight: Font.DemiBold
@@ -249,7 +260,7 @@ Item {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 74
+                        Layout.preferredHeight: 82
                         radius: 6
                         color: workspace.exactSourceSaveSupported ? theme.greenSoft : theme.surfaceSoft
                         border.width: 1
@@ -259,62 +270,56 @@ Item {
                             anchors.margins: 9
                             spacing: 2
                             Label {
-                                text: "VERIFIED SOURCE-PRESERVING SAVE"
+                                text: "EXACT SOURCE SAVE"
                                 color: workspace.exactSourceSaveSupported ? theme.green : theme.textSoft
                                 font.pixelSize: 9
                                 font.weight: Font.Bold
                             }
                             Label {
                                 Layout.fillWidth: true
-                                text: "Same edition + same source profile extension. Output bytes are reread, reparsed and semantic-round-trip checked."
+                                text: "Byte-identical source copy. Same edition and same extension/profile only; vendor XML and unmodeled content remain untouched."
                                 wrapMode: Text.Wrap
                                 color: theme.textSoft
                                 font.pixelSize: theme.captionSize
                             }
                         }
-                    }
-
-                    Label {
-                        text: "Target edition"
-                        color: theme.textSoft
-                        font.pixelSize: theme.captionSize
-                    }
-                    ComboBox {
-                        id: editionPicker
-                        Layout.fillWidth: true
-                        model: ["Preserve source edition", "Edition 1", "Edition 2", "Edition 2.1"]
-                        enabled: workspace.loaded && !workspace.busy
                     }
 
                     ActionButton {
                         Layout.fillWidth: true
                         theme: root.theme
-                        text: "Save verified copy"
-                        primary: true
+                        text: "Save exact source copy"
                         enabled: workspace.exactSourceSaveSupported && !workspace.busy
-                        onClicked: saveDialog.open()
+                        onClicked: {
+                            saveDialog.canonicalRequested = false
+                            saveDialog.open()
+                        }
                     }
+
+                    Rectangle { Layout.fillWidth: true; height: 1; color: theme.lineSoft }
 
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 94
+                        Layout.preferredHeight: 108
                         radius: 6
-                        color: theme.amberSoft
+                        color: workspace.reconstructionSupported ? theme.greenSoft : theme.amberSoft
                         border.width: 1
-                        border.color: theme.amber
+                        border.color: workspace.reconstructionSupported ? theme.green : theme.amber
                         ColumnLayout {
                             anchors.fill: parent
                             anchors.margins: 9
-                            spacing: 3
+                            spacing: 2
                             Label {
-                                text: "RECONSTRUCTION / EDITION CONVERSION GUARDED"
-                                color: theme.amber
+                                text: "CANONICAL RECONSTRUCTION"
+                                color: workspace.reconstructionSupported ? theme.green : theme.amber
                                 font.pixelSize: 9
                                 font.weight: Font.Bold
                             }
                             Label {
                                 Layout.fillWidth: true
-                                text: "Ed1 ↔ Ed2/Ed2.1 and SCD ↔ ICD/CID relabel are rejected until DataTypeTemplates, Communication, Services and extension preservation rules are deterministic."
+                                text: workspace.reconstructionSupported
+                                      ? "Rebuilds modeled DTT/references/DataSets/Reports/GOOSE/SMV and Communication. Output is reparsed + semantic-verified; normalized, not vendor-lossless."
+                                      : "This source contains a model that cannot be reconstructed safely. Exact source preservation remains available."
                                 wrapMode: Text.Wrap
                                 color: theme.textSoft
                                 font.pixelSize: theme.captionSize
@@ -322,16 +327,42 @@ Item {
                         }
                     }
 
-                    Rectangle {
+                    Label { text: "Canonical target edition"; color: theme.textSoft; font.pixelSize: theme.captionSize }
+                    ComboBox {
+                        id: editionPicker
                         Layout.fillWidth: true
-                        height: 1
-                        color: theme.lineSoft
+                        model: ["Preserve source edition", "Edition 1", "Edition 2", "Edition 2.1"]
+                        enabled: workspace.loaded && workspace.editionConversionSupported && !workspace.busy
                     }
+
+                    ActionButton {
+                        Layout.fillWidth: true
+                        theme: root.theme
+                        text: "Export canonical SCL / ICD / CID"
+                        primary: true
+                        enabled: workspace.reconstructionSupported && !workspace.busy
+                        onClicked: {
+                            saveDialog.canonicalRequested = true
+                            saveDialog.open()
+                        }
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: workspace.profileConversionSupported
+                              ? "Profile conversion: SCD + single-IED ICD/CID enabled."
+                              : "ICD/CID requires exactly one modeled IED; SCD remains the canonical multi-IED target."
+                        wrapMode: Text.Wrap
+                        color: workspace.profileConversionSupported ? theme.green : theme.textSoft
+                        font.pixelSize: 9
+                    }
+
+                    Rectangle { Layout.fillWidth: true; height: 1; color: theme.lineSoft }
 
                     Label {
                         visible: workspace.lastExportVerified
                         Layout.fillWidth: true
-                        text: "VERIFIED · " + workspace.lastExportPath
+                        text: "VERIFIED · " + workspace.lastExportMode + " · " + workspace.lastExportPath
                         wrapMode: Text.WrapAnywhere
                         color: theme.green
                         font.pixelSize: theme.captionSize
@@ -350,7 +381,7 @@ Item {
 
                     Label {
                         Layout.fillWidth: true
-                        text: "Milestone R foundation: this surface proves safe preservation and conversion refusal first. Full deterministic reconstruction will only be enabled after its own round-trip gates pass."
+                        text: "Safety boundary: generic Enum ordinal domains and ambiguous nested-SDO parent typing fail closed instead of inventing engineering values. Exact source preservation is the fidelity path for vendor-specific XML."
                         wrapMode: Text.Wrap
                         color: theme.muted
                         font.pixelSize: 9

@@ -37,12 +37,14 @@ class SclWorkspaceController : public QObject {
     Q_PROPERTY(int gooseCount READ gooseCount NOTIFY workspaceChanged)
     Q_PROPERTY(int smvCount READ smvCount NOTIFY workspaceChanged)
     Q_PROPERTY(bool exactSourceSaveSupported READ exactSourceSaveSupported NOTIFY workspaceChanged)
-    Q_PROPERTY(bool reconstructionSupported READ reconstructionSupported CONSTANT)
-    Q_PROPERTY(bool editionConversionSupported READ editionConversionSupported CONSTANT)
+    Q_PROPERTY(bool reconstructionSupported READ reconstructionSupported NOTIFY workspaceChanged)
+    Q_PROPERTY(bool editionConversionSupported READ editionConversionSupported NOTIFY workspaceChanged)
+    Q_PROPERTY(bool profileConversionSupported READ profileConversionSupported NOTIFY workspaceChanged)
     Q_PROPERTY(QStringList preservationReport READ preservationReport NOTIFY workspaceChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY stateChanged)
     Q_PROPERTY(bool lastExportVerified READ lastExportVerified NOTIFY exportChanged)
     Q_PROPERTY(QString lastExportPath READ lastExportPath NOTIFY exportChanged)
+    Q_PROPERTY(QString lastExportMode READ lastExportMode NOTIFY exportChanged)
     Q_PROPERTY(qulonglong generation READ generation NOTIFY stateChanged)
 
 public:
@@ -68,16 +70,19 @@ public:
     [[nodiscard]] int gooseCount() const noexcept;
     [[nodiscard]] int smvCount() const noexcept;
     [[nodiscard]] bool exactSourceSaveSupported() const noexcept { return loaded() && !sourceBytes_.isEmpty(); }
-    [[nodiscard]] bool reconstructionSupported() const noexcept { return false; }
-    [[nodiscard]] bool editionConversionSupported() const noexcept { return false; }
+    [[nodiscard]] bool reconstructionSupported() const noexcept;
+    [[nodiscard]] bool editionConversionSupported() const noexcept;
+    [[nodiscard]] bool profileConversionSupported() const noexcept;
     [[nodiscard]] QStringList preservationReport() const;
     [[nodiscard]] QString lastError() const { return lastError_; }
     [[nodiscard]] bool lastExportVerified() const noexcept { return lastExportVerified_; }
     [[nodiscard]] QString lastExportPath() const { return lastExportPath_; }
+    [[nodiscard]] QString lastExportMode() const { return lastExportMode_; }
     [[nodiscard]] qulonglong generation() const noexcept { return generation_; }
 
     Q_INVOKABLE bool openFile(const QUrl& fileUrl);
     Q_INVOKABLE bool saveAs(const QUrl& fileUrl, const QString& targetEdition = QStringLiteral("preserve"));
+    Q_INVOKABLE bool exportCanonical(const QUrl& fileUrl, const QString& targetEdition = QStringLiteral("preserve"));
     Q_INVOKABLE void cancelOperation();
     Q_INVOKABLE QString diagnosticsText() const;
 
@@ -102,6 +107,7 @@ private:
     QString lastError_;
     bool lastExportVerified_{};
     QString lastExportPath_;
+    QString lastExportMode_;
     QStringList diagnostics_;
     qulonglong generation_{};
     QThreadPool ioPool_;
