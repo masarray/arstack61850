@@ -26,6 +26,14 @@ public:
     [[nodiscard]] static constexpr int identityRetryIntervalMs() noexcept { return 650; }
     [[nodiscard]] static constexpr int heartbeatIntervalMs() noexcept { return 700; }
 
+    // Preserve the facade's two-argument transport call while recognizing the
+    // one multi-command transaction that must be exclusive in S4.
+    void enqueueCommands(const QStringList& commands, bool quiet) {
+        const bool exclusive = commands.size() > 1 &&
+            commands.front() == QStringLiteral("PROFILE BEGIN");
+        enqueueCommands(commands, quiet, exclusive);
+    }
+
 public slots:
     void initialize();
     void shutdown(bool requestStop);
