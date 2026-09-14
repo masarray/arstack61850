@@ -23,12 +23,15 @@ jobs:
     steps:
       - name: Checkout QA branch
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Verify frozen production ancestry
         shell: powershell
         run: |
           $baseline = 'ed46f3bed73d398d71be2eacf34c4995325c3cad'
           git cat-file -e "$baseline^{commit}"
+          if ($LASTEXITCODE -ne 0) { throw 'Frozen production baseline commit is unavailable.' }
           git merge-base --is-ancestor $baseline HEAD
           if ($LASTEXITCODE -ne 0) { throw 'QA branch is not descended from the frozen production baseline.' }
           Write-Host "Frozen baseline ancestry: PASS · $baseline"
