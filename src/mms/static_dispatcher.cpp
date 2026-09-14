@@ -29,6 +29,13 @@ namespace {
     return true;
 }
 
+[[nodiscard]] std::span<const std::uint8_t> as_bytes(
+    const std::string_view text) noexcept {
+    return {
+        reinterpret_cast<const std::uint8_t*>(text.data()),
+        text.size()};
+}
+
 [[nodiscard]] bool valid_mms_data(
     const std::span<const std::uint8_t> encoded) noexcept {
     asn1::BerTlvView data;
@@ -301,14 +308,194 @@ namespace {
             response));
 }
 
+struct ReadCompatibilityRequest final {
+    MmsReadRequestView variables{};
+    MmsObjectNameView variable_list_name{};
+    bool uses_variable_list_name{};
+};
+
+[[nodiscard]] bool populate_relaxed_variable_list(
+    const MmsConfirmedPduView& confirmed,
+    const bool specification_with_result,
+    const std::span<const std::uint8_t> variable_list,
+    MmsReadRequestView& request) noexcept {
+    std::size_t offset = 0U;
+    std::size_t count = 0U;
+    while (offset < variable_list.size()) {
+        if (count >= MmsServiceSpanCodec::maximum_variables) {
+            return false;
+        }
+        asn1::BerTlvView definition;
+        if (!asn1::BerSpanReader::try_read_tlv(variable_list, offset, definition) ||
+            definition.tag_class != asn1::BerClass::universal ||
+            definition.tag_number != 16 || !definition.constructed) {
+            return false;
+        }
+        ++count;
+    }
+    if (count == 0U) {
+        return false;
+    }
+    request = {};
+    request.invoke_id = confirmed.invoke_id;
+    request.specification_with_result = specification_with_result;
+    request.variable_list = variable_list;
+    request.variable_count = count;
+    return true;
+}
+
+// The proven ARIEC61850 server accepts three Read discovery forms used by
+// engineering clients: the normal explicit variableAccessSpecification wrapper,
+// variableListName (DataSet Read), and an unwrapped listOfVariable compatibility
+// form. The public span codec remains strict; this adapter deliberately widens
+// only the server-facing dispatcher and preserves bounded parsing.
+[[nodiscard]] bool try_decode_read_compatibility_request(
+    const MmsConfirmedPduView& confirmed,
+    ReadCompatibilityRequest& request) noexcept {
+    request = {};
+    if (MmsServiceSpanCodec::try_decode_read_request(confirmed, request.variables)) {
+        return true;
+    }
+    if (confirmed.kind != MmsWirePduKind::confirmed_request ||
+        confirmed.service_tag != 4 || !confirmed.service_constructed) {
+        return false;
+    }
+
+    bool specification_with_result = false;
+    bool have_flag = false;
+    bool have_specification = false;
+    std::size_t offset = 0U;
+    while (offset < confirmed.service_value.size()) {
+        asn1::BerTlvView field;
+        if (!asn1::BerSpanReader::try_read_tlv(
+                confirmed.service_value, offset, field) ||
+            field.tag_class != asn1::BerClass::context_specific) {
+            return false;
+        }
+
+        if (field.tag_number == 0 && !field.constructed) {
+            if (have_flag || field.value.size() != 1U) {
+                return false;
+            }
+            specification_with_result = field.value[0] != 0U;
+            have_flag = true;
+            continue;
+        }
+
+        if (have_specification) {
+            return false;
+        }
+
+        if (field.tag_number == 1 && field.constructed) {
+            // Standard/observed form: variableAccessSpecification [1] explicit
+            // wrapper containing either listOfVariable [0] or variableListName [1].
+            asn1::BerTlvView specification;
+            if (!asn1::BerSpanReader::try_read_exact(field.value, specification) ||
+                specification.tag_class != asn1::BerClass::context_specific) {
+                return false;
+            }
+            if (specification.tag_number == 0 && specification.constructed) {
+                if (!populate_relaxed_variable_list(
+                        confirmed,
+                        specification_with_result,
+                        specification.value,
+                        request.variables)) {
+                    return false;
+                }
+                have_specification = true;
+                continue;
+            }
+            if (specification.tag_number == 1 && specification.constructed) {
+                if (!MmsServiceSpanCodec::try_decode_object_name_view(
+                        specification.value, request.variable_list_name)) {
+                    return false;
+                }
+                request.variables.invoke_id = confirmed.invoke_id;
+                request.variables.specification_with_result = specification_with_result;
+                request.uses_variable_list_name = true;
+                have_specification = true;
+                continue;
+            }
+            return false;
+        }
+
+        if (field.tag_number == 0 && field.constructed) {
+            // Compatibility form used by the proven server: unwrapped
+            // listOfVariable [0] directly in Read-Request.
+            if (!populate_relaxed_variable_list(
+                    confirmed,
+                    specification_with_result,
+                    field.value,
+                    request.variables)) {
+                return false;
+            }
+            have_specification = true;
+            continue;
+        }
+
+        return false;
+    }
+
+    return have_specification;
+}
+
+enum class ReadObjectStatus : std::uint8_t {
+    ok,
+    workspace_too_small,
+    backend_failure,
+};
+
+struct ReadObjectResult final {
+    ReadObjectStatus status{ReadObjectStatus::ok};
+    std::size_t required_bytes{};
+};
+
+[[nodiscard]] ReadObjectResult read_object_into_result(
+    const MmsStaticObjectEntry* object,
+    const MmsStaticDispatchPolicy& policy,
+    const std::span<std::uint8_t> workspace,
+    std::size_t& workspace_offset,
+    MmsReadAccessResultInput& result) noexcept {
+    if (object == nullptr) {
+        result = MmsReadAccessResultInput{
+            false, {}, policy.missing_object_failure_code};
+        return {};
+    }
+
+    const auto remaining = workspace.subspan(workspace_offset);
+    const auto read = object->read(object->context, remaining);
+    if (read.status == wire::EncodeStatus::buffer_too_small) {
+        return {
+            ReadObjectStatus::workspace_too_small,
+            workspace_offset + read.required_bytes};
+    }
+    if (!read.success()) {
+        result = MmsReadAccessResultInput{
+            false, {}, policy.backend_failure_code};
+        return {};
+    }
+    if (read.bytes_written > remaining.size() ||
+        !valid_mms_data(remaining.first(read.bytes_written))) {
+        return {ReadObjectStatus::backend_failure, 0U};
+    }
+
+    result = MmsReadAccessResultInput{
+        true,
+        remaining.first(read.bytes_written),
+        0U};
+    workspace_offset += read.bytes_written;
+    return {};
+}
+
 [[nodiscard]] MmsStaticDispatchResult dispatch_read(
     const MmsStaticObjectTable& objects,
+    const MmsStaticDataSetTable& data_sets,
     const MmsStaticDispatchPolicy& policy,
     const MmsConfirmedPduView& confirmed,
     const std::span<std::uint8_t> response,
     const std::span<std::uint8_t> workspace) noexcept {
-    MmsReadRequestView request;
-    if (!MmsServiceSpanCodec::try_decode_read_request(confirmed, request)) {
+    ReadCompatibilityRequest request;
+    if (!try_decode_read_compatibility_request(confirmed, request)) {
         return make_status(MmsStaticDispatchStatus::malformed_request, confirmed);
     }
 
@@ -317,48 +504,79 @@ namespace {
     // listOfAccessResult only. Do not reject the request and do not synthesize a
     // variableAccessSpecification echo that the proven server does not emit.
     std::array<MmsReadAccessResultInput, MmsServiceSpanCodec::maximum_variables> results{};
+    std::size_t result_count = 0U;
     std::size_t workspace_offset = 0U;
-    for (std::size_t index = 0U; index < request.variable_count; ++index) {
-        MmsObjectNameView name;
-        if (!request.try_variable(index, name)) {
-            return make_status(MmsStaticDispatchStatus::malformed_request, confirmed);
-        }
-        const auto* object = objects.find(name);
-        if (object == nullptr) {
-            results[index] = MmsReadAccessResultInput{
-                false, {}, policy.missing_object_failure_code};
-            continue;
-        }
 
-        const auto remaining = workspace.subspan(workspace_offset);
-        const auto read = object->read(object->context, remaining);
-        if (read.status == wire::EncodeStatus::buffer_too_small) {
-            return make_status(
-                MmsStaticDispatchStatus::workspace_too_small,
-                confirmed,
-                workspace_offset + read.required_bytes);
+    if (request.uses_variable_list_name) {
+        const auto* data_set = data_sets.find(request.variable_list_name);
+        if (data_set == nullptr) {
+            // Match the proven ARIEC behavior: a missing DataSet is a Read
+            // AccessResult failure, not a Confirmed-Error for the whole request.
+            results[0] = MmsReadAccessResultInput{
+                false, {}, policy.missing_object_failure_code};
+            result_count = 1U;
+        } else {
+            result_count = data_set->members.size();
+            for (std::size_t index = 0U; index < result_count; ++index) {
+                const auto& member = data_set->members[index];
+                const MmsObjectNameView name{
+                    MmsObjectNameViewKind::domain_specific,
+                    as_bytes(member.domain),
+                    as_bytes(member.item)};
+                const auto read = read_object_into_result(
+                    objects.find(name),
+                    policy,
+                    workspace,
+                    workspace_offset,
+                    results[index]);
+                if (read.status == ReadObjectStatus::workspace_too_small) {
+                    return make_status(
+                        MmsStaticDispatchStatus::workspace_too_small,
+                        confirmed,
+                        read.required_bytes);
+                }
+                if (read.status == ReadObjectStatus::backend_failure) {
+                    return make_status(MmsStaticDispatchStatus::backend_failure, confirmed);
+                }
+            }
         }
-        if (!read.success()) {
-            results[index] = MmsReadAccessResultInput{
-                false, {}, policy.backend_failure_code};
-            continue;
+    } else {
+        result_count = request.variables.variable_count;
+        for (std::size_t index = 0U; index < result_count; ++index) {
+            MmsObjectNameView name;
+            const MmsStaticObjectEntry* object = nullptr;
+            if (request.variables.try_variable(index, name)) {
+                object = objects.find(name);
+            }
+            // Golden behavior keeps an AccessResult slot even when one variable
+            // specification cannot be resolved. This preserves decoder alignment.
+            const auto read = read_object_into_result(
+                object,
+                policy,
+                workspace,
+                workspace_offset,
+                results[index]);
+            if (read.status == ReadObjectStatus::workspace_too_small) {
+                return make_status(
+                    MmsStaticDispatchStatus::workspace_too_small,
+                    confirmed,
+                    read.required_bytes);
+            }
+            if (read.status == ReadObjectStatus::backend_failure) {
+                return make_status(MmsStaticDispatchStatus::backend_failure, confirmed);
+            }
         }
-        if (read.bytes_written > remaining.size() ||
-            !valid_mms_data(remaining.first(read.bytes_written))) {
-            return make_status(MmsStaticDispatchStatus::backend_failure, confirmed);
-        }
-        results[index] = MmsReadAccessResultInput{
-            true,
-            remaining.first(read.bytes_written),
-            0U};
-        workspace_offset += read.bytes_written;
+    }
+
+    if (result_count == 0U || result_count > results.size()) {
+        return make_status(MmsStaticDispatchStatus::malformed_request, confirmed);
     }
 
     return make_encoded(
         confirmed,
         MmsServiceSpanCodec::encode_read_response_into(
             confirmed.invoke_id,
-            std::span<const MmsReadAccessResultInput>{results}.first(request.variable_count),
+            std::span<const MmsReadAccessResultInput>{results}.first(result_count),
             response));
 }
 
@@ -454,7 +672,7 @@ MmsStaticDispatchResult MmsStaticApplicationDispatcher::dispatch(
     case MmsWireConfirmedService::get_named_variable_list_attributes:
         return dispatch_data_set_attributes(data_sets_, request, response);
     case MmsWireConfirmedService::read:
-        return dispatch_read(objects_, policy_, request, response, workspace);
+        return dispatch_read(objects_, data_sets_, policy_, request, response, workspace);
     case MmsWireConfirmedService::write:
         return dispatch_write(objects_, policy_, request, response, access);
     default:
