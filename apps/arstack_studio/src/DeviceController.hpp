@@ -119,18 +119,11 @@ public:
     [[nodiscard]] static constexpr int ioCommandQueueCapacity() noexcept { return 64; }
     [[nodiscard]] static constexpr int ioPresencePollIntervalMs() noexcept { return 750; }
 
-    // S1 semantic identity contract. The parser accepts the immediately
-    // preceding ARStack v1 identity grammar without boot_id so an installed
-    // pre-S1 image is recognized as legacy/updateable rather than "blank".
-    // Current Studio firmware requires boot_id and the mandatory capabilities.
     [[nodiscard]] static bool parseIdentityLine(const QString& line, DeviceIdentity& identity);
     [[nodiscard]] static bool identitySupportsCurrentContract(
         const DeviceIdentity& identity,
         const QString& expectedFirmwareVersion);
 
-    // S2 identification policy remains the public deterministic contract. S4
-    // moves its timer/transport execution into DeviceIoWorker without changing
-    // the attempt count or cadence.
     [[nodiscard]] static constexpr int identityMaxAttempts() noexcept { return 3; }
     [[nodiscard]] static constexpr int identityRetryIntervalMs() noexcept { return 650; }
     [[nodiscard]] static constexpr bool identityRetryAllowed(const int attemptsSent) noexcept {
@@ -158,8 +151,6 @@ public:
     Q_INVOKABLE bool setCtSaturation(bool enabled, double dcOffsetPercent, double harmonicPercent, int harmonicOrder, double clipPercent);
     Q_INVOKABLE virtual bool deployProfile(const QVariantMap& profile);
 
-    // A bounded supervisor timeout must be able to retire stale host-side
-    // deployment state even when the serial peer sends no terminal response.
     void abandonProfileDeployment() {
         if (!profileDeploying_) return;
         profileDeploying_ = false;
@@ -223,7 +214,7 @@ signals:
 
 protected:
     bool sendQuietCommand(const QString& command);
-    bool sendCommandBatch(const QStringList& commands, bool quiet = false, bool exclusive = false);
+    bool sendCommandBatch(const QStringList& commands, bool quiet = false);
     void setSessionHeartbeatEnabled(bool enabled);
 
 private:
