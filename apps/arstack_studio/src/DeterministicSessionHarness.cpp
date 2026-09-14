@@ -29,7 +29,7 @@ public:
             {"current identity -> READY without recovery", currentIdentityNeverRecovers()},
             {"legacy identity -> firmware update", legacyIdentityOffersUpdate()},
             {"auto identity timeout -> UNIDENTIFIED", automaticIdentityTimeoutStaysUnidentified()},
-            {"manual recovery intent -> firmware required", manualRecoveryIntentArmsFirmwareOffer()},
+            {"manual recovery intent survives IDENTIFY -> firmware required", manualRecoveryIntentArmsFirmwareOffer()},
             {"stale generation release -> ignored", staleReleaseGenerationIsIgnored()},
             {"firmware probe before serial release -> blocked", firmwareProbeRequiresReleasedPort()},
             {"profile timeout -> bounded terminal error", profileTimeoutIsTerminal()},
@@ -169,7 +169,7 @@ private:
         session.reconcile();
     }
 
-    static void seedIdentityTimeout(Fixture& fixture, const bool manualRecovery) {
+    static bool seedIdentityTimeout(Fixture& fixture, const bool manualRecovery) {
         auto& device = fixture.device;
         auto& session = fixture.session;
 
@@ -182,21 +182,32 @@ private:
         device.ports_ = {QStringLiteral("COM7")};
         device.recommendedPort_ = QStringLiteral("COM7");
         device.portName_ = QStringLiteral("COM7");
-        device.connected_ = false;
+        device.connected_ = true;
         device.discovering_ = false;
         device.deviceVerified_ = false;
-        device.identificationState_ = DeviceController::IdentificationState::Unidentified;
-        device.identifyAttempts_ = DeviceController::identityMaxAttempts();
+        device.identificationState_ = DeviceController::IdentificationState::Identifying;
+        device.identifyAttempts_ = 1;
         device.identity_ = {};
         device.running_ = false;
         device.profileArmed_ = false;
         device.profileDeploying_ = false;
 
+        // Drive the real intermediate state first. Explicit recovery intent must
+        // survive this normal port-open/semantic-IDENTIFY phase.
         emit device.portsChanged();
-        emit device.discoveryChanged();
-        emit device.deviceIdentityChanged();
+        emit device.connectedChanged();
         emit device.identificationStateChanged();
         session.reconcile();
+        const bool intentSurvivedIdentifying =
+            !manualRecovery || (session.manualRecoveryArmed_ && !session.blankBoardDetected_);
+
+        device.connected_ = false;
+        device.identificationState_ = DeviceController::IdentificationState::Unidentified;
+        device.identifyAttempts_ = DeviceController::identityMaxAttempts();
+        emit device.connectedChanged();
+        emit device.identificationStateChanged();
+        session.reconcile();
+        return intentSurvivedIdentifying;
     }
 
     static void simulateDisconnect(Fixture& fixture) {
@@ -253,8 +264,7 @@ private:
 
     static bool automaticIdentityTimeoutStaysUnidentified() {
         Fixture fixture;
-        if (!fixture.profileReady) return false;
-        seedIdentityTimeout(fixture, false);
+        if (!fixture.profileReady || !seedIdentityTimeout(fixture, false)) return false;
         return fixture.session.state() == QStringLiteral("UNIDENTIFIED") &&
             !fixture.session.firmwareInstallVisible() &&
             !fixture.session.blankBoardDetected_ &&
@@ -263,8 +273,7 @@ private:
 
     static bool manualRecoveryIntentArmsFirmwareOffer() {
         Fixture fixture;
-        if (!fixture.profileReady) return false;
-        seedIdentityTimeout(fixture, true);
+        if (!fixture.profileReady || !seedIdentityTimeout(fixture, true)) return false;
         return fixture.session.state() == QStringLiteral("FIRMWARE REQUIRED") &&
             fixture.session.firmwareInstallVisible() &&
             fixture.session.blankBoardPort_ == QStringLiteral("COM7") &&
