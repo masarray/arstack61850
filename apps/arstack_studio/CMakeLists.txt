@@ -50,6 +50,15 @@ qt_add_executable(arstack_session_harness
     ${ARSTACK_STUDIO_CORE_SOURCES}
 )
 
+# RC2 is a fail-closed evidence evaluator, not a hardware simulator. CI self-tests
+# its acceptance policy; a physical run feeds the same executable a machine-readable
+# evidence JSON collected from Studio telemetry and an independent SV capture.
+qt_add_executable(arstack_rc2_acceptance
+    src/Rc2Acceptance.cpp
+)
+target_link_libraries(arstack_rc2_acceptance PRIVATE Qt6::Core)
+target_compile_features(arstack_rc2_acceptance PRIVATE cxx_std_20)
+
 # S8B adds a Windows-native OS/process ownership gate. It intentionally depends
 # only on the production lock class and the pure serial-error policy. Do not add
 # DeviceIoWorker.hpp as a target source: AUTOMOC would then generate metaobject
