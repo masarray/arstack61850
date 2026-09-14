@@ -4,6 +4,7 @@
 
 #include "ariec61850/acse/association.hpp"
 #include "ariec61850/osi/cotp.hpp"
+#include "ariec61850/osi/presentation.hpp"
 #include "ariec61850/osi/session.hpp"
 
 #include <algorithm>
@@ -16,7 +17,7 @@ namespace ar::iec61850::mms {
 namespace {
 
 struct AssociationAttemptProfile final {
-    const char* name;
+    std::string name;
     std::vector<std::uint8_t> payload;
 };
 
@@ -118,13 +119,111 @@ struct AssociationAttemptProfile final {
     };
 }
 
-[[nodiscard]] std::array<AssociationAttemptProfile, 2U>
-csharp_association_profiles() {
-    return {{
+void append_oid_subidentifier(
+    std::vector<std::uint8_t>& destination,
+    std::uint64_t value) {
+    std::array<std::uint8_t, 10U> encoded{};
+    std::size_t count{};
+    do {
+        encoded[count++] = static_cast<std::uint8_t>(value & 0x7FU);
+        value >>= 7U;
+    } while (value != 0U);
+    while (count > 0U) {
+        --count;
+        destination.push_back(static_cast<std::uint8_t>(
+            encoded[count] | (count == 0U ? 0x00U : 0x80U)));
+    }
+}
+
+[[nodiscard]] std::vector<std::uint8_t> encode_oid_arcs(
+    const std::span<const std::uint32_t> arcs) {
+    if (arcs.size() < 2U || arcs.size() > 32U || arcs[0] > 2U ||
+        (arcs[0] < 2U && arcs[1] > 39U)) {
+        throw std::invalid_argument("Called AP-title OID arcs are invalid.");
+    }
+    std::vector<std::uint8_t> encoded;
+    encoded.reserve(arcs.size() * 2U);
+    append_oid_subidentifier(
+        encoded,
+        static_cast<std::uint64_t>(arcs[0]) * 40U + arcs[1]);
+    for (std::size_t index = 2U; index < arcs.size(); ++index) {
+        append_oid_subidentifier(encoded, arcs[index]);
+    }
+    if (encoded.size() > acse::AcseAssociationCodec::maximum_oid_bytes) {
+        throw std::length_error("Called AP-title OID exceeds the bounded BER length.");
+    }
+    return encoded;
+}
+
+[[nodiscard]] std::vector<osi::SessionParameter> session_parameters(
+    const MmsAssociationAddressing& addressing) {
+    auto parameters = osi::SessionCodec::default_parameters();
+    if (addressing.called_s_selector.empty()) return parameters;
+    const auto found = std::find_if(
+        parameters.begin(), parameters.end(), [](const auto& parameter) {
+            return parameter.code == 0x34U; // called Session selector
+        });
+    if (found == parameters.end()) {
+        parameters.push_back({0x34U, addressing.called_s_selector});
+    } else {
+        found->value = addressing.called_s_selector;
+    }
+    return parameters;
+}
+
+[[nodiscard]] std::vector<std::uint8_t> scl_association_request(
+    const MmsAssociationAddressing& addressing) {
+    auto aarq = acse::AcseAssociationCodec::default_balanced_aarq();
+    if (!addressing.called_ap_title.empty()) {
+        aarq.called_ap_title = encode_oid_arcs(addressing.called_ap_title);
+    }
+    if (addressing.called_ae_qualifier) {
+        aarq.called_ae_qualifier = addressing.called_ae_qualifier;
+    }
+    const auto encoded_aarq = acse::AcseAssociationCodec::encode_aarq(aarq);
+    const auto contexts = osi::PresentationCodec::default_contexts();
+    const auto cp = osi::PresentationCodec::encode_cp(
+        contexts,
+        1U,
+        encoded_aarq,
+        {},
+        addressing.called_p_selector);
+    const auto parameters = session_parameters(addressing);
+    return osi::SessionCodec::encode_connect(cp, parameters);
+}
+
+[[nodiscard]] std::vector<AssociationAttemptProfile> association_profiles(
+    const MmsAssociationOptions& options) {
+    if (options.addressing) {
+        return {{"SclEngineering", scl_association_request(*options.addressing)}};
+    }
+    return {
         {"BalancedApTitle",
          acse::AcseAssociationCodec::build_default_association_request()},
         {"LegacyMinimal", csharp_legacy_minimal_association_request()},
-    }};
+    };
+}
+
+[[nodiscard]] std::vector<std::uint8_t> cotp_connection_request(
+    const MmsAssociationOptions& options,
+    const std::uint16_t source_reference) {
+    const std::array<std::uint8_t, 2U> default_selector{0x00U, 0x01U};
+    const auto destination_selector =
+        options.addressing && !options.addressing->called_t_selector.empty()
+            ? std::span<const std::uint8_t>{options.addressing->called_t_selector}
+            : std::span<const std::uint8_t>{default_selector};
+    const std::array<osi::CotpParameter, 3U> parameters{
+        osi::CotpParameter{
+            osi::CotpFrameCodec::tpdu_size_parameter,
+            {options.tpdu_size_code}},
+        osi::CotpParameter{
+            osi::CotpFrameCodec::source_tsap_parameter,
+            {0x00U, 0x01U}},
+        osi::CotpParameter{
+            osi::CotpFrameCodec::destination_tsap_parameter,
+            std::vector<std::uint8_t>{destination_selector.begin(), destination_selector.end()}},
+    };
+    return osi::CotpFrameCodec::encode_connection_request(source_reference, parameters);
 }
 
 } // namespace
@@ -143,6 +242,17 @@ MmsAssociationRuntime::MmsAssociationRuntime(
     static_cast<void>(osi::CotpFrameCodec::tpdu_size_bytes(options_.tpdu_size_code));
     if (options_.presentation_context_id == 0U) {
         throw std::invalid_argument("MMS presentation context ID must be positive.");
+    }
+    if (options_.addressing) {
+        const auto& addressing = *options_.addressing;
+        if (addressing.called_p_selector.size() > osi::PresentationCodec::maximum_selector_bytes ||
+            addressing.called_s_selector.size() > 64U ||
+            addressing.called_t_selector.size() > 64U) {
+            throw std::invalid_argument("SCL-derived OSI selector exceeds the bounded limit.");
+        }
+        if (!addressing.called_ap_title.empty()) {
+            static_cast<void>(encode_oid_arcs(addressing.called_ap_title));
+        }
     }
     negotiated_.tpdu_size_code = options_.tpdu_size_code;
     negotiated_.presentation_context_id = options_.presentation_context_id;
@@ -276,7 +386,7 @@ void MmsAssociationRuntime::connect(
     negotiated_.tpdu_size_code = options_.tpdu_size_code;
     negotiated_.presentation_context_id = options_.presentation_context_id;
 
-    const auto profiles = csharp_association_profiles();
+    const auto profiles = association_profiles(options_);
     for (std::size_t profile_index = 0U;
          profile_index < profiles.size();
          ++profile_index) {
@@ -286,8 +396,8 @@ void MmsAssociationRuntime::connect(
             require_not_cancelled(stop_token);
 
             // Match the C# oracle: every association profile gets a fresh TCP/COTP
-            // transport. Do not reuse an association that was rejected, malformed,
-            // timed out, or otherwise faulted.
+            // transport. An explicit SCL engineering profile intentionally has no
+            // silent generic retry; generic mode retains the proven two-profile path.
             transport_.close();
             invoke_router_.clear();
             information_reports_.clear();
@@ -312,14 +422,14 @@ void MmsAssociationRuntime::connect(
             state_ = MmsAssociationRuntimeState::transport_connected;
             add_event(
                 MmsAssociationEventKind::transport_connected,
-                std::string{profile.name} + ": byte transport connected.");
+                profile.name + ": byte transport connected.");
 
             state_ = MmsAssociationRuntimeState::cotp_connecting;
             add_event(
                 MmsAssociationEventKind::state_changed,
-                std::string{profile.name} + ": sending COTP Connection Request.");
+                profile.name + ": sending COTP Connection Request.");
             const auto connection_request =
-                osi::CotpFrameCodec::encode_default_connection_request();
+                cotp_connection_request(options_, local_cotp_reference_);
             send_tpkt_payload(connection_request, deadline, stop_token);
 
             std::size_t chunks = 0U;
@@ -364,13 +474,13 @@ void MmsAssociationRuntime::connect(
             state_ = MmsAssociationRuntimeState::cotp_connected;
             add_event(
                 MmsAssociationEventKind::cotp_connected,
-                std::string{profile.name} + ": COTP connected with TPDU size code " +
+                profile.name + ": COTP connected with TPDU size code " +
                     std::to_string(negotiated_.tpdu_size_code) + ".");
 
             state_ = MmsAssociationRuntimeState::acse_associating;
             add_event(
                 MmsAssociationEventKind::state_changed,
-                std::string{profile.name} +
+                profile.name +
                     ": sending ISO Session/Presentation/ACSE association request.");
             send_application_payload(profile.payload, deadline, stop_token);
             const auto association_payload =
@@ -389,7 +499,7 @@ void MmsAssociationRuntime::connect(
             // Preserve the existing safety rule inside one profile: a strict,
             // explicit AARE rejection is never reinterpreted as acceptance by the
             // tolerant marker-based compatibility path. It is, however, eligible
-            // for the next C# oracle profile after a full reconnect.
+            // for the next C# oracle profile after a full reconnect in generic mode.
             if (response && !response->aare.accepted()) {
                 throw MmsAssociationRuntimeError(
                     "ACSE association was rejected with result=" +
@@ -436,13 +546,13 @@ void MmsAssociationRuntime::connect(
                 }
                 used_csharp_compatibility = true;
                 acceptance_message =
-                    std::string{profile.name} + ": " + compatibility_message +
+                    profile.name + ": " + compatibility_message +
                     (strict_failure.empty()
                          ? std::string{}
                          : " Strict decoder diagnostic: " + strict_failure);
             } else {
                 acceptance_message =
-                    std::string{profile.name} +
+                    profile.name +
                     ": MMS association accepted; maximum PDU=" +
                     std::to_string(negotiated_.maximum_mms_pdu_size) + ".";
             }
@@ -466,7 +576,7 @@ void MmsAssociationRuntime::connect(
             throw;
         } catch (const MmsTransportTimeoutError& exception) {
             const auto message =
-                std::string{profile.name} + ": timeout: " + exception.what();
+                profile.name + ": timeout: " + exception.what();
             association_attempts_.push_back({profile.name, false, message});
             state_ = MmsAssociationRuntimeState::faulted;
             last_fault_ = message;
@@ -475,7 +585,7 @@ void MmsAssociationRuntime::connect(
         } catch (const std::exception& exception) {
             if (stop_token.stop_requested()) {
                 const auto message =
-                    std::string{profile.name} + ": cancelled: " + exception.what();
+                    profile.name + ": cancelled: " + exception.what();
                 state_ = MmsAssociationRuntimeState::faulted;
                 last_fault_ = message;
                 add_event(MmsAssociationEventKind::cancelled, message);
@@ -484,7 +594,7 @@ void MmsAssociationRuntime::connect(
             }
 
             const auto message =
-                std::string{profile.name} + ": " + exception.what();
+                profile.name + ": " + exception.what();
             association_attempts_.push_back({profile.name, false, message});
             state_ = MmsAssociationRuntimeState::faulted;
             last_fault_ = message;
@@ -500,7 +610,9 @@ void MmsAssociationRuntime::connect(
     remote_cotp_reference_ = 0U;
     state_ = MmsAssociationRuntimeState::faulted;
 
-    std::string message = "All C# MMS association profiles failed";
+    std::string message = options_.addressing
+        ? "SCL MMS association profile failed"
+        : "All C# MMS association profiles failed";
     if (!association_attempts_.empty()) {
         message += ": ";
         for (std::size_t index = 0U; index < association_attempts_.size(); ++index) {
