@@ -20,6 +20,9 @@ class SmartSessionController : public QObject {
     Q_PROPERTY(QString state READ state NOTIFY stateChanged)
     Q_PROPERTY(QString statusText READ statusText NOTIFY stateChanged)
     Q_PROPERTY(bool startReady READ startReady NOTIFY stateChanged)
+    Q_PROPERTY(bool canDeployProfile READ canDeployProfile NOTIFY stateChanged)
+    Q_PROPERTY(bool liveControlReady READ liveControlReady NOTIFY stateChanged)
+    Q_PROPERTY(bool engineeringEditable READ engineeringEditable NOTIFY stateChanged)
     Q_PROPERTY(bool firmwareUpdateRequired READ firmwareUpdateRequired NOTIFY stateChanged)
     Q_PROPERTY(bool firmwareInstallRequired READ firmwareInstallVisible NOTIFY stateChanged)
     Q_PROPERTY(bool firmwareRetryAvailable READ firmwareRetryAvailable NOTIFY stateChanged)
@@ -51,6 +54,9 @@ public:
     [[nodiscard]] QString state() const;
     [[nodiscard]] QString statusText() const;
     [[nodiscard]] bool startReady() const noexcept;
+    [[nodiscard]] bool canDeployProfile() const noexcept;
+    [[nodiscard]] bool liveControlReady() const noexcept;
+    [[nodiscard]] bool engineeringEditable() const noexcept;
     [[nodiscard]] bool firmwareUpdateRequired() const noexcept;
     [[nodiscard]] bool firmwareInstallRequired() const noexcept;
     [[nodiscard]] bool firmwareInstallVisible() const noexcept {
@@ -114,6 +120,39 @@ public:
 
     Q_INVOKABLE void start();
     Q_INVOKABLE void reconcile();
+
+    // S7: QML submits operator intent only. The supervisor owns every gate that
+    // can mutate device connection, output, live values, profile state or PTP.
+    Q_INVOKABLE bool requestStart();
+    Q_INVOKABLE bool requestStop();
+    Q_INVOKABLE bool requestConnect();
+    Q_INVOKABLE void requestRefreshPorts();
+    Q_INVOKABLE bool requestConnectPort(const QString& portName);
+    Q_INVOKABLE bool requestDisconnect();
+    Q_INVOKABLE bool requestProfileSync();
+    Q_INVOKABLE bool requestSetFrequency(double hz);
+    Q_INVOKABLE bool requestSetSignal(
+        const QString& signalId,
+        double magnitude,
+        double phaseDegrees,
+        quint32 quality,
+        double currentCountsPerAmp,
+        double voltageCountsPerVolt);
+    Q_INVOKABLE bool requestSetQuality(const QString& signalId, quint32 quality);
+    Q_INVOKABLE bool requestSetCtSaturation(
+        bool enabled,
+        double dcOffsetPercent,
+        double harmonicPercent,
+        int harmonicOrder,
+        double clipPercent);
+    Q_INVOKABLE bool requestZero();
+    Q_INVOKABLE bool requestPtpRefresh();
+    Q_INVOKABLE bool requestPtpRole(const QString& role);
+    Q_INVOKABLE bool requestSmpSynch(const QString& mode);
+    Q_INVOKABLE bool requestConfigurePtp(const QVariantMap& profile);
+    Q_INVOKABLE bool requestStartPtp();
+    Q_INVOKABLE bool requestStopPtp();
+
     Q_INVOKABLE bool beginFirmwareUpdate();
     Q_INVOKABLE bool beginFirmwareInstall();
     Q_INVOKABLE bool retryFirmwareUpdate();
@@ -333,6 +372,7 @@ private:
     quint64 advanceSessionGeneration();
     void setPortOwner(PortOwner owner);
     bool firmwareIsCurrent() const;
+    bool deviceControlAvailable() const noexcept;
     void resetProfileSync(bool requireSync);
     bool beginProfileSync(const QVariantMap& profile);
     void handleProfileStateChanged();
