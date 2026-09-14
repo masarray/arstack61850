@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "IedSimulatorController.hpp"
+#include "IedFleetController.hpp"
 
 #include <QCommandLineOption>
 #include <QCommandLineParser>
+#include <QDebug>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
@@ -11,15 +12,50 @@
 #include <QTimer>
 #include <QUrl>
 
+namespace {
+bool configureEndpoint(QObject* backend, const QString& specification, const int defaultPort) {
+    const auto equals = specification.indexOf(QLatin1Char('='));
+    if (equals <= 0 || equals >= specification.size() - 1) return false;
+
+    bool indexOk{};
+    const auto index = specification.left(equals).toInt(&indexOk);
+    if (!indexOk || index < 0) return false;
+
+    auto endpoint = specification.mid(equals + 1).trimmed();
+    if (endpoint.isEmpty()) return false;
+
+    int port = defaultPort;
+    const auto colon = endpoint.lastIndexOf(QLatin1Char(':'));
+    if (colon > 0) {
+        bool portOk{};
+        const auto requestedPort = endpoint.mid(colon + 1).toInt(&portOk);
+        if (!portOk || requestedPort < 1 || requestedPort > 65'535) return false;
+        port = requestedPort;
+        endpoint = endpoint.left(colon);
+    }
+    if (endpoint.isEmpty()) return false;
+
+    bool configured{};
+    const bool invoked = QMetaObject::invokeMethod(
+        backend,
+        "configureIedEndpoint",
+        Q_RETURN_ARG(bool, configured),
+        Q_ARG(int, index),
+        Q_ARG(QString, endpoint),
+        Q_ARG(int, port));
+    return invoked && configured;
+}
+} // namespace
+
 int main(int argc, char* argv[]) {
     QQuickStyle::setStyle(QStringLiteral("Basic"));
     QGuiApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("ARStack61850"));
-    QCoreApplication::setApplicationName(QStringLiteral("ARStack IED Simulator"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+    QCoreApplication::setApplicationName(QStringLiteral("ARStack IED Lab"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("0.2.0"));
 
     QCommandLineParser parser;
-    parser.setApplicationDescription(QStringLiteral("ARStack IEC 61850 IED Simulator"));
+    parser.setApplicationDescription(QStringLiteral("ARStack IEC 61850 multi-IED simulation lab"));
     parser.addHelpOption();
     parser.addVersionOption();
     const QCommandLineOption sclOption{
@@ -28,7 +64,16 @@ int main(int argc, char* argv[]) {
         QStringLiteral("path")};
     const QCommandLineOption runtimeOption{
         QStringLiteral("runtime"),
-        QStringLiteral("Start the MMS runtime after importing the model.")};
+        QStringLiteral("Start the selected MMS runtime after importing the model.")};
+    const QCommandLineOption iedEndpointOption{
+        QStringLiteral("ied-endpoint"),
+        QStringLiteral(
+            "Assign a fleet endpoint as INDEX=IPv4[:PORT]. Repeat for multiple IEDs."),
+        QStringLiteral("assignment")};
+    const QCommandLineOption startIedOption{
+        QStringLiteral("start-ied"),
+        QStringLiteral("Start one IED index after import. Repeat to start a fleet subset."),
+        QStringLiteral("index")};
     const QCommandLineOption screenshotOption{
         QStringLiteral("screenshot"),
         QStringLiteral("Capture the rendered window and exit."),
@@ -38,7 +83,7 @@ int main(int argc, char* argv[]) {
         QStringLiteral("Load the QML scene, wait briefly, and exit.")};
     const QCommandLineOption portOption{
         QStringLiteral("port"),
-        QStringLiteral("Override the MMS listen port."),
+        QStringLiteral("Override the default MMS listen port."),
         QStringLiteral("number")};
     const QCommandLineOption setFirstValueOption{
         QStringLiteral("set-first-value"),
@@ -51,6 +96,8 @@ int main(int argc, char* argv[]) {
     parser.addOptions({
         sclOption,
         runtimeOption,
+        iedEndpointOption,
+        startIedOption,
         screenshotOption,
         smokeOption,
         portOption,
@@ -70,10 +117,14 @@ int main(int argc, char* argv[]) {
     if (!engine.rootObjects().isEmpty()) {
         auto* const rootObject = engine.rootObjects().constFirst();
         auto* const backend = rootObject->findChild<QObject*>(QStringLiteral("simulatorBackend"));
+        int defaultPort = 102;
         if (backend != nullptr && parser.isSet(portOption)) {
             bool valid{};
             const auto port = parser.value(portOption).toInt(&valid);
-            if (valid && port >= 1 && port <= 65'535) backend->setProperty("port", port);
+            if (valid && port >= 1 && port <= 65'535) {
+                defaultPort = port;
+                backend->setProperty("port", port);
+            }
         }
         if (backend != nullptr && parser.isSet(sclOption)) {
             QMetaObject::invokeMethod(
@@ -81,11 +132,40 @@ int main(int argc, char* argv[]) {
                 "loadFile",
                 Q_ARG(QUrl, QUrl::fromLocalFile(parser.value(sclOption))));
         }
-        if (backend != nullptr && parser.isSet(runtimeOption)) {
-            QTimer::singleShot(150, backend, [backend] {
-                QMetaObject::invokeMethod(backend, "startSimulation");
-            });
+
+        bool fleetConfigurationValid = true;
+        if (backend != nullptr) {
+            for (const auto& specification : parser.values(iedEndpointOption)) {
+                if (configureEndpoint(backend, specification, defaultPort)) continue;
+                fleetConfigurationValid = false;
+                qWarning().noquote() << "Invalid or rejected --ied-endpoint:" << specification;
+            }
         }
+
+        if (!fleetConfigurationValid) {
+            QTimer::singleShot(0, &app, [] { QCoreApplication::exit(2); });
+        } else if (backend != nullptr) {
+            if (parser.isSet(runtimeOption)) {
+                QTimer::singleShot(150, backend, [backend] {
+                    QMetaObject::invokeMethod(backend, "startSimulation");
+                });
+            }
+            const auto startIndices = parser.values(startIedOption);
+            if (!startIndices.isEmpty()) {
+                QTimer::singleShot(150, backend, [backend, startIndices] {
+                    for (const auto& text : startIndices) {
+                        bool valid{};
+                        const auto index = text.toInt(&valid);
+                        if (!valid || index < 0) {
+                            qWarning().noquote() << "Invalid --start-ied index:" << text;
+                            continue;
+                        }
+                        QMetaObject::invokeMethod(backend, "startIed", Q_ARG(int, index));
+                    }
+                });
+            }
+        }
+
         if (backend != nullptr && parser.isSet(setFirstValueOption)) {
             const auto value = parser.value(setFirstValueOption);
             auto* const applyTimer = new QTimer{backend};

@@ -55,6 +55,8 @@ add_library(ariec61850_core
     src/evidence/pcap_equivalence.cpp
     src/scl/dataset_reference.cpp
     src/scl/parser.cpp
+    src/simulation/ied_simulator_profile.cpp
+    src/simulation/ied_simulator_engine.cpp
     src/comtrade/model.cpp
     src/comtrade/reader.cpp
     src/comtrade/channel_mapper.cpp
@@ -83,9 +85,14 @@ add_library(ariec61850_mms_server_core
     src/mms/static_object_table.cpp
     src/mms/static_write.cpp
     src/mms/static_data_set_table.cpp
+    src/mms/static_direct_control.cpp
     src/mms/static_dispatcher.cpp
     src/mms/connection_runtime.cpp
     src/mms/static_server_session.cpp
+    src/mms/static_information_report.cpp
+    src/mms/static_report_connection.cpp
+    src/mms/static_urcb_objects.cpp
+    src/mms/static_urcb_runtime.cpp
     src/mms/static_brcb_runtime.cpp
     src/mms/static_brcb_control.cpp
     src/mms/static_brcb_objects.cpp
@@ -174,6 +181,24 @@ if(ARIEC61850_BUILD_TOOLS)
     target_compile_features(ariec61850_mms_read_probe PRIVATE cxx_std_20)
     ariec61850_apply_warnings(ariec61850_mms_read_probe)
     ariec61850_apply_sanitizers(ariec61850_mms_read_probe)
+
+    add_executable(ariec61850_mms_urcb_gi_probe tools/mms_urcb_gi_probe.cpp)
+    target_link_libraries(ariec61850_mms_urcb_gi_probe PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_mms_urcb_gi_probe PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_mms_urcb_gi_probe)
+    ariec61850_apply_sanitizers(ariec61850_mms_urcb_gi_probe)
+
+    add_executable(ariec61850_mms_brcb_event_probe tools/mms_brcb_event_probe.cpp)
+    target_link_libraries(ariec61850_mms_brcb_event_probe PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_mms_brcb_event_probe PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_mms_brcb_event_probe)
+    ariec61850_apply_sanitizers(ariec61850_mms_brcb_event_probe)
+
+    add_executable(ariec61850_control_interop_probe tools/control_interop_probe.cpp)
+    target_link_libraries(ariec61850_control_interop_probe PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_control_interop_probe PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_control_interop_probe)
+    ariec61850_apply_sanitizers(ariec61850_control_interop_probe)
 
     add_executable(ariec61850_rcb_contention_probe tools/rcb_contention_probe.cpp)
     target_link_libraries(ariec61850_rcb_contention_probe PRIVATE ARIEC61850::core)
@@ -265,6 +290,15 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_warnings(ariec61850_scl_tests)
     ariec61850_apply_sanitizers(ariec61850_scl_tests)
     add_test(NAME ariec61850_scl_tests COMMAND ariec61850_scl_tests)
+
+    add_executable(ariec61850_simulation_tests tests/test_simulation.cpp)
+    target_link_libraries(ariec61850_simulation_tests PRIVATE ARIEC61850::core)
+    target_compile_definitions(ariec61850_simulation_tests PRIVATE
+        ARIEC61850_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_features(ariec61850_simulation_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_simulation_tests)
+    ariec61850_apply_sanitizers(ariec61850_simulation_tests)
+    add_test(NAME ariec61850_simulation_tests COMMAND ariec61850_simulation_tests)
 
     add_executable(ariec61850_comtrade_tests tests/test_comtrade.cpp)
     target_link_libraries(ariec61850_comtrade_tests PRIVATE ARIEC61850::core)
@@ -462,6 +496,12 @@ if(ARIEC61850_BUILD_TESTS)
         add_test(
             NAME ariec61850_file_transfer_help
             COMMAND ariec61850_file_transfer --help)
+        add_test(
+            NAME ariec61850_mms_urcb_gi_probe_help
+            COMMAND ariec61850_mms_urcb_gi_probe --help)
+        add_test(
+            NAME ariec61850_mms_brcb_event_probe_help
+            COMMAND ariec61850_mms_brcb_event_probe --help)
         add_test(
             NAME ariec61850_static_ied_server_help
             COMMAND ariec61850_static_ied_server --help)

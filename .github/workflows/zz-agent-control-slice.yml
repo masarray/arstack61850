@@ -1,0 +1,75 @@
+name: Agent Control Wire E2E
+
+on:
+  push:
+    branches:
+      - feat/complete-ariec61850-simulator-parity
+    paths:
+      - '.github/workflows/zz-agent-control-slice.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-control-wire:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/complete-ariec61850-simulator-parity
+          fetch-depth: 0
+
+      - name: Configure root regression build
+        run: >-
+          cmake -S . -B build-control-slice -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DARIEC61850_BUILD_TESTS=ON
+          -DARIEC61850_BUILD_TOOLS=ON
+
+      - name: Build root control targets
+        run: >-
+          cmake --build build-control-slice
+          --target ariec61850_scl_tests ariec61850_static_ied_server ariec61850_control_interop_probe
+          --parallel 2
+
+      - name: Run SCL configured-control regression
+        run: ./build-control-slice/ariec61850_scl_tests
+
+      - name: Configure static-control regression profile
+        run: >-
+          cmake -S tools/mms_direct_control_server -B build-direct-control -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Run static-control state-machine regression
+        run: |
+          cmake --build build-direct-control --target ariec61850_mms_direct_control_tests --parallel 2
+          ./build-direct-control/ariec61850_mms_direct_control_tests
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
+
+      - name: Configure Qt simulator
+        run: >-
+          cmake -S apps/ied_simulator -B build-ied-simulator-qt -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Qt simulator and external probes
+        run: >-
+          cmake --build build-ied-simulator-qt
+          --target arstack_ied_simulator ariec61850_mms_read_probe ariec61850_control_interop_probe
+          --parallel 2
+
+      - name: QML smoke test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ./build-ied-simulator-qt/arstack_ied_simulator --smoke-test
+
+      - name: Prove Direct, SBO and enhanced control over external MMS wire
+        run: >-
+          python3 apps/ied_simulator/test_gui_live_value.py
+          --app ./build-ied-simulator-qt/arstack_ied_simulator
+          --read-probe ./build-ied-simulator-qt
+          --scl ./tests/fixtures/scl/minimal-station-brcb.scd

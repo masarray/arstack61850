@@ -32,17 +32,20 @@ qt_add_qml_module(arstack_ied_simulator
     URI ARStack.IedSimulator
     VERSION 1.0
     SOURCES
-        src/IedSimulatorController.cpp
-        src/IedSimulatorController.hpp
+        src/IedFleetController.cpp
+        src/IedFleetController.hpp
     QML_FILES
         qml/Main.qml
         qml/AppTheme.qml
         qml/SurfaceCard.qml
         qml/ActionButton.qml
+        qml/IconAction.qml
         qml/StatusPill.qml
         qml/ToggleSwitch.qml
         qml/LaunchWorkspace.qml
         qml/RuntimeWorkspace.qml
+        qml/IedExplorer.qml
+        qml/FleetWorkspace.qml
 )
 
 target_link_libraries(arstack_ied_simulator PRIVATE
@@ -62,8 +65,10 @@ target_compile_features(arstack_ied_simulator PRIVATE cxx_std_20)
 
 # The regular library intentionally keeps a strict portable connection runtime.
 # The desktop simulator needs the separate compatibility runtime validated
-# against IEDScout-style AARQ, selector, browse, Identify and FileDirectory
-# traffic.  Keep the two runtimes isolated so the embedded core is unchanged.
+# against common engineering-client AARQ, selector, browse, Identify and
+# FileDirectory traffic. Keep the two runtimes isolated so embedded behavior is
+# unchanged. Reporting is wired here as an application feature over the same
+# bounded per-association server rather than by launching another protocol fork.
 add_library(ariec61850_ied_simulator_server_core STATIC
     ${CMAKE_CURRENT_LIST_DIR}/../../src/asn1/ber_span_reader.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/osi/tpkt_span.cpp
@@ -78,12 +83,22 @@ add_library(ariec61850_ied_simulator_server_core STATIC
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/write_span.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/data_set_span.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/information_report_span.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/buffered_selective_information_report_span.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_object_table.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_write.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_data_set_table.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_direct_control.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_dispatcher.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/connection_runtime_iedsim.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_server_session.cpp)
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_server_session.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_information_report.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_report_connection.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_urcb_objects.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_urcb_runtime.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_brcb_runtime.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_brcb_control.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_brcb_objects.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_brcb_connection.cpp)
 target_include_directories(ariec61850_ied_simulator_server_core PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/../../include)
 target_compile_features(ariec61850_ied_simulator_server_core PUBLIC cxx_std_20)
@@ -99,7 +114,15 @@ if(WIN32)
 endif()
 target_compile_features(ariec61850_ied_simulator_server PRIVATE cxx_std_20)
 
-add_dependencies(arstack_ied_simulator ariec61850_ied_simulator_server)
+# The public-wire URCB/BRCB regression clients are root ARIEC61850 tool targets.
+# Reuse them here instead of defining GUI-local copies so the same sources are
+# compiled by the normal GCC/Clang/MSVC toolchain matrix and by the Qt harness.
+add_dependencies(
+    arstack_ied_simulator
+    ariec61850_ied_simulator_server
+    ariec61850_mms_urcb_gi_probe
+    ariec61850_mms_brcb_event_probe
+    ariec61850_control_interop_probe)
 
 if(WIN32)
     set_target_properties(arstack_ied_simulator PROPERTIES WIN32_EXECUTABLE TRUE)

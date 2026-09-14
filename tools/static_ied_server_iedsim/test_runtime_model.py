@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prove SCL-style static DataSets and live values on one MMS association."""
+"""Prove structured SCL-style static DataSets and live values on one MMS association."""
 
 from __future__ import annotations
 
@@ -24,25 +24,84 @@ def creation_flags() -> int:
 
 
 def manifest(revision: int, value: bool) -> str:
-    text = "true" if value else "false"
-    return "\n".join(
-        [
-            f"ARSTACK_IED_MODEL\t2\t{revision}",
-            "LN\tTESTIEDLD0\tLLN0",
-            "LN\tTESTIEDLD0\tGGIO1",
-            f"OBJ\tTESTIEDLD0\tGGIO1$ST$Ind1$stVal\tBOOLEAN\tBoolean\t{text}",
-            "OBJ\tTESTIEDLD0\tGGIO1$ST$Ind2$stVal\tBOOLEAN\tBoolean\tfalse",
-            "DS\tTESTIEDLD0\tLLN0$Status\tTESTIEDLD0\tGGIO1$ST$Ind1$stVal",
-            "DS\tTESTIEDLD0\tLLN0$Status\tTESTIEDLD0\tGGIO1$ST$Ind2$stVal",
-            "",
-        ]
-    )
+    """Build a vendor-style model with configured whole-DO DataSet members.
+
+    The 36/22 cardinalities mirror the SIPROTEC acceptance case that exposed the
+    regression.  Each configured member owns multiple leaves, so flattening the
+    Digital DataSet would exceed the 64-member static DataSet limit while the
+    correct configured membership remains safely at 36.
+    """
+    tracked_value = "true" if value else "false"
+    lines = [
+        f"ARSTACK_IED_MODEL\t2\t{revision}",
+        "LN\tTESTIEDLD0\tLLN0",
+        "LN\tTESTIEDLD0\tGGIO1",
+    ]
+
+    for index in range(1, 37):
+        object_name = f"Digital{index}"
+        st_val = tracked_value if index == 1 else "false"
+        lines.extend(
+            [
+                f"OBJ\tTESTIEDLD0\tGGIO1$ST${object_name}$stVal\tBOOLEAN\tBoolean\t{st_val}",
+                f"OBJ\tTESTIEDLD0\tGGIO1$ST${object_name}$q\tBOOLEAN\tBoolean\tfalse",
+                f"OBJ\tTESTIEDLD0\tGGIO1$ST${object_name}$detail\tBOOLEAN\tBoolean\tfalse",
+                f"DS\tTESTIEDLD0\tLLN0$Digital\tTESTIEDLD0\tGGIO1$ST${object_name}",
+            ]
+        )
+
+    for index in range(1, 23):
+        object_name = f"Analog{index}"
+        lines.extend(
+            [
+                f"OBJ\tTESTIEDLD0\tGGIO1$MX${object_name}$mag\tINTEGER\tInt32\t{index}",
+                f"OBJ\tTESTIEDLD0\tGGIO1$MX${object_name}$q\tBOOLEAN\tBoolean\tfalse",
+                f"OBJ\tTESTIEDLD0\tGGIO1$MX${object_name}$range\tINTEGER\tInt32\t0",
+                f"DS\tTESTIEDLD0\tLLN0$Analog\tTESTIEDLD0\tGGIO1$MX${object_name}",
+            ]
+        )
+
+    lines.append("")
+    return "\n".join(lines)
 
 
 def atomic_write(path: Path, text: str) -> None:
     replacement = path.with_suffix(".next")
     replacement.write_text(text, encoding="utf-8", newline="\n")
     os.replace(replacement, path)
+
+
+def run_read_probe(
+    executable: str,
+    port: int,
+    item: str,
+    *,
+    count: int = 1,
+    delay_ms: int = 0,
+) -> subprocess.CompletedProcess[str]:
+    command = [
+        executable,
+        "127.0.0.1",
+        str(port),
+        "--domain",
+        "TESTIEDLD0",
+        "--item",
+        item,
+        "--count",
+        str(count),
+        "--timeout-ms",
+        "3000",
+    ]
+    if delay_ms:
+        command.extend(["--delay-ms", str(delay_ms)])
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+        creationflags=creation_flags(),
+    )
 
 
 def main() -> int:
@@ -66,7 +125,7 @@ def main() -> int:
                 "--model-manifest",
                 str(model),
                 "--max-connections",
-                "2",
+                "3",
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -93,11 +152,30 @@ def main() -> int:
             if discovery.returncode != 0:
                 raise RuntimeError(f"discovery failed: {discovery.stderr}\n{discovery.stdout}")
             document = json.loads(discovery.stdout)
-            if document.get("coverage", {}).get("dataSetCount") != 1:
-                raise RuntimeError(f"static DataSet missing: {discovery.stdout}")
+            if document.get("coverage", {}).get("dataSetCount") != 2:
+                raise RuntimeError(f"static DataSets missing: {discovery.stdout}")
             data_sets = document.get("dataSets", [])
-            if len(data_sets) != 1 or data_sets[0].get("memberCount") != 2:
-                raise RuntimeError(f"static DataSet members mismatch: {data_sets}")
+            member_counts = sorted(data_set.get("memberCount") for data_set in data_sets)
+            if len(data_sets) != 2 or member_counts != [22, 36]:
+                raise RuntimeError(
+                    "configured whole-DO DataSet cardinalities changed: "
+                    f"{data_sets}"
+                )
+
+            # A whole-DO FCDA must be exposed as a readable MMS STRUCTURE.  A
+            # successful external read proves the synthesized object is present
+            # in the static object table instead of being silently dropped.
+            structured = run_read_probe(
+                args.read_probe,
+                port,
+                "GGIO1$ST$Digital1",
+            )
+            if structured.returncode != 0 or "value=" not in structured.stdout:
+                raise RuntimeError(
+                    "whole-DO MMS STRUCTURE read failed: "
+                    f"exit={structured.returncode} stdout={structured.stdout!r} "
+                    f"stderr={structured.stderr!r}"
+                )
 
             probe = subprocess.Popen(
                 [
@@ -107,7 +185,7 @@ def main() -> int:
                     "--domain",
                     "TESTIEDLD0",
                     "--item",
-                    "GGIO1$ST$Ind1$stVal",
+                    "GGIO1$ST$Digital1$stVal",
                     "--count",
                     "4",
                     "--delay-ms",
@@ -139,14 +217,19 @@ def main() -> int:
             server_stdout, server_stderr = server.communicate()
             raise
 
-    if server.returncode != 0 or "kind=value_sync" not in server_stdout:
+    if (
+        server.returncode != 0
+        or "kind=server_ready" not in server_stdout
+        or "kind=value_sync" not in server_stdout
+    ):
         raise RuntimeError(
-            f"server live-value evidence missing (exit={server.returncode}):\n"
+            f"server structured/live-value evidence missing (exit={server.returncode}):\n"
             f"{server_stdout}\n{server_stderr}"
         )
     print(
-        "IEDSIM_RUNTIME_MODEL_PASS datasets=1 members=2 "
-        "valueTransition=false->true associationPreserved=true"
+        "IEDSIM_RUNTIME_MODEL_PASS datasets=2 digitalMembers=36 analogMembers=22 "
+        "wholeDoStructureReadable=true valueTransition=false->true "
+        "associationPreserved=true"
     )
     return 0
 

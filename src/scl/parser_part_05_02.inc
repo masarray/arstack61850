@@ -4,7 +4,9 @@
                         stream.address = address->second;
                     }
                     if (data_set != nullptr) {
-                        stream.entries = data_set->entries;
+                        stream.entries = data_set->expanded_entries.empty()
+                            ? data_set->entries
+                            : data_set->expanded_entries;
                     }
                     stream.sample_rate = ushort_attribute(*control, "smpRate");
                     stream.sample_mode = attribute(control, "smpMod");

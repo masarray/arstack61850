@@ -28,7 +28,8 @@ private:
     [[nodiscard]] static std::vector<std::uint8_t> encode_content(const MmsDataValue& value);
     [[nodiscard]] static std::int32_t tag_for(const MmsDataValue& value);
     [[nodiscard]] static MmsDataValue decode_bit_string(std::span<const std::uint8_t> bytes);
-    [[nodiscard]] static float decode_floating_point(std::span<const std::uint8_t> bytes) noexcept;
+    [[nodiscard]] static MmsDataValue decode_floating_point(
+        std::span<const std::uint8_t> bytes) noexcept;
 };
 
 } // namespace ar::iec61850::mms

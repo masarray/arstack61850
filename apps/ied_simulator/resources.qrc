@@ -1,6 +1,8 @@
 <RCC>
     <qresource prefix="/iedsim/assets">
         <file alias="InterVariable.ttf">../arstack_studio/assets/InterVariable.ttf</file>
+        <file alias="LUCIDE_LICENSE.txt">../arstack_studio/assets/LUCIDE_LICENSE.txt</file>
+        <file alias="black-fascia-ied.svg">assets/black-fascia-ied.svg</file>
         <file alias="activity.svg">../arstack_studio/assets/lucide/activity.svg</file>
         <file alias="chevron-down.svg">../arstack_studio/assets/lucide/chevron-down.svg</file>
         <file alias="chevron-up.svg">../arstack_studio/assets/lucide/chevron-up.svg</file>

@@ -27,6 +27,21 @@ struct SclIed final {
     friend bool operator==(const SclIed&, const SclIed&) = default;
 };
 
+struct SclLogicalNode final {
+    std::string ied_name;
+    std::string ld_inst;
+    std::string prefix;
+    std::string ln_class;
+    std::string ln_inst;
+    std::string name;
+
+    [[nodiscard]] std::string mms_domain() const {
+        return ied_name + ld_inst;
+    }
+
+    friend bool operator==(const SclLogicalNode&, const SclLogicalNode&) = default;
+};
+
 struct SclDataSetEntry final {
     std::size_t index{};
     std::string signal_reference;
@@ -45,6 +60,11 @@ struct SclDataSetEntry final {
     bool is_quality{};
     bool is_timestamp{};
 
+    // Instance-level DAI/Val value from SCL when one is explicitly configured.
+    // This is intentionally separate from runtime state: simulator adapters use it
+    // to seed configured semantics such as CF$...$ctlModel without inventing defaults.
+    std::string configured_value;
+
     friend bool operator==(const SclDataSetEntry&, const SclDataSetEntry&) = default;
 };
 
@@ -55,7 +75,15 @@ struct SclDataSet final {
     std::string logical_node_path;
     std::string name;
     std::string reference;
+
+    // Canonical SCL FCDA membership. A whole-DataObject FCDA intentionally keeps
+    // da_name empty and therefore remains one MMS DataSet member.
     std::vector<SclDataSetEntry> entries;
+
+    // Ordered leaf projection used by payload-oriented profiles such as SV and
+    // the current GOOSE publisher path. This view may contain several entries
+    // for one configured whole-DataObject FCDA.
+    std::vector<SclDataSetEntry> expanded_entries;
 
     friend bool operator==(const SclDataSet&, const SclDataSet&) = default;
 };
@@ -163,6 +191,18 @@ struct SclDocument final {
     std::string header_revision;
     SclEdition edition{SclEdition::unknown};
     std::vector<SclIed> ieds;
+
+    // Structural logical-node inventory from the same bounded parser used for
+    // all other SCL data. UI/server layers must consume this instead of
+    // reparsing the source XML independently.
+    std::vector<SclLogicalNode> logical_nodes;
+
+    // Complete structural LD/LN/DO/DA(BDA) leaf projection derived from
+    // DataTypeTemplates. Unlike DataSet entries this inventory is not reduced
+    // to signals referenced by service bindings; simulator/server consumers
+    // use it as the authoritative SCL data-model leaf catalog.
+    std::vector<SclDataSetEntry> model_entries;
+
     std::vector<SclDataSet> data_sets;
     std::vector<SclGooseStream> goose_streams;
     std::vector<SclSampledValuesStream> sampled_values_streams;

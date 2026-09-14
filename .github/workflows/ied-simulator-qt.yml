@@ -10,6 +10,8 @@ on:
       - 'src/mms/**'
       - 'tools/static_ied_server.cpp'
       - 'tools/mms_read_probe.cpp'
+      - 'tools/mms_urcb_gi_probe.cpp'
+      - 'tools/mms_brcb_event_probe.cpp'
       - 'tools/static_ied_server_iedsim/**'
       - 'tests/fixtures/scl/**'
       - 'CMakeLists.txt'
@@ -23,6 +25,8 @@ on:
       - 'src/mms/**'
       - 'tools/static_ied_server.cpp'
       - 'tools/mms_read_probe.cpp'
+      - 'tools/mms_urcb_gi_probe.cpp'
+      - 'tools/mms_brcb_event_probe.cpp'
       - 'tools/static_ied_server_iedsim/**'
       - 'tests/fixtures/scl/**'
       - 'CMakeLists.txt'
@@ -58,9 +62,32 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: ./build-ied-simulator-qt/arstack_ied_simulator --smoke-test
 
+      - name: Capture workbench visual regression
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          ./build-ied-simulator-qt/arstack_ied_simulator
+          --scl ./tests/fixtures/scl/minimal-station-brcb.scd
+          --screenshot ./ied-simulator-workbench.png
+
+      - name: Upload workbench screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: ied-simulator-workbench
+          path: ied-simulator-workbench.png
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Prove GUI value is visible through MMS
         run: >-
           python3 apps/ied_simulator/test_gui_live_value.py
           --app ./build-ied-simulator-qt/arstack_ied_simulator
           --read-probe ./build-ied-simulator-qt
-          --scl ./tests/fixtures/scl/minimal-station.scd
+          --scl ./tests/fixtures/scl/minimal-station-brcb.scd
+
+      - name: Prove two IEDs can share TCP port across distinct local IPs
+        run: >-
+          python3 apps/ied_simulator/test_gui_multi_ied.py
+          --app ./build-ied-simulator-qt/arstack_ied_simulator
+          --read-probe ./build-ied-simulator-qt
+          --scl ./tests/fixtures/scl/compact-multi-stream.scd
