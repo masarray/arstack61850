@@ -48,7 +48,8 @@ for ($i = 1; $i -le 10; $i++) {
         orphanProcessObserved = $orphan
         pass = $pass
     }
-    Write-Host (if ($pass) { 'PASS' } else { 'FAIL' })
+    $cycleResult = if ($pass) { 'PASS' } else { 'FAIL' }
+    Write-Host $cycleResult
     Write-Host ''
 }
 
