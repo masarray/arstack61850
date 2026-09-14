@@ -60,6 +60,11 @@ QString normalizedKind(QString value) {
     if (value.compare(QStringLiteral("GOOSE"), Qt::CaseInsensitive) == 0) {
         return QStringLiteral("GOOSE");
     }
+    if (value.compare(QStringLiteral("SettingGroup"), Qt::CaseInsensitive) == 0 ||
+        value.compare(QStringLiteral("Setting Group"), Qt::CaseInsensitive) == 0 ||
+        value.compare(QStringLiteral("Setting Groups"), Qt::CaseInsensitive) == 0) {
+        return QStringLiteral("SettingGroup");
+    }
     if (value.compare(QStringLiteral("Control"), Qt::CaseInsensitive) == 0) {
         return QStringLiteral("Control");
     }
@@ -69,6 +74,14 @@ QString normalizedKind(QString value) {
 int boundedSize(const std::size_t size) {
     return static_cast<int>(std::min<std::size_t>(
         size, static_cast<std::size_t>(std::numeric_limits<int>::max())));
+}
+
+bool isSettingGroupEntry(const ar::iec61850::scl::SclDataSetEntry& entry) {
+    const auto fc = qstring(entry.functional_constraint);
+    if (fc.compare(QStringLiteral("SE"), Qt::CaseInsensitive) == 0) return true;
+    const auto dataObject = qstring(entry.do_name);
+    return dataObject.compare(QStringLiteral("SGCB"), Qt::CaseInsensitive) == 0 ||
+        dataObject.startsWith(QStringLiteral("SGCB."), Qt::CaseInsensitive);
 }
 } // namespace
 
@@ -146,6 +159,7 @@ void IedCommissioningModel::rebuild() {
     dataSetCount_ = 0;
     reportCount_ = 0;
     gooseCount_ = 0;
+    settingGroupCount_ = 0;
     controlCount_ = 0;
     synchronizedSessionKey_.clear();
     synchronizedDocumentCount_ = backend_ == nullptr
@@ -210,6 +224,21 @@ void IedCommissioningModel::rebuild() {
         ++gooseCount_;
     }
 
+    // Setting-group navigation mirrors the IEDScout concept without inventing
+    // SGCB metadata that the bounded SCL parser does not expose separately.
+    // A Logical Device is included only when the parsed model contains either
+    // FC=SE setting values or the standard SGCB data object.
+    QSet<QString> settingGroupLogicalDevices;
+    for (int index = 0; index < boundedSize(document.model_entries.size()); ++index) {
+        const auto& entry = document.model_entries[static_cast<std::size_t>(index)];
+        if (qstring(entry.ied_name) != iedName || !isSettingGroupEntry(entry)) continue;
+        const auto logicalDevice = qstring(entry.ld_inst);
+        if (logicalDevice.isEmpty() || settingGroupLogicalDevices.contains(logicalDevice)) continue;
+        settingGroupLogicalDevices.insert(logicalDevice);
+        append(Kind::settingGroup, index, logicalDevice);
+        ++settingGroupCount_;
+    }
+
     QSet<QString> controls;
     for (int index = 0; index < boundedSize(document.model_entries.size()); ++index) {
         const auto& entry = document.model_entries[static_cast<std::size_t>(index)];
@@ -260,6 +289,7 @@ QString IedCommissioningModel::kindName(const Kind kind) {
     case Kind::dataSet: return QStringLiteral("DataSet");
     case Kind::report: return QStringLiteral("Report");
     case Kind::goose: return QStringLiteral("GOOSE");
+    case Kind::settingGroup: return QStringLiteral("SettingGroup");
     case Kind::control: return QStringLiteral("Control");
     }
     return QStringLiteral("Unknown");
@@ -359,6 +389,45 @@ QVariantMap IedCommissioningModel::mapForHandle(
                 .arg(goose.entries.size() == 1 ? QString{} : QStringLiteral("s")));
         break;
     }
+    case Kind::settingGroup: {
+        if (handle.sourceIndex < 0 ||
+            handle.sourceIndex >= static_cast<int>(document.model_entries.size())) return {};
+        const auto& seed = document.model_entries[static_cast<std::size_t>(handle.sourceIndex)];
+        const auto iedName = qstring(seed.ied_name);
+        const auto logicalDevice = qstring(seed.ld_inst);
+        int memberCount{};
+        QSet<QString> logicalNodes;
+        bool hasSgcb{};
+        for (const auto& entry : document.model_entries) {
+            if (qstring(entry.ied_name) != iedName || qstring(entry.ld_inst) != logicalDevice ||
+                !isSettingGroupEntry(entry)) {
+                continue;
+            }
+            ++memberCount;
+            logicalNodes.insert(logicalNodeName(entry));
+            const auto dataObject = qstring(entry.do_name);
+            if (dataObject.compare(QStringLiteral("SGCB"), Qt::CaseInsensitive) == 0 ||
+                dataObject.startsWith(QStringLiteral("SGCB."), Qt::CaseInsensitive)) {
+                hasSgcb = true;
+            }
+        }
+        item.insert(QStringLiteral("name"), QStringLiteral("SG %1").arg(logicalDevice));
+        item.insert(QStringLiteral("reference"), QStringLiteral("%1%2").arg(iedName, logicalDevice));
+        item.insert(QStringLiteral("dataSetReference"), QString{});
+        item.insert(QStringLiteral("memberCount"), memberCount);
+        item.insert(QStringLiteral("status"), hasSgcb ? QStringLiteral("SGCB + SE") : QStringLiteral("SE values"));
+        item.insert(QStringLiteral("logicalDevice"), logicalDevice);
+        item.insert(QStringLiteral("logicalNode"), QStringLiteral("LLN0"));
+        item.insert(QStringLiteral("hasSgcb"), hasSgcb);
+        item.insert(
+            QStringLiteral("summary"),
+            QStringLiteral("%1 setting-group value%2 · %3 logical node%4")
+                .arg(memberCount)
+                .arg(memberCount == 1 ? QString{} : QStringLiteral("s"))
+                .arg(logicalNodes.size())
+                .arg(logicalNodes.size() == 1 ? QString{} : QStringLiteral("s")));
+        break;
+    }
     case Kind::control: {
         if (handle.sourceIndex < 0 ||
             handle.sourceIndex >= static_cast<int>(document.model_entries.size())) return {};
@@ -413,6 +482,7 @@ const std::vector<ar::iec61850::scl::SclDataSetEntry>* IedCommissioningModel::en
         if (handle.sourceIndex < 0 ||
             handle.sourceIndex >= static_cast<int>(document.goose_streams.size())) return nullptr;
         return &document.goose_streams[static_cast<std::size_t>(handle.sourceIndex)].entries;
+    case Kind::settingGroup:
     case Kind::control:
         return nullptr;
     }
@@ -421,31 +491,64 @@ const std::vector<ar::iec61850::scl::SclDataSetEntry>* IedCommissioningModel::en
 
 int IedCommissioningModel::memberCount() const noexcept {
     if (selectedHandleIndex_ < 0 || selectedHandleIndex_ >= handles_.size()) return 0;
-    const auto* entries = entriesFor(handles_.at(selectedHandleIndex_));
+    const auto& handle = handles_.at(selectedHandleIndex_);
+    if (handle.kind == Kind::settingGroup) {
+        if (backend_ == nullptr || handle.documentIndex < 0 ||
+            handle.documentIndex >= static_cast<int>(backend_->documents_.size())) return 0;
+        const auto& document = backend_->documents_[static_cast<std::size_t>(handle.documentIndex)].document;
+        if (handle.sourceIndex < 0 || handle.sourceIndex >= static_cast<int>(document.model_entries.size())) return 0;
+        const auto& seed = document.model_entries[static_cast<std::size_t>(handle.sourceIndex)];
+        int count{};
+        for (const auto& entry : document.model_entries) {
+            if (entry.ied_name == seed.ied_name && entry.ld_inst == seed.ld_inst && isSettingGroupEntry(entry)) ++count;
+        }
+        return count;
+    }
+    const auto* entries = entriesFor(handle);
     return entries == nullptr ? 0 : boundedSize(entries->size());
 }
 
 QVariantMap IedCommissioningModel::member(const int row) const {
     if (selectedHandleIndex_ < 0 || selectedHandleIndex_ >= handles_.size()) return {};
-    const auto* entries = entriesFor(handles_.at(selectedHandleIndex_));
+    const auto& handle = handles_.at(selectedHandleIndex_);
+
+    const auto toMap = [](const ar::iec61850::scl::SclDataSetEntry& entry, const int index) {
+        QVariantMap item;
+        item.insert(QStringLiteral("index"), index);
+        item.insert(QStringLiteral("reference"), qstring(entry.signal_reference));
+        item.insert(QStringLiteral("logicalDevice"), qstring(entry.ld_inst));
+        item.insert(QStringLiteral("logicalNode"), logicalNodeName(entry));
+        item.insert(QStringLiteral("dataObject"), qstring(entry.do_name));
+        item.insert(QStringLiteral("dataAttribute"), qstring(entry.da_name));
+        item.insert(QStringLiteral("fc"), qstring(entry.functional_constraint));
+        item.insert(QStringLiteral("cdc"), qstring(entry.cdc));
+        item.insert(QStringLiteral("type"), qstring(entry.basic_type));
+        item.insert(QStringLiteral("configuredValue"), qstring(entry.configured_value));
+        item.insert(QStringLiteral("quality"), entry.is_quality);
+        item.insert(QStringLiteral("timestamp"), entry.is_timestamp);
+        item.insert(QStringLiteral("mmsDomain"), qstring(entry.ied_name) + qstring(entry.ld_inst));
+        item.insert(QStringLiteral("mmsItem"), mmsItem(entry));
+        return item;
+    };
+
+    if (handle.kind == Kind::settingGroup) {
+        if (backend_ == nullptr || handle.documentIndex < 0 ||
+            handle.documentIndex >= static_cast<int>(backend_->documents_.size()) || row < 0) return {};
+        const auto& document = backend_->documents_[static_cast<std::size_t>(handle.documentIndex)].document;
+        if (handle.sourceIndex < 0 || handle.sourceIndex >= static_cast<int>(document.model_entries.size())) return {};
+        const auto& seed = document.model_entries[static_cast<std::size_t>(handle.sourceIndex)];
+        int current{};
+        for (const auto& entry : document.model_entries) {
+            if (entry.ied_name != seed.ied_name || entry.ld_inst != seed.ld_inst || !isSettingGroupEntry(entry)) continue;
+            if (current == row) return toMap(entry, row);
+            ++current;
+        }
+        return {};
+    }
+
+    const auto* entries = entriesFor(handle);
     if (entries == nullptr || row < 0 || row >= boundedSize(entries->size())) return {};
-    const auto& entry = entries->at(static_cast<std::size_t>(row));
-    QVariantMap item;
-    item.insert(QStringLiteral("index"), row);
-    item.insert(QStringLiteral("reference"), qstring(entry.signal_reference));
-    item.insert(QStringLiteral("logicalDevice"), qstring(entry.ld_inst));
-    item.insert(QStringLiteral("logicalNode"), logicalNodeName(entry));
-    item.insert(QStringLiteral("dataObject"), qstring(entry.do_name));
-    item.insert(QStringLiteral("dataAttribute"), qstring(entry.da_name));
-    item.insert(QStringLiteral("fc"), qstring(entry.functional_constraint));
-    item.insert(QStringLiteral("cdc"), qstring(entry.cdc));
-    item.insert(QStringLiteral("type"), qstring(entry.basic_type));
-    item.insert(QStringLiteral("configuredValue"), qstring(entry.configured_value));
-    item.insert(QStringLiteral("quality"), entry.is_quality);
-    item.insert(QStringLiteral("timestamp"), entry.is_timestamp);
-    item.insert(QStringLiteral("mmsDomain"), qstring(entry.ied_name) + qstring(entry.ld_inst));
-    item.insert(QStringLiteral("mmsItem"), mmsItem(entry));
-    return item;
+    return toMap(entries->at(static_cast<std::size_t>(row)), row);
 }
 
 void IedCommissioningModel::select(const int visibleRow) {
@@ -505,6 +608,8 @@ bool IedCommissioningModel::matches(const Handle& handle) const {
         QStringLiteral("goId"),
         QStringLiteral("appId"),
         QStringLiteral("mac"),
+        QStringLiteral("logicalDevice"),
+        QStringLiteral("logicalNode"),
         QStringLiteral("controlModel"),
         QStringLiteral("cdc")};
     for (const auto& key : keys) {
