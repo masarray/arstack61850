@@ -62,6 +62,8 @@ qt_add_qml_module(arstack_ied_simulator
         src/SclWorkspaceController.hpp
         src/GooseMonitorController.cpp
         src/GooseMonitorController.hpp
+        src/ProductHardeningController.cpp
+        src/ProductHardeningController.hpp
     QML_FILES
         qml/Main.qml
         qml/AppTheme.qml
@@ -283,6 +285,17 @@ target_link_libraries(ied_scl_workspace_qa PRIVATE
 target_include_directories(ied_scl_workspace_qa PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(ied_scl_workspace_qa PRIVATE cxx_std_20)
+
+add_executable(ied_product_hardening_qa
+    src/ied_product_hardening_qa.cpp
+    src/ProductHardeningController.cpp
+    src/ProductHardeningController.hpp)
+target_link_libraries(ied_product_hardening_qa PRIVATE
+    Qt6::Core
+    Qt6::Qml)
+target_include_directories(ied_product_hardening_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_product_hardening_qa PRIVATE cxx_std_20)
 
 # The regular library intentionally keeps a strict portable connection runtime.
 # The desktop simulator needs the separate compatibility runtime validated

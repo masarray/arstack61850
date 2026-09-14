@@ -16,9 +16,20 @@ ApplicationWindow {
     color: appTheme.background
     font.family: interFont.status === FontLoader.Ready ? interFont.name : "Segoe UI"
 
-    property int workspaceIndex: simulator.imported ? 5 : 0
+    property int workspaceIndex: 0
+    property bool persistenceReady: false
+    property bool mmsWasConnected: false
+    property bool simulatorAutoSelectPending: true
+
+    onWorkspaceIndexChanged: {
+        if (root.persistenceReady) hardening.workspaceIndex = root.workspaceIndex
+    }
 
     AppTheme { id: appTheme }
+    ProductHardeningController {
+        id: hardening
+        objectName: "productHardeningBackend"
+    }
     IedFleetController {
         id: simulator
         objectName: "simulatorBackend"
@@ -42,6 +53,35 @@ ApplicationWindow {
     GooseMonitorController {
         id: gooseMonitor
         objectName: "gooseMonitorBackend"
+    }
+
+    Component.onCompleted: {
+        if (hardening.lastHost.length > 0) {
+            mmsClient.host = hardening.lastHost
+            mmsClient.port = hardening.lastPort
+        }
+        root.workspaceIndex = hardening.workspaceIndex
+        root.mmsWasConnected = mmsClient.connected
+        root.persistenceReady = true
+    }
+
+    Connections {
+        target: mmsClient
+        function onStateChanged() {
+            if (mmsClient.connected && !root.mmsWasConnected)
+                hardening.rememberEndpoint(mmsClient.host, mmsClient.port)
+            root.mmsWasConnected = mmsClient.connected
+        }
+    }
+
+    Connections {
+        target: simulator
+        function onModelChanged() {
+            if (root.simulatorAutoSelectPending && simulator.imported) {
+                root.workspaceIndex = 5
+                root.simulatorAutoSelectPending = false
+            }
+        }
     }
 
     FontLoader {
@@ -134,6 +174,47 @@ ApplicationWindow {
                 WorkspaceButton { workspace: 5; text: "Simulator" }
                 WorkspaceButton { workspace: 6; text: "GOOSE" }
                 Item { Layout.fillWidth: true }
+
+                ComboBox {
+                    id: recentConnectionPicker
+                    visible: root.workspaceIndex === 0 && hardening.recentEndpoints.length > 0
+                    Layout.preferredWidth: 160
+                    model: hardening.recentEndpoints
+                    enabled: !mmsClient.connected && !mmsClient.busy
+                    onActivated: {
+                        const recentHost = hardening.recentHost(currentIndex)
+                        const recentPort = hardening.recentPort(currentIndex)
+                        if (recentHost.length > 0 && recentPort > 0) {
+                            mmsClient.host = recentHost
+                            mmsClient.port = recentPort
+                        }
+                    }
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Recent MMS endpoints · restored without auto-connect"
+                }
+
+                Label {
+                    visible: !hardening.settingsHealthy
+                    text: "STATE RESET"
+                    color: appTheme.amber
+                    font.pixelSize: 8
+                    font.weight: Font.Bold
+                    ToolTip.visible: stateResetMouse.containsMouse
+                    ToolTip.text: hardening.settingsStatus
+                    MouseArea { id: stateResetMouse; anchors.fill: parent; hoverEnabled: true }
+                }
+
+                Label {
+                    visible: hardening.npcapRequired && !hardening.npcapAvailable
+                    text: "NPCAP REQUIRED"
+                    color: appTheme.amber
+                    font.pixelSize: 8
+                    font.weight: Font.Bold
+                    ToolTip.visible: npcapMouse.containsMouse
+                    ToolTip.text: hardening.npcapStatus
+                    MouseArea { id: npcapMouse; anchors.fill: parent; hoverEnabled: true }
+                }
+
                 Label {
                     text: root.workspaceIndex === 0
                           ? mmsClient.stateText
