@@ -73,8 +73,11 @@ void DeviceIoWorker::initialize() {
             heartbeatTimer_->stop();
             return;
         }
+        // Heartbeat is observational/safety maintenance and must never break an
+        // exclusive profile transaction. If the exclusive gate is active this
+        // tick is simply coalesced away; the next timer tick retries.
         static_cast<void>(enqueueCommandsInternal(
-            {QStringLiteral("HEARTBEAT")}, true, true));
+            {QStringLiteral("HEARTBEAT")}, true, false, false));
     });
 
     connect(serial_, &QSerialPort::readyRead, this, &DeviceIoWorker::processReadyRead);
@@ -126,6 +129,7 @@ void DeviceIoWorker::shutdown(const bool requestStop) {
     }
 
     commandQueue_.clear();
+    exclusiveCommandsRemaining_ = 0;
     writeActive_ = false;
     activeCommand_ = {};
     closePortInternal(true);
@@ -218,6 +222,7 @@ bool DeviceIoWorker::openPortInternal(const QString& portName, const bool automa
     identifyAttempts_ = 0;
     pendingRx_.clear();
     commandQueue_.clear();
+    exclusiveCommandsRemaining_ = 0;
     writeActive_ = false;
     activeCommand_ = {};
     lastPort_ = portName.trimmed();
@@ -264,6 +269,7 @@ void DeviceIoWorker::closePortInternal(const bool emitRelease) {
     identifyAttempts_ = 0;
     pendingRx_.clear();
     commandQueue_.clear();
+    exclusiveCommandsRemaining_ = 0;
     writeActive_ = false;
     activeCommand_ = {};
 
@@ -282,7 +288,8 @@ bool DeviceIoWorker::sendIdentifyProbe() {
 
     ++identifyAttempts_;
     emit identificationAttempt(serial_->portName(), identifyAttempts_, identityMaxAttempts());
-    return enqueueCommandsInternal({QStringLiteral("IDENTIFY")}, false, true);
+    return enqueueCommandsInternal(
+        {QStringLiteral("IDENTIFY")}, false, false, true);
 }
 
 void DeviceIoWorker::finishIdentificationTimeout() {
@@ -314,19 +321,32 @@ void DeviceIoWorker::confirmIdentity() {
     if (verificationTimer_ != nullptr) verificationTimer_->stop();
 }
 
-void DeviceIoWorker::enqueueCommands(const QStringList& commands, const bool quiet) {
-    static_cast<void>(enqueueCommandsInternal(commands, quiet, true));
+void DeviceIoWorker::enqueueCommands(
+    const QStringList& commands,
+    const bool quiet,
+    const bool exclusive) {
+    static_cast<void>(enqueueCommandsInternal(commands, quiet, exclusive, true));
 }
 
 bool DeviceIoWorker::enqueueCommandsInternal(
     const QStringList& commands,
     const bool quiet,
+    const bool exclusive,
     const bool reportRejection) {
     if (serial_ == nullptr || !serial_->isOpen()) {
         if (reportRejection) emit commandRejected(QStringLiteral("Device is not connected."));
         return false;
     }
     if (commands.isEmpty()) return true;
+
+    if (exclusiveCommandsRemaining_ > 0) {
+        if (reportRejection) {
+            emit commandRejected(exclusive
+                ? QStringLiteral("Another exclusive device transaction is already pending.")
+                : QStringLiteral("Device configuration is locked while an exclusive profile transaction is pending."));
+        }
+        return false;
+    }
 
     const int outstanding = commandQueue_.size() + (writeActive_ ? 1 : 0);
     if (commands.size() > commandQueueCapacity() - outstanding) {
@@ -350,9 +370,10 @@ bool DeviceIoWorker::enqueueCommandsInternal(
             if (reportRejection) emit commandRejected(QStringLiteral("Device command exceeds the bounded transport size."));
             return false;
         }
-        prepared.push_back(PendingCommand{trimmed, bytes, quiet});
+        prepared.push_back(PendingCommand{trimmed, bytes, quiet, exclusive});
     }
 
+    if (exclusive) exclusiveCommandsRemaining_ = commands.size();
     for (auto& command : prepared) commandQueue_.enqueue(std::move(command));
     pumpWriteQueue();
     return true;
@@ -383,6 +404,9 @@ void DeviceIoWorker::completeActiveWrite() {
     const PendingCommand completed = activeCommand_;
     writeActive_ = false;
     activeCommand_ = {};
+    if (completed.exclusive && exclusiveCommandsRemaining_ > 0) {
+        --exclusiveCommandsRemaining_;
+    }
     emit commandTransmitted(completed.text, completed.quiet);
     pumpWriteQueue();
 }
@@ -433,6 +457,7 @@ void DeviceIoWorker::setHeartbeatEnabled(const bool enabled) {
         return;
     }
 
-    static_cast<void>(enqueueCommandsInternal({QStringLiteral("HEARTBEAT")}, true, true));
+    static_cast<void>(enqueueCommandsInternal(
+        {QStringLiteral("HEARTBEAT")}, true, false, false));
     if (!heartbeatTimer_->isActive()) heartbeatTimer_->start();
 }
