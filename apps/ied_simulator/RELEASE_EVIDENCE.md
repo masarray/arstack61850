@@ -23,11 +23,45 @@ A feature may have more than one evidence class. The strongest applicable class 
 | GOOSE Monitor/Publisher | LIVE-PROVEN + SIMULATOR-PROVEN | explicit NIC binding; real Layer-2 publisher path; APPID/MAC/VLAN/goID/DataSet/ConfRev; stNum/sqNum/TTL; bounded monitor tables; PCAP export | Windows raw Ethernet requires Npcap runtime availability |
 | Simulator | LIVE-PROVEN + SIMULATOR-PROVEN | child MMS server lifecycle; multi-IED same-port/distinct-address coexistence; live value plane; direct/SBO normal and enhanced controls; URCB/BRCB; bounded start/stop/restart | broader Sampled Values/PTP/embedded platform roadmap is not a desktop RC blocker |
 | Product persistence | OFFLINE-TESTED + UI-PROVEN | atomic versioned state; workspace restore; eight-entry deduplicated recent endpoint list; corrupt/unknown state fail-closed recovery | automatic connection on startup is intentionally disabled |
-| Windows package | DEPLOYED/INSTALLED-PROVEN when release workflow is green | `windeployqt` staging; portable ZIP; NSIS installer; silent install; staged and installed smoke test; helper server and Qt runtime verification | installer does not silently redistribute Npcap; runtime guidance remains explicit |
+| Diagnostics | OFFLINE-TESTED + UI-PROVEN | bounded activity retention plus atomic diagnostics export with a 2 MiB payload guard | diagnostics export is operational evidence, not a protocol trace substitute |
+| Windows package | DEPLOYED/INSTALLED-PROVEN | `windeployqt` staging; portable ZIP; NSIS installer; silent install; staged and installed smoke test; helper server and Qt runtime verification | installer does not silently redistribute Npcap; runtime guidance remains explicit |
+
+## Final Milestone S proof head
+
+Executable/release behavior is proven on head `67ffa58e91fe11e2af7a2de4559e4451a1d5a34d`.
+
+**IED Simulator Release Hardening #10**, run `34811313865`:
+
+- Linux release-soak job `103873063840`: SUCCESS.
+- Windows release-package job `103873063622`: SUCCESS.
+- `PRODUCT_HARDENING_PASS state=atomic workspace_restore=4 recent=8 dedupe=pass bounded_recent=8 crash_recovery=pass auto_reconnect=false npcap_policy=explicit`
+- `PRODUCT_HARDENING_NEGATIVE_PASS corrupt_state=ignored unsupported_schema=rejected invalid_workspace=rejected invalid_endpoint=rejected unbounded_recent=rejected`
+- `WINDOWS_RUNTIME_READINESS_PASS npcap_required=true npcap_available=false guidance=pass raw_ethernet_ready=false`
+- `MMS_CLIENT_RECONNECT_SOAK_PASS cycles=24 association_reacquire=pass clean_disconnect=pass stale_state_not_applied=true bounded_io_worker=1`
+- `APPLICATION_CLOSE_SOAK_PASS cycles=12 runtime_started=pass about_to_quit_cleanup=pass orphan_children=0 socket_release=pass`
+- `WINDOWS_RELEASE_PACKAGE_PASS staged_smoke=pass installed_smoke=pass qt_runtime=pass helper_server=pass npcap_guidance=pass installer=nsis portable=zip reconnect_cycles=24`
+
+**IED Simulator Qt #565**, run `34811313883`, job `103873063746`: SUCCESS through the complete retained desktop regression tail. Key release markers include:
+
+- `IEDSIM_GUARDRAILS_PASS output_cap=65536 drain_budget=64 retained=129 flood_dropped=2031616 diagnostics_export=atomic`
+- `SCL_WORKSPACE_PASS edition_source=ed2 exact_preserve=pass canonical=pass dtt=pass references=pass configured_values=pass deterministic=pass ed1=pass ed2=pass ed21=pass scd=pass icd=pass cid=pass semantic_roundtrip=pass ieds=1 lns=4 leaves=23`
+- `RUNTIME_LIFECYCLE_PASS cycles=12 ... started=12 finished=12 delayed_kill_guard=pass`
+- `RUNTIME_SCALE_RESPONSIVENESS_PASS large=20000,50000 multi_ied=3 fleet_rollback=pass nonblocking_clear=pass`
+- `GOOSE_WIRE_INTEROP_PASS appid=4097 vlan=100 members=3 st_initial=1 sq_retx=1 st_change=2 ttl_initial=8 ttl_retx=16 pcap_packets=3`
+- `GOOSE_WORKSPACE_PASS ... pcap_export=pass`
+- `LIVE_RUNTIME_DATA_PLANE_PASS cases=1000,10000 manifest_hot_rewrites=0 bounded_pending=256 bounded_inflight=256`
+- `IEDSIM_GUI_LIVE_VALUE_PASS ... control_direct_normal=pass control_sbo_normal=pass control_direct_enhanced=pass control_sbo_enhanced=pass urcb_gi=pass brcb_event=pass`
+- `MULTI_IED_PASS` for same TCP port on distinct loopback addresses.
+
+**C++ CI #1501**, run `34811313919`: Windows/MSVC job `103873063736`, Linux/Clang job `103873063924`, and Linux/GCC job `103873063955` all SUCCESS.
+
+All twelve workflows associated with executable proof head `67ffa58e91fe11e2af7a2de4559e4451a1d5a34d` completed SUCCESS: IED Simulator Release Hardening #10, IED Simulator Qt #565, C++ CI #1501, MMS R1-R2 Server CI #165, Security and Evidence #1476, IEDScout Parity Server CI #463, Control Interop Harness CI #753, Dynamic RCB Trial Harness CI #792, BRCB Hard Profile CI #749, Embedded Profile CI #1146, ARStack Studio Qt #521 and SMV Injector GUI #334.
+
+Documentation-only commits after this proof head do not reopen Milestone S unless executable/runtime behavior changes.
 
 ## Runtime and shutdown release gates
 
-The release-candidate branch must pass all of the following on the same executable behavior head:
+The release-candidate behavior head passes all of the following:
 
 - `PRODUCT_HARDENING_PASS`
 - `PRODUCT_HARDENING_NEGATIVE_PASS`
@@ -41,7 +75,9 @@ The application-close soak is intentionally process-external. Each cycle starts 
 
 ## Windows / Npcap policy
 
-The Windows application checks for both `wpcap` and `Packet` runtime libraries. If they are unavailable, the application remains usable for MMS/SCL/simulator workflows and explicitly reports that Npcap must be installed before Windows raw-Ethernet GOOSE Monitor/Publisher use. The release package does not disguise a missing Npcap runtime as a working raw-Ethernet path.
+The Windows application checks for both `wpcap` and `Packet` runtime libraries. If they are unavailable, the application remains usable for MMS/SCL/simulator workflows and explicitly reports that Npcap must be installed before Windows raw-Ethernet GOOSE Monitor/Publisher use. The final Windows runner intentionally had no Npcap runtime; the release gate proved `guidance=pass` and `raw_ethernet_ready=false` rather than manufacturing a false-positive raw-Ethernet result.
+
+The release package does **not** bundle or silently redistribute Npcap.
 
 ## External-vendor interoperability status
 
@@ -56,13 +92,21 @@ When external vendor hardware/simulators are available, results should be append
 - Lossless unknown vendor XML/extensions during canonical SCL conversion: **NOT CLAIMED**; exact-source Save As preserves the source bytes.
 - Automatic field-device connection after application restart: intentionally disabled.
 - Windows raw Ethernet without Npcap: unavailable by design and surfaced with operator guidance.
+- Third-party vendor hardware/proprietary simulator interoperability: **NOT CLAIMED** until such devices are actually attached and evidenced.
 - Sampled Values runtime simulation, PTP, ESP/embedded and broader process-bus platform work remain separate ARStack platform tracks and are not desktop RC prerequisites.
 
 ## Packaging artifacts
 
-The dedicated `IED Simulator Release Hardening` workflow produces two Windows RC artifacts from the same staged directory:
+`IED Simulator Release Hardening #10` produced Windows RC artifact `arstack-iec61850-workbench-windows-rc` from behavior head `67ffa58e91fe11e2af7a2de4559e4451a1d5a34d`.
+
+- GitHub Actions artifact ID: `10334848336`
+- Size: `60,552,499` bytes
+- Digest: `sha256:cbb81b61a596a46d3e8882d842057b6a71c96a9005cdb6a1e393d56c76d7e28c`
+- Artifact retention expiry: `2026-09-28T06:02:54Z`
+
+The artifact contains:
 
 1. `ARStack-IEC61850-Workbench-Setup-win64.exe` — installable NSIS package.
 2. `ARStack-IEC61850-Workbench-portable-win64.zip` — portable deployed tree.
 
-Both contain the workbench executable, the simulator helper executable and the Qt runtime/QML/plugin deployment produced by `windeployqt`. The workflow smoke-tests the staged application and a silent-installed copy before uploading either artifact.
+Both contain the workbench executable, simulator helper executable and Qt runtime/QML/plugin deployment produced by `windeployqt`. The workflow smoke-tested the staged application and a silent-installed copy before upload.
