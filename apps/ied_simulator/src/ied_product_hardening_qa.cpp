@@ -73,10 +73,19 @@ int main(int argc, char** argv) {
             return 8;
         }
 #ifdef Q_OS_WIN
-        if (!restored.npcapRequired() || restored.rawEthernetReady() != restored.npcapAvailable()) {
-            std::cerr << "Windows Npcap readiness contract failed.\n";
+        if (!restored.npcapRequired() || restored.rawEthernetReady() != restored.npcapAvailable() ||
+            !restored.npcapStatus().contains(QStringLiteral("Npcap"), Qt::CaseInsensitive) ||
+            (!restored.npcapAvailable() &&
+             !restored.npcapStatus().contains(QStringLiteral("Install Npcap"), Qt::CaseInsensitive))) {
+            std::cerr << "Windows Npcap readiness/guidance contract failed.\n";
             return 9;
         }
+        std::cout << "WINDOWS_RUNTIME_READINESS_PASS"
+                  << " npcap_required=true"
+                  << " npcap_available=" << (restored.npcapAvailable() ? "true" : "false")
+                  << " guidance=pass"
+                  << " raw_ethernet_ready=" << (restored.rawEthernetReady() ? "true" : "false")
+                  << '\n';
 #else
         if (restored.npcapRequired() || !restored.npcapAvailable() || !restored.rawEthernetReady()) {
             std::cerr << "Non-Windows Npcap readiness contract failed.\n";

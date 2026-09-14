@@ -195,6 +195,9 @@ public:
     }
 
     [[nodiscard]] quint16 port() const noexcept { return server_.serverPort(); }
+    [[nodiscard]] bool connectionIdle() const noexcept {
+        return socket_ == nullptr && session_ == nullptr && runtime_ == nullptr;
+    }
 
 private:
     void acceptConnection() {
@@ -359,5 +362,48 @@ int main(int argc, char** argv) {
               << " stale_generation=" << staleGeneration
               << " current_generation=" << currentGeneration
               << " stale_state_not_applied=true bounded_io_worker=1\n";
+
+    constexpr int reconnectCycles = 24;
+    quint64 previousGeneration = client.generation();
+    for (int cycle = 1; cycle <= reconnectCycles; ++cycle) {
+        if (!waitFor([&] { return fixture.connectionIdle() && !client.operationBusy(); }, 3'000)) {
+            std::cerr << "Fixture did not become idle before reconnect cycle " << cycle << ".\n";
+            return 17;
+        }
+        if (!client.connectToIed() || !waitFor([&] { return client.connected(); }, 6'000)) {
+            std::cerr << "Reconnect cycle " << cycle << " failed: "
+                      << client.lastError().toStdString() << '\n';
+            return 18;
+        }
+        if (client.generation() <= previousGeneration || client.logicalDeviceCount() != 1 ||
+            client.logicalNodeCount() != 1 || client.dataObjectCount() != 1 ||
+            client.dataAttributeCount() != 1) {
+            std::cerr << "Reconnect cycle " << cycle << " restored an invalid session/model.\n";
+            return 19;
+        }
+        const auto connectedGeneration = client.generation();
+        client.disconnectFromIed();
+        if (!waitFor(
+                [&] {
+                    return !client.connected() && !client.operationBusy() && fixture.connectionIdle();
+                },
+                3'000)) {
+            std::cerr << "Reconnect cycle " << cycle << " did not cleanly disconnect.\n";
+            return 20;
+        }
+        if (client.generation() <= connectedGeneration || client.treeModel()->totalNodeCount() != 0 ||
+            !client.treeModel()->selectedNode().isEmpty()) {
+            std::cerr << "Reconnect cycle " << cycle << " leaked stale session state.\n";
+            return 21;
+        }
+        previousGeneration = client.generation();
+    }
+
+    std::cout << "MMS_CLIENT_RECONNECT_SOAK_PASS"
+              << " cycles=" << reconnectCycles
+              << " association_reacquire=pass"
+              << " clean_disconnect=pass"
+              << " stale_state_not_applied=true"
+              << " bounded_io_worker=1\n";
     return 0;
 }

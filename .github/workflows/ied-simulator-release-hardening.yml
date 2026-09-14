@@ -1,0 +1,130 @@
+name: IED Simulator Release Hardening
+
+on:
+  push:
+    paths:
+      - 'apps/ied_simulator/**'
+      - '.github/workflows/ied-simulator-release-hardening.yml'
+  pull_request:
+    paths:
+      - 'apps/ied_simulator/**'
+      - '.github/workflows/ied-simulator-release-hardening.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  linux-release-soak:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
+
+      - name: Configure
+        run: >-
+          cmake -S apps/ied_simulator -B build-ied-simulator-release -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build release soak targets
+        run: >-
+          cmake --build build-ied-simulator-release
+          --target arstack_ied_simulator ied_mms_client_workbench_qa ied_product_hardening_qa
+          --parallel 2
+
+      - name: Product state and runtime readiness regression
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ./build-ied-simulator-release/ied_product_hardening_qa
+
+      - name: MMS reconnect association soak
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          ./build-ied-simulator-release/ied_mms_client_workbench_qa
+          ./tests/fixtures/scl/client-workbench.scd
+
+      - name: Application close child/socket soak
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          python3 apps/ied_simulator/test_application_close_soak.py
+          --app ./build-ied-simulator-release/arstack_ied_simulator
+          --scl ./tests/fixtures/scl/minimal-station-brcb.scd
+          --cycles 12
+
+  windows-release-package:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          cache: true
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis --yes --no-progress
+
+      - name: Configure MSVC release build
+        shell: pwsh
+        run: >-
+          cmake -S apps/ied_simulator -B build-ied-simulator-windows
+          -G "Visual Studio 17 2022" -A x64
+
+      - name: Build workbench and release QA
+        shell: pwsh
+        run: >-
+          cmake --build build-ied-simulator-windows --config Release
+          --target arstack_ied_simulator ariec61850_ied_simulator_server
+          ied_mms_client_workbench_qa ied_product_hardening_qa
+          --parallel 2
+
+      - name: Stage deployed Qt application
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path $PWD 'release-stage\ARStack-IEC61850-Workbench'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item 'build-ied-simulator-windows\Release\arstack_ied_simulator.exe' $stage
+          Copy-Item 'build-ied-simulator-windows\Release\ariec61850_ied_simulator_server.exe' $stage
+          windeployqt --release --qmldir apps/ied_simulator/qml --dir $stage (Join-Path $stage 'arstack_ied_simulator.exe')
+
+      - name: Build portable ZIP and NSIS installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = (Resolve-Path 'release-stage\ARStack-IEC61850-Workbench').Path
+          $release = Join-Path $PWD 'release-artifacts'
+          New-Item -ItemType Directory -Force -Path $release | Out-Null
+          $zip = Join-Path $release 'ARStack-IEC61850-Workbench-portable-win64.zip'
+          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -Force
+          $installer = Join-Path $release 'ARStack-IEC61850-Workbench-Setup-win64.exe'
+          & makensis.exe "/DSTAGE_DIR=$stage" "/DOUT_FILE=$installer" 'apps\ied_simulator\packaging\windows\ARStackIEC61850Workbench.nsi'
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed with exit code $LASTEXITCODE" }
+
+      - name: Verify staged and installed release
+        shell: pwsh
+        run: >-
+          ./apps/ied_simulator/packaging/windows/verify-release.ps1
+          -StageDir ./release-stage/ARStack-IEC61850-Workbench
+          -BuildDir ./build-ied-simulator-windows/Release
+          -InstallerPath ./release-artifacts/ARStack-IEC61850-Workbench-Setup-win64.exe
+          -FixturePath ./tests/fixtures/scl/client-workbench.scd
+
+      - name: Upload Windows release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: arstack-iec61850-workbench-windows-rc
+          path: |
+            release-artifacts/ARStack-IEC61850-Workbench-Setup-win64.exe
+            release-artifacts/ARStack-IEC61850-Workbench-portable-win64.zip
+          if-no-files-found: error
+          retention-days: 14
