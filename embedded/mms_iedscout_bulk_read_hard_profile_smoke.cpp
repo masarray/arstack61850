@@ -30,6 +30,33 @@ constexpr std::array<std::uint8_t, 15U> kVariableDefinition{
     0x1AU, 0x03U, 0x4CU, 0x44U, 0x30U,
     0x1AU, 0x02U, 0x52U, 0x31U};
 
+// Proven ARIEC-compatible Read(variableListName) shape. The first [1] is the
+// explicit variableAccessSpecification wrapper, the second [1] selects
+// variableListName, and the third [1] is the domain-specific ObjectName.
+constexpr std::array<std::uint8_t, 34U> kVariableListReadRequest{
+    0xA0U, 0x20U, 0x02U, 0x01U, 0x26U,
+    0xA4U, 0x1BU, 0x80U, 0x01U, 0xFFU,
+    0xA1U, 0x16U,
+    0xA1U, 0x14U,
+    0xA1U, 0x12U,
+    0x1AU, 0x03U, 0x4CU, 0x44U, 0x30U,
+    0x1AU, 0x0BU,
+    0x4CU, 0x4CU, 0x4EU, 0x30U, 0x24U,
+    0x45U, 0x76U, 0x65U, 0x6EU, 0x74U, 0x73U};
+
+// Compatibility form accepted by the known-good ARIEC server: listOfVariable
+// [0] appears directly in the Read service instead of inside an explicit [1]
+// variableAccessSpecification wrapper.
+constexpr std::array<std::uint8_t, 27U> kUnwrappedReadRequest{
+    0xA0U, 0x19U, 0x02U, 0x01U, 0x27U,
+    0xA4U, 0x14U, 0x80U, 0x01U, 0xFFU,
+    0xA0U, 0x0FU,
+    0x30U, 0x0DU,
+    0xA0U, 0x0BU,
+    0xA1U, 0x09U,
+    0x1AU, 0x03U, 0x4CU, 0x44U, 0x30U,
+    0x1AU, 0x02U, 0x52U, 0x31U};
+
 // IEDScout probes NamedVariableList directories in VMD, AA and then domain
 // scope. These two requests lock the first two compatibility forms.
 constexpr std::array<std::uint8_t, 16U> kVmdDataSetNameListRequest{
@@ -149,6 +176,19 @@ constexpr std::array<std::uint8_t, 20U> kAaDataSetAttributesRequest{
     return true;
 }
 
+[[nodiscard]] bool single_boolean_read_response(
+    const std::span<const std::uint8_t> response,
+    const std::uint32_t expected_invoke) noexcept {
+    mms::MmsReadResponseView read_response;
+    if (!mms::MmsServiceSpanCodec::try_decode_read_response(response, read_response) ||
+        read_response.invoke_id != expected_invoke ||
+        read_response.result_count != 1U) {
+        return false;
+    }
+    mms::MmsReadAccessResultView result;
+    return read_response.try_result(0U, result) && boolean_result_matches(result);
+}
+
 } // namespace
 
 int main() {
@@ -237,6 +277,29 @@ int main() {
             !boolean_result_matches(result)) {
             return 8;
         }
+    }
+
+    // Lock the golden Read(variableListName) behavior: DataSet reads produce one
+    // AccessResult per DataSet member and remain a normal Read-Response.
+    dispatched = dispatcher.dispatch(kVariableListReadRequest, response, workspace);
+    if (!dispatched.success() ||
+        dispatched.service != mms::MmsWireConfirmedService::read ||
+        dispatched.invoke_id != 0x26U ||
+        !single_boolean_read_response(
+            std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
+            0x26U)) {
+        return 13;
+    }
+
+    // Lock the proven compatibility form where listOfVariable is unwrapped.
+    dispatched = dispatcher.dispatch(kUnwrappedReadRequest, response, workspace);
+    if (!dispatched.success() ||
+        dispatched.service != mms::MmsWireConfirmedService::read ||
+        dispatched.invoke_id != 0x27U ||
+        !single_boolean_read_response(
+            std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
+            0x27U)) {
+        return 14;
     }
 
     for (const auto& directory_request : {kVmdDataSetNameListRequest, kAaDataSetNameListRequest}) {
