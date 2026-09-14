@@ -119,7 +119,6 @@ private:
 
     QStringList ports_;
     QString recommendedPort_;
-    QString discoveryStatus_;
     QStringList probeQueue_;
     QByteArray pendingRx_;
     QQueue<PendingCommand> commandQueue_;
