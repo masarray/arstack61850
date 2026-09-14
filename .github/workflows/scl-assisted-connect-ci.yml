@@ -4,20 +4,28 @@ on:
   push:
     paths:
       - 'include/ariec61850/mms/scl_assisted_connect.hpp'
+      - 'include/ariec61850/mms/scl_association.hpp'
+      - 'include/ariec61850/mms/association_runtime.hpp'
       - 'include/ariec61850/mms/live_discovery.hpp'
       - 'src/mms/**'
       - 'src/scl/**'
       - 'include/ariec61850/scl/**'
       - 'tests/test_scl_assisted_connect.cpp'
+      - 'tests/test_scl_association_addressing.cpp'
+      - 'tests/scl_assisted_profile/**'
       - '.github/workflows/scl-assisted-connect-ci.yml'
   pull_request:
     paths:
       - 'include/ariec61850/mms/scl_assisted_connect.hpp'
+      - 'include/ariec61850/mms/scl_association.hpp'
+      - 'include/ariec61850/mms/association_runtime.hpp'
       - 'include/ariec61850/mms/live_discovery.hpp'
       - 'src/mms/**'
       - 'src/scl/**'
       - 'include/ariec61850/scl/**'
       - 'tests/test_scl_assisted_connect.cpp'
+      - 'tests/test_scl_association_addressing.cpp'
+      - 'tests/scl_assisted_profile/**'
       - '.github/workflows/scl-assisted-connect-ci.yml'
 
 concurrency:
@@ -30,24 +38,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure portable core
+      - name: Configure portable profile gates
         run: >-
-          cmake -S . -B build
-          -DARIEC61850_BUILD_TESTS=OFF
-          -DARIEC61850_BUILD_TOOLS=OFF
-          -DARIEC61850_WARNINGS_AS_ERRORS=ON
+          cmake -S tests/scl_assisted_profile -B build-scl-assisted-profile
+          -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build portable core
-        run: cmake --build build --target ariec61850_core --parallel 2
-
-      - name: Compile SCL-assisted wire-profile regression
+      - name: Build SCL-assisted profile gates
         run: >-
-          c++ -std=c++20 -Wall -Wextra -Wpedantic -Werror
-          -Iinclude
-          tests/test_scl_assisted_connect.cpp
-          build/libariec61850_core.a
-          -pthread
-          -o build/scl_assisted_connect_profile
+          cmake --build build-scl-assisted-profile
+          --target scl_assisted_connect_profile scl_association_addressing_profile
+          --parallel 2
 
       - name: Run SCL-assisted wire-profile regression
-        run: ./build/scl_assisted_connect_profile
+        run: ./build-scl-assisted-profile/scl_assisted_connect_profile
+
+      - name: Run SCL association-addressing regression
+        run: ./build-scl-assisted-profile/scl_association_addressing_profile
