@@ -20,6 +20,26 @@ GetNamedVariableListAttributes, and Read. It does not construct Write, RCB enabl
 GI, control, dynamic DataSet mutation, or file-service requests. Regression tests decode every
 discovery request and reject service tag 5.
 
+## Two distinct online model paths
+
+ARStack must keep these workflows conceptually separate:
+
+1. **Live discovery without a trusted SCL model** — obtain the structural model from MMS
+   evidence, then acquire the initial live snapshot.
+2. **SCL-assisted connect** — parse CID/SCL locally, use that model and its communication
+   context, validate the reachable MMS domains, then acquire the initial live snapshot without
+   redundantly rebuilding the model from MMS.
+
+The wire evidence for the first path is documented in
+[`docs/MMS_DISCOVERY_WIRE_PROFILE.md`](docs/MMS_DISCOVERY_WIRE_PROFILE.md).
+The second path is documented in
+[`docs/SCL_ASSISTED_MMS_CONNECT_PROFILE.md`](docs/SCL_ASSISTED_MMS_CONNECT_PROFILE.md).
+
+The key architectural consequence is that the final LN/FC-root initial-read planner should be
+shared by both paths. Full live discovery reaches that planner after network-derived model
+construction; SCL-assisted connect reaches the same planner after local SCL parsing and online
+domain validation.
+
 ## Observed discovery wire behavior
 
 A controlled loopback capture of an independent reference engineering client and MMS simulator
@@ -32,6 +52,31 @@ That document is empirical interoperability evidence, not a normative IEC 61850 
 The current inventory-first discovery flow remains valid; a future optional progressive
 scheduler may use the evidence to improve time-to-first-model and behavioral compatibility
 without changing the canonical read-only service boundary.
+
+## Observed SCL-assisted connect behavior
+
+A second controlled capture established a materially different initial-connect pattern when a
+CID/SCL model was already loaded locally. The observed sequence was:
+
+```text
+parse CID/SCL locally
+ -> establish MMS association using SCL engineering context where available
+ -> GetNameList(Domain, VMD)
+ -> validate the online domain inventory
+ -> skip redundant NamedVariable/GVAA/DataSet reconstruction
+ -> read existing LN/FC roots in bounded batches
+ -> map nested MMS Data through the local canonical type tree
+ -> keep the association online
+```
+
+In that captured configuration, the initial path used 1 domain GetNameList plus 120 Read
+requests, with zero GetVariableAccessAttributes and zero GetNamedVariableListAttributes
+requests. The 120 final FC-root Reads matched the final snapshot phase observed after full live
+discovery of the same simulated IED configuration.
+
+This supports a reusable `InitialFcReadPlanner` architecture rather than two unrelated online
+snapshot implementations. Exact counts and numeric association values remain capture-specific
+and must not be generalized into universal IEC 61850 requirements.
 
 ## Live-model parity
 
