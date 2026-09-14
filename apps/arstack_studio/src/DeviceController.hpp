@@ -7,6 +7,24 @@
 #include <QTimer>
 #include <QVariantMap>
 
+struct DeviceIdentity final {
+    QString product;
+    QString target;
+    QString protocolVersion;
+    QString deviceId;
+    QString firmwareVersion;
+    QString bootId;
+    QStringList capabilities;
+
+    [[nodiscard]] bool empty() const noexcept {
+        return product.isEmpty() && target.isEmpty() && protocolVersion.isEmpty() &&
+            deviceId.isEmpty() && firmwareVersion.isEmpty() && bootId.isEmpty() &&
+            capabilities.isEmpty();
+    }
+
+    friend bool operator==(const DeviceIdentity&, const DeviceIdentity&) = default;
+};
+
 class DeviceController : public QObject {
     Q_OBJECT
     Q_PROPERTY(QStringList ports READ ports NOTIFY portsChanged)
@@ -14,9 +32,13 @@ class DeviceController : public QObject {
     Q_PROPERTY(QString discoveryStatus READ discoveryStatus NOTIFY discoveryChanged)
     Q_PROPERTY(bool discovering READ discovering NOTIFY discoveryChanged)
     Q_PROPERTY(bool deviceVerified READ deviceVerified NOTIFY deviceVerifiedChanged)
-    Q_PROPERTY(QString deviceProduct READ deviceProduct NOTIFY deviceVerifiedChanged)
-    Q_PROPERTY(QString deviceId READ deviceId NOTIFY deviceVerifiedChanged)
-    Q_PROPERTY(QString protocolVersion READ protocolVersion NOTIFY deviceVerifiedChanged)
+    Q_PROPERTY(QString deviceProduct READ deviceProduct NOTIFY deviceIdentityChanged)
+    Q_PROPERTY(QString deviceTarget READ deviceTarget NOTIFY deviceIdentityChanged)
+    Q_PROPERTY(QString deviceId READ deviceId NOTIFY deviceIdentityChanged)
+    Q_PROPERTY(QString protocolVersion READ protocolVersion NOTIFY deviceIdentityChanged)
+    Q_PROPERTY(QString firmwareVersion READ firmwareVersion NOTIFY deviceIdentityChanged)
+    Q_PROPERTY(QString bootId READ bootId NOTIFY deviceIdentityChanged)
+    Q_PROPERTY(QStringList capabilities READ capabilities NOTIFY deviceIdentityChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(bool running READ running NOTIFY runningChanged)
     Q_PROPERTY(QString portName READ portName NOTIFY connectedChanged)
@@ -48,8 +70,13 @@ public:
     [[nodiscard]] bool discovering() const noexcept;
     [[nodiscard]] bool deviceVerified() const noexcept;
     [[nodiscard]] QString deviceProduct() const;
+    [[nodiscard]] QString deviceTarget() const;
     [[nodiscard]] QString deviceId() const;
     [[nodiscard]] QString protocolVersion() const;
+    [[nodiscard]] QString firmwareVersion() const;
+    [[nodiscard]] QString bootId() const;
+    [[nodiscard]] QStringList capabilities() const;
+    [[nodiscard]] DeviceIdentity deviceIdentity() const;
     [[nodiscard]] bool connected() const noexcept;
     [[nodiscard]] bool running() const noexcept;
     [[nodiscard]] QString portName() const;
@@ -71,6 +98,15 @@ public:
     [[nodiscard]] QString ptpAnnounceSent() const;
     [[nodiscard]] QString ptpSyncSent() const;
     [[nodiscard]] QString ptpTxFailures() const;
+
+    // S1 semantic identity contract. The parser accepts the immediately
+    // preceding ARStack v1 identity grammar without boot_id so an installed
+    // pre-S1 image is recognized as legacy/updateable rather than "blank".
+    // Current Studio firmware requires boot_id and the mandatory capabilities.
+    [[nodiscard]] static bool parseIdentityLine(const QString& line, DeviceIdentity& identity);
+    [[nodiscard]] static bool identitySupportsCurrentContract(
+        const DeviceIdentity& identity,
+        const QString& expectedFirmwareVersion);
 
     Q_INVOKABLE void refreshPorts();
     Q_INVOKABLE bool autoDetectAndConnect();
@@ -97,8 +133,6 @@ public:
     Q_INVOKABLE bool stopPtp();
     Q_INVOKABLE bool configurePtp(const QVariantMap& profile);
 
-    // P2 timing role selection is stopped-only for PTP, but independent of the
-    // SV publisher. The firmware owns validation and refuses live role mutation.
     Q_INVOKABLE bool setPtpRole(const QString& requestedRole) {
         const QString role = requestedRole.trimmed().toUpper();
         static const QStringList validRoles{
@@ -116,9 +150,6 @@ public:
         return sendCommand(QStringLiteral("PROFILE PTPROLE %1").arg(role));
     }
 
-    // P1.75 laboratory SV synchronization stimulus. These commands are
-    // intentionally separate from PTP lock detection: AUTO remains conservative,
-    // while 0/1/2 are explicit simulated wire states for relay testing.
     Q_INVOKABLE bool sendSmpSynchShow() {
         return sendCommand(QStringLiteral("PROFILE SHOW"));
     }
@@ -139,6 +170,7 @@ signals:
     void portsChanged();
     void discoveryChanged();
     void deviceVerifiedChanged();
+    void deviceIdentityChanged();
     void connectedChanged();
     void runningChanged();
     void lastErrorChanged();
@@ -149,9 +181,6 @@ signals:
     void deviceMessage(const QString& message);
 
 protected:
-    // Keep high-rate/session-control traffic out of the human diagnostics log.
-    // This is intentionally protected so StudioDeviceController can maintain a
-    // firmware session lease without making the generic controller API public.
     bool sendQuietCommand(const QString& command) {
         if (!serial_.isOpen()) return false;
         const QByteArray bytes = command.toUtf8() + '\n';
@@ -166,6 +195,8 @@ private:
     bool connectPortInternal(const QString& portName, bool automatic);
     bool tryNextProbe();
     bool sendCommand(const QString& command);
+    void applyIdentity(DeviceIdentity identity);
+    void clearIdentity();
     void markDeviceVerified();
     void setDiscoveryState(const QString& status, bool active);
     void setRunning(bool value);
@@ -183,9 +214,7 @@ private:
     QString recommendedPort_;
     QStringList probeQueue_;
     QString discoveryStatus_{QStringLiteral("Looking for an ARStack ESP32-P4 injector...")};
-    QString deviceProduct_;
-    QString deviceId_;
-    QString protocolVersion_;
+    DeviceIdentity identity_;
     QByteArray pendingRx_;
     QString lastError_;
     QString logText_;
