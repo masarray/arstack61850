@@ -109,7 +109,7 @@ private:
     void refreshSelectedSettingGroup();
     void setOperationBusy(bool value);
     [[nodiscard]] std::shared_ptr<std::stop_source> replaceSessionStopSource();
-    [[nodiscard]] std::shared_ptr<std::stop_source> replaceOperationStopSource();
+    std::shared_ptr<std::stop_source> replaceOperationStopSource();
 
     QString host_{QStringLiteral("127.0.0.1")};
     int port_{102};
