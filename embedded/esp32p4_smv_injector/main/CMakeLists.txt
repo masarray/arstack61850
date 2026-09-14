@@ -17,7 +17,7 @@ idf_component_register(
         ${AR_PTP_LAB_SRCS}
     INCLUDE_DIRS "."
     REQUIRES arstack_process_bus esp_eth esp_event esp_timer esp_driver_gptimer freertos
-    PRIV_REQUIRES esp_app_format)
+    PRIV_REQUIRES esp_app_format esp_hw_support)
 
 target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_20)
 
