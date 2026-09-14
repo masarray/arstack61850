@@ -59,7 +59,7 @@ jobs:
       - name: Build
         run: >-
           cmake --build build-ied-simulator-qt
-          --target arstack_ied_simulator ariec61850_mms_read_probe ied_simulator_guardrails_qa ied_simulator_responsiveness_qa ied_simulator_commissioning_qa ied_simulator_runtime_commissioning_qa ied_simulator_goose_publication_qa ied_goose_workspace_qa ied_mms_client_workbench_qa ied_report_workspace_qa ied_file_settings_workspace_qa --parallel 2
+          --target arstack_ied_simulator ariec61850_mms_read_probe ied_simulator_guardrails_qa ied_simulator_responsiveness_qa ied_simulator_commissioning_qa ied_simulator_runtime_commissioning_qa ied_simulator_goose_publication_qa ied_goose_workspace_qa ied_mms_client_workbench_qa ied_report_workspace_qa ied_file_settings_workspace_qa ied_scl_workspace_qa --parallel 2
 
       - name: Bounded activity and child-output guardrails
         run: ./build-ied-simulator-qt/ied_simulator_guardrails_qa
@@ -87,6 +87,13 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: ./build-ied-simulator-qt/ied_file_settings_workspace_qa
+
+      - name: SCL workspace preservation + conversion-policy gates
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          ./build-ied-simulator-qt/ied_scl_workspace_qa
+          ./tests/fixtures/scl/minimal-station-brcb.scd
 
       - name: Prove interactive SCL import uses bounded async path
         env:
