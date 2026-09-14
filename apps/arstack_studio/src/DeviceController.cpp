@@ -29,7 +29,10 @@ const QRegularExpression kProfileArmedExpression{
     QStringLiteral("PROFILE armed generation=(\\d+)\\s+svID=(\\S+)\\s+APPID=0x([0-9A-Fa-f]+)\\s+rate=(\\d+)\\s+wrap=(\\d+)"),
     QRegularExpression::CaseInsensitiveOption};
 const QRegularExpression kIdentityExpression{
-    QStringLiteral("ARSTACK identity product=([A-Z0-9_-]+) target=ESP32-P4 protocol=(\\d+) device_id=([A-Fa-f0-9]{12})"),
+    QStringLiteral(
+        "^ARSTACK identity product=([A-Z0-9_-]+) target=([A-Z0-9_-]+) protocol=(\\d+) "
+        "device_id=([A-Fa-f0-9]{12}) firmware=([0-9A-Za-z._+\\-]+) "
+        "(?:boot_id=([A-Fa-f0-9]{16}) )?capabilities=([A-Z0-9_,.\\-]+)$"),
     QRegularExpression::CaseInsensitiveOption};
 const QRegularExpression kPtpStatusExpression{
     QStringLiteral("PTP status=(RUNNING|STOPPED) Announce=(\\d+) Sync=(\\d+) FollowUp=(\\d+) PdelayFrames=(\\d+) TXfail=(\\d+)"),
@@ -111,9 +114,14 @@ QString DeviceController::recommendedPort() const { return recommendedPort_; }
 QString DeviceController::discoveryStatus() const { return discoveryStatus_; }
 bool DeviceController::discovering() const noexcept { return discovering_; }
 bool DeviceController::deviceVerified() const noexcept { return deviceVerified_; }
-QString DeviceController::deviceProduct() const { return deviceProduct_; }
-QString DeviceController::deviceId() const { return deviceId_; }
-QString DeviceController::protocolVersion() const { return protocolVersion_; }
+QString DeviceController::deviceProduct() const { return identity_.product; }
+QString DeviceController::deviceTarget() const { return identity_.target; }
+QString DeviceController::deviceId() const { return identity_.deviceId; }
+QString DeviceController::protocolVersion() const { return identity_.protocolVersion; }
+QString DeviceController::firmwareVersion() const { return identity_.firmwareVersion; }
+QString DeviceController::bootId() const { return identity_.bootId; }
+QStringList DeviceController::capabilities() const { return identity_.capabilities; }
+DeviceIdentity DeviceController::deviceIdentity() const { return identity_; }
 bool DeviceController::connected() const noexcept { return serial_.isOpen(); }
 bool DeviceController::running() const noexcept { return running_; }
 QString DeviceController::portName() const { return serial_.portName(); }
@@ -135,6 +143,52 @@ QString DeviceController::ptpVlan() const { return ptpVlan_; }
 QString DeviceController::ptpAnnounceSent() const { return ptpAnnounceSent_; }
 QString DeviceController::ptpSyncSent() const { return ptpSyncSent_; }
 QString DeviceController::ptpTxFailures() const { return ptpTxFailures_; }
+
+bool DeviceController::parseIdentityLine(const QString& line, DeviceIdentity& identity) {
+    const auto match = kIdentityExpression.match(line.trimmed());
+    if (!match.hasMatch()) return false;
+
+    DeviceIdentity parsed;
+    parsed.product = match.captured(1).toUpper();
+    parsed.target = match.captured(2).toUpper();
+    parsed.protocolVersion = match.captured(3);
+    parsed.deviceId = match.captured(4).toUpper();
+    parsed.firmwareVersion = match.captured(5);
+    parsed.bootId = match.captured(6).toUpper();
+    parsed.capabilities = match.captured(7).split(QLatin1Char(','), Qt::SkipEmptyParts);
+    for (QString& capability : parsed.capabilities) capability = capability.trimmed().toUpper();
+    parsed.capabilities.removeDuplicates();
+
+    bool protocolOk = false;
+    static_cast<void>(parsed.protocolVersion.toUInt(&protocolOk));
+    if (!protocolOk || parsed.product != QStringLiteral("SMV-INJECTOR") ||
+        parsed.target != QStringLiteral("ESP32-P4") || parsed.capabilities.isEmpty()) {
+        return false;
+    }
+
+    identity = std::move(parsed);
+    return true;
+}
+
+bool DeviceController::identitySupportsCurrentContract(
+    const DeviceIdentity& identity,
+    const QString& expectedFirmwareVersion) {
+    static const QStringList requiredCapabilities{
+        QStringLiteral("SMV-4I4V"),
+        QStringLiteral("LIVE-SETPOINTS"),
+        QStringLiteral("SESSION-LEASE")};
+    if (identity.product != QStringLiteral("SMV-INJECTOR") ||
+        identity.target != QStringLiteral("ESP32-P4") ||
+        identity.protocolVersion != QStringLiteral("1") ||
+        identity.firmwareVersion != expectedFirmwareVersion ||
+        identity.bootId.size() != 16) {
+        return false;
+    }
+    for (const QString& required : requiredCapabilities) {
+        if (!identity.capabilities.contains(required, Qt::CaseInsensitive)) return false;
+    }
+    return true;
+}
 
 void DeviceController::refreshPorts() {
     QList<PortCandidate> candidates;
@@ -188,9 +242,6 @@ bool DeviceController::autoDetectAndConnect() {
     }
     if (ports_.isEmpty()) return false;
 
-    // Windows often exposes ESP USB CDC as the generic "USB Serial Device".
-    // Probe one port at a time with read-only SHOW commands and trust only the
-    // firmware-specific response grammar parsed by processLine().
     probeQueue_ = ports_;
     genericProbeActive_ = true;
     return tryNextProbe();
@@ -220,6 +271,7 @@ bool DeviceController::connectPortInternal(const QString& portName, const bool a
     }
     automaticConnection_ = automatic;
     deviceVerified_ = false;
+    clearIdentity();
     setDiscoveryState(QStringLiteral("Verifying ARStack injector identity..."), true);
 
     serial_.setPortName(portName.trimmed());
@@ -274,9 +326,7 @@ void DeviceController::disconnectPort() {
     resetTelemetry();
     const bool wasVerified = deviceVerified_;
     deviceVerified_ = false;
-    deviceProduct_.clear();
-    deviceId_.clear();
-    protocolVersion_.clear();
+    clearIdentity();
     discovering_ = false;
     automaticConnection_ = false;
     ptpAvailable_ = false;
@@ -513,6 +563,18 @@ void DeviceController::setDiscoveryState(const QString& status, const bool activ
     emit discoveryChanged();
 }
 
+void DeviceController::applyIdentity(DeviceIdentity identity) {
+    if (identity_ == identity) return;
+    identity_ = std::move(identity);
+    emit deviceIdentityChanged();
+}
+
+void DeviceController::clearIdentity() {
+    if (identity_.empty()) return;
+    identity_ = {};
+    emit deviceIdentityChanged();
+}
+
 void DeviceController::markDeviceVerified() {
     if (deviceVerified_) return;
     verificationTimer_.stop();
@@ -590,11 +652,9 @@ void DeviceController::processLine(const QString& rawLine) {
         emit profileStateChanged();
     }
 
-    match = kIdentityExpression.match(line);
-    if (match.hasMatch()) {
-        deviceProduct_ = match.captured(1);
-        protocolVersion_ = match.captured(2);
-        deviceId_ = match.captured(3).toUpper();
+    DeviceIdentity parsedIdentity;
+    if (parseIdentityLine(line, parsedIdentity)) {
+        applyIdentity(std::move(parsedIdentity));
         markDeviceVerified();
     }
 
