@@ -138,6 +138,16 @@ void FirmwareWorker::finishProcess(const int exitCode, const bool normalExit) {
     if (launchTimer_ != nullptr) launchTimer_->stop();
     if (operationTimer_ != nullptr) operationTimer_->stop();
 
+    // Drain the terminal buffers before publishing the result. espflash can
+    // write the chip revision or the final progress token immediately before
+    // exit, and the facade must see that output before it interprets success.
+    if (process_ != nullptr) {
+        const QString out = QString::fromUtf8(process_->readAllStandardOutput());
+        const QString err = QString::fromUtf8(process_->readAllStandardError());
+        if (!out.isEmpty()) emit outputReady(completedGeneration, out);
+        if (!err.isEmpty()) emit outputReady(completedGeneration, err);
+    }
+
     operationActive_ = false;
     if (cancelRequested_) {
         cancelRequested_ = false;
