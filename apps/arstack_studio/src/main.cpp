@@ -234,11 +234,27 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         !DeviceController::identityRetryAllowed(3) &&
         !DeviceController::identityRetryAllowed(-1);
 
+    const bool boundedProfileSyncPolicy =
+        SmartSessionController::profileSyncMaxAttempts() == 2 &&
+        SmartSessionController::profileSyncTimeoutMs() == 2500 &&
+        SmartSessionController::profileSyncRetryAllowed(0) &&
+        SmartSessionController::profileSyncRetryAllowed(1) &&
+        !SmartSessionController::profileSyncRetryAllowed(2) &&
+        !SmartSessionController::profileSyncRetryAllowed(-1) &&
+        SmartSessionController::profileGenerationAdvanced(
+            QStringLiteral("1"), QStringLiteral("2")) &&
+        SmartSessionController::profileGenerationAdvanced(
+            QStringLiteral("—"), QStringLiteral("2")) &&
+        !SmartSessionController::profileGenerationAdvanced(
+            QStringLiteral("2"), QStringLiteral("2")) &&
+        !SmartSessionController::profileGenerationAdvanced(
+            QStringLiteral("2"), QStringLiteral("not-a-generation"));
+
     if (!currentAccepted || !legacyRejectedAsCurrent || !protocolLegacyParsed ||
         !capabilityFailClosed || !rejectsWrongTarget || !rejectsMissingFirmware ||
-        !rejectsMalformedBoot || !boundedIdentifyPolicy) {
+        !rejectsMalformedBoot || !boundedIdentifyPolicy || !boundedProfileSyncPolicy) {
         qCritical().noquote()
-            << "S1/S2 identity contract: FAIL"
+            << "S1/S2/S3 control-plane contract: FAIL"
             << "current=" << currentAccepted
             << "legacy=" << legacyRejectedAsCurrent
             << "protocol-legacy=" << protocolLegacyParsed
@@ -246,7 +262,8 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
             << "wrong-target=" << rejectsWrongTarget
             << "missing-firmware=" << rejectsMissingFirmware
             << "malformed-boot=" << rejectsMalformedBoot
-            << "bounded-identify=" << boundedIdentifyPolicy;
+            << "bounded-identify=" << boundedIdentifyPolicy
+            << "bounded-profile-sync=" << boundedProfileSyncPolicy;
         return 11;
     }
 
@@ -267,7 +284,7 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         return 6;
     }
     qInfo().noquote()
-        << "P0 controller policy: PASS · S1 typed identity + S2 bounded IDENTIFY + unverified START/DEPLOY fail closed";
+        << "P0 controller policy: PASS · S1 typed identity + S2 bounded IDENTIFY + S3 bounded generation-aware profile sync + unverified START/DEPLOY fail closed";
     return 0;
 }
 } // namespace
