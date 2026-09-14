@@ -9,7 +9,9 @@
 #include <QCommandLineOption>
 #include <QCommandLineParser>
 #include <QCoreApplication>
+#include <QDebug>
 #include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -29,6 +31,7 @@ namespace {
 constexpr int kReadyTimeoutMs = 30000;
 constexpr int kStateTimeoutMs = 6000;
 constexpr int kLiveCommitTimeoutMs = 4000;
+constexpr int kProfileTransitionTimeoutMs = 1500;
 constexpr double kCurrentCountsPerAmp = 1000.0;
 constexpr double kVoltageCountsPerVolt = 100.0;
 
@@ -153,8 +156,8 @@ public:
         if (!exerciseLiveEdits()) return fail(outputPath, QStringLiteral("One or more live-edit operations failed or did not advance signal generation."));
         if (!stopAndWait()) return fail(outputPath, QStringLiteral("Could not STOP after live-edit acceptance."));
 
-        profileResync_ = session_.requestProfileSync() && waitReady(kReadyTimeoutMs);
-        if (!profileResync_) return fail(outputPath, QStringLiteral("Profile re-sync did not return to READY."));
+        profileResync_ = resyncProfileAndWait();
+        if (!profileResync_) return fail(outputPath, QStringLiteral("Profile re-sync did not prove a new generation and return to READY."));
 
         if (!session_.requestSmpSynch(QStringLiteral("0"))) {
             return fail(outputPath, QStringLiteral("Could not force conservative smpSynch=0 policy before soak."));
@@ -202,7 +205,8 @@ public:
 
         QJsonObject evidence = makeEvidence();
         evidence.insert(QStringLiteral("boardRunner"), QJsonObject{
-            {QStringLiteral("automatedBoardPathPassed"), true},
+            {QStringLiteral("automatedBoardPathPassed"), soakSeconds_ >= 3600},
+            {QStringLiteral("diagnosticOnly"), soakSeconds_ < 3600},
             {QStringLiteral("deviceId"), deviceId_},
             {QStringLiteral("bootId"), bootId_},
             {QStringLiteral("port"), port_},
@@ -214,6 +218,13 @@ public:
         if (!writeJson(outputPath, evidence)) {
             qCritical().noquote() << "BOARD RC: could not write evidence JSON" << outputPath;
             return 9;
+        }
+
+        if (soakSeconds_ < 3600) {
+            qWarning().noquote()
+                << "BOARD RC diagnostic path: COMPLETE · evidence written to" << outputPath
+                << "· retained soak is below 3600 seconds, so this run is intentionally NOT RC2 acceptance.";
+            return 10;
         }
 
         qInfo().noquote()
@@ -245,6 +256,22 @@ private:
         if (!session_.requestStop()) return false;
         if (!waitUntil([this] { return !device_.running(); }, kStateTimeoutMs)) return false;
         return waitReady(kReadyTimeoutMs);
+    }
+
+    bool resyncProfileAndWait() {
+        const QString baseline = device_.profileGeneration().trimmed();
+        if (!session_.requestProfileSync()) return false;
+
+        const bool transactionObserved = waitUntil([this, baseline] {
+            return device_.profileDeploying() ||
+                session_.state() != QStringLiteral("READY") ||
+                device_.profileGeneration().trimmed() != baseline;
+        }, kProfileTransitionTimeoutMs);
+        if (!transactionObserved) return false;
+        if (!waitReady(kReadyTimeoutMs)) return false;
+
+        return SmartSessionController::profileGenerationAdvanced(
+            baseline, device_.profileGeneration().trimmed());
     }
 
     bool runStartStopCycles(const int count) {
