@@ -88,9 +88,6 @@ public:
         const QString& baseline,
         const QString& observed) noexcept;
 
-    // Firmware handoff is a safety transaction, not an open-ended UI state.
-    // STOP confirmation and serial release are independently bounded so a lost
-    // callback cannot leave Studio stuck in UPDATING FIRMWARE forever.
     [[nodiscard]] static constexpr int firmwareStopAckTimeoutMs() noexcept { return 3500; }
     [[nodiscard]] static constexpr int firmwareReleaseAckTimeoutMs() noexcept { return 2000; }
 
@@ -138,6 +135,9 @@ public:
         quint32 quality,
         double currentCountsPerAmp,
         double voltageCountsPerVolt);
+    Q_INVOKABLE bool requestSetEnabled(const QString& signalId, const bool enabled) {
+        return liveControlReady() && device_ != nullptr && device_->setEnabled(signalId, enabled);
+    }
     Q_INVOKABLE bool requestSetQuality(const QString& signalId, quint32 quality);
     Q_INVOKABLE bool requestSetCtSaturation(
         bool enabled,
@@ -178,89 +178,53 @@ private:
     };
     enum class ProfileSyncStage { idle, deploying, failed };
 
-    // Small safety observer, deliberately not a second supervisor. It watches
-    // only the two acknowledgement barriers owned by this supervisor and
-    // terminates them if their expected callback never arrives. Repeated
-    // stateChanged notifications cannot extend a deadline for the same stage.
     class FirmwareHandoffWatchdog final {
     public:
         explicit FirmwareHandoffWatchdog(SmartSessionController* owner) : owner_(owner) {
             timer_.setSingleShot(true);
-            QObject::connect(owner_, &SmartSessionController::stateChanged, owner_, [this] {
-                synchronize();
-            });
-            QObject::connect(&timer_, &QTimer::timeout, owner_, [this] {
-                expire();
-            });
+            QObject::connect(owner_, &SmartSessionController::stateChanged, owner_, [this] { synchronize(); });
+            QObject::connect(&timer_, &QTimer::timeout, owner_, [this] { expire(); });
         }
 
     private:
         [[nodiscard]] bool waitingForAck() const noexcept {
             if (owner_ == nullptr || !owner_->updateRequested_) return false;
             if (owner_->updateStage_ == UpdateStage::stopping) return true;
-            return owner_->updateStage_ == UpdateStage::releasingPort &&
-                owner_->pendingReleaseGeneration_ != 0;
+            return owner_->updateStage_ == UpdateStage::releasingPort && owner_->pendingReleaseGeneration_ != 0;
         }
-
         [[nodiscard]] int timeoutForStage(const UpdateStage stage) const noexcept {
-            return stage == UpdateStage::stopping
-                ? firmwareStopAckTimeoutMs()
-                : firmwareReleaseAckTimeoutMs();
+            return stage == UpdateStage::stopping ? firmwareStopAckTimeoutMs() : firmwareReleaseAckTimeoutMs();
         }
-
         void synchronize() {
             if (!waitingForAck()) {
-                timer_.stop();
-                armedGeneration_ = 0;
-                armedStage_ = UpdateStage::idle;
-                return;
+                timer_.stop(); armedGeneration_ = 0; armedStage_ = UpdateStage::idle; return;
             }
-
-            if (timer_.isActive() && armedGeneration_ == owner_->sessionGeneration_ &&
-                armedStage_ == owner_->updateStage_) {
-                return;
-            }
-
+            if (timer_.isActive() && armedGeneration_ == owner_->sessionGeneration_ && armedStage_ == owner_->updateStage_) return;
             armedGeneration_ = owner_->sessionGeneration_;
             armedStage_ = owner_->updateStage_;
             timer_.start(timeoutForStage(armedStage_));
         }
-
         void expire() {
-            if (!waitingForAck() || armedGeneration_ == 0 ||
-                owner_->sessionGeneration_ != armedGeneration_ ||
-                owner_->updateStage_ != armedStage_) {
-                synchronize();
-                return;
+            if (!waitingForAck() || armedGeneration_ == 0 || owner_->sessionGeneration_ != armedGeneration_ || owner_->updateStage_ != armedStage_) {
+                synchronize(); return;
             }
-
             const QString reason = armedStage_ == UpdateStage::stopping
-                ? QStringLiteral(
-                    "Timed out waiting for the injector to confirm STOP. Firmware access was not started; retry explicitly after checking the device connection.")
-                : QStringLiteral(
-                    "Timed out waiting for the serial worker to acknowledge port release. Firmware access was blocked to prevent COM-port contention.");
-
+                ? QStringLiteral("Timed out waiting for the injector to confirm STOP. Firmware access was not started; retry explicitly after checking the device connection.")
+                : QStringLiteral("Timed out waiting for the serial worker to acknowledge port release. Firmware access was blocked to prevent COM-port contention.");
             owner_->latchFirmwareFailure(reason);
             emit owner_->firmwareUpdateFinished(false);
             owner_->reconcile();
         }
-
         SmartSessionController* owner_{nullptr};
         QTimer timer_;
         quint64 armedGeneration_{0};
         UpdateStage armedStage_{UpdateStage::idle};
     };
 
-    // S6 keeps re-enumeration recovery inside the existing supervisor. This
-    // observer remembers the semantic device_id of a verified board and only
-    // permits an automatic post-loss recovery to converge on that same board,
-    // even when Windows assigns a different COM number after reset/replug.
     class DeviceRecoveryMonitor final {
     public:
         explicit DeviceRecoveryMonitor(SmartSessionController* owner) : owner_(owner) {
-            QObject::connect(owner_, &SmartSessionController::dependenciesChanged, owner_, [this] {
-                bindDevice();
-            });
+            QObject::connect(owner_, &SmartSessionController::dependenciesChanged, owner_, [this] { bindDevice(); });
         }
 
     private:
@@ -274,43 +238,29 @@ private:
                 expectedRecoveryDeviceId_ = lastVerifiedDeviceId_;
             }
             if (device_ == nullptr) return;
-
-            verifiedConnection_ = QObject::connect(
-                device_, &DeviceController::deviceVerifiedChanged, owner_, [this] {
-                    handleVerificationChange();
-                });
-            identificationConnection_ = QObject::connect(
-                device_, &DeviceController::identificationStateChanged, owner_, [this] {
-                    handleIdentificationChange();
-                });
+            verifiedConnection_ = QObject::connect(device_, &DeviceController::deviceVerifiedChanged, owner_, [this] { handleVerificationChange(); });
+            identificationConnection_ = QObject::connect(device_, &DeviceController::identificationStateChanged, owner_, [this] { handleIdentificationChange(); });
         }
-
         void setRecoveryPending(const bool pending) {
             if (owner_ == nullptr || owner_->recoveryPending_ == pending) return;
             owner_->recoveryPending_ = pending;
             emit owner_->stateChanged();
         }
-
         void handleVerificationChange() {
             if (owner_ == nullptr || device_ == nullptr) return;
-
             if (device_->deviceVerified()) {
                 const QString observed = device_->deviceId().trimmed();
                 if (owner_->recoveryPending_ && !expectedRecoveryDeviceId_.isEmpty() &&
-                    !SmartSessionController::recoveryIdentityMatches(
-                        expectedRecoveryDeviceId_, observed)) {
+                    !SmartSessionController::recoveryIdentityMatches(expectedRecoveryDeviceId_, observed)) {
                     owner_->blankBoardDetected_ = false;
                     owner_->blankBoardPort_.clear();
                     owner_->setupError_ = true;
-                    owner_->setupErrorStatus_ = QStringLiteral(
-                        "A different ARStack injector (%1) appeared while Studio was recovering device %2. Automatic recovery was blocked; reconnect the intended injector or retry explicitly.")
-                        .arg(observed.isEmpty() ? QStringLiteral("unknown") : observed,
-                             expectedRecoveryDeviceId_);
+                    owner_->setupErrorStatus_ = QStringLiteral("A different ARStack injector (%1) appeared while Studio was recovering device %2. Automatic recovery was blocked; reconnect the intended injector or retry explicitly.")
+                        .arg(observed.isEmpty() ? QStringLiteral("unknown") : observed, expectedRecoveryDeviceId_);
                     device_->disconnectPort();
                     owner_->reconcile();
                     return;
                 }
-
                 if (!observed.isEmpty()) {
                     lastVerifiedDeviceId_ = observed;
                     expectedRecoveryDeviceId_ = observed;
@@ -319,7 +269,6 @@ private:
                 wasVerified_ = true;
                 return;
             }
-
             if (wasVerified_ && !owner_->updateRequested_) {
                 expectedRecoveryDeviceId_ = lastVerifiedDeviceId_;
                 setRecoveryPending(!expectedRecoveryDeviceId_.isEmpty());
@@ -329,24 +278,15 @@ private:
             }
             wasVerified_ = false;
         }
-
         void handleIdentificationChange() {
             if (owner_ == nullptr || device_ == nullptr || !owner_->recoveryPending_ ||
-                device_->identificationState() != DeviceController::IdentificationState::Unidentified) {
-                return;
-            }
-
-            // A timeout while recovering a previously verified injector is not
-            // evidence of blank firmware. Keep recovery explicit and never turn
-            // a transient CDC/re-enumeration delay into an Install prompt.
+                device_->identificationState() != DeviceController::IdentificationState::Unidentified) return;
             owner_->blankBoardDetected_ = false;
             owner_->blankBoardPort_.clear();
             owner_->setupError_ = true;
-            owner_->setupErrorStatus_ = QStringLiteral(
-                "The previously verified injector did not answer semantic identity after bounded retries. Firmware absence was not inferred; retry identification after USB settles.");
+            owner_->setupErrorStatus_ = QStringLiteral("The previously verified injector did not answer semantic identity after bounded retries. Firmware absence was not inferred; retry identification after USB settles.");
             owner_->reconcile();
         }
-
         SmartSessionController* owner_{nullptr};
         DeviceController* device_{nullptr};
         QMetaObject::Connection verifiedConnection_;
