@@ -21,7 +21,7 @@ class SmartSessionController : public QObject {
     Q_PROPERTY(QString statusText READ statusText NOTIFY stateChanged)
     Q_PROPERTY(bool startReady READ startReady NOTIFY stateChanged)
     Q_PROPERTY(bool firmwareUpdateRequired READ firmwareUpdateRequired NOTIFY stateChanged)
-    Q_PROPERTY(bool firmwareInstallRequired READ firmwareInstallRequired NOTIFY stateChanged)
+    Q_PROPERTY(bool firmwareInstallRequired READ firmwareInstallVisible NOTIFY stateChanged)
     Q_PROPERTY(bool firmwareRetryAvailable READ firmwareRetryAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool profileSyncRetryAvailable READ profileSyncRetryAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool updatingFirmware READ updatingFirmware NOTIFY stateChanged)
@@ -53,6 +53,9 @@ public:
     [[nodiscard]] bool startReady() const noexcept;
     [[nodiscard]] bool firmwareUpdateRequired() const noexcept;
     [[nodiscard]] bool firmwareInstallRequired() const noexcept;
+    [[nodiscard]] bool firmwareInstallVisible() const noexcept {
+        return !recoveryPending_ && firmwareInstallRequired();
+    }
     [[nodiscard]] bool firmwareRetryAvailable() const noexcept;
     [[nodiscard]] bool profileSyncRetryAvailable() const noexcept;
     [[nodiscard]] bool updatingFirmware() const noexcept;
