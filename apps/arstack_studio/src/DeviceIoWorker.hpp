@@ -6,6 +6,8 @@
 #include <QQueue>
 #include <QStringList>
 
+#include <utility>
+
 class QSerialPort;
 class QTimer;
 
