@@ -42,7 +42,7 @@ QString ProductHardeningController::normalizedHost(const QString& value) {
     }
     if (host.isEmpty() || host.size() > 255) return {};
     for (const auto character : host) {
-        if (character.isSpace() || character.isControl()) return {};
+        if (character.isSpace() || character.category() == QChar::Other_Control) return {};
     }
     return host;
 }
