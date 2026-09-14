@@ -17,8 +17,7 @@ set(ARIEC61850_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(ARIEC61850_BUILD_FUZZERS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../.. ${CMAKE_BINARY_DIR}/ariec61850-core EXCLUDE_FROM_ALL)
 
-qt_add_executable(arstack_studio
-    src/main.cpp
+set(ARSTACK_STUDIO_CORE_SOURCES
     src/SclProfileModel.cpp
     src/SclProfileModel.hpp
     src/DeviceIoWorker.cpp
@@ -33,6 +32,21 @@ qt_add_executable(arstack_studio
     src/FirmwareManager.hpp
     src/SmartSessionController.cpp
     src/SmartSessionController.hpp
+)
+
+qt_add_executable(arstack_studio
+    src/main.cpp
+    ${ARSTACK_STUDIO_CORE_SOURCES}
+)
+
+# S8 is intentionally a separate, headless executable. It links the same
+# production controller/worker sources as Studio but exposes no test command in
+# the release application. Friend-only seams let the harness inject deterministic
+# transport/session events without introducing a second supervisor implementation.
+qt_add_executable(arstack_session_harness
+    src/DeterministicSessionHarness.cpp
+    src/DeterministicSessionHarness.hpp
+    ${ARSTACK_STUDIO_CORE_SOURCES}
 )
 
 qt_add_qml_module(arstack_studio
@@ -88,6 +102,12 @@ qt_add_resources(arstack_studio "reference_templates"
         templates/arstack_4i4v_9-2le_reference.scd
 )
 
+qt_add_resources(arstack_session_harness "session_harness_reference_templates"
+    PREFIX "/arstack"
+    FILES
+        templates/arstack_4i4v_9-2le_reference.scd
+)
+
 target_link_libraries(arstack_studio PRIVATE
     Qt6::Core
     Qt6::Gui
@@ -98,8 +118,18 @@ target_link_libraries(arstack_studio PRIVATE
     ARIEC61850::core
 )
 
+target_link_libraries(arstack_session_harness PRIVATE
+    Qt6::Core
+    Qt6::SerialPort
+    ARIEC61850::core
+)
+
 target_compile_features(arstack_studio PRIVATE cxx_std_20)
+target_compile_features(arstack_session_harness PRIVATE cxx_std_20)
 target_compile_definitions(arstack_studio PRIVATE
+    ARSTACK_STUDIO_VERSION="${PROJECT_VERSION}"
+)
+target_compile_definitions(arstack_session_harness PRIVATE
     ARSTACK_STUDIO_VERSION="${PROJECT_VERSION}"
 )
 
