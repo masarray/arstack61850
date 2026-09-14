@@ -71,6 +71,7 @@ jobs:
           qml_root='apps/arstack_studio/qml'
           device_pattern='([A-Za-z_][A-Za-z0-9_]*\.)*device\.(start|stop|autoDetectAndConnect|connectPort|disconnectPort|refreshPorts|deployProfile|setSignal|setFrequency|setEnabled|setQuality|setCtSaturation|zero|sendPtpShow|sendSmpSynchShow|setPtpRole|setSmpSynchPolicy|configurePtp|startPtp|stopPtp)[[:space:]]*\('
           firmware_pattern='([A-Za-z_][A-Za-z0-9_]*\.)*(firmware|FirmwareService)\.(probeTarget|installFirmware)[[:space:]]*\('
+          device_meta_pattern='Q_INVOKABLE[[:space:]].*(start|stop|autoDetectAndConnect|connectPort|disconnectPort|refreshPorts|deployProfile|setSignal|setFrequency|setEnabled|setQuality|setCtSaturation|zero|sendPtpShow|sendSmpSynchShow|setPtpRole|setSmpSynchPolicy|configurePtp|startPtp|stopPtp)[[:space:]]*\('
 
           if grep -R -nE "$device_pattern" "$qml_root" --include='*.qml'; then
             echo 'S7 regression: QML bypasses SmartSessionController with direct DeviceController authority.'
@@ -80,7 +81,13 @@ jobs:
             echo 'S7 regression: QML bypasses SmartSessionController with direct firmware execution.'
             exit 1
           fi
-          echo 'S7 QML authority boundary: PASS · presentation submits intents through SmartSessionController'
+          if grep -nE "$device_meta_pattern" \
+               apps/arstack_studio/src/DeviceController.hpp \
+               apps/arstack_studio/src/StudioDeviceController.hpp; then
+            echo 'S7 regression: DeviceController mutation leaked back into the QML meta-object.'
+            exit 1
+          fi
+          echo 'S7 QML authority boundary: PASS · presentation submits intents through SmartSessionController and device mutators are not QML-invokable'
 
       - name: Configure
         shell: bash
@@ -94,7 +101,8 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          cmake --build build-arstack-studio --target arstack_studio --parallel 2 \
+          cmake --build build-arstack-studio \
+            --target arstack_studio arstack_session_harness --parallel 2 \
             2>&1 | tee /tmp/arstack-studio-build.log
 
       - name: 4I+4V reference template regression
@@ -110,6 +118,13 @@ jobs:
           set -o pipefail
           ./build-arstack-studio/arstack_studio --check-p0-policy \
             2>&1 | tee /tmp/arstack-studio-p0-policy.log
+
+      - name: S8 deterministic session regression
+        shell: bash
+        run: |
+          set -o pipefail
+          timeout 20s ./build-arstack-studio/arstack_session_harness \
+            2>&1 | tee /tmp/arstack-studio-session-harness.log
 
       - name: Firmware bundle contract regression
         shell: bash
@@ -214,6 +229,7 @@ jobs:
             /tmp/arstack-studio-build.log
             /tmp/arstack-studio-reference-template.log
             /tmp/arstack-studio-p0-policy.log
+            /tmp/arstack-studio-session-harness.log
             /tmp/arstack-studio-firmware-contract.log
             /tmp/arstack-studio-lifecycle.log
             /tmp/arstack-studio-launch.log
