@@ -22,6 +22,9 @@ discovery request and reject service tag 5.
 
 ## Two distinct online model paths
 
+For a short implementation decision map, read
+[`docs/ONLINE_MODEL_CONNECT_DECISION.md`](docs/ONLINE_MODEL_CONNECT_DECISION.md) first.
+
 ARStack must keep these workflows conceptually separate:
 
 1. **Live discovery without a trusted SCL model** — obtain the structural model from MMS
