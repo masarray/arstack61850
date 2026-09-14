@@ -104,6 +104,22 @@ QObject* SmartSessionController::firmware() const noexcept { return firmware_; }
 QString SmartSessionController::state() const { return state_; }
 QString SmartSessionController::statusText() const { return statusText_; }
 bool SmartSessionController::startReady() const noexcept { return startReady_; }
+bool SmartSessionController::canDeployProfile() const noexcept {
+    if (!deviceControlAvailable() || profiles_ == nullptr || device_->running() || device_->profileDeploying()) {
+        return false;
+    }
+    const QVariantMap profile = profiles_->selectedProfile();
+    return profile.value(QStringLiteral("compatibilityClass")).toString() == QStringLiteral("A") &&
+        profile.value(QStringLiteral("deviceSupport")).toString() == QStringLiteral("ready");
+}
+bool SmartSessionController::liveControlReady() const noexcept {
+    return deviceControlAvailable() && !device_->profileDeploying() &&
+        (startReady_ || device_->running());
+}
+bool SmartSessionController::engineeringEditable() const noexcept {
+    return device_ != nullptr && !device_->running() && !updateRequested_ &&
+        portOwner_ != PortOwner::firmwareTool && (firmware_ == nullptr || !firmware_->busy());
+}
 bool SmartSessionController::firmwareUpdateRequired() const noexcept { return firmwareUpdateRequired_; }
 bool SmartSessionController::firmwareInstallRequired() const noexcept {
     return blankBoardDetected_ && !updateRequested_;
@@ -233,6 +249,143 @@ void SmartSessionController::start() {
         refreshRecoveryOfferFromIdentity();
         reconcile();
     });
+}
+
+bool SmartSessionController::requestStart() {
+    if (!startReady_ || !deviceControlAvailable() || device_ == nullptr || device_->running()) return false;
+    return device_->start();
+}
+
+bool SmartSessionController::requestStop() {
+    if (device_ == nullptr) return false;
+    if (!device_->running()) return true;
+    if (portOwner_ != PortOwner::deviceSession || updateRequested_) return false;
+    return device_->stop();
+}
+
+bool SmartSessionController::requestConnect() {
+    if (!started_ || device_ == nullptr || updateRequested_ ||
+        portOwner_ == PortOwner::firmwareTool || device_->discovering()) {
+        return false;
+    }
+    if (device_->deviceVerified()) return true;
+    if (device_->connected()) return false;
+    if (firmware_ != nullptr && firmware_->busy()) return false;
+
+    clearBlankBoardContext();
+    const bool accepted = startDeviceDiscovery();
+    reconcile();
+    return accepted;
+}
+
+void SmartSessionController::requestRefreshPorts() {
+    if (device_ == nullptr || updateRequested_ || portOwner_ == PortOwner::firmwareTool ||
+        (firmware_ != nullptr && firmware_->busy())) {
+        return;
+    }
+    device_->refreshPorts();
+}
+
+bool SmartSessionController::requestConnectPort(const QString& portName) {
+    const QString requested = portName.trimmed();
+    if (!started_ || device_ == nullptr || requested.isEmpty() || updateRequested_ ||
+        portOwner_ == PortOwner::firmwareTool || device_->connected() || device_->discovering() ||
+        (firmware_ != nullptr && firmware_->busy())) {
+        return false;
+    }
+
+    clearBlankBoardContext();
+    advanceSessionGeneration();
+    setPortOwner(PortOwner::deviceSession);
+    const bool accepted = device_->connectPort(requested);
+    reconcile();
+    return accepted;
+}
+
+bool SmartSessionController::requestDisconnect() {
+    if (device_ == nullptr || updateRequested_ || portOwner_ != PortOwner::deviceSession) return false;
+    if (!device_->connected()) return true;
+    if (device_->running()) return false;
+    device_->disconnectPort();
+    return true;
+}
+
+bool SmartSessionController::requestProfileSync() {
+    if (!canDeployProfile()) return false;
+    resetProfileSync(true);
+    QTimer::singleShot(0, this, &SmartSessionController::reconcile);
+    return true;
+}
+
+bool SmartSessionController::requestSetFrequency(const double hz) {
+    return liveControlReady() && device_ != nullptr && device_->setFrequency(hz);
+}
+
+bool SmartSessionController::requestSetSignal(
+    const QString& signalId,
+    const double magnitude,
+    const double phaseDegrees,
+    const quint32 quality,
+    const double currentCountsPerAmp,
+    const double voltageCountsPerVolt) {
+    return liveControlReady() && device_ != nullptr &&
+        device_->setSignal(
+            signalId,
+            magnitude,
+            phaseDegrees,
+            quality,
+            currentCountsPerAmp,
+            voltageCountsPerVolt);
+}
+
+bool SmartSessionController::requestSetQuality(const QString& signalId, const quint32 quality) {
+    return liveControlReady() && device_ != nullptr && device_->setQuality(signalId, quality);
+}
+
+bool SmartSessionController::requestSetCtSaturation(
+    const bool enabled,
+    const double dcOffsetPercent,
+    const double harmonicPercent,
+    const int harmonicOrder,
+    const double clipPercent) {
+    return liveControlReady() && device_ != nullptr &&
+        device_->setCtSaturation(
+            enabled,
+            dcOffsetPercent,
+            harmonicPercent,
+            harmonicOrder,
+            clipPercent);
+}
+
+bool SmartSessionController::requestZero() {
+    return liveControlReady() && device_ != nullptr && device_->zero();
+}
+
+bool SmartSessionController::requestPtpRefresh() {
+    if (!deviceControlAvailable() || device_ == nullptr) return false;
+    const bool ptp = device_->sendPtpShow();
+    const bool sync = device_->sendSmpSynchShow();
+    return ptp && sync;
+}
+
+bool SmartSessionController::requestPtpRole(const QString& role) {
+    return deviceControlAvailable() && device_ != nullptr && device_->setPtpRole(role);
+}
+
+bool SmartSessionController::requestSmpSynch(const QString& mode) {
+    return deviceControlAvailable() && device_ != nullptr && device_->setSmpSynchPolicy(mode);
+}
+
+bool SmartSessionController::requestConfigurePtp(const QVariantMap& profile) {
+    return deviceControlAvailable() && device_ != nullptr && device_->configurePtp(profile);
+}
+
+bool SmartSessionController::requestStartPtp() {
+    return deviceControlAvailable() && device_ != nullptr && device_->startPtp();
+}
+
+bool SmartSessionController::requestStopPtp() {
+    return deviceControlAvailable() && device_ != nullptr && device_->stopPtp();
 }
 
 bool SmartSessionController::beginFirmwareUpdate() {
@@ -746,6 +899,12 @@ bool SmartSessionController::firmwareIsCurrent() const {
     return device_ != nullptr && device_->deviceVerified() &&
         DeviceController::identitySupportsCurrentContract(
             device_->deviceIdentity(), expectedFirmwareVersion());
+}
+
+bool SmartSessionController::deviceControlAvailable() const noexcept {
+    return device_ != nullptr && device_->deviceVerified() && firmwareIsCurrent() &&
+        portOwner_ == PortOwner::deviceSession && !updateRequested_ &&
+        (firmware_ == nullptr || !firmware_->busy());
 }
 
 void SmartSessionController::reconcile() {
