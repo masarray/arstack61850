@@ -30,7 +30,8 @@ The product roadmap is based on the current repository state, not on rewriting I
 - Stage M closes the desktop simulator's real Layer-2 GOOSE publication path with explicit NIC binding, SCL addressing, sequencing/retransmission semantics, bounded lifecycle and PCAP evidence.
 - MMS file service is currently read-oriented: FileDirectory + FileOpen/FileRead/FileClose download. Upload/delete/rename are not currently implemented.
 - Setting Group support now includes SGCB discovery/deep-read and guarded ActSG activation/verification, but full edit is intentionally not claimed until `EditSG -> edit SE values -> CnfEdit` exists end-to-end.
-- SCL parsing recognizes the supported edition model, while deterministic mutable reconstruction/export and live-discovery-to-SCL reconstruction remain the active Milestone R parity gap.
+- SCL now supports exact-source preservation plus deterministic canonical reconstruction/export for modeled semantics, explicit Ed1/Ed2/Ed2.1 conversion, and guarded SCD/ICD/CID output. Canonical conversion intentionally does **not** claim lossless vendor-extension preservation; exact-source Save As remains the lossless path for the original source bytes.
+- Release hardening is now the active desktop-product gap: persistence/recovery and runtime-readiness work has started, while Windows packaging/installer, release-evidence classification and final release-candidate soak/interoperability remain open.
 
 ## Scope rule after Milestone M
 
@@ -40,7 +41,7 @@ Do **not** make Sampled Values runtime simulation, PTP, ESP32/embedded work, or 
 
 The priority order is:
 
-**M GOOSE TX ✅ -> N MMS Client/Discovery ✅ -> O RCB/Reports ✅ -> P GOOSE Monitor/Publisher ✅ -> Q Files + Setting Groups ✅ -> R SCL Export/Ed1-Ed2 IN PROGRESS -> S Release Hardening**
+**M GOOSE TX ✅ -> N MMS Client/Discovery ✅ -> O RCB/Reports ✅ -> P GOOSE Monitor/Publisher ✅ -> Q Files + Setting Groups ✅ -> R SCL Export/Ed1-Ed2 ✅ -> S Release Hardening IN PROGRESS**
 
 ## Milestone M — Real GOOSE Publication — CLOSED
 
@@ -202,45 +203,48 @@ The warning-only cleanup head `86fde29fdc22dfcfc5aeb631f4962ce99202e669` then pa
 
 Documentation-only commits after the proven Q heads do not reopen Q unless executable/protocol behavior changes.
 
-## Milestone R — SCL Reconstruction / Export / Save As — IN PROGRESS
+## Milestone R — SCL Reconstruction / Export / Save As — CLOSED
 
-This is a real product gap and is isolated because it is riskier than simple serialization.
+Milestone R closes the remaining SCL product gap without pretending that normalized reconstruction is byte-for-byte vendor lossless.
 
-### Required surface
+### Closed capability
 
-- construct a mutable engineering workspace from canonical discovery/SCL data without losing references silently;
-- deterministic ICD/CID export as applicable to available information;
-- Save As supported SCL editions, including explicit Ed1/Ed2 conversion policy where supported;
-- deterministic DataTypeTemplates/reference generation;
-- preserve or explicitly report Services, Communication, control blocks and vendor extensions that cannot be represented safely;
-- namespace/version handling must be explicit;
-- unsupported or ambiguous conversions fail closed rather than fabricating data.
-
-### Current foundation tranche
-
-Milestone R begins by establishing a safe export boundary before implementing reconstruction:
-
-- dedicated top-level SCL workspace backed by the canonical `SclParser` / `SclDocument` model;
+- dedicated top-level SCL workspace backed by canonical `SclParser` / `SclDocument` rather than a GUI-specific parser;
 - bounded one-worker source loading with a 64 MiB cap and cancellable operations;
-- explicit edition, namespace, Header and modeled-object inventory projection;
-- verified source-preserving Save As for the same SCL profile/extension;
-- post-write byte verification, reparsing and modeled semantic round-trip comparison;
-- deterministic repeated Save As output;
-- explicit preservation report identifying data not fully retained by the current canonical model;
-- cross-edition conversion and SCD/ICD/CID profile relabel fail closed until deterministic reconstruction rules exist;
-- UI does not claim canonical reconstruction or lossless vendor conversion yet.
-
-The first R implementation spans `b92d2af1a6bff8ef4295c74807cb00f15fa987f0` through `9205c8b4227bb33293ce4fa910c607bd14a7dc97`. Its dedicated CI gate is `SCL workspace preservation + conversion-policy gates`; closure of the full milestone still requires deterministic reconstruction/export rather than source preservation alone.
+- exact-source Save As that preserves original bytes, rereads them, reparses the output and verifies modeled semantic equivalence;
+- deterministic canonical reconstruction/export from `SclDocument` for the semantic surface ARStack actually models;
+- deterministic DataTypeTemplates generation for LNodeType, DOType and DAType plus canonical reference generation;
+- configured DAI values, DataSet/FCDA, ReportControl, GOOSE, Sampled Values and Communication/address reconstruction where modeled;
+- explicit normalized Edition 1, Edition 2 and Edition 2.1 namespace/version policy;
+- SCD canonical output plus guarded single-IED ICD/CID output;
+- atomic canonical write, reread, reparse, semantic round-trip comparison and repeated-output determinism before an export is labelled verified;
+- fail-closed rejection for unsupported profiles, exact-source profile relabel, multi-IED ICD/CID, generic Enum ordinals that cannot be reconstructed safely and nested-SDO ambiguity that the flattened canonical model cannot prove losslessly;
+- exact-source preservation remains the vendor-lossless path; canonical reconstruction explicitly reports that unknown vendor XML/extensions are not claimed lossless.
 
 ### Definition of Done
 
 Exported files reparse successfully, preserve the modeled semantics covered by the source workspace, and pass deterministic round-trip/reference validation. No claim of lossless vendor conversion is made without evidence.
 
-## Milestone S — IEDScout Product Hardening / Release Candidate
+### Closure evidence
+
+The safe source-preservation foundation spans `b92d2af1a6bff8ef4295c74807cb00f15fa987f0` through `9205c8b4227bb33293ce4fa910c607bd14a7dc97`. Full deterministic reconstruction/export landed in `be7050e6d44d88838f91aeacbe0d4b7282b5adcc`.
+
+Implementation head `be7050e6d44d88838f91aeacbe0d4b7282b5adcc` passed **IED Simulator Qt #551**, run `34798050373`, job `103834905561`, through the complete retained regression tail:
+
+- `SCL_WORKSPACE_PASS edition_source=ed2 exact_preserve=pass canonical=pass dtt=pass references=pass configured_values=pass deterministic=pass ed1=pass ed2=pass ed21=pass scd=pass icd=pass cid=pass semantic_roundtrip=pass ieds=1 lns=4 leaves=23`
+- `SCL_WORKSPACE_NEGATIVE_PASS unsupported_profile=rejected exact_relabel=rejected multi_ied_icd=rejected unknown_enum=rejected nested_sdo_ambiguity=rejected malformed=rejected vendor_lossless_claimed=false`
+- Build, QML smoke, N/O/Q gates, malformed-input fail-closed, lifecycle, 5k/20k/50k SCL performance, responsiveness, commissioning K/L, GOOSE M/P, live-data, visual regression, direct/SBO normal/enhanced control, URCB/BRCB and multi-IED coexistence all passed in the same Qt job.
+- All eleven workflows on the R implementation head were green, including C++ CI #1493. Its Windows/MSVC, Linux/GCC and Linux/Clang jobs all passed.
+
+The first S hardening proof head `fbaeb39445c80e1e111cedbdf52bfacf4ba54d57` then reran the same R gate successfully in **IED Simulator Qt #554**, run `34802981455`, job `103849210782`, including the entire retained tail. R therefore remains closed after release-hardening work begins.
+
+Documentation-only commits after the proven R heads do not reopen R unless executable/SCL behavior changes.
+
+## Milestone S — IEDScout Product Hardening / Release Candidate — IN PROGRESS
 
 Unify the product rather than adding another protocol feature.
 
-### Product hardening
+### Product hardening target
 
 - coherent navigation across IED Connection, Reports, GOOSE, Files, Settings, SCL and Simulator;
 - recent connections and workspace persistence;
@@ -252,6 +256,39 @@ Unify the product rather than adding another protocol feature.
 - performance and reconnect/soak testing;
 - interoperability evidence against multiple vendor IEDs/simulators where available;
 - release documentation that distinguishes live-proven, simulator-proven, offline-tested and not-yet-supported behavior.
+
+### S1 — persistent product state + runtime readiness — PROVEN
+
+The first hardening tranche is `ff3e2a41c53fdb2f5939074e54d41111ae3e1e8c`, followed by Qt 6.8 compatibility correction `fbaeb39445c80e1e111cedbdf52bfacf4ba54d57`.
+
+Closed S1 behavior:
+
+- versioned JSON product state is persisted atomically with `QSaveFile` rather than a partially writable ad-hoc settings file;
+- persisted state is capped at 64 KiB and unknown schema, malformed JSON, invalid workspace values, invalid endpoints and unbounded recent lists fail closed to safe defaults;
+- selected workspace is restored across application restart;
+- recent MMS endpoints are de-duplicated and bounded to eight entries;
+- the most recent endpoint is restored into the IED Connection workspace, but startup **does not automatically connect** to a field device;
+- the top navigation can select retained endpoints while disconnected;
+- Windows runtime readiness explicitly checks both `wpcap` and `Packet` libraries and reports Npcap guidance; non-Windows platforms do not falsely require Npcap;
+- state corruption is surfaced as a reset warning and a subsequent valid mutation rewrites a clean atomic state file;
+- one-time Simulator auto-selection on explicit SCL import is preserved without overriding a restored product workspace on ordinary startup.
+
+Final S1 proof head `fbaeb39445c80e1e111cedbdf52bfacf4ba54d57` passed **IED Simulator Qt #554**, run `34802981455`, job `103849210782`:
+
+- `PRODUCT_HARDENING_PASS state=atomic workspace_restore=4 recent=8 dedupe=pass bounded_recent=8 crash_recovery=pass auto_reconnect=false npcap_policy=explicit`
+- `PRODUCT_HARDENING_NEGATIVE_PASS corrupt_state=ignored unsupported_schema=rejected invalid_workspace=rejected invalid_endpoint=rejected unbounded_recent=rejected`
+- the same run passed R again plus the complete retained tail through lifecycle soak, large-SCL performance, responsiveness, commissioning, GOOSE, live-data, screenshot, direct/SBO normal/enhanced control, URCB/BRCB and multi-IED.
+- all eleven workflows on the S1 proof head were green: IED Simulator Qt #554, C++ CI #1495, MMS R1-R2 Server CI #159, Security and Evidence #1470, IEDScout Parity Server CI #457, Control Interop Harness CI #747, Dynamic RCB Trial Harness CI #786, BRCB Hard Profile CI #743, Embedded Profile CI #1140, ARStack Studio Qt #515 and SMV Injector GUI #328.
+
+### Remaining S work before release-candidate closure
+
+S is intentionally **not closed** by S1. The remaining release-candidate work includes:
+
+- Windows deploy/package pipeline and installable artifact, including deployed Qt runtime validation;
+- installer/runtime Npcap detection and operator guidance proven on Windows rather than inferred only from portable source logic;
+- reconnect/application-close soak that spans the unified product workspaces and proves no worker/socket/raw-transport leakage;
+- release documentation/evidence matrix that clearly labels live-proven, simulator-proven, offline-tested and unsupported behavior;
+- multi-vendor / external simulator interoperability evidence where available, with vendor-specific behavior kept distinct from standard behavior.
 
 ### Release principle
 
