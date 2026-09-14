@@ -85,18 +85,11 @@ void DeviceIoWorker::initialize() {
     connect(serial_, &QSerialPort::errorOccurred, this, [this](const QSerialPort::SerialPortError error) {
         if (error == QSerialPort::NoError || serial_ == nullptr || !serial_->isOpen()) return;
         const QString message = serial_->errorString();
-        switch (error) {
-        case QSerialPort::ResourceError:
-        case QSerialPort::DeviceNotFoundError:
-        case QSerialPort::PermissionError:
-        case QSerialPort::ReadError:
-        case QSerialPort::WriteError:
+        if (serialErrorForcesTransportLoss(error)) {
             handleSerialFailure(message);
             return;
-        default:
-            emit transportError(activeGeneration_, message, false);
-            return;
         }
+        emit transportError(activeGeneration_, message, false);
     });
 
     presenceTimer_->start();
