@@ -39,7 +39,7 @@ public:
     [[nodiscard]] bool closeObserved() const noexcept { return closeObserved_; }
 
 protected:
-    bool eventFilter(QObject* watched, QEvent* event) override {
+    [[nodiscard]] bool eventFilter(QObject* watched, QEvent* event) override {
         if (event != nullptr && event->type() == QEvent::Close && app_ != nullptr) {
             closeObserved_ = true;
             app_->quit();
@@ -225,22 +225,39 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
             "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE"),
         rejectedIdentity);
 
+    const bool boundedIdentifyPolicy =
+        DeviceController::identityMaxAttempts() == 3 &&
+        DeviceController::identityRetryIntervalMs() == 650 &&
+        DeviceController::identityRetryAllowed(0) &&
+        DeviceController::identityRetryAllowed(1) &&
+        DeviceController::identityRetryAllowed(2) &&
+        !DeviceController::identityRetryAllowed(3) &&
+        !DeviceController::identityRetryAllowed(-1);
+
     if (!currentAccepted || !legacyRejectedAsCurrent || !protocolLegacyParsed ||
         !capabilityFailClosed || !rejectsWrongTarget || !rejectsMissingFirmware ||
-        !rejectsMalformedBoot) {
+        !rejectsMalformedBoot || !boundedIdentifyPolicy) {
         qCritical().noquote()
-            << "S1 identity contract: FAIL"
+            << "S1/S2 identity contract: FAIL"
             << "current=" << currentAccepted
             << "legacy=" << legacyRejectedAsCurrent
             << "protocol-legacy=" << protocolLegacyParsed
             << "capability-fail-closed=" << capabilityFailClosed
             << "wrong-target=" << rejectsWrongTarget
             << "missing-firmware=" << rejectsMissingFirmware
-            << "malformed-boot=" << rejectsMalformedBoot;
+            << "malformed-boot=" << rejectsMalformedBoot
+            << "bounded-identify=" << boundedIdentifyPolicy;
         return 11;
     }
 
     StudioDeviceController device;
+    const bool startsIdle =
+        device.identificationState() == DeviceController::IdentificationState::Idle &&
+        device.identifyAttempts() == 0;
+    if (!startsIdle) {
+        qCritical().noquote() << "S2 identification state: FAIL · controller did not start Idle";
+        return 12;
+    }
     if (device.start()) {
         qCritical().noquote() << "P0 controller policy: FAIL · unverified device was allowed to START";
         return 5;
@@ -250,7 +267,7 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         return 6;
     }
     qInfo().noquote()
-        << "P0 controller policy: PASS · typed S1 identity + unverified START/DEPLOY fail closed";
+        << "P0 controller policy: PASS · S1 typed identity + S2 bounded IDENTIFY + unverified START/DEPLOY fail closed";
     return 0;
 }
 } // namespace
