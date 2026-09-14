@@ -223,7 +223,7 @@ signals:
 
 protected:
     bool sendQuietCommand(const QString& command);
-    bool sendCommandBatch(const QStringList& commands, bool quiet = false);
+    bool sendCommandBatch(const QStringList& commands, bool quiet = false, bool exclusive = false);
     void setSessionHeartbeatEnabled(bool enabled);
 
 private:
