@@ -102,7 +102,7 @@ public:
     [[nodiscard]] static constexpr int controlHealthProbeIntervalMs() noexcept { return 2000; }
     [[nodiscard]] static constexpr int controlHealthMaxMisses() noexcept { return 2; }
 
-    Q_INVOKABLE bool start() override {
+    bool start() override {
         if (!deviceVerified()) {
             emit deviceMessage(QStringLiteral("Connect and verify the ARStack ESP32-P4 before Start."));
             return false;
@@ -130,13 +130,13 @@ public:
         return DeviceController::start();
     }
 
-    Q_INVOKABLE bool zero() override {
+    bool zero() override {
         pendingSignals_.clear();
         if (!frequencyPending_) liveFlushTimer_.stop();
         return DeviceController::zero();
     }
 
-    Q_INVOKABLE bool setFrequency(const double hz) override {
+    bool setFrequency(const double hz) override {
         if (!std::isfinite(hz) || hz < 0.0 || hz > 1000.0) {
             emit deviceMessage(QStringLiteral("Frequency must be within 0..1000 Hz."));
             return false;
@@ -150,7 +150,7 @@ public:
         return true;
     }
 
-    Q_INVOKABLE bool setSignal(
+    bool setSignal(
         const QString& signalId,
         const double magnitude,
         const double phaseDegrees,
@@ -188,7 +188,7 @@ public:
         return true;
     }
 
-    Q_INVOKABLE bool deployProfile(const QVariantMap& profile) override {
+    bool deployProfile(const QVariantMap& profile) override {
         if (!currentFirmwareIdentitySeen()) {
             emit deviceMessage(QStringLiteral("Firmware update required before profile synchronization."));
             return false;
