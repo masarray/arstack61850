@@ -32,13 +32,13 @@ bool SmartSessionController::profileGenerationAdvanced(
     const QString& baseline,
     const QString& observed) noexcept {
     bool observedOk = false;
-    static_cast<void>(observed.trimmed().toULongLong(&observedOk));
+    const qulonglong observedGeneration = observed.trimmed().toULongLong(&observedOk);
     if (!observedOk) return false;
 
     bool baselineOk = false;
-    static_cast<void>(baseline.trimmed().toULongLong(&baselineOk));
+    const qulonglong baselineGeneration = baseline.trimmed().toULongLong(&baselineOk);
     if (!baselineOk) return true;
-    return observed.trimmed() != baseline.trimmed();
+    return observedGeneration != baselineGeneration;
 }
 
 SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent) {
@@ -589,13 +589,18 @@ void SmartSessionController::handleProfileSyncAttemptFailure(QString reason) {
     if (reason.isEmpty()) reason = QStringLiteral("Profile synchronization did not complete.");
 
     if (profileSyncRetryAllowed(profileSyncAttempts_)) {
+        // Retire DeviceController's pending marker before retrying. Otherwise a
+        // silent peer can leave profileDeploying=true forever even though the
+        // supervisor transaction already timed out.
         profileSyncStage_ = ProfileSyncStage::idle;
-        profileSyncError_ = std::move(reason);
+        profileSyncError_ = reason;
+        if (device_ != nullptr && device_->profileDeploying()) device_->abandonProfileDeployment();
         QTimer::singleShot(0, this, &SmartSessionController::reconcile);
         return;
     }
 
-    latchProfileSyncFailure(std::move(reason));
+    latchProfileSyncFailure(reason);
+    if (device_ != nullptr && device_->profileDeploying()) device_->abandonProfileDeployment();
 }
 
 void SmartSessionController::latchProfileSyncFailure(QString reason) {
