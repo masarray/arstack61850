@@ -34,7 +34,7 @@ public slots:
     void connectPort(const QString& portName);
     void disconnectPort();
     void confirmIdentity();
-    void enqueueCommands(const QStringList& commands, bool quiet);
+    void enqueueCommands(const QStringList& commands, bool quiet, bool exclusive);
     void setHeartbeatEnabled(bool enabled);
 
 signals:
@@ -58,6 +58,7 @@ private:
         QString text;
         QByteArray bytes;
         bool quiet{false};
+        bool exclusive{false};
     };
 
     void refreshPortsInternal(bool forceSignal);
@@ -66,7 +67,11 @@ private:
     void closePortInternal(bool emitRelease);
     bool sendIdentifyProbe();
     void finishIdentificationTimeout();
-    bool enqueueCommandsInternal(const QStringList& commands, bool quiet, bool reportRejection);
+    bool enqueueCommandsInternal(
+        const QStringList& commands,
+        bool quiet,
+        bool exclusive,
+        bool reportRejection);
     void pumpWriteQueue();
     void completeActiveWrite();
     void processReadyRead();
@@ -87,6 +92,7 @@ private:
 
     int highConfidenceCount_{0};
     int identifyAttempts_{0};
+    int exclusiveCommandsRemaining_{0};
     bool initialized_{false};
     bool shuttingDown_{false};
     bool automaticConnection_{false};
