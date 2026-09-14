@@ -51,14 +51,13 @@ qt_add_executable(arstack_session_harness
 )
 
 # S8B adds a Windows-native OS/process ownership gate. It intentionally depends
-# only on the production lock class and the pure serial-error policy, so the test
-# can prove cross-process QLockFile semantics without pulling a second supervisor
-# or test-only serial implementation into the product.
+# only on the production lock class and the pure serial-error policy. Do not add
+# DeviceIoWorker.hpp as a target source: AUTOMOC would then generate metaobject
+# calls for worker slots and pull the full serial worker into this lightweight
+# process-ownership harness.
 if(WIN32)
     qt_add_executable(arstack_windows_ownership_harness
         src/WindowsOwnershipHarness.cpp
-        src/DeviceIoWorker.hpp
-        src/SingleInstanceGuard.hpp
     )
     target_link_libraries(arstack_windows_ownership_harness PRIVATE
         Qt6::Core
