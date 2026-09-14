@@ -34,6 +34,7 @@ class IedCommissioningModel : public QObject {
     Q_PROPERTY(int dataSetCount READ dataSetCount NOTIFY modelChanged)
     Q_PROPERTY(int reportCount READ reportCount NOTIFY modelChanged)
     Q_PROPERTY(int gooseCount READ gooseCount NOTIFY modelChanged)
+    Q_PROPERTY(int settingGroupCount READ settingGroupCount NOTIFY modelChanged)
     Q_PROPERTY(int controlCount READ controlCount NOTIFY modelChanged)
     Q_PROPERTY(quint64 revision READ revision NOTIFY modelChanged)
     Q_PROPERTY(int behaviorCount READ behaviorCount NOTIFY behaviorChanged)
@@ -67,6 +68,7 @@ public:
     [[nodiscard]] int dataSetCount() const noexcept { return dataSetCount_; }
     [[nodiscard]] int reportCount() const noexcept { return reportCount_; }
     [[nodiscard]] int gooseCount() const noexcept { return gooseCount_; }
+    [[nodiscard]] int settingGroupCount() const noexcept { return settingGroupCount_; }
     [[nodiscard]] int controlCount() const noexcept { return controlCount_; }
     [[nodiscard]] quint64 revision() const noexcept { return revision_; }
     [[nodiscard]] int behaviorCount() const noexcept { return behaviors_.size(); }
@@ -127,6 +129,7 @@ private:
         dataSet,
         report,
         goose,
+        settingGroup,
         control,
     };
 
@@ -251,6 +254,7 @@ private:
     int dataSetCount_{};
     int reportCount_{};
     int gooseCount_{};
+    int settingGroupCount_{};
     int controlCount_{};
     quint64 revision_{};
     quint64 behaviorTickCount_{};
