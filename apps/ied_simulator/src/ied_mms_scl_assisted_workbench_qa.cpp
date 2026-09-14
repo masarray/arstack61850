@@ -255,9 +255,11 @@ int main(int argc, char** argv) {
         return 5;
     }
 
-    if (client.modelSource() != QStringLiteral("Trusted SCL + initial snapshot")) {
-        std::cerr << "Workbench silently selected the wrong online-model path: "
-                  << client.modelSource().toStdString() << '\n';
+    if (client.modelSource() != QStringLiteral("Trusted SCL + initial snapshot") ||
+        client.associationProfile() != QStringLiteral("SclEngineering")) {
+        std::cerr << "Workbench selected the wrong trusted-SCL product path: model="
+                  << client.modelSource().toStdString()
+                  << " association=" << client.associationProfile().toStdString() << '\n';
         return 6;
     }
     if (client.logicalDeviceCount() != 1 || client.logicalNodeCount() != 2 ||
@@ -296,10 +298,12 @@ int main(int argc, char** argv) {
     }
 
     const auto diagnostics = client.diagnosticsText();
-    if (!diagnostics.contains(QStringLiteral("SCL synchronization complete")) ||
+    if (!diagnostics.contains(QStringLiteral("Trusted SCL association")) ||
+        !diagnostics.contains(QStringLiteral("SCL engineering OSI addressing")) ||
+        !diagnostics.contains(QStringLiteral("SCL synchronization complete")) ||
         !diagnostics.contains(QStringLiteral("1 Read(s)")) ||
         !diagnostics.contains(QStringLiteral("1 mapped leaf value(s)"))) {
-        std::cerr << "SCL-assisted path did not expose deterministic snapshot diagnostics.\n";
+        std::cerr << "SCL-assisted path did not expose deterministic association/snapshot diagnostics.\n";
         return 12;
     }
 
@@ -364,6 +368,7 @@ int main(int argc, char** argv) {
 
     std::cout << "MMS_SCL_ASSISTED_WORKBENCH_PASS"
               << " trusted_path=pass"
+              << " scl_association=pass"
               << " domain_validation=pass"
               << " initial_snapshot=pass"
               << " mapped_leaf=1"
