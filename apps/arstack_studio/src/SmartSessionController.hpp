@@ -48,10 +48,10 @@ public:
     [[nodiscard]] QString expectedFirmwareVersion() const;
     [[nodiscard]] QString deviceFirmwareVersion() const;
 
-    // Recovery selection is intentionally conservative: prefer the device
-    // classifier's recommended port; otherwise a single visible serial port is
-    // safe to ROM-probe because FirmwareManager performs a read-only chip check
-    // and refuses to write until ESP32-P4 pre-v3 is proven and the user approves.
+    // Recovery is never classified automatically through the ROM bootloader.
+    // Normal startup first exhausts the bounded semantic IDENTIFY contract.
+    // Only an explicit user firmware action may then call FirmwareManager's
+    // read-only ROM target probe before any write is permitted.
     [[nodiscard]] static QString chooseRecoveryPort(
         const QString& recommendedPort,
         const QStringList& visiblePorts);
@@ -66,6 +66,7 @@ public:
     Q_INVOKABLE bool beginFirmwareInstall();
     Q_INVOKABLE bool retryFirmwareUpdate();
     Q_INVOKABLE bool retryFirmwareSetup();
+    Q_INVOKABLE bool retryIdentification();
 
 signals:
     void dependenciesChanged();
@@ -79,7 +80,7 @@ private:
     void reconnectDeviceSignals();
     void reconnectProfileSignals();
     void reconnectFirmwareSignals();
-    void maybeScheduleBlankBoardProbe();
+    void refreshRecoveryOfferFromIdentity();
     void clearBlankBoardContext();
     void latchFirmwareFailure(QString message);
     bool beginFirmwareOperation(const QString& portName);
@@ -95,13 +96,11 @@ private:
     QTimer discoveryTimer_;
     QTimer prepareTimer_;
     QTimer reconnectTimer_;
-    QTimer blankProbeTimer_;
     QString state_{QStringLiteral("WAITING FOR DEVICE")};
     QString statusText_{QStringLiteral("Connect ESP32-P4; ARStack Studio will detect it automatically.")};
     QString deviceFirmwareVersion_;
     QString updatePort_;
     QString blankBoardPort_;
-    QString blankProbeAttemptedPort_;
     QString setupErrorStatus_;
     bool startReady_{false};
     bool firmwareUpdateRequired_{false};
@@ -110,7 +109,6 @@ private:
     bool needsProfileSync_{true};
     bool profileSyncInFlight_{false};
     bool updateRequested_{false};
-    bool blankProbeInFlight_{false};
     bool blankBoardDetected_{false};
     bool setupError_{false};
     int updateReconnectAttempts_{0};
