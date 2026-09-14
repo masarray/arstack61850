@@ -16,4 +16,7 @@
         <file alias="upload.svg">../arstack_studio/assets/lucide/upload.svg</file>
         <file alias="x.svg">../arstack_studio/assets/lucide/x.svg</file>
     </qresource>
+    <qresource prefix="/iedsim">
+        <file alias="IedScoutWorkspaceV2.qml">qml/IedScoutWorkspaceV2.qml</file>
+    </qresource>
 </RCC>
