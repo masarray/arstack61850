@@ -29,8 +29,8 @@ The product roadmap is based on the current repository state, not on rewriting I
 - Live discovery already exposes DataSet inventory and GOOSE/SV/SettingGroup/Log control-block identities with exact-attribute deep reads where implemented.
 - Stage M closes the desktop simulator's real Layer-2 GOOSE publication path with explicit NIC binding, SCL addressing, sequencing/retransmission semantics, bounded lifecycle and PCAP evidence.
 - MMS file service is currently read-oriented: FileDirectory + FileOpen/FileRead/FileClose download. Upload/delete/rename are not currently implemented.
-- Setting Group support currently proves discovery/deep-read (including ActSG, CnfEdit, EditSG, LActTm and NumOfSG on retained OCR7SR12 evidence), which is not equivalent to a complete edit/activate workflow.
-- SCL parsing recognizes the supported edition model, but mutable SCL workspace/export and live-discovery-to-SCL reconstruction remain explicit parity gaps.
+- Setting Group support now includes SGCB discovery/deep-read and guarded ActSG activation/verification, but full edit is intentionally not claimed until `EditSG -> edit SE values -> CnfEdit` exists end-to-end.
+- SCL parsing recognizes the supported edition model, while deterministic mutable reconstruction/export and live-discovery-to-SCL reconstruction remain the active Milestone R parity gap.
 
 ## Scope rule after Milestone M
 
@@ -40,7 +40,7 @@ Do **not** make Sampled Values runtime simulation, PTP, ESP32/embedded work, or 
 
 The priority order is:
 
-**M GOOSE TX ✅ -> N MMS Client/Discovery ✅ -> O RCB/Reports ✅ -> P GOOSE Monitor/Publisher ✅ -> Q Files + Setting Groups NEXT -> R SCL Export/Ed1-Ed2 -> S Release Hardening**
+**M GOOSE TX ✅ -> N MMS Client/Discovery ✅ -> O RCB/Reports ✅ -> P GOOSE Monitor/Publisher ✅ -> Q Files + Setting Groups ✅ -> R SCL Export/Ed1-Ed2 IN PROGRESS -> S Release Hardening**
 
 ## Milestone M — Real GOOSE Publication — CLOSED
 
@@ -166,41 +166,45 @@ Milestone P implementation head `94bbf0a707ace442da1f0c4b0c18ab806f873886` passe
 
 Documentation-only closure commits after the proven P/O heads do not reopen P unless executable/protocol behavior changes.
 
-## Milestone Q — File Transfer + Setting Groups — NEXT
+## Milestone Q — File Transfer + Setting Groups — CLOSED
 
-### Files
+### Closed Files capability
 
-Minimum product parity starts from capability already proven:
+- one persistent MMS utility association shared by Files and Settings instead of a GUI-specific protocol stack;
+- bounded FileDirectory continuation/pagination with remote path, size and modified metadata where supplied;
+- streaming FileOpen/FileRead/FileClose download through canonical `MmsFileTransferRuntime`;
+- progress and cancellation with stop-token propagation;
+- deterministic FileClose/partial-output cleanup on failure;
+- upload/delete/rename remain intentionally unexposed because the canonical core is read-oriented and product need has not justified unsafe ad-hoc mutation.
 
-- directory tree/list;
-- path, size/date metadata where provided;
-- streaming download;
-- progress, cancel and precise error/cleanup presentation;
-- bounded directory continuation/pagination.
+### Closed Setting Groups capability
 
-Upload/delete/rename are **not assumed requirements**. Audit target-product parity and field need first; implement remote mutation only if it materially improves the intended engineering workflow and can be guarded safely.
+- SGCB inventory and deep-read of `NumOfSG`, `ActSG`, `EditSG`, `CnfEdit` and `LActTm`;
+- guarded Activate Group through the canonical exact-type MMS write path;
+- successful activation is followed by verification Read on the same association;
+- invalid group numbers and edit-in-progress state fail closed;
+- no automatic activation retry after ambiguous write outcome;
+- full Setting Group editing is explicitly **not** claimed: `EditSG -> edit SE values -> CnfEdit` remains outside the closed Q surface until that complete transaction is implemented and proven.
 
-### Setting Groups
+### Closure evidence
 
-First expose the SGCB accurately:
+Milestone Q implementation landed in `8cb7ff3f63e12aaa03aebc54d2356f0a874829d8`; QML empty-SGCB state hardening is `2925f76814101c0b279afc885205eb151e262c25`, and behavior-neutral compiler-warning cleanup is `86fde29fdc22dfcfc5aeb631f4962ce99202e669`.
 
-- NumOfSG;
-- ActSG;
-- EditSG;
-- CnfEdit;
-- LActTm.
+The final behavioral proof head `2925f76814101c0b279afc885205eb151e262c25` passed **IED Simulator Qt #537**, run `34793801291`, job `103822906491`, through the complete retained tail including SBO-enhanced control and multi-IED:
 
-Then add guarded **Activate Group** if the canonical write/type path supports the target safely.
+- `FILE_SETTINGS_WORKSPACE_PASS file_pages=2 file_entries=3 download_bytes=6 file_close=pass sgcb=1 attributes=5 actsg_verified=3 activation_writes=1 persistent_association=pass full_sg_edit_claimed=false`
+- `FILE_SETTINGS_WORKSPACE_NEGATIVE_PASS disconnected_ops=rejected invalid_group=rejected edit_in_progress=rejected sink_failure_cleanup=pass bounded_pages=4 bounded_entries=8 no_activation_retry=true`
+- `IEDSIM_GUI_LIVE_VALUE_PASS` retained direct/SBO normal/enhanced control, URCB GI and BRCB event proof.
+- multi-IED same-port/distinct-address coexistence passed in the same job.
+- all ten branch workflows on that behavioral proof head were green: IED Simulator Qt, C++ CI, MMS R1-R2 Server CI, Security and Evidence, IEDScout Parity Server CI, Control Interop Harness CI, Dynamic RCB Trial Harness CI, BRCB Hard Profile CI, Embedded Profile CI and SMV Injector GUI.
 
-Only claim full Setting Group editing after the complete transaction is implemented and proven:
+The warning-only cleanup head `86fde29fdc22dfcfc5aeb631f4962ce99202e669` then passed **IED Simulator Qt #539**, run `34794848866`, job `103825843204`, through every step including the Q gate, GUI/control regression and multi-IED. Q is therefore closed without claiming unsupported remote file mutation or full SG editing.
 
-`EditSG -> edit SE values -> CnfEdit`
+Documentation-only commits after the proven Q heads do not reopen Q unless executable/protocol behavior changes.
 
-Deep-read evidence alone must never be labelled full Setting Group support.
+## Milestone R — SCL Reconstruction / Export / Save As — IN PROGRESS
 
-## Milestone R — SCL Reconstruction / Export / Save As
-
-This is a real product gap and should be isolated because it is riskier than simple serialization.
+This is a real product gap and is isolated because it is riskier than simple serialization.
 
 ### Required surface
 
@@ -211,6 +215,22 @@ This is a real product gap and should be isolated because it is riskier than sim
 - preserve or explicitly report Services, Communication, control blocks and vendor extensions that cannot be represented safely;
 - namespace/version handling must be explicit;
 - unsupported or ambiguous conversions fail closed rather than fabricating data.
+
+### Current foundation tranche
+
+Milestone R begins by establishing a safe export boundary before implementing reconstruction:
+
+- dedicated top-level SCL workspace backed by the canonical `SclParser` / `SclDocument` model;
+- bounded one-worker source loading with a 64 MiB cap and cancellable operations;
+- explicit edition, namespace, Header and modeled-object inventory projection;
+- verified source-preserving Save As for the same SCL profile/extension;
+- post-write byte verification, reparsing and modeled semantic round-trip comparison;
+- deterministic repeated Save As output;
+- explicit preservation report identifying data not fully retained by the current canonical model;
+- cross-edition conversion and SCD/ICD/CID profile relabel fail closed until deterministic reconstruction rules exist;
+- UI does not claim canonical reconstruction or lossless vendor conversion yet.
+
+The first R implementation spans `b92d2af1a6bff8ef4295c74807cb00f15fa987f0` through `9205c8b4227bb33293ce4fa910c607bd14a7dc97`. Its dedicated CI gate is `SCL workspace preservation + conversion-policy gates`; closure of the full milestone still requires deterministic reconstruction/export rather than source preservation alone.
 
 ### Definition of Done
 
