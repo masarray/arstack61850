@@ -4,11 +4,11 @@
 #include <QByteArray>
 #include <QObject>
 #include <QQueue>
+#include <QSerialPort>
 #include <QStringList>
 
 #include <utility>
 
-class QSerialPort;
 class QTimer;
 
 // Long-lived serial transport owner for ARStack Studio.
@@ -28,6 +28,24 @@ public:
     [[nodiscard]] static constexpr int identityMaxAttempts() noexcept { return 3; }
     [[nodiscard]] static constexpr int identityRetryIntervalMs() noexcept { return 650; }
     [[nodiscard]] static constexpr int heartbeatIntervalMs() noexcept { return 700; }
+
+    // S8B Windows ownership contract: access/device/resource/read/write errors
+    // are session-fatal and must release the transport instead of leaving a
+    // stale COM handle alive. Keep this pure so Windows CI can prove the exact
+    // Qt error classification without requiring physical USB hardware.
+    [[nodiscard]] static constexpr bool serialErrorForcesTransportLoss(
+        const QSerialPort::SerialPortError error) noexcept {
+        switch (error) {
+        case QSerialPort::ResourceError:
+        case QSerialPort::DeviceNotFoundError:
+        case QSerialPort::PermissionError:
+        case QSerialPort::ReadError:
+        case QSerialPort::WriteError:
+            return true;
+        default:
+            return false;
+        }
+    }
 
     void enqueueCommands(
         const QStringList& commands,
@@ -101,6 +119,7 @@ private:
 
     QStringList ports_;
     QString recommendedPort_;
+    QString discoveryStatus_;
     QStringList probeQueue_;
     QByteArray pendingRx_;
     QQueue<PendingCommand> commandQueue_;
