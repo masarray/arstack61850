@@ -16,6 +16,20 @@ Item {
         return value === undefined || value === null || String(value).length === 0 ? "—" : String(value)
     }
 
+    function sclHealthLabel() {
+        if (client.trustedSclHealth === "matched") return "SCL MATCHED"
+        if (client.trustedSclHealth === "degraded") return "SCL DEGRADED"
+        if (client.trustedSclHealth === "incompatible") return "SCL INCOMPATIBLE"
+        return ""
+    }
+
+    function sclHealthColor() {
+        if (client.trustedSclHealth === "matched") return theme.green
+        if (client.trustedSclHealth === "degraded") return theme.amber
+        if (client.trustedSclHealth === "incompatible") return theme.red
+        return theme.muted
+    }
+
     function firstVisibleRow() {
         var index = tree.indexAt(4, tree.contentY + 4)
         return index >= 0 ? index : 0
@@ -82,13 +96,38 @@ Item {
 
                 Rectangle {
                     width: 8; height: 8; radius: 4
-                    color: client.connected ? theme.green : client.busy ? theme.amber : client.lastError.length ? theme.red : theme.muted
+                    color: client.trustedSclIncompatible ? theme.red
+                                                        : client.trustedSclDegraded ? theme.amber
+                                                        : client.connected ? theme.green
+                                                                           : client.busy ? theme.amber
+                                                                                         : client.lastError.length ? theme.red : theme.muted
                 }
                 Label {
                     text: client.stateText
                     color: theme.textSoft
                     font.pixelSize: 10
                     font.weight: Font.DemiBold
+                }
+
+                Rectangle {
+                    visible: client.trustedSclHealth.length > 0
+                    implicitWidth: healthLabel.implicitWidth + 14
+                    implicitHeight: 20
+                    radius: 10
+                    color: Qt.rgba(root.sclHealthColor().r,
+                                   root.sclHealthColor().g,
+                                   root.sclHealthColor().b,
+                                   0.12)
+                    border.width: 1
+                    border.color: root.sclHealthColor()
+                    Label {
+                        id: healthLabel
+                        anchors.centerIn: parent
+                        text: root.sclHealthLabel()
+                        color: root.sclHealthColor()
+                        font.pixelSize: 8
+                        font.weight: Font.DemiBold
+                    }
                 }
 
                 Item { Layout.fillWidth: true }
@@ -337,6 +376,13 @@ Item {
                         }
                         Label { text: client.endpoint; color: theme.textSoft; font.pixelSize: 9 }
                         Label { text: "Association: " + root.text(client.associationProfile); color: theme.muted; font.pixelSize: 8 }
+                        Label {
+                            visible: client.trustedSclHealth.length > 0
+                            text: "Trusted SCL health: " + client.trustedSclHealth.toUpperCase()
+                            color: root.sclHealthColor()
+                            font.pixelSize: 8
+                            font.weight: Font.DemiBold
+                        }
                         Label { Layout.fillWidth: true; text: root.text(client.modelSummary); color: theme.muted; font.pixelSize: 8; wrapMode: Text.WordWrap }
                         Label {
                             Layout.fillWidth: true
