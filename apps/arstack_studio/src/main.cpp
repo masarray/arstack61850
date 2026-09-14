@@ -135,22 +135,39 @@ int checkFirmwareContract(int argc, char* argv[]) {
             QString{},
             {QStringLiteral("COM3"), QStringLiteral("COM4")}).isEmpty();
 
+    const bool firmwareTimeoutPolicy =
+        FirmwareManager::launchTimeoutMs() == 15000 &&
+        FirmwareManager::probeTimeoutMs() == 30000 &&
+        FirmwareManager::flashTimeoutMs() == 180000 &&
+        FirmwareManager::resetTimeoutMs() == 20000;
+
+    QElapsedTimer workerDeadline;
+    workerDeadline.start();
+    while (!firmware.workerReady() && workerDeadline.elapsed() < 1500) {
+        app.processEvents(QEventLoop::AllEvents, 20);
+        QThread::msleep(5);
+    }
+    const bool firmwareWorkerBoundary = firmware.workerReady() && firmware.workerAffinityValid();
+
     const bool valid = firmware.bundleReady() && firmware.flasherAvailable() &&
         firmware.firmwareVersion() == QStringLiteral(ARSTACK_STUDIO_VERSION) &&
         firmware.expectedProtocol() == QStringLiteral("1") &&
         firmware.firmwareSha256().size() == 64 &&
         realEspflashFormat && dashedFormat && rejectsWrongChip && revisionPolicy &&
-        flashProgressFormat && recoverySelection;
+        flashProgressFormat && recoverySelection && firmwareTimeoutPolicy && firmwareWorkerBoundary;
     if (!valid) {
         qCritical().noquote()
-            << "Firmware bundle/probe contract: FAIL ·"
+            << "Firmware bundle/probe/worker contract: FAIL ·"
             << firmware.bundleStatus()
             << "espflash-format=" << realEspflashFormat
             << "dashed-format=" << dashedFormat
             << "wrong-chip-rejected=" << rejectsWrongChip
             << "revision-policy=" << revisionPolicy
             << "progress-format=" << flashProgressFormat
-            << "recovery-selection=" << recoverySelection;
+            << "recovery-selection=" << recoverySelection
+            << "timeout-policy=" << firmwareTimeoutPolicy
+            << "worker-ready=" << firmware.workerReady()
+            << "process-affinity=" << firmware.workerAffinityValid();
         return 4;
     }
 
@@ -158,7 +175,7 @@ int checkFirmwareContract(int argc, char* argv[]) {
     firmware.shutdown();
 
     qInfo().noquote()
-        << "Firmware bundle/probe contract: PASS · target/revision/progress/hash/recovery/shutdown policy locked ·"
+        << "Firmware bundle/probe contract: PASS · target/revision/progress/hash policy + generation-aware threaded process boundary locked ·"
         << firmware.bundleStatus();
     return 0;
 }
@@ -167,9 +184,6 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
     QCoreApplication app(argc, argv);
 
     DeviceIdentity currentIdentity;
-    // Match the real ESP-IDF serial framing. The semantic parser must extract
-    // the contract from the log prefix without making the human log itself the
-    // source of product state.
     const QString currentLine = QStringLiteral(
         "I (412) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
         "device_id=A1B2C3D4E5F6 firmware=%1 boot_id=0123456789ABCDEF "
@@ -260,12 +274,33 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         DeviceIoWorker::identityMaxAttempts() == DeviceController::identityMaxAttempts() &&
         DeviceIoWorker::identityRetryIntervalMs() == DeviceController::identityRetryIntervalMs();
 
+    const bool generationPolicy =
+        SmartSessionController::nextSessionGeneration(0) == 1 &&
+        SmartSessionController::nextSessionGeneration(41) == 42 &&
+        SmartSessionController::generationIsCurrent(7, 7) &&
+        !SmartSessionController::generationIsCurrent(7, 6) &&
+        !SmartSessionController::generationIsCurrent(0, 0) &&
+        DeviceController::workerEventIsCurrent(7, 7) &&
+        !DeviceController::workerEventIsCurrent(7, 6) &&
+        FirmwareManager::workerEventIsCurrent(7, 7) &&
+        !FirmwareManager::workerEventIsCurrent(7, 6);
+
+    const bool portOwnershipPolicy =
+        SmartSessionController::firmwareOwnershipValid(
+            SmartSessionController::PortOwner::firmwareTool, false) &&
+        !SmartSessionController::firmwareOwnershipValid(
+            SmartSessionController::PortOwner::firmwareTool, true) &&
+        !SmartSessionController::firmwareOwnershipValid(
+            SmartSessionController::PortOwner::deviceSession, false) &&
+        !SmartSessionController::firmwareOwnershipValid(
+            SmartSessionController::PortOwner::none, false);
+
     if (!currentAccepted || !legacyRejectedAsCurrent || !protocolLegacyParsed ||
         !capabilityFailClosed || !rejectsWrongTarget || !rejectsMissingFirmware ||
         !rejectsMalformedBoot || !boundedIdentifyPolicy || !boundedProfileSyncPolicy ||
-        !workerPolicyAligned) {
+        !workerPolicyAligned || !generationPolicy || !portOwnershipPolicy) {
         qCritical().noquote()
-            << "S1/S2/S3/S4 control-plane contract: FAIL"
+            << "S1/S2/S3/S4/S5 control-plane contract: FAIL"
             << "current=" << currentAccepted
             << "legacy=" << legacyRejectedAsCurrent
             << "protocol-legacy=" << protocolLegacyParsed
@@ -275,7 +310,9 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
             << "malformed-boot=" << rejectsMalformedBoot
             << "bounded-identify=" << boundedIdentifyPolicy
             << "bounded-profile-sync=" << boundedProfileSyncPolicy
-            << "worker-policy-aligned=" << workerPolicyAligned;
+            << "worker-policy-aligned=" << workerPolicyAligned
+            << "generation-policy=" << generationPolicy
+            << "port-owner-policy=" << portOwnershipPolicy;
         return 11;
     }
 
@@ -294,11 +331,13 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         return 13;
     }
 
+    device.setSessionGeneration(1);
     const bool startsIdle =
         device.identificationState() == DeviceController::IdentificationState::Idle &&
-        device.identifyAttempts() == 0;
+        device.identifyAttempts() == 0 &&
+        device.sessionGeneration() == 1;
     if (!startsIdle) {
-        qCritical().noquote() << "S2 identification state: FAIL · controller did not start Idle";
+        qCritical().noquote() << "S5 generation-aware identification state: FAIL";
         return 12;
     }
     if (device.start()) {
@@ -310,7 +349,7 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         return 6;
     }
     qInfo().noquote()
-        << "P0 controller policy: PASS · S1 typed identity + S2 bounded IDENTIFY + S3 bounded profile sync + S4 threaded DeviceIoWorker ownership + unverified START/DEPLOY fail closed";
+        << "P0 controller policy: PASS · S1 typed identity + S2 bounded IDENTIFY + S3 bounded profile sync + S4 threaded DeviceIoWorker + S5 generation/PortOwner/FirmwareWorker boundaries + unverified START/DEPLOY fail closed";
     return 0;
 }
 } // namespace
