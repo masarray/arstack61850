@@ -10,6 +10,7 @@
 #include <QTimer>
 
 #include <algorithm>
+#include <utility>
 
 namespace {
 constexpr qint32 kBaudRate = 115200;
@@ -42,8 +43,6 @@ void DeviceIoWorker::initialize() {
     initialized_ = true;
     shuttingDown_ = false;
 
-    // S4 construction rule: these objects are deliberately created here,
-    // after DeviceIoWorker has moved to its dedicated thread.
     serial_ = new QSerialPort(this);
     verificationTimer_ = new QTimer(this);
     presenceTimer_ = new QTimer(this);
@@ -73,9 +72,6 @@ void DeviceIoWorker::initialize() {
             heartbeatTimer_->stop();
             return;
         }
-        // Heartbeat is observational/safety maintenance and must never break an
-        // exclusive profile transaction. If the exclusive gate is active this
-        // tick is simply coalesced away; the next timer tick retries.
         static_cast<void>(enqueueCommandsInternal(
             {QStringLiteral("HEARTBEAT")}, true, false, false));
     });
@@ -98,14 +94,26 @@ void DeviceIoWorker::initialize() {
             handleSerialFailure(message);
             return;
         default:
-            emit transportError(message, false);
+            emit transportError(activeGeneration_, message, false);
             return;
         }
     });
 
     presenceTimer_->start();
     refreshPortsInternal(true);
-    emit ready(serial_->thread() == QThread::currentThread() && thread() == QThread::currentThread());
+    emit ready(activeGeneration_,
+               serial_->thread() == QThread::currentThread() && thread() == QThread::currentThread());
+}
+
+bool DeviceIoWorker::adoptGeneration(const quint64 generation, const bool closeOldSession) {
+    if (generation == 0) return false;
+    if (generation == activeGeneration_) return true;
+    if (serial_ != nullptr && serial_->isOpen()) {
+        if (!closeOldSession) return false;
+        closePortInternal(true);
+    }
+    activeGeneration_ = generation;
+    return true;
 }
 
 void DeviceIoWorker::shutdown(const bool requestStop) {
@@ -119,8 +127,6 @@ void DeviceIoWorker::shutdown(const bool requestStop) {
     probeQueue_.clear();
     genericProbeActive_ = false;
 
-    // Graceful application shutdown is the only place this worker performs a
-    // short bounded wait. Normal UI/device operations never block the GUI.
     if (requestStop && serial_ != nullptr && serial_->isOpen()) {
         const QByteArray stopBytes{"STOP\n"};
         if (serial_->write(stopBytes) == stopBytes.size()) {
@@ -135,8 +141,12 @@ void DeviceIoWorker::shutdown(const bool requestStop) {
     closePortInternal(true);
 }
 
-void DeviceIoWorker::refreshPorts() {
+void DeviceIoWorker::refreshPorts(const quint64 generation) {
     if (!initialized_ || shuttingDown_) return;
+    if (generation != 0 && generation != activeGeneration_) {
+        if (serial_ != nullptr && serial_->isOpen()) return;
+        activeGeneration_ = generation;
+    }
     refreshPortsInternal(true);
 }
 
@@ -165,12 +175,12 @@ void DeviceIoWorker::refreshPortsInternal(const bool forceSignal) {
     recommendedPort_ = recommended;
     highConfidenceCount_ = highConfidence.size();
     if (forceSignal || changed) {
-        emit portsObserved(ports_, recommendedPort_, highConfidenceCount_);
+        emit portsObserved(activeGeneration_, ports_, recommendedPort_, highConfidenceCount_);
     }
 }
 
-void DeviceIoWorker::autoDetectAndConnect() {
-    if (!initialized_ || shuttingDown_) return;
+void DeviceIoWorker::autoDetectAndConnect(const quint64 generation) {
+    if (!initialized_ || shuttingDown_ || !adoptGeneration(generation, true)) return;
     if (serial_ != nullptr && serial_->isOpen()) return;
 
     refreshPortsInternal(true);
@@ -178,11 +188,11 @@ void DeviceIoWorker::autoDetectAndConnect() {
     genericProbeActive_ = false;
 
     if (!recommendedPort_.isEmpty()) {
-        if (!openPortInternal(recommendedPort_, true)) emit automaticProbeExhausted();
+        if (!openPortInternal(recommendedPort_, true)) emit automaticProbeExhausted(activeGeneration_);
         return;
     }
     if (ports_.isEmpty()) {
-        emit automaticProbeExhausted();
+        emit automaticProbeExhausted(activeGeneration_);
         return;
     }
 
@@ -191,13 +201,13 @@ void DeviceIoWorker::autoDetectAndConnect() {
     tryNextProbe();
 }
 
-void DeviceIoWorker::connectPort(const QString& portName) {
-    if (!initialized_ || shuttingDown_) return;
+void DeviceIoWorker::connectPort(const QString& portName, const quint64 generation) {
+    if (!initialized_ || shuttingDown_ || !adoptGeneration(generation, true)) return;
     probeQueue_.clear();
     genericProbeActive_ = false;
     const QString requested = portName.trimmed();
     if (requested.isEmpty()) {
-        emit portOpenFailed({}, QStringLiteral("Select a serial port first."), false);
+        emit portOpenFailed(activeGeneration_, {}, QStringLiteral("Select a serial port first."), false);
         return;
     }
     static_cast<void>(openPortInternal(requested, false));
@@ -210,11 +220,11 @@ void DeviceIoWorker::tryNextProbe() {
         if (openPortInternal(next, true)) return;
     }
     genericProbeActive_ = false;
-    emit automaticProbeExhausted();
+    emit automaticProbeExhausted(activeGeneration_);
 }
 
 bool DeviceIoWorker::openPortInternal(const QString& portName, const bool automatic) {
-    if (serial_ == nullptr || portName.trimmed().isEmpty()) return false;
+    if (serial_ == nullptr || activeGeneration_ == 0 || portName.trimmed().isEmpty()) return false;
     if (serial_->isOpen()) closePortInternal(true);
 
     automaticConnection_ = automatic;
@@ -227,7 +237,7 @@ bool DeviceIoWorker::openPortInternal(const QString& portName, const bool automa
     activeCommand_ = {};
     lastPort_ = portName.trimmed();
 
-    emit openingPort(lastPort_, automatic);
+    emit openingPort(activeGeneration_, lastPort_, automatic);
 
     serial_->setPortName(lastPort_);
     serial_->setBaudRate(kBaudRate);
@@ -238,12 +248,12 @@ bool DeviceIoWorker::openPortInternal(const QString& portName, const bool automa
 
     if (!serial_->open(QIODevice::ReadWrite)) {
         const QString message = QStringLiteral("Cannot open %1: %2").arg(lastPort_, serial_->errorString());
-        emit portOpenFailed(lastPort_, message, automatic);
+        emit portOpenFailed(activeGeneration_, lastPort_, message, automatic);
         automaticConnection_ = false;
         return false;
     }
 
-    emit portOpened(lastPort_, automatic);
+    emit portOpened(activeGeneration_, lastPort_, automatic);
     if (!sendIdentifyProbe()) {
         finishIdentificationTimeout();
         return false;
@@ -252,8 +262,8 @@ bool DeviceIoWorker::openPortInternal(const QString& portName, const bool automa
     return true;
 }
 
-void DeviceIoWorker::disconnectPort() {
-    if (!initialized_) return;
+void DeviceIoWorker::disconnectPort(const quint64 generation) {
+    if (!initialized_ || generation == 0 || generation != activeGeneration_) return;
     probeQueue_.clear();
     genericProbeActive_ = false;
     automaticConnection_ = false;
@@ -273,21 +283,23 @@ void DeviceIoWorker::closePortInternal(const bool emitRelease) {
     writeActive_ = false;
     activeCommand_ = {};
 
+    const quint64 generation = activeGeneration_;
     const bool wasOpen = serial_->isOpen();
     const QString releasedPort = serial_->portName().trimmed().isEmpty() ? lastPort_ : serial_->portName();
     if (wasOpen) serial_->close();
-    if (wasOpen) emit portClosed(releasedPort);
-    if (emitRelease && wasOpen) emit portReleased(releasedPort);
+    if (wasOpen) emit portClosed(generation, releasedPort);
+    if (emitRelease && wasOpen) emit portReleased(generation, releasedPort);
 }
 
 bool DeviceIoWorker::sendIdentifyProbe() {
-    if (serial_ == nullptr || !serial_->isOpen() || identityConfirmed_ ||
+    if (serial_ == nullptr || !serial_->isOpen() || identityConfirmed_ || activeGeneration_ == 0 ||
         identifyAttempts_ >= identityMaxAttempts()) {
         return false;
     }
 
     ++identifyAttempts_;
-    emit identificationAttempt(serial_->portName(), identifyAttempts_, identityMaxAttempts());
+    emit identificationAttempt(
+        activeGeneration_, serial_->portName(), identifyAttempts_, identityMaxAttempts());
     return enqueueCommandsInternal(
         {QStringLiteral("IDENTIFY")}, false, false, true);
 }
@@ -295,6 +307,7 @@ bool DeviceIoWorker::sendIdentifyProbe() {
 void DeviceIoWorker::finishIdentificationTimeout() {
     if (serial_ == nullptr || identityConfirmed_) return;
 
+    const quint64 generation = activeGeneration_;
     const QString timedOutPort = serial_->portName().trimmed().isEmpty()
         ? lastPort_
         : serial_->portName();
@@ -302,7 +315,7 @@ void DeviceIoWorker::finishIdentificationTimeout() {
     const bool continueProbing = automaticConnection_ && genericProbeActive_ && !probeQueue_.isEmpty();
 
     closePortInternal(true);
-    emit identificationTimedOut(timedOutPort, attempts, continueProbing);
+    emit identificationTimedOut(generation, timedOutPort, attempts, continueProbing);
 
     if (continueProbing) {
         QTimer::singleShot(0, this, &DeviceIoWorker::tryNextProbe);
@@ -312,8 +325,8 @@ void DeviceIoWorker::finishIdentificationTimeout() {
     automaticConnection_ = false;
 }
 
-void DeviceIoWorker::confirmIdentity() {
-    if (serial_ == nullptr || !serial_->isOpen()) return;
+void DeviceIoWorker::confirmIdentity(const quint64 generation) {
+    if (serial_ == nullptr || !serial_->isOpen() || generation != activeGeneration_) return;
     identityConfirmed_ = true;
     automaticConnection_ = false;
     genericProbeActive_ = false;
@@ -324,7 +337,12 @@ void DeviceIoWorker::confirmIdentity() {
 void DeviceIoWorker::enqueueCommands(
     const QStringList& commands,
     const bool quiet,
-    const bool exclusive) {
+    const bool exclusive,
+    const quint64 generation) {
+    if (generation == 0 || generation != activeGeneration_) {
+        emit commandRejected(generation, QStringLiteral("Stale device-session generation rejected."));
+        return;
+    }
     static_cast<void>(enqueueCommandsInternal(commands, quiet, exclusive, true));
 }
 
@@ -334,14 +352,14 @@ bool DeviceIoWorker::enqueueCommandsInternal(
     const bool exclusive,
     const bool reportRejection) {
     if (serial_ == nullptr || !serial_->isOpen()) {
-        if (reportRejection) emit commandRejected(QStringLiteral("Device is not connected."));
+        if (reportRejection) emit commandRejected(activeGeneration_, QStringLiteral("Device is not connected."));
         return false;
     }
     if (commands.isEmpty()) return true;
 
     if (exclusiveCommandsRemaining_ > 0) {
         if (reportRejection) {
-            emit commandRejected(exclusive
+            emit commandRejected(activeGeneration_, exclusive
                 ? QStringLiteral("Another exclusive device transaction is already pending.")
                 : QStringLiteral("Device configuration is locked while an exclusive profile transaction is pending."));
         }
@@ -351,7 +369,7 @@ bool DeviceIoWorker::enqueueCommandsInternal(
     const int outstanding = commandQueue_.size() + (writeActive_ ? 1 : 0);
     if (commands.size() > commandQueueCapacity() - outstanding) {
         if (reportRejection) {
-            emit commandRejected(QStringLiteral(
+            emit commandRejected(activeGeneration_, QStringLiteral(
                 "Device command queue is full; command batch was rejected without partial enqueue."));
         }
         return false;
@@ -362,12 +380,12 @@ bool DeviceIoWorker::enqueueCommandsInternal(
     for (const QString& command : commands) {
         const QString trimmed = command.trimmed();
         if (trimmed.isEmpty() || trimmed.contains(QLatin1Char('\n')) || trimmed.contains(QLatin1Char('\r'))) {
-            if (reportRejection) emit commandRejected(QStringLiteral("Invalid device command."));
+            if (reportRejection) emit commandRejected(activeGeneration_, QStringLiteral("Invalid device command."));
             return false;
         }
         const QByteArray bytes = trimmed.toUtf8() + '\n';
         if (bytes.size() > kMaxCommandBytes) {
-            if (reportRejection) emit commandRejected(QStringLiteral("Device command exceeds the bounded transport size."));
+            if (reportRejection) emit commandRejected(activeGeneration_, QStringLiteral("Device command exceeds the bounded transport size."));
             return false;
         }
         prepared.push_back(PendingCommand{trimmed, bytes, quiet, exclusive});
@@ -407,7 +425,7 @@ void DeviceIoWorker::completeActiveWrite() {
     if (completed.exclusive && exclusiveCommandsRemaining_ > 0) {
         --exclusiveCommandsRemaining_;
     }
-    emit commandTransmitted(completed.text, completed.quiet);
+    emit commandTransmitted(activeGeneration_, completed.text, completed.quiet);
     pumpWriteQueue();
 }
 
@@ -427,13 +445,11 @@ void DeviceIoWorker::processReadyRead() {
         if (!raw.isEmpty() && raw.endsWith('\r')) raw.chop(1);
         const QString line = QString::fromUtf8(raw);
 
-        // Use the one existing semantic parser to stop the handshake timer in
-        // the transport thread before a GUI-thread callback can race its expiry.
         DeviceIdentity identity;
         if (!identityConfirmed_ && DeviceController::parseIdentityLine(line, identity)) {
-            confirmIdentity();
+            confirmIdentity(activeGeneration_);
         }
-        emit lineReceived(line);
+        emit lineReceived(activeGeneration_, line);
     }
 }
 
@@ -441,14 +457,15 @@ void DeviceIoWorker::handleSerialFailure(const QString& message) {
     const QString detail = message.trimmed().isEmpty()
         ? QStringLiteral("Serial transport failed.")
         : message.trimmed();
-    emit transportError(detail, true);
+    emit transportError(activeGeneration_, detail, true);
     probeQueue_.clear();
     genericProbeActive_ = false;
     automaticConnection_ = false;
     closePortInternal(true);
 }
 
-void DeviceIoWorker::setHeartbeatEnabled(const bool enabled) {
+void DeviceIoWorker::setHeartbeatEnabled(const bool enabled, const quint64 generation) {
+    if (generation == 0 || generation != activeGeneration_) return;
     heartbeatEnabled_ = enabled;
     if (heartbeatTimer_ == nullptr) return;
 
