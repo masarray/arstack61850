@@ -4,6 +4,7 @@
 #include "ariec61850/mms/data_codec.hpp"
 #include "ariec61850/mms/live_model.hpp"
 #include "ariec61850/mms/scl_assisted_connect.hpp"
+#include "ariec61850/mms/scl_sync_health.hpp"
 #include "ariec61850/scl/model.hpp"
 
 #include <algorithm>
@@ -87,15 +88,23 @@ namespace detail {
     const ar::iec61850::mms::MmsSclAssistedConnectResult& snapshot) {
     namespace mms = ar::iec61850::mms;
 
+    const auto health = mms::MmsSclSynchronizationHealthClassifier::evaluate(snapshot);
+    mms::MmsSclSynchronizationHealthClassifier::require_compatible(health);
+
     mms::MmsLiveModelDocument model;
     model.source = "TrustedSclInitialSnapshot";
     model.endpoint = snapshot.endpoint;
     model.identity.ied_name = snapshot.ied_name;
     model.identity.source = "TrustedSCL";
-    model.identity.confidence = mms::MmsLiveModelConfidence::exact;
+    model.identity.confidence = health.matched()
+        ? mms::MmsLiveModelConfidence::exact
+        : mms::MmsLiveModelConfidence::high;
     model.identity.candidate_names = {snapshot.ied_name};
+    model.identity.evidence.push_back(health.summary());
     model.identity.evidence.push_back(
-        "Trusted SCL identity validated against online MMS Domain inventory.");
+        health.matched()
+            ? "Trusted SCL identity matched the online MMS Domain and FC-root evidence."
+            : "Trusted SCL identity retained with explicit degraded online evidence; unknown structure was not merged.");
 
     std::map<std::string, std::size_t, std::less<>> device_index;
     std::map<std::string, std::pair<std::size_t, std::size_t>, std::less<>> node_index;
@@ -255,12 +264,21 @@ namespace detail {
         else if (report.data_set_binding_status == "Unbound") ++model.coverage.report_control_unbound_count;
     }
 
-    model.summary = "Trusted SCL + online FC-root snapshot: " +
+    model.summary = "Trusted SCL [" + std::string{health.name()} +
+        "] + online FC-root snapshot: " +
         std::to_string(model.coverage.logical_device_count) + " LD, " +
         std::to_string(model.coverage.logical_node_count) + " LN, " +
         std::to_string(model.coverage.data_attribute_count) + " DA; " +
-        std::to_string(snapshot.read_request_count) + " initial Read request(s).";
+        std::to_string(snapshot.read_request_count) + " initial Read request(s); " +
+        "missingDomains=" + std::to_string(health.missing_domain_count) +
+        ", extraDomains=" + std::to_string(health.extra_domain_count) +
+        ", accessFailures=" + std::to_string(health.access_failure_count) +
+        ", mappingFailures=" + std::to_string(health.structural_mapping_failure_count) + ".";
 
+    if (health.degraded()) {
+        model.warnings.push_back({
+            "SclOnlineIdentityDegraded", snapshot.ied_name, health.summary()});
+    }
     for (const auto& missing : snapshot.domains.missing) {
         model.warnings.push_back({
             "SclDomainUnavailable", missing,
