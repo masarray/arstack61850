@@ -22,6 +22,11 @@ constexpr std::array<std::uint8_t, 27U> kAttributesRequest{
     0x1AU, 0x03U, 0x4CU, 0x44U, 0x30U,
     0x1AU, 0x0BU, 0x4CU, 0x4CU, 0x4EU, 0x30U, 0x24U,
     0x45U, 0x76U, 0x65U, 0x6EU, 0x74U, 0x73U};
+constexpr std::array<std::uint8_t, 20U> kVmdAttributesRequest{
+    0xA0U, 0x12U, 0x02U, 0x01U, 0x01U,
+    0xACU, 0x0DU, 0x80U, 0x0BU,
+    0x4CU, 0x4CU, 0x4EU, 0x30U, 0x24U,
+    0x45U, 0x76U, 0x65U, 0x6EU, 0x74U, 0x73U};
 constexpr std::array<std::uint8_t, 42U> kAttributesResponse{
     0xA1U, 0x28U, 0x02U, 0x01U, 0x01U,
     0xACU, 0x23U, 0x80U, 0x01U, 0x00U,
@@ -86,6 +91,15 @@ int main() {
         return 1;
     }
 
+    mms::MmsNamedVariableListAttributesRequestView vmd_request;
+    if (!mms::MmsDataSetSpanCodec::try_decode_get_named_variable_list_attributes_request(
+            kVmdAttributesRequest, vmd_request) ||
+        vmd_request.invoke_id != 1U ||
+        vmd_request.name.kind != mms::MmsObjectNameViewKind::vmd_specific ||
+        !vmd_request.name.domain.empty() || !matches(vmd_request.name.item, kEvents)) {
+        return 14;
+    }
+
     const std::array<mms::MmsNamedVariableListMemberInput, 2U> encoded_members{
         mms::MmsNamedVariableListMemberInput{"LD0", "R1"},
         mms::MmsNamedVariableListMemberInput{"LD0", "M1"}};
@@ -133,6 +147,9 @@ int main() {
     if (!data_set_table.valid() || !data_set_table.valid_against(object_table)) {
         return 5;
     }
+    if (data_set_table.find(vmd_request.name) != &data_sets[0]) {
+        return 15;
+    }
 
     const mms::MmsStaticApplicationDispatcher dispatcher{object_table, data_set_table};
     std::array<std::uint8_t, 256U> workspace{};
@@ -144,6 +161,16 @@ int main() {
             std::span<const std::uint8_t>{buffer}.first(dispatched.bytes_written),
             kAttributesResponse)) {
         return 6;
+    }
+
+    dispatched = dispatcher.dispatch(kVmdAttributesRequest, buffer, workspace);
+    if (!dispatched.success() ||
+        dispatched.service != mms::MmsWireConfirmedService::get_named_variable_list_attributes ||
+        dispatched.invoke_id != 1U || dispatched.bytes_written != kAttributesResponse.size() ||
+        !matches(
+            std::span<const std::uint8_t>{buffer}.first(dispatched.bytes_written),
+            kAttributesResponse)) {
+        return 16;
     }
 
     dispatched = dispatcher.dispatch(kDataSetNameListRequest, buffer, workspace);
@@ -186,6 +213,14 @@ int main() {
     const mms::MmsStaticDataSetTable invalid_table{invalid_data_sets};
     if (!invalid_table.valid() || invalid_table.valid_against(object_table)) {
         return 11;
+    }
+
+    const std::array<mms::MmsStaticDataSetEntry, 2U> ambiguous_data_sets{
+        mms::MmsStaticDataSetEntry{"LD0", "LLN0$Events", event_members, false},
+        mms::MmsStaticDataSetEntry{"LD1", "LLN0$Events", event_members, false}};
+    const mms::MmsStaticDataSetTable ambiguous_table{ambiguous_data_sets};
+    if (!ambiguous_table.valid() || ambiguous_table.find(vmd_request.name) != nullptr) {
+        return 17;
     }
 
     for (std::uint32_t iteration = 0U; iteration < 50'000U; ++iteration) {
