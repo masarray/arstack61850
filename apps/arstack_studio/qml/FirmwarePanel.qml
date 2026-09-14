@@ -7,6 +7,7 @@ SurfacePanel {
     id: panel
     property var device
     property var firmware
+    property var session
     property string uiFont: "Inter"
     property string monoFont: "Inter"
     property bool technicalDetailsVisible: false
@@ -64,7 +65,7 @@ SurfacePanel {
         }
     }
 
-    Component.onCompleted: panel.device.refreshPorts()
+    Component.onCompleted: if (panel.session) panel.session.requestRefreshPorts()
 
     ColumnLayout {
         anchors.fill: parent
@@ -214,15 +215,15 @@ SurfacePanel {
                             id: firmwarePort
                             Layout.preferredWidth: 205
                             model: panel.device.ports
-                            enabled: !panel.firmware.busy
-                            onPressedChanged: if (pressed) panel.device.refreshPorts()
+                            enabled: panel.session && !panel.firmware.busy
+                            onPressedChanged: if (pressed && panel.session) panel.session.requestRefreshPorts()
                         }
                         CalmButton {
                             theme: panel.theme
                             uiFont: panel.uiFont
                             text: "Refresh"
-                            enabled: !panel.firmware.busy
-                            onClicked: panel.device.refreshPorts()
+                            enabled: panel.session && !panel.firmware.busy
+                            onClicked: panel.session.requestRefreshPorts()
                         }
                         Item { Layout.fillWidth: true }
                     }
