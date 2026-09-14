@@ -25,40 +25,23 @@ public:
             static_cast<void>(flushLiveCommands());
         });
 
-        sessionHeartbeatTimer_.setSingleShot(false);
-        sessionHeartbeatTimer_.setInterval(700);
-        connect(&sessionHeartbeatTimer_, &QTimer::timeout, this, [this] {
-            if (!deviceVerified() || !connected() || !currentFirmwareIdentitySeen()) {
-                sessionHeartbeatTimer_.stop();
-                return;
-            }
-            if (!sendQuietCommand(QStringLiteral("HEARTBEAT")))
-                sessionHeartbeatTimer_.stop();
-        });
-
         connect(this, &DeviceController::connectedChanged, this, [this] {
-            if (!connected()) {
-                sessionHeartbeatTimer_.stop();
-                clearPendingLiveCommands();
-            }
+            if (!connected()) clearPendingLiveCommands();
+            ensureSessionHeartbeat();
         });
         connect(this, &DeviceController::deviceVerifiedChanged, this, [this] {
-            if (!deviceVerified()) {
-                sessionHeartbeatTimer_.stop();
-                clearPendingLiveCommands();
-                return;
-            }
+            if (!deviceVerified()) clearPendingLiveCommands();
             ensureSessionHeartbeat();
         });
         connect(this, &DeviceController::deviceIdentityChanged, this, [this] {
-            // S1: heartbeat/control permission follows the typed semantic
-            // identity only. Human diagnostics text is never product state.
+            // S1 identity still controls permission, but S4 moves the actual
+            // heartbeat timer/write ownership into DeviceIoWorker.
             ensureSessionHeartbeat();
         });
 
         if (auto* app = QCoreApplication::instance(); app != nullptr) {
             connect(app, &QCoreApplication::aboutToQuit, this, [this] {
-                sessionHeartbeatTimer_.stop();
+                setSessionHeartbeatEnabled(false);
                 clearPendingLiveCommands();
                 if (connected() && running()) {
                     static_cast<void>(DeviceController::stop());
@@ -86,14 +69,11 @@ public:
             return false;
         }
 
-        if (!sendQuietCommand(QStringLiteral("HEARTBEAT"))) {
-            emit deviceMessage(QStringLiteral("Control session could not be established before Start."));
-            return false;
-        }
-        if (!sessionHeartbeatTimer_.isActive()) sessionHeartbeatTimer_.start();
-
+        // Queued invocations to one worker preserve sender order: enabling the
+        // heartbeat queues an immediate HEARTBEAT before live values and START.
+        setSessionHeartbeatEnabled(true);
         if (!flushLiveCommands()) {
-            emit deviceMessage(QStringLiteral("Latest injection values could not be sent before Start."));
+            emit deviceMessage(QStringLiteral("Latest injection values could not be queued before Start."));
             return false;
         }
         return DeviceController::start();
@@ -175,11 +155,8 @@ private:
     };
 
     void ensureSessionHeartbeat() {
-        if (!deviceVerified() || !connected() || !currentFirmwareIdentitySeen()) return;
-        if (!sessionHeartbeatTimer_.isActive()) {
-            if (sendQuietCommand(QStringLiteral("HEARTBEAT")))
-                sessionHeartbeatTimer_.start();
-        }
+        setSessionHeartbeatEnabled(
+            deviceVerified() && connected() && currentFirmwareIdentitySeen());
     }
 
     void scheduleLiveFlush() {
@@ -226,7 +203,6 @@ private:
     }
 
     QTimer liveFlushTimer_;
-    QTimer sessionHeartbeatTimer_;
     QHash<QString, PendingSignal> pendingSignals_;
     double requestedFrequencyHz_{50.0};
     double pendingFrequencyHz_{50.0};
