@@ -26,6 +26,7 @@ class SmartSessionController : public QObject {
     Q_PROPERTY(bool profileSyncRetryAvailable READ profileSyncRetryAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool updatingFirmware READ updatingFirmware NOTIFY stateChanged)
     Q_PROPERTY(bool updateNeedsBootloaderHelp READ updateNeedsBootloaderHelp NOTIFY stateChanged)
+    Q_PROPERTY(bool recoveryPending READ recoveryPending NOTIFY stateChanged)
     Q_PROPERTY(int firmwareProgress READ firmwareProgress NOTIFY stateChanged)
     Q_PROPERTY(QString updateStatus READ updateStatus NOTIFY stateChanged)
     Q_PROPERTY(QString firmwareSetupPort READ firmwareSetupPort NOTIFY stateChanged)
@@ -56,6 +57,7 @@ public:
     [[nodiscard]] bool profileSyncRetryAvailable() const noexcept;
     [[nodiscard]] bool updatingFirmware() const noexcept;
     [[nodiscard]] bool updateNeedsBootloaderHelp() const noexcept;
+    [[nodiscard]] bool recoveryPending() const noexcept { return recoveryPending_; }
     [[nodiscard]] int firmwareProgress() const noexcept;
     [[nodiscard]] QString updateStatus() const;
     [[nodiscard]] QString firmwareSetupPort() const;
@@ -241,12 +243,18 @@ private:
                 });
         }
 
+        void setRecoveryPending(const bool pending) {
+            if (owner_ == nullptr || owner_->recoveryPending_ == pending) return;
+            owner_->recoveryPending_ = pending;
+            emit owner_->stateChanged();
+        }
+
         void handleVerificationChange() {
             if (owner_ == nullptr || device_ == nullptr) return;
 
             if (device_->deviceVerified()) {
                 const QString observed = device_->deviceId().trimmed();
-                if (recoveryPending_ && !expectedRecoveryDeviceId_.isEmpty() &&
+                if (owner_->recoveryPending_ && !expectedRecoveryDeviceId_.isEmpty() &&
                     !SmartSessionController::recoveryIdentityMatches(
                         expectedRecoveryDeviceId_, observed)) {
                     owner_->blankBoardDetected_ = false;
@@ -265,14 +273,14 @@ private:
                     lastVerifiedDeviceId_ = observed;
                     expectedRecoveryDeviceId_ = observed;
                 }
-                recoveryPending_ = false;
+                setRecoveryPending(false);
                 wasVerified_ = true;
                 return;
             }
 
             if (wasVerified_ && !owner_->updateRequested_) {
                 expectedRecoveryDeviceId_ = lastVerifiedDeviceId_;
-                recoveryPending_ = !expectedRecoveryDeviceId_.isEmpty();
+                setRecoveryPending(!expectedRecoveryDeviceId_.isEmpty());
                 owner_->blankBoardDetected_ = false;
                 owner_->blankBoardPort_.clear();
                 owner_->resetProfileSync(true);
@@ -281,7 +289,7 @@ private:
         }
 
         void handleIdentificationChange() {
-            if (owner_ == nullptr || device_ == nullptr || !recoveryPending_ ||
+            if (owner_ == nullptr || device_ == nullptr || !owner_->recoveryPending_ ||
                 device_->identificationState() != DeviceController::IdentificationState::Unidentified) {
                 return;
             }
@@ -304,7 +312,6 @@ private:
         QString lastVerifiedDeviceId_;
         QString expectedRecoveryDeviceId_;
         bool wasVerified_{false};
-        bool recoveryPending_{false};
     };
 
     void reconnectDeviceSignals();
@@ -355,6 +362,7 @@ private:
     bool updateRequested_{false};
     bool blankBoardDetected_{false};
     bool setupError_{false};
+    bool recoveryPending_{false};
     int updateReconnectAttempts_{0};
     int profileSyncAttempts_{0};
     PortOwner portOwner_{PortOwner::none};
