@@ -148,6 +148,17 @@ public:
     Q_INVOKABLE bool setQuality(const QString& signalId, quint32 quality);
     Q_INVOKABLE bool setCtSaturation(bool enabled, double dcOffsetPercent, double harmonicPercent, int harmonicOrder, double clipPercent);
     Q_INVOKABLE virtual bool deployProfile(const QVariantMap& profile);
+
+    // A bounded supervisor timeout must be able to retire stale host-side
+    // deployment state even when the serial peer sends no terminal response.
+    // The next PROFILE BEGIN safely replaces any firmware staging transaction.
+    void abandonProfileDeployment() {
+        if (!profileDeploying_) return;
+        profileDeploying_ = false;
+        profileArmed_ = false;
+        emit profileStateChanged();
+    }
+
     Q_INVOKABLE bool sendPtpShow();
     Q_INVOKABLE bool startPtp();
     Q_INVOKABLE bool stopPtp();
