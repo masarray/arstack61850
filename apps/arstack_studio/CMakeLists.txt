@@ -26,6 +26,7 @@ qt_add_executable(arstack_studio
     src/DeviceController.cpp
     src/DeviceController.hpp
     src/StudioDeviceController.hpp
+    src/SingleInstanceGuard.hpp
     src/FirmwareWorker.cpp
     src/FirmwareWorker.hpp
     src/FirmwareManager.cpp
