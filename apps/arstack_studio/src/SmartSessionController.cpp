@@ -245,26 +245,20 @@ bool SmartSessionController::beginFirmwareOperation(const QString& portName) {
 }
 
 bool SmartSessionController::retryFirmwareUpdate() {
-    if (firmware_ == nullptr || updatePort_.isEmpty() || firmware_->busy()) return false;
+    if (device_ == nullptr || firmware_ == nullptr || updatePort_.isEmpty() || firmware_->busy()) return false;
     setupError_ = false;
     setupErrorStatus_.clear();
     blankBoardDetected_ = false;
     updateRequested_ = true;
     updateReconnectAttempts_ = 0;
     updateStage_ = UpdateStage::probing;
-    if (device_ != nullptr && device_->connected()) device_->disconnectPort();
     setPresentation(
         QStringLiteral("UPDATING FIRMWARE"),
         QStringLiteral("Checking ESP32-P4 Download mode…"),
         false,
         false);
-    if (!firmware_->probeTarget(updatePort_)) {
-        latchFirmwareFailure(firmware_->status());
-        emit firmwareUpdateFinished(false);
-        reconcile();
-        return false;
-    }
-    return true;
+    continueFirmwareUpdate();
+    return updateRequested_;
 }
 
 bool SmartSessionController::retryFirmwareSetup() {
@@ -299,12 +293,20 @@ void SmartSessionController::continueFirmwareUpdate() {
     }
 
     updateStage_ = UpdateStage::probing;
-    if (device_->connected()) device_->disconnectPort();
     setPresentation(
         QStringLiteral("UPDATING FIRMWARE"),
         QStringLiteral("Verifying ESP32-P4 before firmware installation…"),
         false,
         false);
+
+    // S4 serial close is asynchronous. Never let espflash race the worker's
+    // COM handle: wait for DeviceController::portReleased before ROM probing.
+    // S5 will add the explicit PortOwner/session-generation protocol.
+    if (device_->connected()) {
+        device_->disconnectPort();
+        return;
+    }
+
     if (!firmware_->probeTarget(updatePort_)) {
         latchFirmwareFailure(firmware_->status());
         emit firmwareUpdateFinished(false);
@@ -356,6 +358,12 @@ void SmartSessionController::reconnectDeviceSignals() {
             QTimer::singleShot(0, this, [this] { continueFirmwareUpdate(); });
         }
         reconcile();
+    });
+    connect(device_, &DeviceController::portReleased, this, [this](const QString&) {
+        if (updateRequested_ && updateStage_ == UpdateStage::probing &&
+            firmware_ != nullptr && !firmware_->busy()) {
+            QTimer::singleShot(0, this, [this] { continueFirmwareUpdate(); });
+        }
     });
     connect(device_, &DeviceController::profileStateChanged, this, [this] {
         handleProfileStateChanged();
