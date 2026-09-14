@@ -164,6 +164,7 @@ SurfacePanel {
         if (smartSession.state === "READY") return "Ready to inject"
         if (smartSession.state === "RUNNING") return "Injection running"
         if (smartSession.state === "PROFILE BLOCKED") return "Profile unavailable"
+        if (smartSession.state === "PROFILE SYNC ERROR") return "Profile sync failed"
         if (smartSession.state === "SETUP ERROR") return "Setup issue"
         return smartSession.state
     }
@@ -175,7 +176,8 @@ SurfacePanel {
             smartSession.state === "FIRMWARE UPDATE" || smartSession.state === "UPDATING FIRMWARE" ||
             smartSession.state === "UPDATE NEEDS BOOT") return theme.amber
         if (smartSession.state === "DEVICE FOUND") return theme.accent
-        if (smartSession.state === "PROFILE BLOCKED" || smartSession.state === "SETUP ERROR") return theme.red
+        if (smartSession.state === "PROFILE BLOCKED" || smartSession.state === "PROFILE SYNC ERROR" ||
+            smartSession.state === "SETUP ERROR") return theme.red
         return theme.muted
     }
 
@@ -187,6 +189,7 @@ SurfacePanel {
         if (smartSession.updateNeedsBootloaderHelp) return "Complete Download mode recovery before starting injection."
         if (smartSession.state === "CONNECTING" || smartSession.state === "CHECKING DEVICE") return "Studio is identifying the device automatically."
         if (smartSession.state === "PREPARING 4I+4V") return "Studio is preparing the default 4I+4V injection automatically."
+        if (smartSession.state === "PROFILE SYNC ERROR") return smartSession.statusText
         if (smartSession.state === "WAITING FOR DEVICE") return "Connect ESP32-P4; Studio will detect it automatically."
         return smartSession.statusText
     }
@@ -205,6 +208,13 @@ SurfacePanel {
         }
         if (smartSession.updatingFirmware || smartSession.updateNeedsBootloaderHelp) {
             controller.showMessage(ribbon.startReason(), false)
+            return
+        }
+        if (smartSession.profileSyncRetryAvailable) {
+            if (smartSession.retryProfileSync())
+                controller.showMessage("Retrying 4I+4V profile synchronization.", false)
+            else
+                controller.showMessage(smartSession.statusText, true)
             return
         }
         if (!smartSession.startReady) {
@@ -659,6 +669,21 @@ SurfacePanel {
                 implicitHeight: 32
                 implicitWidth: 128
                 onClicked: { ribbon.installPromptDeferred = false; installDialog.open() }
+            }
+            CalmButton {
+                visible: smartSession.profileSyncRetryAvailable
+                theme: ribbon.theme
+                uiFont: ribbon.uiFont
+                text: "Retry profile"
+                tone: "accent"
+                implicitHeight: 32
+                implicitWidth: 112
+                onClicked: {
+                    if (smartSession.retryProfileSync())
+                        controller.showMessage("Retrying 4I+4V profile synchronization.", false)
+                    else
+                        controller.showMessage(smartSession.statusText, true)
+                }
             }
 
             RunButton {
