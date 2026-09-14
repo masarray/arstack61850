@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QThread>
 
 class FirmwareWorker;
