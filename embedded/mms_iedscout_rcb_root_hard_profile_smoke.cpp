@@ -5,8 +5,6 @@
 #include "ariec61850/mms/static_brcb_objects.hpp"
 #include "ariec61850/mms/static_brcb_runtime.hpp"
 #include "ariec61850/mms/static_dispatcher.hpp"
-#include "ariec61850/mms/static_urcb_objects.hpp"
-#include "ariec61850/mms/static_urcb_runtime.hpp"
 
 #include <algorithm>
 #include <array>
@@ -21,6 +19,10 @@ namespace {
 using namespace ar::iec61850;
 
 constexpr std::array<std::uint8_t, 2U> kBooleanType{0x83U, 0x00U};
+constexpr std::array<std::uint8_t, 3U> kUnsigned32Type{0x86U, 0x01U, 0x20U};
+constexpr std::array<std::uint8_t, 4U> kVisible255Type{0x8AU, 0x02U, 0x00U, 0xFFU};
+constexpr std::array<std::uint8_t, 3U> kBitString10Type{0x84U, 0x01U, 0x0AU};
+constexpr std::array<std::uint8_t, 3U> kBitString6Type{0x84U, 0x01U, 0x06U};
 constexpr std::array<std::uint8_t, 3U> kTrue{0x83U, 0x01U, 0xFFU};
 constexpr std::array<std::string_view, 11U> kUrcbNames{
     "RptID", "RptEna", "Resv", "DatSet", "ConfRev", "OptFlds",
@@ -29,17 +31,120 @@ constexpr std::array<std::string_view, 8U> kBrcbNames{
     "RptID", "RptEna", "DatSet", "ConfRev",
     "PurgeBuf", "EntryID", "ResvTms", "Owner"};
 
+enum class MockUrcbAttribute : std::uint8_t {
+    report_id,
+    report_enabled,
+    reserved,
+    data_set,
+    conf_revision,
+    optional_fields,
+    buffer_time,
+    trigger_options,
+    integrity_period,
+    general_interrogation,
+    sequence_number,
+};
+
+struct MockUrcbState final {
+    std::string report_id{"URCB-LIVE"};
+    bool enabled{true};
+    bool reserved{true};
+};
+
+struct MockUrcbContext final {
+    MockUrcbState* state{};
+    MockUrcbAttribute attribute{MockUrcbAttribute::report_id};
+};
+
+[[nodiscard]] wire::EncodeResult emit(
+    const std::span<const std::uint8_t> bytes,
+    const std::span<std::uint8_t> destination) noexcept {
+    if (destination.size() < bytes.size()) {
+        return {wire::EncodeStatus::buffer_too_small, 0U, bytes.size()};
+    }
+    std::copy(bytes.begin(), bytes.end(), destination.begin());
+    return {wire::EncodeStatus::ok, bytes.size(), bytes.size()};
+}
+
+[[nodiscard]] wire::EncodeResult emit_boolean(
+    const bool value,
+    const std::span<std::uint8_t> destination) noexcept {
+    const std::array<std::uint8_t, 3U> encoded{
+        0x83U, 0x01U, value ? std::uint8_t{0xFFU} : std::uint8_t{0x00U}};
+    return emit(encoded, destination);
+}
+
+[[nodiscard]] wire::EncodeResult emit_unsigned(
+    const std::uint8_t value,
+    const std::span<std::uint8_t> destination) noexcept {
+    const std::array<std::uint8_t, 3U> encoded{0x86U, 0x01U, value};
+    return emit(encoded, destination);
+}
+
+[[nodiscard]] wire::EncodeResult emit_visible(
+    const std::string_view value,
+    const std::span<std::uint8_t> destination) noexcept {
+    if (value.empty() || value.size() >= 0x80U) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    const auto required = value.size() + 2U;
+    if (destination.size() < required) {
+        return {wire::EncodeStatus::buffer_too_small, 0U, required};
+    }
+    destination[0] = 0x8AU;
+    destination[1] = static_cast<std::uint8_t>(value.size());
+    for (std::size_t index = 0U; index < value.size(); ++index) {
+        destination[index + 2U] = static_cast<std::uint8_t>(
+            static_cast<unsigned char>(value[index]));
+    }
+    return {wire::EncodeStatus::ok, required, required};
+}
+
 [[nodiscard]] wire::EncodeResult read_true(
     const void* context,
     const std::span<std::uint8_t> destination) noexcept {
     if (context == nullptr) {
         return {wire::EncodeStatus::value_out_of_range, 0U, kTrue.size()};
     }
-    if (destination.size() < kTrue.size()) {
-        return {wire::EncodeStatus::buffer_too_small, 0U, kTrue.size()};
+    return emit(kTrue, destination);
+}
+
+[[nodiscard]] wire::EncodeResult read_mock_urcb(
+    const void* raw_context,
+    const std::span<std::uint8_t> destination) noexcept {
+    const auto* context = static_cast<const MockUrcbContext*>(raw_context);
+    if (context == nullptr || context->state == nullptr) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
     }
-    std::copy(kTrue.begin(), kTrue.end(), destination.begin());
-    return {wire::EncodeStatus::ok, kTrue.size(), kTrue.size()};
+    switch (context->attribute) {
+    case MockUrcbAttribute::report_id:
+        return emit_visible(context->state->report_id, destination);
+    case MockUrcbAttribute::report_enabled:
+        return emit_boolean(context->state->enabled, destination);
+    case MockUrcbAttribute::reserved:
+        return emit_boolean(context->state->reserved, destination);
+    case MockUrcbAttribute::data_set:
+        return emit_visible("LD0/LLN0$Events", destination);
+    case MockUrcbAttribute::conf_revision:
+        return emit_unsigned(1U, destination);
+    case MockUrcbAttribute::optional_fields: {
+        constexpr std::array<std::uint8_t, 5U> encoded{0x84U, 0x03U, 0x06U, 0x5CU, 0x80U};
+        return emit(encoded, destination);
+    }
+    case MockUrcbAttribute::buffer_time:
+        return emit_unsigned(0U, destination);
+    case MockUrcbAttribute::trigger_options: {
+        constexpr std::array<std::uint8_t, 4U> encoded{0x84U, 0x02U, 0x02U, 0x70U};
+        return emit(encoded, destination);
+    }
+    case MockUrcbAttribute::integrity_period:
+        return emit_unsigned(0U, destination);
+    case MockUrcbAttribute::general_interrogation:
+        return emit_boolean(false, destination);
+    case MockUrcbAttribute::sequence_number:
+        return emit_unsigned(0U, destination);
+    }
+    return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
 }
 
 [[nodiscard]] std::uint64_t read_now(const void* context) noexcept {
@@ -139,42 +244,44 @@ constexpr std::array<std::string_view, 8U> kBrcbNames{
 int main() {
     try {
         const bool source_value = true;
-        const std::array<mms::MmsStaticObjectEntry, 1U> base_objects{
-            mms::MmsStaticObjectEntry{
-                "LD0", "X1", kBooleanType, read_true, &source_value, false}};
-        const mms::MmsStaticObjectTable base_table{base_objects};
-        if (!base_table.valid()) return 1;
+        MockUrcbState urcb_state;
+        std::array<MockUrcbContext, 11U> urcb_contexts{};
+        for (std::size_t index = 0U; index < urcb_contexts.size(); ++index) {
+            urcb_contexts[index] = MockUrcbContext{
+                &urcb_state,
+                static_cast<MockUrcbAttribute>(index)};
+        }
+
+        std::array<mms::MmsStaticObjectEntry, 12U> pre_brcb_objects{};
+        pre_brcb_objects[0] = mms::MmsStaticObjectEntry{
+            "LD0", "X1", kBooleanType, read_true, &source_value, false};
+        constexpr std::array<std::string_view, 11U> urcb_items{
+            "LLN0$RP$U1$RptID", "LLN0$RP$U1$RptEna", "LLN0$RP$U1$Resv",
+            "LLN0$RP$U1$DatSet", "LLN0$RP$U1$ConfRev", "LLN0$RP$U1$OptFlds",
+            "LLN0$RP$U1$BufTm", "LLN0$RP$U1$TrgOps", "LLN0$RP$U1$IntgPd",
+            "LLN0$RP$U1$GI", "LLN0$RP$U1$SqNum"};
+        const std::array<std::span<const std::uint8_t>, 11U> urcb_types{
+            kVisible255Type, kBooleanType, kBooleanType, kVisible255Type,
+            kUnsigned32Type, kBitString10Type, kUnsigned32Type, kBitString6Type,
+            kUnsigned32Type, kBooleanType, kUnsigned32Type};
+        for (std::size_t index = 0U; index < urcb_items.size(); ++index) {
+            pre_brcb_objects[index + 1U] = mms::MmsStaticObjectEntry{
+                "LD0",
+                urcb_items[index],
+                urcb_types[index],
+                read_mock_urcb,
+                &urcb_contexts[index],
+                false};
+        }
+        const mms::MmsStaticObjectTable pre_brcb_table{pre_brcb_objects};
+        if (!pre_brcb_table.valid()) return 1;
 
         const std::array<mms::MmsStaticDataSetMember, 1U> members{
             mms::MmsStaticDataSetMember{"LD0", "X1"}};
         const std::array<mms::MmsStaticDataSetEntry, 1U> data_sets{
             mms::MmsStaticDataSetEntry{"LD0", "LLN0$Events", members, false}};
         const mms::MmsStaticDataSetTable data_set_table{data_sets};
-        if (!data_set_table.valid_against(base_table)) return 2;
-
-        constexpr std::array<std::uint8_t, 2U> opt_fields{0x5CU, 0x80U};
-        const std::array<mms::MmsStaticUrcbDefinition, 1U> urcb_definitions{
-            mms::MmsStaticUrcbDefinition{
-                "LD0", "LLN0$RP$U1", "URCB-U1",
-                "LD0", "LLN0$Events", 1U, opt_fields, 0U, 0U, 0U}};
-        std::array<mms::MmsStaticUrcbState, 1U> urcb_states{};
-        mms::MmsStaticUrcbRuntime urcb_runtime{
-            urcb_definitions, urcb_states, base_table, data_set_table};
-        if (!urcb_runtime.initialize()) return 3;
-
-        std::array<mms::MmsStaticObjectEntry, 12U> urcb_objects{};
-        std::array<mms::MmsStaticUrcbObjectContext, 11U> urcb_contexts{};
-        std::array<char, 512U> urcb_names{};
-        std::uint64_t now = 100U;
-        mms::MmsStaticUrcbObjectBank urcb_bank{
-            urcb_runtime,
-            base_objects,
-            urcb_objects,
-            urcb_contexts,
-            urcb_names,
-            read_now,
-            &now};
-        if (!urcb_bank.initialize() || !urcb_bank.table().valid()) return 4;
+        if (!data_set_table.valid_against(pre_brcb_table)) return 2;
 
         const mms::MmsStaticBrcbDefinition brcb_definition{
             "LD0",
@@ -196,37 +303,32 @@ int main() {
             brcb_definition,
             pending,
             slots,
-            urcb_bank.table(),
+            pre_brcb_table,
             data_set_table};
-        if (!brcb_runtime.initialize()) return 5;
+        if (!brcb_runtime.initialize()) return 3;
         mms::MmsStaticBrcbControl brcb_control{brcb_runtime};
 
         std::array<mms::MmsStaticObjectEntry, 20U> final_objects{};
         std::array<mms::MmsStaticBrcbObjectContext, 8U> brcb_contexts{};
         std::array<char, 512U> brcb_names{};
+        std::uint64_t now = 100U;
         mms::MmsStaticBrcbObjectBank brcb_bank{
             brcb_definition,
             brcb_runtime,
             brcb_control,
-            urcb_bank.table().objects(),
+            pre_brcb_objects,
             final_objects,
             brcb_contexts,
             brcb_names,
             read_now,
             &now};
-        if (!brcb_bank.initialize() || !brcb_bank.table().valid()) return 6;
+        if (!brcb_bank.initialize() || !brcb_bank.table().valid()) return 4;
 
         mms::MmsStaticDispatchPolicy policy;
         policy.maximum_write_variables = 1U;
         policy.advertise_flattened_child_aliases = true;
         const mms::MmsStaticApplicationDispatcher dispatcher{
             brcb_bank.table(), data_set_table, policy};
-
-        if (urcb_runtime.set_report_id(0U, "URCB-LIVE") != mms::MmsStaticUrcbStatus::ok ||
-            urcb_runtime.set_reserved(0U, true) != mms::MmsStaticUrcbStatus::ok ||
-            urcb_runtime.set_enabled(0U, true, now) != mms::MmsStaticUrcbStatus::ok) {
-            return 7;
-        }
 
         mms::MmsStaticBrcbClientIdentity client;
         client.association_id = 77U;
@@ -236,28 +338,28 @@ int main() {
         if (brcb_control.reserve(client, 5U, now) != mms::MmsStaticBrcbControlStatus::ok ||
             brcb_control.set_report_enabled(client, true, now) !=
                 mms::MmsStaticBrcbControlStatus::ok) {
-            return 8;
+            return 5;
         }
 
         mms::MmsReadResponse first_read;
-        if (!read_roots(dispatcher, 10U, first_read)) return 9;
+        if (!read_roots(dispatcher, 10U, first_read)) return 6;
         const auto& urcb_value = *first_read.results[0].value;
         const auto& brcb_value = *first_read.results[1].value;
         if (urcb_value.kind() != mms::MmsDataKind::structure ||
             brcb_value.kind() != mms::MmsDataKind::structure ||
             urcb_value.children().size() != kUrcbNames.size() ||
             brcb_value.children().size() != kBrcbNames.size()) {
-            return 10;
+            return 7;
         }
         if (!string_value(urcb_value.children()[0], "URCB-LIVE") ||
             !bool_value(urcb_value.children()[1], true) ||
             !bool_value(urcb_value.children()[2], true)) {
-            return 11;
+            return 8;
         }
         if (!string_value(brcb_value.children()[0], "BRCB-B1") ||
             !bool_value(brcb_value.children()[1], true) ||
             !octets_value(brcb_value.children()[7], client.owner_view())) {
-            return 12;
+            return 9;
         }
 
         mms::MmsVariableAccessAttributesResponse urcb_type;
@@ -266,27 +368,28 @@ int main() {
             !read_type(dispatcher, 12U, "LLN0$BR$B1", brcb_type) ||
             !type_names_match(urcb_type.type, kUrcbNames) ||
             !type_names_match(brcb_type.type, kBrcbNames)) {
-            return 13;
+            return 10;
         }
 
-        if (urcb_runtime.set_enabled(0U, false, now) != mms::MmsStaticUrcbStatus::ok ||
-            urcb_runtime.set_reserved(0U, false) != mms::MmsStaticUrcbStatus::ok ||
-            brcb_control.set_report_enabled(client, false, now) !=
+        urcb_state.enabled = false;
+        urcb_state.reserved = false;
+        if (brcb_control.set_report_enabled(client, false, now) !=
                 mms::MmsStaticBrcbControlStatus::ok ||
             brcb_control.release(client, now) != mms::MmsStaticBrcbControlStatus::ok) {
-            return 14;
+            return 11;
         }
 
         now = 200U;
         mms::MmsReadResponse second_read;
-        if (!read_roots(dispatcher, 13U, second_read)) return 15;
+        if (!read_roots(dispatcher, 13U, second_read)) return 12;
         const auto& urcb_after = *second_read.results[0].value;
         const auto& brcb_after = *second_read.results[1].value;
+        const std::span<const std::uint8_t> no_owner;
         if (!bool_value(urcb_after.children()[1], false) ||
             !bool_value(urcb_after.children()[2], false) ||
             !bool_value(brcb_after.children()[1], false) ||
-            !octets_value(brcb_after.children()[7], {})) {
-            return 16;
+            !octets_value(brcb_after.children()[7], no_owner)) {
+            return 13;
         }
 
         return 0;
