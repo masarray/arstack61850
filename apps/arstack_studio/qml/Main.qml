@@ -47,11 +47,11 @@ ApplicationWindow {
 
     font.family: root.uiFont
 
-    // Graceful window close is still a safety boundary. The firmware session
-    // lease covers hard crashes; a normal close should explicitly request STOP.
+    // Graceful window close is still a safety boundary. QML submits only the
+    // Stop intent; the supervisor owns whether the current session may act.
     onClosing: function(close) {
-        if (device.running)
-            device.stop()
+        if (workflowBar.session && workflowBar.session.state === "RUNNING")
+            workflowBar.session.requestStop()
     }
 
     FontLoader {
@@ -60,14 +60,8 @@ ApplicationWindow {
     }
 
     readonly property bool compactLayout: width < 1300
-    readonly property bool selectedProfileDeployable:
-        sclProfiles.selectedProfile.compatibilityClass === "A" &&
-        sclProfiles.selectedProfile.deviceSupport === "ready"
-    readonly property bool canDeploy:
-        device.deviceVerified && !device.running && selectedProfileDeployable && !device.profileDeploying
-    readonly property bool canStart:
-        device.deviceVerified && !device.running &&
-        (!sclProfiles.hasProfiles || (device.profileArmed && !profileDirty))
+    readonly property bool canDeploy: workflowBar.session ? workflowBar.session.canDeployProfile : false
+    readonly property bool canStart: workflowBar.session ? workflowBar.session.startReady : false
     readonly property string toastMessage: transientMessage.length ? transientMessage : device.lastError
     readonly property bool toastError: transientMessage.length ? transientError : device.lastError.length > 0
 
@@ -157,7 +151,7 @@ ApplicationWindow {
     }
 
     function deploySelectedProfile() {
-        if (canDeploy && device.deployProfile(sclProfiles.selectedProfile))
+        if (canDeploy && workflowBar.session.requestProfileSync())
             profileDirty = true
     }
 
@@ -247,9 +241,9 @@ ApplicationWindow {
     }
 
     function sendSignal(group, row) {
-        if (!device.deviceVerified) return true
+        if (!workflowBar.session || !workflowBar.session.liveControlReady) return true
         var signal = groupModel(group).get(row)
-        return device.setSignal(
+        return workflowBar.session.requestSetSignal(
             signal.signalId,
             signal.magnitude,
             signal.phase,
@@ -290,7 +284,7 @@ ApplicationWindow {
         }
 
         selectSignal(group, row)
-        if (device.deviceVerified) {
+        if (workflowBar.session && workflowBar.session.liveControlReady) {
             if (phaseLink && row < 3) sendLinkedGroup(group)
             else sendSignal(group, row)
         }
@@ -298,11 +292,11 @@ ApplicationWindow {
     }
 
     function applyAllSignals() {
-        if (!device.deviceVerified) return
-        device.setFrequency(signalFrequency)
+        if (!workflowBar.session || !workflowBar.session.liveControlReady) return
+        workflowBar.session.requestSetFrequency(signalFrequency)
         for (var group = 0; group < 2; ++group) applyGroupSignals(group)
-        device.setCtSaturation(ctSaturationEnabled, ctDcOffsetPercent,
-                               ctHarmonicPercent, ctHarmonicOrder, ctClipPercent)
+        workflowBar.session.requestSetCtSaturation(ctSaturationEnabled, ctDcOffsetPercent,
+                                                   ctHarmonicPercent, ctHarmonicOrder, ctClipPercent)
     }
 
     function setFrequencyValue(value) {
@@ -312,7 +306,8 @@ ApplicationWindow {
         frequencyField.text = value.toFixed(3)
         frequencyField.invalidInput = false
         refreshPreview()
-        if (device.deviceVerified) device.setFrequency(value)
+        if (workflowBar.session && workflowBar.session.liveControlReady)
+            workflowBar.session.requestSetFrequency(value)
         return true
     }
 
@@ -335,9 +330,9 @@ ApplicationWindow {
         }
         ctSaturationEnabled = enabled
         refreshPreview()
-        if (device.deviceVerified)
-            device.setCtSaturation(enabled, ctDcOffsetPercent,
-                                   ctHarmonicPercent, ctHarmonicOrder, ctClipPercent)
+        if (workflowBar.session && workflowBar.session.liveControlReady)
+            workflowBar.session.requestSetCtSaturation(enabled, ctDcOffsetPercent,
+                                                       ctHarmonicPercent, ctHarmonicOrder, ctClipPercent)
         showMessage(enabled
             ? "CT saturation stress enabled · DC offset + 2nd harmonic + clipping approximation."
             : "CT saturation stress disabled.", false)
@@ -356,7 +351,7 @@ ApplicationWindow {
         }
         selectSignal(activeGroup, activeRow)
         refreshPreview()
-        if (device.deviceVerified) applyAllSignals()
+        if (workflowBar.session && workflowBar.session.liveControlReady) applyAllSignals()
     }
 
     function zeroAll() {
@@ -366,20 +361,22 @@ ApplicationWindow {
         }
         selectSignal(activeGroup, activeRow)
         refreshPreview()
-        if (device.deviceVerified) device.zero()
+        if (workflowBar.session && workflowBar.session.liveControlReady)
+            workflowBar.session.requestZero()
     }
 
     function setActiveQuality(value) {
         var unsignedValue = Number(value) >>> 0
         groupModel(activeGroup).setProperty(activeRow, "quality", unsignedValue)
         activeQuality = unsignedValue
-        if (device.deviceVerified) device.setQuality(activeSignal, unsignedValue)
+        if (workflowBar.session && workflowBar.session.liveControlReady)
+            workflowBar.session.requestSetQuality(activeSignal, unsignedValue)
     }
 
     Shortcut { sequence: "Ctrl+B"; onActivated: root.balanced() }
     Shortcut { sequence: "Ctrl+0"; onActivated: root.zeroAll() }
-    Shortcut { sequence: "F5"; enabled: !device.running; onActivated: workflowBar.requestStart() }
-    Shortcut { sequence: "F6"; enabled: device.running; onActivated: workflowBar.requestStop() }
+    Shortcut { sequence: "F5"; enabled: workflowBar.session && workflowBar.session.state !== "RUNNING"; onActivated: workflowBar.requestStart() }
+    Shortcut { sequence: "F6"; enabled: workflowBar.session && workflowBar.session.state === "RUNNING"; onActivated: workflowBar.requestStop() }
 
     Dialog {
         id: diagnosticsDialog
@@ -503,7 +500,9 @@ ApplicationWindow {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     enabled: !device.discovering
-                    onClicked: device.deviceVerified ? root.openConfiguration() : device.autoDetectAndConnect()
+                    onClicked: device.deviceVerified
+                        ? root.openConfiguration()
+                        : workflowBar.session.requestConnect()
                 }
                 ToolTip.visible: identityMouse.containsMouse
                 ToolTip.text: workflowBar.session.statusText
@@ -574,6 +573,7 @@ ApplicationWindow {
                 controller: root
                 device: device
                 profiles: sclProfiles
+                session: workflowBar.session
                 uiFont: root.uiFont
                 monoFont: root.monoFont
             }
@@ -782,7 +782,8 @@ ApplicationWindow {
                                                     root.signalFrequency = value
                                                     if (value > 0) root.previousAcFrequency = value
                                                     root.refreshPreview()
-                                                    if (device.deviceVerified) device.setFrequency(value)
+                                                    if (workflowBar.session && workflowBar.session.liveControlReady)
+                                                        workflowBar.session.requestSetFrequency(value)
                                                 } else invalidInput = true
                                             }
                                             onEditingFinished: {
