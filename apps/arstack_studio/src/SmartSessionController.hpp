@@ -29,8 +29,17 @@ class SmartSessionController : public QObject {
     Q_PROPERTY(QString firmwareSetupPort READ firmwareSetupPort NOTIFY stateChanged)
     Q_PROPERTY(QString expectedFirmwareVersion READ expectedFirmwareVersion CONSTANT)
     Q_PROPERTY(QString deviceFirmwareVersion READ deviceFirmwareVersion NOTIFY stateChanged)
+    Q_PROPERTY(qulonglong sessionGeneration READ sessionGeneration NOTIFY stateChanged)
+    Q_PROPERTY(PortOwner portOwner READ portOwner NOTIFY stateChanged)
 
 public:
+    enum class PortOwner {
+        none,
+        deviceSession,
+        firmwareTool,
+    };
+    Q_ENUM(PortOwner)
+
     explicit SmartSessionController(QObject* parent = nullptr);
 
     [[nodiscard]] QObject* device() const noexcept;
@@ -50,19 +59,13 @@ public:
     [[nodiscard]] QString firmwareSetupPort() const;
     [[nodiscard]] QString expectedFirmwareVersion() const;
     [[nodiscard]] QString deviceFirmwareVersion() const;
+    [[nodiscard]] quint64 sessionGeneration() const noexcept { return sessionGeneration_; }
+    [[nodiscard]] PortOwner portOwner() const noexcept { return portOwner_; }
 
-    // Recovery is never classified automatically through the ROM bootloader.
-    // Normal startup first exhausts the bounded semantic IDENTIFY contract.
-    // Only an explicit user firmware action may then call FirmwareManager's
-    // read-only ROM target probe before any write is permitted.
     [[nodiscard]] static QString chooseRecoveryPort(
         const QString& recommendedPort,
         const QStringList& visiblePorts);
 
-    // S3 profile synchronization is a bounded transaction. A deployment must
-    // produce a numeric armed generation newer than the baseline when a
-    // baseline is known. One controlled retry is permitted; after that the
-    // supervisor enters a terminal, user-retryable PROFILE SYNC ERROR state.
     [[nodiscard]] static constexpr int profileSyncMaxAttempts() noexcept { return 2; }
     [[nodiscard]] static constexpr int profileSyncTimeoutMs() noexcept { return 2500; }
     [[nodiscard]] static constexpr bool profileSyncRetryAllowed(const int attemptsStarted) noexcept {
@@ -71,6 +74,18 @@ public:
     [[nodiscard]] static bool profileGenerationAdvanced(
         const QString& baseline,
         const QString& observed) noexcept;
+
+    [[nodiscard]] static constexpr bool generationIsCurrent(
+        const quint64 activeGeneration,
+        const quint64 eventGeneration) noexcept {
+        return activeGeneration != 0 && eventGeneration == activeGeneration;
+    }
+    [[nodiscard]] static quint64 nextSessionGeneration(quint64 current) noexcept;
+    [[nodiscard]] static constexpr bool firmwareOwnershipValid(
+        const PortOwner owner,
+        const bool serialConnected) noexcept {
+        return owner == PortOwner::firmwareTool && !serialConnected;
+    }
 
     void setDevice(QObject* object);
     void setProfiles(QObject* object);
@@ -92,7 +107,15 @@ signals:
     void firmwareUpdateFinished(bool success);
 
 private:
-    enum class UpdateStage { idle, stopping, probing, flashing, reconnecting, waitingForBootloader };
+    enum class UpdateStage {
+        idle,
+        stopping,
+        releasingPort,
+        probing,
+        flashing,
+        reconnecting,
+        waitingForBootloader,
+    };
     enum class ProfileSyncStage { idle, deploying, failed };
 
     void reconnectDeviceSignals();
@@ -106,6 +129,10 @@ private:
     void setPresentation(QString state, QString status, bool startReady, bool firmwareUpdateRequired);
     void refreshFirmwareIdentity();
     void continueFirmwareUpdate();
+    bool startFirmwareProbe();
+    bool startDeviceDiscovery();
+    quint64 advanceSessionGeneration();
+    void setPortOwner(PortOwner owner);
     bool firmwareIsCurrent() const;
     void resetProfileSync(bool requireSync);
     bool beginProfileSync(const QVariantMap& profile);
@@ -129,6 +156,8 @@ private:
     QString profileSyncBaselineGeneration_;
     QString profileSyncBootId_;
     QString profileSyncError_;
+    quint64 sessionGeneration_{0};
+    quint64 pendingReleaseGeneration_{0};
     bool startReady_{false};
     bool firmwareUpdateRequired_{false};
     bool started_{false};
@@ -139,6 +168,7 @@ private:
     bool setupError_{false};
     int updateReconnectAttempts_{0};
     int profileSyncAttempts_{0};
+    PortOwner portOwner_{PortOwner::none};
     UpdateStage updateStage_{UpdateStage::idle};
     ProfileSyncStage profileSyncStage_{ProfileSyncStage::idle};
 };
