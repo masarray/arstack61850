@@ -15,6 +15,10 @@ Item {
         return String(value)
     }
 
+    function activationReady() {
+        return settings.selectedSettingGroup.canActivate === true
+    }
+
     Rectangle {
         anchors.fill: parent
         color: theme.background
@@ -99,9 +103,7 @@ Item {
                     }
                     Label {
                         Layout.alignment: Qt.AlignRight
-                        text: settings.associationProfile.length
-                              ? settings.associationProfile
-                              : settings.endpoint
+                        text: settings.associationProfile.length ? settings.associationProfile : settings.endpoint
                         color: theme.muted
                         font.pixelSize: 9
                     }
@@ -149,7 +151,7 @@ Item {
                         spacing: 3
 
                         delegate: Rectangle {
-                            id: row
+                            id: groupRow
                             required property var modelData
                             required property int index
                             width: groupList.width
@@ -157,10 +159,9 @@ Item {
                             radius: 6
                             color: settings.selectedSettingGroupIndex === index
                                    ? theme.accentSoft
-                                   : mouse.containsMouse ? theme.surfaceRaised : theme.surface
+                                   : groupMouse.containsMouse ? theme.surfaceRaised : theme.surface
                             border.width: 1
-                            border.color: settings.selectedSettingGroupIndex === index
-                                          ? theme.accent : theme.lineSoft
+                            border.color: settings.selectedSettingGroupIndex === index ? theme.accent : theme.lineSoft
 
                             ColumnLayout {
                                 anchors.fill: parent
@@ -168,7 +169,7 @@ Item {
                                 spacing: 2
                                 Label {
                                     Layout.fillWidth: true
-                                    text: row.modelData.reference
+                                    text: groupRow.modelData.reference || "SGCB"
                                     elide: Text.ElideMiddle
                                     color: theme.text
                                     font.pixelSize: theme.labelSize
@@ -177,19 +178,19 @@ Item {
                                 RowLayout {
                                     Layout.fillWidth: true
                                     Label {
-                                        text: "ActSG " + (row.modelData.actSG === undefined ? "—" : row.modelData.actSG)
+                                        text: "ActSG " + (groupRow.modelData.actSG === undefined ? "—" : groupRow.modelData.actSG)
                                         color: theme.textSoft
                                         font.pixelSize: theme.captionSize
                                     }
                                     Label {
-                                        text: "Num " + (row.modelData.numOfSG === undefined ? "—" : row.modelData.numOfSG)
+                                        text: "Num " + (groupRow.modelData.numOfSG === undefined ? "—" : groupRow.modelData.numOfSG)
                                         color: theme.textSoft
                                         font.pixelSize: theme.captionSize
                                     }
                                     Item { Layout.fillWidth: true }
                                     Label {
-                                        text: row.modelData.canActivate ? "ACTIVATE READY" : "READ ONLY"
-                                        color: row.modelData.canActivate ? theme.green : theme.amber
+                                        text: groupRow.modelData.canActivate === true ? "ACTIVATE READY" : "READ ONLY"
+                                        color: groupRow.modelData.canActivate === true ? theme.green : theme.amber
                                         font.pixelSize: 9
                                         font.weight: Font.Bold
                                     }
@@ -197,10 +198,10 @@ Item {
                             }
 
                             MouseArea {
-                                id: mouse
+                                id: groupMouse
                                 anchors.fill: parent
                                 hoverEnabled: true
-                                onClicked: settings.selectSettingGroup(row.index)
+                                onClicked: settings.selectSettingGroup(groupRow.index)
                             }
                         }
 
@@ -292,14 +293,13 @@ Item {
                             to: Math.max(1, Number(settings.selectedSettingGroup.numOfSG || 1))
                             value: Math.max(1, Number(settings.selectedSettingGroup.actSG || 1))
                             editable: true
-                            enabled: settings.selectedSettingGroup.canActivate && !settings.operationBusy
+                            enabled: root.activationReady() && !settings.operationBusy
                         }
                         ActionButton {
                             theme: root.theme
                             text: "Activate + verify"
                             primary: true
-                            enabled: settings.connected && settings.selectedSettingGroup.canActivate &&
-                                     !settings.operationBusy
+                            enabled: settings.connected && root.activationReady() && !settings.operationBusy
                             onClicked: settings.activateSelectedSettingGroup(groupTarget.value)
                         }
                         ActionButton {
@@ -311,8 +311,8 @@ Item {
                         }
                         Item { Layout.fillWidth: true }
                         Label {
-                            text: settings.selectedSettingGroup.complete ? "5/5 READ PATH READY" : "PARTIAL READ"
-                            color: settings.selectedSettingGroup.complete ? theme.green : theme.amber
+                            text: settings.selectedSettingGroup.complete === true ? "5/5 READ PATH READY" : "PARTIAL READ"
+                            color: settings.selectedSettingGroup.complete === true ? theme.green : theme.amber
                             font.pixelSize: 9
                             font.weight: Font.Bold
                         }
@@ -320,15 +320,15 @@ Item {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: settings.selectedSettingGroup.canActivate ? 50 : 66
+                        Layout.preferredHeight: root.activationReady() ? 50 : 66
                         radius: 6
-                        color: settings.selectedSettingGroup.canActivate ? theme.greenSoft : theme.amberSoft
+                        color: root.activationReady() ? theme.greenSoft : theme.amberSoft
                         border.width: 1
-                        border.color: settings.selectedSettingGroup.canActivate ? theme.green : theme.amber
+                        border.color: root.activationReady() ? theme.green : theme.amber
                         Label {
                             anchors.fill: parent
                             anchors.margins: 8
-                            text: settings.selectedSettingGroup.canActivate
+                            text: root.activationReady()
                                   ? "Guard: one exact-type ActSG Write followed by verification Read. No automatic retry."
                                   : (settings.selectedSettingGroup.activationBlockedReason ||
                                      "Activation unavailable until SGCB values are read safely.")
@@ -364,7 +364,7 @@ Item {
                                 anchors.rightMargin: 8
                                 spacing: 8
                                 Label {
-                                    text: modelData.path
+                                    text: modelData.path || ""
                                     color: theme.text
                                     font.pixelSize: theme.captionSize
                                     font.weight: Font.DemiBold
@@ -372,14 +372,14 @@ Item {
                                 }
                                 Label {
                                     Layout.fillWidth: true
-                                    text: modelData.reference
+                                    text: modelData.reference || ""
                                     elide: Text.ElideMiddle
                                     color: theme.muted
                                     font.pixelSize: 9
                                 }
                                 Label {
-                                    text: modelData.success ? modelData.value : "READ FAILED"
-                                    color: modelData.success ? theme.textSoft : theme.red
+                                    text: modelData.success === true ? modelData.value : "READ FAILED"
+                                    color: modelData.success === true ? theme.textSoft : theme.red
                                     font.pixelSize: theme.captionSize
                                     Layout.preferredWidth: 135
                                     horizontalAlignment: Text.AlignRight
