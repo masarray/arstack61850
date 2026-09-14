@@ -725,20 +725,24 @@ void SmartSessionController::reconnectFirmwareSignals() {
 }
 
 void SmartSessionController::refreshRecoveryOfferFromIdentity() {
-    if (device_ == nullptr || updateRequested_ || setupError_ || device_->deviceVerified() ||
-        device_->identificationState() != DeviceController::IdentificationState::Unidentified) {
-        if (!updateRequested_ && (device_ == nullptr ||
-            device_->identificationState() != DeviceController::IdentificationState::Unidentified)) {
-            blankBoardDetected_ = false;
-            blankBoardPort_.clear();
-            manualRecoveryArmed_ = false;
-        }
+    if (device_ == nullptr || updateRequested_ || setupError_ || device_->deviceVerified()) {
+        blankBoardDetected_ = false;
+        blankBoardPort_.clear();
+        if (device_ == nullptr || device_->deviceVerified()) manualRecoveryArmed_ = false;
         return;
     }
 
-    // S8 policy: an automatic semantic IDENTIFY timeout means "unknown", never
-    // "blank firmware". The firmware-install offer is armed only after an
-    // explicit manual recovery selection (Verify selected port).
+    // Preserve explicit recovery intent while the selected port moves through
+    // CONNECTING/IDENTIFYING. Only the terminal Unidentified state can turn
+    // that intent into a firmware offer. Automatic discovery always clears the
+    // flag in startDeviceDiscovery(), so a transient handshake failure alone
+    // can never imply blank firmware.
+    if (device_->identificationState() != DeviceController::IdentificationState::Unidentified) {
+        blankBoardDetected_ = false;
+        blankBoardPort_.clear();
+        return;
+    }
+
     if (!manualRecoveryArmed_ || recoveryPending_) {
         blankBoardDetected_ = false;
         blankBoardPort_.clear();
