@@ -112,12 +112,17 @@ public:
     [[nodiscard]] QString ptpAnnounceSent() const;
     [[nodiscard]] QString ptpSyncSent() const;
     [[nodiscard]] QString ptpTxFailures() const;
+    [[nodiscard]] quint64 sessionGeneration() const noexcept { return sessionGeneration_; }
 
-    // S4 worker-boundary diagnostics used by the native regression gate.
     [[nodiscard]] bool ioWorkerReady() const noexcept { return ioWorkerReady_; }
     [[nodiscard]] bool ioWorkerAffinityValid() const noexcept { return ioWorkerAffinityValid_; }
     [[nodiscard]] static constexpr int ioCommandQueueCapacity() noexcept { return 64; }
     [[nodiscard]] static constexpr int ioPresencePollIntervalMs() noexcept { return 750; }
+    [[nodiscard]] static constexpr bool workerEventIsCurrent(
+        const quint64 activeGeneration,
+        const quint64 eventGeneration) noexcept {
+        return activeGeneration != 0 && eventGeneration == activeGeneration;
+    }
 
     [[nodiscard]] static bool parseIdentityLine(const QString& line, DeviceIdentity& identity);
     [[nodiscard]] static bool identitySupportsCurrentContract(
@@ -129,6 +134,8 @@ public:
     [[nodiscard]] static constexpr bool identityRetryAllowed(const int attemptsSent) noexcept {
         return attemptsSent >= 0 && attemptsSent < identityMaxAttempts();
     }
+
+    void setSessionGeneration(quint64 generation);
 
     Q_INVOKABLE void refreshPorts();
     Q_INVOKABLE bool autoDetectAndConnect();
@@ -210,7 +217,7 @@ signals:
     void profileStateChanged();
     void ptpStateChanged();
     void deviceMessage(const QString& message);
-    void portReleased(const QString& portName);
+    void portReleased(quint64 generation, const QString& portName);
 
 protected:
     bool sendQuietCommand(const QString& command);
@@ -253,6 +260,7 @@ private:
     QString lastIdentificationPort_;
     QString portName_;
     QString pendingConnectPort_;
+    quint64 sessionGeneration_{0};
     IdentificationState identificationState_{IdentificationState::Idle};
     int identifyAttempts_{0};
     int highConfidenceCount_{0};
