@@ -163,8 +163,11 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
     QCoreApplication app(argc, argv);
 
     DeviceIdentity currentIdentity;
+    // Match the real ESP-IDF serial framing. The semantic parser must extract
+    // the contract from the log prefix without making the human log itself the
+    // source of product state.
     const QString currentLine = QStringLiteral(
-        "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
+        "I (412) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
         "device_id=A1B2C3D4E5F6 firmware=%1 boot_id=0123456789ABCDEF "
         "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE")
         .arg(QStringLiteral(ARSTACK_STUDIO_VERSION));
@@ -175,7 +178,7 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
 
     DeviceIdentity legacyIdentity;
     const QString legacyLine = QStringLiteral(
-        "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
+        "I (417) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
         "device_id=A1B2C3D4E5F6 firmware=%1 capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE")
         .arg(QStringLiteral(ARSTACK_STUDIO_VERSION));
     const bool legacyParsed = DeviceController::parseIdentityLine(legacyLine, legacyIdentity);
@@ -186,39 +189,51 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
     DeviceIdentity protocolLegacy;
     const bool protocolLegacyParsed = DeviceController::parseIdentityLine(
         QStringLiteral(
-            "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=0 "
+            "I (420) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=0 "
             "device_id=A1B2C3D4E5F6 firmware=0.0.9 capabilities=SMV-4I4V,LIVE-SETPOINTS"),
         protocolLegacy) &&
         !DeviceController::identitySupportsCurrentContract(
             protocolLegacy, QStringLiteral(ARSTACK_STUDIO_VERSION));
 
+    DeviceIdentity reducedCapabilities;
+    const bool capabilityFailClosed = DeviceController::parseIdentityLine(
+        QStringLiteral(
+            "I (425) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
+            "device_id=A1B2C3D4E5F6 firmware=0.1.0 boot_id=0123456789ABCDEF "
+            "capabilities=SMV-4I4V,LIVE-SETPOINTS"),
+        reducedCapabilities) &&
+        !DeviceController::identitySupportsCurrentContract(
+            reducedCapabilities, QStringLiteral(ARSTACK_STUDIO_VERSION));
+
     DeviceIdentity rejectedIdentity;
     const bool rejectsWrongTarget = !DeviceController::parseIdentityLine(
         QStringLiteral(
-            "ARSTACK identity product=SMV-INJECTOR target=ESP32-S3 protocol=1 "
+            "I (430) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR target=ESP32-S3 protocol=1 "
             "device_id=A1B2C3D4E5F6 firmware=0.1.0 boot_id=0123456789ABCDEF "
             "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE"),
         rejectedIdentity);
     const bool rejectsMissingFirmware = !DeviceController::parseIdentityLine(
         QStringLiteral(
-            "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
+            "I (435) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
             "device_id=A1B2C3D4E5F6 boot_id=0123456789ABCDEF "
             "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE"),
         rejectedIdentity);
     const bool rejectsMalformedBoot = !DeviceController::parseIdentityLine(
         QStringLiteral(
-            "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
+            "I (440) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
             "device_id=A1B2C3D4E5F6 firmware=0.1.0 boot_id=NOT-A-BOOT-ID "
             "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE"),
         rejectedIdentity);
 
     if (!currentAccepted || !legacyRejectedAsCurrent || !protocolLegacyParsed ||
-        !rejectsWrongTarget || !rejectsMissingFirmware || !rejectsMalformedBoot) {
+        !capabilityFailClosed || !rejectsWrongTarget || !rejectsMissingFirmware ||
+        !rejectsMalformedBoot) {
         qCritical().noquote()
             << "S1 identity contract: FAIL"
             << "current=" << currentAccepted
             << "legacy=" << legacyRejectedAsCurrent
             << "protocol-legacy=" << protocolLegacyParsed
+            << "capability-fail-closed=" << capabilityFailClosed
             << "wrong-target=" << rejectsWrongTarget
             << "missing-firmware=" << rejectsMissingFirmware
             << "malformed-boot=" << rejectsMalformedBoot;
