@@ -30,8 +30,8 @@ enum class MmsStaticUrcbStatus : std::uint8_t {
 
 enum class MmsStaticUrcbReportReason : std::uint8_t {
     none = 0x00U,
-    general_interrogation = 0x08U,
-    integrity = 0x10U,
+    general_interrogation = 0x04U,
+    integrity = 0x08U,
 };
 
 struct MmsStaticUrcbDefinition final {

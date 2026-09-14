@@ -169,7 +169,6 @@ const MmsDataValue& require_value(const MmsInformationReport& report, const std:
     return *item.value;
 }
 
-
 std::string normalize_data_set_item(const std::string& item) {
     auto parts = split(item, '$');
     if (parts.size() < 2U) return item;
@@ -217,9 +216,6 @@ MmsObjectName decode_variable_definition(const BerTlv& definition) {
 }
 
 MmsObjectName decode_variable_list_name(const BerTlv& specification) {
-    // VariableAccessSpecification.variableListName [1] is found in both
-    // explicit-wrapper and implicit ObjectName forms on real IEC 61850 IEDs.
-    // First accept a nested ObjectName, then reconstruct the implicit choice.
     try {
         return MmsServiceCodec::decode_object_name(specification.value);
     } catch (const std::exception&) {
@@ -228,7 +224,6 @@ MmsObjectName decode_variable_list_name(const BerTlv& specification) {
         return MmsServiceCodec::decode_object_name(encoded);
     }
 }
-
 
 std::string continuity_message(const MmsReportContinuityEventKind kind) {
     switch (kind) {
@@ -567,7 +562,7 @@ MmsReportHeader MmsReportFrameMapper::decode_header(const MmsInformationReport& 
 MmsReportFrame MmsReportFrameMapper::map(
     const MmsInformationReport& report, const std::span<const MmsDataSetDirectoryMember> members) {
     static constexpr std::array<const char*, 6> reason_names{
-        "data-change", "quality-change", "data-update", "integrity", "general-interrogation", "application-trigger"};
+        nullptr, "data-change", "quality-change", "data-update", "integrity", "general-interrogation"};
     MmsReportFrame frame;
     frame.header = decode_header(report);
     frame.raw_access_result_count = report.items.size();
@@ -663,7 +658,8 @@ MmsReportControlState MmsReportControlStateMapper::map_read_response(
         else if (attribute == "EntryID") state.entry_id = octets(value);
         else if (attribute == "TimeOfEntry") state.time_of_entry = value;
         else if (attribute == "TrgOps") {
-            static constexpr std::array<const char*, 6> names{"data-change", "quality-change", "data-update", "integrity", "general-interrogation", "application-trigger"};
+            static constexpr std::array<const char*, 6> names{
+                nullptr, "data-change", "quality-change", "data-update", "integrity", "general-interrogation"};
             state.trigger_options = decode_bit_field(value, names);
         } else if (attribute == "OptFlds") {
             static constexpr std::array<const char*, 10> names{"reserved", "sequence-number", "report-time-stamp", "reason-for-inclusion", "data-set-name", "data-reference", "buffer-overflow", "entry-id", "configuration-revision", "segmentation"};

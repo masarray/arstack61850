@@ -41,6 +41,13 @@ enum class MmsStaticBrcbEventReason : std::uint8_t {
     data_update,
 };
 
+enum class MmsStaticBrcbCaptureReason : std::uint8_t {
+    none,
+    event,
+    general_interrogation,
+    integrity,
+};
+
 struct MmsStaticBrcbDefinition final {
     std::string_view domain;
     std::string_view item;
@@ -52,6 +59,7 @@ struct MmsStaticBrcbDefinition final {
         optional_fields{};
     std::uint32_t buffer_time_ms{};
     std::uint8_t trigger_options{};
+    std::uint32_t integrity_period_ms{};
 };
 
 struct MmsStaticBrcbSlot final {
@@ -74,9 +82,12 @@ struct MmsStaticBrcbPendingState final {
 
 struct MmsStaticBrcbCapturePlan final {
     std::uint32_t pending_revision{};
+    std::uint32_t schedule_revision{};
     std::uint32_t queue_revision{};
     std::uint64_t entry_number{};
+    std::uint64_t observed_now_ms{};
     std::uint8_t sequence_number{};
+    MmsStaticBrcbCaptureReason reason{MmsStaticBrcbCaptureReason::none};
     bool buffer_overflow{};
 };
 
@@ -101,6 +112,8 @@ struct MmsStaticBrcbEntryView final {
 
 class MmsStaticBrcbRuntime final {
 public:
+    static constexpr std::uint32_t minimum_integrity_period_ms = 100U;
+
     MmsStaticBrcbRuntime(
         const MmsStaticBrcbDefinition& definition,
         MmsStaticBrcbPendingState& pending,
@@ -121,9 +134,11 @@ public:
         MmsStaticBrcbEventReason reason,
         std::uint64_t now_ms) noexcept;
 
+    [[nodiscard]] MmsStaticBrcbStatus request_general_interrogation() noexcept;
+
     [[nodiscard]] bool next_due(
         std::uint64_t now_ms,
-        MmsStaticBrcbCapturePlan& plan) const noexcept;
+        MmsStaticBrcbCapturePlan& plan) noexcept;
 
     [[nodiscard]] MmsStaticBrcbCaptureResult capture(
         const MmsStaticBrcbCapturePlan& plan,
@@ -146,8 +161,6 @@ public:
 
     [[nodiscard]] MmsStaticBrcbStatus purge_buffer() noexcept;
 
-    // EntryID attribute readback: all zero when no report is buffered,
-    // otherwise the newest retained report EntryID.
     [[nodiscard]] std::array<std::uint8_t,
         MmsInformationReportSpanCodec::entry_id_bytes> latest_entry_id() const noexcept {
         std::array<std::uint8_t,
@@ -194,9 +207,13 @@ private:
     std::size_t delivery_offset_{};
     std::uint64_t next_entry_number_{1U};
     std::uint64_t dropped_reports_{};
+    std::uint64_t next_integrity_due_ms_{};
     std::uint32_t queue_revision_{1U};
+    std::uint32_t schedule_revision_{1U};
     std::uint8_t sequence_number_{};
     bool replay_gap_{};
+    bool general_interrogation_pending_{};
+    bool integrity_armed_{};
     bool enabled_{};
     bool initialized_{};
 };
