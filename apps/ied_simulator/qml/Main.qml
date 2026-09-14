@@ -75,6 +75,16 @@ ApplicationWindow {
     }
 
     Connections {
+        target: sclWorkspace
+        function onWorkspaceChanged() {
+            // Arm the SCL-assisted online path only after the bounded parser has
+            // accepted the engineering file. Failed/unfinished imports never
+            // become a trusted connection source.
+            mmsClient.trustedSclPath = sclWorkspace.loaded ? sclWorkspace.sourcePath : ""
+        }
+    }
+
+    Connections {
         target: simulator
         function onModelChanged() {
             if (root.simulatorAutoSelectPending && simulator.imported) {
