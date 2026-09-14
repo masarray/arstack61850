@@ -27,6 +27,34 @@ struct SclIed final {
     friend bool operator==(const SclIed&, const SclIed&) = default;
 };
 
+// MMS/OSI communication context carried by Communication/SubNetwork/ConnectedAP.
+// The server-side selectors are kept separately from the client compatibility
+// defaults because SCL describes the selected IED AccessPoint, not the local
+// engineering station identity.
+struct SclMmsAccessPoint final {
+    std::string ied_name;
+    std::string access_point_name;
+    std::string ip_address;
+    std::uint16_t tcp_port{102U};
+
+    // AP-title is stored as OID arcs rather than pre-encoded BER so the SCL
+    // model remains transport/codec independent. Empty means not supplied.
+    std::vector<std::uint32_t> ap_title;
+    std::optional<std::uint32_t> ae_qualifier;
+    std::vector<std::uint8_t> p_selector;
+    std::vector<std::uint8_t> s_selector;
+    std::vector<std::uint8_t> t_selector;
+
+    // A malformed explicitly supplied OSI field must not silently degrade to a
+    // generic association profile. Parser users can still inspect the SCL, while
+    // online consumers fail closed when selecting this AccessPoint.
+    bool association_parameters_present{};
+    bool association_parameters_valid{true};
+    std::string association_error;
+
+    friend bool operator==(const SclMmsAccessPoint&, const SclMmsAccessPoint&) = default;
+};
+
 struct SclLogicalNode final {
     std::string ied_name;
     std::string ld_inst;
@@ -191,6 +219,11 @@ struct SclDocument final {
     std::string header_revision;
     SclEdition edition{SclEdition::unknown};
     std::vector<SclIed> ieds;
+
+    // Communication/SubNetwork/ConnectedAP MMS endpoint and OSI association
+    // context. This stays in the canonical SCL model so desktop/client layers do
+    // not reparse XML or guess vendor-specific addressing independently.
+    std::vector<SclMmsAccessPoint> mms_access_points;
 
     // Structural logical-node inventory from the same bounded parser used for
     // all other SCL data. UI/server layers must consume this instead of
