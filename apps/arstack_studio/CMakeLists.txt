@@ -59,6 +59,30 @@ qt_add_executable(arstack_rc2_acceptance
 target_link_libraries(arstack_rc2_acceptance PRIVATE Qt6::Core)
 target_compile_features(arstack_rc2_acceptance PRIVATE cxx_std_20)
 
+# Physical-board QA is deliberately built outside the frozen release branch. The
+# runner links the exact production controller/supervisor sources from the frozen
+# candidate and emits incomplete/fail-closed RC2 evidence. It never enters the
+# public Studio package and cannot move the release baseline by itself.
+qt_add_executable(arstack_board_acceptance
+    src/BoardAcceptanceRunner.cpp
+    ${ARSTACK_STUDIO_CORE_SOURCES}
+)
+qt_add_resources(arstack_board_acceptance "board_acceptance_reference_templates"
+    PREFIX "/arstack"
+    FILES
+        templates/arstack_4i4v_9-2le_reference.scd
+)
+target_link_libraries(arstack_board_acceptance PRIVATE
+    Qt6::Core
+    Qt6::SerialPort
+    ARIEC61850::core
+)
+target_compile_features(arstack_board_acceptance PRIVATE cxx_std_20)
+target_compile_definitions(arstack_board_acceptance PRIVATE
+    ARSTACK_STUDIO_VERSION="${PROJECT_VERSION}"
+    ARSTACK_BOARD_CANDIDATE_SHA="ed46f3bed73d398d71be2eacf34c4995325c3cad"
+)
+
 # S8B adds a Windows-native OS/process ownership gate. It intentionally depends
 # only on the production lock class and the pure serial-error policy. Do not add
 # DeviceIoWorker.hpp as a target source: AUTOMOC would then generate metaobject
