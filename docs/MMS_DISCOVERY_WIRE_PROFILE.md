@@ -10,6 +10,28 @@ This is **not** a normative IEC 61850 profile and is **not** a conformance claim
 
 The public repository intentionally keeps this evidence vendor-neutral. Commercial product names, logos, screenshots, and proprietary marketing terminology are not part of this profile.
 
+## Relationship to SCL-assisted connect
+
+This file describes the path used when the client must obtain the IED model from the live MMS endpoint.
+
+A separate capture showed that when a trusted CID/SCL model is already loaded, the client can take a shorter path: use the SCL structure and communication context locally, validate the online MMS domains, then execute the same style of LN/FC-root initial snapshot Reads without repeating NamedVariable enumeration, type discovery, or DataSet reconstruction.
+
+That second path is documented in [`SCL_ASSISTED_MMS_CONNECT_PROFILE.md`](SCL_ASSISTED_MMS_CONNECT_PROFILE.md).
+
+The two profiles should be read together. They define two entry paths into one canonical online model/snapshot architecture:
+
+```text
+NO TRUSTED SCL
+    live MMS discovery
+        -> canonical model
+        -> shared FC-root initial snapshot
+
+TRUSTED SCL AVAILABLE
+    local SCL parse + online validation
+        -> canonical model
+        -> shared FC-root initial snapshot
+```
+
 ## Test boundary
 
 Observed workflow:
@@ -118,24 +140,23 @@ GetNameList(domain X)
 
 GetNameList(domain X, continueAfter = last returned identifier)
     -> next listOfIdentifier = [...]
-    -> moreFollows = true/false
 ```
 
-From the observed 105 NamedVariable requests over 32 domains, **73 requests were continuation pages** beyond the first request for each domain.
+Approximately 73 continuation requests were observed across the NamedVariable enumeration. Large domains required multiple pages; one observed domain required 17 pages.
 
-Important interoperability properties:
+The generalized compatibility behavior is therefore:
 
-- continuation is scoped to the same object class and object scope;
-- the continuation token is the last identifier returned by the previous page;
-- discovery continues until `moreFollows = false`;
-- a client must guard against `moreFollows = true` without forward progress;
-- response fragmentation at lower OSI/TCP layers must not change MMS pagination semantics.
+1. preserve the identifiers in server-returned order;
+2. when `moreFollows` is true, set `continueAfter` to the last identifier from the current page;
+3. continue until `moreFollows` is false;
+4. enforce page and object-count bounds;
+5. reject `moreFollows=true` without forward progress.
 
-ARStack already implements the essential bounded continuation rule in `MmsLiveDiscoveryClient::get_name_list()`: when `more_follows` is true, the next request uses the last returned name as `continue_after`.
+This matches the safety direction already implemented in `MmsLiveDiscoveryClient`.
 
-## Progressive semantic discovery
+### 4. Type discovery is progressive and interleaved
 
-A key observation is that discovery was **not** a simple set of fully separated phases such as:
+The capture did not show a simple phase ordering of:
 
 ```text
 all GetNameList
@@ -143,98 +164,117 @@ then all GetVariableAccessAttributes
 then all Read
 ```
 
-Instead, requests were interleaved. Representative behavior was:
+Instead, name enumeration, type probing, and selected Reads were interleaved as model regions became available.
+
+Representative pattern:
 
 ```text
-GetNameList pages
-GetVariableAccessAttributes
-GetNameList pages
-GetVariableAccessAttributes
-Read
-GetNameList
-Read
-GetVariableAccessAttributes
+GetNameList ...
+GetNameList ...
+GetVariableAccessAttributes ...
+GetNameList ...
+GetVariableAccessAttributes ...
+Read ...
+GetNameList ...
 ...
 ```
 
-This suggests a progressive semantic-discovery strategy:
+This is best described as **progressive semantic discovery**.
+
+A future ARStack progressive scheduler may use this behavior to reduce time-to-first-model, but the observation does not invalidate the current inventory-first implementation. Both approaches can be interoperable if the same service semantics, bounds, and final model are preserved.
+
+### 5. GetVariableAccessAttributes targets Logical Node roots
+
+A total of **119 `GetVariableAccessAttributes` requests** were observed.
+
+The useful behavioral pattern is that probes target Logical Node roots such as:
 
 ```text
-discover names
-    -> recognize model structure / Logical Node candidates
-    -> probe type information
-    -> read selected semantic attributes
-    -> continue with the next model region
+<domain> / LLN0
+<domain> / <other-LN>
 ```
 
-For ARStack this is an interoperability/performance observation, not a standards requirement. The current staged discovery implementation remains valid, but an optional progressive orchestration profile may reduce time-to-first-model and may better match behavior seen in mature engineering clients.
+rather than issuing a separate type request for every `LN$FC$DO$DA...` leaf.
 
-## Type discovery behavior
+This allows one nested MMS `TypeSpecification` to describe the FC/DO/DA hierarchy below a Logical Node and is consistent with the current ARStack logical-node type-probe planner.
 
-`GetVariableAccessAttributes` was observed **119 times**.
+### 6. Selective semantic Reads occur during discovery
 
-The reference client primarily used type probes at Logical Node roots rather than blindly probing every leaf Data Attribute. This allows a nested MMS `TypeSpecification` to describe a larger subtree with fewer requests.
+The trace contained Reads before the final online snapshot stage. These Reads included selected metadata and functional-constraint structures used to enrich the discovered model.
 
-This is aligned with the existing ARStack logical-node probe planner, which intentionally selects one type-tree probe per Logical Node root where possible.
-
-Implementation implications:
-
-- retain recursive and bounded `TypeSpecification` decoding;
-- prefer LN-root type probes where the server exposes a useful nested type tree;
-- preserve fallback behavior for servers that require more granular probes;
-- never assume one vendor's type-tree shape is universal.
-
-## Read behavior
-
-`Read` was observed **157 times** during automatic model discovery.
-
-The Reads were selective rather than a brute-force read of every discovered leaf. Observed patterns included:
-
-- selected semantic metadata below `LLN0` and other Logical Nodes;
-- grouped Functional Constraint-oriented reads;
-- model/identity metadata needed to enrich the discovered engineering hierarchy.
-
-This indicates that model discovery is formed from multiple evidence sources:
+Examples included references under patterns such as:
 
 ```text
-MMS object names
-    + TypeSpecification evidence
-    + selected Read results
-    + DataSet directory evidence
+LLN0$EX$NamPlt$ldNs
 ```
 
-ARStack should continue to distinguish structural evidence from mutable runtime values so that a temporary runtime change does not alter structural model identity.
+and grouped FC-root references for selected Logical Nodes.
 
-## DataSet discovery
+The important design point is that discovery is not based solely on names. Model construction can combine:
 
-Named-variable-list discovery was performed with `GetNameList` using object class `NamedVariableList`. The trace contained **34 NamedVariableList GetNameList requests**, including scope-specific inventory work and continuation where needed.
+```text
+GetNameList evidence
+    +
+TypeSpecification evidence
+    +
+selected Read evidence
+```
 
-After candidate DataSets were identified, the client issued **2 `GetNamedVariableListAttributes` requests** to retrieve the member composition of discovered DataSets.
+ARStack should keep those evidence classes distinct so heuristics never become unmarked standards claims.
 
-The observed pattern is therefore:
+### 7. DataSet discovery
+
+The discovery trace used `GetNameList` for `NamedVariableList` identities and then issued two observed `GetNamedVariableListAttributes` requests for discovered DataSets.
+
+The generalized flow is:
 
 ```text
 GetNameList(NamedVariableList)
-    -> discover DataSet names
-    -> GetNamedVariableListAttributes(DataSet)
-    -> retrieve member references
+        |
+        v
+discover DataSet identities
+        |
+        v
+GetNamedVariableListAttributes
+        |
+        v
+retrieve DataSet member composition
 ```
 
-This is consistent with the current ARStack separation between DataSet inventory and DataSet directory/member retrieval.
+The number of DataSets is capture-specific.
 
-## Behavioral fingerprint
+## Final initial-live-snapshot phase
 
-The following compact profile can be used as a regression reference for future capture comparison:
+A particularly important cross-capture result is that the **last 120 Read requests** in this full live-discovery session matched the **120 initial snapshot Read requests** observed in the SCL-assisted connection for the same simulated IED configuration.
+
+The identifier order matched exactly in the compared traces.
+
+This establishes a strong architectural hypothesis:
 
 ```text
-MMS IED DISCOVERY WIRE PROFILE v1
+full live discovery
+    -> build canonical model from MMS
+    -> shared LN/FC-root initial snapshot
 
+SCL-assisted connect
+    -> build canonical model from SCL
+    -> validate online domains
+    -> shared LN/FC-root initial snapshot
+```
+
+Implementation should therefore prefer a reusable initial FC-read planner instead of duplicating snapshot logic inside the discovery engine and the SCL connection path.
+
+Details of the FC-root batching and SCL mapping behavior are maintained in [`SCL_ASSISTED_MMS_CONNECT_PROFILE.md`](SCL_ASSISTED_MMS_CONNECT_PROFILE.md).
+
+## Behavioral fingerprint from this capture
+
+```text
 Transport
 ---------
-TCP destination         102
-COTP source TSAP        0x0000
-COTP destination TSAP   0x0001
-COTP TPDU size          1024 bytes
+TCP destination        102
+COTP source TSAP       0x0000
+COTP destination TSAP  0x0001
+COTP TPDU size         1024 bytes
 
 MMS Initiate
 ------------
@@ -243,117 +283,98 @@ maxOutstandingCalling                10
 maxOutstandingCalled                 10
 nestingLevel                           5
 
-Confirmed requests
+Confirmed services
 ------------------
-invokeID range                         1..418
-invokeID behavior                      monotonic +1
-GetNameList                            140
-GetVariableAccessAttributes            119
-Read                                   157
-GetNamedVariableListAttributes           2
-Total                                  418
+GetNameList                       140
+GetVariableAccessAttributes       119
+Read                              157
+GetNamedVariableListAttributes      2
+Total                             418
 
-Initial model inventory
------------------------
-GetNameList(Domain, VMD-specific)
-observed domains                         32
-initial domain response moreFollows      false
+Invoke behavior
+---------------
+start invokeID                      1
+end invokeID                      418
+observed progression        contiguous +1
 
-NamedVariable enumeration
--------------------------
-per-domain first-page requests            32
-continuation pages                         73
-total NamedVariable requests              105
-continueAfter = last identifier from prior page
+Discovery behavior
+------------------
+initial Domain/VMD GetNameList
+per-domain NamedVariable enumeration
+continueAfter pagination
+LN-root TypeSpecification probes
+selected semantic Reads
+NamedVariableList/DataSet directory discovery
+final shared FC-root live snapshot
 
 Mutation during automatic discovery
 -----------------------------------
-Write                                     0
-Control                                   0
-RCB enable/reservation                    0
-GI                                        0
-Dynamic DataSet mutation                  0
+Write                              0
+Control                            0
+GI                                 0
+RCB enable/reservation             0
 ```
 
-## Current ARStack comparison
+## Comparison with current ARStack discovery orchestration
 
-The current `MmsLiveDiscoveryClient::discover()` is primarily **inventory-first staged discovery**:
+Current `MmsLiveDiscoveryClient::discover()` is primarily inventory-first:
 
 ```text
-1. discover domains
-2. enumerate NamedVariable and NamedVariableList names per domain
-3. build report/DataSet inventory
-4. probe selected variable types
-5. read DataSet directories
-6. optionally read selected RCB state
+domain inventory
+ -> per-domain NamedVariable inventory
+ -> per-domain NamedVariableList inventory
+ -> report/DataSet inventory
+ -> LN-root type probes
+ -> optional DataSet directories
+ -> optional RCB reads
 ```
 
-The observed reference trace behaves more like **progressive semantic discovery**, where type probes and selected Reads are interleaved with name discovery.
+The reference capture shows a more interleaved scheduler.
 
-This is the main orchestration difference identified by this capture. It does **not** imply that the current implementation is incorrect. A future compatibility/performance profile can add progressive scheduling while preserving the same bounded, read-only services and the same normalized output model.
-
-## Recommended implementation direction
-
-Keep one standards-facing discovery engine with explicit scheduling policies rather than embedding a commercial-client imitation into protocol code.
-
-Suggested architecture:
+The distinction should be explicit:
 
 ```text
-MMS codecs / association runtime
-            |
-            v
-bounded discovery primitives
-  - GetNameList + continuation
-  - GetVariableAccessAttributes
-  - GetNamedVariableListAttributes
-  - Read
-            |
-            v
-discovery scheduler policy
-  - staged inventory policy
-  - progressive semantic policy
-            |
-            v
-canonical live-ied-model-v1 mapper
+Current ARStack:
+    inventory-first staged discovery
+
+Observed reference behavior:
+    progressive semantic discovery
 ```
 
-A progressive policy should remain read-only and should be evaluated using measurable outcomes such as:
+This is an orchestration difference, not evidence that the current codecs are wrong.
 
-- time to first usable LD/LN hierarchy;
-- total confirmed-request count;
-- redundant request count;
-- total discovery duration;
-- correctness of the final structural fingerprint;
-- stability across reconnects;
-- behavior with multi-page `GetNameList` responses;
-- behavior under fragmented/coalesced TCP delivery;
-- interoperability across multiple independent IEDs/simulators.
+Any implementation change should preserve existing tested behavior and introduce progressive scheduling as an explicit, reviewable capability rather than rewriting the working discovery path casually.
 
-## Regression invariants
+## Safety and implementation rules
 
-Future discovery changes should preserve these invariants:
+1. Discovery remains read-only unless the caller explicitly selects a different workflow.
+2. Respect negotiated association and PDU limits.
+3. Bound domain count, pages, names, type depth, response sizes, and total work.
+4. Support arbitrary TCP chunking and COTP segmentation/reassembly.
+5. Preserve invoke-ID correlation and tolerate transport fragmentation/coalescing.
+6. Treat `moreFollows` without forward progress as an error.
+7. Do not infer a permanent IED capability from one runtime snapshot.
+8. Keep wire facts, configured expectations, heuristics, and interoperability claims separate.
+9. Reuse the canonical initial FC-root snapshot planner across live-discovery and SCL-assisted modes.
+10. Do not turn capture-specific object counts or identifiers into hard-coded model assumptions.
 
-1. no Write/control/report-enable/DataSet-mutation request is generated by read-only discovery;
-2. every confirmed request is correlated by invoke ID;
-3. negotiated PDU/outstanding/nesting limits are respected;
-4. `GetNameList` continuation is bounded and must make forward progress;
-5. duplicate identifiers do not create duplicate model objects;
-6. lower-layer fragmentation/coalescing does not affect MMS transaction semantics;
-7. a discovery failure in an optional enrichment probe does not corrupt already established structural evidence;
-8. structural and mutable runtime fingerprints remain separate;
-9. capture-derived behavior remains empirical evidence, not silently promoted to an IEC conformance requirement.
+## Recommended regression targets
 
-## Evidence boundary
+Future tests should cover:
 
-This wire profile is one loopback interoperability observation. It should be strengthened with additional controlled captures covering:
+- byte/semantic association-profile vectors;
+- large multi-page `GetNameList` responses;
+- `continueAfter` correctness;
+- duplicate/no-progress continuation rejection;
+- LN-root nested `TypeSpecification` mapping;
+- interleaved confirmed-request sequencing;
+- segmented COTP responses;
+- reconnect after timeout/failure;
+- structural equivalence between staged and progressive discovery schedulers;
+- equivalence of the final FC-root snapshot planner after live discovery vs SCL-assisted connect.
 
-- association only, without model discovery;
-- model discovery against additional independent simulators/IEDs;
-- large models with repeated pagination;
-- lazy/manual tree expansion after automatic discovery;
-- one-value polling behavior;
-- timeout during discovery and clean reconnect;
-- malformed/partial responses in a controlled negative-test server;
-- comparison of staged versus progressive ARStack scheduling against the same endpoint.
+## Evidence status
 
-Physical multi-vendor interoperability evidence remains necessary before making industrial replacement or conformance claims.
+The profile is based on one controlled loopback capture against one simulator configuration. It is high-value behavioral evidence but insufficient for a universal compatibility claim.
+
+Before making progressive discovery or SCL-assisted snapshot behavior a strict default across all targets, repeat the evidence against multiple physical IEDs and/or independent simulators and preserve per-device differences as explicit compatibility profiles when necessary.
