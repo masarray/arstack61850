@@ -25,6 +25,7 @@ SurfacePanel {
     readonly property bool firmwareGateActive:
         smartSession.firmwareInstallRequired || smartSession.firmwareUpdateRequired ||
         smartSession.updatingFirmware || smartSession.updateNeedsBootloaderHelp
+    readonly property bool injectionRunning: smartSession.state === "RUNNING"
 
     Settings {
         id: operatorSettings
@@ -182,7 +183,7 @@ SurfacePanel {
     }
 
     function startReason() {
-        if (device.running) return "SMV output is already running."
+        if (ribbon.injectionRunning) return "SMV output is already running."
         if (smartSession.firmwareInstallRequired) return "Install ARStack firmware before starting injection."
         if (smartSession.firmwareUpdateRequired) return "Update firmware before starting injection."
         if (smartSession.updatingFirmware) return "Firmware installation is in progress."
@@ -195,7 +196,7 @@ SurfacePanel {
     }
 
     function requestStart() {
-        if (device.running) return
+        if (ribbon.injectionRunning) return
         if (smartSession.firmwareInstallRequired) {
             ribbon.installPromptDeferred = false
             installDialog.open()
@@ -221,21 +222,23 @@ SurfacePanel {
             controller.showMessage(ribbon.startReason(), false)
             return
         }
-        device.start()
+        if (!smartSession.requestStart())
+            controller.showMessage(smartSession.statusText, true)
     }
 
     function requestStop() {
-        if (device.running) device.stop()
+        if (ribbon.injectionRunning && !smartSession.requestStop())
+            controller.showMessage("Studio could not stop the current device session.", true)
     }
 
     function openEngineeringDialog() {
-        if (!device.running) engineeringFileDialog.open()
-        else controller.showMessage("Stop injection before changing the engineering configuration.", true)
+        if (smartSession.engineeringEditable) engineeringFileDialog.open()
+        else controller.showMessage("Stop injection or finish the current device operation before changing the engineering configuration.", true)
     }
 
     function loadEngineeringFile(url) {
-        if (device.running) {
-            controller.showMessage("Stop injection before changing the engineering configuration.", true)
+        if (!smartSession.engineeringEditable) {
+            controller.showMessage("Stop injection or finish the current device operation before changing the engineering configuration.", true)
             return false
         }
         if (!profiles.loadFile(url)) {
@@ -250,8 +253,8 @@ SurfacePanel {
     }
 
     function useBuiltInProfile() {
-        if (device.running) {
-            controller.showMessage("Stop injection before changing the engineering configuration.", true)
+        if (!smartSession.engineeringEditable) {
+            controller.showMessage("Stop injection or finish the current device operation before changing the engineering configuration.", true)
             return
         }
         if (profiles.loadReferenceTemplate()) {
@@ -537,14 +540,14 @@ SurfacePanel {
                 Menu {
                     id: fileMenu
                     y: parent.height
-                    MenuItem { text: "Open Engineering File…"; enabled: !device.running; onTriggered: ribbon.openEngineeringDialog() }
+                    MenuItem { text: "Open Engineering File…"; enabled: smartSession.engineeringEditable; onTriggered: ribbon.openEngineeringDialog() }
                     MenuItem {
                         text: "Reopen Last Configuration"
-                        enabled: !device.running && operatorSettings.lastEngineeringUrl.length > 0
+                        enabled: smartSession.engineeringEditable && operatorSettings.lastEngineeringUrl.length > 0
                         onTriggered: ribbon.loadEngineeringFile(operatorSettings.lastEngineeringUrl)
                     }
                     MenuSeparator {}
-                    MenuItem { text: "Use Built-in 4I+4V Profile"; enabled: !device.running; onTriggered: ribbon.useBuiltInProfile() }
+                    MenuItem { text: "Use Built-in 4I+4V Profile"; enabled: smartSession.engineeringEditable; onTriggered: ribbon.useBuiltInProfile() }
                     MenuSeparator {}
                     MenuItem { text: "Exit"; onTriggered: Qt.quit() }
                 }
@@ -557,8 +560,8 @@ SurfacePanel {
                 Menu {
                     id: injectionMenu
                     y: parent.height
-                    MenuItem { text: "Start Injection    F5"; enabled: !device.running; onTriggered: ribbon.requestStart() }
-                    MenuItem { text: "Stop Injection     F6"; enabled: device.running; onTriggered: ribbon.requestStop() }
+                    MenuItem { text: "Start Injection    F5"; enabled: !ribbon.injectionRunning; onTriggered: ribbon.requestStart() }
+                    MenuItem { text: "Stop Injection     F6"; enabled: ribbon.injectionRunning; onTriggered: ribbon.requestStop() }
                     MenuSeparator {}
                     MenuItem { text: "Balanced 3-Phase"; onTriggered: controller.balanced() }
                     MenuItem { text: "Zero All"; onTriggered: controller.zeroAll() }
@@ -690,16 +693,16 @@ SurfacePanel {
                 text: "Start"
                 iconSource: Qt.resolvedUrl("../assets/lucide/play.svg")
                 tone: smartSession.startReady ? "success" : "neutral"
-                enabled: !device.running && !smartSession.updatingFirmware && !smartSession.updateNeedsBootloaderHelp
+                enabled: !ribbon.injectionRunning && !smartSession.updatingFirmware && !smartSession.updateNeedsBootloaderHelp
                 toolTipText: ribbon.startReason()
                 onClicked: ribbon.requestStart()
             }
             RunButton {
                 text: "Stop"
                 iconSource: Qt.resolvedUrl("../assets/lucide/square.svg")
-                tone: device.running ? "danger" : "neutral"
-                enabled: device.running && !smartSession.updatingFirmware
-                toolTipText: device.running ? "Stop Sampled Values output" : "Injection is not running"
+                tone: ribbon.injectionRunning ? "danger" : "neutral"
+                enabled: ribbon.injectionRunning && !smartSession.updatingFirmware
+                toolTipText: ribbon.injectionRunning ? "Stop Sampled Values output" : "Injection is not running"
                 onClicked: ribbon.requestStop()
             }
         }
