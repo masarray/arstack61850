@@ -64,6 +64,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: S7 QML presentation-only authority regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          qml_root='apps/arstack_studio/qml'
+          device_pattern='([A-Za-z_][A-Za-z0-9_]*\.)*device\.(start|stop|autoDetectAndConnect|connectPort|disconnectPort|refreshPorts|deployProfile|setSignal|setFrequency|setEnabled|setQuality|setCtSaturation|zero|sendPtpShow|sendSmpSynchShow|setPtpRole|setSmpSynchPolicy|configurePtp|startPtp|stopPtp)[[:space:]]*\('
+          firmware_pattern='([A-Za-z_][A-Za-z0-9_]*\.)*(firmware|FirmwareService)\.(probeTarget|installFirmware)[[:space:]]*\('
+
+          if grep -R -nE "$device_pattern" "$qml_root" --include='*.qml'; then
+            echo 'S7 regression: QML bypasses SmartSessionController with direct DeviceController authority.'
+            exit 1
+          fi
+          if grep -R -nE "$firmware_pattern" "$qml_root" --include='*.qml'; then
+            echo 'S7 regression: QML bypasses SmartSessionController with direct firmware execution.'
+            exit 1
+          fi
+          echo 'S7 QML authority boundary: PASS · presentation submits intents through SmartSessionController'
+
       - name: Configure
         shell: bash
         run: |
