@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -77,6 +78,8 @@ struct TimingStats final {
 };
 
 TimingStats g_interval_stats{};
+static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
+std::atomic<std::uint32_t> g_sample_tick_total{0U};
 
 struct PacketTemplate final {
     std::vector<std::uint8_t> bytes;
@@ -296,6 +299,21 @@ void merge_stats(TimingStats& local) noexcept {
     local = TimingStats{};
 }
 
+void accumulate_stats(TimingStats& target, const TimingStats& source) noexcept {
+    if (source.samples == 0U) return;
+    target.samples += source.samples;
+    target.canonical_ok += source.canonical_ok;
+    target.canonical_fail += source.canonical_fail;
+    target.mirror_ok += source.mirror_ok;
+    target.mirror_fail += source.mirror_fail;
+    target.missed_slots += source.missed_slots;
+    target.lateness_sum_us += source.lateness_sum_us;
+    target.lateness_min_us = std::min(target.lateness_min_us, source.lateness_min_us);
+    target.lateness_max_us = std::max(target.lateness_max_us, source.lateness_max_us);
+    target.last_sample_count = source.last_sample_count;
+    target.last_signal_generation = source.last_signal_generation;
+}
+
 void reset_interval_stats() noexcept {
     portENTER_CRITICAL(&g_stats_mux);
     g_interval_stats = TimingStats{};
@@ -450,8 +468,6 @@ void publisher_task(void* argument) {
             schedule_anchored = false;
             expected_schedule.reset(active_profile.publisher_rate_hz);
             static_cast<void>(expected_schedule.next_ticks()); // first alarm interval
-            sample_clock = start_sample_clock(task_handle, active_profile.publisher_rate_hz);
-
             ESP_LOGI(kTag,
                      "PROFILE armed generation=%llu svID=%s APPID=0x%04X rate=%lu wrap=%u confRev=%lu VLAN=%u/%u/%u frameLen=%u",
                      static_cast<unsigned long long>(active_profile.generation),
@@ -464,6 +480,12 @@ void publisher_task(void* argument) {
                      static_cast<unsigned>(active_profile.vlan_id),
                      static_cast<unsigned>(active_profile.vlan_priority),
                      static_cast<unsigned>(canonical.bytes.size()));
+
+            // Starting the 250 us clock is the final operation in this branch.
+            // Formatting the profile log after timer enable previously queued
+            // dozens of ISR notifications before the publisher could consume
+            // its first tick, so every START falsely began with missed slots.
+            sample_clock = start_sample_clock(task_handle, active_profile.publisher_rate_hz);
             continue;
         }
 
@@ -537,6 +559,7 @@ void publisher_task(void* argument) {
 
         update_local_timing(
             local, lateness_us, missed_slots, canonical_sample_count, signal_state.generation);
+        g_sample_tick_total.fetch_add(1U, std::memory_order_relaxed);
         canonical_sample_count = static_cast<std::uint16_t>(
             (canonical_sample_count + 1U) % active_profile.sample_counter_modulus);
         mirror_sample_count = static_cast<std::uint16_t>(mirror_sample_count + 1U);
@@ -550,6 +573,11 @@ void publisher_task(void* argument) {
 }
 
 void telemetry_task(void*) {
+    std::uint32_t previous_tick_total = 0U;
+    std::int64_t previous_tick_time_us = 0;
+    bool rate_baseline_valid = false;
+    TimingStats baseline_stats{};
+
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(1000));
         TimingStats snapshot{};
@@ -557,14 +585,47 @@ void telemetry_task(void*) {
         snapshot = g_interval_stats;
         g_interval_stats = TimingStats{};
         portEXIT_CRITICAL(&g_stats_mux);
-        if (snapshot.samples == 0U) continue;
+
+        const std::int64_t now_us = esp_timer_get_time();
+        const std::uint32_t tick_total = g_sample_tick_total.load(std::memory_order_relaxed);
+        if (!live_tx_running() || snapshot.samples == 0U) {
+            rate_baseline_valid = false;
+            baseline_stats = {};
+            previous_tick_total = tick_total;
+            previous_tick_time_us = now_us;
+            continue;
+        }
+
+        // The telemetry task is independent from START and can first wake in
+        // the middle of a publisher second. Use that partial bucket only as a
+        // baseline, while carrying its failures into the first complete report.
+        if (!rate_baseline_valid) {
+            rate_baseline_valid = true;
+            baseline_stats = snapshot;
+            previous_tick_total = tick_total;
+            previous_tick_time_us = now_us;
+            continue;
+        }
+
+        const std::uint32_t elapsed_ticks = tick_total - previous_tick_total;
+        const std::int64_t elapsed_us = now_us - previous_tick_time_us;
+        previous_tick_total = tick_total;
+        previous_tick_time_us = now_us;
+        if (elapsed_ticks == 0U || elapsed_us <= 0) continue;
+
+        accumulate_stats(snapshot, baseline_stats);
+        baseline_stats = {};
+        const std::uint64_t normalized_fps =
+            (static_cast<std::uint64_t>(elapsed_ticks) * 1000000ULL +
+             static_cast<std::uint64_t>(elapsed_us / 2)) /
+            static_cast<std::uint64_t>(elapsed_us);
 
         const std::int64_t mean_lateness_us =
             snapshot.lateness_sum_us / static_cast<std::int64_t>(snapshot.samples);
         ESP_LOGI(kTag,
                  "timing: samples=%llu (~%llu fps) MC ok=%llu fail=%llu mirror ok=%llu fail=%llu missed=%llu wake_late_us[min/mean/max]=%ld/%lld/%ld smpCnt=%u signal_gen=%llu",
                  static_cast<unsigned long long>(snapshot.samples),
-                 static_cast<unsigned long long>(snapshot.samples),
+                 static_cast<unsigned long long>(normalized_fps),
                  static_cast<unsigned long long>(snapshot.canonical_ok),
                  static_cast<unsigned long long>(snapshot.canonical_fail),
                  static_cast<unsigned long long>(snapshot.mirror_ok),

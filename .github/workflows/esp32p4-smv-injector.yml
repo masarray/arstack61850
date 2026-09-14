@@ -55,6 +55,28 @@ jobs:
           grep -qx 'CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y' sdkconfig
           echo 'ESP32-P4 pre-v3 build policy: PASS'
 
+      - name: Verify realtime START and telemetry boundary policy
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path('main/app_main.cpp').read_text(encoding='utf-8')
+          start_begin = source.index('if (take_start_request())')
+          start_end = source.index('if (!live_tx_running())', start_begin)
+          start_block = source[start_begin:start_end]
+          clock_start = start_block.rindex(
+              'sample_clock = start_sample_clock(task_handle, active_profile.publisher_rate_hz);'
+          )
+          assert start_block.rindex('ESP_LOGI') < clock_start
+          assert 'ESP_LOG' not in start_block[clock_start:]
+          assert 'static_assert(std::atomic<std::uint32_t>::is_always_lock_free);' in source
+          assert 'g_sample_tick_total.fetch_add(1U, std::memory_order_relaxed);' in source
+          assert 'elapsed_ticks) * 1000000ULL' in source
+          assert 'rate_baseline_valid = true;' in source
+          print('Realtime boundary policy: PASS - timer starts after formatting and telemetry rate is elapsed-time normalized')
+          PY
+
       - name: Build firmware
         run: source /opt/esp/idf/export.sh && idf.py build
 

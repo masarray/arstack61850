@@ -38,5 +38,20 @@
     "autoStartAfterReconnect": false,
     "physicalAcceptanceRequiredBeforeMergeOrTag": true
   },
-  "exceptions": []
+  "exceptions": [
+    {
+      "path": "embedded/esp32p4_smv_injector/main/app_main.cpp",
+      "blockerIssue": "#83 physical RC2 retained-run telemetry failure",
+      "risk": "The 250 us sample clock starts before synchronous profile logging completes, causing deterministic missed slots at every START; asynchronous telemetry buckets are also mislabeled as one-second fps windows.",
+      "rationale": "Physical board evidence showed the first stream counter starting after skipped slots and fail-closed RC2 telemetry outside 3999..4001 despite a stable 3999.94 fps wire segment. The minimum production fix moves timer enable after preparation and reports elapsed-time-normalized fps from a bounded lock-free tick counter.",
+      "verification": "ESP32-P4 build and realtime boundary policy gate; real-board 10x Start/Stop; first transmitted smpCnt begins at 0 with missed=0; retained 4000-fps telemetry has missed=0 and TX fail=0; independent capture proves continuous counters and 3999..4001 fps; full exact-head release gates."
+    },
+    {
+      "path": ".github/workflows/esp32p4-smv-injector.yml",
+      "blockerIssue": "#83 physical RC2 retained-run telemetry failure",
+      "risk": "The timer/log ordering and normalized telemetry invariant could regress without a deterministic source-policy gate.",
+      "rationale": "Add the smallest CI assertion at the existing ESP32-P4 firmware boundary instead of introducing a second test framework or weakening the physical evaluator.",
+      "verification": "The workflow must reject timer enable before START-path formatting, missing lock-free sample tick accounting, or removal of elapsed-time telemetry normalization; the complete ESP32-P4 firmware build must still pass."
+    }
+  ]
 }
