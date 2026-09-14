@@ -187,6 +187,7 @@ bool SmartSessionController::startDeviceDiscovery() {
         device_->connected() || device_->discovering()) {
         return false;
     }
+    manualRecoveryArmed_ = false;
     advanceSessionGeneration();
     setPortOwner(PortOwner::deviceSession);
     return device_->autoDetectAndConnect();
@@ -295,6 +296,7 @@ bool SmartSessionController::requestConnectPort(const QString& portName) {
     }
 
     clearBlankBoardContext();
+    manualRecoveryArmed_ = true;
     advanceSessionGeneration();
     setPortOwner(PortOwner::deviceSession);
     const bool accepted = device_->connectPort(requested);
@@ -729,7 +731,17 @@ void SmartSessionController::refreshRecoveryOfferFromIdentity() {
             device_->identificationState() != DeviceController::IdentificationState::Unidentified)) {
             blankBoardDetected_ = false;
             blankBoardPort_.clear();
+            manualRecoveryArmed_ = false;
         }
+        return;
+    }
+
+    // S8 policy: an automatic semantic IDENTIFY timeout means "unknown", never
+    // "blank firmware". The firmware-install offer is armed only after an
+    // explicit manual recovery selection (Verify selected port).
+    if (!manualRecoveryArmed_ || recoveryPending_) {
+        blankBoardDetected_ = false;
+        blankBoardPort_.clear();
         return;
     }
 
@@ -747,6 +759,7 @@ void SmartSessionController::refreshRecoveryOfferFromIdentity() {
 void SmartSessionController::clearBlankBoardContext() {
     blankBoardDetected_ = false;
     blankBoardPort_.clear();
+    manualRecoveryArmed_ = false;
     setupError_ = false;
     setupErrorStatus_.clear();
 }
@@ -945,6 +958,20 @@ void SmartSessionController::reconcile() {
         }
     }
 
+    // Fail closed immediately. In particular, a wrong-device recovery must not
+    // briefly fall through to READY while the asynchronous port close is still
+    // being acknowledged by DeviceIoWorker.
+    if (setupError_) {
+        setPresentation(
+            QStringLiteral("SETUP ERROR"),
+            setupErrorStatus_.isEmpty()
+                ? QStringLiteral("Studio could not identify a supported ESP32-P4 on the connected serial device.")
+                : setupErrorStatus_,
+            false,
+            false);
+        return;
+    }
+
     if (device_->discovering() || (device_->connected() && !device_->deviceVerified())) {
         setPresentation(QStringLiteral("CONNECTING"), device_->discoveryStatus(), false, false);
         return;
@@ -956,19 +983,8 @@ void SmartSessionController::reconcile() {
         if (blankBoardDetected_) {
             setPresentation(
                 QStringLiteral("FIRMWARE REQUIRED"),
-                QStringLiteral("ARStack identity was not received from %1 after bounded retries. If this is the intended ESP32-P4, Studio will verify chip and revision before writing firmware.")
+                QStringLiteral("Manual recovery selected for %1 after bounded semantic identification failed. Studio will verify chip and revision before any firmware write.")
                     .arg(blankBoardPort_),
-                false,
-                false);
-            return;
-        }
-
-        if (setupError_) {
-            setPresentation(
-                QStringLiteral("SETUP ERROR"),
-                setupErrorStatus_.isEmpty()
-                    ? QStringLiteral("Studio could not identify a supported ESP32-P4 on the connected serial device.")
-                    : setupErrorStatus_,
                 false,
                 false);
             return;
@@ -977,7 +993,7 @@ void SmartSessionController::reconcile() {
         if (device_->identificationState() == DeviceController::IdentificationState::Unidentified) {
             setPresentation(
                 QStringLiteral("UNIDENTIFIED"),
-                QStringLiteral("No ARStack semantic identity was received after %1 bounded attempts. Retry identification or select the intended device manually.")
+                QStringLiteral("No ARStack semantic identity was received after %1 bounded attempts. Retry identification, or use Tools > Advanced > Verify selected port to enter explicit firmware recovery.")
                     .arg(device_->identifyAttempts()),
                 false,
                 false);
