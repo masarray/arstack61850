@@ -80,20 +80,14 @@ jobs:
             --target arstack_session_harness arstack_windows_ownership_harness --parallel
 
       - name: S8A deterministic session harness on Windows
+        timeout-minutes: 1
         shell: powershell
         run: |
           $exe = Join-Path $PWD 'build-arstack-studio\Release\arstack_session_harness.exe'
           $out = Join-Path $env:RUNNER_TEMP 'arstack-session-windows.out.log'
           $err = Join-Path $env:RUNNER_TEMP 'arstack-session-windows.err.log'
-          $process = Start-Process -FilePath $exe -PassThru `
-            -RedirectStandardOutput $out -RedirectStandardError $err
-          if (-not $process.WaitForExit(30000)) {
-            $process.Kill()
-            throw 'S8A Windows deterministic harness timed out.'
-          }
-          $process.WaitForExit()
-          $process.Refresh()
-          $exitCode = $process.ExitCode
+          & $exe 1> $out 2> $err
+          $exitCode = $LASTEXITCODE
           Get-Content $out -ErrorAction SilentlyContinue
           Get-Content $err -ErrorAction SilentlyContinue
           if ($exitCode -ne 0) {
@@ -101,20 +95,14 @@ jobs:
           }
 
       - name: S8B cross-process ownership and serial-loss harness
+        timeout-minutes: 1
         shell: powershell
         run: |
           $exe = Join-Path $PWD 'build-arstack-studio\Release\arstack_windows_ownership_harness.exe'
           $out = Join-Path $env:RUNNER_TEMP 'arstack-windows-ownership.out.log'
           $err = Join-Path $env:RUNNER_TEMP 'arstack-windows-ownership.err.log'
-          $process = Start-Process -FilePath $exe -PassThru `
-            -RedirectStandardOutput $out -RedirectStandardError $err
-          if (-not $process.WaitForExit(30000)) {
-            $process.Kill()
-            throw 'S8B Windows ownership harness timed out.'
-          }
-          $process.WaitForExit()
-          $process.Refresh()
-          $exitCode = $process.ExitCode
+          & $exe 1> $out 2> $err
+          $exitCode = $LASTEXITCODE
           Get-Content $out -ErrorAction SilentlyContinue
           Get-Content $err -ErrorAction SilentlyContinue
           if ($exitCode -ne 0) {
