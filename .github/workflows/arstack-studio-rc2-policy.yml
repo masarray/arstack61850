@@ -1,0 +1,109 @@
+name: ARStack Studio RC2 Acceptance Policy
+
+on:
+  pull_request:
+    paths:
+      - 'apps/arstack_studio/src/Rc2Acceptance.cpp'
+      - 'apps/arstack_studio/rc2/**'
+      - 'apps/arstack_studio/CMakeLists.txt'
+      - 'docs/SMV_STUDIO_RC2_ACCEPTANCE.md'
+      - '.github/workflows/arstack-studio-rc2-policy.yml'
+  push:
+    paths:
+      - 'apps/arstack_studio/src/Rc2Acceptance.cpp'
+      - 'apps/arstack_studio/rc2/**'
+      - 'apps/arstack_studio/CMakeLists.txt'
+      - 'docs/SMV_STUDIO_RC2_ACCEPTANCE.md'
+      - '.github/workflows/arstack-studio-rc2-policy.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arstack-studio-rc2-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-policy:
+    name: RC2 Windows evidence gate
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.10.3'
+          arch: win64_msvc2022_64
+          modules: 'qtserialport'
+          cache: true
+
+      - name: Configure
+        shell: powershell
+        run: |
+          cmake -S apps/arstack_studio -B build-arstack-studio -G "Visual Studio 17 2022" -A x64 `
+            -DARIEC61850_WARNINGS_AS_ERRORS=ON
+
+      - name: Build RC2 evidence evaluator
+        shell: powershell
+        run: |
+          cmake --build build-arstack-studio --config Release --target arstack_rc2_acceptance --parallel
+
+      - name: RC2 fail-closed policy self-test
+        shell: powershell
+        run: |
+          $exe = Join-Path $PWD 'build-arstack-studio\Release\arstack_rc2_acceptance.exe'
+          & $exe --self-test
+          if ($LASTEXITCODE -ne 0) {
+            throw "RC2 acceptance policy self-test failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Stage physical QA evaluator
+        shell: powershell
+        run: |
+          $stage = Join-Path $PWD 'dist\RC2-Acceptance'
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          $exe = Join-Path $PWD 'build-arstack-studio\Release\arstack_rc2_acceptance.exe'
+          Copy-Item $exe (Join-Path $stage 'arstack_rc2_acceptance.exe')
+          Copy-Item 'apps\arstack_studio\rc2\rc2-evidence-template.json' $stage
+          Copy-Item 'docs\SMV_STUDIO_RC2_ACCEPTANCE.md' $stage
+          windeployqt --release --no-translations (Join-Path $stage 'arstack_rc2_acceptance.exe')
+
+      - name: Upload RC2 physical QA kit
+        uses: actions/upload-artifact@v4
+        with:
+          name: arstack-studio-rc2-acceptance-kit
+          path: dist/RC2-Acceptance
+          if-no-files-found: error
+          retention-days: 14
+
+  linux-policy:
+    name: RC2 Linux policy regression
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04
+    steps:
+      - name: Install build and Qt dependencies
+        shell: bash
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates git cmake ninja-build g++ \
+            qt6-base-dev qt6-declarative-dev qt6-serialport-dev \
+            qml6-module-qtquick qml6-module-qtquick-controls \
+            qml6-module-qtquick-layouts qml6-module-qtquick-dialogs qml6-module-qtquick-window
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        shell: bash
+        run: |
+          cmake -S apps/arstack_studio -B build-arstack-studio -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DARIEC61850_WARNINGS_AS_ERRORS=ON
+
+      - name: Build and self-test RC2 evidence evaluator
+        shell: bash
+        run: |
+          cmake --build build-arstack-studio --target arstack_rc2_acceptance --parallel 2
+          ./build-arstack-studio/arstack_rc2_acceptance --self-test
