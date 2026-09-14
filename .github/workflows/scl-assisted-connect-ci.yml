@@ -5,6 +5,7 @@ on:
     paths:
       - 'include/ariec61850/mms/scl_assisted_connect.hpp'
       - 'include/ariec61850/mms/scl_association.hpp'
+      - 'include/ariec61850/mms/scl_sync_health.hpp'
       - 'include/ariec61850/mms/association_runtime.hpp'
       - 'include/ariec61850/mms/live_discovery.hpp'
       - 'src/mms/**'
@@ -12,12 +13,14 @@ on:
       - 'include/ariec61850/scl/**'
       - 'tests/test_scl_assisted_connect.cpp'
       - 'tests/test_scl_association_addressing.cpp'
+      - 'tests/test_scl_sync_health.cpp'
       - 'tests/scl_assisted_profile/**'
       - '.github/workflows/scl-assisted-connect-ci.yml'
   pull_request:
     paths:
       - 'include/ariec61850/mms/scl_assisted_connect.hpp'
       - 'include/ariec61850/mms/scl_association.hpp'
+      - 'include/ariec61850/mms/scl_sync_health.hpp'
       - 'include/ariec61850/mms/association_runtime.hpp'
       - 'include/ariec61850/mms/live_discovery.hpp'
       - 'src/mms/**'
@@ -25,6 +28,7 @@ on:
       - 'include/ariec61850/scl/**'
       - 'tests/test_scl_assisted_connect.cpp'
       - 'tests/test_scl_association_addressing.cpp'
+      - 'tests/test_scl_sync_health.cpp'
       - 'tests/scl_assisted_profile/**'
       - '.github/workflows/scl-assisted-connect-ci.yml'
 
@@ -46,7 +50,7 @@ jobs:
       - name: Build SCL-assisted profile gates
         run: >-
           cmake --build build-scl-assisted-profile
-          --target scl_assisted_connect_profile scl_association_addressing_profile
+          --target scl_assisted_connect_profile scl_association_addressing_profile scl_sync_health_profile
           --parallel 2
 
       - name: Run SCL-assisted wire-profile regression
@@ -54,3 +58,6 @@ jobs:
 
       - name: Run SCL association-addressing regression
         run: ./build-scl-assisted-profile/scl_association_addressing_profile
+
+      - name: Run trusted-SCL identity-health regression
+        run: ./build-scl-assisted-profile/scl_sync_health_profile
