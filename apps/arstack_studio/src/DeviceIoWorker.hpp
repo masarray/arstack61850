@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <QByteArray>
 #include <QObject>
 #include <QQueue>
 #include <QStringList>
@@ -21,8 +22,6 @@ public:
 
     [[nodiscard]] static constexpr int commandQueueCapacity() noexcept { return 64; }
     [[nodiscard]] static constexpr int presencePollIntervalMs() noexcept { return 750; }
-    [[nodiscard]] static constexpr int identityMaxAttempts() noexcept { return 3; }
-    [[nodiscard]] static constexpr int identityRetryIntervalMs() noexcept { return 650; }
     [[nodiscard]] static constexpr int heartbeatIntervalMs() noexcept { return 700; }
 
 public slots:
