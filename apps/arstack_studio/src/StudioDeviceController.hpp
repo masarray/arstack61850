@@ -16,6 +16,8 @@
 
 class StudioDeviceController : public DeviceController {
     Q_OBJECT
+    Q_PROPERTY(bool controlResponsive READ controlResponsive NOTIFY controlHealthChanged)
+    Q_PROPERTY(int missedHealthReplies READ missedHealthReplies NOTIFY controlHealthChanged)
 
 public:
     explicit StudioDeviceController(QObject* parent = nullptr) : DeviceController(parent) {
@@ -25,12 +27,30 @@ public:
             static_cast<void>(flushLiveCommands());
         });
 
+        // S6 health monitoring is intentionally separate from the 700 ms lease
+        // heartbeat. The heartbeat protects the firmware output failsafe; this
+        // lower-rate positive SHOW/structured-state exchange proves that the
+        // bidirectional control path is still responsive.
+        controlHealthTimer_.setSingleShot(false);
+        controlHealthTimer_.setInterval(controlHealthProbeIntervalMs());
+        connect(&controlHealthTimer_, &QTimer::timeout, this, [this] {
+            serviceControlHealth();
+        });
+
         connect(this, &DeviceController::connectedChanged, this, [this] {
-            if (!connected()) clearPendingLiveCommands();
+            if (!connected()) {
+                clearPendingLiveCommands();
+                resetControlHealth();
+            }
             ensureSessionHeartbeat();
         });
         connect(this, &DeviceController::deviceVerifiedChanged, this, [this] {
-            if (!deviceVerified()) clearPendingLiveCommands();
+            if (!deviceVerified()) {
+                clearPendingLiveCommands();
+                resetControlHealth();
+            } else {
+                establishControlHealth();
+            }
             ensureSessionHeartbeat();
         });
         connect(this, &DeviceController::deviceIdentityChanged, this, [this] {
@@ -38,9 +58,29 @@ public:
             // heartbeat timer/write ownership into DeviceIoWorker.
             ensureSessionHeartbeat();
         });
+        connect(this, &DeviceController::telemetryChanged, this, [this] {
+            // SHOW's machine-parsed state line emits telemetryChanged. Periodic
+            // firmware telemetry also counts as positive control-path evidence,
+            // so it naturally suppresses unnecessary health retries while RUNNING.
+            confirmControlHealth();
+        });
+        connect(this, &DeviceController::portsChanged, this, [this] {
+            // QSerialPort errors are still authoritative, but the worker's
+            // 750 ms enumeration snapshot closes the gap where Windows removes
+            // a COM device before Qt surfaces ResourceError/DeviceNotFoundError.
+            const QString activePort = portName().trimmed();
+            if (connected() && !activePort.isEmpty() && !ports().contains(activePort)) {
+                emit deviceMessage(QStringLiteral(
+                    "%1 disappeared from USB/COM enumeration. Releasing the stale session for automatic recovery.")
+                    .arg(activePort));
+                disconnectPort();
+            }
+        });
 
         if (auto* app = QCoreApplication::instance(); app != nullptr) {
             connect(app, &QCoreApplication::aboutToQuit, this, [this] {
+                controlHealthTimer_.stop();
+                healthProbeOutstanding_ = false;
                 setSessionHeartbeatEnabled(false);
                 clearPendingLiveCommands();
                 if (connected() && running()) {
@@ -55,9 +95,18 @@ public:
             deviceIdentity(), QStringLiteral(ARSTACK_STUDIO_VERSION));
     }
 
+    [[nodiscard]] bool controlResponsive() const noexcept { return controlResponsive_; }
+    [[nodiscard]] int missedHealthReplies() const noexcept { return missedHealthReplies_; }
+    [[nodiscard]] static constexpr int controlHealthProbeIntervalMs() noexcept { return 2000; }
+    [[nodiscard]] static constexpr int controlHealthMaxMisses() noexcept { return 2; }
+
     Q_INVOKABLE bool start() override {
         if (!deviceVerified()) {
             emit deviceMessage(QStringLiteral("Connect and verify the ARStack ESP32-P4 before Start."));
+            return false;
+        }
+        if (!controlResponsive_) {
+            emit deviceMessage(QStringLiteral("Device control health is degraded; wait for recovery before Start."));
             return false;
         }
         if (!currentFirmwareIdentitySeen()) {
@@ -145,6 +194,10 @@ public:
         return DeviceController::deployProfile(profile);
     }
 
+signals:
+    void controlHealthChanged();
+    void controlHealthFailed();
+
 private:
     struct PendingSignal {
         double magnitude{};
@@ -157,6 +210,72 @@ private:
     void ensureSessionHeartbeat() {
         setSessionHeartbeatEnabled(
             deviceVerified() && connected() && currentFirmwareIdentitySeen());
+    }
+
+    void establishControlHealth() {
+        healthProbeOutstanding_ = false;
+        missedHealthReplies_ = 0;
+        setControlResponsive(true);
+        if (!controlHealthTimer_.isActive()) controlHealthTimer_.start();
+    }
+
+    void resetControlHealth() {
+        controlHealthTimer_.stop();
+        healthProbeOutstanding_ = false;
+        const bool changed = controlResponsive_ || missedHealthReplies_ != 0;
+        controlResponsive_ = false;
+        missedHealthReplies_ = 0;
+        if (changed) emit controlHealthChanged();
+    }
+
+    void setControlResponsive(const bool value) {
+        if (controlResponsive_ == value) return;
+        controlResponsive_ = value;
+        emit controlHealthChanged();
+    }
+
+    void confirmControlHealth() {
+        if (!connected() || !deviceVerified()) return;
+        const bool changed = !controlResponsive_ || missedHealthReplies_ != 0;
+        healthProbeOutstanding_ = false;
+        controlResponsive_ = true;
+        missedHealthReplies_ = 0;
+        if (changed) emit controlHealthChanged();
+    }
+
+    void serviceControlHealth() {
+        if (!connected() || !deviceVerified()) {
+            resetControlHealth();
+            return;
+        }
+
+        // Profile deployment is an exclusive transport transaction. Health
+        // observation is deferred instead of interleaving another command or
+        // treating intentional queue exclusivity as a missed response.
+        if (profileDeploying()) return;
+
+        if (healthProbeOutstanding_) {
+            ++missedHealthReplies_;
+            setControlResponsive(false);
+            emit controlHealthChanged();
+            if (missedHealthReplies_ >= controlHealthMaxMisses()) {
+                controlHealthTimer_.stop();
+                healthProbeOutstanding_ = false;
+                emit deviceMessage(QStringLiteral(
+                    "Device control health timed out after bounded probes. Reconnecting without restarting SMV automatically."));
+                emit controlHealthFailed();
+                disconnectPort();
+                return;
+            }
+        }
+
+        // SHOW returns a structured state line parsed by DeviceController. The
+        // request is quiet so the diagnostics log is not polluted by outbound
+        // health traffic; any normal structured telemetry can satisfy the same
+        // positive-liveness proof before the next deadline.
+        if (sendQuietCommand(QStringLiteral("SHOW"))) {
+            healthProbeOutstanding_ = true;
+        }
     }
 
     void scheduleLiveFlush() {
@@ -203,8 +322,12 @@ private:
     }
 
     QTimer liveFlushTimer_;
+    QTimer controlHealthTimer_;
     QHash<QString, PendingSignal> pendingSignals_;
     double requestedFrequencyHz_{50.0};
     double pendingFrequencyHz_{50.0};
+    int missedHealthReplies_{0};
     bool frequencyPending_{false};
+    bool controlResponsive_{false};
+    bool healthProbeOutstanding_{false};
 };
