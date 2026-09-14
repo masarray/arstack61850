@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QStringList>
 #include <QTimer>
+#include <QVariantMap>
 
 class DeviceController;
 class FirmwareManager;
