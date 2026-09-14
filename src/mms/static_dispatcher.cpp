@@ -196,6 +196,79 @@ namespace {
     return names.size() + 1U;
 }
 
+// IEDScout performs deep per-domain directory walks and repeatedly supplies the
+// last identifier from the previous response as continueAfter. Do not first
+// materialize the complete directory into maximum_identifiers storage: a real
+// SCL model can contain thousands of MMS variables and would otherwise fail
+// before pagination is even applied. Keep only one bounded response page and
+// detect moreFollows from the next eligible object.
+[[nodiscard]] MmsStaticDispatchResult dispatch_domain_named_variable_page(
+    const MmsStaticObjectTable& objects,
+    const MmsStaticDispatchPolicy& policy,
+    const MmsConfirmedPduView& confirmed,
+    const MmsGetNameListRequestView& request,
+    const std::span<std::uint8_t> response) noexcept {
+    std::array<std::string_view, MmsServiceSpanCodec::maximum_identifiers> page{};
+    std::size_t page_count = 0U;
+    bool continuation_found = request.continue_after.empty();
+    bool emit = continuation_found;
+    bool more_follows = false;
+
+    for (const auto& object : objects.objects()) {
+        if (!span_equals(request.domain_id, object.domain) ||
+            (!policy.advertise_flattened_child_aliases &&
+             is_flattened_child_with_root(objects, object.domain, object.item))) {
+            continue;
+        }
+
+        if (!emit) {
+            if (span_equals(request.continue_after, object.item)) {
+                continuation_found = true;
+                emit = true;
+            }
+            continue;
+        }
+
+        if (page_count < policy.maximum_names_per_response) {
+            page[page_count++] = object.item;
+            continue;
+        }
+
+        more_follows = true;
+        break;
+    }
+
+    if (!continuation_found) {
+        return make_status(MmsStaticDispatchStatus::object_not_found, confirmed);
+    }
+
+    if (page_count == 0U) {
+        const std::span<const std::string_view> empty;
+        return make_encoded(
+            confirmed,
+            MmsServiceSpanCodec::encode_get_name_list_response_into(
+                confirmed.invoke_id, empty, false, response));
+    }
+
+    auto encoded_count = page_count;
+    while (encoded_count > 0U) {
+        const auto encoded = MmsServiceSpanCodec::encode_get_name_list_response_into(
+            confirmed.invoke_id,
+            std::span<const std::string_view>{page}.first(encoded_count),
+            more_follows || encoded_count < page_count,
+            response);
+        if (encoded.success()) {
+            return make_encoded(confirmed, encoded);
+        }
+        if (encoded.status != wire::EncodeStatus::buffer_too_small || encoded_count == 1U) {
+            return make_encoded(confirmed, encoded);
+        }
+        --encoded_count;
+    }
+
+    return make_status(MmsStaticDispatchStatus::backend_failure, confirmed);
+}
+
 [[nodiscard]] MmsStaticDispatchResult dispatch_get_name_list(
     const MmsStaticObjectTable& objects,
     const MmsStaticDataSetTable& data_sets,
@@ -205,6 +278,12 @@ namespace {
     MmsGetNameListRequestView request;
     if (!MmsServiceSpanCodec::try_decode_get_name_list_request(confirmed, request)) {
         return make_status(MmsStaticDispatchStatus::malformed_request, confirmed);
+    }
+
+    if (request.object_class == MmsNameListObjectClass::named_variable &&
+        request.scope == MmsNameScopeKind::domain_specific) {
+        return dispatch_domain_named_variable_page(
+            objects, policy, confirmed, request, response);
     }
 
     std::array<std::string_view, MmsServiceSpanCodec::maximum_identifiers> names{};
