@@ -824,6 +824,7 @@ ApplicationWindow {
                                 theme: studioTheme
                                 controller: root
                                 device: device
+                                session: workflowBar.session
                                 sourceModel: currentModel
                                 uiFont: root.uiFont
                                 monoFont: root.monoFont
@@ -840,6 +841,7 @@ ApplicationWindow {
                                 theme: studioTheme
                                 controller: root
                                 device: device
+                                session: workflowBar.session
                                 sourceModel: voltageModel
                                 uiFont: root.uiFont
                                 monoFont: root.monoFont
