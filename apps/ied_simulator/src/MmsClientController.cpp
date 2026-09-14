@@ -1,22 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "MmsClientController.hpp"
+#include "MmsSclClientProjection.hpp"
 
 #include "ariec61850/mms/data_codec.hpp"
 #include "ariec61850/mms/live_discovery.hpp"
 #include "ariec61850/mms/live_model.hpp"
 #include "ariec61850/mms/services.hpp"
+#include "ariec61850/scl/parser.hpp"
 
 #include <QMetaObject>
 #include <QPointer>
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <utility>
 
 namespace mms = ar::iec61850::mms;
+namespace scl = ar::iec61850::scl;
 
 namespace {
 std::span<const std::uint8_t> responsePayload(const mms::MmsConfirmedExchangeResult& exchange) {
@@ -112,11 +116,18 @@ mms::MmsDataValue parseWriteValue(
     }
     throw std::invalid_argument("Selected exact MMS type is not in the guarded scalar Write set.");
 }
+
+QString snapshotKey(const arstack::iedsim::SclSnapshotValue& value) {
+    return QString::fromStdString(value.domain) + QLatin1Char('\x1f') +
+        QString::fromStdString(value.item);
+}
 } // namespace
 
 struct MmsClientController::WorkerState final {
     std::unique_ptr<mms::MmsTcpLiveDiscoverySession> session;
     std::shared_ptr<mms::MmsLiveDiscoveryResult> discovery;
+    std::shared_ptr<scl::SclDocument> trustedScl;
+    std::shared_ptr<mms::MmsSclAssistedConnectResult> sclSnapshot;
 };
 
 MmsClientController::MmsClientController(QObject* parent)
@@ -145,6 +156,19 @@ void MmsClientController::setPort(const int value) {
     emit configurationChanged();
 }
 
+void MmsClientController::setTrustedSclPath(const QString& value) {
+    const auto normalized = value.trimmed();
+    if (trustedSclPath_ == normalized) return;
+    trustedSclPath_ = normalized;
+    if (trustedSclPath_.isEmpty()) {
+        appendDiagnostic(QStringLiteral(
+            "Trusted SCL source cleared; next Connect will use full live discovery."));
+    } else {
+        appendDiagnostic(QStringLiteral("Trusted SCL source armed · %1").arg(trustedSclPath_));
+    }
+    emit configurationChanged();
+}
+
 bool MmsClientController::connected() const noexcept { return state_ == State::connected; }
 
 bool MmsClientController::busy() const noexcept {
@@ -155,7 +179,9 @@ QString MmsClientController::stateText() const {
     switch (state_) {
     case State::disconnected: return QStringLiteral("Disconnected");
     case State::connecting: return QStringLiteral("Connecting");
-    case State::discovering: return QStringLiteral("Discovering");
+    case State::discovering: return trustedSclAvailable()
+        ? QStringLiteral("Synchronizing SCL")
+        : QStringLiteral("Discovering");
     case State::connected: return operationBusy_ ? QStringLiteral("Working") : QStringLiteral("Connected");
     case State::faulted: return QStringLiteral("Faulted");
     }
@@ -184,6 +210,7 @@ void MmsClientController::clearModelState() {
     treeModel_.clear();
     iedName_.clear();
     modelSummary_.clear();
+    modelSource_.clear();
     associationProfile_.clear();
     logicalDeviceCount_ = 0;
     logicalNodeCount_ = 0;
@@ -217,21 +244,37 @@ bool MmsClientController::connectToIed() {
     const auto generation = ++generation_;
     const auto requestedHost = host_.trimmed();
     const auto requestedPort = port_;
+    const auto requestedTrustedSclPath = trustedSclPath_.trimmed();
     state_ = State::connecting;
     operationBusy_ = false;
     lastError_.clear();
     clearModelState();
-    appendDiagnostic(QStringLiteral("Connect %1:%2 · generation %3")
-                         .arg(requestedHost).arg(requestedPort).arg(generation));
+    appendDiagnostic(QStringLiteral("Connect %1:%2 · generation %3 · model source %4")
+                         .arg(requestedHost)
+                         .arg(requestedPort)
+                         .arg(generation)
+                         .arg(requestedTrustedSclPath.isEmpty()
+                                  ? QStringLiteral("live discovery")
+                                  : QStringLiteral("trusted SCL")));
     emit stateChanged();
 
     const QPointer<MmsClientController> self{this};
     const auto worker = workerState_;
-    ioPool_.start([self, worker, stop, generation, requestedHost, requestedPort] {
+    ioPool_.start([
+        self, worker, stop, generation, requestedHost, requestedPort, requestedTrustedSclPath] {
         try {
             if (worker->session) worker->session->disconnect();
             worker->session.reset();
             worker->discovery.reset();
+            worker->trustedScl.reset();
+            worker->sclSnapshot.reset();
+
+            std::shared_ptr<scl::SclDocument> trustedScl;
+            if (!requestedTrustedSclPath.isEmpty()) {
+                scl::SclParser parser;
+                trustedScl = std::make_shared<scl::SclDocument>(
+                    parser.load(std::filesystem::path{requestedTrustedSclPath.toStdString()}));
+            }
 
             mms::MmsAssociationOptions associationOptions;
             associationOptions.connect_timeout = std::chrono::milliseconds{5'000};
@@ -243,12 +286,73 @@ bool MmsClientController::connectToIed() {
                 stop->get_token());
 
             if (self) {
-                QMetaObject::invokeMethod(self, [self, generation] {
+                const bool usingTrustedScl = trustedScl != nullptr;
+                QMetaObject::invokeMethod(self, [self, generation, usingTrustedScl] {
                     if (!self || self->generation_ != generation) return;
                     self->state_ = State::discovering;
-                    self->appendDiagnostic(QStringLiteral("Association accepted; discovering live model."));
+                    self->appendDiagnostic(usingTrustedScl
+                        ? QStringLiteral(
+                              "Association accepted; validating Domains and reading trusted SCL FC roots.")
+                        : QStringLiteral("Association accepted; discovering live model."));
                     emit self->stateChanged();
                 }, Qt::QueuedConnection);
+            }
+
+            const auto associationProfile =
+                QString::fromStdString(session->association().active_association_profile());
+
+            if (trustedScl) {
+                auto snapshot = std::make_shared<mms::MmsSclAssistedConnectResult>(
+                    session->synchronize_scl(*trustedScl, {}, {}, stop->get_token()));
+                auto model = std::make_shared<mms::MmsLiveModelDocument>(
+                    arstack::iedsim::build_scl_live_model(*trustedScl, *snapshot));
+                auto initialValues = std::make_shared<std::vector<arstack::iedsim::SclSnapshotValue>>(
+                    arstack::iedsim::collect_scl_snapshot_values(*trustedScl, *snapshot));
+
+                worker->discovery.reset();
+                worker->trustedScl = trustedScl;
+                worker->sclSnapshot = snapshot;
+                worker->session = std::move(session);
+
+                if (self) {
+                    QMetaObject::invokeMethod(
+                        self,
+                        [self, generation, model, snapshot, initialValues, associationProfile] {
+                            if (!self || self->generation_ != generation) return;
+                            self->treeModel_.applyDocument(*model);
+                            for (const auto& value : *initialValues) {
+                                self->treeModel_.applyReadValue(
+                                    snapshotKey(value), QString::fromStdString(value.display));
+                            }
+                            self->iedName_ = QString::fromStdString(model->identity.ied_name);
+                            self->modelSummary_ = QString::fromStdString(model->summary);
+                            self->modelSource_ = QStringLiteral("Trusted SCL + initial snapshot");
+                            self->associationProfile_ = associationProfile;
+                            self->logicalDeviceCount_ =
+                                static_cast<int>(model->coverage.logical_device_count);
+                            self->logicalNodeCount_ =
+                                static_cast<int>(model->coverage.logical_node_count);
+                            self->dataObjectCount_ =
+                                static_cast<int>(model->coverage.data_object_count);
+                            self->dataAttributeCount_ =
+                                static_cast<int>(model->coverage.data_attribute_count);
+                            self->state_ = State::connected;
+                            self->lastError_.clear();
+                            self->appendDiagnostic(
+                                QStringLiteral(
+                                    "SCL synchronization complete · %1 Domain(s) online · %2 Read(s) · "
+                                    "%3 mapped leaf value(s) · missing %4 · extra %5")
+                                    .arg(snapshot->domains.online.size())
+                                    .arg(snapshot->read_request_count)
+                                    .arg(snapshot->mapped_leaf_count)
+                                    .arg(snapshot->domains.missing.size())
+                                    .arg(snapshot->domains.extra.size()));
+                            emit self->modelChanged();
+                            emit self->stateChanged();
+                        },
+                        Qt::QueuedConnection);
+                }
+                return;
             }
 
             mms::MmsLiveDiscoveryOptions options;
@@ -259,8 +363,9 @@ bool MmsClientController::connectToIed() {
                 session->discover(options, stop->get_token()));
             auto model = std::make_shared<mms::MmsLiveModelDocument>(
                 mms::MmsLiveModelBuilder::build(*discovery));
-            const auto associationProfile = QString::fromStdString(session->association().active_association_profile());
             worker->discovery = discovery;
+            worker->trustedScl.reset();
+            worker->sclSnapshot.reset();
             worker->session = std::move(session);
 
             if (self) {
@@ -269,6 +374,7 @@ bool MmsClientController::connectToIed() {
                     self->treeModel_.applyDocument(*model);
                     self->iedName_ = QString::fromStdString(model->identity.ied_name);
                     self->modelSummary_ = QString::fromStdString(model->summary);
+                    self->modelSource_ = QStringLiteral("Live MMS discovery");
                     self->associationProfile_ = associationProfile;
                     self->logicalDeviceCount_ = static_cast<int>(model->coverage.logical_device_count);
                     self->logicalNodeCount_ = static_cast<int>(model->coverage.logical_node_count);
@@ -289,6 +395,8 @@ bool MmsClientController::connectToIed() {
             if (worker->session) worker->session->disconnect();
             worker->session.reset();
             worker->discovery.reset();
+            worker->trustedScl.reset();
+            worker->sclSnapshot.reset();
             if (self) {
                 const auto message = QString::fromUtf8(exception.what());
                 QMetaObject::invokeMethod(self, [self, generation, message] {
@@ -321,6 +429,8 @@ void MmsClientController::disconnectFromIed() {
         if (worker->session) worker->session->disconnect();
         worker->session.reset();
         worker->discovery.reset();
+        worker->trustedScl.reset();
+        worker->sclSnapshot.reset();
     });
 }
 
