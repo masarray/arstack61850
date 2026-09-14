@@ -2,10 +2,11 @@
 #pragma once
 
 #include <QObject>
-#include <QSerialPort>
 #include <QStringList>
-#include <QTimer>
+#include <QThread>
 #include <QVariantMap>
+
+class DeviceIoWorker;
 
 struct DeviceIdentity final {
     QString product;
@@ -73,6 +74,7 @@ public:
     Q_ENUM(IdentificationState)
 
     explicit DeviceController(QObject* parent = nullptr);
+    ~DeviceController() override;
 
     [[nodiscard]] QStringList ports() const;
     [[nodiscard]] QString recommendedPort() const;
@@ -111,6 +113,12 @@ public:
     [[nodiscard]] QString ptpSyncSent() const;
     [[nodiscard]] QString ptpTxFailures() const;
 
+    // S4 worker-boundary diagnostics used by the native regression gate.
+    [[nodiscard]] bool ioWorkerReady() const noexcept { return ioWorkerReady_; }
+    [[nodiscard]] bool ioWorkerAffinityValid() const noexcept { return ioWorkerAffinityValid_; }
+    [[nodiscard]] static constexpr int ioCommandQueueCapacity() noexcept { return 64; }
+    [[nodiscard]] static constexpr int ioPresencePollIntervalMs() noexcept { return 750; }
+
     // S1 semantic identity contract. The parser accepts the immediately
     // preceding ARStack v1 identity grammar without boot_id so an installed
     // pre-S1 image is recognized as legacy/updateable rather than "blank".
@@ -120,8 +128,9 @@ public:
         const DeviceIdentity& identity,
         const QString& expectedFirmwareVersion);
 
-    // S2 identification policy is deliberately small and deterministic. The
-    // same predicate drives production retry behavior and the CI regression.
+    // S2 identification policy remains the public deterministic contract. S4
+    // moves its timer/transport execution into DeviceIoWorker without changing
+    // the attempt count or cadence.
     [[nodiscard]] static constexpr int identityMaxAttempts() noexcept { return 3; }
     [[nodiscard]] static constexpr int identityRetryIntervalMs() noexcept { return 650; }
     [[nodiscard]] static constexpr bool identityRetryAllowed(const int attemptsSent) noexcept {
@@ -151,7 +160,6 @@ public:
 
     // A bounded supervisor timeout must be able to retire stale host-side
     // deployment state even when the serial peer sends no terminal response.
-    // The next PROFILE BEGIN safely replaces any firmware staging transaction.
     void abandonProfileDeployment() {
         if (!profileDeploying_) return;
         profileDeploying_ = false;
@@ -211,28 +219,23 @@ signals:
     void profileStateChanged();
     void ptpStateChanged();
     void deviceMessage(const QString& message);
+    void portReleased(const QString& portName);
 
 protected:
-    bool sendQuietCommand(const QString& command) {
-        if (!serial_.isOpen()) return false;
-        const QByteArray bytes = command.toUtf8() + '\n';
-        if (serial_.write(bytes) < 0) {
-            setError(serial_.errorString());
-            return false;
-        }
-        return true;
-    }
+    bool sendQuietCommand(const QString& command);
+    bool sendCommandBatch(const QStringList& commands, bool quiet = false);
+    void setSessionHeartbeatEnabled(bool enabled);
 
 private:
-    bool connectPortInternal(const QString& portName, bool automatic);
-    bool tryNextProbe();
-    bool sendIdentifyProbe();
     bool sendCommand(const QString& command);
+    void connectWorkerSignals();
+    void handlePortSnapshot(const QStringList& ports, const QString& recommendedPort, int highConfidenceCount);
+    void handlePortOpened(const QString& portName, bool automatic);
+    void handlePortClosed(const QString& portName);
     void applyIdentity(DeviceIdentity identity);
     void clearIdentity();
     void markDeviceVerified();
     void setIdentificationState(IdentificationState state);
-    void finishIdentificationTimeout();
     void setDiscoveryState(const QString& status, bool active);
     void setRunning(bool value);
     void setError(const QString& message);
@@ -243,14 +246,12 @@ private:
     static QString utf8Hex(const QString& text);
     static QString compactMac(const QString& text);
 
-    QSerialPort serial_;
-    QTimer verificationTimer_;
+    DeviceIoWorker* ioWorker_{nullptr};
+    QThread ioThread_;
     QStringList ports_;
     QString recommendedPort_;
-    QStringList probeQueue_;
     QString discoveryStatus_{QStringLiteral("Looking for an ARStack ESP32-P4 injector...")};
     DeviceIdentity identity_;
-    QByteArray pendingRx_;
     QString lastError_;
     QString logText_;
     QString fps_{QStringLiteral("—")};
@@ -259,17 +260,22 @@ private:
     QString signalGeneration_{QStringLiteral("—")};
     QString profileGeneration_{QStringLiteral("—")};
     QString lastIdentificationPort_;
+    QString portName_;
+    QString pendingConnectPort_;
     IdentificationState identificationState_{IdentificationState::Idle};
     int identifyAttempts_{0};
+    int highConfidenceCount_{0};
     bool running_{false};
+    bool connected_{false};
     bool discovering_{false};
     bool deviceVerified_{false};
-    bool automaticConnection_{false};
-    bool genericProbeActive_{false};
     bool profileArmed_{false};
     bool profileDeploying_{false};
     bool ptpAvailable_{false};
     bool ptpRunning_{false};
+    bool ioWorkerReady_{false};
+    bool ioWorkerAffinityValid_{false};
+    bool pendingAutoDetect_{false};
     double signalFrequencyHz_{50.0};
     QString ptpStatus_{QStringLiteral("Waiting for device")};
     QString ptpDomain_{QStringLiteral("-")};
