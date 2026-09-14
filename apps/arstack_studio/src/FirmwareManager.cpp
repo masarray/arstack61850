@@ -2,6 +2,8 @@
 
 #include "FirmwareManager.hpp"
 
+#include "FirmwareWorker.hpp"
+
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -10,6 +12,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMetaObject>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
 
@@ -23,16 +26,6 @@ constexpr auto kPreV3Policy = "pre-v3";
 constexpr qsizetype kMaxOperationOutput = 65536;
 constexpr qsizetype kTrimmedOperationOutput = 49152;
 
-// QProcess::started is the authoritative launch signal. The launch deadline is
-// only a bounded backstop for machines where Windows Defender / endpoint
-// security performs a cold scan of the bundled executable. The previous 2.5 s
-// deadline was short enough to create false failures on real Windows systems.
-constexpr int kLaunchTimeoutMs = 15000;
-constexpr int kProbeTimeoutMs = 30000;
-constexpr int kFlashTimeoutMs = 180000;
-constexpr int kResetTimeoutMs = 20000;
-constexpr int kShutdownWaitMs = 1500;
-
 QString normalizedHash(const QString& text) {
     QString hash = text.trimmed().toLower();
     hash.remove(QLatin1Char(' '));
@@ -41,65 +34,79 @@ QString normalizedHash(const QString& text) {
 } // namespace
 
 FirmwareManager::FirmwareManager(QObject* parent) : QObject(parent) {
-    process_.setProcessChannelMode(QProcess::SeparateChannels);
-
-    startupTimer_.setSingleShot(true);
-    connect(&startupTimer_, &QTimer::timeout, this, [this] {
-        if (shuttingDown_ || !busy_ || operation_ == Operation::none) return;
-        // Never classify a running child as a launch failure. If started() was
-        // delayed in the event queue, the operation deadline owns it instead.
-        if (process_.state() != QProcess::Starting) return;
-
-        const Operation failedOperation = operation_;
-        operation_ = Operation::none;
-        busy_ = false;
-        flashProgress_ = -1;
-        operationTimer_.stop();
-        process_.kill();
-
-        if (failedOperation == Operation::reset) {
-            bootloaderHelpNeeded_ = false;
-            setStatus(QStringLiteral("Firmware was written, but the reset tool did not launch. Press RESET once or reconnect USB; Studio will verify the board."));
-            emit stateChanged();
-            emit installationFinished(false);
-            return;
-        }
-
-        bootloaderHelpNeeded_ = false;
-        fail(QStringLiteral("Bundled firmware tool did not launch within 15 seconds. Windows security may be delaying or blocking it."));
-        emit stateChanged();
-        emit operationFailed(status_, false);
-    });
-
-    operationTimer_.setSingleShot(true);
-    connect(&operationTimer_, &QTimer::timeout, this, &FirmwareManager::handleOperationTimeout);
-
-    connect(&process_, &QProcess::started, this, [this] {
-        startupTimer_.stop();
-        if (shuttingDown_ || operation_ == Operation::none) return;
-        startOperationDeadline(operation_);
-    });
-    connect(&process_, &QProcess::errorOccurred,
-            this, &FirmwareManager::handleProcessError);
-    connect(&process_, &QProcess::readyReadStandardOutput, this, [this] {
-        const QString text = QString::fromUtf8(process_.readAllStandardOutput());
-        appendOperationOutput(text);
-        updateProgressFromOutput(text);
-        appendLog(text);
-    });
-    connect(&process_, &QProcess::readyReadStandardError, this, [this] {
-        const QString text = QString::fromUtf8(process_.readAllStandardError());
-        appendOperationOutput(text);
-        updateProgressFromOutput(text);
-        appendLog(text);
-    });
-    connect(&process_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
-            this, &FirmwareManager::finishOperation);
+    worker_ = new FirmwareWorker;
+    worker_->moveToThread(&workerThread_);
+    workerThread_.setObjectName(QStringLiteral("ARStackFirmwareWorker"));
+    connect(&workerThread_, &QThread::started, worker_, &FirmwareWorker::initialize);
+    connect(&workerThread_, &QThread::finished, worker_, &QObject::deleteLater);
+    connectWorkerSignals();
+    workerThread_.start();
     refreshBundle();
 }
 
 FirmwareManager::~FirmwareManager() {
     shutdown();
+}
+
+void FirmwareManager::connectWorkerSignals() {
+    connect(worker_, &FirmwareWorker::ready, this, [this](const bool affinityValid) {
+        workerReady_ = true;
+        workerAffinityValid_ = affinityValid;
+        emit stateChanged();
+    });
+
+    connect(worker_, &FirmwareWorker::outputReady, this,
+            [this](const quint64 generation, const QString& text) {
+        if (!workerEventIsCurrent(activeOperationGeneration_, generation)) return;
+        appendOperationOutput(text);
+        updateProgressFromOutput(text);
+        appendLog(text);
+    });
+
+    connect(worker_, &FirmwareWorker::operationFinished, this,
+            [this](const quint64 generation, const int exitCode, const bool normalExit) {
+        if (!workerEventIsCurrent(activeOperationGeneration_, generation)) return;
+        finishOperation(exitCode, normalExit);
+    });
+
+    connect(worker_, &FirmwareWorker::operationRejected, this,
+            [this](const quint64 generation, const QString& message) {
+        if (!workerEventIsCurrent(activeOperationGeneration_, generation)) return;
+        handleOperationRejected(message);
+    });
+
+    connect(worker_, &FirmwareWorker::operationLaunchFailed, this,
+            [this](const quint64 generation, const QString& message) {
+        if (!workerEventIsCurrent(activeOperationGeneration_, generation)) return;
+        handleLaunchFailure(message, false);
+    });
+
+    connect(worker_, &FirmwareWorker::operationLaunchTimedOut, this,
+            [this](const quint64 generation) {
+        if (!workerEventIsCurrent(activeOperationGeneration_, generation)) return;
+        handleLaunchFailure({}, true);
+    });
+
+    connect(worker_, &FirmwareWorker::operationTimedOut, this,
+            [this](const quint64 generation) {
+        if (!workerEventIsCurrent(activeOperationGeneration_, generation)) return;
+        handleOperationTimeout();
+    });
+
+    connect(worker_, &FirmwareWorker::operationCancelled, this,
+            [this](const quint64 generation) {
+        if (!workerEventIsCurrent(activeOperationGeneration_, generation)) return;
+        const Operation cancelledOperation = operation_;
+        operation_ = Operation::none;
+        activeOperationGeneration_ = 0;
+        cancelRequested_ = false;
+        busy_ = false;
+        flashProgress_ = -1;
+        setStatus(QStringLiteral("Firmware operation cancelled."));
+        emit stateChanged();
+        if (cancelledOperation == Operation::reset) emit installationFinished(false);
+        else emit operationFailed(status_, false);
+    });
 }
 
 bool FirmwareManager::parseEsp32P4Revision(const QString& output, int& major, int& minor) {
@@ -248,6 +255,10 @@ bool FirmwareManager::probeTarget(const QString& portName) {
         fail(QStringLiteral("Select the ESP32-P4 USB serial port first."));
         return false;
     }
+    if (sessionGeneration_ == 0) {
+        fail(QStringLiteral("Firmware operation has no active supervisor generation."));
+        return false;
+    }
 
     selectedPort_ = port;
     targetVerified_ = false;
@@ -275,6 +286,10 @@ bool FirmwareManager::installFirmware(const QString& portName) {
         fail(QStringLiteral("Check and verify a supported ESP32-P4 pre-v3 board before flashing."));
         return false;
     }
+    if (sessionGeneration_ == 0) {
+        fail(QStringLiteral("Firmware operation has no active supervisor generation."));
+        return false;
+    }
 
     bootloaderHelpNeeded_ = false;
     flashProgress_ = 0;
@@ -292,43 +307,34 @@ bool FirmwareManager::installFirmware(const QString& portName) {
 }
 
 void FirmwareManager::cancel() {
-    if (!busy_ || shuttingDown_) return;
+    if (!busy_ || shuttingDown_ || worker_ == nullptr || activeOperationGeneration_ == 0) return;
     cancelRequested_ = true;
-    startupTimer_.stop();
-    operationTimer_.stop();
     setStatus(QStringLiteral("Cancelling firmware operation..."));
     emit stateChanged();
-
-    if (process_.state() == QProcess::NotRunning) {
-        const Operation cancelledOperation = operation_;
-        cancelRequested_ = false;
-        operation_ = Operation::none;
-        busy_ = false;
-        flashProgress_ = -1;
-        setStatus(QStringLiteral("Firmware operation cancelled."));
-        emit stateChanged();
-        if (cancelledOperation == Operation::reset) emit installationFinished(false);
-        else emit operationFailed(status_, false);
-        return;
-    }
-    process_.kill();
+    const quint64 generation = activeOperationGeneration_;
+    QMetaObject::invokeMethod(
+        worker_,
+        [worker = worker_, generation] { worker->cancel(generation); },
+        Qt::QueuedConnection);
 }
 
 void FirmwareManager::shutdown() {
     if (shuttingDown_) return;
     shuttingDown_ = true;
-    startupTimer_.stop();
-    operationTimer_.stop();
-    cancelRequested_ = true;
     operation_ = Operation::none;
+    activeOperationGeneration_ = 0;
     busy_ = false;
+    cancelRequested_ = true;
 
-    if (process_.state() != QProcess::NotRunning) {
-        QObject::disconnect(&process_, nullptr, this, nullptr);
-        process_.kill();
-        static_cast<void>(process_.waitForFinished(kShutdownWaitMs));
+    if (worker_ != nullptr && workerThread_.isRunning()) {
+        if (QThread::currentThread() == &workerThread_) {
+            worker_->shutdown();
+        } else {
+            QMetaObject::invokeMethod(worker_, &FirmwareWorker::shutdown, Qt::BlockingQueuedConnection);
+        }
+        workerThread_.quit();
+        workerThread_.wait();
     }
-    process_.close();
 }
 
 void FirmwareManager::clearLog() {
@@ -338,81 +344,108 @@ void FirmwareManager::clearLog() {
 }
 
 bool FirmwareManager::startEspflash(const QStringList& arguments, const Operation operation) {
-    if (shuttingDown_) return false;
-    if (process_.state() != QProcess::NotRunning) {
-        fail(QStringLiteral("Another firmware process is already running."));
+    if (shuttingDown_ || worker_ == nullptr || !workerThread_.isRunning() || sessionGeneration_ == 0) {
+        fail(QStringLiteral("Firmware worker is unavailable."));
+        busy_ = false;
         return false;
     }
 
     operation_ = operation;
+    activeOperationGeneration_ = sessionGeneration_;
     operationOutput_.clear();
-    operationTimer_.stop();
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("ESPFLASH_PORT"), selectedPort_);
     environment.insert(QStringLiteral("ESPFLASH_SKIP_UPDATE_CHECK"), QStringLiteral("true"));
-    process_.setProcessEnvironment(environment);
-    process_.setProgram(flasherPath());
-    process_.setArguments(arguments);
     appendLog(QStringLiteral("$ ESPFLASH_PORT=%1 espflash %2\n")
         .arg(selectedPort_, arguments.join(QLatin1Char(' '))));
 
-    process_.start();
-    startupTimer_.start(kLaunchTimeoutMs);
+    const quint64 generation = activeOperationGeneration_;
+    const QString program = flasherPath();
+    const int timeout = operationTimeoutMs(operation);
+    QMetaObject::invokeMethod(
+        worker_,
+        [worker = worker_, generation, program, arguments, environment, timeout] {
+            worker->startOperation(
+                generation,
+                program,
+                arguments,
+                environment,
+                FirmwareManager::launchTimeoutMs(),
+                timeout);
+        },
+        Qt::QueuedConnection);
     return true;
 }
 
-void FirmwareManager::startOperationDeadline(const Operation operation) {
-    int timeoutMs = 0;
+int FirmwareManager::operationTimeoutMs(const Operation operation) const noexcept {
     switch (operation) {
     case Operation::probe:
-        timeoutMs = kProbeTimeoutMs;
-        break;
+        return probeTimeoutMs();
     case Operation::flash:
-        timeoutMs = kFlashTimeoutMs;
-        break;
+        return flashTimeoutMs();
     case Operation::reset:
-        timeoutMs = kResetTimeoutMs;
-        break;
+        return resetTimeoutMs();
     case Operation::none:
-        return;
+        return 1;
     }
-    operationTimer_.start(timeoutMs);
+    return 1;
 }
 
-void FirmwareManager::handleProcessError(const QProcess::ProcessError error) {
-    if (shuttingDown_ || error != QProcess::FailedToStart || operation_ == Operation::none) return;
-
-    startupTimer_.stop();
-    operationTimer_.stop();
-    const Operation failedOperation = operation_;
+void FirmwareManager::handleOperationRejected(const QString& message) {
+    const Operation rejected = operation_;
     operation_ = Operation::none;
+    activeOperationGeneration_ = 0;
     busy_ = false;
     flashProgress_ = -1;
     cancelRequested_ = false;
 
-    if (failedOperation == Operation::reset) {
+    if (rejected == Operation::reset) {
         bootloaderHelpNeeded_ = false;
-        setStatus(QStringLiteral("Firmware was written, but the reset tool could not launch. Press RESET once or reconnect USB; Studio will verify the board."));
+        setStatus(QStringLiteral("Firmware was written, but the reset tool could not start. Press RESET once or reconnect USB; Studio will verify the board."));
         emit stateChanged();
         emit installationFinished(false);
         return;
     }
 
     bootloaderHelpNeeded_ = false;
-    fail(QStringLiteral("Unable to launch bundled firmware tool: %1").arg(process_.errorString()));
+    fail(message.isEmpty() ? QStringLiteral("Firmware worker rejected the operation.") : message);
+    emit stateChanged();
+    emit operationFailed(status_, false);
+}
+
+void FirmwareManager::handleLaunchFailure(const QString& message, const bool timeout) {
+    const Operation failedOperation = operation_;
+    operation_ = Operation::none;
+    activeOperationGeneration_ = 0;
+    busy_ = false;
+    flashProgress_ = -1;
+    cancelRequested_ = false;
+
+    if (failedOperation == Operation::reset) {
+        bootloaderHelpNeeded_ = false;
+        setStatus(timeout
+            ? QStringLiteral("Firmware was written, but the reset tool did not launch. Press RESET once or reconnect USB; Studio will verify the board.")
+            : QStringLiteral("Firmware was written, but the reset tool could not launch. Press RESET once or reconnect USB; Studio will verify the board."));
+        emit stateChanged();
+        emit installationFinished(false);
+        return;
+    }
+
+    bootloaderHelpNeeded_ = false;
+    fail(timeout
+        ? QStringLiteral("Bundled firmware tool did not launch within 15 seconds. Windows security may be delaying or blocking it.")
+        : QStringLiteral("Unable to launch bundled firmware tool: %1").arg(message));
     emit stateChanged();
     emit operationFailed(status_, false);
 }
 
 void FirmwareManager::handleOperationTimeout() {
-    if (shuttingDown_ || !busy_ || operation_ == Operation::none) return;
-
     const Operation timedOut = operation_;
     operation_ = Operation::none;
+    activeOperationGeneration_ = 0;
     busy_ = false;
     flashProgress_ = -1;
-    startupTimer_.stop();
-    process_.kill();
+    cancelRequested_ = false;
 
     if (timedOut == Operation::reset) {
         bootloaderHelpNeeded_ = false;
@@ -432,11 +465,10 @@ void FirmwareManager::handleOperationTimeout() {
     emit operationFailed(status_, true);
 }
 
-void FirmwareManager::finishOperation(const int exitCode, const QProcess::ExitStatus exitStatus) {
-    startupTimer_.stop();
-    operationTimer_.stop();
+void FirmwareManager::finishOperation(const int exitCode, const bool normalExit) {
     const Operation completed = operation_;
     operation_ = Operation::none;
+    activeOperationGeneration_ = 0;
     if (completed == Operation::none || shuttingDown_) return;
 
     if (cancelRequested_) {
@@ -450,7 +482,7 @@ void FirmwareManager::finishOperation(const int exitCode, const QProcess::ExitSt
         return;
     }
 
-    const bool success = exitStatus == QProcess::NormalExit && exitCode == 0;
+    const bool success = normalExit && exitCode == 0;
 
     if (completed == Operation::probe) {
         busy_ = false;
