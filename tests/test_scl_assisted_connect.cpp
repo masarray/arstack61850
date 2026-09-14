@@ -138,7 +138,8 @@ void queue_handshake(ScriptedTransport& transport) {
     }
 
     // Two expected leaves under one FC root. The scripted response intentionally
-    // returns one child only, proving that mapping fails closed with no partial leaf update.
+    // returns one DA child only under Pos, proving mapping fails closed with no
+    // partial leaf update.
     document.model_entries.push_back(
         leaf("XCBR", "1", "ST", "Pos", "stVal", entry_index++));
     document.model_entries.push_back(
@@ -147,8 +148,10 @@ void queue_handshake(ScriptedTransport& transport) {
 }
 
 [[nodiscard]] mms::MmsReadAccessResult successful_root(const bool value) {
+    // FC root -> DataObject structure -> DataAttribute scalar.
     return {
-        mms::MmsDataValue::structure({mms::MmsDataValue::boolean(value)}),
+        mms::MmsDataValue::structure({
+            mms::MmsDataValue::structure({mms::MmsDataValue::boolean(value)})}),
         std::nullopt};
 }
 
@@ -173,6 +176,7 @@ void queue_scl_assisted_responses(ScriptedTransport& transport) {
 
     mms::MmsReadResponse third;
     third.invoke_id = 4U;
+    // XCBR1$ST expects Pos.{stVal,q}; this contains only Pos.stVal.
     third.results.push_back(successful_root(true));
     transport.push_receive(wrap_application(
         mms::MmsServiceCodec::encode_read_response_p_data(third)));
