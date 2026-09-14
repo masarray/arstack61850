@@ -2,9 +2,10 @@
 #pragma once
 
 #include <QObject>
-#include <QProcess>
 #include <QString>
-#include <QTimer>
+#include <QThread>
+
+class FirmwareWorker;
 
 class FirmwareManager : public QObject {
     Q_OBJECT
@@ -41,10 +42,24 @@ public:
     [[nodiscard]] QString status() const { return status_; }
     [[nodiscard]] QString bundleStatus() const { return bundleStatus_; }
     [[nodiscard]] QString logText() const { return logText_; }
+    [[nodiscard]] quint64 sessionGeneration() const noexcept { return sessionGeneration_; }
+    [[nodiscard]] bool workerReady() const noexcept { return workerReady_; }
+    [[nodiscard]] bool workerAffinityValid() const noexcept { return workerAffinityValid_; }
 
     [[nodiscard]] static bool parseEsp32P4Revision(const QString& output, int& major, int& minor);
     [[nodiscard]] static bool supportsEsp32P4Revision(int major, int minor) noexcept;
     [[nodiscard]] static int parseFlashProgress(const QString& output);
+    [[nodiscard]] static constexpr int launchTimeoutMs() noexcept { return 15000; }
+    [[nodiscard]] static constexpr int probeTimeoutMs() noexcept { return 30000; }
+    [[nodiscard]] static constexpr int flashTimeoutMs() noexcept { return 180000; }
+    [[nodiscard]] static constexpr int resetTimeoutMs() noexcept { return 20000; }
+    [[nodiscard]] static constexpr bool workerEventIsCurrent(
+        const quint64 activeGeneration,
+        const quint64 eventGeneration) noexcept {
+        return activeGeneration != 0 && eventGeneration == activeGeneration;
+    }
+
+    void setSessionGeneration(quint64 generation) noexcept { sessionGeneration_ = generation; }
 
     Q_INVOKABLE void refreshBundle();
     Q_INVOKABLE bool probeTarget(const QString& portName);
@@ -66,19 +81,20 @@ private:
     [[nodiscard]] QString flasherPath() const;
     bool loadManifest();
     bool startEspflash(const QStringList& arguments, Operation operation);
-    void startOperationDeadline(Operation operation);
-    void finishOperation(int exitCode, QProcess::ExitStatus exitStatus);
-    void handleProcessError(QProcess::ProcessError error);
+    int operationTimeoutMs(Operation operation) const noexcept;
+    void connectWorkerSignals();
+    void finishOperation(int exitCode, bool normalExit);
+    void handleLaunchFailure(const QString& message, bool timeout);
     void handleOperationTimeout();
+    void handleOperationRejected(const QString& message);
     void updateProgressFromOutput(const QString& text);
     void appendOperationOutput(const QString& text);
     void appendLog(const QString& text);
     void setStatus(const QString& text);
     void fail(const QString& text);
 
-    QProcess process_;
-    QTimer startupTimer_;
-    QTimer operationTimer_;
+    FirmwareWorker* worker_{nullptr};
+    QThread workerThread_;
     Operation operation_{Operation::none};
     QString operationOutput_;
     QString selectedPort_;
@@ -91,6 +107,8 @@ private:
     QString status_{QStringLiteral("Firmware setup ready")};
     QString bundleStatus_{QStringLiteral("Checking firmware package...")};
     QString logText_;
+    quint64 sessionGeneration_{1};
+    quint64 activeOperationGeneration_{0};
     int flashProgress_{-1};
     bool bundleReady_{false};
     bool flasherAvailable_{false};
@@ -99,4 +117,6 @@ private:
     bool bootloaderHelpNeeded_{false};
     bool cancelRequested_{false};
     bool shuttingDown_{false};
+    bool workerReady_{false};
+    bool workerAffinityValid_{false};
 };
