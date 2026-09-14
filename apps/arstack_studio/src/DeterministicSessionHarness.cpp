@@ -74,8 +74,6 @@ private:
             session.setProfiles(&profiles);
             session.setFirmware(&firmware);
             session.setDevice(&device);
-            session.started_ = true;
-            quiesce(session, device);
         }
 
         ~Fixture() {
