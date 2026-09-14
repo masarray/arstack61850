@@ -10,27 +10,35 @@ $exe = (Resolve-Path $Executable).Path
 $lockPath = Join-Path ([IO.Path]::GetTempPath()) 'arstack-studio-single-instance.lock'
 Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
 
+function Start-TrackedProcess([string]$FilePath, [string]$Arguments = '') {
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $FilePath
+    $startInfo.Arguments = $Arguments
+    $startInfo.UseShellExecute = $false
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) {
+        throw "Failed to start $FilePath"
+    }
+    return $process
+}
+
 function Wait-ForExitBounded([System.Diagnostics.Process]$Process, [int]$TimeoutMs, [string]$Label) {
     if (-not $Process.WaitForExit($TimeoutMs)) {
         try { $Process.Kill() } catch {}
         try { $Process.WaitForExit(2000) | Out-Null } catch {}
         throw "$Label timed out after $TimeoutMs ms."
     }
-
-    # PowerShell/.NET may leave ExitCode unmaterialized after the timed overload,
-    # especially for quickly exiting GUI-subsystem processes. Complete the wait
-    # and refresh the process snapshot before callers inspect ExitCode.
     $Process.WaitForExit()
-    $Process.Refresh()
 }
 
 $first = $null
 try {
-    $first = Start-Process -FilePath $exe -PassThru
+    $first = Start-TrackedProcess $exe
     $deadline = [DateTime]::UtcNow.AddMilliseconds($ReadyTimeoutMs)
     while (-not (Test-Path $lockPath) -and [DateTime]::UtcNow -lt $deadline) {
         if ($first.HasExited) {
-            $first.Refresh()
             throw "Primary Studio instance exited before acquiring its process lock (exit=$($first.ExitCode))."
         }
         Start-Sleep -Milliseconds 100
@@ -39,7 +47,7 @@ try {
         throw 'Primary Studio instance did not publish the single-instance lock in time.'
     }
 
-    $second = Start-Process -FilePath $exe -PassThru
+    $second = Start-TrackedProcess $exe
     Wait-ForExitBounded $second $ExitTimeoutMs 'Second Studio instance'
     if ($second.ExitCode -ne 23) {
         throw "Second Studio instance was not blocked by ownership lock; exit=$($second.ExitCode), expected=23."
@@ -51,7 +59,7 @@ try {
     Wait-ForExitBounded $first $ExitTimeoutMs 'Primary Studio hard-stop'
     $first = $null
 
-    $third = Start-Process -FilePath $exe -ArgumentList @('--check-app-lifecycle') -PassThru
+    $third = Start-TrackedProcess $exe '--check-app-lifecycle'
     Wait-ForExitBounded $third $ExitTimeoutMs 'Post-crash Studio lifecycle'
     if ($third.ExitCode -ne 0) {
         throw "Studio did not reclaim the stale ownership lock after hard-stop; exit=$($third.ExitCode)."
@@ -61,12 +69,7 @@ try {
 } finally {
     if ($null -ne $first -and -not $first.HasExited) {
         try { $first.Kill() } catch {}
-        try {
-            if ($first.WaitForExit(2000)) {
-                $first.WaitForExit()
-                $first.Refresh()
-            }
-        } catch {}
+        try { $first.WaitForExit(2000) | Out-Null } catch {}
     }
     Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
 }
