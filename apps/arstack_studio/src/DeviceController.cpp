@@ -89,22 +89,17 @@ DeviceController::DeviceController(QObject* parent) : QObject(parent) {
     });
 
     verificationTimer_.setSingleShot(true);
-    verificationTimer_.setInterval(2600);
+    verificationTimer_.setInterval(identityRetryIntervalMs());
     connect(&verificationTimer_, &QTimer::timeout, this, [this] {
-        if (!serial_.isOpen() || deviceVerified_) return;
-        const bool wasAutomatic = automaticConnection_;
-        const bool continueProbing = wasAutomatic && genericProbeActive_ && !probeQueue_.isEmpty();
-        disconnectPort();
-        if (continueProbing) {
-            QTimer::singleShot(0, this, [this] { static_cast<void>(tryNextProbe()); });
+        if (!serial_.isOpen() || deviceVerified_ ||
+            identificationState_ != IdentificationState::Identifying) {
             return;
         }
-        genericProbeActive_ = false;
-        setDiscoveryState(
-            wasAutomatic
-                ? QStringLiteral("A connected serial device did not identify as an ARStack injector.")
-                : QStringLiteral("The selected serial port did not answer as an ARStack injector."),
-            false);
+        if (identityRetryAllowed(identifyAttempts_) && sendIdentifyProbe()) {
+            verificationTimer_.start();
+            return;
+        }
+        finishIdentificationTimeout();
     });
 
     refreshPorts();
@@ -115,6 +110,8 @@ QString DeviceController::recommendedPort() const { return recommendedPort_; }
 QString DeviceController::discoveryStatus() const { return discoveryStatus_; }
 bool DeviceController::discovering() const noexcept { return discovering_; }
 bool DeviceController::deviceVerified() const noexcept { return deviceVerified_; }
+DeviceController::IdentificationState DeviceController::identificationState() const noexcept { return identificationState_; }
+int DeviceController::identifyAttempts() const noexcept { return identifyAttempts_; }
 QString DeviceController::deviceProduct() const { return identity_.product; }
 QString DeviceController::deviceTarget() const { return identity_.target; }
 QString DeviceController::deviceId() const { return identity_.deviceId; }
@@ -213,11 +210,23 @@ void DeviceController::refreshPorts() {
     const bool recommendationChanged = recommended != recommendedPort_;
     ports_ = std::move(discovered);
     recommendedPort_ = recommended;
+
+    if (identificationState_ == IdentificationState::Unidentified &&
+        !lastIdentificationPort_.isEmpty() && !ports_.contains(lastIdentificationPort_)) {
+        lastIdentificationPort_.clear();
+        identifyAttempts_ = 0;
+        setIdentificationState(IdentificationState::Idle);
+    }
+
     if (portsDidChange) emit portsChanged();
     if (recommendationChanged) emit discoveryChanged();
 
     if (!serial_.isOpen() && !discovering_) {
-        if (!recommendedPort_.isEmpty()) {
+        if (identificationState_ == IdentificationState::Unidentified) {
+            setDiscoveryState(
+                QStringLiteral("ARStack identity was not received. Retry identification or choose firmware setup explicitly."),
+                false);
+        } else if (!recommendedPort_.isEmpty()) {
             setDiscoveryState(QStringLiteral("Compatible ESP32-P4 USB device found."), false);
         } else if (highConfidence.size() > 1) {
             setDiscoveryState(QStringLiteral("Multiple Espressif devices found; choose the intended injector."), false);
@@ -260,7 +269,8 @@ bool DeviceController::tryNextProbe() {
 }
 
 bool DeviceController::connectPortInternal(const QString& portName, const bool automatic) {
-    if (portName.trimmed().isEmpty()) {
+    const QString requestedPort = portName.trimmed();
+    if (requestedPort.isEmpty()) {
         setError(QStringLiteral("Select a serial port first."));
         return false;
     }
@@ -272,10 +282,12 @@ bool DeviceController::connectPortInternal(const QString& portName, const bool a
     }
     automaticConnection_ = automatic;
     deviceVerified_ = false;
+    identifyAttempts_ = 0;
+    lastIdentificationPort_ = requestedPort;
     clearIdentity();
     setDiscoveryState(QStringLiteral("Verifying ARStack injector identity..."), true);
 
-    serial_.setPortName(portName.trimmed());
+    serial_.setPortName(requestedPort);
     serial_.setBaudRate(kBaudRate);
     serial_.setDataBits(QSerialPort::Data8);
     serial_.setParity(QSerialPort::NoParity);
@@ -284,9 +296,10 @@ bool DeviceController::connectPortInternal(const QString& portName, const bool a
 
     if (!serial_.open(QIODevice::ReadWrite)) {
         automaticConnection_ = false;
+        setIdentificationState(IdentificationState::Idle);
         if (!automatic) {
             setDiscoveryState(QStringLiteral("The selected serial port could not be opened."), false);
-            setError(QStringLiteral("Cannot open %1: %2").arg(portName, serial_.errorString()));
+            setError(QStringLiteral("Cannot open %1: %2").arg(requestedPort, serial_.errorString()));
         }
         return false;
     }
@@ -298,15 +311,17 @@ bool DeviceController::connectPortInternal(const QString& portName, const bool a
     profileDeploying_ = false;
     resetTelemetry();
     appendLog(QStringLiteral("•"), QStringLiteral("Connected %1 at 115200 8N1").arg(serial_.portName()));
+    setIdentificationState(IdentificationState::Identifying);
     emit connectedChanged();
     emit runningChanged();
     emit lastErrorChanged();
     emit profileStateChanged();
-    verificationTimer_.setInterval(genericProbeActive_ ? 1100 : 2600);
+
+    if (!sendIdentifyProbe()) {
+        finishIdentificationTimeout();
+        return false;
+    }
     verificationTimer_.start();
-    static_cast<void>(sendCommand(QStringLiteral("IDENTIFY")));
-    static_cast<void>(sendCommand(QStringLiteral("SHOW")));
-    static_cast<void>(sendCommand(QStringLiteral("PROFILE SHOW")));
     return true;
 }
 
@@ -330,6 +345,9 @@ void DeviceController::disconnectPort() {
     clearIdentity();
     discovering_ = false;
     automaticConnection_ = false;
+    identifyAttempts_ = 0;
+    lastIdentificationPort_.clear();
+    setIdentificationState(IdentificationState::Idle);
     ptpAvailable_ = false;
     ptpRunning_ = false;
     ptpStatus_ = QStringLiteral("Waiting for device");
@@ -537,6 +555,18 @@ void DeviceController::clearLog() {
     emit logTextChanged();
 }
 
+bool DeviceController::sendIdentifyProbe() {
+    if (!serial_.isOpen() || !identityRetryAllowed(identifyAttempts_)) return false;
+    ++identifyAttempts_;
+    emit identificationStateChanged();
+    setDiscoveryState(
+        QStringLiteral("Verifying ARStack semantic identity… attempt %1/%2")
+            .arg(identifyAttempts_)
+            .arg(identityMaxAttempts()),
+        true);
+    return sendCommand(QStringLiteral("IDENTIFY"));
+}
+
 bool DeviceController::sendCommand(const QString& command) {
     if (!serial_.isOpen()) {
         setError(QStringLiteral("Device is not connected."));
@@ -555,6 +585,39 @@ void DeviceController::setRunning(const bool value) {
     if (running_ == value) return;
     running_ = value;
     emit runningChanged();
+}
+
+void DeviceController::setIdentificationState(const IdentificationState state) {
+    if (identificationState_ == state) return;
+    identificationState_ = state;
+    emit identificationStateChanged();
+}
+
+void DeviceController::finishIdentificationTimeout() {
+    if (deviceVerified_) return;
+
+    const QString timedOutPort = serial_.portName().trimmed().isEmpty()
+        ? lastIdentificationPort_
+        : serial_.portName();
+    const int attempts = identifyAttempts_;
+    const bool wasAutomatic = automaticConnection_;
+    const bool continueProbing = wasAutomatic && genericProbeActive_ && !probeQueue_.isEmpty();
+
+    disconnectPort();
+    lastIdentificationPort_ = timedOutPort;
+    identifyAttempts_ = attempts;
+    setIdentificationState(IdentificationState::Unidentified);
+    setDiscoveryState(
+        QStringLiteral("No ARStack semantic identity received from %1 after %2 bounded attempts.")
+            .arg(timedOutPort.isEmpty() ? QStringLiteral("the selected port") : timedOutPort)
+            .arg(attempts),
+        false);
+
+    if (continueProbing) {
+        QTimer::singleShot(0, this, [this] { static_cast<void>(tryNextProbe()); });
+        return;
+    }
+    genericProbeActive_ = false;
 }
 
 void DeviceController::setDiscoveryState(const QString& status, const bool active) {
@@ -583,9 +646,13 @@ void DeviceController::markDeviceVerified() {
     automaticConnection_ = false;
     genericProbeActive_ = false;
     probeQueue_.clear();
+    lastIdentificationPort_ = serial_.portName();
+    setIdentificationState(IdentificationState::Verified);
     setDiscoveryState(QStringLiteral("ARStack ESP32-P4 identity verified."), false);
     emit deviceVerifiedChanged();
     emit deviceMessage(QStringLiteral("ESP32-P4 recognized. Device is ready."));
+    static_cast<void>(sendShow());
+    static_cast<void>(sendCommand(QStringLiteral("PROFILE SHOW")));
     static_cast<void>(sendPtpShow());
 }
 
