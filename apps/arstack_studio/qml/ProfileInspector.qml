@@ -8,6 +8,7 @@ SurfacePanel {
     property var controller
     property var device
     property var profiles
+    property var session
     property string uiFont: "Inter"
     property string monoFont: "Inter"
     property bool compact: false
@@ -98,7 +99,7 @@ SurfacePanel {
             theme: panel.theme
             uiFont: panel.uiFont
             text: "Open SCL / CID"
-            enabled: !panel.device.running
+            enabled: panel.session && panel.session.engineeringEditable
             onClicked: panel.controller.openEngineeringFile()
         }
 
@@ -121,7 +122,7 @@ SurfacePanel {
                 model: panel.profiles
                 textRole: "control"
                 currentIndex: panel.profiles.selectedIndex
-                enabled: !panel.device.running
+                enabled: panel.session && panel.session.engineeringEditable
                 font.family: panel.uiFont
                 font.pixelSize: panel.theme.labelSize
                 onActivated: {
@@ -237,6 +238,7 @@ SurfacePanel {
                 NumericField {
                     id: counterField
                     Layout.fillWidth: true
+                    enabled: panel.session && panel.session.engineeringEditable
                     theme: panel.theme
                     monoFont: panel.monoFont
                     compact: true
@@ -247,6 +249,7 @@ SurfacePanel {
                     theme: panel.theme
                     uiFont: panel.uiFont
                     text: "Confirm"
+                    enabled: panel.session && panel.session.engineeringEditable
                     onClicked: {
                         if (counterField.acceptableInput && panel.profiles.confirmCounterModulus(parseInt(counterField.text))) {
                             panel.controller.profileDirty = true
@@ -279,7 +282,8 @@ SurfacePanel {
                         var value = panel.controller.parseOperatorNumber(text)
                         if (acceptableInput && isFinite(value) && value > 0) {
                             panel.controller.currentScale = value
-                            if (panel.device.connected) panel.controller.applyGroupSignals(0)
+                            if (panel.session && panel.session.liveControlReady)
+                                panel.controller.applyGroupSignals(0)
                         } else {
                             text = panel.controller.currentScale.toString()
                         }
@@ -303,7 +307,8 @@ SurfacePanel {
                         var value = panel.controller.parseOperatorNumber(text)
                         if (acceptableInput && isFinite(value) && value > 0) {
                             panel.controller.voltageScale = value
-                            if (panel.device.connected) panel.controller.applyGroupSignals(1)
+                            if (panel.session && panel.session.liveControlReady)
+                                panel.controller.applyGroupSignals(1)
                         } else {
                             text = panel.controller.voltageScale.toString()
                         }
