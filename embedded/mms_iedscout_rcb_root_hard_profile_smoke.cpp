@@ -283,6 +283,9 @@ int main() {
         const mms::MmsStaticDataSetTable data_set_table{data_sets};
         if (!data_set_table.valid_against(pre_brcb_table)) return 2;
 
+        // Embedded BRCB retention/replay requires EntryID in OptFlds. The old
+        // fixture used 0x5C and therefore failed initialization before the RCB
+        // root Read/GVAA behavior under test could run.
         const mms::MmsStaticBrcbDefinition brcb_definition{
             "LD0",
             "LLN0$BR$B1",
@@ -290,7 +293,7 @@ int main() {
             "LD0",
             "LLN0$Events",
             7U,
-            {0x5CU, 0x80U},
+            {0x5DU, 0x80U},
             0U,
             0x70U};
         std::array<std::uint8_t, 1'024U> slot0{};
