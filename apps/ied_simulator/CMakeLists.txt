@@ -55,6 +55,9 @@ qt_add_qml_module(arstack_ied_simulator
         src/MmsClientController.hpp
         src/MmsReportController.cpp
         src/MmsReportController.hpp
+        src/MmsSettingGroupPolicy.hpp
+        src/MmsFileSettingsController.cpp
+        src/MmsFileSettingsController.hpp
         src/GooseMonitorController.cpp
         src/GooseMonitorController.hpp
     QML_FILES
@@ -72,6 +75,8 @@ qt_add_qml_module(arstack_ied_simulator
         qml/IedScoutWorkspace.qml
         qml/MmsClientWorkspace.qml
         qml/ReportsWorkspace.qml
+        qml/FilesWorkspace.qml
+        qml/SettingsWorkspace.qml
         qml/GooseWorkspace.qml
         qml/ActivityMonitor.qml
         qml/CommissioningWorkspace.qml
@@ -249,6 +254,21 @@ target_include_directories(ied_report_workspace_qa PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(ied_report_workspace_qa PRIVATE cxx_std_20)
 
+add_executable(ied_file_settings_workspace_qa
+    src/ied_file_settings_workspace_qa.cpp
+    src/MmsFileSettingsController.cpp
+    src/MmsFileSettingsController.hpp
+    src/MmsSettingGroupPolicy.hpp)
+target_link_libraries(ied_file_settings_workspace_qa PRIVATE
+    Qt6::Core
+    Qt6::Network
+    Qt6::Qml
+    ariec61850_ied_simulator_server_core
+    ARIEC61850::core)
+target_include_directories(ied_file_settings_workspace_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_file_settings_workspace_qa PRIVATE cxx_std_20)
+
 # The regular library intentionally keeps a strict portable connection runtime.
 # The desktop simulator needs the separate compatibility runtime validated
 # against common engineering-client AARQ, selector, browse, Identify and
@@ -302,6 +322,7 @@ target_compile_features(ariec61850_ied_simulator_server PRIVATE cxx_std_20)
 add_dependencies(ied_simulator_responsiveness_qa ariec61850_ied_simulator_server)
 add_dependencies(ied_mms_client_workbench_qa ariec61850_ied_simulator_server)
 add_dependencies(ied_report_workspace_qa ariec61850_ied_simulator_server)
+add_dependencies(ied_file_settings_workspace_qa ariec61850_ied_simulator_server)
 add_dependencies(
     ied_simulator_runtime_commissioning_qa
     ariec61850_ied_simulator_server

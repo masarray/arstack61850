@@ -16,7 +16,7 @@ ApplicationWindow {
     color: appTheme.background
     font.family: interFont.status === FontLoader.Ready ? interFont.name : "Segoe UI"
 
-    property int workspaceIndex: simulator.imported ? 2 : 0
+    property int workspaceIndex: simulator.imported ? 4 : 0
 
     AppTheme { id: appTheme }
     IedFleetController {
@@ -30,6 +30,10 @@ ApplicationWindow {
     MmsReportController {
         id: reports
         objectName: "mmsReportBackend"
+    }
+    MmsFileSettingsController {
+        id: utilities
+        objectName: "mmsFileSettingsBackend"
     }
     GooseMonitorController {
         id: gooseMonitor
@@ -50,30 +54,20 @@ ApplicationWindow {
 
     function importModel() { sclDialog.open() }
 
-    Shortcut {
-        sequence: "Ctrl+1"
-        onActivated: root.workspaceIndex = 0
-    }
-    Shortcut {
-        sequence: "Ctrl+2"
-        onActivated: root.workspaceIndex = 1
-    }
-    Shortcut {
-        sequence: "Ctrl+3"
-        onActivated: root.workspaceIndex = 2
-    }
-    Shortcut {
-        sequence: "Ctrl+4"
-        onActivated: root.workspaceIndex = 3
-    }
+    Shortcut { sequence: "Ctrl+1"; onActivated: root.workspaceIndex = 0 }
+    Shortcut { sequence: "Ctrl+2"; onActivated: root.workspaceIndex = 1 }
+    Shortcut { sequence: "Ctrl+3"; onActivated: root.workspaceIndex = 2 }
+    Shortcut { sequence: "Ctrl+4"; onActivated: root.workspaceIndex = 3 }
+    Shortcut { sequence: "Ctrl+5"; onActivated: root.workspaceIndex = 4 }
+    Shortcut { sequence: "Ctrl+6"; onActivated: root.workspaceIndex = 5 }
     Shortcut {
         sequence: "Ctrl+Shift+A"
-        enabled: root.workspaceIndex === 2
+        enabled: root.workspaceIndex === 4
         onActivated: activityMonitor.opened ? activityMonitor.close() : activityMonitor.open()
     }
     Shortcut {
         sequence: "Ctrl+Shift+C"
-        enabled: root.workspaceIndex === 2 && simulator.imported
+        enabled: root.workspaceIndex === 4 && simulator.imported
         onActivated: commissioningWorkspace.opened ? commissioningWorkspace.close() : commissioningWorkspace.open()
     }
 
@@ -81,7 +75,7 @@ ApplicationWindow {
         id: control
         required property int workspace
         implicitHeight: 28
-        implicitWidth: Math.max(110, label.implicitWidth + 24)
+        implicitWidth: Math.max(102, label.implicitWidth + 22)
         checkable: true
         checked: root.workspaceIndex === workspace
         onClicked: root.workspaceIndex = workspace
@@ -121,30 +115,36 @@ ApplicationWindow {
                     color: appTheme.navigationText
                     font.pixelSize: 11
                     font.weight: Font.DemiBold
-                    Layout.rightMargin: 12
+                    Layout.rightMargin: 8
                 }
 
                 WorkspaceButton { workspace: 0; text: "IED Connection" }
                 WorkspaceButton { workspace: 1; text: "Reports" }
-                WorkspaceButton { workspace: 2; text: "Simulator" }
-                WorkspaceButton { workspace: 3; text: "GOOSE" }
+                WorkspaceButton { workspace: 2; text: "Files" }
+                WorkspaceButton { workspace: 3; text: "Settings" }
+                WorkspaceButton { workspace: 4; text: "Simulator" }
+                WorkspaceButton { workspace: 5; text: "GOOSE" }
                 Item { Layout.fillWidth: true }
                 Label {
                     text: root.workspaceIndex === 0
                           ? mmsClient.stateText
                           : root.workspaceIndex === 1
                             ? reports.stateText
-                            : root.workspaceIndex === 3
-                              ? (gooseMonitor.capturing ? "GOOSE MONITOR LIVE" : "GOOSE")
-                              : (simulator.running ? "SIMULATOR LIVE" : "SIMULATOR")
+                            : (root.workspaceIndex === 2 || root.workspaceIndex === 3)
+                              ? utilities.stateText
+                              : root.workspaceIndex === 5
+                                ? (gooseMonitor.capturing ? "GOOSE MONITOR LIVE" : "GOOSE")
+                                : (simulator.running ? "SIMULATOR LIVE" : "SIMULATOR")
                     color: root.workspaceIndex === 0 && mmsClient.connected
                            ? "#9ff0c1"
                            : root.workspaceIndex === 1 && reports.active
                              ? "#9ff0c1"
                              : root.workspaceIndex === 1 && reports.cleanupRequired
                                ? "#ff9ca5"
-                               : root.workspaceIndex === 3 && gooseMonitor.capturing
-                                 ? "#9ff0c1" : appTheme.navigationMuted
+                               : (root.workspaceIndex === 2 || root.workspaceIndex === 3) && utilities.connected
+                                 ? "#9ff0c1"
+                                 : root.workspaceIndex === 5 && gooseMonitor.capturing
+                                   ? "#9ff0c1" : appTheme.navigationMuted
                     font.pixelSize: 8
                     font.weight: Font.DemiBold
                 }
@@ -166,6 +166,16 @@ ApplicationWindow {
                 reports: reports
             }
 
+            FilesWorkspace {
+                theme: appTheme
+                files: utilities
+            }
+
+            SettingsWorkspace {
+                theme: appTheme
+                settings: utilities
+            }
+
             Item {
                 IedScoutWorkspace {
                     anchors.fill: parent
@@ -179,7 +189,7 @@ ApplicationWindow {
                 theme: appTheme
                 simulator: simulator
                 monitor: gooseMonitor
-                onOpenSimulatorRequested: root.workspaceIndex = 2
+                onOpenSimulatorRequested: root.workspaceIndex = 4
             }
         }
     }
@@ -187,7 +197,7 @@ ApplicationWindow {
     Rectangle {
         id: commissioningLauncher
         z: 20
-        visible: root.workspaceIndex === 2 && simulator.imported && !commissioningWorkspace.opened
+        visible: root.workspaceIndex === 4 && simulator.imported && !commissioningWorkspace.opened
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.rightMargin: 12
@@ -238,7 +248,7 @@ ApplicationWindow {
     Rectangle {
         id: activityLauncher
         z: 20
-        visible: root.workspaceIndex === 2 && !activityMonitor.opened
+        visible: root.workspaceIndex === 4 && !activityMonitor.opened
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.rightMargin: 12
