@@ -75,6 +75,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item '.\build-board-kit\Release\arstack_board_acceptance.exe' $stage
           Copy-Item '.\build-board-kit\Release\arstack_rc2_acceptance.exe' $stage
+          Copy-Item '.\apps\arstack_studio\board-test\record-rc1-session.ps1' $stage
           Copy-Item '.\apps\arstack_studio\board-test\finalize-rc2-evidence.ps1' $stage
           Copy-Item '.\apps\arstack_studio\rc2\rc2-evidence-template.json' $stage
           Copy-Item '.\docs\SMV_STUDIO_BOARD_ACCEPTANCE_RUNBOOK.md' $stage
@@ -91,23 +92,32 @@ jobs:
           Frozen product candidate SHA: ed46f3bed73d398d71be2eacf34c4995325c3cad
           This artifact is QA tooling only. It is not the public Studio release candidate.
 
-          Full board run:
+          RC1 physical session recorder:
+            .\record-rc1-session.ps1 -Output .\rc1-session-evidence.json
+
+          Full automated RC2 board path (default 3600-second soak):
             .\arstack_board_acceptance.exe --output .\rc2-board-evidence.json
 
-          Finalize after independent capture + Studio UI observation:
+          Finalize RC2 after independent capture + Studio UI observation:
             .\finalize-rc2-evidence.ps1 -Evidence .\rc2-board-evidence.json -Evaluator .\arstack_rc2_acceptance.exe -Output .\rc2-final-evidence.json
           '@ | Set-Content -Encoding UTF8 (Join-Path $stage 'START_HERE.txt')
 
-      - name: Parse PowerShell finalizer
+      - name: Parse PowerShell evidence scripts
         shell: powershell
         run: |
-          $path = Resolve-Path '.\board-acceptance-kit\finalize-rc2-evidence.ps1'
-          $tokens = $null
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors) | Out-Null
-          if ($errors.Count -gt 0) {
-            $errors | Format-List *
-            throw "RC2 evidence finalizer contains $($errors.Count) PowerShell parser error(s)."
+          $paths = @(
+            '.\board-acceptance-kit\record-rc1-session.ps1',
+            '.\board-acceptance-kit\finalize-rc2-evidence.ps1'
+          )
+          foreach ($candidate in $paths) {
+            $path = Resolve-Path $candidate
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | Format-List *
+              throw "$candidate contains $($errors.Count) PowerShell parser error(s)."
+            }
           }
 
       - name: Create kit checksum
