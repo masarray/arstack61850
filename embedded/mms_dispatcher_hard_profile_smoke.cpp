@@ -85,6 +85,20 @@ constexpr std::array<std::uint8_t, 15U> kReadResponse{
     0x83U, 0x01U, 0xFFU,
     0x85U, 0x01U, 0x2AU};
 
+constexpr std::array<std::uint8_t, 49U> kReadWithSpecificationResponse{
+    0xA1U, 0x2FU, 0x02U, 0x01U, 0x0DU,
+    0xA4U, 0x2AU,
+    0xA0U, 0x20U, 0xA0U, 0x1EU,
+    0x30U, 0x0DU, 0xA0U, 0x0BU, 0xA1U, 0x09U,
+    0x1AU, 0x03U, 0x4CU, 0x44U, 0x30U,
+    0x1AU, 0x02U, 0x52U, 0x31U,
+    0x30U, 0x0DU, 0xA0U, 0x0BU, 0xA1U, 0x09U,
+    0x1AU, 0x03U, 0x4CU, 0x44U, 0x30U,
+    0x1AU, 0x02U, 0x4DU, 0x31U,
+    0xA1U, 0x06U,
+    0x83U, 0x01U, 0xFFU,
+    0x85U, 0x01U, 0x2AU};
+
 constexpr std::array<std::uint8_t, 29U> kWriteRequest{
     0xA0U, 0x1BU, 0x02U, 0x01U, 0x0EU,
     0xA5U, 0x16U,
@@ -252,10 +266,28 @@ int main() {
 
     dispatched = dispatcher.dispatch(
         kReadWithSpecificationRequest, response, workspace);
-    if (dispatched.status != mms::MmsStaticDispatchStatus::unsupported_request ||
+    if (!dispatched.success() ||
         dispatched.service != mms::MmsWireConfirmedService::read ||
-        dispatched.invoke_id != 13U) {
+        dispatched.invoke_id != 13U ||
+        dispatched.bytes_written != kReadWithSpecificationResponse.size() ||
+        !matches(
+            std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
+            kReadWithSpecificationResponse)) {
         return 30;
+    }
+
+    mms::MmsReadResponseView specification_read_response;
+    mms::MmsReadAccessResultView specification_read_result;
+    if (!mms::MmsServiceSpanCodec::try_decode_read_response(
+            std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
+            specification_read_response) ||
+        specification_read_response.invoke_id != 13U ||
+        specification_read_response.result_count != 2U ||
+        !specification_read_response.try_result(0U, specification_read_result) ||
+        !specification_read_result.success ||
+        !specification_read_response.try_result(1U, specification_read_result) ||
+        !specification_read_result.success) {
+        return 31;
     }
 
     std::array<std::uint8_t, 2U> tiny_workspace{};
