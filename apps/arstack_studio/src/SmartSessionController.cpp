@@ -6,7 +6,6 @@
 #include "FirmwareManager.hpp"
 #include "SclProfileModel.hpp"
 
-#include <QRegularExpression>
 #include <QVariantMap>
 
 #include <algorithm>
@@ -193,8 +192,6 @@ void SmartSessionController::start() {
     if (profiles_ != nullptr) static_cast<void>(ensureDefaultProfile());
     discoveryTimer_.start();
 
-    // Do not make the operator wait for the periodic hot-plug watchdog. The
-    // first identity attempt starts as soon as the QML component is complete.
     QTimer::singleShot(0, this, [this] {
         if (!started_ || device_ == nullptr || updateRequested_) return;
         if (!device_->deviceVerified() && !device_->discovering() && !device_->connected()) {
@@ -321,6 +318,11 @@ void SmartSessionController::reconnectDeviceSignals() {
         }
         reconcile();
     });
+    connect(device_, &DeviceController::deviceIdentityChanged, this, [this] {
+        refreshFirmwareIdentity();
+        emit stateChanged();
+        reconcile();
+    });
     connect(device_, &DeviceController::connectedChanged, this, [this] {
         reconcile();
         maybeScheduleBlankBoardProbe();
@@ -340,10 +342,6 @@ void SmartSessionController::reconnectDeviceSignals() {
         }
         reconcile();
         maybeScheduleBlankBoardProbe();
-    });
-    connect(device_, &DeviceController::logTextChanged, this, [this] {
-        refreshFirmwareIdentity();
-        reconcile();
     });
     connect(device_, &DeviceController::runningChanged, this, [this] {
         if (updateRequested_ && updateStage_ == UpdateStage::stopping &&
@@ -389,17 +387,10 @@ void SmartSessionController::reconnectFirmwareSignals() {
             blankProbeInFlight_ = false;
             const bool samePort = firmware_->selectedPort() == blankBoardPort_;
             if (samePort && firmware_->targetVerified()) {
-                // Read-only ROM identity proved a supported P4. The user still
-                // explicitly approves installation in the normal setup dialog.
                 blankBoardDetected_ = true;
                 setupError_ = false;
                 setupErrorStatus_.clear();
             } else if (samePort && firmware_->bootloaderHelpNeeded()) {
-                // A unique serial candidate exists but ROM did not answer yet.
-                // Treat this as a firmware-setup candidate, not as verified P4;
-                // beginFirmwareInstall() re-probes and cannot write until target
-                // verification succeeds. This keeps novice recovery actionable
-                // without weakening the flash safety boundary.
                 blankBoardDetected_ = true;
                 setupError_ = false;
                 setupErrorStatus_.clear();
@@ -566,24 +557,14 @@ void SmartSessionController::setPresentation(
 }
 
 void SmartSessionController::refreshFirmwareIdentity() {
-    if (device_ == nullptr || !device_->deviceVerified()) return;
-    const QString log = device_->logText();
-    const qsizetype identityPos = log.lastIndexOf(QStringLiteral("ARSTACK identity"), -1, Qt::CaseInsensitive);
-    if (identityPos < 0) return;
-
-    qsizetype lineEnd = log.indexOf(QLatin1Char('\n'), identityPos);
-    if (lineEnd < 0) lineEnd = log.size();
-    const QString identityLine = log.mid(identityPos, lineEnd - identityPos);
-    static const QRegularExpression versionExpression{
-        QStringLiteral(R"(\bfirmware=([0-9A-Za-z._+\-]+))"),
-        QRegularExpression::CaseInsensitiveOption};
-    const auto match = versionExpression.match(identityLine);
-    deviceFirmwareVersion_ = match.hasMatch() ? match.captured(1) : QString{};
+    deviceFirmwareVersion_ =
+        (device_ != nullptr && device_->deviceVerified()) ? device_->firmwareVersion() : QString{};
 }
 
 bool SmartSessionController::firmwareIsCurrent() const {
-    return device_ != nullptr && device_->protocolVersion() == QStringLiteral("1") &&
-        !deviceFirmwareVersion_.isEmpty() && deviceFirmwareVersion_ == expectedFirmwareVersion();
+    return device_ != nullptr && device_->deviceVerified() &&
+        DeviceController::identitySupportsCurrentContract(
+            device_->deviceIdentity(), expectedFirmwareVersion());
 }
 
 void SmartSessionController::reconcile() {
@@ -678,7 +659,7 @@ void SmartSessionController::reconcile() {
                 ? QStringLiteral("legacy/unknown firmware")
                 : QStringLiteral("firmware v%1").arg(deviceFirmwareVersion_);
             latchFirmwareFailure(QStringLiteral(
-                "Firmware was written, but reconnect verification reported %1 instead of v%2. Retry firmware setup explicitly.")
+                "Firmware was written, but reconnect verification reported %1 instead of the current semantic identity contract for v%2. Retry firmware setup explicitly.")
                 .arg(observed, expectedFirmwareVersion()));
             emit firmwareUpdateFinished(false);
             setPresentation(QStringLiteral("SETUP ERROR"), setupErrorStatus_, false, false);
