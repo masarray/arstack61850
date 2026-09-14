@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "DeviceIoWorker.hpp"
 #include "FirmwareManager.hpp"
 #include "SclProfileModel.hpp"
 #include "SmartSessionController.hpp"
@@ -8,11 +9,14 @@
 #include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDebug>
+#include <QElapsedTimer>
 #include <QEvent>
+#include <QEventLoop>
 #include <QGuiApplication>
 #include <QPointer>
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
+#include <QThread>
 #include <QTimer>
 #include <QtQml/qqml.h>
 
@@ -250,11 +254,18 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         !SmartSessionController::profileGenerationAdvanced(
             QStringLiteral("2"), QStringLiteral("not-a-generation"));
 
+    const bool workerPolicyAligned =
+        DeviceIoWorker::commandQueueCapacity() == DeviceController::ioCommandQueueCapacity() &&
+        DeviceIoWorker::presencePollIntervalMs() == DeviceController::ioPresencePollIntervalMs() &&
+        DeviceIoWorker::identityMaxAttempts() == DeviceController::identityMaxAttempts() &&
+        DeviceIoWorker::identityRetryIntervalMs() == DeviceController::identityRetryIntervalMs();
+
     if (!currentAccepted || !legacyRejectedAsCurrent || !protocolLegacyParsed ||
         !capabilityFailClosed || !rejectsWrongTarget || !rejectsMissingFirmware ||
-        !rejectsMalformedBoot || !boundedIdentifyPolicy || !boundedProfileSyncPolicy) {
+        !rejectsMalformedBoot || !boundedIdentifyPolicy || !boundedProfileSyncPolicy ||
+        !workerPolicyAligned) {
         qCritical().noquote()
-            << "S1/S2/S3 control-plane contract: FAIL"
+            << "S1/S2/S3/S4 control-plane contract: FAIL"
             << "current=" << currentAccepted
             << "legacy=" << legacyRejectedAsCurrent
             << "protocol-legacy=" << protocolLegacyParsed
@@ -263,11 +274,26 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
             << "missing-firmware=" << rejectsMissingFirmware
             << "malformed-boot=" << rejectsMalformedBoot
             << "bounded-identify=" << boundedIdentifyPolicy
-            << "bounded-profile-sync=" << boundedProfileSyncPolicy;
+            << "bounded-profile-sync=" << boundedProfileSyncPolicy
+            << "worker-policy-aligned=" << workerPolicyAligned;
         return 11;
     }
 
     StudioDeviceController device;
+    QElapsedTimer workerDeadline;
+    workerDeadline.start();
+    while (!device.ioWorkerReady() && workerDeadline.elapsed() < 1500) {
+        app.processEvents(QEventLoop::AllEvents, 20);
+        QThread::msleep(5);
+    }
+    const bool workerBoundaryReady = device.ioWorkerReady() && device.ioWorkerAffinityValid();
+    if (!workerBoundaryReady) {
+        qCritical().noquote()
+            << "S4 DeviceIoWorker boundary: FAIL · ready=" << device.ioWorkerReady()
+            << "serial-affinity=" << device.ioWorkerAffinityValid();
+        return 13;
+    }
+
     const bool startsIdle =
         device.identificationState() == DeviceController::IdentificationState::Idle &&
         device.identifyAttempts() == 0;
@@ -284,7 +310,7 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         return 6;
     }
     qInfo().noquote()
-        << "P0 controller policy: PASS · S1 typed identity + S2 bounded IDENTIFY + S3 bounded generation-aware profile sync + unverified START/DEPLOY fail closed";
+        << "P0 controller policy: PASS · S1 typed identity + S2 bounded IDENTIFY + S3 bounded profile sync + S4 threaded DeviceIoWorker ownership + unverified START/DEPLOY fail closed";
     return 0;
 }
 } // namespace
