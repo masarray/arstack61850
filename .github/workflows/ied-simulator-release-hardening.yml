@@ -107,7 +107,9 @@ jobs:
           $zip = Join-Path $release 'ARStack-IEC61850-Workbench-portable-win64.zip'
           Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -Force
           $installer = Join-Path $release 'ARStack-IEC61850-Workbench-Setup-win64.exe'
-          & makensis.exe "/DSTAGE_DIR=$stage" "/DOUT_FILE=$installer" 'apps\ied_simulator\packaging\windows\ARStackIEC61850Workbench.nsi'
+          $makensis = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
+          if (-not (Test-Path -LiteralPath $makensis -PathType Leaf)) { throw "makensis not found: $makensis" }
+          & $makensis "/DSTAGE_DIR=$stage" "/DOUT_FILE=$installer" 'apps\ied_simulator\packaging\windows\ARStackIEC61850Workbench.nsi'
           if ($LASTEXITCODE -ne 0) { throw "makensis failed with exit code $LASTEXITCODE" }
 
       - name: Verify staged and installed release
