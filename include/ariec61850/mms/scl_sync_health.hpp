@@ -3,8 +3,8 @@
 
 #include "ariec61850/mms/scl_assisted_connect.hpp"
 
-#include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <sstream>
 #include <string>
 
