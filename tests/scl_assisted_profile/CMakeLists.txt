@@ -27,3 +27,6 @@ add_scl_profile_test(
 add_scl_profile_test(
     scl_association_addressing_profile
     ${CMAKE_CURRENT_LIST_DIR}/../test_scl_association_addressing.cpp)
+add_scl_profile_test(
+    scl_sync_health_profile
+    ${CMAKE_CURRENT_LIST_DIR}/../test_scl_sync_health.cpp)
