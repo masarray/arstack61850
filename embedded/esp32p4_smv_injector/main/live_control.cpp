@@ -7,6 +7,7 @@
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_random.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -49,6 +50,7 @@ std::atomic<bool> g_control_heartbeat_seen{false};
 std::atomic<bool> g_control_lease_active{false};
 std::atomic<std::uint32_t> g_last_heartbeat_ms{0U};
 esp_timer_handle_t g_control_lease_timer{nullptr};
+std::uint64_t g_boot_id{0U};
 
 void wake_publisher() noexcept {
     const auto task = g_publisher_task.load(std::memory_order_acquire);
@@ -150,8 +152,6 @@ void record_control_heartbeat() noexcept {
 
 bool arm_control_lease_if_fresh() noexcept {
     if (!heartbeat_is_fresh()) {
-        // No current Studio heartbeat: preserve the legacy bench/manual START
-        // behavior. Only a Studio-owned session is required to carry a lease.
         g_control_lease_active.store(false, std::memory_order_release);
         return true;
     }
@@ -240,11 +240,12 @@ void print_identity() noexcept {
         ? "SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE"
         : "SMV-4I4V,LIVE-SETPOINTS";
     ESP_LOGI(kTag,
-             "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 device_id=%02X%02X%02X%02X%02X%02X firmware=%s capabilities=%s",
+             "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 device_id=%02X%02X%02X%02X%02X%02X firmware=%s boot_id=%016llX capabilities=%s",
              static_cast<unsigned>(device_id[0]), static_cast<unsigned>(device_id[1]),
              static_cast<unsigned>(device_id[2]), static_cast<unsigned>(device_id[3]),
              static_cast<unsigned>(device_id[4]), static_cast<unsigned>(device_id[5]),
              version,
+             static_cast<unsigned long long>(g_boot_id),
              capabilities);
 }
 
@@ -401,8 +402,6 @@ void handle_line(char* line) noexcept {
         if (has_extra_token(&save)) {
             ESP_LOGE(kTag, "Usage: HEARTBEAT");
         } else {
-            // Intentionally silent: Studio sends this frequently while it owns
-            // the control session, so it must not create serial/log noise.
             record_control_heartbeat();
         }
         return;
@@ -545,7 +544,6 @@ void handle_line(char* line) noexcept {
 
         auto state = g_signal_bank.snapshot();
         auto& channel = state.channels[*channel_index];
-
         if (std::strcmp(command, "SET") == 0) {
             char* rms_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
             char* phase_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
@@ -613,6 +611,11 @@ void live_control_initialize(
     g_start_request.store(false, std::memory_order_release);
     clear_control_session();
 
+    const std::uint64_t random_high = static_cast<std::uint64_t>(esp_random());
+    const std::uint64_t random_low = static_cast<std::uint64_t>(esp_random());
+    g_boot_id = (random_high << 32U) | random_low;
+    if (g_boot_id == 0U) g_boot_id = 1U;
+
     if (g_control_lease_timer == nullptr) {
         esp_timer_create_args_t timer_args{};
         timer_args.callback = &control_lease_timer_callback;
@@ -653,6 +656,12 @@ void live_control_task(void*) noexcept {
     print_help();
     print_state();
     ESP_LOGI(kTag, "Console ready: type a complete command, then press Enter.");
+
+    // S1 startup announcement: once the control task is ready, advertise the
+    // same machine-readable identity returned by IDENTIFY. Studio must still
+    // use explicit request/response as authoritative, but it no longer depends
+    // on landing the first request in a narrow USB re-enumeration window.
+    print_identity();
 
     std::array<char, 192> line{};
     std::size_t length = 0U;
