@@ -5,6 +5,7 @@
 #include "ariec61850/mms/data_codec.hpp"
 #include "ariec61850/mms/live_discovery.hpp"
 #include "ariec61850/mms/live_model.hpp"
+#include "ariec61850/mms/scl_association.hpp"
 #include "ariec61850/mms/services.hpp"
 #include "ariec61850/scl/parser.hpp"
 
@@ -270,15 +271,42 @@ bool MmsClientController::connectToIed() {
             worker->sclSnapshot.reset();
 
             std::shared_ptr<scl::SclDocument> trustedScl;
+            mms::MmsSclAssociationContext sclAssociation;
             if (!requestedTrustedSclPath.isEmpty()) {
                 scl::SclParser parser;
                 trustedScl = std::make_shared<scl::SclDocument>(
                     parser.load(std::filesystem::path{requestedTrustedSclPath.toStdString()}));
+                sclAssociation = mms::resolve_scl_association_context(
+                    *trustedScl, requestedHost.toStdString());
             }
 
             mms::MmsAssociationOptions associationOptions;
             associationOptions.connect_timeout = std::chrono::milliseconds{5'000};
             associationOptions.request_timeout = std::chrono::milliseconds{5'000};
+            associationOptions.addressing = sclAssociation.addressing;
+
+            if (self && trustedScl && sclAssociation.selected()) {
+                const auto associationText = sclAssociation.uses_engineering_addressing()
+                    ? QStringLiteral("SCL engineering OSI addressing")
+                    : QStringLiteral("compatibility OSI defaults");
+                const auto endpointText = sclAssociation.scl_host.empty()
+                    ? QStringLiteral("not specified")
+                    : QStringLiteral("%1:%2")
+                          .arg(QString::fromStdString(sclAssociation.scl_host))
+                          .arg(sclAssociation.scl_port);
+                const auto ied = QString::fromStdString(sclAssociation.ied_name);
+                const auto ap = QString::fromStdString(sclAssociation.access_point_name);
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, generation, associationText, endpointText, ied, ap] {
+                        if (!self || self->generation_ != generation) return;
+                        self->appendDiagnostic(
+                            QStringLiteral("Trusted SCL association · IED %1 · AP %2 · SCL endpoint %3 · %4")
+                                .arg(ied, ap, endpointText, associationText));
+                    },
+                    Qt::QueuedConnection);
+            }
+
             auto session = std::make_unique<mms::MmsTcpLiveDiscoverySession>(
                 mms::TcpMmsTransportOptions{}, associationOptions);
             session->connect(
@@ -303,7 +331,11 @@ bool MmsClientController::connectToIed() {
 
             if (trustedScl) {
                 auto snapshot = std::make_shared<mms::MmsSclAssistedConnectResult>(
-                    session->synchronize_scl(*trustedScl, {}, {}, stop->get_token()));
+                    session->synchronize_scl(
+                        *trustedScl,
+                        sclAssociation.ied_name,
+                        {},
+                        stop->get_token()));
                 auto model = std::make_shared<mms::MmsLiveModelDocument>(
                     arstack::iedsim::build_scl_live_model(*trustedScl, *snapshot));
                 auto initialValues = std::make_shared<std::vector<arstack::iedsim::SclSnapshotValue>>(
