@@ -276,11 +276,18 @@ ApplicationWindow {
             }
 
             Item {
-                IedScoutWorkspace {
+                Loader {
+                    id: simulatorWorkspaceLoader
                     anchors.fill: parent
-                    theme: appTheme
-                    backend: simulator
-                    onOpenSclRequested: root.importModel()
+                    source: "qrc:/iedsim/IedScoutWorkspaceV2.qml"
+                    onLoaded: {
+                        item.theme = appTheme
+                        item.backend = simulator
+                    }
+                }
+                Connections {
+                    target: simulatorWorkspaceLoader.item
+                    function onOpenSclRequested() { root.importModel() }
                 }
             }
 
