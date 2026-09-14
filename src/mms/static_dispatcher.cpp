@@ -568,6 +568,12 @@ struct SyntheticMeasureResult final {
     std::size_t encoded_bytes{};
 };
 
+struct SyntheticChild final {
+    std::string_view prefix{};
+    const MmsStaticObjectEntry* exact{};
+    bool found{};
+};
+
 [[nodiscard]] bool is_descendant_item(
     const std::string_view item,
     const std::string_view prefix) noexcept {
@@ -584,6 +590,39 @@ struct SyntheticMeasureResult final {
     return item.substr(
         0U,
         next == std::string_view::npos ? item.size() : next);
+}
+
+// Object banks are composable and may append live URCB/BRCB leaves after the
+// base table, so do not assume descendants are contiguous. Select the next
+// immediate child lexicographically with a bounded scan. The returned prefix is
+// a view into stable object-name storage and remains valid for the request.
+[[nodiscard]] SyntheticChild next_synthetic_child(
+    const MmsStaticObjectTable& objects,
+    const std::string_view domain,
+    const std::string_view prefix,
+    const std::string_view after,
+    const bool have_after) noexcept {
+    SyntheticChild result;
+    for (const auto& candidate : objects.objects()) {
+        if (candidate.domain != domain ||
+            !is_descendant_item(candidate.item, prefix)) {
+            continue;
+        }
+        const auto child = immediate_child_prefix(candidate.item, prefix);
+        if (child.empty() || (have_after && child <= after)) {
+            continue;
+        }
+        if (!result.found || child < result.prefix) {
+            result.found = true;
+            result.prefix = child;
+            result.exact = candidate.item == child ? &candidate : nullptr;
+            continue;
+        }
+        if (child == result.prefix && candidate.item == child) {
+            result.exact = &candidate;
+        }
+    }
+    return result;
 }
 
 [[nodiscard]] SyntheticMeasureResult measure_exact_object(
@@ -608,36 +647,20 @@ struct SyntheticMeasureResult final {
         return {SyntheticReadStatus::backend_failure, 0U, 0U};
     }
 
-    const auto entries = objects.objects();
     std::size_t content_bytes = 0U;
+    std::string_view after;
+    bool have_after = false;
     bool found_child = false;
-    std::size_t index = 0U;
-    while (index < entries.size()) {
-        const auto& candidate = entries[index];
-        if (candidate.domain != domain ||
-            !is_descendant_item(candidate.item, prefix)) {
-            ++index;
-            continue;
-        }
-
-        const auto child_prefix = immediate_child_prefix(candidate.item, prefix);
-        if (child_prefix.empty()) {
-            return {SyntheticReadStatus::backend_failure, 0U, 0U};
-        }
+    while (true) {
+        const auto child = next_synthetic_child(
+            objects, domain, prefix, after, have_after);
+        if (!child.found) break;
         found_child = true;
-        const MmsStaticObjectEntry* exact =
-            candidate.item == child_prefix ? &candidate : nullptr;
 
-        std::size_t next = index + 1U;
-        while (next < entries.size() && entries[next].domain == domain &&
-               (entries[next].item == child_prefix ||
-                is_descendant_item(entries[next].item, child_prefix))) {
-            ++next;
-        }
-
-        const auto measured = exact != nullptr
-            ? measure_exact_object(*exact)
-            : measure_synthetic_subtree(objects, domain, child_prefix, depth + 1U);
+        const auto measured = child.exact != nullptr
+            ? measure_exact_object(*child.exact)
+            : measure_synthetic_subtree(
+                objects, domain, child.prefix, depth + 1U);
         if (measured.status != SyntheticReadStatus::ok) {
             return measured;
         }
@@ -646,7 +669,8 @@ struct SyntheticMeasureResult final {
             return {SyntheticReadStatus::backend_failure, 0U, 0U};
         }
         content_bytes += measured.encoded_bytes;
-        index = next;
+        after = child.prefix;
+        have_after = true;
     }
 
     if (!found_child) {
@@ -685,34 +709,17 @@ struct SyntheticMeasureResult final {
         return {SyntheticReadStatus::backend_failure, 0U, measured.encoded_bytes};
     }
     std::size_t offset = writer.size();
+    std::string_view after;
+    bool have_after = false;
 
-    const auto entries = objects.objects();
-    std::size_t index = 0U;
-    while (index < entries.size()) {
-        const auto& candidate = entries[index];
-        if (candidate.domain != domain ||
-            !is_descendant_item(candidate.item, prefix)) {
-            ++index;
-            continue;
-        }
+    while (true) {
+        const auto child = next_synthetic_child(
+            objects, domain, prefix, after, have_after);
+        if (!child.found) break;
 
-        const auto child_prefix = immediate_child_prefix(candidate.item, prefix);
-        if (child_prefix.empty()) {
-            return {SyntheticReadStatus::backend_failure, 0U, measured.encoded_bytes};
-        }
-        const MmsStaticObjectEntry* exact =
-            candidate.item == child_prefix ? &candidate : nullptr;
-
-        std::size_t next = index + 1U;
-        while (next < entries.size() && entries[next].domain == domain &&
-               (entries[next].item == child_prefix ||
-                is_descendant_item(entries[next].item, child_prefix))) {
-            ++next;
-        }
-
-        if (exact != nullptr) {
-            const auto read = exact->read(
-                exact->context,
+        if (child.exact != nullptr) {
+            const auto read = child.exact->read(
+                child.exact->context,
                 destination.subspan(offset, measured.encoded_bytes - offset));
             if (read.status == wire::EncodeStatus::buffer_too_small) {
                 const auto required = read.required_bytes >
@@ -734,7 +741,7 @@ struct SyntheticMeasureResult final {
             const auto nested = encode_synthetic_subtree(
                 objects,
                 domain,
-                child_prefix,
+                child.prefix,
                 destination.subspan(offset, measured.encoded_bytes - offset),
                 depth + 1U);
             if (nested.status != SyntheticReadStatus::ok) {
@@ -750,7 +757,8 @@ struct SyntheticMeasureResult final {
             }
             offset += nested.bytes_written;
         }
-        index = next;
+        after = child.prefix;
+        have_after = true;
     }
 
     if (offset != measured.encoded_bytes ||
