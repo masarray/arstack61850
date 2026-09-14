@@ -6,6 +6,7 @@
 #include "ariec61850/mms/live_discovery.hpp"
 #include "ariec61850/mms/live_model.hpp"
 #include "ariec61850/mms/scl_association.hpp"
+#include "ariec61850/mms/scl_sync_health.hpp"
 #include "ariec61850/mms/services.hpp"
 #include "ariec61850/scl/parser.hpp"
 
@@ -336,6 +337,11 @@ bool MmsClientController::connectToIed() {
                         sclAssociation.ied_name,
                         {},
                         stop->get_token()));
+                const auto health =
+                    mms::MmsSclSynchronizationHealthClassifier::evaluate(*snapshot);
+                const auto healthSummary = QString::fromStdString(health.summary());
+                mms::MmsSclSynchronizationHealthClassifier::require_compatible(health);
+
                 auto model = std::make_shared<mms::MmsLiveModelDocument>(
                     arstack::iedsim::build_scl_live_model(*trustedScl, *snapshot));
                 auto initialValues = std::make_shared<std::vector<arstack::iedsim::SclSnapshotValue>>(
@@ -349,7 +355,7 @@ bool MmsClientController::connectToIed() {
                 if (self) {
                     QMetaObject::invokeMethod(
                         self,
-                        [self, generation, model, snapshot, initialValues, associationProfile] {
+                        [self, generation, model, snapshot, initialValues, associationProfile, healthSummary] {
                             if (!self || self->generation_ != generation) return;
                             self->treeModel_.applyDocument(*model);
                             for (const auto& value : *initialValues) {
@@ -370,6 +376,7 @@ bool MmsClientController::connectToIed() {
                                 static_cast<int>(model->coverage.data_attribute_count);
                             self->state_ = State::connected;
                             self->lastError_.clear();
+                            self->appendDiagnostic(healthSummary);
                             self->appendDiagnostic(
                                 QStringLiteral(
                                     "SCL synchronization complete · %1 Domain(s) online · %2 Read(s) · "
