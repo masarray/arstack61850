@@ -28,6 +28,19 @@ QString SmartSessionController::chooseRecoveryPort(
     return visiblePorts.front().trimmed();
 }
 
+bool SmartSessionController::profileGenerationAdvanced(
+    const QString& baseline,
+    const QString& observed) noexcept {
+    bool observedOk = false;
+    static_cast<void>(observed.trimmed().toULongLong(&observedOk));
+    if (!observedOk) return false;
+
+    bool baselineOk = false;
+    static_cast<void>(baseline.trimmed().toULongLong(&baselineOk));
+    if (!baselineOk) return true;
+    return observed.trimmed() != baseline.trimmed();
+}
+
 SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent) {
     discoveryTimer_.setInterval(2500);
     discoveryTimer_.setSingleShot(false);
@@ -43,6 +56,15 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
     prepareTimer_.setInterval(650);
     prepareTimer_.setSingleShot(true);
     connect(&prepareTimer_, &QTimer::timeout, this, &SmartSessionController::reconcile);
+
+    profileSyncTimer_.setInterval(profileSyncTimeoutMs());
+    profileSyncTimer_.setSingleShot(true);
+    connect(&profileSyncTimer_, &QTimer::timeout, this, [this] {
+        if (profileSyncStage_ != ProfileSyncStage::deploying) return;
+        handleProfileSyncAttemptFailure(QStringLiteral(
+            "Timed out waiting for the ESP32-P4 to arm a new profile generation."));
+        reconcile();
+    });
 
     reconnectTimer_.setInterval(3000);
     reconnectTimer_.setSingleShot(true);
@@ -82,6 +104,10 @@ bool SmartSessionController::firmwareInstallRequired() const noexcept {
 }
 bool SmartSessionController::firmwareRetryAvailable() const noexcept {
     return setupError_ && !updatePort_.trimmed().isEmpty() && firmware_ != nullptr && !firmware_->busy();
+}
+bool SmartSessionController::profileSyncRetryAvailable() const noexcept {
+    return profileSyncStage_ == ProfileSyncStage::failed && device_ != nullptr &&
+        device_->deviceVerified() && !device_->running();
 }
 bool SmartSessionController::updatingFirmware() const noexcept {
     return updateStage_ == UpdateStage::stopping || updateStage_ == UpdateStage::probing ||
@@ -123,8 +149,8 @@ void SmartSessionController::setDevice(QObject* object) {
     if (device_ != nullptr) disconnect(device_, nullptr, this, nullptr);
     device_ = next;
     deviceFirmwareVersion_.clear();
-    needsProfileSync_ = true;
-    profileSyncInFlight_ = false;
+    profileSyncBootId_.clear();
+    resetProfileSync(true);
     clearBlankBoardContext();
     reconnectDeviceSignals();
     emit dependenciesChanged();
@@ -136,8 +162,7 @@ void SmartSessionController::setProfiles(QObject* object) {
     if (profiles_ == next) return;
     if (profiles_ != nullptr) disconnect(profiles_, nullptr, this, nullptr);
     profiles_ = next;
-    needsProfileSync_ = true;
-    profileSyncInFlight_ = false;
+    resetProfileSync(true);
     reconnectProfileSignals();
     emit dependenciesChanged();
     reconcile();
@@ -194,8 +219,8 @@ bool SmartSessionController::beginFirmwareOperation(const QString& portName) {
     updatePort_ = port;
     updateRequested_ = true;
     updateReconnectAttempts_ = 0;
-    needsProfileSync_ = true;
-    profileSyncInFlight_ = false;
+    profileSyncBootId_.clear();
+    resetProfileSync(true);
     setupError_ = false;
     setupErrorStatus_.clear();
 
@@ -259,6 +284,13 @@ bool SmartSessionController::retryIdentification() {
     return started;
 }
 
+bool SmartSessionController::retryProfileSync() {
+    if (!profileSyncRetryAvailable()) return false;
+    resetProfileSync(true);
+    QTimer::singleShot(0, this, &SmartSessionController::reconcile);
+    return true;
+}
+
 void SmartSessionController::continueFirmwareUpdate() {
     if (!updateRequested_ || device_ == nullptr || firmware_ == nullptr) return;
     if (device_->running()) {
@@ -287,13 +319,13 @@ void SmartSessionController::reconnectDeviceSignals() {
         if (device_ != nullptr && device_->deviceVerified()) {
             clearBlankBoardContext();
             refreshFirmwareIdentity();
-            needsProfileSync_ = true;
-            profileSyncInFlight_ = false;
+            profileSyncBootId_.clear();
+            resetProfileSync(true);
             prepareTimer_.start();
         } else {
             deviceFirmwareVersion_.clear();
-            needsProfileSync_ = true;
-            profileSyncInFlight_ = false;
+            profileSyncBootId_.clear();
+            resetProfileSync(true);
         }
         reconcile();
     });
@@ -326,11 +358,7 @@ void SmartSessionController::reconnectDeviceSignals() {
         reconcile();
     });
     connect(device_, &DeviceController::profileStateChanged, this, [this] {
-        if (device_ != nullptr && profileSyncInFlight_ &&
-            device_->profileArmed() && !device_->profileDeploying()) {
-            profileSyncInFlight_ = false;
-            needsProfileSync_ = false;
-        }
+        handleProfileStateChanged();
         reconcile();
     });
 }
@@ -338,13 +366,11 @@ void SmartSessionController::reconnectDeviceSignals() {
 void SmartSessionController::reconnectProfileSignals() {
     if (profiles_ == nullptr) return;
     connect(profiles_, &SclProfileModel::sourceChanged, this, [this] {
-        needsProfileSync_ = true;
-        profileSyncInFlight_ = false;
+        resetProfileSync(true);
         QTimer::singleShot(0, this, &SmartSessionController::reconcile);
     });
     connect(profiles_, &SclProfileModel::selectedProfileChanged, this, [this] {
-        needsProfileSync_ = true;
-        profileSyncInFlight_ = false;
+        resetProfileSync(true);
         QTimer::singleShot(0, this, &SmartSessionController::reconcile);
     });
 }
@@ -478,6 +504,110 @@ void SmartSessionController::latchFirmwareFailure(QString message) {
     setupErrorStatus_ = message.isEmpty()
         ? QStringLiteral("Firmware setup did not complete. Retry explicitly when the board is ready.")
         : std::move(message);
+}
+
+void SmartSessionController::resetProfileSync(const bool requireSync) {
+    profileSyncTimer_.stop();
+    profileSyncStage_ = ProfileSyncStage::idle;
+    profileSyncAttempts_ = 0;
+    profileSyncBaselineGeneration_.clear();
+    profileSyncError_.clear();
+    needsProfileSync_ = requireSync;
+}
+
+bool SmartSessionController::beginProfileSync(const QVariantMap& profile) {
+    if (device_ == nullptr || !device_->deviceVerified() || device_->running() ||
+        profileSyncStage_ == ProfileSyncStage::failed ||
+        !profileSyncRetryAllowed(profileSyncAttempts_)) {
+        return false;
+    }
+
+    const QString currentBootId = device_->bootId().trimmed();
+    if (profileSyncBootId_ == currentBootId && !currentBootId.isEmpty()) {
+        profileSyncBaselineGeneration_ = device_->profileGeneration().trimmed();
+    } else {
+        // A profile generation only has meaning inside one firmware boot. Do
+        // not compare a fresh boot against a generation cached from an older
+        // boot/session; the first armed generation on this boot is authoritative.
+        profileSyncBaselineGeneration_.clear();
+        profileSyncBootId_ = currentBootId;
+    }
+
+    ++profileSyncAttempts_;
+    profileSyncStage_ = ProfileSyncStage::deploying;
+    profileSyncError_.clear();
+
+    const bool accepted = device_->deployProfile(profile);
+    if (!accepted) {
+        if (profileSyncStage_ == ProfileSyncStage::deploying) {
+            handleProfileSyncAttemptFailure(
+                device_->lastError().isEmpty()
+                    ? QStringLiteral("Studio could not send the profile transaction to the ESP32-P4.")
+                    : device_->lastError());
+        }
+        return false;
+    }
+
+    if (profileSyncStage_ == ProfileSyncStage::deploying) profileSyncTimer_.start();
+    return true;
+}
+
+void SmartSessionController::handleProfileStateChanged() {
+    if (device_ == nullptr || profileSyncStage_ != ProfileSyncStage::deploying) return;
+    if (device_->profileDeploying()) return;
+
+    if (device_->profileArmed()) {
+        const QString observedGeneration = device_->profileGeneration().trimmed();
+        if (!profileGenerationAdvanced(profileSyncBaselineGeneration_, observedGeneration)) {
+            // Ignore an out-of-order/stale arm indication. The bounded timer
+            // remains authoritative and will retry/fail if no new generation
+            // arrives for this transaction.
+            return;
+        }
+
+        profileSyncTimer_.stop();
+        profileSyncStage_ = ProfileSyncStage::idle;
+        profileSyncAttempts_ = 0;
+        profileSyncBaselineGeneration_ = observedGeneration;
+        profileSyncBootId_ = device_->bootId().trimmed();
+        profileSyncError_.clear();
+        needsProfileSync_ = false;
+        return;
+    }
+
+    handleProfileSyncAttemptFailure(
+        device_->lastError().isEmpty()
+            ? QStringLiteral("The ESP32-P4 rejected the profile transaction.")
+            : device_->lastError());
+}
+
+void SmartSessionController::handleProfileSyncAttemptFailure(QString reason) {
+    profileSyncTimer_.stop();
+    if (profileSyncStage_ == ProfileSyncStage::failed) return;
+
+    reason = reason.trimmed();
+    if (reason.isEmpty()) reason = QStringLiteral("Profile synchronization did not complete.");
+
+    if (profileSyncRetryAllowed(profileSyncAttempts_)) {
+        profileSyncStage_ = ProfileSyncStage::idle;
+        profileSyncError_ = std::move(reason);
+        QTimer::singleShot(0, this, &SmartSessionController::reconcile);
+        return;
+    }
+
+    latchProfileSyncFailure(std::move(reason));
+}
+
+void SmartSessionController::latchProfileSyncFailure(QString reason) {
+    profileSyncTimer_.stop();
+    profileSyncStage_ = ProfileSyncStage::failed;
+    needsProfileSync_ = true;
+    reason = reason.trimmed();
+    if (reason.isEmpty()) reason = QStringLiteral("Profile synchronization did not complete.");
+    profileSyncError_ = QStringLiteral(
+        "%1 Studio stopped after %2 bounded attempts; Start remains inhibited. Retry profile synchronization or reconnect the device.")
+        .arg(reason)
+        .arg(profileSyncMaxAttempts());
 }
 
 bool SmartSessionController::ensureDefaultProfile() {
@@ -656,10 +786,26 @@ void SmartSessionController::reconcile() {
         return;
     }
 
-    if (device_->profileDeploying() || prepareTimer_.isActive()) {
+    if (profileSyncStage_ == ProfileSyncStage::failed) {
+        setPresentation(
+            QStringLiteral("PROFILE SYNC ERROR"),
+            profileSyncError_.isEmpty()
+                ? QStringLiteral("Profile synchronization failed after bounded retries. Retry profile synchronization or reconnect the device.")
+                : profileSyncError_,
+            false,
+            false);
+        return;
+    }
+
+    if (profileSyncStage_ == ProfileSyncStage::deploying ||
+        device_->profileDeploying() || prepareTimer_.isActive()) {
         setPresentation(
             QStringLiteral("PREPARING 4I+4V"),
-            QStringLiteral("Preparing the default 4I+4V injection profile…"),
+            profileSyncStage_ == ProfileSyncStage::deploying
+                ? QStringLiteral("Synchronizing the default 4I+4V profile · attempt %1/%2…")
+                    .arg(profileSyncAttempts_)
+                    .arg(profileSyncMaxAttempts())
+                : QStringLiteral("Preparing the default 4I+4V injection profile…"),
             false,
             false);
         return;
@@ -671,15 +817,12 @@ void SmartSessionController::reconcile() {
             QStringLiteral("Synchronizing the default 4I+4V profile…"),
             false,
             false);
-        if (!profileSyncInFlight_) {
-            profileSyncInFlight_ = device_->deployProfile(profile);
-        }
+        static_cast<void>(beginProfileSync(profile));
         return;
     }
 
     if (!device_->profileArmed()) {
-        needsProfileSync_ = true;
-        profileSyncInFlight_ = false;
+        resetProfileSync(true);
         setPresentation(
             QStringLiteral("PREPARING 4I+4V"),
             QStringLiteral("Restoring the default 4I+4V profile…"),
