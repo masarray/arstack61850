@@ -77,6 +77,7 @@ jobs:
           Copy-Item '.\build-board-kit\Release\arstack_rc2_acceptance.exe' $stage
           Copy-Item '.\apps\arstack_studio\board-test\record-rc1-session.ps1' $stage
           Copy-Item '.\apps\arstack_studio\board-test\finalize-rc2-evidence.ps1' $stage
+          Copy-Item '.\apps\arstack_studio\board-test\verify-physical-acceptance.ps1' $stage
           Copy-Item '.\apps\arstack_studio\rc2\rc2-evidence-template.json' $stage
           Copy-Item '.\docs\SMV_STUDIO_BOARD_ACCEPTANCE_RUNBOOK.md' $stage
 
@@ -92,14 +93,17 @@ jobs:
           Frozen product candidate SHA: ed46f3bed73d398d71be2eacf34c4995325c3cad
           This artifact is QA tooling only. It is not the public Studio release candidate.
 
-          RC1 physical session recorder:
+          1) RC1 physical session recorder:
             .\record-rc1-session.ps1 -Output .\rc1-session-evidence.json
 
-          Full automated RC2 board path (default 3600-second soak):
+          2) Full automated RC2 board path (default 3600-second soak):
             .\arstack_board_acceptance.exe --output .\rc2-board-evidence.json
 
-          Finalize RC2 after independent capture + Studio UI observation:
+          3) Finalize RC2 after independent capture + Studio UI observation:
             .\finalize-rc2-evidence.ps1 -Evidence .\rc2-board-evidence.json -Evaluator .\arstack_rc2_acceptance.exe -Output .\rc2-final-evidence.json
+
+          4) Combined physical release verdict:
+            .\verify-physical-acceptance.ps1 -Rc1Evidence .\rc1-session-evidence.json -Rc2Evidence .\rc2-final-evidence.json -Evaluator .\arstack_rc2_acceptance.exe
           '@ | Set-Content -Encoding UTF8 (Join-Path $stage 'START_HERE.txt')
 
       - name: Parse PowerShell evidence scripts
@@ -107,7 +111,8 @@ jobs:
         run: |
           $paths = @(
             '.\board-acceptance-kit\record-rc1-session.ps1',
-            '.\board-acceptance-kit\finalize-rc2-evidence.ps1'
+            '.\board-acceptance-kit\finalize-rc2-evidence.ps1',
+            '.\board-acceptance-kit\verify-physical-acceptance.ps1'
           )
           foreach ($candidate in $paths) {
             $path = Resolve-Path $candidate
