@@ -19,6 +19,9 @@ class MmsClientController : public QObject {
     Q_PROPERTY(int port READ port WRITE setPort NOTIFY configurationChanged)
     Q_PROPERTY(QString trustedSclPath READ trustedSclPath WRITE setTrustedSclPath NOTIFY configurationChanged)
     Q_PROPERTY(bool trustedSclAvailable READ trustedSclAvailable NOTIFY configurationChanged)
+    Q_PROPERTY(QString trustedSclHealth READ trustedSclHealth NOTIFY stateChanged)
+    Q_PROPERTY(bool trustedSclDegraded READ trustedSclDegraded NOTIFY stateChanged)
+    Q_PROPERTY(bool trustedSclIncompatible READ trustedSclIncompatible NOTIFY stateChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY stateChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY stateChanged)
     Q_PROPERTY(bool operationBusy READ operationBusy NOTIFY stateChanged)
@@ -45,6 +48,25 @@ public:
     [[nodiscard]] int port() const noexcept { return port_; }
     [[nodiscard]] QString trustedSclPath() const { return trustedSclPath_; }
     [[nodiscard]] bool trustedSclAvailable() const noexcept { return !trustedSclPath_.isEmpty(); }
+    [[nodiscard]] QString trustedSclHealth() const {
+        if (lastError_.contains(QStringLiteral("SCL online identity incompatible"), Qt::CaseInsensitive)) {
+            return QStringLiteral("incompatible");
+        }
+        if (modelSource_ != QStringLiteral("Trusted SCL + initial snapshot")) return {};
+        if (modelSummary_.contains(QStringLiteral("Trusted SCL [degraded]"), Qt::CaseInsensitive)) {
+            return QStringLiteral("degraded");
+        }
+        if (modelSummary_.contains(QStringLiteral("Trusted SCL [matched]"), Qt::CaseInsensitive)) {
+            return QStringLiteral("matched");
+        }
+        return {};
+    }
+    [[nodiscard]] bool trustedSclDegraded() const {
+        return trustedSclHealth() == QStringLiteral("degraded");
+    }
+    [[nodiscard]] bool trustedSclIncompatible() const {
+        return trustedSclHealth() == QStringLiteral("incompatible");
+    }
     void setHost(const QString& value);
     void setPort(int value);
     void setTrustedSclPath(const QString& value);
