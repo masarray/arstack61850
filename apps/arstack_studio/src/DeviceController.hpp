@@ -6,6 +6,7 @@
 #include <QThread>
 #include <QVariantMap>
 
+class DeterministicSessionHarness;
 class DeviceIoWorker;
 
 struct DeviceIdentity final {
@@ -277,6 +278,8 @@ protected:
     void setSessionHeartbeatEnabled(bool enabled);
 
 private:
+    friend class DeterministicSessionHarness;
+
     bool sendCommand(const QString& command);
     void connectWorkerSignals();
     void handlePortSnapshot(const QStringList& ports, const QString& recommendedPort, int highConfidenceCount);
