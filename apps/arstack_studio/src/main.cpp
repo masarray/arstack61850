@@ -325,13 +325,38 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
     QFile::remove(lockTestPath);
     const bool singleInstancePolicy = secondInstanceBlocked && lockReacquiredAfterRelease;
 
+    SmartSessionController detachedSupervisor;
+    const bool s7IntentPolicy =
+        !detachedSupervisor.startReady() &&
+        !detachedSupervisor.canDeployProfile() &&
+        !detachedSupervisor.liveControlReady() &&
+        !detachedSupervisor.requestStart() &&
+        !detachedSupervisor.requestStop() &&
+        !detachedSupervisor.requestConnect() &&
+        !detachedSupervisor.requestConnectPort(QStringLiteral("COM7")) &&
+        !detachedSupervisor.requestDisconnect() &&
+        !detachedSupervisor.requestProfileSync() &&
+        !detachedSupervisor.requestSetFrequency(50.0) &&
+        !detachedSupervisor.requestSetSignal(
+            QStringLiteral("IA"), 1.0, 0.0, 0U, 1000.0, 100.0) &&
+        !detachedSupervisor.requestSetEnabled(QStringLiteral("IA"), true) &&
+        !detachedSupervisor.requestSetQuality(QStringLiteral("IA"), 0U) &&
+        !detachedSupervisor.requestSetCtSaturation(false, 0.0, 0.0, 2, 100.0) &&
+        !detachedSupervisor.requestZero() &&
+        !detachedSupervisor.requestPtpRefresh() &&
+        !detachedSupervisor.requestPtpRole(QStringLiteral("SOURCE")) &&
+        !detachedSupervisor.requestSmpSynch(QStringLiteral("AUTO")) &&
+        !detachedSupervisor.requestConfigurePtp({}) &&
+        !detachedSupervisor.requestStartPtp() &&
+        !detachedSupervisor.requestStopPtp();
+
     if (!currentAccepted || !legacyRejectedAsCurrent || !protocolLegacyParsed ||
         !capabilityFailClosed || !rejectsWrongTarget || !rejectsMissingFirmware ||
         !rejectsMalformedBoot || !boundedIdentifyPolicy || !boundedProfileSyncPolicy ||
         !workerPolicyAligned || !generationPolicy || !portOwnershipPolicy ||
-        !s6RecoveryPolicy || !singleInstancePolicy) {
+        !s6RecoveryPolicy || !singleInstancePolicy || !s7IntentPolicy) {
         qCritical().noquote()
-            << "S1/S2/S3/S4/S5/S6 control-plane contract: FAIL"
+            << "S1/S2/S3/S4/S5/S6/S7 control-plane contract: FAIL"
             << "current=" << currentAccepted
             << "legacy=" << legacyRejectedAsCurrent
             << "protocol-legacy=" << protocolLegacyParsed
@@ -345,7 +370,8 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
             << "generation-policy=" << generationPolicy
             << "port-owner-policy=" << portOwnershipPolicy
             << "s6-recovery-health=" << s6RecoveryPolicy
-            << "single-instance=" << singleInstancePolicy;
+            << "single-instance=" << singleInstancePolicy
+            << "s7-intent-fail-closed=" << s7IntentPolicy;
         return 11;
     }
 
@@ -384,7 +410,7 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         return 6;
     }
     qInfo().noquote()
-        << "P0 controller policy: PASS · S1 typed identity + S2 bounded IDENTIFY + S3 bounded profile sync + S4 threaded DeviceIoWorker + S5 generation/PortOwner/FirmwareWorker + S6 device-id recovery/health/single-instance boundaries + unverified START/DEPLOY fail closed";
+        << "P0 controller policy: PASS · S1 typed identity + S2 bounded IDENTIFY + S3 bounded profile sync + S4 threaded DeviceIoWorker + S5 generation/PortOwner/FirmwareWorker + S6 device-id recovery/health/single-instance + S7 supervisor-only operator intent boundaries + unverified START/DEPLOY fail closed";
     return 0;
 }
 } // namespace
