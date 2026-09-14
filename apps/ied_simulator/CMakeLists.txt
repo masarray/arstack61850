@@ -58,6 +58,8 @@ qt_add_qml_module(arstack_ied_simulator
         src/MmsSettingGroupPolicy.hpp
         src/MmsFileSettingsController.cpp
         src/MmsFileSettingsController.hpp
+        src/SclWorkspaceController.cpp
+        src/SclWorkspaceController.hpp
         src/GooseMonitorController.cpp
         src/GooseMonitorController.hpp
     QML_FILES
@@ -77,6 +79,7 @@ qt_add_qml_module(arstack_ied_simulator
         qml/ReportsWorkspace.qml
         qml/FilesWorkspace.qml
         qml/SettingsWorkspace.qml
+        qml/SclWorkspace.qml
         qml/GooseWorkspace.qml
         qml/ActivityMonitor.qml
         qml/CommissioningWorkspace.qml
@@ -268,6 +271,18 @@ target_link_libraries(ied_file_settings_workspace_qa PRIVATE
 target_include_directories(ied_file_settings_workspace_qa PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(ied_file_settings_workspace_qa PRIVATE cxx_std_20)
+
+add_executable(ied_scl_workspace_qa
+    src/ied_scl_workspace_qa.cpp
+    src/SclWorkspaceController.cpp
+    src/SclWorkspaceController.hpp)
+target_link_libraries(ied_scl_workspace_qa PRIVATE
+    Qt6::Core
+    Qt6::Qml
+    ARIEC61850::core)
+target_include_directories(ied_scl_workspace_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_scl_workspace_qa PRIVATE cxx_std_20)
 
 # The regular library intentionally keeps a strict portable connection runtime.
 # The desktop simulator needs the separate compatibility runtime validated
