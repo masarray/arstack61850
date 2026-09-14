@@ -9,6 +9,7 @@
 #include <QTimer>
 #include <QVariantMap>
 
+class DeterministicSessionHarness;
 class FirmwareManager;
 class SclProfileModel;
 
@@ -167,6 +168,8 @@ signals:
     void firmwareUpdateFinished(bool success);
 
 private:
+    friend class DeterministicSessionHarness;
+
     enum class UpdateStage {
         idle,
         stopping,
@@ -344,6 +347,7 @@ private:
     bool needsProfileSync_{true};
     bool updateRequested_{false};
     bool blankBoardDetected_{false};
+    bool manualRecoveryArmed_{false};
     bool setupError_{false};
     bool recoveryPending_{false};
     int updateReconnectAttempts_{0};
