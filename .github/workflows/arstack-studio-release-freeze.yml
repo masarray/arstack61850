@@ -1,0 +1,112 @@
+name: ARStack Studio Release Freeze
+
+on:
+  push:
+    branches:
+      - release/arstack-studio-p0-freeze
+  pull_request:
+    branches:
+      - release/arstack-studio-p0-freeze
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  freeze-guard:
+    name: Blocker-only freeze guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Enforce freeze baseline and declared blocker exceptions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import pathlib
+          import subprocess
+          import sys
+
+          manifest_path = pathlib.Path('apps/arstack_studio/release/freeze-manifest.json')
+          manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+          baseline = manifest['freezeBaselineSha']
+
+          subprocess.run(['git', 'cat-file', '-e', f'{baseline}^{{commit}}'], check=True)
+          changed = subprocess.check_output(
+              ['git', 'diff', '--name-only', f'{baseline}...HEAD'],
+              text=True,
+          ).splitlines()
+
+          governance = {
+              'apps/arstack_studio/release/freeze-manifest.json',
+              'docs/SMV_STUDIO_RELEASE_FREEZE.md',
+              '.github/workflows/arstack-studio-release-freeze.yml',
+          }
+
+          exceptions = manifest.get('exceptions', [])
+          declared = {}
+          required = {'path', 'blockerIssue', 'risk', 'rationale', 'verification'}
+          errors = []
+
+          for item in exceptions:
+              missing = sorted(required - set(item))
+              if missing:
+                  errors.append(f"freeze exception missing {missing}: {item}")
+                  continue
+              path = item['path']
+              if not isinstance(path, str) or not path.strip():
+                  errors.append(f'invalid exception path: {item}')
+                  continue
+              if path in declared:
+                  errors.append(f'duplicate freeze exception path: {path}')
+                  continue
+              for field in ('blockerIssue', 'risk', 'rationale', 'verification'):
+                  if not isinstance(item[field], str) or not item[field].strip():
+                      errors.append(f'empty {field} for freeze exception: {path}')
+              declared[path] = item
+
+          production_changes = [p for p in changed if p not in governance]
+          undeclared = [p for p in production_changes if p not in declared]
+          stale = [p for p in declared if p not in production_changes]
+
+          if manifest.get('state') != 'FROZEN_PENDING_PHYSICAL_ACCEPTANCE':
+              errors.append('freeze manifest state must remain FROZEN_PENDING_PHYSICAL_ACCEPTANCE until physical acceptance is recorded')
+
+          invariants = manifest.get('releaseInvariants', {})
+          expected = {
+              'layout': '4I+4V',
+              'fps': 4000,
+              'asdu': 1,
+              'payloadBytes': 64,
+              'smpSynchWithoutMeasuredEvidence': 0,
+              'autoStartAfterReconnect': False,
+              'physicalAcceptanceRequiredBeforeMergeOrTag': True,
+          }
+          for key, value in expected.items():
+              if invariants.get(key) != value:
+                  errors.append(f'release invariant changed: {key}={invariants.get(key)!r}, expected {value!r}')
+
+          if undeclared:
+              errors.append('undeclared production changes above freeze baseline: ' + ', '.join(undeclared))
+          if stale:
+              errors.append('freeze exceptions do not correspond to changed files: ' + ', '.join(stale))
+
+          print(f'Freeze baseline: {baseline}')
+          print('Changed paths above baseline:')
+          for path in changed:
+              marker = 'governance' if path in governance else 'declared-blocker' if path in declared else 'UNDECLARED'
+              print(f'  [{marker}] {path}')
+
+          if errors:
+              print('\nRELEASE FREEZE: FAIL', file=sys.stderr)
+              for error in errors:
+                  print(f' - {error}', file=sys.stderr)
+              sys.exit(1)
+
+          print('\nRELEASE FREEZE: PASS · no feature/scope change above frozen RC; production deltas are blocker-declared only')
+          PY
