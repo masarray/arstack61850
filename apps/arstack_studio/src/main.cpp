@@ -42,10 +42,6 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override {
         if (event != nullptr && event->type() == QEvent::Close && app_ != nullptr) {
             closeObserved_ = true;
-            // quit() marks the running event loop for termination; it does not
-            // destroy the window synchronously. Returning false therefore still
-            // lets Main.qml's onClosing handler issue its best-effort STOP.
-            // Auxiliary QML windows can no longer keep the process alive.
             app_->quit();
         }
         return QObject::eventFilter(watched, event);
@@ -154,8 +150,6 @@ int checkFirmwareContract(int argc, char* argv[]) {
         return 4;
     }
 
-    // Shutdown must be safe and idempotent; this catches lifecycle regressions
-    // in every package-contract run without launching external firmware tools.
     firmware.shutdown();
     firmware.shutdown();
 
@@ -167,6 +161,70 @@ int checkFirmwareContract(int argc, char* argv[]) {
 
 int checkP0ControllerPolicy(int argc, char* argv[]) {
     QCoreApplication app(argc, argv);
+
+    DeviceIdentity currentIdentity;
+    const QString currentLine = QStringLiteral(
+        "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
+        "device_id=A1B2C3D4E5F6 firmware=%1 boot_id=0123456789ABCDEF "
+        "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE")
+        .arg(QStringLiteral(ARSTACK_STUDIO_VERSION));
+    const bool currentParsed = DeviceController::parseIdentityLine(currentLine, currentIdentity);
+    const bool currentAccepted = currentParsed &&
+        DeviceController::identitySupportsCurrentContract(
+            currentIdentity, QStringLiteral(ARSTACK_STUDIO_VERSION));
+
+    DeviceIdentity legacyIdentity;
+    const QString legacyLine = QStringLiteral(
+        "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
+        "device_id=A1B2C3D4E5F6 firmware=%1 capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE")
+        .arg(QStringLiteral(ARSTACK_STUDIO_VERSION));
+    const bool legacyParsed = DeviceController::parseIdentityLine(legacyLine, legacyIdentity);
+    const bool legacyRejectedAsCurrent = legacyParsed &&
+        !DeviceController::identitySupportsCurrentContract(
+            legacyIdentity, QStringLiteral(ARSTACK_STUDIO_VERSION));
+
+    DeviceIdentity protocolLegacy;
+    const bool protocolLegacyParsed = DeviceController::parseIdentityLine(
+        QStringLiteral(
+            "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=0 "
+            "device_id=A1B2C3D4E5F6 firmware=0.0.9 capabilities=SMV-4I4V,LIVE-SETPOINTS"),
+        protocolLegacy) &&
+        !DeviceController::identitySupportsCurrentContract(
+            protocolLegacy, QStringLiteral(ARSTACK_STUDIO_VERSION));
+
+    DeviceIdentity rejectedIdentity;
+    const bool rejectsWrongTarget = !DeviceController::parseIdentityLine(
+        QStringLiteral(
+            "ARSTACK identity product=SMV-INJECTOR target=ESP32-S3 protocol=1 "
+            "device_id=A1B2C3D4E5F6 firmware=0.1.0 boot_id=0123456789ABCDEF "
+            "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE"),
+        rejectedIdentity);
+    const bool rejectsMissingFirmware = !DeviceController::parseIdentityLine(
+        QStringLiteral(
+            "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
+            "device_id=A1B2C3D4E5F6 boot_id=0123456789ABCDEF "
+            "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE"),
+        rejectedIdentity);
+    const bool rejectsMalformedBoot = !DeviceController::parseIdentityLine(
+        QStringLiteral(
+            "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
+            "device_id=A1B2C3D4E5F6 firmware=0.1.0 boot_id=NOT-A-BOOT-ID "
+            "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE"),
+        rejectedIdentity);
+
+    if (!currentAccepted || !legacyRejectedAsCurrent || !protocolLegacyParsed ||
+        !rejectsWrongTarget || !rejectsMissingFirmware || !rejectsMalformedBoot) {
+        qCritical().noquote()
+            << "S1 identity contract: FAIL"
+            << "current=" << currentAccepted
+            << "legacy=" << legacyRejectedAsCurrent
+            << "protocol-legacy=" << protocolLegacyParsed
+            << "wrong-target=" << rejectsWrongTarget
+            << "missing-firmware=" << rejectsMissingFirmware
+            << "malformed-boot=" << rejectsMalformedBoot;
+        return 11;
+    }
+
     StudioDeviceController device;
     if (device.start()) {
         qCritical().noquote() << "P0 controller policy: FAIL · unverified device was allowed to START";
@@ -176,7 +234,8 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         qCritical().noquote() << "P0 controller policy: FAIL · incompatible/unverified device accepted deploy";
         return 6;
     }
-    qInfo().noquote() << "P0 controller policy: PASS · unverified START/DEPLOY fail closed";
+    qInfo().noquote()
+        << "P0 controller policy: PASS · typed S1 identity + unverified START/DEPLOY fail closed";
     return 0;
 }
 } // namespace
@@ -229,9 +288,6 @@ int main(int argc, char* argv[]) {
 
     PrimaryWindowCloseFilter primaryCloseFilter{&app};
     if (mainWindow != nullptr) {
-        // Auxiliary QML windows deliberately stay instantiated for fast reuse.
-        // The primary ApplicationWindow therefore owns process lifetime: its
-        // close event retires the event loop even when hidden docks still exist.
         mainWindow->installEventFilter(&primaryCloseFilter);
     }
 
@@ -249,9 +305,6 @@ int main(int argc, char* argv[]) {
                 return;
             }
 
-            // Windows hosted runners have no interactive desktop. Deliver the
-            // authoritative Qt close event directly instead of depending on a
-            // native WM_CLOSE round trip that the runner cannot guarantee.
             QCloseEvent closeEvent;
             QCoreApplication::sendEvent(lifecycleTarget.data(), &closeEvent);
             if (!primaryCloseFilter.closeObserved()) {
@@ -260,11 +313,6 @@ int main(int argc, char* argv[]) {
                 return;
             }
 
-            // A GitHub-hosted Windows session can keep the synthetic close
-            // dispatch nested even after QCoreApplication::quit() has been
-            // requested from the production filter. Once the authoritative
-            // filter has observed the close, explicitly finish only the test
-            // harness. Production still relies on the same filter's quit().
             QCoreApplication::exit(0);
         });
         QTimer::singleShot(3500, &app, [] {
