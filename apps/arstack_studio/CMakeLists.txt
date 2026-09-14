@@ -44,6 +44,7 @@ qt_add_executable(arstack_studio
 # the release application. Friend-only seams let the harness inject deterministic
 # transport/session events without introducing a second supervisor implementation.
 qt_add_executable(arstack_session_harness
+    src/DeterministicSessionHarnessMain.cpp
     src/DeterministicSessionHarness.cpp
     src/DeterministicSessionHarness.hpp
     ${ARSTACK_STUDIO_CORE_SOURCES}
