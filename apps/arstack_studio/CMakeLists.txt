@@ -21,6 +21,8 @@ qt_add_executable(arstack_studio
     src/main.cpp
     src/SclProfileModel.cpp
     src/SclProfileModel.hpp
+    src/DeviceIoWorker.cpp
+    src/DeviceIoWorker.hpp
     src/DeviceController.cpp
     src/DeviceController.hpp
     src/StudioDeviceController.hpp
