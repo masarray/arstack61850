@@ -111,14 +111,16 @@ const MmsStaticDataSetEntry* MmsStaticDataSetTable::find(
         return nullptr;
     }
 
-    if (name.kind != MmsObjectNameViewKind::vmd_specific || name.item.empty()) {
+    if ((name.kind != MmsObjectNameViewKind::vmd_specific &&
+         name.kind != MmsObjectNameViewKind::aa_specific) ||
+        name.item.empty()) {
         return nullptr;
     }
 
-    // IEDScout legitimately probes named-variable-list attributes with a
-    // VMD-specific ObjectName such as LLN0$Digital. Resolve that compatibility
-    // form only when the item is unique across logical-device domains. This
-    // preserves deterministic behavior and refuses ambiguous cross-domain names.
+    // IEDScout probes named-variable-list attributes with both VMD-specific and
+    // AA-specific ObjectName forms such as LLN0$Digital. Resolve either
+    // compatibility form only when the item is unique across logical-device
+    // domains. Ambiguity stays an explicit miss instead of picking arbitrarily.
     const MmsStaticDataSetEntry* match = nullptr;
     for (const auto& data_set : data_sets_) {
         if (!equals(name.item, data_set.item)) {
