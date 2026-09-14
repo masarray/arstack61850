@@ -5,7 +5,6 @@
 
 #include <QCoreApplication>
 #include <QHash>
-#include <QRegularExpression>
 #include <QTimer>
 
 #include <cmath>
@@ -51,10 +50,9 @@ public:
             }
             ensureSessionHeartbeat();
         });
-        connect(this, &DeviceController::logTextChanged, this, [this] {
-            // The semantic version field arrives on the same identity line that
-            // verifies the device. Start the lease only for current firmware so
-            // legacy builds are not spammed with an unknown command.
+        connect(this, &DeviceController::deviceIdentityChanged, this, [this] {
+            // S1: heartbeat/control permission follows the typed semantic
+            // identity only. Human diagnostics text is never product state.
             ensureSessionHeartbeat();
         });
 
@@ -70,17 +68,8 @@ public:
     }
 
     [[nodiscard]] bool currentFirmwareIdentitySeen() const {
-        const QString log = logText();
-        const qsizetype identityPos = log.lastIndexOf(QStringLiteral("ARSTACK identity"), -1, Qt::CaseInsensitive);
-        if (identityPos < 0) return false;
-        qsizetype lineEnd = log.indexOf(QLatin1Char('\n'), identityPos);
-        if (lineEnd < 0) lineEnd = log.size();
-        const QString identityLine = log.mid(identityPos, lineEnd - identityPos);
-        static const QRegularExpression versionExpression{
-            QStringLiteral(R"(\bfirmware=([0-9A-Za-z._+\-]+))"),
-            QRegularExpression::CaseInsensitiveOption};
-        const auto match = versionExpression.match(identityLine);
-        return match.hasMatch() && match.captured(1) == QStringLiteral(ARSTACK_STUDIO_VERSION);
+        return DeviceController::identitySupportsCurrentContract(
+            deviceIdentity(), QStringLiteral(ARSTACK_STUDIO_VERSION));
     }
 
     Q_INVOKABLE bool start() override {
@@ -88,7 +77,7 @@ public:
             emit deviceMessage(QStringLiteral("Connect and verify the ARStack ESP32-P4 before Start."));
             return false;
         }
-        if (protocolVersion() != QStringLiteral("1") || !currentFirmwareIdentitySeen()) {
+        if (!currentFirmwareIdentitySeen()) {
             emit deviceMessage(QStringLiteral("Firmware update required before Start."));
             return false;
         }
@@ -97,9 +86,6 @@ public:
             return false;
         }
 
-        // Refresh the firmware lease synchronously so a STOP -> immediate START
-        // cannot have a short unprotected RUN window while waiting for the next
-        // periodic heartbeat tick.
         if (!sendQuietCommand(QStringLiteral("HEARTBEAT"))) {
             emit deviceMessage(QStringLiteral("Control session could not be established before Start."));
             return false;
@@ -172,7 +158,7 @@ public:
     }
 
     Q_INVOKABLE bool deployProfile(const QVariantMap& profile) override {
-        if (protocolVersion() != QStringLiteral("1") || !currentFirmwareIdentitySeen()) {
+        if (!currentFirmwareIdentitySeen()) {
             emit deviceMessage(QStringLiteral("Firmware update required before profile synchronization."));
             return false;
         }
