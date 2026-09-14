@@ -62,12 +62,16 @@ public:
 
     void setSessionGeneration(quint64 generation) noexcept { sessionGeneration_ = generation; }
 
+    // Read-only/diagnostic QML surface. Mutating firmware operations are
+    // intentionally C++-only so QML cannot bypass SmartSessionController's
+    // generation and PortOwner arbitration.
     Q_INVOKABLE void refreshBundle();
-    Q_INVOKABLE bool probeTarget(const QString& portName);
-    Q_INVOKABLE bool installFirmware(const QString& portName);
-    Q_INVOKABLE void cancel();
-    Q_INVOKABLE void shutdown();
     Q_INVOKABLE void clearLog();
+
+    bool probeTarget(const QString& portName);
+    bool installFirmware(const QString& portName);
+    void cancel();
+    void shutdown();
 
 signals:
     void stateChanged();
@@ -108,7 +112,7 @@ private:
     QString status_{QStringLiteral("Firmware setup ready")};
     QString bundleStatus_{QStringLiteral("Checking firmware package...")};
     QString logText_;
-    quint64 sessionGeneration_{1};
+    quint64 sessionGeneration_{0};
     quint64 activeOperationGeneration_{0};
     int flashProgress_{-1};
     bool bundleReady_{false};
