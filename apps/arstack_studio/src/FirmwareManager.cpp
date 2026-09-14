@@ -344,8 +344,9 @@ void FirmwareManager::clearLog() {
 }
 
 bool FirmwareManager::startEspflash(const QStringList& arguments, const Operation operation) {
-    if (shuttingDown_ || worker_ == nullptr || !workerThread_.isRunning() || sessionGeneration_ == 0) {
-        fail(QStringLiteral("Firmware worker is unavailable."));
+    if (shuttingDown_ || worker_ == nullptr || !workerThread_.isRunning() ||
+        !workerReady_ || !workerAffinityValid_ || sessionGeneration_ == 0) {
+        fail(QStringLiteral("Firmware worker is unavailable or not affinity-safe."));
         busy_ = false;
         return false;
     }
