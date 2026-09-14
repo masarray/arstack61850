@@ -14,6 +14,8 @@
 #define ARSTACK_STUDIO_VERSION "0.1.0"
 #endif
 
+class DeterministicSessionHarness;
+
 class StudioDeviceController : public DeviceController {
     Q_OBJECT
     Q_PROPERTY(bool controlResponsive READ controlResponsive NOTIFY controlHealthChanged)
@@ -199,6 +201,8 @@ signals:
     void controlHealthFailed();
 
 private:
+    friend class DeterministicSessionHarness;
+
     struct PendingSignal {
         double magnitude{};
         double phaseDegrees{};
