@@ -1,0 +1,50 @@
+{
+  "schema": "arstack.studio.rc2.v1",
+  "candidateSha": "REPLACE_WITH_40_CHAR_GIT_SHA",
+  "profile": {
+    "channels": 8,
+    "publisherRate": 4000,
+    "asduCount": 1,
+    "payloadBytes": 64,
+    "channelLeafCount": 16
+  },
+  "telemetry": {
+    "durationSeconds": 3600,
+    "fpsMin": 4000,
+    "fpsMax": 4000,
+    "missed": 0,
+    "txFailures": 0,
+    "healthReconnects": 0,
+    "automaticStarts": 0
+  },
+  "operations": {
+    "deployReady": false,
+    "startStopCycles": 0,
+    "zero": false,
+    "liveMagnitude": false,
+    "livePhase": false,
+    "liveFrequency": false,
+    "liveQuality": false,
+    "ctSaturation": false,
+    "profileResync": false,
+    "signalGenerationAdvanced": false,
+    "smpCntRestartOnLiveEdit": true
+  },
+  "capture": {
+    "durationSeconds": 10,
+    "destinationMacMatches": false,
+    "appidMatches": false,
+    "vlanPcpMatches": false,
+    "svIdMatches": false,
+    "confRevMatches": false,
+    "asduCountMatches": false,
+    "payloadBytesMatches": false,
+    "smpCntContinuous": false,
+    "counterWrapObserved": false,
+    "smpSynchAdvertised": 0
+  },
+  "operator": {
+    "uiResponsive": false,
+    "orphanWorkerObserved": true
+  }
+}
