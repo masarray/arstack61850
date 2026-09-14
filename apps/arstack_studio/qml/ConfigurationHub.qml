@@ -10,6 +10,7 @@ Item {
     property var controller
     property var device
     property var profiles
+    property var session
     property string uiFont: "Inter"
     property string monoFont: "Inter"
 
@@ -138,6 +139,7 @@ Item {
                 controller: hub.controller
                 device: hub.device
                 profiles: hub.profiles
+                session: hub.session
                 uiFont: hub.uiFont
                 monoFont: hub.monoFont
                 compact: false
@@ -146,6 +148,7 @@ Item {
                 theme: hub.theme
                 device: hub.device
                 firmware: FirmwareService
+                session: hub.session
                 uiFont: hub.uiFont
                 monoFont: hub.monoFont
             }
@@ -158,12 +161,14 @@ Item {
             PtpExpertPanel {
                 theme: hub.theme
                 device: hub.device
+                session: hub.session
                 uiFont: hub.uiFont
                 monoFont: hub.monoFont
             }
             DeviceExpertPanel {
                 theme: hub.theme
                 device: hub.device
+                session: hub.session
                 uiFont: hub.uiFont
                 monoFont: hub.monoFont
             }
