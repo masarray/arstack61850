@@ -12,57 +12,6 @@ SurfacePanel {
     property bool technicalDetailsVisible: false
 
     readonly property bool hasPort: firmwarePort.currentText.length > 0
-    readonly property bool canInstall:
-        panel.firmware.bundleReady && panel.firmware.targetVerified &&
-        !panel.firmware.busy && panel.hasPort &&
-        firmwarePort.currentText === panel.firmware.selectedPort
-
-    Timer {
-        id: reconnectTimer
-        interval: 1800
-        repeat: false
-        onTriggered: panel.device.autoDetectAndConnect()
-    }
-
-    Timer {
-        id: autoProbeTimer
-        interval: 550
-        repeat: false
-        onTriggered: {
-            if (panel.firmware.busy || panel.firmware.targetVerified)
-                return
-            if (panel.device.ports.length !== 1)
-                return
-            var port = panel.device.ports[0]
-            if (!port || port.length === 0)
-                return
-            if (panel.device.connected)
-                panel.device.disconnectPort()
-            panel.firmware.probeTarget(port)
-        }
-    }
-
-    Connections {
-        target: panel.firmware
-        function onInstallationFinished(resetSucceeded) {
-            if (resetSucceeded)
-                reconnectTimer.restart()
-        }
-    }
-
-    Connections {
-        target: panel.device
-        function onPortsChanged() {
-            if (!panel.firmware.targetVerified && !panel.firmware.busy && panel.device.ports.length === 1)
-                autoProbeTimer.restart()
-        }
-    }
-
-    Component.onCompleted: {
-        panel.device.refreshPorts()
-        if (panel.device.ports.length === 1)
-            autoProbeTimer.restart()
-    }
 
     component StepBadge: Rectangle {
         property string stepText: "1"
@@ -115,6 +64,8 @@ SurfacePanel {
         }
     }
 
+    Component.onCompleted: panel.device.refreshPorts()
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 18
@@ -136,7 +87,7 @@ SurfacePanel {
                     font.letterSpacing: 0.9
                 }
                 Label {
-                    text: "Install ARStack firmware"
+                    text: "Session-controlled firmware service"
                     color: panel.theme.text
                     font.family: panel.uiFont
                     font.pixelSize: 18
@@ -144,9 +95,7 @@ SurfacePanel {
                 }
                 Label {
                     Layout.fillWidth: true
-                    text: panel.device.deviceVerified
-                        ? "The injector is recognized. Reinstall firmware here only when recovery or update is required."
-                        : "For a new board, blank board, or older firmware. The board does not need to identify as ARStack before recovery."
+                    text: "Firmware probing, writing and reset are owned by the guided device session. Advanced view is diagnostic only, preventing a second path from competing for the serial port."
                     color: panel.theme.textSoft
                     font.family: panel.uiFont
                     font.pixelSize: 10
@@ -195,7 +144,7 @@ SurfacePanel {
                     spacing: 1
                     Label {
                         text: panel.firmware.bundleReady
-                            ? "ARStack firmware v" + panel.firmware.firmwareVersion + " is already included"
+                            ? "ARStack firmware v" + panel.firmware.firmwareVersion + " is verified in this Studio package"
                             : "Firmware package is not ready"
                         color: panel.theme.text
                         font.family: panel.uiFont
@@ -205,7 +154,7 @@ SurfacePanel {
                     Label {
                         Layout.fillWidth: true
                         text: panel.firmware.bundleReady
-                            ? "No firmware download or .bin selection is required."
+                            ? "Manifest target, revision policy and SHA-256 are checked before the guided session can write."
                             : panel.firmware.bundleStatus
                         color: panel.theme.muted
                         font.family: panel.uiFont
@@ -218,11 +167,11 @@ SurfacePanel {
 
         Rectangle {
             Layout.fillWidth: true
-            implicitHeight: panel.firmware.bootloaderHelpNeeded ? 146 : 126
+            implicitHeight: 126
             radius: 9
             color: panel.theme.surface2
             border.width: 1
-            border.color: panel.firmware.targetVerified ? "#2c674e" : (panel.firmware.bootloaderHelpNeeded ? "#705827" : panel.theme.lineSoft)
+            border.color: panel.theme.lineSoft
 
             RowLayout {
                 anchors.fill: parent
@@ -231,7 +180,7 @@ SurfacePanel {
 
                 StepBadge {
                     stepText: "1"
-                    complete: panel.firmware.targetVerified
+                    complete: panel.device.deviceVerified
                     Layout.alignment: Qt.AlignTop
                 }
 
@@ -239,7 +188,7 @@ SurfacePanel {
                     Layout.fillWidth: true
                     spacing: 7
                     Label {
-                        text: "Connect and check the board"
+                        text: "Observe the connected device"
                         color: panel.theme.text
                         font.family: panel.uiFont
                         font.pixelSize: 12
@@ -247,25 +196,14 @@ SurfacePanel {
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: panel.firmware.targetVerified
-                            ? panel.firmware.targetChip + " verified on " + panel.firmware.selectedPort
+                        text: panel.device.deviceVerified
+                            ? panel.device.deviceProduct + " · " + panel.device.deviceTarget + " · firmware v" + panel.device.firmwareVersion
                             : (panel.hasPort
-                                ? firmwarePort.currentText + " is visible in Windows. Studio will check the ESP32-P4 automatically."
-                                : "Connect the ESP32-P4 programming USB cable, then click Refresh.")
-                        color: panel.firmware.targetVerified ? panel.theme.green : panel.theme.muted
+                                ? firmwarePort.currentText + " is visible. Device identity and recovery decisions remain owned by the guided session."
+                                : "Connect the ESP32-P4 programming USB cable, then refresh the port list.")
+                        color: panel.device.deviceVerified ? panel.theme.green : panel.theme.muted
                         font.family: panel.uiFont
                         font.pixelSize: 10
-                        wrapMode: Text.WordWrap
-                    }
-
-                    Label {
-                        visible: panel.firmware.bootloaderHelpNeeded
-                        Layout.fillWidth: true
-                        text: "ROM not responding: hold BOOT → press and release RESET → release BOOT → click Retry check."
-                        color: panel.theme.amber
-                        font.family: panel.uiFont
-                        font.pixelSize: 10
-                        font.weight: Font.DemiBold
                         wrapMode: Text.WordWrap
                     }
 
@@ -286,21 +224,6 @@ SurfacePanel {
                             enabled: !panel.firmware.busy
                             onClicked: panel.device.refreshPorts()
                         }
-                        CalmButton {
-                            theme: panel.theme
-                            uiFont: panel.uiFont
-                            text: panel.firmware.busy
-                                ? "Checking…"
-                                : (panel.firmware.targetVerified ? "Board verified" : (panel.firmware.bootloaderHelpNeeded ? "Retry check" : "Check board"))
-                            tone: panel.firmware.targetVerified ? "success" : "accent"
-                            enabled: !panel.firmware.busy && panel.hasPort
-                            toolTipText: "Read ESP32-P4 chip identity and silicon revision from the selected COM port"
-                            onClicked: {
-                                if (panel.device.connected)
-                                    panel.device.disconnectPort()
-                                panel.firmware.probeTarget(firmwarePort.currentText)
-                            }
-                        }
                         Item { Layout.fillWidth: true }
                     }
                 }
@@ -311,9 +234,9 @@ SurfacePanel {
             Layout.fillWidth: true
             implicitHeight: 118
             radius: 9
-            color: panel.canInstall ? "#10251d" : panel.theme.surface2
+            color: panel.theme.surface2
             border.width: 1
-            border.color: panel.canInstall ? "#347a59" : panel.theme.lineSoft
+            border.color: panel.firmware.busy ? panel.theme.accent : panel.theme.lineSoft
 
             RowLayout {
                 anchors.fill: parent
@@ -322,7 +245,8 @@ SurfacePanel {
 
                 StepBadge {
                     stepText: "2"
-                    complete: panel.device.deviceVerified && panel.device.protocolVersion === panel.firmware.expectedProtocol
+                    complete: panel.device.deviceVerified &&
+                              panel.device.protocolVersion === panel.firmware.expectedProtocol
                     Layout.alignment: Qt.AlignTop
                 }
 
@@ -330,7 +254,7 @@ SurfacePanel {
                     Layout.fillWidth: true
                     spacing: 5
                     Label {
-                        text: "Install firmware"
+                        text: panel.firmware.busy ? "Guided firmware operation in progress" : "Use the guided firmware action"
                         color: panel.theme.text
                         font.family: panel.uiFont
                         font.pixelSize: 12
@@ -338,28 +262,31 @@ SurfacePanel {
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: panel.canInstall
-                            ? "Board check passed. Install the bundled firmware; Studio will reset and reconnect automatically."
-                            : "Installation unlocks only after the selected COM port is verified as an allowed ESP32-P4."
-                        color: panel.canInstall ? panel.theme.textSoft : panel.theme.muted
+                        text: panel.firmware.busy
+                            ? "The session supervisor currently owns the firmware tool. Keep USB connected until Studio reports a terminal result."
+                            : "When Studio reports Firmware required or Firmware update, use that guided action from the main workflow. It will stop output, obtain an acknowledged serial release, verify the ESP32-P4, then write."
+                        color: panel.theme.textSoft
                         font.family: panel.uiFont
                         font.pixelSize: 10
                         wrapMode: Text.WordWrap
                     }
                 }
 
-                CalmButton {
-                    theme: panel.theme
-                    uiFont: panel.uiFont
-                    implicitWidth: 190
-                    implicitHeight: 42
-                    text: panel.firmware.busy ? "Working…" : "Install ARStack v" + panel.firmware.firmwareVersion
-                    tone: "success"
-                    enabled: panel.canInstall
-                    toolTipText: panel.canInstall
-                        ? "Flash the verified bundled ARStack firmware to " + firmwarePort.currentText
-                        : "Complete Check board first"
-                    onClicked: panel.firmware.installFirmware(firmwarePort.currentText)
+                Rectangle {
+                    implicitWidth: 150
+                    implicitHeight: 34
+                    radius: 7
+                    color: panel.firmware.busy ? panel.theme.accentSoft : panel.theme.raised
+                    border.width: 1
+                    border.color: panel.firmware.busy ? panel.theme.accent : panel.theme.line
+                    Label {
+                        anchors.centerIn: parent
+                        text: panel.firmware.busy ? "SESSION OWNED" : "GUIDED ONLY"
+                        color: panel.firmware.busy ? panel.theme.accent : panel.theme.textSoft
+                        font.family: panel.uiFont
+                        font.pixelSize: 9
+                        font.weight: Font.Bold
+                    }
                 }
             }
         }
@@ -395,18 +322,10 @@ SurfacePanel {
             }
             Label {
                 Layout.fillWidth: true
-                text: "Protocol, target revision, SHA-256 and flash log"
+                text: "Protocol, target revision, SHA-256 and firmware-service log"
                 color: panel.theme.muted
                 font.family: panel.uiFont
                 font.pixelSize: 9
-            }
-            CalmButton {
-                visible: panel.firmware.busy
-                theme: panel.theme
-                uiFont: panel.uiFont
-                text: "Cancel"
-                tone: "danger"
-                onClicked: panel.firmware.cancel()
             }
         }
 
@@ -440,7 +359,7 @@ SurfacePanel {
             spacing: 6
             RowLayout {
                 Layout.fillWidth: true
-                Label { text: "FLASH LOG"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8; font.weight: Font.Bold; font.letterSpacing: 0.7 }
+                Label { text: "FIRMWARE SERVICE LOG"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8; font.weight: Font.Bold; font.letterSpacing: 0.7 }
                 Item { Layout.fillWidth: true }
                 CalmButton { theme: panel.theme; uiFont: panel.uiFont; text: "Clear"; onClicked: panel.firmware.clearLog() }
             }
