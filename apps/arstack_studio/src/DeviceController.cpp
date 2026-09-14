@@ -41,6 +41,20 @@ const QRegularExpression kPtpStatusExpression{
 const QRegularExpression kPtpConfigExpression{
     QStringLiteral("PTP config domain=(\\d+) transportSpecific=0x([0-9A-Fa-f]+) VLAN=(\\S+) Announce=(\\d+) ms Sync=(\\d+) ms Pdelay=(ON|OFF)"),
     QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kPtpRoleExpression{
+    QStringLiteral("PTPROLE role=(SOURCE|RECEIVER|MONITOR) value=(\\d+) running=([01])"),
+    QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kPtpMeasuredStateExpression{
+    QStringLiteral(
+        "PTP2 role=(SOURCE|RECEIVER|MONITOR) discipline=(UNLOCKED|ACQUIRING|LOCKED|HOLDOVER|FAULT) "
+        "source=(\\S+) offset=(NA|-?\\d+) path=(NA|-?\\d+) jitter=(NA|-?\\d+) freq=(-?\\d+) "
+        "global=([01]) measured=(NA|[012]) rxAnnounce=(\\d+) rxSync=(\\d+) rxFollowUp=(\\d+) "
+        "rxPdelay=(\\d+) pdelayReq=(\\d+) accepted=(\\d+) rejected=(\\d+)"),
+    QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kSmpSynchExpression{
+    QStringLiteral(
+        "SMPSYNCH mode=([A-Z0-9_]+) advertised=([0-2]) source=([A-Z0-9_]+) simulated=([01]) measured=([01])"),
+    QRegularExpression::CaseInsensitiveOption};
 
 [[nodiscard]] bool finitePositive(const double value) noexcept {
     return std::isfinite(value) && value > 0.0;
@@ -430,9 +444,7 @@ void DeviceController::handlePortOpened(const QString& portName, const bool auto
     running_ = false;
     profileArmed_ = false;
     profileDeploying_ = false;
-    ptpAvailable_ = false;
-    ptpRunning_ = false;
-    ptpStatus_ = QStringLiteral("Waiting for device");
+    resetPtpState();
     resetTelemetry();
 
     if (!lastError_.isEmpty()) {
@@ -462,9 +474,7 @@ void DeviceController::handlePortClosed(const QString& portName) {
     identifyAttempts_ = 0;
     setIdentificationState(IdentificationState::Idle);
     discovering_ = false;
-    ptpAvailable_ = false;
-    ptpRunning_ = false;
-    ptpStatus_ = QStringLiteral("Waiting for device");
+    resetPtpState();
     resetTelemetry();
 
     emit runningChanged();
@@ -833,6 +843,8 @@ void DeviceController::processLine(const QString& rawLine) {
         ptpRunning_ = match.captured(1).compare(QStringLiteral("RUNNING"), Qt::CaseInsensitive) == 0;
         ptpAnnounceSent_ = match.captured(2);
         ptpSyncSent_ = match.captured(3);
+        ptpFollowUpSent_ = match.captured(4);
+        ptpPdelayFrames_ = match.captured(5);
         ptpTxFailures_ = match.captured(6);
         ptpStatus_ = ptpRunning_ ? QStringLiteral("Lab TX active") : QStringLiteral("Lab TX stopped");
         emit ptpStateChanged();
@@ -847,9 +859,64 @@ void DeviceController::processLine(const QString& rawLine) {
         emit ptpStateChanged();
     }
 
+    match = kPtpRoleExpression.match(line);
+    if (match.hasMatch()) {
+        ptpAvailable_ = true;
+        ptpRole_ = match.captured(1).toUpper();
+        ptpRunning_ = match.captured(3) == QStringLiteral("1");
+        ptpDiscipline_ = QStringLiteral("UNLOCKED");
+        ptpSource_ = QStringLiteral("NONE");
+        ptpOffsetNs_ = QStringLiteral("NA");
+        ptpPathDelayNs_ = QStringLiteral("NA");
+        ptpJitterNs_ = QStringLiteral("NA");
+        ptpFrequencyPpb_ = QStringLiteral("0");
+        ptpGlobalTraceable_ = false;
+        ptpMeasuredSmpSynch_ = QStringLiteral("NA");
+        ptpRxAnnounce_ = QStringLiteral("0");
+        ptpRxSync_ = QStringLiteral("0");
+        ptpRxFollowUp_ = QStringLiteral("0");
+        ptpRxPdelay_ = QStringLiteral("0");
+        ptpPdelayRequests_ = QStringLiteral("0");
+        ptpAccepted_ = QStringLiteral("0");
+        ptpRejected_ = QStringLiteral("0");
+        ptpStatus_ = ptpRunning_ ? QStringLiteral("Timing active") : QStringLiteral("Timing stopped");
+        emit ptpStateChanged();
+    }
+
+    match = kPtpMeasuredStateExpression.match(line);
+    if (match.hasMatch()) {
+        ptpAvailable_ = true;
+        ptpRole_ = match.captured(1).toUpper();
+        ptpDiscipline_ = match.captured(2).toUpper();
+        ptpSource_ = match.captured(3);
+        ptpOffsetNs_ = match.captured(4);
+        ptpPathDelayNs_ = match.captured(5);
+        ptpJitterNs_ = match.captured(6);
+        ptpFrequencyPpb_ = match.captured(7);
+        ptpGlobalTraceable_ = match.captured(8) == QStringLiteral("1");
+        ptpMeasuredSmpSynch_ = match.captured(9).toUpper();
+        ptpRxAnnounce_ = match.captured(10);
+        ptpRxSync_ = match.captured(11);
+        ptpRxFollowUp_ = match.captured(12);
+        ptpRxPdelay_ = match.captured(13);
+        ptpPdelayRequests_ = match.captured(14);
+        ptpAccepted_ = match.captured(15);
+        ptpRejected_ = match.captured(16);
+        emit ptpStateChanged();
+    }
+
+    match = kSmpSynchExpression.match(line);
+    if (match.hasMatch()) {
+        smpSynchMode_ = match.captured(1).toUpper();
+        smpSynchValue_ = match.captured(2);
+        smpSynchSource_ = match.captured(3).toUpper();
+        smpSynchSimulated_ = match.captured(4) == QStringLiteral("1");
+        smpSynchMeasured_ = match.captured(5) == QStringLiteral("1");
+        emit ptpStateChanged();
+    }
+
     if (line.contains(QStringLiteral("PTP unavailable"), Qt::CaseInsensitive)) {
-        ptpAvailable_ = false;
-        ptpRunning_ = false;
+        resetPtpState();
         ptpStatus_ = QStringLiteral("Not enabled in firmware");
         emit ptpStateChanged();
     }
@@ -873,6 +940,41 @@ void DeviceController::resetTelemetry() {
     txFailures_ = QStringLiteral("—");
     signalGeneration_ = QStringLiteral("—");
     emit telemetryChanged();
+}
+
+void DeviceController::resetPtpState() {
+    ptpAvailable_ = false;
+    ptpRunning_ = false;
+    ptpStatus_ = QStringLiteral("Waiting for device");
+    ptpDomain_ = QStringLiteral("-");
+    ptpTransportSpecific_ = QStringLiteral("-");
+    ptpVlan_ = QStringLiteral("-");
+    ptpAnnounceSent_ = QStringLiteral("-");
+    ptpSyncSent_ = QStringLiteral("-");
+    ptpFollowUpSent_ = QStringLiteral("-");
+    ptpPdelayFrames_ = QStringLiteral("-");
+    ptpTxFailures_ = QStringLiteral("-");
+    ptpRole_ = QStringLiteral("SOURCE");
+    ptpDiscipline_ = QStringLiteral("UNLOCKED");
+    ptpSource_ = QStringLiteral("NONE");
+    ptpOffsetNs_ = QStringLiteral("NA");
+    ptpPathDelayNs_ = QStringLiteral("NA");
+    ptpJitterNs_ = QStringLiteral("NA");
+    ptpFrequencyPpb_ = QStringLiteral("0");
+    ptpGlobalTraceable_ = false;
+    ptpMeasuredSmpSynch_ = QStringLiteral("NA");
+    ptpRxAnnounce_ = QStringLiteral("0");
+    ptpRxSync_ = QStringLiteral("0");
+    ptpRxFollowUp_ = QStringLiteral("0");
+    ptpRxPdelay_ = QStringLiteral("0");
+    ptpPdelayRequests_ = QStringLiteral("0");
+    ptpAccepted_ = QStringLiteral("0");
+    ptpRejected_ = QStringLiteral("0");
+    smpSynchMode_ = QStringLiteral("AUTO");
+    smpSynchValue_ = QStringLiteral("0");
+    smpSynchSource_ = QStringLiteral("SAFE_DEFAULT");
+    smpSynchSimulated_ = false;
+    smpSynchMeasured_ = false;
 }
 
 QString DeviceController::cleanLine(const QString& rawLine) {
