@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string_view>
 
 namespace {
 
@@ -16,6 +17,9 @@ constexpr std::size_t kIedScoutBulkVariables = 78U;
 constexpr std::uint32_t kInvokeId = 33U;
 constexpr std::array<std::uint8_t, 2U> kBooleanType{0x83U, 0x00U};
 constexpr std::array<std::uint8_t, 3U> kBooleanData{0x83U, 0x01U, 0xFFU};
+constexpr std::array<std::uint8_t, 11U> kEvents{
+    0x4CU, 0x4CU, 0x4EU, 0x30U, 0x24U,
+    0x45U, 0x76U, 0x65U, 0x6EU, 0x74U, 0x73U};
 
 // VariableSpecification for LD0/R1, matching the normal MMS domain-specific
 // named-variable encoding used by the bounded server profile.
@@ -25,6 +29,32 @@ constexpr std::array<std::uint8_t, 15U> kVariableDefinition{
     0xA1U, 0x09U,
     0x1AU, 0x03U, 0x4CU, 0x44U, 0x30U,
     0x1AU, 0x02U, 0x52U, 0x31U};
+
+// IEDScout probes NamedVariableList directories in VMD, AA and then domain
+// scope. These two requests lock the first two compatibility forms.
+constexpr std::array<std::uint8_t, 16U> kVmdDataSetNameListRequest{
+    0xA0U, 0x0EU, 0x02U, 0x01U, 0x22U,
+    0xA1U, 0x09U,
+    0xA0U, 0x03U, 0x80U, 0x01U, 0x02U,
+    0xA1U, 0x02U, 0x80U, 0x00U};
+constexpr std::array<std::uint8_t, 16U> kAaDataSetNameListRequest{
+    0xA0U, 0x0EU, 0x02U, 0x01U, 0x23U,
+    0xA1U, 0x09U,
+    0xA0U, 0x03U, 0x80U, 0x01U, 0x02U,
+    0xA1U, 0x02U, 0x82U, 0x00U};
+
+// GetNamedVariableListAttributes probes for the same DataSet in VMD and AA
+// ObjectName forms, matching the proven IEDScout LLN0$Digital/Analog sequence.
+constexpr std::array<std::uint8_t, 20U> kVmdDataSetAttributesRequest{
+    0xA0U, 0x12U, 0x02U, 0x01U, 0x24U,
+    0xACU, 0x0DU, 0x80U, 0x0BU,
+    0x4CU, 0x4CU, 0x4EU, 0x30U, 0x24U,
+    0x45U, 0x76U, 0x65U, 0x6EU, 0x74U, 0x73U};
+constexpr std::array<std::uint8_t, 20U> kAaDataSetAttributesRequest{
+    0xA0U, 0x12U, 0x02U, 0x01U, 0x25U,
+    0xACU, 0x0DU, 0x82U, 0x0BU,
+    0x4CU, 0x4CU, 0x4EU, 0x30U, 0x24U,
+    0x45U, 0x76U, 0x65U, 0x6EU, 0x74U, 0x73U};
 
 [[nodiscard]] wire::EncodeResult read_boolean(
     const void* context,
@@ -105,6 +135,20 @@ constexpr std::array<std::uint8_t, 15U> kVariableDefinition{
         result.encoded_data[2] == kBooleanData[2];
 }
 
+[[nodiscard]] bool identifier_equals(
+    const std::span<const std::uint8_t> identifier,
+    const std::span<const std::uint8_t> expected) noexcept {
+    if (identifier.size() != expected.size()) {
+        return false;
+    }
+    for (std::size_t index = 0U; index < identifier.size(); ++index) {
+        if (identifier[index] != expected[index]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -122,18 +166,27 @@ int main() {
         return 1;
     }
 
+    const std::array<mms::MmsStaticDataSetMember, 1U> event_members{
+        mms::MmsStaticDataSetMember{"LD0", "R1"}};
+    const std::array<mms::MmsStaticDataSetEntry, 1U> data_sets{
+        mms::MmsStaticDataSetEntry{"LD0", "LLN0$Events", event_members, false}};
+    const mms::MmsStaticDataSetTable data_set_table{data_sets};
+    if (!data_set_table.valid() || !data_set_table.valid_against(table)) {
+        return 2;
+    }
+
     const mms::MmsStaticDispatchPolicy policy{
         32U,
         1U,
         10U,
         3U,
         10U};
-    const mms::MmsStaticApplicationDispatcher dispatcher{table, policy};
+    const mms::MmsStaticApplicationDispatcher dispatcher{table, data_set_table, policy};
 
     std::array<std::uint8_t, 2'048U> request{};
     const auto request_bytes = build_bulk_read_request(request);
     if (request_bytes == 0U) {
-        return 2;
+        return 3;
     }
 
     mms::MmsReadRequestView decoded_request;
@@ -143,7 +196,7 @@ int main() {
         decoded_request.invoke_id != kInvokeId ||
         !decoded_request.specification_with_result ||
         decoded_request.variable_count != kIedScoutBulkVariables) {
-        return 3;
+        return 4;
     }
 
     mms::MmsObjectNameView first_name;
@@ -153,12 +206,12 @@ int main() {
         first_name.item.size() != 2U || last_name.item.size() != 2U ||
         first_name.item[0] != 0x52U || first_name.item[1] != 0x31U ||
         last_name.item[0] != 0x52U || last_name.item[1] != 0x31U) {
-        return 4;
+        return 5;
     }
 
     std::array<std::uint8_t, 4'096U> response{};
     std::array<std::uint8_t, 4'096U> workspace{};
-    const auto dispatched = dispatcher.dispatch(
+    auto dispatched = dispatcher.dispatch(
         std::span<const std::uint8_t>{request}.first(request_bytes),
         response,
         workspace);
@@ -166,7 +219,7 @@ int main() {
         dispatched.service != mms::MmsWireConfirmedService::read ||
         dispatched.invoke_id != kInvokeId ||
         dispatched.bytes_written == 0U) {
-        return 5;
+        return 6;
     }
 
     mms::MmsReadResponseView read_response;
@@ -175,15 +228,65 @@ int main() {
             read_response) ||
         read_response.invoke_id != kInvokeId ||
         read_response.result_count != kIedScoutBulkVariables) {
-        return 6;
+        return 7;
     }
 
     mms::MmsReadAccessResultView result;
     for (std::size_t index = 0U; index < kIedScoutBulkVariables; ++index) {
         if (!read_response.try_result(index, result) ||
             !boolean_result_matches(result)) {
-            return 7;
+            return 8;
         }
+    }
+
+    for (const auto& directory_request : {kVmdDataSetNameListRequest, kAaDataSetNameListRequest}) {
+        dispatched = dispatcher.dispatch(directory_request, response, workspace);
+        mms::MmsGetNameListResponseView names;
+        std::span<const std::uint8_t> identifier;
+        if (!dispatched.success() ||
+            dispatched.service != mms::MmsWireConfirmedService::get_name_list ||
+            !mms::MmsServiceSpanCodec::try_decode_get_name_list_response(
+                std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
+                names) ||
+            names.identifier_count != 1U || names.more_follows ||
+            !names.try_identifier(0U, identifier) ||
+            !identifier_equals(identifier, kEvents)) {
+            return 9;
+        }
+    }
+
+    mms::MmsNamedVariableListAttributesRequestView vmd_attributes;
+    mms::MmsNamedVariableListAttributesRequestView aa_attributes;
+    if (!mms::MmsDataSetSpanCodec::try_decode_get_named_variable_list_attributes_request(
+            kVmdDataSetAttributesRequest, vmd_attributes) ||
+        vmd_attributes.name.kind != mms::MmsObjectNameViewKind::vmd_specific ||
+        !mms::MmsDataSetSpanCodec::try_decode_get_named_variable_list_attributes_request(
+            kAaDataSetAttributesRequest, aa_attributes) ||
+        aa_attributes.name.kind != mms::MmsObjectNameViewKind::aa_specific) {
+        return 10;
+    }
+
+    for (const auto& attributes_request : {kVmdDataSetAttributesRequest, kAaDataSetAttributesRequest}) {
+        dispatched = dispatcher.dispatch(attributes_request, response, workspace);
+        mms::MmsNamedVariableListAttributesResponseView attributes_response;
+        if (!dispatched.success() ||
+            dispatched.service != mms::MmsWireConfirmedService::get_named_variable_list_attributes ||
+            !mms::MmsDataSetSpanCodec::try_decode_get_named_variable_list_attributes_response(
+                std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
+                attributes_response) ||
+            attributes_response.member_count != 1U) {
+            return 11;
+        }
+    }
+
+    const std::array<mms::MmsStaticDataSetEntry, 2U> ambiguous_data_sets{
+        mms::MmsStaticDataSetEntry{"LD0", "LLN0$Events", event_members, false},
+        mms::MmsStaticDataSetEntry{"LD1", "LLN0$Events", event_members, false}};
+    const mms::MmsStaticDataSetTable ambiguous_table{ambiguous_data_sets};
+    if (!ambiguous_table.valid() ||
+        ambiguous_table.find(vmd_attributes.name) != nullptr ||
+        ambiguous_table.find(aa_attributes.name) != nullptr) {
+        return 12;
     }
 
     return 0;
