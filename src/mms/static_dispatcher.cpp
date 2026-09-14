@@ -19,9 +19,7 @@ namespace {
 [[nodiscard]] bool span_equals(
     const std::span<const std::uint8_t> bytes,
     const std::string_view text) noexcept {
-    if (bytes.size() != text.size()) {
-        return false;
-    }
+    if (bytes.size() != text.size()) return false;
     for (std::size_t index = 0U; index < bytes.size(); ++index) {
         if (bytes[index] != static_cast<std::uint8_t>(
                 static_cast<unsigned char>(text[index]))) {
@@ -52,10 +50,16 @@ namespace {
         data.tag_class != asn1::BerClass::context_specific) {
         return false;
     }
-    if (data.tag_number == 1 || data.tag_number == 2) {
-        return data.constructed;
-    }
+    if (data.tag_number == 1 || data.tag_number == 2) return data.constructed;
     return data.tag_number >= 3 && data.tag_number <= 17 && !data.constructed;
+}
+
+[[nodiscard]] bool valid_mms_type_specification(
+    const std::span<const std::uint8_t> encoded) noexcept {
+    asn1::BerTlvView type;
+    return !encoded.empty() &&
+        asn1::BerSpanReader::try_read_exact(encoded, type) &&
+        type.tag_class == asn1::BerClass::context_specific;
 }
 
 [[nodiscard]] MmsStaticDispatchResult make_status(
@@ -102,38 +106,22 @@ namespace {
     std::size_t& count,
     const std::string_view value) noexcept {
     for (std::size_t index = 0U; index < count; ++index) {
-        if (names[index] == value) {
-            return true;
-        }
+        if (names[index] == value) return true;
     }
-    if (count >= names.size()) {
-        return false;
-    }
+    if (count >= names.size()) return false;
     names[count++] = value;
     return true;
 }
 
-// IEC 61850 engineering clients discover each Logical Node as one MMS
-// NamedVariable and then walk its hierarchical TypeSpecification. Static
-// profiles also keep flattened leaf aliases in the table so Read/Write can
-// resolve exact FC/DO/DA paths. Do not advertise those aliases as additional
-// top-level NamedVariables when their root Logical Node object is present.
-//
-// The fallback is intentional: a generic MMS profile that only supplies flat
-// names (and no corresponding root entry) keeps the legacy directory behavior.
 [[nodiscard]] bool is_flattened_child_with_root(
     const MmsStaticObjectTable& objects,
     const std::string_view domain,
     const std::string_view item) noexcept {
     const auto separator = item.find('$');
-    if (separator == std::string_view::npos || separator == 0U) {
-        return false;
-    }
+    if (separator == std::string_view::npos || separator == 0U) return false;
     const auto root = item.substr(0U, separator);
     for (const auto& candidate : objects.objects()) {
-        if (candidate.domain == domain && candidate.item == root) {
-            return true;
-        }
+        if (candidate.domain == domain && candidate.item == root) return true;
     }
     return false;
 }
@@ -148,14 +136,10 @@ namespace {
     if (request.object_class == MmsNameListObjectClass::domain &&
         request.scope == MmsNameScopeKind::vmd_specific) {
         for (const auto& object : objects.objects()) {
-            if (!append_unique(names, count, object.domain)) {
-                return names.size() + 1U;
-            }
+            if (!append_unique(names, count, object.domain)) return names.size() + 1U;
         }
         for (const auto& data_set : data_sets.data_sets()) {
-            if (!append_unique(names, count, data_set.domain)) {
-                return names.size() + 1U;
-            }
+            if (!append_unique(names, count, data_set.domain)) return names.size() + 1U;
         }
         return count;
     }
@@ -168,9 +152,7 @@ namespace {
                  is_flattened_child_with_root(objects, object.domain, object.item))) {
                 continue;
             }
-            if (!append_unique(names, count, object.item)) {
-                return names.size() + 1U;
-            }
+            if (!append_unique(names, count, object.item)) return names.size() + 1U;
         }
         return count;
     }
@@ -178,14 +160,8 @@ namespace {
     if (request.object_class == MmsNameListObjectClass::named_variable_list &&
         (request.scope == MmsNameScopeKind::vmd_specific ||
          request.scope == MmsNameScopeKind::aa_specific)) {
-        // Proven IEDScout discovery probes both VMD-specific and AA-specific
-        // NamedVariableList scopes before walking domain-specific DataSets.
-        // Return one deterministic item name per DataSet and de-duplicate names
-        // shared by multiple domains at this scope.
         for (const auto& data_set : data_sets.data_sets()) {
-            if (!append_unique(names, count, data_set.item)) {
-                return names.size() + 1U;
-            }
+            if (!append_unique(names, count, data_set.item)) return names.size() + 1U;
         }
         return count;
     }
@@ -193,10 +169,9 @@ namespace {
     if (request.object_class == MmsNameListObjectClass::named_variable_list &&
         request.scope == MmsNameScopeKind::domain_specific) {
         for (const auto& data_set : data_sets.data_sets()) {
-            if (span_equals(request.domain_id, data_set.domain)) {
-                if (!append_unique(names, count, data_set.item)) {
-                    return names.size() + 1U;
-                }
+            if (span_equals(request.domain_id, data_set.domain) &&
+                !append_unique(names, count, data_set.item)) {
+                return names.size() + 1U;
             }
         }
         return count;
@@ -205,12 +180,6 @@ namespace {
     return names.size() + 1U;
 }
 
-// IEDScout performs deep per-domain directory walks and repeatedly supplies the
-// last identifier from the previous response as continueAfter. Do not first
-// materialize the complete directory into maximum_identifiers storage: a real
-// SCL model can contain thousands of MMS variables and would otherwise fail
-// before pagination is even applied. Keep only one bounded response page and
-// detect moreFollows from the next eligible object.
 [[nodiscard]] MmsStaticDispatchResult dispatch_domain_named_variable_page(
     const MmsStaticObjectTable& objects,
     const MmsStaticDispatchPolicy& policy,
@@ -229,7 +198,6 @@ namespace {
              is_flattened_child_with_root(objects, object.domain, object.item))) {
             continue;
         }
-
         if (!emit) {
             if (span_equals(request.continue_after, object.item)) {
                 continuation_found = true;
@@ -237,12 +205,10 @@ namespace {
             }
             continue;
         }
-
         if (page_count < policy.maximum_names_per_response) {
             page[page_count++] = object.item;
             continue;
         }
-
         more_follows = true;
         break;
     }
@@ -250,7 +216,6 @@ namespace {
     if (!continuation_found) {
         return make_status(MmsStaticDispatchStatus::object_not_found, confirmed);
     }
-
     if (page_count == 0U) {
         const std::span<const std::string_view> empty;
         return make_encoded(
@@ -266,15 +231,12 @@ namespace {
             std::span<const std::string_view>{page}.first(encoded_count),
             more_follows || encoded_count < page_count,
             response);
-        if (encoded.success()) {
-            return make_encoded(confirmed, encoded);
-        }
+        if (encoded.success()) return make_encoded(confirmed, encoded);
         if (encoded.status != wire::EncodeStatus::buffer_too_small || encoded_count == 1U) {
             return make_encoded(confirmed, encoded);
         }
         --encoded_count;
     }
-
     return make_status(MmsStaticDispatchStatus::backend_failure, confirmed);
 }
 
@@ -311,9 +273,7 @@ namespace {
                 break;
             }
         }
-        if (!found) {
-            return make_status(MmsStaticDispatchStatus::object_not_found, confirmed);
-        }
+        if (!found) return make_status(MmsStaticDispatchStatus::object_not_found, confirmed);
     }
 
     const auto available = name_count - start;
@@ -333,37 +293,13 @@ namespace {
             std::span<const std::string_view>{names}.subspan(start, page_count),
             more_follows,
             response);
-        if (encoded.success()) {
-            return make_encoded(confirmed, encoded);
-        }
+        if (encoded.success()) return make_encoded(confirmed, encoded);
         if (encoded.status != wire::EncodeStatus::buffer_too_small || page_count == 1U) {
             return make_encoded(confirmed, encoded);
         }
         --page_count;
     }
     return make_status(MmsStaticDispatchStatus::backend_failure, confirmed);
-}
-
-[[nodiscard]] MmsStaticDispatchResult dispatch_attributes(
-    const MmsStaticObjectTable& objects,
-    const MmsConfirmedPduView& confirmed,
-    const std::span<std::uint8_t> response) noexcept {
-    MmsVariableAccessAttributesRequestView request;
-    if (!MmsServiceSpanCodec::try_decode_variable_access_attributes_request(
-            confirmed, request)) {
-        return make_status(MmsStaticDispatchStatus::malformed_request, confirmed);
-    }
-    const auto* object = objects.find(request.name);
-    if (object == nullptr) {
-        return make_status(MmsStaticDispatchStatus::object_not_found, confirmed);
-    }
-    return make_encoded(
-        confirmed,
-        MmsServiceSpanCodec::encode_variable_access_attributes_response_into(
-            confirmed.invoke_id,
-            object->mms_deletable,
-            object->type_specification,
-            response));
 }
 
 [[nodiscard]] MmsStaticDispatchResult dispatch_data_set_attributes(
@@ -410,9 +346,7 @@ struct ReadCompatibilityRequest final {
     std::size_t offset = 0U;
     std::size_t count = 0U;
     while (offset < variable_list.size()) {
-        if (count >= MmsServiceSpanCodec::maximum_variables) {
-            return false;
-        }
+        if (count >= MmsServiceSpanCodec::maximum_variables) return false;
         asn1::BerTlvView definition;
         if (!asn1::BerSpanReader::try_read_tlv(variable_list, offset, definition) ||
             definition.tag_class != asn1::BerClass::universal ||
@@ -421,9 +355,7 @@ struct ReadCompatibilityRequest final {
         }
         ++count;
     }
-    if (count == 0U) {
-        return false;
-    }
+    if (count == 0U) return false;
     request = {};
     request.invoke_id = confirmed.invoke_id;
     request.specification_with_result = specification_with_result;
@@ -432,18 +364,11 @@ struct ReadCompatibilityRequest final {
     return true;
 }
 
-// The proven ARIEC61850 server accepts three Read discovery forms used by
-// engineering clients: the normal explicit variableAccessSpecification wrapper,
-// variableListName (DataSet Read), and an unwrapped listOfVariable compatibility
-// form. The public span codec remains strict; this adapter deliberately widens
-// only the server-facing dispatcher and preserves bounded parsing.
 [[nodiscard]] bool try_decode_read_compatibility_request(
     const MmsConfirmedPduView& confirmed,
     ReadCompatibilityRequest& request) noexcept {
     request = {};
-    if (MmsServiceSpanCodec::try_decode_read_request(confirmed, request.variables)) {
-        return true;
-    }
+    if (MmsServiceSpanCodec::try_decode_read_request(confirmed, request.variables)) return true;
     if (confirmed.kind != MmsWirePduKind::confirmed_request ||
         confirmed.service_tag != 4 || !confirmed.service_constructed) {
         return false;
@@ -462,21 +387,14 @@ struct ReadCompatibilityRequest final {
         }
 
         if (field.tag_number == 0 && !field.constructed) {
-            if (have_flag || field.value.size() != 1U) {
-                return false;
-            }
+            if (have_flag || field.value.size() != 1U) return false;
             specification_with_result = field.value[0] != 0U;
             have_flag = true;
             continue;
         }
-
-        if (have_specification) {
-            return false;
-        }
+        if (have_specification) return false;
 
         if (field.tag_number == 1 && field.constructed) {
-            // Standard/observed form: variableAccessSpecification [1] explicit
-            // wrapper containing either listOfVariable [0] or variableListName [1].
             asn1::BerTlvView specification;
             if (!asn1::BerSpanReader::try_read_exact(field.value, specification) ||
                 specification.tag_class != asn1::BerClass::context_specific) {
@@ -508,8 +426,6 @@ struct ReadCompatibilityRequest final {
         }
 
         if (field.tag_number == 0 && field.constructed) {
-            // Compatibility form used by the proven server: unwrapped
-            // listOfVariable [0] directly in Read-Request.
             if (!populate_relaxed_variable_list(
                     confirmed,
                     specification_with_result,
@@ -520,33 +436,18 @@ struct ReadCompatibilityRequest final {
             have_specification = true;
             continue;
         }
-
         return false;
     }
-
     return have_specification;
 }
 
-enum class ReadObjectStatus : std::uint8_t {
-    ok,
-    workspace_too_small,
-    backend_failure,
-};
-
-struct ReadObjectResult final {
-    ReadObjectStatus status{ReadObjectStatus::ok};
-    std::size_t required_bytes{};
-};
-
-// IEDScout's SCL-assisted connection starts with a bulk Read of FC roots such
-// as LLN0$CF, LLN0$DC, LLN0$EX, LLN0$RP, LLN0$SP and LLN0$ST. The portable
-// object table intentionally stores exact leaves (and selected explicit roots)
-// rather than materializing every intermediate hierarchy node. Build a missing
-// intermediate object on demand from its exact descendants. This is generic MMS
-// hierarchy behavior, not a Siemens path special-case, and because leaf read
-// callbacks are invoked at request time the resulting structure also reflects
-// live per-association RCB/control state.
 constexpr std::size_t kMaximumSyntheticReadDepth = 16U;
+constexpr std::array<std::string_view, 11U> kUrcbAttributeOrder{
+    "RptID", "RptEna", "Resv", "DatSet", "ConfRev", "OptFlds",
+    "BufTm", "TrgOps", "IntgPd", "GI", "SqNum"};
+constexpr std::array<std::string_view, 8U> kBrcbAttributeOrder{
+    "RptID", "RptEna", "DatSet", "ConfRev",
+    "PurgeBuf", "EntryID", "ResvTms", "Owner"};
 
 enum class SyntheticReadStatus : std::uint8_t {
     ok,
@@ -574,6 +475,11 @@ struct SyntheticChild final {
     bool found{};
 };
 
+struct SyntheticChildRank final {
+    bool known{};
+    std::size_t value{};
+};
+
 [[nodiscard]] bool is_descendant_item(
     const std::string_view item,
     const std::string_view prefix) noexcept {
@@ -587,15 +493,52 @@ struct SyntheticChild final {
     const std::string_view prefix) noexcept {
     if (!is_descendant_item(item, prefix)) return {};
     const auto next = item.find('$', prefix.size() + 1U);
-    return item.substr(
-        0U,
-        next == std::string_view::npos ? item.size() : next);
+    return item.substr(0U, next == std::string_view::npos ? item.size() : next);
 }
 
-// Object banks are composable and may append live URCB/BRCB leaves after the
-// base table, so do not assume descendants are contiguous. Select the next
-// immediate child lexicographically with a bounded scan. The returned prefix is
-// a view into stable object-name storage and remains valid for the request.
+[[nodiscard]] std::span<const std::string_view> semantic_child_order(
+    const std::string_view prefix) noexcept {
+    if (prefix.find("$RP$") != std::string_view::npos) {
+        return {kUrcbAttributeOrder};
+    }
+    if (prefix.find("$BR$") != std::string_view::npos) {
+        return {kBrcbAttributeOrder};
+    }
+    return {};
+}
+
+[[nodiscard]] SyntheticChildRank synthetic_child_rank(
+    const std::string_view prefix,
+    const std::string_view child) noexcept {
+    if (!is_descendant_item(child, prefix)) return {};
+    const auto suffix = child.substr(prefix.size() + 1U);
+    const auto order = semantic_child_order(prefix);
+    for (std::size_t index = 0U; index < order.size(); ++index) {
+        if (suffix == order[index]) return {true, index};
+    }
+    return {};
+}
+
+[[nodiscard]] bool synthetic_child_less(
+    const std::string_view prefix,
+    const std::string_view left,
+    const std::string_view right) noexcept {
+    const auto left_rank = synthetic_child_rank(prefix, left);
+    const auto right_rank = synthetic_child_rank(prefix, right);
+    if (left_rank.known || right_rank.known) {
+        if (left_rank.known && right_rank.known) {
+            return left_rank.value < right_rank.value;
+        }
+        return left_rank.known;
+    }
+    return left < right;
+}
+
+// Composable object banks append live URCB/BRCB leaves, so hierarchy walking
+// must not depend on table contiguity. Generic hierarchy children are lexical,
+// while a concrete RCB root follows the IEC 61850/report-control attribute order
+// used by its TypeSpecification. Read data therefore stays aligned with the
+// field order even though MMS Structure values do not carry component names.
 [[nodiscard]] SyntheticChild next_synthetic_child(
     const MmsStaticObjectTable& objects,
     const std::string_view domain,
@@ -604,23 +547,21 @@ struct SyntheticChild final {
     const bool have_after) noexcept {
     SyntheticChild result;
     for (const auto& candidate : objects.objects()) {
-        if (candidate.domain != domain ||
-            !is_descendant_item(candidate.item, prefix)) {
+        if (candidate.domain != domain || !is_descendant_item(candidate.item, prefix)) {
             continue;
         }
         const auto child = immediate_child_prefix(candidate.item, prefix);
-        if (child.empty() || (have_after && child <= after)) {
+        if (child.empty() ||
+            (have_after && !synthetic_child_less(prefix, after, child))) {
             continue;
         }
-        if (!result.found || child < result.prefix) {
+        if (!result.found || synthetic_child_less(prefix, child, result.prefix)) {
             result.found = true;
             result.prefix = child;
             result.exact = candidate.item == child ? &candidate : nullptr;
             continue;
         }
-        if (child == result.prefix && candidate.item == child) {
-            result.exact = &candidate;
-        }
+        if (child == result.prefix && candidate.item == child) result.exact = &candidate;
     }
     return result;
 }
@@ -628,8 +569,7 @@ struct SyntheticChild final {
 [[nodiscard]] SyntheticMeasureResult measure_exact_object(
     const MmsStaticObjectEntry& object) noexcept {
     const auto probe = object.read(object.context, {});
-    if (probe.status == wire::EncodeStatus::buffer_too_small &&
-        probe.required_bytes > 0U) {
+    if (probe.status == wire::EncodeStatus::buffer_too_small && probe.required_bytes > 0U) {
         return {SyntheticReadStatus::ok, 0U, probe.required_bytes};
     }
     if (probe.success() && probe.bytes_written > 0U) {
@@ -652,18 +592,13 @@ struct SyntheticChild final {
     bool have_after = false;
     bool found_child = false;
     while (true) {
-        const auto child = next_synthetic_child(
-            objects, domain, prefix, after, have_after);
+        const auto child = next_synthetic_child(objects, domain, prefix, after, have_after);
         if (!child.found) break;
         found_child = true;
-
         const auto measured = child.exact != nullptr
             ? measure_exact_object(*child.exact)
-            : measure_synthetic_subtree(
-                objects, domain, child.prefix, depth + 1U);
-        if (measured.status != SyntheticReadStatus::ok) {
-            return measured;
-        }
+            : measure_synthetic_subtree(objects, domain, child.prefix, depth + 1U);
+        if (measured.status != SyntheticReadStatus::ok) return measured;
         if (measured.encoded_bytes >
             std::numeric_limits<std::size_t>::max() - content_bytes) {
             return {SyntheticReadStatus::backend_failure, 0U, 0U};
@@ -673,13 +608,9 @@ struct SyntheticChild final {
         have_after = true;
     }
 
-    if (!found_child) {
-        return {SyntheticReadStatus::not_found, 0U, 0U};
-    }
+    if (!found_child) return {SyntheticReadStatus::not_found, 0U, 0U};
     const auto encoded = asn1::BerSpanWriter::tlv_size(2, content_bytes);
-    if (!encoded) {
-        return {SyntheticReadStatus::backend_failure, 0U, 0U};
-    }
+    if (!encoded) return {SyntheticReadStatus::backend_failure, 0U, 0U};
     return {SyntheticReadStatus::ok, content_bytes, *encoded};
 }
 
@@ -694,18 +625,12 @@ struct SyntheticChild final {
         return {measured.status, 0U, measured.encoded_bytes};
     }
     if (destination.size() < measured.encoded_bytes) {
-        return {
-            SyntheticReadStatus::workspace_too_small,
-            0U,
-            measured.encoded_bytes};
+        return {SyntheticReadStatus::workspace_too_small, 0U, measured.encoded_bytes};
     }
 
     asn1::BerSpanWriter writer{destination.first(measured.encoded_bytes)};
     if (!writer.write_tlv_header(
-            asn1::BerClass::context_specific,
-            true,
-            2,
-            measured.content_bytes)) {
+            asn1::BerClass::context_specific, true, 2, measured.content_bytes)) {
         return {SyntheticReadStatus::backend_failure, 0U, measured.encoded_bytes};
     }
     std::size_t offset = writer.size();
@@ -713,10 +638,8 @@ struct SyntheticChild final {
     bool have_after = false;
 
     while (true) {
-        const auto child = next_synthetic_child(
-            objects, domain, prefix, after, have_after);
+        const auto child = next_synthetic_child(objects, domain, prefix, after, have_after);
         if (!child.found) break;
-
         if (child.exact != nullptr) {
             const auto read = child.exact->read(
                 child.exact->context,
@@ -728,9 +651,7 @@ struct SyntheticChild final {
                     : offset + read.required_bytes;
                 return {SyntheticReadStatus::workspace_too_small, 0U, required};
             }
-            if (!read.success()) {
-                return {SyntheticReadStatus::value_unavailable, 0U, 0U};
-            }
+            if (!read.success()) return {SyntheticReadStatus::value_unavailable, 0U, 0U};
             if (read.bytes_written == 0U ||
                 read.bytes_written > measured.encoded_bytes - offset ||
                 !valid_mms_data(destination.subspan(offset, read.bytes_written))) {
@@ -748,10 +669,7 @@ struct SyntheticChild final {
                 if (nested.status == SyntheticReadStatus::workspace_too_small &&
                     nested.required_bytes <=
                         std::numeric_limits<std::size_t>::max() - offset) {
-                    return {
-                        nested.status,
-                        0U,
-                        offset + nested.required_bytes};
+                    return {nested.status, 0U, offset + nested.required_bytes};
                 }
                 return nested;
             }
@@ -761,12 +679,278 @@ struct SyntheticChild final {
         have_after = true;
     }
 
-    if (offset != measured.encoded_bytes ||
-        !valid_mms_data(destination.first(offset))) {
+    if (offset != measured.encoded_bytes || !valid_mms_data(destination.first(offset))) {
         return {SyntheticReadStatus::backend_failure, 0U, measured.encoded_bytes};
     }
     return {SyntheticReadStatus::ok, offset, offset};
 }
+
+enum class SyntheticTypeStatus : std::uint8_t {
+    ok,
+    not_found,
+    workspace_too_small,
+    backend_failure,
+};
+
+struct SyntheticTypeMeasureResult final {
+    SyntheticTypeStatus status{SyntheticTypeStatus::not_found};
+    std::size_t component_bytes{};
+    std::size_t list_bytes{};
+    std::size_t encoded_bytes{};
+};
+
+struct SyntheticTypeEncodeResult final {
+    SyntheticTypeStatus status{SyntheticTypeStatus::not_found};
+    std::size_t bytes_written{};
+    std::size_t required_bytes{};
+};
+
+[[nodiscard]] bool checked_add(
+    std::size_t& total,
+    const std::size_t value) noexcept {
+    if (value > std::numeric_limits<std::size_t>::max() - total) return false;
+    total += value;
+    return true;
+}
+
+[[nodiscard]] SyntheticTypeMeasureResult measure_synthetic_type_subtree(
+    const MmsStaticObjectTable& objects,
+    const std::string_view domain,
+    const std::string_view prefix,
+    const std::size_t depth) noexcept {
+    if (depth >= kMaximumSyntheticReadDepth || domain.empty() || prefix.empty()) {
+        return {SyntheticTypeStatus::backend_failure, 0U, 0U, 0U};
+    }
+
+    std::size_t component_bytes = 0U;
+    std::string_view after;
+    bool have_after = false;
+    bool found_child = false;
+    while (true) {
+        const auto child = next_synthetic_child(objects, domain, prefix, after, have_after);
+        if (!child.found) break;
+        found_child = true;
+
+        std::size_t child_type_bytes = 0U;
+        if (child.exact != nullptr) {
+            if (!valid_mms_type_specification(child.exact->type_specification)) {
+                return {SyntheticTypeStatus::backend_failure, 0U, 0U, 0U};
+            }
+            child_type_bytes = child.exact->type_specification.size();
+        } else {
+            const auto nested = measure_synthetic_type_subtree(
+                objects, domain, child.prefix, depth + 1U);
+            if (nested.status != SyntheticTypeStatus::ok) return nested;
+            child_type_bytes = nested.encoded_bytes;
+        }
+
+        const auto component_name = child.prefix.substr(prefix.size() + 1U);
+        const auto name_tlv = asn1::BerSpanWriter::tlv_size(0, component_name.size());
+        const auto type_wrapper = asn1::BerSpanWriter::tlv_size(1, child_type_bytes);
+        if (!name_tlv || !type_wrapper) {
+            return {SyntheticTypeStatus::backend_failure, 0U, 0U, 0U};
+        }
+        std::size_t component_content = *name_tlv;
+        if (!checked_add(component_content, *type_wrapper)) {
+            return {SyntheticTypeStatus::backend_failure, 0U, 0U, 0U};
+        }
+        const auto component = asn1::BerSpanWriter::tlv_size(16, component_content);
+        if (!component || !checked_add(component_bytes, *component)) {
+            return {SyntheticTypeStatus::backend_failure, 0U, 0U, 0U};
+        }
+        after = child.prefix;
+        have_after = true;
+    }
+
+    if (!found_child) return {SyntheticTypeStatus::not_found, 0U, 0U, 0U};
+    const auto list = asn1::BerSpanWriter::tlv_size(1, component_bytes);
+    if (!list) return {SyntheticTypeStatus::backend_failure, 0U, 0U, 0U};
+    const auto structure = asn1::BerSpanWriter::tlv_size(2, *list);
+    if (!structure) return {SyntheticTypeStatus::backend_failure, 0U, 0U, 0U};
+    return {SyntheticTypeStatus::ok, component_bytes, *list, *structure};
+}
+
+[[nodiscard]] bool write_header(
+    const std::span<std::uint8_t> destination,
+    std::size_t& offset,
+    const asn1::BerClass tag_class,
+    const bool constructed,
+    const std::int32_t tag_number,
+    const std::size_t value_length) noexcept {
+    if (offset > destination.size()) return false;
+    asn1::BerSpanWriter writer{destination.subspan(offset)};
+    if (!writer.write_tlv_header(tag_class, constructed, tag_number, value_length)) {
+        return false;
+    }
+    offset += writer.size();
+    return true;
+}
+
+[[nodiscard]] bool write_bytes(
+    const std::span<std::uint8_t> destination,
+    std::size_t& offset,
+    const std::span<const std::uint8_t> source) noexcept {
+    if (offset > destination.size() || source.size() > destination.size() - offset) return false;
+    std::copy(source.begin(), source.end(), destination.begin() + static_cast<std::ptrdiff_t>(offset));
+    offset += source.size();
+    return true;
+}
+
+[[nodiscard]] SyntheticTypeEncodeResult encode_synthetic_type_subtree(
+    const MmsStaticObjectTable& objects,
+    const std::string_view domain,
+    const std::string_view prefix,
+    const std::span<std::uint8_t> destination,
+    const std::size_t depth) noexcept {
+    const auto measured = measure_synthetic_type_subtree(objects, domain, prefix, depth);
+    if (measured.status != SyntheticTypeStatus::ok) {
+        return {measured.status, 0U, measured.encoded_bytes};
+    }
+    if (destination.size() < measured.encoded_bytes) {
+        return {SyntheticTypeStatus::workspace_too_small, 0U, measured.encoded_bytes};
+    }
+
+    std::size_t offset = 0U;
+    if (!write_header(
+            destination, offset, asn1::BerClass::context_specific, true, 2,
+            measured.list_bytes) ||
+        !write_header(
+            destination, offset, asn1::BerClass::context_specific, true, 1,
+            measured.component_bytes)) {
+        return {SyntheticTypeStatus::backend_failure, 0U, measured.encoded_bytes};
+    }
+
+    std::string_view after;
+    bool have_after = false;
+    while (true) {
+        const auto child = next_synthetic_child(objects, domain, prefix, after, have_after);
+        if (!child.found) break;
+
+        std::size_t child_type_bytes = 0U;
+        SyntheticTypeMeasureResult nested_measure;
+        if (child.exact != nullptr) {
+            child_type_bytes = child.exact->type_specification.size();
+        } else {
+            nested_measure = measure_synthetic_type_subtree(
+                objects, domain, child.prefix, depth + 1U);
+            if (nested_measure.status != SyntheticTypeStatus::ok) {
+                return {nested_measure.status, 0U, nested_measure.encoded_bytes};
+            }
+            child_type_bytes = nested_measure.encoded_bytes;
+        }
+
+        const auto component_name = child.prefix.substr(prefix.size() + 1U);
+        const auto name_tlv = asn1::BerSpanWriter::tlv_size(0, component_name.size());
+        const auto type_wrapper = asn1::BerSpanWriter::tlv_size(1, child_type_bytes);
+        if (!name_tlv || !type_wrapper) {
+            return {SyntheticTypeStatus::backend_failure, 0U, measured.encoded_bytes};
+        }
+        std::size_t component_content = *name_tlv;
+        if (!checked_add(component_content, *type_wrapper) ||
+            !write_header(
+                destination, offset, asn1::BerClass::universal, true, 16,
+                component_content) ||
+            !write_header(
+                destination, offset, asn1::BerClass::context_specific, false, 0,
+                component_name.size()) ||
+            !write_bytes(destination, offset, as_bytes(component_name)) ||
+            !write_header(
+                destination, offset, asn1::BerClass::context_specific, true, 1,
+                child_type_bytes)) {
+            return {SyntheticTypeStatus::backend_failure, 0U, measured.encoded_bytes};
+        }
+
+        if (child.exact != nullptr) {
+            if (!write_bytes(destination, offset, child.exact->type_specification)) {
+                return {SyntheticTypeStatus::backend_failure, 0U, measured.encoded_bytes};
+            }
+        } else {
+            const auto nested = encode_synthetic_type_subtree(
+                objects,
+                domain,
+                child.prefix,
+                destination.subspan(offset),
+                depth + 1U);
+            if (nested.status != SyntheticTypeStatus::ok) {
+                return nested;
+            }
+            offset += nested.bytes_written;
+        }
+        after = child.prefix;
+        have_after = true;
+    }
+
+    if (offset != measured.encoded_bytes ||
+        !valid_mms_type_specification(destination.first(offset))) {
+        return {SyntheticTypeStatus::backend_failure, 0U, measured.encoded_bytes};
+    }
+    return {SyntheticTypeStatus::ok, offset, offset};
+}
+
+[[nodiscard]] MmsStaticDispatchResult dispatch_attributes(
+    const MmsStaticObjectTable& objects,
+    const MmsConfirmedPduView& confirmed,
+    const std::span<std::uint8_t> response,
+    const std::span<std::uint8_t> workspace) noexcept {
+    MmsVariableAccessAttributesRequestView request;
+    if (!MmsServiceSpanCodec::try_decode_variable_access_attributes_request(
+            confirmed, request)) {
+        return make_status(MmsStaticDispatchStatus::malformed_request, confirmed);
+    }
+
+    if (const auto* object = objects.find(request.name); object != nullptr) {
+        return make_encoded(
+            confirmed,
+            MmsServiceSpanCodec::encode_variable_access_attributes_response_into(
+                confirmed.invoke_id,
+                object->mms_deletable,
+                object->type_specification,
+                response));
+    }
+
+    if (request.name.kind != MmsObjectNameViewKind::domain_specific ||
+        request.name.domain.empty() || request.name.item.empty()) {
+        return make_status(MmsStaticDispatchStatus::object_not_found, confirmed);
+    }
+
+    const auto synthetic = encode_synthetic_type_subtree(
+        objects,
+        as_text(request.name.domain),
+        as_text(request.name.item),
+        workspace,
+        0U);
+    switch (synthetic.status) {
+    case SyntheticTypeStatus::ok:
+        return make_encoded(
+            confirmed,
+            MmsServiceSpanCodec::encode_variable_access_attributes_response_into(
+                confirmed.invoke_id,
+                false,
+                workspace.first(synthetic.bytes_written),
+                response));
+    case SyntheticTypeStatus::not_found:
+        return make_status(MmsStaticDispatchStatus::object_not_found, confirmed);
+    case SyntheticTypeStatus::workspace_too_small:
+        return make_status(
+            MmsStaticDispatchStatus::workspace_too_small,
+            confirmed,
+            synthetic.required_bytes);
+    case SyntheticTypeStatus::backend_failure:
+        return make_status(MmsStaticDispatchStatus::backend_failure, confirmed);
+    }
+    return make_status(MmsStaticDispatchStatus::backend_failure, confirmed);
+}
+
+enum class ReadObjectStatus : std::uint8_t {
+    ok,
+    workspace_too_small,
+    backend_failure,
+};
+
+struct ReadObjectResult final {
+    ReadObjectStatus status{ReadObjectStatus::ok};
+    std::size_t required_bytes{};
+};
 
 [[nodiscard]] ReadObjectResult read_object_into_result(
     const MmsStaticObjectEntry* object,
@@ -775,32 +959,23 @@ struct SyntheticChild final {
     std::size_t& workspace_offset,
     MmsReadAccessResultInput& result) noexcept {
     if (object == nullptr) {
-        result = MmsReadAccessResultInput{
-            false, {}, policy.missing_object_failure_code};
+        result = MmsReadAccessResultInput{false, {}, policy.missing_object_failure_code};
         return {};
     }
-
     const auto remaining = workspace.subspan(workspace_offset);
     const auto read = object->read(object->context, remaining);
     if (read.status == wire::EncodeStatus::buffer_too_small) {
-        return {
-            ReadObjectStatus::workspace_too_small,
-            workspace_offset + read.required_bytes};
+        return {ReadObjectStatus::workspace_too_small, workspace_offset + read.required_bytes};
     }
     if (!read.success()) {
-        result = MmsReadAccessResultInput{
-            false, {}, policy.backend_failure_code};
+        result = MmsReadAccessResultInput{false, {}, policy.backend_failure_code};
         return {};
     }
     if (read.bytes_written > remaining.size() ||
         !valid_mms_data(remaining.first(read.bytes_written))) {
         return {ReadObjectStatus::backend_failure, 0U};
     }
-
-    result = MmsReadAccessResultInput{
-        true,
-        remaining.first(read.bytes_written),
-        0U};
+    result = MmsReadAccessResultInput{true, remaining.first(read.bytes_written), 0U};
     workspace_offset += read.bytes_written;
     return {};
 }
@@ -813,13 +988,11 @@ struct SyntheticChild final {
     std::size_t& workspace_offset,
     MmsReadAccessResultInput& result) noexcept {
     if (const auto* exact = objects.find(name); exact != nullptr) {
-        return read_object_into_result(
-            exact, policy, workspace, workspace_offset, result);
+        return read_object_into_result(exact, policy, workspace, workspace_offset, result);
     }
     if (name.kind != MmsObjectNameViewKind::domain_specific ||
         name.domain.empty() || name.item.empty()) {
-        result = MmsReadAccessResultInput{
-            false, {}, policy.missing_object_failure_code};
+        result = MmsReadAccessResultInput{false, {}, policy.missing_object_failure_code};
         return {};
     }
 
@@ -838,18 +1011,14 @@ struct SyntheticChild final {
             return {ReadObjectStatus::backend_failure, 0U};
         }
         result = MmsReadAccessResultInput{
-            true,
-            remaining.first(synthetic.bytes_written),
-            0U};
+            true, remaining.first(synthetic.bytes_written), 0U};
         workspace_offset += synthetic.bytes_written;
         return {};
     case SyntheticReadStatus::not_found:
-        result = MmsReadAccessResultInput{
-            false, {}, policy.missing_object_failure_code};
+        result = MmsReadAccessResultInput{false, {}, policy.missing_object_failure_code};
         return {};
     case SyntheticReadStatus::value_unavailable:
-        result = MmsReadAccessResultInput{
-            false, {}, policy.backend_failure_code};
+        result = MmsReadAccessResultInput{false, {}, policy.backend_failure_code};
         return {};
     case SyntheticReadStatus::workspace_too_small:
         return {
@@ -876,10 +1045,6 @@ struct SyntheticChild final {
         return make_status(MmsStaticDispatchStatus::malformed_request, confirmed);
     }
 
-    // Proven IEDScout path from ARIEC61850: accept specificationWithResult during
-    // discovery, but keep the interoperable Read-Response shape to
-    // listOfAccessResult only. Do not reject the request and do not synthesize a
-    // variableAccessSpecification echo that the proven server does not emit.
     std::array<MmsReadAccessResultInput, MmsServiceSpanCodec::maximum_variables> results{};
     std::size_t result_count = 0U;
     std::size_t workspace_offset = 0U;
@@ -887,10 +1052,7 @@ struct SyntheticChild final {
     if (request.uses_variable_list_name) {
         const auto* data_set = data_sets.find(request.variable_list_name);
         if (data_set == nullptr) {
-            // Match the proven ARIEC behavior: a missing DataSet is a Read
-            // AccessResult failure, not a Confirmed-Error for the whole request.
-            results[0] = MmsReadAccessResultInput{
-                false, {}, policy.missing_object_failure_code};
+            results[0] = MmsReadAccessResultInput{false, {}, policy.missing_object_failure_code};
             result_count = 1U;
         } else {
             result_count = data_set->members.size();
@@ -901,12 +1063,7 @@ struct SyntheticChild final {
                     as_bytes(member.domain),
                     as_bytes(member.item)};
                 const auto read = read_name_into_result(
-                    objects,
-                    name,
-                    policy,
-                    workspace,
-                    workspace_offset,
-                    results[index]);
+                    objects, name, policy, workspace, workspace_offset, results[index]);
                 if (read.status == ReadObjectStatus::workspace_too_small) {
                     return make_status(
                         MmsStaticDispatchStatus::workspace_too_small,
@@ -927,16 +1084,8 @@ struct SyntheticChild final {
                     false, {}, policy.missing_object_failure_code};
                 continue;
             }
-            // Preserve one AccessResult per requested variable. If an exact
-            // object is absent, try the bounded intermediate-subtree synthesis
-            // used by IEDScout's initial FC-root Read before returning missing.
             const auto read = read_name_into_result(
-                objects,
-                name,
-                policy,
-                workspace,
-                workspace_offset,
-                results[index]);
+                objects, name, policy, workspace, workspace_offset, results[index]);
             if (read.status == ReadObjectStatus::workspace_too_small) {
                 return make_status(
                     MmsStaticDispatchStatus::workspace_too_small,
@@ -952,7 +1101,6 @@ struct SyntheticChild final {
     if (result_count == 0U || result_count > results.size()) {
         return make_status(MmsStaticDispatchStatus::malformed_request, confirmed);
     }
-
     return make_encoded(
         confirmed,
         MmsServiceSpanCodec::encode_read_response_into(
@@ -989,13 +1137,11 @@ struct SyntheticChild final {
     for (std::size_t index = 0U; index < request.variable_count; ++index) {
         const auto* object = resolved[index];
         if (object == nullptr) {
-            results[index] = MmsWriteAccessResultInput{
-                false, policy.missing_object_failure_code};
+            results[index] = MmsWriteAccessResultInput{false, policy.missing_object_failure_code};
             continue;
         }
         if (!object->writable()) {
-            results[index] = MmsWriteAccessResultInput{
-                false, policy.access_denied_failure_code};
+            results[index] = MmsWriteAccessResultInput{false, policy.access_denied_failure_code};
             continue;
         }
         const auto applied = object->contextual_write != nullptr
@@ -1049,7 +1195,7 @@ MmsStaticDispatchResult MmsStaticApplicationDispatcher::dispatch(
     case MmsWireConfirmedService::get_name_list:
         return dispatch_get_name_list(objects_, data_sets_, policy_, request, response);
     case MmsWireConfirmedService::get_variable_access_attributes:
-        return dispatch_attributes(objects_, request, response);
+        return dispatch_attributes(objects_, request, response, workspace);
     case MmsWireConfirmedService::get_named_variable_list_attributes:
         return dispatch_data_set_attributes(data_sets_, request, response);
     case MmsWireConfirmedService::read:
