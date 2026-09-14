@@ -1,0 +1,124 @@
+name: ARStack Studio Board Acceptance Kit
+
+on:
+  push:
+    branches:
+      - 'qa/p0-board-acceptance'
+    paths:
+      - 'apps/arstack_studio/**'
+      - 'docs/SMV_STUDIO_BOARD_ACCEPTANCE_RUNBOOK.md'
+      - '.github/workflows/arstack-studio-board-acceptance-kit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arstack-studio-board-acceptance-kit
+  cancel-in-progress: true
+
+jobs:
+  windows-board-kit:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout QA branch
+        uses: actions/checkout@v4
+
+      - name: Verify frozen production ancestry
+        shell: powershell
+        run: |
+          $baseline = 'ed46f3bed73d398d71be2eacf34c4995325c3cad'
+          git cat-file -e "$baseline^{commit}"
+          git merge-base --is-ancestor $baseline HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'QA branch is not descended from the frozen production baseline.' }
+          Write-Host "Frozen baseline ancestry: PASS · $baseline"
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.10.3'
+          arch: win64_msvc2022_64
+          modules: 'qtserialport'
+          cache: true
+
+      - name: Configure MSVC
+        shell: powershell
+        run: |
+          cmake -S apps/arstack_studio -B build-board-kit -G "Visual Studio 17 2022" -A x64 `
+            -DARIEC61850_WARNINGS_AS_ERRORS=ON
+
+      - name: Build physical acceptance tools
+        shell: powershell
+        run: |
+          cmake --build build-board-kit --config Release `
+            --target arstack_board_acceptance arstack_rc2_acceptance --parallel
+
+      - name: Verify board runner frozen-candidate contract
+        shell: powershell
+        run: |
+          & .\build-board-kit\Release\arstack_board_acceptance.exe --check-contract
+          if ($LASTEXITCODE -ne 0) { throw "Board acceptance contract check failed with exit code $LASTEXITCODE." }
+
+      - name: Verify RC2 fail-closed evaluator policy
+        shell: powershell
+        run: |
+          & .\build-board-kit\Release\arstack_rc2_acceptance.exe --self-test
+          if ($LASTEXITCODE -ne 0) { throw "RC2 evaluator self-test failed with exit code $LASTEXITCODE." }
+
+      - name: Stage board acceptance kit
+        shell: powershell
+        run: |
+          $stage = Join-Path $PWD 'board-acceptance-kit'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item '.\build-board-kit\Release\arstack_board_acceptance.exe' $stage
+          Copy-Item '.\build-board-kit\Release\arstack_rc2_acceptance.exe' $stage
+          Copy-Item '.\apps\arstack_studio\board-test\finalize-rc2-evidence.ps1' $stage
+          Copy-Item '.\apps\arstack_studio\rc2\rc2-evidence-template.json' $stage
+          Copy-Item '.\docs\SMV_STUDIO_BOARD_ACCEPTANCE_RUNBOOK.md' $stage
+
+          $windeployqt = Join-Path $env:QT_ROOT_DIR 'bin\windeployqt.exe'
+          & $windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw `
+            (Join-Path $stage 'arstack_board_acceptance.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed for board acceptance runner.' }
+          & $windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw `
+            (Join-Path $stage 'arstack_rc2_acceptance.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed for RC2 evaluator.' }
+
+          @'
+          Frozen product candidate SHA: ed46f3bed73d398d71be2eacf34c4995325c3cad
+          This artifact is QA tooling only. It is not the public Studio release candidate.
+
+          Full board run:
+            .\arstack_board_acceptance.exe --output .\rc2-board-evidence.json
+
+          Finalize after independent capture + Studio UI observation:
+            .\finalize-rc2-evidence.ps1 -Evidence .\rc2-board-evidence.json -Evaluator .\arstack_rc2_acceptance.exe -Output .\rc2-final-evidence.json
+          '@ | Set-Content -Encoding UTF8 (Join-Path $stage 'START_HERE.txt')
+
+      - name: Parse PowerShell finalizer
+        shell: powershell
+        run: |
+          $path = Resolve-Path '.\board-acceptance-kit\finalize-rc2-evidence.ps1'
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | Format-List *
+            throw "RC2 evidence finalizer contains $($errors.Count) PowerShell parser error(s)."
+          }
+
+      - name: Create kit checksum
+        shell: powershell
+        run: |
+          Get-ChildItem '.\board-acceptance-kit' -File | Sort-Object Name | ForEach-Object {
+            $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          } | Set-Content -Encoding ASCII '.\board-acceptance-kit\SHA256SUMS.txt'
+
+      - name: Upload physical board acceptance kit
+        uses: actions/upload-artifact@v4
+        with:
+          name: arstack-studio-p0-board-acceptance-kit
+          path: board-acceptance-kit
+          if-no-files-found: error
+          retention-days: 14
