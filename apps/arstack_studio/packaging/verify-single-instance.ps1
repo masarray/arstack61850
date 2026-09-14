@@ -16,6 +16,12 @@ function Wait-ForExitBounded([System.Diagnostics.Process]$Process, [int]$Timeout
         try { $Process.WaitForExit(2000) | Out-Null } catch {}
         throw "$Label timed out after $TimeoutMs ms."
     }
+
+    # PowerShell/.NET may leave ExitCode unmaterialized after the timed overload,
+    # especially for quickly exiting GUI-subsystem processes. Complete the wait
+    # and refresh the process snapshot before callers inspect ExitCode.
+    $Process.WaitForExit()
+    $Process.Refresh()
 }
 
 $first = $null
@@ -24,6 +30,7 @@ try {
     $deadline = [DateTime]::UtcNow.AddMilliseconds($ReadyTimeoutMs)
     while (-not (Test-Path $lockPath) -and [DateTime]::UtcNow -lt $deadline) {
         if ($first.HasExited) {
+            $first.Refresh()
             throw "Primary Studio instance exited before acquiring its process lock (exit=$($first.ExitCode))."
         }
         Start-Sleep -Milliseconds 100
@@ -54,7 +61,12 @@ try {
 } finally {
     if ($null -ne $first -and -not $first.HasExited) {
         try { $first.Kill() } catch {}
-        try { $first.WaitForExit(2000) | Out-Null } catch {}
+        try {
+            if ($first.WaitForExit(2000)) {
+                $first.WaitForExit()
+                $first.Refresh()
+            }
+        } catch {}
     }
     Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
 }
