@@ -75,6 +75,12 @@ public:
         const QString& baseline,
         const QString& observed) noexcept;
 
+    // Firmware handoff is a safety transaction, not an open-ended UI state.
+    // STOP confirmation and serial release are independently bounded so a lost
+    // callback cannot leave Studio stuck in UPDATING FIRMWARE forever.
+    [[nodiscard]] static constexpr int firmwareStopAckTimeoutMs() noexcept { return 3500; }
+    [[nodiscard]] static constexpr int firmwareReleaseAckTimeoutMs() noexcept { return 2000; }
+
     [[nodiscard]] static constexpr bool generationIsCurrent(
         const quint64 activeGeneration,
         const quint64 eventGeneration) noexcept {
@@ -117,6 +123,79 @@ private:
         waitingForBootloader,
     };
     enum class ProfileSyncStage { idle, deploying, failed };
+
+    // Small safety observer, deliberately not a second supervisor. It watches
+    // only the two acknowledgement barriers owned by this supervisor and
+    // terminates them if their expected callback never arrives. Repeated
+    // stateChanged notifications cannot extend a deadline for the same stage.
+    class FirmwareHandoffWatchdog final {
+    public:
+        explicit FirmwareHandoffWatchdog(SmartSessionController* owner) : owner_(owner) {
+            timer_.setSingleShot(true);
+            QObject::connect(owner_, &SmartSessionController::stateChanged, owner_, [this] {
+                synchronize();
+            });
+            QObject::connect(&timer_, &QTimer::timeout, owner_, [this] {
+                expire();
+            });
+        }
+
+    private:
+        [[nodiscard]] bool waitingForAck() const noexcept {
+            if (owner_ == nullptr || !owner_->updateRequested_) return false;
+            if (owner_->updateStage_ == UpdateStage::stopping) return true;
+            return owner_->updateStage_ == UpdateStage::releasingPort &&
+                owner_->pendingReleaseGeneration_ != 0;
+        }
+
+        [[nodiscard]] int timeoutForStage(const UpdateStage stage) const noexcept {
+            return stage == UpdateStage::stopping
+                ? firmwareStopAckTimeoutMs()
+                : firmwareReleaseAckTimeoutMs();
+        }
+
+        void synchronize() {
+            if (!waitingForAck()) {
+                timer_.stop();
+                armedGeneration_ = 0;
+                armedStage_ = UpdateStage::idle;
+                return;
+            }
+
+            if (timer_.isActive() && armedGeneration_ == owner_->sessionGeneration_ &&
+                armedStage_ == owner_->updateStage_) {
+                return;
+            }
+
+            armedGeneration_ = owner_->sessionGeneration_;
+            armedStage_ = owner_->updateStage_;
+            timer_.start(timeoutForStage(armedStage_));
+        }
+
+        void expire() {
+            if (!waitingForAck() || armedGeneration_ == 0 ||
+                owner_->sessionGeneration_ != armedGeneration_ ||
+                owner_->updateStage_ != armedStage_) {
+                synchronize();
+                return;
+            }
+
+            const QString reason = armedStage_ == UpdateStage::stopping
+                ? QStringLiteral(
+                    "Timed out waiting for the injector to confirm STOP. Firmware access was not started; retry explicitly after checking the device connection.")
+                : QStringLiteral(
+                    "Timed out waiting for the serial worker to acknowledge port release. Firmware access was blocked to prevent COM-port contention.");
+
+            owner_->latchFirmwareFailure(reason);
+            emit owner_->firmwareUpdateFinished(false);
+            owner_->reconcile();
+        }
+
+        SmartSessionController* owner_{nullptr};
+        QTimer timer_;
+        quint64 armedGeneration_{0};
+        UpdateStage armedStage_{UpdateStage::idle};
+    };
 
     void reconnectDeviceSignals();
     void reconnectProfileSignals();
@@ -171,4 +250,5 @@ private:
     PortOwner portOwner_{PortOwner::none};
     UpdateStage updateStage_{UpdateStage::idle};
     ProfileSyncStage profileSyncStage_{ProfileSyncStage::idle};
+    FirmwareHandoffWatchdog firmwareHandoffWatchdog_{this};
 };
