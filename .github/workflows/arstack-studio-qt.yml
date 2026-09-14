@@ -46,6 +46,82 @@ jobs:
           }
           Write-Host 'Windows launcher PowerShell parse: PASS'
 
+  windows-ownership-integration:
+    name: S8B Windows ownership integration
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.10.3'
+          arch: win64_msvc2022_64
+          modules: 'qtserialport'
+          cache: true
+
+      - name: Configure native Windows harnesses
+        shell: powershell
+        run: |
+          cmake -S apps/arstack_studio -B build-arstack-studio -G "Visual Studio 17 2022" -A x64 `
+            -DARIEC61850_WARNINGS_AS_ERRORS=ON
+
+      - name: Build native Windows harnesses
+        shell: powershell
+        run: |
+          cmake --build build-arstack-studio --config Release `
+            --target arstack_session_harness arstack_windows_ownership_harness --parallel
+
+      - name: S8A deterministic session harness on Windows
+        shell: powershell
+        run: |
+          $exe = Join-Path $PWD 'build-arstack-studio\Release\arstack_session_harness.exe'
+          $out = Join-Path $env:RUNNER_TEMP 'arstack-session-windows.out.log'
+          $err = Join-Path $env:RUNNER_TEMP 'arstack-session-windows.err.log'
+          $process = Start-Process -FilePath $exe -PassThru `
+            -RedirectStandardOutput $out -RedirectStandardError $err
+          if (-not $process.WaitForExit(30000)) {
+            $process.Kill()
+            throw 'S8A Windows deterministic harness timed out.'
+          }
+          Get-Content $out -ErrorAction SilentlyContinue
+          Get-Content $err -ErrorAction SilentlyContinue
+          if ($process.ExitCode -ne 0) {
+            throw "S8A Windows deterministic harness failed with exit code $($process.ExitCode)."
+          }
+
+      - name: S8B cross-process ownership and serial-loss harness
+        shell: powershell
+        run: |
+          $exe = Join-Path $PWD 'build-arstack-studio\Release\arstack_windows_ownership_harness.exe'
+          $out = Join-Path $env:RUNNER_TEMP 'arstack-windows-ownership.out.log'
+          $err = Join-Path $env:RUNNER_TEMP 'arstack-windows-ownership.err.log'
+          $process = Start-Process -FilePath $exe -PassThru `
+            -RedirectStandardOutput $out -RedirectStandardError $err
+          if (-not $process.WaitForExit(30000)) {
+            $process.Kill()
+            throw 'S8B Windows ownership harness timed out.'
+          }
+          Get-Content $out -ErrorAction SilentlyContinue
+          Get-Content $err -ErrorAction SilentlyContinue
+          if ($process.ExitCode -ne 0) {
+            throw "S8B Windows ownership harness failed with exit code $($process.ExitCode)."
+          }
+
+      - name: Retain Windows ownership logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arstack-studio-windows-ownership-logs
+          path: |
+            ${{ runner.temp }}/arstack-session-windows.out.log
+            ${{ runner.temp }}/arstack-session-windows.err.log
+            ${{ runner.temp }}/arstack-windows-ownership.out.log
+            ${{ runner.temp }}/arstack-windows-ownership.err.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   qt-build-smoke:
     runs-on: ubuntu-latest
     container: ubuntu:26.04
