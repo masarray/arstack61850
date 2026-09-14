@@ -75,33 +75,42 @@ DeviceController::~DeviceController() {
 }
 
 void DeviceController::connectWorkerSignals() {
-    connect(ioWorker_, &DeviceIoWorker::ready, this, [this](const bool affinityValid) {
+    connect(ioWorker_, &DeviceIoWorker::ready, this,
+            [this](const quint64, const bool affinityValid) {
         ioWorkerReady_ = true;
         ioWorkerAffinityValid_ = affinityValid;
 
-        if (!pendingConnectPort_.isEmpty()) {
+        const quint64 generation = sessionGeneration_;
+        if (!pendingConnectPort_.isEmpty() && generation != 0) {
             const QString requested = std::exchange(pendingConnectPort_, QString{});
             pendingAutoDetect_ = false;
             QMetaObject::invokeMethod(
                 ioWorker_,
-                [worker = ioWorker_, requested] { worker->connectPort(requested); },
+                [worker = ioWorker_, requested, generation] {
+                    worker->connectPort(requested, generation);
+                },
                 Qt::QueuedConnection);
             return;
         }
-        if (pendingAutoDetect_) {
+        if (pendingAutoDetect_ && generation != 0) {
             pendingAutoDetect_ = false;
             QMetaObject::invokeMethod(
-                ioWorker_, &DeviceIoWorker::autoDetectAndConnect, Qt::QueuedConnection);
+                ioWorker_,
+                [worker = ioWorker_, generation] { worker->autoDetectAndConnect(generation); },
+                Qt::QueuedConnection);
         }
     });
 
     connect(ioWorker_, &DeviceIoWorker::portsObserved, this,
-            [this](const QStringList& ports, const QString& recommended, const int highConfidenceCount) {
+            [this](const quint64 generation, const QStringList& ports,
+                   const QString& recommended, const int highConfidenceCount) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
         handlePortSnapshot(ports, recommended, highConfidenceCount);
     });
 
     connect(ioWorker_, &DeviceIoWorker::openingPort, this,
-            [this](const QString& port, const bool automatic) {
+            [this](const quint64 generation, const QString& port, const bool automatic) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
         Q_UNUSED(port)
         setDiscoveryState(
             automatic
@@ -111,12 +120,15 @@ void DeviceController::connectWorkerSignals() {
     });
 
     connect(ioWorker_, &DeviceIoWorker::portOpened, this,
-            [this](const QString& port, const bool automatic) {
+            [this](const quint64 generation, const QString& port, const bool automatic) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
         handlePortOpened(port, automatic);
     });
 
     connect(ioWorker_, &DeviceIoWorker::portOpenFailed, this,
-            [this](const QString& port, const QString& message, const bool automatic) {
+            [this](const quint64 generation, const QString& port,
+                   const QString& message, const bool automatic) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
         Q_UNUSED(port)
         if (!automatic) {
             setIdentificationState(IdentificationState::Idle);
@@ -126,13 +138,21 @@ void DeviceController::connectWorkerSignals() {
     });
 
     connect(ioWorker_, &DeviceIoWorker::portClosed, this,
-            [this](const QString& port) { handlePortClosed(port); });
+            [this](const quint64 generation, const QString& port) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
+        handlePortClosed(port);
+    });
 
     connect(ioWorker_, &DeviceIoWorker::portReleased, this,
-            [this](const QString& port) { emit portReleased(port); });
+            [this](const quint64 generation, const QString& port) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
+        emit portReleased(generation, port);
+    });
 
     connect(ioWorker_, &DeviceIoWorker::identificationAttempt, this,
-            [this](const QString& port, const int attempt, const int maximum) {
+            [this](const quint64 generation, const QString& port,
+                   const int attempt, const int maximum) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
         lastIdentificationPort_ = port;
         identifyAttempts_ = attempt;
         setIdentificationState(IdentificationState::Identifying);
@@ -144,7 +164,9 @@ void DeviceController::connectWorkerSignals() {
     });
 
     connect(ioWorker_, &DeviceIoWorker::identificationTimedOut, this,
-            [this](const QString& port, const int attempts, const bool continuing) {
+            [this](const quint64 generation, const QString& port,
+                   const int attempts, const bool continuing) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
         lastIdentificationPort_ = port;
         identifyAttempts_ = attempts;
         if (continuing) {
@@ -160,7 +182,9 @@ void DeviceController::connectWorkerSignals() {
             false);
     });
 
-    connect(ioWorker_, &DeviceIoWorker::automaticProbeExhausted, this, [this] {
+    connect(ioWorker_, &DeviceIoWorker::automaticProbeExhausted, this,
+            [this](const quint64 generation) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
         if (identificationState_ != IdentificationState::Unidentified) {
             identifyAttempts_ = 0;
             setIdentificationState(IdentificationState::Idle);
@@ -173,14 +197,20 @@ void DeviceController::connectWorkerSignals() {
     });
 
     connect(ioWorker_, &DeviceIoWorker::lineReceived, this,
-            [this](const QString& line) { processLine(line); });
+            [this](const quint64 generation, const QString& line) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
+        processLine(line);
+    });
 
     connect(ioWorker_, &DeviceIoWorker::commandTransmitted, this,
-            [this](const QString& command, const bool quiet) {
+            [this](const quint64 generation, const QString& command, const bool quiet) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
         if (!quiet) appendLog(QStringLiteral("→"), command);
     });
 
-    connect(ioWorker_, &DeviceIoWorker::commandRejected, this, [this](const QString& message) {
+    connect(ioWorker_, &DeviceIoWorker::commandRejected, this,
+            [this](const quint64 generation, const QString& message) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
         if (profileDeploying_) {
             profileDeploying_ = false;
             profileArmed_ = false;
@@ -190,7 +220,8 @@ void DeviceController::connectWorkerSignals() {
     });
 
     connect(ioWorker_, &DeviceIoWorker::transportError, this,
-            [this](const QString& message, const bool fatal) {
+            [this](const quint64 generation, const QString& message, const bool fatal) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
         Q_UNUSED(fatal)
         setError(message);
     });
@@ -232,6 +263,13 @@ QString DeviceController::ptpVlan() const { return ptpVlan_; }
 QString DeviceController::ptpAnnounceSent() const { return ptpAnnounceSent_; }
 QString DeviceController::ptpSyncSent() const { return ptpSyncSent_; }
 QString DeviceController::ptpTxFailures() const { return ptpTxFailures_; }
+
+void DeviceController::setSessionGeneration(const quint64 generation) {
+    if (generation == 0 || generation == sessionGeneration_) return;
+    sessionGeneration_ = generation;
+    pendingAutoDetect_ = false;
+    pendingConnectPort_.clear();
+}
 
 bool DeviceController::parseIdentityLine(const QString& line, DeviceIdentity& identity) {
     const auto match = kIdentityExpression.match(line.trimmed());
@@ -280,21 +318,28 @@ bool DeviceController::identitySupportsCurrentContract(
 }
 
 void DeviceController::refreshPorts() {
-    if (!ioWorkerReady_ || ioWorker_ == nullptr) return;
-    QMetaObject::invokeMethod(ioWorker_, &DeviceIoWorker::refreshPorts, Qt::QueuedConnection);
+    if (!ioWorkerReady_ || ioWorker_ == nullptr || sessionGeneration_ == 0) return;
+    const quint64 generation = sessionGeneration_;
+    QMetaObject::invokeMethod(
+        ioWorker_,
+        [worker = ioWorker_, generation] { worker->refreshPorts(generation); },
+        Qt::QueuedConnection);
 }
 
 bool DeviceController::autoDetectAndConnect() {
     if (deviceVerified_) return true;
-    if (connected_ || discovering_) return false;
+    if (connected_ || discovering_ || sessionGeneration_ == 0) return false;
 
     pendingConnectPort_.clear();
     pendingAutoDetect_ = !ioWorkerReady_;
     setDiscoveryState(QStringLiteral("Looking for an ARStack ESP32-P4 injector..."), true);
 
     if (ioWorkerReady_ && ioWorker_ != nullptr) {
+        const quint64 generation = sessionGeneration_;
         QMetaObject::invokeMethod(
-            ioWorker_, &DeviceIoWorker::autoDetectAndConnect, Qt::QueuedConnection);
+            ioWorker_,
+            [worker = ioWorker_, generation] { worker->autoDetectAndConnect(generation); },
+            Qt::QueuedConnection);
     }
     return true;
 }
@@ -305,6 +350,10 @@ bool DeviceController::connectPort(const QString& portName) {
         setError(QStringLiteral("Select a serial port first."));
         return false;
     }
+    if (sessionGeneration_ == 0) {
+        setError(QStringLiteral("Device connection has no active supervisor generation."));
+        return false;
+    }
 
     pendingAutoDetect_ = false;
     setDiscoveryState(QStringLiteral("Verifying ARStack injector identity..."), true);
@@ -313,9 +362,12 @@ bool DeviceController::connectPort(const QString& portName) {
         return true;
     }
 
+    const quint64 generation = sessionGeneration_;
     QMetaObject::invokeMethod(
         ioWorker_,
-        [worker = ioWorker_, requested] { worker->connectPort(requested); },
+        [worker = ioWorker_, requested, generation] {
+            worker->connectPort(requested, generation);
+        },
         Qt::QueuedConnection);
     return true;
 }
@@ -323,8 +375,12 @@ bool DeviceController::connectPort(const QString& portName) {
 void DeviceController::disconnectPort() {
     pendingAutoDetect_ = false;
     pendingConnectPort_.clear();
-    if (!ioWorkerReady_ || ioWorker_ == nullptr) return;
-    QMetaObject::invokeMethod(ioWorker_, &DeviceIoWorker::disconnectPort, Qt::QueuedConnection);
+    if (!ioWorkerReady_ || ioWorker_ == nullptr || sessionGeneration_ == 0) return;
+    const quint64 generation = sessionGeneration_;
+    QMetaObject::invokeMethod(
+        ioWorker_,
+        [worker = ioWorker_, generation] { worker->disconnectPort(generation); },
+        Qt::QueuedConnection);
 }
 
 void DeviceController::handlePortSnapshot(
@@ -623,23 +679,29 @@ bool DeviceController::sendQuietCommand(const QString& command) {
 }
 
 bool DeviceController::sendCommandBatch(const QStringList& commands, const bool quiet) {
-    if (!connected_ || !ioWorkerReady_ || ioWorker_ == nullptr) {
+    if (!connected_ || !ioWorkerReady_ || ioWorker_ == nullptr || sessionGeneration_ == 0) {
         setError(QStringLiteral("Device is not connected."));
         return false;
     }
     const QStringList copy = commands;
+    const quint64 generation = sessionGeneration_;
     QMetaObject::invokeMethod(
         ioWorker_,
-        [worker = ioWorker_, copy, quiet] { worker->enqueueCommands(copy, quiet); },
+        [worker = ioWorker_, copy, quiet, generation] {
+            worker->enqueueCommands(copy, quiet, generation);
+        },
         Qt::QueuedConnection);
     return true;
 }
 
 void DeviceController::setSessionHeartbeatEnabled(const bool enabled) {
-    if (!ioWorkerReady_ || ioWorker_ == nullptr) return;
+    if (!ioWorkerReady_ || ioWorker_ == nullptr || sessionGeneration_ == 0) return;
+    const quint64 generation = sessionGeneration_;
     QMetaObject::invokeMethod(
         ioWorker_,
-        [worker = ioWorker_, enabled] { worker->setHeartbeatEnabled(enabled); },
+        [worker = ioWorker_, enabled, generation] {
+            worker->setHeartbeatEnabled(enabled, generation);
+        },
         Qt::QueuedConnection);
 }
 
@@ -683,8 +745,12 @@ void DeviceController::markDeviceVerified() {
     emit deviceVerifiedChanged();
     emit deviceMessage(QStringLiteral("ESP32-P4 recognized. Device is ready."));
 
-    if (ioWorkerReady_ && ioWorker_ != nullptr) {
-        QMetaObject::invokeMethod(ioWorker_, &DeviceIoWorker::confirmIdentity, Qt::QueuedConnection);
+    if (ioWorkerReady_ && ioWorker_ != nullptr && sessionGeneration_ != 0) {
+        const quint64 generation = sessionGeneration_;
+        QMetaObject::invokeMethod(
+            ioWorker_,
+            [worker = ioWorker_, generation] { worker->confirmIdentity(generation); },
+            Qt::QueuedConnection);
     }
     static_cast<void>(sendShow());
     static_cast<void>(sendCommand(QStringLiteral("PROFILE SHOW")));
