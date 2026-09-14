@@ -8,6 +8,7 @@ Rectangle {
     property var theme
     property var controller
     property var device
+    property var session
     property var sourceModel
     property string uiFont: "Inter"
     property string monoFont: "Inter"
@@ -164,8 +165,8 @@ Rectangle {
                             matrix.sourceModel.setProperty(signalRow.rowIndex, "enabled", checked)
                             matrix.controller.selectSignal(matrix.groupIndex, signalRow.rowIndex)
                             matrix.controller.refreshPreview()
-                            if (matrix.device.deviceVerified)
-                                matrix.device.setEnabled(signalRow.sid, checked)
+                            if (matrix.session && matrix.session.liveControlReady)
+                                matrix.session.requestSetEnabled(signalRow.sid, checked)
                         }
                     }
 
@@ -206,9 +207,7 @@ Rectangle {
                                 invalidInput = false
                                 signalRow.pendingMagnitude = value
                                 magnitudeApplyTimer.restart()
-                            } else {
-                                invalidInput = true
-                            }
+                            } else invalidInput = true
                         }
                         onEditingFinished: {
                             var value = matrix.controller.parseOperatorNumber(text)
@@ -258,9 +257,7 @@ Rectangle {
                                 invalidInput = false
                                 signalRow.pendingPhase = value
                                 phaseApplyTimer.restart()
-                            } else {
-                                invalidInput = true
-                            }
+                            } else invalidInput = true
                         }
                         onEditingFinished: {
                             var value = matrix.controller.parseOperatorNumber(text)
