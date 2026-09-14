@@ -183,26 +183,30 @@ public:
 
     void setSessionGeneration(quint64 generation);
 
-    Q_INVOKABLE void refreshPorts();
-    Q_INVOKABLE bool autoDetectAndConnect();
-    Q_INVOKABLE bool connectPort(const QString& portName);
-    Q_INVOKABLE void disconnectPort();
-    Q_INVOKABLE bool sendShow();
-    Q_INVOKABLE virtual bool start();
-    Q_INVOKABLE bool stop();
-    Q_INVOKABLE virtual bool zero();
-    Q_INVOKABLE virtual bool setFrequency(double hz);
-    Q_INVOKABLE virtual bool setSignal(
+    // S7 authority boundary: device/session mutations are public C++ for the
+    // SmartSessionController but intentionally absent from the QML meta-object.
+    // This prevents aliases or future presentation code from bypassing the
+    // supervisor even if a source-policy grep were accidentally evaded.
+    void refreshPorts();
+    bool autoDetectAndConnect();
+    bool connectPort(const QString& portName);
+    void disconnectPort();
+    bool sendShow();
+    virtual bool start();
+    bool stop();
+    virtual bool zero();
+    virtual bool setFrequency(double hz);
+    virtual bool setSignal(
         const QString& signalId,
         double magnitude,
         double phaseDegrees,
         quint32 quality,
         double currentCountsPerAmp,
         double voltageCountsPerVolt);
-    Q_INVOKABLE bool setEnabled(const QString& signalId, bool enabled);
-    Q_INVOKABLE bool setQuality(const QString& signalId, quint32 quality);
-    Q_INVOKABLE bool setCtSaturation(bool enabled, double dcOffsetPercent, double harmonicPercent, int harmonicOrder, double clipPercent);
-    Q_INVOKABLE virtual bool deployProfile(const QVariantMap& profile);
+    bool setEnabled(const QString& signalId, bool enabled);
+    bool setQuality(const QString& signalId, quint32 quality);
+    bool setCtSaturation(bool enabled, double dcOffsetPercent, double harmonicPercent, int harmonicOrder, double clipPercent);
+    virtual bool deployProfile(const QVariantMap& profile);
 
     void abandonProfileDeployment() {
         if (!profileDeploying_) return;
@@ -211,12 +215,12 @@ public:
         emit profileStateChanged();
     }
 
-    Q_INVOKABLE bool sendPtpShow();
-    Q_INVOKABLE bool startPtp();
-    Q_INVOKABLE bool stopPtp();
-    Q_INVOKABLE bool configurePtp(const QVariantMap& profile);
+    bool sendPtpShow();
+    bool startPtp();
+    bool stopPtp();
+    bool configurePtp(const QVariantMap& profile);
 
-    Q_INVOKABLE bool setPtpRole(const QString& requestedRole) {
+    bool setPtpRole(const QString& requestedRole) {
         const QString role = requestedRole.trimmed().toUpper();
         static const QStringList validRoles{
             QStringLiteral("SOURCE"),
@@ -233,10 +237,10 @@ public:
         return sendCommand(QStringLiteral("PROFILE PTPROLE %1").arg(role));
     }
 
-    Q_INVOKABLE bool sendSmpSynchShow() {
+    bool sendSmpSynchShow() {
         return sendCommand(QStringLiteral("PROFILE SHOW"));
     }
-    Q_INVOKABLE bool setSmpSynchPolicy(const QString& requestedMode) {
+    bool setSmpSynchPolicy(const QString& requestedMode) {
         const QString mode = requestedMode.trimmed().toUpper();
         static const QStringList validModes{
             QStringLiteral("AUTO"), QStringLiteral("0"), QStringLiteral("1"), QStringLiteral("2")};
@@ -247,6 +251,8 @@ public:
         return sendCommand(QStringLiteral("PROFILE SMPSYNCH %1").arg(mode));
     }
 
+    // Diagnostics are presentation-safe: clearing the local log does not touch
+    // serial ownership, output state, firmware or the device protocol.
     Q_INVOKABLE void clearLog();
 
 signals:
