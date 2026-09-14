@@ -2,6 +2,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 
 Drawer {
     id: root
@@ -15,6 +16,16 @@ Drawer {
     width: parent ? Math.min(520, Math.max(390, parent.width * 0.42)) : 480
     height: parent ? parent.height : 760
     padding: 0
+
+    FileDialog {
+        id: diagnosticsDialog
+        title: "Export diagnostics"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["Text files (*.txt)", "All files (*)"]
+        defaultSuffix: "txt"
+        onAccepted: root.backend.activityModel.exportDiagnostics(
+                        selectedFile, root.backend.diagnosticsText())
+    }
 
     background: Rectangle {
         color: root.theme.chrome
@@ -58,6 +69,12 @@ Drawer {
                     onClicked: root.backend.copyDiagnostics()
                     ToolTip.visible: hovered
                     ToolTip.text: "Copy full diagnostics"
+                }
+                ToolButton {
+                    text: "Export"
+                    onClicked: diagnosticsDialog.open()
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Save full diagnostics atomically"
                 }
                 ToolButton {
                     text: "Clear"

@@ -3,6 +3,8 @@
 #include "IedActivityModel.hpp"
 
 #include <QDateTime>
+#include <QFileInfo>
+#include <QSaveFile>
 #include <QVariantMap>
 
 #include <algorithm>
@@ -138,6 +140,21 @@ QVariantList IedActivityModel::snapshot() const {
         result.push_back(event);
     }
     return result;
+}
+
+bool IedActivityModel::exportDiagnostics(const QUrl& fileUrl, const QString& text) const {
+    const auto path = fileUrl.toLocalFile();
+    if (path.isEmpty()) return false;
+    const auto payload = text.toUtf8();
+    if (payload.isEmpty() || payload.size() > maxDiagnosticsBytes_) return false;
+
+    QSaveFile output(path);
+    if (!output.open(QIODevice::WriteOnly)) return false;
+    if (output.write(payload) != payload.size()) {
+        output.cancelWriting();
+        return false;
+    }
+    return output.commit();
 }
 
 bool IedActivityModel::matches(const QVariantMap& event) const {

@@ -3,6 +3,7 @@
 
 #include <QAbstractListModel>
 #include <QTimer>
+#include <QUrl>
 #include <QVariantList>
 #include <QtQmlIntegration/qqmlintegration.h>
 
@@ -48,6 +49,10 @@ public:
     [[nodiscard]] QVariantList snapshot() const;
     operator QVariantList() const { return snapshot(); }
 
+    // Diagnostics are written through QSaveFile so an interrupted export never
+    // leaves a partially-written operator evidence file behind.
+    Q_INVOKABLE bool exportDiagnostics(const QUrl& fileUrl, const QString& text) const;
+
     [[nodiscard]] QVariantList::const_iterator begin() const noexcept { return events_.cbegin(); }
     [[nodiscard]] QVariantList::const_iterator end() const noexcept { return events_.cend(); }
 
@@ -60,6 +65,7 @@ signals:
 private:
     static constexpr int maxRetainedEvents_ = 300;
     static constexpr int maxPendingEvents_ = 128;
+    static constexpr qsizetype maxDiagnosticsBytes_ = 2 * 1024 * 1024;
 
     [[nodiscard]] bool matches(const QVariantMap& event) const;
     [[nodiscard]] QVector<int> buildVisibleIndices(const QVariantList& events) const;

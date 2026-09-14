@@ -5,7 +5,10 @@
 
 #include <QCoreApplication>
 #include <QEventLoop>
+#include <QFile>
+#include <QTemporaryDir>
 #include <QTimer>
+#include <QUrl>
 
 #include <iostream>
 
@@ -80,12 +83,30 @@ int main(int argc, char** argv) {
     spin(100);
     if (activity.rowCount() != 1) return fail("text filtering did not isolate the expected newest event");
 
+    QTemporaryDir exportDirectory;
+    if (!exportDirectory.isValid()) return fail("diagnostics export temporary directory is invalid");
+    const auto exportPath = exportDirectory.filePath(QStringLiteral("diagnostics.txt"));
+    const auto diagnostics = QStringLiteral(
+        "ARStack IED Simulator diagnostics\nModel: QA\nRecent activity: bounded\n");
+    if (!activity.exportDiagnostics(QUrl::fromLocalFile(exportPath), diagnostics)) {
+        return fail("atomic diagnostics export failed");
+    }
+    QFile exported(exportPath);
+    if (!exported.open(QIODevice::ReadOnly) || exported.readAll() != diagnostics.toUtf8()) {
+        return fail("diagnostics export did not preserve the requested evidence text");
+    }
+    if (activity.exportDiagnostics(QUrl{}, diagnostics) ||
+        activity.exportDiagnostics(QUrl::fromLocalFile(exportPath), QString{})) {
+        return fail("invalid diagnostics export request did not fail closed");
+    }
+
     std::cout
         << "IEDSIM_GUARDRAILS_PASS"
         << " output_cap=" << ar::iedsim::runtime_guardrails::kMaxBufferedProcessBytes
         << " drain_budget=" << ar::iedsim::runtime_guardrails::kMaxLinesPerDrain
         << " retained=" << activity.retainedCount()
         << " flood_dropped=" << floodResult.droppedBytes
+        << " diagnostics_export=atomic"
         << '\n';
     return 0;
 }
