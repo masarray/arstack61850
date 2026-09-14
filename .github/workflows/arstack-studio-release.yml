@@ -88,8 +88,11 @@ jobs:
               $process.Kill()
               throw "$Label timed out after $TimeoutMs ms"
             }
-            if ($process.ExitCode -ne 0) {
-              throw "$Label failed with exit code $($process.ExitCode)"
+            $process.WaitForExit()
+            $process.Refresh()
+            $exitCode = $process.ExitCode
+            if ($exitCode -ne 0) {
+              throw "$Label failed with exit code $exitCode"
             }
           }
 
