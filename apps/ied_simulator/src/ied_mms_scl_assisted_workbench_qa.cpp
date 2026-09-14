@@ -262,6 +262,15 @@ int main(int argc, char** argv) {
                   << " association=" << client.associationProfile().toStdString() << '\n';
         return 6;
     }
+    if (client.trustedSclHealth() != QStringLiteral("degraded") ||
+        !client.trustedSclDegraded() || client.trustedSclIncompatible() ||
+        !client.modelSummary().contains(QStringLiteral("Trusted SCL [degraded]")) ||
+        !client.modelSummary().contains(QStringLiteral("accessFailures=1"))) {
+        std::cerr << "Workbench did not surface the expected degraded trusted-SCL health: "
+                  << client.trustedSclHealth().toStdString() << " · "
+                  << client.modelSummary().toStdString() << '\n';
+        return 21;
+    }
     if (client.logicalDeviceCount() != 1 || client.logicalNodeCount() != 2 ||
         client.dataObjectCount() != 2 || client.dataAttributeCount() != 4) {
         std::cerr << "Trusted SCL topology was not preserved: ld=" << client.logicalDeviceCount()
@@ -340,6 +349,7 @@ int main(int argc, char** argv) {
         return 16;
     }
     if (client.modelSource() != QStringLiteral("Live MMS discovery") ||
+        !client.trustedSclHealth().isEmpty() ||
         client.logicalDeviceCount() != 1 || client.logicalNodeCount() != 1 ||
         client.dataObjectCount() != 1 || client.dataAttributeCount() != 1) {
         std::cerr << "Cleared SCL source did not restore the full-discovery path.\n";
@@ -369,6 +379,8 @@ int main(int argc, char** argv) {
     std::cout << "MMS_SCL_ASSISTED_WORKBENCH_PASS"
               << " trusted_path=pass"
               << " scl_association=pass"
+              << " identity_health=degraded"
+              << " identity_health_surface=pass"
               << " domain_validation=pass"
               << " initial_snapshot=pass"
               << " mapped_leaf=1"
