@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "DeviceController.hpp"
+
+#include <QMetaObject>
 #include <QObject>
 #include <QStringList>
 #include <QTimer>
 #include <QVariantMap>
 
-class DeviceController;
 class FirmwareManager;
 class SclProfileModel;
 
@@ -91,6 +93,14 @@ public:
         const PortOwner owner,
         const bool serialConnected) noexcept {
         return owner == PortOwner::firmwareTool && !serialConnected;
+    }
+    [[nodiscard]] static bool recoveryIdentityMatches(
+        const QString& expectedDeviceId,
+        const QString& observedDeviceId) noexcept {
+        const QString expected = expectedDeviceId.trimmed();
+        const QString observed = observedDeviceId.trimmed();
+        return !expected.isEmpty() && !observed.isEmpty() &&
+            expected.compare(observed, Qt::CaseInsensitive) == 0;
     }
 
     void setDevice(QObject* object);
@@ -197,6 +207,106 @@ private:
         UpdateStage armedStage_{UpdateStage::idle};
     };
 
+    // S6 keeps re-enumeration recovery inside the existing supervisor. This
+    // observer remembers the semantic device_id of a verified board and only
+    // permits an automatic post-loss recovery to converge on that same board,
+    // even when Windows assigns a different COM number after reset/replug.
+    class DeviceRecoveryMonitor final {
+    public:
+        explicit DeviceRecoveryMonitor(SmartSessionController* owner) : owner_(owner) {
+            QObject::connect(owner_, &SmartSessionController::dependenciesChanged, owner_, [this] {
+                bindDevice();
+            });
+        }
+
+    private:
+        void bindDevice() {
+            QObject::disconnect(verifiedConnection_);
+            QObject::disconnect(identificationConnection_);
+            device_ = owner_ != nullptr ? owner_->device_ : nullptr;
+            wasVerified_ = device_ != nullptr && device_->deviceVerified();
+            if (wasVerified_) {
+                lastVerifiedDeviceId_ = device_->deviceId().trimmed();
+                expectedRecoveryDeviceId_ = lastVerifiedDeviceId_;
+            }
+            if (device_ == nullptr) return;
+
+            verifiedConnection_ = QObject::connect(
+                device_, &DeviceController::deviceVerifiedChanged, owner_, [this] {
+                    handleVerificationChange();
+                });
+            identificationConnection_ = QObject::connect(
+                device_, &DeviceController::identificationStateChanged, owner_, [this] {
+                    handleIdentificationChange();
+                });
+        }
+
+        void handleVerificationChange() {
+            if (owner_ == nullptr || device_ == nullptr) return;
+
+            if (device_->deviceVerified()) {
+                const QString observed = device_->deviceId().trimmed();
+                if (recoveryPending_ && !expectedRecoveryDeviceId_.isEmpty() &&
+                    !SmartSessionController::recoveryIdentityMatches(
+                        expectedRecoveryDeviceId_, observed)) {
+                    owner_->blankBoardDetected_ = false;
+                    owner_->blankBoardPort_.clear();
+                    owner_->setupError_ = true;
+                    owner_->setupErrorStatus_ = QStringLiteral(
+                        "A different ARStack injector (%1) appeared while Studio was recovering device %2. Automatic recovery was blocked; reconnect the intended injector or retry explicitly.")
+                        .arg(observed.isEmpty() ? QStringLiteral("unknown") : observed,
+                             expectedRecoveryDeviceId_);
+                    device_->disconnectPort();
+                    owner_->reconcile();
+                    return;
+                }
+
+                if (!observed.isEmpty()) {
+                    lastVerifiedDeviceId_ = observed;
+                    expectedRecoveryDeviceId_ = observed;
+                }
+                recoveryPending_ = false;
+                wasVerified_ = true;
+                return;
+            }
+
+            if (wasVerified_ && !owner_->updateRequested_) {
+                expectedRecoveryDeviceId_ = lastVerifiedDeviceId_;
+                recoveryPending_ = !expectedRecoveryDeviceId_.isEmpty();
+                owner_->blankBoardDetected_ = false;
+                owner_->blankBoardPort_.clear();
+                owner_->resetProfileSync(true);
+            }
+            wasVerified_ = false;
+        }
+
+        void handleIdentificationChange() {
+            if (owner_ == nullptr || device_ == nullptr || !recoveryPending_ ||
+                device_->identificationState() != DeviceController::IdentificationState::Unidentified) {
+                return;
+            }
+
+            // A timeout while recovering a previously verified injector is not
+            // evidence of blank firmware. Keep recovery explicit and never turn
+            // a transient CDC/re-enumeration delay into an Install prompt.
+            owner_->blankBoardDetected_ = false;
+            owner_->blankBoardPort_.clear();
+            owner_->setupError_ = true;
+            owner_->setupErrorStatus_ = QStringLiteral(
+                "The previously verified injector did not answer semantic identity after bounded retries. Firmware absence was not inferred; retry identification after USB settles.");
+            owner_->reconcile();
+        }
+
+        SmartSessionController* owner_{nullptr};
+        DeviceController* device_{nullptr};
+        QMetaObject::Connection verifiedConnection_;
+        QMetaObject::Connection identificationConnection_;
+        QString lastVerifiedDeviceId_;
+        QString expectedRecoveryDeviceId_;
+        bool wasVerified_{false};
+        bool recoveryPending_{false};
+    };
+
     void reconnectDeviceSignals();
     void reconnectProfileSignals();
     void reconnectFirmwareSignals();
@@ -251,4 +361,5 @@ private:
     UpdateStage updateStage_{UpdateStage::idle};
     ProfileSyncStage profileSyncStage_{ProfileSyncStage::idle};
     FirmwareHandoffWatchdog firmwareHandoffWatchdog_{this};
+    DeviceRecoveryMonitor deviceRecoveryMonitor_{this};
 };
