@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string_view>
 
 namespace {
 
@@ -66,18 +67,18 @@ constexpr std::array<std::uint8_t, 198U> kIedScoutInvoke2{
 
 int main() {
     const bool context = true;
-    // Keep exact (domain,item) lexical order. RP intentionally has no explicit
-    // root object: it proves recursive synthesis across RCB-name and attribute
-    // levels from leaf callbacks, matching the production per-association banks.
+    // Deliberately scramble the RP leaf order to mirror production composition:
+    // URCB/BRCB banks append per-association objects after the base model. The
+    // synthesis algorithm must not require contiguous or pre-sorted descendants.
     const std::array<mms::MmsStaticObjectEntry, 8U> entries{
+        mms::MmsStaticObjectEntry{kDomain, "LLN0$RP$A_URCB$RptID", kBooleanType, read_true, &context},
         mms::MmsStaticObjectEntry{kDomain, "LLN0$CF$Mod$ctlModel", kBooleanType, read_true, &context},
+        mms::MmsStaticObjectEntry{kDomain, "LLN0$ST$Mod$stVal", kBooleanType, read_true, &context},
         mms::MmsStaticObjectEntry{kDomain, "LLN0$DC$NamPlt$vendor", kBooleanType, read_true, &context},
+        mms::MmsStaticObjectEntry{kDomain, "LLN0$RP$A_URCB_1$RptID", kBooleanType, read_true, &context},
         mms::MmsStaticObjectEntry{kDomain, "LLN0$EX$NamPlt$ldNs", kBooleanType, read_true, &context},
         mms::MmsStaticObjectEntry{kDomain, "LLN0$RP$A_URCB$RptEna", kBooleanType, read_true, &context},
-        mms::MmsStaticObjectEntry{kDomain, "LLN0$RP$A_URCB$RptID", kBooleanType, read_true, &context},
-        mms::MmsStaticObjectEntry{kDomain, "LLN0$RP$A_URCB_1$RptID", kBooleanType, read_true, &context},
-        mms::MmsStaticObjectEntry{kDomain, "LLN0$SP$Some$setVal", kBooleanType, read_true, &context},
-        mms::MmsStaticObjectEntry{kDomain, "LLN0$ST$Mod$stVal", kBooleanType, read_true, &context}};
+        mms::MmsStaticObjectEntry{kDomain, "LLN0$SP$Some$setVal", kBooleanType, read_true, &context}};
 
     const mms::MmsStaticObjectTable table{entries};
     if (!table.valid()) return 1;
