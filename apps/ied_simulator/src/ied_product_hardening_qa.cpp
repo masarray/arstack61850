@@ -96,10 +96,19 @@ int main(int argc, char** argv) {
 
     {
         QFile corrupt(path);
-        if (!corrupt.open(QIODevice::WriteOnly | QIODevice::Truncate) || corrupt.write("{not-json") < 0) {
+        if (!corrupt.open(QIODevice::WriteOnly | QIODevice::Truncate) || corrupt.write("{not-json") < 0 ||
+            !corrupt.flush()) {
             std::cerr << "Could not create corrupt product state.\n";
             return 10;
         }
+        // QSaveFile replaces the target during commit. Windows correctly refuses
+        // that replacement while another writer still owns an open handle to the
+        // target, unlike POSIX unlink/rename semantics. Close the deliberate
+        // corruption writer before exercising the application's crash recovery so
+        // the QA measures recovery from malformed persisted bytes, not an external
+        // file-lock held by the test itself.
+        corrupt.close();
+
         ProductHardeningController damaged(path);
         if (damaged.settingsHealthy() || damaged.workspaceIndex() != 0 ||
             !damaged.recentEndpoints().isEmpty()) {
