@@ -19,17 +19,20 @@ namespace {
 using namespace ar::iec61850;
 
 constexpr std::array<std::uint8_t, 2U> kBooleanType{0x83U, 0x00U};
+constexpr std::array<std::uint8_t, 3U> kUnsigned8Type{0x86U, 0x01U, 0x08U};
 constexpr std::array<std::uint8_t, 3U> kUnsigned32Type{0x86U, 0x01U, 0x20U};
-constexpr std::array<std::uint8_t, 4U> kVisible255Type{0x8AU, 0x02U, 0x00U, 0xFFU};
+constexpr std::array<std::uint8_t, 4U> kVisible129Type{0x8AU, 0x02U, 0xFFU, 0x7FU};
+constexpr std::array<std::uint8_t, 4U> kVariableOctet64Type{0x89U, 0x02U, 0xFFU, 0xC0U};
 constexpr std::array<std::uint8_t, 3U> kBitString10Type{0x84U, 0x01U, 0x0AU};
 constexpr std::array<std::uint8_t, 3U> kBitString6Type{0x84U, 0x01U, 0x06U};
 constexpr std::array<std::uint8_t, 3U> kTrue{0x83U, 0x01U, 0xFFU};
-constexpr std::array<std::string_view, 11U> kUrcbNames{
+constexpr std::array<std::string_view, 12U> kUrcbNames{
     "RptID", "RptEna", "Resv", "DatSet", "ConfRev", "OptFlds",
-    "BufTm", "TrgOps", "IntgPd", "GI", "SqNum"};
-constexpr std::array<std::string_view, 8U> kBrcbNames{
-    "RptID", "RptEna", "DatSet", "ConfRev",
-    "PurgeBuf", "EntryID", "ResvTms", "Owner"};
+    "BufTm", "SqNum", "TrgOps", "IntgPd", "GI", "Owner"};
+constexpr std::array<std::string_view, 15U> kBrcbNames{
+    "RptID", "RptEna", "DatSet", "ConfRev", "OptFlds", "BufTm", "SqNum",
+    "TrgOps", "IntgPd", "GI", "PurgeBuf", "EntryID", "TimeofEntry",
+    "ResvTms", "Owner"};
 
 enum class MockUrcbAttribute : std::uint8_t {
     report_id,
@@ -39,10 +42,11 @@ enum class MockUrcbAttribute : std::uint8_t {
     conf_revision,
     optional_fields,
     buffer_time,
+    sequence_number,
     trigger_options,
     integrity_period,
     general_interrogation,
-    sequence_number,
+    owner,
 };
 
 struct MockUrcbState final {
@@ -100,6 +104,12 @@ struct MockUrcbContext final {
     return {wire::EncodeStatus::ok, required, required};
 }
 
+[[nodiscard]] wire::EncodeResult emit_empty_octets(
+    const std::span<std::uint8_t> destination) noexcept {
+    constexpr std::array<std::uint8_t, 2U> encoded{0x89U, 0x00U};
+    return emit(encoded, destination);
+}
+
 [[nodiscard]] wire::EncodeResult read_true(
     const void* context,
     const std::span<std::uint8_t> destination) noexcept {
@@ -133,6 +143,8 @@ struct MockUrcbContext final {
     }
     case MockUrcbAttribute::buffer_time:
         return emit_unsigned(0U, destination);
+    case MockUrcbAttribute::sequence_number:
+        return emit_unsigned(0U, destination);
     case MockUrcbAttribute::trigger_options: {
         constexpr std::array<std::uint8_t, 4U> encoded{0x84U, 0x02U, 0x02U, 0x70U};
         return emit(encoded, destination);
@@ -141,8 +153,8 @@ struct MockUrcbContext final {
         return emit_unsigned(0U, destination);
     case MockUrcbAttribute::general_interrogation:
         return emit_boolean(false, destination);
-    case MockUrcbAttribute::sequence_number:
-        return emit_unsigned(0U, destination);
+    case MockUrcbAttribute::owner:
+        return emit_empty_octets(destination);
     }
     return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
 }
@@ -245,25 +257,25 @@ int main() {
     try {
         const bool source_value = true;
         MockUrcbState urcb_state;
-        std::array<MockUrcbContext, 11U> urcb_contexts{};
+        std::array<MockUrcbContext, 12U> urcb_contexts{};
         for (std::size_t index = 0U; index < urcb_contexts.size(); ++index) {
             urcb_contexts[index] = MockUrcbContext{
                 &urcb_state,
                 static_cast<MockUrcbAttribute>(index)};
         }
 
-        std::array<mms::MmsStaticObjectEntry, 12U> pre_brcb_objects{};
+        std::array<mms::MmsStaticObjectEntry, 13U> pre_brcb_objects{};
         pre_brcb_objects[0] = mms::MmsStaticObjectEntry{
             "LD0", "X1", kBooleanType, read_true, &source_value, false};
-        constexpr std::array<std::string_view, 11U> urcb_items{
+        constexpr std::array<std::string_view, 12U> urcb_items{
             "LLN0$RP$U1$RptID", "LLN0$RP$U1$RptEna", "LLN0$RP$U1$Resv",
             "LLN0$RP$U1$DatSet", "LLN0$RP$U1$ConfRev", "LLN0$RP$U1$OptFlds",
-            "LLN0$RP$U1$BufTm", "LLN0$RP$U1$TrgOps", "LLN0$RP$U1$IntgPd",
-            "LLN0$RP$U1$GI", "LLN0$RP$U1$SqNum"};
-        const std::array<std::span<const std::uint8_t>, 11U> urcb_types{
-            kVisible255Type, kBooleanType, kBooleanType, kVisible255Type,
-            kUnsigned32Type, kBitString10Type, kUnsigned32Type, kBitString6Type,
-            kUnsigned32Type, kBooleanType, kUnsigned32Type};
+            "LLN0$RP$U1$BufTm", "LLN0$RP$U1$SqNum", "LLN0$RP$U1$TrgOps",
+            "LLN0$RP$U1$IntgPd", "LLN0$RP$U1$GI", "LLN0$RP$U1$Owner"};
+        const std::array<std::span<const std::uint8_t>, 12U> urcb_types{
+            kVisible129Type, kBooleanType, kBooleanType, kVisible129Type,
+            kUnsigned32Type, kBitString10Type, kUnsigned32Type, kUnsigned8Type,
+            kBitString6Type, kUnsigned32Type, kBooleanType, kVariableOctet64Type};
         for (std::size_t index = 0U; index < urcb_items.size(); ++index) {
             pre_brcb_objects[index + 1U] = mms::MmsStaticObjectEntry{
                 "LD0",
@@ -283,9 +295,6 @@ int main() {
         const mms::MmsStaticDataSetTable data_set_table{data_sets};
         if (!data_set_table.valid_against(pre_brcb_table)) return 2;
 
-        // Embedded BRCB retention/replay requires EntryID in OptFlds. The old
-        // fixture used 0x5C and therefore failed initialization before the RCB
-        // root Read/GVAA behavior under test could run.
         const mms::MmsStaticBrcbDefinition brcb_definition{
             "LD0",
             "LLN0$BR$B1",
@@ -311,9 +320,9 @@ int main() {
         if (!brcb_runtime.initialize()) return 3;
         mms::MmsStaticBrcbControl brcb_control{brcb_runtime};
 
-        std::array<mms::MmsStaticObjectEntry, 20U> final_objects{};
-        std::array<mms::MmsStaticBrcbObjectContext, 8U> brcb_contexts{};
-        std::array<char, 512U> brcb_names{};
+        std::array<mms::MmsStaticObjectEntry, 28U> final_objects{};
+        std::array<mms::MmsStaticBrcbObjectContext, 15U> brcb_contexts{};
+        std::array<char, 1'024U> brcb_names{};
         std::uint64_t now = 100U;
         mms::MmsStaticBrcbObjectBank brcb_bank{
             brcb_definition,
@@ -354,14 +363,16 @@ int main() {
             brcb_value.children().size() != kBrcbNames.size()) {
             return 7;
         }
+        const std::span<const std::uint8_t> no_owner;
         if (!string_value(urcb_value.children()[0], "URCB-LIVE") ||
             !bool_value(urcb_value.children()[1], true) ||
-            !bool_value(urcb_value.children()[2], true)) {
+            !bool_value(urcb_value.children()[2], true) ||
+            !octets_value(urcb_value.children()[11], no_owner)) {
             return 8;
         }
         if (!string_value(brcb_value.children()[0], "BRCB-B1") ||
             !bool_value(brcb_value.children()[1], true) ||
-            !octets_value(brcb_value.children()[7], client.owner_view())) {
+            !octets_value(brcb_value.children()[14], client.owner_view())) {
             return 9;
         }
 
@@ -387,11 +398,10 @@ int main() {
         if (!read_roots(dispatcher, 13U, second_read)) return 12;
         const auto& urcb_after = *second_read.results[0].value;
         const auto& brcb_after = *second_read.results[1].value;
-        const std::span<const std::uint8_t> no_owner;
         if (!bool_value(urcb_after.children()[1], false) ||
             !bool_value(urcb_after.children()[2], false) ||
             !bool_value(brcb_after.children()[1], false) ||
-            !octets_value(brcb_after.children()[7], no_owner)) {
+            !octets_value(brcb_after.children()[14], no_owner)) {
             return 13;
         }
 
