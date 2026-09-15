@@ -65,6 +65,8 @@ struct MmsStaticBrcbDefinition final {
 struct MmsStaticBrcbSlot final {
     std::span<std::uint8_t> storage{};
     std::array<std::uint8_t, MmsInformationReportSpanCodec::entry_id_bytes> entry_id{};
+    std::array<std::uint8_t, MmsInformationReportSpanCodec::binary_time_bytes>
+        time_of_entry{};
     std::size_t bytes{};
     std::uint8_t sequence_number{};
     bool buffer_overflow{};
@@ -128,6 +130,12 @@ public:
 
     [[nodiscard]] MmsStaticBrcbStatus set_enabled(bool enabled) noexcept;
     [[nodiscard]] constexpr bool enabled() const noexcept { return enabled_; }
+    [[nodiscard]] constexpr std::uint8_t sequence_number() const noexcept {
+        return sequence_number_;
+    }
+    [[nodiscard]] constexpr bool general_interrogation_pending() const noexcept {
+        return general_interrogation_pending_;
+    }
 
     [[nodiscard]] MmsStaticBrcbStatus notify(
         std::size_t data_set_member_index,
@@ -172,6 +180,19 @@ public:
         const auto physical = (head_ + count_ - 1U) % slots_.size();
         const auto& slot = slots_[physical];
         return slot.occupied ? slot.entry_id : empty;
+    }
+
+    [[nodiscard]] std::array<std::uint8_t,
+        MmsInformationReportSpanCodec::binary_time_bytes> latest_time_of_entry() const noexcept {
+        std::array<std::uint8_t,
+            MmsInformationReportSpanCodec::binary_time_bytes> empty{};
+        if (!initialized_ || slots_.empty() || count_ == 0U ||
+            count_ > slots_.size() || head_ >= slots_.size()) {
+            return empty;
+        }
+        const auto physical = (head_ + count_ - 1U) % slots_.size();
+        const auto& slot = slots_[physical];
+        return slot.occupied ? slot.time_of_entry : empty;
     }
 
     [[nodiscard]] constexpr std::size_t queue_size() const noexcept {
