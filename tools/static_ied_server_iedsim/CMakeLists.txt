@@ -105,3 +105,24 @@ add_test(
         --server $<TARGET_FILE:ariec61850_static_ied_server_iedsim>
         --discovery $<TARGET_FILE:ariec61850_iedscout_parity_live_discover>
         --read-probe $<TARGET_FILE:ariec61850_iedscout_parity_read_probe>)
+add_executable(ariec61850_iedscout_parity_file_transfer
+    "${ARSTACK_ROOT}/tools/file_transfer.cpp")
+target_link_libraries(ariec61850_iedscout_parity_file_transfer PRIVATE ARIEC61850::core)
+target_compile_features(ariec61850_iedscout_parity_file_transfer PRIVATE cxx_std_20)
+parity_strict_warnings(ariec61850_iedscout_parity_file_transfer)
+
+add_executable(ariec61850_iedscout_host_file_service_test
+    "${ARSTACK_ROOT}/tools/static_file_service_backend_test.cpp")
+target_link_libraries(ariec61850_iedscout_host_file_service_test PRIVATE ARIEC61850::core)
+target_compile_features(ariec61850_iedscout_host_file_service_test PRIVATE cxx_std_20)
+parity_strict_warnings(ariec61850_iedscout_host_file_service_test)
+
+add_test(NAME iedscout_host_file_service
+    COMMAND ariec61850_iedscout_host_file_service_test)
+add_test(
+    NAME iedscout_file_service_loopback
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_LIST_DIR}/test_file_service.py"
+        --server $<TARGET_FILE:ariec61850_static_ied_server_iedsim>
+        --client $<TARGET_FILE:ariec61850_iedscout_parity_file_transfer>)

@@ -14,6 +14,7 @@
 #include "ariec61850/mms/static_urcb_runtime.hpp"
 #include "ariec61850/osi/cotp.hpp"
 #include "ariec61850/osi/tpkt.hpp"
+#include "static_file_service_backend.hpp"
 
 #include <algorithm>
 #include <array>
@@ -65,6 +66,7 @@ namespace {
 namespace embedded = ar::iec61850::embedded;
 namespace mms = ar::iec61850::mms;
 namespace wire = ar::iec61850::wire;
+namespace filehost = ar::iec61850::host;
 
 std::atomic_bool g_stop{false};
 
@@ -385,12 +387,14 @@ struct SocketStreamContext final {
 struct CliOptions final {
     std::string bind_address{"0.0.0.0"};
     std::string model_manifest;
+    std::string file_root;
     std::uint16_t port{102U};
     std::uint8_t digital_input_mask{};
     std::size_t maximum_connections{};
     std::size_t maximum_active_connections{8U};
     std::uint64_t live_generation{};
     bool live_stdin{};
+    bool allow_file_delete{};
 };
 
 [[nodiscard]] std::uint32_t parse_u32(
@@ -412,6 +416,8 @@ void print_usage() {
         << "  --host IPv4               IPv4 listen address (default 0.0.0.0).\n"
         << "  --port N                  TCP listen port (default 102).\n"
         << "  --model-manifest PATH     Host model manifest emitted by the Qt simulator.\n"
+        << "  --file-root PATH          Sandboxed MMS FileDirectory/Open/Read/Close root.\n"
+        << "  --allow-file-delete       Explicitly enable MMS FileDelete below --file-root.\n"
         << "  --live-stdin              Accept bounded ARSTACK_LIVE updates on stdin.\n"
         << "  --live-generation N       Runtime generation required by live updates.\n"
         << "  --digital-input-mask N    GGIO1 Ind1..Ind8 bit mask (default 0).\n"
@@ -434,8 +440,12 @@ void print_usage() {
             options.live_stdin = true;
             continue;
         }
+        if (option == "--allow-file-delete") {
+            options.allow_file_delete = true;
+            continue;
+        }
         if (option == "--host" || option == "--model-manifest" ||
-            option == "--port" || option == "--digital-input-mask" ||
+            option == "--file-root" || option == "--port" || option == "--digital-input-mask" ||
             option == "--max-connections" || option == "--max-active" ||
             option == "--live-generation") {
             if (++index >= argc) {
@@ -446,6 +456,8 @@ void print_usage() {
                 options.bind_address = value;
             } else if (option == "--model-manifest") {
                 options.model_manifest = value;
+            } else if (option == "--file-root") {
+                options.file_root = value;
             } else if (option == "--port") {
                 const auto parsed = parse_u32(option, value, 65'535U);
                 if (parsed == 0U) {
@@ -480,6 +492,9 @@ void print_usage() {
     }
     if (options.live_stdin && options.live_generation == 0U) {
         throw std::invalid_argument("--live-stdin requires --live-generation.");
+    }
+    if (options.allow_file_delete && options.file_root.empty()) {
+        throw std::invalid_argument("--allow-file-delete requires --file-root.");
     }
     return options;
 }
@@ -673,7 +688,9 @@ struct EncodedValue final {
 struct ConnectionBuffers final {
     std::array<std::uint8_t, 32'768U> receive{};
     std::array<std::uint8_t, 32'768U> response{};
-    std::array<std::uint8_t, 8'192U> workspace{};
+    // Host file responses are wrapped as one MMS PDU before COTP segmentation.
+    // Keep workspace large enough for the negotiated host-side P-DATA frame.
+    std::array<std::uint8_t, 32'768U> workspace{};
     std::array<std::uint8_t, 65'535U> report_frame{};
     std::array<std::uint8_t, 65'535U> report_workspace{};
 };
@@ -1798,6 +1815,7 @@ void serve_connection(
     ManifestModel* const manifest_model,
     LiveUpdateBus* const live_updates,
     std::uint64_t live_sequence,
+    filehost::StaticFileServiceRoot* const file_root,
     const std::uint64_t association_id,
     const std::string_view remote) {
     std::vector<mms::MmsStaticUrcbState> urcb_states;
@@ -1811,6 +1829,7 @@ void serve_connection(
     std::vector<mms::MmsStaticDirectBooleanControlBinding> direct_control_bindings;
     std::vector<mms::MmsStaticObjectEntry> direct_control_objects;
     std::unique_ptr<mms::MmsStaticObjectTable> direct_control_table;
+    std::unique_ptr<filehost::StaticFileServiceSession> file_session;
 
     mms::MmsStaticDispatchPolicy dispatch_policy;
     dispatch_policy.maximum_write_variables = 1U;
@@ -2066,6 +2085,11 @@ void serve_connection(
         const auto shift = static_cast<unsigned>((policy.owner_size - 1U - index) * 8U);
         policy.owner[index] = static_cast<std::uint8_t>(
             (association_id >> shift) & 0xFFU);
+    }
+    if (file_root != nullptr) {
+        file_session = std::make_unique<filehost::StaticFileServiceSession>(*file_root);
+        policy.confirmed_service = &filehost::StaticFileServiceSession::callback;
+        policy.confirmed_service_context = file_session.get();
     }
 
     mms::MmsStaticConnectionRuntime runtime{dispatcher, policy};
@@ -2508,6 +2532,12 @@ int main(int argc, char** argv) {
             throw std::runtime_error("Static MMS server model is invalid.");
         }
 
+        std::unique_ptr<filehost::StaticFileServiceRoot> file_root;
+        if (!options.file_root.empty()) {
+            file_root = std::make_unique<filehost::StaticFileServiceRoot>(
+                std::filesystem::path{options.file_root}, options.allow_file_delete);
+        }
+
         const auto listener = create_listener(options.bind_address, options.port);
         std::set<std::string_view> domain_names;
         for (const auto& object : object_span) domain_names.insert(object.domain);
@@ -2532,6 +2562,8 @@ int main(int argc, char** argv) {
             << " omitted_brcbs=" << manifest_model.omitted_brcbs
             << " truncated=" << truncated
             << " max_active=" << options.maximum_active_connections
+            << " files=" << (file_root ? "enabled" : "disabled")
+            << " file_delete=" << (options.allow_file_delete ? "enabled" : "disabled")
             << " profile=iedscout" << '\n';
 
         LiveUpdateBus live_updates{options.live_generation};
@@ -2595,6 +2627,7 @@ int main(int argc, char** argv) {
                 &live_updates,
                 &object_table,
                 &data_sets,
+                &file_root,
                 client,
                 association_id,
                 remote,
@@ -2656,6 +2689,7 @@ int main(int argc, char** argv) {
                             &local_model,
                             options.live_stdin ? &live_updates : nullptr,
                             live_sequence,
+                            file_root.get(),
                             association_id,
                             remote);
                     } else {
@@ -2666,6 +2700,7 @@ int main(int argc, char** argv) {
                             nullptr,
                             nullptr,
                             0U,
+                            file_root.get(),
                             association_id,
                             remote);
                     }

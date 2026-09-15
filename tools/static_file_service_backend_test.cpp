@@ -39,7 +39,7 @@ struct TemporaryDirectory final {
     return condition;
 }
 
-[[nodiscard]] std::vector<std::uint8_t> exchange(
+[[nodiscard]] std::vector<std::uint8_t> perform_exchange(
     host::StaticFileServiceSession& session,
     const std::vector<std::uint8_t>& request,
     const std::size_t capacity = 128U * 1024U) {
@@ -93,7 +93,7 @@ int main() {
 
         const auto directory_request = mms::MmsFileServiceCodec::encode_file_directory_request_pdu(
             {1U, {}, {}});
-        const auto directory_wire = exchange(session, directory_request);
+        const auto directory_wire = perform_exchange(session, directory_request);
         const auto directory = mms::MmsFileServiceCodec::decode_file_directory_response(
             directory_wire, 1U, {});
         if (!expect(directory.entries.size() == 3U, "root directory must expose three entries") ||
@@ -104,7 +104,7 @@ int main() {
 
         const auto open_request = mms::MmsFileServiceCodec::encode_file_open_request_pdu(
             {2U, "FRA00028.dat", 0U, true});
-        const auto open_wire = exchange(session, open_request);
+        const auto open_wire = perform_exchange(session, open_request);
         const auto opened = mms::MmsFileServiceCodec::decode_file_open_response(open_wire, 2U);
         if (!expect(opened.file_size_bytes == source.size(), "FileOpen must report exact size") ||
             !expect(opened.frsm_id > 0, "FileOpen must allocate positive FRSM")) return 1;
@@ -112,7 +112,7 @@ int main() {
         host::StaticFileServiceSession other_session{shared};
         const auto foreign_read_request = mms::MmsFileServiceCodec::encode_file_read_request_pdu(
             {3U, opened.frsm_id});
-        const auto foreign_read = exchange(other_session, foreign_read_request);
+        const auto foreign_read = perform_exchange(other_session, foreign_read_request);
         if (!expect(confirmed_file_error(
                 foreign_read, 3U, host::StaticFileServiceSession::file_error_nonexistent),
                 "FRSM must be isolated per association")) return 1;
@@ -136,7 +136,7 @@ int main() {
                         first.encoded.status == wire::EncodeStatus::buffer_too_small,
                         "FileRead capacity retry must report required size")) return 1;
             }
-            const auto read_wire = exchange(session, read_request);
+            const auto read_wire = perform_exchange(session, read_request);
             const auto block = mms::MmsFileServiceCodec::decode_file_read_response(read_wire, invoke);
             reconstructed.insert(reconstructed.end(), block.data.begin(), block.data.end());
             more = block.more_follows;
@@ -147,7 +147,7 @@ int main() {
 
         const auto close_request = mms::MmsFileServiceCodec::encode_file_close_request_pdu(
             {invoke++, opened.frsm_id});
-        const auto close_wire = exchange(session, close_request);
+        const auto close_wire = perform_exchange(session, close_request);
         static_cast<void>(mms::MmsFileServiceCodec::decode_file_close_response(
             close_wire, invoke - 1U));
 
@@ -155,7 +155,7 @@ int main() {
         host::StaticFileServiceSession read_only_session{read_only};
         const auto denied_request = mms::MmsFileServiceCodec::encode_file_delete_request_pdu(
             {50U, "FRA00028.cfg", true});
-        const auto denied = exchange(read_only_session, denied_request);
+        const auto denied = perform_exchange(read_only_session, denied_request);
         if (!expect(confirmed_file_error(
                 denied, 50U, host::StaticFileServiceSession::file_error_access_denied),
                 "FileDelete must require explicit server opt-in") ||
@@ -176,10 +176,10 @@ int main() {
                 "FileDelete retry must cache successful destructive response") ||
             !expect(!std::filesystem::exists(temporary.path / "FRA00028.cfg"),
                 "first FileDelete execution must remove the file")) return 1;
-        const auto delete_wire = exchange(session, delete_request);
+        const auto delete_wire = perform_exchange(session, delete_request);
         static_cast<void>(mms::MmsFileServiceCodec::decode_file_delete_response(delete_wire, 51U));
 
-        const auto refreshed_wire = exchange(session,
+        const auto refreshed_wire = perform_exchange(session,
             mms::MmsFileServiceCodec::encode_file_directory_request_pdu({52U, {}, {}}));
         const auto refreshed = mms::MmsFileServiceCodec::decode_file_directory_response(
             refreshed_wire, 52U, {});
