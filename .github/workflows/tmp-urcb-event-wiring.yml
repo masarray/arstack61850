@@ -22,21 +22,21 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
+          from textwrap import dedent
 
           path = Path('tools/static_ied_server.cpp')
           text = path.read_text(encoding='utf-8')
 
-          text = text.replace(
-              'constexpr std::size_t kMaximumSimulatorBrcbs = 16U;',
-              'constexpr std::size_t kMaximumSimulatorBrcbs = 64U;')
+          old_limit = 'constexpr std::size_t kMaximumSimulatorBrcbs = 16U;'
+          new_limit = 'constexpr std::size_t kMaximumSimulatorBrcbs = 64U;'
+          if old_limit in text:
+              text = text.replace(old_limit, new_limit, 1)
+          elif new_limit not in text:
+              raise SystemExit('BRCB capacity marker not found')
 
-          marker = '''[[nodiscard]] mms::MmsStaticBrcbEventReason brcb_event_reason(
-              const ManifestValue& value) noexcept {
-          '''
-          if marker not in text:
-              raise SystemExit('brcb_event_reason marker not found')
-
-          helper = r'''[[nodiscard]] mms::MmsStaticUrcbEventReason urcb_event_reason(
+          marker = '[[nodiscard]] mms::MmsStaticBrcbEventReason brcb_event_reason('
+          helper = dedent(r'''
+          [[nodiscard]] mms::MmsStaticUrcbEventReason urcb_event_reason(
               const ManifestValue& value) noexcept {
               return value.normalized_type == "Quality" || value.item.ends_with("$q")
                   ? mms::MmsStaticUrcbEventReason::quality_change
@@ -85,34 +85,40 @@ jobs:
               }
           }
 
-          '''
+          ''')
           if 'void notify_urcb_changes(' not in text:
-              text = text.replace(marker, helper + marker, 1)
+              position = text.find(marker)
+              if position < 0:
+                  raise SystemExit('brcb_event_reason marker not found')
+              text = text[:position] + helper + text[position:]
 
-          old = '''                    notify_brcb_changes(
-                              *manifest_model,
-                              changed_value_indices,
-                              brcb_runtimes,
-                              monotonic_ms());
-          '''
-          new = '''                    const auto report_change_ms = monotonic_ms();
-                              if (urcb_runtime != nullptr) {
-                                  notify_urcb_changes(
-                                      *manifest_model,
-                                      changed_value_indices,
-                                      *urcb_runtime,
-                                      data_sets,
-                                      report_change_ms);
-                              }
-                              notify_brcb_changes(
-                                  *manifest_model,
-                                  changed_value_indices,
-                                  brcb_runtimes,
-                                  report_change_ms);
-          '''
-          if old not in text:
+          old = (
+              "                    notify_brcb_changes(\n"
+              "                        *manifest_model,\n"
+              "                        changed_value_indices,\n"
+              "                        brcb_runtimes,\n"
+              "                        monotonic_ms());\n"
+          )
+          new = (
+              "                    const auto report_change_ms = monotonic_ms();\n"
+              "                    if (urcb_runtime != nullptr) {\n"
+              "                        notify_urcb_changes(\n"
+              "                            *manifest_model,\n"
+              "                            changed_value_indices,\n"
+              "                            *urcb_runtime,\n"
+              "                            data_sets,\n"
+              "                            report_change_ms);\n"
+              "                    }\n"
+              "                    notify_brcb_changes(\n"
+              "                        *manifest_model,\n"
+              "                        changed_value_indices,\n"
+              "                        brcb_runtimes,\n"
+              "                        report_change_ms);\n"
+          )
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif 'notify_urcb_changes(' not in text[text.find('if (!changed_value_indices.empty())'):]:
               raise SystemExit('report notification call marker not found')
-          text = text.replace(old, new, 1)
 
           path.write_text(text, encoding='utf-8')
 
