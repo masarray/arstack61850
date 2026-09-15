@@ -4,6 +4,7 @@
 #include "ariec61850/sampled_values/rational_schedule.hpp"
 #include "ariec61850/scl/dataset_reference.hpp"
 #include "ariec61850/scl/parser.hpp"
+#include "ariec61850/simulation/ied_simulator_profile.hpp"
 
 #include <algorithm>
 #include <array>
@@ -102,6 +103,7 @@ void parser_extracts_minimal_station_semantics() {
     CHECK(report.control_block_reference == "MU01LD0/LLN0$RP$URCB01");
     CHECK(!report.buffered);
     CHECK(report.indexed);
+    CHECK(report.max_clients == 1U);
     CHECK(report.data_set_reference == "MU01LD0/LLN0$dsGO");
     CHECK(report.data_set_binding_status == SclDataSetBindingStatus::resolved);
     CHECK(report.entries.size() == 3U);
@@ -304,6 +306,92 @@ void parser_preserves_configured_control_model_value() {
     }
 }
 
+void simulator_compiles_semantic_defaults_and_indexed_report_instances() {
+    using namespace ar::iec61850::scl;
+    using namespace ar::iec61850::simulation;
+
+    constexpr std::string_view xml = R"xml(
+<SCL xmlns="http://www.iec.ch/61850/2003/SCL" version="2007" revision="B">
+  <Header id="SIM_DEFAULTS" version="1" revision="A"/>
+  <IED name="IED1" manufacturer="SIEMENS" type="SIM" configVersion="CFG-7">
+    <AccessPoint name="P1"><Server><LDevice inst="LD0">
+      <LN0 lnClass="LLN0" lnType="LLN0Type">
+        <DataSet name="ds"><FCDA ldInst="LD0" lnClass="LLN0" doName="Mod" daName="stVal" fc="ST"/></DataSet>
+        <ReportControl name="UR" datSet="ds" rptID="RID" buffered="false" indexed="true" confRev="3">
+          <RptEnabled max="2"/>
+        </ReportControl>
+      </LN0>
+      <LN lnClass="GGIO" inst="1" lnType="GGIOType"/>
+    </LDevice></Server></AccessPoint>
+  </IED>
+  <DataTypeTemplates>
+    <LNodeType id="LLN0Type" lnClass="LLN0">
+      <DO name="Mod" type="StateType"/>
+      <DO name="Beh" type="StateType"/>
+      <DO name="Health" type="StateType"/>
+      <DO name="NamPlt" type="NamePlateType"/>
+    </LNodeType>
+    <LNodeType id="GGIOType" lnClass="GGIO"><DO name="Other" type="OtherType"/></LNodeType>
+    <DOType id="StateType" cdc="ENS">
+      <DA name="stVal" bType="Enum" type="StateEnum" fc="ST"/>
+      <DA name="q" bType="Quality" fc="ST"/>
+      <DA name="t" bType="Timestamp" fc="ST"/>
+    </DOType>
+    <DOType id="NamePlateType" cdc="LPL">
+      <DA name="vendor" bType="VisString255" fc="DC"/>
+      <DA name="configRev" bType="VisString255" fc="DC"/>
+    </DOType>
+    <DOType id="OtherType" cdc="ENS"><DA name="stVal" bType="Enum" type="StateEnum" fc="ST"/></DOType>
+    <EnumType id="StateEnum"><EnumVal ord="0">reserved</EnumVal><EnumVal ord="1">normal</EnumVal></EnumType>
+  </DataTypeTemplates>
+</SCL>)xml";
+
+    const auto document = SclParser{}.parse(xml, "semantic-defaults.scd");
+    CHECK(document.report_controls.size() == 1U);
+    CHECK(document.report_controls.front().indexed);
+    CHECK(document.report_controls.front().max_clients == 2U);
+
+    IedSimulatorProfileFromSclOptions options;
+    options.ied_name = "IED1";
+    options.simulation_start_unix_ms = 1'700'000'000'123ULL;
+    const auto compiled = IedSimulatorProfileBuilder::build(document, options);
+    CHECK(compiled.report_control_definition_count == 1U);
+    CHECK(compiled.report_control_instance_count == 2U);
+    CHECK(compiled.profile.report_control_blocks.size() == 2U);
+    CHECK(compiled.profile.report_control_blocks[0].mms_item == "LLN0$RP$UR01");
+    CHECK(compiled.profile.report_control_blocks[1].mms_item == "LLN0$RP$UR02");
+    CHECK(compiled.profile.report_control_blocks[0].reference == "IED1LD0/LLN0$RP$UR01");
+    CHECK(compiled.profile.report_control_blocks[1].reference == "IED1LD0/LLN0$RP$UR02");
+    CHECK(compiled.profile.report_control_blocks[0].report_id == "RID");
+    CHECK(compiled.profile.report_control_blocks[1].report_id == "RID");
+
+    const auto point = [&](const std::string_view item) -> const IedSimulatorPoint& {
+        for (const auto& device : compiled.profile.logical_devices) {
+            for (const auto& node : device.logical_nodes) {
+                const auto found = std::find_if(
+                    node.points.begin(), node.points.end(),
+                    [item](const IedSimulatorPoint& candidate) {
+                        return candidate.mms_item == item;
+                    });
+                if (found != node.points.end()) return *found;
+            }
+        }
+        throw std::runtime_error("missing simulator point: " + std::string{item});
+    };
+
+    CHECK(point("LLN0$ST$Mod$stVal").initial_value == "1");
+    CHECK(point("LLN0$ST$Beh$stVal").initial_value == "1");
+    CHECK(point("LLN0$ST$Health$stVal").initial_value == "1");
+    CHECK(point("LLN0$ST$Mod$q").initial_value == "good");
+    CHECK(point("LLN0$ST$Mod$t").initial_value == "unix-ms:1700000000123");
+    CHECK(point("LLN0$DC$NamPlt$vendor").initial_value == "SIEMENS");
+    CHECK(point("LLN0$DC$NamPlt$configRev").initial_value == "CFG-7");
+
+    // Semantic defaults are object-aware: an unrelated Enum still receives the
+    // conservative zero fallback rather than a global "normal=1" mutation.
+    CHECK(point("GGIO1$ST$Other$stVal").initial_value == "0");
+}
+
 void parser_detects_duplicate_ieds_and_missing_dataset_references() {
     using namespace ar::iec61850::scl;
 
@@ -398,6 +486,7 @@ int main() {
         {"SCL structured 4800 SV profile", parser_compiles_structured_4800_sv_profile_without_drift},
         {"SCL dataset references", dataset_reference_resolver_accepts_canonical_and_local_forms},
         {"SCL configured control model", parser_preserves_configured_control_model_value},
+        {"Simulator semantic defaults and indexed RCBs", simulator_compiles_semantic_defaults_and_indexed_report_instances},
         {"SCL conflicts and warnings", parser_detects_duplicate_ieds_and_missing_dataset_references},
         {"SCL edition detection", parser_detects_editions_from_root_metadata},
         {"SCL prefixed namespace", parser_supports_prefixed_namespaces_and_predefined_entities},
