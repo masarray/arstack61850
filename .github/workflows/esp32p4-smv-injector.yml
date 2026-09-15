@@ -8,10 +8,12 @@ on:
       - 'include/ariec61850/asn1/**'
       - 'include/ariec61850/ethernet/**'
       - 'include/ariec61850/mms/utc_time.hpp'
+      - 'include/ariec61850/time_sync/**'
       - 'include/ariec61850/sampled_values/**'
       - 'src/asn1/**'
       - 'src/ethernet/**'
       - 'src/mms/utc_time.cpp'
+      - 'src/time_sync/**'
       - 'src/sampled_values/**'
       - '.github/workflows/esp32p4-smv-injector.yml'
   pull_request:
@@ -20,10 +22,12 @@ on:
       - 'include/ariec61850/asn1/**'
       - 'include/ariec61850/ethernet/**'
       - 'include/ariec61850/mms/utc_time.hpp'
+      - 'include/ariec61850/time_sync/**'
       - 'include/ariec61850/sampled_values/**'
       - 'src/asn1/**'
       - 'src/ethernet/**'
       - 'src/mms/utc_time.cpp'
+      - 'src/time_sync/**'
       - 'src/sampled_values/**'
       - '.github/workflows/esp32p4-smv-injector.yml'
 
@@ -31,7 +35,7 @@ permissions:
   contents: read
 
 env:
-  ARSTACK_FIRMWARE_VERSION: '0.1.0'
+  ARSTACK_FIRMWARE_VERSION: '0.1.1'
   ARSTACK_PROTOCOL_VERSION: '1'
 
 jobs:
@@ -54,6 +58,18 @@ jobs:
           set -euo pipefail
           grep -qx 'CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y' sdkconfig
           echo 'ESP32-P4 pre-v3 build policy: PASS'
+
+      - name: Verify production PTP-P2 profile
+        run: |
+          set -euo pipefail
+          grep -qx 'CONFIG_AR_PTP_LAB_TX=y' sdkconfig
+          grep -qx 'CONFIG_AR_PTP_OPERATING_ROLE=0' sdkconfig
+          grep -qx 'CONFIG_AR_PTP_DOMAIN=0' sdkconfig
+          grep -qx 'CONFIG_AR_PTP_TRANSPORT_SPECIFIC=0' sdkconfig
+          grep -qx 'CONFIG_AR_PTP_RESPOND_PDELAY=y' sdkconfig
+          grep -qx 'CONFIG_AR_PTP_SYNC_INTERVAL_MS=250' sdkconfig
+          grep -qx 'CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS=1000' sdkconfig
+          echo 'Production timing profile: PASS · PTP-P2 LAB_SOURCE · HW timestamp adapter compiled'
 
       - name: Verify realtime START and telemetry boundary policy
         run: |
@@ -107,7 +123,7 @@ jobs:
               "chipRevisionPolicy": "pre-v3",
               "version": os.environ["ARSTACK_FIRMWARE_VERSION"],
               "protocol": int(os.environ["ARSTACK_PROTOCOL_VERSION"]),
-              "capabilities": ["SMV-4I4V", "PROFILE", "LIVE-SETPOINTS"],
+              "capabilities": ["SMV-4I4V", "PROFILE", "LIVE-SETPOINTS", "SESSION-LEASE", "PTP-P2", "SMPSYNCH-AUTO"],
               "flashOffset": 0,
               "image": image,
               "sha256": sha256,
@@ -129,8 +145,10 @@ jobs:
           assert manifest['chipRevisionPolicy'] == 'pre-v3'
           assert manifest['flashOffset'] == 0
           assert manifest['protocol'] == 1
+          assert 'PTP-P2' in manifest['capabilities']
+          assert 'SMPSYNCH-AUTO' in manifest['capabilities']
           assert actual == manifest['sha256']
-          print(f"Firmware package: PASS · {manifest['image']} · pre-v3 · SHA-256 {actual}")
+          print(f"Firmware package: PASS · {manifest['image']} · PTP-P2 · pre-v3 · SHA-256 {actual}")
           PY
 
       - name: Stage Studio firmware package
