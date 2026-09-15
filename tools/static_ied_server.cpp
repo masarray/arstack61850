@@ -741,7 +741,7 @@ struct ManifestDirectControlStorage final {
 };
 
 constexpr std::size_t kMaximumSimulatorDirectControls = 64U;
-constexpr std::size_t kMaximumSimulatorBrcbs = 16U;
+constexpr std::size_t kMaximumSimulatorBrcbs = 64U;
 constexpr std::size_t kBrcbRetainedEntries = 4U;
 constexpr std::size_t kBrcbSlotBytes = 32U * 1024U;
 
@@ -1654,6 +1654,56 @@ void drain_live_stdin(
     return nullptr;
 }
 
+
+[[nodiscard]] mms::MmsStaticUrcbEventReason urcb_event_reason(
+    const ManifestValue& value) noexcept {
+    return value.normalized_type == "Quality" || value.item.ends_with("$q")
+        ? mms::MmsStaticUrcbEventReason::quality_change
+        : mms::MmsStaticUrcbEventReason::data_change;
+}
+
+void notify_urcb_changes(
+    const ManifestModel& model,
+    const std::span<const std::size_t> changed_value_indices,
+    mms::MmsStaticUrcbRuntime& urcbs,
+    const mms::MmsStaticDataSetTable& data_sets,
+    const std::uint64_t now_ms) {
+    for (const auto value_index : changed_value_indices) {
+        if (value_index >= model.values.size()) continue;
+        const auto& value = model.values[value_index];
+        const auto reason = urcb_event_reason(value);
+        for (std::size_t rcb_index = 0U; rcb_index < urcbs.size(); ++rcb_index) {
+            const auto* definition = urcbs.definition(rcb_index);
+            if (definition == nullptr) continue;
+            const auto* data_set = find_data_set(
+                data_sets, definition->data_set_domain, definition->data_set_item);
+            if (data_set == nullptr) continue;
+            for (std::size_t member_index = 0U;
+                 member_index < data_set->members.size();
+                 ++member_index) {
+                const auto& member = data_set->members[member_index];
+                const auto member_matches_value =
+                    member.domain == value.domain &&
+                    (member.item == value.item ||
+                     (value.item.size() > member.item.size() &&
+                      value.item.compare(0U, member.item.size(), member.item) == 0 &&
+                      value.item[member.item.size()] == '$'));
+                if (!member_matches_value) continue;
+                const auto status = urcbs.notify(
+                    rcb_index, member_index, reason, now_ms);
+                if (status != mms::MmsStaticUrcbStatus::ok &&
+                    status != mms::MmsStaticUrcbStatus::temporarily_unavailable) {
+                    std::osyncstream{std::cerr}
+                        << "IEDSIM_EVENT kind=urcb_notify_error rcb="
+                        << definition->item
+                        << " status=" << static_cast<unsigned>(status) << '\n';
+                }
+                break;
+            }
+        }
+    }
+}
+
 [[nodiscard]] mms::MmsStaticBrcbEventReason brcb_event_reason(
     const ManifestValue& value) noexcept {
     return value.normalized_type == "Quality" || value.item.ends_with("$q")
@@ -2078,11 +2128,20 @@ void serve_connection(
                     changed_value_indices.erase(
                         std::unique(changed_value_indices.begin(), changed_value_indices.end()),
                         changed_value_indices.end());
+                    const auto report_change_ms = monotonic_ms();
+                    if (urcb_runtime != nullptr) {
+                        notify_urcb_changes(
+                            *manifest_model,
+                            changed_value_indices,
+                            *urcb_runtime,
+                            data_sets,
+                            report_change_ms);
+                    }
                     notify_brcb_changes(
                         *manifest_model,
                         changed_value_indices,
                         brcb_runtimes,
-                        monotonic_ms());
+                        report_change_ms);
                 }
                 if (manifest_changed != 0U) {
                     std::osyncstream{std::cout}
