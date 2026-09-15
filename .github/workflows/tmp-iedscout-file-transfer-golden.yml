@@ -16,6 +16,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - name: Apply capture-backed parity patch
         shell: python
         run: |
@@ -31,33 +32,35 @@ jobs:
 
           replace_once(
               "src/mms/file_service.cpp",
-              '''    std::vector<std::uint8_t> content = encode_invoke_id(invoke_id);\n    std::vector<std::vector<std::uint8_t>> fields;\n    if (!directory.empty()) {\n        const auto name_sequence = make_tlv(\n            kSequenceTag, graphic_string(directory));\n        fields.push_back(make_tlv(0xA0U, name_sequence));\n    }\n''',
-              '''    std::vector<std::uint8_t> content = encode_invoke_id(invoke_id);\n    std::vector<std::vector<std::uint8_t>> fields;\n    // IEDScout emits fileSpecification [0] even for the root directory.\n    // The root is represented by a single empty GraphicString (A0 02 19 00),\n    // not by omitting the optional field. Preserve that vendor-interoperable\n    // wire shape while keeping continuation optional.\n    const auto name_sequence = make_tlv(\n        kSequenceTag, graphic_string(directory));\n    fields.push_back(make_tlv(0xA0U, name_sequence));\n''')
+              '''    if (!directory.empty()) {\n        const auto name = graphic_string(directory);\n        body.write_tlv(BerClass::context_specific, true, 0, name);\n    }\n''',
+              '''    // Captured IEDScout root FileDirectory request keeps fileSpecification\n    // present and encodes root as one empty GraphicString: A0 02 19 00.\n    // Do not omit [0] for root; several engineering clients use this wire shape.\n    const auto name = graphic_string(directory);\n    body.write_tlv(BerClass::context_specific, true, 0, name);\n''')
 
           replace_once(
               "src/mms/connection_runtime_iedsim.cpp",
               '''// FileDirectory-Response service value: listOfDirectoryEntry [0] empty,\n// moreFollows [1] FALSE. Mirrors the deterministic behavior of the proven\n// ARIEC61850 engineering-client simulator without claiming file-server support.\nconstexpr std::array<std::uint8_t, 5U> kEmptyFileDirectoryFields{\n    0xA0U, 0x00U, 0x81U, 0x01U, 0x00U};\n''',
-              '''// IEDScout golden FileDirectory-Response for an empty root: [0] contains\n// an empty SEQUENCE OF DirectoryEntry and moreFollows is omitted because FALSE\n// is the ASN.1 DEFAULT.  A0 02 30 00 is materially different from A0 00.\nconstexpr std::array<std::uint8_t, 4U> kEmptyFileDirectoryFields{\n    0xA0U, 0x02U, 0x30U, 0x00U};\n''')
+              '''// IEDScout golden empty FileDirectory response: [0] contains an empty\n// SEQUENCE OF DirectoryEntry. moreFollows is DEFAULT FALSE and therefore omitted.\n// Exact service value: A0 02 30 00.\nconstexpr std::array<std::uint8_t, 4U> kEmptyFileDirectoryFields{\n    0xA0U, 0x02U, 0x30U, 0x00U};\n''')
 
           replace_once(
               "tests/test_mms_file_service.cpp",
               '''    const auto root = mms::MmsFileServiceCodec::encode_file_directory_request_pdu(\n        {8U, "/", {}});\n    CHECK(mms::MmsPduCodec::decode_confirmed_request(root).service_value.empty());\n''',
-              '''    const auto root = mms::MmsFileServiceCodec::encode_file_directory_request_pdu(\n        {8U, "/", {}});\n    const auto decoded_root = mms::MmsPduCodec::decode_confirmed_request(root);\n    CHECK(decoded_root.service_tag == 77);\n    // Captured IEDScout root request: BF 4D 04 A0 02 19 00.\n    CHECK(decoded_root.service_value == (ByteVector{0xA0U, 0x02U, 0x19U, 0x00U}));\n''')
+              '''    const auto root = mms::MmsFileServiceCodec::encode_file_directory_request_pdu(\n        {8U, "/", {}});\n    const auto decoded_root = mms::MmsPduCodec::decode_confirmed_request(root);\n    CHECK(decoded_root.service_tag == 77);\n    // Captured IEDScout root request service value: A0 02 19 00.\n    CHECK(decoded_root.service_value ==\n          (ByteVector{0xA0U, 0x02U, 0x19U, 0x00U}));\n''')
 
           replace_once(
               "tests/test_mms_file_service.cpp",
               '''    CHECK(mms::MmsFileServiceCodec::rooted_backslash_path(\n        "COMTRADE/FRA00028.dat") == "\\\\COMTRADE\\\\FRA00028.dat");\n''',
-              '''    CHECK(mms::MmsFileServiceCodec::rooted_backslash_path(\n        "COMTRADE/FRA00028.dat") == "\\\\COMTRADE\\\\FRA00028.dat");\n\n    const auto iedscout_open = mms::MmsFileServiceCodec::encode_file_open_request_pdu(\n        {123U, "ligne_1.DAT", 0U, true});\n    const auto decoded_iedscout_open = mms::MmsPduCodec::decode_confirmed_request(\n        iedscout_open);\n    CHECK(decoded_iedscout_open.service_tag == 72);\n    const auto iedscout_fields = asn1::BerReader::read_children(\n        decoded_iedscout_open.service_value);\n    CHECK(iedscout_fields.size() == 2U);\n    const auto iedscout_names = asn1::BerReader::read_children(\n        iedscout_fields.front().value);\n    CHECK(iedscout_names.size() == 1U);\n    CHECK(asn1::BerReader::read_ascii_string(iedscout_names.front()) ==\n          "\\\\ligne_1.DAT");\n    CHECK(asn1::BerReader::read_unsigned_integer(iedscout_fields[1]) == 0U);\n''')
+              '''    CHECK(mms::MmsFileServiceCodec::rooted_backslash_path(\n        "COMTRADE/FRA00028.dat") == "\\\\COMTRADE\\\\FRA00028.dat");\n\n    // Captured IEDScout FileOpen uses a rooted backslash filename and position 0.\n    const auto iedscout_open = mms::MmsFileServiceCodec::encode_file_open_request_pdu(\n        {123U, "ligne_1.DAT", 0U, true});\n    const auto decoded_iedscout_open = mms::MmsPduCodec::decode_confirmed_request(\n        iedscout_open);\n    CHECK(decoded_iedscout_open.service_tag == 72);\n    const auto iedscout_fields = asn1::BerReader::read_children(\n        decoded_iedscout_open.service_value);\n    CHECK(iedscout_fields.size() == 2U);\n    const auto iedscout_names = asn1::BerReader::read_children(\n        iedscout_fields.front().value);\n    CHECK(iedscout_names.size() == 1U);\n    CHECK(asn1::BerReader::read_ascii_string(iedscout_names.front()) ==\n          "\\\\ligne_1.DAT");\n    CHECK(asn1::BerReader::read_unsigned_integer(iedscout_fields[1]) == 0U);\n''')
 
       - name: Build and run focused client regression
         run: |
           cmake -S . -B build-golden -DARIEC61850_BUILD_TESTS=ON -DARIEC61850_BUILD_TOOLS=OFF -DARIEC61850_WARNINGS_AS_ERRORS=ON
           cmake --build build-golden --target ariec61850_mms_file_service_tests -j2
           ./build-golden/ariec61850_mms_file_service_tests
+
       - name: Build IEDScout parity server profile
         run: |
           cmake -S tools/static_ied_server_iedsim -B build-parity
           cmake --build build-parity --target ariec61850_static_ied_server_iedsim -j2
+
       - name: Commit patch and remove temporary workflow
         run: |
           git config user.name "github-actions[bot]"
