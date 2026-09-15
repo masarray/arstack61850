@@ -276,6 +276,42 @@ Report:
 - exact validation executed;
 - remaining genuine limitations.
 
+## 20. Mandatory canonical IEC 61850 model / SCL contract
+
+Before changing **live discovery, Open SCL, SCL-assisted connect, IED-name resolution, DataSet/RCB model reconstruction, SCL type synthesis, Save SCL, or Edition conversion**, read [`AI_READ_FIRST.md`](AI_READ_FIRST.md), [`SCL_EXPORT.md`](SCL_EXPORT.md), [`docs/SCL_IMPORT_NORMALIZATION_PROFILE.md`](docs/SCL_IMPORT_NORMALIZATION_PROFILE.md), and [`docs/SCL_EXPORT_RECONSTRUCTION_PROFILE.md`](docs/SCL_EXPORT_RECONSTRUCTION_PROFILE.md).
+
+The non-negotiable architecture is:
+
+```text
+LIVE MMS DISCOVERY --------+
+                            |
+                            v
+                     CANONICAL IED MODEL
+                            ^
+                            |
+OPEN SCL -> typed normalize-+
+                            |
+                            v
+                  SHARED EDITION EXPORTERS
+```
+
+Rules:
+- There is **one semantic source of truth**. Do not create separate discovered-IED and opened-SCL semantic trees, caches, resolvers, or exporters.
+- Live discovery and Open SCL are different **ingress adapters** into the same canonical IEC 61850 semantics.
+- Open SCL is a typed semantic import. The XML DOM/tree is source evidence, not the application/protocol source of truth.
+- Save SCL is a local projection of the canonical model. Selecting another target edition must not trigger hidden rediscovery or require a live connection.
+- Source edition and target edition are handled by typed import/export profiles. Do not implement conversion with global string replacement or schema-specific branches scattered through discovery/runtime code.
+- Keep file-declared structure/configuration separate from current live runtime overlays such as values, RCB ownership, EntryID, runtime-added DataSets, and association state.
+- `IED@name` is authoritative for an opened file. A discovery-derived IED name must be evidence-scored. SCL-assisted connect cross-checks the two and reports mismatch; it must not silently rename either model.
+- Preserve DataSet member order and semantic references exactly.
+- Treat `Unknown`, `NotRepresentableInSourceProfile`, and `KnownFalse` as different states. Never silently convert missing/unrepresentable semantics to false or a guessed default.
+- Source-only metadata such as original type IDs, Header/history, descriptions, topology, and private extensions belongs to provenance/source evidence; it must not become a second semantic model.
+- Discovery-derived type IDs are deterministic synthetic identifiers unless independently known; never present them as recovered original vendor IDs.
+- A worker/thread may provide responsiveness, progress, parsing, serialization, or validation off the UI thread. It must not be the reason identity or model semantics are correct.
+- Same-edition normalized round-trip acceptance is **semantic idempotence**, not byte-for-byte XML equality. Cross-edition round-trip compares only the representable semantic subset and must report loss explicitly.
+
+If a patch cannot explain how it preserves this single-model contract, stop and redesign before coding.
+
 ## Final rule
 
 Think like the engineer responsible for a protocol stack and embedded device under sustained field load for years, not like a prototype generator trying to make one packet or screenshot pass.
