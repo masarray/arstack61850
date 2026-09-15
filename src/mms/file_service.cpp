@@ -522,8 +522,8 @@ std::vector<std::uint8_t> MmsFileServiceCodec::encode_file_directory_request_pdu
     const auto name = graphic_string(directory);
     body.write_tlv(BerClass::context_specific, true, 0, name);
     if (!continuation.empty()) {
-        const auto name = graphic_string(continuation);
-        body.write_tlv(BerClass::context_specific, true, 1, name);
+        const auto continuation_name = graphic_string(continuation);
+        body.write_tlv(BerClass::context_specific, true, 1, continuation_name);
     }
     return MmsPduCodec::encode_confirmed_request(
         {request.invoke_id, file_directory_service_tag, true, body.to_vector()});
