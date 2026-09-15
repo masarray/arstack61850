@@ -1,0 +1,103 @@
+name: ARStack Studio Windows Lifecycle
+
+on:
+  push:
+    paths:
+      - 'apps/arstack_studio/**'
+      - '.github/workflows/arstack-studio-windows-lifecycle.yml'
+  pull_request:
+    paths:
+      - 'apps/arstack_studio/**'
+      - '.github/workflows/arstack-studio-windows-lifecycle.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arstack-studio-windows-lifecycle-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  close-exit-reopen:
+    name: Close -> process exit -> immediate reopen
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.10.3'
+          arch: win64_msvc2022_64
+          modules: 'qtserialport'
+          cache: true
+
+      - name: Configure Studio
+        shell: powershell
+        run: |
+          cmake -S apps/arstack_studio -B build-arstack-studio -G "Visual Studio 17 2022" -A x64 `
+            -DARIEC61850_WARNINGS_AS_ERRORS=ON
+          if ($LASTEXITCODE -ne 0) { throw "Studio configure failed: $LASTEXITCODE" }
+
+      - name: Build actual Studio executable
+        shell: powershell
+        run: |
+          cmake --build build-arstack-studio --config Release --target arstack_studio --parallel
+          if ($LASTEXITCODE -ne 0) { throw "Studio build failed: $LASTEXITCODE" }
+
+      - name: Two-cycle graceful lifecycle regression
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          $env:QT_QUICK_BACKEND = 'software'
+
+          $candidate = Get-ChildItem -Path (Join-Path $PWD 'build-arstack-studio') -Recurse -File |
+            Where-Object { $_.Name -ieq 'arstack_studio.exe' -or $_.Name -ieq 'ARStackStudio.exe' } |
+            Select-Object -First 1
+          if ($null -eq $candidate) {
+            throw 'Built ARStack Studio executable was not found.'
+          }
+          $exe = $candidate.FullName
+          Write-Host "Lifecycle executable: $exe"
+
+          function Invoke-LifecycleCycle([int]$Cycle) {
+            $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+            $startInfo.FileName = $exe
+            $startInfo.Arguments = '--check-app-lifecycle'
+            $startInfo.UseShellExecute = $false
+            $startInfo.CreateNoWindow = $true
+
+            $process = New-Object System.Diagnostics.Process
+            $process.StartInfo = $startInfo
+            if (-not $process.Start()) {
+              $process.Dispose()
+              throw "Cycle ${Cycle}: failed to start Studio process."
+            }
+
+            $pidValue = $process.Id
+            if (-not $process.WaitForExit(12000)) {
+              Stop-Process -Id $pidValue -Force -ErrorAction SilentlyContinue
+              $process.Dispose()
+              throw "Cycle ${Cycle}: Studio process did not exit within 12 seconds after primary-window close."
+            }
+
+            $exitCode = $process.ExitCode
+            $process.Dispose()
+
+            if ($exitCode -ne 0) {
+              throw "Cycle ${Cycle}: Studio lifecycle coordinator exited with code $exitCode."
+            }
+            if (Get-Process -Id $pidValue -ErrorAction SilentlyContinue) {
+              throw "Cycle ${Cycle}: Studio PID $pidValue remained alive after native WaitForExit."
+            }
+
+            Write-Host "Cycle $Cycle PASS: close -> clean worker retirement -> PID exit."
+          }
+
+          Invoke-LifecycleCycle 1
+          Start-Sleep -Milliseconds 250
+          Invoke-LifecycleCycle 2
+          Write-Host 'Windows lifecycle gate: PASS · close -> process exit -> lock release -> immediate reopen -> clean exit'

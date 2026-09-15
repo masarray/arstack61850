@@ -71,7 +71,11 @@ public:
     bool probeTarget(const QString& portName);
     bool installFirmware(const QString& portName);
     void cancel();
-    void shutdown();
+    bool shutdown();
+    [[nodiscard]] static constexpr int shutdownAckTimeoutMs() noexcept { return 2200; }
+    [[nodiscard]] static constexpr int shutdownJoinTimeoutMs() noexcept { return 1200; }
+    [[nodiscard]] static constexpr int shutdownRetryTimeoutMs() noexcept { return 800; }
+    [[nodiscard]] static constexpr int shutdownForceTimeoutMs() noexcept { return 500; }
 
 signals:
     void stateChanged();

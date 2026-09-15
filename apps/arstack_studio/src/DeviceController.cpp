@@ -5,8 +5,11 @@
 #include "DeviceIoWorker.hpp"
 
 #include <QDateTime>
+#include <QDebug>
 #include <QMetaObject>
 #include <QRegularExpression>
+#include <QSemaphore>
+#include <QSharedPointer>
 
 #include <cmath>
 #include <limits>
@@ -73,19 +76,77 @@ DeviceController::DeviceController(QObject* parent) : QObject(parent) {
 }
 
 DeviceController::~DeviceController() {
-    if (ioWorker_ == nullptr || !ioThread_.isRunning()) return;
+    static_cast<void>(shutdown());
+}
+
+bool DeviceController::shutdown() {
+    if (shutdownComplete_) return true;
+    if (shuttingDown_) return !ioThread_.isRunning();
+    shuttingDown_ = true;
+    pendingAutoDetect_ = false;
+    pendingConnectPort_.clear();
+
+    if (ioWorker_ == nullptr || !ioThread_.isRunning()) {
+        ioWorker_ = nullptr;
+        ioWorkerReady_ = false;
+        ioWorkerAffinityValid_ = false;
+        shutdownComplete_ = true;
+        shuttingDown_ = false;
+        return true;
+    }
 
     const bool requestStop = running_;
     if (QThread::currentThread() == &ioThread_) {
         ioWorker_->shutdown(requestStop);
-    } else {
-        QMetaObject::invokeMethod(
-            ioWorker_,
-            [worker = ioWorker_, requestStop] { worker->shutdown(requestStop); },
-            Qt::BlockingQueuedConnection);
+        ioThread_.quit();
+        shuttingDown_ = false;
+        return false;
     }
+
+    auto acknowledged = QSharedPointer<QSemaphore>::create();
+    DeviceIoWorker* const worker = ioWorker_;
+    const bool queued = QMetaObject::invokeMethod(
+        worker,
+        [worker, requestStop, acknowledged] {
+            worker->shutdown(requestStop);
+            acknowledged->release();
+        },
+        Qt::QueuedConnection);
+    bool graceful = queued && acknowledged->tryAcquire(1, shutdownAckTimeoutMs());
+    if (!graceful) {
+        qCritical().noquote()
+            << "Device I/O shutdown acknowledgement timed out; entering bounded retirement fallback.";
+    }
+
     ioThread_.quit();
-    ioThread_.wait();
+    bool joined = ioThread_.wait(shutdownJoinTimeoutMs());
+    if (!joined) {
+        graceful = false;
+        qCritical().noquote()
+            << "Device I/O thread missed primary join deadline; retrying bounded retirement.";
+        ioThread_.requestInterruption();
+        ioThread_.quit();
+        joined = ioThread_.wait(shutdownRetryTimeoutMs());
+    }
+    if (!joined) {
+        // Emergency process-exit containment only. Normal CI must never reach this.
+        graceful = false;
+        qCritical().noquote()
+            << "Device I/O thread still alive; emergency terminate fallback engaged.";
+        ioThread_.terminate();
+        joined = ioThread_.wait(shutdownForceTimeoutMs());
+    }
+
+    ioWorker_ = nullptr;
+    ioWorkerReady_ = false;
+    ioWorkerAffinityValid_ = false;
+    connected_ = false;
+    running_ = false;
+    profileDeploying_ = false;
+    shutdownComplete_ = joined;
+    shuttingDown_ = false;
+    if (!joined) qCritical().noquote() << "Device I/O thread could not be retired before exit.";
+    return graceful && joined;
 }
 
 void DeviceController::connectWorkerSignals() {
