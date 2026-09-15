@@ -139,7 +139,7 @@ namespace {
         if (!entry.ied_name.empty()) return entry.ied_name;
     }
     for (const auto& data_set : document.data_sets) {
-        if (!entry.ied_name.empty()) return entry.ied_name;
+        if (!data_set.ied_name.empty()) return data_set.ied_name;
     }
     return {};
 }
@@ -309,18 +309,12 @@ struct InitialValueContext final {
         return entry.configured_value;
     }
 
-    // Standard semantic defaults are deliberately resolved before generic type
-    // defaults.  A normal, freshly-created simulator must not advertise the
-    // reserved/off code simply because an Enum did not have an instance DAI/Val.
     if (normal_process_state(entry) && type == "Enumeration") return "1";
     if (type == "Quality") return "good";
     if (type == "Timestamp") {
         return "unix-ms:" + std::to_string(context.simulation_start_unix_ms);
     }
 
-    // NamePlate values are safe to seed from the selected IED's engineering
-    // metadata.  Do not fabricate descriptive/vendor fields that the SCL does
-    // not provide; only fill fields whose meaning and source are unambiguous.
     if (context.ied != nullptr && ascii_equal(entry.do_name, "NamPlt")) {
         if (ascii_equal(entry.da_name, "vendor") && !context.ied->manufacturer.empty()) {
             return context.ied->manufacturer;
