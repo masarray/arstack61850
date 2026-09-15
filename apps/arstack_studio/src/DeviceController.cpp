@@ -988,15 +988,19 @@ void DeviceController::processLine(const QString& rawLine) {
         static_cast<void>(sendPtpShow());
     }
     if (line.contains(QStringLiteral("PTP start accepted"), Qt::CaseInsensitive)) {
-        ptpStatus_ = QStringLiteral("Timing frames verified");
-        emit deviceMessage(QStringLiteral("PTP source is transmitting verified timing frames."));
+        ptpStatus_ = ptpRole_ == QStringLiteral("SOURCE") ? QStringLiteral("Source TX verified") : QStringLiteral("Timing runtime started");
+        emit deviceMessage(ptpRole_ == QStringLiteral("SOURCE")
+            ? QStringLiteral("PTP source start verified; reading live TX counters.")
+            : QStringLiteral("PTP %1 runtime started.").arg(ptpRole_.toLower()));
         static_cast<void>(sendPtpShow());
     }
     if (line.contains(QStringLiteral("PTP start rejected"), Qt::CaseInsensitive) || line.contains(QStringLiteral("PTP source readiness timeout"), Qt::CaseInsensitive)) {
         ptpRunning_ = false;
         ptpStatus_ = QStringLiteral("PTP start failed");
         emit ptpStateChanged();
-        setError(QStringLiteral("PTP source did not emit timing frames. Check the Ethernet link and retry Start PTP Source."));
+        setError(ptpRole_ == QStringLiteral("SOURCE")
+            ? QStringLiteral("PTP source did not emit Announce/Sync/Follow_Up. Check the Ethernet link and retry Start PTP Source.")
+            : QStringLiteral("PTP %1 could not start. Check the Ethernet link and retry.").arg(ptpRole_.toLower()));
     }
 
     if (line.contains(QStringLiteral("PROFILE commit rejected"), Qt::CaseInsensitive) ||

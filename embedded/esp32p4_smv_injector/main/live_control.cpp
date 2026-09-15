@@ -315,9 +315,9 @@ void handle_ptp_command(char* save) noexcept {
             return;
         }
         if (!ar_esp32p4_ptp_start()) {
-            ESP_LOGE(kTag, "PTP start rejected: Ethernet link/source readiness failed; no verified timing frames were emitted");
+            ESP_LOGE(kTag, "PTP start rejected: Ethernet link or role runtime readiness failed");
         } else {
-            ESP_LOGI(kTag, "PTP start accepted: verified Announce/Sync/Follow_Up transmission");
+            ESP_LOGI(kTag, "PTP start accepted");
         }
         print_ptp_state();
         return;
