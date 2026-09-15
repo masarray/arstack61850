@@ -1,0 +1,74 @@
+name: Temporary host file-service extension hook F1
+
+on:
+  push:
+    branches:
+      - feat/ied-sim-ux-performance-foundation
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add portable confirmed-service extension hook
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def one(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: marker count {count}, expected 1')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          one('include/ariec61850/mms/connection_runtime.hpp',
+              '''using MmsStaticAssociationClosedCallback = void (*)(\n    void* context,\n    std::uint64_t association_id,\n    std::uint64_t now_ms) noexcept;\n\nstruct MmsStaticConnectionPolicy final {\n''',
+              '''using MmsStaticAssociationClosedCallback = void (*)(\n    void* context,\n    std::uint64_t association_id,\n    std::uint64_t now_ms) noexcept;\n\n// Host-side escape hatch for confirmed services that require resources the\n// portable MMS core intentionally does not own (for example a filesystem).\n// The callback encodes a complete MMS ConfirmedResponse/ConfirmedError PDU\n// into `response`. `handled=false` delegates to the normal dispatcher/fallback.\n// Keeping this at the already-decoded confirmed-service boundary preserves\n// negotiated MMS sizing, Presentation wrapping and COTP segmentation in one\n// connection runtime instead of duplicating transport logic in host adapters.\nstruct MmsStaticConfirmedServiceExtensionResult final {\n    bool handled{};\n    wire::EncodeResult encoded{};\n};\n\nusing MmsStaticConfirmedServiceCallback = MmsStaticConfirmedServiceExtensionResult (*)(\n    void* context,\n    MmsWireConfirmedService service,\n    std::uint32_t invoke_id,\n    bool service_constructed,\n    std::span<const std::uint8_t> service_value,\n    std::span<std::uint8_t> response) noexcept;\n\nstruct MmsStaticConnectionPolicy final {\n''')
+
+          one('include/ariec61850/mms/connection_runtime.hpp',
+              '''    MmsStaticAssociationClosedCallback association_closed{};\n    void* association_closed_context{};\n\n    // Appended for aggregate source compatibility. When non-empty, this is the\n''',
+              '''    MmsStaticAssociationClosedCallback association_closed{};\n    void* association_closed_context{};\n\n    // Optional host-owned confirmed-service bridge. The callback must not\n    // retain request spans. Stateful/destructive backends should make retries\n    // with the same invoke ID idempotent because capacity failures leave the\n    // input frame unconsumed and may cause the callback to be entered again.\n    MmsStaticConfirmedServiceCallback confirmed_service{};\n    void* confirmed_service_context{};\n\n    // Appended for aggregate source compatibility. When non-empty, this is the\n''')
+
+          # The general runtime can represent the extension as a synthetic
+          # dispatch result and reuse its existing Presentation/COTP path.
+          one('src/mms/connection_runtime.cpp',
+              '''    const auto application = dispatcher_.dispatch(\n        pdv.single_asn1_type, response, workspace, policy_.access_context());\n    std::size_t mms_response_bytes = application.bytes_written;\n''',
+              '''    MmsStaticDispatchResult application;\n    bool extension_handled{};\n    if (is_confirmed_request && policy_.confirmed_service != nullptr) {\n        const auto extension = policy_.confirmed_service(\n            policy_.confirmed_service_context,\n            confirmed.service(),\n            confirmed.invoke_id,\n            confirmed.service_constructed,\n            confirmed.service_value,\n            response);\n        extension_handled = extension.handled;\n        if (extension.handled) {\n            application.service = confirmed.service();\n            application.invoke_id = confirmed.invoke_id;\n            application.bytes_written = extension.encoded.bytes_written;\n            application.required_bytes = extension.encoded.required_bytes;\n            if (extension.encoded.success()) {\n                application.status = MmsStaticDispatchStatus::response_ready;\n            } else if (extension.encoded.status == wire::EncodeStatus::buffer_too_small) {\n                application.status = MmsStaticDispatchStatus::response_buffer_too_small;\n            } else {\n                application.status = MmsStaticDispatchStatus::backend_failure;\n            }\n        }\n    }\n    if (!extension_handled) {\n        application = dispatcher_.dispatch(\n            pdv.single_asn1_type, response, workspace, policy_.access_context());\n    }\n    std::size_t mms_response_bytes = application.bytes_written;\n''')
+
+          # IEDScout parity runtime has richer negotiated-size/COTP segmentation
+          # handling, so invoke the same extension before its legacy empty
+          # FileDirectory fallback and feed the encoded PDU to wrap_mms_response.
+          one('src/mms/connection_runtime_iedsim.cpp',
+              '''        if (confirmed.service() == MmsWireConfirmedService::file_directory) {\n            const auto directory = confirmed.service_constructed\n''',
+              '''        if (policy_.confirmed_service != nullptr) {\n            const auto extension = policy_.confirmed_service(\n                policy_.confirmed_service_context,\n                confirmed.service(),\n                confirmed.invoke_id,\n                confirmed.service_constructed,\n                confirmed.service_value,\n                response);\n            if (extension.handled) {\n                return finish(wrap_mms_response(\n                    extension.encoded,\n                    peek.frame_bytes,\n                    state_,\n                    mms_presentation_context_id_,\n                    negotiated_mms_pdu_size_,\n                    negotiated_tpdu_size_bytes_,\n                    response,\n                    workspace,\n                    extension.encoded.success()\n                        ? MmsStaticDispatchStatus::response_ready\n                        : MmsStaticDispatchStatus::backend_failure,\n                    confirmed.service(),\n                    confirmed.invoke_id));\n            }\n        }\n\n        if (confirmed.service() == MmsWireConfirmedService::file_directory) {\n            const auto directory = confirmed.service_constructed\n''')
+
+      - name: Build portable core with warnings-as-errors
+        run: |
+          cmake -S . -B build-core -DARIEC61850_BUILD_TESTS=ON -DARIEC61850_BUILD_TOOLS=OFF -DARIEC61850_WARNINGS_AS_ERRORS=ON
+          cmake --build build-core -j2
+          ctest --test-dir build-core --output-on-failure
+
+      - name: Build IEDScout parity server profile
+        run: |
+          cmake -S tools/static_ied_server_iedsim -B build-parity
+          cmake --build build-parity --target ariec61850_static_ied_server_iedsim -j2
+          ctest --test-dir build-parity --output-on-failure
+
+      - name: Commit F1 and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/tmp-file-service-hook-f1.yml
+          git add include/ariec61850/mms/connection_runtime.hpp \
+                  src/mms/connection_runtime.cpp src/mms/connection_runtime_iedsim.cpp
+          git commit -m "feat(mms): add host confirmed-service extension hook"
+          git push origin HEAD:feat/ied-sim-ux-performance-foundation
