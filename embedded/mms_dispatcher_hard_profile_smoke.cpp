@@ -435,7 +435,12 @@ int main() {
         return 19;
     }
 
+    // IEDScout-compatible dual-directory mode now advertises every virtual
+    // hierarchy prefix, not only the concrete flattened leaf aliases. Give the
+    // smoke enough page capacity to validate the complete sorted namespace in
+    // one response; pagination is covered separately by the dedicated profile.
     auto dual_directory_policy = hierarchy_policy;
+    dual_directory_policy.maximum_names_per_response = 16U;
     dual_directory_policy.advertise_flattened_child_aliases = true;
     const mms::MmsStaticApplicationDispatcher dual_directory_dispatcher{
         hierarchy_table,
@@ -449,15 +454,21 @@ int main() {
         !mms::MmsServiceSpanCodec::try_decode_get_name_list_response(
             std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
             dual_directory) ||
-        dual_directory.identifier_count != 5U ||
+        dual_directory.identifier_count != 11U ||
         dual_directory.more_follows) {
         return 20;
     }
-    constexpr std::array<std::string_view, 5U> dual_names{
-        "LLN0",
-        "LLN0$ST$Mod$stVal",
+    constexpr std::array<std::string_view, 11U> dual_names{
         "GGIO1",
+        "GGIO1$ST",
+        "GGIO1$ST$Ind1",
         "GGIO1$ST$Ind1$stVal",
+        "LLN0",
+        "LLN0$ST",
+        "LLN0$ST$Mod",
+        "LLN0$ST$Mod$stVal",
+        "Orphan",
+        "Orphan$ST",
         "Orphan$ST$stVal"};
     for (std::size_t index = 0U; index < dual_names.size(); ++index) {
         if (!dual_directory.try_identifier(index, identifier) ||
