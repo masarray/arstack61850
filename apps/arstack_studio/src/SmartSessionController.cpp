@@ -98,6 +98,31 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
     });
 }
 
+SmartSessionController::~SmartSessionController() {
+    shutdown();
+}
+
+void SmartSessionController::shutdown() {
+    if (shuttingDown_) return;
+    shuttingDown_ = true;
+    started_ = false;
+    discoveryTimer_.stop();
+    prepareTimer_.stop();
+    reconnectTimer_.stop();
+    profileSyncTimer_.stop();
+    firmwareHandoffWatchdog_.shutdown();
+    deviceRecoveryMonitor_.shutdown();
+    updateRequested_ = false;
+    pendingReleaseGeneration_ = 0;
+    profileSyncStage_ = ProfileSyncStage::idle;
+    if (device_ != nullptr) QObject::disconnect(device_, nullptr, this, nullptr);
+    if (profiles_ != nullptr) QObject::disconnect(profiles_, nullptr, this, nullptr);
+    if (firmware_ != nullptr) QObject::disconnect(firmware_, nullptr, this, nullptr);
+    device_ = nullptr;
+    profiles_ = nullptr;
+    firmware_ = nullptr;
+}
+
 QObject* SmartSessionController::device() const noexcept { return device_; }
 QObject* SmartSessionController::profiles() const noexcept { return profiles_; }
 QObject* SmartSessionController::firmware() const noexcept { return firmware_; }
@@ -237,7 +262,7 @@ void SmartSessionController::setFirmware(QObject* object) {
 }
 
 void SmartSessionController::start() {
-    if (started_) return;
+    if (started_ || shuttingDown_) return;
     started_ = true;
     if (profiles_ != nullptr) static_cast<void>(ensureDefaultProfile());
     discoveryTimer_.start();
@@ -925,6 +950,7 @@ bool SmartSessionController::deviceControlAvailable() const noexcept {
 }
 
 void SmartSessionController::reconcile() {
+    if (shuttingDown_) return;
     if (device_ == nullptr || profiles_ == nullptr || firmware_ == nullptr) {
         setPresentation(
             QStringLiteral("INITIALIZING"),

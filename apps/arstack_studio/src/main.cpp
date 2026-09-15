@@ -445,12 +445,6 @@ int main(int argc, char* argv[]) {
     }
 
     FirmwareManager firmwareService;
-    QObject::connect(
-        &app,
-        &QCoreApplication::aboutToQuit,
-        &firmwareService,
-        &FirmwareManager::shutdown,
-        Qt::DirectConnection);
 
     qmlRegisterType<SclProfileModel>("ARStack.Studio", 1, 0, "SclProfileModel");
     qmlRegisterType<StudioDeviceController>("ARStack.Studio", 1, 0, "DeviceController");
@@ -475,6 +469,37 @@ int main(int argc, char* argv[]) {
     if (mainWindow != nullptr) {
         mainWindow->installEventFilter(&primaryCloseFilter);
     }
+
+    QPointer<StudioDeviceController> lifecycleDevice;
+    QPointer<SmartSessionController> lifecycleSession;
+    if (mainWindow != nullptr) {
+        lifecycleDevice = mainWindow->findChild<StudioDeviceController*>();
+        lifecycleSession = mainWindow->findChild<SmartSessionController*>();
+    }
+    if (mainWindow != nullptr && (lifecycleDevice.isNull() || lifecycleSession.isNull())) {
+        qCritical().noquote()
+            << "Application lifecycle owner discovery failed; refusing an unowned worker/session lifetime.";
+        return 14;
+    }
+
+    bool lifecycleCoordinatorInvoked = false;
+    bool lifecycleShutdownClean = false;
+    QObject::connect(
+        &app,
+        &QCoreApplication::aboutToQuit,
+        &app,
+        [&] {
+            lifecycleCoordinatorInvoked = true;
+            if (!lifecycleSession.isNull()) lifecycleSession->shutdown();
+            const bool deviceClean = lifecycleDevice.isNull() || lifecycleDevice->shutdown();
+            const bool firmwareClean = firmwareService.shutdown();
+            lifecycleShutdownClean = deviceClean && firmwareClean;
+            if (!lifecycleShutdownClean) {
+                qCritical().noquote()
+                    << "Application shutdown required an emergency worker-retirement fallback.";
+            }
+        },
+        Qt::DirectConnection);
 
     if (lifecycleCheck) {
         if (mainWindow == nullptr) {
@@ -507,8 +532,14 @@ int main(int argc, char* argv[]) {
     }
 
     const int result = app.exec();
+    if (!lifecycleCoordinatorInvoked || !lifecycleShutdownClean) {
+        qCritical().noquote()
+            << "Application lifecycle regression: shutdown coordinator did not retire all workers cleanly.";
+        return result == 0 ? 15 : result;
+    }
     if (lifecycleCheck && result == 0) {
-        qInfo().noquote() << "Application lifecycle regression: PASS · primary window close reached the lifetime filter";
+        qInfo().noquote()
+            << "Application lifecycle regression: PASS · close -> supervisor stop -> worker join -> process exit";
     }
     return result;
 }

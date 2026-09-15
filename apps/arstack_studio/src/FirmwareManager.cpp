@@ -7,6 +7,7 @@
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -16,6 +17,8 @@
 #include <QMetaObject>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
+#include <QSemaphore>
+#include <QSharedPointer>
 
 #include <algorithm>
 
@@ -46,7 +49,7 @@ FirmwareManager::FirmwareManager(QObject* parent) : QObject(parent) {
 }
 
 FirmwareManager::~FirmwareManager() {
-    shutdown();
+    static_cast<void>(shutdown());
 }
 
 void FirmwareManager::connectWorkerSignals() {
@@ -333,23 +336,64 @@ void FirmwareManager::cancel() {
         Qt::QueuedConnection);
 }
 
-void FirmwareManager::shutdown() {
-    if (shuttingDown_) return;
+bool FirmwareManager::shutdown() {
+    if (shuttingDown_) return !workerThread_.isRunning();
     shuttingDown_ = true;
     operation_ = Operation::none;
     activeOperationGeneration_ = 0;
     busy_ = false;
     cancelRequested_ = true;
 
-    if (worker_ != nullptr && workerThread_.isRunning()) {
-        if (QThread::currentThread() == &workerThread_) {
-            worker_->shutdown();
-        } else {
-            QMetaObject::invokeMethod(worker_, &FirmwareWorker::shutdown, Qt::BlockingQueuedConnection);
-        }
-        workerThread_.quit();
-        workerThread_.wait();
+    if (worker_ == nullptr || !workerThread_.isRunning()) {
+        worker_ = nullptr;
+        workerReady_ = false;
+        workerAffinityValid_ = false;
+        return true;
     }
+    if (QThread::currentThread() == &workerThread_) {
+        worker_->shutdown();
+        workerThread_.quit();
+        return false;
+    }
+
+    auto acknowledged = QSharedPointer<QSemaphore>::create();
+    FirmwareWorker* const worker = worker_;
+    const bool queued = QMetaObject::invokeMethod(
+        worker,
+        [worker, acknowledged] {
+            worker->shutdown();
+            acknowledged->release();
+        },
+        Qt::QueuedConnection);
+    bool graceful = queued && acknowledged->tryAcquire(1, shutdownAckTimeoutMs());
+    if (!graceful) {
+        qCritical().noquote()
+            << "Firmware worker shutdown acknowledgement timed out; entering bounded retirement fallback.";
+    }
+
+    workerThread_.quit();
+    bool joined = workerThread_.wait(shutdownJoinTimeoutMs());
+    if (!joined) {
+        graceful = false;
+        qCritical().noquote()
+            << "Firmware worker missed primary join deadline; retrying bounded retirement.";
+        workerThread_.requestInterruption();
+        workerThread_.quit();
+        joined = workerThread_.wait(shutdownRetryTimeoutMs());
+    }
+    if (!joined) {
+        graceful = false;
+        qCritical().noquote()
+            << "Firmware worker still alive; emergency terminate fallback engaged.";
+        workerThread_.terminate();
+        joined = workerThread_.wait(shutdownForceTimeoutMs());
+    }
+
+    worker_ = nullptr;
+    workerReady_ = false;
+    workerAffinityValid_ = false;
+    if (!joined) qCritical().noquote() << "Firmware worker could not be retired before exit.";
+    return graceful && joined;
 }
 
 void FirmwareManager::clearLog() {

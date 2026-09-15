@@ -3,7 +3,6 @@
 
 #include "DeviceController.hpp"
 
-#include <QCoreApplication>
 #include <QHash>
 #include <QTimer>
 
@@ -79,17 +78,6 @@ public:
             }
         });
 
-        if (auto* app = QCoreApplication::instance(); app != nullptr) {
-            connect(app, &QCoreApplication::aboutToQuit, this, [this] {
-                controlHealthTimer_.stop();
-                healthProbeOutstanding_ = false;
-                setSessionHeartbeatEnabled(false);
-                clearPendingLiveCommands();
-                if (connected() && running()) {
-                    static_cast<void>(DeviceController::stop());
-                }
-            });
-        }
     }
 
     [[nodiscard]] bool currentFirmwareIdentitySeen() const {
