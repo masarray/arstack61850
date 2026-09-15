@@ -609,6 +609,8 @@ void ptp_lab_task(void*) {
 
 #endif
 
+void stop_ptp_lab() noexcept;
+
 void start_ptp_lab(const esp_eth_handle_t eth_handle) {
     if (eth_handle == nullptr) {
         ESP_LOGE(kTag, "PTP lab broadcaster not started: Ethernet handle is null");
