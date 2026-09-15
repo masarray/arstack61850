@@ -29,11 +29,11 @@ constexpr std::uint32_t kServerMaximumNestingLevel = 5U;
 constexpr std::array<std::uint8_t, 4U> kConservativeStructureType{
     0xA2U, 0x02U, 0xA1U, 0x00U};
 
-// FileDirectory-Response service value: listOfDirectoryEntry [0] empty,
-// moreFollows [1] FALSE. Mirrors the deterministic behavior of the proven
-// ARIEC61850 engineering-client simulator without claiming file-server support.
-constexpr std::array<std::uint8_t, 5U> kEmptyFileDirectoryFields{
-    0xA0U, 0x00U, 0x81U, 0x01U, 0x00U};
+// IEDScout golden empty FileDirectory response: [0] contains an empty
+// SEQUENCE OF DirectoryEntry. moreFollows is DEFAULT FALSE and therefore omitted.
+// Exact service value: A0 02 30 00.
+constexpr std::array<std::uint8_t, 4U> kEmptyFileDirectoryFields{
+    0xA0U, 0x02U, 0x30U, 0x00U};
 
 [[nodiscard]] MmsStaticConnectionResult make_result(
     const MmsStaticConnectionStatus status,

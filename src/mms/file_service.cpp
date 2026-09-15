@@ -516,10 +516,11 @@ std::vector<std::uint8_t> MmsFileServiceCodec::encode_file_directory_request_pdu
     BerWriter body;
     const auto directory = normalize_remote_path(request.directory_name, true);
     const auto continuation = normalize_remote_path(request.continue_after, true);
-    if (!directory.empty()) {
-        const auto name = graphic_string(directory);
-        body.write_tlv(BerClass::context_specific, true, 0, name);
-    }
+    // Captured IEDScout root FileDirectory request keeps fileSpecification
+    // present and encodes root as one empty GraphicString: A0 02 19 00.
+    // Do not omit [0] for root; several engineering clients use this wire shape.
+    const auto name = graphic_string(directory);
+    body.write_tlv(BerClass::context_specific, true, 0, name);
     if (!continuation.empty()) {
         const auto name = graphic_string(continuation);
         body.write_tlv(BerClass::context_specific, true, 1, name);

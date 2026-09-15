@@ -262,7 +262,11 @@ void codec_encodes_file_directory_high_tag_and_continuation() {
 
     const auto root = mms::MmsFileServiceCodec::encode_file_directory_request_pdu(
         {8U, "/", {}});
-    CHECK(mms::MmsPduCodec::decode_confirmed_request(root).service_value.empty());
+    const auto decoded_root = mms::MmsPduCodec::decode_confirmed_request(root);
+    CHECK(decoded_root.service_tag == 77);
+    // Captured IEDScout root request service value: A0 02 19 00.
+    CHECK(decoded_root.service_value ==
+          (ByteVector{0xA0U, 0x02U, 0x19U, 0x00U}));
 }
 
 void codec_decodes_directory_attributes_and_preserves_order() {
@@ -294,6 +298,22 @@ void codec_normalizes_paths_and_round_trips_signed_frsm() {
         {18U, "FRA00019", 0U, false}).empty());
     CHECK(mms::MmsFileServiceCodec::rooted_backslash_path(
         "COMTRADE/FRA00028.dat") == "\\COMTRADE\\FRA00028.dat");
+
+    // Captured IEDScout FileOpen uses a rooted backslash filename and position 0.
+    const auto iedscout_open = mms::MmsFileServiceCodec::encode_file_open_request_pdu(
+        {123U, "ligne_1.DAT", 0U, true});
+    const auto decoded_iedscout_open = mms::MmsPduCodec::decode_confirmed_request(
+        iedscout_open);
+    CHECK(decoded_iedscout_open.service_tag == 72);
+    const auto iedscout_fields = asn1::BerReader::read_children(
+        decoded_iedscout_open.service_value);
+    CHECK(iedscout_fields.size() == 2U);
+    const auto iedscout_names = asn1::BerReader::read_children(
+        iedscout_fields.front().value);
+    CHECK(iedscout_names.size() == 1U);
+    CHECK(asn1::BerReader::read_ascii_string(iedscout_names.front()) ==
+          "\\ligne_1.DAT");
+    CHECK(asn1::BerReader::read_unsigned_integer(iedscout_fields[1]) == 0U);
     check_throws<std::invalid_argument>([] {
         static_cast<void>(mms::MmsFileServiceCodec::encode_file_open_request_pdu(
             {1U, "../secret.cfg", 0U, false}));
