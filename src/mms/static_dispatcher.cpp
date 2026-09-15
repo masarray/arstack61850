@@ -511,12 +511,13 @@ struct ReadCompatibilityRequest final {
 }
 
 constexpr std::size_t kMaximumSyntheticReadDepth = 16U;
-constexpr std::array<std::string_view, 11U> kUrcbAttributeOrder{
+constexpr std::array<std::string_view, 12U> kUrcbAttributeOrder{
     "RptID", "RptEna", "Resv", "DatSet", "ConfRev", "OptFlds",
-    "BufTm", "TrgOps", "IntgPd", "GI", "SqNum"};
-constexpr std::array<std::string_view, 8U> kBrcbAttributeOrder{
-    "RptID", "RptEna", "DatSet", "ConfRev",
-    "PurgeBuf", "EntryID", "ResvTms", "Owner"};
+    "BufTm", "SqNum", "TrgOps", "IntgPd", "GI", "Owner"};
+constexpr std::array<std::string_view, 15U> kBrcbAttributeOrder{
+    "RptID", "RptEna", "DatSet", "ConfRev", "OptFlds", "BufTm", "SqNum",
+    "TrgOps", "IntgPd", "GI", "PurgeBuf", "EntryID", "TimeofEntry",
+    "ResvTms", "Owner"};
 
 enum class SyntheticReadStatus : std::uint8_t {
     ok,
@@ -1206,6 +1207,7 @@ struct ReadObjectResult final {
     for (std::size_t index = 0U; index < request.variable_count; ++index) {
         const auto* object = resolved[index];
         if (object == nullptr) {
+            results[index] = MmsWriteAccessResultInput{false, {}, policy.missing_object_failure_code};
             results[index] = MmsWriteAccessResultInput{false, policy.missing_object_failure_code};
             continue;
         }
