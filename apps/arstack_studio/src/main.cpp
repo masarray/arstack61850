@@ -515,10 +515,9 @@ int main(int argc, char* argv[]) {
                 return;
             }
 
-            QCloseEvent closeEvent;
-            QCoreApplication::sendEvent(lifecycleTarget.data(), &closeEvent);
+            lifecycleTarget->close();
             if (!primaryCloseFilter.closeObserved()) {
-                qCritical().noquote() << "Application lifecycle regression: primary QEvent::Close bypassed the lifetime filter.";
+                qCritical().noquote() << "Application lifecycle regression: normal primary-window close bypassed the lifetime filter.";
                 QCoreApplication::exit(10);
                 return;
             }
