@@ -2,13 +2,40 @@
 
 cmake_minimum_required(VERSION 3.20)
 
-option(ARIEC61850_EMBEDDED_NO_EXCEPTIONS "Build embedded profile without C++ exceptions" ON)
-option(ARIEC61850_EMBEDDED_NO_RTTI "Build embedded profile without RTTI" ON)
-option(ARIEC61850_EMBEDDED_WARNINGS_AS_ERRORS "Treat embedded warnings as errors" ON)
+project(ARIEC61850EmbeddedCore
+    VERSION 0.1.0
+    DESCRIPTION "MCU-oriented build profile for arstack61850 wire protocols"
+    LANGUAGES CXX)
+
+option(ARIEC61850_EMBEDDED_NO_RTTI "Disable C++ RTTI in the embedded profile" ON)
+option(ARIEC61850_EMBEDDED_NO_EXCEPTIONS "Disable C++ exceptions after legacy throw paths are removed" OFF)
+option(ARIEC61850_EMBEDDED_WARNINGS_AS_ERRORS "Treat embedded-profile warnings as errors" ON)
 
 set(ARIEC61850_ROOT "${CMAKE_CURRENT_LIST_DIR}/..")
 
+# MCU portability boundary: protocol/wire/state sources only. Host transports,
+# filesystem/PCAP/SCL/CLI layers stay out. Retain the owning codecs used by the
+# embedded regression harness alongside the allocation-free span/server path.
 set(ARIEC61850_EMBEDDED_SOURCES
+    ${ARIEC61850_ROOT}/src/asn1/ber.cpp
+    ${ARIEC61850_ROOT}/src/ethernet/ethernet.cpp
+
+    ${ARIEC61850_ROOT}/src/goose/retransmission_schedule.cpp
+    ${ARIEC61850_ROOT}/src/goose/pdu_codec.cpp
+    ${ARIEC61850_ROOT}/src/goose/frame_codec.cpp
+
+    ${ARIEC61850_ROOT}/src/sampled_values/pdu_codec.cpp
+    ${ARIEC61850_ROOT}/src/sampled_values/frame_codec.cpp
+    ${ARIEC61850_ROOT}/src/sampled_values/quality.cpp
+    ${ARIEC61850_ROOT}/src/sampled_values/payload_inspector.cpp
+    ${ARIEC61850_ROOT}/src/sampled_values/sample_counter.cpp
+
+    ${ARIEC61850_ROOT}/src/osi/tpkt.cpp
+    ${ARIEC61850_ROOT}/src/osi/cotp.cpp
+    ${ARIEC61850_ROOT}/src/osi/session.cpp
+    ${ARIEC61850_ROOT}/src/osi/presentation.cpp
+    ${ARIEC61850_ROOT}/src/acse/association.cpp
+
     ${ARIEC61850_ROOT}/src/asn1/ber_span_reader.cpp
     ${ARIEC61850_ROOT}/src/osi/tpkt_span.cpp
     ${ARIEC61850_ROOT}/src/osi/cotp_span.cpp
@@ -16,6 +43,16 @@ set(ARIEC61850_EMBEDDED_SOURCES
     ${ARIEC61850_ROOT}/src/osi/presentation_span.cpp
     ${ARIEC61850_ROOT}/src/acse/association_span.cpp
     ${ARIEC61850_ROOT}/src/acse/association_compat_span.cpp
+
+    ${ARIEC61850_ROOT}/src/mms/utc_time.cpp
+    ${ARIEC61850_ROOT}/src/mms/data_value.cpp
+    ${ARIEC61850_ROOT}/src/mms/data_codec.cpp
+    ${ARIEC61850_ROOT}/src/mms/pdu.cpp
+    ${ARIEC61850_ROOT}/src/mms/services.cpp
+    ${ARIEC61850_ROOT}/src/mms/invoke_router.cpp
+    ${ARIEC61850_ROOT}/src/mms/association_runtime.cpp
+    ${ARIEC61850_ROOT}/src/mms/file_service.cpp
+
     ${ARIEC61850_ROOT}/src/mms/pdu_span.cpp
     ${ARIEC61850_ROOT}/src/mms/pdu_compat_span.cpp
     ${ARIEC61850_ROOT}/src/mms/services_span.cpp
@@ -38,31 +75,35 @@ set(ARIEC61850_EMBEDDED_SOURCES
     ${ARIEC61850_ROOT}/src/mms/static_brcb_control.cpp
     ${ARIEC61850_ROOT}/src/mms/static_brcb_objects.cpp
     ${ARIEC61850_ROOT}/src/mms/static_brcb_connection.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_brcb_checkpoint_store.cpp
     ${ARIEC61850_ROOT}/src/mms/static_brcb_state_codec.cpp)
 
 add_library(ariec61850_embedded_core STATIC ${ARIEC61850_EMBEDDED_SOURCES})
 add_library(ARIEC61850::embedded_core ALIAS ariec61850_embedded_core)
-target_include_directories(ariec61850_embedded_core PUBLIC ${ARIEC61850_ROOT}/include)
+
 target_compile_features(ariec61850_embedded_core PUBLIC cxx_std_20)
+target_include_directories(ariec61850_embedded_core PUBLIC ${ARIEC61850_ROOT}/include)
 target_compile_definitions(ariec61850_embedded_core PUBLIC
     ARIEC61850_EMBEDDED_PROFILE=1
     ARIEC61850_HOST_SERVICES=0)
 
 function(ariec61850_apply_embedded_flags target)
     if(MSVC)
-        target_compile_options(${target} PRIVATE /W4)
-        if(ARIEC61850_EMBEDDED_WARNINGS_AS_ERRORS)
-            target_compile_options(${target} PRIVATE /WX)
-        endif()
+        target_compile_options(${target} PRIVATE /W4 /permissive-)
         if(ARIEC61850_EMBEDDED_NO_RTTI)
             target_compile_options(${target} PRIVATE /GR-)
         endif()
         if(ARIEC61850_EMBEDDED_NO_EXCEPTIONS)
-            target_compile_options(${target} PRIVATE /EHs-c-)
-            target_compile_definitions(${target} PRIVATE _HAS_EXCEPTIONS=0)
+            message(FATAL_ERROR
+                "ARIEC61850_EMBEDDED_NO_EXCEPTIONS is not ready on MSVC yet. "
+                "Legacy protocol error paths still use C++ exceptions.")
+        endif()
+        if(ARIEC61850_EMBEDDED_WARNINGS_AS_ERRORS)
+            target_compile_options(${target} PRIVATE /WX)
         endif()
     else()
-        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+        target_compile_options(${target} PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion)
         if(ARIEC61850_EMBEDDED_NO_RTTI)
             target_compile_options(${target} PRIVATE -fno-rtti)
         endif()
