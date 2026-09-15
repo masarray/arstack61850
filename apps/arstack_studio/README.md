@@ -2,6 +2,10 @@
 
 ARStack Studio is the **canonical native desktop operator surface** for the first ARStack61850 public Sampled Values release. It is a Qt 6 / C++ / QML application; the ESP32-P4 remains the deterministic real-time publisher.
 
+> **v0.1.0 is publicly released and stable.** Download: https://github.com/masarray/arstack61850/releases/tag/v0.1.0
+>
+> Production source target: `9c7fc7300220db4643e5643081240b955cfe12df` · accepted binary build head: `d9b5b6848415c7e6d1c52ec929e57c66b608058d`.
+
 ## P0 public boundary
 
 The first release is intentionally narrow and testable:
@@ -88,16 +92,24 @@ Protocol `1` is the P0 GUI/firmware capability contract for the supported `SMV-4
 
 ## Windows release artifacts
 
-The P0 release workflow creates separate downloadable files:
+The stable `v0.1.0` public release is available at:
 
-- `ARStack-Studio-0.1.0-win-x64-portable.zip`
-- `ARStack-Studio-0.1.0-win-x64-setup.exe`
-- `SHA256SUMS.txt`
+- [GitHub Release — ARStack Studio / SMV Injector v0.1.0](https://github.com/masarray/arstack61850/releases/tag/v0.1.0)
+- `ARStack-Studio-0.1.0-win-x64-setup.exe` — recommended normal installation
+- `ARStack-Studio-0.1.0-win-x64-portable.zip` — portable package
+- `arstack-esp32p4-smv-0.1.0.bin` — standalone ESP32-P4 firmware asset
+- `firmware-manifest.json`
+- `RELEASE-SHA256SUMS.txt`
 
-Both packages contain the Qt runtime, verified ESP32-P4 firmware bundle, and pinned standalone flasher. The installer is per-user and does not require administrator elevation.
+Published SHA-256 values:
 
-A `v0.1.0` tag is the only accepted P0 publish tag. The GitHub release is intentionally marked prerelease until physical P0 acceptance is complete.
+```text
+877a35dbbe110cc8ab740d3fcdc44a63f348405dc509da3164d9aaa92e9e2622  ARStack-Studio-0.1.0-win-x64-setup.exe
+1487e90254ddc5cab0f7b917580be951311c1697bec6dc19d2e2720683f00f83  ARStack-Studio-0.1.0-win-x64-portable.zip
+fae413d7b6f65b7d10ca65dc277fbf586d487f21209a29875036791088afa9c7  arstack-esp32p4-smv-0.1.0.bin
+```
 
+Both Windows packages contain the Qt runtime, verified ESP32-P4 firmware bundle, and pinned standalone flasher. The installer is per-user and does not require administrator elevation. The release is **stable**, not draft and not prerelease.
 ## Truthfulness boundary
 
 Phasor and waveform views are generated setpoint previews, not independent Ethernet capture evidence. `smpSynch` remains an embedded synchronization truth and must not be promoted to a synchronization claim without measured evidence.

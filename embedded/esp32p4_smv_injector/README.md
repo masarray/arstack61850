@@ -2,6 +2,8 @@
 
 This target runs the ARStack61850 Sampled Values injector on the current ESP32-P4 Ethernet development board using the internal EMAC and onboard RMII PHY.
 
+> **Public product milestone:** the validated 4I+4V / 4000 fps path is released as stable [`v0.1.0`](https://github.com/masarray/arstack61850/releases/tag/v0.1.0). The broader runtime experiments documented below remain engineering follow-on work and do not expand the v0.1.0 claim boundary.
+
 The firmware has progressed beyond the original fixed 4000 fps bring-up. The current runtime accepts a bounded immutable SCL-compiled publisher profile from the host GUI, arms that profile while STOPPED, and publishes deterministic Sampled Values while live signal values remain mutable.
 
 See:
@@ -11,20 +13,17 @@ See:
 
 ## Current hardware result
 
-The current ESP32-P4 path has been proven on real hardware:
+The released P0 baseline has been proven on real ESP32-P4 hardware:
 
-- ESP32-P4 rev 1.3 boots and drives the onboard RMII PHY;
-- raw Layer-2 TX reaches an independent host capture path;
-- IEC 61850 Sampled Values are decoded from the generated `0x88BA` traffic;
-- the development 4000 fps profile has sustained stable device telemetry with zero TX failures and zero missed timer notifications in retained runs;
-- the SCL-driven runtime has physically transitioned to a real engineering-file-derived 4800 fps profile;
-- the 4800 fps retained run reported approximately 4800 samples/s, zero canonical TX failures and zero missed slots;
-- the active profile exposed SCL-derived `svID`, APPID, VLAN/PCP intent, configuration revision, publisher rate and counter modulus in the GUI;
-- three-phase current/voltage waveforms remained observable through the diagnostic capture path;
-- profile identity/layout is immutable while RUNNING, while magnitude, phase, frequency, quality and channel enable state remain live controls.
+- 10/10 Start/Stop cycles passed;
+- the 4I+4V reference profile retained 4000 fps for an uninterrupted 3600-second run;
+- retained telemetry reported zero missed slots, zero TX failures, zero health reconnects and zero automatic starts;
+- an independent SV capture spot-check confirmed one ASDU, 64-byte sample data, continuous `smpCnt` including 3999 -> 0 wraps, and truthful `smpSynch=0`;
+- live magnitude, phase, frequency, Quality and CT edits were exercised without turning the desktop application into the realtime sample clock.
 
-This proves the injector workflow for the supported profile boundary. It does not by itself prove formal IEC conformance or trusted on-wire visibility of every canonical multicast/VLAN field.
+The repository also contains broader engineering experiments, including SCL-driven alternate rates such as 4800 fps. Those experiments are not part of the stable v0.1.0 public product boundary unless a later versioned release explicitly promotes them.
 
+This is product-level engineering evidence for the bounded v0.1.0 profile, not IEC 61850 conformance certification or a protection-grade synchronization claim.
 ## Runtime profile model
 
 The embedded runtime currently accepts a bounded `RuntimePublisherProfile` containing:

@@ -6,35 +6,55 @@ ARStack61850 is the real-time, hardware-aware evolution of ARIEC61850.
 
 The portable C++20 stack remains rooted in the ARIEC61850 behavioral model, but the project north star is now broader: build an open, deterministic IEC 61850 instrumentation platform for hardware-timestamped Sampled Values/GOOSE/PTP injection, analysis, commissioning and real-time closed-loop testing.
 
+## Public release — SMV Injector v0.1.0
+
+**Status: STABLE PUBLIC RELEASE · 2026-09-15**
+
+ARStack Studio / SMV Injector v0.1.0 is the first public production milestone of the ESP32-P4 Sampled Values track. It packages the native Windows operator application, the accepted ESP32-P4 firmware, recovery tooling, and the validated 4I+4V reference workflow.
+
+**[Download SMV Injector v0.1.0](https://github.com/masarray/arstack61850/releases/tag/v0.1.0)**
+
+Public P0 profile:
+
+- 4 current + 4 voltage channels;
+- 4000 frames/s;
+- 1 ASDU per Ethernet frame;
+- 64-byte sample payload;
+- `smpCnt` modulus 4000;
+- `smpSynch=0` until separately measured disciplined-clock evidence exists.
+
+Accepted physical evidence includes 10/10 Start/Stop cycles, live engineering edits, an uninterrupted 3600-second retained run at 4000 fps with `missed=0`, `txFailures=0`, `healthReconnects=0`, and `automaticStarts=0`, plus an independent SV capture spot-check with continuous `smpCnt` including 3999 -> 0 wraps.
+
+Release source target: `9c7fc7300220db4643e5643081240b955cfe12df`. Accepted binary build head: `d9b5b6848415c7e6d1c52ec929e57c66b608058d`. See [`docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md`](docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md) for immutable release provenance, hashes, scope, and the remaining non-blocking research boundary.
+
 ## Start here
 
 For a new engineer or AI development thread, read these before making architecture changes:
 
 1. [`NORTH_STAR.md`](NORTH_STAR.md) — product thesis, standards, hardware roadmap and definition of success.
-2. [`PROJECT_HANDOFF.md`](PROJECT_HANDOFF.md) — current ESP32-P4 bench status and immediate next work.
-3. [`docs/ONLINE_MODEL_CONNECT_DECISION.md`](docs/ONLINE_MODEL_CONNECT_DECISION.md) — short decision contract separating full live discovery from SCL-assisted online connect.
-4. [`LIVE_DISCOVERY_PROFILE.md`](LIVE_DISCOVERY_PROFILE.md) — detailed live-discovery and online-model interoperability boundary.
-5. [`embedded/esp32p4_smv_injector/ARCHITECTURE.md`](embedded/esp32p4_smv_injector/ARCHITECTURE.md) — embedded real-time architecture boundaries.
-6. [`docs/GLOBAL_BENCHMARK.md`](docs/GLOBAL_BENCHMARK.md) — vendor-neutral standards/industry research behind the direction.
-7. Issue #21 — deterministic SV timing-evidence gate.
-8. Issue #24 — standards-first SCL/profile/PTP roadmap.
-9. PR #19 — current ESP32-P4 hardware implementation under bench validation.
+2. [`docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md`](docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md) — current public SMV product milestone, release provenance and validated boundary.
+3. [`PROJECT_HANDOFF.md`](PROJECT_HANDOFF.md) — current repository handoff and separation between released SMV work and active follow-on tracks.
+4. [`apps/arstack_studio/README.md`](apps/arstack_studio/README.md) — operator workflow, firmware recovery and Windows distribution details.
+5. [`docs/ONLINE_MODEL_CONNECT_DECISION.md`](docs/ONLINE_MODEL_CONNECT_DECISION.md) — short decision contract separating full live discovery from SCL-assisted online connect.
+6. [`LIVE_DISCOVERY_PROFILE.md`](LIVE_DISCOVERY_PROFILE.md) — detailed live-discovery and online-model interoperability boundary.
+7. [`embedded/esp32p4_smv_injector/ARCHITECTURE.md`](embedded/esp32p4_smv_injector/ARCHITECTURE.md) — embedded real-time architecture boundaries.
+8. [`docs/GLOBAL_BENCHMARK.md`](docs/GLOBAL_BENCHMARK.md) — vendor-neutral standards/industry research behind the direction.
 
 The project deliberately separates **wire facts**, **configured expectations**, **profile claims**, and **synchronization evidence**. A packet that decodes in a host capture tool is not, by itself, a conformance or timing claim.
 
-## Current hardware milestone
+## Current SMV product milestone
 
-The active ESP32-P4 work has demonstrated on a real development bench:
+The P0 ESP32-P4 Sampled Values product track is **released and public** as `v0.1.0`. The stable GitHub release points to production merge `9c7fc7300220db4643e5643081240b955cfe12df` and publishes a Windows installer, portable package, accepted firmware image, manifest and release checksums.
 
-- ESP32-P4 rev 1.3 + onboard RMII PHY bring-up;
-- raw Ethernet TX reaching a host capture path;
-- independently decoded IEC 61850 Sampled Values frames;
-- GPTimer/FreeRTOS-driven 50 Hz / 80 samples-per-cycle publishing at about 4000 samples/s;
-- stable observed runs with zero device-side TX failures and zero missed GPTimer notifications;
-- balanced three-phase waveform reconstruction on a separate lab diagnostic stream.
+Physical acceptance retained for the public milestone:
 
-The next timing gate is **ESP32-P4 EMAC IEEE1588v2 hardware timestamp evidence**, not tuning the publisher against host USB-Ethernet arrival jitter.
+- 10/10 Start/Stop cycles passed;
+- uninterrupted 3600-second retained run held 4000 fps;
+- `missed=0`, `txFailures=0`, `healthReconnects=0`, `automaticStarts=0`;
+- independent capture confirmed the expected SV profile, one ASDU, 64-byte `seqData`, continuous `smpCnt` and 3999 -> 0 wraps;
+- `smpSynch=0` remains the truthful synchronization state.
 
+The next process-bus research gate is measured hardware timestamp/PTP discipline and broader profile support. Those are follow-on milestones and are **not** retroactively claimed by v0.1.0.
 ## Lineage and portable core
 
 The original work began as an incremental C++20 migration of the ARIEC61850 C# protocol stack. The C# implementation remains a behavioral oracle where cross-language equivalence is still useful, while ARStack-specific work adds deterministic RTOS/hardware execution and evidence that a normal desktop stack cannot provide.
