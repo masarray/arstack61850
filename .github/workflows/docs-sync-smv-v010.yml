@@ -1,0 +1,114 @@
+name: Sync SMV v0.1.0 milestone docs
+
+on:
+  push:
+    branches:
+      - docs/sync-smv-v0.1.0-milestone
+
+permissions:
+  contents: write
+
+jobs:
+  sync-docs:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: docs/sync-smv-v0.1.0-milestone
+          fetch-depth: 0
+
+      - name: Synchronize release milestone documentation
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          release_url = "https://github.com/masarray/arstack61850/releases/tag/v0.1.0"
+          source_sha = "9c7fc7300220db4643e5643081240b955cfe12df"
+          artifact_sha = "d9b5b6848415c7e6d1c52ec929e57c66b608058d"
+
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f"missing expected block: {label}")
+              if text.count(old) != 1:
+                  raise SystemExit(f"expected exactly one block for {label}; got {text.count(old)}")
+              return text.replace(old, new, 1)
+
+          # Repository landing page.
+          p = Path("README.md")
+          text = p.read_text(encoding="utf-8")
+          intro_anchor = "The portable C++20 stack remains rooted in the ARIEC61850 behavioral model, but the project north star is now broader: build an open, deterministic IEC 61850 instrumentation platform for hardware-timestamped Sampled Values/GOOSE/PTP injection, analysis, commissioning and real-time closed-loop testing.\n"
+          public_block = f'''{intro_anchor}\n## Public release — SMV Injector v0.1.0\n\n**Status: STABLE PUBLIC RELEASE · 2026-09-15**\n\nARStack Studio / SMV Injector v0.1.0 is the first public production milestone of the ESP32-P4 Sampled Values track. It packages the native Windows operator application, the accepted ESP32-P4 firmware, recovery tooling, and the validated 4I+4V reference workflow.\n\n**[Download SMV Injector v0.1.0]({release_url})**\n\nPublic P0 profile:\n\n- 4 current + 4 voltage channels;\n- 4000 frames/s;\n- 1 ASDU per Ethernet frame;\n- 64-byte sample payload;\n- `smpCnt` modulus 4000;\n- `smpSynch=0` until separately measured disciplined-clock evidence exists.\n\nAccepted physical evidence includes 10/10 Start/Stop cycles, live engineering edits, an uninterrupted 3600-second retained run at 4000 fps with `missed=0`, `txFailures=0`, `healthReconnects=0`, and `automaticStarts=0`, plus an independent SV capture spot-check with continuous `smpCnt` including 3999 -> 0 wraps.\n\nRelease source target: `{source_sha}`. Accepted binary build head: `{artifact_sha}`. See [`docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md`](docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md) for immutable release provenance, hashes, scope, and the remaining non-blocking research boundary.\n'''
+          text = replace_once(text, intro_anchor, public_block, "README public release insert")
+
+          start_pattern = re.compile(r"## Start here\n\n.*?\nThe project deliberately separates", re.S)
+          start_replacement = '''## Start here\n\nFor a new engineer or AI development thread, read these before making architecture changes:\n\n1. [`NORTH_STAR.md`](NORTH_STAR.md) — product thesis, standards, hardware roadmap and definition of success.\n2. [`docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md`](docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md) — current public SMV product milestone, release provenance and validated boundary.\n3. [`PROJECT_HANDOFF.md`](PROJECT_HANDOFF.md) — current repository handoff and separation between released SMV work and active follow-on tracks.\n4. [`apps/arstack_studio/README.md`](apps/arstack_studio/README.md) — operator workflow, firmware recovery and Windows distribution details.\n5. [`docs/ONLINE_MODEL_CONNECT_DECISION.md`](docs/ONLINE_MODEL_CONNECT_DECISION.md) — short decision contract separating full live discovery from SCL-assisted online connect.\n6. [`LIVE_DISCOVERY_PROFILE.md`](LIVE_DISCOVERY_PROFILE.md) — detailed live-discovery and online-model interoperability boundary.\n7. [`embedded/esp32p4_smv_injector/ARCHITECTURE.md`](embedded/esp32p4_smv_injector/ARCHITECTURE.md) — embedded real-time architecture boundaries.\n8. [`docs/GLOBAL_BENCHMARK.md`](docs/GLOBAL_BENCHMARK.md) — vendor-neutral standards/industry research behind the direction.\n\nThe project deliberately separates'''
+          text, count = start_pattern.subn(start_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit("README Start here block not replaced")
+
+          milestone_pattern = re.compile(r"## Current hardware milestone\n\n.*?(?=\n## Lineage and portable core)", re.S)
+          milestone_replacement = f'''## Current SMV product milestone\n\nThe P0 ESP32-P4 Sampled Values product track is **released and public** as `v0.1.0`. The stable GitHub release points to production merge `{source_sha}` and publishes a Windows installer, portable package, accepted firmware image, manifest and release checksums.\n\nPhysical acceptance retained for the public milestone:\n\n- 10/10 Start/Stop cycles passed;\n- uninterrupted 3600-second retained run held 4000 fps;\n- `missed=0`, `txFailures=0`, `healthReconnects=0`, `automaticStarts=0`;\n- independent capture confirmed the expected SV profile, one ASDU, 64-byte `seqData`, continuous `smpCnt` and 3999 -> 0 wraps;\n- `smpSynch=0` remains the truthful synchronization state.\n\nThe next process-bus research gate is measured hardware timestamp/PTP discipline and broader profile support. Those are follow-on milestones and are **not** retroactively claimed by v0.1.0.\n'''
+          text, count = milestone_pattern.subn(milestone_replacement.rstrip(), text, count=1)
+          if count != 1:
+              raise SystemExit("README current hardware milestone block not replaced")
+          p.write_text(text, encoding="utf-8")
+
+          # Product landing README.
+          p = Path("apps/arstack_studio/README.md")
+          text = p.read_text(encoding="utf-8")
+          opening = "ARStack Studio is the **canonical native desktop operator surface** for the first ARStack61850 public Sampled Values release. It is a Qt 6 / C++ / QML application; the ESP32-P4 remains the deterministic real-time publisher.\n"
+          opening_new = f'''ARStack Studio is the **canonical native desktop operator surface** for the first ARStack61850 public Sampled Values release. It is a Qt 6 / C++ / QML application; the ESP32-P4 remains the deterministic real-time publisher.\n\n> **v0.1.0 is publicly released and stable.** Download: {release_url}\n>\n> Production source target: `{source_sha}` · accepted binary build head: `{artifact_sha}`.\n'''
+          text = replace_once(text, opening, opening_new, "Studio README release banner")
+
+          windows_pattern = re.compile(r"## Windows release artifacts\n\n.*?(?=\n## Truthfulness boundary)", re.S)
+          windows_replacement = f'''## Windows release artifacts\n\nThe stable `v0.1.0` public release is available at:\n\n- [GitHub Release — ARStack Studio / SMV Injector v0.1.0]({release_url})\n- `ARStack-Studio-0.1.0-win-x64-setup.exe` — recommended normal installation\n- `ARStack-Studio-0.1.0-win-x64-portable.zip` — portable package\n- `arstack-esp32p4-smv-0.1.0.bin` — standalone ESP32-P4 firmware asset\n- `firmware-manifest.json`\n- `RELEASE-SHA256SUMS.txt`\n\nPublished SHA-256 values:\n\n```text\n877a35dbbe110cc8ab740d3fcdc44a63f348405dc509da3164d9aaa92e9e2622  ARStack-Studio-0.1.0-win-x64-setup.exe\n1487e90254ddc5cab0f7b917580be951311c1697bec6dc19d2e2720683f00f83  ARStack-Studio-0.1.0-win-x64-portable.zip\nfae413d7b6f65b7d10ca65dc277fbf586d487f21209a29875036791088afa9c7  arstack-esp32p4-smv-0.1.0.bin\n```\n\nBoth Windows packages contain the Qt runtime, verified ESP32-P4 firmware bundle, and pinned standalone flasher. The installer is per-user and does not require administrator elevation. The release is **stable**, not draft and not prerelease.\n'''
+          text, count = windows_pattern.subn(windows_replacement.rstrip(), text, count=1)
+          if count != 1:
+              raise SystemExit("Studio README Windows release block not replaced")
+          p.write_text(text, encoding="utf-8")
+
+          # P0 release contract becomes a release-status record while preserving honesty boundaries.
+          Path("docs/SMV_STUDIO_P0_RELEASE.md").write_text(f'''# ARStack Studio P0 public-release contract\n\n**Milestone status: RELEASED · stable public `v0.1.0` · 2026-09-15**\n\nPublic release: {release_url}\n\nProduction source target: `{source_sha}`  \nAccepted binary build head: `{artifact_sha}`  \nPublic release workflow source: ARStack Studio Release run `34918302946` (SUCCESS)\n\n## Product target\n\nThe first public ARStack Studio release is intentionally bounded to one professional workflow:\n\n> **IEC 61850 Sampled Values Injector / Generator — 4I + 4V**\n\nThe milestone packages the ESP32-P4 publisher as a usable Windows instrument without requiring the operator to install or understand the development toolchain.\n\n## P0 profile boundary\n\n- 4 current channels: `Ia`, `Ib`, `Ic`, `In`\n- 4 voltage channels: `Ua`, `Ub`, `Uc`, `Un`\n- one `INT32 value + Quality` pair per channel\n- 16 ordered FCDA leaves\n- 64-byte sample payload\n- one ASDU\n- 4000 samples/s reference profile\n- sample-counter cycle `0..3999`\n- SCL/CID/SCD/IID import remains available when the compiled stream fits the same firmware boundary\n- `smpSynch=0` until separately measured disciplined-clock evidence exists\n\nProfiles outside this layout may still be parsed and explained, but they are not v0.1.0 deployment targets and must remain blocked from deployment.\n\n## Closed work packages\n\n### P0.1 — Canonical Quick Start — CLOSED\n\n- [x] ARStack-owned 4I+4V reference SCL bundled with the native Qt application\n- [x] canonical C++ SCL parser/profile compiler path\n- [x] Class-A reference profile at 4000 fps / modulus 4000 / 64-byte payload / 16 leaves\n- [x] one-click `4I+4V Quick Start` operator path\n\n### P0.2 — Release UI / UX — CLOSED\n\n- [x] ARStack Studio is the canonical public operator surface\n- [x] device, firmware, profile and output states are explicit\n- [x] Current / Voltage matrices remain the primary work surface\n- [x] disabled Start/Deploy paths expose operator-readable reasons\n- [x] Expert diagnostics remain secondary to the normal workflow\n\n### P0.3 — ESP32-P4 firmware/session manager — CLOSED FOR v0.1.0\n\n- [x] typed semantic device identity and protocol versioning\n- [x] packaged firmware image + manifest + SHA-256 enforcement\n- [x] bounded serial ownership and firmware handoff\n- [x] reconnect verification after firmware operations\n- [x] wrong-device and incompatible-image paths fail closed\n- [x] single-instance/session ownership hardening\n\n### P0.4 — Windows public distribution — CLOSED\n\n- [x] native Release build\n- [x] bundled Qt runtime\n- [x] portable package\n- [x] Windows installer\n- [x] clean Windows package smoke\n- [x] versioned firmware bundle and manifest\n- [x] SHA-256 checksums and release provenance\n- [x] stable tagged GitHub Release `v0.1.0`\n\n### P0.5 — Physical product acceptance — ACCEPTED\n\nExecuted evidence used for the public milestone:\n\n- [x] 10/10 Start/Stop cycles\n- [x] Quick Start profile deploy/start path on the accepted physical board\n- [x] live magnitude / phase / frequency / Quality / CT edits\n- [x] Zero operation\n- [x] uninterrupted 3600-second retained run at 4000 fps\n- [x] `missed=0`, `txFailures=0`, `healthReconnects=0`, `automaticStarts=0`\n- [x] independent capture spot-check of destination MAC, APPID, VLAN/PCP, svID, confRev, one ASDU, 64-byte payload, `smpCnt` continuity and 3999 -> 0 wrap\n- [x] `smpSynch=0` truth boundary retained\n\nThe following strict-lab cases were intentionally deferred as non-blocking follow-on validation and are **not represented as completed physical PASS cases**:\n\n- [ ] exhaustive blank-board/recovery permutations across USB-driver combinations\n- [ ] exhaustive external engineering SCL physical matrix beyond the accepted P0 reference path\n- [ ] broader power-cycle/unplug/replug permutations beyond the product-owner pragmatic release gate\n\n## Published assets\n\n```text\n877a35dbbe110cc8ab740d3fcdc44a63f348405dc509da3164d9aaa92e9e2622  ARStack-Studio-0.1.0-win-x64-setup.exe\n1487e90254ddc5cab0f7b917580be951311c1697bec6dc19d2e2720683f00f83  ARStack-Studio-0.1.0-win-x64-portable.zip\nfae413d7b6f65b7d10ca65dc277fbf586d487f21209a29875036791088afa9c7  arstack-esp32p4-smv-0.1.0.bin\n```\n\n## Explicitly outside v0.1.0\n\n- generalized 3I / 8I / 8I+4V / 9I+6V / 12I+4V / 12I+8V runtime layouts\n- multi-stream publication\n- arbitrary DataSet layouts\n- COMTRADE playback as a released device data plane\n- scripted fault sequences\n- full Process Bus analyzer\n- protection-grade timing claims\n- IEC 61850 conformance/certification claims\n\nThe P0 boundary can widen only through a later versioned milestone. Public v0.1.0 remains a deliberately bounded engineering instrument release.\n''', encoding="utf-8")
+
+          # Immutable public milestone record / documentation landing page.
+          Path("docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md").write_text(f'''# ARStack Studio / SMV Injector v0.1.0\n\n**Stable public release · 15 September 2026**\n\n[Download v0.1.0]({release_url})\n\n## Milestone\n\n`v0.1.0` closes the first public ARStack Sampled Values product milestone: a Windows engineering application supervising a deterministic ESP32-P4 publisher for the validated 4I+4V / 4000 fps profile.\n\nThis milestone is deliberately narrower than the full ARStack roadmap. It is a usable public engineering release, not a protection-grade timing or conformance-certification claim.\n\n## Public package\n\n- Windows x64 installer — recommended for normal use\n- Windows x64 portable package\n- ESP32-P4 firmware image\n- firmware manifest\n- release SHA-256 ledger\n- bundled firmware recovery/flash tooling inside ARStack Studio\n\n## Validated profile\n\n| Property | v0.1.0 value |\n|---|---|\n| Channels | 4 current + 4 voltage |\n| Frame rate | 4000 frames/s |\n| ASDU | 1 per frame |\n| Sample payload | 64 bytes |\n| `smpCnt` modulus | 4000 |\n| `smpSynch` | 0 |\n| Firmware protocol | ARStack protocol v1 |\n\n## Physical acceptance summary\n\nThe accepted physical board run completed:\n\n- 10/10 Start/Stop cycles;\n- live magnitude, phase, frequency, Quality and CT edits;\n- Zero;\n- uninterrupted 3600-second retained run;\n- 4000 fps minimum and maximum throughout retained telemetry;\n- zero missed sample slots;\n- zero TX failures;\n- zero health reconnects;\n- zero automatic Start events.\n\nAn independent capture spot-check contained 39,524 primary SV frames over approximately 9.881 seconds, an effective rate of approximately 3999.899 fps, zero observed `smpCnt` discontinuities, and ten 3999 -> 0 wraps. The capture matched the accepted P0 wire identity and retained `smpSynch=0`.\n\n## Release provenance\n\n| Item | Value |\n|---|---|\n| Stable tag | `v0.1.0` |\n| Production merge | `{source_sha}` |\n| Accepted binary build head | `{artifact_sha}` |\n| Release build | ARStack Studio Release run `34918302946` — SUCCESS |\n| Public publish workflow | Publish Public SMV Injector v0.1.0 run `34933705055` — SUCCESS |\n\nThe `v0.1.0` tag points directly to the production merge SHA above.\n\n## Published SHA-256\n\n```text\n877a35dbbe110cc8ab740d3fcdc44a63f348405dc509da3164d9aaa92e9e2622  ARStack-Studio-0.1.0-win-x64-setup.exe\n1487e90254ddc5cab0f7b917580be951311c1697bec6dc19d2e2720683f00f83  ARStack-Studio-0.1.0-win-x64-portable.zip\nfae413d7b6f65b7d10ca65dc277fbf586d487f21209a29875036791088afa9c7  arstack-esp32p4-smv-0.1.0.bin\n```\n\n## Product boundary after this milestone\n\nThe next SMV work may expand timing evidence, profiles, multi-stream support, replay/sequencing and interoperability. None of that changes the truth of this release:\n\n> v0.1.0 is the stable public 4I+4V / 4000 fps engineering-instrument baseline.\n\nIED Simulator / IEC 61850 Workbench development is a separate product track and should not be used to redefine the v0.1.0 SMV acceptance boundary.\n''', encoding="utf-8")
+
+          # Feature matrix: synchronize only SMV product rows and terminology.
+          p = Path("docs/FEATURE_MATRIX.md")
+          text = p.read_text(encoding="utf-8")
+          status_anchor = "- **Live-proven** — exercised against a reachable IED or vendor simulator.\n"
+          status_new = status_anchor + "- **Public release** — packaged, versioned and publicly downloadable with accepted product-level evidence and an explicit claim boundary.\n"
+          text = replace_once(text, status_anchor, status_new, "feature matrix public-release status")
+          old_row = "| Sampled Values | Live MCU publisher | Planned / embedded path staged | First reference hardware is the Waveshare ESP32-S3-POE-ETH-8DI-8DO; synthetic W5500/ESP-IDF MACRAW transmission proof is required before any timing-grade claim. |"
+          new_rows = "| Sampled Values | Live MCU publisher | Public release / physical accepted | ESP32-P4 ARStack Studio v0.1.0 completed 10/10 Start/Stop cycles and an uninterrupted 3600-second 4000 fps retained run with zero missed slots, TX failures, health reconnects or automatic starts; `smpSynch=0` remains the truthful timing boundary. |\n| Desktop product | ARStack Studio / SMV Injector v0.1.0 | Public release | Stable Windows installer + portable package + ESP32-P4 firmware published under tag `v0.1.0`; independent SV spot-check confirmed the bounded 4I+4V / 4000 fps / 1 ASDU / 64-byte profile. |"
+          text = replace_once(text, old_row, new_rows, "feature matrix SMV live publisher row")
+          old_next = "The next gaps are association-loss and contention evidence for control, remaining MMS file-service parity and fault-record workflows, mutable SCL export/reconstruction, deterministic IED simulator/server integration, and broader application/UI parity. Sampled Values and ESP hardware work remain separate from this MMS-control tranche."
+          new_next = "The next gaps are association-loss and contention evidence for control, remaining MMS file-service parity and fault-record workflows, mutable SCL export/reconstruction, deterministic IED simulator/server integration, and broader application/UI parity. The SMV/ESP32-P4 P0 track is now released as stable `v0.1.0`; future process-bus timing/profile expansion remains a separate follow-on tranche rather than an open blocker for that release."
+          text = replace_once(text, old_next, new_next, "feature matrix next direction")
+          p.write_text(text, encoding="utf-8")
+
+          # Current-state handoff: retire stale PR #19 as the current milestone without rewriting historical bench evidence.
+          p = Path("PROJECT_HANDOFF.md")
+          text = p.read_text(encoding="utf-8")
+          text = replace_once(text, "Last major bench update: **2026-08-10**.", "Last major product milestone update: **2026-09-15 — stable public SMV Injector v0.1.0 released**.", "handoff date")
+          section_pattern = re.compile(r"## 1\. Active repository work\n\n.*?(?=\n## 2\. Tested hardware/toolchain)", re.S)
+          section_replacement = f'''## 1. Active repository work\n\n- Repository: `masarray/arstack61850`\n- Production branch: `main`\n- SMV production merge: `{source_sha}` — PR #79\n- Stable public SMV release: [`v0.1.0`]({release_url})\n- P0.5 supervisor/physical release issue: #83 — closed\n- Legacy first-trial SV PR #15 — archived/superseded, not merged\n- IED Simulator PRs #75/#82 remain separate tracks and must not be conflated with the SMV release baseline\n\nFor current SMV product truth, start with [`docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md`](docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md). Sections below retain useful historical bench/toolchain context; where they conflict with the versioned release record, the release record and current `main` take precedence.\n'''
+          text, count = section_pattern.subn(section_replacement.rstrip(), text, count=1)
+          if count != 1:
+              raise SystemExit("PROJECT_HANDOFF active repository block not replaced")
+          p.write_text(text, encoding="utf-8")
+
+          # This helper workflow is intentionally ephemeral; remove it from the final docs branch.
+          Path(".github/workflows/docs-sync-smv-v010.yml").unlink()
+
+      - name: Commit synchronized documentation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md apps/arstack_studio/README.md docs/SMV_STUDIO_P0_RELEASE.md docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md docs/FEATURE_MATRIX.md PROJECT_HANDOFF.md .github/workflows/docs-sync-smv-v010.yml
+          git diff --cached --check
+          git commit -m "docs: synchronize public SMV v0.1.0 milestone"
+          git push origin HEAD:docs/sync-smv-v0.1.0-milestone
