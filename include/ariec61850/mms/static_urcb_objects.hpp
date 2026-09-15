@@ -20,10 +20,11 @@ enum class MmsStaticUrcbAttribute : std::uint8_t {
     conf_revision,
     optional_fields,
     buffer_time,
+    sequence_number,
     trigger_options,
     integrity_period,
     general_interrogation,
-    sequence_number,
+    owner,
 };
 
 struct MmsStaticUrcbObjectContext final {
@@ -36,7 +37,10 @@ struct MmsStaticUrcbObjectContext final {
 
 class MmsStaticUrcbObjectBank final {
 public:
-    static constexpr std::size_t attributes_per_control_block = 11U;
+    // IEC 61850 / IEDScout-compatible URCB facade:
+    // RptID,RptEna,Resv,DatSet,ConfRev,OptFlds,BufTm,SqNum,
+    // TrgOps,IntgPd,GI,Owner.
+    static constexpr std::size_t attributes_per_control_block = 12U;
 
     MmsStaticUrcbObjectBank(
         MmsStaticUrcbRuntime& runtime,
