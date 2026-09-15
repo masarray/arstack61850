@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <string_view>
 
 namespace {
 
@@ -33,10 +34,11 @@ constexpr std::size_t kPageSize = 32U;
 
 [[nodiscard]] bool identifier_equals(
     const std::span<const std::uint8_t> identifier,
-    const std::array<char, 5U>& expected) noexcept {
-    if (identifier.size() != 4U) return false;
-    for (std::size_t index = 0U; index < 4U; ++index) {
-        if (identifier[index] != static_cast<std::uint8_t>(expected[index])) {
+    const std::string_view expected) noexcept {
+    if (identifier.size() != expected.size()) return false;
+    for (std::size_t index = 0U; index < expected.size(); ++index) {
+        if (identifier[index] != static_cast<std::uint8_t>(
+                static_cast<unsigned char>(expected[index]))) {
             return false;
         }
     }
@@ -112,7 +114,9 @@ int main() {
             if (expected_index >= kObjectCount) return 4;
             std::span<const std::uint8_t> identifier;
             if (!response.try_identifier(page_index, identifier) ||
-                !identifier_equals(identifier, names[expected_index])) {
+                !identifier_equals(
+                    identifier,
+                    std::string_view{names[expected_index].data(), 4U})) {
                 return 5;
             }
             ++expected_index;
@@ -144,6 +148,108 @@ int main() {
         response_bytes,
         workspace);
     if (invalid_result.status != mms::MmsStaticDispatchStatus::object_not_found) return 8;
+
+    // Regression for the real IEDScout Report discovery failure: the concrete
+    // table only contains RCB leaves, but GetNameList must advertise every
+    // virtual hierarchy prefix that synthetic GVAA/Read already understands.
+    constexpr std::array<std::string_view, 4U> hierarchy_items{
+        "LLN0$RP$U1$RptID",
+        "LLN0$RP$U1$RptEna",
+        "LLN0$BR$B1$RptID",
+        "LLN0$BR$B1$RptEna"};
+    std::array<mms::MmsStaticObjectEntry, hierarchy_items.size()> hierarchy_objects{};
+    for (std::size_t index = 0U; index < hierarchy_items.size(); ++index) {
+        hierarchy_objects[index] = mms::MmsStaticObjectEntry{
+            "LD0",
+            hierarchy_items[index],
+            kBooleanType,
+            read_false,
+            nullptr};
+    }
+    const mms::MmsStaticObjectTable hierarchy_table{hierarchy_objects};
+    if (!hierarchy_table.valid()) return 9;
+
+    mms::MmsStaticDispatchPolicy hierarchy_policy;
+    hierarchy_policy.maximum_names_per_response = 3U;
+    hierarchy_policy.advertise_flattened_child_aliases = true;
+    const mms::MmsStaticApplicationDispatcher hierarchy_dispatcher{
+        hierarchy_table, hierarchy_policy};
+
+    constexpr std::array<std::string_view, 9U> expected_hierarchy{
+        "LLN0",
+        "LLN0$BR",
+        "LLN0$BR$B1",
+        "LLN0$BR$B1$RptEna",
+        "LLN0$BR$B1$RptID",
+        "LLN0$RP",
+        "LLN0$RP$U1",
+        "LLN0$RP$U1$RptEna",
+        "LLN0$RP$U1$RptID"};
+
+    continue_after.clear();
+    expected_index = 0U;
+    for (std::uint32_t invoke_id = 20U;
+         expected_index < expected_hierarchy.size();
+         ++invoke_id) {
+        mms::MmsGetNameListRequest request;
+        request.invoke_id = invoke_id;
+        request.object_class = mms::MmsGetNameListObjectClass::named_variable;
+        request.scope = mms::MmsObjectScopeKind::domain_specific;
+        request.domain_id = "LD0";
+        request.continue_after = continue_after;
+
+        const auto encoded_request = mms::MmsServiceCodec::encode_get_name_list_request_pdu(request);
+        const auto dispatched = hierarchy_dispatcher.dispatch(
+            std::span<const std::uint8_t>{encoded_request},
+            response_bytes,
+            workspace);
+        if (!dispatched.success()) return 10;
+
+        mms::MmsGetNameListResponseView response;
+        if (!mms::MmsServiceSpanCodec::try_decode_get_name_list_response(
+                std::span<const std::uint8_t>{response_bytes}.first(dispatched.bytes_written),
+                response) ||
+            response.identifier_count == 0U ||
+            response.identifier_count > hierarchy_policy.maximum_names_per_response) {
+            return 11;
+        }
+
+        for (std::size_t page_index = 0U;
+             page_index < response.identifier_count;
+             ++page_index) {
+            if (expected_index >= expected_hierarchy.size()) return 12;
+            std::span<const std::uint8_t> identifier;
+            if (!response.try_identifier(page_index, identifier) ||
+                !identifier_equals(identifier, expected_hierarchy[expected_index])) {
+                return 13;
+            }
+            ++expected_index;
+        }
+
+        const auto should_have_more = expected_index < expected_hierarchy.size();
+        if (response.more_follows != should_have_more) return 14;
+        if (should_have_more) {
+            continue_after.assign(expected_hierarchy[expected_index - 1U]);
+        }
+    }
+
+    if (expected_index != expected_hierarchy.size()) return 15;
+
+    mms::MmsGetNameListRequest invalid_virtual;
+    invalid_virtual.invoke_id = 30U;
+    invalid_virtual.object_class = mms::MmsGetNameListObjectClass::named_variable;
+    invalid_virtual.scope = mms::MmsObjectScopeKind::domain_specific;
+    invalid_virtual.domain_id = "LD0";
+    invalid_virtual.continue_after = "LLN0$RP$Missing";
+    const auto invalid_virtual_request =
+        mms::MmsServiceCodec::encode_get_name_list_request_pdu(invalid_virtual);
+    const auto invalid_virtual_result = hierarchy_dispatcher.dispatch(
+        std::span<const std::uint8_t>{invalid_virtual_request},
+        response_bytes,
+        workspace);
+    if (invalid_virtual_result.status != mms::MmsStaticDispatchStatus::object_not_found) {
+        return 16;
+    }
 
     return 0;
 }
