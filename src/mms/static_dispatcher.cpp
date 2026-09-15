@@ -216,9 +216,6 @@ namespace {
     bool continuation_found = request.continue_after.empty();
     bool more_follows = false;
 
-    // Preserve the legacy root-only directory policy exactly when flattened
-    // aliases are disabled. IEDScout-style host profiles enable aliases and use
-    // the canonical virtual hierarchy projection below.
     if (!policy.advertise_flattened_child_aliases) {
         bool emit = continuation_found;
         for (const auto& object : objects.objects()) {
@@ -241,11 +238,6 @@ namespace {
             break;
         }
     } else {
-        // IEDScout advertises intermediate hierarchy nodes as first-class
-        // NamedVariables (LN -> FC -> DO/structured component -> leaf). Build a
-        // bounded lexical page directly from the same concrete object table used
-        // by synthetic Read/GVAA. No intermediate object is materialized and no
-        // request-sized heap allocation is required.
         const auto continue_after = as_text(request.continue_after);
         for (const auto& object : objects.objects()) {
             if (!span_equals(request.domain_id, object.domain)) continue;
@@ -604,11 +596,6 @@ struct SyntheticChildRank final {
     return left < right;
 }
 
-// Composable object banks append live URCB/BRCB leaves, so hierarchy walking
-// must not depend on table contiguity. Generic hierarchy children are lexical,
-// while a concrete RCB root follows the IEC 61850/report-control attribute order
-// used by its TypeSpecification. Read data therefore stays aligned with the
-// field order even though MMS Structure values do not carry component names.
 [[nodiscard]] SyntheticChild next_synthetic_child(
     const MmsStaticObjectTable& objects,
     const std::string_view domain,
@@ -1207,7 +1194,6 @@ struct ReadObjectResult final {
     for (std::size_t index = 0U; index < request.variable_count; ++index) {
         const auto* object = resolved[index];
         if (object == nullptr) {
-            results[index] = MmsWriteAccessResultInput{false, {}, policy.missing_object_failure_code};
             results[index] = MmsWriteAccessResultInput{false, policy.missing_object_failure_code};
             continue;
         }
