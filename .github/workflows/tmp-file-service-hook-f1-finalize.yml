@@ -49,7 +49,7 @@ jobs:
       - name: Build and test IEDScout parity server profile
         run: |
           cmake -S tools/static_ied_server_iedsim -B build-parity
-          cmake --build build-parity --target ariec61850_static_ied_server_iedsim -j2
+          cmake --build build-parity -j2
           ctest --test-dir build-parity --output-on-failure
 
       - name: Commit F1 and remove temporary workflows
