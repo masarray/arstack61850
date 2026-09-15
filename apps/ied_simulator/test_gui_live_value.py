@@ -710,7 +710,7 @@ def main() -> int:
                 port,
                 manifest_path,
                 "XCBR1$ST$Pos$t",
-                "value=unix-ms=0 UTC",
+                "value=unix-ms=",
                 "1700000000123",
                 "value=unix-ms=1700000000123 UTC",
             )
@@ -734,7 +734,7 @@ def main() -> int:
                 "urcb_gi=pass "
                 "brcb_event=pass "
                 "quality=same-association:030000->03C110 "
-                "timestamp=same-association:0->1700000000123"
+                "timestamp=same-association:current->1700000000123"
             )
             print(control_output)
             print(sbo_enhanced_output)
