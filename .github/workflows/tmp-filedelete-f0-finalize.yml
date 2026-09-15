@@ -1,0 +1,78 @@
+name: Temporary capture-backed MMS FileDelete F0 finalize
+
+on:
+  push:
+    branches:
+      - feat/ied-sim-ux-performance-foundation
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reuse validated F0 patch and fix diagnostic switch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/tmp-filedelete-f0.yml').read_text(encoding='utf-8').splitlines()
+          marker = '      - name: Apply FileDelete protocol patch'
+          try:
+              marker_index = workflow.index(marker)
+          except ValueError as exc:
+              raise SystemExit('validated F0 patch workflow marker missing') from exc
+          run_index = next(
+              i for i in range(marker_index + 1, len(workflow))
+              if workflow[i] == '        run: |')
+          script_lines = []
+          for line in workflow[run_index + 1:]:
+              if line.startswith('      - name:'):
+                  break
+              if line.startswith('          '):
+                  script_lines.append(line[10:])
+              elif line.strip():
+                  raise SystemExit(f'unexpected indentation in reusable patch: {line!r}')
+              else:
+                  script_lines.append('')
+          script = '\n'.join(script_lines)
+          if 'MmsFileDeleteRequest' not in script or 'file_delete_service_tag = 76' not in script:
+              raise SystemExit('refusing to execute unexpected F0 patch payload')
+          exec(compile(script, 'validated-filedelete-f0-patch', 'exec'), {'__name__': '__main__'})
+
+          server = Path('tools/static_ied_server.cpp')
+          text = server.read_text(encoding='utf-8')
+          old = '''    case mms::MmsWireConfirmedService::get_named_variable_list_attributes:\n        return "GetNamedVariableListAttributes";\n    case mms::MmsWireConfirmedService::file_directory: return "FileDirectory";\n    case mms::MmsWireConfirmedService::unknown: return "Unknown";\n'''
+          new = '''    case mms::MmsWireConfirmedService::get_named_variable_list_attributes:\n        return "GetNamedVariableListAttributes";\n    case mms::MmsWireConfirmedService::file_open: return "FileOpen";\n    case mms::MmsWireConfirmedService::file_read: return "FileRead";\n    case mms::MmsWireConfirmedService::file_close: return "FileClose";\n    case mms::MmsWireConfirmedService::file_delete: return "FileDelete";\n    case mms::MmsWireConfirmedService::file_directory: return "FileDirectory";\n    case mms::MmsWireConfirmedService::unknown: return "Unknown";\n'''
+          if text.count(old) != 1:
+              raise SystemExit('service_text patch marker mismatch')
+          server.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+      - name: Build and run focused FileDelete regression
+        run: |
+          cmake -S . -B build-filedelete -DARIEC61850_BUILD_TESTS=ON -DARIEC61850_BUILD_TOOLS=OFF -DARIEC61850_WARNINGS_AS_ERRORS=ON
+          cmake --build build-filedelete --target ariec61850_mms_file_service_tests -j2
+          ./build-filedelete/ariec61850_mms_file_service_tests
+
+      - name: Build IEDScout parity server profile
+        run: |
+          cmake -S tools/static_ied_server_iedsim -B build-parity
+          cmake --build build-parity --target ariec61850_static_ied_server_iedsim -j2
+
+      - name: Commit F0 and remove temporary workflows
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/tmp-filedelete-f0.yml .github/workflows/tmp-filedelete-f0-finalize.yml
+          git add include/ariec61850/mms/pdu.hpp src/mms/pdu.cpp \
+                  include/ariec61850/mms/pdu_span.hpp src/mms/pdu_span.cpp \
+                  include/ariec61850/mms/file_service.hpp src/mms/file_service.cpp \
+                  tests/test_mms_file_service.cpp tools/static_ied_server.cpp
+          git commit -m "feat(mms): add capture-backed FileDelete service"
+          git push origin HEAD:feat/ied-sim-ux-performance-foundation
