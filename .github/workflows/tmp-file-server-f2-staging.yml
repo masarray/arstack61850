@@ -1,0 +1,59 @@
+name: Temporary F2 isolated validation
+
+on:
+  push:
+    branches:
+      - agent/file-server-f2-validation
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply staged F2 patch
+        shell: python
+        run: |
+          from pathlib import Path
+          workflow = Path('.github/workflows/tmp-file-server-f2.yml').read_text(encoding='utf-8').splitlines()
+          marker = '      - name: Wire sandboxed file backend into server and client tooling'
+          marker_index = workflow.index(marker)
+          run_index = next(i for i in range(marker_index + 1, len(workflow)) if workflow[i] == '        run: |')
+          script_lines = []
+          for line in workflow[run_index + 1:]:
+              if line.startswith('      - name:'):
+                  break
+              if line.startswith('          '):
+                  script_lines.append(line[10:])
+              elif line.strip():
+                  raise SystemExit(f'unexpected reusable patch indentation: {line!r}')
+              else:
+                  script_lines.append('')
+          script = '\n'.join(script_lines)
+          if '--file-root' not in script or 'iedscout_file_service_loopback' not in script:
+              raise SystemExit('refusing unexpected F2 patch payload')
+          exec(compile(script, 'validated-f2-patch', 'exec'), {'__name__': '__main__'})
+
+      - name: Build and run F2 acceptance
+        run: |
+          cmake -S tools/static_ied_server_iedsim -B build-file-server
+          cmake --build build-file-server -j2
+          ctest --test-dir build-file-server --output-on-failure
+
+      - name: Commit F2 to product branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/tmp-file-server-f2.yml .github/workflows/tmp-file-server-f2-staging.yml
+          git add tools/static_file_service_backend.hpp \
+                  tools/static_file_service_backend_test.cpp \
+                  tools/static_ied_server.cpp tools/file_transfer.cpp \
+                  tools/static_ied_server_iedsim/CMakeLists.txt \
+                  tools/static_ied_server_iedsim/test_file_service.py
+          git commit -m "feat(mms): serve sandboxed MMS files with delete parity"
+          git push origin HEAD:feat/ied-sim-ux-performance-foundation
