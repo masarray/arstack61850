@@ -2,18 +2,19 @@
 
 This file is the **current-state handoff** for a new engineer or AI thread. Read [`NORTH_STAR.md`](NORTH_STAR.md) first for the long-term direction, then use this file to continue active development without reconstructing the bench history from chat.
 
-Last major bench update: **2026-08-10**.
+Last major product milestone update: **2026-09-15 — stable public SMV Injector v0.1.0 released**.
 
 ## 1. Active repository work
 
 - Repository: `masarray/arstack61850`
-- Active branch: `feature/esp32p4-smv-injector-p0-p1`
-- Active PR: **#19 — Add ESP32-P4-ETH SMV injector P0/P1 and P2 50 Hz realtime foundation**
-- Timing evidence issue: **#21**
-- Standards-first SCL/profile/PTP roadmap: **#24**
+- Production branch: `main`
+- SMV production merge: `9c7fc7300220db4643e5643081240b955cfe12df` — PR #79
+- Stable public SMV release: [`v0.1.0`](https://github.com/masarray/arstack61850/releases/tag/v0.1.0)
+- P0.5 supervisor/physical release issue: #83 — closed
+- Legacy first-trial SV PR #15 — archived/superseded, not merged
+- IED Simulator PRs #75/#82 remain separate tracks and must not be conflated with the SMV release baseline
 
-Do not assume PR #19 is merged. Check its current head and CI before branching new embedded work.
-
+For current SMV product truth, start with [`docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md`](docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md). Sections below retain useful historical bench/toolchain context; where they conflict with the versioned release record, the release record and current `main` take precedence.
 ## 2. Tested hardware/toolchain
 
 ### Device

@@ -3,6 +3,7 @@
 Status terms are intentionally conservative:
 
 - **Live-proven** — exercised against a reachable IED or vendor simulator.
+- **Public release** — packaged, versioned and publicly downloadable with accepted product-level evidence and an explicit claim boundary.
 - **Offline-tested** — deterministic unit/integration/fuzz/CI evidence exists, but no current live-device claim is made.
 - **Software-ready for lab** — the production path and guarded live-test harness are implemented; retained physical/simulator evidence is still required.
 - **Partial** — useful implementation exists but important parity or interoperability gaps remain.
@@ -51,7 +52,8 @@ Status terms are intentionally conservative:
 | GOOSE | Publisher/subscriber runtime foundations | Offline-tested | Physical process-bus acceptance remains pending. |
 | Sampled Values | PDU / Ethernet encode-decode | Offline-tested | Process-bus work remains separate from MMS control evidence. |
 | Sampled Values | Caller-owned bounded encode path | Offline-tested | `encode_into(span)` avoids fresh frame-buffer allocation in steady-state publisher design. |
-| Sampled Values | Live MCU publisher | Planned / embedded path staged | First reference hardware is the Waveshare ESP32-S3-POE-ETH-8DI-8DO; synthetic W5500/ESP-IDF MACRAW transmission proof is required before any timing-grade claim. |
+| Sampled Values | Live MCU publisher | Public release / physical accepted | ESP32-P4 ARStack Studio v0.1.0 completed 10/10 Start/Stop cycles and an uninterrupted 3600-second 4000 fps retained run with zero missed slots, TX failures, health reconnects or automatic starts; `smpSynch=0` remains the truthful timing boundary. |
+| Desktop product | ARStack Studio / SMV Injector v0.1.0 | Public release | Stable Windows installer + portable package + ESP32-P4 firmware published under tag `v0.1.0`; independent SV spot-check confirmed the bounded 4I+4V / 4000 fps / 1 ASDU / 64-byte profile. |
 | SCL | Read-only parser / engineering support | Offline-tested | Host engineering surface; mutable standards-aware export remains later work. |
 | COMTRADE | CFG/DAT read support | Offline-tested | ASCII/BINARY/BINARY32/FLOAT32 and mapping foundations are implemented. |
 | PCAP | Read/write/evidence support | Live-proven for C5 evidence | Npcap loopback captures were reconciled with JSON Write lists and retained SHA-256 hashes. |
@@ -90,4 +92,4 @@ C1-C5 provide a guarded production control path plus a live evidence harness. Th
 
 ## Next parity direction
 
-The next gaps are association-loss and contention evidence for control, remaining MMS file-service parity and fault-record workflows, mutable SCL export/reconstruction, deterministic IED simulator/server integration, and broader application/UI parity. Sampled Values and ESP hardware work remain separate from this MMS-control tranche.
+The next gaps are association-loss and contention evidence for control, remaining MMS file-service parity and fault-record workflows, mutable SCL export/reconstruction, deterministic IED simulator/server integration, and broader application/UI parity. The SMV/ESP32-P4 P0 track is now released as stable `v0.1.0`; future process-bus timing/profile expansion remains a separate follow-on tranche rather than an open blocker for that release.
