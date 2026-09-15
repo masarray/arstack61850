@@ -180,6 +180,31 @@ namespace {
     return names.size() + 1U;
 }
 
+[[nodiscard]] bool insert_sorted_directory_name(
+    std::array<std::string_view, MmsServiceSpanCodec::maximum_identifiers>& page,
+    std::size_t& page_count,
+    const std::size_t page_capacity,
+    const std::string_view value,
+    bool& more_follows) noexcept {
+    const auto begin = page.begin();
+    const auto end = begin + static_cast<std::ptrdiff_t>(page_count);
+    const auto position = std::lower_bound(begin, end, value);
+    if (position != end && *position == value) return true;
+
+    if (page_count < page_capacity) {
+        std::move_backward(position, end, end + 1);
+        *position = value;
+        ++page_count;
+        return true;
+    }
+
+    more_follows = true;
+    if (page_capacity == 0U || position == end) return true;
+    std::move_backward(position, end - 1, end);
+    *position = value;
+    return true;
+}
+
 [[nodiscard]] MmsStaticDispatchResult dispatch_domain_named_variable_page(
     const MmsStaticObjectTable& objects,
     const MmsStaticDispatchPolicy& policy,
@@ -189,28 +214,72 @@ namespace {
     std::array<std::string_view, MmsServiceSpanCodec::maximum_identifiers> page{};
     std::size_t page_count = 0U;
     bool continuation_found = request.continue_after.empty();
-    bool emit = continuation_found;
     bool more_follows = false;
 
-    for (const auto& object : objects.objects()) {
-        if (!span_equals(request.domain_id, object.domain) ||
-            (!policy.advertise_flattened_child_aliases &&
-             is_flattened_child_with_root(objects, object.domain, object.item))) {
-            continue;
-        }
-        if (!emit) {
-            if (span_equals(request.continue_after, object.item)) {
-                continuation_found = true;
-                emit = true;
+    // Preserve the legacy root-only directory policy exactly when flattened
+    // aliases are disabled. IEDScout-style host profiles enable aliases and use
+    // the canonical virtual hierarchy projection below.
+    if (!policy.advertise_flattened_child_aliases) {
+        bool emit = continuation_found;
+        for (const auto& object : objects.objects()) {
+            if (!span_equals(request.domain_id, object.domain) ||
+                is_flattened_child_with_root(objects, object.domain, object.item)) {
+                continue;
             }
-            continue;
+            if (!emit) {
+                if (span_equals(request.continue_after, object.item)) {
+                    continuation_found = true;
+                    emit = true;
+                }
+                continue;
+            }
+            if (page_count < policy.maximum_names_per_response) {
+                page[page_count++] = object.item;
+                continue;
+            }
+            more_follows = true;
+            break;
         }
-        if (page_count < policy.maximum_names_per_response) {
-            page[page_count++] = object.item;
-            continue;
+    } else {
+        // IEDScout advertises intermediate hierarchy nodes as first-class
+        // NamedVariables (LN -> FC -> DO/structured component -> leaf). Build a
+        // bounded lexical page directly from the same concrete object table used
+        // by synthetic Read/GVAA. No intermediate object is materialized and no
+        // request-sized heap allocation is required.
+        const auto continue_after = as_text(request.continue_after);
+        for (const auto& object : objects.objects()) {
+            if (!span_equals(request.domain_id, object.domain)) continue;
+
+            std::size_t prefix_end = object.item.find('$');
+            while (true) {
+                const auto prefix = object.item.substr(
+                    0U,
+                    prefix_end == std::string_view::npos
+                        ? object.item.size()
+                        : prefix_end);
+                if (!prefix.empty()) {
+                    if (!continue_after.empty() && prefix == continue_after) {
+                        continuation_found = true;
+                    }
+                    if (continue_after.empty() || prefix > continue_after) {
+                        if (!insert_sorted_directory_name(
+                                page,
+                                page_count,
+                                policy.maximum_names_per_response,
+                                prefix,
+                                more_follows)) {
+                            return make_status(
+                                MmsStaticDispatchStatus::backend_failure,
+                                confirmed);
+                        }
+                    }
+                }
+
+                if (prefix_end == std::string_view::npos) break;
+                if (prefix_end + 1U >= object.item.size()) break;
+                prefix_end = object.item.find('$', prefix_end + 1U);
+            }
         }
-        more_follows = true;
-        break;
     }
 
     if (!continuation_found) {
