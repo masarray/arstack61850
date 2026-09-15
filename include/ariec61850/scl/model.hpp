@@ -195,6 +195,15 @@ struct SclReportControl final {
     std::string control_block_reference;
     bool buffered{};
     bool indexed{true};
+
+    // IEC 61850 SCL ReportControl/RptEnabled@max.  This is the maximum number
+    // of simultaneously addressable client instances represented by an indexed
+    // ReportControl.  Keep the SCL definition count separate from the compiled
+    // runtime RCB instance count; an indexed definition with max=N exposes N
+    // concrete RCB object instances.  Missing/zero max is normalized to one by
+    // the parser so downstream compilers never need to invent a value.
+    std::uint32_t max_clients{1U};
+
     std::uint32_t configuration_revision{};
     std::uint32_t buffer_time_milliseconds{};
     std::uint32_t integrity_period_milliseconds{};
