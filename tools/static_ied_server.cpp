@@ -1773,6 +1773,10 @@ void notify_brcb_changes(
         return "GetVariableAccessAttributes";
     case mms::MmsWireConfirmedService::get_named_variable_list_attributes:
         return "GetNamedVariableListAttributes";
+    case mms::MmsWireConfirmedService::file_open: return "FileOpen";
+    case mms::MmsWireConfirmedService::file_read: return "FileRead";
+    case mms::MmsWireConfirmedService::file_close: return "FileClose";
+    case mms::MmsWireConfirmedService::file_delete: return "FileDelete";
     case mms::MmsWireConfirmedService::file_directory: return "FileDirectory";
     case mms::MmsWireConfirmedService::unknown: return "Unknown";
     }

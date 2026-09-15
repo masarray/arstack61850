@@ -45,6 +45,7 @@ enum class MmsConfirmedService : std::int32_t {
     file_open = 72,
     file_read = 73,
     file_close = 74,
+    file_delete = 76,
     file_directory = 77,
 };
 
