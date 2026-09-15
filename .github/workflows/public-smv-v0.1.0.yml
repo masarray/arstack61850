@@ -1,0 +1,148 @@
+name: Publish Public SMV Injector v0.1.0
+
+on:
+  push:
+    branches:
+      - release/public-smv-v0.1.0
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: publish-public-smv-v0.1.0
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish stable v0.1.0
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: v0.1.0
+      RELEASE_TARGET_SHA: 9c7fc7300220db4643e5643081240b955cfe12df
+      ARTIFACT_RUN_ID: '34918302946'
+      ARTIFACT_HEAD_SHA: d9b5b6848415c7e6d1c52ec929e57c66b608058d
+    steps:
+      - name: Verify release provenance and uniqueness
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ARTIFACT_RUN_ID}")"
+          test "$(jq -r '.status' <<<"${run_json}")" = "completed"
+          test "$(jq -r '.conclusion' <<<"${run_json}")" = "success"
+          test "$(jq -r '.head_sha' <<<"${run_json}")" = "${ARTIFACT_HEAD_SHA}"
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${RELEASE_TARGET_SHA}" >/dev/null
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release ${RELEASE_TAG} already exists; refusing duplicate publication."
+            exit 1
+          fi
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "Tag ${RELEASE_TAG} already exists without a release; refusing ambiguous publication."
+            exit 1
+          fi
+
+      - name: Download accepted Windows and firmware artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release/windows release/firmware
+          gh run download "${ARTIFACT_RUN_ID}" --repo "${GITHUB_REPOSITORY}" \
+            --name arstack-studio-windows-x64 --dir release/windows
+          gh run download "${ARTIFACT_RUN_ID}" --repo "${GITHUB_REPOSITORY}" \
+            --name arstack-esp32p4-smv-firmware --dir release/firmware
+          test -s release/windows/ARStack-Studio-0.1.0-win-x64-portable.zip
+          test -s release/windows/ARStack-Studio-0.1.0-win-x64-setup.exe
+          test -s release/firmware/arstack-esp32p4-smv-0.1.0.bin
+          test -s release/firmware/firmware-manifest.json
+
+      - name: Verify immutable release checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '1487e90254ddc5cab0f7b917580be951311c1697bec6dc19d2e2720683f00f83  release/windows/ARStack-Studio-0.1.0-win-x64-portable.zip' | sha256sum -c -
+          echo '877a35dbbe110cc8ab740d3fcdc44a63f348405dc509da3164d9aaa92e9e2622  release/windows/ARStack-Studio-0.1.0-win-x64-setup.exe' | sha256sum -c -
+          echo 'fae413d7b6f65b7d10ca65dc277fbf586d487f21209a29875036791088afa9c7  release/firmware/arstack-esp32p4-smv-0.1.0.bin' | sha256sum -c -
+          echo '32bfccac64378eeb55e49f9a2adce1ae53c109c755ee1472a614d6c1196102f2  release/firmware/firmware-manifest.json' | sha256sum -c -
+          cat > release/RELEASE-SHA256SUMS.txt <<'EOF'
+          1487e90254ddc5cab0f7b917580be951311c1697bec6dc19d2e2720683f00f83  ARStack-Studio-0.1.0-win-x64-portable.zip
+          877a35dbbe110cc8ab740d3fcdc44a63f348405dc509da3164d9aaa92e9e2622  ARStack-Studio-0.1.0-win-x64-setup.exe
+          fae413d7b6f65b7d10ca65dc277fbf586d487f21209a29875036791088afa9c7  arstack-esp32p4-smv-0.1.0.bin
+          32bfccac64378eeb55e49f9a2adce1ae53c109c755ee1472a614d6c1196102f2  firmware-manifest.json
+          EOF
+          sed -i 's/^          //' release/RELEASE-SHA256SUMS.txt
+
+      - name: Prepare public release notes
+        shell: bash
+        run: |
+          cat > release/RELEASE_NOTES.md <<'EOF'
+          # ARStack Studio / SMV Injector v0.1.0
+
+          First public P0 release of the ARStack IEC 61850 Sampled Values injector workflow for Windows + ESP32-P4.
+
+          ## What is included
+
+          - Windows x64 installer (recommended for normal use).
+          - Windows x64 portable package.
+          - Bundled ESP32-P4 SMV firmware and verified firmware manifest.
+          - Bundled recovery/flash tooling inside ARStack Studio.
+          - Deterministic 4I + 4V Quick Start profile at 4000 samples/s.
+          - Explicit Start/Stop control, live engineering edits, Zero, profile synchronization and bounded device-session recovery.
+
+          ## P0 wire profile
+
+          - 4 current + 4 voltage channels.
+          - 4000 frames/s.
+          - 1 ASDU per frame.
+          - 64-byte sample payload.
+          - `smpCnt` modulus 4000.
+          - `smpSynch=0` by design until separately measured disciplined-clock evidence exists.
+
+          ## Release validation
+
+          The accepted physical run completed 10/10 Start/Stop cycles and an uninterrupted 3600-second retained run at 4000 fps with `missed=0`, `txFailures=0`, `healthReconnects=0`, and `automaticStarts=0`.
+
+          An independent SV capture spot-check confirmed the expected destination MAC, APPID, VLAN/PCP, svID, confRev, one ASDU, 64-byte seqData, continuous `smpCnt` including 3999 -> 0 wraps, and `smpSynch=0`.
+
+          ## Scope and honesty boundary
+
+          This is the first public engineering release, not a protection-grade timing or IEC 61850 conformance certification claim. P0 is intentionally bounded to the validated 4I + 4V / 4000 fps profile. Synchronized process-bus timing is not claimed in this release.
+
+          ## Integrity
+
+          `RELEASE-SHA256SUMS.txt` is attached. Verify downloads before deployment when release integrity matters.
+
+          Source release target: `9c7fc7300220db4643e5643081240b955cfe12df`  
+          Accepted binary artifact build head: `d9b5b6848415c7e6d1c52ec929e57c66b608058d`  
+          Release artifact workflow: ARStack Studio Release run `34918302946` (SUCCESS).
+          EOF
+          sed -i 's/^          //' release/RELEASE_NOTES.md
+
+      - name: Publish stable public GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "${RELEASE_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${RELEASE_TARGET_SHA}" \
+            --title 'ARStack Studio / SMV Injector v0.1.0' \
+            --notes-file release/RELEASE_NOTES.md \
+            release/windows/ARStack-Studio-0.1.0-win-x64-setup.exe \
+            release/windows/ARStack-Studio-0.1.0-win-x64-portable.zip \
+            release/firmware/arstack-esp32p4-smv-0.1.0.bin \
+            release/firmware/firmware-manifest.json \
+            release/RELEASE-SHA256SUMS.txt
+
+      - name: Verify published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json tagName,name,isDraft,isPrerelease,url,assets \
+            --jq '{tagName,name,isDraft,isPrerelease,url,assets:[.assets[].name]}'
