@@ -1,0 +1,136 @@
+name: Temporary capture-backed MMS FileDelete F0
+
+on:
+  push:
+    branches:
+      - feat/ied-sim-ux-performance-foundation
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply FileDelete protocol patch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one patch marker, found {count}")
+              p.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          def replace_count(path: str, old: str, new: str, expected: int) -> None:
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f"{path}: expected {expected} patch markers, found {count}")
+              p.write_text(text.replace(old, new), encoding="utf-8")
+
+          replace_once(
+              "include/ariec61850/mms/pdu.hpp",
+              '''    file_open = 72,\n    file_read = 73,\n    file_close = 74,\n    file_directory = 77,\n''',
+              '''    file_open = 72,\n    file_read = 73,\n    file_close = 74,\n    file_delete = 76,\n    file_directory = 77,\n''')
+
+          service_old = '''    case 6: return MmsConfirmedService::get_variable_access_attributes;\n    case 12: return MmsConfirmedService::get_named_variable_list_attributes;\n    default: return MmsConfirmedService::unknown;\n'''
+          service_new = '''    case 6: return MmsConfirmedService::get_variable_access_attributes;\n    case 12: return MmsConfirmedService::get_named_variable_list_attributes;\n    case 72: return MmsConfirmedService::file_open;\n    case 73: return MmsConfirmedService::file_read;\n    case 74: return MmsConfirmedService::file_close;\n    case 76: return MmsConfirmedService::file_delete;\n    case 77: return MmsConfirmedService::file_directory;\n    default: return MmsConfirmedService::unknown;\n'''
+          replace_count("src/mms/pdu.cpp", service_old, service_new, 2)
+
+          replace_once(
+              "include/ariec61850/mms/pdu_span.hpp",
+              '''    get_variable_access_attributes = 6,\n    get_named_variable_list_attributes = 12,\n    file_directory = 77,\n''',
+              '''    get_variable_access_attributes = 6,\n    get_named_variable_list_attributes = 12,\n    file_open = 72,\n    file_read = 73,\n    file_close = 74,\n    file_delete = 76,\n    file_directory = 77,\n''')
+
+          replace_once(
+              "src/mms/pdu_span.cpp",
+              '''    case 6: return MmsWireConfirmedService::get_variable_access_attributes;\n    case 12: return MmsWireConfirmedService::get_named_variable_list_attributes;\n    case 77: return MmsWireConfirmedService::file_directory;\n''',
+              '''    case 6: return MmsWireConfirmedService::get_variable_access_attributes;\n    case 12: return MmsWireConfirmedService::get_named_variable_list_attributes;\n    case 72: return MmsWireConfirmedService::file_open;\n    case 73: return MmsWireConfirmedService::file_read;\n    case 74: return MmsWireConfirmedService::file_close;\n    case 76: return MmsWireConfirmedService::file_delete;\n    case 77: return MmsWireConfirmedService::file_directory;\n''')
+
+          replace_once(
+              "include/ariec61850/mms/file_service.hpp",
+              '''struct MmsFileCloseResponse final {\n    std::uint32_t invoke_id{};\n};\n\nclass MmsFileServiceCodec final {\n''',
+              '''struct MmsFileCloseResponse final {\n    std::uint32_t invoke_id{};\n};\n\nstruct MmsFileDeleteRequest final {\n    std::uint32_t invoke_id{};\n    std::string remote_path;\n    bool rooted_backslash{true};\n};\n\nstruct MmsFileDeleteResponse final {\n    std::uint32_t invoke_id{};\n};\n\nclass MmsFileServiceCodec final {\n''')
+
+          replace_once(
+              "include/ariec61850/mms/file_service.hpp",
+              '''    static constexpr std::int32_t file_open_service_tag = 72;\n    static constexpr std::int32_t file_read_service_tag = 73;\n    static constexpr std::int32_t file_close_service_tag = 74;\n    static constexpr std::int32_t file_directory_service_tag = 77;\n''',
+              '''    static constexpr std::int32_t file_open_service_tag = 72;\n    static constexpr std::int32_t file_read_service_tag = 73;\n    static constexpr std::int32_t file_close_service_tag = 74;\n    static constexpr std::int32_t file_delete_service_tag = 76;\n    static constexpr std::int32_t file_directory_service_tag = 77;\n''')
+
+          replace_once(
+              "include/ariec61850/mms/file_service.hpp",
+              '''    [[nodiscard]] static MmsFileCloseResponse decode_file_close_response(\n        std::span<const std::uint8_t> presentation_or_mms_payload,\n        std::uint32_t expected_invoke_id);\n};\n''',
+              '''    [[nodiscard]] static MmsFileCloseResponse decode_file_close_response(\n        std::span<const std::uint8_t> presentation_or_mms_payload,\n        std::uint32_t expected_invoke_id);\n\n    [[nodiscard]] static std::vector<std::uint8_t> encode_file_delete_request_pdu(\n        const MmsFileDeleteRequest& request);\n    [[nodiscard]] static std::vector<std::uint8_t> encode_file_delete_request_p_data(\n        const MmsFileDeleteRequest& request,\n        std::uint32_t presentation_context_id = 3U);\n    [[nodiscard]] static MmsFileDeleteResponse decode_file_delete_response(\n        std::span<const std::uint8_t> presentation_or_mms_payload,\n        std::uint32_t expected_invoke_id);\n};\n''')
+
+          replace_once(
+              "include/ariec61850/mms/file_service.hpp",
+              '''struct MmsFileTransferResult final {\n    bool success{};\n    std::string remote_path;\n    std::uint64_t bytes_transferred{};\n    std::optional<std::uint64_t> expected_bytes;\n    std::size_t read_operations{};\n    bool remote_file_closed{};\n    bool adaptive_fallback_attempted{};\n    bool adaptive_fallback_succeeded{};\n    MmsFileFailureKind failure_kind{MmsFileFailureKind::none};\n    std::string message;\n    std::vector<MmsFileDiagnostic> diagnostics;\n    std::vector<MmsFileDiagnostic> primary_attempt_diagnostics;\n    std::vector<MmsFileDiagnostic> fallback_attempt_diagnostics;\n};\n''',
+              '''struct MmsFileTransferResult final {\n    bool success{};\n    std::string remote_path;\n    std::uint64_t bytes_transferred{};\n    std::optional<std::uint64_t> expected_bytes;\n    std::size_t read_operations{};\n    bool remote_file_closed{};\n    bool adaptive_fallback_attempted{};\n    bool adaptive_fallback_succeeded{};\n    MmsFileFailureKind failure_kind{MmsFileFailureKind::none};\n    std::string message;\n    std::vector<MmsFileDiagnostic> diagnostics;\n    std::vector<MmsFileDiagnostic> primary_attempt_diagnostics;\n    std::vector<MmsFileDiagnostic> fallback_attempt_diagnostics;\n};\n\nstruct MmsFileDeleteResult final {\n    bool success{};\n    std::string remote_path;\n    MmsFileFailureKind failure_kind{MmsFileFailureKind::none};\n    std::string message;\n    std::vector<MmsFileDiagnostic> diagnostics;\n};\n''')
+
+          replace_once(
+              "include/ariec61850/mms/file_service.hpp",
+              '''    [[nodiscard]] MmsFileTransferResult download_adaptive(\n        const std::string& remote_path,\n        MmsFileSink& sink,\n        MmsFileTransferOptions options = {},\n        MmsFileProgressSink* progress = nullptr,\n        std::stop_token stop_token = {});\n\nprivate:\n''',
+              '''    [[nodiscard]] MmsFileTransferResult download_adaptive(\n        const std::string& remote_path,\n        MmsFileSink& sink,\n        MmsFileTransferOptions options = {},\n        MmsFileProgressSink* progress = nullptr,\n        std::stop_token stop_token = {});\n\n    // Destructive by design: one call maps to one MMS FileDelete request.\n    // There is deliberately no adaptive retry because a destructive request\n    // must never be replayed under an alternate pathname after an ambiguous result.\n    [[nodiscard]] MmsFileDeleteResult remove(\n        const std::string& remote_path,\n        bool rooted_backslash = true,\n        std::stop_token stop_token = {});\n\nprivate:\n''')
+
+          replace_once(
+              "src/mms/file_service.cpp",
+              '''MmsFileCloseResponse MmsFileServiceCodec::decode_file_close_response(\n    const std::span<const std::uint8_t> payload,\n    const std::uint32_t expected_invoke_id) {\n    const auto service = decode_service_response(\n        payload, expected_invoke_id, file_close_service_tag, "FileClose");\n    if (!service.service_value.empty()) {\n        throw_file_error({\n            "FileClose",\n            MmsFileFailureKind::malformed_response,\n            false,\n            "FileClose successful response must be empty.",\n            service.invoke_id,\n            std::nullopt,\n            std::nullopt,\n            std::nullopt,\n            {},\n            hex_preview(payload)});\n    }\n    return {service.invoke_id};\n}\n\nstd::uint32_t MmsAssociationFileServiceChannel::next_invoke_id() {\n''',
+              '''MmsFileCloseResponse MmsFileServiceCodec::decode_file_close_response(\n    const std::span<const std::uint8_t> payload,\n    const std::uint32_t expected_invoke_id) {\n    const auto service = decode_service_response(\n        payload, expected_invoke_id, file_close_service_tag, "FileClose");\n    if (!service.service_value.empty()) {\n        throw_file_error({\n            "FileClose",\n            MmsFileFailureKind::malformed_response,\n            false,\n            "FileClose successful response must be empty.",\n            service.invoke_id,\n            std::nullopt,\n            std::nullopt,\n            std::nullopt,\n            {},\n            hex_preview(payload)});\n    }\n    return {service.invoke_id};\n}\n\nstd::vector<std::uint8_t> MmsFileServiceCodec::encode_file_delete_request_pdu(\n    const MmsFileDeleteRequest& request) {\n    validate_invoke_id(request.invoke_id);\n    const auto normalized = normalize_remote_path(request.remote_path);\n    const auto wire_path = request.rooted_backslash\n        ? rooted_backslash_path(normalized)\n        : normalized;\n    // Captured IEDScout FileDelete [76] carries the GraphicString directly\n    // inside the constructed service value: BF 4C <len> 19 <len> "\\path".\n    return MmsPduCodec::encode_confirmed_request(\n        {request.invoke_id, file_delete_service_tag, true, graphic_string(wire_path)});\n}\n\nstd::vector<std::uint8_t> MmsFileServiceCodec::encode_file_delete_request_p_data(\n    const MmsFileDeleteRequest& request,\n    const std::uint32_t presentation_context_id) {\n    return MmsPduCodec::wrap_p_data(\n        encode_file_delete_request_pdu(request), presentation_context_id);\n}\n\nMmsFileDeleteResponse MmsFileServiceCodec::decode_file_delete_response(\n    const std::span<const std::uint8_t> payload,\n    const std::uint32_t expected_invoke_id) {\n    const auto service = decode_service_response(\n        payload, expected_invoke_id, file_delete_service_tag, "FileDelete");\n    if (!service.service_value.empty()) {\n        throw_file_error({\n            "FileDelete",\n            MmsFileFailureKind::malformed_response,\n            false,\n            "FileDelete successful response must be empty.",\n            service.invoke_id,\n            std::nullopt,\n            std::nullopt,\n            std::nullopt,\n            {},\n            hex_preview(payload)});\n    }\n    return {service.invoke_id};\n}\n\nstd::uint32_t MmsAssociationFileServiceChannel::next_invoke_id() {\n''')
+
+          replace_once(
+              "src/mms/file_service.cpp",
+              '''MmsFileTransferResult MmsFileTransferRuntime::download(\n    const std::string& remote_path,\n''',
+              '''MmsFileDeleteResult MmsFileTransferRuntime::remove(\n    const std::string& remote_path,\n    const bool rooted_backslash,\n    const std::stop_token stop_token) {\n    MmsFileDeleteResult result;\n    try {\n        result.remote_path = MmsFileServiceCodec::normalize_remote_path(remote_path);\n    } catch (const std::exception& exception) {\n        result.failure_kind = MmsFileFailureKind::invalid_argument;\n        result.message = exception.what();\n        return result;\n    }\n    if (stop_token.stop_requested()) {\n        result.failure_kind = MmsFileFailureKind::cancelled;\n        result.message = "FileDelete cancelled before request dispatch.";\n        return result;\n    }\n\n    const auto invoke_id = channel_.next_invoke_id();\n    std::vector<std::uint8_t> encoded;\n    try {\n        encoded = MmsFileServiceCodec::encode_file_delete_request_p_data(\n            {invoke_id, result.remote_path, rooted_backslash},\n            channel_.presentation_context_id());\n        const auto response_payload = channel_.exchange_confirmed(\n            encoded, invoke_id, stop_token);\n        static_cast<void>(MmsFileServiceCodec::decode_file_delete_response(\n            response_payload, invoke_id));\n        append_diagnostic(result.diagnostics, {\n            "FileDelete",\n            MmsFileFailureKind::none,\n            true,\n            "FileDelete completed for one physical remote path.",\n            invoke_id,\n            std::nullopt,\n            std::nullopt,\n            std::nullopt,\n            hex_preview(encoded),\n            hex_preview(response_payload)},\n            8U, codec_hex_preview_bytes);\n        result.success = true;\n        result.message = "FileDelete completed.";\n        return result;\n    } catch (const MmsFileServiceError& exception) {\n        auto diagnostic = exception.diagnostic();\n        diagnostic.request_hex = hex_preview(encoded);\n        append_diagnostic(result.diagnostics, std::move(diagnostic),\n            8U, codec_hex_preview_bytes);\n        result.failure_kind = exception.diagnostic().failure_kind;\n        result.message = exception.what();\n    } catch (const MmsTransportCancelledError& exception) {\n        auto diagnostic = exception_diagnostic(\n            "FileDelete", invoke_id, hex_preview(encoded), exception,\n            MmsFileFailureKind::cancelled);\n        result.failure_kind = diagnostic.failure_kind;\n        result.message = diagnostic.message;\n        append_diagnostic(result.diagnostics, std::move(diagnostic),\n            8U, codec_hex_preview_bytes);\n    } catch (const MmsTransportTimeoutError& exception) {\n        auto diagnostic = exception_diagnostic(\n            "FileDelete", invoke_id, hex_preview(encoded), exception,\n            MmsFileFailureKind::timed_out);\n        result.failure_kind = diagnostic.failure_kind;\n        result.message = diagnostic.message;\n        append_diagnostic(result.diagnostics, std::move(diagnostic),\n            8U, codec_hex_preview_bytes);\n    } catch (const std::exception& exception) {\n        auto diagnostic = exception_diagnostic(\n            "FileDelete", invoke_id, hex_preview(encoded), exception);\n        result.failure_kind = diagnostic.failure_kind;\n        result.message = diagnostic.message;\n        append_diagnostic(result.diagnostics, std::move(diagnostic),\n            8U, codec_hex_preview_bytes);\n    }\n    return result;\n}\n\nMmsFileTransferResult MmsFileTransferRuntime::download(\n    const std::string& remote_path,\n''')
+
+          replace_once(
+              "tests/test_mms_file_service.cpp",
+              '''ByteVector close_response(const std::uint32_t invoke_id) {\n    return confirmed_response(\n        invoke_id, mms::MmsFileServiceCodec::file_close_service_tag, false, {});\n}\n\nclass FakeChannel final : public mms::MmsFileServiceChannel {\n''',
+              '''ByteVector close_response(const std::uint32_t invoke_id) {\n    return confirmed_response(\n        invoke_id, mms::MmsFileServiceCodec::file_close_service_tag, false, {});\n}\n\nByteVector delete_response(const std::uint32_t invoke_id) {\n    return confirmed_response(\n        invoke_id, mms::MmsFileServiceCodec::file_delete_service_tag, false, {});\n}\n\nclass FakeChannel final : public mms::MmsFileServiceChannel {\n''')
+
+          replace_once(
+              "tests/test_mms_file_service.cpp",
+              '''void codec_rejects_invoke_mismatch_malformed_and_trailing_data() {\n''',
+              '''void codec_matches_iedscout_filedelete_golden_shape() {\n    const auto request = mms::MmsFileServiceCodec::encode_file_delete_request_pdu(\n        {0x95U, "30_248202310947607_FRA00030.cfg", true});\n    const auto decoded = mms::MmsPduCodec::decode_confirmed_request(request);\n    CHECK(decoded.invoke_id == 0x95U);\n    CHECK(decoded.service_tag == 76);\n    CHECK(decoded.service() == mms::MmsConfirmedService::file_delete);\n    CHECK(decoded.service_constructed);\n    const auto fields = asn1::BerReader::read_children(decoded.service_value);\n    CHECK(fields.size() == 1U);\n    CHECK(fields.front().encoded_tag == 0x19U);\n    CHECK(asn1::BerReader::read_ascii_string(fields.front()) ==\n          "\\\\30_248202310947607_FRA00030.cfg");\n\n    const auto response = delete_response(0x95U);\n    const auto decoded_response = mms::MmsPduCodec::decode_confirmed_response(\n        mms::MmsPduCodec::extract_mms_payload(response));\n    CHECK(decoded_response.service_tag == 76);\n    CHECK(decoded_response.service() == mms::MmsConfirmedService::file_delete);\n    CHECK(!decoded_response.service_constructed);\n    CHECK(decoded_response.service_value.empty());\n    CHECK(mms::MmsFileServiceCodec::decode_file_delete_response(\n        response, 0x95U).invoke_id == 0x95U);\n}\n\nvoid codec_rejects_invoke_mismatch_malformed_and_trailing_data() {\n''')
+
+          replace_once(
+              "tests/test_mms_file_service.cpp",
+              '''void runtime_streams_multiple_blocks_and_closes_negative_frsm() {\n''',
+              '''void runtime_filedelete_is_single_shot_and_never_adaptive() {\n    FakeChannel channel;\n    channel.respond(delete_response(1U));\n    mms::MmsFileTransferRuntime runtime{channel};\n    const auto result = runtime.remove("FRA00030.dat");\n    CHECK(result.success);\n    CHECK(result.remote_path == "FRA00030.dat");\n    CHECK(channel.sent.size() == 1U);\n    CHECK(sent_service_tag(channel.sent.front()) == 76);\n\n    const auto sent = mms::MmsPduCodec::decode_confirmed_request(\n        mms::MmsPduCodec::extract_mms_payload(channel.sent.front()));\n    const auto names = asn1::BerReader::read_children(sent.service_value);\n    CHECK(names.size() == 1U);\n    CHECK(asn1::BerReader::read_ascii_string(names.front()) == "\\\\FRA00030.dat");\n\n    FakeChannel missing;\n    missing.respond(confirmed_error(1U, 11, 7U));\n    mms::MmsFileTransferRuntime missing_runtime{missing};\n    const auto failed = missing_runtime.remove("missing.cfg");\n    CHECK(!failed.success);\n    CHECK(failed.failure_kind == mms::MmsFileFailureKind::confirmed_error);\n    CHECK(missing.sent.size() == 1U);\n}\n\nvoid runtime_streams_multiple_blocks_and_closes_negative_frsm() {\n''')
+
+          replace_once(
+              "tests/test_mms_file_service.cpp",
+              '''        {"codec path and signed FRSM", codec_normalizes_paths_and_round_trips_signed_frsm},\n        {"codec malformed evidence", codec_rejects_invoke_mismatch_malformed_and_trailing_data},\n        {"directory bounded pagination", directory_runtime_paginates_deduplicates_and_detects_no_progress},\n        {"runtime streaming and close", runtime_streams_multiple_blocks_and_closes_negative_frsm},\n''',
+              '''        {"codec path and signed FRSM", codec_normalizes_paths_and_round_trips_signed_frsm},\n        {"codec IEDScout FileDelete", codec_matches_iedscout_filedelete_golden_shape},\n        {"codec malformed evidence", codec_rejects_invoke_mismatch_malformed_and_trailing_data},\n        {"directory bounded pagination", directory_runtime_paginates_deduplicates_and_detects_no_progress},\n        {"runtime single-shot FileDelete", runtime_filedelete_is_single_shot_and_never_adaptive},\n        {"runtime streaming and close", runtime_streams_multiple_blocks_and_closes_negative_frsm},\n''')
+
+      - name: Build and run focused FileDelete regression
+        run: |
+          cmake -S . -B build-filedelete -DARIEC61850_BUILD_TESTS=ON -DARIEC61850_BUILD_TOOLS=OFF -DARIEC61850_WARNINGS_AS_ERRORS=ON
+          cmake --build build-filedelete --target ariec61850_mms_file_service_tests -j2
+          ./build-filedelete/ariec61850_mms_file_service_tests
+
+      - name: Build IEDScout parity server profile
+        run: |
+          cmake -S tools/static_ied_server_iedsim -B build-parity
+          cmake --build build-parity --target ariec61850_static_ied_server_iedsim -j2
+
+      - name: Commit F0 and remove temporary workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/tmp-filedelete-f0.yml
+          git add include/ariec61850/mms/pdu.hpp src/mms/pdu.cpp \
+                  include/ariec61850/mms/pdu_span.hpp src/mms/pdu_span.cpp \
+                  include/ariec61850/mms/file_service.hpp src/mms/file_service.cpp \
+                  tests/test_mms_file_service.cpp
+          git commit -m "feat(mms): add capture-backed FileDelete service"
+          git push origin HEAD:feat/ied-sim-ux-performance-foundation
