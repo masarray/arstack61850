@@ -10,6 +10,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMetaObject>
@@ -177,7 +178,7 @@ void FirmwareManager::refreshBundle() {
         return;
     }
     bundleReady_ = true;
-    bundleStatus_ = QStringLiteral("Ready · firmware v%1 · ESP32-P4 pre-v3 · SHA-256 verified")
+    bundleStatus_ = QStringLiteral("Ready · firmware v%1 · ESP32-P4 pre-v3 · PTP-P2 · SHA-256 verified")
         .arg(firmwareVersion_);
     emit stateChanged();
 }
@@ -209,11 +210,25 @@ bool FirmwareManager::loadManifest() {
     const QString version = object.value(QStringLiteral("version")).toString().trimmed();
     const QString revisionPolicy = object.value(QStringLiteral("chipRevisionPolicy")).toString().trimmed().toLower();
     const qint64 flashOffset = object.value(QStringLiteral("flashOffset")).toVariant().toLongLong();
+    const QJsonArray capabilities = object.value(QStringLiteral("capabilities")).toArray();
+    const auto hasCapability = [&capabilities](const QString& wanted) {
+        for (const auto& value : capabilities) {
+            if (value.toString().compare(wanted, Qt::CaseInsensitive) == 0) return true;
+        }
+        return false;
+    };
+    const bool productionCapabilities =
+        hasCapability(QStringLiteral("SMV-4I4V")) &&
+        hasCapability(QStringLiteral("PROFILE")) &&
+        hasCapability(QStringLiteral("LIVE-SETPOINTS")) &&
+        hasCapability(QStringLiteral("SESSION-LEASE")) &&
+        hasCapability(QStringLiteral("PTP-P2")) &&
+        hasCapability(QStringLiteral("SMPSYNCH-AUTO"));
 
     if (imageName.isEmpty() || QFileInfo(imageName).fileName() != imageName ||
         expectedHash.size() != 64 || version.isEmpty() || protocol < 1 || flashOffset != 0 ||
-        revisionPolicy != QString::fromLatin1(kPreV3Policy)) {
-        bundleStatus_ = QStringLiteral("Firmware manifest fields are incomplete or unsafe.");
+        revisionPolicy != QString::fromLatin1(kPreV3Policy) || !productionCapabilities) {
+        bundleStatus_ = QStringLiteral("Firmware manifest fields/capabilities are incomplete or unsafe.");
         return false;
     }
 
