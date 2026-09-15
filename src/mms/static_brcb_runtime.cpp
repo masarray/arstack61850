@@ -22,8 +22,6 @@ constexpr std::uint8_t kTriggerIntegrity = 0x08U;
 constexpr std::uint8_t kTriggerGeneralInterrogation = 0x04U;
 constexpr std::uint8_t kAllowedTriggers = 0x7CU;
 
-// ReasonForInclusion has a reserved leading significant bit. The standard
-// reasons therefore begin at 0x40, not at 0x80.
 constexpr std::uint8_t kReasonDataChange = 0x40U;
 constexpr std::uint8_t kReasonQualityChange = 0x20U;
 constexpr std::uint8_t kReasonDataUpdate = 0x10U;
@@ -321,9 +319,6 @@ bool MmsStaticBrcbRuntime::next_due(
         return false;
     }
 
-    // Arm periodic integrity relative to the first scheduler observation after
-    // enable. This preserves the legacy set_enabled(bool) API while avoiding an
-    // immediate catch-up burst when the caller's monotonic clock is already large.
     if (integrity_armed_ && next_integrity_due_ms_ == 0U) {
         const auto period = effective_integrity_period(*definition_);
         next_integrity_due_ms_ = period == 0U
@@ -507,6 +502,10 @@ MmsStaticBrcbCaptureResult MmsStaticBrcbRuntime::capture(
 
     std::copy_n(encode_buffer.begin(), encoded.bytes_written, slot.storage.begin());
     slot.entry_id = entry_id;
+    slot.time_of_entry.fill(0U);
+    if (report_time.size() == slot.time_of_entry.size()) {
+        std::copy(report_time.begin(), report_time.end(), slot.time_of_entry.begin());
+    }
     slot.bytes = encoded.bytes_written;
     slot.sequence_number = plan.sequence_number;
     slot.buffer_overflow = plan.buffer_overflow;
