@@ -23,7 +23,10 @@ enum class MmsStaticDispatchStatus : std::uint8_t {
 };
 
 struct MmsStaticDispatchPolicy final {
-    std::size_t maximum_names_per_response{32U};
+    // The measured IEDScout server discovery profile emits at most 100
+    // identifiers per GetNameList page. Keep the portable default aligned with
+    // that profile; tests/embedded users may still choose a smaller bound.
+    std::size_t maximum_names_per_response{100U};
     std::size_t maximum_write_variables{1U};
     std::uint32_t missing_object_failure_code{10U};
     std::uint32_t access_denied_failure_code{3U};
