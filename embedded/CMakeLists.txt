@@ -65,7 +65,7 @@ set(ARIEC61850_EMBEDDED_SOURCES
     ${ARIEC61850_ROOT}/src/mms/static_direct_control.cpp
     ${ARIEC61850_ROOT}/src/mms/static_data_set_table.cpp
     ${ARIEC61850_ROOT}/src/mms/static_dispatcher.cpp
-    ${ARIEC61850_ROOT}/src/mms/connection_runtime_iedsim.cpp
+    ${ARIEC61850_ROOT}/src/mms/connection_runtime.cpp
     ${ARIEC61850_ROOT}/src/mms/static_server_session.cpp
     ${ARIEC61850_ROOT}/src/mms/static_information_report.cpp
     ${ARIEC61850_ROOT}/src/mms/static_report_connection.cpp
