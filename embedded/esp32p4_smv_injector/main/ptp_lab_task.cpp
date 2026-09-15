@@ -77,6 +77,7 @@ struct PtpLabContext final {
 
 PtpLabContext g_ptp_context{};
 std::atomic_bool g_ptp_started{false};
+std::atomic_bool g_ptp_ready{false};
 std::atomic_bool g_stop_requested{false};
 std::atomic_bool g_ptp_accept_rx{false};
 std::atomic<std::uint64_t> g_announce_sent{0U};
@@ -102,11 +103,13 @@ void fill_kconfig_defaults(ar_ptp_lab_config_t& config) noexcept {
     config.domain_number = static_cast<std::uint8_t>(CONFIG_AR_PTP_DOMAIN);
 #if defined(CONFIG_AR_PTP_VLAN) && CONFIG_AR_PTP_VLAN
     config.vlan_enabled = true;
-#else
-    config.vlan_enabled = false;
-#endif
     config.vlan_id = static_cast<std::uint16_t>(CONFIG_AR_PTP_VLAN_ID);
     config.vlan_priority = static_cast<std::uint8_t>(CONFIG_AR_PTP_VLAN_PRIORITY);
+#else
+    config.vlan_enabled = false;
+    config.vlan_id = 0U;
+    config.vlan_priority = 0U;
+#endif
     config.port_number = static_cast<std::uint16_t>(CONFIG_AR_PTP_PORT_NUMBER);
     config.announce_interval_ms = static_cast<std::uint32_t>(CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS);
     config.sync_interval_ms = static_cast<std::uint32_t>(CONFIG_AR_PTP_SYNC_INTERVAL_MS);
@@ -466,6 +469,7 @@ void finish_runtime(PtpLabContext& context) {
                  status.last_error.empty() ? "" : status.last_error.c_str());
     }
     context.task_handle = nullptr;
+    g_ptp_ready.store(false, std::memory_order_release);
     g_ptp_started.store(false, std::memory_order_release);
 }
 
@@ -571,6 +575,8 @@ void ptp_lab_task(void* argument) {
             if (success) {
                 consecutive_failures = 0U;
                 context.runtime->clear_error();
+                const bool emitted_core_timing = g_announce_sent.load(std::memory_order_relaxed) > 0U && g_sync_sent.load(std::memory_order_relaxed) > 0U && g_follow_up_sent.load(std::memory_order_relaxed) > 0U;
+                if (emitted_core_timing) g_ptp_ready.store(true, std::memory_order_release);
             } else {
                 context.runtime->record_error("Ethernet transmit or hardware timestamp failure");
                 g_tx_failure_count.fetch_add(1U, std::memory_order_relaxed);
@@ -603,6 +609,8 @@ void ptp_lab_task(void*) {
 
 #endif
 
+void stop_ptp_lab() noexcept;
+
 void start_ptp_lab(const esp_eth_handle_t eth_handle) {
     if (eth_handle == nullptr) {
         ESP_LOGE(kTag, "PTP lab broadcaster not started: Ethernet handle is null");
@@ -618,6 +626,7 @@ void start_ptp_lab(const esp_eth_handle_t eth_handle) {
     portEXIT_CRITICAL(&g_control_mux);
 
     reset_live_status();
+    g_ptp_ready.store(false, std::memory_order_release);
     g_ptp_accept_rx.store(false, std::memory_order_release);
     g_stop_requested.store(false, std::memory_order_release);
     g_ptp_context.eth_handle = eth_handle;
@@ -647,7 +656,16 @@ void start_ptp_lab(const esp_eth_handle_t eth_handle) {
         g_ptp_context.task_handle = nullptr;
         g_ptp_started.store(false, std::memory_order_release);
         ESP_LOGE(kTag, "Failed to create PTP lab task on CPU0");
+        return;
     }
+
+    constexpr unsigned kStartReadyPolls = 160U;
+    for (unsigned attempt = 0U; attempt < kStartReadyPolls; ++attempt) {
+        if (g_ptp_ready.load(std::memory_order_acquire) || !g_ptp_started.load(std::memory_order_acquire)) return;
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    ESP_LOGE(kTag, "PTP source readiness timeout: no verified Announce/Sync/Follow_Up TX");
+    stop_ptp_lab();
 }
 
 void stop_ptp_lab() noexcept {
@@ -659,7 +677,7 @@ void stop_ptp_lab() noexcept {
 }
 
 [[nodiscard]] bool ptp_lab_is_running() noexcept {
-    return g_ptp_started.load(std::memory_order_acquire);
+    return g_ptp_ready.load(std::memory_order_acquire);
 }
 
 [[nodiscard]] bool configure_ptp_lab(const ar_ptp_lab_config_t& config) {
@@ -715,7 +733,7 @@ extern "C" bool ar_ptp_lab_is_running(void) {
 
 extern "C" bool ar_ptp_lab_get_status(ar_ptp_lab_status_t* status) {
     if (status == nullptr) return false;
-    status->is_running = ar::esp32p4::smv::g_ptp_started.load(std::memory_order_acquire);
+    status->is_running = ar::esp32p4::smv::g_ptp_ready.load(std::memory_order_acquire);
     status->announce_sent = ar::esp32p4::smv::g_announce_sent.load(std::memory_order_relaxed);
     status->sync_sent = ar::esp32p4::smv::g_sync_sent.load(std::memory_order_relaxed);
     status->follow_up_sent = ar::esp32p4::smv::g_follow_up_sent.load(std::memory_order_relaxed);

@@ -5,8 +5,11 @@
 #include "DeviceIoWorker.hpp"
 
 #include <QDateTime>
+#include <QDebug>
 #include <QMetaObject>
 #include <QRegularExpression>
+#include <QSemaphore>
+#include <QSharedPointer>
 
 #include <cmath>
 #include <limits>
@@ -73,19 +76,77 @@ DeviceController::DeviceController(QObject* parent) : QObject(parent) {
 }
 
 DeviceController::~DeviceController() {
-    if (ioWorker_ == nullptr || !ioThread_.isRunning()) return;
+    static_cast<void>(shutdown());
+}
+
+bool DeviceController::shutdown() {
+    if (shutdownComplete_) return true;
+    if (shuttingDown_) return !ioThread_.isRunning();
+    shuttingDown_ = true;
+    pendingAutoDetect_ = false;
+    pendingConnectPort_.clear();
+
+    if (ioWorker_ == nullptr || !ioThread_.isRunning()) {
+        ioWorker_ = nullptr;
+        ioWorkerReady_ = false;
+        ioWorkerAffinityValid_ = false;
+        shutdownComplete_ = true;
+        shuttingDown_ = false;
+        return true;
+    }
 
     const bool requestStop = running_;
     if (QThread::currentThread() == &ioThread_) {
         ioWorker_->shutdown(requestStop);
-    } else {
-        QMetaObject::invokeMethod(
-            ioWorker_,
-            [worker = ioWorker_, requestStop] { worker->shutdown(requestStop); },
-            Qt::BlockingQueuedConnection);
+        ioThread_.quit();
+        shuttingDown_ = false;
+        return false;
     }
+
+    auto acknowledged = QSharedPointer<QSemaphore>::create();
+    DeviceIoWorker* const worker = ioWorker_;
+    const bool queued = QMetaObject::invokeMethod(
+        worker,
+        [worker, requestStop, acknowledged] {
+            worker->shutdown(requestStop);
+            acknowledged->release();
+        },
+        Qt::QueuedConnection);
+    bool graceful = queued && acknowledged->tryAcquire(1, shutdownAckTimeoutMs());
+    if (!graceful) {
+        qCritical().noquote()
+            << "Device I/O shutdown acknowledgement timed out; entering bounded retirement fallback.";
+    }
+
     ioThread_.quit();
-    ioThread_.wait();
+    bool joined = ioThread_.wait(shutdownJoinTimeoutMs());
+    if (!joined) {
+        graceful = false;
+        qCritical().noquote()
+            << "Device I/O thread missed primary join deadline; retrying bounded retirement.";
+        ioThread_.requestInterruption();
+        ioThread_.quit();
+        joined = ioThread_.wait(shutdownRetryTimeoutMs());
+    }
+    if (!joined) {
+        // Emergency process-exit containment only. Normal CI must never reach this.
+        graceful = false;
+        qCritical().noquote()
+            << "Device I/O thread still alive; emergency terminate fallback engaged.";
+        ioThread_.terminate();
+        joined = ioThread_.wait(shutdownForceTimeoutMs());
+    }
+
+    ioWorker_ = nullptr;
+    ioWorkerReady_ = false;
+    ioWorkerAffinityValid_ = false;
+    connected_ = false;
+    running_ = false;
+    profileDeploying_ = false;
+    shutdownComplete_ = joined;
+    shuttingDown_ = false;
+    if (!joined) qCritical().noquote() << "Device I/O thread could not be retired before exit.";
+    return graceful && joined;
 }
 
 void DeviceController::connectWorkerSignals() {
@@ -317,7 +378,9 @@ bool DeviceController::identitySupportsCurrentContract(
     static const QStringList requiredCapabilities{
         QStringLiteral("SMV-4I4V"),
         QStringLiteral("LIVE-SETPOINTS"),
-        QStringLiteral("SESSION-LEASE")};
+        QStringLiteral("SESSION-LEASE"),
+        QStringLiteral("PTP-P2"),
+        QStringLiteral("SMPSYNCH-AUTO")};
     if (identity.product != QStringLiteral("SMV-INJECTOR") ||
         identity.target != QStringLiteral("ESP32-P4") ||
         identity.protocolVersion != QStringLiteral("1") ||
@@ -923,6 +986,21 @@ void DeviceController::processLine(const QString& rawLine) {
     if (line.contains(QStringLiteral("PTP configuration accepted"), Qt::CaseInsensitive)) {
         emit deviceMessage(QStringLiteral("PTP expert profile accepted."));
         static_cast<void>(sendPtpShow());
+    }
+    if (line.contains(QStringLiteral("PTP start accepted"), Qt::CaseInsensitive)) {
+        ptpStatus_ = ptpRole_ == QStringLiteral("SOURCE") ? QStringLiteral("Source TX verified") : QStringLiteral("Timing runtime started");
+        emit deviceMessage(ptpRole_ == QStringLiteral("SOURCE")
+            ? QStringLiteral("PTP source start verified; reading live TX counters.")
+            : QStringLiteral("PTP %1 runtime started.").arg(ptpRole_.toLower()));
+        static_cast<void>(sendPtpShow());
+    }
+    if (line.contains(QStringLiteral("PTP start rejected"), Qt::CaseInsensitive) || line.contains(QStringLiteral("PTP source readiness timeout"), Qt::CaseInsensitive)) {
+        ptpRunning_ = false;
+        ptpStatus_ = QStringLiteral("PTP start failed");
+        emit ptpStateChanged();
+        setError(ptpRole_ == QStringLiteral("SOURCE")
+            ? QStringLiteral("PTP source did not emit Announce/Sync/Follow_Up. Check the Ethernet link and retry Start PTP Source.")
+            : QStringLiteral("PTP %1 could not start. Check the Ethernet link and retry.").arg(ptpRole_.toLower()));
     }
 
     if (line.contains(QStringLiteral("PROFILE commit rejected"), Qt::CaseInsensitive) ||

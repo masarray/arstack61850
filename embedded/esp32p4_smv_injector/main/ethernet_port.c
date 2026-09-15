@@ -76,15 +76,6 @@ esp_eth_handle_t ar_esp32p4_eth_init(void)
     }
     s_eth_handle = handle;
 
-#if CONFIG_AR_PTP_LAB_TX
-    // Boot auto-start uses the same checked admission/readiness contract as the
-    // live serial control path. A rejected or failed start is never reported as
-    // running merely because an older runtime is still cleaning up.
-    if (!ar_ptp_lab_try_start(handle)) {
-        ESP_LOGW(TAG, "PTP auto-start was rejected or could not start");
-    }
-#endif
-
     ESP_LOGI(TAG,
              "Ethernet configured: PHY addr=%d MDC=%d MDIO=%d REF_CLK=%d",
              AR_PHY_ADDRESS, AR_MDC_GPIO, AR_MDIO_GPIO, AR_RMII_REF_CLK_GPIO);
@@ -95,8 +86,18 @@ bool ar_esp32p4_ptp_start(void)
 {
 #if CONFIG_AR_PTP_LAB_TX
     if (s_eth_handle == NULL) {
+        ESP_LOGE(TAG, "PTP start rejected: Ethernet driver is not initialized");
         return false;
     }
+
+    // ESP-IDF 5.5 does not expose a portable ETH_CMD_G_LINK ioctl. More
+    // importantly, the source runtime already has the stronger readiness
+    // contract we need: ar_ptp_lab_try_start() only succeeds when the source
+    // has emitted verified Announce + Sync + Follow_Up frames. Boot auto-start
+    // is intentionally absent, so this operator path runs only after app_main
+    // has called esp_eth_start(). A disconnected/not-ready link therefore
+    // fails closed through the bounded PTP TX-readiness check instead of being
+    // inferred from a driver-specific link query.
     return ar_ptp_lab_try_start(s_eth_handle);
 #else
     return false;

@@ -25,8 +25,11 @@ if(CONFIG_AR_PTP_LAB_TX)
     # P1.5's proven lab-source implementation remains intact. Rename only its
     # public C facade so P2 can route SOURCE/RECEIVER/MONITOR without duplicating
     # the source timing path or turning one Ethernet port into an invalid
-    # simultaneous master+slave role.
+    # simultaneous master+slave role. The private forward header is injected
+    # only into this translation unit so the bounded start path can invoke its
+    # later-defined stop helper without exposing internal lifecycle authority.
     set_property(SOURCE "ptp_lab_task.cpp" APPEND PROPERTY COMPILE_OPTIONS
+        "-include" "${CMAKE_CURRENT_LIST_DIR}/ptp_lab_forward.hpp"
         "-Dar_ptp_lab_get_default_config=ar_ptp_source_get_default_config"
         "-Dar_ptp_lab_configure=ar_ptp_source_configure"
         "-Dar_ptp_lab_get_config=ar_ptp_source_get_config"

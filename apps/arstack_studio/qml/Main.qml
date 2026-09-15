@@ -11,7 +11,7 @@ ApplicationWindow {
     minimumWidth: 1080
     minimumHeight: 720
     visible: true
-    title: "ARStack Studio · SMV Injector"
+    title: "ARStack Studio · SMV + PTP · v" + Qt.application.version
     color: studioTheme.bg
 
     StudioTheme { id: studioTheme }
@@ -44,14 +44,20 @@ ApplicationWindow {
     property bool waveformDetached: false
     property bool telemetryDockVisible: true
     property bool telemetryExpanded: false
+    property bool applicationShutdownRequested: false
 
     font.family: root.uiFont
 
-    // Graceful window close is still a safety boundary. QML submits only the
-    // Stop intent; the supervisor owns whether the current session may act.
+    // Primary-window close owns application exit. C++ teardown owns STOP, COM
+    // close and worker retirement; QML must not race it with another async STOP.
     onClosing: function(close) {
-        if (workflowBar.session && workflowBar.session.state === "RUNNING")
-            workflowBar.session.requestStop()
+        close.accepted = true
+        if (root.applicationShutdownRequested) return
+        root.applicationShutdownRequested = true
+        configurationWindow.hide()
+        detachedPhasorWindow.hide()
+        detachedWaveformWindow.hide()
+        Qt.quit()
     }
 
     FontLoader {

@@ -48,6 +48,9 @@ public:
     Q_ENUM(PortOwner)
 
     explicit SmartSessionController(QObject* parent = nullptr);
+    ~SmartSessionController() override;
+
+    void shutdown();
 
     [[nodiscard]] QObject* device() const noexcept;
     [[nodiscard]] QObject* profiles() const noexcept;
@@ -188,6 +191,7 @@ private:
             QObject::connect(owner_, &SmartSessionController::stateChanged, owner_, [this] { synchronize(); });
             QObject::connect(&timer_, &QTimer::timeout, owner_, [this] { expire(); });
         }
+        void shutdown() { timer_.stop(); owner_ = nullptr; }
 
     private:
         [[nodiscard]] bool waitingForAck() const noexcept {
@@ -228,6 +232,12 @@ private:
     public:
         explicit DeviceRecoveryMonitor(SmartSessionController* owner) : owner_(owner) {
             QObject::connect(owner_, &SmartSessionController::dependenciesChanged, owner_, [this] { bindDevice(); });
+        }
+        void shutdown() {
+            QObject::disconnect(verifiedConnection_);
+            QObject::disconnect(identificationConnection_);
+            device_ = nullptr;
+            owner_ = nullptr;
         }
 
     private:
@@ -350,6 +360,7 @@ private:
     bool manualRecoveryArmed_{false};
     bool setupError_{false};
     bool recoveryPending_{false};
+    bool shuttingDown_{false};
     int updateReconnectAttempts_{0};
     int profileSyncAttempts_{0};
     PortOwner portOwner_{PortOwner::none};

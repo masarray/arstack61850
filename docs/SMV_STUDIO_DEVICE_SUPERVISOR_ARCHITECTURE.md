@@ -122,7 +122,7 @@ Recommended firmware response/announcement:
 ```text
 ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 \
   device_id=<efuse-id> firmware=<semver> boot_id=<boot-nonce> \
-  capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE
+  capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO
 ```
 
 The existing EFUSE-derived `device_id` remains the stable physical identity. Add a per-boot `boot_id` so Studio can distinguish a reboot/reflash from a delayed line belonging to the previous session.
