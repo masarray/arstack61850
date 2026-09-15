@@ -57,19 +57,34 @@ jobs:
         shell: pwsh
         run: choco install nsis --yes --no-progress
 
-      - name: Configure MSVC release build
+      - name: Configure Workbench release build
         shell: pwsh
         run: >-
           cmake -S apps/ied_simulator -B build-f4-windows
           -G "Visual Studio 18 2026" -A x64
 
-      - name: Build Workbench, server, probes and field-facing QA
+      - name: Build Workbench, server and field-facing QA
         shell: pwsh
         run: >-
           cmake --build build-f4-windows --config Release
           --target arstack_ied_simulator ariec61850_ied_simulator_server
           ied_mms_client_workbench_qa ied_report_workspace_qa ied_file_settings_workspace_qa
-          ariec61850_live_discover ariec61850_mms_read_probe
+          --parallel 2
+
+      - name: Configure standalone field tools
+        shell: pwsh
+        run: >-
+          cmake -S . -B build-f4-tools
+          -G "Visual Studio 18 2026" -A x64
+          -DARIEC61850_BUILD_TESTS=OFF
+          -DARIEC61850_BUILD_TOOLS=ON
+          -DARIEC61850_BUILD_FUZZERS=OFF
+
+      - name: Build standalone field tools
+        shell: pwsh
+        run: >-
+          cmake --build build-f4-tools --config Release
+          --target ariec61850_live_discover ariec61850_mms_read_probe
           ariec61850_mms_urcb_gi_probe ariec61850_mms_brcb_event_probe
           ariec61850_control_block_read_probe ariec61850_file_transfer
           --parallel 2
@@ -135,8 +150,13 @@ jobs:
           Copy-Item 'apps\ied_simulator\field_acceptance\collect-f4-evidence.ps1' $kit
           Set-Content -LiteralPath (Join-Path $kit 'BUILD_HEAD.txt') -Value $env:GITHUB_SHA -Encoding ascii
 
+          $server = Get-ChildItem -Path 'build-f4-windows' -Recurse -File -Filter 'ariec61850_ied_simulator_server.exe' |
+            Where-Object { $_.FullName -match '[\\/]Release[\\/]' } |
+            Select-Object -First 1
+          if (-not $server) { throw 'F4 simulator server not found after Workbench build' }
+          Copy-Item -LiteralPath $server.FullName -Destination (Join-Path $bin $server.Name)
+
           $toolNames = @(
-            'ariec61850_ied_simulator_server.exe',
             'ariec61850_live_discover.exe',
             'ariec61850_mms_read_probe.exe',
             'ariec61850_mms_urcb_gi_probe.exe',
@@ -145,10 +165,10 @@ jobs:
             'ariec61850_file_transfer.exe'
           )
           foreach ($name in $toolNames) {
-            $candidate = Get-ChildItem -Path 'build-f4-windows' -Recurse -File -Filter $name |
+            $candidate = Get-ChildItem -Path 'build-f4-tools' -Recurse -File -Filter $name |
               Where-Object { $_.FullName -match '[\\/]Release[\\/]' } |
               Select-Object -First 1
-            if (-not $candidate) { throw "F4 tool not found after build: $name" }
+            if (-not $candidate) { throw "F4 field tool not found after standalone build: $name" }
             Copy-Item -LiteralPath $candidate.FullName -Destination (Join-Path $bin $name)
           }
 
