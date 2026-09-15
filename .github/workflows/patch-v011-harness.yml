@@ -1,0 +1,38 @@
+name: Patch v0.1.1 deterministic harness
+
+on:
+  push:
+    branches:
+      - feature/ptp-production-v0.1.1
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/ptp-production-v0.1.1
+          fetch-depth: 0
+      - name: Align S8 fixture with v0.1.1 semantic identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('apps/arstack_studio/src/DeterministicSessionHarness.cpp')
+          text = p.read_text(encoding='utf-8')
+          old = '''        result.capabilities = {\n            QStringLiteral("SMV-4I4V"),\n            QStringLiteral("LIVE-SETPOINTS"),\n            QStringLiteral("SESSION-LEASE")};\n'''
+          new = '''        result.capabilities = {\n            QStringLiteral("SMV-4I4V"),\n            QStringLiteral("LIVE-SETPOINTS"),\n            QStringLiteral("SESSION-LEASE"),\n            QStringLiteral("PTP-P2"),\n            QStringLiteral("SMPSYNCH-AUTO")};\n'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected exactly one stale identity fixture, found {text.count(old)}')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          git add apps/arstack_studio/src/DeterministicSessionHarness.cpp
+          git commit -m "test(studio): align S8 fixture with v0.1.1 capabilities"
+          git push origin HEAD:feature/ptp-production-v0.1.1
