@@ -18,7 +18,7 @@ jobs:
           ref: feature/ptp-production-v0.1.1
           fetch-depth: 0
 
-      - name: Apply production PTP profile
+      - name: Apply production PTP source/config/docs
         shell: python
         run: |
           from pathlib import Path
@@ -30,7 +30,6 @@ jobs:
                   raise SystemExit(f"{label}: expected exactly one match, got {text.count(old)}")
               p.write_text(text.replace(old, new, 1), encoding="utf-8")
 
-          # Product patch version: first public firmware with PTP compiled into the production image.
           replace_once(
               "apps/arstack_studio/CMakeLists.txt",
               "project(ARStackStudio VERSION 0.1.0 LANGUAGES CXX)",
@@ -47,8 +46,6 @@ jobs:
               '#define ARSTACK_STUDIO_VERSION "0.1.1"',
               "Studio fallback version")
 
-          # Production firmware profile: preserve conservative ARSVIN-compatible source defaults,
-          # but compile and auto-start the hardware-timestamped PTP-P2 subsystem.
           p = Path("embedded/esp32p4_smv_injector/sdkconfig.defaults")
           text = p.read_text(encoding="utf-8").rstrip() + "\n"
           if "CONFIG_AR_PTP_LAB_TX=" in text or "# CONFIG_AR_PTP_LAB_TX is not set" in text:
@@ -56,14 +53,12 @@ jobs:
           text += '''\n# v0.1.1 production timing companion. LAB_SOURCE preserves the existing\n# ARIEC61850/ARSVIN lab behavior while using ESP32-P4 IEEE1588 HW timestamps.\nCONFIG_AR_PTP_LAB_TX=y\nCONFIG_AR_PTP_OPERATING_ROLE=0\nCONFIG_AR_PTP_DOMAIN=0\nCONFIG_AR_PTP_TRANSPORT_SPECIFIC=0\nCONFIG_AR_PTP_PORT_NUMBER=1\n# CONFIG_AR_PTP_VLAN is not set\nCONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS=1000\nCONFIG_AR_PTP_SYNC_INTERVAL_MS=250\nCONFIG_AR_PTP_RESPOND_PDELAY=y\nCONFIG_AR_PTP_PDELAY_REQUEST_INTERVAL_MS=1000\nCONFIG_AR_PTP_PRIORITY1=128\nCONFIG_AR_PTP_PRIORITY2=128\nCONFIG_AR_PTP_CLOCK_CLASS=248\nCONFIG_AR_PTP_CLOCK_ACCURACY=254\nCONFIG_AR_PTP_OFFSET_SCALED_LOG_VARIANCE=65535\nCONFIG_AR_PTP_TIME_SOURCE=160\nCONFIG_AR_PTP_CURRENT_UTC_OFFSET=37\nCONFIG_AR_PTP_MAX_PATH_DELAY_NS=5000000\nCONFIG_AR_PTP_MAX_PATH_JITTER_NS=100000\nCONFIG_AR_PTP_LOCK_OFFSET_NS=2000\nCONFIG_AR_PTP_UNLOCK_OFFSET_NS=20000\nCONFIG_AR_PTP_PHASE_STEP_THRESHOLD_NS=1000000\nCONFIG_AR_PTP_LOCK_REQUIRED_SAMPLES=8\nCONFIG_AR_PTP_SYNC_TIMEOUT_MS=1000\nCONFIG_AR_PTP_HOLDOVER_TIMEOUT_MS=5000\nCONFIG_AR_PTP_MAX_FREQ_ADJ_PPB=100000\n'''
           p.write_text(text, encoding="utf-8")
 
-          # Firmware semantic identity advertises the product timing contract.
           replace_once(
               "embedded/esp32p4_smv_injector/main/live_control.cpp",
               '''    const char* capabilities = g_control_lease_timer != nullptr\n        ? "SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE"\n        : "SMV-4I4V,LIVE-SETPOINTS";''',
               '''#if CONFIG_AR_PTP_LAB_TX\n    const char* capabilities = g_control_lease_timer != nullptr\n        ? "SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO"\n        : "SMV-4I4V,LIVE-SETPOINTS,PTP-P2,SMPSYNCH-AUTO";\n#else\n    const char* capabilities = g_control_lease_timer != nullptr\n        ? "SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE"\n        : "SMV-4I4V,LIVE-SETPOINTS";\n#endif''',
               "semantic identity capabilities")
 
-          # Studio v0.1.1 fails closed against a firmware bundle that does not carry PTP-P2.
           replace_once(
               "apps/arstack_studio/src/DeviceController.cpp",
               '''    static const QStringList requiredCapabilities{\n        QStringLiteral("SMV-4I4V"),\n        QStringLiteral("LIVE-SETPOINTS"),\n        QStringLiteral("SESSION-LEASE")};''',
@@ -75,40 +70,11 @@ jobs:
           text = text.replace(
               "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE",
               "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO")
-          # Keep the capability-negative regression version-current and omit only PTP-P2.
           text = text.replace(
               "device_id=A1B2C3D4E5F6 firmware=0.1.0 boot_id=0123456789ABCDEF \"\n            \"capabilities=SMV-4I4V,LIVE-SETPOINTS\"",
               "device_id=A1B2C3D4E5F6 firmware=0.1.1 boot_id=0123456789ABCDEF \"\n            \"capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE,SMPSYNCH-AUTO\"")
           p.write_text(text, encoding="utf-8")
 
-          # Release firmware now depends on the portable time-sync core and must prove PTP is ON.
-          p = Path(".github/workflows/esp32p4-smv-injector.yml")
-          text = p.read_text(encoding="utf-8")
-          text = text.replace("ARSTACK_FIRMWARE_VERSION: '0.1.0'", "ARSTACK_FIRMWARE_VERSION: '0.1.1'", 1)
-          trigger_anchor = "      - 'include/ariec61850/mms/utc_time.hpp'\n"
-          if text.count(trigger_anchor) != 2:
-              raise SystemExit(f"firmware workflow trigger anchor count={text.count(trigger_anchor)}")
-          text = text.replace(
-              trigger_anchor,
-              trigger_anchor + "      - 'include/ariec61850/time_sync/**'\n      - 'src/time_sync/**'\n")
-          build_anchor = '''      - name: Verify P0 pre-v3 silicon policy\n        run: |\n          set -euo pipefail\n          grep -qx 'CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y' sdkconfig\n          echo 'ESP32-P4 pre-v3 build policy: PASS'\n'''
-          production_gate = build_anchor + '''\n      - name: Verify production PTP-P2 profile\n        run: |\n          set -euo pipefail\n          grep -qx 'CONFIG_AR_PTP_LAB_TX=y' sdkconfig\n          grep -qx 'CONFIG_AR_PTP_OPERATING_ROLE=0' sdkconfig\n          grep -qx 'CONFIG_AR_PTP_DOMAIN=0' sdkconfig\n          grep -qx 'CONFIG_AR_PTP_TRANSPORT_SPECIFIC=0' sdkconfig\n          grep -qx 'CONFIG_AR_PTP_RESPOND_PDELAY=y' sdkconfig\n          grep -qx 'CONFIG_AR_PTP_SYNC_INTERVAL_MS=250' sdkconfig\n          grep -qx 'CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS=1000' sdkconfig\n          echo 'Production timing profile: PASS · PTP-P2 LAB_SOURCE · HW timestamp adapter compiled'\n'''
-          if text.count(build_anchor) != 1:
-              raise SystemExit("firmware silicon gate anchor mismatch")
-          text = text.replace(build_anchor, production_gate, 1)
-          text = text.replace(
-              '"capabilities": ["SMV-4I4V", "PROFILE", "LIVE-SETPOINTS"],',
-              '"capabilities": ["SMV-4I4V", "PROFILE", "LIVE-SETPOINTS", "SESSION-LEASE", "PTP-P2", "SMPSYNCH-AUTO"],',
-              1)
-          p.write_text(text, encoding="utf-8")
-
-          p = Path(".github/workflows/arstack-studio-release.yml")
-          text = p.read_text(encoding="utf-8")
-          if text.count("ARSTACK_VERSION: '0.1.0'") != 1:
-              raise SystemExit("release version anchor mismatch")
-          p.write_text(text.replace("ARSTACK_VERSION: '0.1.0'", "ARSTACK_VERSION: '0.1.1'", 1), encoding="utf-8")
-
-          # Correct documentation: PTP engine existed already; v0.1.1 promotes it into the product image.
           replace_once(
               "docs/PTP_LAB_TIMING.md",
               "PTP transmission is **off by default**.",
@@ -122,14 +88,12 @@ jobs:
 
           Path("docs/SMV_STUDIO_V0.1.1_PTP_PRODUCTION.md").write_text('''# ARStack Studio v0.1.1 — PTP production integration\n\nStatus: **release candidate integration**.\n\n## Purpose\n\nv0.1.1 promotes the already-implemented ARIEC61850/ARSVIN-derived PTP stack into the normal ESP32-P4 production firmware instead of shipping it compiled out. No second PTP engine is introduced.\n\n## Production default\n\nThe normal firmware image compiles `CONFIG_AR_PTP_LAB_TX=y` and starts in `LAB_SOURCE` mode with conservative ARSVIN-compatible defaults:\n\n- Layer-2 PTPv2 (`0x88F7`)\n- domain 0\n- `transportSpecific=0`\n- untagged PTP by default\n- Announce every 1000 ms\n- two-step Sync every 250 ms\n- Pdelay response enabled\n- clockClass 248\n- clockAccuracy Unknown\n- internal-oscillator time source\n\nThe ESP32-P4 adapter uses its IEEE1588 hardware clock and hardware TX/RX descriptor timestamps for the existing two-step Sync and peer-delay paths.\n\n## Roles retained\n\n- `LAB_SOURCE` — broadcasts Announce / Sync / Follow_Up and answers peer delay.\n- `TIME_RECEIVER` — external-source selection, hardware timestamp correlation, path/offset measurement and bounded clock discipline.\n- `MONITOR` — passive timing observation.\n\nRole changes remain controlled by the existing stopped-only profile path.\n\n## smpSynch truth boundary\n\n`LAB_SOURCE` does **not** make the locally generated SMV clock externally disciplined. `AUTO` therefore remains `smpSynch=0` in source/monitor mode. Only measured `TIME_RECEIVER` discipline may promote AUTO to 1/2 according to the existing P2 evidence policy. Forced 0/1/2 values remain explicit laboratory stimuli.\n\n## Product capability contract\n\nThe v0.1.1 semantic identity and firmware manifest advertise `PTP-P2` and `SMPSYNCH-AUTO`. Studio v0.1.1 requires these capabilities in addition to the existing SMV/live/session contract, so an older PTP-less production image cannot silently present as current.\n\n## Release gate\n\nSoftware CI must prove:\n\n1. the normal production firmware build has PTP-P2 enabled;\n2. the dedicated PTP matrix still builds SOURCE and TIME_RECEIVER;\n3. the Windows Studio/package contract accepts the v0.1.1 firmware identity and manifest;\n4. no IED Simulator source is changed by this integration.\n\nPhysical closeout is intentionally short and product-focused: verify visible Announce/Sync/Follow_Up, matching Pdelay response when requested, and simultaneous SMV 4000 fps with zero missed/TX failures over a practical bench interval. This is an interoperability/product claim, not GPS traceability or formal IEEE/IEC conformance certification.\n''', encoding="utf-8")
 
-          Path(".github/workflows/ptp-production-v011-integration.yml").unlink()
-
-      - name: Commit integration
+      - name: Commit source integration
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add apps/arstack_studio/CMakeLists.txt apps/arstack_studio/src/DeviceController.cpp apps/arstack_studio/src/main.cpp docs/PTP_LAB_TIMING.md docs/SMV_STUDIO_DEVICE_SUPERVISOR_ARCHITECTURE.md docs/SMV_STUDIO_V0.1.1_PTP_PRODUCTION.md embedded/esp32p4_smv_injector/CMakeLists.txt embedded/esp32p4_smv_injector/main/live_control.cpp embedded/esp32p4_smv_injector/sdkconfig.defaults
           git diff --cached --check
           git diff --cached --name-only
           git commit -m "PTP: promote hardware timing engine into v0.1.1 production firmware"
