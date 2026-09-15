@@ -100,6 +100,14 @@ public:
     explicit DeviceController(QObject* parent = nullptr);
     ~DeviceController() override;
 
+    // Application-lifetime boundary required by AGENTS.md section 11.
+    // Returns false if an emergency retirement fallback was required.
+    bool shutdown();
+    [[nodiscard]] static constexpr int shutdownAckTimeoutMs() noexcept { return 1200; }
+    [[nodiscard]] static constexpr int shutdownJoinTimeoutMs() noexcept { return 1200; }
+    [[nodiscard]] static constexpr int shutdownRetryTimeoutMs() noexcept { return 800; }
+    [[nodiscard]] static constexpr int shutdownForceTimeoutMs() noexcept { return 500; }
+
     [[nodiscard]] QStringList ports() const;
     [[nodiscard]] QString recommendedPort() const;
     [[nodiscard]] QString discoveryStatus() const;
@@ -330,6 +338,8 @@ private:
     bool ptpRunning_{false};
     bool ioWorkerReady_{false};
     bool ioWorkerAffinityValid_{false};
+    bool shuttingDown_{false};
+    bool shutdownComplete_{false};
     bool pendingAutoDetect_{false};
     double signalFrequencyHz_{50.0};
     QString ptpStatus_{QStringLiteral("Waiting for device")};
