@@ -78,7 +78,7 @@ jobs:
               Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
               Get-Content $stdout -ErrorAction SilentlyContinue
               Get-Content $stderr -ErrorAction SilentlyContinue
-              throw "Cycle $Cycle: Studio process did not exit within 12 seconds after primary-window close."
+              throw "Cycle ${Cycle}: Studio process did not exit within 12 seconds after primary-window close."
             }
 
             $process.WaitForExit()
@@ -86,19 +86,19 @@ jobs:
             Get-Content $stderr -ErrorAction SilentlyContinue
 
             if ($process.ExitCode -ne 0) {
-              throw "Cycle $Cycle: Studio exited with code $($process.ExitCode)."
+              throw "Cycle ${Cycle}: Studio exited with code $($process.ExitCode)."
             }
             if (Get-Process -Id $process.Id -ErrorAction SilentlyContinue) {
-              throw "Cycle $Cycle: Studio PID $($process.Id) remained alive after WaitForExit."
+              throw "Cycle ${Cycle}: Studio PID $($process.Id) remained alive after WaitForExit."
             }
 
             $combined = ((Get-Content $stdout -Raw -ErrorAction SilentlyContinue) + "`n" +
                          (Get-Content $stderr -Raw -ErrorAction SilentlyContinue))
             if ($combined -notmatch 'Application lifecycle regression: PASS') {
-              throw "Cycle $Cycle: lifecycle coordinator did not report clean worker retirement."
+              throw "Cycle ${Cycle}: lifecycle coordinator did not report clean worker retirement."
             }
             if ($combined -match 'emergency terminate fallback|emergency worker-retirement fallback|could not be retired') {
-              throw "Cycle $Cycle: emergency shutdown fallback was reached."
+              throw "Cycle ${Cycle}: emergency shutdown fallback was reached."
             }
             Write-Host "Cycle $Cycle PASS: close -> worker retirement -> PID exit."
           }
