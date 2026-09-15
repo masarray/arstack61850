@@ -104,7 +104,9 @@ private:
         result.capabilities = {
             QStringLiteral("SMV-4I4V"),
             QStringLiteral("LIVE-SETPOINTS"),
-            QStringLiteral("SESSION-LEASE")};
+            QStringLiteral("SESSION-LEASE"),
+            QStringLiteral("PTP-P2"),
+            QStringLiteral("SMPSYNCH-AUTO")};
         return result;
     }
 
