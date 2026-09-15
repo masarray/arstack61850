@@ -987,6 +987,17 @@ void DeviceController::processLine(const QString& rawLine) {
         emit deviceMessage(QStringLiteral("PTP expert profile accepted."));
         static_cast<void>(sendPtpShow());
     }
+    if (line.contains(QStringLiteral("PTP start accepted"), Qt::CaseInsensitive)) {
+        ptpStatus_ = QStringLiteral("Timing frames verified");
+        emit deviceMessage(QStringLiteral("PTP source is transmitting verified timing frames."));
+        static_cast<void>(sendPtpShow());
+    }
+    if (line.contains(QStringLiteral("PTP start rejected"), Qt::CaseInsensitive) || line.contains(QStringLiteral("PTP source readiness timeout"), Qt::CaseInsensitive)) {
+        ptpRunning_ = false;
+        ptpStatus_ = QStringLiteral("PTP start failed");
+        emit ptpStateChanged();
+        setError(QStringLiteral("PTP source did not emit timing frames. Check the Ethernet link and retry Start PTP Source."));
+    }
 
     if (line.contains(QStringLiteral("PROFILE commit rejected"), Qt::CaseInsensitive) ||
         line.contains(QStringLiteral("PROFILE rejected"), Qt::CaseInsensitive)) {

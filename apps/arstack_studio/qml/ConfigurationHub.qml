@@ -160,6 +160,7 @@ Item {
             }
             PtpExpertPanel {
                 theme: hub.theme
+                controller: hub.controller
                 device: hub.device
                 session: hub.session
                 uiFont: hub.uiFont

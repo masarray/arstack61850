@@ -314,8 +314,11 @@ void handle_ptp_command(char* save) noexcept {
             ESP_LOGE(kTag, "Usage: PTP START");
             return;
         }
-        if (!ar_esp32p4_ptp_start()) ESP_LOGE(kTag, "PTP start rejected: Ethernet is unavailable");
-        else ESP_LOGI(kTag, "PTP start accepted");
+        if (!ar_esp32p4_ptp_start()) {
+            ESP_LOGE(kTag, "PTP start rejected: Ethernet link/source readiness failed; no verified timing frames were emitted");
+        } else {
+            ESP_LOGI(kTag, "PTP start accepted: verified Announce/Sync/Follow_Up transmission");
+        }
         print_ptp_state();
         return;
     }
