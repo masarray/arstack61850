@@ -317,7 +317,9 @@ bool DeviceController::identitySupportsCurrentContract(
     static const QStringList requiredCapabilities{
         QStringLiteral("SMV-4I4V"),
         QStringLiteral("LIVE-SETPOINTS"),
-        QStringLiteral("SESSION-LEASE")};
+        QStringLiteral("SESSION-LEASE"),
+        QStringLiteral("PTP-P2"),
+        QStringLiteral("SMPSYNCH-AUTO")};
     if (identity.product != QStringLiteral("SMV-INJECTOR") ||
         identity.target != QStringLiteral("ESP32-P4") ||
         identity.protocolVersion != QStringLiteral("1") ||

@@ -236,9 +236,15 @@ void print_identity() noexcept {
     }
     const esp_app_desc_t* app = esp_app_get_description();
     const char* version = app != nullptr ? app->version : "unknown";
+#if CONFIG_AR_PTP_LAB_TX
+    const char* capabilities = g_control_lease_timer != nullptr
+        ? "SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO"
+        : "SMV-4I4V,LIVE-SETPOINTS,PTP-P2,SMPSYNCH-AUTO";
+#else
     const char* capabilities = g_control_lease_timer != nullptr
         ? "SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE"
         : "SMV-4I4V,LIVE-SETPOINTS";
+#endif
     ESP_LOGI(kTag,
              "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 device_id=%02X%02X%02X%02X%02X%02X firmware=%s boot_id=%016llX capabilities=%s",
              static_cast<unsigned>(device_id[0]), static_cast<unsigned>(device_id[1]),
