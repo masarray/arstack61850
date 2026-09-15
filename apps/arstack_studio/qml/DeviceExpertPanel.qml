@@ -6,6 +6,7 @@ import QtQuick.Layouts
 SurfacePanel {
     id: panel
     property var device
+    property var session
     property string uiFont: "Inter"
     property string monoFont: "Inter"
 
@@ -56,18 +57,28 @@ SurfacePanel {
                 id: recoveryPort
                 Layout.preferredWidth: 170
                 model: panel.device.ports
-                enabled: !panel.device.connected
+                enabled: panel.session && panel.session.engineeringEditable && !panel.device.connected
                 font.family: panel.uiFont
                 font.pixelSize: 9
-                onPressedChanged: if (pressed) panel.device.refreshPorts()
+                onPressedChanged: if (pressed && panel.session) panel.session.requestRefreshPorts()
             }
-            CalmButton { theme: panel.theme; uiFont: panel.uiFont; text: "Refresh"; onClicked: panel.device.refreshPorts() }
             CalmButton {
                 theme: panel.theme
                 uiFont: panel.uiFont
+                text: "Refresh"
+                enabled: panel.session && !panel.session.updatingFirmware
+                onClicked: panel.session.requestRefreshPorts()
+            }
+            CalmButton {
+                theme: panel.theme
+                uiFont: panel.uiFont
+                enabled: panel.session && !panel.session.updatingFirmware &&
+                         (!panel.device.connected || panel.session.engineeringEditable)
                 tone: panel.device.connected ? "danger" : "accent"
                 text: panel.device.connected ? "Disconnect" : "Verify selected port"
-                onClicked: panel.device.connected ? panel.device.disconnectPort() : panel.device.connectPort(recoveryPort.currentText)
+                onClicked: panel.device.connected
+                    ? panel.session.requestDisconnect()
+                    : panel.session.requestConnectPort(recoveryPort.currentText)
             }
             Item { Layout.fillWidth: true }
         }

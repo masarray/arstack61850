@@ -1,0 +1,57 @@
+{
+  "schema": "arstack.studio.release-freeze.v1",
+  "product": "ARStack Studio",
+  "version": "0.1.0",
+  "freezeBaselineSha": "ed46f3bed73d398d71be2eacf34c4995325c3cad",
+  "artifactBuildCommit": "47aec97ac2887e495c49e3f63459b695e26d8feb",
+  "artifactBuildTree": "3bf3b7ac1a1aaf9b148c8e51b8f236b49dd2c51e",
+  "freezeBaselineTree": "d071404a4ff4ffa8bd3982023bafaa6159d8ce5f",
+  "artifactBuildDeltaFromFreeze": "documentation-only (README / MMS discovery docs); no ARStack Studio, embedded firmware, supervisor, or realtime publisher source delta",
+  "state": "FROZEN_PENDING_PHYSICAL_ACCEPTANCE",
+  "sourcePr": 79,
+  "trackingIssue": 83,
+  "releaseWorkflowRun": 34863664544,
+  "rc2PolicyRun": 34863664307,
+  "artifacts": {
+    "windows": {
+      "name": "arstack-studio-windows-x64",
+      "artifactId": 10358737281,
+      "digest": "sha256:6a74b60b11706e3eab723bfb28827f2138430ce7617d47fa09bcba6617fd90c5"
+    },
+    "firmware": {
+      "name": "arstack-esp32p4-smv-firmware",
+      "artifactId": 10358024903,
+      "digest": "sha256:1cc93abdb60c1e2575ade9ca7eb1a85f7d4ba7cdb52d72280677085fef1676f4"
+    },
+    "rc2AcceptanceKit": {
+      "name": "arstack-studio-rc2-acceptance-kit",
+      "artifactId": 10355888453,
+      "digest": "sha256:2dc83c7ce784dc861eeec6be5b59723ce7c8b9fd23ecc0adbc54fb109518bb3d"
+    }
+  },
+  "releaseInvariants": {
+    "layout": "4I+4V",
+    "fps": 4000,
+    "asdu": 1,
+    "payloadBytes": 64,
+    "smpSynchWithoutMeasuredEvidence": 0,
+    "autoStartAfterReconnect": false,
+    "physicalAcceptanceRequiredBeforeMergeOrTag": true
+  },
+  "exceptions": [
+    {
+      "path": "embedded/esp32p4_smv_injector/main/app_main.cpp",
+      "blockerIssue": "#83 physical RC2 retained-run telemetry failure",
+      "risk": "The 250 us sample clock starts before synchronous profile logging completes, causing deterministic missed slots at every START; asynchronous telemetry buckets are also mislabeled as one-second fps windows.",
+      "rationale": "Physical board evidence showed the first stream counter starting after skipped slots and fail-closed RC2 telemetry outside 3999..4001 despite a stable 3999.94 fps wire segment. The minimum production fix moves timer enable after preparation and reports elapsed-time-normalized fps from a bounded lock-free tick counter.",
+      "verification": "ESP32-P4 build and realtime boundary policy gate; real-board 10x Start/Stop; first transmitted smpCnt begins at 0 with missed=0; retained 4000-fps telemetry has missed=0 and TX fail=0; independent capture proves continuous counters and 3999..4001 fps; full exact-head release gates."
+    },
+    {
+      "path": ".github/workflows/esp32p4-smv-injector.yml",
+      "blockerIssue": "#83 physical RC2 retained-run telemetry failure",
+      "risk": "The timer/log ordering and normalized telemetry invariant could regress without a deterministic source-policy gate.",
+      "rationale": "Add the smallest CI assertion at the existing ESP32-P4 firmware boundary instead of introducing a second test framework or weakening the physical evaluator.",
+      "verification": "The workflow must reject timer enable before START-path formatting, missing lock-free sample tick accounting, or removal of elapsed-time telemetry normalization; the complete ESP32-P4 firmware build must still pass."
+    }
+  ]
+}

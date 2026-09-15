@@ -2,16 +2,17 @@
 
 #include "DeviceController.hpp"
 
-#include <QDateTime>
-#include <QRegularExpression>
-#include <QSerialPortInfo>
+#include "DeviceIoWorker.hpp"
 
-#include <algorithm>
+#include <QDateTime>
+#include <QMetaObject>
+#include <QRegularExpression>
+
 #include <cmath>
 #include <limits>
+#include <utility>
 
 namespace {
-constexpr qint32 kBaudRate = 115200;
 const QRegularExpression kAnsiExpression{QStringLiteral("\\x1B\\[[0-9;]*m")};
 const QRegularExpression kStateExpression{
     QStringLiteral("state=(RUNNING|STOPPED).*generation=(\\d+).*signal_frequency=(\\d+)\\s*mHz"),
@@ -29,7 +30,10 @@ const QRegularExpression kProfileArmedExpression{
     QStringLiteral("PROFILE armed generation=(\\d+)\\s+svID=(\\S+)\\s+APPID=0x([0-9A-Fa-f]+)\\s+rate=(\\d+)\\s+wrap=(\\d+)"),
     QRegularExpression::CaseInsensitiveOption};
 const QRegularExpression kIdentityExpression{
-    QStringLiteral("ARSTACK identity product=([A-Z0-9_-]+) target=ESP32-P4 protocol=(\\d+) device_id=([A-Fa-f0-9]{12})"),
+    QStringLiteral(
+        "ARSTACK identity product=([A-Z0-9_-]+) target=([A-Z0-9_-]+) protocol=(\\d+) "
+        "device_id=([A-Fa-f0-9]{12}) firmware=([0-9A-Za-z._+\\-]+) "
+        "(?:boot_id=([A-Fa-f0-9]{16}) )?capabilities=([A-Z0-9_,.\\-]+)"),
     QRegularExpression::CaseInsensitiveOption};
 const QRegularExpression kPtpStatusExpression{
     QStringLiteral("PTP status=(RUNNING|STOPPED) Announce=(\\d+) Sync=(\\d+) FollowUp=(\\d+) PdelayFrames=(\\d+) TXfail=(\\d+)"),
@@ -37,24 +41,20 @@ const QRegularExpression kPtpStatusExpression{
 const QRegularExpression kPtpConfigExpression{
     QStringLiteral("PTP config domain=(\\d+) transportSpecific=0x([0-9A-Fa-f]+) VLAN=(\\S+) Announce=(\\d+) ms Sync=(\\d+) ms Pdelay=(ON|OFF)"),
     QRegularExpression::CaseInsensitiveOption};
-
-struct PortCandidate {
-    QString name;
-    int confidence{};
-};
-
-[[nodiscard]] int portConfidence(const QSerialPortInfo& info) {
-    int score = 0;
-    if (info.hasVendorIdentifier() && info.vendorIdentifier() == 0x303AU) score += 100;
-    const QString identity = QStringLiteral("%1 %2 %3")
-        .arg(info.description(), info.manufacturer(), info.serialNumber()).toLower();
-    if (identity.contains(QStringLiteral("esp32-p4"))) score += 90;
-    else if (identity.contains(QStringLiteral("esp32"))) score += 65;
-    if (identity.contains(QStringLiteral("espressif"))) score += 60;
-    if (identity.contains(QStringLiteral("usb jtag")) ||
-        identity.contains(QStringLiteral("usb serial"))) score += 15;
-    return score;
-}
+const QRegularExpression kPtpRoleExpression{
+    QStringLiteral("PTPROLE role=(SOURCE|RECEIVER|MONITOR) value=(\\d+) running=([01])"),
+    QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kPtpMeasuredStateExpression{
+    QStringLiteral(
+        "PTP2 role=(SOURCE|RECEIVER|MONITOR) discipline=(UNLOCKED|ACQUIRING|LOCKED|HOLDOVER|FAULT) "
+        "source=(\\S+) offset=(NA|-?\\d+) path=(NA|-?\\d+) jitter=(NA|-?\\d+) freq=(-?\\d+) "
+        "global=([01]) measured=(NA|[012]) rxAnnounce=(\\d+) rxSync=(\\d+) rxFollowUp=(\\d+) "
+        "rxPdelay=(\\d+) pdelayReq=(\\d+) accepted=(\\d+) rejected=(\\d+)"),
+    QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kSmpSynchExpression{
+    QStringLiteral(
+        "SMPSYNCH mode=([A-Z0-9_]+) advertised=([0-2]) source=([A-Z0-9_]+) simulated=([01]) measured=([01])"),
+    QRegularExpression::CaseInsensitiveOption};
 
 [[nodiscard]] bool finitePositive(const double value) noexcept {
     return std::isfinite(value) && value > 0.0;
@@ -62,48 +62,183 @@ struct PortCandidate {
 } // namespace
 
 DeviceController::DeviceController(QObject* parent) : QObject(parent) {
-    connect(&serial_, &QSerialPort::readyRead, this, [this] {
-        pendingRx_.append(serial_.readAll());
-        while (true) {
-            const auto newline = pendingRx_.indexOf('\n');
-            if (newline < 0) break;
-            QByteArray line = pendingRx_.left(newline);
-            pendingRx_.remove(0, newline + 1);
-            if (!line.isEmpty() && line.endsWith('\r')) line.chop(1);
-            processLine(QString::fromUtf8(line));
-        }
-    });
+    ioWorker_ = new DeviceIoWorker;
+    ioWorker_->moveToThread(&ioThread_);
+    ioThread_.setObjectName(QStringLiteral("ARStackDeviceIo"));
 
-    connect(&serial_, &QSerialPort::errorOccurred, this, [this](const QSerialPort::SerialPortError error) {
-        if (error == QSerialPort::NoError) return;
-        if (error == QSerialPort::ResourceError || error == QSerialPort::DeviceNotFoundError) {
-            setError(serial_.errorString());
-            disconnectPort();
-        } else if (serial_.isOpen()) {
-            setError(serial_.errorString());
-        }
-    });
+    connect(&ioThread_, &QThread::started, ioWorker_, &DeviceIoWorker::initialize);
+    connect(&ioThread_, &QThread::finished, ioWorker_, &QObject::deleteLater);
+    connectWorkerSignals();
+    ioThread_.start();
+}
 
-    verificationTimer_.setSingleShot(true);
-    verificationTimer_.setInterval(2600);
-    connect(&verificationTimer_, &QTimer::timeout, this, [this] {
-        if (!serial_.isOpen() || deviceVerified_) return;
-        const bool wasAutomatic = automaticConnection_;
-        const bool continueProbing = wasAutomatic && genericProbeActive_ && !probeQueue_.isEmpty();
-        disconnectPort();
-        if (continueProbing) {
-            QTimer::singleShot(0, this, [this] { static_cast<void>(tryNextProbe()); });
+DeviceController::~DeviceController() {
+    if (ioWorker_ == nullptr || !ioThread_.isRunning()) return;
+
+    const bool requestStop = running_;
+    if (QThread::currentThread() == &ioThread_) {
+        ioWorker_->shutdown(requestStop);
+    } else {
+        QMetaObject::invokeMethod(
+            ioWorker_,
+            [worker = ioWorker_, requestStop] { worker->shutdown(requestStop); },
+            Qt::BlockingQueuedConnection);
+    }
+    ioThread_.quit();
+    ioThread_.wait();
+}
+
+void DeviceController::connectWorkerSignals() {
+    connect(ioWorker_, &DeviceIoWorker::ready, this,
+            [this](const quint64, const bool affinityValid) {
+        ioWorkerReady_ = true;
+        ioWorkerAffinityValid_ = affinityValid;
+
+        const quint64 generation = sessionGeneration_;
+        if (!pendingConnectPort_.isEmpty() && generation != 0) {
+            const QString requested = std::exchange(pendingConnectPort_, QString{});
+            pendingAutoDetect_ = false;
+            QMetaObject::invokeMethod(
+                ioWorker_,
+                [worker = ioWorker_, requested, generation] {
+                    worker->connectPort(requested, generation);
+                },
+                Qt::QueuedConnection);
             return;
         }
-        genericProbeActive_ = false;
+        if (pendingAutoDetect_ && generation != 0) {
+            pendingAutoDetect_ = false;
+            QMetaObject::invokeMethod(
+                ioWorker_,
+                [worker = ioWorker_, generation] { worker->autoDetectAndConnect(generation); },
+                Qt::QueuedConnection);
+        }
+    });
+
+    connect(ioWorker_, &DeviceIoWorker::portsObserved, this,
+            [this](const quint64 generation, const QStringList& ports,
+                   const QString& recommended, const int highConfidenceCount) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
+        handlePortSnapshot(ports, recommended, highConfidenceCount);
+    });
+
+    connect(ioWorker_, &DeviceIoWorker::openingPort, this,
+            [this](const quint64 generation, const QString& port, const bool automatic) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
+        Q_UNUSED(port)
         setDiscoveryState(
-            wasAutomatic
-                ? QStringLiteral("A connected serial device did not identify as an ARStack injector.")
-                : QStringLiteral("The selected serial port did not answer as an ARStack injector."),
+            automatic
+                ? QStringLiteral("Checking connected device for an ARStack injector...")
+                : QStringLiteral("Verifying ARStack injector identity..."),
+            true);
+    });
+
+    connect(ioWorker_, &DeviceIoWorker::portOpened, this,
+            [this](const quint64 generation, const QString& port, const bool automatic) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
+        handlePortOpened(port, automatic);
+    });
+
+    connect(ioWorker_, &DeviceIoWorker::portOpenFailed, this,
+            [this](const quint64 generation, const QString& port,
+                   const QString& message, const bool automatic) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
+        Q_UNUSED(port)
+        if (!automatic) {
+            setIdentificationState(IdentificationState::Idle);
+            setDiscoveryState(QStringLiteral("The selected serial port could not be opened."), false);
+            setError(message);
+        }
+    });
+
+    connect(ioWorker_, &DeviceIoWorker::portClosed, this,
+            [this](const quint64 generation, const QString& port) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
+        handlePortClosed(port);
+    });
+
+    connect(ioWorker_, &DeviceIoWorker::portReleased, this,
+            [this](const quint64 generation, const QString& port) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
+        emit portReleased(generation, port);
+    });
+
+    connect(ioWorker_, &DeviceIoWorker::identificationAttempt, this,
+            [this](const quint64 generation, const QString& port,
+                   const int attempt, const int maximum) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
+        lastIdentificationPort_ = port;
+        identifyAttempts_ = attempt;
+        setIdentificationState(IdentificationState::Identifying);
+        setDiscoveryState(
+            QStringLiteral("Verifying ARStack semantic identity… attempt %1/%2")
+                .arg(attempt)
+                .arg(maximum),
+            true);
+    });
+
+    connect(ioWorker_, &DeviceIoWorker::identificationTimedOut, this,
+            [this](const quint64 generation, const QString& port,
+                   const int attempts, const bool continuing) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
+        lastIdentificationPort_ = port;
+        identifyAttempts_ = attempts;
+        if (continuing) {
+            setIdentificationState(IdentificationState::Identifying);
+            setDiscoveryState(QStringLiteral("Checking connected devices for an ARStack injector..."), true);
+            return;
+        }
+        setIdentificationState(IdentificationState::Unidentified);
+        setDiscoveryState(
+            QStringLiteral("No ARStack semantic identity received from %1 after %2 bounded attempts.")
+                .arg(port.isEmpty() ? QStringLiteral("the selected port") : port)
+                .arg(attempts),
             false);
     });
 
-    refreshPorts();
+    connect(ioWorker_, &DeviceIoWorker::automaticProbeExhausted, this,
+            [this](const quint64 generation) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
+        if (identificationState_ != IdentificationState::Unidentified) {
+            identifyAttempts_ = 0;
+            setIdentificationState(IdentificationState::Idle);
+        }
+        setDiscoveryState(
+            ports_.isEmpty()
+                ? QStringLiteral("No verified injector found; setpoints remain editable offline.")
+                : QStringLiteral("No ARStack injector answered; manual port selection remains available."),
+            false);
+    });
+
+    connect(ioWorker_, &DeviceIoWorker::lineReceived, this,
+            [this](const quint64 generation, const QString& line) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
+        processLine(line);
+    });
+
+    connect(ioWorker_, &DeviceIoWorker::commandTransmitted, this,
+            [this](const quint64 generation, const QString& command, const bool quiet) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
+        if (!quiet) appendLog(QStringLiteral("→"), command);
+    });
+
+    connect(ioWorker_, &DeviceIoWorker::commandRejected, this,
+            [this](const quint64 generation, const QString& message) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
+        if (profileDeploying_) {
+            profileDeploying_ = false;
+            profileArmed_ = false;
+            emit profileStateChanged();
+        }
+        setError(message);
+    });
+
+    connect(ioWorker_, &DeviceIoWorker::transportError, this,
+            [this](const quint64 generation, const QString& message, const bool fatal) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
+        Q_UNUSED(fatal)
+        setError(message);
+    });
 }
 
 QStringList DeviceController::ports() const { return ports_; }
@@ -111,12 +246,19 @@ QString DeviceController::recommendedPort() const { return recommendedPort_; }
 QString DeviceController::discoveryStatus() const { return discoveryStatus_; }
 bool DeviceController::discovering() const noexcept { return discovering_; }
 bool DeviceController::deviceVerified() const noexcept { return deviceVerified_; }
-QString DeviceController::deviceProduct() const { return deviceProduct_; }
-QString DeviceController::deviceId() const { return deviceId_; }
-QString DeviceController::protocolVersion() const { return protocolVersion_; }
-bool DeviceController::connected() const noexcept { return serial_.isOpen(); }
+DeviceController::IdentificationState DeviceController::identificationState() const noexcept { return identificationState_; }
+int DeviceController::identifyAttempts() const noexcept { return identifyAttempts_; }
+QString DeviceController::deviceProduct() const { return identity_.product; }
+QString DeviceController::deviceTarget() const { return identity_.target; }
+QString DeviceController::deviceId() const { return identity_.deviceId; }
+QString DeviceController::protocolVersion() const { return identity_.protocolVersion; }
+QString DeviceController::firmwareVersion() const { return identity_.firmwareVersion; }
+QString DeviceController::bootId() const { return identity_.bootId; }
+QStringList DeviceController::capabilities() const { return identity_.capabilities; }
+DeviceIdentity DeviceController::deviceIdentity() const { return identity_; }
+bool DeviceController::connected() const noexcept { return connected_; }
 bool DeviceController::running() const noexcept { return running_; }
-QString DeviceController::portName() const { return serial_.portName(); }
+QString DeviceController::portName() const { return portName_; }
 QString DeviceController::lastError() const { return lastError_; }
 QString DeviceController::logText() const { return logText_; }
 QString DeviceController::fps() const { return fps_; }
@@ -136,35 +278,153 @@ QString DeviceController::ptpAnnounceSent() const { return ptpAnnounceSent_; }
 QString DeviceController::ptpSyncSent() const { return ptpSyncSent_; }
 QString DeviceController::ptpTxFailures() const { return ptpTxFailures_; }
 
-void DeviceController::refreshPorts() {
-    QList<PortCandidate> candidates;
-    for (const auto& info : QSerialPortInfo::availablePorts()) {
-        candidates.push_back({info.portName(), portConfidence(info)});
-    }
-    std::sort(candidates.begin(), candidates.end(), [](const PortCandidate& left, const PortCandidate& right) {
-        if (left.confidence != right.confidence) return left.confidence > right.confidence;
-        return left.name.localeAwareCompare(right.name) < 0;
-    });
+void DeviceController::setSessionGeneration(const quint64 generation) {
+    if (generation == 0 || generation == sessionGeneration_) return;
+    sessionGeneration_ = generation;
+    pendingAutoDetect_ = false;
+    pendingConnectPort_.clear();
+}
 
-    QStringList discovered;
-    QStringList highConfidence;
-    for (const auto& candidate : candidates) {
-        discovered.push_back(candidate.name);
-        if (candidate.confidence >= 60) highConfidence.push_back(candidate.name);
+bool DeviceController::parseIdentityLine(const QString& line, DeviceIdentity& identity) {
+    const auto match = kIdentityExpression.match(line.trimmed());
+    if (!match.hasMatch()) return false;
+
+    DeviceIdentity parsed;
+    parsed.product = match.captured(1).toUpper();
+    parsed.target = match.captured(2).toUpper();
+    parsed.protocolVersion = match.captured(3);
+    parsed.deviceId = match.captured(4).toUpper();
+    parsed.firmwareVersion = match.captured(5);
+    parsed.bootId = match.captured(6).toUpper();
+    parsed.capabilities = match.captured(7).split(QLatin1Char(','), Qt::SkipEmptyParts);
+    for (QString& capability : parsed.capabilities) capability = capability.trimmed().toUpper();
+    parsed.capabilities.removeDuplicates();
+
+    bool protocolOk = false;
+    static_cast<void>(parsed.protocolVersion.toUInt(&protocolOk));
+    if (!protocolOk || parsed.product != QStringLiteral("SMV-INJECTOR") ||
+        parsed.target != QStringLiteral("ESP32-P4") || parsed.capabilities.isEmpty()) {
+        return false;
     }
-    discovered.removeDuplicates();
-    const QString recommended = highConfidence.size() == 1 ? highConfidence.front() : QString{};
-    const bool portsDidChange = discovered != ports_;
-    const bool recommendationChanged = recommended != recommendedPort_;
-    ports_ = std::move(discovered);
-    recommendedPort_ = recommended;
+
+    identity = std::move(parsed);
+    return true;
+}
+
+bool DeviceController::identitySupportsCurrentContract(
+    const DeviceIdentity& identity,
+    const QString& expectedFirmwareVersion) {
+    static const QStringList requiredCapabilities{
+        QStringLiteral("SMV-4I4V"),
+        QStringLiteral("LIVE-SETPOINTS"),
+        QStringLiteral("SESSION-LEASE")};
+    if (identity.product != QStringLiteral("SMV-INJECTOR") ||
+        identity.target != QStringLiteral("ESP32-P4") ||
+        identity.protocolVersion != QStringLiteral("1") ||
+        identity.firmwareVersion != expectedFirmwareVersion ||
+        identity.bootId.size() != 16) {
+        return false;
+    }
+    for (const QString& required : requiredCapabilities) {
+        if (!identity.capabilities.contains(required, Qt::CaseInsensitive)) return false;
+    }
+    return true;
+}
+
+void DeviceController::refreshPorts() {
+    if (!ioWorkerReady_ || ioWorker_ == nullptr || sessionGeneration_ == 0) return;
+    const quint64 generation = sessionGeneration_;
+    QMetaObject::invokeMethod(
+        ioWorker_,
+        [worker = ioWorker_, generation] { worker->refreshPorts(generation); },
+        Qt::QueuedConnection);
+}
+
+bool DeviceController::autoDetectAndConnect() {
+    if (deviceVerified_) return true;
+    if (connected_ || discovering_ || sessionGeneration_ == 0) return false;
+
+    pendingConnectPort_.clear();
+    pendingAutoDetect_ = !ioWorkerReady_;
+    setDiscoveryState(QStringLiteral("Looking for an ARStack ESP32-P4 injector..."), true);
+
+    if (ioWorkerReady_ && ioWorker_ != nullptr) {
+        const quint64 generation = sessionGeneration_;
+        QMetaObject::invokeMethod(
+            ioWorker_,
+            [worker = ioWorker_, generation] { worker->autoDetectAndConnect(generation); },
+            Qt::QueuedConnection);
+    }
+    return true;
+}
+
+bool DeviceController::connectPort(const QString& portName) {
+    const QString requested = portName.trimmed();
+    if (requested.isEmpty()) {
+        setError(QStringLiteral("Select a serial port first."));
+        return false;
+    }
+    if (sessionGeneration_ == 0) {
+        setError(QStringLiteral("Device connection has no active supervisor generation."));
+        return false;
+    }
+
+    pendingAutoDetect_ = false;
+    setDiscoveryState(QStringLiteral("Verifying ARStack injector identity..."), true);
+    if (!ioWorkerReady_) {
+        pendingConnectPort_ = requested;
+        return true;
+    }
+
+    const quint64 generation = sessionGeneration_;
+    QMetaObject::invokeMethod(
+        ioWorker_,
+        [worker = ioWorker_, requested, generation] {
+            worker->connectPort(requested, generation);
+        },
+        Qt::QueuedConnection);
+    return true;
+}
+
+void DeviceController::disconnectPort() {
+    pendingAutoDetect_ = false;
+    pendingConnectPort_.clear();
+    if (!ioWorkerReady_ || ioWorker_ == nullptr || sessionGeneration_ == 0) return;
+    const quint64 generation = sessionGeneration_;
+    QMetaObject::invokeMethod(
+        ioWorker_,
+        [worker = ioWorker_, generation] { worker->disconnectPort(generation); },
+        Qt::QueuedConnection);
+}
+
+void DeviceController::handlePortSnapshot(
+    const QStringList& ports,
+    const QString& recommendedPort,
+    const int highConfidenceCount) {
+    const bool portsDidChange = ports != ports_;
+    const bool recommendationChanged = recommendedPort != recommendedPort_;
+    ports_ = ports;
+    recommendedPort_ = recommendedPort;
+    highConfidenceCount_ = highConfidenceCount;
+
+    if (identificationState_ == IdentificationState::Unidentified &&
+        !lastIdentificationPort_.isEmpty() && !ports_.contains(lastIdentificationPort_)) {
+        lastIdentificationPort_.clear();
+        identifyAttempts_ = 0;
+        setIdentificationState(IdentificationState::Idle);
+    }
+
     if (portsDidChange) emit portsChanged();
     if (recommendationChanged) emit discoveryChanged();
 
-    if (!serial_.isOpen() && !discovering_) {
-        if (!recommendedPort_.isEmpty()) {
+    if (!connected_ && !discovering_) {
+        if (identificationState_ == IdentificationState::Unidentified) {
+            setDiscoveryState(
+                QStringLiteral("ARStack identity was not received. Retry identification or choose firmware setup explicitly."),
+                false);
+        } else if (!recommendedPort_.isEmpty()) {
             setDiscoveryState(QStringLiteral("Compatible ESP32-P4 USB device found."), false);
-        } else if (highConfidence.size() > 1) {
+        } else if (highConfidenceCount_ > 1) {
             setDiscoveryState(QStringLiteral("Multiple Espressif devices found; choose the intended injector."), false);
         } else {
             setDiscoveryState(QStringLiteral("No verified injector found; setpoints remain editable offline."), false);
@@ -172,116 +432,53 @@ void DeviceController::refreshPorts() {
     }
 }
 
-bool DeviceController::connectPort(const QString& portName) {
-    return connectPortInternal(portName, false);
-}
-
-bool DeviceController::autoDetectAndConnect() {
-    if (deviceVerified_) return true;
-    refreshPorts();
-    probeQueue_.clear();
-    genericProbeActive_ = false;
-    if (!recommendedPort_.isEmpty()) {
-        setDiscoveryState(
-            QStringLiteral("Compatible device found. Verifying ARStack identity..."), true);
-        return connectPortInternal(recommendedPort_, true);
-    }
-    if (ports_.isEmpty()) return false;
-
-    // Windows often exposes ESP USB CDC as the generic "USB Serial Device".
-    // Probe one port at a time with read-only SHOW commands and trust only the
-    // firmware-specific response grammar parsed by processLine().
-    probeQueue_ = ports_;
-    genericProbeActive_ = true;
-    return tryNextProbe();
-}
-
-bool DeviceController::tryNextProbe() {
-    while (!probeQueue_.isEmpty()) {
-        const QString port = probeQueue_.takeFirst();
-        setDiscoveryState(QStringLiteral("Checking connected devices for an ARStack injector..."), true);
-        if (connectPortInternal(port, true)) return true;
-    }
-    genericProbeActive_ = false;
-    setDiscoveryState(QStringLiteral("No ARStack injector answered; manual port selection remains available."), false);
-    return false;
-}
-
-bool DeviceController::connectPortInternal(const QString& portName, const bool automatic) {
-    if (portName.trimmed().isEmpty()) {
-        setError(QStringLiteral("Select a serial port first."));
-        return false;
-    }
-    if (serial_.isOpen()) disconnectPort();
-
-    if (!automatic) {
-        probeQueue_.clear();
-        genericProbeActive_ = false;
-    }
-    automaticConnection_ = automatic;
+void DeviceController::handlePortOpened(const QString& portName, const bool automatic) {
+    Q_UNUSED(automatic)
+    const bool wasVerified = deviceVerified_;
+    connected_ = true;
+    portName_ = portName;
+    lastIdentificationPort_ = portName;
+    identifyAttempts_ = 0;
     deviceVerified_ = false;
-    setDiscoveryState(QStringLiteral("Verifying ARStack injector identity..."), true);
-
-    serial_.setPortName(portName.trimmed());
-    serial_.setBaudRate(kBaudRate);
-    serial_.setDataBits(QSerialPort::Data8);
-    serial_.setParity(QSerialPort::NoParity);
-    serial_.setStopBits(QSerialPort::OneStop);
-    serial_.setFlowControl(QSerialPort::NoFlowControl);
-
-    if (!serial_.open(QIODevice::ReadWrite)) {
-        automaticConnection_ = false;
-        if (!automatic) {
-            setDiscoveryState(QStringLiteral("The selected serial port could not be opened."), false);
-            setError(QStringLiteral("Cannot open %1: %2").arg(portName, serial_.errorString()));
-        }
-        return false;
-    }
-
-    pendingRx_.clear();
-    lastError_.clear();
+    clearIdentity();
     running_ = false;
     profileArmed_ = false;
     profileDeploying_ = false;
+    resetPtpState();
     resetTelemetry();
-    appendLog(QStringLiteral("•"), QStringLiteral("Connected %1 at 115200 8N1").arg(serial_.portName()));
+
+    if (!lastError_.isEmpty()) {
+        lastError_.clear();
+        emit lastErrorChanged();
+    }
+
+    appendLog(QStringLiteral("•"), QStringLiteral("Connected %1 at 115200 8N1").arg(portName_));
+    setIdentificationState(IdentificationState::Identifying);
     emit connectedChanged();
     emit runningChanged();
-    emit lastErrorChanged();
     emit profileStateChanged();
-    verificationTimer_.setInterval(genericProbeActive_ ? 1100 : 2600);
-    verificationTimer_.start();
-    static_cast<void>(sendCommand(QStringLiteral("IDENTIFY")));
-    static_cast<void>(sendCommand(QStringLiteral("SHOW")));
-    static_cast<void>(sendCommand(QStringLiteral("PROFILE SHOW")));
-    return true;
+    emit ptpStateChanged();
+    if (wasVerified) emit deviceVerifiedChanged();
 }
 
-void DeviceController::disconnectPort() {
-    const bool wasConnected = serial_.isOpen();
-    verificationTimer_.stop();
-    if (serial_.isOpen()) serial_.close();
-    pendingRx_.clear();
-    if (running_) {
-        running_ = false;
-        emit runningChanged();
-    }
-    if (profileDeploying_ || profileArmed_) {
-        profileDeploying_ = false;
-        profileArmed_ = false;
-        emit profileStateChanged();
-    }
-    resetTelemetry();
+void DeviceController::handlePortClosed(const QString& portName) {
+    const bool wasConnected = connected_;
     const bool wasVerified = deviceVerified_;
+    connected_ = false;
+    if (!portName.isEmpty()) portName_ = portName;
+    running_ = false;
+    profileDeploying_ = false;
+    profileArmed_ = false;
     deviceVerified_ = false;
-    deviceProduct_.clear();
-    deviceId_.clear();
-    protocolVersion_.clear();
+    clearIdentity();
+    identifyAttempts_ = 0;
+    setIdentificationState(IdentificationState::Idle);
     discovering_ = false;
-    automaticConnection_ = false;
-    ptpAvailable_ = false;
-    ptpRunning_ = false;
-    ptpStatus_ = QStringLiteral("Waiting for device");
+    resetPtpState();
+    resetTelemetry();
+
+    emit runningChanged();
+    emit profileStateChanged();
     emit discoveryChanged();
     emit ptpStateChanged();
     if (wasVerified) emit deviceVerifiedChanged();
@@ -399,10 +596,6 @@ bool DeviceController::deployProfile(const QVariantMap& profile) {
     if (includeDataSet) flags |= 0x1U;
     if (includeSampleRate) flags |= 0x2U;
 
-    profileDeploying_ = true;
-    profileArmed_ = false;
-    emit profileStateChanged();
-
     const QStringList commands{
         QStringLiteral("PROFILE BEGIN"),
         QStringLiteral("PROFILE ID %1").arg(idHex),
@@ -415,12 +608,13 @@ bool DeviceController::deployProfile(const QVariantMap& profile) {
         QStringLiteral("PROFILE SHOW"),
     };
 
-    for (const auto& command : commands) {
-        if (!sendCommand(command)) {
-            profileDeploying_ = false;
-            emit profileStateChanged();
-            return false;
-        }
+    profileDeploying_ = true;
+    profileArmed_ = false;
+    emit profileStateChanged();
+    if (!sendCommandBatch(commands)) {
+        profileDeploying_ = false;
+        emit profileStateChanged();
+        return false;
     }
     return true;
 }
@@ -487,23 +681,50 @@ void DeviceController::clearLog() {
 }
 
 bool DeviceController::sendCommand(const QString& command) {
-    if (!serial_.isOpen()) {
+    return sendCommandBatch({command}, false);
+}
+
+bool DeviceController::sendQuietCommand(const QString& command) {
+    return sendCommandBatch({command}, true);
+}
+
+bool DeviceController::sendCommandBatch(const QStringList& commands, const bool quiet) {
+    if (!connected_ || !ioWorkerReady_ || ioWorker_ == nullptr || sessionGeneration_ == 0) {
         setError(QStringLiteral("Device is not connected."));
         return false;
     }
-    const QByteArray bytes = command.toUtf8() + '\n';
-    if (serial_.write(bytes) < 0) {
-        setError(serial_.errorString());
-        return false;
-    }
-    appendLog(QStringLiteral("→"), command);
+    const QStringList copy = commands;
+    const quint64 generation = sessionGeneration_;
+    QMetaObject::invokeMethod(
+        ioWorker_,
+        [worker = ioWorker_, copy, quiet, generation] {
+            worker->enqueueCommands(copy, quiet, generation);
+        },
+        Qt::QueuedConnection);
     return true;
+}
+
+void DeviceController::setSessionHeartbeatEnabled(const bool enabled) {
+    if (!ioWorkerReady_ || ioWorker_ == nullptr || sessionGeneration_ == 0) return;
+    const quint64 generation = sessionGeneration_;
+    QMetaObject::invokeMethod(
+        ioWorker_,
+        [worker = ioWorker_, enabled, generation] {
+            worker->setHeartbeatEnabled(enabled, generation);
+        },
+        Qt::QueuedConnection);
 }
 
 void DeviceController::setRunning(const bool value) {
     if (running_ == value) return;
     running_ = value;
     emit runningChanged();
+}
+
+void DeviceController::setIdentificationState(const IdentificationState state) {
+    if (identificationState_ == state) return;
+    identificationState_ = state;
+    emit identificationStateChanged();
 }
 
 void DeviceController::setDiscoveryState(const QString& status, const bool active) {
@@ -513,16 +734,36 @@ void DeviceController::setDiscoveryState(const QString& status, const bool activ
     emit discoveryChanged();
 }
 
+void DeviceController::applyIdentity(DeviceIdentity identity) {
+    if (identity_ == identity) return;
+    identity_ = std::move(identity);
+    emit deviceIdentityChanged();
+}
+
+void DeviceController::clearIdentity() {
+    if (identity_.empty()) return;
+    identity_ = {};
+    emit deviceIdentityChanged();
+}
+
 void DeviceController::markDeviceVerified() {
     if (deviceVerified_) return;
-    verificationTimer_.stop();
     deviceVerified_ = true;
-    automaticConnection_ = false;
-    genericProbeActive_ = false;
-    probeQueue_.clear();
+    lastIdentificationPort_ = portName_;
+    setIdentificationState(IdentificationState::Verified);
     setDiscoveryState(QStringLiteral("ARStack ESP32-P4 identity verified."), false);
     emit deviceVerifiedChanged();
     emit deviceMessage(QStringLiteral("ESP32-P4 recognized. Device is ready."));
+
+    if (ioWorkerReady_ && ioWorker_ != nullptr && sessionGeneration_ != 0) {
+        const quint64 generation = sessionGeneration_;
+        QMetaObject::invokeMethod(
+            ioWorker_,
+            [worker = ioWorker_, generation] { worker->confirmIdentity(generation); },
+            Qt::QueuedConnection);
+    }
+    static_cast<void>(sendShow());
+    static_cast<void>(sendCommand(QStringLiteral("PROFILE SHOW")));
     static_cast<void>(sendPtpShow());
 }
 
@@ -590,11 +831,9 @@ void DeviceController::processLine(const QString& rawLine) {
         emit profileStateChanged();
     }
 
-    match = kIdentityExpression.match(line);
-    if (match.hasMatch()) {
-        deviceProduct_ = match.captured(1);
-        protocolVersion_ = match.captured(2);
-        deviceId_ = match.captured(3).toUpper();
+    DeviceIdentity parsedIdentity;
+    if (parseIdentityLine(line, parsedIdentity)) {
+        applyIdentity(std::move(parsedIdentity));
         markDeviceVerified();
     }
 
@@ -604,6 +843,8 @@ void DeviceController::processLine(const QString& rawLine) {
         ptpRunning_ = match.captured(1).compare(QStringLiteral("RUNNING"), Qt::CaseInsensitive) == 0;
         ptpAnnounceSent_ = match.captured(2);
         ptpSyncSent_ = match.captured(3);
+        ptpFollowUpSent_ = match.captured(4);
+        ptpPdelayFrames_ = match.captured(5);
         ptpTxFailures_ = match.captured(6);
         ptpStatus_ = ptpRunning_ ? QStringLiteral("Lab TX active") : QStringLiteral("Lab TX stopped");
         emit ptpStateChanged();
@@ -618,9 +859,64 @@ void DeviceController::processLine(const QString& rawLine) {
         emit ptpStateChanged();
     }
 
+    match = kPtpRoleExpression.match(line);
+    if (match.hasMatch()) {
+        ptpAvailable_ = true;
+        ptpRole_ = match.captured(1).toUpper();
+        ptpRunning_ = match.captured(3) == QStringLiteral("1");
+        ptpDiscipline_ = QStringLiteral("UNLOCKED");
+        ptpSource_ = QStringLiteral("NONE");
+        ptpOffsetNs_ = QStringLiteral("NA");
+        ptpPathDelayNs_ = QStringLiteral("NA");
+        ptpJitterNs_ = QStringLiteral("NA");
+        ptpFrequencyPpb_ = QStringLiteral("0");
+        ptpGlobalTraceable_ = false;
+        ptpMeasuredSmpSynch_ = QStringLiteral("NA");
+        ptpRxAnnounce_ = QStringLiteral("0");
+        ptpRxSync_ = QStringLiteral("0");
+        ptpRxFollowUp_ = QStringLiteral("0");
+        ptpRxPdelay_ = QStringLiteral("0");
+        ptpPdelayRequests_ = QStringLiteral("0");
+        ptpAccepted_ = QStringLiteral("0");
+        ptpRejected_ = QStringLiteral("0");
+        ptpStatus_ = ptpRunning_ ? QStringLiteral("Timing active") : QStringLiteral("Timing stopped");
+        emit ptpStateChanged();
+    }
+
+    match = kPtpMeasuredStateExpression.match(line);
+    if (match.hasMatch()) {
+        ptpAvailable_ = true;
+        ptpRole_ = match.captured(1).toUpper();
+        ptpDiscipline_ = match.captured(2).toUpper();
+        ptpSource_ = match.captured(3);
+        ptpOffsetNs_ = match.captured(4);
+        ptpPathDelayNs_ = match.captured(5);
+        ptpJitterNs_ = match.captured(6);
+        ptpFrequencyPpb_ = match.captured(7);
+        ptpGlobalTraceable_ = match.captured(8) == QStringLiteral("1");
+        ptpMeasuredSmpSynch_ = match.captured(9).toUpper();
+        ptpRxAnnounce_ = match.captured(10);
+        ptpRxSync_ = match.captured(11);
+        ptpRxFollowUp_ = match.captured(12);
+        ptpRxPdelay_ = match.captured(13);
+        ptpPdelayRequests_ = match.captured(14);
+        ptpAccepted_ = match.captured(15);
+        ptpRejected_ = match.captured(16);
+        emit ptpStateChanged();
+    }
+
+    match = kSmpSynchExpression.match(line);
+    if (match.hasMatch()) {
+        smpSynchMode_ = match.captured(1).toUpper();
+        smpSynchValue_ = match.captured(2);
+        smpSynchSource_ = match.captured(3).toUpper();
+        smpSynchSimulated_ = match.captured(4) == QStringLiteral("1");
+        smpSynchMeasured_ = match.captured(5) == QStringLiteral("1");
+        emit ptpStateChanged();
+    }
+
     if (line.contains(QStringLiteral("PTP unavailable"), Qt::CaseInsensitive)) {
-        ptpAvailable_ = false;
-        ptpRunning_ = false;
+        resetPtpState();
         ptpStatus_ = QStringLiteral("Not enabled in firmware");
         emit ptpStateChanged();
     }
@@ -644,6 +940,41 @@ void DeviceController::resetTelemetry() {
     txFailures_ = QStringLiteral("—");
     signalGeneration_ = QStringLiteral("—");
     emit telemetryChanged();
+}
+
+void DeviceController::resetPtpState() {
+    ptpAvailable_ = false;
+    ptpRunning_ = false;
+    ptpStatus_ = QStringLiteral("Waiting for device");
+    ptpDomain_ = QStringLiteral("-");
+    ptpTransportSpecific_ = QStringLiteral("-");
+    ptpVlan_ = QStringLiteral("-");
+    ptpAnnounceSent_ = QStringLiteral("-");
+    ptpSyncSent_ = QStringLiteral("-");
+    ptpFollowUpSent_ = QStringLiteral("-");
+    ptpPdelayFrames_ = QStringLiteral("-");
+    ptpTxFailures_ = QStringLiteral("-");
+    ptpRole_ = QStringLiteral("SOURCE");
+    ptpDiscipline_ = QStringLiteral("UNLOCKED");
+    ptpSource_ = QStringLiteral("NONE");
+    ptpOffsetNs_ = QStringLiteral("NA");
+    ptpPathDelayNs_ = QStringLiteral("NA");
+    ptpJitterNs_ = QStringLiteral("NA");
+    ptpFrequencyPpb_ = QStringLiteral("0");
+    ptpGlobalTraceable_ = false;
+    ptpMeasuredSmpSynch_ = QStringLiteral("NA");
+    ptpRxAnnounce_ = QStringLiteral("0");
+    ptpRxSync_ = QStringLiteral("0");
+    ptpRxFollowUp_ = QStringLiteral("0");
+    ptpRxPdelay_ = QStringLiteral("0");
+    ptpPdelayRequests_ = QStringLiteral("0");
+    ptpAccepted_ = QStringLiteral("0");
+    ptpRejected_ = QStringLiteral("0");
+    smpSynchMode_ = QStringLiteral("AUTO");
+    smpSynchValue_ = QStringLiteral("0");
+    smpSynchSource_ = QStringLiteral("SAFE_DEFAULT");
+    smpSynchSimulated_ = false;
+    smpSynchMeasured_ = false;
 }
 
 QString DeviceController::cleanLine(const QString& rawLine) {

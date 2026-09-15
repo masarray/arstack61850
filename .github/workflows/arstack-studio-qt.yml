@@ -19,6 +19,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: arstack-studio-qt-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows-launcher-parse:
     runs-on: windows-latest
@@ -26,21 +30,97 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Parse Windows launcher
+      - name: Parse Windows PowerShell entrypoints
         shell: powershell
         run: |
-          $path = Resolve-Path '.\apps\arstack_studio\run-windows.ps1'
-          $tokens = $null
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            $path,
-            [ref]$tokens,
-            [ref]$errors) | Out-Null
-          if ($errors.Count -gt 0) {
-            $errors | Format-List *
-            throw "Windows launcher contains $($errors.Count) PowerShell parser error(s)."
+          $paths = @(
+            '.\apps\arstack_studio\run-windows.ps1',
+            '.\apps\arstack_studio\packaging\verify-single-instance.ps1'
+          )
+          foreach ($candidate in $paths) {
+            $path = Resolve-Path $candidate
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $path,
+              [ref]$tokens,
+              [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | Format-List *
+              throw "$candidate contains $($errors.Count) PowerShell parser error(s)."
+            }
           }
-          Write-Host 'Windows launcher PowerShell parse: PASS'
+          Write-Host 'Windows PowerShell parse: PASS · launcher + S8B packaged ownership probe'
+
+  windows-ownership-integration:
+    name: S8B Windows ownership integration
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.10.3'
+          arch: win64_msvc2022_64
+          modules: 'qtserialport'
+          cache: true
+
+      - name: Configure native Windows harnesses
+        shell: powershell
+        run: |
+          cmake -S apps/arstack_studio -B build-arstack-studio -G "Visual Studio 17 2022" -A x64 `
+            -DARIEC61850_WARNINGS_AS_ERRORS=ON
+
+      - name: Build native Windows harnesses
+        shell: powershell
+        run: |
+          cmake --build build-arstack-studio --config Release `
+            --target arstack_session_harness arstack_windows_ownership_harness --parallel
+
+      - name: S8A deterministic session harness on Windows
+        timeout-minutes: 1
+        shell: powershell
+        run: |
+          $exe = Join-Path $PWD 'build-arstack-studio\Release\arstack_session_harness.exe'
+          $out = Join-Path $env:RUNNER_TEMP 'arstack-session-windows.out.log'
+          $err = Join-Path $env:RUNNER_TEMP 'arstack-session-windows.err.log'
+          & $exe 1> $out 2> $err
+          $exitCode = $LASTEXITCODE
+          Get-Content $out -ErrorAction SilentlyContinue
+          Get-Content $err -ErrorAction SilentlyContinue
+          if ($exitCode -ne 0) {
+            throw "S8A Windows deterministic harness failed with exit code $exitCode."
+          }
+
+      - name: S8B cross-process ownership and serial-loss harness
+        timeout-minutes: 1
+        shell: powershell
+        run: |
+          $exe = Join-Path $PWD 'build-arstack-studio\Release\arstack_windows_ownership_harness.exe'
+          $out = Join-Path $env:RUNNER_TEMP 'arstack-windows-ownership.out.log'
+          $err = Join-Path $env:RUNNER_TEMP 'arstack-windows-ownership.err.log'
+          & $exe 1> $out 2> $err
+          $exitCode = $LASTEXITCODE
+          Get-Content $out -ErrorAction SilentlyContinue
+          Get-Content $err -ErrorAction SilentlyContinue
+          if ($exitCode -ne 0) {
+            throw "S8B Windows ownership harness failed with exit code $exitCode."
+          }
+
+      - name: Retain Windows ownership logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arstack-studio-windows-ownership-logs
+          path: |
+            ${{ runner.temp }}/arstack-session-windows.out.log
+            ${{ runner.temp }}/arstack-session-windows.err.log
+            ${{ runner.temp }}/arstack-windows-ownership.out.log
+            ${{ runner.temp }}/arstack-windows-ownership.err.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   qt-build-smoke:
     runs-on: ubuntu-latest
@@ -60,6 +140,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: S7 QML presentation-only authority regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          qml_root='apps/arstack_studio/qml'
+          device_pattern='([A-Za-z_][A-Za-z0-9_]*\.)*device\.(start|stop|autoDetectAndConnect|connectPort|disconnectPort|refreshPorts|deployProfile|setSignal|setFrequency|setEnabled|setQuality|setCtSaturation|zero|sendPtpShow|sendSmpSynchShow|setPtpRole|setSmpSynchPolicy|configurePtp|startPtp|stopPtp)[[:space:]]*\('
+          firmware_pattern='([A-Za-z_][A-Za-z0-9_]*\.)*(firmware|FirmwareService)\.(probeTarget|installFirmware)[[:space:]]*\('
+          device_meta_pattern='Q_INVOKABLE[[:space:]].*(start|stop|autoDetectAndConnect|connectPort|disconnectPort|refreshPorts|deployProfile|setSignal|setFrequency|setEnabled|setQuality|setCtSaturation|zero|sendPtpShow|sendSmpSynchShow|setPtpRole|setSmpSynchPolicy|configurePtp|startPtp|stopPtp)[[:space:]]*\('
+
+          if grep -R -nE "$device_pattern" "$qml_root" --include='*.qml'; then
+            echo 'S7 regression: QML bypasses SmartSessionController with direct DeviceController authority.'
+            exit 1
+          fi
+          if grep -R -nE "$firmware_pattern" "$qml_root" --include='*.qml'; then
+            echo 'S7 regression: QML bypasses SmartSessionController with direct firmware execution.'
+            exit 1
+          fi
+          if grep -nE "$device_meta_pattern" \
+               apps/arstack_studio/src/DeviceController.hpp \
+               apps/arstack_studio/src/StudioDeviceController.hpp; then
+            echo 'S7 regression: DeviceController mutation leaked back into the QML meta-object.'
+            exit 1
+          fi
+          echo 'S7 QML authority boundary: PASS · presentation submits intents through SmartSessionController and device mutators are not QML-invokable'
+
       - name: Configure
         shell: bash
         run: |
@@ -72,8 +177,95 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          cmake --build build-arstack-studio --target arstack_studio --parallel 2 \
+          cmake --build build-arstack-studio \
+            --target arstack_studio arstack_session_harness --parallel 2 \
             2>&1 | tee /tmp/arstack-studio-build.log
+
+      - name: 4I+4V reference template regression
+        shell: bash
+        run: |
+          set -o pipefail
+          ./build-arstack-studio/arstack_studio --check-reference-template \
+            2>&1 | tee /tmp/arstack-studio-reference-template.log
+
+      - name: Native P0 controller policy regression
+        shell: bash
+        run: |
+          set -o pipefail
+          ./build-arstack-studio/arstack_studio --check-p0-policy \
+            2>&1 | tee /tmp/arstack-studio-p0-policy.log
+
+      - name: S8 deterministic session regression
+        shell: bash
+        run: |
+          set -o pipefail
+          timeout 20s ./build-arstack-studio/arstack_session_harness \
+            2>&1 | tee /tmp/arstack-studio-session-harness.log
+
+      - name: Firmware bundle contract regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/arstack-firmware-contract
+          rm -rf "$root"
+          mkdir -p "$root/firmware" "$root/tools"
+          printf 'ARStack-P0-firmware-contract\n' > "$root/firmware/arstack-esp32p4-smv-0.1.0.bin"
+          sha="$(sha256sum "$root/firmware/arstack-esp32p4-smv-0.1.0.bin" | awk '{print $1}')"
+          cat > "$root/firmware/firmware-manifest.json" <<EOF
+          {
+            "schema": "arstack.studio.firmware.v1",
+            "product": "ARStack ESP32-P4 SMV Injector",
+            "chip": "esp32p4",
+            "chipRevisionPolicy": "pre-v3",
+            "version": "0.1.0",
+            "protocol": 1,
+            "flashOffset": 0,
+            "image": "arstack-esp32p4-smv-0.1.0.bin",
+            "sha256": "$sha"
+          }
+          EOF
+          cat > "$root/tools/espflash" <<'EOF'
+          #!/bin/sh
+          echo 'espflash contract stub'
+          EOF
+          chmod +x "$root/tools/espflash"
+
+          ARSTACK_STUDIO_FIRMWARE_DIR="$root/firmware" \
+          ARSTACK_STUDIO_ESPFLASH="$root/tools/espflash" \
+            ./build-arstack-studio/arstack_studio --check-firmware-contract \
+            2>&1 | tee /tmp/arstack-studio-firmware-contract.log
+
+          cp "$root/firmware/firmware-manifest.json" "$root/firmware/firmware-manifest.valid.json"
+
+          zeros=0000000000000000000000000000000000000000000000000000000000000000
+          sed -i "s/\"sha256\": \"$sha\"/\"sha256\": \"$zeros\"/" "$root/firmware/firmware-manifest.json"
+          if ARSTACK_STUDIO_FIRMWARE_DIR="$root/firmware" \
+             ARSTACK_STUDIO_ESPFLASH="$root/tools/espflash" \
+             ./build-arstack-studio/arstack_studio --check-firmware-contract \
+             >> /tmp/arstack-studio-firmware-contract.log 2>&1; then
+            echo 'Corrupted firmware hash was incorrectly accepted.' | tee -a /tmp/arstack-studio-firmware-contract.log
+            exit 1
+          fi
+          echo 'Corrupted firmware hash: correctly blocked' | tee -a /tmp/arstack-studio-firmware-contract.log
+
+          cp "$root/firmware/firmware-manifest.valid.json" "$root/firmware/firmware-manifest.json"
+          sed -i 's/"chip": "esp32p4"/"chip": "esp32s3"/' "$root/firmware/firmware-manifest.json"
+          if ARSTACK_STUDIO_FIRMWARE_DIR="$root/firmware" \
+             ARSTACK_STUDIO_ESPFLASH="$root/tools/espflash" \
+             ./build-arstack-studio/arstack_studio --check-firmware-contract \
+             >> /tmp/arstack-studio-firmware-contract.log 2>&1; then
+            echo 'Wrong-chip firmware manifest was incorrectly accepted.' | tee -a /tmp/arstack-studio-firmware-contract.log
+            exit 1
+          fi
+          echo 'Wrong-chip firmware manifest: correctly blocked' | tee -a /tmp/arstack-studio-firmware-contract.log
+
+      - name: Primary-window shutdown regression
+        shell: bash
+        run: |
+          set -o pipefail
+          timeout 5s env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+            ./build-arstack-studio/arstack_studio --check-app-lifecycle \
+            2>&1 | tee /tmp/arstack-studio-lifecycle.log
 
       - name: Headless QML launch smoke
         shell: bash
@@ -89,6 +281,20 @@ jobs:
             exit "$status"
           fi
 
+      - name: High-DPI QML launch smoke
+        shell: bash
+        run: |
+          set +e
+          timeout 6s env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software QT_SCALE_FACTOR=1.75 \
+            ./build-arstack-studio/arstack_studio > /tmp/arstack-studio-hidpi.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/arstack-studio-hidpi.log
+          if [ "$status" -ne 124 ]; then
+            echo "ARStack Studio high-DPI launch exited early (status=$status)."
+            exit "$status"
+          fi
+
       - name: Retain Qt smoke logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -97,6 +303,12 @@ jobs:
           path: |
             /tmp/arstack-studio-configure.log
             /tmp/arstack-studio-build.log
+            /tmp/arstack-studio-reference-template.log
+            /tmp/arstack-studio-p0-policy.log
+            /tmp/arstack-studio-session-harness.log
+            /tmp/arstack-studio-firmware-contract.log
+            /tmp/arstack-studio-lifecycle.log
             /tmp/arstack-studio-launch.log
+            /tmp/arstack-studio-hidpi.log
           if-no-files-found: ignore
           retention-days: 7

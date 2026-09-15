@@ -1,78 +1,116 @@
-# ARStack Studio — native Qt SMV Injector
+# ARStack Studio — 4I + 4V SMV Injector / Generator
 
-`apps/arstack_studio` is the native Qt 6 / C++ / QML operator surface for the ESP32-P4 Sampled Values injector.
+ARStack Studio is the **canonical native desktop operator surface** for the first ARStack61850 public Sampled Values release. It is a Qt 6 / C++ / QML application; the ESP32-P4 remains the deterministic real-time publisher.
 
-This branch is intentionally stacked on `feature/smv-scl-profile-bridge` so the desktop application follows the latest SCL/profile and embedded-runtime behavior instead of freezing an older web-GUI snapshot.
+## P0 public boundary
+
+The first release is intentionally narrow and testable:
+
+- IEC 61850 Sampled Values, 9-2LE-style **4 current + 4 voltage**;
+- wire order `Ia, Ib, Ic, In, Ua, Ub, Uc, Un`;
+- one INT32 value plus one 32-bit Quality word for each signal;
+- 16 FCDA leaves / 64-byte sample payload;
+- **4000 frames/s**, `SmpPerSec`;
+- one ASDU per frame;
+- explicit `smpCnt` modulus 4000;
+- ESP32-P4-ETH target running the ARStack protocol-v1 firmware.
+
+Broader codecs, SCL parsing, COMTRADE support, experimental timing work, or other layouts elsewhere in the repository do **not** expand this P0 deployment boundary.
 
 ## Architecture
 
 ```text
-SCL / CID / SCD / IID
+4I+4V Quick Start or compatible SCL/CID/SCD/IID
   -> ARIEC61850 SclParser
   -> SvPublisherProfileCompiler
-  -> shared ESP32-P4 deployment support classifier
+  -> fail-closed ESP32-P4 deployment classifier
   -> Qt SclProfileModel
-  -> operator selects / validates stream
-  -> Qt DeviceController (QSerialPort)
-  -> current ESP32-P4 PROFILE + live-control protocol
-  -> deterministic publisher on ESP32-P4
+  -> operator Deploy
+  -> guarded Qt DeviceController
+  -> ARStack protocol v1
+  -> deterministic ESP32-P4 SMV publisher
 ```
 
-The Qt application is a presentation and control plane. The PC is not the 4000/4800 fps realtime clock and does not replace the ESP32-P4 publisher.
+The desktop application never becomes the 4000 fps timing source. It configures and supervises the embedded publisher.
 
-## Latest workflow carried into Qt
+## Normal operator workflow
 
-- direct native SCL/CID/SCD/IID import using the repository C++ parser;
-- resolved SampledValueControl stream selection;
-- compatibility Class A / B / C;
-- fail-closed ESP32-P4 device-support classification;
-- explicit sample-counter-modulus confirmation for Class-B candidate profiles;
-- explicit current counts/A and voltage counts/V test scaling;
-- immutable profile deployment while STOPPED;
-- profile identity: svID, data set, destination MAC, APPID, VLAN/PCP, confRev, publisher rate and counter modulus;
-- optional DataSet / SampleRate ASDU-field flags already supported by the current device bridge;
-- native serial 115200 8N1 control using Qt SerialPort;
-- smart USB discovery with firmware-handshake verification and sequential
-  read-only fallback probing when Windows exposes only generic COM metadata;
-- explicit `IDENTIFY` device identity backed by the ESP32-P4 factory MAC, so
-  the normal workflow never asks the operator to choose a COM port;
-- live magnitude, phase, editable AC frequency, DC, enable and quality controls;
-- mandatory live apply after verified connection; no mode switch can leave the
-  operator editing a stale local copy while output is running;
-- an ARSVIN-compatible CT-saturation test shape with bounded DC offset,
-  harmonic, order, and clip controls in Expert mode;
-- START / STOP / ZERO / SHOW and runtime telemetry;
-- keyboard-first 4I + 4V matrix navigation;
-- 3-phase linkage;
-- persistent generated phasor and waveform preview;
-- PTP Lab TX status, bounded runtime configuration, start/stop, and counters;
-- serial diagnostics surface.
+1. Open **ARStack Studio**.
+2. Choose **4I+4V Quick Start**, or **Open SCL** for a compatible external profile.
+3. Connect the ESP32-P4-ETH board. Studio verifies the `ARSTACK identity` handshake and protocol.
+4. **Deploy** the validated Class-A 4I+4V profile.
+5. Adjust Current / Voltage setpoints as required.
+6. **Start** Sampled Values output.
+7. **Stop** before changing immutable profile identity fields or before leaving the test setup.
 
-The current deployment gate intentionally accepts only the embedded layout already supported by the ESP32-P4 runtime. Broader SCL structures may parse correctly while remaining `unsupported-layout`; the GUI does not guess them into the firmware profile.
+The Home ribbon exposes explicit `DEVICE`, `FW`, `PROFILE`, and `OUTPUT` state. Disabled Deploy/Start controls explain the blocking condition instead of silently doing nothing.
+
+Critical START and DEPLOY rules are repeated in the native controller, so keyboard shortcuts or alternate QML paths cannot bypass the public P0 safety boundary.
+
+## Blank board / firmware recovery
+
+For a blank board, recovery board, or protocol mismatch, open **Configuration → Firmware**.
+
+The Firmware Manager uses this fail-closed sequence:
+
+1. select the USB serial port;
+2. **Verify ESP32-P4** using the ROM flasher connection;
+3. validate `firmware-manifest.json`;
+4. verify the packaged firmware SHA-256;
+5. unlock **Install / Recover** only for a verified ESP32-P4;
+6. write the single merged recovery image at flash offset `0x0`;
+7. reset the chip;
+8. reconnect and require the normal ARStack `IDENTIFY` handshake.
+
+A missing flasher, missing image, malformed manifest, incompatible chip declaration, unsafe flash offset, protocol mismatch, or SHA-256 mismatch keeps installation blocked.
+
+The redistributable Windows package includes a pinned standalone `espflash`; the operator does **not** need Rust, Python, ESP-IDF, CMake, Qt, or a source checkout.
+
+## Firmware package contract
+
+A release package contains:
+
+```text
+ARStackStudio.exe
+firmware/
+  firmware-manifest.json
+  arstack-esp32p4-smv-0.1.0.bin
+  SHA256SUMS.txt
+tools/
+  espflash.exe
+licenses/
+  espflash/
+```
+
+Manifest schema `arstack.studio.firmware.v1` binds the image to chip `esp32p4`, firmware version `0.1.0`, protocol `1`, flash offset `0`, the exact image filename, image SHA-256, ESP-IDF build version, and source commit.
+
+Protocol `1` is the P0 GUI/firmware capability contract for the supported `SMV-4I4V`, profile deployment, and live setpoint workflow.
+
+## Windows release artifacts
+
+The P0 release workflow creates separate downloadable files:
+
+- `ARStack-Studio-0.1.0-win-x64-portable.zip`
+- `ARStack-Studio-0.1.0-win-x64-setup.exe`
+- `SHA256SUMS.txt`
+
+Both packages contain the Qt runtime, verified ESP32-P4 firmware bundle, and pinned standalone flasher. The installer is per-user and does not require administrator elevation.
+
+A `v0.1.0` tag is the only accepted P0 publish tag. The GitHub release is intentionally marked prerelease until physical P0 acceptance is complete.
 
 ## Truthfulness boundary
 
-The phasor and waveform are **generated setpoint previews**. They visualize the configured engineering state. They are not independent Ethernet on-wire evidence.
+Phasor and waveform views are generated setpoint previews, not independent Ethernet capture evidence. `smpSynch` remains an embedded synchronization truth and must not be promoted to a synchronization claim without measured evidence.
 
-CT Saturation is a deterministic test-waveform approximation, not a calibrated
-electromagnetic CT model. Its preview and parameters are labeled accordingly.
+CI can prove parser/compiler behavior, firmware manifest/hash enforcement, native START/DEPLOY guards, Qt instantiation, high-DPI launch, firmware build/package generation, Windows portable construction, installer construction, and packaged-app smoke execution. CI cannot prove physical Ethernet waveform or timing behavior.
 
-A later Process Bus monitor can add an observed trace and generated-vs-observed comparison without changing this distinction.
+The final physical gate is maintained in [`../../docs/SMV_STUDIO_P0_RELEASE.md`](../../docs/SMV_STUDIO_P0_RELEASE.md).
 
-`smpSynch` remains an embedded timing/synchronization truth. The GUI must not claim synchronized output until the runtime has measured synchronization evidence.
+## Development build
 
-## Build
+Qt 6.5+ is required with Core, Gui, Qml, Quick, QuickControls2 and SerialPort, together with a C++20 compiler and CMake 3.24+.
 
-Qt 6.5+ is required with:
-
-- Qt Core / Gui / Qml / Quick / QuickControls2
-- Qt SerialPort
-- a C++20 compiler
-- CMake 3.24+
-
-### Windows example
-
-From the repository root with a Qt-enabled developer shell:
+From a Qt-enabled Windows developer shell:
 
 ```powershell
 cmake -S apps/arstack_studio -B build-arstack-studio -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -80,114 +118,31 @@ cmake --build build-arstack-studio --target arstack_studio --parallel
 .\build-arstack-studio\arstack_studio.exe
 ```
 
-On the Windows development workstation used for this phase, Qt is installed at
-`D:\Qt\6.8.3\msvc2022_64`. The `msvc2022_64` directory is the Qt binary-kit
-name; the launcher does **not** require the Visual Studio 2022 IDE. It discovers
-the newest installed Visual Studio x64 C++ toolchain with `vswhere`, including
-Visual Studio 2026 / MSVC v145.
-
-Build and launch with one command:
+The repository also provides:
 
 ```powershell
 .\apps\arstack_studio\run.cmd
 ```
 
-Or call the PowerShell launcher directly:
+or:
 
 ```powershell
 .\apps\arstack_studio\run-windows.ps1
 ```
 
-Use `-NoLaunch` for a build-only verification. Use `-VisualStudioRoot` only when
-you intentionally want to override automatic Visual Studio discovery. Use
-`-QtRoot` when the Qt kit is installed somewhere other than the default path.
-The launcher imports the selected Visual Studio developer environment, verifies
-`cl.exe`, and reuses Visual Studio's bundled Ninja without modifying the user's
-global `PATH`.
+These developer launchers are not required by the redistributable release.
 
-## P2 fast-workflow ribbon
+## Automated Studio gates
 
-The compact Home / View / Engineering ribbon carries ARSVIN's short operator
-loop into the native Qt surface without copying its visual styling. Home keeps
-Balanced, Zero, Check, Configure, Deploy, Start, and Stop one action away. View
-owns dock visibility and detachment; Engineering owns SCL, smart discovery,
-PTP refresh, and diagnostics. Device and output state stay in the header/footer
-instead of being repeated as large workflow cards.
+`.github/workflows/arstack-studio-qt.yml` checks:
 
-Keyboard operators can use `Ctrl+O`, `Ctrl+B`, `Ctrl+0`, `Ctrl+K`, `Ctrl+D`,
-`F5`, and `F6`. Check reports readiness through the existing non-modal status
-surface; it does not bypass the deployment gate.
+- native Qt configure/build with warnings as errors;
+- bundled 4I+4V reference profile contract;
+- native P0 controller fail-closed policy;
+- valid firmware bundle acceptance;
+- corrupted firmware SHA-256 rejection;
+- normal offscreen QML launch;
+- high-DPI QML launch;
+- Windows launcher PowerShell parsing.
 
-## P2 dock shell
-
-The main window now behaves as a compact engineering shell rather than a fixed
-form. Engineering source, profile, scaling, quick setup, and runtime details
-live in a dedicated Smart / Expert Configuration window instead of consuming
-permanent space beside the injector. Phasor View and Waveform View are separate
-right-side docks; each can be hidden or detached into its own real Qt window.
-Status History and Output Monitor share a bottom dock that starts collapsed.
-The View ribbon restores closed panels, detaches either plot, and expands the
-bottom monitor.
-
-The shell uses nested draggable splitters: editor vs preview docks, Phasor vs
-Waveform, and workspace vs bottom monitor. Every pane keeps a protective
-minimum size, while its split can be resized directly like an engineering MDI
-shell. The complete monitor header is clickable for smooth expand/collapse.
-
-Smart mode is the default and guides device recognition, PTP inspection, and SV
-profile selection. Expert mode exposes the detailed SV profile compiler plus
-bounded PTP domain, transportSpecific, VLAN, interval, and peer-delay controls.
-Deploy and Start remain disabled until the serial response proves the connected
-port is the ARStack ESP32-P4 injector.
-
-PTP remains explicitly labeled as a laboratory timing companion. The firmware
-serial surface now supports `PTP SHOW`, `PTP START`, `PTP STOP`, and bounded
-`PTP CONFIG`; none of these claims external grandmaster lock or changes the
-truthful `smpSynch` boundary.
-
-The safety-critical editor remains the stable center pane. Split sizes are
-operator-adjustable, while arbitrary drag-reordering and layout persistence
-remain follow-up work; detaching a view must never move or duplicate the output
-controls.
-
-For redistribution, package the required dynamically linked Qt runtime libraries with the normal Qt deployment tooling and review the applicable Qt/LGPL distribution obligations for the chosen module set.
-
-## CI
-
-`.github/workflows/arstack-studio-qt.yml` performs:
-
-1. standalone Qt configure;
-2. native C++ / QML build;
-3. headless QML launch smoke test;
-4. retained configure/build/launch logs on every run.
-
-A green desktop CI proves that the application builds and QML instantiates in the hosted environment. It does **not** replace physical ESP32-P4 / Ethernet validation.
-
-## Physical acceptance still required
-
-Before this desktop GUI is treated as a proven replacement for the current bench surface, retain hardware evidence for at least:
-
-1. native serial `IDENTIFY`, SHOW, and PROFILE SHOW using updated firmware;
-2. development 4000 fps START/STOP and live SET/FREQ/ENABLE/QUALITY updates;
-3. SCL Class-A profile deployment followed by PROFILE committed/armed confirmation;
-4. 4800 fps profile deployment and observed ~4800 fps with the expected smpCnt cycle;
-5. live magnitude/phase changes without unintended counter restart;
-6. DC and CT-saturation SHAPE commands with observed on-wire sample values;
-7. PTP Lab TX configuration/counters and explicit non-lock truth labeling;
-8. generated-vs-on-wire identity comparison using a trusted capture path.
-
-## UI direction
-
-The desktop visual target is a calm premium engineering instrument:
-
-- Inter Variable is bundled under the SIL Open Font License and used for all
-  interface, numeric, status, and plot-label text; no monospace family is used;
-- compact Lucide SVG icons are bundled with upstream license notices for the
-  ribbon and dock controls;
-- Current and Voltage are the primary working matrices;
-- SCL/profile information stays available without dominating the work surface;
-- phasor and waveform remain persistent;
-- Start/Stop remain fixed and obvious;
-- values are optimized for keyboard operation;
-- no browser/local-web-server dependency is required by the desktop application;
-- visualization remains intentionally lightweight before any future custom `QQuickItem`/scene-graph optimization.
+`.github/workflows/arstack-studio-release.yml` additionally builds the merged ESP32-P4 firmware package and the Windows portable/installer release candidates.

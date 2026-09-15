@@ -13,18 +13,21 @@ Rectangle {
     property var historyModel
     property string uiFont: "Inter"
     property string monoFont: "Inter"
-    property bool expanded: true
+    property bool expanded: false
 
     signal closeRequested()
 
-    implicitHeight: 32
-    Layout.preferredHeight: expanded ? 124 : 32
+    readonly property bool hasRuntimeTelemetry:
+        telemetry.device.fps !== "—" || telemetry.device.missed !== "—" || telemetry.device.txFailures !== "—"
+
+    implicitHeight: 34
+    Layout.preferredHeight: expanded ? 132 : 34
     color: theme.surface
     radius: theme.panelRadius
     border.width: 1
     border.color: theme.line
     clip: true
-    Behavior on Layout.preferredHeight { NumberAnimation { duration: 220; easing.type: Easing.InOutCubic } }
+    Behavior on Layout.preferredHeight { NumberAnimation { duration: 180; easing.type: Easing.InOutCubic } }
 
     ColumnLayout {
         anchors.fill: parent
@@ -33,7 +36,7 @@ Rectangle {
         Rectangle {
             id: headerBar
             Layout.fillWidth: true
-            Layout.preferredHeight: 32
+            Layout.preferredHeight: 34
             color: headerMouse.containsMouse ? theme.raisedHover : theme.raised
             Behavior on color { ColorAnimation { duration: 90 } }
 
@@ -47,35 +50,36 @@ Rectangle {
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 10
-                anchors.rightMargin: 6
-                spacing: 7
+                anchors.leftMargin: 11
+                anchors.rightMargin: 7
+                spacing: 8
 
-                Rectangle { width: 3; height: 14; radius: 2; color: telemetry.device.running ? theme.green : theme.accent }
+                Rectangle {
+                    width: 7
+                    height: 7
+                    radius: 4
+                    color: telemetry.device.running ? theme.green : (telemetry.device.deviceVerified ? theme.accent : theme.muted2)
+                }
                 Label {
-                    text: "Status & output monitor"
-                    color: theme.textSoft
+                    text: telemetry.device.running ? "Injection running" : (telemetry.device.deviceVerified ? "Device ready" : "Monitor")
+                    color: telemetry.device.running ? theme.green : theme.textSoft
                     font.family: telemetry.uiFont
-                    font.pixelSize: theme.labelSize
+                    font.pixelSize: 10
                     font.weight: Font.DemiBold
                     verticalAlignment: Text.AlignVCenter
                 }
-                Label {
-                    text: telemetry.device.running ? "LIVE" : "STANDBY"
-                    color: telemetry.device.running ? theme.green : theme.muted
-                    font.family: telemetry.monoFont
-                    font.pixelSize: theme.captionSize - 1
-                    font.weight: Font.Bold
-                    verticalAlignment: Text.AlignVCenter
-                }
+
                 Item { Layout.fillWidth: true }
+
                 Label {
-                    text: "FPS " + telemetry.device.fps + "   ·   MISSED " + telemetry.device.missed + "   ·   TX FAIL " + telemetry.device.txFailures
+                    visible: telemetry.device.running && telemetry.hasRuntimeTelemetry
+                    text: telemetry.device.fps + " fps  ·  missed " + telemetry.device.missed + "  ·  tx fail " + telemetry.device.txFailures
                     color: theme.muted
                     font.family: telemetry.monoFont
-                    font.pixelSize: theme.captionSize - 1
+                    font.pixelSize: 9
                     verticalAlignment: Text.AlignVCenter
                 }
+
                 DarkToolButton {
                     theme: telemetry.theme
                     uiFont: telemetry.uiFont
@@ -84,24 +88,13 @@ Rectangle {
                         : Qt.resolvedUrl("../assets/lucide/chevron-up.svg")
                     onClicked: telemetry.expanded = !telemetry.expanded
                     ToolTip.visible: hovered
-                    ToolTip.text: telemetry.expanded ? "Collapse monitor" : "Expand monitor"
-                }
-                DarkToolButton {
-                    theme: telemetry.theme
-                    uiFont: telemetry.uiFont
-                    iconSource: Qt.resolvedUrl("../assets/lucide/x.svg")
-                    iconSize: 19
-                    onClicked: telemetry.closeRequested()
-                    ToolTip.visible: hovered
-                    ToolTip.text: "Close monitor"
+                    ToolTip.text: telemetry.expanded ? "Hide monitor details" : "Show monitor details"
                 }
             }
         }
 
         RowLayout {
-            visible: opacity > 0
-            opacity: telemetry.expanded ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: telemetry.expanded ? 180 : 110; easing.type: Easing.OutCubic } }
+            visible: telemetry.expanded
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.margins: 9
@@ -110,7 +103,7 @@ Rectangle {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                Layout.preferredWidth: 1.25
+                Layout.preferredWidth: 1.35
                 radius: theme.controlRadius
                 color: theme.surface2
                 border.width: 1
@@ -118,39 +111,49 @@ Rectangle {
 
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 8
-                    spacing: 3
+                    anchors.margins: 9
+                    spacing: 5
                     Label {
-                        text: "STATUS HISTORY"
-                        color: theme.muted
+                        text: "Recent activity"
+                        color: theme.textSoft
                         font.family: telemetry.uiFont
-                        font.pixelSize: theme.captionSize - 1
+                        font.pixelSize: 10
                         font.weight: Font.DemiBold
-                        font.letterSpacing: 0.8
                     }
                     ListView {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         model: telemetry.historyModel
                         clip: true
-                        spacing: 2
+                        spacing: 3
                         delegate: RowLayout {
                             required property string timeText
                             required property string messageText
                             required property bool isError
                             width: ListView.view.width
-                            spacing: 7
-                            Label { text: timeText; color: theme.muted; font.family: telemetry.monoFont; font.pixelSize: theme.captionSize - 1 }
-                            Label { Layout.fillWidth: true; text: messageText; color: isError ? theme.red : theme.textSoft; font.family: telemetry.uiFont; font.pixelSize: theme.captionSize; elide: Text.ElideRight }
+                            spacing: 8
+                            Label {
+                                text: timeText
+                                color: theme.muted
+                                font.family: telemetry.monoFont
+                                font.pixelSize: 9
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: messageText
+                                color: isError ? theme.red : theme.textSoft
+                                font.family: telemetry.uiFont
+                                font.pixelSize: 10
+                                elide: Text.ElideRight
+                            }
                         }
                     }
                 }
             }
 
             Rectangle {
-                Layout.fillWidth: true
+                Layout.preferredWidth: 250
                 Layout.fillHeight: true
-                Layout.preferredWidth: 0.75
                 radius: theme.controlRadius
                 color: theme.surface2
                 border.width: 1
@@ -158,43 +161,26 @@ Rectangle {
 
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 8
-                    spacing: 4
+                    anchors.margins: 10
+                    spacing: 7
                     Label {
-                        text: "OUTPUT CHANNELS"
-                        color: theme.muted
+                        text: "Transmission"
+                        color: theme.textSoft
                         font.family: telemetry.uiFont
-                        font.pixelSize: theme.captionSize - 1
+                        font.pixelSize: 10
                         font.weight: Font.DemiBold
-                        font.letterSpacing: 0.8
                     }
-                    RowLayout {
+                    GridLayout {
                         Layout.fillWidth: true
-                        spacing: 10
-                        Repeater {
-                            model: telemetry.currentModel
-                            delegate: RowLayout {
-                                required property string signalId
-                                required property bool enabled
-                                spacing: 4
-                                Rectangle { width: 7; height: 7; radius: 4; color: enabled ? theme.green : theme.muted2 }
-                                Label { text: signalId; color: theme.textSoft; font.family: telemetry.monoFont; font.pixelSize: theme.captionSize }
-                            }
-                        }
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 10
-                        Repeater {
-                            model: telemetry.voltageModel
-                            delegate: RowLayout {
-                                required property string signalId
-                                required property bool enabled
-                                spacing: 4
-                                Rectangle { width: 7; height: 7; radius: 4; color: enabled ? theme.accent : theme.muted2 }
-                                Label { text: signalId; color: theme.textSoft; font.family: telemetry.monoFont; font.pixelSize: theme.captionSize }
-                            }
-                        }
+                        columns: 2
+                        columnSpacing: 16
+                        rowSpacing: 5
+                        Label { text: "Rate"; color: theme.muted; font.family: telemetry.uiFont; font.pixelSize: 9 }
+                        Label { text: telemetry.device.fps === "—" ? "—" : telemetry.device.fps + " fps"; color: theme.text; font.family: telemetry.monoFont; font.pixelSize: 10 }
+                        Label { text: "Missed"; color: theme.muted; font.family: telemetry.uiFont; font.pixelSize: 9 }
+                        Label { text: telemetry.device.missed; color: telemetry.device.missed === "0" ? theme.green : theme.text; font.family: telemetry.monoFont; font.pixelSize: 10 }
+                        Label { text: "TX failures"; color: theme.muted; font.family: telemetry.uiFont; font.pixelSize: 9 }
+                        Label { text: telemetry.device.txFailures; color: telemetry.device.txFailures === "0" ? theme.green : theme.text; font.family: telemetry.monoFont; font.pixelSize: 10 }
                     }
                 }
             }

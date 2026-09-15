@@ -33,6 +33,14 @@ Rectangle {
             Layout.preferredHeight: 34
             color: "#131b24"
 
+            MouseArea {
+                anchors.fill: parent
+                enabled: frame.detachable
+                acceptedButtons: Qt.LeftButton
+                cursorShape: frame.detachable ? Qt.SizeAllCursor : Qt.ArrowCursor
+                onDoubleClicked: frame.detachRequested()
+            }
+
             RowLayout {
                 anchors.fill: parent
                 anchors.leftMargin: 10
@@ -85,7 +93,7 @@ Rectangle {
                     uiFont: frame.uiFont
                     onClicked: frame.detachRequested()
                     ToolTip.visible: hovered
-                    ToolTip.text: "Detach into a separate window"
+                    ToolTip.text: "Float this dock (double-click the title also works)"
                 }
                 DarkToolButton {
                     visible: frame.closable
@@ -95,7 +103,7 @@ Rectangle {
                     uiFont: frame.uiFont
                     onClicked: frame.closeRequested()
                     ToolTip.visible: hovered
-                    ToolTip.text: "Close this view"
+                    ToolTip.text: "Hide this dock; restore it from View > Docks"
                 }
             }
 
