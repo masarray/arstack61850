@@ -109,6 +109,16 @@ struct IedSimulatorProfileFromSclOptions final {
     std::string runtime_ied_name;
     bool include_quality_and_timestamp_points{true};
     double nominal_frequency_hz{50.0};
+
+    // Zero captures system_clock once at profile-build time. Tests and replay
+    // harnesses can supply an exact epoch-millisecond seed so every default
+    // Timestamp in one compiled simulator model is deterministic and coherent.
+    std::uint64_t simulation_start_unix_ms{};
+
+    // Defensive host-side bound. The canonical SCL model preserves the exact
+    // RptEnabled@max value; the runtime profile compiler limits materialized
+    // client instances and emits a finding instead of accepting unbounded input.
+    std::uint32_t maximum_report_clients_per_definition{64U};
 };
 
 struct IedSimulatorProfileFromSclResult final {
@@ -118,6 +128,8 @@ struct IedSimulatorProfileFromSclResult final {
     std::size_t data_set_member_count{};
     std::size_t structural_data_attribute_count{};
     std::size_t skipped_member_count{};
+    std::size_t report_control_definition_count{};
+    std::size_t report_control_instance_count{};
     std::vector<std::string> findings;
 };
 

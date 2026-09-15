@@ -600,7 +600,7 @@ def main() -> int:
                     manifest_text = manifest_path.read_text(encoding="utf-8")
                 except (FileNotFoundError, PermissionError, UnicodeDecodeError):
                     manifest_text = ""
-                mapped_value = "TCTR1$MX$Amp$instMag$i\tINT32\tNumber\t42"
+                mapped_value = "TCTR1$MX$Amp$instMag$i\tINT32\tNumber\t0"
                 structural_only_value = (
                     "TCTR1$MX$AmpUnmapped$instMag$i\tINT32\tNumber\t0"
                 )
@@ -619,7 +619,7 @@ def main() -> int:
                     "CTL\tMU01LD0\tGGIO1\tSPCSO4\tSPC\t4",
                 )
                 if (
-                    manifest_text.startswith("ARSTACK_IED_MODEL\t2\t2\n")
+                    manifest_text.startswith("ARSTACK_IED_MODEL\t2\t1\n")
                     and mapped_value in manifest_text
                     and structural_only_value in manifest_text
                     and "XCBR1$ST$Pos$q\tQuality\tQuality\tgood" in manifest_text
@@ -636,7 +636,7 @@ def main() -> int:
                 time.sleep(0.1)
             else:
                 raise RuntimeError(
-                    "GUI did not publish revision 2 with edited/full model leaves, reporting metadata, and configured control metadata"
+                    "GUI did not keep the startup manifest at revision 1 while preserving full model/report/control metadata"
                 )
 
             deadline = time.monotonic() + 10.0
@@ -710,14 +710,20 @@ def main() -> int:
                 port,
                 manifest_path,
                 "XCBR1$ST$Pos$t",
-                "value=unix-ms=0 UTC",
+                "value=unix-ms=",
                 "1700000000123",
                 "value=unix-ms=1700000000123 UTC",
             )
 
             app.wait(timeout=47)
+            app_log.flush()
+            app_log.seek(0)
+            app_output = app_log.read()
+            if "IEDSIM_LIVE_ACK generation=" not in app_output:
+                raise RuntimeError("GUI edit was not acknowledged by the live runtime data plane")
             print(
                 "IEDSIM_GUI_LIVE_VALUE_PASS "
+                "hot_delta=acknowledged manifest_hot_rewrites=0 "
                 "edited=MU01LD0/TCTR1$MX$Amp$instMag$i:42 "
                 "structural=MU01LD0/TCTR1$MX$AmpUnmapped$instMag$i:0 "
                 f"concurrent_association_seconds={concurrent_seconds:.3f} "
@@ -728,7 +734,7 @@ def main() -> int:
                 "urcb_gi=pass "
                 "brcb_event=pass "
                 "quality=same-association:030000->03C110 "
-                "timestamp=same-association:0->1700000000123"
+                "timestamp=same-association:current->1700000000123"
             )
             print(control_output)
             print(sbo_enhanced_output)

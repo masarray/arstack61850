@@ -196,9 +196,9 @@ int main() {
     }
     mms::MmsStaticBrcbControl control{reports};
 
-    std::array<mms::MmsStaticObjectEntry, 9U> object_storage{};
-    std::array<mms::MmsStaticBrcbObjectContext, 8U> context_storage{};
-    std::array<char, 128U> name_storage{};
+    std::array<mms::MmsStaticObjectEntry, 16U> object_storage{};
+    std::array<mms::MmsStaticBrcbObjectContext, 15U> context_storage{};
+    std::array<char, 320U> name_storage{};
     std::uint64_t now = 100U;
     mms::MmsStaticBrcbObjectBank bank{
         definition,
@@ -210,7 +210,7 @@ int main() {
         name_storage,
         read_now,
         &now};
-    if (!bank.initialize() || bank.object_count() != 9U || !bank.table().valid()) {
+    if (!bank.initialize() || bank.object_count() != 16U || !bank.table().valid()) {
         return 2;
     }
 
@@ -321,7 +321,7 @@ int main() {
     }
 
     std::array<std::uint8_t, 32U> read_buffer{};
-    const auto& entry_object = object_storage[1U + 5U];
+    const auto& entry_object = object_storage[1U + 11U];
     const auto entry_read = entry_object.read(entry_object.context, read_buffer);
     if (!entry_read.success() || entry_read.bytes_written != 10U ||
         read_buffer[0] != 0x89U || read_buffer[1] != 0x08U ||
@@ -329,7 +329,7 @@ int main() {
             [](const std::uint8_t byte) { return byte == 0U; })) {
         return 21;
     }
-    const auto& purge_object = object_storage[1U + 4U];
+    const auto& purge_object = object_storage[1U + 10U];
     const auto purge_read = purge_object.read(purge_object.context, read_buffer);
     if (!purge_read.success() || purge_read.bytes_written != 3U ||
         read_buffer[0] != 0x83U || read_buffer[2] != 0x00U) {

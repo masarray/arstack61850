@@ -18,14 +18,15 @@ namespace {
 constexpr std::uint8_t kTriggerDataChange = 0x40U;
 constexpr std::uint8_t kTriggerQualityChange = 0x20U;
 constexpr std::uint8_t kTriggerDataUpdate = 0x10U;
-// Carry all standard SCL TrgOps bits accepted by the ARIEC simulator profile.
-// Event capture below currently maps dchg/qchg/dupd; integrity/GI scheduling is
-// handled separately by the reporting application layer as those paths land.
+constexpr std::uint8_t kTriggerIntegrity = 0x08U;
+constexpr std::uint8_t kTriggerGeneralInterrogation = 0x04U;
 constexpr std::uint8_t kAllowedTriggers = 0x7CU;
 
-constexpr std::uint8_t kReasonDataChange = 0x80U;
-constexpr std::uint8_t kReasonQualityChange = 0x40U;
-constexpr std::uint8_t kReasonDataUpdate = 0x20U;
+constexpr std::uint8_t kReasonDataChange = 0x40U;
+constexpr std::uint8_t kReasonQualityChange = 0x20U;
+constexpr std::uint8_t kReasonDataUpdate = 0x10U;
+constexpr std::uint8_t kReasonIntegrity = 0x08U;
+constexpr std::uint8_t kReasonGeneralInterrogation = 0x04U;
 
 constexpr std::uint8_t kOptReasonForInclusion = 0x10U;
 constexpr std::uint8_t kOptEntryId = 0x01U;
@@ -57,6 +58,16 @@ void bump_revision(std::uint32_t& revision) noexcept {
     return current == std::numeric_limits<std::uint64_t>::max()
         ? 1U
         : current + 1U;
+}
+
+[[nodiscard]] std::uint32_t effective_integrity_period(
+    const MmsStaticBrcbDefinition& definition) noexcept {
+    if (definition.integrity_period_ms == 0U) {
+        return 0U;
+    }
+    return definition.integrity_period_ms < MmsStaticBrcbRuntime::minimum_integrity_period_ms
+        ? MmsStaticBrcbRuntime::minimum_integrity_period_ms
+        : definition.integrity_period_ms;
 }
 
 [[nodiscard]] std::span<const std::uint8_t> as_bytes(
@@ -130,6 +141,20 @@ void clear_pending(MmsStaticBrcbPendingState& pending) noexcept {
     return false;
 }
 
+[[nodiscard]] std::uint8_t scheduled_reason_mask(
+    const MmsStaticBrcbCaptureReason reason) noexcept {
+    switch (reason) {
+    case MmsStaticBrcbCaptureReason::integrity:
+        return kReasonIntegrity;
+    case MmsStaticBrcbCaptureReason::general_interrogation:
+        return kReasonGeneralInterrogation;
+    case MmsStaticBrcbCaptureReason::none:
+    case MmsStaticBrcbCaptureReason::event:
+        return 0U;
+    }
+    return 0U;
+}
+
 [[nodiscard]] std::array<std::uint8_t, MmsInformationReportSpanCodec::entry_id_bytes>
 encode_entry_id(const std::uint64_t entry_number) noexcept {
     std::array<std::uint8_t, MmsInformationReportSpanCodec::entry_id_bytes> result{};
@@ -168,10 +193,6 @@ bool MmsStaticBrcbRuntime::initialize() noexcept {
             static_cast<std::uint8_t>(~kAllowedOptionalFirst)) != 0U ||
         (definition_->optional_fields[1] &
             static_cast<std::uint8_t>(~kAllowedOptionalSecond)) != 0U ||
-        // EntryID is the only BRCB-specific optional field required for retained
-        // history/replay. BufOvfl itself is optional in IEC 61850 and in the
-        // ARIEC C# simulator profile, so do not synthesize it just to satisfy a
-        // native hard-profile policy.
         (definition_->optional_fields[0] & kOptEntryId) == 0U ||
         definition_->trigger_options == 0U ||
         (definition_->trigger_options & static_cast<std::uint8_t>(~kAllowedTriggers)) != 0U) {
@@ -198,9 +219,13 @@ bool MmsStaticBrcbRuntime::initialize() noexcept {
     delivery_offset_ = 0U;
     next_entry_number_ = 1U;
     dropped_reports_ = 0U;
+    next_integrity_due_ms_ = 0U;
     queue_revision_ = 1U;
+    schedule_revision_ = 1U;
     sequence_number_ = 0U;
     replay_gap_ = false;
+    general_interrogation_pending_ = false;
+    integrity_armed_ = false;
     enabled_ = false;
     initialized_ = true;
     return true;
@@ -208,7 +233,7 @@ bool MmsStaticBrcbRuntime::initialize() noexcept {
 
 MmsStaticBrcbStatus MmsStaticBrcbRuntime::set_enabled(
     const bool enabled) noexcept {
-    if (!initialized_ || pending_ == nullptr) {
+    if (!initialized_ || pending_ == nullptr || definition_ == nullptr) {
         return MmsStaticBrcbStatus::invalid_runtime;
     }
     if (enabled_ == enabled) {
@@ -216,7 +241,13 @@ MmsStaticBrcbStatus MmsStaticBrcbRuntime::set_enabled(
     }
     enabled_ = enabled;
     clear_pending(*pending_);
+    general_interrogation_pending_ = false;
+    next_integrity_due_ms_ = 0U;
+    const auto period = effective_integrity_period(*definition_);
+    integrity_armed_ = enabled && period != 0U &&
+        (definition_->trigger_options & kTriggerIntegrity) != 0U;
     bump_revision(pending_->revision);
+    bump_revision(schedule_revision_);
     return MmsStaticBrcbStatus::ok;
 }
 
@@ -262,19 +293,60 @@ MmsStaticBrcbStatus MmsStaticBrcbRuntime::notify(
     return MmsStaticBrcbStatus::ok;
 }
 
+MmsStaticBrcbStatus MmsStaticBrcbRuntime::request_general_interrogation() noexcept {
+    if (!initialized_ || definition_ == nullptr) {
+        return MmsStaticBrcbStatus::invalid_runtime;
+    }
+    if (!enabled_) {
+        return MmsStaticBrcbStatus::temporarily_unavailable;
+    }
+    if ((definition_->trigger_options & kTriggerGeneralInterrogation) == 0U) {
+        return MmsStaticBrcbStatus::trigger_not_selected;
+    }
+    if (!general_interrogation_pending_) {
+        general_interrogation_pending_ = true;
+        bump_revision(schedule_revision_);
+    }
+    return MmsStaticBrcbStatus::ok;
+}
+
 bool MmsStaticBrcbRuntime::next_due(
     const std::uint64_t now_ms,
-    MmsStaticBrcbCapturePlan& plan) const noexcept {
+    MmsStaticBrcbCapturePlan& plan) noexcept {
     plan = {};
-    if (!initialized_ || pending_ == nullptr || !enabled_ ||
-        !pending_->pending || pending_->pending_member_count == 0U ||
-        now_ms < pending_->due_ms || slots_.empty()) {
+    if (!initialized_ || pending_ == nullptr || definition_ == nullptr ||
+        !enabled_ || slots_.empty()) {
         return false;
     }
+
+    if (integrity_armed_ && next_integrity_due_ms_ == 0U) {
+        const auto period = effective_integrity_period(*definition_);
+        next_integrity_due_ms_ = period == 0U
+            ? 0U
+            : saturating_add(now_ms, period);
+        bump_revision(schedule_revision_);
+    }
+
+    MmsStaticBrcbCaptureReason reason{MmsStaticBrcbCaptureReason::none};
+    if (general_interrogation_pending_) {
+        reason = MmsStaticBrcbCaptureReason::general_interrogation;
+    } else if (pending_->pending && pending_->pending_member_count != 0U &&
+               now_ms >= pending_->due_ms) {
+        reason = MmsStaticBrcbCaptureReason::event;
+    } else if (integrity_armed_ && next_integrity_due_ms_ != 0U &&
+               now_ms >= next_integrity_due_ms_) {
+        reason = MmsStaticBrcbCaptureReason::integrity;
+    } else {
+        return false;
+    }
+
     plan.pending_revision = pending_->revision;
+    plan.schedule_revision = schedule_revision_;
     plan.queue_revision = queue_revision_;
     plan.entry_number = next_entry_number_;
+    plan.observed_now_ms = now_ms;
     plan.sequence_number = next_sequence_number(sequence_number_);
+    plan.reason = reason;
     plan.buffer_overflow = count_ == slots_.size() && delivery_offset_ == 0U;
     return true;
 }
@@ -293,12 +365,22 @@ MmsStaticBrcbCaptureResult MmsStaticBrcbRuntime::capture(
     }
     const bool full = count_ == slots_.size();
     const bool overflow = full && delivery_offset_ == 0U;
-    if (!enabled_ || !pending_->pending || pending_->pending_member_count == 0U ||
-        plan.pending_revision != pending_->revision ||
+    const bool event_plan = plan.reason == MmsStaticBrcbCaptureReason::event;
+    const bool integrity_plan = plan.reason == MmsStaticBrcbCaptureReason::integrity;
+    const bool gi_plan = plan.reason == MmsStaticBrcbCaptureReason::general_interrogation;
+    const bool scheduled_plan = integrity_plan || gi_plan;
+
+    if (!enabled_ || (!event_plan && !scheduled_plan) ||
         plan.queue_revision != queue_revision_ ||
         plan.entry_number != next_entry_number_ ||
         plan.sequence_number != next_sequence_number(sequence_number_) ||
-        plan.buffer_overflow != overflow) {
+        plan.buffer_overflow != overflow ||
+        (event_plan && (!pending_->pending || pending_->pending_member_count == 0U ||
+            plan.pending_revision != pending_->revision)) ||
+        (scheduled_plan && plan.schedule_revision != schedule_revision_) ||
+        (gi_plan && !general_interrogation_pending_) ||
+        (integrity_plan && (!integrity_armed_ || next_integrity_due_ms_ == 0U ||
+            plan.observed_now_ms < next_integrity_due_ms_))) {
         result.status = MmsStaticBrcbStatus::stale_plan;
         return result;
     }
@@ -310,6 +392,7 @@ MmsStaticBrcbCaptureResult MmsStaticBrcbRuntime::capture(
         return result;
     }
 
+    const auto full_reason = scheduled_reason_mask(plan.reason);
     std::array<std::size_t, MmsInformationReportSpanCodec::maximum_members> indices{};
     std::array<MmsInformationReportReferenceInput,
         MmsInformationReportSpanCodec::maximum_members> references{};
@@ -322,7 +405,9 @@ MmsStaticBrcbCaptureResult MmsStaticBrcbRuntime::capture(
     for (std::size_t member_index = 0U;
          member_index < data_set->members.size();
          ++member_index) {
-        const auto reason_mask = pending_->member_reason_masks[member_index];
+        const auto reason_mask = scheduled_plan
+            ? full_reason
+            : pending_->member_reason_masks[member_index];
         if (reason_mask == 0U) {
             continue;
         }
@@ -358,7 +443,10 @@ MmsStaticBrcbCaptureResult MmsStaticBrcbRuntime::capture(
         workspace_offset += read.bytes_written;
         ++included;
     }
-    if (included == 0U || included != pending_->pending_member_count) {
+    const auto expected_included = scheduled_plan
+        ? data_set->members.size()
+        : pending_->pending_member_count;
+    if (included == 0U || included != expected_included) {
         result.status = MmsStaticBrcbStatus::stale_plan;
         result.included_member_count = included;
         return result;
@@ -414,16 +502,16 @@ MmsStaticBrcbCaptureResult MmsStaticBrcbRuntime::capture(
 
     std::copy_n(encode_buffer.begin(), encoded.bytes_written, slot.storage.begin());
     slot.entry_id = entry_id;
+    slot.time_of_entry.fill(0U);
+    if (report_time.size() == slot.time_of_entry.size()) {
+        std::copy(report_time.begin(), report_time.end(), slot.time_of_entry.begin());
+    }
     slot.bytes = encoded.bytes_written;
     slot.sequence_number = plan.sequence_number;
     slot.buffer_overflow = plan.buffer_overflow;
     slot.occupied = true;
 
     if (full) {
-        // The physical oldest slot is being recycled. If the delivery cursor is
-        // already past it, retain the same logical next-to-deliver entry by
-        // shifting the cursor with the head. Otherwise an undelivered report is
-        // irrecoverably lost and the recovery gap must remain visible.
         if (delivery_offset_ == 0U) {
             ++dropped_reports_;
             replay_gap_ = true;
@@ -436,8 +524,22 @@ MmsStaticBrcbCaptureResult MmsStaticBrcbRuntime::capture(
     }
     sequence_number_ = plan.sequence_number;
     next_entry_number_ = next_entry_number(plan.entry_number);
-    clear_pending(*pending_);
-    bump_revision(pending_->revision);
+
+    if (event_plan) {
+        clear_pending(*pending_);
+        bump_revision(pending_->revision);
+    } else if (gi_plan) {
+        general_interrogation_pending_ = false;
+        bump_revision(schedule_revision_);
+    } else if (integrity_plan) {
+        const auto period = effective_integrity_period(*definition_);
+        next_integrity_due_ms_ = period == 0U
+            ? 0U
+            : saturating_add(plan.observed_now_ms, period);
+        integrity_armed_ = period != 0U && enabled_ &&
+            (definition_->trigger_options & kTriggerIntegrity) != 0U;
+        bump_revision(schedule_revision_);
+    }
     bump_revision(queue_revision_);
 
     result.status = MmsStaticBrcbStatus::ok;

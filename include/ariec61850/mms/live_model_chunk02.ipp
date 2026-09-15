@@ -299,6 +299,47 @@ inline void append_unique_ci(
     for (const auto& [domain, variables] : discovery.names.domain_variables) {
         for (const auto& variable : variables) add(MmsLiveReferenceParser::parse_variable(domain, variable));
     }
+
+    // IEC 61850 servers commonly advertise only one MMS NamedVariable per
+    // Logical Node and expose FC/DO/DA members through that root's hierarchical
+    // TypeSpecification. Project exactly FC -> DO -> DA here. Children below a
+    // structured DA are BDAs and must not inflate the model's DA coverage; the
+    // structured DA's own TypeSpecification still preserves those child types.
+    for (const auto& evidence : discovery.variable_types) {
+        if (!evidence.success() ||
+            evidence.variable.kind != MmsObjectNameKind::domain_specific ||
+            evidence.variable.domain.empty() || evidence.variable.item.empty()) {
+            continue;
+        }
+
+        const auto& root = evidence.attributes->type;
+        std::size_t projected_components{};
+        for (const auto& fc : root.children) {
+            if (projected_components >= MmsServiceCodec::maximum_type_components) break;
+            if (fc.name.empty() || !MmsLiveReferenceParser::known_functional_constraint(fc.name)) {
+                continue;
+            }
+            ++projected_components;
+            for (const auto& data_object : fc.children) {
+                if (projected_components >= MmsServiceCodec::maximum_type_components) break;
+                if (data_object.name.empty()) continue;
+                ++projected_components;
+                for (const auto& data_attribute : data_object.children) {
+                    if (projected_components >= MmsServiceCodec::maximum_type_components) break;
+                    if (data_attribute.name.empty()) continue;
+                    ++projected_components;
+                    const auto item = evidence.variable.item + "$" + fc.name + "$" +
+                        data_object.name + "$" + data_attribute.name;
+                    add(MmsLiveReferenceParser::parse_variable(
+                        evidence.variable.domain,
+                        item,
+                        "GetVariableAccessAttributesLogicalNodeTree",
+                        100U));
+                }
+            }
+        }
+    }
+
     for (const auto& evidence : discovery.data_set_directories) {
         if (!evidence.success()) continue;
         for (const auto& member : evidence.directory->members) {

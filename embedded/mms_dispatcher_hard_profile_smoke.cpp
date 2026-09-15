@@ -85,6 +85,15 @@ constexpr std::array<std::uint8_t, 15U> kReadResponse{
     0x83U, 0x01U, 0xFFU,
     0x85U, 0x01U, 0x2AU};
 
+// ARIEC61850 golden behavior that is proven with IEDScout: the request may set
+// specificationWithResult, while the response remains the compact
+// listOfAccessResult form and does not synthesize variableAccessSpecification.
+constexpr std::array<std::uint8_t, 15U> kReadWithSpecificationResponse{
+    0xA1U, 0x0DU, 0x02U, 0x01U, 0x0DU,
+    0xA4U, 0x08U, 0xA1U, 0x06U,
+    0x83U, 0x01U, 0xFFU,
+    0x85U, 0x01U, 0x2AU};
+
 constexpr std::array<std::uint8_t, 29U> kWriteRequest{
     0xA0U, 0x1BU, 0x02U, 0x01U, 0x0EU,
     0xA5U, 0x16U,
@@ -252,10 +261,28 @@ int main() {
 
     dispatched = dispatcher.dispatch(
         kReadWithSpecificationRequest, response, workspace);
-    if (dispatched.status != mms::MmsStaticDispatchStatus::unsupported_request ||
+    if (!dispatched.success() ||
         dispatched.service != mms::MmsWireConfirmedService::read ||
-        dispatched.invoke_id != 13U) {
+        dispatched.invoke_id != 13U ||
+        dispatched.bytes_written != kReadWithSpecificationResponse.size() ||
+        !matches(
+            std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
+            kReadWithSpecificationResponse)) {
         return 30;
+    }
+
+    mms::MmsReadResponseView specification_read_response;
+    mms::MmsReadAccessResultView specification_read_result;
+    if (!mms::MmsServiceSpanCodec::try_decode_read_response(
+            std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
+            specification_read_response) ||
+        specification_read_response.invoke_id != 13U ||
+        specification_read_response.result_count != 2U ||
+        !specification_read_response.try_result(0U, specification_read_result) ||
+        !specification_read_result.success ||
+        !specification_read_response.try_result(1U, specification_read_result) ||
+        !specification_read_result.success) {
+        return 31;
     }
 
     std::array<std::uint8_t, 2U> tiny_workspace{};
@@ -408,7 +435,12 @@ int main() {
         return 19;
     }
 
+    // IEDScout-compatible dual-directory mode now advertises every virtual
+    // hierarchy prefix, not only the concrete flattened leaf aliases. Give the
+    // smoke enough page capacity to validate the complete sorted namespace in
+    // one response; pagination is covered separately by the dedicated profile.
     auto dual_directory_policy = hierarchy_policy;
+    dual_directory_policy.maximum_names_per_response = 16U;
     dual_directory_policy.advertise_flattened_child_aliases = true;
     const mms::MmsStaticApplicationDispatcher dual_directory_dispatcher{
         hierarchy_table,
@@ -422,15 +454,21 @@ int main() {
         !mms::MmsServiceSpanCodec::try_decode_get_name_list_response(
             std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
             dual_directory) ||
-        dual_directory.identifier_count != 5U ||
+        dual_directory.identifier_count != 11U ||
         dual_directory.more_follows) {
         return 20;
     }
-    constexpr std::array<std::string_view, 5U> dual_names{
-        "LLN0",
-        "LLN0$ST$Mod$stVal",
+    constexpr std::array<std::string_view, 11U> dual_names{
         "GGIO1",
+        "GGIO1$ST",
+        "GGIO1$ST$Ind1",
         "GGIO1$ST$Ind1$stVal",
+        "LLN0",
+        "LLN0$ST",
+        "LLN0$ST$Mod",
+        "LLN0$ST$Mod$stVal",
+        "Orphan",
+        "Orphan$ST",
         "Orphan$ST$stVal"};
     for (std::size_t index = 0U; index < dual_names.size(); ++index) {
         if (!dual_directory.try_identifier(index, identifier) ||

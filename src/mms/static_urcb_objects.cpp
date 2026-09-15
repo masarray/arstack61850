@@ -17,8 +17,11 @@ namespace ar::iec61850::mms {
 namespace {
 
 constexpr std::array<std::uint8_t, 2U> kBooleanType{0x83U, 0x00U};
+constexpr std::array<std::uint8_t, 3U> kUnsigned8Type{0x86U, 0x01U, 0x08U};
 constexpr std::array<std::uint8_t, 3U> kUnsigned32Type{0x86U, 0x01U, 0x20U};
-constexpr std::array<std::uint8_t, 4U> kVisible255Type{0x8AU, 0x02U, 0x00U, 0xFFU};
+// Golden IEDScout server uses the variable-length VisibleString(129) form.
+constexpr std::array<std::uint8_t, 4U> kVisible129Type{0x8AU, 0x02U, 0xFFU, 0x7FU};
+constexpr std::array<std::uint8_t, 4U> kVariableOctet64Type{0x89U, 0x02U, 0xFFU, 0xC0U};
 constexpr std::array<std::uint8_t, 3U> kBitString10Type{0x84U, 0x01U, 0x0AU};
 constexpr std::array<std::uint8_t, 3U> kBitString6Type{0x84U, 0x01U, 0x06U};
 
@@ -32,10 +35,11 @@ constexpr std::array<MmsStaticUrcbAttribute,
         MmsStaticUrcbAttribute::conf_revision,
         MmsStaticUrcbAttribute::optional_fields,
         MmsStaticUrcbAttribute::buffer_time,
+        MmsStaticUrcbAttribute::sequence_number,
         MmsStaticUrcbAttribute::trigger_options,
         MmsStaticUrcbAttribute::integrity_period,
         MmsStaticUrcbAttribute::general_interrogation,
-        MmsStaticUrcbAttribute::sequence_number};
+        MmsStaticUrcbAttribute::owner};
 
 constexpr std::array<std::string_view,
                      MmsStaticUrcbObjectBank::attributes_per_control_block>
@@ -47,10 +51,11 @@ constexpr std::array<std::string_view,
         "ConfRev",
         "OptFlds",
         "BufTm",
+        "SqNum",
         "TrgOps",
         "IntgPd",
         "GI",
-        "SqNum"};
+        "Owner"};
 
 constexpr std::uint32_t kHardwareFault = 1U;
 constexpr std::uint32_t kTemporarilyUnavailable = 2U;
@@ -83,7 +88,7 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
     switch (attribute) {
     case MmsStaticUrcbAttribute::report_id:
     case MmsStaticUrcbAttribute::data_set:
-        return kVisible255Type;
+        return kVisible129Type;
     case MmsStaticUrcbAttribute::report_enabled:
     case MmsStaticUrcbAttribute::reserved:
     case MmsStaticUrcbAttribute::general_interrogation:
@@ -91,12 +96,15 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
     case MmsStaticUrcbAttribute::conf_revision:
     case MmsStaticUrcbAttribute::buffer_time:
     case MmsStaticUrcbAttribute::integrity_period:
-    case MmsStaticUrcbAttribute::sequence_number:
         return kUnsigned32Type;
+    case MmsStaticUrcbAttribute::sequence_number:
+        return kUnsigned8Type;
     case MmsStaticUrcbAttribute::optional_fields:
         return kBitString10Type;
     case MmsStaticUrcbAttribute::trigger_options:
         return kBitString6Type;
+    case MmsStaticUrcbAttribute::owner:
+        return kVariableOctet64Type;
     }
     return {};
 }
@@ -104,7 +112,8 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
 [[nodiscard]] bool writable_attribute(
     const MmsStaticUrcbAttribute attribute) noexcept {
     return attribute != MmsStaticUrcbAttribute::conf_revision &&
-        attribute != MmsStaticUrcbAttribute::sequence_number;
+        attribute != MmsStaticUrcbAttribute::sequence_number &&
+        attribute != MmsStaticUrcbAttribute::owner;
 }
 
 [[nodiscard]] wire::EncodeResult capacity_result(
@@ -241,6 +250,26 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
     return capacity;
 }
 
+[[nodiscard]] wire::EncodeResult encode_octets(
+    const std::span<const std::uint8_t> bytes,
+    const std::span<std::uint8_t> destination) noexcept {
+    const auto total = asn1::BerSpanWriter::tlv_size(9, bytes.size());
+    if (!total) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    const auto capacity = capacity_result(*total, destination);
+    if (!capacity.success()) {
+        return capacity;
+    }
+    asn1::BerSpanWriter writer{destination.first(*total)};
+    if (!writer.write_tlv_header(
+            asn1::BerClass::context_specific, false, 9, bytes.size()) ||
+        !writer.write_bytes(bytes) || writer.size() != *total) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, *total};
+    }
+    return capacity;
+}
+
 [[nodiscard]] wire::EncodeResult read_urcb_attribute(
     const void* raw_context,
     const std::span<std::uint8_t> destination) noexcept {
@@ -269,6 +298,8 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
         return encode_bit_string(6U, state->optional_fields, destination);
     case MmsStaticUrcbAttribute::buffer_time:
         return encode_unsigned(state->buffer_time_ms, destination);
+    case MmsStaticUrcbAttribute::sequence_number:
+        return encode_unsigned(state->sequence_number, destination);
     case MmsStaticUrcbAttribute::trigger_options: {
         const std::array<std::uint8_t, 1U> trigger{state->trigger_options};
         return encode_bit_string(2U, trigger, destination);
@@ -277,8 +308,13 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
         return encode_unsigned(state->integrity_period_ms, destination);
     case MmsStaticUrcbAttribute::general_interrogation:
         return encode_boolean(state->general_interrogation_pending, destination);
-    case MmsStaticUrcbAttribute::sequence_number:
-        return encode_unsigned(state->sequence_number, destination);
+    case MmsStaticUrcbAttribute::owner: {
+        // The portable URCB runtime is per-association, so no cross-association
+        // Owner identity is retained here. Expose the standards-compatible
+        // empty Owner value instead of omitting the required field.
+        const std::span<const std::uint8_t> empty_owner;
+        return encode_octets(empty_owner, destination);
+    }
     }
     return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
 }
@@ -494,6 +530,7 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
     }
     case MmsStaticUrcbAttribute::conf_revision:
     case MmsStaticUrcbAttribute::sequence_number:
+    case MmsStaticUrcbAttribute::owner:
         return {false, kObjectAccessDenied};
     }
     return {false, kHardwareFault};

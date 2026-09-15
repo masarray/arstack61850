@@ -119,9 +119,21 @@ MmsStaticServerSessionResult MmsStaticServerSession::poll_once() noexcept {
             response_offset_ = 0U;
             response_size_ = connection.bytes_written;
             {
+                // The IED-simulator compatibility runtime intentionally converts
+                // malformed/unsupported/object-not-found confirmed requests into
+                // a standards-level Confirmed-Error while keeping the association
+                // open. Historically this session surfaced that as response_pending,
+                // causing the desktop Activity feed to claim "Read ... answered".
+                // Preserve the queued response, but expose a rejected application
+                // status for Read compatibility errors so diagnostics tell the truth.
+                const auto read_confirmed_error =
+                    connection.application_service == MmsWireConfirmedService::read &&
+                    connection.application_status != MmsStaticDispatchStatus::response_ready;
                 auto result = make_result(
-                MmsStaticServerSessionStatus::response_pending,
-                connection.status);
+                    read_confirmed_error
+                        ? MmsStaticServerSessionStatus::application_rejected
+                        : MmsStaticServerSessionStatus::response_pending,
+                    connection.status);
                 result.application_status = connection.application_status;
                 result.application_service = connection.application_service;
                 result.invoke_id = connection.invoke_id;

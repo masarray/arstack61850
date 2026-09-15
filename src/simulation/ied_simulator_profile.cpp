@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <iomanip>
 #include <locale>
@@ -281,11 +282,24 @@ struct MeasurementShape final {
     return result.empty() ? std::string{"0"} : result;
 }
 
+struct InitialValueContext final {
+    std::uint64_t simulation_start_unix_ms{};
+    const scl::SclIed* ied{};
+};
+
+[[nodiscard]] bool normal_process_state(const scl::SclDataSetEntry& entry) noexcept {
+    if (!ascii_equal(entry.da_name, "stVal")) return false;
+    return ascii_equal(entry.do_name, "Mod") ||
+        ascii_equal(entry.do_name, "Beh") ||
+        ascii_equal(entry.do_name, "Health");
+}
+
 [[nodiscard]] std::string initial_value(
     const scl::SclDataSetEntry& entry,
     const std::string& type,
     const MeasurementShape& shape,
-    const bool measurement) {
+    const bool measurement,
+    const InitialValueContext& context) {
     if (!entry.configured_value.empty()) {
         if (ascii_equal(entry.da_name, "ctlModel")) {
             if (const auto code = control_model_code(entry.configured_value); code.has_value()) {
@@ -294,8 +308,22 @@ struct MeasurementShape final {
         }
         return entry.configured_value;
     }
+
+    if (normal_process_state(entry) && type == "Enumeration") return "1";
     if (type == "Quality") return "good";
-    if (type == "Timestamp") return "0";
+    if (type == "Timestamp") {
+        return "unix-ms:" + std::to_string(context.simulation_start_unix_ms);
+    }
+
+    if (context.ied != nullptr && ascii_equal(entry.do_name, "NamPlt")) {
+        if (ascii_equal(entry.da_name, "vendor") && !context.ied->manufacturer.empty()) {
+            return context.ied->manufacturer;
+        }
+        if (ascii_equal(entry.da_name, "configRev") && !context.ied->config_version.empty()) {
+            return context.ied->config_version;
+        }
+    }
+
     if (measurement) return format_number(shape.base_value);
     if (type == "Boolean") return "false";
     if (type == "Enumeration") return "0";
@@ -306,7 +334,8 @@ struct MeasurementShape final {
 [[nodiscard]] IedSimulatorPoint make_point(
     const scl::SclDataSetEntry& entry,
     const std::string& source_ied,
-    const std::string& runtime_ied) {
+    const std::string& runtime_ied,
+    const InitialValueContext& initial_context) {
     IedSimulatorPoint point;
     point.ied_name = runtime_ied;
     point.logical_device = entry.ld_inst;
@@ -336,7 +365,8 @@ struct MeasurementShape final {
     else if (point.display_type == "Timestamp") point.kind = SimulatorPointKind::timestamp;
     else if (measurement) point.kind = SimulatorPointKind::measurement;
     else point.kind = SimulatorPointKind::status;
-    point.initial_value = initial_value(entry, point.display_type, shape, measurement);
+    point.initial_value = initial_value(
+        entry, point.display_type, shape, measurement, initial_context);
     return point;
 }
 
@@ -390,6 +420,13 @@ void ensure_node(
     auto logical_node = replace_dots(report.logical_node_path, '$');
     if (logical_node.empty()) logical_node = "LLN0";
     return logical_node + (report.buffered ? "$BR$" : "$RP$") + report.name;
+}
+
+[[nodiscard]] std::string report_instance_suffix(const std::uint32_t instance) {
+    std::ostringstream stream;
+    stream.imbue(std::locale::classic());
+    stream << std::setfill('0') << std::setw(2) << instance;
+    return stream.str();
 }
 
 } // namespace
@@ -511,6 +548,16 @@ IedSimulatorProfileFromSclResult IedSimulatorProfileBuilder::build(
         result.profile.vendor = ied_it->manufacturer;
     }
 
+    const auto now_ms = static_cast<std::uint64_t>(std::max<std::int64_t>(
+        1LL,
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count()));
+    const InitialValueContext initial_context{
+        options.simulation_start_unix_ms != 0U
+            ? options.simulation_start_unix_ms
+            : now_ms,
+        ied_it == document.ieds.end() ? nullptr : &*ied_it};
+
     std::map<std::string, DeviceBuilder> devices;
     for (const auto& logical_node : document.logical_nodes) {
         if (!matches_ied(logical_node.ied_name, source_ied)) continue;
@@ -535,7 +582,7 @@ IedSimulatorProfileFromSclResult IedSimulatorProfileBuilder::build(
                 relative_reference(entry));
             return;
         }
-        auto point = make_point(entry, source_ied, runtime_ied);
+        auto point = make_point(entry, source_ied, runtime_ied, initial_context);
         point.source_order = source_order++;
         const auto key = point.mms_domain + "\n" + point.mms_item;
         if (!point_keys.insert(key).second) return;
@@ -599,25 +646,51 @@ IedSimulatorProfileFromSclResult IedSimulatorProfileBuilder::build(
         if (!output.members.empty()) result.profile.data_sets.push_back(std::move(output));
     }
 
+    const auto report_client_bound = std::max<std::uint32_t>(
+        1U, options.maximum_report_clients_per_definition);
     for (const auto& report : document.report_controls) {
         if (!matches_ied(report.ied_name, source_ied)) continue;
-        IedSimulatorReportControlBlock output;
-        output.reference = remap_reference(report.control_block_reference, source_ied, runtime_ied);
-        output.mms_domain = runtime_ied + report.ld_inst;
-        output.mms_item = report_item(report);
-        output.buffered = report.buffered;
-        output.data_set_reference = remap_reference(report.data_set_reference, source_ied, runtime_ied);
-        output.report_id = report.report_id.empty() ? report.name : report.report_id;
-        output.configuration_revision = report.configuration_revision;
-        output.buffer_time_milliseconds = report.buffer_time_milliseconds;
-        output.integrity_period_milliseconds = report.integrity_period_milliseconds;
-        output.trigger_options = report.buffered
-            ? "data-change, quality-change, integrity, GI"
-            : "data-change, quality-change, GI";
-        output.optional_fields = report.buffered
-            ? "seqNum, entryId, timeStamp, reasonCode, dataSet, confRev"
-            : "seqNum, timeStamp, reasonCode, dataSet, confRev";
-        result.profile.report_control_blocks.push_back(std::move(output));
+        ++result.report_control_definition_count;
+
+        const auto requested_instances = report.indexed
+            ? std::max<std::uint32_t>(1U, report.max_clients)
+            : 1U;
+        const auto compiled_instances = std::min(requested_instances, report_client_bound);
+        if (compiled_instances != requested_instances) {
+            result.findings.push_back(
+                "ReportControl " + report.control_block_reference + " requests " +
+                std::to_string(requested_instances) +
+                " client instances; simulator runtime bound reduced this to " +
+                std::to_string(compiled_instances) + ".");
+        }
+
+        const auto base_reference = remap_reference(
+            report.control_block_reference, source_ied, runtime_ied);
+        const auto base_item = report_item(report);
+        for (std::uint32_t instance = 1U; instance <= compiled_instances; ++instance) {
+            const auto suffix = report.indexed
+                ? report_instance_suffix(instance)
+                : std::string{};
+            IedSimulatorReportControlBlock output;
+            output.reference = base_reference + suffix;
+            output.mms_domain = runtime_ied + report.ld_inst;
+            output.mms_item = base_item + suffix;
+            output.buffered = report.buffered;
+            output.data_set_reference = remap_reference(
+                report.data_set_reference, source_ied, runtime_ied);
+            output.report_id = report.report_id.empty() ? report.name : report.report_id;
+            output.configuration_revision = report.configuration_revision;
+            output.buffer_time_milliseconds = report.buffer_time_milliseconds;
+            output.integrity_period_milliseconds = report.integrity_period_milliseconds;
+            output.trigger_options = report.buffered
+                ? "data-change, quality-change, integrity, GI"
+                : "data-change, quality-change, GI";
+            output.optional_fields = report.buffered
+                ? "seqNum, entryId, timeStamp, reasonCode, dataSet, confRev"
+                : "seqNum, timeStamp, reasonCode, dataSet, confRev";
+            result.profile.report_control_blocks.push_back(std::move(output));
+            ++result.report_control_instance_count;
+        }
     }
 
     if (result.profile.logical_devices.empty()) {

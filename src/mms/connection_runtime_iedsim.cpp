@@ -29,11 +29,11 @@ constexpr std::uint32_t kServerMaximumNestingLevel = 5U;
 constexpr std::array<std::uint8_t, 4U> kConservativeStructureType{
     0xA2U, 0x02U, 0xA1U, 0x00U};
 
-// FileDirectory-Response service value: listOfDirectoryEntry [0] empty,
-// moreFollows [1] FALSE. Mirrors the deterministic behavior of the proven
-// ARIEC61850 engineering-client simulator without claiming file-server support.
-constexpr std::array<std::uint8_t, 5U> kEmptyFileDirectoryFields{
-    0xA0U, 0x00U, 0x81U, 0x01U, 0x00U};
+// IEDScout golden empty FileDirectory response: [0] contains an empty
+// SEQUENCE OF DirectoryEntry. moreFollows is DEFAULT FALSE and therefore omitted.
+// Exact service value: A0 02 30 00.
+constexpr std::array<std::uint8_t, 4U> kEmptyFileDirectoryFields{
+    0xA0U, 0x02U, 0x30U, 0x00U};
 
 [[nodiscard]] MmsStaticConnectionResult make_result(
     const MmsStaticConnectionStatus status,
@@ -744,6 +744,32 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
                 MmsStaticDispatchStatus::response_ready,
                 MmsWireConfirmedService::identify,
                 confirmed.invoke_id));
+        }
+
+        if (policy_.confirmed_service != nullptr) {
+            const auto extension = policy_.confirmed_service(
+                policy_.confirmed_service_context,
+                confirmed.service(),
+                confirmed.invoke_id,
+                confirmed.service_constructed,
+                confirmed.service_value,
+                response);
+            if (extension.handled) {
+                return finish(wrap_mms_response(
+                    extension.encoded,
+                    peek.frame_bytes,
+                    state_,
+                    mms_presentation_context_id_,
+                    negotiated_mms_pdu_size_,
+                    negotiated_tpdu_size_bytes_,
+                    response,
+                    workspace,
+                    extension.encoded.success()
+                        ? MmsStaticDispatchStatus::response_ready
+                        : MmsStaticDispatchStatus::backend_failure,
+                    confirmed.service(),
+                    confirmed.invoke_id));
+            }
         }
 
         if (confirmed.service() == MmsWireConfirmedService::file_directory) {

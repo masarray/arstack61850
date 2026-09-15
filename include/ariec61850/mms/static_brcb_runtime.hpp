@@ -41,6 +41,13 @@ enum class MmsStaticBrcbEventReason : std::uint8_t {
     data_update,
 };
 
+enum class MmsStaticBrcbCaptureReason : std::uint8_t {
+    none,
+    event,
+    general_interrogation,
+    integrity,
+};
+
 struct MmsStaticBrcbDefinition final {
     std::string_view domain;
     std::string_view item;
@@ -52,11 +59,14 @@ struct MmsStaticBrcbDefinition final {
         optional_fields{};
     std::uint32_t buffer_time_ms{};
     std::uint8_t trigger_options{};
+    std::uint32_t integrity_period_ms{};
 };
 
 struct MmsStaticBrcbSlot final {
     std::span<std::uint8_t> storage{};
     std::array<std::uint8_t, MmsInformationReportSpanCodec::entry_id_bytes> entry_id{};
+    std::array<std::uint8_t, MmsInformationReportSpanCodec::binary_time_bytes>
+        time_of_entry{};
     std::size_t bytes{};
     std::uint8_t sequence_number{};
     bool buffer_overflow{};
@@ -74,9 +84,12 @@ struct MmsStaticBrcbPendingState final {
 
 struct MmsStaticBrcbCapturePlan final {
     std::uint32_t pending_revision{};
+    std::uint32_t schedule_revision{};
     std::uint32_t queue_revision{};
     std::uint64_t entry_number{};
+    std::uint64_t observed_now_ms{};
     std::uint8_t sequence_number{};
+    MmsStaticBrcbCaptureReason reason{MmsStaticBrcbCaptureReason::none};
     bool buffer_overflow{};
 };
 
@@ -101,6 +114,8 @@ struct MmsStaticBrcbEntryView final {
 
 class MmsStaticBrcbRuntime final {
 public:
+    static constexpr std::uint32_t minimum_integrity_period_ms = 100U;
+
     MmsStaticBrcbRuntime(
         const MmsStaticBrcbDefinition& definition,
         MmsStaticBrcbPendingState& pending,
@@ -115,15 +130,23 @@ public:
 
     [[nodiscard]] MmsStaticBrcbStatus set_enabled(bool enabled) noexcept;
     [[nodiscard]] constexpr bool enabled() const noexcept { return enabled_; }
+    [[nodiscard]] constexpr std::uint8_t sequence_number() const noexcept {
+        return sequence_number_;
+    }
+    [[nodiscard]] constexpr bool general_interrogation_pending() const noexcept {
+        return general_interrogation_pending_;
+    }
 
     [[nodiscard]] MmsStaticBrcbStatus notify(
         std::size_t data_set_member_index,
         MmsStaticBrcbEventReason reason,
         std::uint64_t now_ms) noexcept;
 
+    [[nodiscard]] MmsStaticBrcbStatus request_general_interrogation() noexcept;
+
     [[nodiscard]] bool next_due(
         std::uint64_t now_ms,
-        MmsStaticBrcbCapturePlan& plan) const noexcept;
+        MmsStaticBrcbCapturePlan& plan) noexcept;
 
     [[nodiscard]] MmsStaticBrcbCaptureResult capture(
         const MmsStaticBrcbCapturePlan& plan,
@@ -146,8 +169,6 @@ public:
 
     [[nodiscard]] MmsStaticBrcbStatus purge_buffer() noexcept;
 
-    // EntryID attribute readback: all zero when no report is buffered,
-    // otherwise the newest retained report EntryID.
     [[nodiscard]] std::array<std::uint8_t,
         MmsInformationReportSpanCodec::entry_id_bytes> latest_entry_id() const noexcept {
         std::array<std::uint8_t,
@@ -159,6 +180,19 @@ public:
         const auto physical = (head_ + count_ - 1U) % slots_.size();
         const auto& slot = slots_[physical];
         return slot.occupied ? slot.entry_id : empty;
+    }
+
+    [[nodiscard]] std::array<std::uint8_t,
+        MmsInformationReportSpanCodec::binary_time_bytes> latest_time_of_entry() const noexcept {
+        std::array<std::uint8_t,
+            MmsInformationReportSpanCodec::binary_time_bytes> empty{};
+        if (!initialized_ || slots_.empty() || count_ == 0U ||
+            count_ > slots_.size() || head_ >= slots_.size()) {
+            return empty;
+        }
+        const auto physical = (head_ + count_ - 1U) % slots_.size();
+        const auto& slot = slots_[physical];
+        return slot.occupied ? slot.time_of_entry : empty;
     }
 
     [[nodiscard]] constexpr std::size_t queue_size() const noexcept {
@@ -194,9 +228,13 @@ private:
     std::size_t delivery_offset_{};
     std::uint64_t next_entry_number_{1U};
     std::uint64_t dropped_reports_{};
+    std::uint64_t next_integrity_due_ms_{};
     std::uint32_t queue_revision_{1U};
+    std::uint32_t schedule_revision_{1U};
     std::uint8_t sequence_number_{};
     bool replay_gap_{};
+    bool general_interrogation_pending_{};
+    bool integrity_armed_{};
     bool enabled_{};
     bool initialized_{};
 };

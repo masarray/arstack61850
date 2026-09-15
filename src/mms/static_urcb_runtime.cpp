@@ -2,7 +2,11 @@
 
 #include "ariec61850/mms/static_urcb_runtime.hpp"
 
+#include "ariec61850/mms/buffered_selective_information_report_span.hpp"
+#include "ariec61850/mms/buffered_selective_report_detail.hpp"
+
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -15,7 +19,12 @@ namespace {
 constexpr std::uint8_t kAllowedOptionalFirst = 0x7CU;
 constexpr std::uint8_t kAllowedOptionalSecond = 0x80U;
 constexpr std::uint8_t kAllowedTriggerOptions = 0x7CU;
+constexpr std::uint8_t kTriggerDataChange = 0x40U;
+constexpr std::uint8_t kTriggerQualityChange = 0x20U;
+constexpr std::uint8_t kTriggerDataUpdate = 0x10U;
 constexpr std::uint8_t kTriggerIntegrity = 0x08U;
+constexpr std::uint8_t kTriggerGeneralInterrogation = 0x04U;
+constexpr std::uint8_t kOptReasonForInclusion = 0x10U;
 
 [[nodiscard]] bool visible_ascii(
     const std::string_view text,
@@ -135,6 +144,61 @@ void refresh_integrity_arm(
         : 0U;
 }
 
+void clear_pending_event(MmsStaticUrcbState& state) noexcept {
+    std::fill(
+        state.member_reason_masks.begin(),
+        state.member_reason_masks.end(),
+        std::uint8_t{0U});
+    state.event_due_ms = 0U;
+    state.pending_member_count = 0U;
+    state.event_pending = false;
+}
+
+[[nodiscard]] bool event_mapping(
+    const MmsStaticUrcbEventReason reason,
+    std::uint8_t& trigger_mask,
+    std::uint8_t& report_reason) noexcept {
+    switch (reason) {
+    case MmsStaticUrcbEventReason::data_change:
+        trigger_mask = kTriggerDataChange;
+        report_reason = static_cast<std::uint8_t>(MmsStaticUrcbReportReason::data_change);
+        return true;
+    case MmsStaticUrcbEventReason::quality_change:
+        trigger_mask = kTriggerQualityChange;
+        report_reason = static_cast<std::uint8_t>(MmsStaticUrcbReportReason::quality_change);
+        return true;
+    case MmsStaticUrcbEventReason::data_update:
+        trigger_mask = kTriggerDataUpdate;
+        report_reason = static_cast<std::uint8_t>(MmsStaticUrcbReportReason::data_update);
+        return true;
+    }
+    return false;
+}
+
+[[nodiscard]] bool event_reason(const MmsStaticUrcbReportReason reason) noexcept {
+    return reason == MmsStaticUrcbReportReason::data_change ||
+        reason == MmsStaticUrcbReportReason::quality_change ||
+        reason == MmsStaticUrcbReportReason::data_update;
+}
+
+[[nodiscard]] MmsStaticUrcbReportReason dominant_event_reason(
+    const MmsStaticUrcbState& state) noexcept {
+    std::uint8_t combined{};
+    for (const auto reason : state.member_reason_masks) {
+        combined = static_cast<std::uint8_t>(combined | reason);
+    }
+    if ((combined & static_cast<std::uint8_t>(MmsStaticUrcbReportReason::data_change)) != 0U) {
+        return MmsStaticUrcbReportReason::data_change;
+    }
+    if ((combined & static_cast<std::uint8_t>(MmsStaticUrcbReportReason::quality_change)) != 0U) {
+        return MmsStaticUrcbReportReason::quality_change;
+    }
+    if ((combined & static_cast<std::uint8_t>(MmsStaticUrcbReportReason::data_update)) != 0U) {
+        return MmsStaticUrcbReportReason::data_update;
+    }
+    return MmsStaticUrcbReportReason::none;
+}
+
 [[nodiscard]] std::uint8_t next_sequence_number(
     const std::uint8_t current) noexcept {
     return static_cast<std::uint8_t>(
@@ -152,7 +216,11 @@ void refresh_integrity_arm(
     if (plan.reason == MmsStaticUrcbReportReason::general_interrogation) {
         return state.general_interrogation_pending;
     }
-    return plan.reason == MmsStaticUrcbReportReason::integrity && state.integrity_armed;
+    if (plan.reason == MmsStaticUrcbReportReason::integrity) {
+        return state.integrity_armed;
+    }
+    return event_reason(plan.reason) && state.event_pending &&
+        state.pending_member_count != 0U;
 }
 
 [[nodiscard]] MmsStaticUrcbEncodeResult map_report_result(
@@ -184,6 +252,110 @@ void refresh_integrity_arm(
     return {status, result.bytes_written, result.required_bytes, result.member_count};
 }
 
+[[nodiscard]] MmsStaticUrcbEncodeResult encode_selective_event(
+    const MmsStaticObjectTable& objects,
+    const MmsStaticDataSetTable& data_sets,
+    const MmsStaticUrcbState& state,
+    const MmsStaticUrcbEmissionPlan& plan,
+    const std::span<const std::uint8_t> report_time,
+    const std::span<std::uint8_t> destination,
+    const std::span<std::uint8_t> workspace) noexcept {
+    const auto data_set_name = object_name(state.data_set_domain(), state.data_set_item());
+    const auto* data_set = data_sets.find(data_set_name);
+    if (data_set == nullptr) {
+        return {MmsStaticUrcbStatus::data_set_not_found, 0U, 0U, 0U};
+    }
+    if (data_set->members.empty() ||
+        data_set->members.size() > MmsInformationReportSpanCodec::maximum_members) {
+        return {MmsStaticUrcbStatus::report_encode_failed, 0U, 0U, 0U};
+    }
+
+    std::array<std::size_t, MmsInformationReportSpanCodec::maximum_members> indices{};
+    std::array<MmsInformationReportReferenceInput,
+        MmsInformationReportSpanCodec::maximum_members> references{};
+    std::array<MmsReadAccessResultInput,
+        MmsInformationReportSpanCodec::maximum_members> results{};
+    std::array<std::uint8_t, MmsInformationReportSpanCodec::maximum_members> reasons{};
+
+    std::size_t included{};
+    std::size_t workspace_offset{};
+    for (std::size_t member_index = 0U;
+         member_index < data_set->members.size();
+         ++member_index) {
+        const auto reason_mask = state.member_reason_masks[member_index];
+        if (reason_mask == 0U) continue;
+        const auto& member = data_set->members[member_index];
+        const auto* object = objects.find(object_name(member.domain, member.item));
+        if (object == nullptr || object->read == nullptr) {
+            return {MmsStaticUrcbStatus::backend_failure, 0U, 0U, included};
+        }
+        if (workspace_offset > workspace.size()) {
+            return {MmsStaticUrcbStatus::workspace_too_small, 0U, workspace_offset, included};
+        }
+        const auto remaining = workspace.subspan(workspace_offset);
+        const auto read = object->read(object->context, remaining);
+        if (read.status == wire::EncodeStatus::buffer_too_small) {
+            const auto required = read.required_bytes >
+                    std::numeric_limits<std::size_t>::max() - workspace_offset
+                ? std::numeric_limits<std::size_t>::max()
+                : workspace_offset + read.required_bytes;
+            return {MmsStaticUrcbStatus::workspace_too_small, 0U, required, included};
+        }
+        if (!read.success() || read.bytes_written > remaining.size() ||
+            !detail::valid_mms_data(remaining.first(read.bytes_written))) {
+            return {MmsStaticUrcbStatus::backend_failure, 0U, 0U, included};
+        }
+
+        indices[included] = member_index;
+        references[included] = {member.domain, member.item};
+        results[included] = {true, remaining.first(read.bytes_written), 0U};
+        reasons[included] = reason_mask;
+        workspace_offset += read.bytes_written;
+        ++included;
+    }
+    if (included == 0U || included != state.pending_member_count) {
+        return {MmsStaticUrcbStatus::stale_plan, 0U, 0U, included};
+    }
+
+    MmsBufferedSelectiveInformationReportSnapshotInput report;
+    report.report_id = state.report_id();
+    report.optional_fields = state.optional_fields;
+    report.sequence_number = plan.sequence_number;
+    report.report_time = report_time;
+    report.data_set_reference = {state.data_set_domain(), state.data_set_item()};
+    report.buffer_overflow = false;
+    report.entry_id = {};
+    report.conf_revision = state.conf_revision;
+    report.data_set_member_count = data_set->members.size();
+    report.included_member_indices =
+        std::span<const std::size_t>{indices}.first(included);
+    report.included_member_references =
+        std::span<const MmsInformationReportReferenceInput>{references}.first(included);
+    report.included_member_results =
+        std::span<const MmsReadAccessResultInput>{results}.first(included);
+    if ((state.optional_fields[0] & kOptReasonForInclusion) != 0U) {
+        report.included_reason_for_inclusion =
+            std::span<const std::uint8_t>{reasons}.first(included);
+    }
+
+    const auto encoded =
+        MmsBufferedSelectiveInformationReportSpanCodec::encode_snapshot_into(
+            report, destination);
+    if (encoded.success()) {
+        return {MmsStaticUrcbStatus::ok,
+                encoded.bytes_written,
+                encoded.required_bytes,
+                included};
+    }
+    return {
+        encoded.status == wire::EncodeStatus::buffer_too_small
+            ? MmsStaticUrcbStatus::response_buffer_too_small
+            : MmsStaticUrcbStatus::report_encode_failed,
+        0U,
+        encoded.required_bytes,
+        included};
+}
+
 } // namespace
 
 bool MmsStaticUrcbRuntime::initialize() noexcept {
@@ -198,14 +370,16 @@ bool MmsStaticUrcbRuntime::initialize() noexcept {
 
     for (std::size_t index = 0U; index < definitions_.size(); ++index) {
         const auto& definition = definitions_[index];
+        const auto* data_set = data_sets_->find(object_name(
+            definition.data_set_domain,
+            definition.data_set_item));
         if (!valid_reference(definition.domain, definition.item) ||
             !valid_report_id(definition.report_id) ||
             !valid_reference(definition.data_set_domain, definition.data_set_item) ||
             !valid_optional_fields(definition.optional_fields) ||
             !valid_trigger_options(definition.trigger_options) ||
-            data_sets_->find(object_name(
-                definition.data_set_domain,
-                definition.data_set_item)) == nullptr) {
+            data_set == nullptr || data_set->members.empty() ||
+            data_set->members.size() > MmsInformationReportSpanCodec::maximum_members) {
             return false;
         }
         for (std::size_t earlier = 0U; earlier < index; ++earlier) {
@@ -305,6 +479,7 @@ MmsStaticUrcbStatus MmsStaticUrcbRuntime::set_enabled(
 
     state_ref->enabled = enabled;
     state_ref->general_interrogation_pending = false;
+    clear_pending_event(*state_ref);
     if (enabled) {
         state_ref->sequence_number = 0U;
         refresh_integrity_arm(*state_ref, now_ms);
@@ -499,10 +674,63 @@ MmsStaticUrcbStatus MmsStaticUrcbRuntime::request_general_interrogation(
     if (!state_ref->enabled) {
         return MmsStaticUrcbStatus::temporarily_unavailable;
     }
+    if ((state_ref->trigger_options & kTriggerGeneralInterrogation) == 0U) {
+        return MmsStaticUrcbStatus::invalid_value;
+    }
     if (!state_ref->general_interrogation_pending) {
         state_ref->general_interrogation_pending = true;
         bump_revision(*state_ref);
     }
+    return MmsStaticUrcbStatus::ok;
+}
+
+MmsStaticUrcbStatus MmsStaticUrcbRuntime::notify(
+    const std::size_t index,
+    const std::size_t data_set_member_index,
+    const MmsStaticUrcbEventReason reason,
+    const std::uint64_t now_ms) noexcept {
+    auto* state_ref = state(index);
+    if (!initialized_ || data_sets_ == nullptr) {
+        return MmsStaticUrcbStatus::invalid_runtime;
+    }
+    if (state_ref == nullptr) {
+        return MmsStaticUrcbStatus::index_out_of_range;
+    }
+    if (!state_ref->enabled) {
+        return MmsStaticUrcbStatus::temporarily_unavailable;
+    }
+
+    std::uint8_t trigger_mask{};
+    std::uint8_t report_reason{};
+    if (!event_mapping(reason, trigger_mask, report_reason)) {
+        return MmsStaticUrcbStatus::invalid_value;
+    }
+    if ((state_ref->trigger_options & trigger_mask) == 0U) {
+        // A value update outside selected TrgOps is intentionally a no-op.
+        return MmsStaticUrcbStatus::ok;
+    }
+
+    const auto* data_set = data_sets_->find(object_name(
+        state_ref->data_set_domain(), state_ref->data_set_item()));
+    if (data_set == nullptr) {
+        return MmsStaticUrcbStatus::data_set_not_found;
+    }
+    if (data_set_member_index >= data_set->members.size() ||
+        data_set_member_index >= state_ref->member_reason_masks.size()) {
+        return MmsStaticUrcbStatus::invalid_value;
+    }
+
+    if (!state_ref->event_pending) {
+        state_ref->event_pending = true;
+        state_ref->event_due_ms = saturating_add(now_ms, state_ref->buffer_time_ms);
+    }
+    if (state_ref->member_reason_masks[data_set_member_index] == 0U) {
+        ++state_ref->pending_member_count;
+    }
+    state_ref->member_reason_masks[data_set_member_index] =
+        static_cast<std::uint8_t>(
+            state_ref->member_reason_masks[data_set_member_index] | report_reason);
+    bump_revision(*state_ref);
     return MmsStaticUrcbStatus::ok;
 }
 
@@ -521,6 +749,20 @@ bool MmsStaticUrcbRuntime::next_due(
             plan.revision = state_ref.revision;
             plan.sequence_number = next_sequence_number(state_ref.sequence_number);
             plan.reason = MmsStaticUrcbReportReason::general_interrogation;
+            return true;
+        }
+    }
+    for (std::size_t index = 0U; index < definitions_.size(); ++index) {
+        const auto& state_ref = states_[index];
+        if (state_ref.enabled && state_ref.event_pending &&
+            state_ref.pending_member_count != 0U &&
+            now_ms >= state_ref.event_due_ms) {
+            const auto reason = dominant_event_reason(state_ref);
+            if (reason == MmsStaticUrcbReportReason::none) continue;
+            plan.index = index;
+            plan.revision = state_ref.revision;
+            plan.sequence_number = next_sequence_number(state_ref.sequence_number);
+            plan.reason = reason;
             return true;
         }
     }
@@ -552,6 +794,17 @@ MmsStaticUrcbEncodeResult MmsStaticUrcbRuntime::encode(
     const auto& state_ref = states_[plan.index];
     if (!plan_matches_state(plan, state_ref)) {
         return {MmsStaticUrcbStatus::stale_plan, 0U, 0U, 0U};
+    }
+
+    if (event_reason(plan.reason)) {
+        return encode_selective_event(
+            *objects_,
+            *data_sets_,
+            state_ref,
+            plan,
+            report_time,
+            destination,
+            workspace);
     }
 
     const auto data_set_name = object_name(
@@ -595,6 +848,8 @@ MmsStaticUrcbStatus MmsStaticUrcbRuntime::commit(
     state_ref.sequence_number = plan.sequence_number;
     if (plan.reason == MmsStaticUrcbReportReason::general_interrogation) {
         state_ref.general_interrogation_pending = false;
+    } else if (event_reason(plan.reason)) {
+        clear_pending_event(state_ref);
     } else if (plan.reason == MmsStaticUrcbReportReason::integrity) {
         const auto period = effective_integrity_period(state_ref);
         state_ref.next_integrity_due_ms = period == 0U

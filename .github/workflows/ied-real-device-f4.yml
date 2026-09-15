@@ -1,0 +1,206 @@
+name: F4 Real IED Acceptance RC
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/ied-sim-ux-performance-foundation
+    paths:
+      - 'apps/ied_simulator/**'
+      - 'embedded/**'
+      - 'tests/fixtures/scl/**'
+      - 'tools/static_ied_server.cpp'
+      - 'tools/static_file_service_backend.hpp'
+      - 'tools/static_file_service_backend_test.cpp'
+      - 'tools/file_transfer.cpp'
+      - 'tools/mms_*probe.cpp'
+      - 'tools/control_block_read_probe.cpp'
+      - 'tools/live_discover.cpp'
+      - 'tools/static_ied_server_iedsim/**'
+      - 'src/mms/**'
+      - 'include/ariec61850/mms/**'
+      - '.github/workflows/ied-real-device-f4.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  protocol-gate:
+    name: Linux protocol gate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure current IEDScout-compatible server
+        run: cmake -S tools/static_ied_server_iedsim -B build-f4-protocol -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build protocol acceptance targets
+        run: cmake --build build-f4-protocol --parallel 2
+
+      - name: Run retained server/report/file acceptance
+        run: ctest --test-dir build-f4-protocol --output-on-failure
+
+  windows-field-kit:
+    name: Windows F4 RC and field kit
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          cache: true
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis --yes --no-progress
+
+      - name: Configure Workbench release build
+        shell: pwsh
+        run: >-
+          cmake -S apps/ied_simulator -B build-f4-windows
+          -G "Visual Studio 18 2026" -A x64
+
+      - name: Build Workbench, server and field-facing QA
+        shell: pwsh
+        run: >-
+          cmake --build build-f4-windows --config Release
+          --target arstack_ied_simulator ariec61850_ied_simulator_server
+          ied_mms_client_workbench_qa ied_report_workspace_qa ied_file_settings_workspace_qa
+          ied_product_hardening_qa
+          --parallel 2
+
+      - name: Configure standalone field tools
+        shell: pwsh
+        run: >-
+          cmake -S . -B build-f4-tools
+          -G "Visual Studio 18 2026" -A x64
+          -DARIEC61850_BUILD_TESTS=OFF
+          -DARIEC61850_BUILD_TOOLS=ON
+          -DARIEC61850_BUILD_FUZZERS=OFF
+
+      - name: Build standalone field tools
+        shell: pwsh
+        run: >-
+          cmake --build build-f4-tools --config Release
+          --target ariec61850_live_discover ariec61850_mms_read_probe
+          ariec61850_mms_urcb_gi_probe ariec61850_mms_brcb_event_probe
+          ariec61850_control_block_read_probe ariec61850_file_transfer
+          --parallel 2
+
+      - name: Run client/report/file preflight
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          & '.\build-f4-windows\Release\ied_mms_client_workbench_qa.exe' '.\tests\fixtures\scl\client-workbench.scd'
+          if ($LASTEXITCODE -ne 0) { throw "MMS client workbench QA failed: $LASTEXITCODE" }
+          & '.\build-f4-windows\Release\ied_report_workspace_qa.exe' '.\tests\fixtures\scl\minimal-station-brcb.scd'
+          if ($LASTEXITCODE -ne 0) { throw "Reports workbench QA failed: $LASTEXITCODE" }
+          & '.\build-f4-windows\Release\ied_file_settings_workspace_qa.exe'
+          if ($LASTEXITCODE -ne 0) { throw "Files/settings workbench QA failed: $LASTEXITCODE" }
+
+      - name: Stage deployed Qt application
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path $PWD 'release-stage\ARStack-IEC61850-Workbench'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item 'build-f4-windows\Release\arstack_ied_simulator.exe' $stage
+          Copy-Item 'build-f4-windows\Release\ariec61850_ied_simulator_server.exe' $stage
+          windeployqt --release --qmldir apps/ied_simulator/qml --dir $stage (Join-Path $stage 'arstack_ied_simulator.exe')
+
+      - name: Build latest portable ZIP and NSIS installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = (Resolve-Path 'release-stage\ARStack-IEC61850-Workbench').Path
+          $release = Join-Path $PWD 'release-artifacts'
+          New-Item -ItemType Directory -Force -Path $release | Out-Null
+          $zip = Join-Path $release 'ARStack-IEC61850-Workbench-portable-win64.zip'
+          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -Force
+          $installer = Join-Path $release 'ARStack-IEC61850-Workbench-Setup-win64.exe'
+          $makensis = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
+          if (-not (Test-Path -LiteralPath $makensis -PathType Leaf)) { throw "makensis not found: $makensis" }
+          & $makensis "/DSTAGE_DIR=$stage" "/DOUT_FILE=$installer" 'apps\ied_simulator\packaging\windows\ARStackIEC61850Workbench.nsi'
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed with exit code $LASTEXITCODE" }
+
+      - name: Verify staged and installed release
+        shell: pwsh
+        run: >-
+          ./apps/ied_simulator/packaging/windows/verify-release.ps1
+          -StageDir ./release-stage/ARStack-IEC61850-Workbench
+          -BuildDir ./build-f4-windows/Release
+          -InstallerPath ./release-artifacts/ARStack-IEC61850-Workbench-Setup-win64.exe
+          -FixturePath ./tests/fixtures/scl/client-workbench.scd
+
+      - name: Assemble F4 external-acceptance kit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $kit = Join-Path $PWD 'f4-kit'
+          $bin = Join-Path $kit 'tools'
+          New-Item -ItemType Directory -Force -Path $bin | Out-Null
+
+          Copy-Item 'release-artifacts\ARStack-IEC61850-Workbench-Setup-win64.exe' $kit
+          Copy-Item 'release-artifacts\ARStack-IEC61850-Workbench-portable-win64.zip' $kit
+          Copy-Item 'apps\ied_simulator\field_acceptance\F4_REAL_IED_ACCEPTANCE.md' $kit
+          Copy-Item 'apps\ied_simulator\field_acceptance\ACCEPTANCE_RESULT_TEMPLATE.md' $kit
+          Copy-Item 'apps\ied_simulator\field_acceptance\collect-f4-evidence.ps1' $kit
+          Set-Content -LiteralPath (Join-Path $kit 'BUILD_HEAD.txt') -Value $env:GITHUB_SHA -Encoding ascii
+
+          $server = Get-ChildItem -Path 'build-f4-windows' -Recurse -File -Filter 'ariec61850_ied_simulator_server.exe' |
+            Where-Object { $_.FullName -match '[\\/]Release[\\/]' } |
+            Select-Object -First 1
+          if (-not $server) { throw 'F4 simulator server not found after Workbench build' }
+          Copy-Item -LiteralPath $server.FullName -Destination (Join-Path $bin $server.Name)
+
+          $toolNames = @(
+            'ariec61850_live_discover.exe',
+            'ariec61850_mms_read_probe.exe',
+            'ariec61850_mms_urcb_gi_probe.exe',
+            'ariec61850_mms_brcb_event_probe.exe',
+            'ariec61850_control_block_read_probe.exe',
+            'ariec61850_file_transfer.exe'
+          )
+          foreach ($name in $toolNames) {
+            $candidate = Get-ChildItem -Path 'build-f4-tools' -Recurse -File -Filter $name |
+              Where-Object { $_.FullName -match '[\\/]Release[\\/]' } |
+              Select-Object -First 1
+            if (-not $candidate) { throw "F4 field tool not found after standalone build: $name" }
+            Copy-Item -LiteralPath $candidate.FullName -Destination (Join-Path $bin $name)
+          }
+
+          $manifest = [ordered]@{
+            schemaVersion = 'arstack-f4-field-kit-v1'
+            headSha = $env:GITHUB_SHA
+            generatedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+            externalAcceptance = 'pending_real_client_or_device'
+            issue95CloseAllowed = $false
+            destructiveFieldFileDelete = $false
+          }
+          $manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $kit 'F4_BUILD_MANIFEST.json') -Encoding UTF8
+
+          Get-ChildItem -Path $kit -Recurse -File |
+            Where-Object { $_.Name -ne 'SHA256SUMS.txt' } |
+            ForEach-Object {
+              $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              $relative = [IO.Path]::GetRelativePath($kit, $_.FullName).Replace('\', '/')
+              "$hash  $relative"
+            } | Set-Content -LiteralPath (Join-Path $kit 'SHA256SUMS.txt') -Encoding ascii
+
+          $archive = Join-Path $PWD 'release-artifacts\ARStack-F4-Real-IED-Acceptance-Kit-win64.zip'
+          Compress-Archive -Path (Join-Path $kit '*') -DestinationPath $archive -Force
+
+      - name: Upload F4 Windows RC
+        uses: actions/upload-artifact@v4
+        with:
+          name: arstack-f4-real-ied-acceptance-rc
+          path: |
+            release-artifacts/ARStack-IEC61850-Workbench-Setup-win64.exe
+            release-artifacts/ARStack-IEC61850-Workbench-portable-win64.zip
+            release-artifacts/ARStack-F4-Real-IED-Acceptance-Kit-win64.zip
+          if-no-files-found: error
+          retention-days: 14

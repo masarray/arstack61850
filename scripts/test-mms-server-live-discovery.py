@@ -249,11 +249,11 @@ def main() -> int:
             ("--mask", "0x3C"),
             2,
             9,
-            19,
+            20,
             1,
             1,
             2,
-            19,
+            20,
         ),
     )
     for profile in profiles:

@@ -14,6 +14,7 @@
 #include "ariec61850/mms/static_urcb_runtime.hpp"
 #include "ariec61850/osi/cotp.hpp"
 #include "ariec61850/osi/tpkt.hpp"
+#include "static_file_service_backend.hpp"
 
 #include <algorithm>
 #include <array>
@@ -22,6 +23,7 @@
 #include <climits>
 #include <csignal>
 #include <cstddef>
+#include <deque>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
@@ -30,6 +32,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <span>
@@ -49,6 +52,7 @@
 #endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <windows.h>
 #else
 #include <arpa/inet.h>
 #include <cerrno>
@@ -62,6 +66,7 @@ namespace {
 namespace embedded = ar::iec61850::embedded;
 namespace mms = ar::iec61850::mms;
 namespace wire = ar::iec61850::wire;
+namespace filehost = ar::iec61850::host;
 
 std::atomic_bool g_stop{false};
 
@@ -382,10 +387,14 @@ struct SocketStreamContext final {
 struct CliOptions final {
     std::string bind_address{"0.0.0.0"};
     std::string model_manifest;
+    std::string file_root;
     std::uint16_t port{102U};
     std::uint8_t digital_input_mask{};
     std::size_t maximum_connections{};
     std::size_t maximum_active_connections{8U};
+    std::uint64_t live_generation{};
+    bool live_stdin{};
+    bool allow_file_delete{};
 };
 
 [[nodiscard]] std::uint32_t parse_u32(
@@ -407,6 +416,10 @@ void print_usage() {
         << "  --host IPv4               IPv4 listen address (default 0.0.0.0).\n"
         << "  --port N                  TCP listen port (default 102).\n"
         << "  --model-manifest PATH     Host model manifest emitted by the Qt simulator.\n"
+        << "  --file-root PATH          Sandboxed MMS FileDirectory/Open/Read/Close root.\n"
+        << "  --allow-file-delete       Explicitly enable MMS FileDelete below --file-root.\n"
+        << "  --live-stdin              Accept bounded ARSTACK_LIVE updates on stdin.\n"
+        << "  --live-generation N       Runtime generation required by live updates.\n"
         << "  --digital-input-mask N    GGIO1 Ind1..Ind8 bit mask (default 0).\n"
         << "  --max-connections N       Exit after N accepted TCP connections (default unlimited).\n"
         << "  --max-active N            Maximum concurrent associations (default 8, max 64).\n"
@@ -423,9 +436,18 @@ void print_usage() {
             print_usage();
             std::exit(0);
         }
+        if (option == "--live-stdin") {
+            options.live_stdin = true;
+            continue;
+        }
+        if (option == "--allow-file-delete") {
+            options.allow_file_delete = true;
+            continue;
+        }
         if (option == "--host" || option == "--model-manifest" ||
-            option == "--port" || option == "--digital-input-mask" ||
-            option == "--max-connections" || option == "--max-active") {
+            option == "--file-root" || option == "--port" || option == "--digital-input-mask" ||
+            option == "--max-connections" || option == "--max-active" ||
+            option == "--live-generation") {
             if (++index >= argc) {
                 throw std::invalid_argument(option + " requires a value.");
             }
@@ -434,6 +456,8 @@ void print_usage() {
                 options.bind_address = value;
             } else if (option == "--model-manifest") {
                 options.model_manifest = value;
+            } else if (option == "--file-root") {
+                options.file_root = value;
             } else if (option == "--port") {
                 const auto parsed = parse_u32(option, value, 65'535U);
                 if (parsed == 0U) {
@@ -449,6 +473,12 @@ void print_usage() {
                     throw std::invalid_argument("--max-active must be 1..64.");
                 }
                 options.maximum_active_connections = static_cast<std::size_t>(parsed);
+            } else if (option == "--live-generation") {
+                std::size_t consumed{};
+                options.live_generation = std::stoull(value, &consumed, 10);
+                if (consumed != value.size() || options.live_generation == 0U) {
+                    throw std::invalid_argument("--live-generation must be a positive integer.");
+                }
             } else {
                 options.maximum_connections = static_cast<std::size_t>(
                     parse_u32(
@@ -459,6 +489,12 @@ void print_usage() {
             continue;
         }
         throw std::invalid_argument("Unknown option: " + option);
+    }
+    if (options.live_stdin && options.live_generation == 0U) {
+        throw std::invalid_argument("--live-stdin requires --live-generation.");
+    }
+    if (options.allow_file_delete && options.file_root.empty()) {
+        throw std::invalid_argument("--allow-file-delete requires --file-root.");
     }
     return options;
 }
@@ -652,7 +688,9 @@ struct EncodedValue final {
 struct ConnectionBuffers final {
     std::array<std::uint8_t, 32'768U> receive{};
     std::array<std::uint8_t, 32'768U> response{};
-    std::array<std::uint8_t, 8'192U> workspace{};
+    // Host file responses are wrapped as one MMS PDU before COTP segmentation.
+    // Keep workspace large enough for the negotiated host-side P-DATA frame.
+    std::array<std::uint8_t, 32'768U> workspace{};
     std::array<std::uint8_t, 65'535U> report_frame{};
     std::array<std::uint8_t, 65'535U> report_workspace{};
 };
@@ -720,7 +758,7 @@ struct ManifestDirectControlStorage final {
 };
 
 constexpr std::size_t kMaximumSimulatorDirectControls = 64U;
-constexpr std::size_t kMaximumSimulatorBrcbs = 16U;
+constexpr std::size_t kMaximumSimulatorBrcbs = 64U;
 constexpr std::size_t kBrcbRetainedEntries = 4U;
 constexpr std::size_t kBrcbSlotBytes = 32U * 1024U;
 
@@ -744,6 +782,97 @@ struct ManifestModel final {
     std::size_t omitted_urcbs{};
     std::size_t omitted_brcbs{};
     std::size_t declared_entries{};
+};
+
+struct LiveUpdate final {
+    std::uint64_t sequence{};
+    std::uint64_t generation{};
+    std::uint64_t revision{};
+    std::string domain;
+    std::string item;
+    std::string value;
+};
+
+struct LiveUpdateCollection final {
+    std::vector<LiveUpdate> updates;
+    std::uint64_t sequence{};
+    bool resync{};
+};
+
+class LiveUpdateBus final {
+public:
+    explicit LiveUpdateBus(const std::uint64_t generation) : generation_{generation} {}
+
+    [[nodiscard]] bool publish(LiveUpdate update, std::uint64_t* const sequence) {
+        std::scoped_lock lock{mutex_};
+        if (update.generation != generation_ || update.revision <= last_revision_) return false;
+        update.sequence = next_sequence_++;
+        last_revision_ = update.revision;
+        const auto key = update.domain + '\x1f' + update.item;
+        latest_[key] = update;
+        history_.push_back(update);
+        while (history_.size() > kHistoryLimit) history_.pop_front();
+        if (sequence != nullptr) *sequence = update.sequence;
+        return true;
+    }
+
+    [[nodiscard]] LiveUpdateCollection latestSnapshot() const {
+        std::scoped_lock lock{mutex_};
+        LiveUpdateCollection result;
+        result.sequence = next_sequence_ > 0U ? next_sequence_ - 1U : 0U;
+        result.resync = true;
+        result.updates.reserve(latest_.size());
+        for (const auto& [key, update] : latest_) {
+            static_cast<void>(key);
+            result.updates.push_back(update);
+        }
+        std::sort(result.updates.begin(), result.updates.end(),
+            [](const LiveUpdate& left, const LiveUpdate& right) {
+                return left.sequence < right.sequence;
+            });
+        return result;
+    }
+
+    [[nodiscard]] LiveUpdateCollection collectSince(const std::uint64_t sequence) const {
+        std::scoped_lock lock{mutex_};
+        LiveUpdateCollection result;
+        result.sequence = next_sequence_ > 0U ? next_sequence_ - 1U : 0U;
+        if (sequence >= result.sequence || history_.empty()) return result;
+        if (sequence + 1U < history_.front().sequence) {
+            result.resync = true;
+            result.updates.reserve(latest_.size());
+            for (const auto& [key, update] : latest_) {
+                static_cast<void>(key);
+                result.updates.push_back(update);
+            }
+            std::sort(result.updates.begin(), result.updates.end(),
+                [](const LiveUpdate& left, const LiveUpdate& right) {
+                    return left.sequence < right.sequence;
+                });
+            return result;
+        }
+        result.updates.reserve(history_.size());
+        for (const auto& update : history_) {
+            if (update.sequence > sequence) result.updates.push_back(update);
+        }
+        return result;
+    }
+
+private:
+    static constexpr std::size_t kHistoryLimit = 1024U;
+    std::uint64_t generation_{};
+    mutable std::mutex mutex_;
+    std::deque<LiveUpdate> history_;
+    std::unordered_map<std::string, LiveUpdate> latest_;
+    std::uint64_t next_sequence_{1U};
+    std::uint64_t last_revision_{};
+};
+
+struct LiveInputState final {
+    std::string buffer;
+    std::uint64_t last_revision{};
+    bool overflow_reported{};
+    bool eof{};
 };
 
 struct BrcbAssociationRuntime final {
@@ -1347,6 +1476,191 @@ void rebuild_manifest_root_values(ManifestModel& model) {
     return changed;
 }
 
+[[nodiscard]] std::optional<std::string> decode_hex(const std::string_view text) {
+    if ((text.size() & 1U) != 0U || text.size() > 8U * 1024U) return std::nullopt;
+    const auto nibble = [](const char value) -> int {
+        if (value >= '0' && value <= '9') return value - '0';
+        if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+        if (value >= 'A' && value <= 'F') return value - 'A' + 10;
+        return -1;
+    };
+    std::string decoded;
+    decoded.resize(text.size() / 2U);
+    for (std::size_t index = 0U; index < decoded.size(); ++index) {
+        const auto high = nibble(text[index * 2U]);
+        const auto low = nibble(text[index * 2U + 1U]);
+        if (high < 0 || low < 0) return std::nullopt;
+        decoded[index] = static_cast<char>((high << 4) | low);
+    }
+    return decoded;
+}
+
+[[nodiscard]] bool apply_live_updates(
+    ManifestModel& model,
+    const std::span<const LiveUpdate> updates,
+    std::vector<std::size_t>* const changed_value_indices) {
+    bool changed{};
+    for (const auto& update : updates) {
+        const auto found = model.value_indices.find(object_key(update.domain, update.item));
+        if (found == model.value_indices.end()) continue;
+        auto& value = model.values[found->second];
+        if (value.text == update.value) continue;
+        const auto data = mms::MmsSimulatorManifestCodec::data(
+            value.type, value.raw_type, value.normalized_type, update.value);
+        value.text = update.value;
+        value.data = data;
+        value.encoded = mms::MmsDataCodec::encode(*value.data);
+        if (changed_value_indices != nullptr) changed_value_indices->push_back(found->second);
+        changed = true;
+    }
+    if (changed) rebuild_manifest_root_values(model);
+    return changed;
+}
+
+void update_live_control_state(ManifestModel& model, const LiveUpdate& update) {
+    for (auto& control : model.direct_control_storage) {
+        if (control.shared_state == nullptr || control.domain != update.domain ||
+            control.status_item != update.item) {
+            continue;
+        }
+        const auto normalized = update.value == "true" || update.value == "1" ||
+            update.value == "on" || update.value == "TRUE";
+        control.shared_state->value.store(normalized ? 1U : 0U, std::memory_order_relaxed);
+    }
+}
+
+[[nodiscard]] int read_live_stdin(std::array<char, 4096U>& bytes) noexcept {
+#if defined(_WIN32)
+    const auto handle = ::GetStdHandle(STD_INPUT_HANDLE);
+    if (handle == nullptr || handle == INVALID_HANDLE_VALUE) return -1;
+    DWORD available{};
+    if (!::PeekNamedPipe(handle, nullptr, 0, nullptr, &available, nullptr)) return -1;
+    if (available == 0U) return 0;
+    DWORD read{};
+    const auto wanted = static_cast<DWORD>(std::min<std::size_t>(bytes.size(), available));
+    if (!::ReadFile(handle, bytes.data(), wanted, &read, nullptr)) return -1;
+    return static_cast<int>(read);
+#else
+    fd_set read_set;
+    FD_ZERO(&read_set);
+    FD_SET(STDIN_FILENO, &read_set);
+    timeval timeout{};
+    const auto ready = ::select(STDIN_FILENO + 1, &read_set, nullptr, nullptr, &timeout);
+    if (ready == 0) return 0;
+    if (ready < 0) return errno == EINTR ? 0 : -1;
+    const auto count = ::read(STDIN_FILENO, bytes.data(), bytes.size());
+    if (count <= 0) return -1;
+    return static_cast<int>(count);
+#endif
+}
+
+void reject_live_update(
+    const std::uint64_t generation,
+    const std::uint64_t revision,
+    const std::string_view reason) {
+    std::osyncstream{std::cout}
+        << "IEDSIM_EVENT kind=live_update_ack generation=" << generation
+        << " revision=" << revision << " accepted=false reason=" << reason << '\n';
+}
+
+void drain_live_stdin(
+    LiveInputState& input,
+    const CliOptions& options,
+    ManifestModel& model,
+    LiveUpdateBus& bus) {
+    if (input.eof) return;
+    std::array<char, 4096U> bytes{};
+    const auto count = read_live_stdin(bytes);
+    if (count < 0) {
+        input.eof = true;
+        return;
+    }
+    if (count > 0) {
+        input.buffer.append(bytes.data(), static_cast<std::size_t>(count));
+        if (input.buffer.size() > 64U * 1024U) {
+            input.buffer.clear();
+            if (!input.overflow_reported) {
+                input.overflow_reported = true;
+                std::osyncstream{std::cerr}
+                    << "IEDSIM_EVENT kind=live_input_overflow limit=65536\n";
+            }
+            return;
+        }
+    }
+
+    std::size_t drained{};
+    while (drained < 64U) {
+        const auto newline = input.buffer.find('\n');
+        if (newline == std::string::npos) break;
+        auto line = input.buffer.substr(0U, newline);
+        input.buffer.erase(0U, newline + 1U);
+        ++drained;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.size() > 12U * 1024U) {
+            reject_live_update(options.live_generation, 0U, "line-too-large");
+            continue;
+        }
+        const auto fields = split_fields(line, '\t');
+        if (fields.size() != 7U || fields[0] != "ARSTACK_LIVE" || fields[1] != "1") {
+            reject_live_update(options.live_generation, 0U, "malformed");
+            continue;
+        }
+        std::size_t generation_consumed{};
+        std::size_t revision_consumed{};
+        std::uint64_t generation{};
+        std::uint64_t revision{};
+        try {
+            generation = std::stoull(fields[2], &generation_consumed, 10);
+            revision = std::stoull(fields[3], &revision_consumed, 10);
+        } catch (...) {
+            reject_live_update(options.live_generation, 0U, "bad-revision");
+            continue;
+        }
+        if (generation_consumed != fields[2].size() || revision_consumed != fields[3].size() ||
+            generation != options.live_generation || revision == 0U || revision <= input.last_revision) {
+            reject_live_update(generation, revision, "stale-generation-or-revision");
+            continue;
+        }
+        const auto domain = decode_hex(fields[4]);
+        const auto item = decode_hex(fields[5]);
+        const auto value = decode_hex(fields[6]);
+        if (!domain.has_value() || !item.has_value() || !value.has_value() ||
+            domain->empty() || item->empty() || value->size() > 4U * 1024U) {
+            reject_live_update(generation, revision, "bad-payload");
+            continue;
+        }
+        const auto found = model.value_indices.find(object_key(*domain, *item));
+        if (found == model.value_indices.end()) {
+            reject_live_update(generation, revision, "unknown-object");
+            continue;
+        }
+        auto& target = model.values[found->second];
+        const auto parsed = mms::MmsSimulatorManifestCodec::data(
+            target.type, target.raw_type, target.normalized_type, *value);
+
+        LiveUpdate update;
+        update.generation = generation;
+        update.revision = revision;
+        update.domain = *domain;
+        update.item = *item;
+        update.value = *value;
+        std::uint64_t sequence{};
+        if (!bus.publish(update, &sequence)) {
+            reject_live_update(generation, revision, "stale-generation-or-revision");
+            continue;
+        }
+        target.text = update.value;
+        target.data = parsed;
+        target.encoded = mms::MmsDataCodec::encode(*target.data);
+        rebuild_manifest_root_values(model);
+        update_live_control_state(model, update);
+        input.last_revision = revision;
+        std::osyncstream{std::cout}
+            << "IEDSIM_EVENT kind=live_update_ack generation=" << generation
+            << " revision=" << revision << " accepted=true sequence=" << sequence << '\n';
+    }
+}
+
 [[nodiscard]] const mms::MmsStaticDataSetEntry* find_data_set(
     const mms::MmsStaticDataSetTable& data_sets,
     const std::string_view domain,
@@ -1355,6 +1669,56 @@ void rebuild_manifest_root_values(ManifestModel& model) {
         if (data_set.domain == domain && data_set.item == item) return &data_set;
     }
     return nullptr;
+}
+
+
+[[nodiscard]] mms::MmsStaticUrcbEventReason urcb_event_reason(
+    const ManifestValue& value) noexcept {
+    return value.normalized_type == "Quality" || value.item.ends_with("$q")
+        ? mms::MmsStaticUrcbEventReason::quality_change
+        : mms::MmsStaticUrcbEventReason::data_change;
+}
+
+void notify_urcb_changes(
+    const ManifestModel& model,
+    const std::span<const std::size_t> changed_value_indices,
+    mms::MmsStaticUrcbRuntime& urcbs,
+    const mms::MmsStaticDataSetTable& data_sets,
+    const std::uint64_t now_ms) {
+    for (const auto value_index : changed_value_indices) {
+        if (value_index >= model.values.size()) continue;
+        const auto& value = model.values[value_index];
+        const auto reason = urcb_event_reason(value);
+        for (std::size_t rcb_index = 0U; rcb_index < urcbs.size(); ++rcb_index) {
+            const auto* definition = urcbs.definition(rcb_index);
+            if (definition == nullptr) continue;
+            const auto* data_set = find_data_set(
+                data_sets, definition->data_set_domain, definition->data_set_item);
+            if (data_set == nullptr) continue;
+            for (std::size_t member_index = 0U;
+                 member_index < data_set->members.size();
+                 ++member_index) {
+                const auto& member = data_set->members[member_index];
+                const auto member_matches_value =
+                    member.domain == value.domain &&
+                    (member.item == value.item ||
+                     (value.item.size() > member.item.size() &&
+                      value.item.compare(0U, member.item.size(), member.item) == 0 &&
+                      value.item[member.item.size()] == '$'));
+                if (!member_matches_value) continue;
+                const auto status = urcbs.notify(
+                    rcb_index, member_index, reason, now_ms);
+                if (status != mms::MmsStaticUrcbStatus::ok &&
+                    status != mms::MmsStaticUrcbStatus::temporarily_unavailable) {
+                    std::osyncstream{std::cerr}
+                        << "IEDSIM_EVENT kind=urcb_notify_error rcb="
+                        << definition->item
+                        << " status=" << static_cast<unsigned>(status) << '\n';
+                }
+                break;
+            }
+        }
+    }
 }
 
 [[nodiscard]] mms::MmsStaticBrcbEventReason brcb_event_reason(
@@ -1426,6 +1790,10 @@ void notify_brcb_changes(
         return "GetVariableAccessAttributes";
     case mms::MmsWireConfirmedService::get_named_variable_list_attributes:
         return "GetNamedVariableListAttributes";
+    case mms::MmsWireConfirmedService::file_open: return "FileOpen";
+    case mms::MmsWireConfirmedService::file_read: return "FileRead";
+    case mms::MmsWireConfirmedService::file_close: return "FileClose";
+    case mms::MmsWireConfirmedService::file_delete: return "FileDelete";
     case mms::MmsWireConfirmedService::file_directory: return "FileDirectory";
     case mms::MmsWireConfirmedService::unknown: return "Unknown";
     }
@@ -1445,6 +1813,9 @@ void serve_connection(
     const mms::MmsStaticObjectTable& object_table,
     const mms::MmsStaticDataSetTable& data_sets,
     ManifestModel* const manifest_model,
+    LiveUpdateBus* const live_updates,
+    std::uint64_t live_sequence,
+    filehost::StaticFileServiceRoot* const file_root,
     const std::uint64_t association_id,
     const std::string_view remote) {
     std::vector<mms::MmsStaticUrcbState> urcb_states;
@@ -1458,6 +1829,7 @@ void serve_connection(
     std::vector<mms::MmsStaticDirectBooleanControlBinding> direct_control_bindings;
     std::vector<mms::MmsStaticObjectEntry> direct_control_objects;
     std::unique_ptr<mms::MmsStaticObjectTable> direct_control_table;
+    std::unique_ptr<filehost::StaticFileServiceSession> file_session;
 
     mms::MmsStaticDispatchPolicy dispatch_policy;
     dispatch_policy.maximum_write_variables = 1U;
@@ -1714,6 +2086,11 @@ void serve_connection(
         policy.owner[index] = static_cast<std::uint8_t>(
             (association_id >> shift) & 0xFFU);
     }
+    if (file_root != nullptr) {
+        file_session = std::make_unique<filehost::StaticFileServiceSession>(*file_root);
+        policy.confirmed_service = &filehost::StaticFileServiceSession::callback;
+        policy.confirmed_service_context = file_session.get();
+    }
 
     mms::MmsStaticConnectionRuntime runtime{dispatcher, policy};
     SocketStreamContext socket_context{socket};
@@ -1752,25 +2129,60 @@ void serve_connection(
         if (manifest_model != nullptr && now >= next_model_refresh) {
             next_model_refresh = now + std::chrono::milliseconds{25};
             try {
-                const auto changed = refresh_manifest_values(
+                changed_value_indices.clear();
+                const auto manifest_changed = refresh_manifest_values(
                     *manifest_model, &changed_value_indices);
-                if (changed != 0U) {
-                    // Object-bank topology, callback contexts and MMS type
-                    // specifications are structural and remain immutable after
-                    // association setup. ManifestValue callbacks read the
-                    // updated encoded payload directly, so reinitializing a
-                    // composed bank here is both unnecessary and unsafe: a
-                    // nested bank can copy aliases from its own storage while
-                    // it is being rebuilt. Notify report runtimes only.
+                bool live_changed{};
+                bool resync{};
+                if (live_updates != nullptr) {
+                    LiveUpdateCollection collection;
+                    if (manifest_changed != 0U) {
+                        // A legacy manifest refresh may contain stale values for
+                        // objects already changed through the hot channel. Reapply
+                        // the bounded latest-state overlay before notifying reports.
+                        collection = live_updates->latestSnapshot();
+                    } else {
+                        collection = live_updates->collectSince(live_sequence);
+                    }
+                    if (!collection.updates.empty()) {
+                        live_changed = apply_live_updates(
+                            *manifest_model, collection.updates, &changed_value_indices);
+                    }
+                    live_sequence = collection.sequence;
+                    resync = collection.resync;
+                }
+                if (!changed_value_indices.empty()) {
+                    std::sort(changed_value_indices.begin(), changed_value_indices.end());
+                    changed_value_indices.erase(
+                        std::unique(changed_value_indices.begin(), changed_value_indices.end()),
+                        changed_value_indices.end());
+                    const auto report_change_ms = monotonic_ms();
+                    if (urcb_runtime != nullptr) {
+                        notify_urcb_changes(
+                            *manifest_model,
+                            changed_value_indices,
+                            *urcb_runtime,
+                            data_sets,
+                            report_change_ms);
+                    }
                     notify_brcb_changes(
                         *manifest_model,
                         changed_value_indices,
                         brcb_runtimes,
-                        monotonic_ms());
+                        report_change_ms);
+                }
+                if (manifest_changed != 0U) {
                     std::osyncstream{std::cout}
                         << "IEDSIM_EVENT kind=value_sync association="
-                        << association_id << " changed=" << changed
+                        << association_id << " changed=" << manifest_changed
                         << " revision=" << manifest_model->revision << '\n';
+                }
+                if (live_changed) {
+                    std::osyncstream{std::cout}
+                        << "IEDSIM_EVENT kind=live_value_sync association="
+                        << association_id << " changed=" << changed_value_indices.size()
+                        << " sequence=" << live_sequence
+                        << " resync=" << (resync ? "true" : "false") << '\n';
                 }
             } catch (const std::exception& exception) {
                 std::osyncstream{std::cerr}
@@ -2120,6 +2532,12 @@ int main(int argc, char** argv) {
             throw std::runtime_error("Static MMS server model is invalid.");
         }
 
+        std::unique_ptr<filehost::StaticFileServiceRoot> file_root;
+        if (!options.file_root.empty()) {
+            file_root = std::make_unique<filehost::StaticFileServiceRoot>(
+                std::filesystem::path{options.file_root}, options.allow_file_delete);
+        }
+
         const auto listener = create_listener(options.bind_address, options.port);
         std::set<std::string_view> domain_names;
         for (const auto& object : object_span) domain_names.insert(object.domain);
@@ -2144,20 +2562,28 @@ int main(int argc, char** argv) {
             << " omitted_brcbs=" << manifest_model.omitted_brcbs
             << " truncated=" << truncated
             << " max_active=" << options.maximum_active_connections
+            << " files=" << (file_root ? "enabled" : "disabled")
+            << " file_delete=" << (options.allow_file_delete ? "enabled" : "disabled")
             << " profile=iedscout" << '\n';
 
+        LiveUpdateBus live_updates{options.live_generation};
+        LiveInputState live_input;
         std::vector<WorkerSlot> workers(options.maximum_active_connections);
         std::size_t connection_count = 0U;
         while (!g_stop.load(std::memory_order_relaxed) &&
                (options.maximum_connections == 0U ||
                 connection_count < options.maximum_connections)) {
+            if (options.live_stdin) {
+                drain_live_stdin(live_input, options, manifest_model, live_updates);
+            }
             auto* worker = available_worker(workers);
             if (worker == nullptr) {
                 std::this_thread::sleep_for(std::chrono::milliseconds{2});
                 continue;
             }
 
-            const auto readiness = wait_socket(listener, true, 200U);
+            const auto readiness = wait_socket(
+                listener, true, options.live_stdin ? 25U : 200U);
             if (readiness == SocketWaitStatus::timeout ||
                 readiness == SocketWaitStatus::interrupted) {
                 continue;
@@ -2198,8 +2624,10 @@ int main(int argc, char** argv) {
                 &manifest_type,
                 &manifest_value,
                 &manifest_model,
+                &live_updates,
                 &object_table,
                 &data_sets,
+                &file_root,
                 client,
                 association_id,
                 remote,
@@ -2232,6 +2660,16 @@ int main(int argc, char** argv) {
                             local_control.shared_state = shared->shared_state;
                         }
 
+                        std::uint64_t live_sequence{};
+                        if (options.live_stdin) {
+                            const auto overlay = live_updates.latestSnapshot();
+                            std::vector<std::size_t> overlay_indices;
+                            overlay_indices.reserve(overlay.updates.size());
+                            static_cast<void>(apply_live_updates(
+                                local_model, overlay.updates, &overlay_indices));
+                            live_sequence = overlay.sequence;
+                        }
+
                         const auto local_object_span =
                             std::span<const mms::MmsStaticObjectEntry>{local_model.objects};
                         const auto local_data_set_span =
@@ -2249,6 +2687,9 @@ int main(int argc, char** argv) {
                             local_object_table,
                             local_data_sets,
                             &local_model,
+                            options.live_stdin ? &live_updates : nullptr,
+                            live_sequence,
+                            file_root.get(),
                             association_id,
                             remote);
                     } else {
@@ -2257,6 +2698,9 @@ int main(int argc, char** argv) {
                             object_table,
                             data_sets,
                             nullptr,
+                            nullptr,
+                            0U,
+                            file_root.get(),
                             association_id,
                             remote);
                     }

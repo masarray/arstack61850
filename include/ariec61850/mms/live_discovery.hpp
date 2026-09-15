@@ -4,6 +4,7 @@
 #include "ariec61850/mms/association_runtime.hpp"
 #include "ariec61850/mms/control_block_read.hpp"
 #include "ariec61850/mms/reporting.hpp"
+#include "ariec61850/mms/scl_assisted_connect.hpp"
 #include "ariec61850/mms/tcp_transport.hpp"
 
 #include <cstddef>
@@ -127,6 +128,19 @@ public:
     [[nodiscard]] MmsLiveDiscoveryResult discover(
         const MmsLiveDiscoveryOptions& options = {},
         std::stop_token stop_token = {});
+
+    // Trusted-SCL path: Domain validation + deterministic FC-root snapshot only.
+    // It deliberately does not invoke full NamedVariable/GVAA/DataSet discovery.
+    [[nodiscard]] MmsSclAssistedConnectResult synchronize_scl(
+        const scl::SclDocument& document,
+        std::string ied_name = {},
+        const MmsSclAssistedConnectOptions& options = {},
+        std::stop_token stop_token = {}) {
+        MmsSclAssistedConnectClient client{association_};
+        return client.synchronize(
+            document, std::move(ied_name), options, stop_token);
+    }
+
     void disconnect(std::stop_token stop_token = {}) noexcept;
 
     [[nodiscard]] bool associated() const noexcept { return association_.associated(); }

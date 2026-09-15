@@ -3,6 +3,7 @@
 #include "ariec61850/ethernet/ethernet.hpp"
 #include "ariec61850/goose/frame_codec.hpp"
 #include "ariec61850/goose/pdu_codec.hpp"
+#include "ariec61850/goose/raw_ethernet_publisher.hpp"
 #include "ariec61850/mms/data_value.hpp"
 #include "ariec61850/mms/utc_time.hpp"
 
@@ -145,6 +146,16 @@ void malformed_pdu_and_wrong_ethertype_are_rejected() {
     goose::GooseFrame decoded_frame;
     CHECK(!goose::GooseFrameCodec::try_decode(bytes, decoded_frame));
 }
+
+void raw_publisher_requires_explicit_interface() {
+    using namespace ar::iec61850;
+    goose::RawEthernetPublisher publisher;
+    std::string error;
+    CHECK(!publisher.active());
+    CHECK(!publisher.open({}, error));
+    CHECK(!error.empty());
+    CHECK(!publisher.active());
+}
 }
 
 int main() {
@@ -152,7 +163,8 @@ int main() {
         {"GOOSE PDU golden vector", pdu_matches_csharp_vector_and_roundtrips},
         {"GOOSE Ethernet golden vector", ethernet_frame_matches_vector_and_roundtrips},
         {"GOOSE dataset count validation", mismatched_data_set_count_is_rejected},
-        {"GOOSE malformed input", malformed_pdu_and_wrong_ethertype_are_rejected}};
+        {"GOOSE malformed input", malformed_pdu_and_wrong_ethertype_are_rejected},
+        {"GOOSE raw publisher explicit binding", raw_publisher_requires_explicit_interface}};
     std::size_t passed = 0U;
     for (const auto& [name, test] : tests) {
         try { test(); ++passed; std::cout << "[PASS] " << name << '\n'; }

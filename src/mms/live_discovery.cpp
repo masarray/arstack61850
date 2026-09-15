@@ -117,10 +117,11 @@ void validate_options(const MmsLiveDiscoveryOptions& options) {
 }
 
 // Mirrors ARIEC61850 LiveIedVariableTypeProbePlanner: probe one MMS type tree at
-// each Logical Node root instead of probing every LN$FC$DO$DA leaf.  A normal
-// IEC 61850 server can return the nested FC/DO/DA TypeSpecification from this
-// root, reducing a large model from thousands of type requests to roughly the
-// Logical Node count.
+// each Logical Node root instead of probing every LN$FC$DO$DA leaf. Standards-
+// shaped servers usually advertise the Logical Node root directly (for example
+// "GGIO1"), while older/flat profiles may advertise only aliases such as
+// "GGIO1$ST$Ind1$stVal". Accept both forms and de-duplicate by domain/LN so a
+// hierarchical TypeSpecification is still requested exactly once per LN.
 [[nodiscard]] std::vector<MmsObjectName> build_logical_node_type_probe_candidates(
     const MmsDiscoverySnapshot& snapshot,
     const std::size_t maximum_probes) {
@@ -130,11 +131,13 @@ void validate_options(const MmsLiveDiscoveryOptions& options) {
 
     for (const auto& [domain, variables] : snapshot.domain_variables) {
         for (const auto& item : variables) {
+            if (item.empty()) continue;
             const auto separator = item.find('$');
-            if (separator == std::string::npos || separator == 0U) {
-                continue;
-            }
-            const auto logical_node = item.substr(0U, separator);
+            if (separator == 0U) continue;
+            const auto logical_node = separator == std::string::npos
+                ? item
+                : item.substr(0U, separator);
+            if (logical_node.empty()) continue;
             const auto identity = lower_ascii(domain) + "\n" + lower_ascii(logical_node);
             if (!seen.insert(identity).second) {
                 continue;

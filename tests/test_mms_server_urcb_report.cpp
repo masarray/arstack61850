@@ -190,7 +190,7 @@ int main() {
             7U,
             {0x7CU, 0x80U},
             0U,
-            0x08U,
+            0x0CU,
             1'000U}};
     std::array<mms::MmsStaticUrcbState, 1U> states{};
     mms::MmsStaticUrcbRuntime reports{
