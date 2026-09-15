@@ -1,4 +1,4 @@
-name: Stage v0.1.1 stabilization fixes
+name: Stage normal-close regression path
 
 on:
   push:
@@ -9,14 +9,14 @@ permissions:
   contents: write
 
 jobs:
-  stabilize:
+  patch:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/ptp-production-v0.1.1
           fetch-depth: 0
-      - name: Apply runtime and normal-close fixes
+      - name: Exercise real QQuickWindow close path
         shell: bash
         run: |
           set -euo pipefail
@@ -25,68 +25,17 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           python - <<'PY'
           from pathlib import Path
-
-          def replace(path, old, new, label):
-              p = Path(path)
-              s = p.read_text(encoding='utf-8')
-              if old not in s:
-                  raise SystemExit(f'missing {label}: {path}')
-              p.write_text(s.replace(old, new, 1), encoding='utf-8')
-
-          replace('apps/arstack_studio/qml/Main.qml', '    title: "ARStack Studio · SMV Injector"\n', '    title: "ARStack Studio · SMV + PTP · v" + Qt.application.version\n', 'title')
-          old_close = '    property bool telemetryExpanded: false\n\n    font.family: root.uiFont\n\n    // Graceful window close is still a safety boundary. QML submits only the\n    // Stop intent; the supervisor owns whether the current session may act.\n    onClosing: function(close) {\n        if (workflowBar.session && workflowBar.session.state === "RUNNING")\n            workflowBar.session.requestStop()\n    }\n'
-          new_close = '    property bool telemetryExpanded: false\n    property bool applicationShutdownRequested: false\n\n    font.family: root.uiFont\n\n    // Primary-window close owns application exit. C++ teardown owns STOP, COM\n    // close and worker retirement; QML must not race it with another async STOP.\n    onClosing: function(close) {\n        close.accepted = true\n        if (root.applicationShutdownRequested) return\n        root.applicationShutdownRequested = true\n        configurationWindow.hide()\n        detachedPhasorWindow.hide()\n        detachedWaveformWindow.hide()\n        Qt.quit()\n    }\n'
-          replace('apps/arstack_studio/qml/Main.qml', old_close, new_close, 'normal close')
-
-          p = Path('embedded/esp32p4_smv_injector/main/ethernet_port.c')
+          p = Path('apps/arstack_studio/src/main.cpp')
           s = p.read_text(encoding='utf-8')
-          auto = '\n#if CONFIG_AR_PTP_LAB_TX\n    // Boot auto-start uses the same checked admission/readiness contract as the\n    // live serial control path. A rejected or failed start is never reported as\n    // running merely because an older runtime is still cleaning up.\n    if (!ar_ptp_lab_try_start(handle)) {\n        ESP_LOGW(TAG, "PTP auto-start was rejected or could not start");\n    }\n#endif\n'
-          if auto not in s: raise SystemExit('missing premature PTP auto-start')
-          s = s.replace(auto, '\n', 1)
-          old = 'bool ar_esp32p4_ptp_start(void)\n{\n#if CONFIG_AR_PTP_LAB_TX\n    if (s_eth_handle == NULL) {\n        return false;\n    }\n    return ar_ptp_lab_try_start(s_eth_handle);\n#else\n    return false;\n#endif\n}\n'
-          new = 'bool ar_esp32p4_ptp_start(void)\n{\n#if CONFIG_AR_PTP_LAB_TX\n    if (s_eth_handle == NULL) {\n        ESP_LOGE(TAG, "PTP start rejected: Ethernet driver is not initialized");\n        return false;\n    }\n    bool link_up = false;\n    const esp_err_t link_result = esp_eth_ioctl(s_eth_handle, ETH_CMD_G_LINK, &link_up);\n    if (link_result != ESP_OK || !link_up) {\n        ESP_LOGE(TAG, "PTP start rejected: Ethernet link is not up");\n        return false;\n    }\n    return ar_ptp_lab_try_start(s_eth_handle);\n#else\n    return false;\n#endif\n}\n'
-          if old not in s: raise SystemExit('missing PTP start function')
-          p.write_text(s.replace(old, new, 1), encoding='utf-8')
-
-          p = Path('embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp')
-          s = p.read_text(encoding='utf-8')
-          replace_atomic = 'std::atomic_bool g_ptp_started{false};\nstd::atomic_bool g_stop_requested{false};'
-          if replace_atomic not in s: raise SystemExit('missing PTP atomics')
-          s = s.replace(replace_atomic, 'std::atomic_bool g_ptp_started{false};\nstd::atomic_bool g_ptp_ready{false};\nstd::atomic_bool g_stop_requested{false};', 1)
-          old_finish = '    context.task_handle = nullptr;\n    g_ptp_started.store(false, std::memory_order_release);'
-          if old_finish not in s: raise SystemExit('missing PTP finish')
-          s = s.replace(old_finish, '    context.task_handle = nullptr;\n    g_ptp_ready.store(false, std::memory_order_release);\n    g_ptp_started.store(false, std::memory_order_release);', 1)
-          old_success = '            if (success) {\n                consecutive_failures = 0U;\n                context.runtime->clear_error();\n            } else {'
-          new_success = '            if (success) {\n                consecutive_failures = 0U;\n                context.runtime->clear_error();\n                const bool emitted_core_timing = g_announce_sent.load(std::memory_order_relaxed) > 0U && g_sync_sent.load(std::memory_order_relaxed) > 0U && g_follow_up_sent.load(std::memory_order_relaxed) > 0U;\n                if (emitted_core_timing) g_ptp_ready.store(true, std::memory_order_release);\n            } else {'
-          if old_success not in s: raise SystemExit('missing PTP send-success block')
-          s = s.replace(old_success, new_success, 1)
-          reset = '    reset_live_status();\n    g_ptp_accept_rx.store(false, std::memory_order_release);'
-          if reset not in s: raise SystemExit('missing PTP reset')
-          s = s.replace(reset, '    reset_live_status();\n    g_ptp_ready.store(false, std::memory_order_release);\n    g_ptp_accept_rx.store(false, std::memory_order_release);', 1)
-          old_create = '        g_ptp_context.task_handle = nullptr;\n        g_ptp_started.store(false, std::memory_order_release);\n        ESP_LOGE(kTag, "Failed to create PTP lab task on CPU0");\n    }\n}\n\nvoid stop_ptp_lab() noexcept {'
-          new_create = '        g_ptp_context.task_handle = nullptr;\n        g_ptp_started.store(false, std::memory_order_release);\n        ESP_LOGE(kTag, "Failed to create PTP lab task on CPU0");\n        return;\n    }\n\n    constexpr unsigned kStartReadyPolls = 160U;\n    for (unsigned attempt = 0U; attempt < kStartReadyPolls; ++attempt) {\n        if (g_ptp_ready.load(std::memory_order_acquire) || !g_ptp_started.load(std::memory_order_acquire)) return;\n        vTaskDelay(pdMS_TO_TICKS(10));\n    }\n    ESP_LOGE(kTag, "PTP source readiness timeout: no verified Announce/Sync/Follow_Up TX");\n    stop_ptp_lab();\n}\n\nvoid stop_ptp_lab() noexcept {'
-          if old_create not in s: raise SystemExit('missing PTP task creation tail')
-          s = s.replace(old_create, new_create, 1)
-          old_running = '[[nodiscard]] bool ptp_lab_is_running() noexcept {\n    return g_ptp_started.load(std::memory_order_acquire);\n}'
-          if old_running not in s: raise SystemExit('missing PTP running state')
-          s = s.replace(old_running, '[[nodiscard]] bool ptp_lab_is_running() noexcept {\n    return g_ptp_ready.load(std::memory_order_acquire);\n}', 1)
-          status = '    status->is_running = ar::esp32p4::smv::g_ptp_started.load(std::memory_order_acquire);'
-          if status not in s: raise SystemExit('missing PTP status running')
-          s = s.replace(status, '    status->is_running = ar::esp32p4::smv::g_ptp_ready.load(std::memory_order_acquire);', 1)
+          old = '            QCloseEvent closeEvent;\n            QCoreApplication::sendEvent(lifecycleTarget.data(), &closeEvent);\n            if (!primaryCloseFilter.closeObserved()) {'
+          new = '            lifecycleTarget->close();\n            if (!primaryCloseFilter.closeObserved()) {'
+          if old not in s:
+              raise SystemExit('normal-close regression anchor not found')
+          s = s.replace(old, new, 1)
+          s = s.replace('Application lifecycle regression: primary QEvent::Close bypassed the lifetime filter.', 'Application lifecycle regression: normal primary-window close bypassed the lifetime filter.', 1)
           p.write_text(s, encoding='utf-8')
-
-          replace('embedded/esp32p4_smv_injector/main/live_control.cpp', '        if (!ar_esp32p4_ptp_start()) ESP_LOGE(kTag, "PTP start rejected: Ethernet is unavailable");\n        else ESP_LOGI(kTag, "PTP start accepted");\n', '        if (!ar_esp32p4_ptp_start()) {\n            ESP_LOGE(kTag, "PTP start rejected: Ethernet link/source readiness failed; no verified timing frames were emitted");\n        } else {\n            ESP_LOGI(kTag, "PTP start accepted: verified Announce/Sync/Follow_Up transmission");\n        }\n', 'PTP truth message')
-
-          p = Path('apps/arstack_studio/src/DeviceController.cpp')
-          s = p.read_text(encoding='utf-8')
-          anchor = '    if (line.contains(QStringLiteral("PTP configuration accepted"), Qt::CaseInsensitive)) {\n        emit deviceMessage(QStringLiteral("PTP expert profile accepted."));\n        static_cast<void>(sendPtpShow());\n    }\n'
-          extra = anchor + '    if (line.contains(QStringLiteral("PTP start accepted"), Qt::CaseInsensitive)) {\n        ptpStatus_ = QStringLiteral("Timing frames verified");\n        emit deviceMessage(QStringLiteral("PTP source is transmitting verified timing frames."));\n        static_cast<void>(sendPtpShow());\n    }\n    if (line.contains(QStringLiteral("PTP start rejected"), Qt::CaseInsensitive) || line.contains(QStringLiteral("PTP source readiness timeout"), Qt::CaseInsensitive)) {\n        ptpRunning_ = false;\n        ptpStatus_ = QStringLiteral("PTP start failed");\n        emit ptpStateChanged();\n        setError(QStringLiteral("PTP source did not emit timing frames. Check the Ethernet link and retry Start PTP Source."));\n    }\n'
-          if anchor not in s: raise SystemExit('missing DeviceController PTP config anchor')
-          p.write_text(s.replace(anchor, extra, 1), encoding='utf-8')
-
-          replace('apps/arstack_studio/qml/ConfigurationHub.qml', '            PtpExpertPanel {\n                theme: hub.theme\n                device: hub.device\n', '            PtpExpertPanel {\n                theme: hub.theme\n                controller: hub.controller\n                device: hub.device\n', 'PTP controller binding')
           PY
-          git add apps/arstack_studio/qml/Main.qml apps/arstack_studio/qml/ConfigurationHub.qml apps/arstack_studio/src/DeviceController.cpp embedded/esp32p4_smv_injector/main/ethernet_port.c embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp embedded/esp32p4_smv_injector/main/live_control.cpp
+          git add apps/arstack_studio/src/main.cpp
           git diff --cached --check
-          git commit -m "fix(v0.1.1): verify PTP source TX and normal GUI shutdown"
+          git commit -m "test(studio): exercise real primary-window close path"
           git push origin HEAD:feature/ptp-production-v0.1.1
