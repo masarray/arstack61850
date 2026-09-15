@@ -69,6 +69,7 @@ jobs:
           cmake --build build-f4-windows --config Release
           --target arstack_ied_simulator ariec61850_ied_simulator_server
           ied_mms_client_workbench_qa ied_report_workspace_qa ied_file_settings_workspace_qa
+          ied_product_hardening_qa
           --parallel 2
 
       - name: Configure standalone field tools
