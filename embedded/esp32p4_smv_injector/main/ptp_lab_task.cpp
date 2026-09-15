@@ -102,11 +102,13 @@ void fill_kconfig_defaults(ar_ptp_lab_config_t& config) noexcept {
     config.domain_number = static_cast<std::uint8_t>(CONFIG_AR_PTP_DOMAIN);
 #if defined(CONFIG_AR_PTP_VLAN) && CONFIG_AR_PTP_VLAN
     config.vlan_enabled = true;
-#else
-    config.vlan_enabled = false;
-#endif
     config.vlan_id = static_cast<std::uint16_t>(CONFIG_AR_PTP_VLAN_ID);
     config.vlan_priority = static_cast<std::uint8_t>(CONFIG_AR_PTP_VLAN_PRIORITY);
+#else
+    config.vlan_enabled = false;
+    config.vlan_id = 0U;
+    config.vlan_priority = 0U;
+#endif
     config.port_number = static_cast<std::uint16_t>(CONFIG_AR_PTP_PORT_NUMBER);
     config.announce_interval_ms = static_cast<std::uint32_t>(CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS);
     config.sync_interval_ms = static_cast<std::uint32_t>(CONFIG_AR_PTP_SYNC_INTERVAL_MS);
