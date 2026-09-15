@@ -567,8 +567,35 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
         }
     }
 
-    const auto application = dispatcher_.dispatch(
-        pdv.single_asn1_type, response, workspace, policy_.access_context());
+    MmsStaticDispatchResult application;
+    bool extension_handled{};
+    if (is_confirmed_request && policy_.confirmed_service != nullptr) {
+        const auto extension = policy_.confirmed_service(
+            policy_.confirmed_service_context,
+            confirmed.service(),
+            confirmed.invoke_id,
+            confirmed.service_constructed,
+            confirmed.service_value,
+            response);
+        extension_handled = extension.handled;
+        if (extension.handled) {
+            application.service = confirmed.service();
+            application.invoke_id = confirmed.invoke_id;
+            application.bytes_written = extension.encoded.bytes_written;
+            application.required_bytes = extension.encoded.required_bytes;
+            if (extension.encoded.success()) {
+                application.status = MmsStaticDispatchStatus::response_ready;
+            } else if (extension.encoded.status == wire::EncodeStatus::buffer_too_small) {
+                application.status = MmsStaticDispatchStatus::response_buffer_too_small;
+            } else {
+                application.status = MmsStaticDispatchStatus::backend_failure;
+            }
+        }
+    }
+    if (!extension_handled) {
+        application = dispatcher_.dispatch(
+            pdv.single_asn1_type, response, workspace, policy_.access_context());
+    }
     std::size_t mms_response_bytes = application.bytes_written;
     if (!application.success()) {
         if (application.status == MmsStaticDispatchStatus::response_buffer_too_small) {

@@ -746,6 +746,32 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
                 confirmed.invoke_id));
         }
 
+        if (policy_.confirmed_service != nullptr) {
+            const auto extension = policy_.confirmed_service(
+                policy_.confirmed_service_context,
+                confirmed.service(),
+                confirmed.invoke_id,
+                confirmed.service_constructed,
+                confirmed.service_value,
+                response);
+            if (extension.handled) {
+                return finish(wrap_mms_response(
+                    extension.encoded,
+                    peek.frame_bytes,
+                    state_,
+                    mms_presentation_context_id_,
+                    negotiated_mms_pdu_size_,
+                    negotiated_tpdu_size_bytes_,
+                    response,
+                    workspace,
+                    extension.encoded.success()
+                        ? MmsStaticDispatchStatus::response_ready
+                        : MmsStaticDispatchStatus::backend_failure,
+                    confirmed.service(),
+                    confirmed.invoke_id));
+            }
+        }
+
         if (confirmed.service() == MmsWireConfirmedService::file_directory) {
             const auto directory = confirmed.service_constructed
                 ? MmsPduSpanCodec::encode_confirmed_response_into(
