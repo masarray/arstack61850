@@ -7,6 +7,8 @@ on:
       - feat/ied-sim-ux-performance-foundation
     paths:
       - 'apps/ied_simulator/**'
+      - 'embedded/**'
+      - 'tests/fixtures/scl/**'
       - 'tools/static_ied_server.cpp'
       - 'tools/static_file_service_backend.hpp'
       - 'tools/static_file_service_backend_test.cpp'
