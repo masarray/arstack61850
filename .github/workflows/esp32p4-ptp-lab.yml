@@ -45,6 +45,31 @@ jobs:
       - name: Select ESP32-P4 target
         run: source /opt/esp/idf/export.sh && idf.py set-target esp32p4
 
+      - name: Verify PTP source readiness contract
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          eth = Path('main/ethernet_port.c').read_text(encoding='utf-8')
+          ptp = Path('main/ptp_lab_task.cpp').read_text(encoding='utf-8')
+          if 'ar_ptp_lab_try_start(handle)' in eth:
+              raise SystemExit('PTP must not auto-start inside Ethernet initialization before esp_eth_start/link readiness')
+          required = [
+              'ETH_CMD_G_LINK',
+              'g_ptp_ready',
+              'PTP source readiness timeout',
+              'g_announce_sent.load',
+              'g_sync_sent.load',
+              'g_follow_up_sent.load',
+              'return g_ptp_ready.load',
+          ]
+          combined = eth + '\n' + ptp
+          missing = [token for token in required if token not in combined]
+          if missing:
+              raise SystemExit('PTP verified-start contract missing: ' + ', '.join(missing))
+          print('PTP source contract: explicit link-ready start + verified Announce/Sync/Follow_Up TX')
+          PY
+
       - name: Enable guarded PTP-P2 profile
         shell: bash
         run: |
