@@ -28,10 +28,19 @@ enum class MmsStaticUrcbStatus : std::uint8_t {
     report_encode_failed,
 };
 
+enum class MmsStaticUrcbEventReason : std::uint8_t {
+    data_change,
+    quality_change,
+    data_update,
+};
+
 enum class MmsStaticUrcbReportReason : std::uint8_t {
     none = 0x00U,
     general_interrogation = 0x04U,
     integrity = 0x08U,
+    data_update = 0x10U,
+    quality_change = 0x20U,
+    data_change = 0x40U,
 };
 
 struct MmsStaticUrcbDefinition final {
@@ -62,17 +71,22 @@ struct MmsStaticUrcbState final {
     std::size_t data_set_item_size{};
     std::array<std::uint8_t, MmsInformationReportSpanCodec::optional_field_bytes>
         optional_fields{};
+    std::array<std::uint8_t, MmsInformationReportSpanCodec::maximum_members>
+        member_reason_masks{};
     std::uint32_t conf_revision{1U};
     std::uint32_t buffer_time_ms{};
     std::uint32_t integrity_period_ms{};
     std::uint64_t next_integrity_due_ms{};
+    std::uint64_t event_due_ms{};
     std::uint32_t revision{};
+    std::size_t pending_member_count{};
     std::uint8_t trigger_options{};
     std::uint8_t sequence_number{};
     bool enabled{};
     bool reserved{};
     bool general_interrogation_pending{};
     bool integrity_armed{};
+    bool event_pending{};
 
     [[nodiscard]] std::string_view report_id() const noexcept {
         return {report_id_storage.data(), report_id_size};
@@ -110,7 +124,11 @@ struct MmsStaticUrcbEncodeResult final {
 
 class MmsStaticUrcbRuntime final {
 public:
-    static constexpr std::size_t maximum_control_blocks = 16U;
+    // Validation ceiling only. Storage remains caller-owned and therefore
+    // embedded targets can still choose a smaller deterministic backing span.
+    // 64 matches the bounded host-side indexed ReportControl compiler and is
+    // sufficient for the measured 34-instance golden IED model.
+    static constexpr std::size_t maximum_control_blocks = 64U;
     static constexpr std::uint32_t minimum_integrity_period_ms = 100U;
 
     MmsStaticUrcbRuntime(
@@ -166,6 +184,14 @@ public:
         std::uint32_t integrity_period_ms) noexcept;
     [[nodiscard]] MmsStaticUrcbStatus request_general_interrogation(
         std::size_t index) noexcept;
+
+    // Event updates are coalesced per DataSet member during BufTm. Repeated
+    // reasons are ORed, and no heap allocation or per-RCB worker is required.
+    [[nodiscard]] MmsStaticUrcbStatus notify(
+        std::size_t index,
+        std::size_t data_set_member_index,
+        MmsStaticUrcbEventReason reason,
+        std::uint64_t now_ms) noexcept;
 
     [[nodiscard]] bool next_due(
         std::uint64_t now_ms,
