@@ -37,6 +37,25 @@ namespace {
     return asn1::BerSpanReader::try_read_tlv(source, offset, tlv);
 }
 
+[[nodiscard]] std::optional<std::uint64_t> decode_origin_category_value(
+    const asn1::BerTlvView& or_cat) noexcept {
+    // IEC 61850 OriginatorCategory is an enumeration. Existing ARStack clients
+    // encode it as MMS UNSIGNED (context tag 6), while libiec61850 encodes the
+    // same non-negative value as MMS INTEGER (context tag 5). Accept only these
+    // two primitive representations here; all other Oper fields remain strict.
+    if (context_tag(or_cat, 6, false)) {
+        return asn1::BerSpanReader::read_unsigned_integer(or_cat);
+    }
+    if (context_tag(or_cat, 5, false)) {
+        const auto signed_value = asn1::BerSpanReader::read_signed_integer(or_cat);
+        if (!signed_value || *signed_value < 0) {
+            return std::nullopt;
+        }
+        return static_cast<std::uint64_t>(*signed_value);
+    }
+    return std::nullopt;
+}
+
 [[nodiscard]] bool decode_origin(
     const asn1::BerTlvView& origin,
     std::uint8_t& category) noexcept {
@@ -46,11 +65,10 @@ namespace {
     std::size_t offset = 0U;
     asn1::BerTlvView or_cat;
     asn1::BerTlvView or_ident;
-    if (!read_next(origin.value, offset, or_cat) ||
-        !context_tag(or_cat, 6, false)) {
+    if (!read_next(origin.value, offset, or_cat)) {
         return false;
     }
-    const auto category_value = asn1::BerSpanReader::read_unsigned_integer(or_cat);
+    const auto category_value = decode_origin_category_value(or_cat);
     if (!category_value || *category_value > 0xFFU) {
         return false;
     }

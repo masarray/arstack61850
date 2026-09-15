@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "IedSimulatorController.hpp"
+#include "SclMmsMaterializer.hpp"
 
 #include "ariec61850/scl/parser.hpp"
 
 #include <QCoreApplication>
 #include <QClipboard>
 #include <QDateTime>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QJsonDocument>
 #include <QNetworkInterface>
 #include <QSaveFile>
 #include <QSet>
@@ -18,10 +21,11 @@
 #include <QXmlStreamReader>
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <set>
 #include <string>
-#include <unordered_set>
+#include <vector>
 
 namespace {
 QString qstring(const std::string& value) {
@@ -57,9 +61,7 @@ QString initialValue(const QString& type, const QString& dataAttribute) {
     if (type == QStringLiteral("Boolean")) return QStringLiteral("false");
     if (type == QStringLiteral("Enumeration")) return QStringLiteral("intermediate-state");
     if (type == QStringLiteral("Quality")) return QStringLiteral("Good");
-    if (type == QStringLiteral("Timestamp")) {
-        return QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"));
-    }
+    if (type == QStringLiteral("Timestamp")) return QStringLiteral("1970-01-01 00:00:00.000");
     if (type == QStringLiteral("Number")) return QStringLiteral("0");
     if (dataAttribute.compare(QStringLiteral("stVal"), Qt::CaseInsensitive) == 0) {
         return QStringLiteral("on");
@@ -95,13 +97,84 @@ QString mmsDomainFor(const ar::iec61850::scl::SclDataSetEntry& entry) {
 QString mmsItemFor(const ar::iec61850::scl::SclDataSetEntry& entry) {
     auto attribute = qstring(entry.da_name);
     attribute.replace(QLatin1Char('.'), QLatin1Char('$'));
+    auto dataObject = qstring(entry.do_name);
+    dataObject.replace(QLatin1Char('.'), QLatin1Char('$'));
     QStringList parts{
         qstring(entry.prefix) + qstring(entry.ln_class) + qstring(entry.ln_inst),
         qstring(entry.functional_constraint),
-        qstring(entry.do_name)};
+        dataObject};
     if (!attribute.isEmpty()) parts.push_back(attribute);
     parts.removeAll(QString{});
     return parts.join(QLatin1Char('$'));
+}
+
+bool mmsWritableFc(const QString& fc) {
+    return fc.compare(QStringLiteral("SP"), Qt::CaseInsensitive) == 0 ||
+        fc.compare(QStringLiteral("SG"), Qt::CaseInsensitive) == 0 ||
+        fc.compare(QStringLiteral("SE"), Qt::CaseInsensitive) == 0 ||
+        fc.compare(QStringLiteral("SV"), Qt::CaseInsensitive) == 0 ||
+        fc.compare(QStringLiteral("CF"), Qt::CaseInsensitive) == 0 ||
+        fc.compare(QStringLiteral("DC"), Qt::CaseInsensitive) == 0;
+}
+
+QString runtimeValueKey(const QVariantMap& item) {
+    const auto domain = item.value(QStringLiteral("mmsDomain")).toString();
+    const auto mmsItem = item.value(QStringLiteral("mmsItem")).toString();
+    if (!domain.isEmpty() && !mmsItem.isEmpty()) {
+        return domain + QLatin1Char('\n') + mmsItem;
+    }
+    return item.value(QStringLiteral("reference")).toString();
+}
+
+QString deterministicTimestamp(quint64 milliseconds);
+
+QVariantMap materializedValueMap(const arstack::iedsim::MaterializedSclValue& value) {
+    QVariantMap item;
+    item.insert(
+        QStringLiteral("name"),
+        value.dataObject + QLatin1Char('.') + value.dataAttribute);
+    item.insert(QStringLiteral("reference"), value.reference);
+    item.insert(QStringLiteral("logicalDevice"), value.logicalDevice);
+    item.insert(QStringLiteral("logicalNode"), value.logicalNode);
+    item.insert(QStringLiteral("dataObject"), value.dataObject);
+    item.insert(QStringLiteral("dataAttribute"), value.dataAttribute);
+    item.insert(QStringLiteral("fc"), value.functionalConstraint);
+    item.insert(QStringLiteral("cdc"), value.cdc);
+    item.insert(QStringLiteral("type"), value.normalizedType);
+    item.insert(QStringLiteral("rawType"), value.rawType);
+    item.insert(QStringLiteral("mmsTypeSignature"), value.mmsTypeSignature);
+    item.insert(QStringLiteral("iedName"), value.iedName);
+    item.insert(QStringLiteral("mmsDomain"), value.mmsDomain);
+    item.insert(QStringLiteral("mmsItem"), value.mmsItem);
+    item.insert(QStringLiteral("value"), value.initialValue);
+    item.insert(QStringLiteral("quality"), QStringLiteral("Good"));
+    item.insert(QStringLiteral("origin"), QStringLiteral("scl"));
+    const auto controlMetadata =
+        value.dataAttribute.compare(QStringLiteral("ctlModel"), Qt::CaseInsensitive) == 0 ||
+        value.dataAttribute.compare(QStringLiteral("sboTimeout"), Qt::CaseInsensitive) == 0 ||
+        value.dataAttribute.compare(QStringLiteral("operTimeout"), Qt::CaseInsensitive) == 0;
+    item.insert(
+        QStringLiteral("writable"),
+        !value.quality && !value.timestamp && !controlMetadata);
+    item.insert(QStringLiteral("mmsWritable"), value.mmsWritable);
+    item.insert(QStringLiteral("changed"), false);
+    item.insert(QStringLiteral("timestamp"), deterministicTimestamp(0U));
+    item.insert(QStringLiteral("updated"), deterministicTimestamp(0U));
+    item.insert(QStringLiteral("liveRevision"), 0ULL);
+    if (value.normalizedType == QStringLiteral("Enumeration")) {
+        item.insert(
+            QStringLiteral("options"),
+            QStringList{
+                QStringLiteral("intermediate-state"),
+                QStringLiteral("off"),
+                QStringLiteral("on"),
+                QStringLiteral("bad-state")});
+    } else if (value.normalizedType == QStringLiteral("Boolean")) {
+        item.insert(
+            QStringLiteral("options"),
+            QStringList{QStringLiteral("false"), QStringLiteral("true")});
+    }
+    return item;
 }
 
 QByteArray manifestField(QString value) {
@@ -109,6 +182,45 @@ QByteArray manifestField(QString value) {
     value.replace(QLatin1Char('\r'), QLatin1Char(' '));
     value.replace(QLatin1Char('\n'), QLatin1Char(' '));
     return value.toUtf8();
+}
+
+QString liveHex(const QString& value) {
+    return QString::fromLatin1(value.toUtf8().toHex());
+}
+
+QString liveUnhex(const QString& value) {
+    return QString::fromUtf8(QByteArray::fromHex(value.toLatin1()));
+}
+
+QString deterministicTimestamp(const quint64 milliseconds) {
+    return QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(milliseconds))
+        .toUTC()
+        .toString(Qt::ISODateWithMs);
+}
+
+quint8 reportTriggerMask(const ar::iec61850::scl::SclReportControl& report) {
+    quint8 mask{};
+    if (report.trigger_options.data_change) mask |= 0x40U;
+    if (report.trigger_options.quality_change) mask |= 0x20U;
+    if (report.trigger_options.data_update) mask |= 0x10U;
+    if (report.trigger_options.integrity) mask |= 0x08U;
+    if (report.trigger_options.general_interrogation) mask |= 0x04U;
+    return mask;
+}
+
+std::array<quint8, 2U> reportOptionalMask(
+    const ar::iec61850::scl::SclReportControl& report) {
+    std::array<quint8, 2U> mask{};
+    if (report.optional_fields.sequence_number) mask[0] |= 0x40U;
+    if (report.optional_fields.report_timestamp) mask[0] |= 0x20U;
+    if (report.optional_fields.reason_code) mask[0] |= 0x10U;
+    if (report.optional_fields.data_set) mask[0] |= 0x08U;
+    if (report.optional_fields.data_reference) mask[0] |= 0x04U;
+    if (report.buffered && report.optional_fields.buffer_overflow) mask[0] |= 0x02U;
+    if (report.buffered && report.optional_fields.entry_id) mask[0] |= 0x01U;
+    if (report.optional_fields.configuration_revision) mask[1] |= 0x80U;
+    if (report.buffered && report.optional_fields.segmentation) mask[1] |= 0x40U;
+    return mask;
 }
 } // namespace
 
@@ -226,7 +338,7 @@ int IedSimulatorController::gooseCount() const noexcept { return gooseCount_; }
 QString IedSimulatorController::modelStatus() const {
     if (!fatalError_.isEmpty()) return fatalError_;
     if (!imported()) return QStringLiteral("No engineering model loaded");
-    return QStringLiteral("Validated · %1 IED%2 · IEC 61850 model ready")
+    return QStringLiteral("Validated · %1 IED%2 · full SCL MMS model ready")
         .arg(ieds_.size())
         .arg(ieds_.size() == 1 ? QString{} : QStringLiteral("s"));
 }
@@ -301,20 +413,31 @@ bool IedSimulatorController::importFile(const QUrl& fileUrl, const bool append) 
     try {
         auto document = ar::iec61850::scl::SclParser{}.load(
             std::filesystem::path{path.toStdWString()});
+        const auto materialized = arstack::iedsim::materializeSclMmsModel(path);
+        QVariantList materializedValues;
+        materializedValues.reserve(static_cast<qsizetype>(materialized.values.size()));
+        for (const auto& value : materialized.values) {
+            materializedValues.push_back(materializedValueMap(value));
+        }
+        if (running_ || starting_) stopSimulation();
         if (!append) {
-            if (running_ || starting_) stopSimulation();
             documents_.clear();
             runtimeValues_.clear();
         }
-        documents_.push_back(LoadedDocument{path, std::move(document)});
+        documents_.push_back(LoadedDocument{path, std::move(document), std::move(materializedValues)});
         sourcePath_ = path;
         sourceName_ = QFileInfo(path).fileName();
         fatalError_.clear();
         previousValue_.reset();
+        pendingMutationRequest_ = 0U;
+        pendingUndo_ = false;
         rebuildPresentation();
         appendActivity(
             QStringLiteral("Importer"),
-            QStringLiteral("%1 imported and validated successfully.").arg(sourceName_),
+            QStringLiteral("%1 imported: %2 structural MMS leaves across %3 logical nodes.")
+                .arg(sourceName_)
+                .arg(materialized.values.size())
+                .arg(materialized.logicalNodeCount),
             QStringLiteral("Success"));
         return true;
     } catch (const std::exception& error) {
@@ -332,6 +455,8 @@ void IedSimulatorController::clear() {
     values_.clear();
     runtimeValues_.clear();
     previousValue_.reset();
+    pendingMutationRequest_ = 0U;
+    pendingUndo_ = false;
     sourceName_.clear();
     sourcePath_.clear();
     fatalError_.clear();
@@ -361,6 +486,16 @@ void IedSimulatorController::selectValue(const int index) {
     if (selectedValueIndex_ == normalized) return;
     selectedValueIndex_ = normalized;
     emit selectionChanged();
+}
+
+bool IedSimulatorController::selectValueByMmsItem(const QString& mmsItem) {
+    for (qsizetype index = 0; index < values_.size(); ++index) {
+        if (values_.at(index).toMap().value(QStringLiteral("mmsItem")).toString() == mmsItem) {
+            selectValue(static_cast<int>(index));
+            return true;
+        }
+    }
+    return false;
 }
 
 bool IedSimulatorController::startSimulation() {
@@ -409,64 +544,155 @@ bool IedSimulatorController::applySelectedValue(
     const QString& value,
     const QString& quality,
     const QString& origin) {
-    if (!running_ || selectedValueIndex_ < 0 || selectedValueIndex_ >= values_.size()) {
+    if (!running_ || pendingMutationRequest_ != 0U ||
+        selectedValueIndex_ < 0 || selectedValueIndex_ >= values_.size()) {
         return false;
     }
-    auto item = values_.at(selectedValueIndex_).toMap();
-    previousValue_ = ValueSnapshot{selectedIedIndex_, selectedValueIndex_, item};
-    const auto before = item.value(QStringLiteral("value")).toString();
-    item.insert(QStringLiteral("value"), value);
-    item.insert(QStringLiteral("quality"), quality);
-    item.insert(QStringLiteral("origin"), origin);
-    item.insert(QStringLiteral("changed"), true);
-    item.insert(
-        QStringLiteral("updated"),
-        QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss.zzz")));
-    values_[selectedValueIndex_] = item;
-    runtimeValues_.insert(item.value(QStringLiteral("reference")).toString(), item);
-    if (!writeModelManifest()) {
-        values_[selectedValueIndex_] = previousValue_->value;
-        runtimeValues_.insert(
-            previousValue_->value.value(QStringLiteral("reference")).toString(),
-            previousValue_->value);
+    const auto item = values_.at(selectedValueIndex_).toMap();
+    if (!item.value(QStringLiteral("writable")).toBool()) return false;
+
+    previousValue_ = ValueSnapshot{
+        selectedIedIndex_, selectedValueIndex_, item, 0U};
+    const auto requestId = nextMutationRequest_++;
+    pendingMutationRequest_ = requestId;
+    pendingUndo_ = false;
+    const auto expectedRevision = std::optional<quint64>{
+        item.value(QStringLiteral("liveRevision")).toULongLong()};
+    if (!sendLiveMutation(item, value, quality, origin, requestId, expectedRevision)) {
+        pendingMutationRequest_ = 0U;
         previousValue_.reset();
-        emit valuesChanged();
-        emit selectionChanged();
         return false;
     }
-    emit valuesChanged();
-    emit selectionChanged();
-    appendActivity(
-        QStringLiteral("Value"),
-        QStringLiteral("%1 changed from %2 to %3 · quality %4 · origin %5")
-            .arg(item.value(QStringLiteral("reference")).toString(), before, value, quality, origin),
-        QStringLiteral("Success"));
     return true;
 }
 
 bool IedSimulatorController::undoLastChange() {
-    if (!previousValue_.has_value() || previousValue_->iedIndex != selectedIedIndex_ ||
-        previousValue_->valueIndex < 0 || previousValue_->valueIndex >= values_.size()) {
+    if (!running_ || pendingMutationRequest_ != 0U || !previousValue_.has_value() ||
+        previousValue_->iedIndex != selectedIedIndex_ ||
+        previousValue_->valueIndex < 0 || previousValue_->valueIndex >= values_.size() ||
+        previousValue_->appliedRevision == 0U) {
         return false;
     }
-    const int index = previousValue_->valueIndex;
-    const auto reference = previousValue_->value.value(QStringLiteral("reference")).toString();
-    const auto current = values_[index].toMap();
-    values_[index] = previousValue_->value;
-    runtimeValues_.insert(reference, previousValue_->value);
-    if (!writeModelManifest()) {
-        values_[index] = current;
-        runtimeValues_.insert(reference, current);
+    const auto requestId = nextMutationRequest_++;
+    pendingMutationRequest_ = requestId;
+    pendingUndo_ = true;
+    const auto& previous = previousValue_->value;
+    if (!sendLiveMutation(
+            previous,
+            previous.value(QStringLiteral("value")).toString(),
+            previous.value(QStringLiteral("quality")).toString(),
+            QStringLiteral("gui-undo"),
+            requestId,
+            previousValue_->appliedRevision)) {
+        pendingMutationRequest_ = 0U;
+        pendingUndo_ = false;
         return false;
     }
-    selectedValueIndex_ = index;
-    previousValue_.reset();
+    return true;
+}
+
+bool IedSimulatorController::sendLiveMutation(
+    const QVariantMap& item,
+    const QString& value,
+    const QString& quality,
+    const QString& origin,
+    const quint64 requestId,
+    const std::optional<quint64> expectedRevision) {
+    if (serverProcess_.state() != QProcess::Running) return false;
+    const auto domain = item.value(QStringLiteral("mmsDomain")).toString();
+    const auto mmsItem = item.value(QStringLiteral("mmsItem")).toString();
+    if (domain.isEmpty() || mmsItem.isEmpty()) return false;
+
+    QByteArray command{"IEDSIM_CMD kind=set request="};
+    command += QByteArray::number(requestId);
+    command += " domain=";
+    command += liveHex(domain).toLatin1();
+    command += " item=";
+    command += liveHex(mmsItem).toLatin1();
+    command += " value=";
+    command += liveHex(value).toLatin1();
+    command += " quality=";
+    command += liveHex(quality).toLatin1();
+    command += " origin=";
+    command += liveHex(origin).toLatin1();
+    if (expectedRevision.has_value()) {
+        command += " expected=";
+        command += QByteArray::number(*expectedRevision);
+    }
+    command += '\n';
+    return serverProcess_.write(command) == command.size();
+}
+
+void IedSimulatorController::applyServerValueState(const QVariantMap& fields) {
+    const auto domain = liveUnhex(fields.value(QStringLiteral("domain")).toString());
+    const auto itemName = liveUnhex(fields.value(QStringLiteral("item")).toString());
+    const auto key = domain + QLatin1Char('\n') + itemName;
+    auto found = runtimeValues_.find(key);
+    if (found == runtimeValues_.end()) {
+        appendActivity(
+            QStringLiteral("Live state"),
+            QStringLiteral("Server published an unknown state key %1/%2.").arg(domain, itemName),
+            QStringLiteral("Warning"));
+        return;
+    }
+
+    auto state = found.value();
+    const auto revision = fields.value(QStringLiteral("revision")).toULongLong();
+    const auto timestampMs = fields.value(QStringLiteral("timestamp_ms")).toULongLong();
+    const auto timestamp = deterministicTimestamp(timestampMs);
+    state.insert(QStringLiteral("value"), liveUnhex(fields.value(QStringLiteral("value")).toString()));
+    state.insert(QStringLiteral("quality"), liveUnhex(fields.value(QStringLiteral("quality")).toString()));
+    state.insert(QStringLiteral("origin"), liveUnhex(fields.value(QStringLiteral("origin")).toString()));
+    state.insert(QStringLiteral("timestamp"), timestamp);
+    state.insert(QStringLiteral("updated"), timestamp);
+    state.insert(QStringLiteral("liveRevision"), revision);
+    state.insert(QStringLiteral("changed"), revision != 0U);
+    found.value() = state;
+
+    for (qsizetype index = 0; index < values_.size(); ++index) {
+        if (runtimeValueKey(values_.at(index).toMap()) == key) {
+            values_[index] = state;
+            break;
+        }
+    }
+
+    const auto requestId = fields.value(QStringLiteral("request")).toULongLong();
+    if (requestId != 0U && requestId == pendingMutationRequest_) {
+        if (pendingUndo_) {
+            previousValue_.reset();
+        } else if (previousValue_.has_value()) {
+            previousValue_->appliedRevision = revision;
+        }
+        pendingMutationRequest_ = 0U;
+        pendingUndo_ = false;
+    }
+
     emit valuesChanged();
     emit selectionChanged();
     appendActivity(
-        QStringLiteral("Value"),
-        QStringLiteral("Last change to %1 was reverted.").arg(reference));
-    return true;
+        QStringLiteral("Live state"),
+        QStringLiteral("%1/%2 = %3 · quality %4 · origin %5 · rev %6")
+            .arg(
+                domain,
+                itemName,
+                state.value(QStringLiteral("value")).toString(),
+                state.value(QStringLiteral("quality")).toString(),
+                state.value(QStringLiteral("origin")).toString())
+            .arg(revision),
+        QStringLiteral("Success"));
+}
+
+bool IedSimulatorController::writeLiveStateSnapshot(const QString& path) const {
+    if (path.isEmpty()) return false;
+    QStringList keys = runtimeValues_.keys();
+    std::sort(keys.begin(), keys.end());
+    QVariantList snapshot;
+    snapshot.reserve(keys.size());
+    for (const auto& key : keys) snapshot.push_back(runtimeValues_.value(key));
+    QSaveFile output{path};
+    if (!output.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
+    output.write(QJsonDocument::fromVariant(snapshot).toJson(QJsonDocument::Indented));
+    return output.commit();
 }
 
 void IedSimulatorController::clearActivity() {
@@ -495,7 +721,7 @@ QString IedSimulatorController::diagnosticsText() const {
         "IEDScout profile: Authentication=None; AP-title=1,1,1,999,1; "
         "AE-qualifier=12; P-selector=00 00 00 01; S-selector=00 01; T-selector=00 01\n");
     text += QStringLiteral(
-        "Counts: IED=%1; LD=%2; referenced DO=%3; referenced DA=%4; "
+        "Counts: IED=%1; LD=%2; materialized DO=%3; materialized DA=%4; "
         "DataSet=%5; Report=%6; GOOSE=%7\n")
         .arg(ieds_.size())
         .arg(logicalDeviceCount_)
@@ -544,6 +770,11 @@ void IedSimulatorController::consumeServerOutput(
 void IedSimulatorController::processServerLine(
     const QString& line,
     const bool standardError) {
+    if (standardError) {
+        qWarning().noquote() << "[IEDSIM server]" << line;
+    } else {
+        qInfo().noquote() << "[IEDSIM server]" << line;
+    }
     if (!line.startsWith(QStringLiteral("IEDSIM_EVENT "))) {
         appendActivity(
             QStringLiteral("MMS"),
@@ -559,6 +790,35 @@ void IedSimulatorController::processServerLine(
         if (separator > 0) fields.insert(token.left(separator), token.mid(separator + 1));
     }
     const auto kind = fields.value(QStringLiteral("kind")).toString();
+    if (kind == QStringLiteral("value_state")) {
+        applyServerValueState(fields);
+        return;
+    }
+    if (kind == QStringLiteral("value_rejected")) {
+        const auto requestId = fields.value(QStringLiteral("request")).toULongLong();
+        const bool wasUndo = pendingUndo_;
+        if (requestId != 0U && requestId == pendingMutationRequest_) {
+            pendingMutationRequest_ = 0U;
+            pendingUndo_ = false;
+            if (!wasUndo) previousValue_.reset();
+        }
+        appendActivity(
+            QStringLiteral("Live state"),
+            QStringLiteral("Mutation rejected: %1")
+                .arg(liveUnhex(fields.value(QStringLiteral("reason")).toString())),
+            QStringLiteral("Warning"));
+        return;
+    }
+    if (kind == QStringLiteral("state_ready")) {
+        appendActivity(
+            QStringLiteral("Live state"),
+            QStringLiteral("Server-authoritative live store ready: %1 values, rev %2, clock %3 ms.")
+                .arg(fields.value(QStringLiteral("values")).toString())
+                .arg(fields.value(QStringLiteral("revision")).toString())
+                .arg(fields.value(QStringLiteral("clock_ms")).toString()),
+            QStringLiteral("Success"));
+        return;
+    }
     if (kind == QStringLiteral("server_ready")) {
         setRuntimeState(true, false);
         appendActivity(
@@ -575,7 +835,7 @@ void IedSimulatorController::processServerLine(
         if (truncated > 0) {
             appendActivity(
                 QStringLiteral("Model"),
-                QStringLiteral("%1 logical-node roots exceeded the bounded host profile and were omitted.")
+                QStringLiteral("%1 MMS leaves exceeded the host interoperability profile and were omitted.")
                     .arg(truncated),
                 QStringLiteral("Warning"));
         }
@@ -632,120 +892,217 @@ bool IedSimulatorController::writeModelManifest() {
             QStringLiteral("arstack-ied-simulator-%1.model")
                 .arg(QCoreApplication::applicationPid()));
     }
-    seedRuntimeValues();
-    ++modelRevision_;
-    QByteArray manifest = "ARSTACK_IED_MODEL\t2\t" +
-        QByteArray::number(modelRevision_) + "\n";
-    QSet<QString> uniqueRoots;
-    for (const auto& loaded : documents_) {
-        QFile input{loaded.path};
-        if (!input.open(QIODevice::ReadOnly)) {
-            appendActivity(
-                QStringLiteral("Model"),
-                QStringLiteral("Could not reopen %1 for runtime model projection.").arg(loaded.path),
-                QStringLiteral("Error"));
-            return false;
-        }
-        QXmlStreamReader xml{&input};
-        QString currentIed;
-        QString currentDomain;
-        while (!xml.atEnd()) {
-            xml.readNext();
-            if (xml.isStartElement()) {
-                const auto element = xml.name();
-                const auto attributes = xml.attributes();
-                if (element == QStringLiteral("IED")) {
-                    currentIed = attributes.value(QStringLiteral("name")).toString();
-                } else if (element == QStringLiteral("LDevice")) {
-                    currentDomain = currentIed + attributes.value(QStringLiteral("inst")).toString();
-                } else if ((element == QStringLiteral("LN") ||
-                            element == QStringLiteral("LN0")) &&
-                           !currentDomain.isEmpty()) {
-                    const auto logicalNode =
-                        attributes.value(QStringLiteral("prefix")).toString() +
-                        attributes.value(QStringLiteral("lnClass")).toString() +
-                        attributes.value(QStringLiteral("inst")).toString();
-                    if (!logicalNode.isEmpty()) {
-                        const auto key = currentDomain + QLatin1Char('\n') + logicalNode;
-                        if (!uniqueRoots.contains(key)) {
-                            uniqueRoots.insert(key);
-                            manifest += "LN\t" + currentDomain.toUtf8() + "\t" +
-                                logicalNode.toUtf8() + "\n";
-                        }
-                    }
-                }
-            } else if (xml.isEndElement()) {
-                if (xml.name() == QStringLiteral("LDevice")) currentDomain.clear();
-                if (xml.name() == QStringLiteral("IED")) currentIed.clear();
-            }
-        }
-        if (xml.hasError()) {
-            appendActivity(
-                QStringLiteral("Model"),
-                QStringLiteral("Runtime model projection failed: %1").arg(xml.errorString()),
-                QStringLiteral("Error"));
-            return false;
-        }
+
+    QSaveFile output{serverModelManifestPath_};
+    if (!output.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        appendActivity(
+            QStringLiteral("Server"),
+            QStringLiteral("Could not create the MMS model manifest: %1")
+                .arg(output.errorString()),
+            QStringLiteral("Error"));
+        return false;
     }
+
+    ++modelRevision_;
+    output.write("ARSTACK_IED_MODEL\t4\t");
+    output.write(QByteArray::number(modelRevision_));
+    output.write("\n");
 
     QSet<QString> emittedObjects;
-    for (auto it = runtimeValues_.cbegin(); it != runtimeValues_.cend(); ++it) {
-        const auto item = it.value();
+    const auto emitObject = [&](const QVariantMap& item) {
         const auto domain = item.value(QStringLiteral("mmsDomain")).toString();
         const auto mmsItem = item.value(QStringLiteral("mmsItem")).toString();
-        if (domain.isEmpty() || mmsItem.isEmpty()) continue;
+        const auto signature = item.value(QStringLiteral("mmsTypeSignature")).toString();
+        if (domain.isEmpty() || mmsItem.isEmpty() || signature.isEmpty()) return;
         const auto key = domain + QLatin1Char('\n') + mmsItem;
-        if (emittedObjects.contains(key)) continue;
+        if (emittedObjects.contains(key)) return;
         emittedObjects.insert(key);
-        manifest += "OBJ\t" + manifestField(domain) + "\t" +
-            manifestField(mmsItem) + "\t" +
-            manifestField(item.value(QStringLiteral("rawType")).toString()) + "\t" +
-            manifestField(item.value(QStringLiteral("type")).toString()) + "\t" +
-            manifestField(item.value(QStringLiteral("value")).toString()) + "\n";
+        output.write("OBJ\t");
+        output.write(manifestField(domain));
+        output.write("\t");
+        output.write(manifestField(mmsItem));
+        output.write("\t");
+        output.write(manifestField(item.value(QStringLiteral("rawType")).toString()));
+        output.write("\t");
+        output.write(manifestField(item.value(QStringLiteral("type")).toString()));
+        output.write("\t");
+        output.write(manifestField(signature));
+        output.write("\t");
+        output.write(manifestField(item.value(QStringLiteral("value")).toString()));
+        output.write("\n");
+        if (item.value(QStringLiteral("mmsWritable")).toBool()) {
+            output.write("MUT\t");
+            output.write(manifestField(domain));
+            output.write("\t");
+            output.write(manifestField(mmsItem));
+            output.write("\n");
+        }
+    };
+
+    // Preserve SCL declaration order for the recursive TypeSpecification while
+    // reading the current value from the unified Qt runtime state.
+    for (const auto& loaded : documents_) {
+        for (const auto& variant : loaded.materializedValues) {
+            const auto declared = variant.toMap();
+            const auto key = runtimeValueKey(declared);
+            const auto found = runtimeValues_.constFind(key);
+            emitObject(found == runtimeValues_.cend() ? declared : *found);
+        }
     }
 
-    QSet<QString> emittedDataSetMembers;
+    // Keep deterministic host-only extensions, but never let enrichment-only
+    // entries redefine the structural SCL model without an exact type.
+    QStringList remainingKeys;
+    remainingKeys.reserve(runtimeValues_.size());
+    for (auto it = runtimeValues_.cbegin(); it != runtimeValues_.cend(); ++it) {
+        if (!emittedObjects.contains(it.value().value(QStringLiteral("mmsDomain")).toString() +
+                                    QLatin1Char('\n') +
+                                    it.value().value(QStringLiteral("mmsItem")).toString()) &&
+            !it.value().value(QStringLiteral("mmsTypeSignature")).toString().isEmpty()) {
+            remainingKeys.push_back(it.key());
+        }
+    }
+    std::sort(remainingKeys.begin(), remainingKeys.end());
+    for (const auto& key : remainingKeys) emitObject(runtimeValues_.value(key));
+
     for (const auto& loaded : documents_) {
         for (const auto& dataSet : loaded.document.data_sets) {
             const auto dataSetDomain = qstring(dataSet.ied_name) + qstring(dataSet.ld_inst);
-            auto dataSetItem = qstring(dataSet.logical_node_path) + QLatin1Char('$') +
-                qstring(dataSet.name);
-            dataSetItem.replace(QLatin1Char('.'), QLatin1Char('$'));
-            for (const auto& entry : dataSet.entries) {
-                const auto memberDomain = mmsDomainFor(entry);
-                const auto memberItem = mmsItemFor(entry);
-                const auto memberKey = dataSetDomain + QLatin1Char('\n') + dataSetItem +
-                    QLatin1Char('\n') + memberDomain + QLatin1Char('\n') + memberItem;
+            const auto dataSetItem = qstring(dataSet.logical_node_path) + QLatin1Char('$') + qstring(dataSet.name);
+            for (const auto& member : dataSet.entries) {
+                const auto memberDomain = mmsDomainFor(member);
+                const auto memberItem = mmsItemFor(member);
                 if (dataSetDomain.isEmpty() || dataSetItem.isEmpty() ||
-                    memberDomain.isEmpty() || memberItem.isEmpty() ||
-                    emittedDataSetMembers.contains(memberKey)) continue;
-                emittedDataSetMembers.insert(memberKey);
-                manifest += "DS\t" + manifestField(dataSetDomain) + "\t" +
-                    manifestField(dataSetItem) + "\t" + manifestField(memberDomain) +
-                    "\t" + manifestField(memberItem) + "\n";
+                    memberDomain.isEmpty() || memberItem.isEmpty()) continue;
+                output.write("DS\t");
+                output.write(manifestField(dataSetDomain));
+                output.write("\t");
+                output.write(manifestField(dataSetItem));
+                output.write("\t");
+                output.write(manifestField(memberDomain));
+                output.write("\t");
+                output.write(manifestField(memberItem));
+                output.write("\n");
             }
         }
+
+        for (const auto& report : loaded.document.report_controls) {
+            const auto domain = qstring(report.ied_name) + qstring(report.ld_inst);
+            const auto ln = qstring(report.logical_node_path);
+            const auto name = qstring(report.name);
+            if (domain.isEmpty() || ln.isEmpty() || name.isEmpty()) continue;
+            const auto item = ln + (report.buffered ? QStringLiteral("$BR$") : QStringLiteral("$RP$")) + name;
+            const auto dataSetDomain = domain;
+            const auto dataSetItem = ln + QLatin1Char('$') + qstring(report.data_set_name);
+            output.write("RCB\t");
+            output.write(manifestField(domain));
+            output.write("\t");
+            output.write(manifestField(item));
+            output.write("\t");
+            output.write(report.buffered ? "1" : "0");
+            output.write("\t");
+            output.write(manifestField(qstring(report.report_id)));
+            output.write("\t");
+            output.write(manifestField(dataSetDomain));
+            output.write("\t");
+            output.write(manifestField(dataSetItem));
+            output.write("\t");
+            output.write(QByteArray::number((report.configuration_revision == 0U ? 1U : report.configuration_revision)));
+            output.write("\t");
+            output.write(QByteArray::number(report.buffer_time_milliseconds));
+            output.write("\t");
+            output.write(QByteArray::number(report.integrity_period_milliseconds));
+            output.write("\t");
+            output.write(report.indexed ? "1" : "0");
+            const auto triggerMask = reportTriggerMask(report);
+            const auto optionalMask = reportOptionalMask(report);
+            output.write("\t");
+            output.write(QByteArray::number(triggerMask));
+            output.write("\t");
+            output.write(QByteArray::number(optionalMask[0]));
+            output.write("\t");
+            output.write(QByteArray::number(optionalMask[1]));
+            output.write("\n");
+        }
     }
-    if (uniqueRoots.isEmpty()) {
+
+    // P3: materialize command services from SCL control metadata without
+    // making CO a generic writable value. ctlModel/sboTimeout/operTimeout stay
+    // regular read-only CF leaves; CTRL only binds the service runtime to the
+    // authoritative ST/MX status leaf.
+    for (const auto& loaded : documents_) {
+        for (const auto& variant : loaded.materializedValues) {
+            const auto ctl = variant.toMap();
+            if (ctl.value(QStringLiteral("dataAttribute")).toString()
+                    .compare(QStringLiteral("ctlModel"), Qt::CaseInsensitive) != 0) continue;
+            bool modelOk = false;
+            const auto model = ctl.value(QStringLiteral("value")).toString().toUInt(&modelOk);
+            if (!modelOk || model < 1U || model > 4U) continue;
+            const auto domain = ctl.value(QStringLiteral("mmsDomain")).toString();
+            const auto ln = ctl.value(QStringLiteral("logicalNode")).toString();
+            const auto dataObject = ctl.value(QStringLiteral("dataObject")).toString();
+            if (domain.isEmpty() || ln.isEmpty() || dataObject.isEmpty()) continue;
+
+            QString statusDomain;
+            QString statusItem;
+            quint64 sboTimeout = 10'000U;
+            quint64 operTimeout = 1'000U;
+            for (const auto& siblingVariant : loaded.materializedValues) {
+                const auto sibling = siblingVariant.toMap();
+                if (sibling.value(QStringLiteral("mmsDomain")).toString() != domain ||
+                    sibling.value(QStringLiteral("logicalNode")).toString() != ln ||
+                    sibling.value(QStringLiteral("dataObject")).toString() != dataObject) continue;
+                const auto da = sibling.value(QStringLiteral("dataAttribute")).toString();
+                const auto fc = sibling.value(QStringLiteral("fc")).toString();
+                if (da.compare(QStringLiteral("stVal"), Qt::CaseInsensitive) == 0 &&
+                    fc.compare(QStringLiteral("ST"), Qt::CaseInsensitive) == 0) {
+                    statusDomain = sibling.value(QStringLiteral("mmsDomain")).toString();
+                    statusItem = sibling.value(QStringLiteral("mmsItem")).toString();
+                } else if (da.compare(QStringLiteral("sboTimeout"), Qt::CaseInsensitive) == 0) {
+                    bool ok = false;
+                    const auto parsed = sibling.value(QStringLiteral("value")).toString().toULongLong(&ok);
+                    if (ok && parsed > 0U) sboTimeout = parsed;
+                } else if (da.compare(QStringLiteral("operTimeout"), Qt::CaseInsensitive) == 0) {
+                    bool ok = false;
+                    const auto parsed = sibling.value(QStringLiteral("value")).toString().toULongLong(&ok);
+                    if (ok && parsed > 0U) operTimeout = parsed;
+                }
+            }
+            if (statusDomain.isEmpty() || statusItem.isEmpty()) continue;
+            output.write("CTRL\t");
+            output.write(manifestField(domain));
+            output.write("\t");
+            output.write(manifestField(ln));
+            output.write("\t");
+            output.write(manifestField(dataObject));
+            output.write("\t");
+            output.write(QByteArray::number(model));
+            output.write("\t");
+            output.write(manifestField(statusDomain));
+            output.write("\t");
+            output.write(manifestField(statusItem));
+            output.write("\t");
+            output.write(QByteArray::number(sboTimeout));
+            output.write("\t");
+            output.write(QByteArray::number(operTimeout));
+            output.write("\n");
+        }
+    }
+
+    if (emittedObjects.isEmpty()) {
         appendActivity(
-            QStringLiteral("Model"),
-            QStringLiteral("The imported SCL contains no discoverable logical-node roots."),
+            QStringLiteral("Server"),
+            QStringLiteral("The imported SCL produced no exact structural MMS objects."),
             QStringLiteral("Error"));
+        output.cancelWriting();
         return false;
     }
-    QSaveFile output{serverModelManifestPath_};
-    if (!output.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
-        output.write(manifest) != manifest.size()) {
-        appendActivity(
-            QStringLiteral("Model"),
-            QStringLiteral("Could not create the temporary MMS model manifest."),
-            QStringLiteral("Error"));
-        return false;
-    }
+
     if (!output.commit()) {
         appendActivity(
-            QStringLiteral("Model"),
-            QStringLiteral("Could not publish the MMS model manifest atomically."),
+            QStringLiteral("Server"),
+            QStringLiteral("Could not publish the MMS model manifest: %1")
+                .arg(output.errorString()),
             QStringLiteral("Error"));
         return false;
     }
@@ -767,9 +1124,6 @@ void IedSimulatorController::rebuildPresentation() {
     reportCount_ = 0;
     gooseCount_ = 0;
 
-    std::set<QString> logicalDevices;
-    std::set<QString> dataObjects;
-    std::set<QString> dataAttributes;
     for (std::size_t documentIndex = 0; documentIndex < documents_.size(); ++documentIndex) {
         const auto& loaded = documents_[documentIndex];
         const auto& document = loaded.document;
@@ -788,24 +1142,6 @@ void IedSimulatorController::rebuildPresentation() {
             item.insert(QStringLiteral("endpoint"), QStringLiteral("%1:%2").arg(listenAddress_).arg(port_));
             ieds_.push_back(item);
         }
-
-        const auto collectEntry = [&](const ar::iec61850::scl::SclDataSetEntry& entry) {
-            const auto ld = qstring(entry.ied_name) + QLatin1Char('/') + qstring(entry.ld_inst);
-            logicalDevices.insert(ld);
-            const auto object = ld + QLatin1Char('/') + qstring(entry.ln_class) + qstring(entry.ln_inst) +
-                QLatin1Char('/') + qstring(entry.do_name);
-            dataObjects.insert(object);
-            dataAttributes.insert(object + QLatin1Char('/') + qstring(entry.da_name));
-        };
-        for (const auto& dataSet : document.data_sets) {
-            for (const auto& entry : dataSet.entries) collectEntry(entry);
-        }
-        for (const auto& stream : document.goose_streams) {
-            for (const auto& entry : stream.entries) collectEntry(entry);
-        }
-        for (const auto& report : document.report_controls) {
-            for (const auto& entry : report.entries) collectEntry(entry);
-        }
     }
     if (ieds_.isEmpty()) {
         QVariantMap fallback;
@@ -818,15 +1154,37 @@ void IedSimulatorController::rebuildPresentation() {
         fallback.insert(QStringLiteral("endpoint"), QStringLiteral("%1:%2").arg(listenAddress_).arg(port_));
         ieds_.push_back(fallback);
     }
+
+    seedRuntimeValues();
+    std::set<QString> logicalDevices;
+    std::set<QString> dataObjects;
+    std::set<QString> dataAttributes;
+    for (auto it = runtimeValues_.cbegin(); it != runtimeValues_.cend(); ++it) {
+        const auto& item = it.value();
+        const auto ied = item.value(QStringLiteral("iedName")).toString();
+        const auto ld = item.value(QStringLiteral("logicalDevice")).toString();
+        const auto ln = item.value(QStringLiteral("logicalNode")).toString();
+        const auto dataObject = item.value(QStringLiteral("dataObject")).toString();
+        const auto dataAttribute = item.value(QStringLiteral("dataAttribute")).toString();
+        if (!ld.isEmpty()) logicalDevices.insert(ied + QLatin1Char('/') + ld);
+        if (!dataObject.isEmpty()) {
+            dataObjects.insert(ied + QLatin1Char('/') + ld + QLatin1Char('/') + ln +
+                               QLatin1Char('/') + dataObject);
+        }
+        if (!dataAttribute.isEmpty()) {
+            dataAttributes.insert(ied + QLatin1Char('/') + ld + QLatin1Char('/') + ln +
+                                  QLatin1Char('/') + dataObject + QLatin1Char('/') + dataAttribute);
+        }
+    }
     logicalDeviceCount_ = static_cast<int>(logicalDevices.size());
     dataObjectCount_ = static_cast<int>(dataObjects.size());
     dataAttributeCount_ = static_cast<int>(dataAttributes.size());
+
     const auto maximumIedIndex = static_cast<int>(ieds_.size()) - 1;
     selectedIedIndex_ = ieds_.isEmpty()
         ? -1
         : std::clamp(selectedIedIndex_, 0, maximumIedIndex);
     if (selectedIedIndex_ < 0 && !ieds_.isEmpty()) selectedIedIndex_ = 0;
-    seedRuntimeValues();
     rebuildValues();
     emit modelChanged();
     emit selectionChanged();
@@ -839,44 +1197,73 @@ void IedSimulatorController::rebuildValues() {
         emit valuesChanged();
         return;
     }
-    const auto ied = ieds_.at(selectedIedIndex_).toMap();
-    const int documentIndex = ied.value(QStringLiteral("documentIndex")).toInt();
-    if (documentIndex < 0 || documentIndex >= static_cast<int>(documents_.size())) {
-        emit valuesChanged();
-        return;
+    const auto selectedName = ieds_.at(selectedIedIndex_).toMap()
+        .value(QStringLiteral("name")).toString();
+    std::vector<QVariantMap> selected;
+    selected.reserve(static_cast<std::size_t>(runtimeValues_.size()));
+    for (auto it = runtimeValues_.cbegin(); it != runtimeValues_.cend(); ++it) {
+        const auto& item = it.value();
+        const auto iedName = item.value(QStringLiteral("iedName")).toString();
+        if (!iedName.isEmpty() && iedName != selectedName) continue;
+        selected.push_back(item);
     }
-    const auto selectedName = ied.value(QStringLiteral("name")).toString();
-    const auto& document = documents_[static_cast<std::size_t>(documentIndex)].document;
-    std::unordered_set<std::string> seen;
-    const auto appendEntry = [&](const ar::iec61850::scl::SclDataSetEntry& entry) {
-        if (!entry.ied_name.empty() && qstring(entry.ied_name) != selectedName) return;
-        const auto reference = referenceFor(entry).toStdString();
-        if (!seen.insert(reference).second) return;
-        const auto key = referenceFor(entry);
-        if (!runtimeValues_.contains(key)) runtimeValues_.insert(key, valueMap(entry));
-        values_.push_back(runtimeValues_.value(key));
-    };
-    for (const auto& dataSet : document.data_sets) {
-        for (const auto& entry : dataSet.entries) appendEntry(entry);
-    }
-    for (const auto& stream : document.goose_streams) {
-        for (const auto& entry : stream.entries) appendEntry(entry);
-    }
-    for (const auto& report : document.report_controls) {
-        for (const auto& entry : report.entries) appendEntry(entry);
-    }
+    std::sort(selected.begin(), selected.end(), [](const auto& left, const auto& right) {
+        const auto leftKey = left.value(QStringLiteral("mmsDomain")).toString() + QLatin1Char('/') +
+            left.value(QStringLiteral("mmsItem")).toString();
+        const auto rightKey = right.value(QStringLiteral("mmsDomain")).toString() + QLatin1Char('/') +
+            right.value(QStringLiteral("mmsItem")).toString();
+        return leftKey < rightKey;
+    });
+    for (const auto& item : selected) values_.push_back(item);
     selectedValueIndex_ = values_.isEmpty() ? -1 : 0;
     emit valuesChanged();
 }
 
 void IedSimulatorController::seedRuntimeValues() {
-    const auto seedEntry = [this](const ar::iec61850::scl::SclDataSetEntry& entry) {
-        const auto key = referenceFor(entry);
-        if (!key.isEmpty() && !runtimeValues_.contains(key)) {
-            runtimeValues_.insert(key, valueMap(entry));
+    const auto seedMap = [this](QVariantMap incoming) {
+        const auto key = runtimeValueKey(incoming);
+        if (key.isEmpty()) return;
+        if (!runtimeValues_.contains(key)) {
+            runtimeValues_.insert(key, std::move(incoming));
+            return;
         }
+        auto current = runtimeValues_.value(key);
+        static const QStringList metadataFields{
+            QStringLiteral("name"),
+            QStringLiteral("reference"),
+            QStringLiteral("logicalDevice"),
+            QStringLiteral("logicalNode"),
+            QStringLiteral("dataObject"),
+            QStringLiteral("dataAttribute"),
+            QStringLiteral("fc"),
+            QStringLiteral("cdc"),
+            QStringLiteral("type"),
+            QStringLiteral("rawType"),
+            QStringLiteral("mmsTypeSignature"),
+            QStringLiteral("iedName"),
+            QStringLiteral("mmsDomain"),
+            QStringLiteral("mmsItem"),
+            QStringLiteral("timestamp"),
+            QStringLiteral("liveRevision"),
+            QStringLiteral("options")};
+        for (const auto& field : metadataFields) {
+            const auto existing = current.value(field);
+            if ((!existing.isValid() || existing.toString().isEmpty()) && incoming.contains(field)) {
+                current.insert(field, incoming.value(field));
+            }
+        }
+        current.insert(
+            QStringLiteral("mmsWritable"),
+            current.value(QStringLiteral("mmsWritable")).toBool() ||
+                incoming.value(QStringLiteral("mmsWritable")).toBool());
+        runtimeValues_.insert(key, std::move(current));
     };
+
     for (const auto& loaded : documents_) {
+        for (const auto& value : loaded.materializedValues) seedMap(value.toMap());
+        const auto seedEntry = [&](const ar::iec61850::scl::SclDataSetEntry& entry) {
+            seedMap(valueMap(entry));
+        };
         for (const auto& dataSet : loaded.document.data_sets) {
             for (const auto& entry : dataSet.entries) seedEntry(entry);
         }
@@ -892,6 +1279,7 @@ void IedSimulatorController::seedRuntimeValues() {
 QVariantMap IedSimulatorController::valueMap(
     const ar::iec61850::scl::SclDataSetEntry& entry) {
     const auto type = normalizedType(entry);
+    const auto fc = qstring(entry.functional_constraint);
     QVariantMap item;
     item.insert(QStringLiteral("name"), displayName(entry));
     item.insert(QStringLiteral("reference"), referenceFor(entry));
@@ -901,7 +1289,7 @@ QVariantMap IedSimulatorController::valueMap(
         qstring(entry.prefix) + qstring(entry.ln_class) + qstring(entry.ln_inst));
     item.insert(QStringLiteral("dataObject"), qstring(entry.do_name));
     item.insert(QStringLiteral("dataAttribute"), qstring(entry.da_name));
-    item.insert(QStringLiteral("fc"), qstring(entry.functional_constraint));
+    item.insert(QStringLiteral("fc"), fc);
     item.insert(QStringLiteral("cdc"), qstring(entry.cdc));
     item.insert(QStringLiteral("type"), type);
     item.insert(QStringLiteral("rawType"), qstring(entry.basic_type));
@@ -910,10 +1298,15 @@ QVariantMap IedSimulatorController::valueMap(
     item.insert(QStringLiteral("mmsItem"), mmsItemFor(entry));
     item.insert(QStringLiteral("value"), initialValue(type, qstring(entry.da_name)));
     item.insert(QStringLiteral("quality"), QStringLiteral("Good"));
-    item.insert(QStringLiteral("origin"), QStringLiteral("Simulator"));
+    item.insert(QStringLiteral("origin"), QStringLiteral("scl"));
     item.insert(QStringLiteral("writable"), !entry.is_quality && !entry.is_timestamp);
+    item.insert(
+        QStringLiteral("mmsWritable"),
+        mmsWritableFc(fc) && !entry.is_quality && !entry.is_timestamp);
     item.insert(QStringLiteral("changed"), false);
-    item.insert(QStringLiteral("updated"), QStringLiteral("—"));
+    item.insert(QStringLiteral("timestamp"), deterministicTimestamp(0U));
+    item.insert(QStringLiteral("updated"), deterministicTimestamp(0U));
+    item.insert(QStringLiteral("liveRevision"), 0ULL);
     if (type == QStringLiteral("Enumeration")) {
         item.insert(
             QStringLiteral("options"),

@@ -36,6 +36,11 @@ struct MmsStaticRequestAccessContext final {
     }
 };
 
+using MmsStaticContextualReadCallback = wire::EncodeResult (*)(
+    const void* context,
+    std::span<std::uint8_t> destination,
+    const MmsStaticRequestAccessContext& access) noexcept;
+
 using MmsStaticContextualWriteCallback = MmsStaticWriteResult (*)(
     void* context,
     std::span<const std::uint8_t> encoded_data,
@@ -54,6 +59,10 @@ struct MmsStaticObjectEntry final {
     // Appended for source compatibility with existing aggregate initializers.
     // A contextual callback takes precedence over the legacy write callback.
     MmsStaticContextualWriteCallback contextual_write{};
+
+    // Appended for source compatibility. Contextual Read is required by
+    // association-owned services such as SBO normal Select (a Read service).
+    MmsStaticContextualReadCallback contextual_read{};
 
     [[nodiscard]] constexpr bool writable() const noexcept {
         return write != nullptr || contextual_write != nullptr;
