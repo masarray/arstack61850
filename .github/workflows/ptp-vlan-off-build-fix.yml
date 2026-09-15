@@ -1,0 +1,41 @@
+name: Stage PTP VLAN-off production compile fix
+
+on:
+  push:
+    branches:
+      - feature/ptp-production-v0.1.1
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/ptp-production-v0.1.1
+          fetch-depth: 0
+
+      - name: Guard VLAN-only Kconfig macros
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp')
+          text = p.read_text(encoding='utf-8')
+          old = '''#if defined(CONFIG_AR_PTP_VLAN) && CONFIG_AR_PTP_VLAN\n    config.vlan_enabled = true;\n#else\n    config.vlan_enabled = false;\n#endif\n    config.vlan_id = static_cast<std::uint16_t>(CONFIG_AR_PTP_VLAN_ID);\n    config.vlan_priority = static_cast<std::uint8_t>(CONFIG_AR_PTP_VLAN_PRIORITY);'''
+          new = '''#if defined(CONFIG_AR_PTP_VLAN) && CONFIG_AR_PTP_VLAN\n    config.vlan_enabled = true;\n    config.vlan_id = static_cast<std::uint16_t>(CONFIG_AR_PTP_VLAN_ID);\n    config.vlan_priority = static_cast<std::uint8_t>(CONFIG_AR_PTP_VLAN_PRIORITY);\n#else\n    config.vlan_enabled = false;\n    config.vlan_id = 0U;\n    config.vlan_priority = 0U;\n#endif'''
+          if text.count(old) != 1:
+              raise SystemExit(f'PTP VLAN defaults anchor count={text.count(old)}')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+      - name: Commit source fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp
+          git diff --cached --check
+          git commit -m "PTP: support untagged production profile without VLAN Kconfig macros"
+          git push origin HEAD:feature/ptp-production-v0.1.1
