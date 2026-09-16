@@ -30,10 +30,8 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DARIEC61850_WARNINGS_AS_ERRORS=ON
 
-      - name: Build portable core and SGCB field probe
-        run: >-
-          cmake --build build --parallel 2
-          --target ariec61850_mms_sgcb_probe ariec61850_mms_static_setting_group_tests ariec61850_scl_tests
+      - name: Build full portable suite and SGCB field probe
+        run: cmake --build build --parallel 2
 
       - name: Focused SettingControl and SGCB core regressions
         run: >-
