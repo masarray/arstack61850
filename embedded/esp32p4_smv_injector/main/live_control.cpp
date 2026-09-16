@@ -646,6 +646,7 @@ void live_control_force_stop() noexcept {
     g_start_request.store(false, std::memory_order_release);
     clear_control_session();
     wake_publisher();
+    ESP_LOGW(kTag, "STOP accepted: SV transmission suppressed by fail-closed runtime");
 }
 
 SvLiveSignalState live_signal_snapshot() noexcept {

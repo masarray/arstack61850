@@ -275,6 +275,19 @@ void record_live_sent(const PtpMessageType message_type) noexcept {
     return true;
 }
 
+void disable_hardware_ptp(const esp_eth_handle_t eth_handle) noexcept {
+    if (eth_handle == nullptr) return;
+    bool enable = false;
+    const auto result = esp_eth_ioctl(
+        eth_handle,
+        static_cast<esp_eth_io_cmd_t>(ETH_MAC_ESP_CMD_PTP_ENABLE),
+        &enable);
+    if (result != ESP_OK) {
+        ESP_LOGW(kTag, "Unable to restore normal EMAC mode after PTP SOURCE: %s",
+                 esp_err_to_name(result));
+    }
+}
+
 void seed_hardware_clock(const esp_eth_handle_t eth_handle) noexcept {
     eth_mac_time_t initial_time{};
     const std::time_t system_time = std::time(nullptr);
@@ -468,6 +481,7 @@ void finish_runtime(PtpLabContext& context) {
                  status.last_error.empty() ? "" : " lastError=",
                  status.last_error.empty() ? "" : status.last_error.c_str());
     }
+    disable_hardware_ptp(context.eth_handle);
     context.task_handle = nullptr;
     g_ptp_ready.store(false, std::memory_order_release);
     g_ptp_started.store(false, std::memory_order_release);
@@ -674,6 +688,12 @@ void stop_ptp_lab() noexcept {
     if (g_ptp_context.task_handle != nullptr) {
         xTaskNotifyGive(g_ptp_context.task_handle);
     }
+    constexpr unsigned kCleanupPolls = 100U;
+    for (unsigned attempt = 0U; attempt < kCleanupPolls; ++attempt) {
+        if (!g_ptp_started.load(std::memory_order_acquire)) return;
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+    ESP_LOGE(kTag, "PTP SOURCE cleanup timeout; EMAC rollback incomplete after 500 ms");
 }
 
 [[nodiscard]] bool ptp_lab_is_running() noexcept {

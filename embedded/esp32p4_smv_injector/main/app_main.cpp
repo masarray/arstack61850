@@ -34,6 +34,7 @@ namespace {
 
 using ar::esp32p4::smv::RuntimePublisherProfile;
 using ar::esp32p4::smv::live_control_bind_publisher_task;
+using ar::esp32p4::smv::live_control_force_stop;
 using ar::esp32p4::smv::live_control_initialize;
 using ar::esp32p4::smv::live_control_task;
 using ar::esp32p4::smv::live_signal_snapshot;
@@ -58,6 +59,7 @@ constexpr char kMirrorSvId[] = "AR_DIAG_SV1";
 constexpr std::uint16_t kSampleModeSamplesPerSecond = 1U;
 constexpr std::uint16_t kDiagnosticEtherType = 0x88B5U;
 constexpr std::uint32_t kStatsMergeEvery = 400U;
+constexpr std::uint32_t kTransportFailureStopThreshold = 400U; // 100 ms at 4 kHz
 constexpr std::uint32_t kTimerResolutionHz = 1000000U;
 
 EventGroupHandle_t g_link_events = nullptr;
@@ -429,6 +431,8 @@ void publisher_task(void* argument) {
     TimingStats local{};
     bool schedule_anchored = false;
     std::int64_t expected_wake_us = 0;
+    std::uint32_t consecutive_canonical_tx_failures = 0U;
+    esp_err_t last_canonical_tx_error = ESP_OK;
 
 #if CONFIG_AR_SMV_DIAGNOSTIC_PROBES
     std::array<std::uint8_t, 60> probe_broadcast{};
@@ -466,6 +470,8 @@ void publisher_task(void* argument) {
             local = TimingStats{};
             reset_interval_stats();
             schedule_anchored = false;
+            consecutive_canonical_tx_failures = 0U;
+            last_canonical_tx_error = ESP_OK;
             expected_schedule.reset(active_profile.publisher_rate_hz);
             static_cast<void>(expected_schedule.next_ticks()); // first alarm interval
             ESP_LOGI(kTag,
@@ -529,6 +535,8 @@ void publisher_task(void* argument) {
 
         if ((xEventGroupGetBits(g_link_events) & kLinkUpBit) == 0U) {
             ++local.canonical_fail;
+            last_canonical_tx_error = ESP_ERR_INVALID_STATE;
+            ++consecutive_canonical_tx_failures;
 #if CONFIG_AR_SMV_BROADCAST_MIRROR
             ++local.mirror_fail;
 #endif
@@ -536,8 +544,15 @@ void publisher_task(void* argument) {
             patch_packet(canonical, canonical_sample_count, row, signal_state);
             const esp_err_t canonical_result =
                 esp_eth_transmit(eth_handle, canonical.bytes.data(), canonical.bytes.size());
-            if (canonical_result == ESP_OK) ++local.canonical_ok;
-            else ++local.canonical_fail;
+            if (canonical_result == ESP_OK) {
+                ++local.canonical_ok;
+                consecutive_canonical_tx_failures = 0U;
+                last_canonical_tx_error = ESP_OK;
+            } else {
+                ++local.canonical_fail;
+                last_canonical_tx_error = canonical_result;
+                ++consecutive_canonical_tx_failures;
+            }
 
 #if CONFIG_AR_SMV_BROADCAST_MIRROR
             patch_packet(mirror, mirror_sample_count, row, signal_state);
@@ -560,6 +575,18 @@ void publisher_task(void* argument) {
         update_local_timing(
             local, lateness_us, missed_slots, canonical_sample_count, signal_state.generation);
         g_sample_tick_total.fetch_add(1U, std::memory_order_relaxed);
+        if (consecutive_canonical_tx_failures >= kTransportFailureStopThreshold) {
+            ESP_LOGE(kTag,
+                     "SV transport fault: %lu consecutive canonical TX failures; last=%s; forcing STOP",
+                     static_cast<unsigned long>(consecutive_canonical_tx_failures),
+                     esp_err_to_name(last_canonical_tx_error));
+            merge_stats(local);
+            live_control_force_stop();
+            stop_sample_clock(sample_clock);
+            schedule_anchored = false;
+            consecutive_canonical_tx_failures = 0U;
+            continue;
+        }
         canonical_sample_count = static_cast<std::uint16_t>(
             (canonical_sample_count + 1U) % active_profile.sample_counter_modulus);
         mirror_sample_count = static_cast<std::uint16_t>(mirror_sample_count + 1U);
