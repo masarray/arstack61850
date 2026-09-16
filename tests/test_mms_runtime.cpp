@@ -266,18 +266,18 @@ void association_consumes_coalesced_buffered_tpkt_before_socket_wait() {
     ScriptedTransport transport;
     queue_handshake(transport);
     mms::MmsAssociationRuntime runtime{transport};
-    runtime.connect({\"127.0.0.1\", 102U});
+    runtime.connect({"127.0.0.1", 102U});
 
     const auto invoke_id = runtime.next_invoke_id();
     mms::MmsReadRequest request;
     request.invoke_id = invoke_id;
     request.variables.push_back(
-        mms::MmsObjectName::domain_specific(\"LD0\", \"LLN0$ST$Mod$stVal\"));
+        mms::MmsObjectName::domain_specific("LD0", "LLN0$ST$Mod$stVal"));
     const auto request_bytes = mms::MmsServiceCodec::encode_read_request_p_data(request);
 
     mms::MmsReadResponse response;
     response.invoke_id = invoke_id;
-    response.results.push_back({mms::MmsDataValue::cboolean(true), std::noptull});
+    response.results.push_back({mms::MmsDataValue::boolean(true), std::nullopt});
     const auto response_frame = wrap_application(
         mms::MmsServiceCodec::encode_read_response_p_data(response));
     const auto report_frame = wrap_application(
