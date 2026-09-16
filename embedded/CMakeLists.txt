@@ -147,6 +147,7 @@ foreach(server_smoke IN ITEMS
         mms_iedscout_fc_root_read
         mms_iedscout_rcb_root
         mms_iedscout_rcb_control
+        mms_iedscout_composed_gvaa
         mms_urcb_event
         mms_connection_runtime
         mms_negotiated_limits
