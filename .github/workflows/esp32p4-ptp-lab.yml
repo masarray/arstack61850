@@ -63,8 +63,11 @@ jobs:
           # ESP-IDF 5.5 has no portable ETH_CMD_G_LINK query. Admission truth is
           # therefore the stronger bounded runtime contract: explicit operator
           # start is accepted only after real Announce + Sync + Follow_Up TX.
+          # The Ethernet facade intentionally stores the checked-start result so
+          # a failed SOURCE start can restore normal shared-EMAC mode.
           required = [
-              'return ar_ptp_lab_try_start(s_eth_handle);',
+              'const bool started = ar_ptp_lab_try_start(s_eth_handle);',
+              'ar_esp32p4_restore_normal_emac();',
               'g_ptp_ready',
               'PTP source readiness timeout',
               'g_announce_sent.load',
@@ -76,7 +79,7 @@ jobs:
           missing = [token for token in required if token not in combined]
           if missing:
               raise SystemExit('PTP verified-start contract missing: ' + ', '.join(missing))
-          print('PTP source contract: explicit post-Ethernet-start operator path + verified Announce/Sync/Follow_Up TX')
+          print('PTP source contract: explicit post-Ethernet-start path + verified TX + failed-start EMAC rollback')
           PY
 
       - name: Enable guarded PTP-P2 profile
