@@ -1,0 +1,146 @@
+name: Phase2B SGCB Production Wiring
+
+on:
+  push:
+    branches:
+      - feat/ied-sim-ux-performance-foundation
+    paths:
+      - 'scripts/phase2b_sgcb_production_patch.py'
+      - '.github/workflows/zz-phase2b-sgcb-production.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  wire-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/ied-sim-ux-performance-foundation
+          fetch-depth: 0
+
+      - name: Apply Phase 2B production wiring
+        run: python3 scripts/phase2b_sgcb_production_patch.py
+
+      - name: Configure portable core
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DARIEC61850_WARNINGS_AS_ERRORS=ON
+
+      - name: Build portable core and SGCB field probe
+        run: >-
+          cmake --build build --parallel 2
+          --target ariec61850_mms_sgcb_probe ariec61850_mms_static_setting_group_tests ariec61850_scl_tests
+
+      - name: Focused SettingControl and SGCB core regressions
+        run: >-
+          ctest --test-dir build --output-on-failure
+          -R 'ariec61850_(scl_tests|mms_static_setting_group_tests)'
+
+      - name: Full portable regression
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
+
+      - name: Configure desktop simulator
+        run: >-
+          cmake -S apps/ied_simulator -B build-qt -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DARIEC61850_WARNINGS_AS_ERRORS=ON
+
+      - name: Build production simulator server and manifest projection QA
+        run: >-
+          cmake --build build-qt --parallel 2
+          --target arstack_ied_simulator ariec61850_ied_simulator_server ied_setting_control_manifest_qa
+
+      - name: Verify exact SCL to SGCB manifest projection
+        run: ./build-qt/ied_setting_control_manifest_qa
+
+      - name: Real socket SGCB discovery activation and cross-association state
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > sgcb-production.manifest <<'EOF'
+          ARSTACK_IED_MODEL	2	1
+          LN	SGIEDLD0	LLN0
+          OBJ	SGIEDLD0	LLN0$ST$Mod$stVal	BOOLEAN	BOOLEAN	false
+          SGCB	SGIEDLD0	LLN0$SP$SGCB	4	1
+          EOF
+
+          PORT="$(python3 - <<'PY'
+          import socket
+          s = socket.socket()
+          s.bind(('127.0.0.1', 0))
+          print(s.getsockname()[1])
+          s.close()
+          PY
+          )"
+          ./build-qt/ariec61850_ied_simulator_server \
+            --host 127.0.0.1 --port "$PORT" \
+            --model-manifest "$PWD/sgcb-production.manifest" \
+            --max-connections 2 >sgcb-server.log 2>&1 &
+          SERVER_PID=$!
+          cleanup() {
+            if kill -0 "$SERVER_PID" 2>/dev/null; then
+              kill "$SERVER_PID" 2>/dev/null || true
+              wait "$SERVER_PID" 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 200); do
+            if grep -q 'IEDSIM_EVENT kind=server_ready' sgcb-server.log; then break; fi
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              cat sgcb-server.log
+              exit 1
+            fi
+            sleep 0.025
+          done
+          grep -q 'IEDSIM_EVENT kind=server_ready.*sgcbs=1' sgcb-server.log || {
+            cat sgcb-server.log
+            echo 'Missing sgcbs=1 readiness evidence' >&2
+            exit 1
+          }
+
+          ./build/ariec61850_mms_sgcb_probe 127.0.0.1 "$PORT" \
+            --domain SGIEDLD0 --root 'LLN0$SP$SGCB' \
+            --expect-num 4 --expect-act 1 --activate 3 | tee sgcb-association-1.log
+          ./build/ariec61850_mms_sgcb_probe 127.0.0.1 "$PORT" \
+            --domain SGIEDLD0 --root 'LLN0$SP$SGCB' \
+            --expect-num 4 --expect-act 3 --reject 5 | tee sgcb-association-2.log
+
+          wait "$SERVER_PID"
+          trap - EXIT
+          grep -q 'SGCB_PROBE_PASS discovery=5/5 num=4 initial=1 final=3.*activation=verified' sgcb-association-1.log
+          grep -q 'SGCB_PROBE_PASS discovery=5/5 num=4 initial=3 final=3.*rejection=verified' sgcb-association-2.log
+          if grep -q 'IEDSIM_EVENT kind=client_error' sgcb-server.log; then
+            cat sgcb-server.log
+            echo 'Production SGCB acceptance emitted client_error' >&2
+            exit 1
+          fi
+          echo 'SGCB_PRODUCTION_SOCKET_PASS discovery=5/5 activation=1->3 cross_association=3 reject_out_of_range=pass'
+
+      - name: Commit Phase 2B only after all gates pass
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/zz-phase2b-sgcb-production.yml scripts/phase2b_sgcb_production_patch.py
+          git add \
+            CMakeLists.txt \
+            apps/ied_simulator/CMakeLists.txt \
+            apps/ied_simulator/src/IedFleetController.cpp \
+            apps/ied_simulator/src/IedSettingControlManifest.hpp \
+            apps/ied_simulator/src/ied_setting_control_manifest_qa.cpp \
+            tools/static_ied_server.cpp \
+            tools/mms_sgcb_probe.cpp
+          git commit -m "feat(ied): wire SGCB into simulator runtime"
+          git push origin HEAD:feat/ied-sim-ux-performance-foundation
