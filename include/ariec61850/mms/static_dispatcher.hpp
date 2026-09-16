@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string_view>
 
 namespace ar::iec61850::mms {
 
@@ -38,6 +39,11 @@ struct MmsStaticDispatchPolicy final {
     bool advertise_flattened_child_aliases{};
 };
 
+struct MmsStaticDirectoryEntry final {
+    std::string_view domain;
+    std::string_view item;
+};
+
 struct MmsStaticDispatchResult final {
     MmsStaticDispatchStatus status{MmsStaticDispatchStatus::malformed_request};
     MmsWireConfirmedService service{MmsWireConfirmedService::unknown};
@@ -63,6 +69,22 @@ public:
         const MmsStaticDispatchPolicy policy = {}) noexcept
         : objects_{objects}, data_sets_{data_sets}, policy_{policy} {}
 
+    // directory must be sorted by (domain,item), unique, and remain alive for
+    // the dispatcher lifetime. It is optional so embedded profiles retain the
+    // fixed-buffer scan path without host-side heap requirements.
+    constexpr MmsStaticApplicationDispatcher(
+        const MmsStaticObjectTable& objects,
+        const MmsStaticDataSetTable& data_sets,
+        const std::span<const MmsStaticDirectoryEntry> directory,
+        const MmsStaticDispatchPolicy policy = {}) noexcept
+        : objects_{objects}, data_sets_{data_sets}, directory_{directory}, policy_{policy} {}
+
+    constexpr MmsStaticApplicationDispatcher(
+        const MmsStaticObjectTable& objects,
+        const std::span<const MmsStaticDirectoryEntry> directory,
+        const MmsStaticDispatchPolicy policy = {}) noexcept
+        : objects_{objects}, directory_{directory}, policy_{policy} {}
+
     [[nodiscard]] MmsStaticDispatchResult dispatch(
         std::span<const std::uint8_t> mms_request,
         std::span<std::uint8_t> response,
@@ -86,6 +108,7 @@ public:
 private:
     const MmsStaticObjectTable& objects_;
     MmsStaticDataSetTable data_sets_{};
+    std::span<const MmsStaticDirectoryEntry> directory_{};
     MmsStaticDispatchPolicy policy_{};
 };
 

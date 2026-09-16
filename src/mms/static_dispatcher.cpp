@@ -205,6 +205,69 @@ namespace {
     return true;
 }
 
+[[nodiscard]] MmsStaticDispatchResult dispatch_indexed_domain_named_variable_page(
+    const std::span<const MmsStaticDirectoryEntry> directory,
+    const MmsStaticDispatchPolicy& policy,
+    const MmsConfirmedPduView& confirmed,
+    const MmsGetNameListRequestView& request,
+    const std::span<std::uint8_t> response) noexcept {
+    const auto domain = as_text(request.domain_id);
+    const auto first = std::lower_bound(
+        directory.begin(), directory.end(), domain,
+        [](const MmsStaticDirectoryEntry& entry, const std::string_view value) noexcept {
+            return entry.domain < value;
+        });
+    const auto last = std::upper_bound(
+        first, directory.end(), domain,
+        [](const std::string_view value, const MmsStaticDirectoryEntry& entry) noexcept {
+            return value < entry.domain;
+        });
+
+    auto cursor = first;
+    if (!request.continue_after.empty()) {
+        const auto continuation = as_text(request.continue_after);
+        const auto found = std::lower_bound(
+            first, last, continuation,
+            [](const MmsStaticDirectoryEntry& entry, const std::string_view value) noexcept {
+                return entry.item < value;
+            });
+        if (found == last || found->item != continuation) {
+            return make_status(MmsStaticDispatchStatus::object_not_found, confirmed);
+        }
+        cursor = found + 1;
+    }
+
+    std::array<std::string_view, MmsServiceSpanCodec::maximum_identifiers> page{};
+    std::size_t page_count{};
+    while (cursor != last && page_count < policy.maximum_names_per_response) {
+        page[page_count++] = cursor->item;
+        ++cursor;
+    }
+    const bool more_follows = cursor != last;
+    if (page_count == 0U) {
+        const std::span<const std::string_view> empty;
+        return make_encoded(
+            confirmed,
+            MmsServiceSpanCodec::encode_get_name_list_response_into(
+                confirmed.invoke_id, empty, false, response));
+    }
+
+    auto encoded_count = page_count;
+    while (encoded_count > 0U) {
+        const auto encoded = MmsServiceSpanCodec::encode_get_name_list_response_into(
+            confirmed.invoke_id,
+            std::span<const std::string_view>{page}.first(encoded_count),
+            more_follows || encoded_count < page_count,
+            response);
+        if (encoded.success()) return make_encoded(confirmed, encoded);
+        if (encoded.status != wire::EncodeStatus::buffer_too_small || encoded_count == 1U) {
+            return make_encoded(confirmed, encoded);
+        }
+        --encoded_count;
+    }
+    return make_status(MmsStaticDispatchStatus::backend_failure, confirmed);
+}
+
 [[nodiscard]] MmsStaticDispatchResult dispatch_domain_named_variable_page(
     const MmsStaticObjectTable& objects,
     const MmsStaticDispatchPolicy& policy,
@@ -304,6 +367,7 @@ namespace {
 [[nodiscard]] MmsStaticDispatchResult dispatch_get_name_list(
     const MmsStaticObjectTable& objects,
     const MmsStaticDataSetTable& data_sets,
+    const std::span<const MmsStaticDirectoryEntry> directory,
     const MmsStaticDispatchPolicy& policy,
     const MmsConfirmedPduView& confirmed,
     const std::span<std::uint8_t> response) noexcept {
@@ -314,6 +378,10 @@ namespace {
 
     if (request.object_class == MmsNameListObjectClass::named_variable &&
         request.scope == MmsNameScopeKind::domain_specific) {
+        if (!directory.empty() && policy.advertise_flattened_child_aliases) {
+            return dispatch_indexed_domain_named_variable_page(
+                directory, policy, confirmed, request, response);
+        }
         return dispatch_domain_named_variable_page(
             objects, policy, confirmed, request, response);
     }
@@ -1250,7 +1318,8 @@ MmsStaticDispatchResult MmsStaticApplicationDispatcher::dispatch(
 
     switch (request.service()) {
     case MmsWireConfirmedService::get_name_list:
-        return dispatch_get_name_list(objects_, data_sets_, policy_, request, response);
+        return dispatch_get_name_list(
+            objects_, data_sets_, directory_, policy_, request, response);
     case MmsWireConfirmedService::get_variable_access_attributes:
         return dispatch_attributes(objects_, request, response, workspace);
     case MmsWireConfirmedService::get_named_variable_list_attributes:

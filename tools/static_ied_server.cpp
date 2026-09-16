@@ -1812,6 +1812,46 @@ void notify_brcb_changes(
     return std::string{text.data()} + ':' + std::to_string(ntohs(peer.sin_port));
 }
 
+[[nodiscard]] std::vector<mms::MmsStaticDirectoryEntry> build_directory_index(
+    const mms::MmsStaticObjectTable& objects) {
+    std::vector<mms::MmsStaticDirectoryEntry> directory;
+    std::size_t estimated{};
+    for (const auto& object : objects.objects()) {
+        estimated += 1U + static_cast<std::size_t>(
+            std::count(object.item.begin(), object.item.end(), '$'));
+    }
+    directory.reserve(estimated);
+    for (const auto& object : objects.objects()) {
+        std::size_t prefix_end = object.item.find('$');
+        while (true) {
+            const auto prefix = object.item.substr(
+                0U,
+                prefix_end == std::string_view::npos ? object.item.size() : prefix_end);
+            if (!prefix.empty()) directory.push_back({object.domain, prefix});
+            if (prefix_end == std::string_view::npos || prefix_end + 1U >= object.item.size()) {
+                break;
+            }
+            prefix_end = object.item.find('$', prefix_end + 1U);
+        }
+    }
+    std::sort(
+        directory.begin(), directory.end(),
+        [](const mms::MmsStaticDirectoryEntry& left,
+           const mms::MmsStaticDirectoryEntry& right) noexcept {
+            if (left.domain != right.domain) return left.domain < right.domain;
+            return left.item < right.item;
+        });
+    directory.erase(
+        std::unique(
+            directory.begin(), directory.end(),
+            [](const mms::MmsStaticDirectoryEntry& left,
+               const mms::MmsStaticDirectoryEntry& right) noexcept {
+                return left.domain == right.domain && left.item == right.item;
+            }),
+        directory.end());
+    return directory;
+}
+
 void serve_connection(
     const NativeSocket socket,
     const mms::MmsStaticObjectTable& object_table,
@@ -2079,8 +2119,15 @@ void serve_connection(
         dispatch_policy.advertise_flattened_child_aliases = true;
     }
 
+    std::vector<mms::MmsStaticDirectoryEntry> directory_index;
+    if (dispatch_policy.advertise_flattened_child_aliases) {
+        directory_index = build_directory_index(*dispatch_objects);
+    }
     const mms::MmsStaticApplicationDispatcher dispatcher{
-        *dispatch_objects, data_sets, dispatch_policy};
+        *dispatch_objects,
+        data_sets,
+        std::span<const mms::MmsStaticDirectoryEntry>{directory_index},
+        dispatch_policy};
 
     mms::MmsStaticConnectionPolicy policy;
     policy.association_id = association_id;

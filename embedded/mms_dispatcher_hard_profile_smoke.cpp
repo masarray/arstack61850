@@ -442,8 +442,21 @@ int main() {
     auto dual_directory_policy = hierarchy_policy;
     dual_directory_policy.maximum_names_per_response = 16U;
     dual_directory_policy.advertise_flattened_child_aliases = true;
+    constexpr std::array<mms::MmsStaticDirectoryEntry, 11U> dual_directory_index{{
+        {"LDH", "GGIO1"},
+        {"LDH", "GGIO1$ST"},
+        {"LDH", "GGIO1$ST$Ind1"},
+        {"LDH", "GGIO1$ST$Ind1$stVal"},
+        {"LDH", "LLN0"},
+        {"LDH", "LLN0$ST"},
+        {"LDH", "LLN0$ST$Mod"},
+        {"LDH", "LLN0$ST$Mod$stVal"},
+        {"LDH", "Orphan"},
+        {"LDH", "Orphan$ST"},
+        {"LDH", "Orphan$ST$stVal"}}};
     const mms::MmsStaticApplicationDispatcher dual_directory_dispatcher{
         hierarchy_table,
+        std::span<const mms::MmsStaticDirectoryEntry>{dual_directory_index},
         dual_directory_policy};
     dispatched = dual_directory_dispatcher.dispatch(
         kNamedVariableDirectoryRequest,
