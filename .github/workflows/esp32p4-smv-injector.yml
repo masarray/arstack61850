@@ -62,6 +62,7 @@ jobs:
       - name: Verify production PTP-P2 profile
         run: |
           set -euo pipefail
+          grep -qx 'CONFIG_ETH_TRANSMIT_MUTEX=y' sdkconfig
           grep -qx 'CONFIG_AR_PTP_LAB_TX=y' sdkconfig
           grep -qx 'CONFIG_AR_PTP_OPERATING_ROLE=0' sdkconfig
           grep -qx 'CONFIG_AR_PTP_DOMAIN=0' sdkconfig
@@ -69,9 +70,9 @@ jobs:
           grep -qx 'CONFIG_AR_PTP_RESPOND_PDELAY=y' sdkconfig
           grep -qx 'CONFIG_AR_PTP_SYNC_INTERVAL_MS=250' sdkconfig
           grep -qx 'CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS=1000' sdkconfig
-          echo 'Production timing profile: PASS · PTP-P2 LAB_SOURCE · HW timestamp adapter compiled'
+          echo 'Production timing profile: PASS · serialized shared EMAC TX · PTP-P2 LAB_SOURCE · HW timestamp adapter compiled'
 
-      - name: Verify realtime START and telemetry boundary policy
+      - name: Verify realtime START, transport health and telemetry boundary policy
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -90,7 +91,10 @@ jobs:
           assert 'g_sample_tick_total.fetch_add(1U, std::memory_order_relaxed);' in source
           assert 'elapsed_ticks) * 1000000ULL' in source
           assert 'rate_baseline_valid = true;' in source
-          print('Realtime boundary policy: PASS - timer starts after formatting and telemetry rate is elapsed-time normalized')
+          assert 'kTransportFailureStopThreshold = 400U' in source
+          assert 'live_control_force_stop();' in source
+          assert 'SV transport fault:' in source
+          print('Realtime boundary policy: PASS - post-log timer start + elapsed-time telemetry + 100 ms fail-closed canonical TX')
           PY
 
       - name: Build firmware
