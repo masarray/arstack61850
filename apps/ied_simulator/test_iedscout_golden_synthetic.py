@@ -51,6 +51,31 @@ def run(command: list[str], timeout: int = 15) -> str:
     return output
 
 
+def terminate_process_tree(process: subprocess.Popen[str]) -> None:
+    if os.name == "nt" and process.poll() is None:
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            capture_output=True,
+            text=True,
+            check=False,
+            creationflags=creation_flags(),
+        )
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+        return
+
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+
 def verify_fixture(scl: Path) -> None:
     root = ET.parse(scl).getroot()
     namespace = {"scl": "http://www.iec.ch/61850/2003/SCL"}
@@ -87,6 +112,27 @@ def verify_fixture(scl: Path) -> None:
         raise RuntimeError("Golden fixture must contain SettingControl numOfSGs=4 actSG=1")
 
 
+def verify_manifest_inventory(manifest_text: str) -> None:
+    urcbs = 0
+    brcbs = 0
+    sgcbs = 0
+    for line in manifest_text.splitlines():
+        fields = line.split("\t")
+        if len(fields) >= 4 and fields[0] == "RCB":
+            if fields[3] == "0":
+                urcbs += 1
+            elif fields[3] == "1":
+                brcbs += 1
+        elif fields and fields[0] == "SGCB":
+            sgcbs += 1
+
+    if (urcbs, brcbs, sgcbs) != (32, 2, 1):
+        raise RuntimeError(
+            "Golden manifest inventory mismatch: "
+            f"urcbs={urcbs} brcbs={brcbs} sgcbs={sgcbs}; expected 32/2/1"
+        )
+
+
 def require_read(read_probe: Path, port: int, item: str, expected: str) -> str:
     output = run([
         str(read_probe), "127.0.0.1", str(port),
@@ -96,6 +142,18 @@ def require_read(read_probe: Path, port: int, item: str, expected: str) -> str:
     if expected not in output:
         raise RuntimeError(f"Read evidence for {item} did not contain {expected!r}:\n{output}")
     return output
+
+
+def wait_for_read(read_probe: Path, port: int, item: str, expected: str) -> str:
+    deadline = time.monotonic() + 6.0
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            return require_read(read_probe, port, item, expected)
+        except (RuntimeError, subprocess.TimeoutExpired) as error:
+            last_error = error
+            time.sleep(0.10)
+    raise RuntimeError(f"MMS server did not become readable for {item}: {last_error}")
 
 
 def update_manifest_value(manifest_path: Path, item: str, new_value: str) -> int:
@@ -234,9 +292,9 @@ def main() -> int:
                     except (FileNotFoundError, PermissionError, UnicodeDecodeError):
                         manifest_text = ""
                     if (
-                        "IEDSIM_EVENT kind=server_ready" in ready_text
-                        and "RCB\tIEDGOLDENLD0\tLLN0$BR$Buffer01\t1\t" in manifest_text
+                        "RCB\tIEDGOLDENLD0\tLLN0$BR$Buffer01\t1\t" in manifest_text
                         and "OBJ\tIEDGOLDENLD0\tXCBR1$ST$Pos$stVal\t" in manifest_text
+                        and "SGCB\tIEDGOLDENLD0\tLLN0$SP$SGCB\t4\t1" in manifest_text
                     ):
                         break
                     if process.poll() is not None:
@@ -245,25 +303,19 @@ def main() -> int:
                 else:
                     ready_text = log_path.read_text(encoding="utf-8", errors="replace")
 
-                required_ready = (
-                    "urcbs=32",
-                    "brcbs=2",
-                    "sgcbs=1",
-                    "omitted_urcbs=0",
-                    "omitted_brcbs=0",
-                )
-                if "IEDSIM_EVENT kind=server_ready" not in ready_text or any(
-                    token not in ready_text for token in required_ready
-                ):
-                    raise RuntimeError(
-                        "Golden runtime readiness/count evidence is incomplete:\n" + ready_text
-                    )
                 if not manifest_text:
-                    raise RuntimeError("Golden runtime manifest was not available for event injection")
+                    raise RuntimeError(
+                        "Golden runtime manifest was not available for event injection.\n" + ready_text
+                    )
+                verify_manifest_inventory(manifest_text)
+
+                # The desktop binary is a GUI subsystem executable on Windows, so
+                # stdout is not a reliable readiness channel there. A complete
+                # manifest plus an actual MMS Read proves the runtime is live.
+                wait_for_read(read_probe, port, "LLN0$RP$Uncfg01$RptEna", "value=false")
 
                 # First/last dense unconfigured URCBs must survive manifest projection
                 # and be MMS-readable, proving they were not dropped by capacity logic.
-                require_read(read_probe, port, "LLN0$RP$Uncfg01$RptEna", "value=false")
                 require_read(read_probe, port, "LLN0$RP$Uncfg30$RptEna", "value=false")
 
                 # Indexed instances are concrete MMS ObjectNames while RptID remains
@@ -314,13 +366,7 @@ def main() -> int:
                 if "IEDSIM_EVENT kind=client_error" in final_log:
                     raise RuntimeError("Golden runtime emitted client_error:\n" + final_log)
             finally:
-                if process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=5)
+                terminate_process_tree(process)
 
     print(
         "IEDSCOUT_GOLDEN_SYNTHETIC_PASS "
