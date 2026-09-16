@@ -21,6 +21,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: esp32p4-ptp-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-esp32p4-ptp:
     strategy:
@@ -33,6 +37,7 @@ jobs:
             role_value: 1
     name: build-esp32p4-ptp-${{ matrix.role_name }}
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     container:
       image: espressif/idf:v5.5.4
     defaults:
