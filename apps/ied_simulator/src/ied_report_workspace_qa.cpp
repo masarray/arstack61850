@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "IedFleetController.hpp"
+#include "IedReportControlManifest.hpp"
 #include "MmsReportController.hpp"
 
 #include <QCoreApplication>
@@ -17,6 +18,64 @@
 #include <functional>
 
 namespace {
+bool verifyIndexedRcbManifestExpansion() {
+    using ar::iec61850::scl::SclReportControl;
+
+    QSet<QString> emitted;
+    SclReportControl brcb;
+    brcb.ied_name = "AA1E1F06R4";
+    brcb.ld_inst = "Application";
+    brcb.logical_node_path = "LLN0";
+    brcb.name = "Buffer";
+    brcb.data_set_name = "dsDin";
+    brcb.buffered = true;
+    brcb.indexed = true;
+    brcb.max_clients = 2U;
+    brcb.configuration_revision = 1U;
+    brcb.buffer_time_milliseconds = 100U;
+    brcb.integrity_period_milliseconds = 10'000U;
+
+    const auto brcbLines = arstack::iedsim::reportControlManifestLines(
+        brcb,
+        QStringLiteral("AA1E1F06R4"),
+        emitted);
+    const bool brcbExpanded =
+        brcbLines.count('\n') == 2 &&
+        brcbLines.contains("\tLLN0$BR$Buffer01\t1\t") &&
+        brcbLines.contains("\tLLN0$BR$Buffer02\t1\t") &&
+        !brcbLines.contains("\tLLN0$BR$Buffer\t1\t");
+
+    emitted.clear();
+    SclReportControl urcb = brcb;
+    urcb.name = "Unbuffer";
+    urcb.buffered = false;
+    const auto urcbLines = arstack::iedsim::reportControlManifestLines(
+        urcb,
+        QStringLiteral("AA1E1F06R4"),
+        emitted);
+    const bool urcbExpanded =
+        urcbLines.count('\n') == 2 &&
+        urcbLines.contains("\tLLN0$RP$Unbuffer01\t0\t") &&
+        urcbLines.contains("\tLLN0$RP$Unbuffer02\t0\t") &&
+        !urcbLines.contains("\tLLN0$RP$Unbuffer\t0\t");
+
+    emitted.clear();
+    SclReportControl nonIndexed = urcb;
+    nonIndexed.name = "Static";
+    nonIndexed.indexed = false;
+    nonIndexed.max_clients = 4U;
+    const auto nonIndexedLines = arstack::iedsim::reportControlManifestLines(
+        nonIndexed,
+        QStringLiteral("AA1E1F06R4"),
+        emitted);
+    const bool nonIndexedStable =
+        nonIndexedLines.count('\n') == 1 &&
+        nonIndexedLines.contains("\tLLN0$RP$Static\t0\t") &&
+        !nonIndexedLines.contains("LLN0$RP$Static01");
+
+    return brcbExpanded && urcbExpanded && nonIndexedStable;
+}
+
 bool waitUntil(const std::function<bool()>& predicate, const int timeoutMs) {
     QElapsedTimer timer;
     timer.start();
@@ -55,6 +114,11 @@ int main(int argc, char* argv[]) {
     if (argc != 2) {
         qCritical() << "usage: ied_report_workspace_qa <scl>";
         return 2;
+    }
+
+    if (!verifyIndexedRcbManifestExpansion()) {
+        qCritical() << "REPORTS_WORKBENCH_FAIL indexed_rcb_manifest";
+        return 20;
     }
 
     MmsReportController negative;
@@ -212,6 +276,7 @@ int main(int argc, char* argv[]) {
         << "dynamic_candidates=" + QString::number(dynamicCandidates.size())
         << "members=" + QString::number(memberCount)
         << "gi_reports=" + QString::number(reportCountAfterGi)
+        << "rcb_manifest_instances=pass"
         << "urcb=pass"
         << "brcb_inventory=pass"
         << "entryid_indicator=pass"
