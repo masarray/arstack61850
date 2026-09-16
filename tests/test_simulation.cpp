@@ -85,8 +85,8 @@ void profile_builder_preserves_full_structural_model() {
     CHECK(brcb != built.profile.report_control_blocks.end());
     CHECK(urcb->mode() == "URCB");
     CHECK(brcb->mode() == "BRCB");
-    CHECK(urcb->mms_item == "LLN0$RP$URCB0101");
-    CHECK(brcb->mms_item == "LLN0$BR$BRCB0101");
+    CHECK(urcb->mms_item == "LLN0$RP$URCB01");
+    CHECK(brcb->mms_item == "LLN0$BR$BRCB01");
 }
 
 void profile_builder_remaps_runtime_identity_and_filters_qt() {
