@@ -26,6 +26,31 @@ SurfacePanel {
         smartSession.firmwareInstallRequired || smartSession.firmwareUpdateRequired ||
         smartSession.updatingFirmware || smartSession.updateNeedsBootloaderHelp
     readonly property bool injectionRunning: smartSession.state === "RUNNING"
+    readonly property int firmwareStageIndex: {
+        if (smartSession.updateNeedsBootloaderHelp) return 1
+        if (!smartSession.updatingFirmware) return -1
+        if (FirmwareService.busy) {
+            if (!FirmwareService.targetVerified) return 1
+            if (FirmwareService.flashProgress >= 100) return 3
+            if (FirmwareService.flashProgress >= 0) return 2
+            return 1
+        }
+        return FirmwareService.flashProgress >= 100 ? 4 : 0
+    }
+    readonly property var firmwareStages: [
+        { title: "Prepare session", detail: "Stop output and release the serial port" },
+        { title: "Verify board", detail: "Confirm ESP32-P4 ROM identity" },
+        { title: "Write firmware", detail: "Program the verified ARStack image" },
+        { title: "Restart board", detail: "Reset after the flash completes" },
+        { title: "Reconnect & verify", detail: "Confirm the new ARStack semantic identity" }
+    ]
+
+    function firmwareStageState(index) {
+        if (firmwareStageIndex < 0) return "pending"
+        if (index < firmwareStageIndex) return "done"
+        if (index === firmwareStageIndex) return "active"
+        return "pending"
+    }
 
     Settings {
         id: operatorSettings
@@ -411,9 +436,26 @@ SurfacePanel {
         id: progressDialog
         modal: true
         anchors.centerIn: Overlay.overlay
-        width: 450
-        title: smartSession.updateNeedsBootloaderHelp ? "Device needs Download mode" : "Installing firmware"
+        width: 500
         closePolicy: Popup.NoAutoClose
+        padding: 18
+        header: Rectangle {
+            implicitHeight: 46
+            color: ribbon.theme.surface2
+            border.width: 1
+            border.color: smartSession.updateNeedsBootloaderHelp ? ribbon.theme.amber : ribbon.theme.line
+            Label {
+                anchors.fill: parent
+                anchors.leftMargin: 18
+                anchors.rightMargin: 18
+                text: smartSession.updateNeedsBootloaderHelp ? "Device needs Download mode" : "Firmware update"
+                color: smartSession.updateNeedsBootloaderHelp ? ribbon.theme.amber : ribbon.theme.text
+                font.family: ribbon.uiFont
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+                verticalAlignment: Text.AlignVCenter
+            }
+        }
         background: Rectangle {
             color: ribbon.theme.surface
             radius: 10
@@ -421,18 +463,101 @@ SurfacePanel {
             border.color: smartSession.updateNeedsBootloaderHelp ? ribbon.theme.amber : ribbon.theme.line
         }
         contentItem: ColumnLayout {
-            spacing: 12
+            spacing: 13
+
             Label {
                 Layout.fillWidth: true
                 text: smartSession.updateNeedsBootloaderHelp
-                    ? "Studio cannot reach the ESP32-P4 bootloader yet."
-                    : "Keep USB connected. Studio verifies the board before reporting success."
+                    ? "Studio cannot reach the ESP32-P4 ROM bootloader yet."
+                    : "Keep USB connected. Studio reports success only after the board restarts and reconnects with the expected ARStack identity."
                 color: smartSession.updateNeedsBootloaderHelp ? ribbon.theme.amber : ribbon.theme.text
                 font.family: ribbon.uiFont
-                font.pixelSize: 13
+                font.pixelSize: 12
                 font.weight: Font.DemiBold
                 wrapMode: Text.WordWrap
             }
+
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: stageColumn.implicitHeight + 18
+                radius: 8
+                color: ribbon.theme.panelAlt
+                border.width: 1
+                border.color: ribbon.theme.lineSoft
+
+                ColumnLayout {
+                    id: stageColumn
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.margins: 9
+                    spacing: 2
+
+                    Repeater {
+                        model: ribbon.firmwareStages
+                        delegate: RowLayout {
+                            required property int index
+                            required property var modelData
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 38
+                            spacing: 10
+                            readonly property string stageState: ribbon.firmwareStageState(index)
+
+                            Rectangle {
+                                width: 20
+                                height: 20
+                                radius: 10
+                                color: parent.stageState === "done" ? ribbon.theme.greenSoft
+                                     : parent.stageState === "active" ? ribbon.theme.accentSoft
+                                     : "transparent"
+                                border.width: 1
+                                border.color: parent.stageState === "done" ? ribbon.theme.green
+                                            : parent.stageState === "active" ? ribbon.theme.accent
+                                            : ribbon.theme.line
+                                Label {
+                                    anchors.centerIn: parent
+                                    text: parent.parent.stageState === "done" ? "✓" : parent.parent.stageState === "active" ? "•" : ""
+                                    color: parent.parent.stageState === "done" ? ribbon.theme.green : ribbon.theme.accent
+                                    font.family: ribbon.uiFont
+                                    font.pixelSize: parent.parent.stageState === "active" ? 16 : 11
+                                    font.weight: Font.Bold
+                                }
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 0
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: modelData.title
+                                    color: stageState === "pending" ? ribbon.theme.muted : ribbon.theme.text
+                                    font.family: ribbon.uiFont
+                                    font.pixelSize: 10
+                                    font.weight: stageState === "active" ? Font.DemiBold : Font.Medium
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: modelData.detail
+                                    color: ribbon.theme.muted
+                                    font.family: ribbon.uiFont
+                                    font.pixelSize: 9
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            Label {
+                                visible: index === 2 && stageState === "active" && smartSession.firmwareProgress >= 0
+                                text: smartSession.firmwareProgress + "%"
+                                color: ribbon.theme.accent
+                                font.family: ribbon.monoFont
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                            }
+                        }
+                    }
+                }
+            }
+
             Label {
                 Layout.fillWidth: true
                 text: smartSession.updateStatus.length > 0 ? smartSession.updateStatus : "Preparing firmware installation…"
@@ -441,23 +566,49 @@ SurfacePanel {
                 font.pixelSize: 10
                 wrapMode: Text.WordWrap
             }
-            ProgressBar {
-                visible: !smartSession.updateNeedsBootloaderHelp
+
+            ColumnLayout {
+                visible: !smartSession.updateNeedsBootloaderHelp && ribbon.firmwareStageIndex === 2
                 Layout.fillWidth: true
-                from: 0; to: 100
-                indeterminate: smartSession.firmwareProgress < 0
-                value: smartSession.firmwareProgress < 0 ? 0 : smartSession.firmwareProgress
+                spacing: 6
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        text: "Writing firmware"
+                        color: ribbon.theme.textSoft
+                        font.family: ribbon.uiFont
+                        font.pixelSize: 9
+                    }
+                    Item { Layout.fillWidth: true }
+                    Label {
+                        text: smartSession.firmwareProgress >= 0 ? smartSession.firmwareProgress + "%" : "Starting…"
+                        color: smartSession.firmwareProgress >= 0 ? ribbon.theme.accent : ribbon.theme.muted
+                        font.family: ribbon.monoFont
+                        font.pixelSize: 10
+                        font.weight: Font.DemiBold
+                    }
+                }
+
+                Rectangle {
+                    id: flashTrack
+                    Layout.fillWidth: true
+                    height: 8
+                    radius: 4
+                    color: ribbon.theme.lineSoft
+                    clip: true
+                    Rectangle {
+                        height: parent.height
+                        radius: parent.radius
+                        color: ribbon.theme.accent
+                        width: smartSession.firmwareProgress < 0
+                            ? 0
+                            : parent.width * Math.max(0, Math.min(1, smartSession.firmwareProgress / 100.0))
+                        Behavior on width { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                    }
+                }
             }
-            Label {
-                visible: !smartSession.updateNeedsBootloaderHelp && smartSession.firmwareProgress >= 0
-                Layout.fillWidth: true
-                text: smartSession.firmwareProgress + "%"
-                color: ribbon.theme.text
-                font.family: ribbon.monoFont
-                font.pixelSize: 12
-                font.weight: Font.DemiBold
-                horizontalAlignment: Text.AlignHCenter
-            }
+
             RowLayout {
                 visible: smartSession.updateNeedsBootloaderHelp
                 Layout.fillWidth: true
@@ -482,8 +633,25 @@ SurfacePanel {
         modal: true
         anchors.centerIn: Overlay.overlay
         width: 430
-        title: ribbon.firmwareResultSuccess ? "Success" : "Firmware result"
         closePolicy: Popup.NoAutoClose
+        padding: 18
+        header: Rectangle {
+            implicitHeight: 44
+            color: ribbon.theme.surface2
+            border.width: 1
+            border.color: ribbon.firmwareResultSuccess ? ribbon.theme.green : ribbon.theme.red
+            Label {
+                anchors.fill: parent
+                anchors.leftMargin: 18
+                anchors.rightMargin: 18
+                text: ribbon.firmwareResultSuccess ? "Firmware verified" : "Firmware result"
+                color: ribbon.firmwareResultSuccess ? ribbon.theme.green : ribbon.theme.text
+                font.family: ribbon.uiFont
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+                verticalAlignment: Text.AlignVCenter
+            }
+        }
         background: Rectangle {
             color: ribbon.theme.surface
             radius: 10
