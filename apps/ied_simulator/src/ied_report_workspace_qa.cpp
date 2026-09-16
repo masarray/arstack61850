@@ -11,6 +11,7 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QHostAddress>
+#include <QSet>
 #include <QTcpServer>
 #include <QThread>
 #include <QUrl>
@@ -74,6 +75,27 @@ bool verifyIndexedRcbManifestExpansion() {
         !nonIndexedLines.contains("LLN0$RP$Static01");
 
     return brcbExpanded && urcbExpanded && nonIndexedStable;
+}
+
+bool verifyIedScoutIndexedInventory(
+    const QString& sclPath,
+    const QVariantList& reportControls) {
+    if (QFileInfo(sclPath).fileName() != QStringLiteral("iedscout-indexed-reports.scd")) {
+        return true;
+    }
+
+    QSet<QString> references;
+    for (const auto& value : reportControls) {
+        const auto reference = value.toMap().value(QStringLiteral("reference")).toString();
+        if (!reference.isEmpty()) references.insert(reference);
+    }
+
+    static const QSet<QString> expected{
+        QStringLiteral("IEDSCOUT01LD0/LLN0.Buffer01"),
+        QStringLiteral("IEDSCOUT01LD0/LLN0.Buffer02"),
+        QStringLiteral("IEDSCOUT01LD0/LLN0.Unbuffer01"),
+        QStringLiteral("IEDSCOUT01LD0/LLN0.Unbuffer02")};
+    return references == expected;
 }
 
 bool waitUntil(const std::function<bool()>& predicate, const int timeoutMs) {
@@ -169,6 +191,15 @@ int main(int argc, char* argv[]) {
         qCritical() << "REPORTS_WORKBENCH_FAIL inventory"
                     << dataSets.size() << reportControls.size() << staticCandidates.size();
         return 8;
+    }
+    if (!verifyIedScoutIndexedInventory(sclPath, reportControls)) {
+        QStringList actual;
+        for (const auto& value : reportControls) {
+            actual.push_back(value.toMap().value(QStringLiteral("reference")).toString());
+        }
+        qCritical().noquote() << "REPORTS_WORKBENCH_FAIL iedscout_indexed_inventory"
+                              << actual.join(QLatin1Char(','));
+        return 21;
     }
 
     bool sawUrcb = false;
@@ -268,6 +299,8 @@ int main(int argc, char* argv[]) {
         return 19;
     }
 
+    const bool iedScoutFixture =
+        QFileInfo(sclPath).fileName() == QStringLiteral("iedscout-indexed-reports.scd");
     qInfo().noquote()
         << "REPORTS_WORKBENCH_PASS"
         << "datasets=" + QString::number(dataSets.size())
@@ -277,6 +310,7 @@ int main(int argc, char* argv[]) {
         << "members=" + QString::number(memberCount)
         << "gi_reports=" + QString::number(reportCountAfterGi)
         << "rcb_manifest_instances=pass"
+        << QStringLiteral("iedscout_indexed_inventory=%1").arg(iedScoutFixture ? QStringLiteral("pass") : QStringLiteral("n/a"))
         << "urcb=pass"
         << "brcb_inventory=pass"
         << "entryid_indicator=pass"
