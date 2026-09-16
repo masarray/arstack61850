@@ -99,6 +99,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "MMS client workbench QA failed: $LASTEXITCODE" }
           & '.\build-f4-windows\Release\ied_report_workspace_qa.exe' '.\tests\fixtures\scl\minimal-station-brcb.scd'
           if ($LASTEXITCODE -ne 0) { throw "Reports workbench QA failed: $LASTEXITCODE" }
+          & '.\build-f4-windows\Release\ied_report_workspace_qa.exe' '.\tests\fixtures\scl\iedscout-indexed-reports.scd'
+          if ($LASTEXITCODE -ne 0) { throw "IEDScout indexed Reports QA failed: $LASTEXITCODE" }
           & '.\build-f4-windows\Release\ied_file_settings_workspace_qa.exe'
           if ($LASTEXITCODE -ne 0) { throw "Files/settings workbench QA failed: $LASTEXITCODE" }
 
