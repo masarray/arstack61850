@@ -20,7 +20,7 @@ concurrency:
 jobs:
   repair-source:
     name: Apply one-shot P0 firmware build identity repair
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     timeout-minutes: 5
     steps:
       - name: Checkout feature branch
@@ -36,42 +36,6 @@ jobs:
             echo 'P0 build identity repair already applied; no-op.'
             exit 0
           fi
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('.github/scripts/p0_firmware_build_identity_repair.py')
-          text = p.read_text(encoding='utf-8')
-
-          # CMake's regex dialect is deliberately kept simple: exact length is
-          # checked independently, then characters are constrained to hex.
-          old = '''if(NOT ARSTACK_FIRMWARE_BUILD_ID MATCHES "^[0-9a-f]{16}$")
-    message(FATAL_ERROR "ARSTACK_FIRMWARE_BUILD_ID must be exactly 16 hexadecimal characters")
-endif()'''
-          new = '''string(LENGTH "${ARSTACK_FIRMWARE_BUILD_ID}" ARSTACK_FIRMWARE_BUILD_ID_LENGTH)
-if(NOT ARSTACK_FIRMWARE_BUILD_ID_LENGTH EQUAL 16 OR NOT ARSTACK_FIRMWARE_BUILD_ID MATCHES "^[0-9a-f]+$")
-    message(FATAL_ERROR "ARSTACK_FIRMWARE_BUILD_ID must be exactly 16 hexadecimal characters")
-endif()'''
-          if old not in text:
-              raise SystemExit('repair-script CMake validation block not found')
-          text = text.replace(old, new, 1)
-
-          # AGENTS.md requires one provenance source of truth. The existing
-          # manifest sourceCommit remains authoritative, so do not mutate the
-          # firmware workflow or add a second manifest buildId field.
-          start = text.index('replace_once(\n    ".github/workflows/esp32p4-smv-injector.yml",')
-          end = text.index('replace_once(\n    "apps/arstack_studio/src/DeviceController.hpp",', start)
-          text = text[:start] + text[end:]
-
-          # FirmwareManager derives the short semantic build ID from the
-          # already-authoritative sourceCommit field in the manifest.
-          old = '''    '    const QString version = object.value(QStringLiteral("version")).toString().trimmed();\\n    const QString buildId = object.value(QStringLiteral("buildId")).toString().trimmed().toLower();\\n    const QString sourceCommit = object.value(QStringLiteral("sourceCommit")).toString().trimmed().toLower();\\n    const QString revisionPolicy = object.value(QStringLiteral("chipRevisionPolicy")).toString().trimmed().toLower();\\n',
-'''
-          new = '''    '    const QString version = object.value(QStringLiteral("version")).toString().trimmed();\\n    const QString sourceCommit = object.value(QStringLiteral("sourceCommit")).toString().trimmed().toLower();\\n    const QString buildId = sourceCommit.left(16);\\n    const QString revisionPolicy = object.value(QStringLiteral("chipRevisionPolicy")).toString().trimmed().toLower();\\n',
-'''
-          if old not in text:
-              raise SystemExit('repair-script manifest provenance block not found')
-          text = text.replace(old, new, 1)
-          p.write_text(text, encoding='utf-8')
-          PY
           python3 .github/scripts/p0_firmware_build_identity_repair.py
       - name: Verify repair invariants
         shell: bash
