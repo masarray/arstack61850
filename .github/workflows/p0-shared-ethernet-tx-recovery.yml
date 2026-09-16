@@ -1,0 +1,215 @@
+name: Stage P0 shared Ethernet TX recovery
+
+on:
+  push:
+    branches:
+      - feature/ptp-production-v0.1.1
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/ptp-production-v0.1.1
+          fetch-depth: 0
+
+      - name: Apply P0 shared Ethernet TX recovery
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one anchor, found {count}')
+              return text.replace(old, new, 1)
+
+          # 1) ESP-IDF Ethernet driver serialization for concurrent SMV + PTP producers.
+          p = Path('embedded/esp32p4_smv_injector/sdkconfig.defaults')
+          text = p.read_text(encoding='utf-8')
+          anchor = 'CONFIG_ETH_USE_ESP32_EMAC=y\n'
+          text = replace_once(
+              text,
+              anchor,
+              anchor + '# SMV and PTP are concurrent L2 TX producers in v0.1.1; serialize the shared EMAC.\nCONFIG_ETH_TRANSMIT_MUTEX=y\n',
+              'sdkconfig Ethernet mutex')
+          p.write_text(text, encoding='utf-8')
+
+          # 2) Hardware PTP mode must be rolled back on every STOP/start-failure.
+          p = Path('embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp')
+          text = p.read_text(encoding='utf-8')
+          enable_block = '''[[nodiscard]] bool enable_hardware_ptp(const esp_eth_handle_t eth_handle) noexcept {
+              bool enable = true;
+              const auto result = esp_eth_ioctl(
+                  eth_handle,
+                  static_cast<esp_eth_io_cmd_t>(ETH_MAC_ESP_CMD_PTP_ENABLE),
+                  &enable);
+              if (result != ESP_OK) {
+                  ESP_LOGE(kTag, "Failed to enable ESP32-P4 IEEE1588 hardware clock: %s",
+                           esp_err_to_name(result));
+                  return false;
+              }
+              return true;
+          }
+          '''.replace('          ', '')
+          disable_block = enable_block + '''
+          void disable_hardware_ptp(const esp_eth_handle_t eth_handle) noexcept {
+              if (eth_handle == nullptr) return;
+              bool enable = false;
+              const auto result = esp_eth_ioctl(
+                  eth_handle,
+                  static_cast<esp_eth_io_cmd_t>(ETH_MAC_ESP_CMD_PTP_ENABLE),
+                  &enable);
+              if (result != ESP_OK) {
+                  ESP_LOGW(kTag, "Failed to restore normal EMAC mode after PTP: %s",
+                           esp_err_to_name(result));
+              }
+          }
+          '''.replace('          ', '')
+          text = replace_once(text, enable_block, disable_block, 'PTP disable helper')
+
+          finish_anchor = '''    }
+              context.task_handle = nullptr;
+              g_ptp_ready.store(false, std::memory_order_release);
+              g_ptp_started.store(false, std::memory_order_release);
+          }
+          '''.replace('          ', '')
+          finish_replacement = '''    }
+              // Hardware timestamp mode changes the shared EMAC data path. Restore normal
+              // Ethernet mode before publishing STOPPED so SMV can continue independently.
+              disable_hardware_ptp(context.eth_handle);
+              context.task_handle = nullptr;
+              g_ptp_ready.store(false, std::memory_order_release);
+              g_ptp_started.store(false, std::memory_order_release);
+          }
+          '''.replace('          ', '')
+          text = replace_once(text, finish_anchor, finish_replacement, 'PTP teardown rollback')
+
+          stop_anchor = '''void stop_ptp_lab() noexcept {
+              if (!g_ptp_started.load(std::memory_order_acquire)) return;
+              g_stop_requested.store(true, std::memory_order_release);
+              if (g_ptp_context.task_handle != nullptr) {
+                  xTaskNotifyGive(g_ptp_context.task_handle);
+              }
+          }
+          '''.replace('          ', '')
+          stop_replacement = '''void stop_ptp_lab() noexcept {
+              if (!g_ptp_started.load(std::memory_order_acquire)) return;
+              g_stop_requested.store(true, std::memory_order_release);
+              if (g_ptp_context.task_handle != nullptr) {
+                  xTaskNotifyGive(g_ptp_context.task_handle);
+              }
+
+              // A failed SOURCE start must not return to the operator while the EMAC is
+              // still in PTP timestamp mode. Wait only for bounded worker-owned teardown.
+              constexpr unsigned kStopCleanupPolls = 100U;
+              for (unsigned attempt = 0U; attempt < kStopCleanupPolls; ++attempt) {
+                  if (!g_ptp_started.load(std::memory_order_acquire)) return;
+                  vTaskDelay(pdMS_TO_TICKS(5));
+              }
+              ESP_LOGE(kTag, "PTP stop cleanup timeout; EMAC rollback did not complete within 500 ms");
+          }
+          '''.replace('          ', '')
+          text = replace_once(text, stop_anchor, stop_replacement, 'bounded PTP stop cleanup')
+          p.write_text(text, encoding='utf-8')
+
+          # 3) Fail closed when canonical SMV transport is dead even though the sample clock is healthy.
+          p = Path('embedded/esp32p4_smv_injector/main/app_main.cpp')
+          text = p.read_text(encoding='utf-8')
+          text = replace_once(
+              text,
+              'using ar::esp32p4::smv::live_control_bind_publisher_task;\n',
+              'using ar::esp32p4::smv::live_control_bind_publisher_task;\nusing ar::esp32p4::smv::live_control_force_stop;\n',
+              'force-stop import')
+          text = replace_once(
+              text,
+              'constexpr std::uint32_t kStatsMergeEvery = 400U;\n',
+              'constexpr std::uint32_t kStatsMergeEvery = 400U;\nconstexpr std::uint32_t kTransportFailureStopThreshold = 400U; // 100 ms at the P0 4000 fps profile\n',
+              'transport threshold')
+          text = replace_once(
+              text,
+              '    std::int64_t expected_wake_us = 0;\n',
+              '    std::int64_t expected_wake_us = 0;\n    std::uint32_t consecutive_canonical_tx_failures = 0U;\n    esp_err_t last_canonical_tx_error = ESP_OK;\n',
+              'transport state')
+          text = replace_once(
+              text,
+              '            schedule_anchored = false;\n            expected_schedule.reset(active_profile.publisher_rate_hz);\n',
+              '            schedule_anchored = false;\n            consecutive_canonical_tx_failures = 0U;\n            last_canonical_tx_error = ESP_OK;\n            expected_schedule.reset(active_profile.publisher_rate_hz);\n',
+              'transport reset at START')
+
+          old_tx = '''        if ((xEventGroupGetBits(g_link_events) & kLinkUpBit) == 0U) {
+              ++local.canonical_fail;
+          #if CONFIG_AR_SMV_BROADCAST_MIRROR
+              ++local.mirror_fail;
+          #endif
+          } else {
+              patch_packet(canonical, canonical_sample_count, row, signal_state);
+              const esp_err_t canonical_result =
+                  esp_eth_transmit(eth_handle, canonical.bytes.data(), canonical.bytes.size());
+              if (canonical_result == ESP_OK) ++local.canonical_ok;
+              else ++local.canonical_fail;
+          '''.replace('          ', '')
+          new_tx = '''        if ((xEventGroupGetBits(g_link_events) & kLinkUpBit) == 0U) {
+              ++local.canonical_fail;
+              last_canonical_tx_error = ESP_ERR_INVALID_STATE;
+              ++consecutive_canonical_tx_failures;
+          #if CONFIG_AR_SMV_BROADCAST_MIRROR
+              ++local.mirror_fail;
+          #endif
+          } else {
+              patch_packet(canonical, canonical_sample_count, row, signal_state);
+              const esp_err_t canonical_result =
+                  esp_eth_transmit(eth_handle, canonical.bytes.data(), canonical.bytes.size());
+              if (canonical_result == ESP_OK) {
+                  ++local.canonical_ok;
+                  consecutive_canonical_tx_failures = 0U;
+                  last_canonical_tx_error = ESP_OK;
+              } else {
+                  ++local.canonical_fail;
+                  last_canonical_tx_error = canonical_result;
+                  ++consecutive_canonical_tx_failures;
+              }
+          '''.replace('          ', '')
+          text = replace_once(text, old_tx, new_tx, 'canonical TX health tracking')
+
+          timing_anchor = '''        update_local_timing(
+              local, lateness_us, missed_slots, canonical_sample_count, signal_state.generation);
+              g_sample_tick_total.fetch_add(1U, std::memory_order_relaxed);
+          '''.replace('          ', '')
+          timing_replacement = timing_anchor + '''        if (consecutive_canonical_tx_failures >= kTransportFailureStopThreshold) {
+              ESP_LOGE(kTag,
+                       "SV transport fault: %lu consecutive canonical TX failures; last=%s; forcing STOP",
+                       static_cast<unsigned long>(consecutive_canonical_tx_failures),
+                       esp_err_to_name(last_canonical_tx_error));
+              merge_stats(local);
+              live_control_force_stop();
+              stop_sample_clock(sample_clock);
+              schedule_anchored = false;
+              consecutive_canonical_tx_failures = 0U;
+              continue;
+          }
+          '''.replace('          ', '')
+          text = replace_once(text, timing_anchor, timing_replacement, 'fail-closed transport STOP')
+          p.write_text(text, encoding='utf-8')
+
+      - name: Verify and commit P0 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -qx 'CONFIG_ETH_TRANSMIT_MUTEX=y' embedded/esp32p4_smv_injector/sdkconfig.defaults
+          grep -q 'disable_hardware_ptp(context.eth_handle);' embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp
+          grep -q 'kTransportFailureStopThreshold = 400U' embedded/esp32p4_smv_injector/main/app_main.cpp
+          grep -q 'live_control_force_stop();' embedded/esp32p4_smv_injector/main/app_main.cpp
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add embedded/esp32p4_smv_injector/sdkconfig.defaults \
+                  embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp \
+                  embedded/esp32p4_smv_injector/main/app_main.cpp
+          git commit -m 'fix(p0): recover shared Ethernet TX for SMV and PTP'
+          git push origin HEAD:feature/ptp-production-v0.1.1
