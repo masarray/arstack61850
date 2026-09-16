@@ -98,16 +98,14 @@ jobs:
           --server ./build-qt/ariec61850_ied_simulator_server
           --build-dir ./build-qt
 
-      - name: Commit Phase 2B only after every gate passes
+      - name: Commit tested Phase 2B source
         shell: bash
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git rm .github/workflows/zz-phase2b-sgcb-final.yml
           git add \
             CMakeLists.txt \
-            .github/workflows/ied-simulator-qt.yml \
             apps/ied_simulator/CMakeLists.txt \
             apps/ied_simulator/src/IedFleetController.cpp \
             apps/ied_simulator/src/IedSettingControlManifest.hpp \
