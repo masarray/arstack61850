@@ -1,0 +1,354 @@
+name: P0 authoritative SMV/PTP recovery
+
+on:
+  push:
+    branches:
+      - feature/ptp-production-v0.1.1
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/ptp-production-v0.1.1
+          fetch-depth: 0
+
+      - name: Apply authoritative P0 recovery
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          changed = []
+
+          def write_if_changed(path: str, before: str, after: str) -> None:
+              if before != after:
+                  Path(path).write_text(after, encoding='utf-8')
+                  changed.append(path)
+
+          def replace_required(text: str, old: str, new: str, label: str) -> str:
+              if new in text:
+                  return text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one anchor, found {count}')
+              return text.replace(old, new, 1)
+
+          def patch_function(text: str, signature: str, old: str, new: str, label: str) -> str:
+              start = text.find(signature)
+              if start < 0:
+                  raise SystemExit(f'{label}: function not found')
+              end = text.find('\n}\n', start)
+              if end < 0:
+                  raise SystemExit(f'{label}: function end not found')
+              end += 3
+              body = text[start:end]
+              if new in body:
+                  return text
+              count = body.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one in-function anchor, found {count}')
+              body = body.replace(old, new, 1)
+              return text[:start] + body + text[end:]
+
+          # ------------------------------------------------------------------
+          # 1) Shared Ethernet serialization: v0.1.1 runs SMV and PTP as
+          # concurrent L2 producers on the same ESP-IDF Ethernet handle.
+          # ------------------------------------------------------------------
+          path = 'embedded/esp32p4_smv_injector/sdkconfig.defaults'
+          before = Path(path).read_text(encoding='utf-8')
+          after = before
+          if 'CONFIG_ETH_TRANSMIT_MUTEX=y' not in after:
+              after = replace_required(
+                  after,
+                  'CONFIG_ETH_USE_ESP32_EMAC=y\n',
+                  'CONFIG_ETH_USE_ESP32_EMAC=y\n'
+                  '# SMV and PTP share one EMAC TX path; serialize concurrent producers.\n'
+                  'CONFIG_ETH_TRANSMIT_MUTEX=y\n',
+                  'Ethernet TX mutex')
+          write_if_changed(path, before, after)
+
+          # ------------------------------------------------------------------
+          # 2) ESP-IDF direct ctrl_vargs contract: argc is the number of raw
+          # variadic arguments. One buffer/length pair therefore requires 2.
+          # Fix both active hardware-timestamp TX paths.
+          # ------------------------------------------------------------------
+          for path in (
+              'embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp',
+              'embedded/esp32p4_smv_injector/main/ptp_receiver_task.cpp'):
+              before = Path(path).read_text(encoding='utf-8')
+              after = before
+              pattern = re.compile(
+                  r'(const auto result = esp_eth_transmit_ctrl_vargs\(\n'
+                  r'\s*[a-zA-Z_][a-zA-Z0-9_]*,\n'
+                  r'\s*&tx_timestamp,\n\s*)1U(,\n\s*frame\.data\(\),\n\s*frame\.size\(\)\);)')
+              if 'esp_eth_transmit_ctrl_vargs argc is the raw variadic-argument count' not in after:
+                  after, count = pattern.subn(r'\g<1>2U\2', after, count=1)
+                  if count != 1:
+                      raise SystemExit(f'{path}: hardware TX argc anchor not found')
+                  after = after.replace(
+                      '// esp_eth_transmit_ctrl_vargs argc counts buffer/length pairs. One PTP\n'
+                      '    // Ethernet frame is exactly one pair.\n',
+                      '// esp_eth_transmit_ctrl_vargs argc is the raw variadic-argument count.\n'
+                      '    // One Ethernet frame supplies buffer + length, therefore argc=2.\n',
+                      1)
+              write_if_changed(path, before, after)
+
+          # ------------------------------------------------------------------
+          # 3) Hardware PTP mode is shared EMAC state. Roll it back on every
+          # role teardown and make STOP wait for bounded worker cleanup.
+          # ------------------------------------------------------------------
+          helper = '''void disable_hardware_ptp(const esp_eth_handle_t handle) noexcept {
+              if (handle == nullptr) return;
+              bool enable = false;
+              const auto result = esp_eth_ioctl(
+                  handle,
+                  static_cast<esp_eth_io_cmd_t>(ETH_MAC_ESP_CMD_PTP_ENABLE),
+                  &enable);
+              if (result != ESP_OK) {
+                  ESP_LOGW(kTag, "Unable to restore normal EMAC mode after PTP: %s",
+                           esp_err_to_name(result));
+              }
+          }
+
+          '''.replace('          ', '')
+
+          for path in (
+              'embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp',
+              'embedded/esp32p4_smv_injector/main/ptp_receiver_task.cpp'):
+              before = Path(path).read_text(encoding='utf-8')
+              after = before
+              if 'void disable_hardware_ptp(' not in after:
+                  marker = 'void seed_hardware_clock('
+                  pos = after.find(marker)
+                  if pos < 0:
+                      raise SystemExit(f'{path}: seed_hardware_clock anchor missing')
+                  after = after[:pos] + helper + after[pos:]
+              write_if_changed(path, before, after)
+
+          path = 'embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp'
+          before = Path(path).read_text(encoding='utf-8')
+          after = patch_function(
+              before,
+              'void finish_runtime(PtpLabContext& context)',
+              '    context.task_handle = nullptr;\n',
+              '    disable_hardware_ptp(context.eth_handle);\n'
+              '    context.task_handle = nullptr;\n',
+              'SOURCE EMAC rollback')
+          after = patch_function(
+              after,
+              'void stop_ptp_lab() noexcept',
+              '    if (g_ptp_context.task_handle != nullptr) {\n'
+              '        xTaskNotifyGive(g_ptp_context.task_handle);\n'
+              '    }\n',
+              '    if (g_ptp_context.task_handle != nullptr) {\n'
+              '        xTaskNotifyGive(g_ptp_context.task_handle);\n'
+              '    }\n'
+              '    constexpr unsigned kCleanupPolls = 100U;\n'
+              '    for (unsigned attempt = 0U; attempt < kCleanupPolls; ++attempt) {\n'
+              '        if (!g_ptp_started.load(std::memory_order_acquire)) return;\n'
+              '        vTaskDelay(pdMS_TO_TICKS(5));\n'
+              '    }\n'
+              '    ESP_LOGE(kTag, "PTP SOURCE cleanup timeout; EMAC rollback incomplete after 500 ms");\n',
+              'SOURCE bounded STOP')
+          write_if_changed(path, before, after)
+
+          path = 'embedded/esp32p4_smv_injector/main/ptp_receiver_task.cpp'
+          before = Path(path).read_text(encoding='utf-8')
+          after = patch_function(
+              before,
+              'void finish_receiver(ReceiverContext& context) noexcept',
+              '    smp_synch_lab_set_measured(std::nullopt);\n'
+              '    context.receiver.reset();\n',
+              '    smp_synch_lab_set_measured(std::nullopt);\n'
+              '    disable_hardware_ptp(context.eth_handle);\n'
+              '    context.receiver.reset();\n',
+              'RECEIVER/MONITOR EMAC rollback')
+          after = patch_function(
+              after,
+              'void ptp_receiver_stop() noexcept',
+              '    if (g_receiver_context.task_handle != nullptr) {\n'
+              '        xTaskNotifyGive(g_receiver_context.task_handle);\n'
+              '    }\n',
+              '    if (g_receiver_context.task_handle != nullptr) {\n'
+              '        xTaskNotifyGive(g_receiver_context.task_handle);\n'
+              '    }\n'
+              '    constexpr unsigned kCleanupPolls = 100U;\n'
+              '    for (unsigned attempt = 0U; attempt < kCleanupPolls; ++attempt) {\n'
+              '        if (!g_receiver_running.load(std::memory_order_acquire)) return;\n'
+              '        vTaskDelay(pdMS_TO_TICKS(5));\n'
+              '    }\n'
+              '    ESP_LOGE(kTag, "PTP receiver cleanup timeout; EMAC rollback incomplete after 500 ms");\n',
+              'RECEIVER/MONITOR bounded STOP')
+          write_if_changed(path, before, after)
+
+          # ------------------------------------------------------------------
+          # 4) SMV fail-closed transport state. A healthy 4 kHz scheduler with
+          # 0 successful Ethernet frames must not remain RUNNING.
+          # ------------------------------------------------------------------
+          path = 'embedded/esp32p4_smv_injector/main/app_main.cpp'
+          before = Path(path).read_text(encoding='utf-8')
+          after = before
+          if 'kTransportFailureStopThreshold' not in after:
+              after = replace_required(
+                  after,
+                  'using ar::esp32p4::smv::live_control_bind_publisher_task;\n',
+                  'using ar::esp32p4::smv::live_control_bind_publisher_task;\n'
+                  'using ar::esp32p4::smv::live_control_force_stop;\n',
+                  'force-stop import')
+              after = replace_required(
+                  after,
+                  'constexpr std::uint32_t kStatsMergeEvery = 400U;\n',
+                  'constexpr std::uint32_t kStatsMergeEvery = 400U;\n'
+                  'constexpr std::uint32_t kTransportFailureStopThreshold = 400U; // 100 ms at 4000 fps\n',
+                  'transport threshold')
+              after = replace_required(
+                  after,
+                  '    std::int64_t expected_wake_us = 0;\n',
+                  '    std::int64_t expected_wake_us = 0;\n'
+                  '    std::uint32_t consecutive_canonical_tx_failures = 0U;\n'
+                  '    esp_err_t last_canonical_tx_error = ESP_OK;\n',
+                  'transport state')
+              after = replace_required(
+                  after,
+                  '            schedule_anchored = false;\n'
+                  '            expected_schedule.reset(active_profile.publisher_rate_hz);\n',
+                  '            schedule_anchored = false;\n'
+                  '            consecutive_canonical_tx_failures = 0U;\n'
+                  '            last_canonical_tx_error = ESP_OK;\n'
+                  '            expected_schedule.reset(active_profile.publisher_rate_hz);\n',
+                  'START transport reset')
+              old = '''        if ((xEventGroupGetBits(g_link_events) & kLinkUpBit) == 0U) {
+              ++local.canonical_fail;
+          #if CONFIG_AR_SMV_BROADCAST_MIRROR
+              ++local.mirror_fail;
+          #endif
+          } else {
+              patch_packet(canonical, canonical_sample_count, row, signal_state);
+              const esp_err_t canonical_result =
+                  esp_eth_transmit(eth_handle, canonical.bytes.data(), canonical.bytes.size());
+              if (canonical_result == ESP_OK) ++local.canonical_ok;
+              else ++local.canonical_fail;
+          '''.replace('          ', '')
+              new = '''        if ((xEventGroupGetBits(g_link_events) & kLinkUpBit) == 0U) {
+              ++local.canonical_fail;
+              last_canonical_tx_error = ESP_ERR_INVALID_STATE;
+              ++consecutive_canonical_tx_failures;
+          #if CONFIG_AR_SMV_BROADCAST_MIRROR
+              ++local.mirror_fail;
+          #endif
+          } else {
+              patch_packet(canonical, canonical_sample_count, row, signal_state);
+              const esp_err_t canonical_result =
+                  esp_eth_transmit(eth_handle, canonical.bytes.data(), canonical.bytes.size());
+              if (canonical_result == ESP_OK) {
+                  ++local.canonical_ok;
+                  consecutive_canonical_tx_failures = 0U;
+                  last_canonical_tx_error = ESP_OK;
+              } else {
+                  ++local.canonical_fail;
+                  last_canonical_tx_error = canonical_result;
+                  ++consecutive_canonical_tx_failures;
+              }
+          '''.replace('          ', '')
+              after = replace_required(after, old, new, 'canonical TX health')
+              anchor = '''        update_local_timing(
+              local, lateness_us, missed_slots, canonical_sample_count, signal_state.generation);
+              g_sample_tick_total.fetch_add(1U, std::memory_order_relaxed);
+          '''.replace('          ', '')
+              replacement = anchor + '''        if (consecutive_canonical_tx_failures >= kTransportFailureStopThreshold) {
+              ESP_LOGE(kTag,
+                       "SV transport fault: %lu consecutive canonical TX failures; last=%s; forcing STOP",
+                       static_cast<unsigned long>(consecutive_canonical_tx_failures),
+                       esp_err_to_name(last_canonical_tx_error));
+              merge_stats(local);
+              live_control_force_stop();
+              stop_sample_clock(sample_clock);
+              schedule_anchored = false;
+              consecutive_canonical_tx_failures = 0U;
+              continue;
+          }
+          '''.replace('          ', '')
+              after = replace_required(after, anchor, replacement, 'transport fail-close')
+          write_if_changed(path, before, after)
+
+          # Make forced transport STOP visible to Studio's existing parser.
+          path = 'embedded/esp32p4_smv_injector/main/live_control.cpp'
+          before = Path(path).read_text(encoding='utf-8')
+          after = patch_function(
+              before,
+              'void live_control_force_stop() noexcept',
+              '    wake_publisher();\n',
+              '    wake_publisher();\n'
+              '    ESP_LOGW(kTag, "STOP accepted: SV transmission suppressed by fail-closed runtime");\n',
+              'fail-closed STOP observability')
+          write_if_changed(path, before, after)
+
+          # ------------------------------------------------------------------
+          # 5) Repair the Studio CI contract fixture: it was still manufacturing
+          # a 0.1.0 bundle without the production capabilities required by 0.1.1.
+          # ------------------------------------------------------------------
+          path = '.github/workflows/arstack-studio-qt.yml'
+          before = Path(path).read_text(encoding='utf-8')
+          after = before
+          after = after.replace('arstack-esp32p4-smv-0.1.0.bin', 'arstack-esp32p4-smv-0.1.1.bin')
+          after = after.replace('"version": "0.1.0",', '"version": "0.1.1",')
+          manifest_anchor = '            "protocol": 1,\n            "flashOffset": 0,\n'
+          manifest_new = ('            "protocol": 1,\n'
+                          '            "capabilities": ["SMV-4I4V", "PROFILE", "LIVE-SETPOINTS", "SESSION-LEASE", "PTP-P2", "SMPSYNCH-AUTO"],\n'
+                          '            "flashOffset": 0,\n')
+          if '"capabilities": ["SMV-4I4V", "PROFILE", "LIVE-SETPOINTS", "SESSION-LEASE", "PTP-P2", "SMPSYNCH-AUTO"]' not in after:
+              after = replace_required(after, manifest_anchor, manifest_new, 'Studio v0.1.1 manifest fixture')
+          write_if_changed(path, before, after)
+
+          # Lock the Ethernet safety contract in firmware CI.
+          path = '.github/workflows/esp32p4-smv-injector.yml'
+          before = Path(path).read_text(encoding='utf-8')
+          after = before
+          if "grep -qx 'CONFIG_ETH_TRANSMIT_MUTEX=y' sdkconfig" not in after:
+              after = replace_required(
+                  after,
+                  "          grep -qx 'CONFIG_AR_PTP_LAB_TX=y' sdkconfig\n",
+                  "          grep -qx 'CONFIG_AR_PTP_LAB_TX=y' sdkconfig\n"
+                  "          grep -qx 'CONFIG_ETH_TRANSMIT_MUTEX=y' sdkconfig\n",
+                  'firmware mutex CI gate')
+          write_if_changed(path, before, after)
+
+          print('Patched files:')
+          for path in changed:
+              print(f'  {path}')
+          if not changed:
+              print('  none (already converged)')
+
+      - name: Verify, remove staging workflows, and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -qx 'CONFIG_ETH_TRANSMIT_MUTEX=y' embedded/esp32p4_smv_injector/sdkconfig.defaults
+          test "$(grep -R -n -A5 'esp_eth_transmit_ctrl_vargs(' embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp embedded/esp32p4_smv_injector/main/ptp_receiver_task.cpp | grep -c '2U,')" -eq 2
+          grep -q 'disable_hardware_ptp(context.eth_handle);' embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp
+          grep -q 'disable_hardware_ptp(context.eth_handle);' embedded/esp32p4_smv_injector/main/ptp_receiver_task.cpp
+          grep -q 'kTransportFailureStopThreshold = 400U' embedded/esp32p4_smv_injector/main/app_main.cpp
+          grep -q 'STOP accepted: SV transmission suppressed by fail-closed runtime' embedded/esp32p4_smv_injector/main/live_control.cpp
+          grep -q 'arstack-esp32p4-smv-0.1.1.bin' .github/workflows/arstack-studio-qt.yml
+          grep -q 'SMPSYNCH-AUTO' .github/workflows/arstack-studio-qt.yml
+          git diff --check
+
+          rm -f .github/workflows/p0-authoritative-recovery.yml
+          rm -f .github/workflows/p0-shared-ethernet-tx-recovery.yml
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No changes to commit.'
+            exit 0
+          fi
+          git commit -m 'fix(p0): recover SMV/PTP Ethernet TX and Studio contract'
+          git pull --rebase origin feature/ptp-production-v0.1.1
+          git push origin HEAD:feature/ptp-production-v0.1.1
