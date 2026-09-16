@@ -1023,47 +1023,50 @@ struct SyntheticTypeEncodeResult final {
         return make_status(MmsStaticDispatchStatus::malformed_request, confirmed);
     }
 
-    if (const auto* object = objects.find(request.name); object != nullptr) {
+    const auto* exact = objects.find(request.name);
+    if (request.name.kind == MmsObjectNameViewKind::domain_specific &&
+        !request.name.domain.empty() && !request.name.item.empty()) {
+        // A Logical Node/root object may have been encoded before dynamic
+        // service objects (RP/BR/SG/CO aliases) were composed into the final
+        // per-association table. Build GVAA from that final table first whenever
+        // descendants exist so discovery, GVAA and Read share one hierarchy.
+        const auto synthetic = encode_synthetic_type_subtree(
+            objects,
+            as_text(request.name.domain),
+            as_text(request.name.item),
+            workspace,
+            0U);
+        switch (synthetic.status) {
+        case SyntheticTypeStatus::ok:
+            return make_encoded(
+                confirmed,
+                MmsServiceSpanCodec::encode_variable_access_attributes_response_into(
+                    confirmed.invoke_id,
+                    exact != nullptr ? exact->mms_deletable : false,
+                    workspace.first(synthetic.bytes_written),
+                    response));
+        case SyntheticTypeStatus::workspace_too_small:
+            return make_status(
+                MmsStaticDispatchStatus::workspace_too_small,
+                confirmed,
+                synthetic.required_bytes);
+        case SyntheticTypeStatus::backend_failure:
+            return make_status(MmsStaticDispatchStatus::backend_failure, confirmed);
+        case SyntheticTypeStatus::not_found:
+            break;
+        }
+    }
+
+    if (exact != nullptr) {
         return make_encoded(
             confirmed,
             MmsServiceSpanCodec::encode_variable_access_attributes_response_into(
                 confirmed.invoke_id,
-                object->mms_deletable,
-                object->type_specification,
+                exact->mms_deletable,
+                exact->type_specification,
                 response));
     }
-
-    if (request.name.kind != MmsObjectNameViewKind::domain_specific ||
-        request.name.domain.empty() || request.name.item.empty()) {
-        return make_status(MmsStaticDispatchStatus::object_not_found, confirmed);
-    }
-
-    const auto synthetic = encode_synthetic_type_subtree(
-        objects,
-        as_text(request.name.domain),
-        as_text(request.name.item),
-        workspace,
-        0U);
-    switch (synthetic.status) {
-    case SyntheticTypeStatus::ok:
-        return make_encoded(
-            confirmed,
-            MmsServiceSpanCodec::encode_variable_access_attributes_response_into(
-                confirmed.invoke_id,
-                false,
-                workspace.first(synthetic.bytes_written),
-                response));
-    case SyntheticTypeStatus::not_found:
-        return make_status(MmsStaticDispatchStatus::object_not_found, confirmed);
-    case SyntheticTypeStatus::workspace_too_small:
-        return make_status(
-            MmsStaticDispatchStatus::workspace_too_small,
-            confirmed,
-            synthetic.required_bytes);
-    case SyntheticTypeStatus::backend_failure:
-        return make_status(MmsStaticDispatchStatus::backend_failure, confirmed);
-    }
-    return make_status(MmsStaticDispatchStatus::backend_failure, confirmed);
+    return make_status(MmsStaticDispatchStatus::object_not_found, confirmed);
 }
 
 enum class ReadObjectStatus : std::uint8_t {
@@ -1309,7 +1312,7 @@ MmsStaticDispatchResult MmsStaticApplicationDispatcher::dispatch(
     const std::span<std::uint8_t> response,
     const std::span<std::uint8_t> workspace,
     const MmsStaticRequestAccessContext& access) const noexcept {
-    if (!objects_.valid() || !data_sets_.valid_against(objects_) || !policy_valid(policy_)) {
+    if (!model_valid_ || !policy_valid(policy_)) {
         return make_status(MmsStaticDispatchStatus::invalid_object_table, request);
     }
     if (request.kind != MmsWirePduKind::confirmed_request) {
