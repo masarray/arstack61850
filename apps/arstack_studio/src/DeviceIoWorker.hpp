@@ -29,6 +29,48 @@ public:
     [[nodiscard]] static constexpr int identityRetryIntervalMs() noexcept { return 650; }
     [[nodiscard]] static constexpr int heartbeatIntervalMs() noexcept { return 700; }
 
+    // Fast discovery policy: USB bridge metadata may prioritize a port, but it
+    // never verifies device identity. The opened port must still answer the
+    // semantic IDENTIFY contract before Studio can become READY.
+    [[nodiscard]] static int portConfidenceForMetadata(
+        const bool hasVendorIdentifier,
+        const quint16 vendorIdentifier,
+        const bool hasProductIdentifier,
+        const quint16 productIdentifier,
+        const QString& description,
+        const QString& manufacturer,
+        const QString& serialNumber) {
+        int score = 0;
+        if (hasVendorIdentifier && vendorIdentifier == 0x303AU) score += 100;
+
+        const QString identity = QStringLiteral("%1 %2 %3")
+            .arg(description, manufacturer, serialNumber).toLower();
+
+        // The current ARStack ESP32-P4 board exposes its console through a WCH
+        // CH343 bridge on Windows. Treat that bridge as a fast transport
+        // candidate, not as proof that the device is ARStack.
+        const bool saysCh343 = identity.contains(QStringLiteral("ch343"));
+        const bool wchCh343 = hasVendorIdentifier && vendorIdentifier == 0x1A86U &&
+            hasProductIdentifier && productIdentifier == 0x55D3U;
+        if (wchCh343) score += 95;
+        else if (saysCh343) score += 85;
+
+        if (identity.contains(QStringLiteral("esp32-p4"))) score += 90;
+        else if (identity.contains(QStringLiteral("esp32"))) score += 65;
+        if (identity.contains(QStringLiteral("espressif"))) score += 60;
+        if (identity.contains(QStringLiteral("usb jtag")) ||
+            identity.contains(QStringLiteral("usb serial")) ||
+            identity.contains(QStringLiteral("usb-enhanced-serial"))) {
+            score += 15;
+        }
+
+        // Windows can expose many virtual Bluetooth COM ports. They are poor
+        // automatic injector candidates and must never outrank a physical USB
+        // bridge. Manual selection remains available.
+        if (identity.contains(QStringLiteral("bluetooth"))) score -= 120;
+        return score;
+    }
+
     // S8B Windows ownership contract: access/device/resource/read/write errors
     // are session-fatal and must release the transport instead of leaving a
     // stale COM handle alive. Keep this pure so Windows CI can prove the exact

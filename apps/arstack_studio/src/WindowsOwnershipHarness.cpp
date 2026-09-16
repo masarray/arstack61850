@@ -76,6 +76,27 @@ bool serialTransportLossPolicy() {
         !DeviceIoWorker::serialErrorForcesTransportLoss(Error::UnknownError);
 }
 
+bool fastUsbDiscoveryPolicy() {
+    const int ch343Exact = DeviceIoWorker::portConfidenceForMetadata(
+        true, 0x1A86U, true, 0x55D3U,
+        QStringLiteral("USB-Enhanced-SERIAL CH343"), {}, {});
+    const int ch343ByName = DeviceIoWorker::portConfidenceForMetadata(
+        false, 0U, false, 0U,
+        QStringLiteral("USB-Enhanced-SERIAL CH343"), {}, {});
+    const int bluetooth = DeviceIoWorker::portConfidenceForMetadata(
+        false, 0U, false, 0U,
+        QStringLiteral("Standard Serial over Bluetooth link"), {}, {});
+    const int generic = DeviceIoWorker::portConfidenceForMetadata(
+        false, 0U, false, 0U, QStringLiteral("USB Serial Port"), {}, {});
+    const int espressif = DeviceIoWorker::portConfidenceForMetadata(
+        true, 0x303AU, false, 0U, QStringLiteral("USB JTAG/serial debug unit"),
+        QStringLiteral("Espressif"), {});
+
+    return ch343Exact >= 60 && ch343ByName >= 60 && espressif >= 60 &&
+        ch343Exact > generic && ch343ByName > generic &&
+        ch343Exact > bluetooth && bluetooth < generic;
+}
+
 bool crossProcessOwnershipAndCrashRecovery() {
     QTemporaryDir temp;
     if (!temp.isValid()) return false;
@@ -123,6 +144,7 @@ int main(int argc, char* argv[]) {
     }
 
     const bool serialPolicy = serialTransportLossPolicy();
+    const bool fastDiscovery = fastUsbDiscoveryPolicy();
     const bool processOwnership = crossProcessOwnershipAndCrashRecovery();
 
     qInfo().noquote()
@@ -130,16 +152,20 @@ int main(int argc, char* argv[]) {
         << (serialPolicy ? "PASS" : "FAIL")
         << "· Permission/Resource/DeviceNotFound/Read/Write errors force transport loss";
     qInfo().noquote()
+        << "S8B Windows discovery:"
+        << (fastDiscovery ? "PASS" : "FAIL")
+        << "· CH343/Espressif USB outrank generic and Bluetooth COM ports; IDENTIFY remains authoritative";
+    qInfo().noquote()
         << "S8B Windows ownership:"
         << (processOwnership ? "PASS" : "FAIL")
         << "· second process blocked with exit 23 and stale lock reclaimed after hard crash";
 
-    if (!serialPolicy || !processOwnership) {
-        qCritical().noquote() << "S8B Windows ownership integration harness: FAIL";
+    if (!serialPolicy || !fastDiscovery || !processOwnership) {
+        qCritical().noquote() << "S8B Windows ownership/discovery integration harness: FAIL";
         return 22;
     }
 
     qInfo().noquote()
-        << "S8B Windows ownership integration harness: PASS · OS process lock + crash recovery + serial transport-loss policy locked";
+        << "S8B Windows ownership/discovery integration harness: PASS · fast CH343 discovery + OS process lock + crash recovery + serial transport-loss policy locked";
     return 0;
 }
