@@ -39,8 +39,8 @@
             </DataSet>
             <SampledValueControl name="MSVCB01" datSet="dsSV" smvID="MU01LD0/LLN0$MSVCB01" confRev="3" smpRate="4000" nofASDU="1" smpMod="SmpPerSec" multicast="true" />
             <GSEControl name="GCB01" datSet="dsGO" appID="trip-goose" confRev="2" type="GOOSE" minTime="4" maxTime="1000" />
-            <ReportControl name="URCB01" datSet="dsGO" rptID="MU01LD0/LLN0$RP$URCB01" confRev="1" buffered="false" bufTime="100" intgPd="1000" />
-            <ReportControl name="BRCB01" datSet="dsGO" rptID="MU01LD0/LLN0$BR$BRCB01" confRev="2" buffered="true" bufTime="75" intgPd="1000" />
+            <ReportControl name="URCB01" datSet="dsGO" rptID="MU01LD0/LLN0$RP$URCB01" confRev="1" buffered="false" indexed="false" bufTime="100" intgPd="1000" />
+            <ReportControl name="BRCB01" datSet="dsGO" rptID="MU01LD0/LLN0$BR$BRCB01" confRev="2" buffered="true" indexed="false" bufTime="75" intgPd="1000" />
           </LN0>
           <LN lnClass="TCTR" inst="1" lnType="TCTRType" />
           <LN lnClass="XCBR" inst="1" lnType="XCBRType" />
