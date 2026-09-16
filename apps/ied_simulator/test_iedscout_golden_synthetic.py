@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
 import socket
@@ -97,6 +98,92 @@ def require_read(read_probe: Path, port: int, item: str, expected: str) -> str:
     return output
 
 
+def update_manifest_value(manifest_path: Path, item: str, new_value: str) -> int:
+    text = manifest_path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    if not lines or not lines[0].startswith("ARSTACK_IED_MODEL\t2\t"):
+        raise RuntimeError("Golden simulator manifest header is missing")
+    header = lines[0].split("\t")
+    revision = int(header[2]) + 1
+    lines[0] = f"ARSTACK_IED_MODEL\t2\t{revision}"
+
+    prefix = f"OBJ\tIEDGOLDENLD0\t{item}\t"
+    changed = False
+    for index, line in enumerate(lines[1:], start=1):
+        if not line.startswith(prefix):
+            continue
+        fields = line.split("\t")
+        if len(fields) < 6:
+            raise RuntimeError(f"Malformed golden OBJ line for {item}: {line}")
+        fields[5] = new_value
+        lines[index] = "\t".join(fields)
+        changed = True
+        break
+    if not changed:
+        raise RuntimeError(f"Golden manifest object not found: {item}")
+
+    temporary = manifest_path.with_suffix(manifest_path.suffix + ".golden-new")
+    temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    os.replace(temporary, manifest_path)
+    return revision
+
+
+def run_brcb_event_probe(
+    brcb_probe: Path,
+    port: int,
+    manifest_path: Path,
+) -> str:
+    """Enable indexed BRCB, mutate one DataSet member, require buffered report."""
+    process = subprocess.Popen(
+        [
+            str(brcb_probe), "127.0.0.1", str(port),
+            "--domain", "IEDGOLDENLD0",
+            "--rcb", "LLN0$BR$Buffer01",
+            "--timeout-ms", "9000",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        creationflags=creation_flags(),
+    )
+    try:
+        if process.stdout is None:
+            raise RuntimeError("Golden BRCB probe stdout pipe was not created")
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            ready = executor.submit(process.stdout.readline).result(timeout=7).strip()
+        print(ready)
+        if "MMS_BRCB_EVENT_READY" not in ready:
+            stderr = process.stderr.read() if process.stderr is not None else ""
+            raise RuntimeError(
+                "Golden BRCB did not become ready after RptEna=true: "
+                f"stdout={ready!r} stderr={stderr!r}"
+            )
+
+        revision = update_manifest_value(
+            manifest_path,
+            "XCBR1$ST$Pos$stVal",
+            "true",
+        )
+        remaining_stdout, stderr = process.communicate(timeout=13)
+        output = ready + "\n" + remaining_stdout
+        print(remaining_stdout, end="")
+        if stderr:
+            print(stderr, end="")
+        if process.returncode != 0 or "MMS_BRCB_EVENT_PASS" not in output:
+            raise RuntimeError(
+                "Golden BRCB buffered InformationReport regression failed: "
+                f"revision={revision} exit={process.returncode} "
+                f"stdout={output!r} stderr={stderr!r}"
+            )
+        if "rptid=IEDGOLDENLD0/LLN0$BR$Buffer" not in output:
+            raise RuntimeError("Golden BRCB report changed the unsuffixed RptID identity")
+        return output
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=3)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--app", required=True, type=Path)
@@ -134,13 +221,23 @@ def main() -> int:
                 env=environment,
                 creationflags=creation_flags(),
             )
+            manifest_path = Path(tempfile.gettempdir()) / f"arstack-ied-simulator-{process.pid}.model"
             try:
                 deadline = time.monotonic() + 15.0
                 ready_text = ""
+                manifest_text = ""
                 while time.monotonic() < deadline:
                     log.flush()
                     ready_text = log_path.read_text(encoding="utf-8", errors="replace")
-                    if "IEDSIM_EVENT kind=server_ready" in ready_text:
+                    try:
+                        manifest_text = manifest_path.read_text(encoding="utf-8")
+                    except (FileNotFoundError, PermissionError, UnicodeDecodeError):
+                        manifest_text = ""
+                    if (
+                        "IEDSIM_EVENT kind=server_ready" in ready_text
+                        and "RCB\tIEDGOLDENLD0\tLLN0$BR$Buffer01\t1\t" in manifest_text
+                        and "OBJ\tIEDGOLDENLD0\tXCBR1$ST$Pos$stVal\t" in manifest_text
+                    ):
                         break
                     if process.poll() is not None:
                         break
@@ -161,6 +258,8 @@ def main() -> int:
                     raise RuntimeError(
                         "Golden runtime readiness/count evidence is incomplete:\n" + ready_text
                     )
+                if not manifest_text:
+                    raise RuntimeError("Golden runtime manifest was not available for event injection")
 
                 # First/last dense unconfigured URCBs must survive manifest projection
                 # and be MMS-readable, proving they were not dropped by capacity logic.
@@ -190,16 +289,8 @@ def main() -> int:
                 ):
                     raise RuntimeError("Indexed URCB GI evidence is incomplete:\n" + urcb)
 
-                brcb = run([
-                    str(brcb_probe), "127.0.0.1", str(port),
-                    "--domain", "IEDGOLDENLD0",
-                    "--rcb", "LLN0$BR$Buffer01",
-                    "--timeout-ms", "9000",
-                ], timeout=14)
-                if (
-                    "MMS_BRCB_EVENT_PASS" not in brcb
-                    or "rptid=IEDGOLDENLD0/LLN0$BR$Buffer" not in brcb
-                ):
+                brcb = run_brcb_event_probe(brcb_probe, port, manifest_path)
+                if "MMS_BRCB_EVENT_PASS" not in brcb:
                     raise RuntimeError("Indexed BRCB report evidence is incomplete:\n" + brcb)
 
                 first_sg = run([
