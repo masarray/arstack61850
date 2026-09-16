@@ -214,15 +214,6 @@ signals:
 private:
     friend class DeterministicSessionHarness;
 
-    enum class UpdateStage {
-        idle,
-        stopping,
-        releasingPort,
-        probing,
-        flashing,
-        reconnecting,
-        waitingForBootloader,
-    };
     enum class ProfileSyncStage { idle, deploying, failed };
 
     class FirmwareHandoffWatchdog final {
