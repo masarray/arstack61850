@@ -11,9 +11,65 @@ on:
       - '.github/workflows/ied-simulator-release-hardening.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
+  apply-rcb-source-fix:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feat/ied-sim-ux-performance-foundation'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply production ReportControl manifest fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("apps/ied_simulator/src/IedFleetController.cpp")
+          text = path.read_text(encoding="utf-8")
+
+          old_include = '#include "IedFleetController.hpp"\n#include "IedRuntimeGuardrails.hpp"'
+          new_include = '#include "IedFleetController.hpp"\n#include "IedReportControlManifest.hpp"\n#include "IedRuntimeGuardrails.hpp"'
+          if text.count(old_include) != 1:
+              raise SystemExit("expected IedFleetController include anchor exactly once")
+          text = text.replace(old_include, new_include, 1)
+
+          start_marker = "    QSet<QString> emittedReportControls;\n    for (const auto& report : loaded.document.report_controls) {"
+          start = text.index(start_marker)
+          end_marker = "\n\n    if (uniqueRoots.isEmpty()) {"
+          end = text.index(end_marker, start)
+          replacement = '''    QSet<QString> emittedReportControls;
+    for (const auto& report : loaded.document.report_controls) {
+        manifest += arstack::iedsim::reportControlManifestLines(
+            report,
+            activeIedName,
+            emittedReportControls);
+    }'''
+          text = text[:start] + replacement + text[end:]
+          path.write_text(text, encoding="utf-8")
+          PY
+
+          grep -F '#include "IedReportControlManifest.hpp"' apps/ied_simulator/src/IedFleetController.cpp
+          grep -F 'arstack::iedsim::reportControlManifestLines' apps/ied_simulator/src/IedFleetController.cpp
+          if grep -F 'const auto name = qstring(report.name);' apps/ied_simulator/src/IedFleetController.cpp; then
+            echo "legacy RCB compiler block still present" >&2
+            exit 1
+          fi
+
+      - name: Commit production source fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add apps/ied_simulator/src/IedFleetController.cpp
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(ied-sim): expand indexed ReportControl runtime instances"
+          git push origin HEAD:feat/ied-sim-ux-performance-foundation
+
   linux-release-soak:
     runs-on: ubuntu-24.04
     steps:
