@@ -1,0 +1,92 @@
+name: Phase2B SGCB Final Acceptance
+
+on:
+  push:
+    branches:
+      - feat/ied-sim-ux-performance-foundation
+    paths:
+      - '.github/workflows/zz-phase2b-sgcb-final.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  wire-verify-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/ied-sim-ux-performance-foundation
+          fetch-depth: 0
+
+      - name: Materialize reviewed Phase 2B patches from immutable commits
+        run: |
+          git show 178e091960634e8fb0853602b590c4c78a1d265b:scripts/phase2b_sgcb_production_patch.py > /tmp/phase2b-production.py
+          git show d89dcdf8357b73667434aef4789bd7d9b29babed:scripts/phase2b_sgcb_permanent_ci_patch.py > /tmp/phase2b-permanent-ci.py
+          python3 -m py_compile /tmp/phase2b-production.py /tmp/phase2b-permanent-ci.py
+          python3 /tmp/phase2b-production.py
+          python3 /tmp/phase2b-permanent-ci.py
+
+      - name: Configure portable core
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DARIEC61850_WARNINGS_AS_ERRORS=ON
+
+      - name: Build full portable suite
+        run: cmake --build build --parallel 2
+
+      - name: Focused SettingControl and SGCB core regressions
+        run: >-
+          ctest --test-dir build --output-on-failure
+          -R 'ariec61850_(scl_tests|mms_static_setting_group_tests)'
+
+      - name: Full portable regression
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
+
+      - name: Configure desktop simulator
+        run: >-
+          cmake -S apps/ied_simulator -B build-qt -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DARIEC61850_WARNINGS_AS_ERRORS=ON
+
+      - name: Build production simulator and SGCB QA
+        run: >-
+          cmake --build build-qt --parallel 2
+          --target arstack_ied_simulator ariec61850_ied_simulator_server ied_setting_control_manifest_qa
+
+      - name: Verify exact SCL to SGCB manifest projection
+        run: ./build-qt/ied_setting_control_manifest_qa
+
+      - name: Real production socket SGCB acceptance
+        run: >-
+          python3 apps/ied_simulator/test_sgcb_production.py
+          --server ./build-qt/ariec61850_ied_simulator_server
+          --build-dir ./build-qt
+
+      - name: Commit Phase 2B only after every gate passes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/zz-phase2b-sgcb-final.yml
+          git add \
+            CMakeLists.txt \
+            .github/workflows/ied-simulator-qt.yml \
+            apps/ied_simulator/CMakeLists.txt \
+            apps/ied_simulator/src/IedFleetController.cpp \
+            apps/ied_simulator/src/IedSettingControlManifest.hpp \
+            apps/ied_simulator/src/ied_setting_control_manifest_qa.cpp \
+            apps/ied_simulator/test_sgcb_production.py \
+            tools/static_ied_server.cpp \
+            tools/mms_sgcb_probe.cpp
+          git commit -m "feat(ied): wire SGCB into simulator runtime"
+          git push origin HEAD:feat/ied-sim-ux-performance-foundation
