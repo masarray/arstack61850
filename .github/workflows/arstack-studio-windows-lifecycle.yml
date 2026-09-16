@@ -11,13 +11,48 @@ on:
       - '.github/workflows/arstack-studio-windows-lifecycle.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: arstack-studio-windows-lifecycle-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  repair-source:
+    name: Apply one-shot P0 firmware build identity repair
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/ptp-production-v0.1.1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/ptp-production-v0.1.1
+          fetch-depth: 0
+      - name: Apply P0 repair
+        run: python3 .github/scripts/p0_firmware_build_identity_repair.py
+      - name: Verify repair invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -R "firmwareBuildId" -n apps/arstack_studio/src apps/arstack_studio/qml/FirmwarePanel.qml
+          grep -F 'build=%s boot_id=' embedded/esp32p4_smv_injector/main/live_control.cpp
+          grep -F '"buildId": source_commit[:16].lower()' .github/workflows/esp32p4-smv-injector.yml
+          grep -F 'same version stale build -> firmware update' apps/arstack_studio/src/DeterministicSessionHarness.cpp
+      - name: Commit source repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "ARStack P0 Repair"
+          git config user.email "actions@users.noreply.github.com"
+          git add embedded/esp32p4_smv_injector apps/arstack_studio .github/workflows/esp32p4-smv-injector.yml
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git commit -m "fix(p0): bind firmware updates to semantic build identity"
+          git push origin HEAD:feature/ptp-production-v0.1.1
+
   close-exit-reopen:
     name: Close -> process exit -> immediate reopen
     runs-on: windows-2022
