@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   apply:
-    runs-on: ubuntu-latest
+    runs-on: macos-15
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -21,7 +21,7 @@ jobs:
           ref: feature/ptp-production-v0.1.1
           fetch-depth: 0
       - name: Apply phase 1 ribbon patch
-        run: python .github/scripts/p0_ribbon_phase1.py
+        run: python3 .github/scripts/p0_ribbon_phase1.py
       - name: Commit source changes
         run: |
           if git diff --quiet; then
