@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import ARStack.IedSimulator 1.0
 
@@ -16,6 +17,17 @@ Item {
     property string pendingQuality: "Good"
     property string pendingOrigin: "Simulator"
     readonly property bool showInspector: width >= 1260
+
+    function localPathFromUrl(value) {
+        var text = decodeURIComponent(String(value))
+        if (text.indexOf("file:///") === 0) {
+            var local = text.substring(8)
+            if (/^[A-Za-z]:\//.test(local)) return local
+            return "/" + local
+        }
+        if (text.indexOf("file://") === 0) return "//" + text.substring(7)
+        return text
+    }
 
     IedNavigationModel {
         id: navigationModel
@@ -934,6 +946,16 @@ Item {
         }
     }
 
+    FolderDialog {
+        id: fileRootDialog
+        title: "Choose File transfer folder"
+        onAccepted: {
+            var local = root.localPathFromUrl(selectedFolder)
+            fileRootField.text = local
+            backend.fileFolder = local
+        }
+    }
+
     Dialog {
         id: startDialog
         modal: true
@@ -946,6 +968,7 @@ Item {
             var addressIndex = backend.availableAddresses.indexOf(backend.listenAddress)
             addressBox.currentIndex = Math.max(0, addressIndex)
             portField.text = String(backend.port)
+            fileRootField.text = backend.fileFolder || ""
         }
 
         contentItem: ColumnLayout {
@@ -1004,6 +1027,53 @@ Item {
                 font.pixelSize: 10
             }
 
+            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: theme.lineSoft }
+            RowLayout {
+                Layout.fillWidth: true
+                CheckBox {
+                    id: fileServiceCheck
+                    checked: backend.fileServiceEnabled
+                    onToggled: backend.fileServiceEnabled = checked
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 0
+                    Label {
+                        text: "Enable MMS file service"
+                        color: theme.textSoft
+                        font.pixelSize: 10
+                        font.weight: Font.DemiBold
+                    }
+                    Label {
+                        text: "IEDScout file access is sandboxed to this folder."
+                        color: theme.muted
+                        font.pixelSize: 8
+                    }
+                }
+            }
+            Label {
+                text: "File transfer folder"
+                color: fileServiceCheck.checked ? theme.muted : theme.line
+                font.pixelSize: 9
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                TextField {
+                    id: fileRootField
+                    Layout.fillWidth: true
+                    enabled: fileServiceCheck.checked
+                    selectByMouse: true
+                    placeholderText: "Choose folder exposed to MMS client"
+                    font.pixelSize: 10
+                    onEditingFinished: backend.fileFolder = text
+                }
+                CommandButton {
+                    text: "Browse…"
+                    enabled: fileServiceCheck.checked
+                    onClicked: fileRootDialog.open()
+                }
+            }
+
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 52
@@ -1038,11 +1108,15 @@ Item {
                 CommandButton {
                     text: "Start IED"
                     primary: true
-                    enabled: addressBox.currentText.length > 0 && Number(portField.text) >= 1 && Number(portField.text) <= 65535
+                    enabled: addressBox.currentText.length > 0 &&
+                             Number(portField.text) >= 1 && Number(portField.text) <= 65535 &&
+                             (!fileServiceCheck.checked || fileRootField.text.trim().length > 0)
                     onClicked: {
                         var requestedPort = Number(portField.text)
-                        if (backend.configureIedEndpoint(backend.selectedIedIndex, addressBox.currentText, requestedPort)) {
-                            backend.startSimulation()
+                        backend.fileServiceEnabled = fileServiceCheck.checked
+                        backend.fileFolder = fileRootField.text
+                        if (backend.configureIedEndpoint(backend.selectedIedIndex, addressBox.currentText, requestedPort) &&
+                                backend.startSimulation()) {
                             startDialog.close()
                         }
                     }
