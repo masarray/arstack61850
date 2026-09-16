@@ -105,14 +105,28 @@ def run_live_discovery(live_discover: Path, port: int) -> int:
             "expected 34/0/0"
         )
 
+    # live_discover intentionally reports this non-RCB warning while GO/SV/SG/LG
+    # deep value reads remain optional companion evidence. It must not mask a
+    # proven-complete Report hierarchy, but every other warning remains fatal.
     warnings = model.get("warnings", [])
-    if warnings:
-        raise RuntimeError(f"Golden production discovery emitted warnings: {warnings}")
+    allowed_warning_codes = {"CONTROL_BLOCK_VALUE_READ_PENDING"}
+    unexpected_warnings = [
+        warning for warning in warnings
+        if not isinstance(warning, dict)
+        or warning.get("code") not in allowed_warning_codes
+    ]
+    if unexpected_warnings:
+        raise RuntimeError(
+            "Golden production discovery emitted unexpected warnings: "
+            f"{unexpected_warnings}"
+        )
 
+    allowed_warning_count = len(warnings) - len(unexpected_warnings)
     print(
         "IEDSCOUT_GOLDEN_DISCOVERY_PASS "
         f"report_controls={report_count} rcb_read_complete=true "
-        f"warnings=0 elapsed_ms={elapsed_ms}"
+        f"unexpected_warnings=0 allowed_non_rcb_warnings={allowed_warning_count} "
+        f"elapsed_ms={elapsed_ms}"
     )
     return elapsed_ms
 
