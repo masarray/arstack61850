@@ -1551,7 +1551,8 @@ void rebuild_manifest_root_values(ManifestModel& model) {
             storage.conf_revision,
             storage.optional_fields,
             storage.buffer_time_ms,
-            storage.trigger_options});
+            storage.trigger_options,
+            storage.integrity_period_ms});
     }
     return model;
 }
@@ -1992,7 +1993,9 @@ void serve_connection(
     std::unique_ptr<filehost::StaticFileServiceSession> file_session;
 
     mms::MmsStaticDispatchPolicy dispatch_policy;
-    dispatch_policy.maximum_write_variables = 1U;
+    // IEDScout can configure an RCB and re-enable it in one MMS Write.
+    // Keep the host transaction bounded to one complete BRCB attribute set.
+    dispatch_policy.maximum_write_variables = 16U;
     const mms::MmsStaticObjectTable* dispatch_objects = &object_table;
     if (manifest_model != nullptr && !manifest_model->direct_control_storage.empty()) {
         direct_control_states.resize(manifest_model->direct_control_storage.size());

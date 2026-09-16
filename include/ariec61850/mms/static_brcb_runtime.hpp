@@ -129,6 +129,11 @@ public:
     [[nodiscard]] constexpr bool valid() const noexcept { return initialized_; }
 
     [[nodiscard]] MmsStaticBrcbStatus set_enabled(bool enabled) noexcept;
+    [[nodiscard]] MmsStaticBrcbStatus set_trigger_options(
+        std::uint8_t trigger_options) noexcept;
+    [[nodiscard]] constexpr std::uint8_t trigger_options() const noexcept {
+        return trigger_options_;
+    }
     [[nodiscard]] constexpr bool enabled() const noexcept { return enabled_; }
     [[nodiscard]] constexpr std::uint8_t sequence_number() const noexcept {
         return sequence_number_;
@@ -232,6 +237,7 @@ private:
     std::uint32_t queue_revision_{1U};
     std::uint32_t schedule_revision_{1U};
     std::uint8_t sequence_number_{};
+    std::uint8_t trigger_options_{};
     bool replay_gap_{};
     bool general_interrogation_pending_{};
     bool integrity_armed_{};

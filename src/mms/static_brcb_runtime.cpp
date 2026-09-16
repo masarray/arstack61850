@@ -223,6 +223,7 @@ bool MmsStaticBrcbRuntime::initialize() noexcept {
     queue_revision_ = 1U;
     schedule_revision_ = 1U;
     sequence_number_ = 0U;
+    trigger_options_ = definition_->trigger_options;
     replay_gap_ = false;
     general_interrogation_pending_ = false;
     integrity_armed_ = false;
@@ -245,7 +246,31 @@ MmsStaticBrcbStatus MmsStaticBrcbRuntime::set_enabled(
     next_integrity_due_ms_ = 0U;
     const auto period = effective_integrity_period(*definition_);
     integrity_armed_ = enabled && period != 0U &&
-        (definition_->trigger_options & kTriggerIntegrity) != 0U;
+        (trigger_options_ & kTriggerIntegrity) != 0U;
+    bump_revision(pending_->revision);
+    bump_revision(schedule_revision_);
+    return MmsStaticBrcbStatus::ok;
+}
+
+MmsStaticBrcbStatus MmsStaticBrcbRuntime::set_trigger_options(
+    const std::uint8_t trigger_options) noexcept {
+    if (!initialized_ || definition_ == nullptr || pending_ == nullptr) {
+        return MmsStaticBrcbStatus::invalid_runtime;
+    }
+    if ((trigger_options & static_cast<std::uint8_t>(~kAllowedTriggers)) != 0U) {
+        return MmsStaticBrcbStatus::invalid_definition;
+    }
+    if (enabled_) {
+        return MmsStaticBrcbStatus::temporarily_unavailable;
+    }
+    if (trigger_options_ == trigger_options) {
+        return MmsStaticBrcbStatus::ok;
+    }
+    trigger_options_ = trigger_options;
+    clear_pending(*pending_);
+    general_interrogation_pending_ = false;
+    next_integrity_due_ms_ = 0U;
+    integrity_armed_ = false;
     bump_revision(pending_->revision);
     bump_revision(schedule_revision_);
     return MmsStaticBrcbStatus::ok;
@@ -266,7 +291,7 @@ MmsStaticBrcbStatus MmsStaticBrcbRuntime::notify(
     std::uint8_t trigger_mask = 0U;
     std::uint8_t report_reason = 0U;
     if (!event_mapping(reason, trigger_mask, report_reason) ||
-        (definition_->trigger_options & trigger_mask) == 0U) {
+        (trigger_options_ & trigger_mask) == 0U) {
         return MmsStaticBrcbStatus::trigger_not_selected;
     }
 
@@ -300,7 +325,7 @@ MmsStaticBrcbStatus MmsStaticBrcbRuntime::request_general_interrogation() noexce
     if (!enabled_) {
         return MmsStaticBrcbStatus::temporarily_unavailable;
     }
-    if ((definition_->trigger_options & kTriggerGeneralInterrogation) == 0U) {
+    if ((trigger_options_ & kTriggerGeneralInterrogation) == 0U) {
         return MmsStaticBrcbStatus::trigger_not_selected;
     }
     if (!general_interrogation_pending_) {
@@ -537,7 +562,7 @@ MmsStaticBrcbCaptureResult MmsStaticBrcbRuntime::capture(
             ? 0U
             : saturating_add(plan.observed_now_ms, period);
         integrity_armed_ = period != 0U && enabled_ &&
-            (definition_->trigger_options & kTriggerIntegrity) != 0U;
+            (trigger_options_ & kTriggerIntegrity) != 0U;
         bump_revision(schedule_revision_);
     }
     bump_revision(queue_revision_);

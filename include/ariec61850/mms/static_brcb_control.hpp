@@ -76,6 +76,11 @@ public:
         bool enabled,
         std::uint64_t now_ms) noexcept;
 
+    [[nodiscard]] MmsStaticBrcbControlStatus set_trigger_options(
+        const MmsStaticBrcbClientIdentity& client,
+        std::uint8_t trigger_options,
+        std::uint64_t now_ms) noexcept;
+
     [[nodiscard]] MmsStaticBrcbControlStatus request_general_interrogation(
         const MmsStaticBrcbClientIdentity& client,
         std::uint64_t now_ms) noexcept;

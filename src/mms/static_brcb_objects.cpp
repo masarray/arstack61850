@@ -119,6 +119,7 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
 
 [[nodiscard]] bool writable_attribute(const MmsStaticBrcbAttribute attribute) noexcept {
     return attribute == MmsStaticBrcbAttribute::report_enabled ||
+        attribute == MmsStaticBrcbAttribute::trigger_options ||
         attribute == MmsStaticBrcbAttribute::general_interrogation ||
         attribute == MmsStaticBrcbAttribute::purge_buffer ||
         attribute == MmsStaticBrcbAttribute::entry_id ||
@@ -359,7 +360,7 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
     case MmsStaticBrcbAttribute::sequence_number:
         return encode_unsigned(context->reports->sequence_number(), destination);
     case MmsStaticBrcbAttribute::trigger_options: {
-        const std::array<std::uint8_t, 1U> trigger{context->definition->trigger_options};
+        const std::array<std::uint8_t, 1U> trigger{context->reports->trigger_options()};
         return encode_bit_string(2U, trigger, destination);
     }
     case MmsStaticBrcbAttribute::integrity_period:
@@ -398,6 +399,31 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
         return false;
     }
     value = tlv.value[0] != 0U;
+    return true;
+}
+
+[[nodiscard]] bool decode_bit_string(
+    const std::span<const std::uint8_t> encoded,
+    const std::uint8_t expected_unused_bits,
+    const std::size_t expected_bytes,
+    std::span<const std::uint8_t>& bytes) noexcept {
+    bytes = {};
+    asn1::BerTlvView tlv;
+    if (!asn1::BerSpanReader::try_read_exact(encoded, tlv) ||
+        tlv.tag_class != asn1::BerClass::context_specific ||
+        tlv.tag_number != 4 || tlv.constructed ||
+        tlv.value.size() != expected_bytes + 1U ||
+        tlv.value[0] != expected_unused_bits) {
+        return false;
+    }
+    bytes = tlv.value.subspan(1U);
+    if (!bytes.empty() && expected_unused_bits != 0U) {
+        const auto mask = static_cast<std::uint8_t>((1U << expected_unused_bits) - 1U);
+        if ((bytes.back() & mask) != 0U) {
+            bytes = {};
+            return false;
+        }
+    }
     return true;
 }
 
@@ -516,6 +542,22 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
         return map_control_status(
             context->control->set_report_enabled(client, value, now));
     }
+    case MmsStaticBrcbAttribute::trigger_options: {
+        std::span<const std::uint8_t> bytes;
+        if (!decode_bit_string(encoded_data, 2U, 1U, bytes)) {
+            return {false, kTypeInconsistent};
+        }
+        constexpr std::uint8_t allowed = 0x7CU;
+        if ((bytes[0] & static_cast<std::uint8_t>(~allowed)) != 0U) {
+            return {false, kObjectValueInvalid};
+        }
+        const auto claim = ensure_claimed(*context, client, now);
+        if (claim != MmsStaticBrcbControlStatus::ok) {
+            return map_control_status(claim);
+        }
+        return map_control_status(
+            context->control->set_trigger_options(client, bytes[0], now));
+    }
     case MmsStaticBrcbAttribute::general_interrogation: {
         bool value = false;
         if (!decode_boolean(encoded_data, value)) {
@@ -577,7 +619,6 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
     case MmsStaticBrcbAttribute::optional_fields:
     case MmsStaticBrcbAttribute::buffer_time:
     case MmsStaticBrcbAttribute::sequence_number:
-    case MmsStaticBrcbAttribute::trigger_options:
     case MmsStaticBrcbAttribute::integrity_period:
     case MmsStaticBrcbAttribute::time_of_entry:
     case MmsStaticBrcbAttribute::owner:
