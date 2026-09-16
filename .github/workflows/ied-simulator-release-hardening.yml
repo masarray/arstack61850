@@ -28,31 +28,29 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-
           path = Path("apps/ied_simulator/src/IedFleetController.cpp")
           text = path.read_text(encoding="utf-8")
-
           old_include = '#include "IedFleetController.hpp"\n#include "IedRuntimeGuardrails.hpp"'
           new_include = '#include "IedFleetController.hpp"\n#include "IedReportControlManifest.hpp"\n#include "IedRuntimeGuardrails.hpp"'
           if text.count(old_include) != 1:
               raise SystemExit("expected IedFleetController include anchor exactly once")
           text = text.replace(old_include, new_include, 1)
-
           start_marker = "    QSet<QString> emittedReportControls;\n    for (const auto& report : loaded.document.report_controls) {"
           start = text.index(start_marker)
           end_marker = "\n\n    if (uniqueRoots.isEmpty()) {"
           end = text.index(end_marker, start)
-          replacement = '''    QSet<QString> emittedReportControls;
-    for (const auto& report : loaded.document.report_controls) {
-        manifest += arstack::iedsim::reportControlManifestLines(
-            report,
-            activeIedName,
-            emittedReportControls);
-    }'''
+          replacement = "\n".join([
+              "    QSet<QString> emittedReportControls;",
+              "    for (const auto& report : loaded.document.report_controls) {",
+              "        manifest += arstack::iedsim::reportControlManifestLines(",
+              "            report,",
+              "            activeIedName,",
+              "            emittedReportControls);",
+              "    }",
+          ])
           text = text[:start] + replacement + text[end:]
           path.write_text(text, encoding="utf-8")
           PY
-
           grep -F '#include "IedReportControlManifest.hpp"' apps/ied_simulator/src/IedFleetController.cpp
           grep -F 'arstack::iedsim::reportControlManifestLines' apps/ied_simulator/src/IedFleetController.cpp
           if grep -F 'const auto name = qstring(report.name);' apps/ied_simulator/src/IedFleetController.cpp; then
