@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+import json
 import os
 from pathlib import Path
 import socket
@@ -49,6 +50,71 @@ def run(command: list[str], timeout: int = 15) -> str:
             f"Command failed ({result.returncode}): {' '.join(command)}\n{output}"
         )
     return output
+
+
+def run_live_discovery(live_discover: Path, port: int) -> int:
+    """Prove that real GetNameList discovery exposes the complete RCB hierarchy."""
+    command = [
+        str(live_discover),
+        "127.0.0.1",
+        str(port),
+        "--model-json",
+        "--timeout-ms",
+        "7000",
+    ]
+    started = time.monotonic()
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+        creationflags=creation_flags(),
+    )
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+    if result.stderr:
+        print(result.stderr, end="")
+    if result.returncode not in (0, 1):
+        raise RuntimeError(
+            "Golden production discovery failed: "
+            f"exit={result.returncode} stderr={result.stderr!r} stdout={result.stdout!r}"
+        )
+    try:
+        model = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(
+            f"Golden production discovery did not emit JSON: {error}\n{result.stdout}"
+        ) from error
+
+    if model.get("schemaVersion") != "live-ied-model-v1":
+        raise RuntimeError(
+            "Golden production discovery did not emit live-ied-model-v1 JSON"
+        )
+
+    coverage = model.get("coverage")
+    if not isinstance(coverage, dict):
+        raise RuntimeError("Golden production discovery omitted coverage")
+
+    report_count = int(coverage.get("reportControlCount", 0) or 0)
+    not_read = int(coverage.get("reportControlBindingNotReadCount", 0) or 0)
+    read_failed = int(coverage.get("reportControlBindingReadFailedCount", 0) or 0)
+    if (report_count, not_read, read_failed) != (34, 0, 0):
+        raise RuntimeError(
+            "Golden production discovery RCB coverage mismatch: "
+            f"count={report_count} not_read={not_read} read_failed={read_failed}; "
+            "expected 34/0/0"
+        )
+
+    warnings = model.get("warnings", [])
+    if warnings:
+        raise RuntimeError(f"Golden production discovery emitted warnings: {warnings}")
+
+    print(
+        "IEDSCOUT_GOLDEN_DISCOVERY_PASS "
+        f"report_controls={report_count} rcb_read_complete=true "
+        f"warnings=0 elapsed_ms={elapsed_ms}"
+    )
+    return elapsed_ms
 
 
 def terminate_process_tree(process: subprocess.Popen[str]) -> None:
@@ -101,15 +167,25 @@ def verify_fixture(scl: Path) -> None:
     ]
     setting = root.find(".//scl:LN0/scl:SettingControl", namespace)
     if len(unconfigured) != 30:
-        raise RuntimeError(f"Golden fixture must contain 30 unconfigured URCBs, got {len(unconfigured)}")
+        raise RuntimeError(
+            f"Golden fixture must contain 30 unconfigured URCBs, got {len(unconfigured)}"
+        )
     if len(indexed_urcb) != 1 or len(indexed_brcb) != 1:
-        raise RuntimeError("Golden fixture must contain one indexed URCB family and one indexed BRCB family")
+        raise RuntimeError(
+            "Golden fixture must contain one indexed URCB family and one indexed BRCB family"
+        )
     for control in indexed_urcb + indexed_brcb:
         enabled = control.find("scl:RptEnabled", namespace)
         if enabled is None or enabled.attrib.get("max") != "2":
             raise RuntimeError("Indexed golden RCB family must have RptEnabled max=2")
-    if setting is None or setting.attrib.get("numOfSGs") != "4" or setting.attrib.get("actSG") != "1":
-        raise RuntimeError("Golden fixture must contain SettingControl numOfSGs=4 actSG=1")
+    if (
+        setting is None
+        or setting.attrib.get("numOfSGs") != "4"
+        or setting.attrib.get("actSG") != "1"
+    ):
+        raise RuntimeError(
+            "Golden fixture must contain SettingControl numOfSGs=4 actSG=1"
+        )
 
 
 def verify_manifest_inventory(manifest_text: str) -> None:
@@ -140,7 +216,9 @@ def require_read(read_probe: Path, port: int, item: str, expected: str) -> str:
         "--timeout-ms", "5000",
     ])
     if expected not in output:
-        raise RuntimeError(f"Read evidence for {item} did not contain {expected!r}:\n{output}")
+        raise RuntimeError(
+            f"Read evidence for {item} did not contain {expected!r}:\n{output}"
+        )
     return output
 
 
@@ -256,12 +334,14 @@ def main() -> int:
         raise RuntimeError("Golden acceptance requires an existing app and SCL fixture")
     verify_fixture(scl)
 
+    live_discover = find_binary(build_dir, "ariec61850_live_discover")
     read_probe = find_binary(build_dir, "ariec61850_mms_read_probe")
     urcb_probe = find_binary(build_dir, "ariec61850_mms_urcb_gi_probe")
     brcb_probe = find_binary(build_dir, "ariec61850_mms_brcb_event_probe")
     sgcb_probe = find_binary(build_dir, "ariec61850_mms_sgcb_probe")
 
     port = free_port()
+    discovery_ms = -1
     with tempfile.TemporaryDirectory(prefix="arstack-iedscout-golden-") as temp:
         log_path = Path(temp) / "golden-runtime.log"
         environment = os.environ.copy()
@@ -279,14 +359,19 @@ def main() -> int:
                 env=environment,
                 creationflags=creation_flags(),
             )
-            manifest_path = Path(tempfile.gettempdir()) / f"arstack-ied-simulator-{process.pid}.model"
+            manifest_path = (
+                Path(tempfile.gettempdir())
+                / f"arstack-ied-simulator-{process.pid}.model"
+            )
             try:
                 deadline = time.monotonic() + 15.0
                 ready_text = ""
                 manifest_text = ""
                 while time.monotonic() < deadline:
                     log.flush()
-                    ready_text = log_path.read_text(encoding="utf-8", errors="replace")
+                    ready_text = log_path.read_text(
+                        encoding="utf-8", errors="replace"
+                    )
                     try:
                         manifest_text = manifest_path.read_text(encoding="utf-8")
                     except (FileNotFoundError, PermissionError, UnicodeDecodeError):
@@ -301,22 +386,35 @@ def main() -> int:
                         break
                     time.sleep(0.05)
                 else:
-                    ready_text = log_path.read_text(encoding="utf-8", errors="replace")
+                    ready_text = log_path.read_text(
+                        encoding="utf-8", errors="replace"
+                    )
 
                 if not manifest_text:
                     raise RuntimeError(
-                        "Golden runtime manifest was not available for event injection.\n" + ready_text
+                        "Golden runtime manifest was not available for event injection.\n"
+                        + ready_text
                     )
                 verify_manifest_inventory(manifest_text)
 
                 # The desktop binary is a GUI subsystem executable on Windows, so
                 # stdout is not a reliable readiness channel there. A complete
                 # manifest plus an actual MMS Read proves the runtime is live.
-                wait_for_read(read_probe, port, "LLN0$RP$Uncfg01$RptEna", "value=false")
+                wait_for_read(
+                    read_probe, port, "LLN0$RP$Uncfg01$RptEna", "value=false"
+                )
+
+                # Critical regression: direct reads of known ObjectNames are not
+                # enough. IEDScout first builds its Report tree from production
+                # GetNameList discovery. This gate must fail if the server omits,
+                # truncates, misorders, or cannot read the RCB hierarchy.
+                discovery_ms = run_live_discovery(live_discover, port)
 
                 # First/last dense unconfigured URCBs must survive manifest projection
                 # and be MMS-readable, proving they were not dropped by capacity logic.
-                require_read(read_probe, port, "LLN0$RP$Uncfg30$RptEna", "value=false")
+                require_read(
+                    read_probe, port, "LLN0$RP$Uncfg30$RptEna", "value=false"
+                )
 
                 # Indexed instances are concrete MMS ObjectNames while RptID remains
                 # the unsuffixed SCL family identity used by IEDScout.
@@ -339,32 +437,51 @@ def main() -> int:
                     "MMS_URCB_GI_PASS" not in urcb
                     or "rptid=IEDGOLDENLD0/LLN0$RP$Unbuffer" not in urcb
                 ):
-                    raise RuntimeError("Indexed URCB GI evidence is incomplete:\n" + urcb)
+                    raise RuntimeError(
+                        "Indexed URCB GI evidence is incomplete:\n" + urcb
+                    )
 
                 brcb = run_brcb_event_probe(brcb_probe, port, manifest_path)
                 if "MMS_BRCB_EVENT_PASS" not in brcb:
-                    raise RuntimeError("Indexed BRCB report evidence is incomplete:\n" + brcb)
+                    raise RuntimeError(
+                        "Indexed BRCB report evidence is incomplete:\n" + brcb
+                    )
 
                 first_sg = run([
                     str(sgcb_probe), "127.0.0.1", str(port),
                     "--domain", "IEDGOLDENLD0", "--root", "LLN0$SP$SGCB",
                     "--expect-num", "4", "--expect-act", "1", "--activate", "3",
                 ])
-                if "SGCB_PROBE_PASS discovery=5/5 num=4 initial=1 final=3" not in first_sg:
-                    raise RuntimeError("Golden SGCB activation evidence is incomplete:\n" + first_sg)
+                if (
+                    "SGCB_PROBE_PASS discovery=5/5 num=4 initial=1 final=3"
+                    not in first_sg
+                ):
+                    raise RuntimeError(
+                        "Golden SGCB activation evidence is incomplete:\n" + first_sg
+                    )
 
                 second_sg = run([
                     str(sgcb_probe), "127.0.0.1", str(port),
                     "--domain", "IEDGOLDENLD0", "--root", "LLN0$SP$SGCB",
                     "--expect-num", "4", "--expect-act", "3", "--reject", "5",
                 ])
-                if "SGCB_PROBE_PASS discovery=5/5 num=4 initial=3 final=3" not in second_sg:
-                    raise RuntimeError("Golden SGCB cross-association evidence is incomplete:\n" + second_sg)
+                if (
+                    "SGCB_PROBE_PASS discovery=5/5 num=4 initial=3 final=3"
+                    not in second_sg
+                ):
+                    raise RuntimeError(
+                        "Golden SGCB cross-association evidence is incomplete:\n"
+                        + second_sg
+                    )
 
                 log.flush()
-                final_log = log_path.read_text(encoding="utf-8", errors="replace")
+                final_log = log_path.read_text(
+                    encoding="utf-8", errors="replace"
+                )
                 if "IEDSIM_EVENT kind=client_error" in final_log:
-                    raise RuntimeError("Golden runtime emitted client_error:\n" + final_log)
+                    raise RuntimeError(
+                        "Golden runtime emitted client_error:\n" + final_log
+                    )
             finally:
                 terminate_process_tree(process)
 
@@ -372,6 +489,8 @@ def main() -> int:
         "IEDSCOUT_GOLDEN_SYNTHETIC_PASS "
         "rcb_runtime=34 unconfigured_urcb=30 indexed_urcb=2 indexed_brcb=2 "
         "sgcb=1 omitted_urcbs=0 omitted_brcbs=0 "
+        "discovery=pass rcb_discovery=34 rcb_read_complete=true "
+        f"discovery_ms={discovery_ms} "
         "urcb_gi=pass brcb_report=pass sgcb_cross_association=pass"
     )
     return 0
