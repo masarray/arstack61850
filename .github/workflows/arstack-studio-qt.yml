@@ -218,6 +218,7 @@ jobs:
             "chip": "esp32p4",
             "chipRevisionPolicy": "pre-v3",
             "version": "0.1.1",
+            "sourceCommit": "0123456789abcdef0123456789abcdef01234567",
             "protocol": 1,
             "capabilities": ["SMV-4I4V", "PROFILE", "LIVE-SETPOINTS", "SESSION-LEASE", "PTP-P2", "SMPSYNCH-AUTO"],
             "flashOffset": 0,
