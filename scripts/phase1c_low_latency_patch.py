@@ -34,6 +34,16 @@ replace(
     '''            std::osyncstream{std::cout}\n                << "IEDSIM_EVENT kind=client_connected association="\n                << association_id << " remote=" << remote\n                << " tcp_nodelay=" << (tcp_nodelay ? "true" : "false") << '\\n';\n''',
 )
 
+# The GUI intentionally routes child IEDSIM_EVENT lines into its bounded activity
+# model instead of stdout. Enable the existing diagnostic trace only for this QA
+# process so the integration gate can observe the socket option without changing
+# production logging behavior.
+replace(
+    "apps/ied_simulator/test_gui_live_value.py",
+    '''    environment = dict(os.environ)\n    environment["QT_QPA_PLATFORM"] = "offscreen"\n''',
+    '''    environment = dict(os.environ)\n    environment["QT_QPA_PLATFORM"] = "offscreen"\n    environment["ARSTACK_IEDSIM_TRACE_SERVER"] = "1"\n''',
+)
+
 latency_function = r'''
 
 def measure_same_association_read_latency(
