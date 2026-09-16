@@ -79,10 +79,10 @@ jobs:
             $p = Start-Process -FilePath $exe -ArgumentList '--check-app-lifecycle' -PassThru
             if (-not $p.WaitForExit(12000)) {
               Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-              throw "Cycle $cycle: Studio PID did not exit after primary-window close"
+              throw "Cycle ${cycle}: Studio PID did not exit after primary-window close"
             }
-            if ($p.ExitCode -ne 0) { throw "Cycle $cycle: lifecycle exit code $($p.ExitCode)" }
-            if (Get-Process -Id $p.Id -ErrorAction SilentlyContinue) { throw "Cycle $cycle: PID remained alive" }
+            if ($p.ExitCode -ne 0) { throw "Cycle ${cycle}: lifecycle exit code $($p.ExitCode)" }
+            if (Get-Process -Id $p.Id -ErrorAction SilentlyContinue) { throw "Cycle ${cycle}: PID remained alive" }
           }
 
       - name: Stage Studio with verified firmware
