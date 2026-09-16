@@ -189,15 +189,26 @@ void seed_hardware_clock(const esp_eth_handle_t handle) noexcept {
     PtpTimestamp& timestamp) noexcept {
     if (frame.empty()) return false;
     eth_mac_time_t tx_timestamp{};
-    // esp_eth_transmit_ctrl_vargs argc counts buffer/length pairs. One PTP
-    // Ethernet frame is exactly one pair.
+    // ESP-IDF 5.5 forwards argc as the number of variadic arguments. The
+    // ESP32-P4 EMAC implementation computes buf_num = argc / 2, therefore one
+    // Ethernet frame requires two arguments: buffer pointer + buffer length.
     const auto result = esp_eth_transmit_ctrl_vargs(
         handle,
         &tx_timestamp,
-        1U,
+        2U,
         frame.data(),
         frame.size());
-    if (result != ESP_OK || !valid_hw_timestamp(tx_timestamp)) return false;
+    if (result != ESP_OK) {
+        ESP_LOGE(kTag, "PTP receiver hardware-timestamp TX failed: %s", esp_err_to_name(result));
+        return false;
+    }
+    if (!valid_hw_timestamp(tx_timestamp)) {
+        ESP_LOGE(kTag,
+                 "PTP receiver TX completed without a valid hardware timestamp: sec=%lu ns=%lu",
+                 static_cast<unsigned long>(tx_timestamp.seconds),
+                 static_cast<unsigned long>(tx_timestamp.nanoseconds));
+        return false;
+    }
     timestamp = to_ptp_timestamp(tx_timestamp);
     return true;
 }
