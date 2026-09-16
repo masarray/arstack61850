@@ -25,6 +25,8 @@ class SmartSessionController : public QObject {
     Q_PROPERTY(bool liveControlReady READ liveControlReady NOTIFY stateChanged)
     Q_PROPERTY(bool engineeringEditable READ engineeringEditable NOTIFY stateChanged)
     Q_PROPERTY(bool firmwareUpdateRequired READ firmwareUpdateRequired NOTIFY stateChanged)
+    Q_PROPERTY(bool firmwareUpdateAvailable READ firmwareUpdateAvailable NOTIFY stateChanged)
+    Q_PROPERTY(bool firmwareUpdateCanCancel READ firmwareUpdateCanCancel NOTIFY stateChanged)
     Q_PROPERTY(bool firmwareReinstallAvailable READ firmwareReinstallAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool firmwareInstallRequired READ firmwareInstallVisible NOTIFY stateChanged)
     Q_PROPERTY(bool firmwareRetryAvailable READ firmwareRetryAvailable NOTIFY stateChanged)
@@ -65,6 +67,8 @@ public:
     [[nodiscard]] bool liveControlReady() const noexcept;
     [[nodiscard]] bool engineeringEditable() const noexcept;
     [[nodiscard]] bool firmwareUpdateRequired() const noexcept;
+    [[nodiscard]] bool firmwareUpdateAvailable() const noexcept;
+    [[nodiscard]] bool firmwareUpdateCanCancel() const noexcept;
     [[nodiscard]] bool firmwareReinstallAvailable() const noexcept;
     [[nodiscard]] bool firmwareInstallRequired() const noexcept;
     [[nodiscard]] bool firmwareInstallVisible() const noexcept {
@@ -167,6 +171,7 @@ public:
     Q_INVOKABLE bool beginFirmwareReinstall();
     Q_INVOKABLE bool beginFirmwareInstall();
     Q_INVOKABLE bool retryFirmwareUpdate();
+    Q_INVOKABLE bool cancelFirmwareUpdate();
     Q_INVOKABLE bool retryFirmwareSetup();
     Q_INVOKABLE bool retryIdentification();
     Q_INVOKABLE bool retryProfileSync();
@@ -332,6 +337,7 @@ private:
     quint64 advanceSessionGeneration();
     void setPortOwner(PortOwner owner);
     bool firmwareIsCurrent() const;
+    bool firmwareIsCompatible() const;
     bool deviceControlAvailable() const noexcept;
     void resetProfileSync(bool requireSync);
     bool beginProfileSync(const QVariantMap& profile);
@@ -364,6 +370,7 @@ private:
     bool wasReady_{false};
     bool needsProfileSync_{true};
     bool updateRequested_{false};
+    bool updateWasOptional_{false};
     bool blankBoardDetected_{false};
     bool manualRecoveryArmed_{false};
     bool setupError_{false};

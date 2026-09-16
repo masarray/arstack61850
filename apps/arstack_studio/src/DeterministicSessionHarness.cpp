@@ -28,8 +28,9 @@ public:
         const CaseResult cases[] = {
             {"current identity -> READY without recovery", currentIdentityNeverRecovers()},
             {"legacy identity -> firmware update", legacyIdentityOffersUpdate()},
-            {"same version missing build ID -> firmware update", sameVersionMissingBuildOffersUpdate()},
-            {"same version stale build -> firmware update", sameVersionStaleBuildOffersUpdate()},
+            {"same version missing build ID -> READY with update suggestion", sameVersionMissingBuildOffersUpdate()},
+            {"same version stale build -> READY with update suggestion", sameVersionStaleBuildOffersUpdate()},
+            {"optional bootloader wait -> cancel restores supervisor", optionalBootloaderWaitCanCancel()},
             {"trusted ESP32-P4 identity timeout -> firmware required", automaticIdentityTimeoutOffersFirmwareRecovery()},
             {"single visible COM without metadata -> firmware required", singleVisibleTimeoutWithoutRecommendationOffersFirmwareRecovery()},
             {"ambiguous identity timeout -> UNIDENTIFIED", ambiguousIdentityTimeoutStaysUnidentified()},
@@ -135,6 +136,7 @@ private:
         session.blankBoardDetected_ = false;
         session.blankBoardPort_.clear();
         session.updateRequested_ = false;
+        session.updateWasOptional_ = false;
         session.updateStage_ = SmartSessionController::UpdateStage::idle;
         session.portOwner_ = SmartSessionController::PortOwner::deviceSession;
         session.profileSyncStage_ = SmartSessionController::ProfileSyncStage::idle;
@@ -281,10 +283,11 @@ private:
         auto stale = identity();
         stale.buildId.clear();
         seedVerified(fixture, stale, QStringLiteral("COM7"), false);
-        return fixture.session.state() == QStringLiteral("FIRMWARE UPDATE") &&
-            fixture.session.firmwareUpdateRequired() &&
+        return fixture.session.state() == QStringLiteral("READY") &&
+            !fixture.session.firmwareUpdateRequired() &&
+            fixture.session.firmwareUpdateAvailable() &&
             !fixture.session.firmwareReinstallAvailable() &&
-            !fixture.session.startReady();
+            fixture.session.startReady();
     }
 
     static bool sameVersionStaleBuildOffersUpdate() {
@@ -293,10 +296,35 @@ private:
         auto stale = identity();
         stale.buildId = QStringLiteral("fedcba9876543210");
         seedVerified(fixture, stale, QStringLiteral("COM7"), false);
-        return fixture.session.state() == QStringLiteral("FIRMWARE UPDATE") &&
-            fixture.session.firmwareUpdateRequired() &&
+        return fixture.session.state() == QStringLiteral("READY") &&
+            !fixture.session.firmwareUpdateRequired() &&
+            fixture.session.firmwareUpdateAvailable() &&
             !fixture.session.firmwareReinstallAvailable() &&
-            !fixture.session.startReady();
+            fixture.session.startReady();
+    }
+
+    static bool optionalBootloaderWaitCanCancel() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        auto stale = identity();
+        stale.buildId = QStringLiteral("fedcba9876543210");
+        seedVerified(fixture, stale, QStringLiteral("COM7"), false);
+        auto& session = fixture.session;
+        auto& device = fixture.device;
+
+        session.started_ = false; // deterministic: exercise state recovery without real COM discovery.
+        session.updateRequested_ = true;
+        session.updateWasOptional_ = true;
+        session.updateStage_ = SmartSessionController::UpdateStage::waitingForBootloader;
+        session.portOwner_ = SmartSessionController::PortOwner::firmwareTool;
+        device.connected_ = false;
+        device.deviceVerified_ = false;
+
+        const bool cancelled = session.cancelFirmwareUpdate();
+        return cancelled && !session.updateRequested_ && !session.updateWasOptional_ &&
+            session.updateStage_ == SmartSessionController::UpdateStage::idle &&
+            session.portOwner_ == SmartSessionController::PortOwner::none &&
+            !session.setupError_;
     }
 
     static bool automaticIdentityTimeoutOffersFirmwareRecovery() {

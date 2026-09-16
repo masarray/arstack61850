@@ -149,11 +149,13 @@ Rectangle {
                 }
 
                 RibbonGroup {
-                    visible: bar.session.firmwareUpdateRequired || bar.session.firmwareInstallRequired || bar.session.profileSyncRetryAvailable
+                    visible: bar.session.firmwareUpdateRequired || bar.session.firmwareUpdateAvailable || bar.session.firmwareInstallRequired || bar.session.profileSyncRetryAvailable
                     theme: bar.theme; uiFont: bar.uiFont; title: "Attention"
                     RibbonAction {
-                        visible: bar.session.firmwareUpdateRequired
-                        theme: bar.theme; uiFont: bar.uiFont; text: "Update firmware"; tone: "accent"
+                        visible: bar.session.firmwareUpdateRequired || bar.session.firmwareUpdateAvailable
+                        theme: bar.theme; uiFont: bar.uiFont
+                        text: bar.session.firmwareUpdateRequired ? "Update firmware" : "Update available"
+                        tone: bar.session.firmwareUpdateRequired ? "accent" : "neutral"
                         onClicked: bar.workflow.openUpdatePrompt()
                     }
                     RibbonAction {

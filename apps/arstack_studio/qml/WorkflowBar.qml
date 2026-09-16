@@ -162,7 +162,7 @@ SurfacePanel {
         if (smartSession.state === "UPDATING FIRMWARE") return "Installing firmware"
         if (smartSession.state === "UPDATE NEEDS BOOT") return "Download mode required"
         if (smartSession.state === "PREPARING 4I+4V") return "Preparing"
-        if (smartSession.state === "READY") return "Ready to inject"
+        if (smartSession.state === "READY") return smartSession.firmwareUpdateAvailable ? "Ready · update available" : "Ready to inject"
         if (smartSession.state === "RUNNING") return "Injection running"
         if (smartSession.state === "PROFILE BLOCKED") return "Profile unavailable"
         if (smartSession.state === "PROFILE SYNC ERROR") return "Profile sync failed"
@@ -363,14 +363,14 @@ SurfacePanel {
         modal: true
         anchors.centerIn: Overlay.overlay
         width: 410
-        title: "Firmware update required"
+        title: smartSession.firmwareUpdateRequired ? "Firmware update required" : "Firmware update available"
         closePolicy: Popup.NoAutoClose
         background: Rectangle { color: ribbon.theme.surface; radius: 10; border.width: 1; border.color: ribbon.theme.line }
         contentItem: ColumnLayout {
             spacing: 12
             Label {
                 Layout.fillWidth: true
-                text: "Update firmware to start injection"
+                text: smartSession.firmwareUpdateRequired ? "Update firmware to start injection" : "A newer firmware build is available"
                 color: ribbon.theme.text
                 font.family: ribbon.uiFont
                 font.pixelSize: 14
@@ -379,7 +379,9 @@ SurfacePanel {
             }
             Label {
                 Layout.fillWidth: true
-                text: "This ESP32-P4 is connected, but its ARStack firmware is older than this Studio build. Update now? Studio will flash, restart, reconnect, and verify it automatically."
+                text: smartSession.firmwareUpdateRequired
+                    ? "This ESP32-P4 does not satisfy the current runtime contract. Update is required before injection."
+                    : "The connected firmware is compatible and can be used now. A newer bundled build is available; update only when convenient. Studio will flash, restart, reconnect, and verify it automatically."
                 color: ribbon.theme.textSoft
                 font.family: ribbon.uiFont
                 font.pixelSize: 11
@@ -459,6 +461,16 @@ SurfacePanel {
             RowLayout {
                 visible: smartSession.updateNeedsBootloaderHelp
                 Layout.fillWidth: true
+                CalmButton {
+                    visible: smartSession.firmwareUpdateCanCancel
+                    theme: ribbon.theme; uiFont: ribbon.uiFont; text: "Use current firmware"; implicitWidth: 150
+                    onClicked: {
+                        if (smartSession.cancelFirmwareUpdate()) {
+                            progressDialog.close()
+                            controller.showMessage("Firmware update skipped. Reconnecting to the compatible firmware already on the board.", false)
+                        }
+                    }
+                }
                 Item { Layout.fillWidth: true }
                 CalmButton { theme: ribbon.theme; uiFont: ribbon.uiFont; text: "Retry"; tone: "accent"; implicitWidth: 110; onClicked: smartSession.retryFirmwareUpdate() }
             }

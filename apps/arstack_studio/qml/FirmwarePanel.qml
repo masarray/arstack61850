@@ -265,7 +265,9 @@ SurfacePanel {
                         Layout.fillWidth: true
                         text: panel.firmware.busy
                             ? "The session supervisor currently owns the firmware tool. Keep USB connected until Studio reports a terminal result."
-                            : "When Studio reports Firmware required or Firmware update, use that guided action from the main workflow. It will stop output, obtain an acknowledged serial release, verify the ESP32-P4, then write."
+                            : (panel.session && panel.session.firmwareUpdateAvailable
+                                ? "The board firmware is compatible and remains usable. A newer build is available as an optional guided update."
+                                : "When Studio reports Firmware required, use the guided action. It will stop output, obtain an acknowledged serial release, verify the ESP32-P4, then write.")
                         color: panel.theme.textSoft
                         font.family: panel.uiFont
                         font.pixelSize: 10
@@ -278,15 +280,15 @@ SurfacePanel {
                     theme: panel.theme
                     uiFont: panel.uiFont
                     implicitWidth: 172
-                    text: panel.session && panel.session.firmwareUpdateRequired
-                        ? "Update firmware"
+                    text: panel.session && (panel.session.firmwareUpdateRequired || panel.session.firmwareUpdateAvailable)
+                        ? (panel.session.firmwareUpdateRequired ? "Update firmware" : "Update available")
                         : "Reinstall current"
                     visible: panel.session &&
-                             (panel.session.firmwareUpdateRequired || panel.session.firmwareReinstallAvailable)
+                             (panel.session.firmwareUpdateRequired || panel.session.firmwareUpdateAvailable || panel.session.firmwareReinstallAvailable)
                     enabled: visible && !panel.firmware.busy
                     tone: panel.session && panel.session.firmwareUpdateRequired ? "accent" : "normal"
                     onClicked: {
-                        if (panel.session.firmwareUpdateRequired)
+                        if (panel.session.firmwareUpdateRequired || panel.session.firmwareUpdateAvailable)
                             panel.session.beginFirmwareUpdate()
                         else
                             panel.session.beginFirmwareReinstall()

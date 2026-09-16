@@ -148,6 +148,15 @@ bool SmartSessionController::engineeringEditable() const noexcept {
         portOwner_ != PortOwner::firmwareTool && (firmware_ == nullptr || !firmware_->busy());
 }
 bool SmartSessionController::firmwareUpdateRequired() const noexcept { return firmwareUpdateRequired_; }
+bool SmartSessionController::firmwareUpdateAvailable() const noexcept {
+    return device_ != nullptr && firmware_ != nullptr && device_->deviceVerified() &&
+        firmware_->bundleReady() && !firmware_->busy() && !updateRequested_ &&
+        firmwareIsCompatible() && !firmwareIsCurrent();
+}
+bool SmartSessionController::firmwareUpdateCanCancel() const noexcept {
+    return updateRequested_ && updateWasOptional_ && updateStage_ == UpdateStage::waitingForBootloader &&
+        firmware_ != nullptr && !firmware_->busy();
+}
 bool SmartSessionController::firmwareReinstallAvailable() const noexcept {
     return device_ != nullptr && firmware_ != nullptr && device_->deviceVerified() &&
         firmware_->bundleReady() && !firmware_->busy() && !updateRequested_ && firmwareIsCurrent();
@@ -430,15 +439,18 @@ bool SmartSessionController::beginFirmwareUpdate() {
         !firmware_->bundleReady() || firmware_->busy()) {
         return false;
     }
+    updateWasOptional_ = firmwareUpdateAvailable() && !firmwareUpdateRequired_;
     return beginFirmwareOperation(device_->portName());
 }
 
 bool SmartSessionController::beginFirmwareReinstall() {
     if (!firmwareReinstallAvailable() || device_ == nullptr) return false;
+    updateWasOptional_ = true;
     return beginFirmwareOperation(device_->portName());
 }
 
 bool SmartSessionController::beginFirmwareInstall() {
+    updateWasOptional_ = false;
     refreshRecoveryOfferFromIdentity();
     if (device_ == nullptr || firmware_ == nullptr || !blankBoardDetected_ ||
         !firmware_->bundleReady() || firmware_->busy() || blankBoardPort_.isEmpty()) {
@@ -490,6 +502,31 @@ bool SmartSessionController::retryFirmwareUpdate() {
     pendingReleaseGeneration_ = 0;
     continueFirmwareUpdate();
     return updateRequested_;
+}
+
+bool SmartSessionController::cancelFirmwareUpdate() {
+    if (!firmwareUpdateCanCancel() || device_ == nullptr) return false;
+    reconnectTimer_.stop();
+    updateRequested_ = false;
+    updateWasOptional_ = false;
+    updateStage_ = UpdateStage::idle;
+    updateReconnectAttempts_ = 0;
+    pendingReleaseGeneration_ = 0;
+    setupError_ = false;
+    setupErrorStatus_.clear();
+    blankBoardDetected_ = false;
+    blankBoardPort_.clear();
+    if (portOwner_ == PortOwner::firmwareTool) setPortOwner(PortOwner::none);
+    if (started_ && !device_->connected() && !device_->discovering()) {
+        QTimer::singleShot(0, this, [this] {
+            if (!started_ || updateRequested_ || device_ == nullptr || device_->connected() || device_->discovering()) return;
+            static_cast<void>(startDeviceDiscovery());
+            reconcile();
+        });
+    } else {
+        reconcile();
+    }
+    return true;
 }
 
 bool SmartSessionController::retryFirmwareSetup() {
@@ -814,17 +851,26 @@ void SmartSessionController::clearBlankBoardContext() {
 
 void SmartSessionController::latchFirmwareFailure(QString message) {
     reconnectTimer_.stop();
+    const bool optionalOperation = updateWasOptional_;
     updateRequested_ = false;
+    updateWasOptional_ = false;
     updateStage_ = UpdateStage::idle;
     updateReconnectAttempts_ = 0;
     pendingReleaseGeneration_ = 0;
     blankBoardDetected_ = false;
     if (portOwner_ == PortOwner::firmwareTool) setPortOwner(PortOwner::none);
-    setupError_ = true;
     message = message.trimmed();
-    setupErrorStatus_ = message.isEmpty()
+    setupError_ = !optionalOperation;
+    setupErrorStatus_ = optionalOperation ? QString{} : (message.isEmpty()
         ? QStringLiteral("Firmware setup did not complete. Retry explicitly when the board is ready.")
-        : std::move(message);
+        : std::move(message));
+    if (optionalOperation && started_ && device_ != nullptr && !device_->connected() && !device_->discovering()) {
+        QTimer::singleShot(0, this, [this] {
+            if (!started_ || updateRequested_ || device_ == nullptr || device_->connected() || device_->discovering()) return;
+            static_cast<void>(startDeviceDiscovery());
+            reconcile();
+        });
+    }
 }
 
 void SmartSessionController::resetProfileSync(const bool requireSync) {
@@ -963,8 +1009,14 @@ bool SmartSessionController::firmwareIsCurrent() const {
             device_->deviceIdentity(), expectedFirmwareVersion(), expectedFirmwareBuildId());
 }
 
+bool SmartSessionController::firmwareIsCompatible() const {
+    return device_ != nullptr && device_->deviceVerified() &&
+        DeviceController::identitySupportsCurrentContract(
+            device_->deviceIdentity(), expectedFirmwareVersion(), QString{});
+}
+
 bool SmartSessionController::deviceControlAvailable() const noexcept {
-    return device_ != nullptr && device_->deviceVerified() && firmwareIsCurrent() &&
+    return device_ != nullptr && device_->deviceVerified() && firmwareIsCompatible() &&
         portOwner_ == PortOwner::deviceSession && !updateRequested_ &&
         (firmware_ == nullptr || !firmware_->busy());
 }
@@ -1061,47 +1113,50 @@ void SmartSessionController::reconcile() {
     }
 
     refreshFirmwareIdentity();
-    if (!firmwareIsCurrent()) {
-        if (updateRequested_ && updateStage_ == UpdateStage::reconnecting) {
+
+    // A completed write must verify the exact bundled build. This remains
+    // fail-closed even though a pre-existing compatible build may be used.
+    if (updateRequested_ && updateStage_ == UpdateStage::reconnecting) {
+        if (!firmwareIsCurrent()) {
             const QString observed = deviceFirmwareVersion_.isEmpty()
                 ? QStringLiteral("legacy/unknown firmware")
                 : QStringLiteral("firmware v%1").arg(deviceFirmwareVersion_);
             latchFirmwareFailure(QStringLiteral(
-                "Firmware was written, but reconnect verification reported %1 instead of the current semantic identity contract for v%2. Retry firmware setup explicitly.")
+                "Firmware was written, but reconnect verification reported %1 instead of the exact bundled build for v%2.")
                 .arg(observed, expectedFirmwareVersion()));
             emit firmwareUpdateFinished(false);
-            setPresentation(QStringLiteral("SETUP ERROR"), setupErrorStatus_, false, false);
+            reconcile();
             return;
         }
-        const QString versionText = deviceFirmwareVersion_.isEmpty()
-            ? QStringLiteral("legacy firmware")
-            : QStringLiteral("firmware v%1").arg(deviceFirmwareVersion_);
-        const QString observedBuild = deviceFirmwareBuildId_.isEmpty()
-            ? QStringLiteral("legacy/no build ID")
-            : deviceFirmwareBuildId_;
-        const QString packageBuild = expectedFirmwareBuildId().isEmpty()
-            ? QStringLiteral("unknown")
-            : expectedFirmwareBuildId();
-        setPresentation(
-            QStringLiteral("FIRMWARE UPDATE"),
-            QStringLiteral("%1 build %2 detected. Studio package contains v%3 build %4; update is required before injection.")
-                .arg(versionText, observedBuild, expectedFirmwareVersion(), packageBuild),
-            false,
-            true);
-        return;
-    }
-
-    if (updateRequested_ && updateStage_ == UpdateStage::reconnecting) {
         updateRequested_ = false;
+        updateWasOptional_ = false;
         updateStage_ = UpdateStage::idle;
         clearBlankBoardContext();
         emit firmwareUpdateFinished(true);
     }
 
+    // Runtime compatibility and package freshness are intentionally separate.
+    // Same-version firmware with the required protocol/capabilities remains
+    // usable; build provenance mismatch is an advisory update, not a lockout.
+    if (!firmwareIsCompatible()) {
+        const QString versionText = deviceFirmwareVersion_.isEmpty()
+            ? QStringLiteral("legacy firmware")
+            : QStringLiteral("firmware v%1").arg(deviceFirmwareVersion_);
+        setPresentation(
+            QStringLiteral("FIRMWARE UPDATE"),
+            QStringLiteral("%1 does not satisfy the current protocol/capability contract. Update is required before injection.")
+                .arg(versionText),
+            false,
+            true);
+        return;
+    }
+
     if (device_->running()) {
         setPresentation(
             QStringLiteral("RUNNING"),
-            QStringLiteral("4I + 4V · 4000 samples/s · live value apply"),
+            firmwareUpdateAvailable()
+                ? QStringLiteral("4I + 4V · 4000 samples/s · live value apply · firmware update available")
+                : QStringLiteral("4I + 4V · 4000 samples/s · live value apply"),
             false,
             false);
         return;
@@ -1167,7 +1222,9 @@ void SmartSessionController::reconcile() {
 
     setPresentation(
         QStringLiteral("READY"),
-        QStringLiteral("4I + 4V · 4000 samples/s · ready to start"),
+        firmwareUpdateAvailable()
+            ? QStringLiteral("4I + 4V · 4000 samples/s · ready · firmware update available")
+            : QStringLiteral("4I + 4V · 4000 samples/s · ready to start"),
         true,
         false);
 }
