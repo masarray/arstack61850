@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <SCL xmlns="http://www.iec.ch/61850/2003/SCL" version="2007" revision="B">
-  <!-- Acceptance fixture: indexed ReportControl expansion + URCB/BRCB GI/report interoperability. -->
+  <!-- Acceptance fixture: indexed ReportControl expansion + URCB/BRCB GI/report interoperability; non-indexed legacy coverage is separate. -->
   <Header id="AR_IEDSCOUT_INDEXED_REPORTS" version="1" revision="A" />
   <IED name="IEDSCOUT01" manufacturer="AR" type="ProtectionIED" configVersion="1">
     <AccessPoint name="P1">
