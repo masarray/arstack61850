@@ -195,6 +195,12 @@ if(ARIEC61850_BUILD_TOOLS)
     ariec61850_apply_warnings(ariec61850_mms_brcb_event_probe)
     ariec61850_apply_sanitizers(ariec61850_mms_brcb_event_probe)
 
+    add_executable(ariec61850_mms_sgcb_probe tools/mms_sgcb_probe.cpp)
+    target_link_libraries(ariec61850_mms_sgcb_probe PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_mms_sgcb_probe PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_mms_sgcb_probe)
+    ariec61850_apply_sanitizers(ariec61850_mms_sgcb_probe)
+
     add_executable(ariec61850_control_interop_probe tools/control_interop_probe.cpp)
     target_link_libraries(ariec61850_control_interop_probe PRIVATE ARIEC61850::core)
     target_compile_features(ariec61850_control_interop_probe PRIVATE cxx_std_20)

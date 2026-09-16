@@ -2,6 +2,7 @@
 
 #include "IedFleetController.hpp"
 #include "IedReportControlManifest.hpp"
+#include "IedSettingControlManifest.hpp"
 #include "IedRuntimeGuardrails.hpp"
 
 #include "ariec61850/scl/parser.hpp"
@@ -1896,6 +1897,12 @@ bool IedFleetController::writeModelManifest(const int iedIndex) {
             report,
             activeIedName,
             emittedReportControls);
+    }
+
+    QSet<QString> emittedSettingControls;
+    for (const auto& setting : loaded.document.setting_controls) {
+        manifest += arstack::iedsim::settingControlManifestLine(
+            setting, activeIedName, emittedSettingControls);
     }
 
     if (uniqueRoots.isEmpty()) {

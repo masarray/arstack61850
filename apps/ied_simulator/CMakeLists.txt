@@ -102,6 +102,15 @@ target_include_directories(arstack_ied_simulator PRIVATE
 
 target_compile_features(arstack_ied_simulator PRIVATE cxx_std_20)
 
+add_executable(ied_setting_control_manifest_qa
+    src/ied_setting_control_manifest_qa.cpp)
+target_link_libraries(ied_setting_control_manifest_qa PRIVATE
+    Qt6::Core)
+target_include_directories(ied_setting_control_manifest_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src
+    ${CMAKE_CURRENT_LIST_DIR}/../../include)
+target_compile_features(ied_setting_control_manifest_qa PRIVATE cxx_std_20)
+
 add_executable(ied_simulator_guardrails_qa
     src/ied_simulator_guardrails_qa.cpp
     src/IedActivityModel.cpp
@@ -366,6 +375,7 @@ add_dependencies(
     ariec61850_ied_simulator_server
     ariec61850_mms_urcb_gi_probe
     ariec61850_mms_brcb_event_probe
+    ariec61850_mms_sgcb_probe
     ariec61850_control_interop_probe)
 
 if(WIN32)

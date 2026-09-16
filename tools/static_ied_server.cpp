@@ -5,6 +5,8 @@
 #include "ariec61850/mms/reporting.hpp"
 #include "ariec61850/mms/simulator_manifest_codec.hpp"
 #include "ariec61850/mms/static_direct_control.hpp"
+#include "ariec61850/mms/static_setting_group.hpp"
+#include "ariec61850/mms/utc_time.hpp"
 #include "ariec61850/mms/static_brcb_connection.hpp"
 #include "ariec61850/mms/static_brcb_control.hpp"
 #include "ariec61850/mms/static_brcb_objects.hpp"
@@ -397,6 +399,13 @@ struct SocketStreamContext final {
     return monotonic_ms();
 }
 
+[[nodiscard]] bool setting_group_utc_now(
+    const void*,
+    const std::span<std::uint8_t, 8U> destination) noexcept {
+    return mms::Iec61850UtcTime{std::chrono::system_clock::now(), 0U}
+        .try_write_bytes(destination);
+}
+
 [[nodiscard]] std::array<std::uint8_t, 6U> report_binary_time() noexcept {
     constexpr std::int64_t milliseconds_per_day = 86'400'000LL;
     constexpr std::int64_t unix_days_to_1984 = 5'113LL;
@@ -773,6 +782,14 @@ struct ManifestReportControlStorage final {
     std::uint32_t integrity_period_ms{};
 };
 
+struct ManifestSettingGroupStorage final {
+    std::string domain;
+    std::string item;
+    std::uint32_t number_of_groups{};
+    std::uint32_t active_group{};
+    std::shared_ptr<mms::MmsStaticSettingGroupSharedState> shared_state;
+};
+
 struct ManifestDirectControlStorage final {
     std::string domain;
     std::string logical_node;
@@ -809,6 +826,7 @@ struct ManifestModel final {
     std::unordered_map<std::string, std::size_t> value_indices;
     std::vector<ManifestDirectControlStorage> direct_control_storage;
     std::size_t omitted_direct_controls{};
+    std::vector<ManifestSettingGroupStorage> setting_group_storage;
     std::vector<ManifestDataSetStorage> data_set_storage;
     std::vector<mms::MmsStaticDataSetEntry> data_sets;
     std::vector<ManifestReportControlStorage> report_control_storage;
@@ -910,6 +928,15 @@ struct LiveInputState final {
     std::uint64_t last_revision{};
     bool overflow_reported{};
     bool eof{};
+};
+
+struct SettingGroupAssociationRuntime final {
+    mms::MmsStaticSettingGroupDefinition definition;
+    std::vector<mms::MmsStaticObjectEntry> object_storage;
+    std::array<mms::MmsStaticSettingGroupObjectContext,
+        mms::MmsStaticSettingGroupObjectBank::attributes_per_control_block> context_storage{};
+    std::vector<char> name_storage;
+    std::unique_ptr<mms::MmsStaticSettingGroupObjectBank> bank;
 };
 
 struct BrcbAssociationRuntime final {
@@ -1111,6 +1138,12 @@ void rebuild_manifest_root_values(ManifestModel& model) {
         std::string member_domain;
         std::string member_item;
     };
+    struct ParsedSettingGroup final {
+        std::string domain;
+        std::string item;
+        std::uint32_t number_of_groups{};
+        std::uint32_t active_group{};
+    };
     struct ParsedReportControl final {
         std::string domain;
         std::string item;
@@ -1128,6 +1161,7 @@ void rebuild_manifest_root_values(ManifestModel& model) {
     std::vector<ParsedObject> parsed_objects;
     std::vector<ParsedControl> parsed_controls;
     std::vector<ParsedDataSetMember> parsed_members;
+    std::vector<ParsedSettingGroup> parsed_setting_groups;
     std::vector<ParsedReportControl> parsed_reports;
     std::set<std::pair<std::string, std::string>> unique_roots;
     std::set<std::pair<std::string, std::string>> unique_objects;
@@ -1188,6 +1222,21 @@ void rebuild_manifest_root_values(ManifestModel& model) {
             report.optional_fields[1] = static_cast<std::uint8_t>(
                 parse_u32("RCB OptFlds[1]", fields[12], 0xFFU));
             parsed_reports.push_back(std::move(report));
+        } else if (fields.size() >= 5U && fields[0] == "SGCB") {
+            if (fields[1].empty() || fields[2].empty()) {
+                throw std::runtime_error("Model manifest contains a malformed SGCB entry.");
+            }
+            ParsedSettingGroup setting;
+            setting.domain = fields[1];
+            setting.item = fields[2];
+            setting.number_of_groups = parse_u32("SGCB NumOfSG", fields[3], 0xFFU);
+            setting.active_group = parse_u32("SGCB ActSG", fields[4], 0xFFU);
+            if (setting.number_of_groups == 0U || setting.active_group == 0U ||
+                setting.active_group > setting.number_of_groups) {
+                throw std::runtime_error(
+                    "Model manifest SGCB requires 1 <= ActSG <= NumOfSG <= 255.");
+            }
+            parsed_setting_groups.push_back(std::move(setting));
         }
     }
     if (roots.empty()) {
@@ -1314,6 +1363,22 @@ void rebuild_manifest_root_values(ManifestModel& model) {
         model.direct_control_storage.push_back(std::move(control));
     }
 
+    std::set<std::pair<std::string, std::string>> unique_setting_groups;
+    model.setting_group_storage.reserve(parsed_setting_groups.size());
+    for (const auto& parsed : parsed_setting_groups) {
+        if (!unique_setting_groups.emplace(parsed.domain, parsed.item).second) {
+            throw std::runtime_error("Model manifest contains a duplicate SGCB entry.");
+        }
+        ManifestSettingGroupStorage setting;
+        setting.domain = parsed.domain;
+        setting.item = parsed.item;
+        setting.number_of_groups = parsed.number_of_groups;
+        setting.active_group = parsed.active_group;
+        setting.shared_state = std::make_shared<mms::MmsStaticSettingGroupSharedState>(
+            parsed.number_of_groups, parsed.active_group);
+        model.setting_group_storage.push_back(std::move(setting));
+    }
+
     const auto ensure_data_set_member_object = [&](const ParsedDataSetMember& member) {
         const auto key = object_key(member.member_domain, member.member_item);
         if (model.value_indices.contains(key)) return true;
@@ -1387,11 +1452,24 @@ void rebuild_manifest_root_values(ManifestModel& model) {
         }
         control_service_objects += control.service_object_count;
     }
-    if (model.objects.size() > mms::MmsStaticObjectTable::maximum_objects - control_service_objects) {
-        throw std::runtime_error("Configured controls exceed MMS object capacity.");
+    const auto setting_group_count = model.setting_group_storage.size();
+    if (setting_group_count >
+        mms::MmsStaticObjectTable::maximum_objects /
+            mms::MmsStaticSettingGroupObjectBank::attributes_per_control_block) {
+        throw std::runtime_error("Configured SGCBs exceed MMS object capacity.");
+    }
+    const auto setting_group_service_objects = setting_group_count *
+        mms::MmsStaticSettingGroupObjectBank::attributes_per_control_block;
+    if (control_service_objects >
+        mms::MmsStaticObjectTable::maximum_objects - setting_group_service_objects) {
+        throw std::runtime_error("Configured controls and SGCBs exceed MMS object capacity.");
+    }
+    const auto service_objects = control_service_objects + setting_group_service_objects;
+    if (model.objects.size() > mms::MmsStaticObjectTable::maximum_objects - service_objects) {
+        throw std::runtime_error("Configured controls and SGCBs exceed MMS object capacity.");
     }
     auto remaining_object_slots = mms::MmsStaticObjectTable::maximum_objects -
-        model.objects.size() - control_service_objects;
+        model.objects.size() - service_objects;
     const auto available_urcb_slots = std::min<std::size_t>(
         mms::MmsStaticUrcbRuntime::maximum_control_blocks,
         remaining_object_slots /
@@ -1910,6 +1988,7 @@ void serve_connection(
     std::vector<mms::MmsStaticDirectBooleanControlBinding> direct_control_bindings;
     std::vector<mms::MmsStaticObjectEntry> direct_control_objects;
     std::unique_ptr<mms::MmsStaticObjectTable> direct_control_table;
+    std::vector<std::unique_ptr<SettingGroupAssociationRuntime>> setting_group_runtimes;
     std::unique_ptr<filehost::StaticFileServiceSession> file_session;
 
     mms::MmsStaticDispatchPolicy dispatch_policy;
@@ -2025,6 +2104,52 @@ void serve_connection(
         dispatch_objects = direct_control_table.get();
         dispatch_policy.advertise_flattened_child_aliases = true;
     }
+    if (manifest_model != nullptr && !manifest_model->setting_group_storage.empty()) {
+        setting_group_runtimes.reserve(manifest_model->setting_group_storage.size());
+        for (auto& setting : manifest_model->setting_group_storage) {
+            if (setting.shared_state == nullptr || !setting.shared_state->valid()) {
+                throw std::runtime_error("Configured SGCB has no valid canonical shared state.");
+            }
+            auto runtime = std::make_unique<SettingGroupAssociationRuntime>();
+            runtime->definition = mms::MmsStaticSettingGroupDefinition{
+                setting.domain, setting.item};
+            mms::MmsStaticSettingGroupObjectBank sizing_bank{
+                runtime->definition,
+                *setting.shared_state,
+                dispatch_objects->objects(),
+                std::span<mms::MmsStaticObjectEntry>{},
+                std::span<mms::MmsStaticSettingGroupObjectContext>{},
+                std::span<char>{},
+                setting_group_utc_now,
+                nullptr};
+            const auto required_objects = sizing_bank.required_object_capacity();
+            const auto required_contexts = sizing_bank.required_context_capacity();
+            const auto required_names = sizing_bank.required_name_bytes();
+            if (required_objects == std::numeric_limits<std::size_t>::max() ||
+                required_contexts == std::numeric_limits<std::size_t>::max() ||
+                required_names == std::numeric_limits<std::size_t>::max()) {
+                throw std::runtime_error("SGCB object-bank capacity calculation failed.");
+            }
+            runtime->object_storage.resize(required_objects);
+            runtime->name_storage.resize(required_names);
+            runtime->bank = std::make_unique<mms::MmsStaticSettingGroupObjectBank>(
+                runtime->definition,
+                *setting.shared_state,
+                dispatch_objects->objects(),
+                std::span<mms::MmsStaticObjectEntry>{runtime->object_storage},
+                std::span<mms::MmsStaticSettingGroupObjectContext>{runtime->context_storage},
+                std::span<char>{runtime->name_storage},
+                setting_group_utc_now,
+                nullptr);
+            if (!runtime->bank->initialize()) {
+                throw std::runtime_error("Could not expose SGCB MMS attribute objects.");
+            }
+            dispatch_objects = &runtime->bank->table();
+            setting_group_runtimes.push_back(std::move(runtime));
+        }
+        dispatch_policy.advertise_flattened_child_aliases = true;
+    }
+
     const auto* process_objects = dispatch_objects;
     if (manifest_model != nullptr && !manifest_model->urcb_definitions.empty()) {
         urcb_states.resize(manifest_model->urcb_definitions.size());
@@ -2633,6 +2758,8 @@ int main(int argc, char** argv) {
             ? manifest_model.declared_entries - object_span.size()
             : 0U;
         const auto exposed_objects = object_span.size() +
+            manifest_model.setting_group_storage.size() *
+                mms::MmsStaticSettingGroupObjectBank::attributes_per_control_block +
             manifest_model.urcb_definitions.size() *
                 mms::MmsStaticUrcbObjectBank::attributes_per_control_block +
             manifest_model.brcb_definitions.size() *
@@ -2643,6 +2770,7 @@ int main(int argc, char** argv) {
             << " objects=" << exposed_objects
             << " domains=" << domain_names.size()
             << " datasets=" << data_set_span.size()
+            << " sgcbs=" << manifest_model.setting_group_storage.size()
             << " urcbs=" << manifest_model.urcb_definitions.size()
             << " brcbs=" << manifest_model.brcb_definitions.size()
             << " declared_brcbs=" << manifest_model.buffered_report_controls
@@ -2759,6 +2887,21 @@ int main(int argc, char** argv) {
                                     "Per-association control has no canonical shared state.");
                             }
                             local_control.shared_state = shared->shared_state;
+                        }
+                        for (auto& local_setting : local_model.setting_group_storage) {
+                            const auto shared = std::find_if(
+                                manifest_model.setting_group_storage.begin(),
+                                manifest_model.setting_group_storage.end(),
+                                [&](const auto& candidate) {
+                                    return candidate.domain == local_setting.domain &&
+                                        candidate.item == local_setting.item;
+                                });
+                            if (shared == manifest_model.setting_group_storage.end() ||
+                                shared->shared_state == nullptr) {
+                                throw std::runtime_error(
+                                    "Per-association SGCB has no canonical shared state.");
+                            }
+                            local_setting.shared_state = shared->shared_state;
                         }
 
                         std::uint64_t live_sequence{};
