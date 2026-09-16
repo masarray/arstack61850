@@ -86,6 +86,9 @@ qt_add_qml_module(arstack_studio
         qml/DarkToolButton.qml
         qml/TelemetryDock.qml
         qml/WorkflowBar.qml
+        qml/ModernRibbon.qml
+        qml/RibbonGroup.qml
+        qml/RibbonAction.qml
         qml/CalmButton.qml
         qml/NumericField.qml
         qml/StateBadge.qml

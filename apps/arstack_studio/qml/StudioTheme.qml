@@ -6,6 +6,7 @@ QtObject {
     readonly property color chrome: "#0c1117"
     readonly property color surface: "#11171f"
     readonly property color surface2: "#0e141b"
+    readonly property color panelAlt: "#101820"
     readonly property color raised: "#151d27"
     readonly property color raisedHover: "#1a2430"
     readonly property color line: "#26313d"

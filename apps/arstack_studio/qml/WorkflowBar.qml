@@ -277,6 +277,23 @@ SurfacePanel {
         controller.showMessage("Dock layout reset.", false)
     }
 
+    function openUpdatePrompt() {
+        updatePromptDeferred = false
+        updateDialog.open()
+    }
+
+    function openInstallPrompt() {
+        installPromptDeferred = false
+        installDialog.open()
+    }
+
+    function retryProfileSync() {
+        if (smartSession.retryProfileSync())
+            controller.showMessage("Retrying 4I+4V profile synchronization.", false)
+        else
+            controller.showMessage(smartSession.statusText, true)
+    }
+
     FileDialog {
         id: engineeringFileDialog
         title: "Open IEC 61850 engineering configuration"
@@ -500,211 +517,18 @@ SurfacePanel {
         }
     }
 
-    implicitHeight: 72
-    color: theme.surface2
-    border.color: theme.line
+    implicitHeight: ribbon.compact ? 70 : 96
+    color: "transparent"
+    border.width: 0
 
-    component MenuButton: CalmButton {
-        theme: ribbon.theme
-        uiFont: ribbon.uiFont
-        implicitHeight: 24
-        implicitWidth: 66
-        font.pixelSize: 10
-    }
-
-    component RunButton: CalmButton {
-        theme: ribbon.theme
-        uiFont: ribbon.uiFont
-        implicitHeight: 36
-        implicitWidth: 112
-        iconSize: 15
-        font.pixelSize: 10
-    }
-
-    ColumnLayout {
+    ModernRibbon {
         anchors.fill: parent
-        anchors.leftMargin: 10
-        anchors.rightMargin: 10
-        anchors.topMargin: 5
-        anchors.bottomMargin: 5
-        spacing: 4
-
-        RowLayout {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 24
-            spacing: 3
-
-            MenuButton {
-                text: "File"
-                onClicked: fileMenu.open()
-                Menu {
-                    id: fileMenu
-                    y: parent.height
-                    MenuItem { text: "Open Engineering File…"; enabled: smartSession.engineeringEditable; onTriggered: ribbon.openEngineeringDialog() }
-                    MenuItem {
-                        text: "Reopen Last Configuration"
-                        enabled: smartSession.engineeringEditable && operatorSettings.lastEngineeringUrl.length > 0
-                        onTriggered: ribbon.loadEngineeringFile(operatorSettings.lastEngineeringUrl)
-                    }
-                    MenuSeparator {}
-                    MenuItem { text: "Use Built-in 4I+4V Profile"; enabled: smartSession.engineeringEditable; onTriggered: ribbon.useBuiltInProfile() }
-                    MenuSeparator {}
-                    MenuItem { text: "Exit"; onTriggered: Qt.quit() }
-                }
-            }
-
-            MenuButton {
-                text: "Injection"
-                implicitWidth: 82
-                onClicked: injectionMenu.open()
-                Menu {
-                    id: injectionMenu
-                    y: parent.height
-                    MenuItem { text: "Start Injection    F5"; enabled: !ribbon.injectionRunning; onTriggered: ribbon.requestStart() }
-                    MenuItem { text: "Stop Injection     F6"; enabled: ribbon.injectionRunning; onTriggered: ribbon.requestStop() }
-                    MenuSeparator {}
-                    MenuItem { text: "Balanced 3-Phase"; onTriggered: controller.balanced() }
-                    MenuItem { text: "Zero All"; onTriggered: controller.zeroAll() }
-                }
-            }
-
-            MenuButton {
-                text: "View"
-                onClicked: viewMenu.open()
-                Menu {
-                    id: viewMenu
-                    y: parent.height
-                    Menu {
-                        title: "Docks"
-                        MenuItem {
-                            text: (controller.phasorDockVisible || controller.phasorDetached ? "✓  " : "    ") + "Phasor"
-                            onTriggered: {
-                                if (controller.phasorDetached) controller.phasorDetached = false
-                                controller.phasorDockVisible = !controller.phasorDockVisible
-                            }
-                        }
-                        MenuItem {
-                            text: (controller.waveformDockVisible || controller.waveformDetached ? "✓  " : "    ") + "Waveform"
-                            onTriggered: {
-                                if (controller.waveformDetached) controller.waveformDetached = false
-                                controller.waveformDockVisible = !controller.waveformDockVisible
-                            }
-                        }
-                        MenuItem {
-                            text: (controller.telemetryDockVisible ? "✓  " : "    ") + "Status Monitor"
-                            onTriggered: controller.telemetryDockVisible = !controller.telemetryDockVisible
-                        }
-                        MenuSeparator {}
-                        MenuItem {
-                            text: "Dock All Floating Views"
-                            enabled: controller.phasorDetached || controller.waveformDetached
-                            onTriggered: {
-                                if (controller.phasorDetached) { controller.phasorDetached = false; controller.phasorDockVisible = true }
-                                if (controller.waveformDetached) { controller.waveformDetached = false; controller.waveformDockVisible = true }
-                            }
-                        }
-                        MenuItem { text: "Reset Dock Layout"; onTriggered: ribbon.resetDockLayout() }
-                    }
-                }
-            }
-
-            MenuButton {
-                text: "Tools"
-                onClicked: toolsMenu.open()
-                Menu {
-                    id: toolsMenu
-                    y: parent.height
-                    MenuItem { text: "Advanced…"; onTriggered: controller.openConfiguration() }
-                    MenuItem { text: "Diagnostics…"; onTriggered: controller.openDiagnostics() }
-                }
-            }
-
-            Item { Layout.fillWidth: true }
-
-            Label {
-                visible: !ribbon.compact
-                text: operatorSettings.lastEngineeringUrl.length > 0 ? "Last configuration auto-opens" : "Built-in 4I+4V default"
-                color: ribbon.theme.muted
-                font.family: ribbon.uiFont
-                font.pixelSize: 9
-            }
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            spacing: 8
-
-            Rectangle { width: 8; height: 8; radius: 4; color: ribbon.smartStateColor }
-            Label {
-                text: ribbon.displayState
-                color: ribbon.smartStateColor
-                font.family: ribbon.uiFont
-                font.pixelSize: 11
-                font.weight: Font.DemiBold
-            }
-            Label {
-                Layout.fillWidth: true
-                visible: !ribbon.compact
-                text: smartSession.state === "READY" ? "4I + 4V · 4000 samples/s" : smartSession.statusText
-                color: ribbon.theme.muted
-                font.family: ribbon.uiFont
-                font.pixelSize: 10
-                elide: Text.ElideRight
-            }
-
-            CalmButton {
-                visible: smartSession.firmwareUpdateRequired && !smartSession.updatingFirmware
-                theme: ribbon.theme
-                uiFont: ribbon.uiFont
-                text: "Update firmware"
-                tone: "accent"
-                implicitHeight: 32
-                implicitWidth: 128
-                onClicked: { ribbon.updatePromptDeferred = false; updateDialog.open() }
-            }
-            CalmButton {
-                visible: smartSession.firmwareInstallRequired && !smartSession.updatingFirmware
-                theme: ribbon.theme
-                uiFont: ribbon.uiFont
-                text: "Install firmware"
-                tone: "accent"
-                implicitHeight: 32
-                implicitWidth: 128
-                onClicked: { ribbon.installPromptDeferred = false; installDialog.open() }
-            }
-            CalmButton {
-                visible: smartSession.profileSyncRetryAvailable
-                theme: ribbon.theme
-                uiFont: ribbon.uiFont
-                text: "Retry profile"
-                tone: "accent"
-                implicitHeight: 32
-                implicitWidth: 112
-                onClicked: {
-                    if (smartSession.retryProfileSync())
-                        controller.showMessage("Retrying 4I+4V profile synchronization.", false)
-                    else
-                        controller.showMessage(smartSession.statusText, true)
-                }
-            }
-
-            RunButton {
-                text: "Start"
-                iconSource: Qt.resolvedUrl("../assets/lucide/play.svg")
-                tone: smartSession.startReady ? "success" : "neutral"
-                enabled: !ribbon.injectionRunning && !smartSession.updatingFirmware && !smartSession.updateNeedsBootloaderHelp
-                toolTipText: ribbon.startReason()
-                onClicked: ribbon.requestStart()
-            }
-            RunButton {
-                text: "Stop"
-                iconSource: Qt.resolvedUrl("../assets/lucide/square.svg")
-                tone: ribbon.injectionRunning ? "danger" : "neutral"
-                enabled: ribbon.injectionRunning && !smartSession.updatingFirmware
-                toolTipText: ribbon.injectionRunning ? "Stop Sampled Values output" : "Injection is not running"
-                onClicked: ribbon.requestStop()
-            }
-        }
+        theme: ribbon.theme
+        controller: ribbon.controller
+        workflow: ribbon
+        session: smartSession
+        device: ribbon.device
+        uiFont: ribbon.uiFont
+        compact: ribbon.compact
     }
 }

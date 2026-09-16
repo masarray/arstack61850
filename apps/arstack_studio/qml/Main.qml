@@ -6,10 +6,10 @@ import ARStack.Studio 1.0
 
 ApplicationWindow {
     id: root
-    width: 1480
-    height: 900
-    minimumWidth: 1080
-    minimumHeight: 720
+    width: 1240
+    height: 760
+    minimumWidth: 960
+    minimumHeight: 620
     visible: true
     title: "ARStack Studio · SMV + PTP · v" + Qt.application.version
     color: studioTheme.bg
@@ -66,11 +66,11 @@ ApplicationWindow {
         source: Qt.resolvedUrl("../assets/InterVariable.ttf")
     }
 
-    readonly property bool compactLayout: width < 1300
+    readonly property bool compactLayout: width < 1120
     readonly property bool canDeploy: workflowBar.session ? workflowBar.session.canDeployProfile : false
     readonly property bool canStart: workflowBar.session ? workflowBar.session.startReady : false
-    readonly property string toastMessage: transientMessage.length ? transientMessage : device.lastError
-    readonly property bool toastError: transientMessage.length ? transientError : device.lastError.length > 0
+    readonly property string toastMessage: transientMessage
+    readonly property bool toastError: transientError
 
     SclProfileModel { id: sclProfiles }
     DeviceController { id: device }
@@ -679,8 +679,8 @@ ApplicationWindow {
         WorkflowBar {
             id: workflowBar
             Layout.fillWidth: true
-            Layout.preferredHeight: 72
-            Layout.minimumHeight: 72
+            Layout.preferredHeight: workflowBar.implicitHeight
+            Layout.minimumHeight: workflowBar.implicitHeight
             theme: studioTheme
             controller: root
             device: device
@@ -763,10 +763,6 @@ ApplicationWindow {
                                 anchors.rightMargin: 11
                                 spacing: 8
 
-                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "AC"; tone: root.signalFrequency > 0 ? "accent" : "normal"; implicitWidth: 46; onClicked: root.setWaveformMode("AC") }
-                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "DC"; tone: root.signalFrequency === 0 ? "accent" : "normal"; implicitWidth: 46; onClicked: root.setWaveformMode("DC") }
-                                Rectangle { width: 1; height: 24; color: studioTheme.lineSoft }
-
                                 ColumnLayout {
                                     spacing: 0
                                     Label { text: root.signalFrequency === 0 ? "DC MODE" : "FREQUENCY"; color: studioTheme.muted; font.family: root.uiFont; font.pixelSize: studioTheme.captionSize - 1; font.weight: Font.DemiBold; font.letterSpacing: 0.8 }
@@ -780,8 +776,8 @@ ApplicationWindow {
                                             implicitWidth: 84
                                             text: "50.000"
                                             suffixText: "Hz"
-                                            enabled: root.signalFrequency > 0
-                                            validator: DoubleValidator { bottom: 0.001; top: 1000.0; decimals: 3 }
+                                            enabled: true
+                                            validator: DoubleValidator { bottom: 0.0; top: 1000.0; decimals: 3 }
                                             onTextEdited: {
                                                 var value = root.parseOperatorNumber(text)
                                                 if (root.validFrequency(value)) {
@@ -798,15 +794,16 @@ ApplicationWindow {
                                                 if (!root.validFrequency(value)) {
                                                     text = root.signalFrequency.toFixed(3)
                                                     invalidInput = false
-                                                    root.showMessage("AC frequency must be greater than 0 and not exceed 1000 Hz.", true)
+                                                    root.showMessage("Frequency must be within 0..1000 Hz (0 = DC).", true)
                                                 } else text = value.toFixed(3)
                                             }
                                         }
                                     }
                                 }
 
-                                CalmButton { visible: root.signalFrequency > 0; theme: studioTheme; uiFont: root.uiFont; text: "50"; implicitWidth: 44; onClicked: root.setFrequencyValue(50) }
-                                CalmButton { visible: root.signalFrequency > 0; theme: studioTheme; uiFont: root.uiFont; text: "60"; implicitWidth: 44; onClicked: root.setFrequencyValue(60) }
+                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "0"; implicitWidth: 44; toolTipText: "DC"; onClicked: root.setFrequencyValue(0) }
+                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "50"; implicitWidth: 44; onClicked: root.setFrequencyValue(50) }
+                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "60"; implicitWidth: 44; onClicked: root.setFrequencyValue(60) }
                                 Rectangle { width: 1; height: 24; color: studioTheme.lineSoft }
                                 CheckBox {
                                     enabled: root.signalFrequency > 0

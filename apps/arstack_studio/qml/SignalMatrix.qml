@@ -116,7 +116,7 @@ Rectangle {
                 property real pendingPhase: angle
 
                 Layout.fillWidth: true
-                Layout.preferredHeight: matrix.compact ? 54 : 60
+                Layout.preferredHeight: matrix.compact ? 46 : 50
                 color: signalRow.selected ? "#111c27"
                     : (magnitudeField.activeFocus || phaseField.activeFocus) ? "#131f2b"
                     : rowHover.hovered ? "#101820" : "transparent"
