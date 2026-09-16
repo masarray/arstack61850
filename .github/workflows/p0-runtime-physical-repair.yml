@@ -8,9 +8,13 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: p0-runtime-physical-repair
+  cancel-in-progress: true
+
 jobs:
   repair:
-    runs-on: windows-2025
+    runs-on: macos-15
     timeout-minutes: 10
     steps:
       - name: Checkout repair branch
@@ -20,20 +24,15 @@ jobs:
           fetch-depth: 0
 
       - name: Apply P0 runtime repair
-        shell: powershell
         run: |
-          python .github/scripts/p0_runtime_physical_repair.py
-          if ($LASTEXITCODE -ne 0) { throw "Repair script failed: $LASTEXITCODE" }
+          python3 .github/scripts/p0_runtime_physical_repair.py
           git diff --check
-          if ($LASTEXITCODE -ne 0) { throw "git diff check failed: $LASTEXITCODE" }
 
       - name: Commit repaired runtime source
-        shell: powershell
         run: |
+          set -euo pipefail
           git config user.name 'Ari Sulistiono'
           git config user.email 'ari.sulistiono@gmail.com'
           git add apps/arstack_studio/src/main.cpp apps/arstack_studio/qml/Main.qml apps/arstack_studio/src/DeviceController.cpp apps/arstack_studio/src/DeviceController.hpp apps/arstack_studio/src/SmartSessionController.cpp apps/arstack_studio/src/DeterministicSessionHarness.cpp
           git commit -m 'fix(p0): hard-exit GUI close and infer single-board firmware recovery'
-          if ($LASTEXITCODE -ne 0) { throw "Commit failed: $LASTEXITCODE" }
           git push origin HEAD:feature/ptp-production-v0.1.1
-          if ($LASTEXITCODE -ne 0) { throw "Push failed: $LASTEXITCODE" }
