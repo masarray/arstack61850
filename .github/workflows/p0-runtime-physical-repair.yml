@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   repair:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout repair branch
         uses: actions/checkout@v4
@@ -19,7 +19,7 @@ jobs:
           fetch-depth: 0
 
       - name: Apply P0 runtime repair
-        run: python .github/scripts/p0_runtime_physical_repair.py
+        run: python3 .github/scripts/p0_runtime_physical_repair.py
 
       - name: Validate repaired source
         shell: bash
