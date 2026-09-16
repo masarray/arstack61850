@@ -5,6 +5,7 @@ on:
     paths:
       - 'apps/arstack_studio/**'
       - '.github/scripts/p0_finalize_firmware_progress.py'
+      - '.github/scripts/p0_finalize_firmware_progress_functions.py'
       - '.github/workflows/p0-finalize-firmware-progress.yml'
 
 permissions:
@@ -25,7 +26,9 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
       - name: Apply P0 firmware progress finalizer
-        run: python3 .github/scripts/p0_finalize_firmware_progress.py
+        run: |
+          python3 .github/scripts/p0_finalize_firmware_progress.py
+          python3 .github/scripts/p0_finalize_firmware_progress_functions.py
       - name: Verify focused invariants
         shell: bash
         run: |
@@ -36,6 +39,8 @@ jobs:
           grep -q 'smartSession.firmwareUpdateStage' apps/arstack_studio/qml/WorkflowBar.qml
           grep -q 'fragmented espflash progress -> monotonic' apps/arstack_studio/src/DeterministicSessionHarness.cpp
           grep -q 'firmware stage projection -> supervisor-owned' apps/arstack_studio/src/DeterministicSessionHarness.cpp
+          grep -q 'static bool fragmentedEspflashProgressIsMonotonic()' apps/arstack_studio/src/DeterministicSessionHarness.cpp
+          grep -q 'static bool firmwareStageProjectionIsExplicit()' apps/arstack_studio/src/DeterministicSessionHarness.cpp
       - name: Commit source-only repair
         shell: bash
         run: |
@@ -50,5 +55,5 @@ jobs:
           fi
           git config user.name 'ARStack P0 Repair'
           git config user.email 'actions@users.noreply.github.com'
-          git commit -m 'fix(studio): finalize firmware progress observability'
+          git commit -m 'fix(studio): finalize firmware progress regressions'
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
