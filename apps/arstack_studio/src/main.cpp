@@ -49,7 +49,11 @@ protected:
     [[nodiscard]] bool eventFilter(QObject* watched, QEvent* event) override {
         if (event != nullptr && event->type() == QEvent::Close && app_ != nullptr) {
             closeObserved_ = true;
-            app_->quit();
+            // QCoreApplication::quit() can be ignored by application/window
+            // policy. A primary-window close is an explicit process-exit request,
+            // so terminate the main event loop deterministically. aboutToQuit()
+            // remains the single cleanup boundary for serial/firmware workers.
+            QCoreApplication::exit(0);
         }
         return QObject::eventFilter(watched, event);
     }
@@ -521,8 +525,8 @@ int main(int argc, char* argv[]) {
                 QCoreApplication::exit(10);
                 return;
             }
-
-            QCoreApplication::exit(0);
+            // Do not call exit() here. The regression must prove that the real
+            // primary-window close path itself terminates the process.
         });
         QTimer::singleShot(3500, &app, [] {
             qCritical().noquote() << "Application lifecycle regression: primary close was not observed in time.";

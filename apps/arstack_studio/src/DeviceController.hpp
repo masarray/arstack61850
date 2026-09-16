@@ -110,6 +110,7 @@ public:
 
     [[nodiscard]] QStringList ports() const;
     [[nodiscard]] QString recommendedPort() const;
+    [[nodiscard]] QString recoveryCandidatePort() const;
     [[nodiscard]] QString discoveryStatus() const;
     [[nodiscard]] bool discovering() const noexcept;
     [[nodiscard]] bool deviceVerified() const noexcept;
@@ -312,6 +313,7 @@ private:
     QThread ioThread_;
     QStringList ports_;
     QString recommendedPort_;
+    QString recoveryCandidatePort_;
     QString discoveryStatus_{QStringLiteral("Looking for an ARStack ESP32-P4 injector...")};
     DeviceIdentity identity_;
     QString lastError_;

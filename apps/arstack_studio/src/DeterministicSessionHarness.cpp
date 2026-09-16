@@ -29,6 +29,7 @@ public:
             {"current identity -> READY without recovery", currentIdentityNeverRecovers()},
             {"legacy identity -> firmware update", legacyIdentityOffersUpdate()},
             {"trusted ESP32-P4 identity timeout -> firmware required", automaticIdentityTimeoutOffersFirmwareRecovery()},
+            {"single visible COM without metadata -> firmware required", singleVisibleTimeoutWithoutRecommendationOffersFirmwareRecovery()},
             {"ambiguous identity timeout -> UNIDENTIFIED", ambiguousIdentityTimeoutStaysUnidentified()},
             {"manual recovery intent survives IDENTIFY -> firmware required", manualRecoveryIntentArmsFirmwareOffer()},
             {"stale generation release -> ignored", staleReleaseGenerationIsIgnored()},
@@ -273,6 +274,37 @@ private:
             fixture.session.blankBoardDetected_ &&
             fixture.session.blankBoardPort_ == QStringLiteral("COM7") &&
             !fixture.session.startReady();
+    }
+
+    static bool singleVisibleTimeoutWithoutRecommendationOffersFirmwareRecovery() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        auto& device = fixture.device;
+        auto& session = fixture.session;
+        quiesce(session, device);
+        session.clearBlankBoardContext();
+        session.portOwner_ = SmartSessionController::PortOwner::deviceSession;
+        session.recoveryPending_ = false;
+
+        device.ports_ = {QStringLiteral("COM7")};
+        device.recommendedPort_.clear();
+        device.recoveryCandidatePort_ = QStringLiteral("COM7");
+        device.portName_ = QStringLiteral("COM7");
+        device.connected_ = false;
+        device.discovering_ = false;
+        device.deviceVerified_ = false;
+        device.identificationState_ = DeviceController::IdentificationState::Unidentified;
+        device.identifyAttempts_ = DeviceController::identityMaxAttempts();
+        device.identity_ = {};
+        emit device.portsChanged();
+        emit device.identificationStateChanged();
+        session.reconcile();
+
+        return session.state() == QStringLiteral("FIRMWARE REQUIRED") &&
+            session.firmwareInstallVisible() &&
+            session.blankBoardDetected_ &&
+            session.blankBoardPort_ == QStringLiteral("COM7") &&
+            !session.startReady();
     }
 
     static bool ambiguousIdentityTimeoutStaysUnidentified() {

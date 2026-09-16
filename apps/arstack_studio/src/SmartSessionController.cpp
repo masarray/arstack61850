@@ -24,7 +24,9 @@ QString SmartSessionController::chooseRecoveryPort(
     const QString& recommendedPort,
     const QStringList& visiblePorts) {
     const QString recommended = recommendedPort.trimmed();
-    if (!recommended.isEmpty()) return recommended;
+    if (!recommended.isEmpty() && visiblePorts.contains(recommended, Qt::CaseInsensitive)) {
+        return recommended;
+    }
     if (visiblePorts.size() != 1) return {};
     return visiblePorts.front().trimmed();
 }
@@ -774,14 +776,17 @@ void SmartSessionController::refreshRecoveryOfferFromIdentity() {
         return;
     }
 
-    const QString recommended = device_->recommendedPort().trimmed();
-    if (recommended.isEmpty() || !device_->ports().contains(recommended)) {
+    QString recoveryPort = device_->recoveryCandidatePort().trimmed();
+    if (recoveryPort.isEmpty()) {
+        recoveryPort = chooseRecoveryPort(device_->recommendedPort(), device_->ports());
+    }
+    if (recoveryPort.isEmpty() || !device_->ports().contains(recoveryPort, Qt::CaseInsensitive)) {
         blankBoardDetected_ = false;
         blankBoardPort_.clear();
         return;
     }
 
-    blankBoardPort_ = recommended;
+    blankBoardPort_ = recoveryPort;
     blankBoardDetected_ = true;
 }
 
@@ -1023,7 +1028,7 @@ void SmartSessionController::reconcile() {
         if (device_->identificationState() == DeviceController::IdentificationState::Unidentified) {
             setPresentation(
                 QStringLiteral("UNIDENTIFIED"),
-                QStringLiteral("No ARStack semantic identity was received after %1 bounded attempts. Retry identification, or use Tools > Advanced > Verify selected port to enter explicit firmware recovery.")
+                QStringLiteral("No ARStack semantic identity was received after %1 bounded attempts and the visible serial devices are ambiguous. Disconnect unrelated serial devices or select the intended ESP32-P4 port, then retry.")
                     .arg(device_->identifyAttempts()),
                 false,
                 false);

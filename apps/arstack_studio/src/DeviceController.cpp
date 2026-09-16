@@ -244,6 +244,14 @@ void DeviceController::connectWorkerSignals() {
         if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
         lastIdentificationPort_ = port;
         identifyAttempts_ = attempts;
+        const QString timedOutPort = port.trimmed();
+        const bool singleVisiblePort = ports_.size() == 1 &&
+            ports_.constFirst().compare(timedOutPort, Qt::CaseInsensitive) == 0;
+        const bool recommendedCandidate = !recommendedPort_.isEmpty() &&
+            recommendedPort_.compare(timedOutPort, Qt::CaseInsensitive) == 0;
+        if (!timedOutPort.isEmpty() && (singleVisiblePort || recommendedCandidate)) {
+            recoveryCandidatePort_ = timedOutPort;
+        }
         if (continuing) {
             setIdentificationState(IdentificationState::Identifying);
             setDiscoveryState(QStringLiteral("Checking connected devices for an ARStack injector..."), true);
@@ -304,6 +312,7 @@ void DeviceController::connectWorkerSignals() {
 
 QStringList DeviceController::ports() const { return ports_; }
 QString DeviceController::recommendedPort() const { return recommendedPort_; }
+QString DeviceController::recoveryCandidatePort() const { return recoveryCandidatePort_; }
 QString DeviceController::discoveryStatus() const { return discoveryStatus_; }
 bool DeviceController::discovering() const noexcept { return discovering_; }
 bool DeviceController::deviceVerified() const noexcept { return deviceVerified_; }
@@ -469,6 +478,9 @@ void DeviceController::handlePortSnapshot(
     ports_ = ports;
     recommendedPort_ = recommendedPort;
     highConfidenceCount_ = highConfidenceCount;
+    if (!recoveryCandidatePort_.isEmpty() && !ports_.contains(recoveryCandidatePort_)) {
+        recoveryCandidatePort_.clear();
+    }
 
     if (identificationState_ == IdentificationState::Unidentified &&
         !lastIdentificationPort_.isEmpty() && !ports_.contains(lastIdentificationPort_)) {
@@ -501,6 +513,7 @@ void DeviceController::handlePortOpened(const QString& portName, const bool auto
     connected_ = true;
     portName_ = portName;
     lastIdentificationPort_ = portName;
+    recoveryCandidatePort_.clear();
     identifyAttempts_ = 0;
     deviceVerified_ = false;
     clearIdentity();
@@ -812,6 +825,7 @@ void DeviceController::clearIdentity() {
 void DeviceController::markDeviceVerified() {
     if (deviceVerified_) return;
     deviceVerified_ = true;
+    recoveryCandidatePort_.clear();
     lastIdentificationPort_ = portName_;
     setIdentificationState(IdentificationState::Verified);
     setDiscoveryState(QStringLiteral("ARStack ESP32-P4 identity verified."), false);

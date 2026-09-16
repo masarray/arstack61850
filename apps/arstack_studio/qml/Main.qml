@@ -57,7 +57,8 @@ ApplicationWindow {
         configurationWindow.hide()
         detachedPhasorWindow.hide()
         detachedWaveformWindow.hide()
-        Qt.quit()
+        // C++ owns process termination and bounded worker retirement. Do not
+        // race it with a second QML quit path.
     }
 
     FontLoader {
