@@ -44,6 +44,20 @@ std::optional<std::uint8_t> parse_u8(const std::string_view text) {
     return static_cast<std::uint8_t>(*value);
 }
 
+std::optional<std::uint32_t> optional_uint_attribute(
+    const XmlNode& node,
+    const std::string_view name) {
+    const auto text = trim_copy(attribute(&node, name));
+    if (text.empty()) return std::nullopt;
+    std::uint32_t value{};
+    const auto result = std::from_chars(
+        text.data(), text.data() + text.size(), value, 10);
+    if (result.ec != std::errc{} || result.ptr != text.data() + text.size()) {
+        return std::nullopt;
+    }
+    return value;
+}
+
 std::uint32_t uint_attribute(const XmlNode& node, const std::string_view name) {
     const auto text = attribute(&node, name);
     std::uint32_t value{};

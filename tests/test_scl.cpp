@@ -392,6 +392,47 @@ void simulator_compiles_semantic_defaults_and_indexed_report_instances() {
     CHECK(point("GGIO1$ST$Other$stVal").initial_value == "0");
 }
 
+void parser_preserves_setting_control_and_invalid_state() {
+    using namespace ar::iec61850::scl;
+
+    constexpr std::string_view valid_xml = R"xml(
+<SCL xmlns="http://www.iec.ch/61850/2003/SCL" version="2007" revision="B">
+  <IED name="IED1"><AccessPoint><Server><LDevice inst="LD0">
+    <LN0 lnClass="LLN0"><SettingControl numOfSGs="3" actSG="2"/></LN0>
+  </LDevice></Server></AccessPoint></IED>
+</SCL>)xml";
+    const auto valid = SclParser{}.parse(valid_xml, "setting-valid.scd");
+    CHECK(valid.setting_controls.size() == 1U);
+    const auto& control = valid.setting_controls.front();
+    CHECK(control.ied_name == "IED1");
+    CHECK(control.ld_inst == "LD0");
+    CHECK(control.logical_node_path == "LLN0");
+    CHECK(control.control_block_reference == "IED1LD0/LLN0$SP$SGCB");
+    CHECK(control.number_of_setting_groups == std::optional<std::uint32_t>{3U});
+    CHECK(control.active_setting_group == std::optional<std::uint32_t>{2U});
+    CHECK(control.valid());
+    CHECK(std::none_of(valid.warnings.begin(), valid.warnings.end(), [](const std::string& warning) {
+        return warning.find("SettingControl") != std::string::npos;
+    }));
+
+    constexpr std::string_view invalid_xml = R"xml(
+<SCL xmlns="http://www.iec.ch/61850/2003/SCL" version="2007" revision="B">
+  <IED name="IED1"><AccessPoint><Server><LDevice inst="LD0">
+    <LN0 lnClass="LLN0"><SettingControl numOfSGs="0" actSG="bogus"/></LN0>
+  </LDevice></Server></AccessPoint></IED>
+</SCL>)xml";
+    const auto invalid = SclParser{}.parse(invalid_xml, "setting-invalid.scd");
+    CHECK(invalid.setting_controls.size() == 1U);
+    CHECK(!invalid.setting_controls.front().valid());
+    CHECK(invalid.setting_controls.front().number_of_setting_groups ==
+          std::optional<std::uint32_t>{0U});
+    CHECK(!invalid.setting_controls.front().active_setting_group.has_value());
+    CHECK(std::any_of(invalid.warnings.begin(), invalid.warnings.end(), [](const std::string& warning) {
+        return warning.find("SettingControl 'IED1LD0/LLN0$SP$SGCB'") != std::string::npos &&
+               warning.find("invalid or missing") != std::string::npos;
+    }));
+}
+
 void parser_detects_duplicate_ieds_and_missing_dataset_references() {
     using namespace ar::iec61850::scl;
 
@@ -487,6 +528,7 @@ int main() {
         {"SCL dataset references", dataset_reference_resolver_accepts_canonical_and_local_forms},
         {"SCL configured control model", parser_preserves_configured_control_model_value},
         {"Simulator semantic defaults and indexed RCBs", simulator_compiles_semantic_defaults_and_indexed_report_instances},
+        {"SCL SettingControl", parser_preserves_setting_control_and_invalid_state},
         {"SCL conflicts and warnings", parser_detects_duplicate_ieds_and_missing_dataset_references},
         {"SCL edition detection", parser_detects_editions_from_root_metadata},
         {"SCL prefixed namespace", parser_supports_prefixed_namespaces_and_predefined_entities},

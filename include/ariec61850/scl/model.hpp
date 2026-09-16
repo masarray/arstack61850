@@ -212,6 +212,25 @@ struct SclReportControl final {
     friend bool operator==(const SclReportControl&, const SclReportControl&) = default;
 };
 
+struct SclSettingControl final {
+    std::string ied_name;
+    std::string ld_inst;
+    std::string logical_node_path;
+    std::string control_block_reference;
+    std::optional<std::uint32_t> number_of_setting_groups;
+    std::optional<std::uint32_t> active_setting_group;
+
+    [[nodiscard]] bool valid() const noexcept {
+        return number_of_setting_groups.has_value() &&
+            active_setting_group.has_value() &&
+            *number_of_setting_groups != 0U &&
+            *active_setting_group != 0U &&
+            *active_setting_group <= *number_of_setting_groups;
+    }
+
+    friend bool operator==(const SclSettingControl&, const SclSettingControl&) = default;
+};
+
 struct SclConflict final {
     std::string kind;
     std::string key;
@@ -249,6 +268,7 @@ struct SclDocument final {
     std::vector<SclGooseStream> goose_streams;
     std::vector<SclSampledValuesStream> sampled_values_streams;
     std::vector<SclReportControl> report_controls;
+    std::vector<SclSettingControl> setting_controls;
     std::vector<std::string> warnings;
     std::vector<SclConflict> conflicts;
 
