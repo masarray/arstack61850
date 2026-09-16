@@ -37,11 +37,11 @@ jobs:
           text = cmake.read_text(encoding='utf-8')
           old = '''target_include_directories(ied_setting_control_manifest_qa PRIVATE
               ${CMAKE_CURRENT_LIST_DIR}/src)
-'''
+          '''
           new = '''target_include_directories(ied_setting_control_manifest_qa PRIVATE
               ${CMAKE_CURRENT_LIST_DIR}/src
               ${CMAKE_CURRENT_LIST_DIR}/../../include)
-'''
+          '''
           if text.count(old) != 1:
               raise SystemExit('Expected one SGCB manifest QA include-dir block')
           cmake.write_text(text.replace(old, new, 1), encoding='utf-8')
