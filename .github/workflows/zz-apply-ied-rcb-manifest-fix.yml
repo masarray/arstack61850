@@ -1,0 +1,87 @@
+name: Apply targeted IED RCB manifest source patch
+
+on:
+  push:
+    branches:
+      - feat/ied-sim-ux-performance-foundation
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch production manifest compiler
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('apps/ied_simulator/src/IedFleetController.cpp')
+          text = path.read_text(encoding='utf-8')
+
+          old_include = '''#include "IedFleetController.hpp"\n#include "IedRuntimeGuardrails.hpp"'''
+          new_include = '''#include "IedFleetController.hpp"\n#include "IedReportControlManifest.hpp"\n#include "IedRuntimeGuardrails.hpp"'''
+          if text.count(old_include) != 1:
+              raise SystemExit('expected IedFleetController include anchor exactly once')
+          text = text.replace(old_include, new_include, 1)
+
+          old_block = '''    QSet<QString> emittedReportControls;
+    for (const auto& report : loaded.document.report_controls) {
+        if (qstring(report.ied_name) != activeIedName) continue;
+        const auto domain = qstring(report.ied_name) + qstring(report.ld_inst);
+        auto logicalNode = qstring(report.logical_node_path);
+        logicalNode.replace(QLatin1Char('.'), QLatin1Char('$'));
+        const auto name = qstring(report.name);
+        auto dataSetItem = logicalNode + QLatin1Char('$') + qstring(report.data_set_name);
+        dataSetItem.replace(QLatin1Char('.'), QLatin1Char('$'));
+        const auto item = logicalNode +
+            (report.buffered ? QStringLiteral("$BR$") : QStringLiteral("$RP$")) + name;
+        if (domain.isEmpty() || logicalNode.isEmpty() || name.isEmpty() || dataSetItem.isEmpty()) continue;
+        const auto key = domain + QLatin1Char('\\n') + item;
+        if (emittedReportControls.contains(key)) continue;
+        emittedReportControls.insert(key);
+
+        auto reportId = qstring(report.report_id);
+        if (reportId.isEmpty()) reportId = domain + QLatin1Char('/') + item;
+        const auto triggerOptions = report.buffered ? 0x6CU : 0x64U;
+        const auto optionalFields0 = report.buffered ? 0x79U : 0x78U;
+        constexpr auto optionalFields1 = 0x80U;
+        manifest += "RCB\\t" + manifestField(domain) + "\\t" + manifestField(item) + "\\t" +
+            QByteArray::number(report.buffered ? 1 : 0) + "\\t" +
+            manifestField(reportId) + "\\t" + manifestField(domain) + "\\t" +
+            manifestField(dataSetItem) + "\\t" +
+            QByteArray::number(report.configuration_revision) + "\\t" +
+            QByteArray::number(report.buffer_time_milliseconds) + "\\t" +
+            QByteArray::number(report.integrity_period_milliseconds) + "\\t" +
+            QByteArray::number(triggerOptions) + "\\t" +
+            QByteArray::number(optionalFields0) + "\\t" +
+            QByteArray::number(optionalFields1) + "\\n";
+    }'''
+          new_block = '''    QSet<QString> emittedReportControls;
+    for (const auto& report : loaded.document.report_controls) {
+        manifest += arstack::iedsim::reportControlManifestLines(
+            report,
+            activeIedName,
+            emittedReportControls);
+    }'''
+          if text.count(old_block) != 1:
+              raise SystemExit('expected legacy ReportControl manifest block exactly once')
+          text = text.replace(old_block, new_block, 1)
+          path.write_text(text, encoding='utf-8')
+
+      - name: Commit targeted source patch and remove helper workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/zz-apply-ied-rcb-manifest-fix.yml
+          git add apps/ied_simulator/src/IedFleetController.cpp
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(ied-sim): expand indexed ReportControl runtime instances"
+          git push origin HEAD:feat/ied-sim-ux-performance-foundation
