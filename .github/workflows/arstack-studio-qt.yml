@@ -209,18 +209,19 @@ jobs:
           root=/tmp/arstack-firmware-contract
           rm -rf "$root"
           mkdir -p "$root/firmware" "$root/tools"
-          printf 'ARStack-P0-firmware-contract\n' > "$root/firmware/arstack-esp32p4-smv-0.1.0.bin"
-          sha="$(sha256sum "$root/firmware/arstack-esp32p4-smv-0.1.0.bin" | awk '{print $1}')"
+          printf 'ARStack-P0-firmware-contract\n' > "$root/firmware/arstack-esp32p4-smv-0.1.1.bin"
+          sha="$(sha256sum "$root/firmware/arstack-esp32p4-smv-0.1.1.bin" | awk '{print $1}')"
           cat > "$root/firmware/firmware-manifest.json" <<EOF
           {
             "schema": "arstack.studio.firmware.v1",
             "product": "ARStack ESP32-P4 SMV Injector",
             "chip": "esp32p4",
             "chipRevisionPolicy": "pre-v3",
-            "version": "0.1.0",
+            "version": "0.1.1",
             "protocol": 1,
+            "capabilities": ["SMV-4I4V", "PROFILE", "LIVE-SETPOINTS", "SESSION-LEASE", "PTP-P2", "SMPSYNCH-AUTO"],
             "flashOffset": 0,
-            "image": "arstack-esp32p4-smv-0.1.0.bin",
+            "image": "arstack-esp32p4-smv-0.1.1.bin",
             "sha256": "$sha"
           }
           EOF
