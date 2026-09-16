@@ -129,6 +129,11 @@ public:
     [[nodiscard]] constexpr bool valid() const noexcept { return initialized_; }
 
     [[nodiscard]] MmsStaticBrcbStatus set_enabled(bool enabled) noexcept;
+    [[nodiscard]] MmsStaticBrcbStatus set_optional_fields(
+        std::span<const std::uint8_t> optional_fields) noexcept;
+    [[nodiscard]] constexpr const auto& optional_fields() const noexcept {
+        return optional_fields_;
+    }
     [[nodiscard]] MmsStaticBrcbStatus set_trigger_options(
         std::uint8_t trigger_options) noexcept;
     [[nodiscard]] constexpr std::uint8_t trigger_options() const noexcept {
@@ -237,6 +242,8 @@ private:
     std::uint32_t queue_revision_{1U};
     std::uint32_t schedule_revision_{1U};
     std::uint8_t sequence_number_{};
+    std::array<std::uint8_t, MmsInformationReportSpanCodec::optional_field_bytes>
+        optional_fields_{};
     std::uint8_t trigger_options_{};
     bool replay_gap_{};
     bool general_interrogation_pending_{};

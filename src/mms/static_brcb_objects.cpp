@@ -119,6 +119,7 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
 
 [[nodiscard]] bool writable_attribute(const MmsStaticBrcbAttribute attribute) noexcept {
     return attribute == MmsStaticBrcbAttribute::report_enabled ||
+        attribute == MmsStaticBrcbAttribute::optional_fields ||
         attribute == MmsStaticBrcbAttribute::trigger_options ||
         attribute == MmsStaticBrcbAttribute::general_interrogation ||
         attribute == MmsStaticBrcbAttribute::purge_buffer ||
@@ -354,7 +355,7 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
     case MmsStaticBrcbAttribute::conf_revision:
         return encode_unsigned(context->definition->conf_revision, destination);
     case MmsStaticBrcbAttribute::optional_fields:
-        return encode_bit_string(6U, context->definition->optional_fields, destination);
+        return encode_bit_string(6U, context->reports->optional_fields(), destination);
     case MmsStaticBrcbAttribute::buffer_time:
         return encode_unsigned(context->definition->buffer_time_ms, destination);
     case MmsStaticBrcbAttribute::sequence_number:
@@ -542,6 +543,24 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
         return map_control_status(
             context->control->set_report_enabled(client, value, now));
     }
+    case MmsStaticBrcbAttribute::optional_fields: {
+        std::span<const std::uint8_t> bytes;
+        if (!decode_bit_string(encoded_data, 6U, 2U, bytes)) {
+            return {false, kTypeInconsistent};
+        }
+        constexpr std::uint8_t allowed_first = 0x7FU;
+        constexpr std::uint8_t allowed_second = 0x80U;
+        if ((bytes[0] & static_cast<std::uint8_t>(~allowed_first)) != 0U ||
+            (bytes[1] & static_cast<std::uint8_t>(~allowed_second)) != 0U) {
+            return {false, kObjectValueInvalid};
+        }
+        const auto claim = ensure_claimed(*context, client, now);
+        if (claim != MmsStaticBrcbControlStatus::ok) {
+            return map_control_status(claim);
+        }
+        return map_control_status(
+            context->control->set_optional_fields(client, bytes, now));
+    }
     case MmsStaticBrcbAttribute::trigger_options: {
         std::span<const std::uint8_t> bytes;
         if (!decode_bit_string(encoded_data, 2U, 1U, bytes)) {
@@ -616,7 +635,6 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
     case MmsStaticBrcbAttribute::report_id:
     case MmsStaticBrcbAttribute::data_set:
     case MmsStaticBrcbAttribute::conf_revision:
-    case MmsStaticBrcbAttribute::optional_fields:
     case MmsStaticBrcbAttribute::buffer_time:
     case MmsStaticBrcbAttribute::sequence_number:
     case MmsStaticBrcbAttribute::integrity_period:

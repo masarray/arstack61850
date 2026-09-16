@@ -167,6 +167,20 @@ MmsStaticBrcbControlStatus MmsStaticBrcbControl::set_report_enabled(
     return map_runtime_status(reports_->set_enabled(enabled));
 }
 
+MmsStaticBrcbControlStatus MmsStaticBrcbControl::set_optional_fields(
+    const MmsStaticBrcbClientIdentity& client,
+    const std::span<const std::uint8_t> optional_fields,
+    const std::uint64_t now_ms) noexcept {
+    const auto access = require_control_access(client, now_ms);
+    if (access != MmsStaticBrcbControlStatus::ok) {
+        return access;
+    }
+    if (reports_->enabled()) {
+        return MmsStaticBrcbControlStatus::temporarily_unavailable;
+    }
+    return map_runtime_status(reports_->set_optional_fields(optional_fields));
+}
+
 MmsStaticBrcbControlStatus MmsStaticBrcbControl::set_trigger_options(
     const MmsStaticBrcbClientIdentity& client,
     const std::uint8_t trigger_options,

@@ -76,6 +76,11 @@ public:
         bool enabled,
         std::uint64_t now_ms) noexcept;
 
+    [[nodiscard]] MmsStaticBrcbControlStatus set_optional_fields(
+        const MmsStaticBrcbClientIdentity& client,
+        std::span<const std::uint8_t> optional_fields,
+        std::uint64_t now_ms) noexcept;
+
     [[nodiscard]] MmsStaticBrcbControlStatus set_trigger_options(
         const MmsStaticBrcbClientIdentity& client,
         std::uint8_t trigger_options,

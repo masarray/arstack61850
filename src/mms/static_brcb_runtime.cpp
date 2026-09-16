@@ -223,6 +223,7 @@ bool MmsStaticBrcbRuntime::initialize() noexcept {
     queue_revision_ = 1U;
     schedule_revision_ = 1U;
     sequence_number_ = 0U;
+    optional_fields_ = definition_->optional_fields;
     trigger_options_ = definition_->trigger_options;
     replay_gap_ = false;
     general_interrogation_pending_ = false;
@@ -247,6 +248,32 @@ MmsStaticBrcbStatus MmsStaticBrcbRuntime::set_enabled(
     const auto period = effective_integrity_period(*definition_);
     integrity_armed_ = enabled && period != 0U &&
         (trigger_options_ & kTriggerIntegrity) != 0U;
+    bump_revision(pending_->revision);
+    bump_revision(schedule_revision_);
+    return MmsStaticBrcbStatus::ok;
+}
+
+MmsStaticBrcbStatus MmsStaticBrcbRuntime::set_optional_fields(
+    const std::span<const std::uint8_t> optional_fields) noexcept {
+    if (!initialized_ || definition_ == nullptr || pending_ == nullptr) {
+        return MmsStaticBrcbStatus::invalid_runtime;
+    }
+    if (optional_fields.size() != optional_fields_.size() ||
+        (optional_fields[0] & static_cast<std::uint8_t>(~kAllowedOptionalFirst)) != 0U ||
+        (optional_fields[1] & static_cast<std::uint8_t>(~kAllowedOptionalSecond)) != 0U) {
+        return MmsStaticBrcbStatus::invalid_definition;
+    }
+    if (enabled_) {
+        return MmsStaticBrcbStatus::temporarily_unavailable;
+    }
+    if (std::equal(optional_fields.begin(), optional_fields.end(), optional_fields_.begin())) {
+        return MmsStaticBrcbStatus::ok;
+    }
+    std::copy(optional_fields.begin(), optional_fields.end(), optional_fields_.begin());
+    clear_pending(*pending_);
+    general_interrogation_pending_ = false;
+    next_integrity_due_ms_ = 0U;
+    integrity_armed_ = false;
     bump_revision(pending_->revision);
     bump_revision(schedule_revision_);
     return MmsStaticBrcbStatus::ok;
@@ -480,7 +507,7 @@ MmsStaticBrcbCaptureResult MmsStaticBrcbRuntime::capture(
     const auto entry_id = encode_entry_id(plan.entry_number);
     MmsBufferedSelectiveInformationReportSnapshotInput report;
     report.report_id = definition_->report_id;
-    report.optional_fields = definition_->optional_fields;
+    report.optional_fields = optional_fields_;
     report.sequence_number = plan.sequence_number;
     report.report_time = report_time;
     report.data_set_reference = {
@@ -495,7 +522,7 @@ MmsStaticBrcbCaptureResult MmsStaticBrcbRuntime::capture(
         std::span<const MmsInformationReportReferenceInput>{references}.first(included);
     report.included_member_results =
         std::span<const MmsReadAccessResultInput>{results}.first(included);
-    if ((definition_->optional_fields[0] & kOptReasonForInclusion) != 0U) {
+    if ((optional_fields_[0] & kOptReasonForInclusion) != 0U) {
         report.included_reason_for_inclusion =
             std::span<const std::uint8_t>{reasons}.first(included);
     }
