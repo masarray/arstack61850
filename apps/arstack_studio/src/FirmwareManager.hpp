@@ -110,6 +110,10 @@ private:
     QThread workerThread_;
     Operation operation_{Operation::none};
     QString operationOutput_;
+    // Bounded rolling tail used only for terminal-style espflash progress.
+    // It preserves tokens split across QProcess chunks without duplicating the
+    // operation log or creating another process/parser owner.
+    QString progressOutputTail_;
     QString selectedPort_;
     QString targetChip_{QStringLiteral("Not checked")};
     QString firmwareVersion_{QStringLiteral("-")};
