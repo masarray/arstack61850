@@ -30,6 +30,16 @@ jobs:
           text = p.read_text()
           text = text.replace('#include <array>\n', '#include <algorithm>\n#include <array>\n')
           text = text.replace('#include <string>\n', '#include <string>\n#include <string_view>\n')
+          anchor = '''[[nodiscard]] mms::MmsObjectNameView object_name(\n'''
+          helper = '''[[nodiscard]] wire::EncodeResult read_base_object(\n    const void*,\n    const std::span<std::uint8_t> destination) noexcept {\n    constexpr std::size_t required = 3U;\n    if (destination.size() < required) {\n        return {wire::EncodeStatus::buffer_too_small, 0U, required};\n    }\n    destination[0] = 0x83U;\n    destination[1] = 0x01U;\n    destination[2] = 0x00U;\n    return {wire::EncodeStatus::ok, required, required};\n}\n\n'''
+          if anchor not in text:
+              raise SystemExit('SGCB fixture object_name anchor not found')
+          text = text.replace(anchor, helper + anchor, 1)
+          old = 'mms::MmsStaticObjectEntry{"LD0", "LLN0", root_type, nullptr, nullptr}'
+          new = 'mms::MmsStaticObjectEntry{"LD0", "LLN0", root_type, read_base_object, nullptr}'
+          if old not in text:
+              raise SystemExit('SGCB fixture invalid base entry anchor not found')
+          text = text.replace(old, new, 1)
           p.write_text(text)
           PY
 
