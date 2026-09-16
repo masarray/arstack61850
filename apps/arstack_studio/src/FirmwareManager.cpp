@@ -148,17 +148,34 @@ bool FirmwareManager::supportsEsp32P4Revision(const int major, const int minor) 
 }
 
 int FirmwareManager::parseFlashProgress(const QString& output) {
-    // Keep this parser pure so the firmware contract harness can exercise the
-    // exact production token rules. Stream reassembly lives in
-    // updateProgressFromOutput() and remains bounded.
+    // Keep this parser pure so deterministic fixtures exercise the exact
+    // production token rules. Stream reassembly remains bounded in
+    // updateProgressFromOutput(). espflash has used both percentage output and
+    // indicatif-style "current/total segment ..." progress bars.
     const QString normalized = normalizedTerminalProgress(output);
-    static const QRegularExpression expression{
-        QStringLiteral(R"((?<![\d.])(\d{1,3})\s*%)")};
-    auto matches = expression.globalMatch(normalized);
     int latest = -1;
-    while (matches.hasNext()) {
-        const int value = matches.next().captured(1).toInt();
+
+    static const QRegularExpression percentExpression{
+        QStringLiteral(R"((?<![\d.])(\d{1,3})\s*%)")};
+    auto percentMatches = percentExpression.globalMatch(normalized);
+    while (percentMatches.hasNext()) {
+        const int value = percentMatches.next().captured(1).toInt();
         if (value >= 0 && value <= 100) latest = value;
+    }
+
+    static const QRegularExpression segmentExpression{
+        QStringLiteral(R"((?<!\d)(\d{1,9})\s*/\s*(\d{1,9})\s+segment\b)"),
+        QRegularExpression::CaseInsensitiveOption};
+    auto segmentMatches = segmentExpression.globalMatch(normalized);
+    while (segmentMatches.hasNext()) {
+        const auto match = segmentMatches.next();
+        bool currentOk = false;
+        bool totalOk = false;
+        const qint64 current = match.captured(1).toLongLong(&currentOk);
+        const qint64 total = match.captured(2).toLongLong(&totalOk);
+        if (!currentOk || !totalOk || total <= 0 || current < 0 || current > total) continue;
+        const int value = static_cast<int>((current * 100 + total / 2) / total);
+        latest = std::clamp(value, 0, 100);
     }
     return latest;
 }
@@ -338,7 +355,9 @@ bool FirmwareManager::installFirmware(const QString& portName) {
     }
 
     bootloaderHelpNeeded_ = false;
-    flashProgress_ = 0;
+    // Do not invent 0%. Progress remains unknown until espflash emits real
+    // write telemetry. The UI renders this as an indeterminate write state.
+    flashProgress_ = -1;
     progressOutputTail_.clear();
     busy_ = true;
     cancelRequested_ = false;

@@ -35,6 +35,7 @@ class SmartSessionController : public QObject {
     Q_PROPERTY(bool updateNeedsBootloaderHelp READ updateNeedsBootloaderHelp NOTIFY stateChanged)
     Q_PROPERTY(bool recoveryPending READ recoveryPending NOTIFY stateChanged)
     Q_PROPERTY(int firmwareProgress READ firmwareProgress NOTIFY stateChanged)
+    Q_PROPERTY(QString firmwareUpdateStage READ firmwareUpdateStage NOTIFY stateChanged)
     Q_PROPERTY(QString updateStatus READ updateStatus NOTIFY stateChanged)
     Q_PROPERTY(QString firmwareSetupPort READ firmwareSetupPort NOTIFY stateChanged)
     Q_PROPERTY(QString expectedFirmwareVersion READ expectedFirmwareVersion CONSTANT)
@@ -51,6 +52,17 @@ public:
         firmwareTool,
     };
     Q_ENUM(PortOwner)
+
+    enum class UpdateStage {
+        idle,
+        stopping,
+        releasingPort,
+        probing,
+        flashing,
+        reconnecting,
+        waitingForBootloader,
+    };
+    Q_ENUM(UpdateStage)
 
     explicit SmartSessionController(QObject* parent = nullptr);
     ~SmartSessionController() override;
@@ -80,6 +92,23 @@ public:
     [[nodiscard]] bool updateNeedsBootloaderHelp() const noexcept;
     [[nodiscard]] bool recoveryPending() const noexcept { return recoveryPending_; }
     [[nodiscard]] int firmwareProgress() const noexcept;
+    [[nodiscard]] QString firmwareUpdateStage() const {
+        switch (updateStage_) {
+        case UpdateStage::stopping:
+        case UpdateStage::releasingPort:
+            return QStringLiteral("prepare");
+        case UpdateStage::probing:
+        case UpdateStage::waitingForBootloader:
+            return QStringLiteral("verify");
+        case UpdateStage::flashing:
+            return QStringLiteral("write");
+        case UpdateStage::reconnecting:
+            return QStringLiteral("reconnect");
+        case UpdateStage::idle:
+            return QStringLiteral("idle");
+        }
+        return QStringLiteral("idle");
+    }
     [[nodiscard]] QString updateStatus() const;
     [[nodiscard]] QString firmwareSetupPort() const;
     [[nodiscard]] QString expectedFirmwareVersion() const;

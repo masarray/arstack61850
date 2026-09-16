@@ -31,6 +31,8 @@ public:
             {"same version missing build ID -> READY with update suggestion", sameVersionMissingBuildOffersUpdate()},
             {"same version stale build -> READY with update suggestion", sameVersionStaleBuildOffersUpdate()},
             {"optional bootloader wait -> cancel restores supervisor", optionalBootloaderWaitCanCancel()},
+            {"firmware stage projection -> supervisor-owned", firmwareStageProjectionIsExplicit()},
+            {"fragmented espflash progress -> monotonic", fragmentedEspflashProgressIsMonotonic()},
             {"trusted ESP32-P4 identity timeout -> firmware required", automaticIdentityTimeoutOffersFirmwareRecovery()},
             {"single visible COM without metadata -> firmware required", singleVisibleTimeoutWithoutRecommendationOffersFirmwareRecovery()},
             {"ambiguous identity timeout -> UNIDENTIFIED", ambiguousIdentityTimeoutStaysUnidentified()},

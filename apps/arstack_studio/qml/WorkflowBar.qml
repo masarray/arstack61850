@@ -27,21 +27,18 @@ SurfacePanel {
         smartSession.updatingFirmware || smartSession.updateNeedsBootloaderHelp
     readonly property bool injectionRunning: smartSession.state === "RUNNING"
     readonly property int firmwareStageIndex: {
-        if (smartSession.updateNeedsBootloaderHelp) return 1
-        if (!smartSession.updatingFirmware) return -1
-        if (FirmwareService.busy) {
-            if (!FirmwareService.targetVerified) return 1
-            if (FirmwareService.flashProgress >= 100) return 3
-            if (FirmwareService.flashProgress >= 0) return 2
-            return 1
+        switch (smartSession.firmwareUpdateStage) {
+        case "prepare": return 0
+        case "verify": return 1
+        case "write": return 2
+        case "reconnect": return 3
+        default: return -1
         }
-        return FirmwareService.flashProgress >= 100 ? 4 : 0
     }
     readonly property var firmwareStages: [
         { title: "Prepare session", detail: "Stop output and release the serial port" },
         { title: "Verify board", detail: "Confirm ESP32-P4 ROM identity" },
-        { title: "Write firmware", detail: "Program the verified ARStack image" },
-        { title: "Restart board", detail: "Reset after the flash completes" },
+        { title: "Write & restart", detail: "Program the verified image and reset the board" },
         { title: "Reconnect & verify", detail: "Confirm the new ARStack semantic identity" }
     ]
 
@@ -582,7 +579,7 @@ SurfacePanel {
                     }
                     Item { Layout.fillWidth: true }
                     Label {
-                        text: smartSession.firmwareProgress >= 0 ? smartSession.firmwareProgress + "%" : "Starting…"
+                        text: smartSession.firmwareProgress >= 0 ? smartSession.firmwareProgress + "%" : "Starting write…"
                         color: smartSession.firmwareProgress >= 0 ? ribbon.theme.accent : ribbon.theme.muted
                         font.family: ribbon.monoFont
                         font.pixelSize: 10
@@ -598,13 +595,29 @@ SurfacePanel {
                     color: ribbon.theme.lineSoft
                     clip: true
                     Rectangle {
+                        visible: smartSession.firmwareProgress >= 0
                         height: parent.height
                         radius: parent.radius
                         color: ribbon.theme.accent
-                        width: smartSession.firmwareProgress < 0
-                            ? 0
-                            : parent.width * Math.max(0, Math.min(1, smartSession.firmwareProgress / 100.0))
+                        width: parent.width * Math.max(0, Math.min(1, smartSession.firmwareProgress / 100.0))
                         Behavior on width { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                    }
+                    Rectangle {
+                        id: indeterminateFlash
+                        visible: smartSession.firmwareProgress < 0
+                        height: parent.height
+                        width: Math.max(28, parent.width * 0.24)
+                        radius: parent.radius
+                        color: ribbon.theme.accent
+                        opacity: 0.72
+                        NumberAnimation on x {
+                            running: indeterminateFlash.visible
+                            loops: Animation.Infinite
+                            from: -indeterminateFlash.width
+                            to: flashTrack.width
+                            duration: 900
+                            easing.type: Easing.InOutQuad
+                        }
                     }
                 }
             }
