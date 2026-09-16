@@ -12,6 +12,7 @@
 #include <QGuiApplication>
 #include <QHostAddress>
 #include <QSet>
+#include <QStringList>
 #include <QTcpServer>
 #include <QThread>
 #include <QUrl>
@@ -19,6 +20,10 @@
 #include <functional>
 
 namespace {
+bool isIedScoutIndexedFixture(const QString& sclPath) {
+    return QFileInfo(sclPath).fileName() == QStringLiteral("iedscout-indexed-reports.scd");
+}
+
 bool verifyIndexedRcbManifestExpansion() {
     using ar::iec61850::scl::SclReportControl;
 
@@ -80,14 +85,24 @@ bool verifyIndexedRcbManifestExpansion() {
 bool verifyIedScoutIndexedInventory(
     const QString& sclPath,
     const QVariantList& reportControls) {
-    if (QFileInfo(sclPath).fileName() != QStringLiteral("iedscout-indexed-reports.scd")) {
-        return true;
-    }
+    if (!isIedScoutIndexedFixture(sclPath)) return true;
 
     QSet<QString> references;
+    bool allConcreteInstancesReadable = true;
     for (const auto& value : reportControls) {
-        const auto reference = value.toMap().value(QStringLiteral("reference")).toString();
-        if (!reference.isEmpty()) references.insert(reference);
+        const auto item = value.toMap();
+        const auto reference = item.value(QStringLiteral("reference")).toString();
+        if (reference.isEmpty()) continue;
+        references.insert(reference);
+
+        const bool buffered = item.value(QStringLiteral("buffered")).toBool();
+        const auto expectedReportId = buffered
+            ? QStringLiteral("IEDSCOUT01LD0/LLN0$BR$Buffer")
+            : QStringLiteral("IEDSCOUT01LD0/LLN0$RP$Unbuffer");
+        allConcreteInstancesReadable = allConcreteInstancesReadable &&
+            item.value(QStringLiteral("probeOk")).toBool() &&
+            !item.value(QStringLiteral("dataSet")).toString().isEmpty() &&
+            item.value(QStringLiteral("reportId")).toString() == expectedReportId;
     }
 
     static const QSet<QString> expected{
@@ -95,7 +110,7 @@ bool verifyIedScoutIndexedInventory(
         QStringLiteral("IEDSCOUT01LD0/LLN0.Buffer02"),
         QStringLiteral("IEDSCOUT01LD0/LLN0.Unbuffer01"),
         QStringLiteral("IEDSCOUT01LD0/LLN0.Unbuffer02")};
-    return references == expected;
+    return references == expected && allConcreteInstancesReadable;
 }
 
 bool waitUntil(const std::function<bool()>& predicate, const int timeoutMs) {
@@ -115,17 +130,35 @@ bool loadAsync(IedFleetController& controller, const QString& path) {
     return controller.imported() && controller.fatalError().isEmpty();
 }
 
-int selectEligibleUrcb(MmsReportController& reports) {
+int selectEligibleRcb(
+    MmsReportController& reports,
+    const bool buffered,
+    const QString& exactReference = {}) {
     const auto controls = reports.reportControls();
     for (int row = 0; row < controls.size(); ++row) {
         const auto item = controls.at(row).toMap();
-        if (item.value(QStringLiteral("buffered")).toBool()) continue;
+        if (item.value(QStringLiteral("buffered")).toBool() != buffered) continue;
+        if (!exactReference.isEmpty() &&
+            item.value(QStringLiteral("reference")).toString() != exactReference) {
+            continue;
+        }
         if (!item.value(QStringLiteral("probeOk")).toBool()) continue;
         if (item.value(QStringLiteral("dataSet")).toString().isEmpty()) continue;
         if (!reports.selectRcb(row)) continue;
         if (!reports.selectedDataSetMembers().isEmpty()) return row;
     }
     return -1;
+}
+
+bool reportProjectionPresent(const MmsReportController& reports) {
+    const auto frames = reports.receivedReports();
+    if (frames.isEmpty()) return false;
+    const auto frame = frames.first().toMap();
+    return !frame.value(QStringLiteral("reportId")).toString().isEmpty() &&
+        !frame.value(QStringLiteral("dataSet")).toString().isEmpty() &&
+        !frame.value(QStringLiteral("values")).toStringList().isEmpty() &&
+        frame.contains(QStringLiteral("entryId")) &&
+        frame.contains(QStringLiteral("overflow"));
 }
 } // namespace
 
@@ -154,6 +187,13 @@ int main(int argc, char* argv[]) {
 
     IedFleetController simulator;
     const QString sclPath = QString::fromLocal8Bit(argv[1]);
+    const bool iedScoutFixture = isIedScoutIndexedFixture(sclPath);
+    const QString exactUrcb = iedScoutFixture
+        ? QStringLiteral("IEDSCOUT01LD0/LLN0.Unbuffer01")
+        : QString{};
+    const QString exactBrcb = iedScoutFixture
+        ? QStringLiteral("IEDSCOUT01LD0/LLN0.Buffer01")
+        : QString{};
     if (!loadAsync(simulator, sclPath)) {
         qCritical().noquote() << "REPORTS_WORKBENCH_FAIL import" << simulator.fatalError();
         return 4;
@@ -195,7 +235,12 @@ int main(int argc, char* argv[]) {
     if (!verifyIedScoutIndexedInventory(sclPath, reportControls)) {
         QStringList actual;
         for (const auto& value : reportControls) {
-            actual.push_back(value.toMap().value(QStringLiteral("reference")).toString());
+            const auto item = value.toMap();
+            actual.push_back(
+                item.value(QStringLiteral("reference")).toString() +
+                QStringLiteral("|probe=") +
+                (item.value(QStringLiteral("probeOk")).toBool() ? QStringLiteral("ok") : QStringLiteral("fail")) +
+                QStringLiteral("|rptID=") + item.value(QStringLiteral("reportId")).toString());
         }
         qCritical().noquote() << "REPORTS_WORKBENCH_FAIL iedscout_indexed_inventory"
                               << actual.join(QLatin1Char(','));
@@ -220,7 +265,7 @@ int main(int argc, char* argv[]) {
         return 9;
     }
 
-    const int selected = selectEligibleUrcb(reports);
+    const int selected = selectEligibleRcb(reports, false, exactUrcb);
     if (selected < 0 || reports.selectedDataSetMembers().isEmpty()) {
         qCritical() << "REPORTS_WORKBENCH_FAIL eligible_urcb";
         return 10;
@@ -238,19 +283,9 @@ int main(int argc, char* argv[]) {
         return 12;
     }
     const auto reportCountAfterGi = reports.receivedReportCount();
-    const auto frames = reports.receivedReports();
-    if (frames.isEmpty()) {
+    if (!reportProjectionPresent(reports)) {
         qCritical() << "REPORTS_WORKBENCH_FAIL report_projection";
         return 13;
-    }
-    const auto firstFrame = frames.first().toMap();
-    if (firstFrame.value(QStringLiteral("reportId")).toString().isEmpty() ||
-        firstFrame.value(QStringLiteral("dataSet")).toString().isEmpty() ||
-        firstFrame.value(QStringLiteral("values")).toStringList().isEmpty() ||
-        !firstFrame.contains(QStringLiteral("entryId")) ||
-        !firstFrame.contains(QStringLiteral("overflow"))) {
-        qCritical().noquote() << "REPORTS_WORKBENCH_FAIL report_fields" << firstFrame;
-        return 14;
     }
 
     // The controller uses the association runtime's bounded non-fatal polling
@@ -277,7 +312,7 @@ int main(int argc, char* argv[]) {
         qCritical().noquote() << "REPORTS_WORKBENCH_FAIL active_reconnect" << reports.lastError();
         return 16;
     }
-    if (selectEligibleUrcb(reports) < 0 ||
+    if (selectEligibleRcb(reports, false, exactUrcb) < 0 ||
         !reports.enableSelected(true) ||
         !waitUntil([&reports] { return reports.active() && !reports.busy(); }, 8'000) ||
         !waitUntil([&reports] { return reports.receivedReportCount() > 0; }, 5'000)) {
@@ -292,6 +327,36 @@ int main(int argc, char* argv[]) {
         return 18;
     }
 
+    qulonglong brcbGiReports = 0;
+    if (iedScoutFixture) {
+        if (selectEligibleRcb(reports, true, exactBrcb) < 0 ||
+            reports.selectedDataSetMembers().isEmpty()) {
+            qCritical() << "REPORTS_WORKBENCH_FAIL eligible_brcb";
+            return 22;
+        }
+        if (!reports.enableSelected(true) ||
+            !waitUntil([&reports] { return reports.active() && !reports.busy(); }, 8'000)) {
+            qCritical().noquote() << "REPORTS_WORKBENCH_FAIL brcb_enable_gi" << reports.lastError();
+            return 23;
+        }
+        if (!waitUntil([&reports] { return reports.receivedReportCount() > 0; }, 5'000)) {
+            qCritical().noquote() << "REPORTS_WORKBENCH_FAIL brcb_gi_report"
+                                  << reports.diagnosticsText();
+            return 24;
+        }
+        brcbGiReports = reports.receivedReportCount();
+        if (!reportProjectionPresent(reports)) {
+            qCritical() << "REPORTS_WORKBENCH_FAIL brcb_report_projection";
+            return 25;
+        }
+        if (!reports.disableSelected() ||
+            !waitUntil([&reports] { return !reports.active() && !reports.busy(); }, 6'000) ||
+            reports.cleanupRequired()) {
+            qCritical().noquote() << "REPORTS_WORKBENCH_FAIL brcb_cleanup" << reports.lastError();
+            return 26;
+        }
+    }
+
     reports.disconnectFromIed();
     simulator.stopSimulation();
     if (!waitUntil([&simulator] { return !simulator.anyRunning(); }, 4'000)) {
@@ -299,8 +364,6 @@ int main(int argc, char* argv[]) {
         return 19;
     }
 
-    const bool iedScoutFixture =
-        QFileInfo(sclPath).fileName() == QStringLiteral("iedscout-indexed-reports.scd");
     qInfo().noquote()
         << "REPORTS_WORKBENCH_PASS"
         << "datasets=" + QString::number(dataSets.size())
@@ -308,10 +371,12 @@ int main(int argc, char* argv[]) {
         << "static_candidates=" + QString::number(staticCandidates.size())
         << "dynamic_candidates=" + QString::number(dynamicCandidates.size())
         << "members=" + QString::number(memberCount)
-        << "gi_reports=" + QString::number(reportCountAfterGi)
+        << "urcb_gi_reports=" + QString::number(reportCountAfterGi)
+        << "brcb_gi_reports=" + QString::number(brcbGiReports)
         << "rcb_manifest_instances=pass"
         << QStringLiteral("iedscout_indexed_inventory=%1").arg(iedScoutFixture ? QStringLiteral("pass") : QStringLiteral("n/a"))
         << "urcb=pass"
+        << QStringLiteral("brcb_gi=%1").arg(iedScoutFixture ? QStringLiteral("pass") : QStringLiteral("n/a"))
         << "brcb_inventory=pass"
         << "entryid_indicator=pass"
         << "cleanup=pass"
