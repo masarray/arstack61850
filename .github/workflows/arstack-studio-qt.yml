@@ -34,8 +34,8 @@ jobs:
         shell: powershell
         run: |
           $paths = @(
-            '.\apps\arstack_studio\run-windows.ps1',
-            '.\apps\arstack_studio\packaging\verify-single-instance.ps1'
+            '.\\apps\\arstack_studio\\run-windows.ps1',
+            '.\\apps\\arstack_studio\\packaging\\verify-single-instance.ps1'
           )
           foreach ($candidate in $paths) {
             $path = Resolve-Path $candidate
@@ -83,7 +83,7 @@ jobs:
         timeout-minutes: 1
         shell: powershell
         run: |
-          $exe = Join-Path $PWD 'build-arstack-studio\Release\arstack_session_harness.exe'
+          $exe = Join-Path $PWD 'build-arstack-studio\\Release\\arstack_session_harness.exe'
           $out = Join-Path $env:RUNNER_TEMP 'arstack-session-windows.out.log'
           $err = Join-Path $env:RUNNER_TEMP 'arstack-session-windows.err.log'
           & $exe 1> $out 2> $err
@@ -98,7 +98,7 @@ jobs:
         timeout-minutes: 1
         shell: powershell
         run: |
-          $exe = Join-Path $PWD 'build-arstack-studio\Release\arstack_windows_ownership_harness.exe'
+          $exe = Join-Path $PWD 'build-arstack-studio\\Release\\arstack_windows_ownership_harness.exe'
           $out = Join-Path $env:RUNNER_TEMP 'arstack-windows-ownership.out.log'
           $err = Join-Path $env:RUNNER_TEMP 'arstack-windows-ownership.err.log'
           & $exe 1> $out 2> $err
@@ -130,11 +130,11 @@ jobs:
         shell: bash
         run: |
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            ca-certificates git cmake ninja-build g++ \
-            qt6-base-dev qt6-declarative-dev qt6-serialport-dev \
-            qml6-module-qtquick qml6-module-qtquick-controls \
-            qml6-module-qtquick-layouts qml6-module-qtquick-dialogs \
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \\
+            ca-certificates git cmake ninja-build g++ \\
+            qt6-base-dev qt6-declarative-dev qt6-serialport-dev \\
+            qml6-module-qtquick qml6-module-qtquick-controls \\
+            qml6-module-qtquick-layouts qml6-module-qtquick-dialogs \\
             qml6-module-qtquick-window
 
       - name: Checkout
@@ -145,9 +145,9 @@ jobs:
         run: |
           set -euo pipefail
           qml_root='apps/arstack_studio/qml'
-          device_pattern='([A-Za-z_][A-Za-z0-9_]*\.)*device\.(start|stop|autoDetectAndConnect|connectPort|disconnectPort|refreshPorts|deployProfile|setSignal|setFrequency|setEnabled|setQuality|setCtSaturation|zero|sendPtpShow|sendSmpSynchShow|setPtpRole|setSmpSynchPolicy|configurePtp|startPtp|stopPtp)[[:space:]]*\('
-          firmware_pattern='([A-Za-z_][A-Za-z0-9_]*\.)*(firmware|FirmwareService)\.(probeTarget|installFirmware)[[:space:]]*\('
-          device_meta_pattern='Q_INVOKABLE[[:space:]].*(start|stop|autoDetectAndConnect|connectPort|disconnectPort|refreshPorts|deployProfile|setSignal|setFrequency|setEnabled|setQuality|setCtSaturation|zero|sendPtpShow|sendSmpSynchShow|setPtpRole|setSmpSynchPolicy|configurePtp|startPtp|stopPtp)[[:space:]]*\('
+          device_pattern='([A-Za-z_][A-Za-z0-9_]*\\.)*device\\.(start|stop|autoDetectAndConnect|connectPort|disconnectPort|refreshPorts|deployProfile|setSignal|setFrequency|setEnabled|setQuality|setCtSaturation|zero|sendPtpShow|sendSmpSynchShow|setPtpRole|setSmpSynchPolicy|configurePtp|startPtp|stopPtp)[[:space:]]*\\('
+          firmware_pattern='([A-Za-z_][A-Za-z0-9_]*\\.)*(firmware|FirmwareService)\\.(probeTarget|installFirmware)[[:space:]]*\\('
+          device_meta_pattern='Q_INVOKABLE[[:space:]].*(start|stop|autoDetectAndConnect|connectPort|disconnectPort|refreshPorts|deployProfile|setSignal|setFrequency|setEnabled|setQuality|setCtSaturation|zero|sendPtpShow|sendSmpSynchShow|setPtpRole|setSmpSynchPolicy|configurePtp|startPtp|stopPtp)[[:space:]]*\\('
 
           if grep -R -nE "$device_pattern" "$qml_root" --include='*.qml'; then
             echo 'S7 regression: QML bypasses SmartSessionController with direct DeviceController authority.'
@@ -157,8 +157,8 @@ jobs:
             echo 'S7 regression: QML bypasses SmartSessionController with direct firmware execution.'
             exit 1
           fi
-          if grep -nE "$device_meta_pattern" \
-               apps/arstack_studio/src/DeviceController.hpp \
+          if grep -nE "$device_meta_pattern" \\
+               apps/arstack_studio/src/DeviceController.hpp \\
                apps/arstack_studio/src/StudioDeviceController.hpp; then
             echo 'S7 regression: DeviceController mutation leaked back into the QML meta-object.'
             exit 1
@@ -169,37 +169,37 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          cmake -S apps/arstack_studio -B build-arstack-studio -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
+          cmake -S apps/arstack_studio -B build-arstack-studio -G Ninja \\
+            -DCMAKE_BUILD_TYPE=Release \\
             -DARIEC61850_WARNINGS_AS_ERRORS=ON 2>&1 | tee /tmp/arstack-studio-configure.log
 
       - name: Build
         shell: bash
         run: |
           set -o pipefail
-          cmake --build build-arstack-studio \
-            --target arstack_studio arstack_session_harness --parallel 2 \
+          cmake --build build-arstack-studio \\
+            --target arstack_studio arstack_session_harness --parallel 2 \\
             2>&1 | tee /tmp/arstack-studio-build.log
 
       - name: 4I+4V reference template regression
         shell: bash
         run: |
           set -o pipefail
-          ./build-arstack-studio/arstack_studio --check-reference-template \
+          ./build-arstack-studio/arstack_studio --check-reference-template \\
             2>&1 | tee /tmp/arstack-studio-reference-template.log
 
       - name: Native P0 controller policy regression
         shell: bash
         run: |
           set -o pipefail
-          ./build-arstack-studio/arstack_studio --check-p0-policy \
+          ./build-arstack-studio/arstack_studio --check-p0-policy \\
             2>&1 | tee /tmp/arstack-studio-p0-policy.log
 
       - name: S8 deterministic session regression
         shell: bash
         run: |
           set -o pipefail
-          timeout 20s ./build-arstack-studio/arstack_session_harness \
+          timeout 20s ./build-arstack-studio/arstack_session_harness \\
             2>&1 | tee /tmp/arstack-studio-session-harness.log
 
       - name: Firmware bundle contract regression
@@ -218,6 +218,7 @@ jobs:
             "chip": "esp32p4",
             "chipRevisionPolicy": "pre-v3",
             "version": "0.1.1",
+            "sourceCommit": "0123456789abcdef0123456789abcdef01234567",
             "protocol": 1,
             "capabilities": ["SMV-4I4V", "PROFILE", "LIVE-SETPOINTS", "SESSION-LEASE", "PTP-P2", "SMPSYNCH-AUTO"],
             "flashOffset": 0,
@@ -231,18 +232,29 @@ jobs:
           EOF
           chmod +x "$root/tools/espflash"
 
-          ARSTACK_STUDIO_FIRMWARE_DIR="$root/firmware" \
-          ARSTACK_STUDIO_ESPFLASH="$root/tools/espflash" \
-            ./build-arstack-studio/arstack_studio --check-firmware-contract \
+          ARSTACK_STUDIO_FIRMWARE_DIR="$root/firmware" \\
+          ARSTACK_STUDIO_ESPFLASH="$root/tools/espflash" \\
+            ./build-arstack-studio/arstack_studio --check-firmware-contract \\
             2>&1 | tee /tmp/arstack-studio-firmware-contract.log
 
           cp "$root/firmware/firmware-manifest.json" "$root/firmware/firmware-manifest.valid.json"
 
+          sed -i 's/"sourceCommit": "0123456789abcdef0123456789abcdef01234567"/"sourceCommit": "invalid"/' "$root/firmware/firmware-manifest.json"
+          if ARSTACK_STUDIO_FIRMWARE_DIR="$root/firmware" \\
+             ARSTACK_STUDIO_ESPFLASH="$root/tools/espflash" \\
+             ./build-arstack-studio/arstack_studio --check-firmware-contract \\
+             >> /tmp/arstack-studio-firmware-contract.log 2>&1; then
+            echo 'Invalid firmware provenance was incorrectly accepted.' | tee -a /tmp/arstack-studio-firmware-contract.log
+            exit 1
+          fi
+          echo 'Invalid firmware provenance: correctly blocked' | tee -a /tmp/arstack-studio-firmware-contract.log
+
+          cp "$root/firmware/firmware-manifest.valid.json" "$root/firmware/firmware-manifest.json"
           zeros=0000000000000000000000000000000000000000000000000000000000000000
           sed -i "s/\"sha256\": \"$sha\"/\"sha256\": \"$zeros\"/" "$root/firmware/firmware-manifest.json"
-          if ARSTACK_STUDIO_FIRMWARE_DIR="$root/firmware" \
-             ARSTACK_STUDIO_ESPFLASH="$root/tools/espflash" \
-             ./build-arstack-studio/arstack_studio --check-firmware-contract \
+          if ARSTACK_STUDIO_FIRMWARE_DIR="$root/firmware" \\
+             ARSTACK_STUDIO_ESPFLASH="$root/tools/espflash" \\
+             ./build-arstack-studio/arstack_studio --check-firmware-contract \\
              >> /tmp/arstack-studio-firmware-contract.log 2>&1; then
             echo 'Corrupted firmware hash was incorrectly accepted.' | tee -a /tmp/arstack-studio-firmware-contract.log
             exit 1
@@ -251,9 +263,9 @@ jobs:
 
           cp "$root/firmware/firmware-manifest.valid.json" "$root/firmware/firmware-manifest.json"
           sed -i 's/"chip": "esp32p4"/"chip": "esp32s3"/' "$root/firmware/firmware-manifest.json"
-          if ARSTACK_STUDIO_FIRMWARE_DIR="$root/firmware" \
-             ARSTACK_STUDIO_ESPFLASH="$root/tools/espflash" \
-             ./build-arstack-studio/arstack_studio --check-firmware-contract \
+          if ARSTACK_STUDIO_FIRMWARE_DIR="$root/firmware" \\
+             ARSTACK_STUDIO_ESPFLASH="$root/tools/espflash" \\
+             ./build-arstack-studio/arstack_studio --check-firmware-contract \\
              >> /tmp/arstack-studio-firmware-contract.log 2>&1; then
             echo 'Wrong-chip firmware manifest was incorrectly accepted.' | tee -a /tmp/arstack-studio-firmware-contract.log
             exit 1
@@ -264,15 +276,15 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          timeout 5s env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
-            ./build-arstack-studio/arstack_studio --check-app-lifecycle \
+          timeout 5s env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \\
+            ./build-arstack-studio/arstack_studio --check-app-lifecycle \\
             2>&1 | tee /tmp/arstack-studio-lifecycle.log
 
       - name: Headless QML launch smoke
         shell: bash
         run: |
           set +e
-          timeout 6s env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+          timeout 6s env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \\
             ./build-arstack-studio/arstack_studio > /tmp/arstack-studio-launch.log 2>&1
           status=$?
           set -e
@@ -286,7 +298,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          timeout 6s env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software QT_SCALE_FACTOR=1.75 \
+          timeout 6s env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software QT_SCALE_FACTOR=1.75 \\
             ./build-arstack-studio/arstack_studio > /tmp/arstack-studio-hidpi.log 2>&1
           status=$?
           set -e
