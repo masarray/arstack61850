@@ -238,19 +238,20 @@ void print_identity() noexcept {
     const char* version = app != nullptr ? app->version : "unknown";
 #if CONFIG_AR_PTP_LAB_TX
     const char* capabilities = g_control_lease_timer != nullptr
-        ? "SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO"
-        : "SMV-4I4V,LIVE-SETPOINTS,PTP-P2,SMPSYNCH-AUTO";
+        ? "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO"
+        : "SMV-4I4V,PROFILE,LIVE-SETPOINTS,PTP-P2,SMPSYNCH-AUTO";
 #else
     const char* capabilities = g_control_lease_timer != nullptr
-        ? "SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE"
-        : "SMV-4I4V,LIVE-SETPOINTS";
+        ? "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE"
+        : "SMV-4I4V,PROFILE,LIVE-SETPOINTS";
 #endif
     ESP_LOGI(kTag,
-             "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 device_id=%02X%02X%02X%02X%02X%02X firmware=%s boot_id=%016llX capabilities=%s",
+             "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 device_id=%02X%02X%02X%02X%02X%02X firmware=%s build=%s boot_id=%016llX capabilities=%s",
              static_cast<unsigned>(device_id[0]), static_cast<unsigned>(device_id[1]),
              static_cast<unsigned>(device_id[2]), static_cast<unsigned>(device_id[3]),
              static_cast<unsigned>(device_id[4]), static_cast<unsigned>(device_id[5]),
              version,
+             ARSTACK_FIRMWARE_BUILD_ID,
              static_cast<unsigned long long>(g_boot_id),
              capabilities);
 }

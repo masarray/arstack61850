@@ -25,6 +25,7 @@ class SmartSessionController : public QObject {
     Q_PROPERTY(bool liveControlReady READ liveControlReady NOTIFY stateChanged)
     Q_PROPERTY(bool engineeringEditable READ engineeringEditable NOTIFY stateChanged)
     Q_PROPERTY(bool firmwareUpdateRequired READ firmwareUpdateRequired NOTIFY stateChanged)
+    Q_PROPERTY(bool firmwareReinstallAvailable READ firmwareReinstallAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool firmwareInstallRequired READ firmwareInstallVisible NOTIFY stateChanged)
     Q_PROPERTY(bool firmwareRetryAvailable READ firmwareRetryAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool profileSyncRetryAvailable READ profileSyncRetryAvailable NOTIFY stateChanged)
@@ -35,7 +36,9 @@ class SmartSessionController : public QObject {
     Q_PROPERTY(QString updateStatus READ updateStatus NOTIFY stateChanged)
     Q_PROPERTY(QString firmwareSetupPort READ firmwareSetupPort NOTIFY stateChanged)
     Q_PROPERTY(QString expectedFirmwareVersion READ expectedFirmwareVersion CONSTANT)
+    Q_PROPERTY(QString expectedFirmwareBuildId READ expectedFirmwareBuildId NOTIFY stateChanged)
     Q_PROPERTY(QString deviceFirmwareVersion READ deviceFirmwareVersion NOTIFY stateChanged)
+    Q_PROPERTY(QString deviceFirmwareBuildId READ deviceFirmwareBuildId NOTIFY stateChanged)
     Q_PROPERTY(qulonglong sessionGeneration READ sessionGeneration NOTIFY stateChanged)
     Q_PROPERTY(PortOwner portOwner READ portOwner NOTIFY stateChanged)
 
@@ -62,6 +65,7 @@ public:
     [[nodiscard]] bool liveControlReady() const noexcept;
     [[nodiscard]] bool engineeringEditable() const noexcept;
     [[nodiscard]] bool firmwareUpdateRequired() const noexcept;
+    [[nodiscard]] bool firmwareReinstallAvailable() const noexcept;
     [[nodiscard]] bool firmwareInstallRequired() const noexcept;
     [[nodiscard]] bool firmwareInstallVisible() const noexcept {
         return !recoveryPending_ && firmwareInstallRequired();
@@ -75,7 +79,9 @@ public:
     [[nodiscard]] QString updateStatus() const;
     [[nodiscard]] QString firmwareSetupPort() const;
     [[nodiscard]] QString expectedFirmwareVersion() const;
+    [[nodiscard]] QString expectedFirmwareBuildId() const;
     [[nodiscard]] QString deviceFirmwareVersion() const;
+    [[nodiscard]] QString deviceFirmwareBuildId() const;
     [[nodiscard]] quint64 sessionGeneration() const noexcept { return sessionGeneration_; }
     [[nodiscard]] PortOwner portOwner() const noexcept { return portOwner_; }
 
@@ -158,6 +164,7 @@ public:
     Q_INVOKABLE bool requestStopPtp();
 
     Q_INVOKABLE bool beginFirmwareUpdate();
+    Q_INVOKABLE bool beginFirmwareReinstall();
     Q_INVOKABLE bool beginFirmwareInstall();
     Q_INVOKABLE bool retryFirmwareUpdate();
     Q_INVOKABLE bool retryFirmwareSetup();
@@ -342,6 +349,7 @@ private:
     QString state_{QStringLiteral("WAITING FOR DEVICE")};
     QString statusText_{QStringLiteral("Connect ESP32-P4; ARStack Studio will detect it automatically.")};
     QString deviceFirmwareVersion_;
+    QString deviceFirmwareBuildId_;
     QString updatePort_;
     QString blankBoardPort_;
     QString setupErrorStatus_;

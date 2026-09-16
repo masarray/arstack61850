@@ -148,6 +148,10 @@ bool SmartSessionController::engineeringEditable() const noexcept {
         portOwner_ != PortOwner::firmwareTool && (firmware_ == nullptr || !firmware_->busy());
 }
 bool SmartSessionController::firmwareUpdateRequired() const noexcept { return firmwareUpdateRequired_; }
+bool SmartSessionController::firmwareReinstallAvailable() const noexcept {
+    return device_ != nullptr && firmware_ != nullptr && device_->deviceVerified() &&
+        firmware_->bundleReady() && !firmware_->busy() && !updateRequested_ && firmwareIsCurrent();
+}
 bool SmartSessionController::firmwareInstallRequired() const noexcept {
     return blankBoardDetected_ && !updateRequested_;
 }
@@ -193,7 +197,11 @@ QString SmartSessionController::updateStatus() const {
 }
 QString SmartSessionController::firmwareSetupPort() const { return blankBoardPort_; }
 QString SmartSessionController::expectedFirmwareVersion() const { return QStringLiteral(ARSTACK_STUDIO_VERSION); }
+QString SmartSessionController::expectedFirmwareBuildId() const {
+    return firmware_ != nullptr ? firmware_->firmwareBuildId() : QString{};
+}
 QString SmartSessionController::deviceFirmwareVersion() const { return deviceFirmwareVersion_; }
+QString SmartSessionController::deviceFirmwareBuildId() const { return deviceFirmwareBuildId_; }
 
 quint64 SmartSessionController::advanceSessionGeneration() {
     sessionGeneration_ = nextSessionGeneration(sessionGeneration_);
@@ -425,6 +433,11 @@ bool SmartSessionController::beginFirmwareUpdate() {
     return beginFirmwareOperation(device_->portName());
 }
 
+bool SmartSessionController::beginFirmwareReinstall() {
+    if (!firmwareReinstallAvailable() || device_ == nullptr) return false;
+    return beginFirmwareOperation(device_->portName());
+}
+
 bool SmartSessionController::beginFirmwareInstall() {
     refreshRecoveryOfferFromIdentity();
     if (device_ == nullptr || firmware_ == nullptr || !blankBoardDetected_ ||
@@ -579,6 +592,7 @@ void SmartSessionController::reconnectDeviceSignals() {
             prepareTimer_.start();
         } else {
             deviceFirmwareVersion_.clear();
+            deviceFirmwareBuildId_.clear();
             profileSyncBootId_.clear();
             resetProfileSync(true);
         }
@@ -938,14 +952,15 @@ void SmartSessionController::setPresentation(
 }
 
 void SmartSessionController::refreshFirmwareIdentity() {
-    deviceFirmwareVersion_ =
-        (device_ != nullptr && device_->deviceVerified()) ? device_->firmwareVersion() : QString{};
+    const bool verified = device_ != nullptr && device_->deviceVerified();
+    deviceFirmwareVersion_ = verified ? device_->firmwareVersion() : QString{};
+    deviceFirmwareBuildId_ = verified ? device_->firmwareBuildId() : QString{};
 }
 
 bool SmartSessionController::firmwareIsCurrent() const {
     return device_ != nullptr && device_->deviceVerified() &&
         DeviceController::identitySupportsCurrentContract(
-            device_->deviceIdentity(), expectedFirmwareVersion());
+            device_->deviceIdentity(), expectedFirmwareVersion(), expectedFirmwareBuildId());
 }
 
 bool SmartSessionController::deviceControlAvailable() const noexcept {
@@ -1061,10 +1076,16 @@ void SmartSessionController::reconcile() {
         const QString versionText = deviceFirmwareVersion_.isEmpty()
             ? QStringLiteral("legacy firmware")
             : QStringLiteral("firmware v%1").arg(deviceFirmwareVersion_);
+        const QString observedBuild = deviceFirmwareBuildId_.isEmpty()
+            ? QStringLiteral("legacy/no build ID")
+            : deviceFirmwareBuildId_;
+        const QString packageBuild = expectedFirmwareBuildId().isEmpty()
+            ? QStringLiteral("unknown")
+            : expectedFirmwareBuildId();
         setPresentation(
             QStringLiteral("FIRMWARE UPDATE"),
-            QStringLiteral("%1 detected. ARStack Studio v%2 is ready to update it.")
-                .arg(versionText, expectedFirmwareVersion()),
+            QStringLiteral("%1 build %2 detected. Studio package contains v%3 build %4; update is required before injection.")
+                .arg(versionText, observedBuild, expectedFirmwareVersion(), packageBuild),
             false,
             true);
         return;

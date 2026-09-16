@@ -159,6 +159,7 @@ int checkFirmwareContract(int argc, char* argv[]) {
     const bool valid = firmware.bundleReady() && firmware.flasherAvailable() &&
         firmware.firmwareVersion() == QStringLiteral(ARSTACK_STUDIO_VERSION) &&
         firmware.expectedProtocol() == QStringLiteral("1") &&
+        firmware.firmwareBuildId().size() == 16 &&
         firmware.firmwareSha256().size() == 64 &&
         realEspflashFormat && dashedFormat && rejectsWrongChip && revisionPolicy &&
         flashProgressFormat && recoverySelection && firmwareTimeoutPolicy && firmwareWorkerBoundary;
@@ -193,23 +194,23 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
     DeviceIdentity currentIdentity;
     const QString currentLine = QStringLiteral(
         "I (412) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
-        "device_id=A1B2C3D4E5F6 firmware=%1 boot_id=0123456789ABCDEF "
-        "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO")
+        "device_id=A1B2C3D4E5F6 firmware=%1 build=0123456789abcdef boot_id=0123456789ABCDEF "
+        "capabilities=SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO")
         .arg(QStringLiteral(ARSTACK_STUDIO_VERSION));
     const bool currentParsed = DeviceController::parseIdentityLine(currentLine, currentIdentity);
     const bool currentAccepted = currentParsed &&
         DeviceController::identitySupportsCurrentContract(
-            currentIdentity, QStringLiteral(ARSTACK_STUDIO_VERSION));
+            currentIdentity, QStringLiteral(ARSTACK_STUDIO_VERSION), QStringLiteral("0123456789abcdef"));
 
     DeviceIdentity legacyIdentity;
     const QString legacyLine = QStringLiteral(
         "I (417) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
-        "device_id=A1B2C3D4E5F6 firmware=%1 capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO")
+        "device_id=A1B2C3D4E5F6 firmware=%1 boot_id=0123456789ABCDEF capabilities=SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO")
         .arg(QStringLiteral(ARSTACK_STUDIO_VERSION));
     const bool legacyParsed = DeviceController::parseIdentityLine(legacyLine, legacyIdentity);
     const bool legacyRejectedAsCurrent = legacyParsed &&
         !DeviceController::identitySupportsCurrentContract(
-            legacyIdentity, QStringLiteral(ARSTACK_STUDIO_VERSION));
+            legacyIdentity, QStringLiteral(ARSTACK_STUDIO_VERSION), QStringLiteral("0123456789abcdef"));
 
     DeviceIdentity protocolLegacy;
     const bool protocolLegacyParsed = DeviceController::parseIdentityLine(

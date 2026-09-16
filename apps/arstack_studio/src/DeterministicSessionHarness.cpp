@@ -28,6 +28,8 @@ public:
         const CaseResult cases[] = {
             {"current identity -> READY without recovery", currentIdentityNeverRecovers()},
             {"legacy identity -> firmware update", legacyIdentityOffersUpdate()},
+            {"same version missing build ID -> firmware update", sameVersionMissingBuildOffersUpdate()},
+            {"same version stale build -> firmware update", sameVersionStaleBuildOffersUpdate()},
             {"trusted ESP32-P4 identity timeout -> firmware required", automaticIdentityTimeoutOffersFirmwareRecovery()},
             {"single visible COM without metadata -> firmware required", singleVisibleTimeoutWithoutRecommendationOffersFirmwareRecovery()},
             {"ambiguous identity timeout -> UNIDENTIFIED", ambiguousIdentityTimeoutStaysUnidentified()},
@@ -72,6 +74,9 @@ private:
         bool profileReady{false};
 
         Fixture() {
+            firmware.firmwareVersion_ = QStringLiteral(ARSTACK_STUDIO_VERSION);
+            firmware.firmwareBuildId_ = QStringLiteral("0123456789abcdef");
+            firmware.bundleReady_ = true;
             profileReady = profiles.loadReferenceTemplate();
             session.setProfiles(&profiles);
             session.setFirmware(&firmware);
@@ -95,16 +100,19 @@ private:
     static DeviceIdentity identity(
         const QString& deviceId = QStringLiteral("A1B2C3D4E5F6"),
         const QString& firmware = QStringLiteral(ARSTACK_STUDIO_VERSION),
-        const QString& bootId = QStringLiteral("0123456789ABCDEF")) {
+        const QString& bootId = QStringLiteral("0123456789ABCDEF"),
+        const QString& buildId = QStringLiteral("0123456789abcdef")) {
         DeviceIdentity result;
         result.product = QStringLiteral("SMV-INJECTOR");
         result.target = QStringLiteral("ESP32-P4");
         result.protocolVersion = QStringLiteral("1");
         result.deviceId = deviceId;
         result.firmwareVersion = firmware;
+        result.buildId = buildId;
         result.bootId = bootId;
         result.capabilities = {
             QStringLiteral("SMV-4I4V"),
+            QStringLiteral("PROFILE"),
             QStringLiteral("LIVE-SETPOINTS"),
             QStringLiteral("SESSION-LEASE"),
             QStringLiteral("PTP-P2"),
@@ -249,6 +257,7 @@ private:
         seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
         return fixture.session.state() == QStringLiteral("READY") &&
             fixture.session.startReady() &&
+            fixture.session.firmwareReinstallAvailable() &&
             !fixture.session.firmwareInstallVisible() &&
             !fixture.session.firmwareUpdateRequired();
     }
@@ -263,6 +272,30 @@ private:
             false);
         return fixture.session.state() == QStringLiteral("FIRMWARE UPDATE") &&
             fixture.session.firmwareUpdateRequired() &&
+            !fixture.session.startReady();
+    }
+
+    static bool sameVersionMissingBuildOffersUpdate() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        auto stale = identity();
+        stale.buildId.clear();
+        seedVerified(fixture, stale, QStringLiteral("COM7"), false);
+        return fixture.session.state() == QStringLiteral("FIRMWARE UPDATE") &&
+            fixture.session.firmwareUpdateRequired() &&
+            !fixture.session.firmwareReinstallAvailable() &&
+            !fixture.session.startReady();
+    }
+
+    static bool sameVersionStaleBuildOffersUpdate() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        auto stale = identity();
+        stale.buildId = QStringLiteral("fedcba9876543210");
+        seedVerified(fixture, stale, QStringLiteral("COM7"), false);
+        return fixture.session.state() == QStringLiteral("FIRMWARE UPDATE") &&
+            fixture.session.firmwareUpdateRequired() &&
+            !fixture.session.firmwareReinstallAvailable() &&
             !fixture.session.startReady();
     }
 

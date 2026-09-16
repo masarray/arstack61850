@@ -163,6 +163,7 @@ void FirmwareManager::refreshBundle() {
     if (busy_ || shuttingDown_) return;
     bundleReady_ = false;
     firmwareVersion_ = QStringLiteral("-");
+    firmwareBuildId_.clear();
     expectedProtocol_ = QStringLiteral("-");
     revisionPolicy_.clear();
     firmwareSha256_.clear();
@@ -181,8 +182,8 @@ void FirmwareManager::refreshBundle() {
         return;
     }
     bundleReady_ = true;
-    bundleStatus_ = QStringLiteral("Ready · firmware v%1 · ESP32-P4 pre-v3 · PTP-P2 · SHA-256 verified")
-        .arg(firmwareVersion_);
+    bundleStatus_ = QStringLiteral("Ready · firmware v%1 · build %2 · ESP32-P4 pre-v3 · PTP-P2 · SHA-256 verified")
+        .arg(firmwareVersion_, firmwareBuildId_);
     emit stateChanged();
 }
 
@@ -211,6 +212,8 @@ bool FirmwareManager::loadManifest() {
     const QString expectedHash = normalizedHash(object.value(QStringLiteral("sha256")).toString());
     const int protocol = object.value(QStringLiteral("protocol")).toInt(-1);
     const QString version = object.value(QStringLiteral("version")).toString().trimmed();
+    const QString sourceCommit = object.value(QStringLiteral("sourceCommit")).toString().trimmed().toLower();
+    const QString buildId = sourceCommit.left(16);
     const QString revisionPolicy = object.value(QStringLiteral("chipRevisionPolicy")).toString().trimmed().toLower();
     const qint64 flashOffset = object.value(QStringLiteral("flashOffset")).toVariant().toLongLong();
     const QJsonArray capabilities = object.value(QStringLiteral("capabilities")).toArray();
@@ -230,6 +233,8 @@ bool FirmwareManager::loadManifest() {
 
     if (imageName.isEmpty() || QFileInfo(imageName).fileName() != imageName ||
         expectedHash.size() != 64 || version.isEmpty() || protocol < 1 || flashOffset != 0 ||
+        !QRegularExpression(QStringLiteral("^[0-9a-f]{16}$")).match(buildId).hasMatch() ||
+        !sourceCommit.startsWith(buildId, Qt::CaseInsensitive) ||
         revisionPolicy != QString::fromLatin1(kPreV3Policy) || !productionCapabilities) {
         bundleStatus_ = QStringLiteral("Firmware manifest fields/capabilities are incomplete or unsafe.");
         return false;
@@ -254,6 +259,7 @@ bool FirmwareManager::loadManifest() {
     }
 
     firmwareVersion_ = version;
+    firmwareBuildId_ = buildId;
     expectedProtocol_ = QString::number(protocol);
     revisionPolicy_ = revisionPolicy;
     firmwareSha256_ = actualHash;

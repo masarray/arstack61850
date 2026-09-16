@@ -145,7 +145,7 @@ SurfacePanel {
                     spacing: 1
                     Label {
                         text: panel.firmware.bundleReady
-                            ? "ARStack firmware v" + panel.firmware.firmwareVersion + " is verified in this Studio package"
+                            ? "ARStack firmware v" + panel.firmware.firmwareVersion + " · build " + panel.firmware.firmwareBuildId + " is verified in this Studio package"
                             : "Firmware package is not ready"
                         color: panel.theme.text
                         font.family: panel.uiFont
@@ -273,7 +273,28 @@ SurfacePanel {
                     }
                 }
 
+                CalmButton {
+                    id: firmwareAction
+                    theme: panel.theme
+                    uiFont: panel.uiFont
+                    implicitWidth: 172
+                    text: panel.session && panel.session.firmwareUpdateRequired
+                        ? "Update firmware"
+                        : "Reinstall current"
+                    visible: panel.session &&
+                             (panel.session.firmwareUpdateRequired || panel.session.firmwareReinstallAvailable)
+                    enabled: visible && !panel.firmware.busy
+                    tone: panel.session && panel.session.firmwareUpdateRequired ? "accent" : "normal"
+                    onClicked: {
+                        if (panel.session.firmwareUpdateRequired)
+                            panel.session.beginFirmwareUpdate()
+                        else
+                            panel.session.beginFirmwareReinstall()
+                    }
+                }
+
                 Rectangle {
+                    visible: !firmwareAction.visible
                     implicitWidth: 150
                     implicitHeight: 34
                     radius: 7

@@ -6,6 +6,7 @@
 #include <QStringList>
 #include <QThread>
 
+class DeterministicSessionHarness;
 class FirmwareWorker;
 
 class FirmwareManager : public QObject {
@@ -19,6 +20,7 @@ class FirmwareManager : public QObject {
     Q_PROPERTY(QString selectedPort READ selectedPort NOTIFY stateChanged)
     Q_PROPERTY(QString targetChip READ targetChip NOTIFY stateChanged)
     Q_PROPERTY(QString firmwareVersion READ firmwareVersion NOTIFY stateChanged)
+    Q_PROPERTY(QString firmwareBuildId READ firmwareBuildId NOTIFY stateChanged)
     Q_PROPERTY(QString expectedProtocol READ expectedProtocol NOTIFY stateChanged)
     Q_PROPERTY(QString firmwareSha256 READ firmwareSha256 NOTIFY stateChanged)
     Q_PROPERTY(QString status READ status NOTIFY stateChanged)
@@ -38,6 +40,7 @@ public:
     [[nodiscard]] QString selectedPort() const { return selectedPort_; }
     [[nodiscard]] QString targetChip() const { return targetChip_; }
     [[nodiscard]] QString firmwareVersion() const { return firmwareVersion_; }
+    [[nodiscard]] QString firmwareBuildId() const { return firmwareBuildId_; }
     [[nodiscard]] QString expectedProtocol() const { return expectedProtocol_; }
     [[nodiscard]] QString firmwareSha256() const { return firmwareSha256_; }
     [[nodiscard]] QString status() const { return status_; }
@@ -84,6 +87,7 @@ signals:
     void operationFailed(const QString& message, bool bootloaderHelpNeeded);
 
 private:
+    friend class DeterministicSessionHarness;
     enum class Operation { none, probe, flash, reset };
 
     [[nodiscard]] QString bundleRoot() const;
@@ -109,6 +113,7 @@ private:
     QString selectedPort_;
     QString targetChip_{QStringLiteral("Not checked")};
     QString firmwareVersion_{QStringLiteral("-")};
+    QString firmwareBuildId_;
     QString expectedProtocol_{QStringLiteral("-")};
     QString revisionPolicy_;
     QString firmwareSha256_;

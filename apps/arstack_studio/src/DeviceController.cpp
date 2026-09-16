@@ -36,6 +36,7 @@ const QRegularExpression kIdentityExpression{
     QStringLiteral(
         "ARSTACK identity product=([A-Z0-9_-]+) target=([A-Z0-9_-]+) protocol=(\\d+) "
         "device_id=([A-Fa-f0-9]{12}) firmware=([0-9A-Za-z._+\\-]+) "
+        "(?:build=([A-Fa-f0-9]{16}) )?"
         "(?:boot_id=([A-Fa-f0-9]{16}) )?capabilities=([A-Z0-9_,.\\-]+)"),
     QRegularExpression::CaseInsensitiveOption};
 const QRegularExpression kPtpStatusExpression{
@@ -323,6 +324,7 @@ QString DeviceController::deviceTarget() const { return identity_.target; }
 QString DeviceController::deviceId() const { return identity_.deviceId; }
 QString DeviceController::protocolVersion() const { return identity_.protocolVersion; }
 QString DeviceController::firmwareVersion() const { return identity_.firmwareVersion; }
+QString DeviceController::firmwareBuildId() const { return identity_.buildId; }
 QString DeviceController::bootId() const { return identity_.bootId; }
 QStringList DeviceController::capabilities() const { return identity_.capabilities; }
 DeviceIdentity DeviceController::deviceIdentity() const { return identity_; }
@@ -365,8 +367,9 @@ bool DeviceController::parseIdentityLine(const QString& line, DeviceIdentity& id
     parsed.protocolVersion = match.captured(3);
     parsed.deviceId = match.captured(4).toUpper();
     parsed.firmwareVersion = match.captured(5);
-    parsed.bootId = match.captured(6).toUpper();
-    parsed.capabilities = match.captured(7).split(QLatin1Char(','), Qt::SkipEmptyParts);
+    parsed.buildId = match.captured(6).toLower();
+    parsed.bootId = match.captured(7).toUpper();
+    parsed.capabilities = match.captured(8).split(QLatin1Char(','), Qt::SkipEmptyParts);
     for (QString& capability : parsed.capabilities) capability = capability.trimmed().toUpper();
     parsed.capabilities.removeDuplicates();
 
@@ -383,17 +386,21 @@ bool DeviceController::parseIdentityLine(const QString& line, DeviceIdentity& id
 
 bool DeviceController::identitySupportsCurrentContract(
     const DeviceIdentity& identity,
-    const QString& expectedFirmwareVersion) {
+    const QString& expectedFirmwareVersion,
+    const QString& expectedBuildId) {
     static const QStringList requiredCapabilities{
         QStringLiteral("SMV-4I4V"),
+        QStringLiteral("PROFILE"),
         QStringLiteral("LIVE-SETPOINTS"),
         QStringLiteral("SESSION-LEASE"),
         QStringLiteral("PTP-P2"),
         QStringLiteral("SMPSYNCH-AUTO")};
+    const QString wantedBuild = expectedBuildId.trimmed().toLower();
     if (identity.product != QStringLiteral("SMV-INJECTOR") ||
         identity.target != QStringLiteral("ESP32-P4") ||
         identity.protocolVersion != QStringLiteral("1") ||
         identity.firmwareVersion != expectedFirmwareVersion ||
+        (!wantedBuild.isEmpty() && identity.buildId.compare(wantedBuild, Qt::CaseInsensitive) != 0) ||
         identity.bootId.size() != 16) {
         return false;
     }
