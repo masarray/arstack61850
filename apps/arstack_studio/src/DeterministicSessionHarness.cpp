@@ -329,6 +329,48 @@ private:
             !session.setupError_;
     }
 
+    static bool firmwareStageProjectionIsExplicit() {
+        Fixture fixture;
+        auto& session = fixture.session;
+        session.updateStage_ = SmartSessionController::UpdateStage::idle;
+        const bool idle = session.firmwareUpdateStage() == QStringLiteral("idle");
+        session.updateStage_ = SmartSessionController::UpdateStage::stopping;
+        const bool stopping = session.firmwareUpdateStage() == QStringLiteral("prepare");
+        session.updateStage_ = SmartSessionController::UpdateStage::releasingPort;
+        const bool releasing = session.firmwareUpdateStage() == QStringLiteral("prepare");
+        session.updateStage_ = SmartSessionController::UpdateStage::probing;
+        const bool probing = session.firmwareUpdateStage() == QStringLiteral("verify");
+        session.updateStage_ = SmartSessionController::UpdateStage::flashing;
+        const bool flashing = session.firmwareUpdateStage() == QStringLiteral("write");
+        session.updateStage_ = SmartSessionController::UpdateStage::reconnecting;
+        const bool reconnecting = session.firmwareUpdateStage() == QStringLiteral("reconnect");
+        session.updateStage_ = SmartSessionController::UpdateStage::waitingForBootloader;
+        const bool bootloader = session.firmwareUpdateStage() == QStringLiteral("verify");
+        return idle && stopping && releasing && probing && flashing && reconnecting && bootloader;
+    }
+
+    static bool fragmentedEspflashProgressIsMonotonic() {
+        Fixture fixture;
+        auto& firmware = fixture.firmware;
+        firmware.operation_ = FirmwareManager::Operation::flash;
+        firmware.flashProgress_ = -1;
+        firmware.progressOutputTail_.clear();
+
+        firmware.updateProgressFromOutput(QString::fromLatin1("\x1B[2K\r[00:00:01] [================] 4"));
+        const bool remainsUnknown = firmware.flashProgress_ == -1;
+        firmware.updateProgressFromOutput(QStringLiteral("2/100 segment 0x0\r"));
+        const bool reconstructsSplitCounter = firmware.flashProgress_ == 42;
+        firmware.updateProgressFromOutput(QStringLiteral("[00:00:02] [========] 21/100 segment 0x0\r"));
+        const bool neverMovesBackward = firmware.flashProgress_ == 42;
+        firmware.updateProgressFromOutput(QStringLiteral("[00:00:03] [========================================] 100/100 segment 0x0\r"));
+        const bool reachesCompletion = firmware.flashProgress_ == 100;
+
+        return remainsUnknown && reconstructsSplitCounter && neverMovesBackward && reachesCompletion &&
+            FirmwareManager::parseFlashProgress(QStringLiteral("Writing 64%\r")) == 64 &&
+            FirmwareManager::parseFlashProgress(QStringLiteral("[00:00:02] [================] 17/20 segment 0x10000")) == 85 &&
+            FirmwareManager::parseFlashProgress(QStringLiteral("21/0 segment 0x0")) == -1;
+    }
+
     static bool automaticIdentityTimeoutOffersFirmwareRecovery() {
         Fixture fixture;
         if (!fixture.profileReady || !seedIdentityTimeout(fixture, false)) return false;
