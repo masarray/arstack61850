@@ -20,7 +20,6 @@ concurrency:
 jobs:
   repair-source:
     name: Apply one-shot P0 firmware build identity repair
-    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/ptp-production-v0.1.1'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -30,7 +29,14 @@ jobs:
           ref: feature/ptp-production-v0.1.1
           fetch-depth: 0
       - name: Apply P0 repair
-        run: python3 .github/scripts/p0_firmware_build_identity_repair.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -q 'firmwareBuildId' apps/arstack_studio/src/DeviceController.hpp; then
+            echo 'P0 build identity repair already applied; no-op.'
+            exit 0
+          fi
+          python3 .github/scripts/p0_firmware_build_identity_repair.py
       - name: Verify repair invariants
         shell: bash
         run: |
