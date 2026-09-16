@@ -18,9 +18,9 @@ jobs:
         with:
           ref: feature/ptp-production-v0.1.1
           fetch-depth: 0
-      - name: Apply repair
-        run: python3 .github/scripts/p0_smv_final_repair.py
-      - name: Validate repair
+      - name: Apply source repair
+        run: python3 .github/scripts/p0_smv_source_repair.py
+      - name: Validate source repair
         run: |
           set -euo pipefail
           git diff --check
