@@ -26,19 +26,15 @@ jobs:
           git diff --check
           grep -n 'kTransportFailureStopThreshold\|live_control_force_stop\|SV transport fault' embedded/esp32p4_smv_injector/main/app_main.cpp
           grep -n 'disable_hardware_ptp\|cleanup timeout' embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp embedded/esp32p4_smv_injector/main/ptp_receiver_task.cpp
-      - name: Commit repair
+      - name: Commit source repair
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm .github/workflows/p0-smv-final-repair.yml .github/scripts/p0_smv_final_repair.py
           git add embedded/esp32p4_smv_injector/main/app_main.cpp
           git add embedded/esp32p4_smv_injector/main/live_control.cpp
           git add embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp
           git add embedded/esp32p4_smv_injector/main/ptp_receiver_task.cpp
-          git add .github/workflows/arstack-studio-qt.yml
-          git add .github/workflows/esp32p4-ptp-lab.yml
-          git add .github/workflows/esp32p4-smv-injector.yml
           git diff --cached --check
           git commit -m 'fix(p0): fail closed SMV transport and restore shared EMAC state'
           git push origin HEAD:feature/ptp-production-v0.1.1
