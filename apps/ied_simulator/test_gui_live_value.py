@@ -74,6 +74,50 @@ def run_probe(read_probe: str, port: int, item: str) -> subprocess.CompletedProc
     )
 
 
+
+
+def measure_same_association_read_latency(
+    read_probe: str,
+    port: int,
+    item: str,
+    count: int = 100,
+) -> tuple[float, float]:
+    """Measure a bounded burst on one established MMS association."""
+    started = time.monotonic()
+    result = subprocess.run(
+        probe_command(read_probe, port, item)
+        + [
+            "--count",
+            str(count),
+            "--delay-ms",
+            "1",
+            "--timeout-ms",
+            "3000",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=6,
+        check=False,
+        creationflags=creation_flags(),
+    )
+    elapsed = time.monotonic() - started
+    observed = result.stdout.count("MMS_READ index=")
+    if result.returncode != 0 or observed != count:
+        raise RuntimeError(
+            "same-association read latency burst failed: "
+            f"exit={result.returncode} reads={observed}/{count} "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+    # This is deliberately a generous CI guard, not a real-time claim. It catches
+    # pathological multi-second request/response latency while tolerating shared
+    # runner scheduling and process startup variance.
+    if elapsed >= 2.5:
+        raise RuntimeError(
+            f"same-association 100-read burst exceeded latency budget: {elapsed:.3f}s"
+        )
+    return elapsed, (elapsed * 1000.0 / count)
+
+
 def run_urcb_gi_probe(urcb_probe: str, port: int) -> str:
     result = subprocess.run(
         [
@@ -566,6 +610,7 @@ def main() -> int:
     port = free_port()
     environment = dict(os.environ)
     environment["QT_QPA_PLATFORM"] = "offscreen"
+    environment["ARSTACK_IEDSIM_TRACE_SERVER"] = "1"
     with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as app_log:
         app = subprocess.Popen(
             [
@@ -690,6 +735,11 @@ def main() -> int:
                 port,
                 "TCTR1$MX$Amp$instMag$i",
             )
+            read_burst_seconds, read_burst_average_ms = measure_same_association_read_latency(
+                read_probe,
+                port,
+                "TCTR1$MX$Amp$instMag$i",
+            )
             urcb_output = run_urcb_gi_probe(urcb_probe, port)
             brcb_output = run_brcb_event_probe(
                 brcb_probe,
@@ -721,12 +771,17 @@ def main() -> int:
             app_output = app_log.read()
             if "IEDSIM_LIVE_ACK generation=" not in app_output:
                 raise RuntimeError("GUI edit was not acknowledged by the live runtime data plane")
+            if "tcp_nodelay=true" not in app_output:
+                raise RuntimeError("accepted MMS sockets did not prove TCP_NODELAY enabled")
             print(
                 "IEDSIM_GUI_LIVE_VALUE_PASS "
                 "hot_delta=acknowledged manifest_hot_rewrites=0 "
                 "edited=MU01LD0/TCTR1$MX$Amp$instMag$i:42 "
                 "structural=MU01LD0/TCTR1$MX$AmpUnmapped$instMag$i:0 "
                 f"concurrent_association_seconds={concurrent_seconds:.3f} "
+                f"read_burst_100_seconds={read_burst_seconds:.3f} "
+                f"read_burst_average_ms={read_burst_average_ms:.3f} "
+                "tcp_nodelay=pass "
                 "control_direct_normal=pass "
                 "control_sbo_normal=pass "
                 "control_direct_enhanced=pass "

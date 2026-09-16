@@ -57,6 +57,7 @@
 #include <arpa/inet.h>
 #include <cerrno>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -126,6 +127,42 @@ void close_socket(const NativeSocket socket) noexcept {
 #else
     return errno == EINTR;
 #endif
+}
+
+[[nodiscard]] bool configure_low_latency_socket(const NativeSocket socket) noexcept {
+    int enabled = 1;
+#if defined(_WIN32)
+    if (::setsockopt(
+            socket,
+            IPPROTO_TCP,
+            TCP_NODELAY,
+            reinterpret_cast<const char*>(&enabled),
+            static_cast<int>(sizeof(enabled))) != 0) {
+        return false;
+    }
+    int observed = 0;
+    int observed_size = static_cast<int>(sizeof(observed));
+    if (::getsockopt(
+            socket,
+            IPPROTO_TCP,
+            TCP_NODELAY,
+            reinterpret_cast<char*>(&observed),
+            &observed_size) != 0) {
+        return false;
+    }
+#else
+    if (::setsockopt(
+            socket, IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled)) != 0) {
+        return false;
+    }
+    int observed = 0;
+    socklen_t observed_size = static_cast<socklen_t>(sizeof(observed));
+    if (::getsockopt(
+            socket, IPPROTO_TCP, TCP_NODELAY, &observed, &observed_size) != 0) {
+        return false;
+    }
+#endif
+    return observed != 0;
 }
 
 [[nodiscard]] SocketWaitStatus wait_socket(
@@ -2661,12 +2698,25 @@ int main(int argc, char** argv) {
                 continue;
             }
 
+            // IEC 61850 MMS uses small request/response APDUs where Nagle can
+            // add avoidable latency when paired with delayed ACK behavior. This
+            // is a host-socket concern only; protocol timeouts/retries remain
+            // unchanged. Verify the option after setting it so integration tests
+            // prove the accepted connection actually runs in low-latency mode.
+            const bool tcp_nodelay = configure_low_latency_socket(client);
+            if (!tcp_nodelay) {
+                std::osyncstream{std::cerr}
+                    << "IEDSIM_EVENT kind=socket_option_warning option=tcp_nodelay"
+                    << " error=" << socket_error_text() << '\n';
+            }
+
             ++connection_count;
             const auto association_id = static_cast<std::uint64_t>(connection_count);
             const auto remote = peer_address(peer);
             std::osyncstream{std::cout}
                 << "IEDSIM_EVENT kind=client_connected association="
-                << association_id << " remote=" << remote << '\n';
+                << association_id << " remote=" << remote
+                << " tcp_nodelay=" << (tcp_nodelay ? "true" : "false") << '\n';
 
             worker->done = std::make_shared<std::atomic_bool>(false);
             const auto done = worker->done;
