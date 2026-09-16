@@ -5,6 +5,8 @@ on:
     branches:
       - feat/ied-sim-ux-performance-foundation
     paths:
+      - 'apps/ied_simulator/test_iedscout_golden_synthetic.py'
+      - 'tests/fixtures/scl/iedscout-golden-synthetic.cid'
       - '.github/workflows/zz-iedscout-golden-synthetic.yml'
 
 permissions:
