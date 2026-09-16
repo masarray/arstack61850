@@ -36,6 +36,21 @@ jobs:
             echo 'P0 build identity repair already applied; no-op.'
             exit 0
           fi
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.github/scripts/p0_firmware_build_identity_repair.py')
+          text = p.read_text(encoding='utf-8')
+          old = '''if(NOT ARSTACK_FIRMWARE_BUILD_ID MATCHES "^[0-9a-f]{16}$")
+    message(FATAL_ERROR "ARSTACK_FIRMWARE_BUILD_ID must be exactly 16 hexadecimal characters")
+endif()'''
+          new = '''string(LENGTH "${ARSTACK_FIRMWARE_BUILD_ID}" ARSTACK_FIRMWARE_BUILD_ID_LENGTH)
+if(NOT ARSTACK_FIRMWARE_BUILD_ID_LENGTH EQUAL 16 OR NOT ARSTACK_FIRMWARE_BUILD_ID MATCHES "^[0-9a-f]+$")
+    message(FATAL_ERROR "ARSTACK_FIRMWARE_BUILD_ID must be exactly 16 hexadecimal characters")
+endif()'''
+          if old not in text:
+              raise SystemExit('repair-script CMake validation block not found')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
           python3 .github/scripts/p0_firmware_build_identity_repair.py
       - name: Verify repair invariants
         shell: bash
