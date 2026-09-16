@@ -1,0 +1,35 @@
+name: P0 Ribbon Phase 1 Apply
+
+on:
+  push:
+    branches:
+      - feature/ptp-production-v0.1.1
+    paths:
+      - '.github/workflows/p0-ribbon-phase1.yml'
+      - '.github/scripts/p0_ribbon_phase1.py'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/ptp-production-v0.1.1
+          fetch-depth: 0
+      - name: Apply phase 1 ribbon patch
+        run: python .github/scripts/p0_ribbon_phase1.py
+      - name: Commit source changes
+        run: |
+          if git diff --quiet; then
+            echo 'Phase 1 patch already present.'
+            exit 0
+          fi
+          git config user.name 'ARStack CI Repair'
+          git config user.email 'actions@users.noreply.github.com'
+          git add apps/arstack_studio
+          git commit -m 'ui: adopt modern tabbed ribbon and compact instrument shell'
+          git push origin HEAD:feature/ptp-production-v0.1.1
