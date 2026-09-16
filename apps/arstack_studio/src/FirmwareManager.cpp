@@ -29,11 +29,25 @@ constexpr auto kExpectedChip = "esp32p4";
 constexpr auto kPreV3Policy = "pre-v3";
 constexpr qsizetype kMaxOperationOutput = 65536;
 constexpr qsizetype kTrimmedOperationOutput = 49152;
+constexpr qsizetype kMaxProgressOutputTail = 2048;
+constexpr qsizetype kTrimmedProgressOutputTail = 1024;
 
 QString normalizedHash(const QString& text) {
     QString hash = text.trimmed().toLower();
     hash.remove(QLatin1Char(' '));
     return hash;
+}
+
+QString normalizedTerminalProgress(QString text) {
+    // espflash renders progress as terminal output. QProcess can deliver ANSI
+    // control sequences, carriage-return rewrites and arbitrary chunk splits.
+    // Strip presentation controls here; the full operation log remains intact.
+    static const QRegularExpression ansiCsi{
+        QStringLiteral(R"(\x1B\[[0-?]*[ -/]*[@-~])")};
+    text.remove(ansiCsi);
+    text.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+    text.remove(QLatin1Char('\b'));
+    return text;
 }
 } // namespace
 
@@ -106,6 +120,7 @@ void FirmwareManager::connectWorkerSignals() {
         cancelRequested_ = false;
         busy_ = false;
         flashProgress_ = -1;
+        progressOutputTail_.clear();
         setStatus(QStringLiteral("Firmware operation cancelled."));
         emit stateChanged();
         if (cancelledOperation == Operation::reset) emit installationFinished(false);
@@ -133,8 +148,13 @@ bool FirmwareManager::supportsEsp32P4Revision(const int major, const int minor) 
 }
 
 int FirmwareManager::parseFlashProgress(const QString& output) {
-    static const QRegularExpression expression{QStringLiteral(R"((\d{1,3})\s*%)")};
-    auto matches = expression.globalMatch(output);
+    // Keep this parser pure so the firmware contract harness can exercise the
+    // exact production token rules. Stream reassembly lives in
+    // updateProgressFromOutput() and remains bounded.
+    const QString normalized = normalizedTerminalProgress(output);
+    static const QRegularExpression expression{
+        QStringLiteral(R"((?<![\d.])(\d{1,3})\s*%)")};
+    auto matches = expression.globalMatch(normalized);
     int latest = -1;
     while (matches.hasNext()) {
         const int value = matches.next().captured(1).toInt();
@@ -169,6 +189,7 @@ void FirmwareManager::refreshBundle() {
     firmwareSha256_.clear();
     firmwareImagePath_.clear();
     flashProgress_ = -1;
+    progressOutputTail_.clear();
 
     const QFileInfo flasherInfo{flasherPath()};
     flasherAvailable_ = flasherInfo.exists() && flasherInfo.isFile() && flasherInfo.isExecutable();
@@ -288,6 +309,7 @@ bool FirmwareManager::probeTarget(const QString& portName) {
     targetVerified_ = false;
     bootloaderHelpNeeded_ = false;
     flashProgress_ = -1;
+    progressOutputTail_.clear();
     targetChip_ = QStringLiteral("Checking %1...").arg(port);
     busy_ = true;
     cancelRequested_ = false;
@@ -317,6 +339,7 @@ bool FirmwareManager::installFirmware(const QString& portName) {
 
     bootloaderHelpNeeded_ = false;
     flashProgress_ = 0;
+    progressOutputTail_.clear();
     busy_ = true;
     cancelRequested_ = false;
     setStatus(QStringLiteral("Installing ARStack firmware v%1 on %2...").arg(firmwareVersion_, port));
@@ -349,6 +372,7 @@ bool FirmwareManager::shutdown() {
     activeOperationGeneration_ = 0;
     busy_ = false;
     cancelRequested_ = true;
+    progressOutputTail_.clear();
 
     if (worker_ == nullptr || !workerThread_.isRunning()) {
         worker_ = nullptr;
@@ -410,7 +434,7 @@ void FirmwareManager::clearLog() {
 
 bool FirmwareManager::startEspflash(const QStringList& arguments, const Operation operation) {
     if (shuttingDown_ || worker_ == nullptr || !workerThread_.isRunning() ||
-        !workerReady_ || !workerAffinityValid_ || sessionGeneration_ == 0) {
+        !workerReady_ || !workerAffinityValid() || sessionGeneration_ == 0) {
         fail(QStringLiteral("Firmware worker is unavailable or not affinity-safe."));
         busy_ = false;
         return false;
@@ -419,6 +443,7 @@ bool FirmwareManager::startEspflash(const QStringList& arguments, const Operatio
     operation_ = operation;
     activeOperationGeneration_ = sessionGeneration_;
     operationOutput_.clear();
+    if (operation == Operation::flash) progressOutputTail_.clear();
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("ESPFLASH_PORT"), selectedPort_);
     environment.insert(QStringLiteral("ESPFLASH_SKIP_UPDATE_CHECK"), QStringLiteral("true"));
@@ -463,6 +488,7 @@ void FirmwareManager::handleOperationRejected(const QString& message) {
     activeOperationGeneration_ = 0;
     busy_ = false;
     flashProgress_ = -1;
+    progressOutputTail_.clear();
     cancelRequested_ = false;
 
     if (rejected == Operation::reset) {
@@ -485,6 +511,7 @@ void FirmwareManager::handleLaunchFailure(const QString& message, const bool tim
     activeOperationGeneration_ = 0;
     busy_ = false;
     flashProgress_ = -1;
+    progressOutputTail_.clear();
     cancelRequested_ = false;
 
     if (failedOperation == Operation::reset) {
@@ -511,6 +538,7 @@ void FirmwareManager::handleOperationTimeout() {
     activeOperationGeneration_ = 0;
     busy_ = false;
     flashProgress_ = -1;
+    progressOutputTail_.clear();
     cancelRequested_ = false;
 
     if (timedOut == Operation::reset) {
@@ -541,6 +569,7 @@ void FirmwareManager::finishOperation(const int exitCode, const bool normalExit)
         cancelRequested_ = false;
         busy_ = false;
         flashProgress_ = -1;
+        progressOutputTail_.clear();
         setStatus(QStringLiteral("Firmware operation cancelled."));
         emit stateChanged();
         if (completed == Operation::reset) emit installationFinished(false);
@@ -592,6 +621,7 @@ void FirmwareManager::finishOperation(const int exitCode, const bool normalExit)
         if (!success) {
             busy_ = false;
             flashProgress_ = -1;
+            progressOutputTail_.clear();
             bootloaderHelpNeeded_ = true;
             fail(QStringLiteral("Firmware installation failed. Put the board in Download mode and retry. The device is not considered ready."));
             emit stateChanged();
@@ -616,6 +646,7 @@ void FirmwareManager::finishOperation(const int exitCode, const bool normalExit)
 
     if (completed == Operation::reset) {
         busy_ = false;
+        progressOutputTail_.clear();
         if (success) {
             targetVerified_ = false;
             bootloaderHelpNeeded_ = false;
@@ -632,8 +663,19 @@ void FirmwareManager::finishOperation(const int exitCode, const bool normalExit)
 
 void FirmwareManager::updateProgressFromOutput(const QString& text) {
     if (operation_ != Operation::flash || text.isEmpty()) return;
-    const int latest = parseFlashProgress(text);
-    if (latest < 0 || flashProgress_ == latest) return;
+
+    // QProcess signal boundaries are not protocol boundaries. Preserve a small
+    // rolling suffix so tokens such as "6" + "4%" are reconstructed without
+    // allowing terminal output to grow an unbounded presentation buffer.
+    progressOutputTail_ += text;
+    if (progressOutputTail_.size() > kMaxProgressOutputTail) {
+        progressOutputTail_ = progressOutputTail_.right(kTrimmedProgressOutputTail);
+    }
+
+    const int latest = parseFlashProgress(progressOutputTail_);
+    // espflash can repaint older terminal lines; operator progress must never
+    // move backwards. Completion still owns the authoritative 100% transition.
+    if (latest < 0 || latest <= flashProgress_) return;
     flashProgress_ = std::clamp(latest, 0, 100);
     emit stateChanged();
 }
