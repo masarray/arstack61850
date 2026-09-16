@@ -14,6 +14,7 @@ on:
       - 'tools/mms_read_probe.cpp'
       - 'tools/mms_urcb_gi_probe.cpp'
       - 'tools/mms_brcb_event_probe.cpp'
+      - 'tools/mms_sgcb_probe.cpp'
       - 'tools/static_ied_server_iedsim/**'
       - 'tests/fixtures/scl/**'
       - 'CMakeLists.txt'
@@ -31,6 +32,7 @@ on:
       - 'tools/mms_read_probe.cpp'
       - 'tools/mms_urcb_gi_probe.cpp'
       - 'tools/mms_brcb_event_probe.cpp'
+      - 'tools/mms_sgcb_probe.cpp'
       - 'tools/static_ied_server_iedsim/**'
       - 'tests/fixtures/scl/**'
       - 'CMakeLists.txt'
@@ -59,7 +61,7 @@ jobs:
       - name: Build
         run: >-
           cmake --build build-ied-simulator-qt
-          --target arstack_ied_simulator ariec61850_mms_read_probe ied_simulator_guardrails_qa ied_simulator_responsiveness_qa ied_simulator_commissioning_qa ied_simulator_runtime_commissioning_qa ied_simulator_goose_publication_qa ied_goose_workspace_qa ied_mms_client_workbench_qa ied_report_workspace_qa ied_file_settings_workspace_qa ied_scl_workspace_qa ied_product_hardening_qa --parallel 2
+          --target arstack_ied_simulator ariec61850_mms_read_probe ariec61850_mms_sgcb_probe ied_setting_control_manifest_qa ied_simulator_guardrails_qa ied_simulator_responsiveness_qa ied_simulator_commissioning_qa ied_simulator_runtime_commissioning_qa ied_simulator_goose_publication_qa ied_goose_workspace_qa ied_mms_client_workbench_qa ied_report_workspace_qa ied_file_settings_workspace_qa ied_scl_workspace_qa ied_product_hardening_qa --parallel 2
 
       - name: Bounded activity and child-output guardrails
         run: ./build-ied-simulator-qt/ied_simulator_guardrails_qa
@@ -94,6 +96,15 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: ./build-ied-simulator-qt/ied_file_settings_workspace_qa
+
+      - name: Canonical SettingControl manifest projection gate
+        run: ./build-ied-simulator-qt/ied_setting_control_manifest_qa
+
+      - name: Production SGCB discovery and ActSG cross-association gate
+        run: >-
+          python3 apps/ied_simulator/test_sgcb_production.py
+          --server ./build-ied-simulator-qt/ariec61850_ied_simulator_server
+          --build-dir ./build-ied-simulator-qt
 
       - name: SCL workspace preservation + conversion-policy gates
         env:
