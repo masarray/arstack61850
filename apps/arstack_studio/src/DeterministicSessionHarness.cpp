@@ -28,7 +28,8 @@ public:
         const CaseResult cases[] = {
             {"current identity -> READY without recovery", currentIdentityNeverRecovers()},
             {"legacy identity -> firmware update", legacyIdentityOffersUpdate()},
-            {"auto identity timeout -> UNIDENTIFIED", automaticIdentityTimeoutStaysUnidentified()},
+            {"trusted ESP32-P4 identity timeout -> firmware required", automaticIdentityTimeoutOffersFirmwareRecovery()},
+            {"ambiguous identity timeout -> UNIDENTIFIED", ambiguousIdentityTimeoutStaysUnidentified()},
             {"manual recovery intent survives IDENTIFY -> firmware required", manualRecoveryIntentArmsFirmwareOffer()},
             {"stale generation release -> ignored", staleReleaseGenerationIsIgnored()},
             {"firmware probe before serial release -> blocked", firmwareProbeRequiresReleasedPort()},
@@ -264,13 +265,43 @@ private:
             !fixture.session.startReady();
     }
 
-    static bool automaticIdentityTimeoutStaysUnidentified() {
+    static bool automaticIdentityTimeoutOffersFirmwareRecovery() {
         Fixture fixture;
         if (!fixture.profileReady || !seedIdentityTimeout(fixture, false)) return false;
-        return fixture.session.state() == QStringLiteral("UNIDENTIFIED") &&
-            !fixture.session.firmwareInstallVisible() &&
-            !fixture.session.blankBoardDetected_ &&
+        return fixture.session.state() == QStringLiteral("FIRMWARE REQUIRED") &&
+            fixture.session.firmwareInstallVisible() &&
+            fixture.session.blankBoardDetected_ &&
+            fixture.session.blankBoardPort_ == QStringLiteral("COM7") &&
             !fixture.session.startReady();
+    }
+
+    static bool ambiguousIdentityTimeoutStaysUnidentified() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        auto& device = fixture.device;
+        auto& session = fixture.session;
+        quiesce(session, device);
+        session.clearBlankBoardContext();
+        session.portOwner_ = SmartSessionController::PortOwner::deviceSession;
+        session.recoveryPending_ = false;
+
+        device.ports_ = {QStringLiteral("COM7"), QStringLiteral("COM8")};
+        device.recommendedPort_.clear();
+        device.portName_ = QStringLiteral("COM7");
+        device.connected_ = false;
+        device.discovering_ = false;
+        device.deviceVerified_ = false;
+        device.identificationState_ = DeviceController::IdentificationState::Unidentified;
+        device.identifyAttempts_ = DeviceController::identityMaxAttempts();
+        device.identity_ = {};
+        emit device.portsChanged();
+        emit device.identificationStateChanged();
+        session.reconcile();
+
+        return session.state() == QStringLiteral("UNIDENTIFIED") &&
+            !session.firmwareInstallVisible() &&
+            !session.blankBoardDetected_ &&
+            !session.startReady();
     }
 
     static bool manualRecoveryIntentArmsFirmwareOffer() {

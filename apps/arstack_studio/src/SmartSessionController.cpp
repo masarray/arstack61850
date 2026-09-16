@@ -757,18 +757,18 @@ void SmartSessionController::refreshRecoveryOfferFromIdentity() {
         return;
     }
 
-    // Preserve explicit recovery intent while the selected port moves through
-    // CONNECTING/IDENTIFYING. Only the terminal Unidentified state can turn
-    // that intent into a firmware offer. Automatic discovery always clears the
-    // flag in startDeviceDiscovery(), so a transient handshake failure alone
-    // can never imply blank firmware.
+    // A terminal semantic-identification timeout on the *single* high-confidence
+    // Espressif/ESP32 candidate is a safe legacy/blank-firmware recovery signal.
+    // This does not authorize a write: FirmwareManager still releases the serial
+    // session and requires espflash ROM identity + ESP32-P4 pre-v3 verification
+    // before write-bin can start. Generic or ambiguous serial ports remain closed.
     if (device_->identificationState() != DeviceController::IdentificationState::Unidentified) {
         blankBoardDetected_ = false;
         blankBoardPort_.clear();
         return;
     }
 
-    if (!manualRecoveryArmed_ || recoveryPending_) {
+    if (recoveryPending_) {
         blankBoardDetected_ = false;
         blankBoardPort_.clear();
         return;
@@ -1013,7 +1013,7 @@ void SmartSessionController::reconcile() {
         if (blankBoardDetected_) {
             setPresentation(
                 QStringLiteral("FIRMWARE REQUIRED"),
-                QStringLiteral("Manual recovery selected for %1 after bounded semantic identification failed. Studio will verify chip and revision before any firmware write.")
+                QStringLiteral("ESP32-P4 candidate %1 did not answer the current semantic identity after bounded attempts. Studio can install the bundled firmware after ROM chip/revision verification.")
                     .arg(blankBoardPort_),
                 false,
                 false);
