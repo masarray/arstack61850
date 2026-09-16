@@ -1,0 +1,35 @@
+name: P0 PTP Vargs Fix Apply
+
+on:
+  push:
+    branches:
+      - feature/ptp-production-v0.1.1
+    paths:
+      - '.github/workflows/p0-ptp-vargs-fix.yml'
+      - '.github/scripts/p0_ptp_vargs_fix.py'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/ptp-production-v0.1.1
+          fetch-depth: 0
+      - name: Apply ESP-IDF 5.5 varargs correction
+        run: python3 .github/scripts/p0_ptp_vargs_fix.py
+      - name: Commit source changes
+        run: |
+          if git diff --quiet; then
+            echo 'PTP varargs patch already present.'
+            exit 0
+          fi
+          git config user.name 'ARStack CI Repair'
+          git config user.email 'actions@users.noreply.github.com'
+          git add embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp embedded/esp32p4_smv_injector/main/ptp_receiver_task.cpp
+          git commit -m 'fix(ptp): honor ESP-IDF 5.5 varargs contract and expose TX failures'
+          git push origin HEAD:feature/ptp-production-v0.1.1
