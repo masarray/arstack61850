@@ -1,0 +1,54 @@
+name: P0 Finalize Firmware Progress
+
+on:
+  pull_request:
+    paths:
+      - 'apps/arstack_studio/**'
+      - '.github/scripts/p0_finalize_firmware_progress.py'
+      - '.github/workflows/p0-finalize-firmware-progress.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: p0-finalize-firmware-progress-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  repair-source:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - name: Apply P0 firmware progress finalizer
+        run: python3 .github/scripts/p0_finalize_firmware_progress.py
+      - name: Verify focused invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'flashProgress_ = -1;' apps/arstack_studio/src/FirmwareManager.cpp
+          grep -q 'segmentExpression' apps/arstack_studio/src/FirmwareManager.cpp
+          grep -q 'firmwareUpdateStage READ firmwareUpdateStage' apps/arstack_studio/src/SmartSessionController.hpp
+          grep -q 'smartSession.firmwareUpdateStage' apps/arstack_studio/qml/WorkflowBar.qml
+          grep -q 'fragmented espflash progress -> monotonic' apps/arstack_studio/src/DeterministicSessionHarness.cpp
+          grep -q 'firmware stage projection -> supervisor-owned' apps/arstack_studio/src/DeterministicSessionHarness.cpp
+      - name: Commit source-only repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add apps/arstack_studio/src/FirmwareManager.cpp \
+                  apps/arstack_studio/src/SmartSessionController.hpp \
+                  apps/arstack_studio/src/DeterministicSessionHarness.cpp \
+                  apps/arstack_studio/qml/WorkflowBar.qml
+          if git diff --cached --quiet; then
+            echo 'Source already finalized.'
+            exit 0
+          fi
+          git config user.name 'ARStack P0 Repair'
+          git config user.email 'actions@users.noreply.github.com'
+          git commit -m 'fix(studio): finalize firmware progress observability'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
