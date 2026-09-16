@@ -34,6 +34,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: esp32p4-smv-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   ARSTACK_FIRMWARE_VERSION: '0.1.1'
   ARSTACK_PROTOCOL_VERSION: '1'
@@ -41,6 +45,7 @@ env:
 jobs:
   build-esp32p4:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     container:
       image: espressif/idf:v5.5.4
     defaults:
