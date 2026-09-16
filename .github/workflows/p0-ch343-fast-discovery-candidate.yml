@@ -1,0 +1,180 @@
+name: P0 CH343 Fast Discovery Windows Candidate
+
+on:
+  push:
+    paths:
+      - '.github/workflows/p0-ch343-fast-discovery-candidate.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: p0-ch343-fast-discovery-candidate
+  cancel-in-progress: true
+
+env:
+  ARSTACK_VERSION: '0.1.1'
+  QT_VERSION: '6.10.3'
+  ESPFLASH_VERSION: '4.5.0'
+  ESPFLASH_WINDOWS_ZIP_SHA256: '854c82c947c20e7f337f120f0398042ed1760f2269cb0f9be3d2beae3b66fbfb'
+
+jobs:
+  windows-candidate:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - name: Checkout fast-discovery source
+        uses: actions/checkout@v4
+        with:
+          ref: feature/ptp-production-v0.1.1
+
+      - name: Download verified unchanged v0.1.1 firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: arstack-esp32p4-smv-firmware
+          path: firmware-package
+          run-id: 35071107192
+          github-token: ${{ github.token }}
+          repository: masarray/arstack61850
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: win64_msvc2022_64
+          modules: 'qtserialport'
+          cache: true
+
+      - name: Configure and build Studio plus regression harnesses
+        shell: powershell
+        run: |
+          cmake -S apps/arstack_studio -B build-arstack-studio -G "Visual Studio 17 2022" -A x64 `
+            -DARIEC61850_WARNINGS_AS_ERRORS=ON
+          if ($LASTEXITCODE -ne 0) { throw "Configure failed: $LASTEXITCODE" }
+          cmake --build build-arstack-studio --config Release `
+            --target arstack_studio arstack_session_harness arstack_windows_ownership_harness --parallel
+          if ($LASTEXITCODE -ne 0) { throw "Build failed: $LASTEXITCODE" }
+
+      - name: Prove CH343 fast discovery and ownership policy
+        shell: powershell
+        run: |
+          & "$PWD\build-arstack-studio\Release\arstack_windows_ownership_harness.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Windows discovery/ownership harness failed: $LASTEXITCODE" }
+
+      - name: Prove deterministic session recovery policy
+        shell: powershell
+        run: |
+          & "$PWD\build-arstack-studio\Release\arstack_session_harness.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Session harness failed: $LASTEXITCODE" }
+
+      - name: Prove close kills process twice
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          $env:QT_QUICK_BACKEND = 'software'
+          $exe = Join-Path $PWD 'build-arstack-studio\Release\arstack_studio.exe'
+          for ($cycle = 1; $cycle -le 2; $cycle++) {
+            $p = Start-Process -FilePath $exe -ArgumentList '--check-app-lifecycle' -PassThru
+            if (-not $p.WaitForExit(12000)) {
+              Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+              throw "Cycle $cycle: Studio PID did not exit after primary-window close"
+            }
+            if ($p.ExitCode -ne 0) { throw "Cycle $cycle: lifecycle exit code $($p.ExitCode)" }
+            if (Get-Process -Id $p.Id -ErrorAction SilentlyContinue) { throw "Cycle $cycle: PID remained alive" }
+          }
+
+      - name: Stage Studio with verified firmware
+        shell: powershell
+        run: |
+          $stage = Join-Path $PWD 'dist\ARStack-Studio'
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item "$PWD\build-arstack-studio\Release\arstack_studio.exe" (Join-Path $stage 'ARStackStudio.exe')
+          windeployqt --release --qmldir "$PWD\apps\arstack_studio\qml" --compiler-runtime (Join-Path $stage 'ARStackStudio.exe')
+          Copy-Item LICENSE, NOTICE, THIRD_PARTY_NOTICES.md, COPYRIGHT.md -Destination $stage
+          New-Item -ItemType Directory -Force (Join-Path $stage 'firmware') | Out-Null
+          Copy-Item 'firmware-package\*' -Destination (Join-Path $stage 'firmware') -Recurse
+
+      - name: Bundle pinned espflash
+        shell: powershell
+        run: |
+          $url = "https://github.com/esp-rs/espflash/releases/download/v$env:ESPFLASH_VERSION/espflash-x86_64-pc-windows-msvc.zip"
+          $zip = Join-Path $env:RUNNER_TEMP 'espflash.zip'
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          $actual = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $env:ESPFLASH_WINDOWS_ZIP_SHA256) { throw "espflash SHA mismatch: $actual" }
+          $extract = Join-Path $env:RUNNER_TEMP 'espflash'
+          Expand-Archive -Path $zip -DestinationPath $extract -Force
+          $espflash = Get-ChildItem $extract -Filter espflash.exe -Recurse | Select-Object -First 1
+          if (-not $espflash) { throw 'espflash.exe not found' }
+          $tools = Join-Path $PWD 'dist\ARStack-Studio\tools'
+          New-Item -ItemType Directory -Force $tools | Out-Null
+          Copy-Item $espflash.FullName (Join-Path $tools 'espflash.exe')
+
+      - name: Packaged contract and lifecycle checks
+        shell: powershell
+        run: |
+          function Assert-Zero([string]$FilePath, [string[]]$Arguments, [string]$Label) {
+            $p = Start-Process -FilePath $FilePath -ArgumentList $Arguments -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "$Label failed: $($p.ExitCode)" }
+          }
+          $stage = Join-Path $PWD 'dist\ARStack-Studio'
+          $studio = Join-Path $stage 'ARStackStudio.exe'
+          $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $stage 'firmware'
+          $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $stage 'tools\espflash.exe'
+          $env:ESPFLASH_SKIP_UPDATE_CHECK = 'true'
+          Assert-Zero $studio @('--check-firmware-contract') 'Firmware contract'
+          Assert-Zero $studio @('--check-p0-policy') 'P0 policy'
+          Assert-Zero $studio @('--check-app-lifecycle') 'Packaged lifecycle'
+
+      - name: Build portable ZIP and NSIS installer
+        shell: powershell
+        run: |
+          $portable = Join-Path $PWD "dist\ARStack-Studio-$env:ARSTACK_VERSION-CH343-fast-win-x64-portable.zip"
+          Compress-Archive -Path 'dist\ARStack-Studio\*' -DestinationPath $portable -CompressionLevel Optimal -Force
+          choco install nsis -y --no-progress
+          $makensis = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
+          if (-not (Test-Path $makensis)) { throw "makensis not found: $makensis" }
+          $stage = (Resolve-Path 'dist\ARStack-Studio').Path
+          $setup = Join-Path $PWD "dist\ARStack-Studio-$env:ARSTACK_VERSION-CH343-fast-win-x64-setup.exe"
+          $script = (Resolve-Path 'apps\arstack_studio\packaging\ARStackStudio.nsi').Path
+          & $makensis "/DSOURCE_DIR=$stage" "/DOUTPUT_FILE=$setup" "/DAPP_VERSION=$env:ARSTACK_VERSION" $script
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $setup)) { throw 'NSIS installer build failed' }
+          $lines = foreach ($file in @($portable, $setup)) {
+            $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $([IO.Path]::GetFileName($file))"
+          }
+          $lines | Set-Content 'dist\SHA256SUMS-CH343.txt' -Encoding ascii
+          Get-Content 'dist\SHA256SUMS-CH343.txt'
+
+      - name: Smoke installed EXE and prove PID exits
+        shell: powershell
+        run: |
+          $installer = (Resolve-Path "dist\ARStack-Studio-$env:ARSTACK_VERSION-CH343-fast-win-x64-setup.exe").Path
+          $installDir = Join-Path $env:RUNNER_TEMP 'ARStackStudioCH343'
+          $install = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Silent install failed: $($install.ExitCode)" }
+          $exe = Join-Path $installDir 'ARStackStudio.exe'
+          if (-not (Test-Path $exe)) { throw 'Installed EXE missing' }
+          $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $installDir 'firmware'
+          $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $installDir 'tools\espflash.exe'
+          $env:ESPFLASH_SKIP_UPDATE_CHECK = 'true'
+          $p = Start-Process -FilePath $exe -ArgumentList '--check-app-lifecycle' -PassThru
+          if (-not $p.WaitForExit(12000)) {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            throw 'Installed Studio did not exit after primary-window close'
+          }
+          if ($p.ExitCode -ne 0) { throw "Installed lifecycle failed: $($p.ExitCode)" }
+          if (Get-Process -Id $p.Id -ErrorAction SilentlyContinue) { throw 'Installed Studio PID remained alive' }
+
+      - name: Upload CH343 fast candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: arstack-studio-ch343-fast-windows-x64
+          path: |
+            dist/ARStack-Studio-${{ env.ARSTACK_VERSION }}-CH343-fast-win-x64-portable.zip
+            dist/ARStack-Studio-${{ env.ARSTACK_VERSION }}-CH343-fast-win-x64-setup.exe
+            dist/SHA256SUMS-CH343.txt
+          if-no-files-found: error
+          retention-days: 7
