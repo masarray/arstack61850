@@ -58,32 +58,44 @@ struct MmsStaticDispatchResult final {
 
 class MmsStaticApplicationDispatcher final {
 public:
-    explicit constexpr MmsStaticApplicationDispatcher(
+    explicit MmsStaticApplicationDispatcher(
         const MmsStaticObjectTable& objects,
         const MmsStaticDispatchPolicy policy = {}) noexcept
-        : objects_{objects}, policy_{policy} {}
+        : objects_{objects},
+          policy_{policy},
+          model_valid_{data_sets_.valid_against(objects_)} {}
 
-    constexpr MmsStaticApplicationDispatcher(
+    MmsStaticApplicationDispatcher(
         const MmsStaticObjectTable& objects,
         const MmsStaticDataSetTable& data_sets,
         const MmsStaticDispatchPolicy policy = {}) noexcept
-        : objects_{objects}, data_sets_{data_sets}, policy_{policy} {}
+        : objects_{objects},
+          data_sets_{data_sets},
+          policy_{policy},
+          model_valid_{data_sets_.valid_against(objects_)} {}
 
     // directory must be sorted by (domain,item), unique, and remain alive for
     // the dispatcher lifetime. It is optional so embedded profiles retain the
     // fixed-buffer scan path without host-side heap requirements.
-    constexpr MmsStaticApplicationDispatcher(
+    MmsStaticApplicationDispatcher(
         const MmsStaticObjectTable& objects,
         const MmsStaticDataSetTable& data_sets,
         const std::span<const MmsStaticDirectoryEntry> directory,
         const MmsStaticDispatchPolicy policy = {}) noexcept
-        : objects_{objects}, data_sets_{data_sets}, directory_{directory}, policy_{policy} {}
+        : objects_{objects},
+          data_sets_{data_sets},
+          directory_{directory},
+          policy_{policy},
+          model_valid_{data_sets_.valid_against(objects_)} {}
 
-    constexpr MmsStaticApplicationDispatcher(
+    MmsStaticApplicationDispatcher(
         const MmsStaticObjectTable& objects,
         const std::span<const MmsStaticDirectoryEntry> directory,
         const MmsStaticDispatchPolicy policy = {}) noexcept
-        : objects_{objects}, directory_{directory}, policy_{policy} {}
+        : objects_{objects},
+          directory_{directory},
+          policy_{policy},
+          model_valid_{data_sets_.valid_against(objects_)} {}
 
     [[nodiscard]] MmsStaticDispatchResult dispatch(
         std::span<const std::uint8_t> mms_request,
@@ -110,6 +122,10 @@ private:
     MmsStaticDataSetTable data_sets_{};
     std::span<const MmsStaticDirectoryEntry> directory_{};
     MmsStaticDispatchPolicy policy_{};
+    // Structural object/DataSet validation is immutable for the dispatcher
+    // lifetime. Compute it once at construction so large SCL models do not pay
+    // the O(N^2) duplicate scan again for every MMS request.
+    bool model_valid_{};
 };
 
 } // namespace ar::iec61850::mms
