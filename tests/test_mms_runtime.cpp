@@ -261,6 +261,49 @@ void association_lifecycle_routes_reports_and_confirmed_results() {
     CHECK(transport.close_count() >= 1U);
 }
 
+
+void association_consumes_coalesced_buffered_tpkt_before_socket_wait() {
+    ScriptedTransport transport;
+    queue_handshake(transport);
+    mms::MmsAssociationRuntime runtime{transport};
+    runtime.connect({\"127.0.0.1\", 102U});
+
+    const auto invoke_id = runtime.next_invoke_id();
+    mms::MmsReadRequest request;
+    request.invoke_id = invoke_id;
+    request.variables.push_back(
+        mms::MmsObjectName::domain_specific(\"LD0\", \"LLN0$ST$Mod$stVal\"));
+    const auto request_bytes = mms::MmsServiceCodec::encode_read_request_p_data(request);
+
+    mms::MmsReadResponse response;
+    response.invoke_id = invoke_id;
+    response.results.push_back({mms::MmsDataValue::cboolean(true), std::noptull});
+    const auto response_frame = wrap_application(
+        mms::MmsServiceCodec::encode_read_response_p_data(response));
+    const auto report_frame = wrap_application(
+        mms::MmsInformationReportCodec::encode_p_data(make_report()));
+
+    ByteVector coalesced = response_frame;
+    coalesced.insert(coalesced.end(), report_frame.begin(), report_frame.end());
+    transport.push_receive(std::move(coalesced));
+
+    const auto exchange = runtime.exchange_confirmed(request_bytes, invoke_id);
+    CHECK(exchange.envelope.kind == mms::MmsPduKind::confirmed_response);
+    CHECK(runtime.queued_information_report_count() == 0U);
+
+    // There are deliberately no further scripted socket bytes. The report is
+    // already a complete second TPKT frame buffered by the first receive().
+    // This must succeed without waiting for another transport receive.
+    mms::MmsPduEnvelope envelope;
+    CHECK(runtime.try_poll_once_for(std::chrono::milliseconds{1}, envelope));
+    CHECK(envelope.information_report);
+    CHECK(runtime.queued_information_report_count() == 1U);
+
+    ByteVector queued_report;
+    CHECK(runtime.try_pop_information_report(queued_report));
+    CHECK(mms::MmsInformationReportCodec::is_information_report(queued_report));
+}
+
 void association_retries_legacy_profile_after_balanced_rejection() {
     ScriptedTransport transport;
     const auto balanced = acse::AcseAssociationCodec::build_default_association_request();
@@ -633,6 +676,7 @@ void subscription_does_not_take_over_an_enabled_rcb() {
 int main() {
     const std::vector<std::pair<std::string, std::function<void()>>> tests{
         {"association lifecycle and routing", association_lifecycle_routes_reports_and_confirmed_results},
+        {"coalesced TPKT buffered receive", association_consumes_coalesced_buffered_tpkt_before_socket_wait},
         {"association profile fallback", association_retries_legacy_profile_after_balanced_rejection},
         {"association cancellation and reconnect", association_rejects_cancelled_connect_and_can_reconnect},
         {"confirmed exchange timeout closes transport and reconnects", confirmed_exchange_timeout_closes_transport_and_can_reconnect},

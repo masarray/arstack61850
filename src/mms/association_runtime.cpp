@@ -330,16 +330,12 @@ std::vector<std::uint8_t> MmsAssociationRuntime::receive_application_payload(
     std::size_t receive_chunks = 0U;
     while (!reassembler.is_complete()) {
         require_not_cancelled(stop_token);
-        if (receive_chunks >= options_.maximum_receive_chunks_per_operation) {
-            throw MmsAssociationRuntimeError(
-                "MMS receive chunk limit exceeded before a complete COTP payload arrived.");
-        }
-        auto bytes = transport_.receive(deadline, stop_token);
-        ++receive_chunks;
-        if (bytes.empty()) {
-            throw MmsAssociationRuntimeError("MMS transport returned an empty receive chunk.");
-        }
-        tpkt_decoder_.append(bytes);
+
+        // A single TCP recv() may contain more than one complete TPKT frame.
+        // Always consume frames already buffered by the previous receive before
+        // waiting for new socket bytes. Otherwise a confirmed response followed
+        // immediately by an InformationReport can leave the report stranded in
+        // tpkt_decoder_ until unrelated network traffic arrives.
         osi::TpktFrame frame;
         while (tpkt_decoder_.try_pop(frame)) {
             const auto tpdu = osi::CotpFrameCodec::decode(frame.payload);
@@ -358,6 +354,20 @@ std::vector<std::uint8_t> MmsAssociationRuntime::receive_application_payload(
                 break;
             }
         }
+        if (reassembler.is_complete()) {
+            break;
+        }
+
+        if (receive_chunks >= options_.maximum_receive_chunks_per_operation) {
+            throw MmsAssociationRuntimeError(
+                "MMS receive chunk limit exceeded before a complete COTP payload arrived.");
+        }
+        auto bytes = transport_.receive(deadline, stop_token);
+        ++receive_chunks;
+        if (bytes.empty()) {
+            throw MmsAssociationRuntimeError("MMS transport returned an empty receive chunk.");
+        }
+        tpkt_decoder_.append(bytes);
     }
     return reassembler.complete();
 }
