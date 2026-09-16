@@ -278,8 +278,11 @@ void IedFleetController::setFileServiceEnabled(const bool value) {
 }
 
 void IedFleetController::setFileFolder(const QString& value) {
-    if (fileFolder_ == value) return;
-    fileFolder_ = value;
+    const auto normalized = QDir::cleanPath(value.trimmed());
+    if (fileFolder_ == normalized) return;
+    fileFolder_ = normalized == QStringLiteral(".") && value.trimmed().isEmpty()
+        ? QString{}
+        : normalized;
     emit configurationChanged();
 }
 
@@ -431,12 +434,13 @@ bool IedFleetController::startIed(const int index) {
     auto* runtime = runtimeAt(index);
     if (runtime == nullptr || !runtime->enabled || isActiveState(runtime->state)) return false;
 
+    const auto iedName = ieds_.at(index).toMap().value(QStringLiteral("name")).toString();
     if (runtime->listenAddress.trimmed().isEmpty()) {
         appendActivity(
             QStringLiteral("Network"),
             QStringLiteral("Assign a local IPv4 address before starting this IED."),
             QStringLiteral("Error"),
-            ieds_.at(index).toMap().value(QStringLiteral("name")).toString());
+            iedName);
         return false;
     }
     if (!isLocalAddress(runtime->listenAddress)) {
@@ -445,15 +449,28 @@ bool IedFleetController::startIed(const int index) {
             QStringLiteral("%1 is not currently assigned to this computer.")
                 .arg(runtime->listenAddress),
             QStringLiteral("Error"),
-            ieds_.at(index).toMap().value(QStringLiteral("name")).toString());
+            iedName);
         return false;
     }
     const auto conflict = endpointConflictFor(index, false);
     if (!conflict.isEmpty()) {
         appendActivity(
-            QStringLiteral("Network"), conflict, QStringLiteral("Error"),
-            ieds_.at(index).toMap().value(QStringLiteral("name")).toString());
+            QStringLiteral("Network"), conflict, QStringLiteral("Error"), iedName);
         return false;
+    }
+
+    QString fileRoot;
+    if (fileServiceEnabled_) {
+        const QFileInfo rootInfo{fileFolder_.trimmed()};
+        if (fileFolder_.trimmed().isEmpty() || !rootInfo.exists() || !rootInfo.isDir()) {
+            appendActivity(
+                QStringLiteral("Files"),
+                QStringLiteral("Choose an existing File transfer folder before starting the IED."),
+                QStringLiteral("Error"),
+                iedName);
+            return false;
+        }
+        fileRoot = QDir::cleanPath(rootInfo.absoluteFilePath());
     }
 
     const auto executable = serverExecutable();
@@ -462,7 +479,7 @@ bool IedFleetController::startIed(const int index) {
             QStringLiteral("Server"),
             QStringLiteral("ariec61850_ied_simulator_server was not found beside the GUI."),
             QStringLiteral("Error"),
-            ieds_.at(index).toMap().value(QStringLiteral("name")).toString());
+            iedName);
         return false;
     }
     if (!writeModelManifest(index)) return false;
@@ -494,20 +511,26 @@ bool IedFleetController::startIed(const int index) {
     runtime->liveSentAtMilliseconds.clear();
     setRuntimeState(index, RuntimeState::starting);
     runtime->process->setProgram(executable);
-    runtime->process->setArguments({
+    QStringList arguments{
         QStringLiteral("--host"), runtime->listenAddress,
         QStringLiteral("--port"), QString::number(runtime->port),
         QStringLiteral("--model-manifest"), runtime->modelManifestPath,
         QStringLiteral("--live-stdin"),
-        QStringLiteral("--live-generation"), QString::number(runtime->liveGeneration)});
+        QStringLiteral("--live-generation"), QString::number(runtime->liveGeneration)};
+    if (!fileRoot.isEmpty()) {
+        arguments << QStringLiteral("--file-root") << fileRoot;
+    }
+    runtime->process->setArguments(arguments);
     runtime->process->start();
 
-    const auto iedName = ieds_.at(index).toMap().value(QStringLiteral("name")).toString();
     appendActivity(
         QStringLiteral("Server"),
-        QStringLiteral("Starting IEC 61850 MMS endpoint on %1:%2.")
+        QStringLiteral("Starting IEC 61850 MMS endpoint on %1:%2%3.")
             .arg(runtime->listenAddress)
-            .arg(runtime->port),
+            .arg(runtime->port)
+            .arg(fileRoot.isEmpty()
+                ? QString{}
+                : QStringLiteral(" · file root %1").arg(fileRoot)),
         QStringLiteral("Info"),
         iedName);
 
@@ -1030,6 +1053,11 @@ QString IedFleetController::diagnosticsText() const {
     text += QStringLiteral("Model: %1\nSource: %2\n")
         .arg(sourceName_.isEmpty() ? QStringLiteral("<none>") : sourceName_)
         .arg(sourcePath_.isEmpty() ? QStringLiteral("<none>") : sourcePath_);
+    text += QStringLiteral("File service: %1%2\n")
+        .arg(fileServiceEnabled_ ? QStringLiteral("enabled") : QStringLiteral("disabled"))
+        .arg(fileServiceEnabled_ && !fileFolder_.isEmpty()
+            ? QStringLiteral(" · root=") + fileFolder_
+            : QString{});
     text += QStringLiteral("Fleet: %1 IEDs; %2 running\n")
         .arg(ieds_.size())
         .arg(runningCount());
