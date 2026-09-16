@@ -83,6 +83,13 @@ jobs:
           ./build-ied-simulator-qt/ied_report_workspace_qa
           ./tests/fixtures/scl/minimal-station-brcb.scd
 
+      - name: IEDScout indexed RCB production-path gate
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          ./build-ied-simulator-qt/ied_report_workspace_qa
+          ./tests/fixtures/scl/iedscout-indexed-reports.scd
+
       - name: File transfer + Setting Groups workspace gates
         env:
           QT_QPA_PLATFORM: offscreen
