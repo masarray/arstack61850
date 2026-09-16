@@ -1,0 +1,43 @@
+name: IEDScout Synthetic Golden Acceptance
+
+on:
+  push:
+    branches:
+      - feat/ied-sim-ux-performance-foundation
+    paths:
+      - '.github/workflows/zz-iedscout-golden-synthetic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  golden-runtime:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
+
+      - name: Configure Workbench
+        run: >-
+          cmake -S apps/ied_simulator -B build-golden -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DARIEC61850_WARNINGS_AS_ERRORS=ON
+
+      - name: Build Workbench and golden field probes
+        run: >-
+          cmake --build build-golden --parallel 2
+          --target arstack_ied_simulator ariec61850_mms_read_probe ariec61850_mms_sgcb_probe
+
+      - name: Run synthetic golden CID runtime acceptance
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          python3 apps/ied_simulator/test_iedscout_golden_synthetic.py
+          --app ./build-golden/arstack_ied_simulator
+          --build-dir ./build-golden
+          --scl ./tests/fixtures/scl/iedscout-golden-synthetic.cid
