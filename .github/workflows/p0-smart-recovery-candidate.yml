@@ -127,6 +127,7 @@ jobs:
       - name: Build portable ZIP and installer
         shell: powershell
         run: |
+          $ErrorActionPreference = 'Stop'
           $portable = Join-Path $PWD "dist\ARStack-Studio-$env:ARSTACK_VERSION-smart-recovery-win-x64-portable.zip"
           Compress-Archive -Path 'dist\ARStack-Studio\*' -DestinationPath $portable -CompressionLevel Optimal -Force
           choco install nsis -y --no-progress
@@ -134,7 +135,9 @@ jobs:
           $stage = (Resolve-Path 'dist\ARStack-Studio').Path
           $out = Join-Path $PWD "dist\ARStack-Studio-$env:ARSTACK_VERSION-smart-recovery-win-x64-setup.exe"
           $script = (Resolve-Path 'apps\arstack_studio\packaging\ARStackStudio.nsi').Path
-          & makensis "/DSOURCE_DIR=$stage" "/DOUTPUT_FILE=$out" "/DAPP_VERSION=$env:ARSTACK_VERSION" $script
+          $makensis = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
+          if (-not (Test-Path $makensis)) { throw "makensis.exe not found at $makensis" }
+          & $makensis "/DSOURCE_DIR=$stage" "/DOUTPUT_FILE=$out" "/DAPP_VERSION=$env:ARSTACK_VERSION" $script
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path $out)) { throw 'NSIS installer build failed' }
           $files = @($portable, $out)
           $lines = foreach ($file in $files) {
