@@ -87,7 +87,8 @@ jobs:
           cmake --build build-f4-tools --config Release
           --target ariec61850_live_discover ariec61850_mms_read_probe
           ariec61850_mms_urcb_gi_probe ariec61850_mms_brcb_event_probe
-          ariec61850_control_block_read_probe ariec61850_file_transfer
+          ariec61850_mms_sgcb_probe ariec61850_control_block_read_probe
+          ariec61850_file_transfer
           --parallel 2
 
       - name: Run client/report/file preflight
@@ -103,6 +104,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "IEDScout indexed Reports QA failed: $LASTEXITCODE" }
           & '.\build-f4-windows\Release\ied_file_settings_workspace_qa.exe'
           if ($LASTEXITCODE -ne 0) { throw "Files/settings workbench QA failed: $LASTEXITCODE" }
+
+      - name: Run IEDScout synthetic golden Windows preflight
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          python '.\apps\ied_simulator\test_iedscout_golden_synthetic.py' `
+            --app '.\build-f4-windows\Release\arstack_ied_simulator.exe' `
+            --build-dir '.\build-f4-tools\Release' `
+            --scl '.\tests\fixtures\scl\iedscout-golden-synthetic.cid'
+          if ($LASTEXITCODE -ne 0) { throw "IEDScout synthetic golden preflight failed: $LASTEXITCODE" }
 
       - name: Stage deployed Qt application
         shell: pwsh
@@ -144,13 +156,16 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $kit = Join-Path $PWD 'f4-kit'
           $bin = Join-Path $kit 'tools'
+          $fixtures = Join-Path $kit 'fixtures'
           New-Item -ItemType Directory -Force -Path $bin | Out-Null
+          New-Item -ItemType Directory -Force -Path $fixtures | Out-Null
 
           Copy-Item 'release-artifacts\ARStack-IEC61850-Workbench-Setup-win64.exe' $kit
           Copy-Item 'release-artifacts\ARStack-IEC61850-Workbench-portable-win64.zip' $kit
           Copy-Item 'apps\ied_simulator\field_acceptance\F4_REAL_IED_ACCEPTANCE.md' $kit
           Copy-Item 'apps\ied_simulator\field_acceptance\ACCEPTANCE_RESULT_TEMPLATE.md' $kit
           Copy-Item 'apps\ied_simulator\field_acceptance\collect-f4-evidence.ps1' $kit
+          Copy-Item 'tests\fixtures\scl\iedscout-golden-synthetic.cid' $fixtures
           Set-Content -LiteralPath (Join-Path $kit 'BUILD_HEAD.txt') -Value $env:GITHUB_SHA -Encoding ascii
 
           $server = Get-ChildItem -Path 'build-f4-windows' -Recurse -File -Filter 'ariec61850_ied_simulator_server.exe' |
@@ -164,6 +179,7 @@ jobs:
             'ariec61850_mms_read_probe.exe',
             'ariec61850_mms_urcb_gi_probe.exe',
             'ariec61850_mms_brcb_event_probe.exe',
+            'ariec61850_mms_sgcb_probe.exe',
             'ariec61850_control_block_read_probe.exe',
             'ariec61850_file_transfer.exe'
           )
@@ -176,10 +192,11 @@ jobs:
           }
 
           $manifest = [ordered]@{
-            schemaVersion = 'arstack-f4-field-kit-v1'
+            schemaVersion = 'arstack-f4-field-kit-v2-iedscout-golden'
             headSha = $env:GITHUB_SHA
             generatedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
-            externalAcceptance = 'pending_real_client_or_device'
+            syntheticGolden = 'passed_in_windows_preflight'
+            externalAcceptance = 'pending_real_omicron_iedscout'
             issue95CloseAllowed = $false
             destructiveFieldFileDelete = $false
           }

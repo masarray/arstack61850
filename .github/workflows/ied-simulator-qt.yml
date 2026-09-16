@@ -106,6 +106,15 @@ jobs:
           --server ./build-ied-simulator-qt/ariec61850_ied_simulator_server
           --build-dir ./build-ied-simulator-qt
 
+      - name: IEDScout synthetic golden runtime gate
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          python3 apps/ied_simulator/test_iedscout_golden_synthetic.py
+          --app ./build-ied-simulator-qt/arstack_ied_simulator
+          --build-dir ./build-ied-simulator-qt
+          --scl ./tests/fixtures/scl/iedscout-golden-synthetic.cid
+
       - name: SCL workspace preservation + conversion-policy gates
         env:
           QT_QPA_PLATFORM: offscreen
