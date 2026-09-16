@@ -177,6 +177,42 @@ int main() {
     const std::array<mms::MmsStaticDataSetEntry, 1U> data_set_entries{
         mms::MmsStaticDataSetEntry{"LD0", "LLN0$Events", members, false}};
     const mms::MmsStaticDataSetTable data_sets{data_set_entries};
+
+    const std::array<mms::MmsStaticUrcbDefinition, 1U> unconfigured_definitions{
+        mms::MmsStaticUrcbDefinition{
+            "LD0",
+            "LLN0$RP$Spare01",
+            "LD0/LLN0$RP$Spare",
+            {},
+            {},
+            1U,
+            {0x00U, 0x00U},
+            0U,
+            0x04U,
+            0U}};
+    std::array<mms::MmsStaticUrcbState, 1U> unconfigured_states{};
+    mms::MmsStaticUrcbRuntime unconfigured_reports{
+        unconfigured_definitions, unconfigured_states, object_table, data_sets};
+    if (!unconfigured_reports.initialize()) {
+        return 40;
+    }
+    const auto* unconfigured_state = unconfigured_reports.state(0U);
+    if (unconfigured_state == nullptr ||
+        !unconfigured_state->data_set_domain().empty() ||
+        !unconfigured_state->data_set_item().empty()) {
+        return 41;
+    }
+    if (unconfigured_reports.set_enabled(0U, true, 10U) !=
+        mms::MmsStaticUrcbStatus::data_set_not_found) {
+        return 42;
+    }
+    if (unconfigured_reports.set_data_set(0U, "LD0", "LLN0$Events") !=
+            mms::MmsStaticUrcbStatus::ok ||
+        unconfigured_reports.set_enabled(0U, true, 10U) !=
+            mms::MmsStaticUrcbStatus::ok) {
+        return 43;
+    }
+
     const mms::MmsStaticApplicationDispatcher dispatcher{object_table, data_sets};
     mms::MmsStaticConnectionRuntime connection{dispatcher};
 

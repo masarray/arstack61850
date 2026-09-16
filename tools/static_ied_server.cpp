@@ -1124,8 +1124,10 @@ void rebuild_manifest_root_values(ManifestModel& model) {
         } else if (fields.size() >= 5U && fields[0] == "DS") {
             parsed_members.push_back({fields[1], fields[2], fields[3], fields[4]});
         } else if (fields.size() >= 13U && fields[0] == "RCB") {
+            const bool partial_data_set_reference =
+                fields[5].empty() != fields[6].empty();
             if (fields[1].empty() || fields[2].empty() || fields[4].empty() ||
-                fields[5].empty() || fields[6].empty() ||
+                partial_data_set_reference ||
                 (fields[3] != "0" && fields[3] != "1")) {
                 throw std::runtime_error("Model manifest contains a malformed RCB entry.");
             }
@@ -1360,7 +1362,9 @@ void rebuild_manifest_root_values(ManifestModel& model) {
     model.report_control_storage.reserve(available_urcb_slots);
     for (auto& report : parsed_reports) {
         if (report.buffered) continue;
-        if (!available_data_sets.contains({report.data_set_domain, report.data_set_item}) ||
+        const bool has_data_set = !report.data_set_domain.empty();
+        if ((has_data_set &&
+             !available_data_sets.contains({report.data_set_domain, report.data_set_item})) ||
             model.report_control_storage.size() >= available_urcb_slots) {
             ++model.omitted_urcbs;
             continue;

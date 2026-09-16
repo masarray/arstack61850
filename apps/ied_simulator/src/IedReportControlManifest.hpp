@@ -54,10 +54,15 @@ inline QByteArray reportControlManifestLines(
     auto logicalNode = QString::fromStdString(report.logical_node_path);
     logicalNode.replace(QLatin1Char('.'), QLatin1Char('$'));
     const auto baseName = QString::fromStdString(report.name);
-    auto dataSetItem = logicalNode + QLatin1Char('$') +
-        QString::fromStdString(report.data_set_name);
-    dataSetItem.replace(QLatin1Char('.'), QLatin1Char('$'));
-    if (domain.isEmpty() || logicalNode.isEmpty() || baseName.isEmpty() || dataSetItem.isEmpty()) {
+    const auto dataSetName = QString::fromStdString(report.data_set_name);
+    QString dataSetDomain;
+    QString dataSetItem;
+    if (!dataSetName.isEmpty()) {
+        dataSetDomain = domain;
+        dataSetItem = logicalNode + QLatin1Char('$') + dataSetName;
+        dataSetItem.replace(QLatin1Char('.'), QLatin1Char('$'));
+    }
+    if (domain.isEmpty() || logicalNode.isEmpty() || baseName.isEmpty()) {
         return {};
     }
 
@@ -81,7 +86,7 @@ inline QByteArray reportControlManifestLines(
         lines += "RCB\t" + reportManifestField(domain) + "\t" +
             reportManifestField(item) + "\t" +
             QByteArray::number(report.buffered ? 1 : 0) + "\t" +
-            reportManifestField(reportId) + "\t" + reportManifestField(domain) + "\t" +
+            reportManifestField(reportId) + "\t" + reportManifestField(dataSetDomain) + "\t" +
             reportManifestField(dataSetItem) + "\t" +
             QByteArray::number(report.configuration_revision) + "\t" +
             QByteArray::number(report.buffer_time_milliseconds) + "\t" +

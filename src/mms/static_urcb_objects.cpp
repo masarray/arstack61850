@@ -200,6 +200,11 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
     const std::string_view domain,
     const std::string_view item,
     const std::span<std::uint8_t> destination) noexcept {
+    if (domain.empty() || item.empty()) {
+        return domain.empty() && item.empty()
+            ? encode_visible({}, destination)
+            : wire::EncodeResult{wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
     if (domain.size() > std::numeric_limits<std::size_t>::max() - 1U - item.size()) {
         return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
     }

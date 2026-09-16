@@ -60,6 +60,15 @@ constexpr std::uint8_t kOptReasonForInclusion = 0x10U;
             MmsInformationReportSpanCodec::maximum_reference_bytes;
 }
 
+[[nodiscard]] bool valid_optional_reference(
+    const std::string_view domain,
+    const std::string_view item) noexcept {
+    if (domain.empty() || item.empty()) {
+        return domain.empty() && item.empty();
+    }
+    return valid_reference(domain, item);
+}
+
 [[nodiscard]] bool valid_optional_fields(
     const std::span<const std::uint8_t> optional_fields) noexcept {
     return optional_fields.size() ==
@@ -77,7 +86,7 @@ template <std::size_t N>
     const std::string_view source,
     std::array<char, N>& destination,
     std::size_t& length) noexcept {
-    if (source.empty() || source.size() > destination.size()) {
+    if (source.size() > destination.size()) {
         length = 0U;
         return false;
     }
@@ -370,17 +379,21 @@ bool MmsStaticUrcbRuntime::initialize() noexcept {
 
     for (std::size_t index = 0U; index < definitions_.size(); ++index) {
         const auto& definition = definitions_[index];
-        const auto* data_set = data_sets_->find(object_name(
-            definition.data_set_domain,
-            definition.data_set_item));
         if (!valid_reference(definition.domain, definition.item) ||
             !valid_report_id(definition.report_id) ||
-            !valid_reference(definition.data_set_domain, definition.data_set_item) ||
+            !valid_optional_reference(
+                definition.data_set_domain, definition.data_set_item) ||
             !valid_optional_fields(definition.optional_fields) ||
-            !valid_trigger_options(definition.trigger_options) ||
-            data_set == nullptr || data_set->members.empty() ||
-            data_set->members.size() > MmsInformationReportSpanCodec::maximum_members) {
+            !valid_trigger_options(definition.trigger_options)) {
             return false;
+        }
+        if (!definition.data_set_domain.empty()) {
+            const auto* data_set = data_sets_->find(object_name(
+                definition.data_set_domain, definition.data_set_item));
+            if (data_set == nullptr || data_set->members.empty() ||
+                data_set->members.size() > MmsInformationReportSpanCodec::maximum_members) {
+                return false;
+            }
         }
         for (std::size_t earlier = 0U; earlier < index; ++earlier) {
             if (same_name(definitions_[earlier], definition)) {
@@ -476,6 +489,16 @@ MmsStaticUrcbStatus MmsStaticUrcbRuntime::set_enabled(
     if (state_ref->enabled == enabled) {
         return MmsStaticUrcbStatus::ok;
     }
+    if (enabled) {
+        if (state_ref->data_set_domain().empty() || state_ref->data_set_item().empty()) {
+            return MmsStaticUrcbStatus::data_set_not_found;
+        }
+        const auto* data_set = data_sets_->find(object_name(
+            state_ref->data_set_domain(), state_ref->data_set_item()));
+        if (data_set == nullptr || data_set->members.empty()) {
+            return MmsStaticUrcbStatus::data_set_not_found;
+        }
+    }
 
     state_ref->enabled = enabled;
     state_ref->general_interrogation_pending = false;
@@ -551,11 +574,14 @@ MmsStaticUrcbStatus MmsStaticUrcbRuntime::set_data_set(
     if (state_ref->enabled) {
         return MmsStaticUrcbStatus::object_access_denied;
     }
-    if (!valid_reference(domain, item)) {
+    if (!valid_optional_reference(domain, item)) {
         return MmsStaticUrcbStatus::invalid_value;
     }
-    if (data_sets_->find(object_name(domain, item)) == nullptr) {
-        return MmsStaticUrcbStatus::data_set_not_found;
+    if (!domain.empty()) {
+        const auto* data_set = data_sets_->find(object_name(domain, item));
+        if (data_set == nullptr || data_set->members.empty()) {
+            return MmsStaticUrcbStatus::data_set_not_found;
+        }
     }
     if (state_ref->data_set_domain() == domain && state_ref->data_set_item() == item) {
         return MmsStaticUrcbStatus::ok;
