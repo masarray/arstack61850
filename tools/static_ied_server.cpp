@@ -758,7 +758,12 @@ struct ManifestValue final {
 };
 
 struct ManifestTypeNode final {
+    // Lookup remains ordered/stable for existing pointer semantics, while
+    // child_order records the first-seen SCL/manifest declaration order. MMS
+    // Structure values are positional; alphabetically iterating this map would
+    // corrupt IEC 61850 CDC layouts such as SPS {stVal, q, t}.
     std::map<std::string, ManifestTypeNode> children;
+    std::vector<std::string> child_order;
     std::optional<std::size_t> value_index;
 };
 
@@ -997,6 +1002,16 @@ void encode_manifest_value(ManifestValue& value) {
     return {wire::EncodeStatus::ok, value.encoded.size(), value.encoded.size()};
 }
 
+[[nodiscard]] const ManifestTypeNode& ordered_child(
+    const ManifestTypeNode& node,
+    const std::string& child_name) {
+    const auto child = node.children.find(child_name);
+    if (child == node.children.end()) {
+        throw std::runtime_error("Manifest structure order references a missing child.");
+    }
+    return child->second;
+}
+
 [[nodiscard]] mms::MmsTypeSpecification node_type(
     const ManifestTypeNode& node,
     const ManifestModel& model,
@@ -1009,9 +1024,10 @@ void encode_manifest_value(ManifestValue& value) {
     mms::MmsTypeSpecification result;
     result.kind = mms::MmsTypeKind::structure;
     result.name = std::move(name);
-    result.children.reserve(node.children.size());
-    for (const auto& [child_name, child] : node.children) {
-        result.children.push_back(node_type(child, model, child_name));
+    result.children.reserve(node.child_order.size());
+    for (const auto& child_name : node.child_order) {
+        result.children.push_back(node_type(
+            ordered_child(node, child_name), model, child_name));
     }
     return result;
 }
@@ -1023,10 +1039,9 @@ void encode_manifest_value(ManifestValue& value) {
         return *model.values[*node.value_index].data;
     }
     std::vector<mms::MmsDataValue> children;
-    children.reserve(node.children.size());
-    for (const auto& [name, child] : node.children) {
-        static_cast<void>(name);
-        children.push_back(node_data(child, model));
+    children.reserve(node.child_order.size());
+    for (const auto& child_name : node.child_order) {
+        children.push_back(node_data(ordered_child(node, child_name), model));
     }
     return mms::MmsDataValue::structure(std::move(children));
 }
@@ -1284,7 +1299,10 @@ void rebuild_manifest_root_values(ManifestModel& model) {
         if (found_root == root_indices.end()) continue;
         auto* node = &model.root_trees[found_root->second];
         for (std::size_t part = 1U; part < parts.size(); ++part) {
-            node = &node->children[parts[part]];
+            const auto& child_name = parts[part];
+            const auto [child, inserted] = node->children.try_emplace(child_name);
+            if (inserted) node->child_order.push_back(child_name);
+            node = &child->second;
         }
         node->value_index = value_index;
     }
