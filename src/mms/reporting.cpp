@@ -586,8 +586,10 @@ MmsReportFrame MmsReportFrameMapper::map(
     }
 
     const auto included_count = frame.included_data_set_indexes.size();
-    std::vector<MmsInformationReportItem> value_items;
-    for (std::size_t i = 0U; i < included_count; ++i) value_items.push_back(require_item(report, cursor++));
+    // IEC 61850-8-1 report access results are grouped after the
+    // inclusion bitstring: DataRef* (optional), Value*, then
+    // ReasonForInclusion* (optional). Keep the cursor in that exact
+    // order so metadata can never be projected as process values.
     std::vector<std::string> data_references(included_count);
     if (frame.header.optional_fields.has("data-reference")) {
         for (auto& reference : data_references) {
@@ -595,6 +597,11 @@ MmsReportFrame MmsReportFrameMapper::map(
             if (!value) throw MmsReportingFormatError("MMS report data-reference is not a visible string.");
             reference = *value;
         }
+    }
+    std::vector<MmsInformationReportItem> value_items;
+    value_items.reserve(included_count);
+    for (std::size_t i = 0U; i < included_count; ++i) {
+        value_items.push_back(require_item(report, cursor++));
     }
     std::vector<MmsReportBitField> reasons(included_count);
     if (frame.header.optional_fields.has("reason-for-inclusion")) {

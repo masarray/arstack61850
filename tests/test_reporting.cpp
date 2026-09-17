@@ -75,10 +75,10 @@ MmsInformationReport realistic_report(
         add(MmsDataValue::boolean(more_segments));
     }
     add(MmsDataValue::bit_string(6U, inclusion));
-    add(MmsDataValue::boolean(true));
-    add(MmsDataValue::boolean(false));
     add(MmsDataValue::visible_string("LD0/GGIO1.Ind1.stVal"));
     add(MmsDataValue::visible_string("LD0/GGIO1.Ind2.stVal"));
+    add(MmsDataValue::boolean(true));
+    add(MmsDataValue::boolean(false));
     add(MmsDataValue::bit_string(2U, reason_a));
     add(MmsDataValue::bit_string(2U, reason_b));
     return report;
@@ -266,9 +266,77 @@ void csharp_exact_report_shape_maps_byte_semantics() {
             "C# exact GI reason bit mapping failed.");
 }
 
+void canonical_report_payload_order_matrix() {
+    struct Case final {
+        bool data_reference;
+        bool reason;
+        std::uint8_t option_mask;
+    };
+    constexpr std::array<Case, 4U> cases{{
+        {false, false, 0x00U},
+        {true,  false, 0x04U},
+        {false, true,  0x10U},
+        {true,  true,  0x14U},
+    }};
+    const std::array<std::uint8_t, 1U> inclusion{0xC0U};
+    const std::array<std::uint8_t, 1U> reason_a{0x40U};
+    const std::array<std::uint8_t, 1U> reason_b{0x08U};
+    const auto directory = MmsDataSetDirectoryCodec::decode_response(
+        MmsDataSetDirectoryCodec::encode_response_pdu(directory_fixture()), 9U);
+
+    for (const auto& test : cases) {
+        const std::array<std::uint8_t, 2U> options{test.option_mask, 0x00U};
+        MmsInformationReport report;
+        auto add = [&report](MmsDataValue value) {
+            report.items.push_back({report.items.size(), std::move(value), std::nullopt});
+        };
+        add(MmsDataValue::visible_string("LD0/LLN0.RP.matrix"));
+        add(MmsDataValue::bit_string(6U, options));
+        add(MmsDataValue::bit_string(6U, inclusion));
+        if (test.data_reference) {
+            add(MmsDataValue::visible_string("LD0/GGIO1.Ind1.stVal"));
+            add(MmsDataValue::visible_string("LD0/GGIO1.Ind2.stVal"));
+        }
+        add(MmsDataValue::boolean(true));
+        add(MmsDataValue::boolean(false));
+        if (test.reason) {
+            add(MmsDataValue::bit_string(2U, reason_a));
+            add(MmsDataValue::bit_string(2U, reason_b));
+        }
+
+        const auto frame = MmsReportFrameMapper::map(report, directory.members);
+        require(frame.values.size() == 2U, "Canonical report matrix value count mismatch.");
+        require(frame.values[0].value && frame.values[1].value &&
+                    frame.values[0].value->kind() == MmsDataKind::boolean &&
+                    frame.values[1].value->kind() == MmsDataKind::boolean &&
+                    std::get<bool>(frame.values[0].value->value()) &&
+                    !std::get<bool>(frame.values[1].value->value()),
+                "Canonical report matrix consumed metadata as a process value.");
+        require(test.data_reference
+                    ? frame.values[0].data_reference == "LD0/GGIO1.Ind1.stVal" &&
+                      frame.values[1].data_reference == "LD0/GGIO1.Ind2.stVal"
+                    : frame.values[0].data_reference.empty() &&
+                      frame.values[1].data_reference.empty(),
+                "Canonical report matrix DataRef projection mismatch.");
+        require(test.reason
+                    ? frame.values[0].reason_for_inclusion.has("data-change") &&
+                      frame.values[1].reason_for_inclusion.has("integrity")
+                    : frame.values[0].reason_for_inclusion.names.empty() &&
+                      frame.values[1].reason_for_inclusion.names.empty(),
+                "Canonical report matrix ReasonForInclusion projection mismatch.");
+    }
+
+    // Reject the legacy false-green layout where a process value precedes DataRef.
+    auto legacy = realistic_report();
+    std::swap(legacy.items[9U], legacy.items[11U]);
+    require_throws([&legacy, &directory] {
+        static_cast<void>(MmsReportFrameMapper::map(legacy, directory.members));
+    }, "Legacy Value-before-DataRef report layout was silently accepted.");
+}
+
 void report_failure_result_is_preserved() {
     auto report = realistic_report();
-    report.items[9U] = {9U, std::nullopt, 3U};
+    report.items[11U] = {11U, std::nullopt, 3U};
     const auto directory = MmsDataSetDirectoryCodec::decode_response(
         MmsDataSetDirectoryCodec::encode_response_pdu(directory_fixture()), 9U);
     const auto frame = MmsReportFrameMapper::map(report, directory.members);
@@ -377,6 +445,7 @@ int main() {
         {"InformationReport", information_report_round_trip},
         {"InformationReport variableListName", information_report_variable_list_name_is_supported},
         {"exact report mapping", exact_report_mapping_decodes_optional_fields},
+        {"canonical report payload order", canonical_report_payload_order_matrix},
         {"report reason bit numbering", standard_reason_and_trigger_bit_numbering_is_exact},
         {"C# exact report shape", csharp_exact_report_shape_maps_byte_semantics},
         {"report failure result", report_failure_result_is_preserved},

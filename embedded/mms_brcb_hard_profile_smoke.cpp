@@ -77,6 +77,25 @@ constexpr std::array<std::uint8_t, 6U> kReportTime{
     return true;
 }
 
+[[nodiscard]] bool decode_visible_string(
+    const mms::MmsReadAccessResultView& item,
+    const std::string_view expected) noexcept {
+    if (!item.success) return false;
+    asn1::BerTlvView tlv;
+    if (!asn1::BerSpanReader::try_read_exact(item.encoded_data, tlv) ||
+        tlv.tag_class != asn1::BerClass::context_specific ||
+        tlv.tag_number != 10 || tlv.constructed || tlv.value.size() != expected.size()) {
+        return false;
+    }
+    for (std::size_t index = 0U; index < expected.size(); ++index) {
+        if (tlv.value[index] != static_cast<std::uint8_t>(
+                static_cast<unsigned char>(expected[index]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 [[nodiscard]] bool expected_entry(
     const std::array<std::uint8_t, mms::MmsInformationReportSpanCodec::entry_id_bytes>& entry,
     const std::uint64_t value) noexcept {
@@ -189,6 +208,8 @@ int main() {
     if (!report.try_item(5U, item) || !decode_boolean(item, boolean_value) || boolean_value ||
         !report.try_item(6U, item) || !decode_octet_string(item, capture.entry_id) ||
         !report.try_item(8U, item) || !decode_bit_string(item, 5U, 0xA0U) ||
+        !report.try_item(9U, item) || !decode_visible_string(item, "LD0/X1") ||
+        !report.try_item(10U, item) || !decode_visible_string(item, "LD0/X3") ||
         !report.try_item(11U, item) || !decode_boolean(item, boolean_value) || !boolean_value ||
         !report.try_item(12U, item) || !decode_boolean(item, boolean_value) || !boolean_value ||
         !report.try_item(13U, item) || !decode_bit_string(item, 2U, 0x40U) ||
