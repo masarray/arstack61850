@@ -710,7 +710,7 @@ SurfacePanel {
         }
     }
 
-    implicitHeight: ribbon.compact ? 70 : 96
+    implicitHeight: 62
     color: "transparent"
     border.width: 0
 

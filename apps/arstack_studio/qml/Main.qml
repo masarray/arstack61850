@@ -429,121 +429,45 @@ ApplicationWindow {
         }
     }
 
-    header: Rectangle {
-        height: 50
-        color: studioTheme.chrome
-        border.width: 1
-        border.color: studioTheme.lineSoft
 
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 15
-            anchors.rightMargin: 15
-            spacing: 9
-
-            Rectangle {
-                width: 30
-                height: 30
-                radius: 6
-                color: "#101b27"
-                border.width: 1
-                border.color: "#315071"
-                Image {
-                    anchors.centerIn: parent
-                    width: 17
-                    height: 17
-                    source: Qt.resolvedUrl("../assets/lucide/radio-tower.svg")
-                    sourceSize.width: 34
-                    sourceSize.height: 34
-                }
-            }
-
-            ColumnLayout {
-                spacing: 0
-                Layout.alignment: Qt.AlignVCenter
-                Label { text: "ARSTACK61850"; color: studioTheme.muted; font.family: root.uiFont; font.pixelSize: studioTheme.captionSize - 1; font.weight: Font.Bold; font.letterSpacing: 1.0; verticalAlignment: Text.AlignVCenter }
-                Label { text: "SMV Injector"; color: studioTheme.text; font.family: root.uiFont; font.pixelSize: 13; font.weight: Font.DemiBold; verticalAlignment: Text.AlignVCenter }
-            }
-
-            Item { Layout.fillWidth: true }
-
-            Rectangle {
-                Layout.preferredWidth: root.compactLayout ? 170 : 210
-                implicitHeight: 32
-                radius: 7
-                color: studioTheme.surface2
-                border.width: 1
-                border.color: workflowBar.smartStateColor
-
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 10
-                    anchors.rightMargin: 10
-                    spacing: 8
-                    Rectangle { width: 8; height: 8; radius: 4; color: workflowBar.smartStateColor }
-                    Label {
-                        Layout.fillWidth: true
-                        Layout.alignment: Qt.AlignVCenter
-                        text: workflowBar.displayState
-                        color: workflowBar.smartStateColor
-                        font.family: root.uiFont
-                        font.pixelSize: 9
-                        font.weight: Font.DemiBold
-                        verticalAlignment: Text.AlignVCenter
-                        elide: Text.ElideRight
-                    }
-                    Label {
-                        text: device.deviceVerified ? "•••" : "↻"
-                        color: studioTheme.accent
-                        font.family: root.uiFont
-                        font.pixelSize: 13
-                        font.weight: Font.Bold
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                }
-                MouseArea {
-                    id: identityMouse
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    enabled: !device.discovering
-                    onClicked: device.deviceVerified
-                        ? root.openConfiguration()
-                        : workflowBar.session.requestConnect()
-                }
-                ToolTip.visible: identityMouse.containsMouse
-                ToolTip.text: workflowBar.session.statusText
-                ToolTip.delay: 450
-            }
-        }
-    }
 
     footer: Rectangle {
-        height: 30
+        height: 28
         color: studioTheme.chrome
         border.width: 1
         border.color: studioTheme.lineSoft
 
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 15
-            anchors.rightMargin: 15
-            spacing: 9
+            anchors.leftMargin: 12
+            anchors.rightMargin: 12
+            spacing: 8
+
             Rectangle { width: 6; height: 6; radius: 3; color: workflowBar.smartStateColor }
             Label {
-                Layout.fillWidth: true
-                text: workflowBar.session.statusText
+                text: device.deviceVerified ? device.portName + " · ESP32-P4" : workflowBar.displayState
+                color: device.deviceVerified ? studioTheme.textSoft : workflowBar.smartStateColor
+                font.family: root.uiFont
+                font.pixelSize: 9
+                font.weight: Font.Medium
+            }
+            Rectangle { width: 1; height: 14; color: studioTheme.lineSoft }
+            Label {
+                text: workflowBar.injectionRunning ? "SMV output active" : "4I + 4V · 4000 samples/s"
                 color: studioTheme.muted
                 font.family: root.uiFont
-                font.pixelSize: studioTheme.captionSize
-                elide: Text.ElideRight
+                font.pixelSize: 9
             }
+            Item { Layout.fillWidth: true }
             Label {
-                visible: device.running
-                text: "FPS " + device.fps + "  ·  MISSED " + device.missed + "  ·  TX FAIL " + device.txFailures
+                visible: device.deviceVerified
+                text: device.running
+                    ? "FPS " + device.fps + "   MISSED " + device.missed + "   TX FAIL " + device.txFailures
+                    : "READY"
                 color: (Number(device.missed) > 0 || Number(device.txFailures) > 0) ? studioTheme.amber : studioTheme.textSoft
                 font.family: root.monoFont
-                font.pixelSize: studioTheme.captionSize
+                font.pixelSize: 9
+                font.weight: Font.Medium
             }
         }
     }
@@ -673,14 +597,14 @@ ApplicationWindow {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: root.compactLayout ? 9 : 11
-        spacing: root.compactLayout ? 9 : 11
+        anchors.margins: 8
+        spacing: 8
 
         WorkflowBar {
             id: workflowBar
             Layout.fillWidth: true
-            Layout.preferredHeight: workflowBar.implicitHeight
-            Layout.minimumHeight: workflowBar.implicitHeight
+            Layout.preferredHeight: 62
+            Layout.minimumHeight: 62
             theme: studioTheme
             controller: root
             device: device
@@ -743,7 +667,6 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             ColumnLayout {
                                 spacing: 1
-                                Label { text: "INJECTION"; color: studioTheme.muted; font.family: root.uiFont; font.pixelSize: studioTheme.captionSize; font.weight: Font.DemiBold; font.letterSpacing: 0.9 }
                                 Label { text: "4I + 4V Injection"; color: studioTheme.text; font.family: root.uiFont; font.pixelSize: root.compactLayout ? 18 : 20; font.weight: Font.DemiBold }
                             }
                             Item { Layout.fillWidth: true }
@@ -986,7 +909,7 @@ ApplicationWindow {
             }
 
             TelemetryDock {
-                visible: root.telemetryDockVisible
+                visible: root.telemetryDockVisible && root.telemetryExpanded
                 SplitView.fillWidth: true
                 SplitView.minimumHeight: root.telemetryExpanded ? 88 : 32
                 SplitView.maximumHeight: root.telemetryExpanded ? 320 : 32
@@ -1009,7 +932,7 @@ ApplicationWindow {
     StatusToast {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 48
+        anchors.bottomMargin: 38
         theme: studioTheme
         uiFont: root.uiFont
         message: root.toastMessage
