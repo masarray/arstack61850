@@ -1,0 +1,42 @@
+name: P0 bootstrap fixture correction
+
+on:
+  push:
+    branches:
+      - feat/ied-sim-ux-performance-foundation
+    paths:
+      - .github/workflows/p0-bootstrap-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  correct-fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/ied-sim-ux-performance-foundation
+          fetch-depth: 0
+
+      - name: Correct logical TrgOps fixture without changing BER unused-bits metadata
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('.github/workflows/p0-rcb-transaction-bootstrap.yml')
+          text = p.read_text()
+          count = text.count('0xFCU')
+          if count != 3:
+              raise SystemExit(f'expected exactly 3 erroneous 0xFCU fixture literals, found {count}')
+          p.write_text(text.replace('0xFCU', '0x7CU'))
+
+      - name: Commit corrected bootstrap and remove helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/p0-bootstrap-fix.yml
+          git config user.name "ARStack P0 Bot"
+          git config user.email "actions@github.com"
+          git add -A
+          git commit -m "ci(p0): correct TrgOps golden fixture semantics"
+          git push origin HEAD:feat/ied-sim-ux-performance-foundation
