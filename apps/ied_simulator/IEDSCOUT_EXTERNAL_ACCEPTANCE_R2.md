@@ -1,6 +1,6 @@
 # IEDScout External Acceptance R2
 
-Date: 2026-09-16
+Date: 2026-09-17
 
 This ledger records external OMICRON IEDScout evidence separately from synthetic/CI evidence. It is intentionally conservative: capabilities are only marked accepted when observed with the real client.
 
@@ -54,14 +54,41 @@ The fix:
 
 The BRCB hard-profile regression passed before this source commit was pushed.
 
+## P0 reporting hardening checkpoint
+
+The external acceptance boundary above is unchanged, but two additional protocol-level hardening items are now implemented on the PR branch and retained as regression requirements.
+
+### P0.2 — canonical InformationReport payload order
+
+Implementation commit: `6a7dfec7b9cb82460169eb2188a4e384835e104f`.
+
+The owning report mapper now consumes the IEC 61850 report access-result groups in canonical order after the inclusion bitstring:
+
+1. `DataRef*` when selected by `OptFlds`,
+2. process `Value*`,
+3. `ReasonForInclusion*` when selected.
+
+Regression coverage includes all four DataRef/Reason combinations and rejects the former false-green `Value-before-DataRef` fixture layout. The selective BRCB encoder regression separately locks the same wire order. The runtime client fixture was subsequently aligned in `bff75e60694ccf4997223016683863d760fa7d98` so retained end-to-end tests no longer encode the legacy ordering.
+
+### P0.3 — negotiated COTP TPDU segmentation
+
+Implementation commit: `e1937d90c2c57bdb53f840845cce3746e22a62af`.
+
+Outbound server TSDUs are now segmented into one or more complete TPKT/COTP Data frames according to the negotiated COTP TPDU-size parameter. Intermediate Data TPDUs clear EOT and only the final segment sets EOT. The implementation uses bounded span-based encoding and does not introduce a hidden heap-backed transport queue.
+
+Focused regression coverage negotiates a 128-byte TPDU, requires multi-segment association and MMS responses, verifies every emitted TPKT remains inside the negotiated TPDU limit, and reassembles a segmented BRCB InformationReport before decoding it. This directly protects the field-capture case where IEDScout negotiates a bounded COTP TPDU and the server must not emit oversized single-frame responses.
+
+These P0.2/P0.3 results are synthetic/protocol regression evidence, not a replacement for the real IEDScout closure condition below.
+
 ## External closure condition
 
-R2 reporting remains open until a new Windows artifact from this fix is tested with real IEDScout and proves:
+R2 reporting remains open until a new Windows artifact from the current hardened branch is tested with real IEDScout and proves:
 
 - editing Trigger Options returns no IEDScout error,
 - the subsequent `RptEna=true` succeeds,
 - changed trigger selection actually controls emitted reports,
 - GI/report delivery remains functional,
+- segmented responses remain transparent to IEDScout under its negotiated COTP TPDU size,
 - the locked discovery/report-inventory/file-transfer baseline still passes.
 
 Do not close Issue #95 or merge PR #82 solely from synthetic CI evidence.
