@@ -37,6 +37,42 @@ namespace mms = ar::iec61850::mms;
         : std::span<const std::uint8_t>{exchange.presentation_payload};
 }
 
+[[nodiscard]] std::string_view data_kind_name(const mms::MmsDataKind kind) noexcept {
+    switch (kind) {
+    case mms::MmsDataKind::array: return "array";
+    case mms::MmsDataKind::structure: return "structure";
+    case mms::MmsDataKind::boolean: return "boolean";
+    case mms::MmsDataKind::bit_string: return "bit-string";
+    case mms::MmsDataKind::integer: return "integer";
+    case mms::MmsDataKind::unsigned_integer: return "unsigned";
+    case mms::MmsDataKind::floating_point: return "floating-point";
+    case mms::MmsDataKind::octet_string: return "octet-string";
+    case mms::MmsDataKind::visible_string: return "visible-string";
+    case mms::MmsDataKind::binary_time: return "binary-time";
+    case mms::MmsDataKind::bcd: return "bcd";
+    case mms::MmsDataKind::boolean_array: return "boolean-array";
+    case mms::MmsDataKind::mms_string: return "mms-string";
+    case mms::MmsDataKind::utc_time: return "utc-time";
+    case mms::MmsDataKind::unknown: return "unknown";
+    }
+    return "unknown";
+}
+
+[[nodiscard]] std::string data_shape(const mms::MmsDataValue& value) {
+    std::string result{data_kind_name(value.kind())};
+    if (value.kind() != mms::MmsDataKind::array &&
+        value.kind() != mms::MmsDataKind::structure) {
+        return result;
+    }
+    result.push_back('(');
+    for (std::size_t index = 0U; index < value.children().size(); ++index) {
+        if (index != 0U) result.push_back(',');
+        result += data_shape(value.children()[index]);
+    }
+    result.push_back(')');
+    return result;
+}
+
 void print_usage() {
     std::cout
         << "Usage: ariec61850_mms_read_probe <host> [port] --domain NAME --item NAME [options]\n\n"
@@ -118,10 +154,11 @@ int main(const int argc, char** argv) {
             if (response.results.size() != 1U || !response.results[0].success()) {
                 throw std::runtime_error("Read returned a failed AccessResult.");
             }
+            const auto& value = *response.results[0].value;
             std::cout << "MMS_READ index=" << (index + 1U)
                       << " reference=" << domain << '/' << item
-                      << " value=" << mms::MmsDataCodec::to_display_string(
-                             *response.results[0].value)
+                      << " shape=" << data_shape(value)
+                      << " value=" << mms::MmsDataCodec::to_display_string(value)
                       << '\n';
             std::cout.flush();
             if (index + 1U < count) std::this_thread::sleep_for(delay);
