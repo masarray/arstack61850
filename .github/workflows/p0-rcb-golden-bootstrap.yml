@@ -1,0 +1,310 @@
+name: P0 RCB golden bootstrap
+
+on:
+  push:
+    branches:
+      - feat/ied-sim-ux-performance-foundation
+    paths:
+      - .github/workflows/p0-rcb-golden-bootstrap.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/ied-sim-ux-performance-foundation
+          fetch-depth: 0
+
+      - name: Apply P0.1 golden RCB semantics
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, found {count}: {old[:80]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          def replace_all(path, old, new, minimum=1):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count < minimum:
+                  raise SystemExit(f"{path}: expected at least {minimum} matches, found {count}: {old!r}")
+              p.write_text(text.replace(old, new))
+              return count
+
+          # BRCB runtime: retain the complete six-bit TrgOps field. 0x80 is the
+          # transient flag used by mature IEC 61850 stacks; it is state, not a
+          # separate report reason. Keep IntgPd as mutable runtime configuration.
+          replace_once(
+              "src/mms/static_brcb_runtime.cpp",
+              "constexpr std::uint8_t kAllowedTriggers = 0x7CU;",
+              "constexpr std::uint8_t kTriggerTransient = 0x80U;\n"
+              "constexpr std::uint8_t kAllowedTriggers = 0xFCU;")
+          replace_once(
+              "src/mms/static_brcb_runtime.cpp",
+              "[[nodiscard]] std::uint32_t effective_integrity_period(\n"
+              "    const MmsStaticBrcbDefinition& definition) noexcept {\n"
+              "    if (definition.integrity_period_ms == 0U) {\n"
+              "        return 0U;\n"
+              "    }\n"
+              "    return definition.integrity_period_ms < MmsStaticBrcbRuntime::minimum_integrity_period_ms\n"
+              "        ? MmsStaticBrcbRuntime::minimum_integrity_period_ms\n"
+              "        : definition.integrity_period_ms;\n"
+              "}",
+              "[[nodiscard]] std::uint32_t effective_integrity_period(\n"
+              "    const std::uint32_t configured_ms) noexcept {\n"
+              "    if (configured_ms == 0U) return 0U;\n"
+              "    return configured_ms < MmsStaticBrcbRuntime::minimum_integrity_period_ms\n"
+              "        ? MmsStaticBrcbRuntime::minimum_integrity_period_ms\n"
+              "        : configured_ms;\n"
+              "}")
+          replace_once(
+              "src/mms/static_brcb_runtime.cpp",
+              "    trigger_options_ = definition_->trigger_options;\n"
+              "    replay_gap_ = false;",
+              "    trigger_options_ = definition_->trigger_options;\n"
+              "    integrity_period_ms_ = definition_->integrity_period_ms;\n"
+              "    replay_gap_ = false;")
+          replace_all(
+              "src/mms/static_brcb_runtime.cpp",
+              "effective_integrity_period(*definition_)",
+              "effective_integrity_period(integrity_period_ms_)",
+              minimum=2)
+          replace_once(
+              "src/mms/static_brcb_runtime.cpp",
+              "MmsStaticBrcbStatus MmsStaticBrcbRuntime::notify(\n",
+              "MmsStaticBrcbStatus MmsStaticBrcbRuntime::set_integrity_period(\n"
+              "    const std::uint32_t integrity_period_ms) noexcept {\n"
+              "    if (!initialized_ || definition_ == nullptr || pending_ == nullptr) {\n"
+              "        return MmsStaticBrcbStatus::invalid_runtime;\n"
+              "    }\n"
+              "    if (enabled_) {\n"
+              "        return MmsStaticBrcbStatus::temporarily_unavailable;\n"
+              "    }\n"
+              "    if (integrity_period_ms_ == integrity_period_ms) {\n"
+              "        return MmsStaticBrcbStatus::ok;\n"
+              "    }\n"
+              "    integrity_period_ms_ = integrity_period_ms;\n"
+              "    clear_pending(*pending_);\n"
+              "    general_interrogation_pending_ = false;\n"
+              "    next_integrity_due_ms_ = 0U;\n"
+              "    integrity_armed_ = false;\n"
+              "    bump_revision(pending_->revision);\n"
+              "    bump_revision(schedule_revision_);\n"
+              "    return MmsStaticBrcbStatus::ok;\n"
+              "}\n\n"
+              "MmsStaticBrcbStatus MmsStaticBrcbRuntime::notify(\n")
+          # Avoid an unused-constant warning while explicitly documenting that
+          # transient is retained but does not itself schedule a report.
+          replace_once(
+              "src/mms/static_brcb_runtime.cpp",
+              "constexpr std::uint8_t kAllowedTriggers = 0xFCU;",
+              "constexpr std::uint8_t kAllowedTriggers = static_cast<std::uint8_t>(\n"
+              "    kTriggerTransient | 0x7CU);")
+
+          replace_once(
+              "include/ariec61850/mms/static_brcb_runtime.hpp",
+              "    [[nodiscard]] constexpr std::uint8_t trigger_options() const noexcept {\n"
+              "        return trigger_options_;\n"
+              "    }\n"
+              "    [[nodiscard]] constexpr bool enabled() const noexcept { return enabled_; }",
+              "    [[nodiscard]] constexpr std::uint8_t trigger_options() const noexcept {\n"
+              "        return trigger_options_;\n"
+              "    }\n"
+              "    [[nodiscard]] MmsStaticBrcbStatus set_integrity_period(\n"
+              "        std::uint32_t integrity_period_ms) noexcept;\n"
+              "    [[nodiscard]] constexpr std::uint32_t integrity_period_ms() const noexcept {\n"
+              "        return integrity_period_ms_;\n"
+              "    }\n"
+              "    [[nodiscard]] constexpr bool enabled() const noexcept { return enabled_; }")
+          replace_once(
+              "include/ariec61850/mms/static_brcb_runtime.hpp",
+              "    std::uint8_t trigger_options_{};\n"
+              "    bool replay_gap_{};",
+              "    std::uint8_t trigger_options_{};\n"
+              "    std::uint32_t integrity_period_ms_{};\n"
+              "    bool replay_gap_{};")
+
+          # Control layer owns reservation/association policy for the mutable field.
+          replace_once(
+              "include/ariec61850/mms/static_brcb_control.hpp",
+              "    [[nodiscard]] MmsStaticBrcbControlStatus request_general_interrogation(\n",
+              "    [[nodiscard]] MmsStaticBrcbControlStatus set_integrity_period(\n"
+              "        const MmsStaticBrcbClientIdentity& client,\n"
+              "        std::uint32_t integrity_period_ms,\n"
+              "        std::uint64_t now_ms) noexcept;\n\n"
+              "    [[nodiscard]] MmsStaticBrcbControlStatus request_general_interrogation(\n")
+          replace_once(
+              "src/mms/static_brcb_control.cpp",
+              "MmsStaticBrcbControlStatus MmsStaticBrcbControl::request_general_interrogation(\n",
+              "MmsStaticBrcbControlStatus MmsStaticBrcbControl::set_integrity_period(\n"
+              "    const MmsStaticBrcbClientIdentity& client,\n"
+              "    const std::uint32_t integrity_period_ms,\n"
+              "    const std::uint64_t now_ms) noexcept {\n"
+              "    const auto access = require_control_access(client, now_ms);\n"
+              "    if (access != MmsStaticBrcbControlStatus::ok) return access;\n"
+              "    if (reports_->enabled()) {\n"
+              "        return MmsStaticBrcbControlStatus::temporarily_unavailable;\n"
+              "    }\n"
+              "    return map_runtime_status(reports_->set_integrity_period(integrity_period_ms));\n"
+              "}\n\n"
+              "MmsStaticBrcbControlStatus MmsStaticBrcbControl::request_general_interrogation(\n")
+
+          # BRCB object semantics: IntgPd is writable while disabled and TrgOps
+          # accepts all six encoded bits (including transient).
+          replace_once(
+              "src/mms/static_brcb_objects.cpp",
+              "        attribute == MmsStaticBrcbAttribute::trigger_options ||\n"
+              "        attribute == MmsStaticBrcbAttribute::general_interrogation ||",
+              "        attribute == MmsStaticBrcbAttribute::trigger_options ||\n"
+              "        attribute == MmsStaticBrcbAttribute::integrity_period ||\n"
+              "        attribute == MmsStaticBrcbAttribute::general_interrogation ||")
+          replace_once(
+              "src/mms/static_brcb_objects.cpp",
+              "    case MmsStaticBrcbAttribute::integrity_period:\n"
+              "        return encode_unsigned(context->definition->integrity_period_ms, destination);",
+              "    case MmsStaticBrcbAttribute::integrity_period:\n"
+              "        return encode_unsigned(context->reports->integrity_period_ms(), destination);")
+          replace_once(
+              "src/mms/static_brcb_objects.cpp",
+              "        constexpr std::uint8_t allowed = 0x7CU;",
+              "        constexpr std::uint8_t allowed = 0xFCU;")
+          replace_once(
+              "src/mms/static_brcb_objects.cpp",
+              "[[nodiscard]] bool decode_nonnegative_integer16(\n",
+              "[[nodiscard]] bool decode_unsigned32(\n"
+              "    const std::span<const std::uint8_t> encoded,\n"
+              "    std::uint32_t& value) noexcept {\n"
+              "    value = 0U;\n"
+              "    asn1::BerTlvView tlv;\n"
+              "    if (!asn1::BerSpanReader::try_read_exact(encoded, tlv) ||\n"
+              "        tlv.tag_class != asn1::BerClass::context_specific ||\n"
+              "        tlv.tag_number != 6 || tlv.constructed ||\n"
+              "        tlv.value.empty() || tlv.value.size() > sizeof(std::uint32_t)) {\n"
+              "        return false;\n"
+              "    }\n"
+              "    for (const auto byte : tlv.value) {\n"
+              "        value = static_cast<std::uint32_t>((value << 8U) | byte);\n"
+              "    }\n"
+              "    return true;\n"
+              "}\n\n"
+              "[[nodiscard]] bool decode_nonnegative_integer16(\n")
+          replace_once(
+              "src/mms/static_brcb_objects.cpp",
+              "    case MmsStaticBrcbAttribute::general_interrogation: {",
+              "    case MmsStaticBrcbAttribute::integrity_period: {\n"
+              "        std::uint32_t value{};\n"
+              "        if (!decode_unsigned32(encoded_data, value)) {\n"
+              "            return {false, kTypeInconsistent};\n"
+              "        }\n"
+              "        const auto claim = ensure_claimed(*context, client, now);\n"
+              "        if (claim != MmsStaticBrcbControlStatus::ok) {\n"
+              "            return map_control_status(claim);\n"
+              "        }\n"
+              "        return map_control_status(\n"
+              "            context->control->set_integrity_period(client, value, now));\n"
+              "    }\n"
+              "    case MmsStaticBrcbAttribute::general_interrogation: {")
+          replace_once(
+              "src/mms/static_brcb_objects.cpp",
+              "    case MmsStaticBrcbAttribute::sequence_number:\n"
+              "    case MmsStaticBrcbAttribute::integrity_period:\n"
+              "    case MmsStaticBrcbAttribute::time_of_entry:",
+              "    case MmsStaticBrcbAttribute::sequence_number:\n"
+              "    case MmsStaticBrcbAttribute::time_of_entry:")
+
+          # URCB uses the same six-bit TriggerConditions wire type; preserve the
+          # transient flag there too so the two report-control classes agree.
+          replace_once(
+              "src/mms/static_urcb_runtime.cpp",
+              "constexpr std::uint8_t kAllowedTriggerOptions = 0x7CU;",
+              "constexpr std::uint8_t kAllowedTriggerOptions = 0xFCU;")
+
+          # Golden regression from the real IEDScout trace:
+          # IntgPd=5000, TrgOps=0xFC/unused=2, OptFlds=0x7B80/unused=6,
+          # then RptEna=true. Assert all live values before GI.
+          test = Path("embedded/mms_iedscout_rcb_control_hard_profile_smoke.cpp")
+          text = test.read_text()
+          text = text.replace(
+              "constexpr std::array<std::uint8_t, 3U> kTrue{0x83U, 0x01U, 0xFFU};",
+              "constexpr std::array<std::uint8_t, 3U> kTrue{0x83U, 0x01U, 0xFFU};\n"
+              "constexpr std::array<std::uint8_t, 4U> kIntgPd5000{0x86U, 0x02U, 0x13U, 0x88U};\n"
+              "constexpr std::array<std::uint8_t, 4U> kTrgOpsAll{0x84U, 0x02U, 0x02U, 0xFCU};\n"
+              "constexpr std::array<std::uint8_t, 5U> kOptFldsGolden{0x84U, 0x03U, 0x06U, 0x7BU, 0x80U};",
+              1)
+          old = (
+              "    const auto* rpt_ena = find_item(bank.table(), \"B1$RptEna\");\n"
+              "    const auto* gi = find_item(bank.table(), \"B1$GI\");\n"
+              "    const auto* time_of_entry = find_item(bank.table(), \"B1$TimeofEntry\");\n"
+              "    if (rpt_ena == nullptr || gi == nullptr || time_of_entry == nullptr ||\n"
+              "        rpt_ena->contextual_write == nullptr || gi->contextual_write == nullptr) {\n"
+              "        return 5;\n"
+              "    }")
+          new = (
+              "    const auto* rpt_ena = find_item(bank.table(), \"B1$RptEna\");\n"
+              "    const auto* intg_pd = find_item(bank.table(), \"B1$IntgPd\");\n"
+              "    const auto* trg_ops = find_item(bank.table(), \"B1$TrgOps\");\n"
+              "    const auto* opt_flds = find_item(bank.table(), \"B1$OptFlds\");\n"
+              "    const auto* gi = find_item(bank.table(), \"B1$GI\");\n"
+              "    const auto* time_of_entry = find_item(bank.table(), \"B1$TimeofEntry\");\n"
+              "    if (rpt_ena == nullptr || intg_pd == nullptr || trg_ops == nullptr ||\n"
+              "        opt_flds == nullptr || gi == nullptr || time_of_entry == nullptr ||\n"
+              "        rpt_ena->contextual_write == nullptr || intg_pd->contextual_write == nullptr ||\n"
+              "        trg_ops->contextual_write == nullptr || opt_flds->contextual_write == nullptr ||\n"
+              "        gi->contextual_write == nullptr) {\n"
+              "        return 5;\n"
+              "    }")
+          if old not in text: raise SystemExit("golden test object lookup pattern missing")
+          text = text.replace(old, new, 1)
+          old = "    const auto enable = rpt_ena->contextual_write(rpt_ena->write_context, kTrue, a);\n    if (!enable.success || !reports.enabled()) return 6;"
+          new = (
+              "    const auto intg = intg_pd->contextual_write(intg_pd->write_context, kIntgPd5000, a);\n"
+              "    const auto trg = trg_ops->contextual_write(trg_ops->write_context, kTrgOpsAll, a);\n"
+              "    const auto opt = opt_flds->contextual_write(opt_flds->write_context, kOptFldsGolden, a);\n"
+              "    if (!intg.success || !trg.success || !opt.success ||\n"
+              "        reports.integrity_period_ms() != 5'000U ||\n"
+              "        reports.trigger_options() != 0xFCU ||\n"
+              "        reports.optional_fields()[0] != 0x7BU ||\n"
+              "        reports.optional_fields()[1] != 0x80U) {\n"
+              "        return 6;\n"
+              "    }\n\n"
+              "    const auto enable = rpt_ena->contextual_write(rpt_ena->write_context, kTrue, a);\n"
+              "    if (!enable.success || !reports.enabled()) return 7;")
+          if old not in text: raise SystemExit("golden test enable pattern missing")
+          text = text.replace(old, new, 1)
+          # Renumber subsequent return codes only for readability; behavior is what matters.
+          text = text.replace("return 7;", "return 8;", 1)
+          text = text.replace("return 8;", "return 9;", 1)
+          text = text.replace("return 9;", "return 10;", 1)
+          text = text.replace("return 10;", "return 11;", 1)
+          text = text.replace("return 11;", "return 12;", 1)
+          test.write_text(text)
+
+      - name: Configure embedded P0 regression
+        run: cmake -S . -B build-p0 -DCMAKE_BUILD_TYPE=Release -DARIEC61850_BUILD_EMBEDDED_PROFILE=ON
+
+      - name: Build embedded P0 regression
+        run: cmake --build build-p0 --parallel
+
+      - name: Run embedded P0 regression
+        run: ctest --test-dir build-p0 --output-on-failure
+
+      - name: Commit verified P0.1 semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/p0-rcb-golden-bootstrap.yml
+          git config user.name "ARStack P0 Bot"
+          git config user.email "actions@github.com"
+          git add -A
+          git commit -m "fix(mms): accept golden six-bit RCB trigger configuration"
+          git push origin HEAD:feat/ied-sim-ux-performance-foundation
