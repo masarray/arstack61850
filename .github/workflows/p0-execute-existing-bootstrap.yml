@@ -1,0 +1,58 @@
+name: P0 execute RCB transaction patch
+
+on:
+  push:
+    branches:
+      - feat/ied-sim-ux-performance-foundation
+    paths:
+      - .github/workflows/p0-execute-existing-bootstrap.yml
+
+permissions:
+  contents: write
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/ied-sim-ux-performance-foundation
+          fetch-depth: 0
+
+      - name: Execute corrected source patch from reviewed bootstrap
+        shell: python
+        run: |
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/p0-rcb-transaction-bootstrap.yml').read_text()
+          # 0x7C is the logical six-bit TrgOps mask observed in the IEDScout golden trace.
+          workflow = workflow.replace('0xFCU', '0x7CU')
+          marker = '      - name: Apply semantic RCB write ordering\n'
+          begin = workflow.index('        run: |\n', workflow.index(marker)) + len('        run: |\n')
+          end = workflow.index('\n      - name: Configure embedded transaction regression', begin)
+          patch_script = textwrap.dedent(workflow[begin:end])
+          exec(compile(patch_script, 'p0-rcb-source-patch.py', 'exec'), {})
+
+      - name: Configure embedded transaction regression
+        run: cmake -S . -B build-p0-tx -DCMAKE_BUILD_TYPE=Release -DARIEC61850_BUILD_EMBEDDED_PROFILE=ON
+
+      - name: Build embedded transaction regression
+        run: cmake --build build-p0-tx --parallel
+
+      - name: Run embedded transaction regression
+        run: ctest --test-dir build-p0-tx --output-on-failure
+
+      - name: Commit verified source only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "ARStack P0 Bot"
+          git config user.email "actions@github.com"
+          git add -A -- . ':!.github/workflows'
+          if git diff --cached --quiet; then
+            echo "No source changes produced"
+            exit 1
+          fi
+          git commit -m "fix(mms): order RCB multi-writes by lifecycle semantics"
+          git push origin HEAD:feat/ied-sim-ux-performance-foundation
