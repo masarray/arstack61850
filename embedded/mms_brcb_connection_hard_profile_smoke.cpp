@@ -120,9 +120,9 @@ constexpr std::array<std::uint8_t, 184U> kAssociationRequest{
 
 [[nodiscard]] bool decode_report_frame(
     const std::span<const std::uint8_t> frame,
+    const std::span<std::uint8_t> reassembled,
     mms::MmsInformationReportView& report,
     std::size_t* segment_count = nullptr) noexcept {
-    std::array<std::uint8_t, 2048U> reassembled{};
     std::size_t input_offset{};
     std::size_t reassembled_size{};
     std::size_t segments{};
@@ -150,7 +150,7 @@ constexpr std::array<std::uint8_t, 184U> kAssociationRequest{
     osi::PresentationPdvView pdv;
     return segments != 0U &&
         osi::SessionSpanCodec::try_decode_data_transfer_view(
-            std::span<const std::uint8_t>{reassembled}.first(reassembled_size), session) &&
+            reassembled.first(reassembled_size), session) &&
         osi::PresentationSpanCodec::try_decode_fully_encoded_data_view(
             session.presentation_payload, pdv) &&
         pdv.context_id == 3U &&
@@ -298,10 +298,12 @@ int main() {
         return 12;
     }
 
+    std::array<std::uint8_t, 2048U> report_storage{};
     mms::MmsInformationReportView decoded;
     std::size_t report_segments{};
     if (!decode_report_frame(
             std::span<const std::uint8_t>{response}.first(retry.bytes_written),
+            report_storage,
             decoded,
             &report_segments) ||
         report_segments < 2U || decoded.item_count != 12U) {
