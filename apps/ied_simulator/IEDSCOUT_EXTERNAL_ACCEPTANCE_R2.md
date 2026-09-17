@@ -78,11 +78,37 @@ Outbound server TSDUs are now segmented into one or more complete TPKT/COTP Data
 
 Focused regression coverage negotiates a 128-byte TPDU, requires multi-segment association and MMS responses, verifies every emitted TPKT remains inside the negotiated TPDU limit, and reassembles a segmented BRCB InformationReport before decoding it. This directly protects the field-capture case where IEDScout negotiates a bounded COTP TPDU and the server must not emit oversized single-frame responses.
 
+A follow-up regression-only lifetime defect was corrected in `3e65ba19b6f8682640b711425e6f24ecef6ccfee`: the decoded `MmsInformationReportView` now keeps its segmented reassembly backing storage alive for the complete assertion scope instead of referencing a local buffer that had already gone out of scope. No production protocol behavior changed in that follow-up.
+
+### Exact-head synthetic closure
+
+Synthetic/protocol acceptance for P0.2 and P0.3 is now closed on exact head `3e65ba19b6f8682640b711425e6f24ecef6ccfee`.
+
+All 15 PR workflows attached to that exact head completed successfully, including the protocol and product surfaces most relevant to this correction:
+
+- MMS R1-R2 Server CI
+- IEDScout Parity Server CI
+- BRCB Hard Profile CI
+- Embedded Profile CI
+- Dynamic RCB Trial Harness CI
+- Control Interop Harness CI
+- C++ CI
+- IED Simulator Qt
+- IED Simulator Release Hardening
+
+The exact-head Windows RC was produced by IED Simulator Release Hardening run `35205603573`:
+
+- artifact: `arstack-iec61850-workbench-windows-rc`
+- artifact ID: `10490192212`
+- digest: `sha256:8e3533b7d681f504a3a50739f05252366740c86ede8903fbf4e5852835c3f1fa`
+- contains `ARStack-IEC61850-Workbench-Setup-win64.exe`
+- contains `ARStack-IEC61850-Workbench-portable-win64.zip`
+
 These P0.2/P0.3 results are synthetic/protocol regression evidence, not a replacement for the real IEDScout closure condition below.
 
 ## External closure condition
 
-R2 reporting remains open until a new Windows artifact from the current hardened branch is tested with real IEDScout and proves:
+R2 reporting remains open until the exact-head Windows artifact above is tested with real IEDScout and proves:
 
 - editing Trigger Options returns no IEDScout error,
 - the subsequent `RptEna=true` succeeds,
