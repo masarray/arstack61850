@@ -18,9 +18,10 @@ Rectangle {
     property string unitText: "A RMS"
     property bool compact: false
 
-    color: "#0b1219"
-    radius: 8
-    border.width: 0
+    color: matrix.theme.surface2
+    radius: 7
+    border.width: 1
+    border.color: matrix.theme.lineSoft
 
     function phaseColorFor(index) {
         return [theme.phaseA, theme.phaseB, theme.phaseC, theme.phaseN][index]
@@ -41,15 +42,15 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 36
-            Layout.leftMargin: 12
-            Layout.rightMargin: 12
-            spacing: 8
+            Layout.preferredHeight: 32
+            Layout.leftMargin: 11
+            Layout.rightMargin: 11
+            spacing: 7
             Label {
                 text: matrix.titleText
                 color: matrix.theme.text
                 font.family: matrix.uiFont
-                font.pixelSize: 13
+                font.pixelSize: 12
                 font.weight: Font.DemiBold
                 verticalAlignment: Text.AlignVCenter
             }
@@ -58,7 +59,7 @@ Rectangle {
                 text: matrix.unitText
                 color: matrix.theme.muted
                 font.family: matrix.uiFont
-                font.pixelSize: 9
+                font.pixelSize: 8
                 font.weight: Font.Medium
                 verticalAlignment: Text.AlignVCenter
             }
@@ -68,36 +69,36 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 22
-            Layout.leftMargin: 10
-            Layout.rightMargin: 10
-            spacing: 7
-            Item { Layout.preferredWidth: 26 }
+            Layout.preferredHeight: 20
+            Layout.leftMargin: 9
+            Layout.rightMargin: 9
+            spacing: 6
+            Item { Layout.preferredWidth: 25 }
             Label {
-                text: "Channel"
-                Layout.preferredWidth: 50
-                color: matrix.theme.muted
-                font.family: matrix.uiFont
-                font.pixelSize: 8
+                text: "CH"
+                Layout.preferredWidth: 46
+                color: matrix.theme.muted2
+                font.family: matrix.monoFont
+                font.pixelSize: 7
                 font.weight: Font.DemiBold
                 verticalAlignment: Text.AlignVCenter
             }
             Label {
-                text: "Value"
+                text: "MAGNITUDE"
                 Layout.fillWidth: true
-                color: matrix.theme.muted
+                color: matrix.theme.muted2
                 font.family: matrix.uiFont
-                font.pixelSize: 8
+                font.pixelSize: 7
                 font.weight: Font.DemiBold
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
             }
             Label {
-                text: "Phase"
-                Layout.preferredWidth: matrix.compact ? 88 : 104
-                color: matrix.theme.muted
+                text: "ANGLE"
+                Layout.preferredWidth: matrix.compact ? 84 : 100
+                color: matrix.theme.muted2
                 font.family: matrix.uiFont
-                font.pixelSize: 8
+                font.pixelSize: 7
                 font.weight: Font.DemiBold
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
@@ -124,8 +125,8 @@ Rectangle {
                 property real pendingPhase: angle
 
                 Layout.fillWidth: true
-                Layout.preferredHeight: matrix.compact ? 42 : 44
-                color: signalRow.selected ? "#101d28"
+                Layout.preferredHeight: matrix.compact ? 40 : 42
+                color: signalRow.selected ? "#101c27"
                     : (magnitudeField.activeFocus || phaseField.activeFocus) ? "#0f1922"
                     : rowHover.hovered ? "#0d161e" : "transparent"
                 Behavior on color { ColorAnimation { duration: 90 } }
@@ -151,7 +152,7 @@ Rectangle {
                 Rectangle {
                     visible: signalRow.selected
                     width: 2
-                    opacity: 0.82
+                    opacity: 0.86
                     anchors.left: parent.left
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
@@ -160,12 +161,12 @@ Rectangle {
 
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: 10
-                    anchors.rightMargin: 10
-                    spacing: 7
+                    anchors.leftMargin: 9
+                    anchors.rightMargin: 9
+                    spacing: 6
 
                     CheckBox {
-                        Layout.preferredWidth: 26
+                        Layout.preferredWidth: 25
                         Layout.alignment: Qt.AlignVCenter
                         checked: signalRow.channelEnabled
                         ToolTip.visible: hovered
@@ -180,10 +181,10 @@ Rectangle {
                     }
 
                     RowLayout {
-                        Layout.preferredWidth: 50
+                        Layout.preferredWidth: 46
                         Layout.alignment: Qt.AlignVCenter
-                        spacing: 7
-                        Rectangle { width: 7; height: 7; radius: 4; color: signalRow.phaseColor }
+                        spacing: 6
+                        Rectangle { width: 6; height: 6; radius: 3; color: signalRow.phaseColor }
                         Label {
                             text: signalRow.sid
                             color: signalRow.selected ? matrix.theme.text : matrix.theme.textSoft
@@ -199,7 +200,7 @@ Rectangle {
                         Layout.fillWidth: true
                         theme: matrix.theme
                         monoFont: matrix.monoFont
-                        compact: matrix.compact
+                        compact: true
                         suffixText: matrix.groupIndex === 0 ? "A" : "V"
                         text: signalRow.mag.toFixed(3)
                         invalidInput: false
@@ -246,10 +247,10 @@ Rectangle {
                     NumericField {
                         id: phaseField
                         enabled: matrix.controller.signalFrequency > 0
-                        Layout.preferredWidth: matrix.compact ? 88 : 104
+                        Layout.preferredWidth: matrix.compact ? 84 : 100
                         theme: matrix.theme
                         monoFont: matrix.monoFont
-                        compact: matrix.compact
+                        compact: true
                         suffixText: "°"
                         text: signalRow.angle.toFixed(2)
                         invalidInput: false
@@ -295,8 +296,11 @@ Rectangle {
                 }
 
                 Rectangle {
+                    visible: signalRow.rowIndex < 3
                     anchors.left: parent.left
+                    anchors.leftMargin: 9
                     anchors.right: parent.right
+                    anchors.rightMargin: 9
                     anchors.bottom: parent.bottom
                     height: 1
                     color: matrix.theme.lineSoft
