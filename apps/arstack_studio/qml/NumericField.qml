@@ -18,11 +18,11 @@ TextField {
     selectionColor: theme.accent
     selectedTextColor: theme.bg
     font.family: monoFont
-    font.pixelSize: compact ? 12 : 14
+    font.pixelSize: compact ? 12 : 13
     font.weight: Font.DemiBold
     leftPadding: 10
-    rightPadding: suffixText.length > 0 ? 34 : 10
-    implicitHeight: compact ? 35 : 39
+    rightPadding: suffixText.length > 0 ? 31 : 10
+    implicitHeight: compact ? 34 : 36
 
     Label {
         visible: field.suffixText.length > 0
@@ -32,15 +32,15 @@ TextField {
         text: field.suffixText
         color: field.activeFocus ? field.theme.textSoft : field.theme.muted
         font.family: field.monoFont
-        font.pixelSize: field.compact ? 9 : 10
+        font.pixelSize: field.compact ? 9 : 9
         font.weight: Font.Medium
         Behavior on color { ColorAnimation { duration: 90 } }
     }
 
     background: Rectangle {
-        radius: 7
-        color: field.activeFocus ? "#0b141d" : (field.hovered ? "#121c26" : "#10171f")
-        border.width: field.activeFocus ? 2 : 1
+        radius: 6
+        color: field.activeFocus ? "#0b141d" : (field.hovered ? "#101922" : "#0d141b")
+        border.width: 1
         border.color: field.invalidInput ? field.theme.red
             : field.activeFocus ? field.theme.accent
             : field.hovered ? "#334252" : field.theme.lineSoft
