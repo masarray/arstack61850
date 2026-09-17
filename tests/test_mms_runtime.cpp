@@ -212,8 +212,8 @@ void queue_handshake(ScriptedTransport& transport) {
     add(mms::MmsDataValue::octet_string(entry));
     add(mms::MmsDataValue::unsigned_integer(1U));
     add(mms::MmsDataValue::bit_string(7U, inclusion));
-    add(mms::MmsDataValue::boolean(true));
     add(mms::MmsDataValue::visible_string("LD0/PTOC1.Str.stVal"));
+    add(mms::MmsDataValue::boolean(true));
     add(mms::MmsDataValue::bit_string(2U, reason));
     return report;
 }
