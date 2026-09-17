@@ -1,0 +1,47 @@
+name: Phase 1 Demo Shell Refinement
+
+on:
+  pull_request:
+    paths:
+      - 'apps/arstack_studio/**'
+      - '.github/scripts/phase1_demo_shell.py'
+      - '.github/workflows/phase1-demo-shell.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: phase1-demo-shell-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  apply-shell:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - name: Apply demo shell refinement
+        run: python3 .github/scripts/phase1_demo_shell.py
+      - name: Verify presentation-only scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff -- apps/arstack_studio/qml/Main.qml apps/arstack_studio/qml/WorkflowBar.qml
+          test "$(grep -c 'header: Rectangle {' apps/arstack_studio/qml/Main.qml || true)" -eq 0
+          grep -q 'Layout.preferredHeight: 62' apps/arstack_studio/qml/Main.qml
+          grep -q 'implicitHeight: 62' apps/arstack_studio/qml/WorkflowBar.qml
+          grep -q 'visible: root.telemetryDockVisible && root.telemetryExpanded' apps/arstack_studio/qml/Main.qml
+      - name: Commit presentation source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add apps/arstack_studio/qml/Main.qml apps/arstack_studio/qml/WorkflowBar.qml
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name 'ARStack UI Refinement'
+          git config user.email 'actions@users.noreply.github.com'
+          git commit -m 'ui(studio): consolidate shell for demo-grade layout'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
