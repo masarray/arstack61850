@@ -8,6 +8,7 @@
 #include "ariec61850/osi/session_span.hpp"
 #include "ariec61850/osi/tpkt_span.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -74,6 +75,7 @@ constexpr std::array<std::uint8_t, 184U> kAssociationRequest{
     result.owner[0] = owner[0];
     result.owner[1] = owner[1];
     result.owner_size = owner.size();
+    result.maximum_tpdu_size_code = 0x07U;
     return result;
 }
 
@@ -83,7 +85,7 @@ constexpr std::array<std::uint8_t, 184U> kAssociationRequest{
     std::span<std::uint8_t> response,
     std::span<std::uint8_t> workspace,
     std::span<std::uint8_t> scratch) noexcept {
-    constexpr std::array<std::uint8_t, 1U> tpdu_size{0x0AU};
+    constexpr std::array<std::uint8_t, 1U> tpdu_size{0x07U};
     constexpr std::array<std::uint8_t, 2U> source_tsap{0x00U, 0x01U};
     constexpr std::array<std::uint8_t, 2U> destination_tsap{0x00U, 0x01U};
     const std::array<osi::CotpParameterView, 3U> parameters{
@@ -118,15 +120,37 @@ constexpr std::array<std::uint8_t, 184U> kAssociationRequest{
 
 [[nodiscard]] bool decode_report_frame(
     const std::span<const std::uint8_t> frame,
-    mms::MmsInformationReportView& report) noexcept {
-    osi::TpktFrameView tpkt;
-    osi::CotpTpduView cotp;
+    mms::MmsInformationReportView& report,
+    std::size_t* segment_count = nullptr) noexcept {
+    std::array<std::uint8_t, 2048U> reassembled{};
+    std::size_t input_offset{};
+    std::size_t reassembled_size{};
+    std::size_t segments{};
+    while (input_offset < frame.size()) {
+        const auto remaining = frame.subspan(input_offset);
+        const auto peek = osi::TpktSpanCodec::peek_frame(remaining);
+        if (!peek.ready() || peek.frame_bytes == 0U) return false;
+        osi::TpktFrameView tpkt;
+        osi::CotpTpduView cotp;
+        if (!osi::TpktSpanCodec::try_decode_view(remaining.first(peek.frame_bytes), tpkt) ||
+            !osi::CotpSpanCodec::try_decode_view(tpkt.payload, cotp) ||
+            cotp.kind != osi::CotpWireKind::data ||
+            cotp.user_data.size() > reassembled.size() - reassembled_size) {
+            return false;
+        }
+        std::copy(cotp.user_data.begin(), cotp.user_data.end(),
+            reassembled.begin() + static_cast<std::ptrdiff_t>(reassembled_size));
+        reassembled_size += cotp.user_data.size();
+        input_offset += peek.frame_bytes;
+        ++segments;
+        if ((input_offset == frame.size()) != cotp.end_of_transmission) return false;
+    }
+    if (segment_count != nullptr) *segment_count = segments;
     osi::SessionDataTransferView session;
     osi::PresentationPdvView pdv;
-    return osi::TpktSpanCodec::try_decode_view(frame, tpkt) &&
-        osi::CotpSpanCodec::try_decode_view(tpkt.payload, cotp) &&
-        cotp.kind == osi::CotpWireKind::data && cotp.end_of_transmission &&
-        osi::SessionSpanCodec::try_decode_data_transfer_view(cotp.user_data, session) &&
+    return segments != 0U &&
+        osi::SessionSpanCodec::try_decode_data_transfer_view(
+            std::span<const std::uint8_t>{reassembled}.first(reassembled_size), session) &&
         osi::PresentationSpanCodec::try_decode_fully_encoded_data_view(
             session.presentation_payload, pdv) &&
         pdv.context_id == 3U &&
@@ -170,7 +194,8 @@ int main() {
         dispatcher, connection_policy(foreign_b.association_id, kOwnerB)};
 
     const mms::MmsStaticBrcbDefinition definition{
-        "LD0", "LLN0$BR$Events", "LD0/LLN0$BR$Events",
+        "LD0", "LLN0$BR$Events",
+        "LD0/LLN0$BR$Events_P0_3_Negotiated_TPDU_Segmentation_Proof",
         "LD0", "LLN0$Events", 4U, {0x7FU, 0x80U}, 0U, 0x70U};
     std::array<std::uint8_t, 1024U> slot_storage{};
     std::array<mms::MmsStaticBrcbSlot, 1U> slots{
@@ -274,9 +299,12 @@ int main() {
     }
 
     mms::MmsInformationReportView decoded;
+    std::size_t report_segments{};
     if (!decode_report_frame(
-            std::span<const std::uint8_t>{response}.first(retry.bytes_written), decoded) ||
-        decoded.item_count != 12U) {
+            std::span<const std::uint8_t>{response}.first(retry.bytes_written),
+            decoded,
+            &report_segments) ||
+        report_segments < 2U || decoded.item_count != 12U) {
         return 13;
     }
     mms::MmsReadAccessResultView item;

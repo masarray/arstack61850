@@ -94,6 +94,36 @@ constexpr std::array<std::uint8_t, 41U> kReadRequest{
     return {wire::EncodeStatus::ok, 3U, 3U};
 }
 
+[[nodiscard]] bool validate_segmented_stream(
+    const std::span<const std::uint8_t> bytes,
+    const std::size_t negotiated_tpdu_size_bytes,
+    const bool require_multiple) noexcept {
+    std::size_t offset{};
+    std::size_t segments{};
+    while (offset < bytes.size()) {
+        const auto remaining = bytes.subspan(offset);
+        const auto peek = osi::TpktSpanCodec::peek_frame(remaining);
+        if (!peek.ready() || peek.frame_bytes == 0U ||
+            peek.frame_bytes > negotiated_tpdu_size_bytes + osi::TpktSpanCodec::header_length) {
+            return false;
+        }
+        osi::TpktFrameView tpkt;
+        osi::CotpTpduView cotp;
+        if (!osi::TpktSpanCodec::try_decode_view(remaining.first(peek.frame_bytes), tpkt) ||
+            !osi::CotpSpanCodec::try_decode_view(tpkt.payload, cotp) ||
+            cotp.kind != osi::CotpWireKind::data) {
+            return false;
+        }
+        offset += peek.frame_bytes;
+        ++segments;
+        if ((offset == bytes.size()) != cotp.end_of_transmission) {
+            return false;
+        }
+    }
+    return offset == bytes.size() && segments != 0U &&
+        (!require_multiple || segments > 1U);
+}
+
 [[nodiscard]] bool set_maximum_mms_pdu(
     std::array<std::uint8_t, kAssociationRequest.size()>& association,
     const std::uint32_t value) noexcept {
@@ -329,20 +359,36 @@ int main() {
     std::array<std::uint8_t, 2048U> scratch{};
     std::array<std::uint8_t, 2048U> presentation{};
 
-    // A 128-byte TPDU cannot carry the fixed association-accept TSDU as one DT
-    // TPDU. Until outbound COTP segmentation is implemented, reject it rather
-    // than violate the negotiated limit.
+    // A 128-byte negotiated TPDU must segment the association accept and
+    // later confirmed responses into bounded TPKTs instead of rejecting them.
     mms::MmsStaticConnectionRuntime tiny_tpdu{dispatcher};
     if (!connect_cotp(tiny_tpdu, 0x07U, request, response, workspace, scratch)) {
         return 2;
     }
     const auto tiny_association = associate(
         tiny_tpdu, 65'000U, request, response, workspace, scratch);
-    if (tiny_association.status != mms::MmsStaticConnectionStatus::peer_limit_exceeded ||
-        tiny_association.bytes_written != 0U ||
+    if (!tiny_association.response_ready() ||
         tiny_tpdu.negotiated_tpdu_size_bytes() != 128U ||
-        tiny_tpdu.state() != mms::MmsStaticConnectionState::awaiting_association) {
+        tiny_tpdu.state() != mms::MmsStaticConnectionState::established ||
+        !validate_segmented_stream(
+            std::span<const std::uint8_t>{response}.first(tiny_association.bytes_written),
+            128U,
+            true)) {
         return 3;
+    }
+    const auto tiny_read_tpkt = build_mms_tpkt(
+        kReadRequest, request, presentation, scratch);
+    if (!tiny_read_tpkt.success()) return 21;
+    const auto tiny_read_result = tiny_tpdu.process_tcp_window(
+        std::span<const std::uint8_t>{request}.first(tiny_read_tpkt.bytes_written),
+        response,
+        workspace);
+    if (!tiny_read_result.response_ready() ||
+        !validate_segmented_stream(
+            std::span<const std::uint8_t>{response}.first(tiny_read_result.bytes_written),
+            128U,
+            true)) {
+        return 22;
     }
 
     mms::MmsStaticConnectionPolicy policy;

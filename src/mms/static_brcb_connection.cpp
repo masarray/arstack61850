@@ -3,6 +3,7 @@
 #include "ariec61850/mms/static_brcb_connection.hpp"
 
 #include "ariec61850/osi/cotp_span.hpp"
+#include "ariec61850/osi/cotp_tpkt_stream.hpp"
 #include "ariec61850/osi/presentation_span.hpp"
 #include "ariec61850/osi/tpkt_span.hpp"
 
@@ -14,18 +15,6 @@
 
 namespace ar::iec61850::mms {
 namespace {
-
-[[nodiscard]] bool add_size(
-    const std::size_t base,
-    const std::size_t extra,
-    std::size_t& total) noexcept {
-    if (extra > std::numeric_limits<std::size_t>::max() - base) {
-        total = 0U;
-        return false;
-    }
-    total = base + extra;
-    return true;
-}
 
 [[nodiscard]] MmsStaticBrcbConnectionResult make_result(
     const MmsStaticBrcbConnectionStatus status,
@@ -95,63 +84,36 @@ MmsStaticBrcbConnectionResult MmsStaticBrcbConnection::poll(
         if (p_data.status != wire::EncodeStatus::buffer_too_small) {
             return make_result(MmsStaticBrcbConnectionStatus::frame_encode_failed, &entry);
         }
-        std::size_t final_required{};
-        if (!add_size(p_data.required_bytes, 7U, final_required)) {
-            return make_result(MmsStaticBrcbConnectionStatus::frame_encode_failed, &entry);
+        osi::CotpTpktDataStreamPlan plan;
+        if (!osi::CotpTpktDataStreamSpanCodec::try_plan(
+                p_data.required_bytes, connection.negotiated_tpdu_size_bytes(), plan)) {
+            return make_result(MmsStaticBrcbConnectionStatus::peer_limit_exceeded, &entry);
         }
         auto result = make_result(
             MmsStaticBrcbConnectionStatus::workspace_too_small, &entry);
-        result.required_workspace_bytes = final_required;
-        result.required_response_bytes = final_required;
+        result.required_workspace_bytes = p_data.required_bytes;
+        result.required_response_bytes = plan.required_bytes;
         return result;
     }
 
-    std::size_t cotp_required{};
-    if (!add_size(p_data.bytes_written, 3U, cotp_required)) {
-        return make_result(MmsStaticBrcbConnectionStatus::frame_encode_failed, &entry);
-    }
-    const auto tpdu_limit = connection.negotiated_tpdu_size_bytes();
-    if (tpdu_limit == 0U || cotp_required > tpdu_limit) {
+    const auto framed = osi::CotpTpktDataStreamSpanCodec::encode_into(
+        workspace.first(p_data.bytes_written),
+        connection.negotiated_tpdu_size_bytes(),
+        response);
+    if (!framed.success()) {
+        if (framed.status == wire::EncodeStatus::buffer_too_small) {
+            auto result = make_result(
+                MmsStaticBrcbConnectionStatus::response_buffer_too_small, &entry);
+            result.required_response_bytes = framed.required_bytes;
+            return result;
+        }
         return make_result(MmsStaticBrcbConnectionStatus::peer_limit_exceeded, &entry);
     }
 
-    std::size_t final_required{};
-    if (!add_size(cotp_required, osi::TpktSpanCodec::header_length, final_required)) {
-        return make_result(MmsStaticBrcbConnectionStatus::frame_encode_failed, &entry);
-    }
-    if (response.size() < final_required) {
-        auto result = make_result(
-            MmsStaticBrcbConnectionStatus::response_buffer_too_small, &entry);
-        result.required_response_bytes = final_required;
-        return result;
-    }
-    if (workspace.size() < final_required) {
-        auto result = make_result(
-            MmsStaticBrcbConnectionStatus::workspace_too_small, &entry);
-        result.required_response_bytes = final_required;
-        result.required_workspace_bytes = final_required;
-        return result;
-    }
-
-    const auto cotp = osi::CotpSpanCodec::encode_data_into(
-        workspace.first(p_data.bytes_written),
-        response.first(final_required - osi::TpktSpanCodec::header_length));
-    if (!cotp.success()) {
-        return make_result(MmsStaticBrcbConnectionStatus::frame_encode_failed, &entry);
-    }
-
-    const auto tpkt = osi::TpktSpanCodec::encode_into(
-        response.first(cotp.bytes_written),
-        workspace.first(final_required));
-    if (!tpkt.success() || tpkt.bytes_written != final_required) {
-        return make_result(MmsStaticBrcbConnectionStatus::frame_encode_failed, &entry);
-    }
-
     auto result = make_result(MmsStaticBrcbConnectionStatus::response_ready, &entry);
-    std::copy_n(workspace.begin(), tpkt.bytes_written, response.begin());
-    result.bytes_written = tpkt.bytes_written;
-    result.required_response_bytes = final_required;
-    result.required_workspace_bytes = final_required;
+    result.bytes_written = framed.bytes_written;
+    result.required_response_bytes = framed.required_bytes;
+    result.required_workspace_bytes = p_data.bytes_written;
     return result;
 }
 
