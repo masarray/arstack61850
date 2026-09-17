@@ -404,18 +404,20 @@ void confirmed_exchange_timeout_closes_transport_and_can_reconnect() {
 
 void queue_probe_response(
     ScriptedTransport& transport,
-    const std::uint32_t invoke_id) {
+    const std::uint32_t invoke_id,
+    const bool enabled = false,
+    const bool reserved = false) {
     mms::MmsReadResponse response;
     response.invoke_id = invoke_id;
     response.results = {
         {mms::MmsDataValue::visible_string("RPT-A"), std::nullopt},
-        {mms::MmsDataValue::boolean(false), std::nullopt},
+        {mms::MmsDataValue::boolean(enabled), std::nullopt},
         {mms::MmsDataValue::visible_string("LD0/LLN0.DataSet"), std::nullopt},
         {mms::MmsDataValue::unsigned_integer(1U), std::nullopt},
         {mms::MmsDataValue::bit_string(0U, ByteVector{0x5AU, 0x00U}), std::nullopt},
         {mms::MmsDataValue::bit_string(0U, ByteVector{0x40U}), std::nullopt},
         {mms::MmsDataValue::boolean(false), std::nullopt},
-        {mms::MmsDataValue::boolean(false), std::nullopt},
+        {mms::MmsDataValue::boolean(reserved), std::nullopt},
     };
     transport.push_receive(wrap_application(
         mms::MmsServiceCodec::encode_read_response_p_data(response)));
@@ -495,12 +497,13 @@ void queue_static_preclaim_response(
 
 void queue_static_subscription_probe_response(
     ScriptedTransport& transport,
-    const std::uint32_t invoke_id) {
+    const std::uint32_t invoke_id,
+    const bool enabled = false) {
     mms::MmsReadResponse response;
     response.invoke_id = invoke_id;
     response.results = {
         {mms::MmsDataValue::visible_string("RPT-FALLBACK"), std::nullopt},
-        {mms::MmsDataValue::boolean(false), std::nullopt},
+        {mms::MmsDataValue::boolean(enabled), std::nullopt},
         {mms::MmsDataValue::visible_string("LD0/LLN0.DataSet"), std::nullopt},
         {mms::MmsDataValue::unsigned_integer(1U), std::nullopt},
         {mms::MmsDataValue::boolean(false), std::nullopt},
@@ -522,9 +525,10 @@ void static_session_skips_contended_preferred_and_subscribes_fallback() {
 
     queue_static_preclaim_response(transport, 1U, true);
     queue_static_preclaim_response(transport, 2U, false);
-    queue_static_subscription_probe_response(transport, 3U);
+    queue_static_subscription_probe_response(transport, 3U, false);
     queue_write_success(transport, 4U); // RptEna=true
-    queue_write_success(transport, 5U); // GI=true
+    queue_static_subscription_probe_response(transport, 5U, true); // verified enabled
+    queue_write_success(transport, 6U); // GI=true
 
     mms::MmsStaticReportSessionOptions options;
     options.selection.preferred_rcb_reference = preferred.reference;
@@ -558,14 +562,14 @@ void static_session_skips_contended_preferred_and_subscribes_fallback() {
     CHECK(session.poll_once());
     CHECK(session.snapshot().subscription->received_reports == 1U);
 
-    queue_write_success(transport, 6U); // RptEna=false
+    queue_write_success(transport, 7U); // RptEna=false
     session.stop();
     const auto stopped = session.snapshot();
     CHECK(!stopped.active);
     CHECK(stopped.subscription->state ==
           mms::MmsReportSubscriptionState::stopped);
     CHECK(!stopped.subscription->cleanup_required);
-    CHECK(transport.sent().size() == 8U); // CR, AARQ, 3 reads, 3 writes
+    CHECK(transport.sent().size() == 9U); // CR, AARQ, 4 reads, 3 writes
 }
 
 void static_session_rejects_data_set_rebinding() {
@@ -589,10 +593,12 @@ void subscription_runtime_reserves_enables_receives_and_cleans_up() {
     mms::MmsAssociationRuntime association{transport};
     association.connect({"127.0.0.1", 102U});
 
-    queue_probe_response(transport, 1U);
+    queue_probe_response(transport, 1U, false, false);
     queue_write_success(transport, 2U); // Resv=true
-    queue_write_success(transport, 3U); // RptEna=true
-    queue_write_success(transport, 4U); // GI=true
+    queue_probe_response(transport, 3U, false, true); // verified reservation
+    queue_write_success(transport, 4U); // RptEna=true
+    queue_probe_response(transport, 5U, true, true); // verified enabled
+    queue_write_success(transport, 6U); // GI=true
 
     mms::MmsReportSubscriptionRuntime subscription{
         association, make_urcb_candidate(), make_directory()};
@@ -610,8 +616,8 @@ void subscription_runtime_reserves_enables_receives_and_cleans_up() {
     CHECK(observed.decode_failures == 0U);
     CHECK(observed.streams.size() == 1U);
 
-    queue_write_success(transport, 5U); // RptEna=false
-    queue_write_success(transport, 6U); // Resv=false
+    queue_write_success(transport, 7U); // RptEna=false
+    queue_write_success(transport, 8U); // Resv=false
     subscription.stop();
     const auto stopped = subscription.snapshot();
     CHECK(stopped.state == mms::MmsReportSubscriptionState::stopped);
@@ -626,10 +632,12 @@ void subscription_marks_cleanup_required_when_association_is_lost() {
     mms::MmsAssociationRuntime association{transport};
     association.connect({"127.0.0.1", 102U});
 
-    queue_probe_response(transport, 1U);
-    queue_write_success(transport, 2U);
-    queue_write_success(transport, 3U);
-    queue_write_success(transport, 4U);
+    queue_probe_response(transport, 1U, false, false);
+    queue_write_success(transport, 2U); // Resv=true
+    queue_probe_response(transport, 3U, false, true); // verified reservation
+    queue_write_success(transport, 4U); // RptEna=true
+    queue_probe_response(transport, 5U, true, true); // verified enabled
+    queue_write_success(transport, 6U); // GI=true
 
     mms::MmsReportSubscriptionRuntime subscription{
         association, make_urcb_candidate(), make_directory()};
