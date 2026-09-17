@@ -18,10 +18,9 @@ Rectangle {
     property string unitText: "A RMS"
     property bool compact: false
 
-    color: theme.surface2
+    color: "#0b1219"
     radius: 8
-    border.width: 1
-    border.color: theme.lineSoft
+    border.width: 0
 
     function phaseColorFor(index) {
         return [theme.phaseA, theme.phaseB, theme.phaseC, theme.phaseN][index]
@@ -42,17 +41,10 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 40
+            Layout.preferredHeight: 36
             Layout.leftMargin: 12
             Layout.rightMargin: 12
             spacing: 8
-
-            Rectangle {
-                width: 3
-                height: 18
-                radius: 2
-                color: matrix.theme.accent
-            }
             Label {
                 text: matrix.titleText
                 color: matrix.theme.text
@@ -76,7 +68,7 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 25
+            Layout.preferredHeight: 22
             Layout.leftMargin: 10
             Layout.rightMargin: 10
             spacing: 7
@@ -132,10 +124,10 @@ Rectangle {
                 property real pendingPhase: angle
 
                 Layout.fillWidth: true
-                Layout.preferredHeight: matrix.compact ? 43 : 45
-                color: signalRow.selected ? "#101a24"
-                    : (magnitudeField.activeFocus || phaseField.activeFocus) ? "#111c27"
-                    : rowHover.hovered ? "#0f171f" : "transparent"
+                Layout.preferredHeight: matrix.compact ? 42 : 44
+                color: signalRow.selected ? "#101d28"
+                    : (magnitudeField.activeFocus || phaseField.activeFocus) ? "#0f1922"
+                    : rowHover.hovered ? "#0d161e" : "transparent"
                 Behavior on color { ColorAnimation { duration: 90 } }
 
                 HoverHandler { id: rowHover }
@@ -159,6 +151,7 @@ Rectangle {
                 Rectangle {
                     visible: signalRow.selected
                     width: 2
+                    opacity: 0.82
                     anchors.left: parent.left
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom

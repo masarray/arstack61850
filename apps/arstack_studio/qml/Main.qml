@@ -657,25 +657,24 @@ ApplicationWindow {
 
                     ColumnLayout {
                         anchors.fill: parent
-                        anchors.margins: root.compactLayout ? 12 : 15
-                        spacing: 9
+                        anchors.margins: root.compactLayout ? 11 : 13
+                        spacing: 8
 
                         RowLayout {
                             Layout.fillWidth: true
                             ColumnLayout {
                                 spacing: 1
-                                Label { text: "4I + 4V Injection"; color: studioTheme.text; font.family: root.uiFont; font.pixelSize: root.compactLayout ? 18 : 20; font.weight: Font.DemiBold }
+                                Label { text: "4I + 4V Injection"; color: studioTheme.text; font.family: root.uiFont; font.pixelSize: root.compactLayout ? 17 : 18; font.weight: Font.DemiBold }
                             }
                             Item { Layout.fillWidth: true }
                         }
 
                         Rectangle {
                             Layout.fillWidth: true
-                            height: 53
-                            radius: 7
-                            color: studioTheme.surface2
-                            border.width: 1
-                            border.color: studioTheme.lineSoft
+                            height: 48
+                            radius: 8
+                            color: "#0b1219"
+                            border.width: 0
 
                             RowLayout {
                                 anchors.fill: parent
@@ -683,41 +682,42 @@ ApplicationWindow {
                                 anchors.rightMargin: 11
                                 spacing: 8
 
-                                ColumnLayout {
-                                    spacing: 0
-                                    Label { text: root.signalFrequency === 0 ? "DC MODE" : "FREQUENCY"; color: studioTheme.muted; font.family: root.uiFont; font.pixelSize: studioTheme.captionSize - 1; font.weight: Font.DemiBold; font.letterSpacing: 0.8 }
-                                    RowLayout {
-                                        spacing: 5
-                                        NumericField {
-                                            id: frequencyField
-                                            theme: studioTheme
-                                            monoFont: root.monoFont
-                                            compact: root.compactLayout
-                                            implicitWidth: 84
-                                            text: "50.000"
-                                            suffixText: "Hz"
-                                            enabled: true
-                                            validator: DoubleValidator { bottom: 0.0; top: 1000.0; decimals: 3 }
-                                            onTextEdited: {
-                                                var value = root.parseOperatorNumber(text)
-                                                if (root.validFrequency(value)) {
-                                                    invalidInput = false
-                                                    root.signalFrequency = value
-                                                    if (value > 0) root.previousAcFrequency = value
-                                                    root.refreshPreview()
-                                                    if (workflowBar.session && workflowBar.session.liveControlReady)
-                                                        workflowBar.session.requestSetFrequency(value)
-                                                } else invalidInput = true
-                                            }
-                                            onEditingFinished: {
-                                                var value = root.parseOperatorNumber(text)
-                                                if (!root.validFrequency(value)) {
-                                                    text = root.signalFrequency.toFixed(3)
-                                                    invalidInput = false
-                                                    root.showMessage("Frequency must be within 0..1000 Hz (0 = DC).", true)
-                                                } else text = value.toFixed(3)
-                                            }
-                                        }
+                                Label {
+                                    text: "Frequency"
+                                    color: studioTheme.textSoft
+                                    font.family: root.uiFont
+                                    font.pixelSize: 10
+                                    font.weight: Font.DemiBold
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                NumericField {
+                                    id: frequencyField
+                                    theme: studioTheme
+                                    monoFont: root.monoFont
+                                    compact: root.compactLayout
+                                    implicitWidth: 90
+                                    text: "50.000"
+                                    suffixText: "Hz"
+                                    enabled: true
+                                    validator: DoubleValidator { bottom: 0.0; top: 1000.0; decimals: 3 }
+                                    onTextEdited: {
+                                        var value = root.parseOperatorNumber(text)
+                                        if (root.validFrequency(value)) {
+                                            invalidInput = false
+                                            root.signalFrequency = value
+                                            if (value > 0) root.previousAcFrequency = value
+                                            root.refreshPreview()
+                                            if (workflowBar.session && workflowBar.session.liveControlReady)
+                                                workflowBar.session.requestSetFrequency(value)
+                                        } else invalidInput = true
+                                    }
+                                    onEditingFinished: {
+                                        var value = root.parseOperatorNumber(text)
+                                        if (!root.validFrequency(value)) {
+                                            text = root.signalFrequency.toFixed(3)
+                                            invalidInput = false
+                                            root.showMessage("Frequency must be within 0..1000 Hz (0 = DC).", true)
+                                        } else text = value.toFixed(3)
                                     }
                                 }
 
