@@ -121,6 +121,7 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
     return attribute == MmsStaticBrcbAttribute::report_enabled ||
         attribute == MmsStaticBrcbAttribute::optional_fields ||
         attribute == MmsStaticBrcbAttribute::trigger_options ||
+        attribute == MmsStaticBrcbAttribute::integrity_period ||
         attribute == MmsStaticBrcbAttribute::general_interrogation ||
         attribute == MmsStaticBrcbAttribute::purge_buffer ||
         attribute == MmsStaticBrcbAttribute::entry_id ||
@@ -365,7 +366,7 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
         return encode_bit_string(2U, trigger, destination);
     }
     case MmsStaticBrcbAttribute::integrity_period:
-        return encode_unsigned(context->definition->integrity_period_ms, destination);
+        return encode_unsigned(context->reports->integrity_period_ms(), destination);
     case MmsStaticBrcbAttribute::general_interrogation:
         return encode_boolean(context->reports->general_interrogation_pending(), destination);
     case MmsStaticBrcbAttribute::purge_buffer:
@@ -424,6 +425,23 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
             bytes = {};
             return false;
         }
+    }
+    return true;
+}
+
+[[nodiscard]] bool decode_unsigned32(
+    const std::span<const std::uint8_t> encoded,
+    std::uint32_t& value) noexcept {
+    value = 0U;
+    asn1::BerTlvView tlv;
+    if (!asn1::BerSpanReader::try_read_exact(encoded, tlv) ||
+        tlv.tag_class != asn1::BerClass::context_specific ||
+        tlv.tag_number != 6 || tlv.constructed ||
+        tlv.value.empty() || tlv.value.size() > sizeof(std::uint32_t)) {
+        return false;
+    }
+    for (const auto byte : tlv.value) {
+        value = static_cast<std::uint32_t>((value << 8U) | byte);
     }
     return true;
 }
@@ -566,7 +584,7 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
         if (!decode_bit_string(encoded_data, 2U, 1U, bytes)) {
             return {false, kTypeInconsistent};
         }
-        constexpr std::uint8_t allowed = 0x7CU;
+        constexpr std::uint8_t allowed = 0xFCU;
         if ((bytes[0] & static_cast<std::uint8_t>(~allowed)) != 0U) {
             return {false, kObjectValueInvalid};
         }
@@ -576,6 +594,18 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
         }
         return map_control_status(
             context->control->set_trigger_options(client, bytes[0], now));
+    }
+    case MmsStaticBrcbAttribute::integrity_period: {
+        std::uint32_t value{};
+        if (!decode_unsigned32(encoded_data, value)) {
+            return {false, kTypeInconsistent};
+        }
+        const auto claim = ensure_claimed(*context, client, now);
+        if (claim != MmsStaticBrcbControlStatus::ok) {
+            return map_control_status(claim);
+        }
+        return map_control_status(
+            context->control->set_integrity_period(client, value, now));
     }
     case MmsStaticBrcbAttribute::general_interrogation: {
         bool value = false;
@@ -637,7 +667,6 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
     case MmsStaticBrcbAttribute::conf_revision:
     case MmsStaticBrcbAttribute::buffer_time:
     case MmsStaticBrcbAttribute::sequence_number:
-    case MmsStaticBrcbAttribute::integrity_period:
     case MmsStaticBrcbAttribute::time_of_entry:
     case MmsStaticBrcbAttribute::owner:
         return {false, kObjectAccessDenied};

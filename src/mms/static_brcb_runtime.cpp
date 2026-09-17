@@ -20,7 +20,9 @@ constexpr std::uint8_t kTriggerQualityChange = 0x20U;
 constexpr std::uint8_t kTriggerDataUpdate = 0x10U;
 constexpr std::uint8_t kTriggerIntegrity = 0x08U;
 constexpr std::uint8_t kTriggerGeneralInterrogation = 0x04U;
-constexpr std::uint8_t kAllowedTriggers = 0x7CU;
+constexpr std::uint8_t kTriggerTransient = 0x80U;
+constexpr std::uint8_t kAllowedTriggers = static_cast<std::uint8_t>(
+    kTriggerTransient | 0x7CU);
 
 constexpr std::uint8_t kReasonDataChange = 0x40U;
 constexpr std::uint8_t kReasonQualityChange = 0x20U;
@@ -61,13 +63,11 @@ void bump_revision(std::uint32_t& revision) noexcept {
 }
 
 [[nodiscard]] std::uint32_t effective_integrity_period(
-    const MmsStaticBrcbDefinition& definition) noexcept {
-    if (definition.integrity_period_ms == 0U) {
-        return 0U;
-    }
-    return definition.integrity_period_ms < MmsStaticBrcbRuntime::minimum_integrity_period_ms
+    const std::uint32_t configured_ms) noexcept {
+    if (configured_ms == 0U) return 0U;
+    return configured_ms < MmsStaticBrcbRuntime::minimum_integrity_period_ms
         ? MmsStaticBrcbRuntime::minimum_integrity_period_ms
-        : definition.integrity_period_ms;
+        : configured_ms;
 }
 
 [[nodiscard]] std::span<const std::uint8_t> as_bytes(
@@ -225,6 +225,7 @@ bool MmsStaticBrcbRuntime::initialize() noexcept {
     sequence_number_ = 0U;
     optional_fields_ = definition_->optional_fields;
     trigger_options_ = definition_->trigger_options;
+    integrity_period_ms_ = definition_->integrity_period_ms;
     replay_gap_ = false;
     general_interrogation_pending_ = false;
     integrity_armed_ = false;
@@ -245,7 +246,7 @@ MmsStaticBrcbStatus MmsStaticBrcbRuntime::set_enabled(
     clear_pending(*pending_);
     general_interrogation_pending_ = false;
     next_integrity_due_ms_ = 0U;
-    const auto period = effective_integrity_period(*definition_);
+    const auto period = effective_integrity_period(integrity_period_ms_);
     integrity_armed_ = enabled && period != 0U &&
         (trigger_options_ & kTriggerIntegrity) != 0U;
     bump_revision(pending_->revision);
@@ -294,6 +295,27 @@ MmsStaticBrcbStatus MmsStaticBrcbRuntime::set_trigger_options(
         return MmsStaticBrcbStatus::ok;
     }
     trigger_options_ = trigger_options;
+    clear_pending(*pending_);
+    general_interrogation_pending_ = false;
+    next_integrity_due_ms_ = 0U;
+    integrity_armed_ = false;
+    bump_revision(pending_->revision);
+    bump_revision(schedule_revision_);
+    return MmsStaticBrcbStatus::ok;
+}
+
+MmsStaticBrcbStatus MmsStaticBrcbRuntime::set_integrity_period(
+    const std::uint32_t integrity_period_ms) noexcept {
+    if (!initialized_ || definition_ == nullptr || pending_ == nullptr) {
+        return MmsStaticBrcbStatus::invalid_runtime;
+    }
+    if (enabled_) {
+        return MmsStaticBrcbStatus::temporarily_unavailable;
+    }
+    if (integrity_period_ms_ == integrity_period_ms) {
+        return MmsStaticBrcbStatus::ok;
+    }
+    integrity_period_ms_ = integrity_period_ms;
     clear_pending(*pending_);
     general_interrogation_pending_ = false;
     next_integrity_due_ms_ = 0U;
@@ -372,7 +394,7 @@ bool MmsStaticBrcbRuntime::next_due(
     }
 
     if (integrity_armed_ && next_integrity_due_ms_ == 0U) {
-        const auto period = effective_integrity_period(*definition_);
+        const auto period = effective_integrity_period(integrity_period_ms_);
         next_integrity_due_ms_ = period == 0U
             ? 0U
             : saturating_add(now_ms, period);
@@ -584,7 +606,7 @@ MmsStaticBrcbCaptureResult MmsStaticBrcbRuntime::capture(
         general_interrogation_pending_ = false;
         bump_revision(schedule_revision_);
     } else if (integrity_plan) {
-        const auto period = effective_integrity_period(*definition_);
+        const auto period = effective_integrity_period(integrity_period_ms_);
         next_integrity_due_ms_ = period == 0U
             ? 0U
             : saturating_add(plan.observed_now_ms, period);

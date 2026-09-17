@@ -139,6 +139,11 @@ public:
     [[nodiscard]] constexpr std::uint8_t trigger_options() const noexcept {
         return trigger_options_;
     }
+    [[nodiscard]] MmsStaticBrcbStatus set_integrity_period(
+        std::uint32_t integrity_period_ms) noexcept;
+    [[nodiscard]] constexpr std::uint32_t integrity_period_ms() const noexcept {
+        return integrity_period_ms_;
+    }
     [[nodiscard]] constexpr bool enabled() const noexcept { return enabled_; }
     [[nodiscard]] constexpr std::uint8_t sequence_number() const noexcept {
         return sequence_number_;
@@ -245,6 +250,7 @@ private:
     std::array<std::uint8_t, MmsInformationReportSpanCodec::optional_field_bytes>
         optional_fields_{};
     std::uint8_t trigger_options_{};
+    std::uint32_t integrity_period_ms_{};
     bool replay_gap_{};
     bool general_interrogation_pending_{};
     bool integrity_armed_{};

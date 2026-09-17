@@ -18,7 +18,7 @@ namespace {
 
 constexpr std::uint8_t kAllowedOptionalFirst = 0x7CU;
 constexpr std::uint8_t kAllowedOptionalSecond = 0x80U;
-constexpr std::uint8_t kAllowedTriggerOptions = 0x7CU;
+constexpr std::uint8_t kAllowedTriggerOptions = 0xFCU;
 constexpr std::uint8_t kTriggerDataChange = 0x40U;
 constexpr std::uint8_t kTriggerQualityChange = 0x20U;
 constexpr std::uint8_t kTriggerDataUpdate = 0x10U;

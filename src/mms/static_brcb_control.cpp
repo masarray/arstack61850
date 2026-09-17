@@ -195,6 +195,18 @@ MmsStaticBrcbControlStatus MmsStaticBrcbControl::set_trigger_options(
     return map_runtime_status(reports_->set_trigger_options(trigger_options));
 }
 
+MmsStaticBrcbControlStatus MmsStaticBrcbControl::set_integrity_period(
+    const MmsStaticBrcbClientIdentity& client,
+    const std::uint32_t integrity_period_ms,
+    const std::uint64_t now_ms) noexcept {
+    const auto access = require_control_access(client, now_ms);
+    if (access != MmsStaticBrcbControlStatus::ok) return access;
+    if (reports_->enabled()) {
+        return MmsStaticBrcbControlStatus::temporarily_unavailable;
+    }
+    return map_runtime_status(reports_->set_integrity_period(integrity_period_ms));
+}
+
 MmsStaticBrcbControlStatus MmsStaticBrcbControl::request_general_interrogation(
     const MmsStaticBrcbClientIdentity& client,
     const std::uint64_t now_ms) noexcept {

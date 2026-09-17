@@ -14,6 +14,9 @@ using namespace ar::iec61850;
 
 constexpr std::array<std::uint8_t, 2U> kBooleanType{0x83U, 0x00U};
 constexpr std::array<std::uint8_t, 3U> kTrue{0x83U, 0x01U, 0xFFU};
+constexpr std::array<std::uint8_t, 4U> kIntgPd5000{0x86U, 0x02U, 0x13U, 0x88U};
+constexpr std::array<std::uint8_t, 4U> kTrgOpsAll{0x84U, 0x02U, 0x02U, 0xFCU};
+constexpr std::array<std::uint8_t, 5U> kOptFldsGolden{0x84U, 0x03U, 0x06U, 0x7BU, 0x80U};
 
 [[nodiscard]] wire::EncodeResult read_boolean(
     const void* context,
@@ -105,10 +108,16 @@ int main() {
     if (!bank.initialize() || bank.object_count() != 16U || !bank.table().valid()) return 4;
 
     const auto* rpt_ena = find_item(bank.table(), "B1$RptEna");
+    const auto* intg_pd = find_item(bank.table(), "B1$IntgPd");
+    const auto* trg_ops = find_item(bank.table(), "B1$TrgOps");
+    const auto* opt_flds = find_item(bank.table(), "B1$OptFlds");
     const auto* gi = find_item(bank.table(), "B1$GI");
     const auto* time_of_entry = find_item(bank.table(), "B1$TimeofEntry");
-    if (rpt_ena == nullptr || gi == nullptr || time_of_entry == nullptr ||
-        rpt_ena->contextual_write == nullptr || gi->contextual_write == nullptr) {
+    if (rpt_ena == nullptr || intg_pd == nullptr || trg_ops == nullptr ||
+        opt_flds == nullptr || gi == nullptr || time_of_entry == nullptr ||
+        rpt_ena->contextual_write == nullptr || intg_pd->contextual_write == nullptr ||
+        trg_ops->contextual_write == nullptr || opt_flds->contextual_write == nullptr ||
+        gi->contextual_write == nullptr) {
         return 5;
     }
 
@@ -117,8 +126,19 @@ int main() {
     const auto a = access(101U, owner_a);
     const auto b = access(202U, owner_b);
 
+    const auto intg = intg_pd->contextual_write(intg_pd->write_context, kIntgPd5000, a);
+    const auto trg = trg_ops->contextual_write(trg_ops->write_context, kTrgOpsAll, a);
+    const auto opt = opt_flds->contextual_write(opt_flds->write_context, kOptFldsGolden, a);
+    if (!intg.success || !trg.success || !opt.success ||
+        reports.integrity_period_ms() != 5'000U ||
+        reports.trigger_options() != 0xFCU ||
+        reports.optional_fields()[0] != 0x7BU ||
+        reports.optional_fields()[1] != 0x80U) {
+        return 6;
+    }
+
     const auto enable = rpt_ena->contextual_write(rpt_ena->write_context, kTrue, a);
-    if (!enable.success || !reports.enabled()) return 6;
+    if (!enable.success || !reports.enabled()) return 12;
 
     const auto denied_gi = gi->contextual_write(gi->write_context, kTrue, b);
     if (denied_gi.success || denied_gi.failure_code != 3U) return 7;
