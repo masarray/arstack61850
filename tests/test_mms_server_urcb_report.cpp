@@ -258,6 +258,28 @@ int main() {
         return 1;
     }
 
+    constexpr std::array<std::uint8_t, 2U> iedscout_generic_optflds{0x7BU, 0x80U};
+    constexpr std::array<std::uint8_t, 2U> effective_urcb_optflds{0x78U, 0x80U};
+    constexpr std::array<std::uint8_t, 2U> unsupported_segmentation{0x78U, 0xC0U};
+    constexpr std::array<std::uint8_t, 2U> original_optflds{0x7CU, 0x80U};
+    if (reports.set_optional_fields(0U, iedscout_generic_optflds) !=
+            mms::MmsStaticUrcbStatus::ok) {
+        return 44;
+    }
+    const auto* compatibility_state = reports.state(0U);
+    if (compatibility_state == nullptr ||
+        compatibility_state->optional_fields != effective_urcb_optflds) {
+        return 45;
+    }
+    if (reports.set_optional_fields(0U, unsupported_segmentation) !=
+            mms::MmsStaticUrcbStatus::invalid_value) {
+        return 46;
+    }
+    if (reports.set_optional_fields(0U, original_optflds) !=
+            mms::MmsStaticUrcbStatus::ok) {
+        return 47;
+    }
+
     std::array<std::uint8_t, 2048U> request{};
     std::array<std::uint8_t, 2048U> response{};
     std::array<std::uint8_t, 2048U> workspace{};

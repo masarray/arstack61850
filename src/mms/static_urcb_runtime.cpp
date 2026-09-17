@@ -16,7 +16,8 @@
 namespace ar::iec61850::mms {
 namespace {
 
-constexpr std::uint8_t kAllowedOptionalFirst = 0x7CU;
+constexpr std::uint8_t kEffectiveOptionalFirst = 0x7CU;
+constexpr std::uint8_t kAcceptedOptionalFirst = 0x7FU;
 constexpr std::uint8_t kAllowedOptionalSecond = 0x80U;
 constexpr std::uint8_t kAllowedTriggerOptions = 0xFCU;
 constexpr std::uint8_t kTriggerDataChange = 0x40U;
@@ -73,8 +74,16 @@ constexpr std::uint8_t kOptReasonForInclusion = 0x10U;
     const std::span<const std::uint8_t> optional_fields) noexcept {
     return optional_fields.size() ==
                MmsInformationReportSpanCodec::optional_field_bytes &&
-        (optional_fields[0] & static_cast<std::uint8_t>(~kAllowedOptionalFirst)) == 0U &&
+        (optional_fields[0] & static_cast<std::uint8_t>(~kAcceptedOptionalFirst)) == 0U &&
         (optional_fields[1] & static_cast<std::uint8_t>(~kAllowedOptionalSecond)) == 0U;
+}
+
+[[nodiscard]] std::array<std::uint8_t,
+    MmsInformationReportSpanCodec::optional_field_bytes> effective_optional_fields(
+    const std::span<const std::uint8_t> optional_fields) noexcept {
+    return {
+        static_cast<std::uint8_t>(optional_fields[0] & kEffectiveOptionalFirst),
+        static_cast<std::uint8_t>(optional_fields[1] & kAllowedOptionalSecond)};
 }
 
 [[nodiscard]] bool valid_trigger_options(const std::uint8_t options) noexcept {
@@ -420,7 +429,7 @@ bool MmsStaticUrcbRuntime::initialize() noexcept {
                 state_ref.data_set_item_size)) {
             return false;
         }
-        state_ref.optional_fields = definition.optional_fields;
+        state_ref.optional_fields = effective_optional_fields(definition.optional_fields);
         state_ref.conf_revision = definition.conf_revision;
         state_ref.buffer_time_ms = definition.buffer_time_ms;
         state_ref.trigger_options = definition.trigger_options;
@@ -616,8 +625,7 @@ MmsStaticUrcbStatus MmsStaticUrcbRuntime::set_optional_fields(
     if (!valid_optional_fields(optional_fields)) {
         return MmsStaticUrcbStatus::invalid_value;
     }
-    const std::array<std::uint8_t, MmsInformationReportSpanCodec::optional_field_bytes>
-        next{optional_fields[0], optional_fields[1]};
+    const auto next = effective_optional_fields(optional_fields);
     if (state_ref->optional_fields != next) {
         state_ref->optional_fields = next;
         bump_revision(*state_ref);
