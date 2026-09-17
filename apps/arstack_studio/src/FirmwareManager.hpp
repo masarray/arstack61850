@@ -6,6 +6,7 @@
 #include <QStringList>
 #include <QThread>
 
+class DeterministicSessionHarness;
 class FirmwareWorker;
 
 class FirmwareManager : public QObject {
@@ -19,6 +20,7 @@ class FirmwareManager : public QObject {
     Q_PROPERTY(QString selectedPort READ selectedPort NOTIFY stateChanged)
     Q_PROPERTY(QString targetChip READ targetChip NOTIFY stateChanged)
     Q_PROPERTY(QString firmwareVersion READ firmwareVersion NOTIFY stateChanged)
+    Q_PROPERTY(QString firmwareBuildId READ firmwareBuildId NOTIFY stateChanged)
     Q_PROPERTY(QString expectedProtocol READ expectedProtocol NOTIFY stateChanged)
     Q_PROPERTY(QString firmwareSha256 READ firmwareSha256 NOTIFY stateChanged)
     Q_PROPERTY(QString status READ status NOTIFY stateChanged)
@@ -38,6 +40,7 @@ public:
     [[nodiscard]] QString selectedPort() const { return selectedPort_; }
     [[nodiscard]] QString targetChip() const { return targetChip_; }
     [[nodiscard]] QString firmwareVersion() const { return firmwareVersion_; }
+    [[nodiscard]] QString firmwareBuildId() const { return firmwareBuildId_; }
     [[nodiscard]] QString expectedProtocol() const { return expectedProtocol_; }
     [[nodiscard]] QString firmwareSha256() const { return firmwareSha256_; }
     [[nodiscard]] QString status() const { return status_; }
@@ -71,7 +74,11 @@ public:
     bool probeTarget(const QString& portName);
     bool installFirmware(const QString& portName);
     void cancel();
-    void shutdown();
+    bool shutdown();
+    [[nodiscard]] static constexpr int shutdownAckTimeoutMs() noexcept { return 2200; }
+    [[nodiscard]] static constexpr int shutdownJoinTimeoutMs() noexcept { return 1200; }
+    [[nodiscard]] static constexpr int shutdownRetryTimeoutMs() noexcept { return 800; }
+    [[nodiscard]] static constexpr int shutdownForceTimeoutMs() noexcept { return 500; }
 
 signals:
     void stateChanged();
@@ -80,6 +87,7 @@ signals:
     void operationFailed(const QString& message, bool bootloaderHelpNeeded);
 
 private:
+    friend class DeterministicSessionHarness;
     enum class Operation { none, probe, flash, reset };
 
     [[nodiscard]] QString bundleRoot() const;
@@ -102,9 +110,14 @@ private:
     QThread workerThread_;
     Operation operation_{Operation::none};
     QString operationOutput_;
+    // Bounded rolling tail used only for terminal-style espflash progress.
+    // It preserves tokens split across QProcess chunks without duplicating the
+    // operation log or creating another process/parser owner.
+    QString progressOutputTail_;
     QString selectedPort_;
     QString targetChip_{QStringLiteral("Not checked")};
     QString firmwareVersion_{QStringLiteral("-")};
+    QString firmwareBuildId_;
     QString expectedProtocol_{QStringLiteral("-")};
     QString revisionPolicy_;
     QString firmwareSha256_;

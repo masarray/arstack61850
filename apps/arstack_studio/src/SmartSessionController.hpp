@@ -25,6 +25,9 @@ class SmartSessionController : public QObject {
     Q_PROPERTY(bool liveControlReady READ liveControlReady NOTIFY stateChanged)
     Q_PROPERTY(bool engineeringEditable READ engineeringEditable NOTIFY stateChanged)
     Q_PROPERTY(bool firmwareUpdateRequired READ firmwareUpdateRequired NOTIFY stateChanged)
+    Q_PROPERTY(bool firmwareUpdateAvailable READ firmwareUpdateAvailable NOTIFY stateChanged)
+    Q_PROPERTY(bool firmwareUpdateCanCancel READ firmwareUpdateCanCancel NOTIFY stateChanged)
+    Q_PROPERTY(bool firmwareReinstallAvailable READ firmwareReinstallAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool firmwareInstallRequired READ firmwareInstallVisible NOTIFY stateChanged)
     Q_PROPERTY(bool firmwareRetryAvailable READ firmwareRetryAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool profileSyncRetryAvailable READ profileSyncRetryAvailable NOTIFY stateChanged)
@@ -32,10 +35,13 @@ class SmartSessionController : public QObject {
     Q_PROPERTY(bool updateNeedsBootloaderHelp READ updateNeedsBootloaderHelp NOTIFY stateChanged)
     Q_PROPERTY(bool recoveryPending READ recoveryPending NOTIFY stateChanged)
     Q_PROPERTY(int firmwareProgress READ firmwareProgress NOTIFY stateChanged)
+    Q_PROPERTY(QString firmwareUpdateStage READ firmwareUpdateStage NOTIFY stateChanged)
     Q_PROPERTY(QString updateStatus READ updateStatus NOTIFY stateChanged)
     Q_PROPERTY(QString firmwareSetupPort READ firmwareSetupPort NOTIFY stateChanged)
     Q_PROPERTY(QString expectedFirmwareVersion READ expectedFirmwareVersion CONSTANT)
+    Q_PROPERTY(QString expectedFirmwareBuildId READ expectedFirmwareBuildId NOTIFY stateChanged)
     Q_PROPERTY(QString deviceFirmwareVersion READ deviceFirmwareVersion NOTIFY stateChanged)
+    Q_PROPERTY(QString deviceFirmwareBuildId READ deviceFirmwareBuildId NOTIFY stateChanged)
     Q_PROPERTY(qulonglong sessionGeneration READ sessionGeneration NOTIFY stateChanged)
     Q_PROPERTY(PortOwner portOwner READ portOwner NOTIFY stateChanged)
 
@@ -47,7 +53,21 @@ public:
     };
     Q_ENUM(PortOwner)
 
+    enum class UpdateStage {
+        idle,
+        stopping,
+        releasingPort,
+        probing,
+        flashing,
+        reconnecting,
+        waitingForBootloader,
+    };
+    Q_ENUM(UpdateStage)
+
     explicit SmartSessionController(QObject* parent = nullptr);
+    ~SmartSessionController() override;
+
+    void shutdown();
 
     [[nodiscard]] QObject* device() const noexcept;
     [[nodiscard]] QObject* profiles() const noexcept;
@@ -59,6 +79,9 @@ public:
     [[nodiscard]] bool liveControlReady() const noexcept;
     [[nodiscard]] bool engineeringEditable() const noexcept;
     [[nodiscard]] bool firmwareUpdateRequired() const noexcept;
+    [[nodiscard]] bool firmwareUpdateAvailable() const noexcept;
+    [[nodiscard]] bool firmwareUpdateCanCancel() const noexcept;
+    [[nodiscard]] bool firmwareReinstallAvailable() const noexcept;
     [[nodiscard]] bool firmwareInstallRequired() const noexcept;
     [[nodiscard]] bool firmwareInstallVisible() const noexcept {
         return !recoveryPending_ && firmwareInstallRequired();
@@ -69,10 +92,29 @@ public:
     [[nodiscard]] bool updateNeedsBootloaderHelp() const noexcept;
     [[nodiscard]] bool recoveryPending() const noexcept { return recoveryPending_; }
     [[nodiscard]] int firmwareProgress() const noexcept;
+    [[nodiscard]] QString firmwareUpdateStage() const {
+        switch (updateStage_) {
+        case UpdateStage::stopping:
+        case UpdateStage::releasingPort:
+            return QStringLiteral("prepare");
+        case UpdateStage::probing:
+        case UpdateStage::waitingForBootloader:
+            return QStringLiteral("verify");
+        case UpdateStage::flashing:
+            return QStringLiteral("write");
+        case UpdateStage::reconnecting:
+            return QStringLiteral("reconnect");
+        case UpdateStage::idle:
+            return QStringLiteral("idle");
+        }
+        return QStringLiteral("idle");
+    }
     [[nodiscard]] QString updateStatus() const;
     [[nodiscard]] QString firmwareSetupPort() const;
     [[nodiscard]] QString expectedFirmwareVersion() const;
+    [[nodiscard]] QString expectedFirmwareBuildId() const;
     [[nodiscard]] QString deviceFirmwareVersion() const;
+    [[nodiscard]] QString deviceFirmwareBuildId() const;
     [[nodiscard]] quint64 sessionGeneration() const noexcept { return sessionGeneration_; }
     [[nodiscard]] PortOwner portOwner() const noexcept { return portOwner_; }
 
@@ -155,8 +197,10 @@ public:
     Q_INVOKABLE bool requestStopPtp();
 
     Q_INVOKABLE bool beginFirmwareUpdate();
+    Q_INVOKABLE bool beginFirmwareReinstall();
     Q_INVOKABLE bool beginFirmwareInstall();
     Q_INVOKABLE bool retryFirmwareUpdate();
+    Q_INVOKABLE bool cancelFirmwareUpdate();
     Q_INVOKABLE bool retryFirmwareSetup();
     Q_INVOKABLE bool retryIdentification();
     Q_INVOKABLE bool retryProfileSync();
@@ -170,15 +214,6 @@ signals:
 private:
     friend class DeterministicSessionHarness;
 
-    enum class UpdateStage {
-        idle,
-        stopping,
-        releasingPort,
-        probing,
-        flashing,
-        reconnecting,
-        waitingForBootloader,
-    };
     enum class ProfileSyncStage { idle, deploying, failed };
 
     class FirmwareHandoffWatchdog final {
@@ -188,6 +223,7 @@ private:
             QObject::connect(owner_, &SmartSessionController::stateChanged, owner_, [this] { synchronize(); });
             QObject::connect(&timer_, &QTimer::timeout, owner_, [this] { expire(); });
         }
+        void shutdown() { timer_.stop(); owner_ = nullptr; }
 
     private:
         [[nodiscard]] bool waitingForAck() const noexcept {
@@ -228,6 +264,12 @@ private:
     public:
         explicit DeviceRecoveryMonitor(SmartSessionController* owner) : owner_(owner) {
             QObject::connect(owner_, &SmartSessionController::dependenciesChanged, owner_, [this] { bindDevice(); });
+        }
+        void shutdown() {
+            QObject::disconnect(verifiedConnection_);
+            QObject::disconnect(identificationConnection_);
+            device_ = nullptr;
+            owner_ = nullptr;
         }
 
     private:
@@ -315,6 +357,7 @@ private:
     quint64 advanceSessionGeneration();
     void setPortOwner(PortOwner owner);
     bool firmwareIsCurrent() const;
+    bool firmwareIsCompatible() const;
     bool deviceControlAvailable() const noexcept;
     void resetProfileSync(bool requireSync);
     bool beginProfileSync(const QVariantMap& profile);
@@ -332,6 +375,7 @@ private:
     QString state_{QStringLiteral("WAITING FOR DEVICE")};
     QString statusText_{QStringLiteral("Connect ESP32-P4; ARStack Studio will detect it automatically.")};
     QString deviceFirmwareVersion_;
+    QString deviceFirmwareBuildId_;
     QString updatePort_;
     QString blankBoardPort_;
     QString setupErrorStatus_;
@@ -346,10 +390,12 @@ private:
     bool wasReady_{false};
     bool needsProfileSync_{true};
     bool updateRequested_{false};
+    bool updateWasOptional_{false};
     bool blankBoardDetected_{false};
     bool manualRecoveryArmed_{false};
     bool setupError_{false};
     bool recoveryPending_{false};
+    bool shuttingDown_{false};
     int updateReconnectAttempts_{0};
     int profileSyncAttempts_{0};
     PortOwner portOwner_{PortOwner::none};

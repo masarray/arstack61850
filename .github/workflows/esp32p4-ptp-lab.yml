@@ -21,6 +21,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: esp32p4-ptp-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-esp32p4-ptp:
     strategy:
@@ -33,6 +37,7 @@ jobs:
             role_value: 1
     name: build-esp32p4-ptp-${{ matrix.role_name }}
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     container:
       image: espressif/idf:v5.5.4
     defaults:
@@ -44,6 +49,54 @@ jobs:
 
       - name: Select ESP32-P4 target
         run: source /opt/esp/idf/export.sh && idf.py set-target esp32p4
+
+      - name: Verify PTP source readiness and ESP-IDF 5.5 TX contract
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          eth = Path('main/ethernet_port.c').read_text(encoding='utf-8')
+          app = Path('main/app_main.cpp').read_text(encoding='utf-8')
+          ptp = Path('main/ptp_lab_task.cpp').read_text(encoding='utf-8')
+          receiver = Path('main/ptp_receiver_task.cpp').read_text(encoding='utf-8')
+
+          # Never allow the old premature boot path back into Ethernet init.
+          if 'ar_ptp_lab_try_start(handle)' in eth:
+              raise SystemExit('PTP must not auto-start inside Ethernet initialization before app_main starts Ethernet')
+          if 'ESP_ERROR_CHECK(esp_eth_start(eth_handle));' not in app:
+              raise SystemExit('app_main must explicitly start Ethernet before operator-controlled PTP can run')
+
+          # ESP-IDF 5.5 esp_eth_transmit_ctrl_vargs forwards argc as the number
+          # of variadic arguments. ESP32-P4 EMAC computes buf_num = argc / 2,
+          # so one frame is two varargs: buffer pointer + buffer length.
+          tx_signature = '2U,\n        frame.data(),\n        frame.size()'
+          if tx_signature not in ptp:
+              raise SystemExit('PTP SOURCE timestamp TX must pass argc=2 for one buffer/length frame on ESP-IDF 5.5')
+          if tx_signature not in receiver:
+              raise SystemExit('PTP RECEIVER timestamp TX must pass argc=2 for one buffer/length frame on ESP-IDF 5.5')
+          if 'argc counts buffer/length pairs' in ptp or 'argc counts buffer/length pairs' in receiver:
+              raise SystemExit('stale/incorrect esp_eth_transmit_ctrl_vargs argc documentation remains')
+          if 'PTP hardware-timestamp TX failed:' not in ptp or 'without a valid hardware timestamp' not in ptp:
+              raise SystemExit('PTP SOURCE must distinguish driver TX errors from invalid timestamp evidence')
+
+          # Admission truth is the stronger bounded runtime contract: explicit
+          # operator start is accepted only after real Announce + Sync + Follow_Up TX.
+          required = [
+              'const bool started = ar_ptp_lab_try_start(s_eth_handle);',
+              'ar_esp32p4_restore_normal_emac();',
+              'g_ptp_ready',
+              'PTP source readiness timeout',
+              'g_announce_sent.load',
+              'g_sync_sent.load',
+              'g_follow_up_sent.load',
+              'return g_ptp_ready.load',
+          ]
+          combined = eth + '\n' + ptp
+          missing = [token for token in required if token not in combined]
+          if missing:
+              raise SystemExit('PTP verified-start contract missing: ' + ', '.join(missing))
+          print('PTP contract: post-Ethernet start + ESP-IDF 5.5 argc=2 timestamp TX + verified core timing + rollback')
+          PY
 
       - name: Enable guarded PTP-P2 profile
         shell: bash

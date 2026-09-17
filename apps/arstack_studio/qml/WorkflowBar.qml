@@ -26,6 +26,28 @@ SurfacePanel {
         smartSession.firmwareInstallRequired || smartSession.firmwareUpdateRequired ||
         smartSession.updatingFirmware || smartSession.updateNeedsBootloaderHelp
     readonly property bool injectionRunning: smartSession.state === "RUNNING"
+    readonly property int firmwareStageIndex: {
+        switch (smartSession.firmwareUpdateStage) {
+        case "prepare": return 0
+        case "verify": return 1
+        case "write": return 2
+        case "reconnect": return 3
+        default: return -1
+        }
+    }
+    readonly property var firmwareStages: [
+        { title: "Prepare session", detail: "Stop output and release the serial port" },
+        { title: "Verify board", detail: "Confirm ESP32-P4 ROM identity" },
+        { title: "Write & restart", detail: "Program the verified image and reset the board" },
+        { title: "Reconnect & verify", detail: "Confirm the new ARStack semantic identity" }
+    ]
+
+    function firmwareStageState(index) {
+        if (firmwareStageIndex < 0) return "pending"
+        if (index < firmwareStageIndex) return "done"
+        if (index === firmwareStageIndex) return "active"
+        return "pending"
+    }
 
     Settings {
         id: operatorSettings
@@ -162,7 +184,7 @@ SurfacePanel {
         if (smartSession.state === "UPDATING FIRMWARE") return "Installing firmware"
         if (smartSession.state === "UPDATE NEEDS BOOT") return "Download mode required"
         if (smartSession.state === "PREPARING 4I+4V") return "Preparing"
-        if (smartSession.state === "READY") return "Ready to inject"
+        if (smartSession.state === "READY") return smartSession.firmwareUpdateAvailable ? "Ready · update available" : "Ready to inject"
         if (smartSession.state === "RUNNING") return "Injection running"
         if (smartSession.state === "PROFILE BLOCKED") return "Profile unavailable"
         if (smartSession.state === "PROFILE SYNC ERROR") return "Profile sync failed"
@@ -277,6 +299,23 @@ SurfacePanel {
         controller.showMessage("Dock layout reset.", false)
     }
 
+    function openUpdatePrompt() {
+        updatePromptDeferred = false
+        updateDialog.open()
+    }
+
+    function openInstallPrompt() {
+        installPromptDeferred = false
+        installDialog.open()
+    }
+
+    function retryProfileSync() {
+        if (smartSession.retryProfileSync())
+            controller.showMessage("Retrying 4I+4V profile synchronization.", false)
+        else
+            controller.showMessage(smartSession.statusText, true)
+    }
+
     FileDialog {
         id: engineeringFileDialog
         title: "Open IEC 61850 engineering configuration"
@@ -346,14 +385,14 @@ SurfacePanel {
         modal: true
         anchors.centerIn: Overlay.overlay
         width: 410
-        title: "Firmware update required"
+        title: smartSession.firmwareUpdateRequired ? "Firmware update required" : "Firmware update available"
         closePolicy: Popup.NoAutoClose
         background: Rectangle { color: ribbon.theme.surface; radius: 10; border.width: 1; border.color: ribbon.theme.line }
         contentItem: ColumnLayout {
             spacing: 12
             Label {
                 Layout.fillWidth: true
-                text: "Update firmware to start injection"
+                text: smartSession.firmwareUpdateRequired ? "Update firmware to start injection" : "A newer firmware build is available"
                 color: ribbon.theme.text
                 font.family: ribbon.uiFont
                 font.pixelSize: 14
@@ -362,7 +401,9 @@ SurfacePanel {
             }
             Label {
                 Layout.fillWidth: true
-                text: "This ESP32-P4 is connected, but its ARStack firmware is older than this Studio build. Update now? Studio will flash, restart, reconnect, and verify it automatically."
+                text: smartSession.firmwareUpdateRequired
+                    ? "This ESP32-P4 does not satisfy the current runtime contract. Update is required before injection."
+                    : "The connected firmware is compatible and can be used now. A newer bundled build is available; update only when convenient. Studio will flash, restart, reconnect, and verify it automatically."
                 color: ribbon.theme.textSoft
                 font.family: ribbon.uiFont
                 font.pixelSize: 11
@@ -392,9 +433,26 @@ SurfacePanel {
         id: progressDialog
         modal: true
         anchors.centerIn: Overlay.overlay
-        width: 450
-        title: smartSession.updateNeedsBootloaderHelp ? "Device needs Download mode" : "Installing firmware"
+        width: 500
         closePolicy: Popup.NoAutoClose
+        padding: 18
+        header: Rectangle {
+            implicitHeight: 46
+            color: ribbon.theme.surface2
+            border.width: 1
+            border.color: smartSession.updateNeedsBootloaderHelp ? ribbon.theme.amber : ribbon.theme.line
+            Label {
+                anchors.fill: parent
+                anchors.leftMargin: 18
+                anchors.rightMargin: 18
+                text: smartSession.updateNeedsBootloaderHelp ? "Device needs Download mode" : "Firmware update"
+                color: smartSession.updateNeedsBootloaderHelp ? ribbon.theme.amber : ribbon.theme.text
+                font.family: ribbon.uiFont
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+                verticalAlignment: Text.AlignVCenter
+            }
+        }
         background: Rectangle {
             color: ribbon.theme.surface
             radius: 10
@@ -402,18 +460,101 @@ SurfacePanel {
             border.color: smartSession.updateNeedsBootloaderHelp ? ribbon.theme.amber : ribbon.theme.line
         }
         contentItem: ColumnLayout {
-            spacing: 12
+            spacing: 13
+
             Label {
                 Layout.fillWidth: true
                 text: smartSession.updateNeedsBootloaderHelp
-                    ? "Studio cannot reach the ESP32-P4 bootloader yet."
-                    : "Keep USB connected. Studio verifies the board before reporting success."
+                    ? "Studio cannot reach the ESP32-P4 ROM bootloader yet."
+                    : "Keep USB connected. Studio reports success only after the board restarts and reconnects with the expected ARStack identity."
                 color: smartSession.updateNeedsBootloaderHelp ? ribbon.theme.amber : ribbon.theme.text
                 font.family: ribbon.uiFont
-                font.pixelSize: 13
+                font.pixelSize: 12
                 font.weight: Font.DemiBold
                 wrapMode: Text.WordWrap
             }
+
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: stageColumn.implicitHeight + 18
+                radius: 8
+                color: ribbon.theme.panelAlt
+                border.width: 1
+                border.color: ribbon.theme.lineSoft
+
+                ColumnLayout {
+                    id: stageColumn
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.margins: 9
+                    spacing: 2
+
+                    Repeater {
+                        model: ribbon.firmwareStages
+                        delegate: RowLayout {
+                            required property int index
+                            required property var modelData
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 38
+                            spacing: 10
+                            readonly property string stageState: ribbon.firmwareStageState(index)
+
+                            Rectangle {
+                                width: 20
+                                height: 20
+                                radius: 10
+                                color: parent.stageState === "done" ? ribbon.theme.greenSoft
+                                     : parent.stageState === "active" ? ribbon.theme.accentSoft
+                                     : "transparent"
+                                border.width: 1
+                                border.color: parent.stageState === "done" ? ribbon.theme.green
+                                            : parent.stageState === "active" ? ribbon.theme.accent
+                                            : ribbon.theme.line
+                                Label {
+                                    anchors.centerIn: parent
+                                    text: parent.parent.stageState === "done" ? "✓" : parent.parent.stageState === "active" ? "•" : ""
+                                    color: parent.parent.stageState === "done" ? ribbon.theme.green : ribbon.theme.accent
+                                    font.family: ribbon.uiFont
+                                    font.pixelSize: parent.parent.stageState === "active" ? 16 : 11
+                                    font.weight: Font.Bold
+                                }
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 0
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: modelData.title
+                                    color: stageState === "pending" ? ribbon.theme.muted : ribbon.theme.text
+                                    font.family: ribbon.uiFont
+                                    font.pixelSize: 10
+                                    font.weight: stageState === "active" ? Font.DemiBold : Font.Medium
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: modelData.detail
+                                    color: ribbon.theme.muted
+                                    font.family: ribbon.uiFont
+                                    font.pixelSize: 9
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            Label {
+                                visible: index === 2 && stageState === "active" && smartSession.firmwareProgress >= 0
+                                text: smartSession.firmwareProgress + "%"
+                                color: ribbon.theme.accent
+                                font.family: ribbon.monoFont
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                            }
+                        }
+                    }
+                }
+            }
+
             Label {
                 Layout.fillWidth: true
                 text: smartSession.updateStatus.length > 0 ? smartSession.updateStatus : "Preparing firmware installation…"
@@ -422,26 +563,78 @@ SurfacePanel {
                 font.pixelSize: 10
                 wrapMode: Text.WordWrap
             }
-            ProgressBar {
-                visible: !smartSession.updateNeedsBootloaderHelp
+
+            ColumnLayout {
+                visible: !smartSession.updateNeedsBootloaderHelp && ribbon.firmwareStageIndex === 2
                 Layout.fillWidth: true
-                from: 0; to: 100
-                indeterminate: smartSession.firmwareProgress < 0
-                value: smartSession.firmwareProgress < 0 ? 0 : smartSession.firmwareProgress
+                spacing: 6
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        text: "Writing firmware"
+                        color: ribbon.theme.textSoft
+                        font.family: ribbon.uiFont
+                        font.pixelSize: 9
+                    }
+                    Item { Layout.fillWidth: true }
+                    Label {
+                        text: smartSession.firmwareProgress >= 0 ? smartSession.firmwareProgress + "%" : "Starting write…"
+                        color: smartSession.firmwareProgress >= 0 ? ribbon.theme.accent : ribbon.theme.muted
+                        font.family: ribbon.monoFont
+                        font.pixelSize: 10
+                        font.weight: Font.DemiBold
+                    }
+                }
+
+                Rectangle {
+                    id: flashTrack
+                    Layout.fillWidth: true
+                    height: 8
+                    radius: 4
+                    color: ribbon.theme.lineSoft
+                    clip: true
+                    Rectangle {
+                        visible: smartSession.firmwareProgress >= 0
+                        height: parent.height
+                        radius: parent.radius
+                        color: ribbon.theme.accent
+                        width: parent.width * Math.max(0, Math.min(1, smartSession.firmwareProgress / 100.0))
+                        Behavior on width { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                    }
+                    Rectangle {
+                        id: indeterminateFlash
+                        visible: smartSession.firmwareProgress < 0
+                        height: parent.height
+                        width: Math.max(28, parent.width * 0.24)
+                        radius: parent.radius
+                        color: ribbon.theme.accent
+                        opacity: 0.72
+                        NumberAnimation on x {
+                            running: indeterminateFlash.visible
+                            loops: Animation.Infinite
+                            from: -indeterminateFlash.width
+                            to: flashTrack.width
+                            duration: 900
+                            easing.type: Easing.InOutQuad
+                        }
+                    }
+                }
             }
-            Label {
-                visible: !smartSession.updateNeedsBootloaderHelp && smartSession.firmwareProgress >= 0
-                Layout.fillWidth: true
-                text: smartSession.firmwareProgress + "%"
-                color: ribbon.theme.text
-                font.family: ribbon.monoFont
-                font.pixelSize: 12
-                font.weight: Font.DemiBold
-                horizontalAlignment: Text.AlignHCenter
-            }
+
             RowLayout {
                 visible: smartSession.updateNeedsBootloaderHelp
                 Layout.fillWidth: true
+                CalmButton {
+                    visible: smartSession.firmwareUpdateCanCancel
+                    theme: ribbon.theme; uiFont: ribbon.uiFont; text: "Use current firmware"; implicitWidth: 150
+                    onClicked: {
+                        if (smartSession.cancelFirmwareUpdate()) {
+                            progressDialog.close()
+                            controller.showMessage("Firmware update skipped. Reconnecting to the compatible firmware already on the board.", false)
+                        }
+                    }
+                }
                 Item { Layout.fillWidth: true }
                 CalmButton { theme: ribbon.theme; uiFont: ribbon.uiFont; text: "Retry"; tone: "accent"; implicitWidth: 110; onClicked: smartSession.retryFirmwareUpdate() }
             }
@@ -453,8 +646,25 @@ SurfacePanel {
         modal: true
         anchors.centerIn: Overlay.overlay
         width: 430
-        title: ribbon.firmwareResultSuccess ? "Success" : "Firmware result"
         closePolicy: Popup.NoAutoClose
+        padding: 18
+        header: Rectangle {
+            implicitHeight: 44
+            color: ribbon.theme.surface2
+            border.width: 1
+            border.color: ribbon.firmwareResultSuccess ? ribbon.theme.green : ribbon.theme.red
+            Label {
+                anchors.fill: parent
+                anchors.leftMargin: 18
+                anchors.rightMargin: 18
+                text: ribbon.firmwareResultSuccess ? "Firmware verified" : "Firmware result"
+                color: ribbon.firmwareResultSuccess ? ribbon.theme.green : ribbon.theme.text
+                font.family: ribbon.uiFont
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+                verticalAlignment: Text.AlignVCenter
+            }
+        }
         background: Rectangle {
             color: ribbon.theme.surface
             radius: 10
@@ -500,211 +710,18 @@ SurfacePanel {
         }
     }
 
-    implicitHeight: 72
-    color: theme.surface2
-    border.color: theme.line
+    implicitHeight: 54
+    color: "transparent"
+    border.width: 0
 
-    component MenuButton: CalmButton {
-        theme: ribbon.theme
-        uiFont: ribbon.uiFont
-        implicitHeight: 24
-        implicitWidth: 66
-        font.pixelSize: 10
-    }
-
-    component RunButton: CalmButton {
-        theme: ribbon.theme
-        uiFont: ribbon.uiFont
-        implicitHeight: 36
-        implicitWidth: 112
-        iconSize: 15
-        font.pixelSize: 10
-    }
-
-    ColumnLayout {
+    ModernRibbon {
         anchors.fill: parent
-        anchors.leftMargin: 10
-        anchors.rightMargin: 10
-        anchors.topMargin: 5
-        anchors.bottomMargin: 5
-        spacing: 4
-
-        RowLayout {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 24
-            spacing: 3
-
-            MenuButton {
-                text: "File"
-                onClicked: fileMenu.open()
-                Menu {
-                    id: fileMenu
-                    y: parent.height
-                    MenuItem { text: "Open Engineering File…"; enabled: smartSession.engineeringEditable; onTriggered: ribbon.openEngineeringDialog() }
-                    MenuItem {
-                        text: "Reopen Last Configuration"
-                        enabled: smartSession.engineeringEditable && operatorSettings.lastEngineeringUrl.length > 0
-                        onTriggered: ribbon.loadEngineeringFile(operatorSettings.lastEngineeringUrl)
-                    }
-                    MenuSeparator {}
-                    MenuItem { text: "Use Built-in 4I+4V Profile"; enabled: smartSession.engineeringEditable; onTriggered: ribbon.useBuiltInProfile() }
-                    MenuSeparator {}
-                    MenuItem { text: "Exit"; onTriggered: Qt.quit() }
-                }
-            }
-
-            MenuButton {
-                text: "Injection"
-                implicitWidth: 82
-                onClicked: injectionMenu.open()
-                Menu {
-                    id: injectionMenu
-                    y: parent.height
-                    MenuItem { text: "Start Injection    F5"; enabled: !ribbon.injectionRunning; onTriggered: ribbon.requestStart() }
-                    MenuItem { text: "Stop Injection     F6"; enabled: ribbon.injectionRunning; onTriggered: ribbon.requestStop() }
-                    MenuSeparator {}
-                    MenuItem { text: "Balanced 3-Phase"; onTriggered: controller.balanced() }
-                    MenuItem { text: "Zero All"; onTriggered: controller.zeroAll() }
-                }
-            }
-
-            MenuButton {
-                text: "View"
-                onClicked: viewMenu.open()
-                Menu {
-                    id: viewMenu
-                    y: parent.height
-                    Menu {
-                        title: "Docks"
-                        MenuItem {
-                            text: (controller.phasorDockVisible || controller.phasorDetached ? "✓  " : "    ") + "Phasor"
-                            onTriggered: {
-                                if (controller.phasorDetached) controller.phasorDetached = false
-                                controller.phasorDockVisible = !controller.phasorDockVisible
-                            }
-                        }
-                        MenuItem {
-                            text: (controller.waveformDockVisible || controller.waveformDetached ? "✓  " : "    ") + "Waveform"
-                            onTriggered: {
-                                if (controller.waveformDetached) controller.waveformDetached = false
-                                controller.waveformDockVisible = !controller.waveformDockVisible
-                            }
-                        }
-                        MenuItem {
-                            text: (controller.telemetryDockVisible ? "✓  " : "    ") + "Status Monitor"
-                            onTriggered: controller.telemetryDockVisible = !controller.telemetryDockVisible
-                        }
-                        MenuSeparator {}
-                        MenuItem {
-                            text: "Dock All Floating Views"
-                            enabled: controller.phasorDetached || controller.waveformDetached
-                            onTriggered: {
-                                if (controller.phasorDetached) { controller.phasorDetached = false; controller.phasorDockVisible = true }
-                                if (controller.waveformDetached) { controller.waveformDetached = false; controller.waveformDockVisible = true }
-                            }
-                        }
-                        MenuItem { text: "Reset Dock Layout"; onTriggered: ribbon.resetDockLayout() }
-                    }
-                }
-            }
-
-            MenuButton {
-                text: "Tools"
-                onClicked: toolsMenu.open()
-                Menu {
-                    id: toolsMenu
-                    y: parent.height
-                    MenuItem { text: "Advanced…"; onTriggered: controller.openConfiguration() }
-                    MenuItem { text: "Diagnostics…"; onTriggered: controller.openDiagnostics() }
-                }
-            }
-
-            Item { Layout.fillWidth: true }
-
-            Label {
-                visible: !ribbon.compact
-                text: operatorSettings.lastEngineeringUrl.length > 0 ? "Last configuration auto-opens" : "Built-in 4I+4V default"
-                color: ribbon.theme.muted
-                font.family: ribbon.uiFont
-                font.pixelSize: 9
-            }
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            spacing: 8
-
-            Rectangle { width: 8; height: 8; radius: 4; color: ribbon.smartStateColor }
-            Label {
-                text: ribbon.displayState
-                color: ribbon.smartStateColor
-                font.family: ribbon.uiFont
-                font.pixelSize: 11
-                font.weight: Font.DemiBold
-            }
-            Label {
-                Layout.fillWidth: true
-                visible: !ribbon.compact
-                text: smartSession.state === "READY" ? "4I + 4V · 4000 samples/s" : smartSession.statusText
-                color: ribbon.theme.muted
-                font.family: ribbon.uiFont
-                font.pixelSize: 10
-                elide: Text.ElideRight
-            }
-
-            CalmButton {
-                visible: smartSession.firmwareUpdateRequired && !smartSession.updatingFirmware
-                theme: ribbon.theme
-                uiFont: ribbon.uiFont
-                text: "Update firmware"
-                tone: "accent"
-                implicitHeight: 32
-                implicitWidth: 128
-                onClicked: { ribbon.updatePromptDeferred = false; updateDialog.open() }
-            }
-            CalmButton {
-                visible: smartSession.firmwareInstallRequired && !smartSession.updatingFirmware
-                theme: ribbon.theme
-                uiFont: ribbon.uiFont
-                text: "Install firmware"
-                tone: "accent"
-                implicitHeight: 32
-                implicitWidth: 128
-                onClicked: { ribbon.installPromptDeferred = false; installDialog.open() }
-            }
-            CalmButton {
-                visible: smartSession.profileSyncRetryAvailable
-                theme: ribbon.theme
-                uiFont: ribbon.uiFont
-                text: "Retry profile"
-                tone: "accent"
-                implicitHeight: 32
-                implicitWidth: 112
-                onClicked: {
-                    if (smartSession.retryProfileSync())
-                        controller.showMessage("Retrying 4I+4V profile synchronization.", false)
-                    else
-                        controller.showMessage(smartSession.statusText, true)
-                }
-            }
-
-            RunButton {
-                text: "Start"
-                iconSource: Qt.resolvedUrl("../assets/lucide/play.svg")
-                tone: smartSession.startReady ? "success" : "neutral"
-                enabled: !ribbon.injectionRunning && !smartSession.updatingFirmware && !smartSession.updateNeedsBootloaderHelp
-                toolTipText: ribbon.startReason()
-                onClicked: ribbon.requestStart()
-            }
-            RunButton {
-                text: "Stop"
-                iconSource: Qt.resolvedUrl("../assets/lucide/square.svg")
-                tone: ribbon.injectionRunning ? "danger" : "neutral"
-                enabled: ribbon.injectionRunning && !smartSession.updatingFirmware
-                toolTipText: ribbon.injectionRunning ? "Stop Sampled Values output" : "Injection is not running"
-                onClicked: ribbon.requestStop()
-            }
-        }
+        theme: ribbon.theme
+        controller: ribbon.controller
+        workflow: ribbon
+        session: smartSession
+        device: ribbon.device
+        uiFont: ribbon.uiFont
+        compact: ribbon.compact
     }
 }

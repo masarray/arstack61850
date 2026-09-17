@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(ARStackStudio VERSION 0.1.0 LANGUAGES CXX)
+project(ARStackStudio VERSION 0.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -86,6 +86,9 @@ qt_add_qml_module(arstack_studio
         qml/DarkToolButton.qml
         qml/TelemetryDock.qml
         qml/WorkflowBar.qml
+        qml/ModernRibbon.qml
+        qml/RibbonGroup.qml
+        qml/RibbonAction.qml
         qml/CalmButton.qml
         qml/NumericField.qml
         qml/StateBadge.qml

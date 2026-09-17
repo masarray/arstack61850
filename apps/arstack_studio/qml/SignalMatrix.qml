@@ -18,10 +18,10 @@ Rectangle {
     property string unitText: "A RMS"
     property bool compact: false
 
-    color: theme.surface2
-    radius: 9
+    color: matrix.theme.surface2
+    radius: 7
     border.width: 1
-    border.color: theme.lineSoft
+    border.color: matrix.theme.lineSoft
 
     function phaseColorFor(index) {
         return [theme.phaseA, theme.phaseB, theme.phaseC, theme.phaseN][index]
@@ -42,32 +42,15 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 44
-            Layout.leftMargin: 12
-            Layout.rightMargin: 12
-            spacing: 9
-
-            Rectangle {
-                width: 23
-                height: 23
-                radius: 6
-                color: "#122033"
-                border.width: 1
-                border.color: "#223955"
-                Label {
-                    anchors.centerIn: parent
-                    text: matrix.symbolText
-                    color: matrix.theme.accent
-                    font.family: matrix.monoFont
-                    font.pixelSize: 11
-                    font.weight: Font.Bold
-                }
-            }
+            Layout.preferredHeight: 32
+            Layout.leftMargin: 11
+            Layout.rightMargin: 11
+            spacing: 7
             Label {
                 text: matrix.titleText
                 color: matrix.theme.text
                 font.family: matrix.uiFont
-                font.pixelSize: 13
+                font.pixelSize: 12
                 font.weight: Font.DemiBold
                 verticalAlignment: Text.AlignVCenter
             }
@@ -76,7 +59,7 @@ Rectangle {
                 text: matrix.unitText
                 color: matrix.theme.muted
                 font.family: matrix.uiFont
-                font.pixelSize: 10
+                font.pixelSize: 8
                 font.weight: Font.Medium
                 verticalAlignment: Text.AlignVCenter
             }
@@ -86,14 +69,40 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 28
-            Layout.leftMargin: 10
-            Layout.rightMargin: 10
-            spacing: 8
-            Item { Layout.preferredWidth: 28 }
-            Label { text: "Channel"; Layout.preferredWidth: 46; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: 9; font.weight: Font.DemiBold; verticalAlignment: Text.AlignVCenter }
-            Label { text: "Value"; Layout.fillWidth: true; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: 9; font.weight: Font.DemiBold; verticalAlignment: Text.AlignVCenter }
-            Label { text: "Phase"; Layout.preferredWidth: matrix.compact ? 92 : 108; color: matrix.theme.muted; font.family: matrix.uiFont; font.pixelSize: 9; font.weight: Font.DemiBold; verticalAlignment: Text.AlignVCenter }
+            Layout.preferredHeight: 20
+            Layout.leftMargin: 9
+            Layout.rightMargin: 9
+            spacing: 6
+            Item { Layout.preferredWidth: 25 }
+            Label {
+                text: "CH"
+                Layout.preferredWidth: 46
+                color: matrix.theme.muted2
+                font.family: matrix.monoFont
+                font.pixelSize: 7
+                font.weight: Font.DemiBold
+                verticalAlignment: Text.AlignVCenter
+            }
+            Label {
+                text: "MAGNITUDE"
+                Layout.fillWidth: true
+                color: matrix.theme.muted2
+                font.family: matrix.uiFont
+                font.pixelSize: 7
+                font.weight: Font.DemiBold
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+            }
+            Label {
+                text: "ANGLE"
+                Layout.preferredWidth: matrix.compact ? 84 : 100
+                color: matrix.theme.muted2
+                font.family: matrix.uiFont
+                font.pixelSize: 7
+                font.weight: Font.DemiBold
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+            }
         }
 
         Repeater {
@@ -116,10 +125,10 @@ Rectangle {
                 property real pendingPhase: angle
 
                 Layout.fillWidth: true
-                Layout.preferredHeight: matrix.compact ? 54 : 60
-                color: signalRow.selected ? "#111c27"
-                    : (magnitudeField.activeFocus || phaseField.activeFocus) ? "#131f2b"
-                    : rowHover.hovered ? "#101820" : "transparent"
+                Layout.preferredHeight: matrix.compact ? 40 : 42
+                color: signalRow.selected ? "#101c27"
+                    : (magnitudeField.activeFocus || phaseField.activeFocus) ? "#0f1922"
+                    : rowHover.hovered ? "#0d161e" : "transparent"
                 Behavior on color { ColorAnimation { duration: 90 } }
 
                 HoverHandler { id: rowHover }
@@ -142,7 +151,8 @@ Rectangle {
 
                 Rectangle {
                     visible: signalRow.selected
-                    width: 3
+                    width: 2
+                    opacity: 0.86
                     anchors.left: parent.left
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
@@ -151,12 +161,12 @@ Rectangle {
 
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: 10
-                    anchors.rightMargin: 10
-                    spacing: 8
+                    anchors.leftMargin: 9
+                    anchors.rightMargin: 9
+                    spacing: 6
 
                     CheckBox {
-                        Layout.preferredWidth: 28
+                        Layout.preferredWidth: 25
                         Layout.alignment: Qt.AlignVCenter
                         checked: signalRow.channelEnabled
                         ToolTip.visible: hovered
@@ -174,12 +184,12 @@ Rectangle {
                         Layout.preferredWidth: 46
                         Layout.alignment: Qt.AlignVCenter
                         spacing: 6
-                        Rectangle { width: 8; height: 8; radius: 4; color: signalRow.phaseColor }
+                        Rectangle { width: 6; height: 6; radius: 3; color: signalRow.phaseColor }
                         Label {
                             text: signalRow.sid
                             color: signalRow.selected ? matrix.theme.text : matrix.theme.textSoft
                             font.family: matrix.monoFont
-                            font.pixelSize: 11
+                            font.pixelSize: 10
                             font.weight: Font.Bold
                             verticalAlignment: Text.AlignVCenter
                         }
@@ -190,7 +200,7 @@ Rectangle {
                         Layout.fillWidth: true
                         theme: matrix.theme
                         monoFont: matrix.monoFont
-                        compact: matrix.compact
+                        compact: true
                         suffixText: matrix.groupIndex === 0 ? "A" : "V"
                         text: signalRow.mag.toFixed(3)
                         invalidInput: false
@@ -237,10 +247,10 @@ Rectangle {
                     NumericField {
                         id: phaseField
                         enabled: matrix.controller.signalFrequency > 0
-                        Layout.preferredWidth: matrix.compact ? 92 : 108
+                        Layout.preferredWidth: matrix.compact ? 84 : 100
                         theme: matrix.theme
                         monoFont: matrix.monoFont
-                        compact: matrix.compact
+                        compact: true
                         suffixText: "°"
                         text: signalRow.angle.toFixed(2)
                         invalidInput: false
@@ -286,8 +296,11 @@ Rectangle {
                 }
 
                 Rectangle {
+                    visible: signalRow.rowIndex < 3
                     anchors.left: parent.left
+                    anchors.leftMargin: 9
                     anchors.right: parent.right
+                    anchors.rightMargin: 9
                     anchors.bottom: parent.bottom
                     height: 1
                     color: matrix.theme.lineSoft

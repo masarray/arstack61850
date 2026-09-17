@@ -13,7 +13,7 @@ RowLayout {
     property real qualityValue: 0
     property bool compact: false
 
-    spacing: 7
+    spacing: 6
 
     function hexText(value) {
         return "0x" + (Number(value) >>> 0).toString(16).padStart(8, "0").toUpperCase()
@@ -41,7 +41,7 @@ RowLayout {
         if (q & (1 << 9)) parts.push("inaccurate")
         if (q & (1 << 11)) parts.push("test")
         if (q & (1 << 12)) parts.push("operator-blocked")
-        return parts.length ? parts.join(" · ") : "no detail flags"
+        return parts.length ? parts.join(" · ") : ""
     }
 
     function presetIndex(value) {
@@ -71,17 +71,16 @@ RowLayout {
     }
 
     Label {
-        text: "QUALITY"
+        text: "Quality"
         color: editor.theme.muted
         font.family: editor.uiFont
-        font.pixelSize: 8
+        font.pixelSize: 9
         font.weight: Font.DemiBold
-        font.letterSpacing: 0.8
     }
 
     Rectangle {
-        implicitHeight: 22
-        implicitWidth: validityText.implicitWidth + 16
+        implicitHeight: 20
+        implicitWidth: validityText.implicitWidth + 14
         radius: 5
         color: editor.validityName(editor.qualityValue) === "GOOD" ? editor.theme.greenSoft :
                editor.validityName(editor.qualityValue) === "QUESTIONABLE" ? editor.theme.amberSoft : editor.theme.redSoft
@@ -102,7 +101,7 @@ RowLayout {
 
     ComboBox {
         id: presetBox
-        implicitWidth: editor.compact ? 104 : 118
+        implicitWidth: editor.compact ? 98 : 108
         model: ["Good", "Invalid", "Questionable", "Test"]
         currentIndex: editor.presetIndex(editor.qualityValue)
         font.family: editor.uiFont
@@ -115,7 +114,7 @@ RowLayout {
         theme: editor.theme
         monoFont: editor.monoFont
         compact: true
-        implicitWidth: editor.compact ? 106 : 120
+        implicitWidth: editor.compact ? 100 : 112
         Component.onCompleted: text = editor.hexText(editor.qualityValue)
         onEditingFinished: {
             var trimmed = text.trim()
@@ -131,15 +130,17 @@ RowLayout {
                 controller.showMessage("Quality must be a valid 32-bit value.", true)
             }
         }
+        ToolTip.visible: hovered && editor.flagSummary(editor.qualityValue).length > 0
+        ToolTip.text: editor.flagSummary(editor.qualityValue)
     }
 
     Label {
         Layout.fillWidth: true
-        visible: !editor.compact
+        visible: !editor.compact && editor.flagSummary(editor.qualityValue).length > 0
         text: editor.flagSummary(editor.qualityValue)
         elide: Text.ElideRight
         color: editor.theme.muted
         font.family: editor.uiFont
-        font.pixelSize: 9
+        font.pixelSize: 8
     }
 }

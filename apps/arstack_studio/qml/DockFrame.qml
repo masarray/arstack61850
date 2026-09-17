@@ -21,7 +21,7 @@ Rectangle {
     color: theme.surface
     radius: theme.panelRadius
     border.width: 1
-    border.color: theme.line
+    border.color: theme.lineSoft
     clip: true
 
     ColumnLayout {
@@ -30,8 +30,8 @@ Rectangle {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 34
-            color: "#131b24"
+            Layout.preferredHeight: 30
+            color: theme.surface2
 
             MouseArea {
                 anchors.fill: parent
@@ -44,15 +44,9 @@ Rectangle {
             RowLayout {
                 anchors.fill: parent
                 anchors.leftMargin: 10
-                anchors.rightMargin: 6
-                spacing: 7
+                anchors.rightMargin: 5
+                spacing: 6
 
-                Rectangle {
-                    width: 3
-                    height: 16
-                    radius: 2
-                    color: theme.accent
-                }
                 Label {
                     Layout.fillWidth: true
                     text: frame.titleText
@@ -64,46 +58,35 @@ Rectangle {
                     verticalAlignment: Text.AlignVCenter
                 }
 
-                Rectangle {
+                Label {
                     visible: frame.statusText.length > 0
-                    implicitWidth: statusLabel.implicitWidth + 12
-                    implicitHeight: 20
-                    radius: 5
-                    color: "#0d141c"
-                    border.width: 1
-                    border.color: theme.lineSoft
-
-                    Label {
-                        id: statusLabel
-                        anchors.centerIn: parent
-                        text: frame.statusText
-                        color: theme.muted
-                        font.family: frame.monoFont
-                        font.pixelSize: theme.captionSize - 2
-                        font.weight: Font.DemiBold
-                        verticalAlignment: Text.AlignVCenter
-                    }
+                    text: frame.statusText
+                    color: theme.muted
+                    font.family: frame.monoFont
+                    font.pixelSize: Math.max(7, theme.captionSize - 1)
+                    font.weight: Font.Medium
+                    verticalAlignment: Text.AlignVCenter
                 }
 
                 DarkToolButton {
                     visible: frame.detachable
                     iconSource: Qt.resolvedUrl("../assets/lucide/external-link.svg")
-                    iconSize: 17
+                    iconSize: 15
                     theme: frame.theme
                     uiFont: frame.uiFont
                     onClicked: frame.detachRequested()
                     ToolTip.visible: hovered
-                    ToolTip.text: "Float this dock (double-click the title also works)"
+                    ToolTip.text: "Float view"
                 }
                 DarkToolButton {
                     visible: frame.closable
                     iconSource: Qt.resolvedUrl("../assets/lucide/x.svg")
-                    iconSize: 18
+                    iconSize: 16
                     theme: frame.theme
                     uiFont: frame.uiFont
                     onClicked: frame.closeRequested()
                     ToolTip.visible: hovered
-                    ToolTip.text: "Hide this dock; restore it from View > Docks"
+                    ToolTip.text: "Hide view"
                 }
             }
 

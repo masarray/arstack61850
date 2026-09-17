@@ -6,12 +6,12 @@ import ARStack.Studio 1.0
 
 ApplicationWindow {
     id: root
-    width: 1480
-    height: 900
-    minimumWidth: 1080
-    minimumHeight: 720
+    width: 1240
+    height: 760
+    minimumWidth: 960
+    minimumHeight: 620
     visible: true
-    title: "ARStack Studio · SMV Injector"
+    title: "ARStack Studio · SMV + PTP · v" + Qt.application.version
     color: studioTheme.bg
 
     StudioTheme { id: studioTheme }
@@ -44,14 +44,21 @@ ApplicationWindow {
     property bool waveformDetached: false
     property bool telemetryDockVisible: true
     property bool telemetryExpanded: false
+    property bool applicationShutdownRequested: false
 
     font.family: root.uiFont
 
-    // Graceful window close is still a safety boundary. QML submits only the
-    // Stop intent; the supervisor owns whether the current session may act.
+    // Primary-window close owns application exit. C++ teardown owns STOP, COM
+    // close and worker retirement; QML must not race it with another async STOP.
     onClosing: function(close) {
-        if (workflowBar.session && workflowBar.session.state === "RUNNING")
-            workflowBar.session.requestStop()
+        close.accepted = true
+        if (root.applicationShutdownRequested) return
+        root.applicationShutdownRequested = true
+        configurationWindow.hide()
+        detachedPhasorWindow.hide()
+        detachedWaveformWindow.hide()
+        // C++ owns process termination and bounded worker retirement. Do not
+        // race it with a second QML quit path.
     }
 
     FontLoader {
@@ -59,11 +66,11 @@ ApplicationWindow {
         source: Qt.resolvedUrl("../assets/InterVariable.ttf")
     }
 
-    readonly property bool compactLayout: width < 1300
+    readonly property bool compactLayout: width < 1120
     readonly property bool canDeploy: workflowBar.session ? workflowBar.session.canDeployProfile : false
     readonly property bool canStart: workflowBar.session ? workflowBar.session.startReady : false
-    readonly property string toastMessage: transientMessage.length ? transientMessage : device.lastError
-    readonly property bool toastError: transientMessage.length ? transientError : device.lastError.length > 0
+    readonly property string toastMessage: transientMessage
+    readonly property bool toastError: transientError
 
     SclProfileModel { id: sclProfiles }
     DeviceController { id: device }
@@ -422,121 +429,42 @@ ApplicationWindow {
         }
     }
 
-    header: Rectangle {
-        height: 50
-        color: studioTheme.chrome
-        border.width: 1
-        border.color: studioTheme.lineSoft
 
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 15
-            anchors.rightMargin: 15
-            spacing: 9
-
-            Rectangle {
-                width: 30
-                height: 30
-                radius: 6
-                color: "#101b27"
-                border.width: 1
-                border.color: "#315071"
-                Image {
-                    anchors.centerIn: parent
-                    width: 17
-                    height: 17
-                    source: Qt.resolvedUrl("../assets/lucide/radio-tower.svg")
-                    sourceSize.width: 34
-                    sourceSize.height: 34
-                }
-            }
-
-            ColumnLayout {
-                spacing: 0
-                Layout.alignment: Qt.AlignVCenter
-                Label { text: "ARSTACK61850"; color: studioTheme.muted; font.family: root.uiFont; font.pixelSize: studioTheme.captionSize - 1; font.weight: Font.Bold; font.letterSpacing: 1.0; verticalAlignment: Text.AlignVCenter }
-                Label { text: "SMV Injector"; color: studioTheme.text; font.family: root.uiFont; font.pixelSize: 13; font.weight: Font.DemiBold; verticalAlignment: Text.AlignVCenter }
-            }
-
-            Item { Layout.fillWidth: true }
-
-            Rectangle {
-                Layout.preferredWidth: root.compactLayout ? 170 : 210
-                implicitHeight: 32
-                radius: 7
-                color: studioTheme.surface2
-                border.width: 1
-                border.color: workflowBar.smartStateColor
-
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 10
-                    anchors.rightMargin: 10
-                    spacing: 8
-                    Rectangle { width: 8; height: 8; radius: 4; color: workflowBar.smartStateColor }
-                    Label {
-                        Layout.fillWidth: true
-                        Layout.alignment: Qt.AlignVCenter
-                        text: workflowBar.displayState
-                        color: workflowBar.smartStateColor
-                        font.family: root.uiFont
-                        font.pixelSize: 9
-                        font.weight: Font.DemiBold
-                        verticalAlignment: Text.AlignVCenter
-                        elide: Text.ElideRight
-                    }
-                    Label {
-                        text: device.deviceVerified ? "•••" : "↻"
-                        color: studioTheme.accent
-                        font.family: root.uiFont
-                        font.pixelSize: 13
-                        font.weight: Font.Bold
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                }
-                MouseArea {
-                    id: identityMouse
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    enabled: !device.discovering
-                    onClicked: device.deviceVerified
-                        ? root.openConfiguration()
-                        : workflowBar.session.requestConnect()
-                }
-                ToolTip.visible: identityMouse.containsMouse
-                ToolTip.text: workflowBar.session.statusText
-                ToolTip.delay: 450
-            }
-        }
-    }
 
     footer: Rectangle {
-        height: 30
+        height: 28
         color: studioTheme.chrome
         border.width: 1
         border.color: studioTheme.lineSoft
 
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 15
-            anchors.rightMargin: 15
-            spacing: 9
-            Rectangle { width: 6; height: 6; radius: 3; color: workflowBar.smartStateColor }
+            anchors.leftMargin: 12
+            anchors.rightMargin: 12
+            spacing: 8
+
             Label {
-                Layout.fillWidth: true
-                text: workflowBar.session.statusText
+                text: device.deviceVerified ? device.portName + " · ESP32-P4" : "No device"
+                color: device.deviceVerified ? studioTheme.textSoft : studioTheme.muted
+                font.family: root.uiFont
+                font.pixelSize: 9
+                font.weight: Font.Medium
+            }
+            Rectangle { width: 1; height: 12; color: studioTheme.lineSoft }
+            Label {
+                text: "4I + 4V · 4000 samples/s"
                 color: studioTheme.muted
                 font.family: root.uiFont
-                font.pixelSize: studioTheme.captionSize
-                elide: Text.ElideRight
+                font.pixelSize: 9
             }
+            Item { Layout.fillWidth: true }
             Label {
-                visible: device.running
-                text: "FPS " + device.fps + "  ·  MISSED " + device.missed + "  ·  TX FAIL " + device.txFailures
+                visible: device.deviceVerified
+                text: "FPS " + device.fps + "   MISSED " + device.missed + "   TX FAIL " + device.txFailures
                 color: (Number(device.missed) > 0 || Number(device.txFailures) > 0) ? studioTheme.amber : studioTheme.textSoft
                 font.family: root.monoFont
-                font.pixelSize: studioTheme.captionSize
+                font.pixelSize: 9
+                font.weight: Font.Medium
             }
         }
     }
@@ -666,14 +594,14 @@ ApplicationWindow {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: root.compactLayout ? 9 : 11
-        spacing: root.compactLayout ? 9 : 11
+        anchors.margins: 8
+        spacing: 8
 
         WorkflowBar {
             id: workflowBar
             Layout.fillWidth: true
-            Layout.preferredHeight: 72
-            Layout.minimumHeight: 72
+            Layout.preferredHeight: 54
+            Layout.minimumHeight: 54
             theme: studioTheme
             controller: root
             device: device
@@ -729,26 +657,24 @@ ApplicationWindow {
 
                     ColumnLayout {
                         anchors.fill: parent
-                        anchors.margins: root.compactLayout ? 12 : 15
-                        spacing: 9
+                        anchors.margins: root.compactLayout ? 11 : 13
+                        spacing: 8
 
                         RowLayout {
                             Layout.fillWidth: true
                             ColumnLayout {
                                 spacing: 1
-                                Label { text: "INJECTION"; color: studioTheme.muted; font.family: root.uiFont; font.pixelSize: studioTheme.captionSize; font.weight: Font.DemiBold; font.letterSpacing: 0.9 }
-                                Label { text: "4I + 4V Injection"; color: studioTheme.text; font.family: root.uiFont; font.pixelSize: root.compactLayout ? 18 : 20; font.weight: Font.DemiBold }
+                                Label { text: "4I + 4V Injection"; color: studioTheme.text; font.family: root.uiFont; font.pixelSize: root.compactLayout ? 17 : 18; font.weight: Font.DemiBold }
                             }
                             Item { Layout.fillWidth: true }
                         }
 
                         Rectangle {
                             Layout.fillWidth: true
-                            height: 53
-                            radius: 7
-                            color: studioTheme.surface2
-                            border.width: 1
-                            border.color: studioTheme.lineSoft
+                            height: 48
+                            radius: 8
+                            color: "#0b1219"
+                            border.width: 0
 
                             RowLayout {
                                 anchors.fill: parent
@@ -756,50 +682,48 @@ ApplicationWindow {
                                 anchors.rightMargin: 11
                                 spacing: 8
 
-                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "AC"; tone: root.signalFrequency > 0 ? "accent" : "normal"; implicitWidth: 46; onClicked: root.setWaveformMode("AC") }
-                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "DC"; tone: root.signalFrequency === 0 ? "accent" : "normal"; implicitWidth: 46; onClicked: root.setWaveformMode("DC") }
-                                Rectangle { width: 1; height: 24; color: studioTheme.lineSoft }
-
-                                ColumnLayout {
-                                    spacing: 0
-                                    Label { text: root.signalFrequency === 0 ? "DC MODE" : "FREQUENCY"; color: studioTheme.muted; font.family: root.uiFont; font.pixelSize: studioTheme.captionSize - 1; font.weight: Font.DemiBold; font.letterSpacing: 0.8 }
-                                    RowLayout {
-                                        spacing: 5
-                                        NumericField {
-                                            id: frequencyField
-                                            theme: studioTheme
-                                            monoFont: root.monoFont
-                                            compact: root.compactLayout
-                                            implicitWidth: 84
-                                            text: "50.000"
-                                            suffixText: "Hz"
-                                            enabled: root.signalFrequency > 0
-                                            validator: DoubleValidator { bottom: 0.001; top: 1000.0; decimals: 3 }
-                                            onTextEdited: {
-                                                var value = root.parseOperatorNumber(text)
-                                                if (root.validFrequency(value)) {
-                                                    invalidInput = false
-                                                    root.signalFrequency = value
-                                                    if (value > 0) root.previousAcFrequency = value
-                                                    root.refreshPreview()
-                                                    if (workflowBar.session && workflowBar.session.liveControlReady)
-                                                        workflowBar.session.requestSetFrequency(value)
-                                                } else invalidInput = true
-                                            }
-                                            onEditingFinished: {
-                                                var value = root.parseOperatorNumber(text)
-                                                if (!root.validFrequency(value)) {
-                                                    text = root.signalFrequency.toFixed(3)
-                                                    invalidInput = false
-                                                    root.showMessage("AC frequency must be greater than 0 and not exceed 1000 Hz.", true)
-                                                } else text = value.toFixed(3)
-                                            }
-                                        }
+                                Label {
+                                    text: "Frequency"
+                                    color: studioTheme.textSoft
+                                    font.family: root.uiFont
+                                    font.pixelSize: 10
+                                    font.weight: Font.DemiBold
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                NumericField {
+                                    id: frequencyField
+                                    theme: studioTheme
+                                    monoFont: root.monoFont
+                                    compact: root.compactLayout
+                                    implicitWidth: 90
+                                    text: "50.000"
+                                    suffixText: "Hz"
+                                    enabled: true
+                                    validator: DoubleValidator { bottom: 0.0; top: 1000.0; decimals: 3 }
+                                    onTextEdited: {
+                                        var value = root.parseOperatorNumber(text)
+                                        if (root.validFrequency(value)) {
+                                            invalidInput = false
+                                            root.signalFrequency = value
+                                            if (value > 0) root.previousAcFrequency = value
+                                            root.refreshPreview()
+                                            if (workflowBar.session && workflowBar.session.liveControlReady)
+                                                workflowBar.session.requestSetFrequency(value)
+                                        } else invalidInput = true
+                                    }
+                                    onEditingFinished: {
+                                        var value = root.parseOperatorNumber(text)
+                                        if (!root.validFrequency(value)) {
+                                            text = root.signalFrequency.toFixed(3)
+                                            invalidInput = false
+                                            root.showMessage("Frequency must be within 0..1000 Hz (0 = DC).", true)
+                                        } else text = value.toFixed(3)
                                     }
                                 }
 
-                                CalmButton { visible: root.signalFrequency > 0; theme: studioTheme; uiFont: root.uiFont; text: "50"; implicitWidth: 44; onClicked: root.setFrequencyValue(50) }
-                                CalmButton { visible: root.signalFrequency > 0; theme: studioTheme; uiFont: root.uiFont; text: "60"; implicitWidth: 44; onClicked: root.setFrequencyValue(60) }
+                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "0"; implicitWidth: 44; toolTipText: "DC"; onClicked: root.setFrequencyValue(0) }
+                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "50"; implicitWidth: 44; onClicked: root.setFrequencyValue(50) }
+                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "60"; implicitWidth: 44; onClicked: root.setFrequencyValue(60) }
                                 Rectangle { width: 1; height: 24; color: studioTheme.lineSoft }
                                 CheckBox {
                                     enabled: root.signalFrequency > 0
@@ -911,7 +835,7 @@ ApplicationWindow {
                         SplitView.preferredHeight: 300
                         theme: studioTheme
                         titleText: "Phasor"
-                        statusText: "GENERATED"
+                        statusText: ""
                         uiFont: root.uiFont
                         monoFont: root.monoFont
                         detachable: true
@@ -982,7 +906,7 @@ ApplicationWindow {
             }
 
             TelemetryDock {
-                visible: root.telemetryDockVisible
+                visible: root.telemetryDockVisible && root.telemetryExpanded
                 SplitView.fillWidth: true
                 SplitView.minimumHeight: root.telemetryExpanded ? 88 : 32
                 SplitView.maximumHeight: root.telemetryExpanded ? 320 : 32
@@ -1005,7 +929,7 @@ ApplicationWindow {
     StatusToast {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 48
+        anchors.bottomMargin: 38
         theme: studioTheme
         uiFont: root.uiFont
         message: root.toastMessage

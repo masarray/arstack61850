@@ -105,7 +105,7 @@ The PTP task runs separately from the Sampled Values realtime task. It does not 
 
 ## Configuration
 
-PTP transmission is **off by default**.
+The portable PTP feature remains Kconfig-guarded, but the ARStack Studio **v0.1.1 production firmware profile enables it by default** in `LAB_SOURCE` mode. Custom/experimental firmware may still disable `CONFIG_AR_PTP_LAB_TX` explicitly.
 
 Relevant ESP32-P4 configuration options:
 

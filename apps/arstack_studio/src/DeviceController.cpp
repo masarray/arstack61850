@@ -5,8 +5,11 @@
 #include "DeviceIoWorker.hpp"
 
 #include <QDateTime>
+#include <QDebug>
 #include <QMetaObject>
 #include <QRegularExpression>
+#include <QSemaphore>
+#include <QSharedPointer>
 
 #include <cmath>
 #include <limits>
@@ -33,6 +36,7 @@ const QRegularExpression kIdentityExpression{
     QStringLiteral(
         "ARSTACK identity product=([A-Z0-9_-]+) target=([A-Z0-9_-]+) protocol=(\\d+) "
         "device_id=([A-Fa-f0-9]{12}) firmware=([0-9A-Za-z._+\\-]+) "
+        "(?:build=([A-Fa-f0-9]{16}) )?"
         "(?:boot_id=([A-Fa-f0-9]{16}) )?capabilities=([A-Z0-9_,.\\-]+)"),
     QRegularExpression::CaseInsensitiveOption};
 const QRegularExpression kPtpStatusExpression{
@@ -73,19 +77,77 @@ DeviceController::DeviceController(QObject* parent) : QObject(parent) {
 }
 
 DeviceController::~DeviceController() {
-    if (ioWorker_ == nullptr || !ioThread_.isRunning()) return;
+    static_cast<void>(shutdown());
+}
+
+bool DeviceController::shutdown() {
+    if (shutdownComplete_) return true;
+    if (shuttingDown_) return !ioThread_.isRunning();
+    shuttingDown_ = true;
+    pendingAutoDetect_ = false;
+    pendingConnectPort_.clear();
+
+    if (ioWorker_ == nullptr || !ioThread_.isRunning()) {
+        ioWorker_ = nullptr;
+        ioWorkerReady_ = false;
+        ioWorkerAffinityValid_ = false;
+        shutdownComplete_ = true;
+        shuttingDown_ = false;
+        return true;
+    }
 
     const bool requestStop = running_;
     if (QThread::currentThread() == &ioThread_) {
         ioWorker_->shutdown(requestStop);
-    } else {
-        QMetaObject::invokeMethod(
-            ioWorker_,
-            [worker = ioWorker_, requestStop] { worker->shutdown(requestStop); },
-            Qt::BlockingQueuedConnection);
+        ioThread_.quit();
+        shuttingDown_ = false;
+        return false;
     }
+
+    auto acknowledged = QSharedPointer<QSemaphore>::create();
+    DeviceIoWorker* const worker = ioWorker_;
+    const bool queued = QMetaObject::invokeMethod(
+        worker,
+        [worker, requestStop, acknowledged] {
+            worker->shutdown(requestStop);
+            acknowledged->release();
+        },
+        Qt::QueuedConnection);
+    bool graceful = queued && acknowledged->tryAcquire(1, shutdownAckTimeoutMs());
+    if (!graceful) {
+        qCritical().noquote()
+            << "Device I/O shutdown acknowledgement timed out; entering bounded retirement fallback.";
+    }
+
     ioThread_.quit();
-    ioThread_.wait();
+    bool joined = ioThread_.wait(shutdownJoinTimeoutMs());
+    if (!joined) {
+        graceful = false;
+        qCritical().noquote()
+            << "Device I/O thread missed primary join deadline; retrying bounded retirement.";
+        ioThread_.requestInterruption();
+        ioThread_.quit();
+        joined = ioThread_.wait(shutdownRetryTimeoutMs());
+    }
+    if (!joined) {
+        // Emergency process-exit containment only. Normal CI must never reach this.
+        graceful = false;
+        qCritical().noquote()
+            << "Device I/O thread still alive; emergency terminate fallback engaged.";
+        ioThread_.terminate();
+        joined = ioThread_.wait(shutdownForceTimeoutMs());
+    }
+
+    ioWorker_ = nullptr;
+    ioWorkerReady_ = false;
+    ioWorkerAffinityValid_ = false;
+    connected_ = false;
+    running_ = false;
+    profileDeploying_ = false;
+    shutdownComplete_ = joined;
+    shuttingDown_ = false;
+    if (!joined) qCritical().noquote() << "Device I/O thread could not be retired before exit.";
+    return graceful && joined;
 }
 
 void DeviceController::connectWorkerSignals() {
@@ -183,6 +245,14 @@ void DeviceController::connectWorkerSignals() {
         if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
         lastIdentificationPort_ = port;
         identifyAttempts_ = attempts;
+        const QString timedOutPort = port.trimmed();
+        const bool singleVisiblePort = ports_.size() == 1 &&
+            ports_.constFirst().compare(timedOutPort, Qt::CaseInsensitive) == 0;
+        const bool recommendedCandidate = !recommendedPort_.isEmpty() &&
+            recommendedPort_.compare(timedOutPort, Qt::CaseInsensitive) == 0;
+        if (!timedOutPort.isEmpty() && (singleVisiblePort || recommendedCandidate)) {
+            recoveryCandidatePort_ = timedOutPort;
+        }
         if (continuing) {
             setIdentificationState(IdentificationState::Identifying);
             setDiscoveryState(QStringLiteral("Checking connected devices for an ARStack injector..."), true);
@@ -243,6 +313,7 @@ void DeviceController::connectWorkerSignals() {
 
 QStringList DeviceController::ports() const { return ports_; }
 QString DeviceController::recommendedPort() const { return recommendedPort_; }
+QString DeviceController::recoveryCandidatePort() const { return recoveryCandidatePort_; }
 QString DeviceController::discoveryStatus() const { return discoveryStatus_; }
 bool DeviceController::discovering() const noexcept { return discovering_; }
 bool DeviceController::deviceVerified() const noexcept { return deviceVerified_; }
@@ -253,6 +324,7 @@ QString DeviceController::deviceTarget() const { return identity_.target; }
 QString DeviceController::deviceId() const { return identity_.deviceId; }
 QString DeviceController::protocolVersion() const { return identity_.protocolVersion; }
 QString DeviceController::firmwareVersion() const { return identity_.firmwareVersion; }
+QString DeviceController::firmwareBuildId() const { return identity_.buildId; }
 QString DeviceController::bootId() const { return identity_.bootId; }
 QStringList DeviceController::capabilities() const { return identity_.capabilities; }
 DeviceIdentity DeviceController::deviceIdentity() const { return identity_; }
@@ -295,8 +367,9 @@ bool DeviceController::parseIdentityLine(const QString& line, DeviceIdentity& id
     parsed.protocolVersion = match.captured(3);
     parsed.deviceId = match.captured(4).toUpper();
     parsed.firmwareVersion = match.captured(5);
-    parsed.bootId = match.captured(6).toUpper();
-    parsed.capabilities = match.captured(7).split(QLatin1Char(','), Qt::SkipEmptyParts);
+    parsed.buildId = match.captured(6).toLower();
+    parsed.bootId = match.captured(7).toUpper();
+    parsed.capabilities = match.captured(8).split(QLatin1Char(','), Qt::SkipEmptyParts);
     for (QString& capability : parsed.capabilities) capability = capability.trimmed().toUpper();
     parsed.capabilities.removeDuplicates();
 
@@ -313,15 +386,21 @@ bool DeviceController::parseIdentityLine(const QString& line, DeviceIdentity& id
 
 bool DeviceController::identitySupportsCurrentContract(
     const DeviceIdentity& identity,
-    const QString& expectedFirmwareVersion) {
+    const QString& expectedFirmwareVersion,
+    const QString& expectedBuildId) {
     static const QStringList requiredCapabilities{
         QStringLiteral("SMV-4I4V"),
+        QStringLiteral("PROFILE"),
         QStringLiteral("LIVE-SETPOINTS"),
-        QStringLiteral("SESSION-LEASE")};
+        QStringLiteral("SESSION-LEASE"),
+        QStringLiteral("PTP-P2"),
+        QStringLiteral("SMPSYNCH-AUTO")};
+    const QString wantedBuild = expectedBuildId.trimmed().toLower();
     if (identity.product != QStringLiteral("SMV-INJECTOR") ||
         identity.target != QStringLiteral("ESP32-P4") ||
         identity.protocolVersion != QStringLiteral("1") ||
         identity.firmwareVersion != expectedFirmwareVersion ||
+        (!wantedBuild.isEmpty() && identity.buildId.compare(wantedBuild, Qt::CaseInsensitive) != 0) ||
         identity.bootId.size() != 16) {
         return false;
     }
@@ -406,6 +485,9 @@ void DeviceController::handlePortSnapshot(
     ports_ = ports;
     recommendedPort_ = recommendedPort;
     highConfidenceCount_ = highConfidenceCount;
+    if (!recoveryCandidatePort_.isEmpty() && !ports_.contains(recoveryCandidatePort_)) {
+        recoveryCandidatePort_.clear();
+    }
 
     if (identificationState_ == IdentificationState::Unidentified &&
         !lastIdentificationPort_.isEmpty() && !ports_.contains(lastIdentificationPort_)) {
@@ -438,6 +520,7 @@ void DeviceController::handlePortOpened(const QString& portName, const bool auto
     connected_ = true;
     portName_ = portName;
     lastIdentificationPort_ = portName;
+    recoveryCandidatePort_.clear();
     identifyAttempts_ = 0;
     deviceVerified_ = false;
     clearIdentity();
@@ -749,6 +832,7 @@ void DeviceController::clearIdentity() {
 void DeviceController::markDeviceVerified() {
     if (deviceVerified_) return;
     deviceVerified_ = true;
+    recoveryCandidatePort_.clear();
     lastIdentificationPort_ = portName_;
     setIdentificationState(IdentificationState::Verified);
     setDiscoveryState(QStringLiteral("ARStack ESP32-P4 identity verified."), false);
@@ -923,6 +1007,21 @@ void DeviceController::processLine(const QString& rawLine) {
     if (line.contains(QStringLiteral("PTP configuration accepted"), Qt::CaseInsensitive)) {
         emit deviceMessage(QStringLiteral("PTP expert profile accepted."));
         static_cast<void>(sendPtpShow());
+    }
+    if (line.contains(QStringLiteral("PTP start accepted"), Qt::CaseInsensitive)) {
+        ptpStatus_ = ptpRole_ == QStringLiteral("SOURCE") ? QStringLiteral("Source TX verified") : QStringLiteral("Timing runtime started");
+        emit deviceMessage(ptpRole_ == QStringLiteral("SOURCE")
+            ? QStringLiteral("PTP source start verified; reading live TX counters.")
+            : QStringLiteral("PTP %1 runtime started.").arg(ptpRole_.toLower()));
+        static_cast<void>(sendPtpShow());
+    }
+    if (line.contains(QStringLiteral("PTP start rejected"), Qt::CaseInsensitive) || line.contains(QStringLiteral("PTP source readiness timeout"), Qt::CaseInsensitive)) {
+        ptpRunning_ = false;
+        ptpStatus_ = QStringLiteral("PTP start failed");
+        emit ptpStateChanged();
+        setError(ptpRole_ == QStringLiteral("SOURCE")
+            ? QStringLiteral("PTP source did not emit Announce/Sync/Follow_Up. Check the Ethernet link and retry Start PTP Source.")
+            : QStringLiteral("PTP %1 could not start. Check the Ethernet link and retry.").arg(ptpRole_.toLower()));
     }
 
     if (line.contains(QStringLiteral("PROFILE commit rejected"), Qt::CaseInsensitive) ||

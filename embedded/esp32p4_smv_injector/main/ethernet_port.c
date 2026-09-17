@@ -5,6 +5,8 @@
 #include "esp_err.h"
 #include "esp_eth_mac_esp.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "sdkconfig.h"
 
 #if CONFIG_AR_PTP_LAB_TX
@@ -29,6 +31,28 @@ enum {
     AR_RMII_RXD0_GPIO = 29,
     AR_RMII_RXD1_GPIO = 30,
 };
+
+#if CONFIG_AR_PTP_LAB_TX
+static void ar_esp32p4_restore_normal_emac(void)
+{
+    if (s_eth_handle == NULL) {
+        return;
+    }
+
+    bool enable = false;
+    const esp_err_t result = esp_eth_ioctl(
+        s_eth_handle,
+        (esp_eth_io_cmd_t)ETH_MAC_ESP_CMD_PTP_ENABLE,
+        &enable);
+    if (result != ESP_OK) {
+        ESP_LOGW(TAG,
+                 "Unable to restore normal EMAC mode after failed PTP start: %s",
+                 esp_err_to_name(result));
+    } else {
+        ESP_LOGI(TAG, "Normal EMAC mode restored after failed PTP start");
+    }
+}
+#endif
 
 esp_eth_handle_t ar_esp32p4_eth_init(void)
 {
@@ -76,15 +100,6 @@ esp_eth_handle_t ar_esp32p4_eth_init(void)
     }
     s_eth_handle = handle;
 
-#if CONFIG_AR_PTP_LAB_TX
-    // Boot auto-start uses the same checked admission/readiness contract as the
-    // live serial control path. A rejected or failed start is never reported as
-    // running merely because an older runtime is still cleaning up.
-    if (!ar_ptp_lab_try_start(handle)) {
-        ESP_LOGW(TAG, "PTP auto-start was rejected or could not start");
-    }
-#endif
-
     ESP_LOGI(TAG,
              "Ethernet configured: PHY addr=%d MDC=%d MDIO=%d REF_CLK=%d",
              AR_PHY_ADDRESS, AR_MDC_GPIO, AR_MDIO_GPIO, AR_RMII_REF_CLK_GPIO);
@@ -95,9 +110,25 @@ bool ar_esp32p4_ptp_start(void)
 {
 #if CONFIG_AR_PTP_LAB_TX
     if (s_eth_handle == NULL) {
+        ESP_LOGE(TAG, "PTP start rejected: Ethernet driver is not initialized");
         return false;
     }
-    return ar_ptp_lab_try_start(s_eth_handle);
+
+    // SOURCE start is accepted only after verified Announce + Sync + Follow_Up
+    // transmission. A failed start must not leave the shared EMAC in IEEE1588
+    // timestamp mode because SMV uses the same MAC immediately afterwards.
+    const bool started = ar_ptp_lab_try_start(s_eth_handle);
+    if (started) {
+        return true;
+    }
+
+    ar_ptp_lab_stop();
+    // The PTP task owns RX callback/runtime teardown. Give that bounded cleanup
+    // time to retire before restoring the MAC timestamp mode. This path executes
+    // only after the 1.6 s verified-start timeout/failure, never in the SMV hot path.
+    vTaskDelay(pdMS_TO_TICKS(50));
+    ar_esp32p4_restore_normal_emac();
+    return false;
 #else
     return false;
 #endif

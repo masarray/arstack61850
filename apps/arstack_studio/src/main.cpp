@@ -27,7 +27,7 @@
 #include <string_view>
 
 #ifndef ARSTACK_STUDIO_VERSION
-#define ARSTACK_STUDIO_VERSION "0.1.0"
+#define ARSTACK_STUDIO_VERSION "0.1.1"
 #endif
 
 namespace {
@@ -49,7 +49,11 @@ protected:
     [[nodiscard]] bool eventFilter(QObject* watched, QEvent* event) override {
         if (event != nullptr && event->type() == QEvent::Close && app_ != nullptr) {
             closeObserved_ = true;
-            app_->quit();
+            // QCoreApplication::quit() can be ignored by application/window
+            // policy. A primary-window close is an explicit process-exit request,
+            // so terminate the main event loop deterministically. aboutToQuit()
+            // remains the single cleanup boundary for serial/firmware workers.
+            QCoreApplication::exit(0);
         }
         return QObject::eventFilter(watched, event);
     }
@@ -155,6 +159,7 @@ int checkFirmwareContract(int argc, char* argv[]) {
     const bool valid = firmware.bundleReady() && firmware.flasherAvailable() &&
         firmware.firmwareVersion() == QStringLiteral(ARSTACK_STUDIO_VERSION) &&
         firmware.expectedProtocol() == QStringLiteral("1") &&
+        firmware.firmwareBuildId().size() == 16 &&
         firmware.firmwareSha256().size() == 64 &&
         realEspflashFormat && dashedFormat && rejectsWrongChip && revisionPolicy &&
         flashProgressFormat && recoverySelection && firmwareTimeoutPolicy && firmwareWorkerBoundary;
@@ -189,23 +194,23 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
     DeviceIdentity currentIdentity;
     const QString currentLine = QStringLiteral(
         "I (412) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
-        "device_id=A1B2C3D4E5F6 firmware=%1 boot_id=0123456789ABCDEF "
-        "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE")
+        "device_id=A1B2C3D4E5F6 firmware=%1 build=0123456789abcdef boot_id=0123456789ABCDEF "
+        "capabilities=SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO")
         .arg(QStringLiteral(ARSTACK_STUDIO_VERSION));
     const bool currentParsed = DeviceController::parseIdentityLine(currentLine, currentIdentity);
     const bool currentAccepted = currentParsed &&
         DeviceController::identitySupportsCurrentContract(
-            currentIdentity, QStringLiteral(ARSTACK_STUDIO_VERSION));
+            currentIdentity, QStringLiteral(ARSTACK_STUDIO_VERSION), QStringLiteral("0123456789abcdef"));
 
     DeviceIdentity legacyIdentity;
     const QString legacyLine = QStringLiteral(
         "I (417) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
-        "device_id=A1B2C3D4E5F6 firmware=%1 capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE")
+        "device_id=A1B2C3D4E5F6 firmware=%1 boot_id=0123456789ABCDEF capabilities=SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO")
         .arg(QStringLiteral(ARSTACK_STUDIO_VERSION));
     const bool legacyParsed = DeviceController::parseIdentityLine(legacyLine, legacyIdentity);
     const bool legacyRejectedAsCurrent = legacyParsed &&
         !DeviceController::identitySupportsCurrentContract(
-            legacyIdentity, QStringLiteral(ARSTACK_STUDIO_VERSION));
+            legacyIdentity, QStringLiteral(ARSTACK_STUDIO_VERSION), QStringLiteral("0123456789abcdef"));
 
     DeviceIdentity protocolLegacy;
     const bool protocolLegacyParsed = DeviceController::parseIdentityLine(
@@ -220,8 +225,8 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
     const bool capabilityFailClosed = DeviceController::parseIdentityLine(
         QStringLiteral(
             "I (425) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
-            "device_id=A1B2C3D4E5F6 firmware=0.1.0 boot_id=0123456789ABCDEF "
-            "capabilities=SMV-4I4V,LIVE-SETPOINTS"),
+            "device_id=A1B2C3D4E5F6 firmware=0.1.1 boot_id=0123456789ABCDEF "
+            "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE,SMPSYNCH-AUTO"),
         reducedCapabilities) &&
         !DeviceController::identitySupportsCurrentContract(
             reducedCapabilities, QStringLiteral(ARSTACK_STUDIO_VERSION));
@@ -231,19 +236,19 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         QStringLiteral(
             "I (430) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR target=ESP32-S3 protocol=1 "
             "device_id=A1B2C3D4E5F6 firmware=0.1.0 boot_id=0123456789ABCDEF "
-            "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE"),
+            "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO"),
         rejectedIdentity);
     const bool rejectsMissingFirmware = !DeviceController::parseIdentityLine(
         QStringLiteral(
             "I (435) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
             "device_id=A1B2C3D4E5F6 boot_id=0123456789ABCDEF "
-            "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE"),
+            "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO"),
         rejectedIdentity);
     const bool rejectsMalformedBoot = !DeviceController::parseIdentityLine(
         QStringLiteral(
             "I (440) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
             "device_id=A1B2C3D4E5F6 firmware=0.1.0 boot_id=NOT-A-BOOT-ID "
-            "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE"),
+            "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO"),
         rejectedIdentity);
 
     const bool boundedIdentifyPolicy =
@@ -445,12 +450,6 @@ int main(int argc, char* argv[]) {
     }
 
     FirmwareManager firmwareService;
-    QObject::connect(
-        &app,
-        &QCoreApplication::aboutToQuit,
-        &firmwareService,
-        &FirmwareManager::shutdown,
-        Qt::DirectConnection);
 
     qmlRegisterType<SclProfileModel>("ARStack.Studio", 1, 0, "SclProfileModel");
     qmlRegisterType<StudioDeviceController>("ARStack.Studio", 1, 0, "DeviceController");
@@ -476,6 +475,37 @@ int main(int argc, char* argv[]) {
         mainWindow->installEventFilter(&primaryCloseFilter);
     }
 
+    QPointer<StudioDeviceController> lifecycleDevice;
+    QPointer<SmartSessionController> lifecycleSession;
+    if (mainWindow != nullptr) {
+        lifecycleDevice = mainWindow->findChild<StudioDeviceController*>();
+        lifecycleSession = mainWindow->findChild<SmartSessionController*>();
+    }
+    if (mainWindow != nullptr && (lifecycleDevice.isNull() || lifecycleSession.isNull())) {
+        qCritical().noquote()
+            << "Application lifecycle owner discovery failed; refusing an unowned worker/session lifetime.";
+        return 14;
+    }
+
+    bool lifecycleCoordinatorInvoked = false;
+    bool lifecycleShutdownClean = false;
+    QObject::connect(
+        &app,
+        &QCoreApplication::aboutToQuit,
+        &app,
+        [&] {
+            lifecycleCoordinatorInvoked = true;
+            if (!lifecycleSession.isNull()) lifecycleSession->shutdown();
+            const bool deviceClean = lifecycleDevice.isNull() || lifecycleDevice->shutdown();
+            const bool firmwareClean = firmwareService.shutdown();
+            lifecycleShutdownClean = deviceClean && firmwareClean;
+            if (!lifecycleShutdownClean) {
+                qCritical().noquote()
+                    << "Application shutdown required an emergency worker-retirement fallback.";
+            }
+        },
+        Qt::DirectConnection);
+
     if (lifecycleCheck) {
         if (mainWindow == nullptr) {
             qCritical().noquote() << "Application lifecycle regression: main window was not created.";
@@ -490,15 +520,14 @@ int main(int argc, char* argv[]) {
                 return;
             }
 
-            QCloseEvent closeEvent;
-            QCoreApplication::sendEvent(lifecycleTarget.data(), &closeEvent);
+            lifecycleTarget->close();
             if (!primaryCloseFilter.closeObserved()) {
-                qCritical().noquote() << "Application lifecycle regression: primary QEvent::Close bypassed the lifetime filter.";
+                qCritical().noquote() << "Application lifecycle regression: normal primary-window close bypassed the lifetime filter.";
                 QCoreApplication::exit(10);
                 return;
             }
-
-            QCoreApplication::exit(0);
+            // Do not call exit() here. The regression must prove that the real
+            // primary-window close path itself terminates the process.
         });
         QTimer::singleShot(3500, &app, [] {
             qCritical().noquote() << "Application lifecycle regression: primary close was not observed in time.";
@@ -507,8 +536,14 @@ int main(int argc, char* argv[]) {
     }
 
     const int result = app.exec();
+    if (!lifecycleCoordinatorInvoked || !lifecycleShutdownClean) {
+        qCritical().noquote()
+            << "Application lifecycle regression: shutdown coordinator did not retire all workers cleanly.";
+        return result == 0 ? 15 : result;
+    }
     if (lifecycleCheck && result == 0) {
-        qInfo().noquote() << "Application lifecycle regression: PASS · primary window close reached the lifetime filter";
+        qInfo().noquote()
+            << "Application lifecycle regression: PASS · close -> supervisor stop -> worker join -> process exit";
     }
     return result;
 }

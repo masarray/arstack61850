@@ -7,14 +7,18 @@
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMetaObject>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
+#include <QSemaphore>
+#include <QSharedPointer>
 
 #include <algorithm>
 
@@ -25,11 +29,25 @@ constexpr auto kExpectedChip = "esp32p4";
 constexpr auto kPreV3Policy = "pre-v3";
 constexpr qsizetype kMaxOperationOutput = 65536;
 constexpr qsizetype kTrimmedOperationOutput = 49152;
+constexpr qsizetype kMaxProgressOutputTail = 2048;
+constexpr qsizetype kTrimmedProgressOutputTail = 1024;
 
 QString normalizedHash(const QString& text) {
     QString hash = text.trimmed().toLower();
     hash.remove(QLatin1Char(' '));
     return hash;
+}
+
+QString normalizedTerminalProgress(QString text) {
+    // espflash renders progress as terminal output. QProcess can deliver ANSI
+    // control sequences, carriage-return rewrites and arbitrary chunk splits.
+    // Strip presentation controls here; the full operation log remains intact.
+    static const QRegularExpression ansiCsi{
+        QStringLiteral(R"(\x1B\[[0-?]*[ -/]*[@-~])")};
+    text.remove(ansiCsi);
+    text.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+    text.remove(QLatin1Char('\b'));
+    return text;
 }
 } // namespace
 
@@ -45,7 +63,7 @@ FirmwareManager::FirmwareManager(QObject* parent) : QObject(parent) {
 }
 
 FirmwareManager::~FirmwareManager() {
-    shutdown();
+    static_cast<void>(shutdown());
 }
 
 void FirmwareManager::connectWorkerSignals() {
@@ -102,6 +120,7 @@ void FirmwareManager::connectWorkerSignals() {
         cancelRequested_ = false;
         busy_ = false;
         flashProgress_ = -1;
+        progressOutputTail_.clear();
         setStatus(QStringLiteral("Firmware operation cancelled."));
         emit stateChanged();
         if (cancelledOperation == Operation::reset) emit installationFinished(false);
@@ -129,12 +148,34 @@ bool FirmwareManager::supportsEsp32P4Revision(const int major, const int minor) 
 }
 
 int FirmwareManager::parseFlashProgress(const QString& output) {
-    static const QRegularExpression expression{QStringLiteral(R"((\d{1,3})\s*%)")};
-    auto matches = expression.globalMatch(output);
+    // Keep this parser pure so deterministic fixtures exercise the exact
+    // production token rules. Stream reassembly remains bounded in
+    // updateProgressFromOutput(). espflash has used both percentage output and
+    // indicatif-style "current/total segment ..." progress bars.
+    const QString normalized = normalizedTerminalProgress(output);
     int latest = -1;
-    while (matches.hasNext()) {
-        const int value = matches.next().captured(1).toInt();
+
+    static const QRegularExpression percentExpression{
+        QStringLiteral(R"((?<![\d.])(\d{1,3})\s*%)")};
+    auto percentMatches = percentExpression.globalMatch(normalized);
+    while (percentMatches.hasNext()) {
+        const int value = percentMatches.next().captured(1).toInt();
         if (value >= 0 && value <= 100) latest = value;
+    }
+
+    static const QRegularExpression segmentExpression{
+        QStringLiteral(R"((?<!\d)(\d{1,9})\s*/\s*(\d{1,9})\s+segment\b)"),
+        QRegularExpression::CaseInsensitiveOption};
+    auto segmentMatches = segmentExpression.globalMatch(normalized);
+    while (segmentMatches.hasNext()) {
+        const auto match = segmentMatches.next();
+        bool currentOk = false;
+        bool totalOk = false;
+        const qint64 current = match.captured(1).toLongLong(&currentOk);
+        const qint64 total = match.captured(2).toLongLong(&totalOk);
+        if (!currentOk || !totalOk || total <= 0 || current < 0 || current > total) continue;
+        const int value = static_cast<int>((current * 100 + total / 2) / total);
+        latest = std::clamp(value, 0, 100);
     }
     return latest;
 }
@@ -159,11 +200,13 @@ void FirmwareManager::refreshBundle() {
     if (busy_ || shuttingDown_) return;
     bundleReady_ = false;
     firmwareVersion_ = QStringLiteral("-");
+    firmwareBuildId_.clear();
     expectedProtocol_ = QStringLiteral("-");
     revisionPolicy_.clear();
     firmwareSha256_.clear();
     firmwareImagePath_.clear();
     flashProgress_ = -1;
+    progressOutputTail_.clear();
 
     const QFileInfo flasherInfo{flasherPath()};
     flasherAvailable_ = flasherInfo.exists() && flasherInfo.isFile() && flasherInfo.isExecutable();
@@ -177,8 +220,8 @@ void FirmwareManager::refreshBundle() {
         return;
     }
     bundleReady_ = true;
-    bundleStatus_ = QStringLiteral("Ready · firmware v%1 · ESP32-P4 pre-v3 · SHA-256 verified")
-        .arg(firmwareVersion_);
+    bundleStatus_ = QStringLiteral("Ready · firmware v%1 · build %2 · ESP32-P4 pre-v3 · PTP-P2 · SHA-256 verified")
+        .arg(firmwareVersion_, firmwareBuildId_);
     emit stateChanged();
 }
 
@@ -207,13 +250,31 @@ bool FirmwareManager::loadManifest() {
     const QString expectedHash = normalizedHash(object.value(QStringLiteral("sha256")).toString());
     const int protocol = object.value(QStringLiteral("protocol")).toInt(-1);
     const QString version = object.value(QStringLiteral("version")).toString().trimmed();
+    const QString sourceCommit = object.value(QStringLiteral("sourceCommit")).toString().trimmed().toLower();
+    const QString buildId = sourceCommit.left(16);
     const QString revisionPolicy = object.value(QStringLiteral("chipRevisionPolicy")).toString().trimmed().toLower();
     const qint64 flashOffset = object.value(QStringLiteral("flashOffset")).toVariant().toLongLong();
+    const QJsonArray capabilities = object.value(QStringLiteral("capabilities")).toArray();
+    const auto hasCapability = [&capabilities](const QString& wanted) {
+        for (const auto& value : capabilities) {
+            if (value.toString().compare(wanted, Qt::CaseInsensitive) == 0) return true;
+        }
+        return false;
+    };
+    const bool productionCapabilities =
+        hasCapability(QStringLiteral("SMV-4I4V")) &&
+        hasCapability(QStringLiteral("PROFILE")) &&
+        hasCapability(QStringLiteral("LIVE-SETPOINTS")) &&
+        hasCapability(QStringLiteral("SESSION-LEASE")) &&
+        hasCapability(QStringLiteral("PTP-P2")) &&
+        hasCapability(QStringLiteral("SMPSYNCH-AUTO"));
 
     if (imageName.isEmpty() || QFileInfo(imageName).fileName() != imageName ||
         expectedHash.size() != 64 || version.isEmpty() || protocol < 1 || flashOffset != 0 ||
-        revisionPolicy != QString::fromLatin1(kPreV3Policy)) {
-        bundleStatus_ = QStringLiteral("Firmware manifest fields are incomplete or unsafe.");
+        !QRegularExpression(QStringLiteral("^[0-9a-f]{16}$")).match(buildId).hasMatch() ||
+        !sourceCommit.startsWith(buildId, Qt::CaseInsensitive) ||
+        revisionPolicy != QString::fromLatin1(kPreV3Policy) || !productionCapabilities) {
+        bundleStatus_ = QStringLiteral("Firmware manifest fields/capabilities are incomplete or unsafe.");
         return false;
     }
 
@@ -236,6 +297,7 @@ bool FirmwareManager::loadManifest() {
     }
 
     firmwareVersion_ = version;
+    firmwareBuildId_ = buildId;
     expectedProtocol_ = QString::number(protocol);
     revisionPolicy_ = revisionPolicy;
     firmwareSha256_ = actualHash;
@@ -264,6 +326,7 @@ bool FirmwareManager::probeTarget(const QString& portName) {
     targetVerified_ = false;
     bootloaderHelpNeeded_ = false;
     flashProgress_ = -1;
+    progressOutputTail_.clear();
     targetChip_ = QStringLiteral("Checking %1...").arg(port);
     busy_ = true;
     cancelRequested_ = false;
@@ -292,7 +355,10 @@ bool FirmwareManager::installFirmware(const QString& portName) {
     }
 
     bootloaderHelpNeeded_ = false;
-    flashProgress_ = 0;
+    // Do not invent 0%. Progress remains unknown until espflash emits real
+    // write telemetry. The UI renders this as an indeterminate write state.
+    flashProgress_ = -1;
+    progressOutputTail_.clear();
     busy_ = true;
     cancelRequested_ = false;
     setStatus(QStringLiteral("Installing ARStack firmware v%1 on %2...").arg(firmwareVersion_, port));
@@ -318,23 +384,65 @@ void FirmwareManager::cancel() {
         Qt::QueuedConnection);
 }
 
-void FirmwareManager::shutdown() {
-    if (shuttingDown_) return;
+bool FirmwareManager::shutdown() {
+    if (shuttingDown_) return !workerThread_.isRunning();
     shuttingDown_ = true;
     operation_ = Operation::none;
     activeOperationGeneration_ = 0;
     busy_ = false;
     cancelRequested_ = true;
+    progressOutputTail_.clear();
 
-    if (worker_ != nullptr && workerThread_.isRunning()) {
-        if (QThread::currentThread() == &workerThread_) {
-            worker_->shutdown();
-        } else {
-            QMetaObject::invokeMethod(worker_, &FirmwareWorker::shutdown, Qt::BlockingQueuedConnection);
-        }
-        workerThread_.quit();
-        workerThread_.wait();
+    if (worker_ == nullptr || !workerThread_.isRunning()) {
+        worker_ = nullptr;
+        workerReady_ = false;
+        workerAffinityValid_ = false;
+        return true;
     }
+    if (QThread::currentThread() == &workerThread_) {
+        worker_->shutdown();
+        workerThread_.quit();
+        return false;
+    }
+
+    auto acknowledged = QSharedPointer<QSemaphore>::create();
+    FirmwareWorker* const worker = worker_;
+    const bool queued = QMetaObject::invokeMethod(
+        worker,
+        [worker, acknowledged] {
+            worker->shutdown();
+            acknowledged->release();
+        },
+        Qt::QueuedConnection);
+    bool graceful = queued && acknowledged->tryAcquire(1, shutdownAckTimeoutMs());
+    if (!graceful) {
+        qCritical().noquote()
+            << "Firmware worker shutdown acknowledgement timed out; entering bounded retirement fallback.";
+    }
+
+    workerThread_.quit();
+    bool joined = workerThread_.wait(shutdownJoinTimeoutMs());
+    if (!joined) {
+        graceful = false;
+        qCritical().noquote()
+            << "Firmware worker missed primary join deadline; retrying bounded retirement.";
+        workerThread_.requestInterruption();
+        workerThread_.quit();
+        joined = workerThread_.wait(shutdownRetryTimeoutMs());
+    }
+    if (!joined) {
+        graceful = false;
+        qCritical().noquote()
+            << "Firmware worker still alive; emergency terminate fallback engaged.";
+        workerThread_.terminate();
+        joined = workerThread_.wait(shutdownForceTimeoutMs());
+    }
+
+    worker_ = nullptr;
+    workerReady_ = false;
+    workerAffinityValid_ = false;
+    if (!joined) qCritical().noquote() << "Firmware worker could not be retired before exit.";
+    return graceful && joined;
 }
 
 void FirmwareManager::clearLog() {
@@ -345,7 +453,7 @@ void FirmwareManager::clearLog() {
 
 bool FirmwareManager::startEspflash(const QStringList& arguments, const Operation operation) {
     if (shuttingDown_ || worker_ == nullptr || !workerThread_.isRunning() ||
-        !workerReady_ || !workerAffinityValid_ || sessionGeneration_ == 0) {
+        !workerReady_ || !workerAffinityValid() || sessionGeneration_ == 0) {
         fail(QStringLiteral("Firmware worker is unavailable or not affinity-safe."));
         busy_ = false;
         return false;
@@ -354,6 +462,7 @@ bool FirmwareManager::startEspflash(const QStringList& arguments, const Operatio
     operation_ = operation;
     activeOperationGeneration_ = sessionGeneration_;
     operationOutput_.clear();
+    if (operation == Operation::flash) progressOutputTail_.clear();
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("ESPFLASH_PORT"), selectedPort_);
     environment.insert(QStringLiteral("ESPFLASH_SKIP_UPDATE_CHECK"), QStringLiteral("true"));
@@ -398,6 +507,7 @@ void FirmwareManager::handleOperationRejected(const QString& message) {
     activeOperationGeneration_ = 0;
     busy_ = false;
     flashProgress_ = -1;
+    progressOutputTail_.clear();
     cancelRequested_ = false;
 
     if (rejected == Operation::reset) {
@@ -420,6 +530,7 @@ void FirmwareManager::handleLaunchFailure(const QString& message, const bool tim
     activeOperationGeneration_ = 0;
     busy_ = false;
     flashProgress_ = -1;
+    progressOutputTail_.clear();
     cancelRequested_ = false;
 
     if (failedOperation == Operation::reset) {
@@ -446,6 +557,7 @@ void FirmwareManager::handleOperationTimeout() {
     activeOperationGeneration_ = 0;
     busy_ = false;
     flashProgress_ = -1;
+    progressOutputTail_.clear();
     cancelRequested_ = false;
 
     if (timedOut == Operation::reset) {
@@ -476,6 +588,7 @@ void FirmwareManager::finishOperation(const int exitCode, const bool normalExit)
         cancelRequested_ = false;
         busy_ = false;
         flashProgress_ = -1;
+        progressOutputTail_.clear();
         setStatus(QStringLiteral("Firmware operation cancelled."));
         emit stateChanged();
         if (completed == Operation::reset) emit installationFinished(false);
@@ -527,6 +640,7 @@ void FirmwareManager::finishOperation(const int exitCode, const bool normalExit)
         if (!success) {
             busy_ = false;
             flashProgress_ = -1;
+            progressOutputTail_.clear();
             bootloaderHelpNeeded_ = true;
             fail(QStringLiteral("Firmware installation failed. Put the board in Download mode and retry. The device is not considered ready."));
             emit stateChanged();
@@ -551,6 +665,7 @@ void FirmwareManager::finishOperation(const int exitCode, const bool normalExit)
 
     if (completed == Operation::reset) {
         busy_ = false;
+        progressOutputTail_.clear();
         if (success) {
             targetVerified_ = false;
             bootloaderHelpNeeded_ = false;
@@ -567,8 +682,19 @@ void FirmwareManager::finishOperation(const int exitCode, const bool normalExit)
 
 void FirmwareManager::updateProgressFromOutput(const QString& text) {
     if (operation_ != Operation::flash || text.isEmpty()) return;
-    const int latest = parseFlashProgress(text);
-    if (latest < 0 || flashProgress_ == latest) return;
+
+    // QProcess signal boundaries are not protocol boundaries. Preserve a small
+    // rolling suffix so tokens such as "6" + "4%" are reconstructed without
+    // allowing terminal output to grow an unbounded presentation buffer.
+    progressOutputTail_ += text;
+    if (progressOutputTail_.size() > kMaxProgressOutputTail) {
+        progressOutputTail_ = progressOutputTail_.right(kTrimmedProgressOutputTail);
+    }
+
+    const int latest = parseFlashProgress(progressOutputTail_);
+    // espflash can repaint older terminal lines; operator progress must never
+    // move backwards. Completion still owns the authoritative 100% transition.
+    if (latest < 0 || latest <= flashProgress_) return;
     flashProgress_ = std::clamp(latest, 0, 100);
     emit stateChanged();
 }

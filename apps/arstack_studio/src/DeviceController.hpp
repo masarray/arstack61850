@@ -15,12 +15,13 @@ struct DeviceIdentity final {
     QString protocolVersion;
     QString deviceId;
     QString firmwareVersion;
+    QString buildId;
     QString bootId;
     QStringList capabilities;
 
     [[nodiscard]] bool empty() const noexcept {
         return product.isEmpty() && target.isEmpty() && protocolVersion.isEmpty() &&
-            deviceId.isEmpty() && firmwareVersion.isEmpty() && bootId.isEmpty() &&
+            deviceId.isEmpty() && firmwareVersion.isEmpty() && buildId.isEmpty() && bootId.isEmpty() &&
             capabilities.isEmpty();
     }
 
@@ -41,6 +42,7 @@ class DeviceController : public QObject {
     Q_PROPERTY(QString deviceId READ deviceId NOTIFY deviceIdentityChanged)
     Q_PROPERTY(QString protocolVersion READ protocolVersion NOTIFY deviceIdentityChanged)
     Q_PROPERTY(QString firmwareVersion READ firmwareVersion NOTIFY deviceIdentityChanged)
+    Q_PROPERTY(QString firmwareBuildId READ firmwareBuildId NOTIFY deviceIdentityChanged)
     Q_PROPERTY(QString bootId READ bootId NOTIFY deviceIdentityChanged)
     Q_PROPERTY(QStringList capabilities READ capabilities NOTIFY deviceIdentityChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
@@ -100,8 +102,17 @@ public:
     explicit DeviceController(QObject* parent = nullptr);
     ~DeviceController() override;
 
+    // Application-lifetime boundary required by AGENTS.md section 11.
+    // Returns false if an emergency retirement fallback was required.
+    bool shutdown();
+    [[nodiscard]] static constexpr int shutdownAckTimeoutMs() noexcept { return 1200; }
+    [[nodiscard]] static constexpr int shutdownJoinTimeoutMs() noexcept { return 1200; }
+    [[nodiscard]] static constexpr int shutdownRetryTimeoutMs() noexcept { return 800; }
+    [[nodiscard]] static constexpr int shutdownForceTimeoutMs() noexcept { return 500; }
+
     [[nodiscard]] QStringList ports() const;
     [[nodiscard]] QString recommendedPort() const;
+    [[nodiscard]] QString recoveryCandidatePort() const;
     [[nodiscard]] QString discoveryStatus() const;
     [[nodiscard]] bool discovering() const noexcept;
     [[nodiscard]] bool deviceVerified() const noexcept;
@@ -112,6 +123,7 @@ public:
     [[nodiscard]] QString deviceId() const;
     [[nodiscard]] QString protocolVersion() const;
     [[nodiscard]] QString firmwareVersion() const;
+    [[nodiscard]] QString firmwareBuildId() const;
     [[nodiscard]] QString bootId() const;
     [[nodiscard]] QStringList capabilities() const;
     [[nodiscard]] DeviceIdentity deviceIdentity() const;
@@ -174,7 +186,8 @@ public:
     [[nodiscard]] static bool parseIdentityLine(const QString& line, DeviceIdentity& identity);
     [[nodiscard]] static bool identitySupportsCurrentContract(
         const DeviceIdentity& identity,
-        const QString& expectedFirmwareVersion);
+        const QString& expectedFirmwareVersion,
+        const QString& expectedBuildId = {});
 
     [[nodiscard]] static constexpr int identityMaxAttempts() noexcept { return 3; }
     [[nodiscard]] static constexpr int identityRetryIntervalMs() noexcept { return 650; }
@@ -304,6 +317,7 @@ private:
     QThread ioThread_;
     QStringList ports_;
     QString recommendedPort_;
+    QString recoveryCandidatePort_;
     QString discoveryStatus_{QStringLiteral("Looking for an ARStack ESP32-P4 injector...")};
     DeviceIdentity identity_;
     QString lastError_;
@@ -330,6 +344,8 @@ private:
     bool ptpRunning_{false};
     bool ioWorkerReady_{false};
     bool ioWorkerAffinityValid_{false};
+    bool shuttingDown_{false};
+    bool shutdownComplete_{false};
     bool pendingAutoDetect_{false};
     double signalFrequencyHz_{50.0};
     QString ptpStatus_{QStringLiteral("Waiting for device")};

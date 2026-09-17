@@ -147,6 +147,19 @@ ar_ptp_lab_status_t g_receiver_status{};
     return true;
 }
 
+void disable_hardware_ptp(const esp_eth_handle_t handle) noexcept {
+    if (handle == nullptr) return;
+    bool enable = false;
+    const auto result = esp_eth_ioctl(
+        handle,
+        static_cast<esp_eth_io_cmd_t>(ETH_MAC_ESP_CMD_PTP_ENABLE),
+        &enable);
+    if (result != ESP_OK) {
+        ESP_LOGW(kTag, "Unable to restore normal EMAC mode after PTP receiver/monitor: %s",
+                 esp_err_to_name(result));
+    }
+}
+
 void seed_hardware_clock(const esp_eth_handle_t handle) noexcept {
     eth_mac_time_t current{};
     if (esp_eth_ioctl(
@@ -176,15 +189,26 @@ void seed_hardware_clock(const esp_eth_handle_t handle) noexcept {
     PtpTimestamp& timestamp) noexcept {
     if (frame.empty()) return false;
     eth_mac_time_t tx_timestamp{};
-    // esp_eth_transmit_ctrl_vargs argc counts buffer/length pairs. One PTP
-    // Ethernet frame is exactly one pair.
+    // ESP-IDF 5.5 forwards argc as the number of variadic arguments. The
+    // ESP32-P4 EMAC implementation computes buf_num = argc / 2, therefore one
+    // Ethernet frame requires two arguments: buffer pointer + buffer length.
     const auto result = esp_eth_transmit_ctrl_vargs(
         handle,
         &tx_timestamp,
-        1U,
+        2U,
         frame.data(),
         frame.size());
-    if (result != ESP_OK || !valid_hw_timestamp(tx_timestamp)) return false;
+    if (result != ESP_OK) {
+        ESP_LOGE(kTag, "PTP receiver hardware-timestamp TX failed: %s", esp_err_to_name(result));
+        return false;
+    }
+    if (!valid_hw_timestamp(tx_timestamp)) {
+        ESP_LOGE(kTag,
+                 "PTP receiver TX completed without a valid hardware timestamp: sec=%lu ns=%lu",
+                 static_cast<unsigned long>(tx_timestamp.seconds),
+                 static_cast<unsigned long>(tx_timestamp.nanoseconds));
+        return false;
+    }
     timestamp = to_ptp_timestamp(tx_timestamp);
     return true;
 }
@@ -669,6 +693,7 @@ void finish_receiver(ReceiverContext& context) noexcept {
             context.eth_handle, 0, context.applied_frequency_ppb));
     }
     smp_synch_lab_set_measured(std::nullopt);
+    disable_hardware_ptp(context.eth_handle);
     context.receiver.reset();
     context.discipline.reset();
     context.task_handle = nullptr;
@@ -923,6 +948,12 @@ void ptp_receiver_stop() noexcept {
     if (g_receiver_context.task_handle != nullptr) {
         xTaskNotifyGive(g_receiver_context.task_handle);
     }
+    constexpr unsigned kCleanupPolls = 100U;
+    for (unsigned attempt = 0U; attempt < kCleanupPolls; ++attempt) {
+        if (!g_receiver_running.load(std::memory_order_acquire)) return;
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+    ESP_LOGE(kTag, "PTP receiver cleanup timeout; EMAC rollback incomplete after 500 ms");
 }
 
 bool ptp_receiver_is_running() noexcept {

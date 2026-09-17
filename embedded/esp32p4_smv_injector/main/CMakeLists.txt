@@ -20,6 +20,8 @@ idf_component_register(
     PRIV_REQUIRES esp_app_format esp_hw_support)
 
 target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_20)
+target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    ARSTACK_FIRMWARE_BUILD_ID="${ARSTACK_FIRMWARE_BUILD_ID}")
 
 if(CONFIG_AR_PTP_LAB_TX)
     # P1.5's proven lab-source implementation remains intact. Rename only its

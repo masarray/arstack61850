@@ -77,6 +77,7 @@ struct PtpLabContext final {
 
 PtpLabContext g_ptp_context{};
 std::atomic_bool g_ptp_started{false};
+std::atomic_bool g_ptp_ready{false};
 std::atomic_bool g_stop_requested{false};
 std::atomic_bool g_ptp_accept_rx{false};
 std::atomic<std::uint64_t> g_announce_sent{0U};
@@ -102,11 +103,13 @@ void fill_kconfig_defaults(ar_ptp_lab_config_t& config) noexcept {
     config.domain_number = static_cast<std::uint8_t>(CONFIG_AR_PTP_DOMAIN);
 #if defined(CONFIG_AR_PTP_VLAN) && CONFIG_AR_PTP_VLAN
     config.vlan_enabled = true;
-#else
-    config.vlan_enabled = false;
-#endif
     config.vlan_id = static_cast<std::uint16_t>(CONFIG_AR_PTP_VLAN_ID);
     config.vlan_priority = static_cast<std::uint8_t>(CONFIG_AR_PTP_VLAN_PRIORITY);
+#else
+    config.vlan_enabled = false;
+    config.vlan_id = 0U;
+    config.vlan_priority = 0U;
+#endif
     config.port_number = static_cast<std::uint16_t>(CONFIG_AR_PTP_PORT_NUMBER);
     config.announce_interval_ms = static_cast<std::uint32_t>(CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS);
     config.sync_interval_ms = static_cast<std::uint32_t>(CONFIG_AR_PTP_SYNC_INTERVAL_MS);
@@ -272,6 +275,19 @@ void record_live_sent(const PtpMessageType message_type) noexcept {
     return true;
 }
 
+void disable_hardware_ptp(const esp_eth_handle_t eth_handle) noexcept {
+    if (eth_handle == nullptr) return;
+    bool enable = false;
+    const auto result = esp_eth_ioctl(
+        eth_handle,
+        static_cast<esp_eth_io_cmd_t>(ETH_MAC_ESP_CMD_PTP_ENABLE),
+        &enable);
+    if (result != ESP_OK) {
+        ESP_LOGW(kTag, "Unable to restore normal EMAC mode after PTP SOURCE: %s",
+                 esp_err_to_name(result));
+    }
+}
+
 void seed_hardware_clock(const esp_eth_handle_t eth_handle) noexcept {
     eth_mac_time_t initial_time{};
     const std::time_t system_time = std::time(nullptr);
@@ -304,7 +320,12 @@ void seed_hardware_clock(const esp_eth_handle_t eth_handle) noexcept {
     const esp_eth_handle_t eth_handle,
     std::vector<std::uint8_t>& frame) noexcept {
     if (frame.empty()) return false;
-    return esp_eth_transmit(eth_handle, frame.data(), frame.size()) == ESP_OK;
+    const auto result = esp_eth_transmit(eth_handle, frame.data(), frame.size());
+    if (result != ESP_OK) {
+        ESP_LOGE(kTag, "PTP general TX failed: %s", esp_err_to_name(result));
+        return false;
+    }
+    return true;
 }
 
 [[nodiscard]] bool transmit_with_hw_timestamp(
@@ -313,15 +334,24 @@ void seed_hardware_clock(const esp_eth_handle_t eth_handle) noexcept {
     PtpTimestamp& timestamp) noexcept {
     if (frame.empty()) return false;
     eth_mac_time_t tx_timestamp{};
-    // esp_eth_transmit_ctrl_vargs argc counts buffer/length pairs. One PTP
-    // Ethernet frame is exactly one pair.
+    // ESP-IDF 5.5 forwards argc as the number of variadic arguments. The
+    // ESP32-P4 EMAC implementation computes buf_num = argc / 2, therefore one
+    // Ethernet frame requires two arguments: buffer pointer + buffer length.
     const auto result = esp_eth_transmit_ctrl_vargs(
         eth_handle,
         &tx_timestamp,
-        1U,
+        2U,
         frame.data(),
         frame.size());
-    if (result != ESP_OK || !valid_hw_timestamp(tx_timestamp)) {
+    if (result != ESP_OK) {
+        ESP_LOGE(kTag, "PTP hardware-timestamp TX failed: %s", esp_err_to_name(result));
+        return false;
+    }
+    if (!valid_hw_timestamp(tx_timestamp)) {
+        ESP_LOGE(kTag,
+                 "PTP TX completed without a valid hardware timestamp: sec=%lu ns=%lu",
+                 static_cast<unsigned long>(tx_timestamp.seconds),
+                 static_cast<unsigned long>(tx_timestamp.nanoseconds));
         return false;
     }
     timestamp = to_ptp_timestamp(tx_timestamp);
@@ -465,7 +495,9 @@ void finish_runtime(PtpLabContext& context) {
                  status.last_error.empty() ? "" : " lastError=",
                  status.last_error.empty() ? "" : status.last_error.c_str());
     }
+    disable_hardware_ptp(context.eth_handle);
     context.task_handle = nullptr;
+    g_ptp_ready.store(false, std::memory_order_release);
     g_ptp_started.store(false, std::memory_order_release);
 }
 
@@ -571,6 +603,8 @@ void ptp_lab_task(void* argument) {
             if (success) {
                 consecutive_failures = 0U;
                 context.runtime->clear_error();
+                const bool emitted_core_timing = g_announce_sent.load(std::memory_order_relaxed) > 0U && g_sync_sent.load(std::memory_order_relaxed) > 0U && g_follow_up_sent.load(std::memory_order_relaxed) > 0U;
+                if (emitted_core_timing) g_ptp_ready.store(true, std::memory_order_release);
             } else {
                 context.runtime->record_error("Ethernet transmit or hardware timestamp failure");
                 g_tx_failure_count.fetch_add(1U, std::memory_order_relaxed);
@@ -603,6 +637,8 @@ void ptp_lab_task(void*) {
 
 #endif
 
+void stop_ptp_lab() noexcept;
+
 void start_ptp_lab(const esp_eth_handle_t eth_handle) {
     if (eth_handle == nullptr) {
         ESP_LOGE(kTag, "PTP lab broadcaster not started: Ethernet handle is null");
@@ -618,6 +654,7 @@ void start_ptp_lab(const esp_eth_handle_t eth_handle) {
     portEXIT_CRITICAL(&g_control_mux);
 
     reset_live_status();
+    g_ptp_ready.store(false, std::memory_order_release);
     g_ptp_accept_rx.store(false, std::memory_order_release);
     g_stop_requested.store(false, std::memory_order_release);
     g_ptp_context.eth_handle = eth_handle;
@@ -647,7 +684,16 @@ void start_ptp_lab(const esp_eth_handle_t eth_handle) {
         g_ptp_context.task_handle = nullptr;
         g_ptp_started.store(false, std::memory_order_release);
         ESP_LOGE(kTag, "Failed to create PTP lab task on CPU0");
+        return;
     }
+
+    constexpr unsigned kStartReadyPolls = 160U;
+    for (unsigned attempt = 0U; attempt < kStartReadyPolls; ++attempt) {
+        if (g_ptp_ready.load(std::memory_order_acquire) || !g_ptp_started.load(std::memory_order_acquire)) return;
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    ESP_LOGE(kTag, "PTP source readiness timeout: no verified Announce/Sync/Follow_Up TX");
+    stop_ptp_lab();
 }
 
 void stop_ptp_lab() noexcept {
@@ -656,10 +702,16 @@ void stop_ptp_lab() noexcept {
     if (g_ptp_context.task_handle != nullptr) {
         xTaskNotifyGive(g_ptp_context.task_handle);
     }
+    constexpr unsigned kCleanupPolls = 100U;
+    for (unsigned attempt = 0U; attempt < kCleanupPolls; ++attempt) {
+        if (!g_ptp_started.load(std::memory_order_acquire)) return;
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+    ESP_LOGE(kTag, "PTP SOURCE cleanup timeout; EMAC rollback incomplete after 500 ms");
 }
 
 [[nodiscard]] bool ptp_lab_is_running() noexcept {
-    return g_ptp_started.load(std::memory_order_acquire);
+    return g_ptp_ready.load(std::memory_order_acquire);
 }
 
 [[nodiscard]] bool configure_ptp_lab(const ar_ptp_lab_config_t& config) {
@@ -715,7 +767,7 @@ extern "C" bool ar_ptp_lab_is_running(void) {
 
 extern "C" bool ar_ptp_lab_get_status(ar_ptp_lab_status_t* status) {
     if (status == nullptr) return false;
-    status->is_running = ar::esp32p4::smv::g_ptp_started.load(std::memory_order_acquire);
+    status->is_running = ar::esp32p4::smv::g_ptp_ready.load(std::memory_order_acquire);
     status->announce_sent = ar::esp32p4::smv::g_announce_sent.load(std::memory_order_relaxed);
     status->sync_sent = ar::esp32p4::smv::g_sync_sent.load(std::memory_order_relaxed);
     status->follow_up_sent = ar::esp32p4::smv::g_follow_up_sent.load(std::memory_order_relaxed);

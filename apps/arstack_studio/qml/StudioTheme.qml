@@ -6,6 +6,7 @@ QtObject {
     readonly property color chrome: "#0c1117"
     readonly property color surface: "#11171f"
     readonly property color surface2: "#0e141b"
+    readonly property color panelAlt: "#101820"
     readonly property color raised: "#151d27"
     readonly property color raisedHover: "#1a2430"
     readonly property color line: "#26313d"
@@ -34,14 +35,14 @@ QtObject {
     readonly property color plotGridStrong: "#334353"
     readonly property color plotSurface: "#0b1219"
 
-    // Shared density and typography tokens. Keep engineering data compact,
-    // but never depend on tiny text to make the workspace fit.
-    readonly property int captionSize: 10
-    readonly property int labelSize: 11
-    readonly property int bodySize: 12
-    readonly property int subtitleSize: 15
-    readonly property int titleSize: 20
-    readonly property int controlHeight: 36
-    readonly property int panelRadius: 10
+    // Premium demo density: compact enough to read as a desktop instrument,
+    // while keeping engineering values comfortably legible at 100–150% DPI.
+    readonly property int captionSize: 9
+    readonly property int labelSize: 10
+    readonly property int bodySize: 11
+    readonly property int subtitleSize: 14
+    readonly property int titleSize: 18
+    readonly property int controlHeight: 34
+    readonly property int panelRadius: 8
     readonly property int controlRadius: 7
 }

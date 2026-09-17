@@ -28,7 +28,14 @@ public:
         const CaseResult cases[] = {
             {"current identity -> READY without recovery", currentIdentityNeverRecovers()},
             {"legacy identity -> firmware update", legacyIdentityOffersUpdate()},
-            {"auto identity timeout -> UNIDENTIFIED", automaticIdentityTimeoutStaysUnidentified()},
+            {"same version missing build ID -> READY with update suggestion", sameVersionMissingBuildOffersUpdate()},
+            {"same version stale build -> READY with update suggestion", sameVersionStaleBuildOffersUpdate()},
+            {"optional bootloader wait -> cancel restores supervisor", optionalBootloaderWaitCanCancel()},
+            {"firmware stage projection -> supervisor-owned", firmwareStageProjectionIsExplicit()},
+            {"fragmented espflash progress -> monotonic", fragmentedEspflashProgressIsMonotonic()},
+            {"trusted ESP32-P4 identity timeout -> firmware required", automaticIdentityTimeoutOffersFirmwareRecovery()},
+            {"single visible COM without metadata -> firmware required", singleVisibleTimeoutWithoutRecommendationOffersFirmwareRecovery()},
+            {"ambiguous identity timeout -> UNIDENTIFIED", ambiguousIdentityTimeoutStaysUnidentified()},
             {"manual recovery intent survives IDENTIFY -> firmware required", manualRecoveryIntentArmsFirmwareOffer()},
             {"stale generation release -> ignored", staleReleaseGenerationIsIgnored()},
             {"firmware probe before serial release -> blocked", firmwareProbeRequiresReleasedPort()},
@@ -70,6 +77,9 @@ private:
         bool profileReady{false};
 
         Fixture() {
+            firmware.firmwareVersion_ = QStringLiteral(ARSTACK_STUDIO_VERSION);
+            firmware.firmwareBuildId_ = QStringLiteral("0123456789abcdef");
+            firmware.bundleReady_ = true;
             profileReady = profiles.loadReferenceTemplate();
             session.setProfiles(&profiles);
             session.setFirmware(&firmware);
@@ -93,18 +103,23 @@ private:
     static DeviceIdentity identity(
         const QString& deviceId = QStringLiteral("A1B2C3D4E5F6"),
         const QString& firmware = QStringLiteral(ARSTACK_STUDIO_VERSION),
-        const QString& bootId = QStringLiteral("0123456789ABCDEF")) {
+        const QString& bootId = QStringLiteral("0123456789ABCDEF"),
+        const QString& buildId = QStringLiteral("0123456789abcdef")) {
         DeviceIdentity result;
         result.product = QStringLiteral("SMV-INJECTOR");
         result.target = QStringLiteral("ESP32-P4");
         result.protocolVersion = QStringLiteral("1");
         result.deviceId = deviceId;
         result.firmwareVersion = firmware;
+        result.buildId = buildId;
         result.bootId = bootId;
         result.capabilities = {
             QStringLiteral("SMV-4I4V"),
+            QStringLiteral("PROFILE"),
             QStringLiteral("LIVE-SETPOINTS"),
-            QStringLiteral("SESSION-LEASE")};
+            QStringLiteral("SESSION-LEASE"),
+            QStringLiteral("PTP-P2"),
+            QStringLiteral("SMPSYNCH-AUTO")};
         return result;
     }
 
@@ -123,6 +138,7 @@ private:
         session.blankBoardDetected_ = false;
         session.blankBoardPort_.clear();
         session.updateRequested_ = false;
+        session.updateWasOptional_ = false;
         session.updateStage_ = SmartSessionController::UpdateStage::idle;
         session.portOwner_ = SmartSessionController::PortOwner::deviceSession;
         session.profileSyncStage_ = SmartSessionController::ProfileSyncStage::idle;
@@ -245,6 +261,7 @@ private:
         seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
         return fixture.session.state() == QStringLiteral("READY") &&
             fixture.session.startReady() &&
+            fixture.session.firmwareReinstallAvailable() &&
             !fixture.session.firmwareInstallVisible() &&
             !fixture.session.firmwareUpdateRequired();
     }
@@ -262,13 +279,166 @@ private:
             !fixture.session.startReady();
     }
 
-    static bool automaticIdentityTimeoutStaysUnidentified() {
+    static bool sameVersionMissingBuildOffersUpdate() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        auto stale = identity();
+        stale.buildId.clear();
+        seedVerified(fixture, stale, QStringLiteral("COM7"), false);
+        return fixture.session.state() == QStringLiteral("READY") &&
+            !fixture.session.firmwareUpdateRequired() &&
+            fixture.session.firmwareUpdateAvailable() &&
+            !fixture.session.firmwareReinstallAvailable() &&
+            fixture.session.startReady();
+    }
+
+    static bool sameVersionStaleBuildOffersUpdate() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        auto stale = identity();
+        stale.buildId = QStringLiteral("fedcba9876543210");
+        seedVerified(fixture, stale, QStringLiteral("COM7"), false);
+        return fixture.session.state() == QStringLiteral("READY") &&
+            !fixture.session.firmwareUpdateRequired() &&
+            fixture.session.firmwareUpdateAvailable() &&
+            !fixture.session.firmwareReinstallAvailable() &&
+            fixture.session.startReady();
+    }
+
+    static bool optionalBootloaderWaitCanCancel() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        auto stale = identity();
+        stale.buildId = QStringLiteral("fedcba9876543210");
+        seedVerified(fixture, stale, QStringLiteral("COM7"), false);
+        auto& session = fixture.session;
+        auto& device = fixture.device;
+
+        session.started_ = false; // deterministic: exercise state recovery without real COM discovery.
+        session.updateRequested_ = true;
+        session.updateWasOptional_ = true;
+        session.updateStage_ = SmartSessionController::UpdateStage::waitingForBootloader;
+        session.portOwner_ = SmartSessionController::PortOwner::firmwareTool;
+        device.connected_ = false;
+        device.deviceVerified_ = false;
+
+        const bool cancelled = session.cancelFirmwareUpdate();
+        return cancelled && !session.updateRequested_ && !session.updateWasOptional_ &&
+            session.updateStage_ == SmartSessionController::UpdateStage::idle &&
+            session.portOwner_ == SmartSessionController::PortOwner::none &&
+            !session.setupError_;
+    }
+
+    static bool firmwareStageProjectionIsExplicit() {
+        Fixture fixture;
+        auto& session = fixture.session;
+        session.updateStage_ = SmartSessionController::UpdateStage::idle;
+        const bool idle = session.firmwareUpdateStage() == QStringLiteral("idle");
+        session.updateStage_ = SmartSessionController::UpdateStage::stopping;
+        const bool stopping = session.firmwareUpdateStage() == QStringLiteral("prepare");
+        session.updateStage_ = SmartSessionController::UpdateStage::releasingPort;
+        const bool releasing = session.firmwareUpdateStage() == QStringLiteral("prepare");
+        session.updateStage_ = SmartSessionController::UpdateStage::probing;
+        const bool probing = session.firmwareUpdateStage() == QStringLiteral("verify");
+        session.updateStage_ = SmartSessionController::UpdateStage::flashing;
+        const bool flashing = session.firmwareUpdateStage() == QStringLiteral("write");
+        session.updateStage_ = SmartSessionController::UpdateStage::reconnecting;
+        const bool reconnecting = session.firmwareUpdateStage() == QStringLiteral("reconnect");
+        session.updateStage_ = SmartSessionController::UpdateStage::waitingForBootloader;
+        const bool bootloader = session.firmwareUpdateStage() == QStringLiteral("verify");
+        return idle && stopping && releasing && probing && flashing && reconnecting && bootloader;
+    }
+
+    static bool fragmentedEspflashProgressIsMonotonic() {
+        Fixture fixture;
+        auto& firmware = fixture.firmware;
+        firmware.operation_ = FirmwareManager::Operation::flash;
+        firmware.flashProgress_ = -1;
+        firmware.progressOutputTail_.clear();
+
+        firmware.updateProgressFromOutput(QString::fromLatin1("\x1B[2K\r[00:00:01] [================] 4"));
+        const bool remainsUnknown = firmware.flashProgress_ == -1;
+        firmware.updateProgressFromOutput(QStringLiteral("2/100 segment 0x0\r"));
+        const bool reconstructsSplitCounter = firmware.flashProgress_ == 42;
+        firmware.updateProgressFromOutput(QStringLiteral("[00:00:02] [========] 21/100 segment 0x0\r"));
+        const bool neverMovesBackward = firmware.flashProgress_ == 42;
+        firmware.updateProgressFromOutput(QStringLiteral("[00:00:03] [========================================] 100/100 segment 0x0\r"));
+        const bool reachesCompletion = firmware.flashProgress_ == 100;
+
+        return remainsUnknown && reconstructsSplitCounter && neverMovesBackward && reachesCompletion &&
+            FirmwareManager::parseFlashProgress(QStringLiteral("Writing 64%\r")) == 64 &&
+            FirmwareManager::parseFlashProgress(QStringLiteral("[00:00:02] [================] 17/20 segment 0x10000")) == 85 &&
+            FirmwareManager::parseFlashProgress(QStringLiteral("21/0 segment 0x0")) == -1;
+    }
+
+    static bool automaticIdentityTimeoutOffersFirmwareRecovery() {
         Fixture fixture;
         if (!fixture.profileReady || !seedIdentityTimeout(fixture, false)) return false;
-        return fixture.session.state() == QStringLiteral("UNIDENTIFIED") &&
-            !fixture.session.firmwareInstallVisible() &&
-            !fixture.session.blankBoardDetected_ &&
+        return fixture.session.state() == QStringLiteral("FIRMWARE REQUIRED") &&
+            fixture.session.firmwareInstallVisible() &&
+            fixture.session.blankBoardDetected_ &&
+            fixture.session.blankBoardPort_ == QStringLiteral("COM7") &&
             !fixture.session.startReady();
+    }
+
+    static bool singleVisibleTimeoutWithoutRecommendationOffersFirmwareRecovery() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        auto& device = fixture.device;
+        auto& session = fixture.session;
+        quiesce(session, device);
+        session.clearBlankBoardContext();
+        session.portOwner_ = SmartSessionController::PortOwner::deviceSession;
+        session.recoveryPending_ = false;
+
+        device.ports_ = {QStringLiteral("COM7")};
+        device.recommendedPort_.clear();
+        device.recoveryCandidatePort_ = QStringLiteral("COM7");
+        device.portName_ = QStringLiteral("COM7");
+        device.connected_ = false;
+        device.discovering_ = false;
+        device.deviceVerified_ = false;
+        device.identificationState_ = DeviceController::IdentificationState::Unidentified;
+        device.identifyAttempts_ = DeviceController::identityMaxAttempts();
+        device.identity_ = {};
+        emit device.portsChanged();
+        emit device.identificationStateChanged();
+        session.reconcile();
+
+        return session.state() == QStringLiteral("FIRMWARE REQUIRED") &&
+            session.firmwareInstallVisible() &&
+            session.blankBoardDetected_ &&
+            session.blankBoardPort_ == QStringLiteral("COM7") &&
+            !session.startReady();
+    }
+
+    static bool ambiguousIdentityTimeoutStaysUnidentified() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        auto& device = fixture.device;
+        auto& session = fixture.session;
+        quiesce(session, device);
+        session.clearBlankBoardContext();
+        session.portOwner_ = SmartSessionController::PortOwner::deviceSession;
+        session.recoveryPending_ = false;
+
+        device.ports_ = {QStringLiteral("COM7"), QStringLiteral("COM8")};
+        device.recommendedPort_.clear();
+        device.portName_ = QStringLiteral("COM7");
+        device.connected_ = false;
+        device.discovering_ = false;
+        device.deviceVerified_ = false;
+        device.identificationState_ = DeviceController::IdentificationState::Unidentified;
+        device.identifyAttempts_ = DeviceController::identityMaxAttempts();
+        device.identity_ = {};
+        emit device.portsChanged();
+        emit device.identificationStateChanged();
+        session.reconcile();
+
+        return session.state() == QStringLiteral("UNIDENTIFIED") &&
+            !session.firmwareInstallVisible() &&
+            !session.blankBoardDetected_ &&
+            !session.startReady();
     }
 
     static bool manualRecoveryIntentArmsFirmwareOffer() {

@@ -23,16 +23,14 @@ struct PortCandidate final {
 };
 
 [[nodiscard]] int portConfidence(const QSerialPortInfo& info) {
-    int score = 0;
-    if (info.hasVendorIdentifier() && info.vendorIdentifier() == 0x303AU) score += 100;
-    const QString identity = QStringLiteral("%1 %2 %3")
-        .arg(info.description(), info.manufacturer(), info.serialNumber()).toLower();
-    if (identity.contains(QStringLiteral("esp32-p4"))) score += 90;
-    else if (identity.contains(QStringLiteral("esp32"))) score += 65;
-    if (identity.contains(QStringLiteral("espressif"))) score += 60;
-    if (identity.contains(QStringLiteral("usb jtag")) ||
-        identity.contains(QStringLiteral("usb serial"))) score += 15;
-    return score;
+    return DeviceIoWorker::portConfidenceForMetadata(
+        info.hasVendorIdentifier(),
+        info.hasVendorIdentifier() ? info.vendorIdentifier() : 0U,
+        info.hasProductIdentifier(),
+        info.hasProductIdentifier() ? info.productIdentifier() : 0U,
+        info.description(),
+        info.manufacturer(),
+        info.serialNumber());
 }
 } // namespace
 
