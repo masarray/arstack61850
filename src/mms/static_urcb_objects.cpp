@@ -116,6 +116,19 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
         attribute != MmsStaticUrcbAttribute::owner;
 }
 
+[[nodiscard]] MmsStaticWriteSemantic write_semantic(
+    const MmsStaticUrcbAttribute attribute) noexcept {
+    if (attribute == MmsStaticUrcbAttribute::report_enabled) {
+        return MmsStaticWriteSemantic::rcb_enable;
+    }
+    if (attribute == MmsStaticUrcbAttribute::general_interrogation) {
+        return MmsStaticWriteSemantic::rcb_general_interrogation;
+    }
+    return writable_attribute(attribute)
+        ? MmsStaticWriteSemantic::rcb_configuration
+        : MmsStaticWriteSemantic::ordinary;
+}
+
 [[nodiscard]] wire::EncodeResult capacity_result(
     const std::size_t required,
     const std::span<std::uint8_t> destination) noexcept {
@@ -640,6 +653,9 @@ bool MmsStaticUrcbObjectBank::initialize() noexcept {
                 now_context_};
 
             const auto attribute = kAttributes[attribute_index];
+            const auto writable = writable_attribute(attribute);
+            const auto* transaction_group = static_cast<const void*>(
+                &context_storage_[urcb_index * attributes_per_control_block]);
             object_storage_[object_offset] = MmsStaticObjectEntry{
                 definition->domain,
                 std::string_view{name, name_size},
@@ -647,8 +663,11 @@ bool MmsStaticUrcbObjectBank::initialize() noexcept {
                 read_urcb_attribute,
                 &context,
                 false,
-                writable_attribute(attribute) ? write_urcb_attribute : nullptr,
-                writable_attribute(attribute) ? &context : nullptr};
+                writable ? write_urcb_attribute : nullptr,
+                writable ? &context : nullptr,
+                nullptr,
+                writable ? transaction_group : nullptr,
+                writable ? write_semantic(attribute) : MmsStaticWriteSemantic::ordinary};
 
             name_offset += name_size;
             ++context_offset;

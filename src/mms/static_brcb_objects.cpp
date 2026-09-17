@@ -128,6 +128,19 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
         attribute == MmsStaticBrcbAttribute::reservation_time;
 }
 
+[[nodiscard]] MmsStaticWriteSemantic write_semantic(
+    const MmsStaticBrcbAttribute attribute) noexcept {
+    if (attribute == MmsStaticBrcbAttribute::report_enabled) {
+        return MmsStaticWriteSemantic::rcb_enable;
+    }
+    if (attribute == MmsStaticBrcbAttribute::general_interrogation) {
+        return MmsStaticWriteSemantic::rcb_general_interrogation;
+    }
+    return writable_attribute(attribute)
+        ? MmsStaticWriteSemantic::rcb_configuration
+        : MmsStaticWriteSemantic::ordinary;
+}
+
 [[nodiscard]] wire::EncodeResult capacity_result(
     const std::size_t required,
     const std::span<std::uint8_t> destination) noexcept {
@@ -760,7 +773,9 @@ bool MmsStaticBrcbObjectBank::initialize() noexcept {
             false,
             nullptr,
             writable ? &context : nullptr,
-            writable ? write_brcb_attribute : nullptr};
+            writable ? write_brcb_attribute : nullptr,
+            writable ? static_cast<const void*>(control_) : nullptr,
+            writable ? write_semantic(attribute) : MmsStaticWriteSemantic::ordinary};
 
         name_offset += name_size;
         ++object_offset;

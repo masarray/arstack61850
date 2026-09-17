@@ -1237,6 +1237,85 @@ struct ReadObjectResult final {
             response));
 }
 
+[[nodiscard]] bool decode_write_boolean(
+    const std::span<const std::uint8_t> encoded,
+    bool& value) noexcept {
+    value = false;
+    asn1::BerTlvView tlv;
+    if (!asn1::BerSpanReader::try_read_exact(encoded, tlv) ||
+        tlv.tag_class != asn1::BerClass::context_specific ||
+        tlv.tag_number != 3 || tlv.constructed || tlv.value.size() != 1U) {
+        return false;
+    }
+    value = tlv.value[0] != 0U;
+    return true;
+}
+
+[[nodiscard]] std::uint8_t write_phase(
+    const MmsStaticObjectEntry& object,
+    const std::span<const std::uint8_t> value) noexcept {
+    switch (object.write_semantic) {
+    case MmsStaticWriteSemantic::rcb_enable: {
+        bool enable = true;
+        if (decode_write_boolean(value, enable) && !enable) return 0U;
+        return 2U;
+    }
+    case MmsStaticWriteSemantic::rcb_configuration:
+        return 1U;
+    case MmsStaticWriteSemantic::rcb_general_interrogation:
+        return 3U;
+    case MmsStaticWriteSemantic::ordinary:
+        return 1U;
+    }
+    return 1U;
+}
+
+void build_write_execution_order(
+    const std::span<const MmsStaticObjectEntry* const> resolved,
+    const std::span<const std::span<const std::uint8_t>> values,
+    const std::span<std::size_t> order) noexcept {
+    for (std::size_t index = 0U; index < order.size(); ++index) order[index] = index;
+    for (std::size_t first = 0U; first < order.size(); ++first) {
+        const auto* object = resolved[first];
+        if (object == nullptr || object->write_transaction_group == nullptr) continue;
+        bool seen = false;
+        for (std::size_t previous = 0U; previous < first; ++previous) {
+            const auto* candidate = resolved[previous];
+            if (candidate != nullptr &&
+                candidate->write_transaction_group == object->write_transaction_group) {
+                seen = true;
+                break;
+            }
+        }
+        if (seen) continue;
+
+        std::array<std::size_t, MmsServiceSpanCodec::maximum_variables> positions{};
+        std::array<std::size_t, MmsServiceSpanCodec::maximum_variables> members{};
+        std::size_t count = 0U;
+        for (std::size_t index = first; index < order.size(); ++index) {
+            const auto* candidate = resolved[index];
+            if (candidate != nullptr &&
+                candidate->write_transaction_group == object->write_transaction_group) {
+                positions[count] = index;
+                members[count] = index;
+                ++count;
+            }
+        }
+        for (std::size_t i = 1U; i < count; ++i) {
+            const auto member = members[i];
+            const auto phase = write_phase(*resolved[member], values[member]);
+            std::size_t j = i;
+            while (j > 0U &&
+                   write_phase(*resolved[members[j - 1U]], values[members[j - 1U]]) > phase) {
+                members[j] = members[j - 1U];
+                --j;
+            }
+            members[j] = member;
+        }
+        for (std::size_t i = 0U; i < count; ++i) order[positions[i]] = members[i];
+    }
+}
+
 [[nodiscard]] MmsStaticDispatchResult dispatch_write(
     const MmsStaticObjectTable& objects,
     const MmsStaticDispatchPolicy& policy,
@@ -1262,7 +1341,13 @@ struct ReadObjectResult final {
     }
 
     std::array<MmsWriteAccessResultInput, MmsServiceSpanCodec::maximum_variables> results{};
-    for (std::size_t index = 0U; index < request.variable_count; ++index) {
+    std::array<std::size_t, MmsServiceSpanCodec::maximum_variables> execution_order{};
+    build_write_execution_order(
+        std::span<const MmsStaticObjectEntry* const>{resolved}.first(request.variable_count),
+        std::span<const std::span<const std::uint8_t>>{values}.first(request.variable_count),
+        std::span<std::size_t>{execution_order}.first(request.variable_count));
+    for (std::size_t execution = 0U; execution < request.variable_count; ++execution) {
+        const auto index = execution_order[execution];
         const auto* object = resolved[index];
         if (object == nullptr) {
             results[index] = MmsWriteAccessResultInput{false, policy.missing_object_failure_code};
