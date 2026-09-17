@@ -25,6 +25,34 @@ jobs:
       - name: Apply negotiated COTP segmentation source patch
         run: python .github/p0_3_patch.py
 
+      - name: Remove stale single-frame helpers
+        shell: python
+        run: |
+          from pathlib import Path
+
+          helper = '''[[nodiscard]] bool add_size(
+              const std::size_t base,
+              const std::size_t extra,
+              std::size_t& total) noexcept {
+              if (extra > std::numeric_limits<std::size_t>::max() - base) {
+                  total = 0U;
+                  return false;
+              }
+              total = base + extra;
+              return true;
+          }
+
+          '''
+          for name in (
+              "src/mms/static_report_connection.cpp",
+              "src/mms/static_brcb_connection.cpp",
+          ):
+              path = Path(name)
+              text = path.read_text()
+              if text.count(helper) != 1:
+                  raise SystemExit(f"{name}: stale add_size helper not found exactly once")
+              path.write_text(text.replace(helper, "", 1))
+
       - name: Configure MMS R1-R2 regression
         run: cmake -S tools/mms_direct_control_server -B build-p03-r12 -DCMAKE_BUILD_TYPE=Release
 
