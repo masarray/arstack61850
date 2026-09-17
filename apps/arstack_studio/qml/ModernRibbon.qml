@@ -14,7 +14,7 @@ Rectangle {
     property string uiFont: "Inter"
     property bool compact: false
 
-    implicitHeight: 62
+    implicitHeight: 54
     radius: 9
     color: theme.chrome
     border.width: 1
@@ -31,10 +31,12 @@ Rectangle {
         anchors.fill: parent
         anchors.leftMargin: 10
         anchors.rightMargin: 10
-        spacing: 7
+        spacing: 8
 
+        // Product identity is intentionally compact. The command bar is a tool,
+        // not a second title bar.
         RowLayout {
-            Layout.preferredWidth: bar.compact ? 138 : 164
+            Layout.preferredWidth: bar.compact ? 132 : 158
             Layout.alignment: Qt.AlignVCenter
             spacing: 8
 
@@ -42,9 +44,9 @@ Rectangle {
                 width: 30
                 height: 30
                 radius: 7
-                color: "#101a24"
+                color: "#0f1821"
                 border.width: 1
-                border.color: "#294761"
+                border.color: "#27445d"
                 Image {
                     anchors.centerIn: parent
                     width: 16
@@ -57,10 +59,10 @@ Rectangle {
 
             ColumnLayout {
                 Layout.fillWidth: true
-                spacing: 0
+                spacing: -1
                 Label {
                     Layout.fillWidth: true
-                    text: "ARStack Studio"
+                    text: "ARStack"
                     color: bar.theme.text
                     font.family: bar.uiFont
                     font.pixelSize: 12
@@ -69,7 +71,7 @@ Rectangle {
                 }
                 Label {
                     Layout.fillWidth: true
-                    text: bar.compact ? "SMV + PTP" : "SMV Injector · v" + Qt.application.version
+                    text: "SMV + PTP"
                     color: bar.theme.muted
                     font.family: bar.uiFont
                     font.pixelSize: 8
@@ -79,13 +81,13 @@ Rectangle {
             }
         }
 
-        Rectangle { width: 1; height: 30; color: bar.theme.lineSoft }
+        Rectangle { width: 1; height: 26; color: bar.theme.lineSoft }
 
+        // Primary operator actions. These are the only visually dominant controls.
         RibbonAction {
             theme: bar.theme
             uiFont: bar.uiFont
             text: "Start"
-            large: true
             tone: bar.session.startReady ? "success" : "neutral"
             iconSource: Qt.resolvedUrl("../assets/lucide/play.svg")
             enabled: !bar.workflow.injectionRunning && !bar.session.updatingFirmware && !bar.session.updateNeedsBootloaderHelp
@@ -97,7 +99,6 @@ Rectangle {
             theme: bar.theme
             uiFont: bar.uiFont
             text: "Stop"
-            large: true
             tone: bar.workflow.injectionRunning ? "danger" : "neutral"
             iconSource: Qt.resolvedUrl("../assets/lucide/square.svg")
             enabled: bar.workflow.injectionRunning && !bar.session.updatingFirmware
@@ -105,8 +106,9 @@ Rectangle {
             onClicked: bar.workflow.requestStop()
         }
 
-        Rectangle { width: 1; height: 30; color: bar.theme.lineSoft }
+        Rectangle { width: 1; height: 26; color: bar.theme.lineSoft }
 
+        // Engineering actions remain available, but no longer compete with Start/Stop.
         RibbonAction {
             theme: bar.theme
             uiFont: bar.uiFont
@@ -118,9 +120,10 @@ Rectangle {
         }
 
         RibbonAction {
+            visible: !bar.compact
             theme: bar.theme
             uiFont: bar.uiFont
-            text: "4I + 4V"
+            text: "Default 4I+4V"
             iconSource: Qt.resolvedUrl("../assets/lucide/panels-top-left.svg")
             enabled: bar.session.engineeringEditable
             toolTipText: "Use the built-in 4I + 4V / 4000 samples/s profile"
@@ -148,57 +151,37 @@ Rectangle {
             }
         }
 
-        Item { Layout.fillWidth: true; Layout.minimumWidth: 6 }
+        Item { Layout.fillWidth: true; Layout.minimumWidth: 8 }
 
-        RowLayout {
-            Layout.alignment: Qt.AlignVCenter
-            spacing: 3
-
-            RibbonAction {
-                theme: bar.theme
-                uiFont: bar.uiFont
-                text: "Phasor"
-                checkable: true
-                checked: bar.controller.phasorDockVisible || bar.controller.phasorDetached
-                tone: checked ? "accent" : "neutral"
-                toolTipText: "Show or hide the phasor preview"
-                onClicked: {
-                    if (bar.controller.phasorDetached) bar.controller.phasorDetached = false
-                    bar.controller.phasorDockVisible = checked
-                }
-            }
-
-            RibbonAction {
-                theme: bar.theme
-                uiFont: bar.uiFont
-                text: "Wave"
-                checkable: true
-                checked: bar.controller.waveformDockVisible || bar.controller.waveformDetached
-                tone: checked ? "accent" : "neutral"
-                toolTipText: "Show or hide the waveform preview"
-                onClicked: {
-                    if (bar.controller.waveformDetached) bar.controller.waveformDetached = false
-                    bar.controller.waveformDockVisible = checked
-                }
-            }
-
-            RibbonAction {
-                theme: bar.theme
-                uiFont: bar.uiFont
-                text: "Monitor"
-                visible: !bar.compact
-                checkable: true
-                checked: bar.controller.telemetryDockVisible && bar.controller.telemetryExpanded
-                tone: checked ? "accent" : "neutral"
-                toolTipText: "Open the detailed telemetry monitor"
-                onClicked: {
-                    bar.controller.telemetryDockVisible = checked
-                    bar.controller.telemetryExpanded = checked
-                }
+        // Secondary view controls are deliberately quiet and compact.
+        RibbonAction {
+            theme: bar.theme
+            uiFont: bar.uiFont
+            text: "Phasor"
+            checkable: true
+            checked: bar.controller.phasorDockVisible || bar.controller.phasorDetached
+            tone: checked ? "accent" : "neutral"
+            toolTipText: "Show or hide phasor preview"
+            onClicked: {
+                if (bar.controller.phasorDetached) bar.controller.phasorDetached = false
+                bar.controller.phasorDockVisible = checked
             }
         }
 
-        Rectangle { width: 1; height: 30; color: bar.theme.lineSoft }
+        RibbonAction {
+            theme: bar.theme
+            uiFont: bar.uiFont
+            text: "Waveform"
+            visible: !bar.compact
+            checkable: true
+            checked: bar.controller.waveformDockVisible || bar.controller.waveformDetached
+            tone: checked ? "accent" : "neutral"
+            toolTipText: "Show or hide waveform preview"
+            onClicked: {
+                if (bar.controller.waveformDetached) bar.controller.waveformDetached = false
+                bar.controller.waveformDockVisible = checked
+            }
+        }
 
         RibbonAction {
             theme: bar.theme
@@ -210,31 +193,22 @@ Rectangle {
             onClicked: bar.controller.openConfiguration()
         }
 
-        RibbonAction {
-            visible: !bar.compact
-            theme: bar.theme
-            uiFont: bar.uiFont
-            text: "Diagnostics"
-            iconOnly: true
-            iconSource: Qt.resolvedUrl("../assets/lucide/scan-search.svg")
-            toolTipText: "Open device diagnostics"
-            onClicked: bar.controller.openDiagnostics()
-        }
-
         Rectangle {
-            Layout.preferredWidth: bar.compact ? 128 : 158
-            Layout.preferredHeight: 40
+            Layout.preferredWidth: bar.compact ? 122 : 148
+            Layout.preferredHeight: 34
             Layout.alignment: Qt.AlignVCenter
-            radius: 8
+            radius: 17
             color: "#0b1117"
             border.width: 1
-            border.color: bar.workflow.smartStateColor
+            border.color: Qt.rgba(bar.workflow.smartStateColor.r,
+                                  bar.workflow.smartStateColor.g,
+                                  bar.workflow.smartStateColor.b, 0.65)
 
             RowLayout {
                 anchors.fill: parent
                 anchors.leftMargin: 10
-                anchors.rightMargin: 9
-                spacing: 8
+                anchors.rightMargin: 10
+                spacing: 7
 
                 Rectangle {
                     width: 7
@@ -243,26 +217,15 @@ Rectangle {
                     color: bar.workflow.smartStateColor
                 }
 
-                ColumnLayout {
+                Label {
                     Layout.fillWidth: true
-                    spacing: 0
-                    Label {
-                        Layout.fillWidth: true
-                        text: bar.workflow.displayState
-                        color: bar.workflow.smartStateColor
-                        font.family: bar.uiFont
-                        font.pixelSize: 9
-                        font.weight: Font.DemiBold
-                        elide: Text.ElideRight
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        text: bar.device.deviceVerified ? bar.device.portName + " · ESP32-P4" : "Device discovery"
-                        color: bar.theme.muted
-                        font.family: bar.uiFont
-                        font.pixelSize: 8
-                        elide: Text.ElideRight
-                    }
+                    text: bar.workflow.displayState
+                    color: bar.workflow.smartStateColor
+                    font.family: bar.uiFont
+                    font.pixelSize: 9
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
+                    verticalAlignment: Text.AlignVCenter
                 }
             }
 
@@ -275,7 +238,9 @@ Rectangle {
                 onClicked: bar.reconnectOrOpenDevice()
             }
             ToolTip.visible: stateMouse.containsMouse
-            ToolTip.text: bar.session.statusText
+            ToolTip.text: bar.device.deviceVerified
+                ? bar.device.portName + " · ESP32-P4\n" + bar.session.statusText
+                : bar.session.statusText
             ToolTip.delay: 420
         }
     }
