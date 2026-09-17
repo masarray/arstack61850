@@ -14,11 +14,10 @@ Rectangle {
     property string uiFont: "Inter"
     property bool compact: false
 
-    implicitHeight: 54
-    radius: 9
-    color: theme.chrome
-    border.width: 1
-    border.color: theme.lineSoft
+    implicitHeight: 52
+    radius: 0
+    color: "transparent"
+    border.width: 0
 
     function reconnectOrOpenDevice() {
         if (device.deviceVerified)
@@ -27,63 +26,61 @@ Rectangle {
             session.requestConnect()
     }
 
+    function conciseState() {
+        if (session.state === "RUNNING") return "Running"
+        if (session.state === "READY") return "Ready"
+        if (session.state === "WAITING FOR DEVICE") return "Offline"
+        if (session.state === "DEVICE FOUND" || session.state === "CONNECTING" || session.state === "CHECKING DEVICE") return "Connecting"
+        if (session.state === "FIRMWARE REQUIRED") return "Firmware required"
+        if (session.state === "UPDATING FIRMWARE") return "Updating"
+        if (session.state === "UPDATE NEEDS BOOT") return "Bootloader"
+        if (session.state === "PREPARING 4I+4V") return "Preparing"
+        if (session.state === "PROFILE BLOCKED" || session.state === "PROFILE SYNC ERROR" || session.state === "SETUP ERROR") return "Attention"
+        return workflow.displayState
+    }
+
     RowLayout {
         anchors.fill: parent
         anchors.leftMargin: 10
         anchors.rightMargin: 10
-        spacing: 8
+        spacing: 6
 
-        // Product identity is intentionally compact. The command bar is a tool,
-        // not a second title bar.
         RowLayout {
-            Layout.preferredWidth: bar.compact ? 132 : 158
+            Layout.preferredWidth: bar.compact ? 112 : 132
             Layout.alignment: Qt.AlignVCenter
             spacing: 8
 
             Rectangle {
-                width: 30
-                height: 30
+                width: 28
+                height: 28
                 radius: 7
-                color: "#0f1821"
+                color: "#0d151d"
                 border.width: 1
-                border.color: "#27445d"
+                border.color: bar.theme.lineSoft
                 Image {
                     anchors.centerIn: parent
-                    width: 16
-                    height: 16
+                    width: 15
+                    height: 15
                     source: Qt.resolvedUrl("../assets/lucide/radio-tower.svg")
-                    sourceSize.width: 32
-                    sourceSize.height: 32
+                    sourceSize.width: 30
+                    sourceSize.height: 30
                 }
             }
 
-            ColumnLayout {
+            Label {
                 Layout.fillWidth: true
-                spacing: -1
-                Label {
-                    Layout.fillWidth: true
-                    text: "ARStack"
-                    color: bar.theme.text
-                    font.family: bar.uiFont
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    elide: Text.ElideRight
-                }
-                Label {
-                    Layout.fillWidth: true
-                    text: "SMV + PTP"
-                    color: bar.theme.muted
-                    font.family: bar.uiFont
-                    font.pixelSize: 8
-                    font.weight: Font.Medium
-                    elide: Text.ElideRight
-                }
+                text: "SMV Injector"
+                color: bar.theme.text
+                font.family: bar.uiFont
+                font.pixelSize: 11
+                font.weight: Font.DemiBold
+                elide: Text.ElideRight
+                verticalAlignment: Text.AlignVCenter
             }
         }
 
-        Rectangle { width: 1; height: 26; color: bar.theme.lineSoft }
+        Rectangle { width: 1; height: 24; color: bar.theme.lineSoft }
 
-        // Primary operator actions. These are the only visually dominant controls.
         RibbonAction {
             theme: bar.theme
             uiFont: bar.uiFont
@@ -106,9 +103,8 @@ Rectangle {
             onClicked: bar.workflow.requestStop()
         }
 
-        Rectangle { width: 1; height: 26; color: bar.theme.lineSoft }
+        Rectangle { width: 1; height: 24; color: bar.theme.lineSoft }
 
-        // Engineering actions remain available, but no longer compete with Start/Stop.
         RibbonAction {
             theme: bar.theme
             uiFont: bar.uiFont
@@ -123,7 +119,7 @@ Rectangle {
             visible: !bar.compact
             theme: bar.theme
             uiFont: bar.uiFont
-            text: "Default 4I+4V"
+            text: "4I+4V"
             iconSource: Qt.resolvedUrl("../assets/lucide/panels-top-left.svg")
             enabled: bar.session.engineeringEditable
             toolTipText: "Use the built-in 4I + 4V / 4000 samples/s profile"
@@ -131,29 +127,25 @@ Rectangle {
         }
 
         RibbonAction {
-            visible: bar.session.firmwareUpdateRequired || bar.session.firmwareUpdateAvailable ||
-                     bar.session.firmwareInstallRequired || bar.session.profileSyncRetryAvailable
+            visible: bar.session.firmwareUpdateRequired || bar.session.firmwareInstallRequired || bar.session.profileSyncRetryAvailable
             theme: bar.theme
             uiFont: bar.uiFont
             tone: "warning"
             text: bar.session.firmwareInstallRequired ? "Install firmware"
                 : bar.session.firmwareUpdateRequired ? "Firmware required"
-                : bar.session.firmwareUpdateAvailable ? "Update available"
                 : "Retry profile"
             toolTipText: bar.session.firmwareInstallRequired ? "Install the bundled ARStack firmware"
                 : bar.session.firmwareUpdateRequired ? "Firmware update is required before injection"
-                : bar.session.firmwareUpdateAvailable ? "A compatible newer firmware build is available"
                 : "Retry the 4I + 4V profile synchronization"
             onClicked: {
                 if (bar.session.firmwareInstallRequired) bar.workflow.openInstallPrompt()
-                else if (bar.session.firmwareUpdateRequired || bar.session.firmwareUpdateAvailable) bar.workflow.openUpdatePrompt()
+                else if (bar.session.firmwareUpdateRequired) bar.workflow.openUpdatePrompt()
                 else bar.workflow.retryProfileSync()
             }
         }
 
         Item { Layout.fillWidth: true; Layout.minimumWidth: 8 }
 
-        // Secondary view controls are deliberately quiet and compact.
         RibbonAction {
             theme: bar.theme
             uiFont: bar.uiFont
@@ -171,7 +163,7 @@ Rectangle {
         RibbonAction {
             theme: bar.theme
             uiFont: bar.uiFont
-            text: "Waveform"
+            text: "Wave"
             visible: !bar.compact
             checkable: true
             checked: bar.controller.waveformDockVisible || bar.controller.waveformDetached
@@ -186,40 +178,43 @@ Rectangle {
         RibbonAction {
             theme: bar.theme
             uiFont: bar.uiFont
-            text: "Advanced"
+            text: bar.compact ? "" : "Advanced"
             iconOnly: bar.compact
             iconSource: Qt.resolvedUrl("../assets/lucide/settings-2.svg")
-            toolTipText: "Advanced device, firmware, waveform and timing controls"
+            tone: "neutral"
+            toolTipText: bar.session.firmwareUpdateAvailable
+                ? "Advanced controls · optional firmware update available"
+                : "Advanced device, firmware, waveform and timing controls"
             onClicked: bar.controller.openConfiguration()
         }
 
         Rectangle {
-            Layout.preferredWidth: bar.compact ? 122 : 148
-            Layout.preferredHeight: 34
+            Layout.preferredWidth: bar.compact ? 92 : 112
+            Layout.preferredHeight: 30
             Layout.alignment: Qt.AlignVCenter
-            radius: 17
-            color: "#0b1117"
+            radius: 15
+            color: "#0a1016"
             border.width: 1
             border.color: Qt.rgba(bar.workflow.smartStateColor.r,
                                   bar.workflow.smartStateColor.g,
-                                  bar.workflow.smartStateColor.b, 0.65)
+                                  bar.workflow.smartStateColor.b, 0.48)
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 10
-                anchors.rightMargin: 10
-                spacing: 7
+                anchors.leftMargin: 9
+                anchors.rightMargin: 9
+                spacing: 6
 
                 Rectangle {
-                    width: 7
-                    height: 7
-                    radius: 4
+                    width: 6
+                    height: 6
+                    radius: 3
                     color: bar.workflow.smartStateColor
                 }
 
                 Label {
                     Layout.fillWidth: true
-                    text: bar.workflow.displayState
+                    text: bar.conciseState()
                     color: bar.workflow.smartStateColor
                     font.family: bar.uiFont
                     font.pixelSize: 9
