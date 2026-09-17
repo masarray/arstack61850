@@ -1,0 +1,67 @@
+name: P0.3 negotiated COTP segmentation bootstrap
+
+on:
+  push:
+    branches:
+      - feat/ied-sim-ux-performance-foundation
+    paths:
+      - .github/workflows/p0-3-cotp-segmentation-bootstrap.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/ied-sim-ux-performance-foundation
+          fetch-depth: 0
+
+      - name: Harden patch bootstrap
+        run: python .github/p0_3_patch_fix.py
+
+      - name: Apply negotiated COTP segmentation source patch
+        run: python .github/p0_3_patch.py
+
+      - name: Configure MMS R1-R2 regression
+        run: cmake -S tools/mms_direct_control_server -B build-p03-r12 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build and run MMS R1-R2 regression
+        run: |
+          cmake --build build-p03-r12 --parallel
+          ctest --test-dir build-p03-r12 --output-on-failure
+
+      - name: Configure BRCB hard-profile regression
+        run: cmake -S embedded/brcb_hard_profile -B build-p03-brcb -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build and run negotiated transport/report regressions
+        run: |
+          cmake --build build-p03-brcb --target ariec61850_hard_mms_negotiated_limits_smoke ariec61850_hard_mms_brcb_connection_smoke --parallel
+          ctest --test-dir build-p03-brcb -R 'ariec61850_hard_mms_(negotiated_limits|brcb_connection)_smoke' --output-on-failure
+
+      - name: Configure IEDScout production server path
+        run: cmake -S tools/static_ied_server_iedsim -B build-p03-iedsim -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build IEDScout production server path
+        run: cmake --build build-p03-iedsim --parallel
+
+      - name: Commit verified P0.3 source only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "ARStack P0 Bot"
+          git config user.email "actions@github.com"
+          git add \
+            include/ariec61850/osi/cotp_tpkt_stream.hpp \
+            src/mms/connection_runtime.cpp \
+            src/mms/connection_runtime_iedsim.cpp \
+            src/mms/static_report_connection.cpp \
+            src/mms/static_brcb_connection.cpp \
+            embedded/mms_negotiated_limits_hard_profile_smoke.cpp \
+            tests/test_mms_server_urcb_report.cpp \
+            embedded/mms_brcb_connection_hard_profile_smoke.cpp
+          git diff --cached --check
+          git commit -m "fix(osi): segment outbound COTP data by negotiated TPDU"
+          git push origin HEAD:feat/ied-sim-ux-performance-foundation
