@@ -21,7 +21,7 @@ Observed with real IEDScout:
 
 These surfaces are treated as retained regression requirements. Reporting fixes must not weaken discovery, report inventory, or file transfer.
 
-## Remaining R2 reporting blocker captured on wire
+## Original R2 reporting blocker captured on wire
 
 Capture: `Arstack_Reporting.pcapng` supplied from the real-client session.
 
@@ -38,7 +38,7 @@ Root cause was twofold:
 - Production simulator dispatch policy allowed only one variable per MMS Write.
 - BRCB `TrgOps` was exposed read-only even though the URCB path already supported mutable trigger options.
 
-## Fix under verification
+## BRCB fix under external verification
 
 Implementation head: `ab8768338e17fd630c9c464e3df9314ae3d177cf`
 
@@ -56,7 +56,7 @@ The BRCB hard-profile regression passed before this source commit was pushed.
 
 ## P0 reporting hardening checkpoint
 
-The external acceptance boundary above is unchanged, but two additional protocol-level hardening items are now implemented on the PR branch and retained as regression requirements.
+The external acceptance boundary below remains conservative, but protocol-level hardening is retained as regression requirements.
 
 ### P0.2 — canonical InformationReport payload order
 
@@ -80,21 +80,11 @@ Focused regression coverage negotiates a 128-byte TPDU, requires multi-segment a
 
 A follow-up regression-only lifetime defect was corrected in `3e65ba19b6f8682640b711425e6f24ecef6ccfee`: the decoded `MmsInformationReportView` now keeps its segmented reassembly backing storage alive for the complete assertion scope instead of referencing a local buffer that had already gone out of scope. No production protocol behavior changed in that follow-up.
 
-### Exact-head synthetic closure
+### P0.2/P0.3 exact-head synthetic closure
 
-Synthetic/protocol acceptance for P0.2 and P0.3 is now closed on exact head `3e65ba19b6f8682640b711425e6f24ecef6ccfee`.
+Synthetic/protocol acceptance for P0.2 and P0.3 closed on exact head `3e65ba19b6f8682640b711425e6f24ecef6ccfee`.
 
-All 15 PR workflows attached to that exact head completed successfully, including the protocol and product surfaces most relevant to this correction:
-
-- MMS R1-R2 Server CI
-- IEDScout Parity Server CI
-- BRCB Hard Profile CI
-- Embedded Profile CI
-- Dynamic RCB Trial Harness CI
-- Control Interop Harness CI
-- C++ CI
-- IED Simulator Qt
-- IED Simulator Release Hardening
+All 15 PR workflows attached to that exact head completed successfully, including MMS R1-R2 Server CI, IEDScout Parity Server CI, BRCB Hard Profile CI, Embedded Profile CI, Dynamic RCB Trial Harness CI, Control Interop Harness CI, C++ CI, IED Simulator Qt, and IED Simulator Release Hardening.
 
 The exact-head Windows RC was produced by IED Simulator Release Hardening run `35205603573`:
 
@@ -104,16 +94,56 @@ The exact-head Windows RC was produced by IED Simulator Release Hardening run `3
 - contains `ARStack-IEC61850-Workbench-Setup-win64.exe`
 - contains `ARStack-IEC61850-Workbench-portable-win64.zip`
 
-These P0.2/P0.3 results are synthetic/protocol regression evidence, not a replacement for the real IEDScout closure condition below.
+These P0.2/P0.3 results are synthetic/protocol regression evidence, not a replacement for real-client acceptance.
+
+## R4 real-client reporting evidence
+
+Capture: `Arstack_DiscoveryIED_R4_rcb.pcapng` plus simulator diagnostics from the same real OMICRON IEDScout session.
+
+### BRCB result — externally accepted
+
+`LLN0$BR$Buffer01` now enables and reports successfully both when IEDScout leaves Trigger Options / Optional Fields at their IED values and when the user modifies those fields in IEDScout. This closes the original BRCB write-interoperability symptom for the tested R4 session. BRCB behavior remains a retained regression requirement.
+
+### URCB result — remaining OptFlds interoperability gap isolated
+
+`LLN0$RP$Unbuffer01` enables and reports when Trigger Options / Optional Fields are left unchanged. The R4 diagnostics also show repeated `Unbuffer01` reports after enable, so the remaining failure is not the URCB report scheduler or InformationReport emission path.
+
+When the user modifies Trigger Options / Optional Fields, IEDScout sends one grouped MMS Write containing, in order:
+
+1. `LLN0$RP$Unbuffer01$IntgPd = 5000`,
+2. `LLN0$RP$Unbuffer01$TrgOps` BIT STRING bytes `02 FC`,
+3. `LLN0$RP$Unbuffer01$OptFlds` BIT STRING bytes `06 7B 80`,
+4. `LLN0$RP$Unbuffer01$RptEna = true`.
+
+The captured ARStack WriteResponse returns success for `IntgPd`, success for `TrgOps`, failure code `11` (`object-value-invalid`) for `OptFlds`, then success for `RptEna`. IEDScout surfaces that third result as `parameter-value-inconsistent`. Therefore this R4 failure is specifically the URCB `OptFlds=0x7B80` write, not `TrgOps` and not generic report enable.
+
+The IEDScout value uses its generic RCB Options editor and includes first-octet bits for `BufferOverflow` and `EntryID`, which have meaning for BRCB but are not emitted by URCB reports. ARStack's strict URCB validator previously accepted only first-octet mask `0x7C`, so `0x7B80` was rejected.
+
+### P0.4 — URCB generic OptFlds normalization
+
+Implementation commit: `2361809ab319a7a57fd23100d0e1cb7b96972cb2`.
+
+The URCB runtime now:
+
+- accepts client first-octet Optional Fields through mask `0x7F`, so IEDScout's generic `0x7B80` request is interoperable,
+- normalizes the effective URCB first octet through `0x7C`, therefore captured `0x7B80` becomes effective URCB `0x7880`,
+- continues to reject the unsupported segmentation bit in the second octet,
+- never advertises or encodes BRCB-only `BufferOverflow` / `EntryID` metadata in an URCB InformationReport,
+- applies the same normalization during initialization and later OptFlds writes.
+
+Focused host URCB regression, embedded URCB hard-profile regression, and the production IEDScout server build all passed in bootstrap run `35219711196` before the source commit was pushed. Temporary bootstrap files were removed after that proof.
+
+P0.4 remains externally open until a new exact-head Windows build proves the modified URCB path in real IEDScout.
 
 ## External closure condition
 
-R2 reporting remains open until the exact-head Windows artifact above is tested with real IEDScout and proves:
+R2/R4 reporting remains open until the new P0.4 exact-head Windows artifact is tested with real IEDScout and proves:
 
-- editing Trigger Options returns no IEDScout error,
-- the subsequent `RptEna=true` succeeds,
-- changed trigger selection actually controls emitted reports,
+- modified `LLN0$RP$Unbuffer01` Trigger Options / Optional Fields no longer produce `parameter-value-inconsistent`,
+- the grouped URCB write and subsequent `RptEna=true` result in an enabled URCB,
+- changed trigger selection actually controls emitted URCB reports,
 - GI/report delivery remains functional,
+- the already-accepted BRCB modified Trigger Options / Optional Fields path does not regress,
 - segmented responses remain transparent to IEDScout under its negotiated COTP TPDU size,
 - the locked discovery/report-inventory/file-transfer baseline still passes.
 
