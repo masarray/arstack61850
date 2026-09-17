@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 
 Button {
     id: control
@@ -10,72 +11,78 @@ Button {
     property string tone: "neutral"
     property url iconSource
     property bool large: false
+    property bool iconOnly: false
     property string toolTipText: ""
 
-    implicitWidth: large ? 72 : Math.max(70, label.implicitWidth + 28)
-    implicitHeight: large ? 54 : 28
+    implicitWidth: iconOnly ? 36 : large ? Math.max(76, label.implicitWidth + 42) : Math.max(58, label.implicitWidth + (icon.visible ? 36 : 22))
+    implicitHeight: large ? 40 : 34
     hoverEnabled: true
     activeFocusOnTab: true
     font.family: uiFont
-    font.pixelSize: large ? 10 : 9
+    font.pixelSize: large ? 11 : 10
     font.weight: Font.DemiBold
 
-    readonly property color fillColor: !enabled ? theme.surface2
-        : tone === "success" ? (hovered ? "#1e5c43" : "#194d38")
-        : tone === "danger" ? (hovered ? "#523039" : theme.redSoft)
-        : tone === "accent" ? (hovered ? "#1d3c5e" : theme.accentSoft)
+    readonly property color fillColor: !enabled ? "transparent"
+        : tone === "success" ? (hovered ? "#1b4b39" : "#163c2f")
+        : tone === "danger" ? (hovered ? "#4a2830" : "#392127")
+        : tone === "accent" ? (hovered ? "#173654" : "#142b42")
+        : tone === "warning" ? (hovered ? "#46391f" : "#362d1c")
+        : checked ? theme.accentSoft
         : hovered ? theme.raisedHover : "transparent"
-    readonly property color edgeColor: !enabled ? theme.lineSoft
-        : tone === "success" ? "#347a59"
-        : tone === "danger" ? "#86434b"
+    readonly property color edgeColor: !enabled ? "transparent"
+        : tone === "success" ? "#2e7254"
+        : tone === "danger" ? "#7a3d47"
         : tone === "accent" ? "#315f8d"
+        : tone === "warning" ? "#7b6231"
+        : checked ? "#315f8d"
         : activeFocus ? theme.accent : "transparent"
     readonly property color textColor: !enabled ? theme.muted2
-        : tone === "success" ? "#d6f4e6"
-        : tone === "danger" ? "#ffdce0"
-        : tone === "accent" ? "#dcebff" : theme.textSoft
+        : tone === "success" ? "#d9f7e9"
+        : tone === "danger" ? "#ffdce1"
+        : tone === "accent" ? "#ddebff"
+        : tone === "warning" ? "#f2d79c"
+        : checked ? theme.text : theme.textSoft
 
     contentItem: Item {
-        implicitWidth: control.large
-            ? Math.max(label.implicitWidth, control.iconSource.toString().length ? 22 : 0)
-            : label.implicitWidth + (control.iconSource.toString().length ? 22 : 0)
-        implicitHeight: control.large ? 46 : Math.max(18, label.implicitHeight)
+        implicitWidth: row.implicitWidth
+        implicitHeight: row.implicitHeight
 
-        Image {
-            id: icon
-            visible: control.iconSource.toString().length > 0
-            source: control.iconSource
-            width: control.large ? 20 : 14
-            height: width
-            sourceSize.width: width * 2
-            sourceSize.height: height * 2
-            opacity: control.enabled ? 0.94 : 0.30
-            anchors.horizontalCenter: control.large ? parent.horizontalCenter : undefined
-            anchors.left: control.large ? undefined : parent.left
-            anchors.top: control.large ? parent.top : undefined
-            anchors.verticalCenter: control.large ? undefined : parent.verticalCenter
-        }
+        RowLayout {
+            id: row
+            anchors.centerIn: parent
+            spacing: control.iconOnly ? 0 : 7
 
-        Text {
-            id: label
-            text: control.text
-            color: control.textColor
-            font: control.font
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.bottom: control.large ? parent.bottom : undefined
-            anchors.verticalCenter: control.large ? undefined : parent.verticalCenter
+            Image {
+                id: icon
+                visible: control.iconSource.toString().length > 0
+                source: control.iconSource
+                Layout.preferredWidth: control.large ? 17 : 15
+                Layout.preferredHeight: Layout.preferredWidth
+                sourceSize.width: Layout.preferredWidth * 2
+                sourceSize.height: Layout.preferredHeight * 2
+                opacity: control.enabled ? 0.96 : 0.30
+            }
+
+            Text {
+                id: label
+                visible: !control.iconOnly
+                text: control.text
+                color: control.textColor
+                font: control.font
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+            }
         }
     }
 
     background: Rectangle {
-        radius: 6
+        radius: 7
         color: control.fillColor
         border.width: control.edgeColor === "transparent" ? 0 : 1
         border.color: control.edgeColor
         Behavior on color { ColorAnimation { duration: 90 } }
+        Behavior on border.color { ColorAnimation { duration: 90 } }
     }
 
     ToolTip.visible: hovered && toolTipText.length > 0
