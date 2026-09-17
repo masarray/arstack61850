@@ -1,0 +1,53 @@
+name: Release v0.1.1 Dispatch
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/release-v0.1.1-dispatch.yml'
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  tag-and-dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create accepted v0.1.1 tag on merge commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='2bcf28dd948161bb70fdc6d5b338e9a600670bc1'
+          target="$(git rev-parse HEAD^)"
+          if [ "$target" != "$expected" ]; then
+            echo "Refusing release: expected parent $expected, got $target" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin refs/tags/v0.1.1 >/dev/null 2>&1; then
+            remote="$(git ls-remote --tags origin refs/tags/v0.1.1 | awk '{print $1}')"
+            if [ "$remote" != "$target" ]; then
+              echo "Tag v0.1.1 already exists at $remote, expected $target" >&2
+              exit 1
+            fi
+          else
+            git config user.name 'ARStack Release'
+            git config user.email 'actions@users.noreply.github.com'
+            git tag v0.1.1 "$target"
+            git push origin refs/tags/v0.1.1
+          fi
+
+      - name: Dispatch canonical tagged release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run arstack-studio-release.yml --ref v0.1.1
+          echo 'Canonical ARStack Studio Release dispatched for refs/tags/v0.1.1.'
