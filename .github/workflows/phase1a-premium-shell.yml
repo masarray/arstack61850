@@ -1,0 +1,46 @@
+name: Phase 1A Premium Shell
+
+on:
+  pull_request:
+    paths:
+      - 'apps/arstack_studio/qml/**'
+      - '.github/scripts/phase1a_premium_shell.py'
+      - '.github/workflows/phase1a-premium-shell.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: phase1a-premium-shell-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  apply-source:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - name: Apply premium shell patch
+        run: python3 .github/scripts/phase1a_premium_shell.py
+      - name: Verify presentation invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'implicitHeight: 54' apps/arstack_studio/qml/ModernRibbon.qml
+          grep -q 'implicitHeight: 54' apps/arstack_studio/qml/WorkflowBar.qml
+          grep -q 'Layout.preferredHeight: 54' apps/arstack_studio/qml/Main.qml
+          ! grep -q 'statusText: "GENERATED"' apps/arstack_studio/qml/Main.qml
+      - name: Commit presentation-only source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add apps/arstack_studio/qml/WorkflowBar.qml apps/arstack_studio/qml/Main.qml
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name 'ARStack UX'
+          git config user.email 'actions@users.noreply.github.com'
+          git commit -m 'feat(studio): simplify premium demo shell'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
