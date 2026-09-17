@@ -710,7 +710,7 @@ SurfacePanel {
         }
     }
 
-    implicitHeight: 62
+    implicitHeight: 54
     color: "transparent"
     border.width: 0
 

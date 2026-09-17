@@ -443,17 +443,16 @@ ApplicationWindow {
             anchors.rightMargin: 12
             spacing: 8
 
-            Rectangle { width: 6; height: 6; radius: 3; color: workflowBar.smartStateColor }
             Label {
-                text: device.deviceVerified ? device.portName + " · ESP32-P4" : workflowBar.displayState
-                color: device.deviceVerified ? studioTheme.textSoft : workflowBar.smartStateColor
+                text: device.deviceVerified ? device.portName + " · ESP32-P4" : "No device"
+                color: device.deviceVerified ? studioTheme.textSoft : studioTheme.muted
                 font.family: root.uiFont
                 font.pixelSize: 9
                 font.weight: Font.Medium
             }
-            Rectangle { width: 1; height: 14; color: studioTheme.lineSoft }
+            Rectangle { width: 1; height: 12; color: studioTheme.lineSoft }
             Label {
-                text: workflowBar.injectionRunning ? "SMV output active" : "4I + 4V · 4000 samples/s"
+                text: "4I + 4V · 4000 samples/s"
                 color: studioTheme.muted
                 font.family: root.uiFont
                 font.pixelSize: 9
@@ -461,9 +460,7 @@ ApplicationWindow {
             Item { Layout.fillWidth: true }
             Label {
                 visible: device.deviceVerified
-                text: device.running
-                    ? "FPS " + device.fps + "   MISSED " + device.missed + "   TX FAIL " + device.txFailures
-                    : "READY"
+                text: "FPS " + device.fps + "   MISSED " + device.missed + "   TX FAIL " + device.txFailures
                 color: (Number(device.missed) > 0 || Number(device.txFailures) > 0) ? studioTheme.amber : studioTheme.textSoft
                 font.family: root.monoFont
                 font.pixelSize: 9
@@ -603,8 +600,8 @@ ApplicationWindow {
         WorkflowBar {
             id: workflowBar
             Layout.fillWidth: true
-            Layout.preferredHeight: 62
-            Layout.minimumHeight: 62
+            Layout.preferredHeight: 54
+            Layout.minimumHeight: 54
             theme: studioTheme
             controller: root
             device: device
@@ -838,7 +835,7 @@ ApplicationWindow {
                         SplitView.preferredHeight: 300
                         theme: studioTheme
                         titleText: "Phasor"
-                        statusText: "GENERATED"
+                        statusText: ""
                         uiFont: root.uiFont
                         monoFont: root.monoFont
                         detachable: true
