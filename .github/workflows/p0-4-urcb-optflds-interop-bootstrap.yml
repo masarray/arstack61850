@@ -1,0 +1,63 @@
+name: P0.4 URCB OptFlds IEDScout interop bootstrap
+
+on:
+  push:
+    branches:
+      - feat/ied-sim-ux-performance-foundation
+    paths:
+      - .github/workflows/p0-4-urcb-optflds-interop-bootstrap.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/ied-sim-ux-performance-foundation
+          fetch-depth: 0
+
+      - name: Apply URCB OptFlds compatibility patch
+        run: python .github/p0_4_urcb_optflds_patch.py
+
+      - name: Configure owning MMS URCB regression
+        run: cmake -S tools/mms_direct_control_server -B build-p04-r12 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build and run owning MMS URCB regression
+        run: |
+          cmake --build build-p04-r12 --target ariec61850_mms_server_urcb_tests --parallel
+          ctest --test-dir build-p04-r12 -R ariec61850_mms_server_urcb_tests --output-on-failure
+
+      - name: Configure embedded hard profile
+        run: >-
+          cmake -S embedded -B build-p04-embedded
+          -DARIEC61850_EMBEDDED_NO_RTTI=ON
+          -DARIEC61850_EMBEDDED_NO_EXCEPTIONS=OFF
+          -DARIEC61850_EMBEDDED_WARNINGS_AS_ERRORS=ON
+
+      - name: Build and run URCB hard-profile regression
+        run: |
+          cmake --build build-p04-embedded --target ariec61850_embedded_mms_urcb_event_smoke --parallel
+          ctest --test-dir build-p04-embedded -R ariec61850_embedded_mms_urcb_event_smoke --output-on-failure
+
+      - name: Configure IEDScout production server path
+        run: cmake -S tools/static_ied_server_iedsim -B build-p04-iedsim -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build IEDScout production server path
+        run: cmake --build build-p04-iedsim --parallel
+
+      - name: Commit verified P0.4 source only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "ARStack P0 Bot"
+          git config user.email "actions@github.com"
+          git add \
+            src/mms/static_urcb_runtime.cpp \
+            tests/test_mms_server_urcb_report.cpp \
+            embedded/mms_urcb_event_hard_profile_smoke.cpp
+          git diff --cached --check
+          git commit -m "fix(mms): normalize buffered-only OptFlds on URCB writes"
+          git push origin HEAD:feat/ied-sim-ux-performance-foundation
