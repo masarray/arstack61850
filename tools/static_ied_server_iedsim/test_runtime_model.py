@@ -65,12 +65,12 @@ def manifest(revision: int, value: bool) -> str:
     lines.append(
         "RCB\tTESTIEDLD0\tLLN0$RP$Structured01\t0\t"
         "TESTIEDLD0/LLN0$RP$Structured01\tTESTIEDLD0\tLLN0$Digital\t"
-        "1\t0\t0\t124\t0\t0"
+        "1\t0\t0\t124\t120\t128"
     )
     lines.append(
         "RCB\tTESTIEDLD0\tLLN0$RP$StructuredAnalog01\t0\t"
         "TESTIEDLD0/LLN0$RP$StructuredAnalog01\tTESTIEDLD0\tLLN0$Analog\t"
-        "1\t0\t0\t124\t0\t0"
+        "1\t0\t0\t124\t120\t128"
     )
     lines.append("")
     return "\n".join(lines)
@@ -281,7 +281,7 @@ def main() -> int:
                 creationflags=creation_flags(),
             )
             digital_report_shape = (
-                "report_values=36 "
+                "access_results=79 report_values=36 "
                 "first_value_shape=structure(boolean,bit-string,utc-time)"
             )
             digital_report_value = "first_value={true,"
@@ -318,7 +318,7 @@ def main() -> int:
                 creationflags=creation_flags(),
             )
             analog_report_shape = (
-                "report_values=22 "
+                "access_results=51 report_values=22 "
                 "first_value_shape="
                 "structure(structure(integer,floating-point),bit-string,utc-time)"
             )
@@ -354,6 +354,7 @@ def main() -> int:
         "digitalTypeDataOrder=structure(boolean,bit-string,utc-time) "
         "analogTypeDataOrder=structure(structure(integer,floating-point),bit-string,utc-time) "
         "urcbGiDigital=36 urcbGiAnalog=22 reportBackedTotal=58 "
+        "productionOptFlds=0x78,0x80 reasonAlignment=true "
         "digitalReportShape=structure(boolean,bit-string,utc-time) "
         "analogReportShape=structure(structure(integer,floating-point),bit-string,utc-time) "
         "digitalReportLiveValue=true valueTransition=false->true "
