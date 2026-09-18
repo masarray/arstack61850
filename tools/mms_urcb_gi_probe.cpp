@@ -205,6 +205,16 @@ int main(const int argc, char** argv) {
             throw std::runtime_error("GI InformationReport contains no process values.");
         }
         const auto first_value_shape = data_shape(*frame.values.front().value);
+        const auto uniform_value_shape = std::all_of(
+            frame.values.begin(), frame.values.end(),
+            [&first_value_shape](const mms::MmsReportValue& value) {
+                return value.value.has_value() &&
+                    data_shape(*value.value) == first_value_shape;
+            });
+        if (!uniform_value_shape) {
+            throw std::runtime_error(
+                "GI InformationReport process values do not share one MMS shape.");
+        }
 
         require_boolean_write(session.association(), domain, rpt_ena, false);
         session.disconnect();
@@ -212,7 +222,8 @@ int main(const int argc, char** argv) {
                   << " rptid=" << frame.header.report_id
                   << " access_results=" << report.items.size()
                   << " report_values=" << frame.values.size()
-                  << " first_value_shape=" << first_value_shape << '\n';
+                  << " first_value_shape=" << first_value_shape
+                  << " uniform_value_shape=true" << '\n';
         return 0;
     } catch (const std::exception& exception) {
         std::cerr << "MMS URCB GI probe failed: " << exception.what() << '\n';
