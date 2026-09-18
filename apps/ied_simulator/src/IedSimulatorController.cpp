@@ -664,9 +664,13 @@ bool IedSimulatorController::writeModelManifest() {
             manifestField(item) + "\n";
     }
 
+    // `values_` is reconstructed from IedSimulatorPoint::source_order.  Emit
+    // OBJ records in that same SCL declaration order. MMS structures are
+    // ordered values; using QHash iteration here made child order random and
+    // could turn SPS {stVal, q, t} into {q, stVal, t} on the wire.
     QSet<QString> emittedObjects;
-    for (auto it = runtimeValues_.cbegin(); it != runtimeValues_.cend(); ++it) {
-        const auto item = it.value();
+    for (const auto& runtimeValue : values_) {
+        const auto item = runtimeValue.toMap();
         if (item.value(QStringLiteral("iedName")).toString() != activeIedName) continue;
         const auto domain = item.value(QStringLiteral("mmsDomain")).toString();
         const auto mmsItem = item.value(QStringLiteral("mmsItem")).toString();
@@ -977,7 +981,8 @@ QVariantMap IedSimulatorController::valueMap(
     item.insert(QStringLiteral("writable"), true);
     item.insert(QStringLiteral("changed"), false);
     item.insert(QStringLiteral("updated"), QStringLiteral("—"));
-    if (point.display_type == "Enumeration" && point.cdc == "DPC") {
+    if (point.display_type == "Enumeration" &&
+        (point.cdc == "DPC" || point.cdc == "DPS")) {
         item.insert(
             QStringLiteral("options"),
             QStringList{

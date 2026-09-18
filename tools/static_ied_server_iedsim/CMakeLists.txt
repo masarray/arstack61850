@@ -85,6 +85,13 @@ target_link_libraries(ariec61850_iedscout_parity_read_probe PRIVATE
 target_compile_features(ariec61850_iedscout_parity_read_probe PRIVATE cxx_std_20)
 parity_strict_warnings(ariec61850_iedscout_parity_read_probe)
 
+add_executable(ariec61850_iedscout_parity_urcb_gi_probe
+    "${ARSTACK_ROOT}/tools/mms_urcb_gi_probe.cpp")
+target_link_libraries(ariec61850_iedscout_parity_urcb_gi_probe PRIVATE
+    ARIEC61850::core)
+target_compile_features(ariec61850_iedscout_parity_urcb_gi_probe PRIVATE cxx_std_20)
+parity_strict_warnings(ariec61850_iedscout_parity_urcb_gi_probe)
+
 enable_testing()
 add_test(NAME iedscout_parity_server_help
     COMMAND ariec61850_static_ied_server_iedsim --help)
@@ -105,7 +112,8 @@ add_test(
         "${CMAKE_CURRENT_LIST_DIR}/test_runtime_model.py"
         --server $<TARGET_FILE:ariec61850_static_ied_server_iedsim>
         --discovery $<TARGET_FILE:ariec61850_iedscout_parity_live_discover>
-        --read-probe $<TARGET_FILE:ariec61850_iedscout_parity_read_probe>)
+        --read-probe $<TARGET_FILE:ariec61850_iedscout_parity_read_probe>
+        --urcb-probe $<TARGET_FILE:ariec61850_iedscout_parity_urcb_gi_probe>)
 add_executable(ariec61850_iedscout_parity_file_transfer
     "${ARSTACK_ROOT}/tools/file_transfer.cpp")
 target_link_libraries(ariec61850_iedscout_parity_file_transfer PRIVATE ARIEC61850::core)

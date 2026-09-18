@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "ariec61850/mms/data_codec.hpp"
 #include "ariec61850/mms/live_discovery.hpp"
 #include "ariec61850/mms/reporting.hpp"
 #include "ariec61850/mms/services.hpp"
@@ -36,6 +37,43 @@ namespace mms = ar::iec61850::mms;
     return exchange.presentation_payload.empty()
         ? exchange.envelope.mms_payload
         : std::span<const std::uint8_t>{exchange.presentation_payload};
+}
+
+[[nodiscard]] std::string_view data_kind_name(const mms::MmsDataKind kind) noexcept {
+    switch (kind) {
+    case mms::MmsDataKind::array: return "array";
+    case mms::MmsDataKind::structure: return "structure";
+    case mms::MmsDataKind::boolean: return "boolean";
+    case mms::MmsDataKind::bit_string: return "bit-string";
+    case mms::MmsDataKind::integer: return "integer";
+    case mms::MmsDataKind::unsigned_integer: return "unsigned";
+    case mms::MmsDataKind::floating_point: return "floating-point";
+    case mms::MmsDataKind::octet_string: return "octet-string";
+    case mms::MmsDataKind::visible_string: return "visible-string";
+    case mms::MmsDataKind::binary_time: return "binary-time";
+    case mms::MmsDataKind::bcd: return "bcd";
+    case mms::MmsDataKind::boolean_array: return "boolean-array";
+    case mms::MmsDataKind::object_id: return "object-id";
+    case mms::MmsDataKind::mms_string: return "mms-string";
+    case mms::MmsDataKind::utc_time: return "utc-time";
+    case mms::MmsDataKind::unknown: return "unknown";
+    }
+    return "unknown";
+}
+
+[[nodiscard]] std::string data_shape(const mms::MmsDataValue& value) {
+    std::string result{data_kind_name(value.kind())};
+    if (value.kind() != mms::MmsDataKind::array &&
+        value.kind() != mms::MmsDataKind::structure) {
+        return result;
+    }
+    result.push_back('(');
+    for (std::size_t index = 0U; index < value.children().size(); ++index) {
+        if (index != 0U) result.push_back(',');
+        result += data_shape(value.children()[index]);
+    }
+    result.push_back(')');
+    return result;
 }
 
 void require_boolean_write(
@@ -161,16 +199,42 @@ int main(const int argc, char** argv) {
         if (report.items.empty()) {
             throw std::runtime_error("GI InformationReport contains no AccessResults.");
         }
-        const auto header = mms::MmsReportFrameMapper::decode_header(report);
-        if (header.report_id.empty()) {
+        const auto frame = mms::MmsReportFrameMapper::map(report, {});
+        if (frame.header.report_id.empty()) {
             throw std::runtime_error("GI InformationReport has no ReportID.");
         }
+        if (frame.values.empty() || !frame.values.front().value) {
+            throw std::runtime_error("GI InformationReport contains no process values.");
+        }
+        const auto all_values_present = std::all_of(
+            frame.values.begin(), frame.values.end(),
+            [](const mms::MmsReportValue& value) {
+                return value.value.has_value();
+            });
+        if (!all_values_present) {
+            throw std::runtime_error(
+                "GI InformationReport contains a failed process AccessResult.");
+        }
+        const auto first_value_shape = data_shape(*frame.values.front().value);
+        const auto first_value_display =
+            mms::MmsDataCodec::to_display_string(*frame.values.front().value);
+        const auto uniform_value_shape = std::all_of(
+            frame.values.begin(), frame.values.end(),
+            [&first_value_shape](const mms::MmsReportValue& value) {
+                return data_shape(*value.value) == first_value_shape;
+            });
 
         require_boolean_write(session.association(), domain, rpt_ena, false);
         session.disconnect();
         std::cout << "MMS_URCB_GI_PASS reference=" << domain << '/' << rcb
-                  << " rptid=" << header.report_id
-                  << " access_results=" << report.items.size() << '\n';
+                  << " rptid=" << frame.header.report_id
+                  << " access_results=" << report.items.size()
+                  << " report_values=" << frame.values.size()
+                  << " first_value_shape=" << first_value_shape
+                  << " first_value=" << first_value_display
+                  << " all_values_present=true"
+                  << " uniform_value_shape="
+                  << (uniform_value_shape ? "true" : "false") << '\n';
         return 0;
     } catch (const std::exception& exception) {
         std::cerr << "MMS URCB GI probe failed: " << exception.what() << '\n';

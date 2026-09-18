@@ -754,11 +754,17 @@ struct ManifestValue final {
     std::vector<std::uint8_t> type_specification;
     std::vector<std::uint8_t> encoded;
     const ManifestTypeNode* structured_node{};
+    std::size_t source_order{std::numeric_limits<std::size_t>::max()};
     bool root{};
 };
 
 struct ManifestTypeNode final {
+    // Lookup remains ordered/stable for existing pointer semantics, while
+    // child_order records the first-seen SCL/manifest declaration order. MMS
+    // Structure values are positional; alphabetically iterating this map would
+    // corrupt IEC 61850 CDC layouts such as SPS {stVal, q, t}.
     std::map<std::string, ManifestTypeNode> children;
+    std::vector<std::string> child_order;
     std::optional<std::size_t> value_index;
 };
 
@@ -997,6 +1003,16 @@ void encode_manifest_value(ManifestValue& value) {
     return {wire::EncodeStatus::ok, value.encoded.size(), value.encoded.size()};
 }
 
+[[nodiscard]] const ManifestTypeNode& ordered_child(
+    const ManifestTypeNode& node,
+    const std::string& child_name) {
+    const auto child = node.children.find(child_name);
+    if (child == node.children.end()) {
+        throw std::runtime_error("Manifest structure order references a missing child.");
+    }
+    return child->second;
+}
+
 [[nodiscard]] mms::MmsTypeSpecification node_type(
     const ManifestTypeNode& node,
     const ManifestModel& model,
@@ -1009,9 +1025,10 @@ void encode_manifest_value(ManifestValue& value) {
     mms::MmsTypeSpecification result;
     result.kind = mms::MmsTypeKind::structure;
     result.name = std::move(name);
-    result.children.reserve(node.children.size());
-    for (const auto& [child_name, child] : node.children) {
-        result.children.push_back(node_type(child, model, child_name));
+    result.children.reserve(node.child_order.size());
+    for (const auto& child_name : node.child_order) {
+        result.children.push_back(node_type(
+            ordered_child(node, child_name), model, child_name));
     }
     return result;
 }
@@ -1023,12 +1040,26 @@ void encode_manifest_value(ManifestValue& value) {
         return *model.values[*node.value_index].data;
     }
     std::vector<mms::MmsDataValue> children;
-    children.reserve(node.children.size());
-    for (const auto& [name, child] : node.children) {
-        static_cast<void>(name);
-        children.push_back(node_data(child, model));
+    children.reserve(node.child_order.size());
+    for (const auto& child_name : node.child_order) {
+        children.push_back(node_data(ordered_child(node, child_name), model));
     }
     return mms::MmsDataValue::structure(std::move(children));
+}
+
+[[nodiscard]] std::size_t node_source_order(
+    const ManifestTypeNode& node,
+    const ManifestModel& model) noexcept {
+    auto order = std::numeric_limits<std::size_t>::max();
+    if (node.value_index.has_value() && *node.value_index < model.values.size()) {
+        order = model.values[*node.value_index].source_order;
+    }
+    for (const auto& child_name : node.child_order) {
+        order = std::min(
+            order,
+            node_source_order(ordered_child(node, child_name), model));
+    }
+    return order;
 }
 
 void rebuild_manifest_roots(ManifestModel& model) {
@@ -1263,7 +1294,8 @@ void rebuild_manifest_root_values(ManifestModel& model) {
         model.root_trees.emplace_back();
     }
 
-    for (const auto& parsed : parsed_objects) {
+    for (std::size_t parsed_index = 0U; parsed_index < parsed_objects.size(); ++parsed_index) {
+        const auto& parsed = parsed_objects[parsed_index];
         if (model.values.size() >= mms::MmsStaticObjectTable::maximum_objects) break;
         const auto key = object_key(parsed.domain, parsed.item);
         if (model.value_indices.contains(key)) continue;
@@ -1273,6 +1305,7 @@ void rebuild_manifest_root_values(ManifestModel& model) {
         value.raw_type = parsed.raw_type;
         value.normalized_type = parsed.normalized_type;
         value.text = parsed.text;
+        value.source_order = parsed_index;
         encode_manifest_value(value);
         const auto value_index = model.values.size();
         model.values.push_back(std::move(value));
@@ -1284,7 +1317,10 @@ void rebuild_manifest_root_values(ManifestModel& model) {
         if (found_root == root_indices.end()) continue;
         auto* node = &model.root_trees[found_root->second];
         for (std::size_t part = 1U; part < parts.size(); ++part) {
-            node = &node->children[parts[part]];
+            const auto& child_name = parts[part];
+            const auto [child, inserted] = node->children.try_emplace(child_name);
+            if (inserted) node->child_order.push_back(child_name);
+            node = &child->second;
         }
         node->value_index = value_index;
     }
@@ -1292,12 +1328,14 @@ void rebuild_manifest_root_values(ManifestModel& model) {
 
     model.objects.reserve(model.values.size());
     for (auto& value : model.values) {
-        model.objects.push_back(mms::MmsStaticObjectEntry{
+        auto object = mms::MmsStaticObjectEntry{
             value.domain,
             value.item,
             value.type_specification,
             read_manifest_value,
-            &value});
+            &value};
+        object.declaration_order = value.source_order;
+        model.objects.push_back(object);
     }
 
     // Compile configured SPC command Data Objects into virtual IEC 61850
@@ -1393,6 +1431,7 @@ void rebuild_manifest_root_values(ManifestModel& model) {
         value.domain = member.member_domain;
         value.item = member.member_item;
         value.structured_node = node;
+        value.source_order = node_source_order(*node, model);
         value.type = node_type(*node, model, parts.empty() ? std::string{} : parts.back());
         value.data = node_data(*node, model);
         value.type_specification = mms::MmsServiceCodec::encode_type_specification(value.type);
@@ -1402,12 +1441,14 @@ void rebuild_manifest_root_values(ManifestModel& model) {
         model.values.push_back(std::move(value));
         model.value_indices.emplace(key, value_index);
         auto& stored = model.values.back();
-        model.objects.push_back(mms::MmsStaticObjectEntry{
+        auto object = mms::MmsStaticObjectEntry{
             stored.domain,
             stored.item,
             stored.type_specification,
             read_manifest_value,
-            &stored});
+            &stored};
+        object.declaration_order = stored.source_order;
+        model.objects.push_back(object);
         return true;
     };
 
@@ -2427,6 +2468,9 @@ void serve_connection(
                 << " accepted="
                 << (result.status == mms::MmsStaticServerSessionStatus::application_rejected
                         ? "false" : "true")
+                << " rx_bytes=" << result.bytes_received
+                << " tx_bytes=" << result.bytes_sent
+                << " pending_tx=" << session.pending_output_bytes()
                 << '\n';
         }
         if (result.terminal()) {
@@ -2633,8 +2677,15 @@ struct WorkerSlot final {
 };
 
 [[nodiscard]] WorkerSlot* available_worker(std::vector<WorkerSlot>& workers) {
+    // Prefer never-used/reaped slots before joining a just-completed worker.
+    // On Windows a worker can have emitted client_closed while its thread is
+    // still finishing transport/model teardown; joining that slot directly in
+    // the accept loop can transiently stop new associations even though other
+    // worker capacity is available.
     for (auto& worker : workers) {
         if (!worker.thread.joinable()) return &worker;
+    }
+    for (auto& worker : workers) {
         if (worker.done != nullptr && worker.done->load(std::memory_order_acquire)) {
             worker.thread.join();
             worker.done.reset();

@@ -602,6 +602,7 @@ struct SyntheticMeasureResult final {
 struct SyntheticChild final {
     std::string_view prefix{};
     const MmsStaticObjectEntry* exact{};
+    std::size_t declaration_order{std::numeric_limits<std::size_t>::max()};
     bool found{};
 };
 
@@ -664,6 +665,32 @@ struct SyntheticChildRank final {
     return left < right;
 }
 
+[[nodiscard]] bool use_declaration_order(
+    const std::string_view prefix) noexcept {
+    // SCL declaration order is positional inside constructed Data Objects/Data
+    // Attributes (LN$FC$DO...). LN roots and FC namespaces are discovery
+    // namespaces rather than positional values.
+    return static_cast<std::size_t>(
+        std::count(
+            prefix.begin(),
+            prefix.end(),
+            static_cast<char>(0x24))) >= 2U;
+}
+
+[[nodiscard]] bool declaration_order_less(
+    const std::size_t left_order,
+    const std::string_view left,
+    const std::size_t right_order,
+    const std::string_view right) noexcept {
+    constexpr auto unspecified = std::numeric_limits<std::size_t>::max();
+    if (left_order != unspecified || right_order != unspecified) {
+        if (left_order == unspecified) return false;
+        if (right_order == unspecified) return true;
+        if (left_order != right_order) return left_order < right_order;
+    }
+    return left < right;
+}
+
 [[nodiscard]] SyntheticChild next_synthetic_child(
     const MmsStaticObjectTable& objects,
     const std::string_view domain,
@@ -671,22 +698,64 @@ struct SyntheticChildRank final {
     const std::string_view after,
     const bool have_after) noexcept {
     SyntheticChild result;
+    const bool semantic_order = !semantic_child_order(prefix).empty();
+    const bool declaration_order = !semantic_order && use_declaration_order(prefix);
+
+    auto after_order = std::numeric_limits<std::size_t>::max();
+    if (have_after && declaration_order) {
+        for (const auto& candidate : objects.objects()) {
+            if (candidate.domain != domain || !is_descendant_item(candidate.item, prefix)) {
+                continue;
+            }
+            const auto child = immediate_child_prefix(candidate.item, prefix);
+            if (child == after) {
+                after_order = std::min(after_order, candidate.declaration_order);
+            }
+        }
+    }
+
     for (const auto& candidate : objects.objects()) {
         if (candidate.domain != domain || !is_descendant_item(candidate.item, prefix)) {
             continue;
         }
         const auto child = immediate_child_prefix(candidate.item, prefix);
-        if (child.empty() ||
-            (have_after && !synthetic_child_less(prefix, after, child))) {
+        if (child.empty() || (have_after && child == after)) continue;
+
+        if (have_after) {
+            if (semantic_order) {
+                if (!synthetic_child_less(prefix, after, child)) continue;
+            } else if (declaration_order &&
+                after_order != std::numeric_limits<std::size_t>::max() &&
+                candidate.declaration_order != std::numeric_limits<std::size_t>::max()) {
+                if (candidate.declaration_order <= after_order) continue;
+            } else if (!synthetic_child_less(prefix, after, child)) {
+                continue;
+            }
+        }
+
+        if (result.found && child == result.prefix) {
+            result.declaration_order =
+                std::min(result.declaration_order, candidate.declaration_order);
+            if (candidate.item == child) result.exact = &candidate;
             continue;
         }
-        if (!result.found || synthetic_child_less(prefix, child, result.prefix)) {
-            result.found = true;
-            result.prefix = child;
-            result.exact = candidate.item == child ? &candidate : nullptr;
-            continue;
-        }
-        if (child == result.prefix && candidate.item == child) result.exact = &candidate;
+
+        const bool better = !result.found ||
+            (semantic_order
+                ? synthetic_child_less(prefix, child, result.prefix)
+                : declaration_order
+                    ? declaration_order_less(
+                        candidate.declaration_order,
+                        child,
+                        result.declaration_order,
+                        result.prefix)
+                    : synthetic_child_less(prefix, child, result.prefix));
+        if (!better) continue;
+
+        result.found = true;
+        result.prefix = child;
+        result.exact = candidate.item == child ? &candidate : nullptr;
+        result.declaration_order = candidate.declaration_order;
     }
     return result;
 }
@@ -1024,12 +1093,34 @@ struct SyntheticTypeEncodeResult final {
     }
 
     const auto* exact = objects.find(request.name);
+    const auto request_item = as_text(request.name.item);
+
+    // Exact non-LN objects carry the authoritative positional MMS
+    // TypeSpecification. Read uses the same exact object, so GVAA must describe
+    // its Data with identical component order. Re-synthesizing ordinary
+    // descendants can reorder IEC 61850 structures such as {stVal,q,t}.
+    //
+    // Logical Node roots are the exception: their static exact object can
+    // predate per-association RP/BR/SG/CO objects, so roots still need final
+    // table synthesis below.
+    if (exact != nullptr &&
+        request.name.kind == MmsObjectNameViewKind::domain_specific &&
+        request_item.find(static_cast<char>(0x24)) != std::string_view::npos) {
+        return make_encoded(
+            confirmed,
+            MmsServiceSpanCodec::encode_variable_access_attributes_response_into(
+                confirmed.invoke_id,
+                exact->mms_deletable,
+                exact->type_specification,
+                response));
+    }
+
     if (request.name.kind == MmsObjectNameViewKind::domain_specific &&
         !request.name.domain.empty() && !request.name.item.empty()) {
         // A Logical Node/root object may have been encoded before dynamic
         // service objects (RP/BR/SG/CO aliases) were composed into the final
         // per-association table. Build GVAA from that final table first whenever
-        // descendants exist so discovery, GVAA and Read share one hierarchy.
+        // descendants exist so discovery sees the complete final hierarchy.
         const auto synthetic = encode_synthetic_type_subtree(
             objects,
             as_text(request.name.domain),
