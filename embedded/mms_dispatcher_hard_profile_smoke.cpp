@@ -497,10 +497,13 @@ int main() {
     // {stVal,q,t} into {q,stVal,t}, while Read still returns the exact value.
     mms::MmsTypeSpecification exact_sps_type;
     exact_sps_type.kind = mms::MmsTypeKind::structure;
-    exact_sps_type.children = {
-        mms::MmsTypeSpecification{mms::MmsTypeKind::boolean, "stVal"},
-        mms::MmsTypeSpecification{mms::MmsTypeKind::bit_string, "q"},
-        mms::MmsTypeSpecification{mms::MmsTypeKind::utc_time, "t"}};
+    exact_sps_type.children.resize(3U);
+    exact_sps_type.children[0].kind = mms::MmsTypeKind::boolean;
+    exact_sps_type.children[0].name = "stVal";
+    exact_sps_type.children[1].kind = mms::MmsTypeKind::bit_string;
+    exact_sps_type.children[1].name = "q";
+    exact_sps_type.children[2].kind = mms::MmsTypeKind::utc_time;
+    exact_sps_type.children[2].name = "t";
     const auto exact_sps_type_bytes =
         mms::MmsServiceCodec::encode_type_specification(exact_sps_type);
     constexpr std::array<std::uint8_t, 2U> kBitStringType{0x84U, 0x00U};
