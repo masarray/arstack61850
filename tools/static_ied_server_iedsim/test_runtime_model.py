@@ -270,7 +270,7 @@ def main() -> int:
                     f"stderr={dpc.stderr!r}"
                 )
 
-            first_read_signal = root / "first-read.signal"
+            first_read_signal = Path(directory) / "first-read.signal"
             probe = subprocess.Popen(
                 [
                     args.read_probe,
