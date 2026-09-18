@@ -211,39 +211,38 @@ namespace {
     const MmsConfirmedPduView& confirmed,
     const MmsGetNameListRequestView& request,
     const std::span<std::uint8_t> response) noexcept {
+    // The host IED-simulator directory intentionally preserves SCL/IEDScout
+    // declaration order instead of lexical item order.  Continuation therefore
+    // follows the exact emitted sequence rather than lower_bound() semantics.
     const auto domain = as_text(request.domain_id);
-    const auto first = std::lower_bound(
-        directory.begin(), directory.end(), domain,
-        [](const MmsStaticDirectoryEntry& entry, const std::string_view value) noexcept {
-            return entry.domain < value;
-        });
-    const auto last = std::upper_bound(
-        first, directory.end(), domain,
-        [](const std::string_view value, const MmsStaticDirectoryEntry& entry) noexcept {
-            return value < entry.domain;
-        });
-
-    auto cursor = first;
-    if (!request.continue_after.empty()) {
-        const auto continuation = as_text(request.continue_after);
-        const auto found = std::lower_bound(
-            first, last, continuation,
-            [](const MmsStaticDirectoryEntry& entry, const std::string_view value) noexcept {
-                return entry.item < value;
-            });
-        if (found == last || found->item != continuation) {
-            return make_status(MmsStaticDispatchStatus::object_not_found, confirmed);
-        }
-        cursor = found + 1;
-    }
+    const auto continuation = as_text(request.continue_after);
+    bool emit = continuation.empty();
+    bool continuation_found = emit;
+    bool more_follows = false;
 
     std::array<std::string_view, MmsServiceSpanCodec::maximum_identifiers> page{};
     std::size_t page_count{};
-    while (cursor != last && page_count < policy.maximum_names_per_response) {
-        page[page_count++] = cursor->item;
-        ++cursor;
+    for (const auto& entry : directory) {
+        if (entry.domain != domain) continue;
+        if (!emit) {
+            if (entry.item == continuation) {
+                continuation_found = true;
+                emit = true;
+            }
+            continue;
+        }
+        if (!continuation.empty() && entry.item == continuation) continue;
+        if (page_count < policy.maximum_names_per_response) {
+            page[page_count++] = entry.item;
+            continue;
+        }
+        more_follows = true;
+        break;
     }
-    const bool more_follows = cursor != last;
+
+    if (!continuation_found) {
+        return make_status(MmsStaticDispatchStatus::object_not_found, confirmed);
+    }
     if (page_count == 0U) {
         const std::span<const std::string_view> empty;
         return make_encoded(
@@ -1100,12 +1099,21 @@ struct SyntheticTypeEncodeResult final {
     // its Data with identical component order. Re-synthesizing ordinary
     // descendants can reorder IEC 61850 structures such as {stVal,q,t}.
     //
-    // Logical Node roots are the exception: their static exact object can
-    // predate per-association RP/BR/SG/CO objects, so roots still need final
-    // table synthesis below.
+    // Non-LLN0 Logical Node roots are also precompiled from the SCL declaration
+    // tree. The simulator patches configured control-service contracts into
+    // those roots before exposing the object table, so rebuilding a large CSWI/
+    // XSWI tree for every GVAA request is both unnecessary and pathological.
+    // IEDScout's golden CSWI1 GVAA is a bounded ~1.5 kB response; serving the
+    // precompiled root keeps that behavior deterministic. LLN0 remains the
+    // exception because RP/BR/SG service objects are composed per association.
+    const bool exact_logical_node_root =
+        exact != nullptr &&
+        request.name.kind == MmsObjectNameViewKind::domain_specific &&
+        request_item.find(static_cast<char>(0x24)) == std::string_view::npos;
     if (exact != nullptr &&
         request.name.kind == MmsObjectNameViewKind::domain_specific &&
-        request_item.find(static_cast<char>(0x24)) != std::string_view::npos) {
+        (request_item.find(static_cast<char>(0x24)) != std::string_view::npos ||
+         (exact_logical_node_root && request_item != "LLN0"))) {
         return make_encoded(
             confirmed,
             MmsServiceSpanCodec::encode_variable_access_attributes_response_into(
