@@ -35,7 +35,11 @@ public:
         MmsTypeSpecification result;
         result.name = std::move(name);
 
-        if (normalized == "QUALITY" || raw == "QUALITY") {
+        // The SCL bType is the wire authority. The normalized/display type is
+        // UI metadata and may only be used as a fallback when bType is absent.
+        // This prevents names such as orCat/orIdent/sboTimeout/Test from being
+        // promoted to UTC-Time by an accidental display classifier.
+        if (raw == "QUALITY") {
             result.kind = MmsTypeKind::bit_string;
             result.size = 13U;
             return result;
@@ -55,7 +59,7 @@ public:
             result.size = 10U;
             return result;
         }
-        if (normalized == "TIMESTAMP" || raw == "TIMESTAMP") {
+        if (raw == "TIMESTAMP") {
             result.kind = MmsTypeKind::utc_time;
             return result;
         }
@@ -64,12 +68,14 @@ public:
             result.size = 6U;
             return result;
         }
-        if (normalized == "ENUMERATION" || raw == "ENUM") {
+        if (raw == "ENUM") {
+            // OMICRON IEDScout advertises IEC 61850 Enum leaves as INTEGER(8)
+            // for the captured SIPROTEC model (Mod/Beh/Health/ctlModel).
             result.kind = MmsTypeKind::integer;
-            result.size = 32U;
+            result.size = 8U;
             return result;
         }
-        if (normalized == "BOOLEAN" || raw == "BOOLEAN" || raw == "BOOL") {
+        if (raw == "BOOLEAN" || raw == "BOOL") {
             result.kind = MmsTypeKind::boolean;
             return result;
         }
@@ -98,6 +104,7 @@ public:
         if (starts_with(raw, "VISSTRING")) {
             result.kind = MmsTypeKind::visible_string;
             result.size = suffix_width(raw, "VISSTRING", 255U);
+            result.variable_length = true;
             return result;
         }
         if (starts_with(raw, "UNICODE") || starts_with(raw, "MMSSTRING")) {
@@ -105,24 +112,46 @@ public:
             result.size = starts_with(raw, "UNICODE")
                 ? suffix_width(raw, "UNICODE", 255U)
                 : suffix_width(raw, "MMSSTRING", 255U);
+            result.variable_length = true;
             return result;
         }
         if (starts_with(raw, "OCTET")) {
             result.kind = MmsTypeKind::octet_string;
             result.size = suffix_width(raw, "OCTET", 64U);
+            result.variable_length = true;
             return result;
         }
         if (raw == "OBJREF") {
             result.kind = MmsTypeKind::visible_string;
             result.size = 129U;
+            result.variable_length = true;
             return result;
         }
         if (raw == "CURRENCY") {
             result.kind = MmsTypeKind::visible_string;
             result.size = 3U;
+            result.variable_length = true;
             return result;
         }
 
+        if (normalized == "QUALITY") {
+            result.kind = MmsTypeKind::bit_string;
+            result.size = 13U;
+            return result;
+        }
+        if (normalized == "TIMESTAMP") {
+            result.kind = MmsTypeKind::utc_time;
+            return result;
+        }
+        if (normalized == "ENUMERATION") {
+            result.kind = MmsTypeKind::integer;
+            result.size = 8U;
+            return result;
+        }
+        if (normalized == "BOOLEAN") {
+            result.kind = MmsTypeKind::boolean;
+            return result;
+        }
         if (normalized == "NUMBER") {
             result.kind = MmsTypeKind::integer;
             result.size = 32U;
@@ -131,6 +160,7 @@ public:
 
         result.kind = MmsTypeKind::visible_string;
         result.size = 255U;
+        result.variable_length = true;
         return result;
     }
 
