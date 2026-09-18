@@ -150,6 +150,8 @@ def main() -> int:
                 str(model),
                 "--max-connections",
                 "32",
+                "--max-active",
+                "32",
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
