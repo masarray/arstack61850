@@ -28,6 +28,17 @@ qt_add_executable(arstack_ied_simulator
     resources.qrc
 )
 
+if(WIN32)
+    set(ARSTACK_APP_ICON "${CMAKE_CURRENT_LIST_DIR}/../../assets/favicon.ico")
+    configure_file(
+        "${CMAKE_CURRENT_LIST_DIR}/packaging/windows/arstack_ied_simulator.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/arstack_ied_simulator.rc"
+        @ONLY)
+    target_sources(
+        arstack_ied_simulator
+        PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/arstack_ied_simulator.rc")
+endif()
+
 qt_add_qml_module(arstack_ied_simulator
     URI ARStack.IedSimulator
     VERSION 1.0
