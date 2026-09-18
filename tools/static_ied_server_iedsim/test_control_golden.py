@@ -44,7 +44,10 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="arstack-iedsim-control-") as directory:
         root = Path(directory)
         model = root / "control.model"
-        model.write_text(manifest(), encoding="utf-8")
+        model_text = manifest()
+        if "CTL\tTESTIEDLD0\tCSWI1\tPos\tDPC\t4" not in model_text:
+            raise RuntimeError("golden fixture lost engineering CDC=DPC control metadata")
+        model.write_text(model_text, encoding="utf-8")
         stdout_path = root / "server.stdout.log"
         stderr_path = root / "server.stderr.log"
 
@@ -112,7 +115,8 @@ def main() -> int:
                     )
                 required = [
                     "ctlModel=sbo-enhanced",
-                    "cdc=DPC",
+                    "DISCOVERY_EVIDENCE Oper=structure(ctlVal:boolean,origin:structure(orCat:integer,orIdent:octet-string),ctlNum:unsigned,T:utc-time,Test:boolean,Check:bit-string)",
+                    "DISCOVERY_EVIDENCE SBOw=structure(ctlVal:boolean,origin:structure(orCat:integer,orIdent:octet-string),ctlNum:unsigned,T:utc-time,Test:boolean,Check:bit-string)",
                     "STATUS_BEFORE 0x0640",
                     "CONTROL_RESULT action=operate completion=positive-termination "
                     "accepted=true termination=true",
