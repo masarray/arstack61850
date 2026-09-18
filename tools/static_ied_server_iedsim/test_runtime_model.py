@@ -167,8 +167,18 @@ def main() -> int:
             if discovery.returncode != 0:
                 raise RuntimeError(f"discovery failed: {discovery.stderr}\n{discovery.stdout}")
             document = json.loads(discovery.stdout)
-            if document.get("coverage", {}).get("dataSetCount") != 2:
+            coverage = document.get("coverage", {})
+            if coverage.get("dataSetCount") != 2:
                 raise RuntimeError(f"static DataSets missing: {discovery.stdout}")
+            if (
+                coverage.get("reportControlCount") != 2
+                or coverage.get("reportControlBindingNotReadCount") != 0
+                or coverage.get("reportControlBindingReadFailedCount") != 0
+            ):
+                raise RuntimeError(
+                    "LN-root synthetic discovery lost configured URCB hierarchy: "
+                    f"{coverage}"
+                )
             data_sets = document.get("dataSets", [])
             member_counts = sorted(data_set.get("memberCount") for data_set in data_sets)
             if len(data_sets) != 2 or member_counts != [22, 36]:
@@ -350,7 +360,8 @@ def main() -> int:
             f"{server_stdout}\n{server_stderr}"
         )
     print(
-        "IEDSIM_RUNTIME_MODEL_PASS datasets=2 digitalMembers=36 analogMembers=22 "
+        "IEDSIM_RUNTIME_MODEL_PASS datasets=2 reportControls=2 rcbBindingsComplete=true "
+        "digitalMembers=36 analogMembers=22 "
         "digitalTypeDataOrder=structure(boolean,bit-string,utc-time) "
         "analogTypeDataOrder=structure(structure(integer,floating-point),bit-string,utc-time) "
         "urcbGiDigital=36 urcbGiAnalog=22 reportBackedTotal=58 "
