@@ -205,6 +205,8 @@ int main(const int argc, char** argv) {
             throw std::runtime_error("GI InformationReport contains no process values.");
         }
         const auto first_value_shape = data_shape(*frame.values.front().value);
+        const auto first_value_display =
+            mms::MmsDataCodec::to_display_string(*frame.values.front().value);
         const auto uniform_value_shape = std::all_of(
             frame.values.begin(), frame.values.end(),
             [&first_value_shape](const mms::MmsReportValue& value) {
@@ -223,6 +225,7 @@ int main(const int argc, char** argv) {
                   << " access_results=" << report.items.size()
                   << " report_values=" << frame.values.size()
                   << " first_value_shape=" << first_value_shape
+                  << " first_value=" << first_value_display
                   << " uniform_value_shape=true" << '\n';
         return 0;
     } catch (const std::exception& exception) {
