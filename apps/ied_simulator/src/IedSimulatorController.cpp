@@ -705,8 +705,8 @@ bool IedSimulatorController::writeModelManifest() {
         const auto key = domain + QLatin1Char('\n') + logicalNode + QLatin1Char('\n') + dataObject;
         if (emittedControls.contains(key)) continue;
         emittedControls.insert(key);
-        manifest += "CTL\t" + manifestField(domain) + "\t" + manifestField(logicalNode) +
-            "\t" + manifestField(dataObject) + "\t" + manifestField(cdc) + "\t" +
+        manifest += "CTL	" + manifestField(domain) + "	" + manifestField(logicalNode) +
+            "	" + manifestField(dataObject) + "	" + manifestField(cdc) + "	" +
             QByteArray::number(*model) + "\n";
     }
 
