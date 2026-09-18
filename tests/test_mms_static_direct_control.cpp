@@ -41,15 +41,19 @@ struct TestClock final {
     const std::uint8_t ctl_num,
     const bool test,
     const std::uint8_t check_bits = 0U,
-    const std::uint8_t origin_category = 2U) {
+    const std::uint8_t origin_category = 2U,
+    const bool integer_origin_category = false) {
     constexpr std::array<std::uint8_t, 3U> origin_id{'H', 'M', 'I'};
     constexpr std::array<std::uint8_t, 1U> no_check{0U};
     const std::array<std::uint8_t, 1U> check_byte{check_bits};
 
+    const auto encoded_origin_category = integer_origin_category
+        ? MmsDataValue::integer(origin_category)
+        : MmsDataValue::unsigned_integer(origin_category);
     auto oper = MmsDataValue::structure({
         MmsDataValue::boolean(value),
         MmsDataValue::structure({
-            MmsDataValue::unsigned_integer(origin_category),
+            encoded_origin_category,
             MmsDataValue::octet_string(origin_id),
         }),
         MmsDataValue::unsigned_integer(ctl_num),
@@ -134,6 +138,17 @@ void valid_oper_updates_live_state() {
     CHECK(!state.last_test);
     CHECK(state.accepted_operations == 1U);
     CHECK(state.rejected_operations == 0U);
+}
+
+void golden_iedscout_integer_origin_and_checks_decode() {
+    const auto bytes = make_oper(true, 41U, false, 0xC0U, 2U, true);
+    MmsStaticDirectBooleanOperate decoded;
+    CHECK(try_decode_static_direct_boolean_operate(bytes, decoded));
+    CHECK(decoded.control_value);
+    CHECK(decoded.origin_category == 2U);
+    CHECK(decoded.control_number == 41U);
+    CHECK(decoded.synchro_check);
+    CHECK(decoded.interlock_check);
 }
 
 void test_oper_is_non_mutating() {
@@ -352,6 +367,7 @@ void read_callbacks_match_mms_types() {
 int main() {
     try {
         valid_oper_updates_live_state();
+        golden_iedscout_integer_origin_and_checks_decode();
         test_oper_is_non_mutating();
         unsupported_check_bits_fail_closed();
         invalid_shape_and_values_are_rejected();

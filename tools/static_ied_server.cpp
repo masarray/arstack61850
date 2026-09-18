@@ -701,7 +701,7 @@ struct EncodedValue final {
     fields.reserve(include_check ? 6U : 5U);
     fields.push_back(control_scalar(mms::MmsTypeKind::boolean, "ctlVal"));
     fields.push_back(control_structure("origin", {
-        control_scalar(mms::MmsTypeKind::unsigned_integer, "orCat"),
+        control_scalar(mms::MmsTypeKind::integer, "orCat"),
         control_scalar(mms::MmsTypeKind::octet_string, "orIdent", 64U),
     }));
     fields.push_back(control_scalar(mms::MmsTypeKind::unsigned_integer, "ctlNum"));
@@ -1338,16 +1338,20 @@ void rebuild_manifest_root_values(ManifestModel& model) {
         model.objects.push_back(object);
     }
 
-    // Compile configured SPC command Data Objects into virtual IEC 61850
+    // Compile configured SPC/DPC command Data Objects into virtual IEC 61850
     // control-service objects. Structural ST/CF leaves remain sourced from SCL;
     // CO$SBO/SBOw/Oper/Cancel are service objects owned by the server runtime.
+    // DPC process stVal remains DBPOS (2-bit BIT STRING); only the CO service
+    // ctlVal follows the IEDScout wire contract and is BOOLEAN Open/Close.
     const auto oper_type = direct_boolean_oper_type_specification();
     const auto sbow_type = direct_boolean_sbow_type_specification();
     const auto cancel_type = direct_boolean_cancel_type_specification();
     const auto sbo_type = sbo_reference_type_specification();
     std::set<std::pair<std::string, std::string>> unique_direct_controls;
     for (const auto& parsed : parsed_controls) {
-        if (parsed.control_model == 0U || parsed.control_model > 4U || parsed.cdc != "SPC") {
+        const bool spc = parsed.cdc == "SPC";
+        const bool dpc = parsed.cdc == "DPC";
+        if (parsed.control_model == 0U || parsed.control_model > 4U || (!spc && !dpc)) {
             ++model.omitted_direct_controls;
             continue;
         }
@@ -1364,14 +1368,25 @@ void rebuild_manifest_root_values(ManifestModel& model) {
         if (!unique_direct_controls.emplace(parsed.domain, oper_item).second) continue;
         const auto status = model.value_indices.find(object_key(parsed.domain, status_item));
         const auto ctl_model = model.value_indices.find(object_key(parsed.domain, ctl_model_item));
-        if (status == model.value_indices.end() || ctl_model == model.value_indices.end() ||
-            model.values[status->second].type.kind != mms::MmsTypeKind::boolean) {
+        if (status == model.value_indices.end() || ctl_model == model.value_indices.end()) {
             ++model.omitted_direct_controls;
             continue;
         }
-        const auto& encoded_status = model.values[status->second].encoded;
-        const auto initial = encoded_status.size() >= 3U && encoded_status[0] == 0x83U &&
-            encoded_status.back() != 0U;
+        const auto& status_value = model.values[status->second];
+        const bool supported_status_type =
+            (spc && status_value.type.kind == mms::MmsTypeKind::boolean) ||
+            (dpc && status_value.type.kind == mms::MmsTypeKind::bit_string &&
+             status_value.type.size.value_or(0U) == 2U);
+        if (!supported_status_type) {
+            ++model.omitted_direct_controls;
+            continue;
+        }
+        const bool initial = spc
+            ? (status_value.encoded.size() >= 3U &&
+               status_value.encoded[0] == 0x83U &&
+               status_value.encoded.back() != 0U)
+            : (status_value.text == "on" || status_value.text == "closed" ||
+               status_value.text == "2" || status_value.text == "true");
         ManifestDirectControlStorage control;
         control.domain = parsed.domain;
         control.logical_node = parsed.logical_node;
@@ -2028,6 +2043,7 @@ void serve_connection(
     std::vector<std::unique_ptr<BrcbAssociationRuntime>> brcb_runtimes;
     std::vector<mms::MmsStaticDirectBooleanControlState> direct_control_states;
     std::vector<mms::MmsStaticDirectBooleanControlBinding> direct_control_bindings;
+    std::vector<std::size_t> direct_control_accept_counts;
     std::vector<mms::MmsStaticObjectEntry> direct_control_objects;
     std::unique_ptr<mms::MmsStaticObjectTable> direct_control_table;
     std::vector<std::unique_ptr<SettingGroupAssociationRuntime>> setting_group_runtimes;
@@ -2041,6 +2057,7 @@ void serve_connection(
     if (manifest_model != nullptr && !manifest_model->direct_control_storage.empty()) {
         direct_control_states.resize(manifest_model->direct_control_storage.size());
         direct_control_bindings.resize(manifest_model->direct_control_storage.size());
+        direct_control_accept_counts.resize(manifest_model->direct_control_storage.size());
         direct_control_objects.assign(object_table.objects().begin(), object_table.objects().end());
         static constexpr std::array<std::uint8_t, 2U> unsigned_type{0x86U, 0x00U};
 
@@ -2057,17 +2074,26 @@ void serve_connection(
             binding.sbo_timeout_ms = 10'000U;
             binding.now_ms = report_now_ms;
             binding.now_context = nullptr;
+            // Golden IEDScout accepts ARSAS Check=0xC0 for this simulator
+            // control path (synchro + interlock requested).
+            binding.policy.allow_synchro_check = true;
+            binding.policy.allow_interlock_check = true;
 
             bool status_found{};
             bool ctl_model_found{};
             for (auto& object : direct_control_objects) {
                 if (object.domain != control.domain) continue;
                 if (object.item == control.status_item) {
-                    object.read = read_atomic_boolean;
-                    object.context = &control.shared_state->value;
-                    object.write = nullptr;
-                    object.write_context = nullptr;
-                    object.contextual_write = nullptr;
+                    if (control.cdc == "SPC") {
+                        object.read = read_atomic_boolean;
+                        object.context = &control.shared_state->value;
+                        object.write = nullptr;
+                        object.write_context = nullptr;
+                        object.contextual_write = nullptr;
+                    }
+                    // DPC keeps the SCL-derived DBPOS read callback/type. Oper
+                    // synchronizes its ManifestValue below so Read and reports
+                    // both expose the correct 2-bit process state.
                     status_found = true;
                 } else if (object.item == control.ctl_model_item) {
                     object.type_specification = std::span<const std::uint8_t>{unsigned_type};
@@ -2500,20 +2526,30 @@ void serve_connection(
                 try {
                     const auto origin = std::span<const std::uint8_t>{
                         command.origin_identifier.data(), command.origin_identifier_size};
-                    auto last_appl_error = mms::MmsDataValue::structure({
-                        mms::MmsDataValue::visible_string(control.selection_reference),
-                        mms::MmsDataValue::integer(0),
+                    mms::Iec61850UtcTime timestamp;
+                    if (!mms::Iec61850UtcTime::try_from_bytes(
+                            std::span<const std::uint8_t>{command.timestamp}, timestamp)) {
+                        throw std::runtime_error("Stored control timestamp is not valid UTC-Time.");
+                    }
+                    std::array<std::uint8_t, 1U> check_bits{
+                        static_cast<std::uint8_t>(
+                            (command.synchro_check ? 0x80U : 0U) |
+                            (command.interlock_check ? 0x40U : 0U))};
+                    auto command_echo = mms::MmsDataValue::structure({
+                        mms::MmsDataValue::boolean(command.control_value),
                         mms::MmsDataValue::structure({
-                            mms::MmsDataValue::unsigned_integer(command.origin_category),
+                            mms::MmsDataValue::integer(command.origin_category),
                             mms::MmsDataValue::octet_string(origin),
                         }),
                         mms::MmsDataValue::unsigned_integer(command.control_number),
-                        mms::MmsDataValue::integer(25),
+                        mms::MmsDataValue::utc_time(timestamp),
+                        mms::MmsDataValue::boolean(command.test),
+                        mms::MmsDataValue::bit_string(6U, check_bits),
                     });
                     mms::MmsInformationReport report;
                     report.variable_references.push_back(
                         mms::MmsObjectName::domain_specific(control.domain, control.oper_item));
-                    report.items.push_back({0U, std::move(last_appl_error), std::nullopt});
+                    report.items.push_back({0U, std::move(command_echo), std::nullopt});
                     const auto p_data = mms::MmsInformationReportCodec::encode_p_data(
                         report, runtime.mms_presentation_context_id());
                     const auto cotp = ar::iec61850::osi::CotpFrameCodec::encode_data(p_data);
@@ -2544,6 +2580,65 @@ void serve_connection(
                 break;
             }
         }
+        // Match the IEDScout enhanced-control wire lifecycle: positive Oper
+        // response first, then positive CommandTermination, then commit process
+        // state and notify RCB feedback. Direct-Normal controls have no pending
+        // termination, so they still commit in this same loop iteration.
+        if (manifest_model != nullptr) {
+            for (std::size_t index = 0U; index < direct_control_bindings.size(); ++index) {
+                auto& binding = direct_control_bindings[index];
+                if (binding.state == nullptr ||
+                    index >= direct_control_accept_counts.size() ||
+                    index >= manifest_model->direct_control_storage.size()) {
+                    continue;
+                }
+                if (binding.state->accepted_operations <= direct_control_accept_counts[index]) {
+                    continue;
+                }
+                // Enhanced controls must expose positive CommandTermination before
+                // committing process feedback. While the Oper WriteResponse is
+                // still draining, pending_termination remains true and the status
+                // transition is intentionally deferred to the next server loop.
+                if (binding.state->pending_termination) {
+                    continue;
+                }
+                direct_control_accept_counts[index] = binding.state->accepted_operations;
+                if (binding.state->last_test) continue;
+
+                const auto& control = manifest_model->direct_control_storage[index];
+                const auto found = manifest_model->value_indices.find(
+                    object_key(control.domain, control.status_item));
+                if (found == manifest_model->value_indices.end()) continue;
+                auto& status = manifest_model->values[found->second];
+                const auto next_text = control.cdc == "DPC"
+                    ? (binding.state->value != 0U ? std::string{"on"} : std::string{"off"})
+                    : (binding.state->value != 0U ? std::string{"true"} : std::string{"false"});
+                if (status.text != next_text) {
+                    status.text = next_text;
+                    status.data = mms::MmsSimulatorManifestCodec::data(
+                        status.type, status.raw_type, status.normalized_type, status.text);
+                    status.encoded = mms::MmsDataCodec::encode(*status.data);
+                    rebuild_manifest_root_values(*manifest_model);
+
+                    const std::array<std::size_t, 1U> changed{found->second};
+                    const auto changed_ms = monotonic_ms();
+                    if (urcb_runtime != nullptr) {
+                        notify_urcb_changes(
+                            *manifest_model, changed, *urcb_runtime, data_sets, changed_ms);
+                    }
+                    notify_brcb_changes(
+                        *manifest_model, changed, brcb_runtimes, changed_ms);
+                    std::osyncstream{std::cout}
+                        << "IEDSIM_EVENT kind=control_process_feedback association="
+                        << association_id << " object=" << control.selection_reference
+                        << " value=" << next_text
+                        << " ctlNum="
+                        << static_cast<unsigned>(binding.state->last_control_number)
+                        << '\n';
+                }
+            }
+        }
+
         if (!brcb_runtimes.empty()) {
             const auto binary_time = report_binary_time();
             for (auto& brcb : brcb_runtimes) {
