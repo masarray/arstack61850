@@ -48,10 +48,18 @@ namespace {
     asn1::BerTlvView or_cat;
     asn1::BerTlvView or_ident;
     if (!read_next(origin.value, offset, or_cat) ||
-        !context_tag(or_cat, 6, false)) {
+        !(context_tag(or_cat, 5, false) || context_tag(or_cat, 6, false))) {
         return false;
     }
-    const auto category_value = asn1::BerSpanReader::read_unsigned_integer(or_cat);
+    std::optional<std::uint64_t> category_value;
+    if (context_tag(or_cat, 5, false)) {
+        const auto signed_category = asn1::BerSpanReader::read_signed_integer(or_cat);
+        if (signed_category && *signed_category >= 0) {
+            category_value = static_cast<std::uint64_t>(*signed_category);
+        }
+    } else {
+        category_value = asn1::BerSpanReader::read_unsigned_integer(or_cat);
+    }
     if (!category_value || *category_value > 0xFFU) {
         return false;
     }
