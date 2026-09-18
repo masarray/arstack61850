@@ -74,9 +74,11 @@ public:
           policy_{policy},
           model_valid_{data_sets_.valid_against(objects_)} {}
 
-    // directory must be sorted by (domain,item), unique, and remain alive for
-    // the dispatcher lifetime. It is optional so embedded profiles retain the
-    // fixed-buffer scan path without host-side heap requirements.
+    // directory must be unique, grouped by domain in the desired wire order,
+    // and remain alive for the dispatcher lifetime. Host IED-simulator profiles
+    // preserve SCL/IEDScout declaration order; embedded profiles may omit the
+    // directory and retain the fixed-buffer scan path without host-side heap
+    // requirements.
     MmsStaticApplicationDispatcher(
         const MmsStaticObjectTable& objects,
         const MmsStaticDataSetTable& data_sets,
