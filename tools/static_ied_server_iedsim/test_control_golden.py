@@ -117,6 +117,7 @@ def main() -> int:
                     "ctlModel=sbo-enhanced",
                     "DISCOVERY_EVIDENCE Oper=structure(ctlVal:boolean,origin:structure(orCat:integer,orIdent:octet-string),ctlNum:unsigned,T:utc-time,Test:boolean,Check:bit-string)",
                     "DISCOVERY_EVIDENCE SBOw=structure(ctlVal:boolean,origin:structure(orCat:integer,orIdent:octet-string),ctlNum:unsigned,T:utc-time,Test:boolean,Check:bit-string)",
+                    "DISCOVERY_EVIDENCE Cancel=structure(ctlVal:boolean,origin:structure(orCat:integer,orIdent:octet-string),ctlNum:unsigned,T:utc-time,Test:boolean)",
                     "STATUS_BEFORE 0x0640",
                     "CONTROL_RESULT action=operate completion=positive-termination "
                     "accepted=true termination=true",
