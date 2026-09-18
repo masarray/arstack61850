@@ -194,6 +194,74 @@ void profile_builder_seeds_iec61850_semantic_initial_values() {
     CHECK(sps->initial_value == "false");
 }
 
+void profile_builder_does_not_suffix_match_timestamp_or_quality() {
+    using namespace ar::iec61850;
+
+    scl::SclDocument document;
+    document.source_name = "iedscout-type-regression.scd";
+    scl::SclIed ied;
+    ied.name = "IEDTYPE";
+    document.ieds.push_back(std::move(ied));
+
+    scl::SclLogicalNode cswi;
+    cswi.ied_name = "IEDTYPE";
+    cswi.ld_inst = "LD0";
+    cswi.ln_class = "CSWI";
+    cswi.ln_inst = "1";
+    cswi.name = "CSWI1";
+    document.logical_nodes.push_back(std::move(cswi));
+
+    const auto append = [&](std::string do_name,
+                            std::string da_name,
+                            std::string fc,
+                            std::string cdc,
+                            std::string basic_type,
+                            const bool quality = false,
+                            const bool timestamp = false) {
+        scl::SclDataSetEntry entry;
+        entry.ied_name = "IEDTYPE";
+        entry.ld_inst = "LD0";
+        entry.ln_class = "CSWI";
+        entry.ln_inst = "1";
+        entry.do_name = std::move(do_name);
+        entry.da_name = std::move(da_name);
+        entry.functional_constraint = std::move(fc);
+        entry.cdc = std::move(cdc);
+        entry.basic_type = std::move(basic_type);
+        entry.is_quality = quality;
+        entry.is_timestamp = timestamp;
+        document.model_entries.push_back(std::move(entry));
+    };
+
+    append("Pos", "origin.orCat", "ST", "DPC", "INT8");
+    append("Pos", "origin.orIdent", "ST", "DPC", "Octet64");
+    append("Pos", "sboTimeout", "CF", "DPC", "INT32U");
+    append("Pos", "operTimeout", "CF", "DPC", "INT32U");
+    append("LocSta", "Oper.Test", "CO", "SPC", "BOOLEAN");
+    append("Pos", "q", "ST", "DPC", "Quality", true, false);
+    append("Pos", "t", "ST", "DPC", "Timestamp", false, true);
+
+    simulation::IedSimulatorProfileFromSclOptions options;
+    options.ied_name = "IEDTYPE";
+    const auto built = simulation::IedSimulatorProfileBuilder::build(document, options);
+
+    const auto* or_cat = find_point(built.profile, "CSWI1$ST$Pos$origin$orCat");
+    const auto* or_ident = find_point(built.profile, "CSWI1$ST$Pos$origin$orIdent");
+    const auto* sbo_timeout = find_point(built.profile, "CSWI1$CF$Pos$sboTimeout");
+    const auto* oper_timeout = find_point(built.profile, "CSWI1$CF$Pos$operTimeout");
+    const auto* test = find_point(built.profile, "CSWI1$CO$LocSta$Oper$Test");
+    const auto* q = find_point(built.profile, "CSWI1$ST$Pos$q");
+    const auto* t = find_point(built.profile, "CSWI1$ST$Pos$t");
+
+    CHECK(or_cat != nullptr && or_cat->display_type == "Number");
+    CHECK(or_ident != nullptr && or_ident->display_type == "Octet64");
+    CHECK(sbo_timeout != nullptr && sbo_timeout->display_type == "Number");
+    CHECK(oper_timeout != nullptr && oper_timeout->display_type == "Number");
+    CHECK(test != nullptr && test->display_type == "Boolean");
+    CHECK(q != nullptr && q->display_type == "Quality");
+    CHECK(t != nullptr && t->display_type == "Timestamp");
+}
+
 void engine_supports_case_insensitive_manual_state_and_deterministic_steps() {
     using namespace ar::iec61850::simulation;
     auto profile = IedSimulatorProfile::create_default_feeder_profile();
@@ -254,9 +322,11 @@ int main() {
         std::cout << "[PASS] simulator runtime identity/filtering\n";
         profile_builder_seeds_iec61850_semantic_initial_values();
         std::cout << "[PASS] simulator IEC 61850 semantic initial values\n";
+        profile_builder_does_not_suffix_match_timestamp_or_quality();
+        std::cout << "[PASS] simulator exact q/t attribute classification\n";
         engine_supports_case_insensitive_manual_state_and_deterministic_steps();
         std::cout << "[PASS] simulator deterministic engine\n";
-        std::cout << "Passed 4/4 simulator runtime tests.\n";
+        std::cout << "Passed 5/5 simulator runtime tests.\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "[FAIL] " << error.what() << '\n';
