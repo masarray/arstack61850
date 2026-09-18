@@ -36,6 +36,7 @@ def manifest(revision: int, value: bool) -> str:
         f"ARSTACK_IED_MODEL\t2\t{revision}",
         "LN\tTESTIEDLD0\tLLN0",
         "LN\tTESTIEDLD0\tGGIO1",
+        "LN\tTESTIEDLD0\tXCBR1",
     ]
 
     for index in range(1, 37):
@@ -61,6 +62,14 @@ def manifest(revision: int, value: bool) -> str:
                 f"DS\tTESTIEDLD0\tLLN0$Analog\tTESTIEDLD0\tGGIO1$MX${object_name}",
             ]
         )
+
+    lines.extend(
+        [
+            "OBJ\tTESTIEDLD0\tXCBR1$ST$Pos$stVal\tDBPOS\tEnumeration\tintermediate-state",
+            "OBJ\tTESTIEDLD0\tXCBR1$ST$Pos$q\tQUALITY\tQuality\tgood",
+            "OBJ\tTESTIEDLD0\tXCBR1$ST$Pos$t\tTimestamp\tTimestamp\tunix-ms:1720000000000",
+        ]
+    )
 
     lines.append(
         "RCB\tTESTIEDLD0\tLLN0$RP$Structured01\t0\t"
@@ -140,7 +149,7 @@ def main() -> int:
                 "--model-manifest",
                 str(model),
                 "--max-connections",
-                "6",
+                "7",
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -235,6 +244,30 @@ def main() -> int:
                     f"expectedType={analog_type!r} expectedData={analog_shape!r} "
                     f"exit={analog.returncode} stdout={analog.stdout!r} "
                     f"stderr={analog.stderr!r}"
+                )
+
+            dpc = run_read_probe(
+                args.read_probe,
+                port,
+                "XCBR1$ST$Pos",
+                with_type=True,
+            )
+            dpc_signature = "structure(bit-string,bit-string,utc-time)"
+            dpc_type = f"type={dpc_signature}"
+            dpc_shape = f"shape={dpc_signature}"
+            if (
+                dpc.returncode != 0
+                or dpc_type not in dpc.stdout
+                or "type_bit_widths=2,13" not in dpc.stdout
+                or dpc_shape not in dpc.stdout
+                or "data_bit_widths=2,13" not in dpc.stdout
+            ):
+                raise RuntimeError(
+                    "DPC Pos stVal/q positional width mismatch: "
+                    f"expectedType={dpc_type!r} expectedTypeWidths='2,13' "
+                    f"expectedData={dpc_shape!r} expectedDataWidths='2,13' "
+                    f"exit={dpc.returncode} stdout={dpc.stdout!r} "
+                    f"stderr={dpc.stderr!r}"
                 )
 
             probe = subprocess.Popen(
@@ -367,6 +400,7 @@ def main() -> int:
         "digitalMembers=36 analogMembers=22 "
         "digitalTypeDataOrder=structure(boolean,bit-string,utc-time) "
         "analogTypeDataOrder=structure(structure(integer,floating-point),bit-string,utc-time) "
+        "dpcPosOrder=stVal2bit,q13bit,tUtc "
         "urcbGiDigital=36 urcbGiAnalog=22 reportBackedTotal=58 "
         "productionOptFlds=0x78,0x80 reasonAlignment=true "
         "digitalReportShape=structure(boolean,bit-string,utc-time) "
