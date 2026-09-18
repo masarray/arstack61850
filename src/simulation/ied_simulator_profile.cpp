@@ -191,6 +191,7 @@ namespace {
         return "Timestamp";
     }
     if (ascii_contains(entry.basic_type, "Bool")) return "Boolean";
+    if (ascii_equal(entry.basic_type, "Dbpos")) return "Enumeration";
     if (!entry.enum_type.empty() || ascii_contains(entry.basic_type, "Enum")) {
         return "Enumeration";
     }
@@ -310,6 +311,11 @@ struct InitialValueContext final {
     }
 
     if (normal_process_state(entry) && type == "Enumeration") return "1";
+    if (ascii_equal(entry.basic_type, "Dbpos") &&
+        ascii_equal(entry.da_name, "stVal") &&
+        (ascii_equal(entry.cdc, "DPC") || ascii_equal(entry.cdc, "DPS"))) {
+        return "intermediate-state";
+    }
     if (type == "Quality") return "good";
     if (type == "Timestamp") {
         return "unix-ms:" + std::to_string(context.simulation_start_unix_ms);
