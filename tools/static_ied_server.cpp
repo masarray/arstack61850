@@ -2120,6 +2120,17 @@ void serve_connection(
                 throw std::runtime_error("Configured command control is missing ST/CF backing objects.");
             }
 
+            const bool select_before_operate =
+                control.control_model == 2U || control.control_model == 4U;
+            const auto service_order = [&](const std::size_t offset) noexcept {
+                constexpr auto unspecified = std::numeric_limits<std::size_t>::max();
+                if (control.service_order == unspecified ||
+                    offset > unspecified - control.service_order) {
+                    return unspecified;
+                }
+                return control.service_order + offset;
+            };
+
             if (control.control_model == 2U) {
                 auto service = mms::MmsStaticObjectEntry{
                     control.domain,
@@ -2127,7 +2138,7 @@ void serve_connection(
                     control.sbo_type_specification,
                     mms::mms_static_sbo_normal_read,
                     &binding};
-                service.declaration_order = control.service_order;
+                service.declaration_order = service_order(0U);
                 direct_control_objects.push_back(service);
             } else if (control.control_model == 4U) {
                 auto service = mms::MmsStaticObjectEntry{
@@ -2140,7 +2151,7 @@ void serve_connection(
                     nullptr,
                     &binding,
                     mms::mms_static_boolean_write_sbow_contextual};
-                service.declaration_order = control.service_order;
+                service.declaration_order = service_order(0U);
                 direct_control_objects.push_back(service);
             }
 
@@ -2154,7 +2165,7 @@ void serve_connection(
                 nullptr,
                 &binding,
                 mms::mms_static_boolean_write_oper_contextual};
-            operate_service.declaration_order = control.service_order;
+            operate_service.declaration_order = service_order(select_before_operate ? 1U : 0U);
             direct_control_objects.push_back(operate_service);
 
             if (control.control_model == 2U || control.control_model == 4U) {
@@ -2168,7 +2179,7 @@ void serve_connection(
                     nullptr,
                     &binding,
                     mms::mms_static_boolean_write_cancel_contextual};
-                service.declaration_order = control.service_order;
+                service.declaration_order = service_order(2U);
                 direct_control_objects.push_back(service);
             }
         }
