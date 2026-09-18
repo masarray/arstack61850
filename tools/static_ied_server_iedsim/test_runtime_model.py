@@ -62,6 +62,11 @@ def manifest(revision: int, value: bool) -> str:
             ]
         )
 
+    lines.append(
+        "RCB\tTESTIEDLD0\tLLN0$RP$Structured01\t0\t"
+        "TESTIEDLD0/LLN0$RP$Structured01\tTESTIEDLD0\tLLN0$Digital\t"
+        "1\t0\t0\t124\t0\t0"
+    )
     lines.append("")
     return "\n".join(lines)
 
@@ -113,6 +118,7 @@ def main() -> int:
     parser.add_argument("--server", required=True)
     parser.add_argument("--discovery", required=True)
     parser.add_argument("--read-probe", required=True)
+    parser.add_argument("--urcb-probe", required=True)
     args = parser.parse_args()
 
     port = free_port()
@@ -250,6 +256,35 @@ def main() -> int:
                     + "\n".join(reads)
                     + f"\nstderr:\n{probe_stderr}"
                 )
+
+            report = subprocess.run(
+                [
+                    args.urcb_probe,
+                    "127.0.0.1",
+                    str(port),
+                    "--domain",
+                    "TESTIEDLD0",
+                    "--rcb",
+                    "LLN0$RP$Structured01",
+                    "--timeout-ms",
+                    "5000",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+                creationflags=creation_flags(),
+            )
+            report_shape = (
+                "report_values=36 "
+                "first_value_shape=structure(boolean,bit-string,utc-time)"
+            )
+            if report.returncode != 0 or report_shape not in report.stdout:
+                raise RuntimeError(
+                    "URCB GI structured DataSet report projection mismatch: "
+                    f"expected={report_shape!r} exit={report.returncode} "
+                    f"stdout={report.stdout!r} stderr={report.stderr!r}"
+                )
             server_stdout, server_stderr = server.communicate(timeout=8)
         except BaseException:
             server.kill()
@@ -269,6 +304,7 @@ def main() -> int:
         "IEDSIM_RUNTIME_MODEL_PASS datasets=2 digitalMembers=36 analogMembers=22 "
         "digitalTypeDataOrder=structure(boolean,bit-string,utc-time) "
         "analogTypeDataOrder=structure(structure(integer,floating-point),bit-string,utc-time) "
+        "urcbGiValues=36 urcbFirstValue=structure(boolean,bit-string,utc-time) "
         "valueTransition=false->true associationPreserved=true"
     )
     return 0
