@@ -2595,6 +2595,13 @@ void serve_connection(
                 if (binding.state->accepted_operations <= direct_control_accept_counts[index]) {
                     continue;
                 }
+                // Enhanced controls must expose positive CommandTermination before
+                // committing process feedback. While the Oper WriteResponse is
+                // still draining, pending_termination remains true and the status
+                // transition is intentionally deferred to the next server loop.
+                if (binding.state->pending_termination) {
+                    continue;
+                }
                 direct_control_accept_counts[index] = binding.state->accepted_operations;
                 if (binding.state->last_test) continue;
 
