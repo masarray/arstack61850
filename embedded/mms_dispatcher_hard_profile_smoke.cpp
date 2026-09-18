@@ -551,6 +551,52 @@ int main() {
         return 24;
     }
 
+    // Synthetic ancestors must follow SCL/source declaration order rather
+    // than table/alphabetic order. Deliberately store q before stVal, then
+    // declare stVal as the earlier source member.
+    std::array<mms::MmsStaticObjectEntry, 3U> synthetic_order_objects{
+        mms::MmsStaticObjectEntry{
+            "LDH", "GGIO2$ST$Ind1$q", kBitStringType,
+            read_boolean, &hierarchy_value, false},
+        mms::MmsStaticObjectEntry{
+            "LDH", "GGIO2$ST$Ind1$stVal", kBooleanType,
+            read_boolean, &hierarchy_value, false},
+        mms::MmsStaticObjectEntry{
+            "LDH", "GGIO2$ST$Ind1$t", kUtcTimeType,
+            read_boolean, &hierarchy_value, false}};
+    synthetic_order_objects[0].declaration_order = 1U;
+    synthetic_order_objects[1].declaration_order = 0U;
+    synthetic_order_objects[2].declaration_order = 2U;
+    const mms::MmsStaticObjectTable synthetic_order_table{synthetic_order_objects};
+    const mms::MmsStaticApplicationDispatcher synthetic_order_dispatcher{
+        synthetic_order_table, hierarchy_policy};
+    if (!synthetic_order_table.valid()) {
+        return 25;
+    }
+
+    mms::MmsVariableAccessAttributesRequest synthetic_order_request;
+    synthetic_order_request.invoke_id = 26U;
+    synthetic_order_request.name =
+        mms::MmsObjectName::domain_specific("LDH", "GGIO2$ST$Ind1");
+    const auto synthetic_order_request_pdu =
+        mms::MmsServiceCodec::encode_variable_access_attributes_request_pdu(
+            synthetic_order_request);
+    dispatched = synthetic_order_dispatcher.dispatch(
+        synthetic_order_request_pdu, response, workspace);
+    mms::MmsVariableAccessAttributesResponseView synthetic_order_response;
+    if (!dispatched.success() ||
+        !mms::MmsServiceSpanCodec::try_decode_variable_access_attributes_response(
+            std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
+            synthetic_order_response) ||
+        synthetic_order_response.invoke_id != 26U ||
+        synthetic_order_response.type_specification.size() != exact_sps_type_bytes.size() ||
+        !std::equal(
+            synthetic_order_response.type_specification.begin(),
+            synthetic_order_response.type_specification.end(),
+            exact_sps_type_bytes.begin())) {
+        return 26;
+    }
+
     for (std::uint32_t iteration = 0U; iteration < 20'000U; ++iteration) {
         relay_state = true;
         const auto read = dispatcher.dispatch(kReadRequest, response, workspace);
