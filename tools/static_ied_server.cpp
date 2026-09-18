@@ -676,11 +676,13 @@ struct EncodedValue final {
 [[nodiscard]] mms::MmsTypeSpecification control_scalar(
     const mms::MmsTypeKind kind,
     std::string name,
-    const std::optional<std::uint32_t> size = std::nullopt) {
+    const std::optional<std::uint32_t> size = std::nullopt,
+    const bool variable_length = false) {
     mms::MmsTypeSpecification result;
     result.kind = kind;
     result.name = std::move(name);
     result.size = size;
+    result.variable_length = variable_length;
     return result;
 }
 
@@ -701,10 +703,10 @@ struct EncodedValue final {
     fields.reserve(include_check ? 6U : 5U);
     fields.push_back(control_scalar(mms::MmsTypeKind::boolean, "ctlVal"));
     fields.push_back(control_structure("origin", {
-        control_scalar(mms::MmsTypeKind::integer, "orCat"),
-        control_scalar(mms::MmsTypeKind::octet_string, "orIdent", 64U),
+        control_scalar(mms::MmsTypeKind::integer, "orCat", 8U),
+        control_scalar(mms::MmsTypeKind::octet_string, "orIdent", 64U, true),
     }));
-    fields.push_back(control_scalar(mms::MmsTypeKind::unsigned_integer, "ctlNum"));
+    fields.push_back(control_scalar(mms::MmsTypeKind::unsigned_integer, "ctlNum", 8U));
     fields.push_back(control_scalar(mms::MmsTypeKind::utc_time, "T"));
     fields.push_back(control_scalar(mms::MmsTypeKind::boolean, "Test"));
     if (include_check) {
@@ -728,7 +730,7 @@ struct EncodedValue final {
 
 [[nodiscard]] std::vector<std::uint8_t> sbo_reference_type_specification() {
     return mms::MmsServiceCodec::encode_type_specification(
-        control_scalar(mms::MmsTypeKind::visible_string, "SBO", 129U));
+        control_scalar(mms::MmsTypeKind::visible_string, "SBO", 129U, true));
 }
 
 struct ConnectionBuffers final {
