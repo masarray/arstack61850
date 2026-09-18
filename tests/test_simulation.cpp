@@ -111,6 +111,89 @@ void profile_builder_remaps_runtime_identity_and_filters_qt() {
     CHECK(built.profile.report_control_blocks.front().mms_domain == "SIM01LD0");
 }
 
+void profile_builder_seeds_iec61850_semantic_initial_values() {
+    using namespace ar::iec61850;
+
+    scl::SclDocument document;
+    document.source_name = "semantic-initial-values.scd";
+
+    scl::SclIed ied;
+    ied.name = "IEDSEM";
+    ied.manufacturer = "AR";
+    document.ieds.push_back(std::move(ied));
+
+    scl::SclLogicalNode xcbr;
+    xcbr.ied_name = "IEDSEM";
+    xcbr.ld_inst = "LD0";
+    xcbr.ln_class = "XCBR";
+    xcbr.ln_inst = "1";
+    xcbr.name = "XCBR1";
+    document.logical_nodes.push_back(std::move(xcbr));
+
+    scl::SclLogicalNode ggio;
+    ggio.ied_name = "IEDSEM";
+    ggio.ld_inst = "LD0";
+    ggio.ln_class = "GGIO";
+    ggio.ln_inst = "1";
+    ggio.name = "GGIO1";
+    document.logical_nodes.push_back(std::move(ggio));
+
+    const auto append = [&](std::string ln_class,
+                            std::string ln_inst,
+                            std::string do_name,
+                            std::string da_name,
+                            std::string fc,
+                            std::string cdc,
+                            std::string basic_type,
+                            const bool quality = false,
+                            const bool timestamp = false) {
+        scl::SclDataSetEntry entry;
+        entry.ied_name = "IEDSEM";
+        entry.ld_inst = "LD0";
+        entry.ln_class = std::move(ln_class);
+        entry.ln_inst = std::move(ln_inst);
+        entry.do_name = std::move(do_name);
+        entry.da_name = std::move(da_name);
+        entry.functional_constraint = std::move(fc);
+        entry.cdc = std::move(cdc);
+        entry.basic_type = std::move(basic_type);
+        entry.is_quality = quality;
+        entry.is_timestamp = timestamp;
+        document.model_entries.push_back(std::move(entry));
+    };
+
+    append("XCBR", "1", "Pos", "stVal", "ST", "DPC", "Dbpos");
+    append("XCBR", "1", "Pos", "q", "ST", "DPC", "Quality", true, false);
+    append("XCBR", "1", "Pos", "t", "ST", "DPC", "Timestamp", false, true);
+    append("GGIO", "1", "Ind1", "stVal", "ST", "SPS", "BOOLEAN");
+
+    simulation::IedSimulatorProfileFromSclOptions options;
+    options.ied_name = "IEDSEM";
+    options.simulation_start_unix_ms = 1'720'000'000'000ULL;
+    const auto built = simulation::IedSimulatorProfileBuilder::build(document, options);
+
+    const auto* pos = find_point(built.profile, "XCBR1$ST$Pos$stVal");
+    CHECK(pos != nullptr);
+    CHECK(pos->basic_type == "Dbpos");
+    CHECK(pos->display_type == "Enumeration");
+    CHECK(pos->initial_value == "intermediate-state");
+
+    const auto* quality = find_point(built.profile, "XCBR1$ST$Pos$q");
+    CHECK(quality != nullptr);
+    CHECK(quality->display_type == "Quality");
+    CHECK(quality->initial_value == "good");
+
+    const auto* timestamp = find_point(built.profile, "XCBR1$ST$Pos$t");
+    CHECK(timestamp != nullptr);
+    CHECK(timestamp->display_type == "Timestamp");
+    CHECK(timestamp->initial_value == "unix-ms:1720000000000");
+
+    const auto* sps = find_point(built.profile, "GGIO1$ST$Ind1$stVal");
+    CHECK(sps != nullptr);
+    CHECK(sps->display_type == "Boolean");
+    CHECK(sps->initial_value == "false");
+}
+
 void engine_supports_case_insensitive_manual_state_and_deterministic_steps() {
     using namespace ar::iec61850::simulation;
     auto profile = IedSimulatorProfile::create_default_feeder_profile();
@@ -169,9 +252,11 @@ int main() {
         std::cout << "[PASS] simulator full structural profile\n";
         profile_builder_remaps_runtime_identity_and_filters_qt();
         std::cout << "[PASS] simulator runtime identity/filtering\n";
+        profile_builder_seeds_iec61850_semantic_initial_values();
+        std::cout << "[PASS] simulator IEC 61850 semantic initial values\n";
         engine_supports_case_insensitive_manual_state_and_deterministic_steps();
         std::cout << "[PASS] simulator deterministic engine\n";
-        std::cout << "Passed 3/3 simulator runtime tests.\n";
+        std::cout << "Passed 4/4 simulator runtime tests.\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "[FAIL] " << error.what() << '\n';
