@@ -263,8 +263,10 @@ def run_direct_normal_control_regression(
             f"exit={discovery.returncode} stdout={discovery.stdout!r} stderr={discovery.stderr!r}"
         )
 
-    # Prove fail-closed Check handling before the accepted command.
-    rejected = subprocess.run(
+    # IEDScout accepts ARSAS Check=0xC0 (synchro + interlock requested).
+    # Keep this compatibility explicit instead of treating valid Check bits as
+    # an object-value-invalid condition.
+    checked = subprocess.run(
         common
         + [
             "--action",
@@ -273,6 +275,10 @@ def run_direct_normal_control_regression(
             "on",
             "--value-kind",
             "bool",
+            "--interlock-check",
+            "on",
+            "--synchro-check",
+            "on",
             "--arm",
             "IEC61850-LAB-CONTROL",
         ],
@@ -283,14 +289,15 @@ def run_direct_normal_control_regression(
         creationflags=creation_flags(),
     )
     if (
-        rejected.returncode != 4
-        or "accepted=false" not in rejected.stdout
-        or "mmsFailure=11:object-value-invalid" not in rejected.stdout
-        or "STATUS_AFTER false" not in rejected.stdout
+        checked.returncode != 0
+        or "completion=accepted" not in checked.stdout
+        or "accepted=true" not in checked.stdout
+        or "STATUS_AFTER true" not in checked.stdout
+        or "NO_RETRY_EVIDENCE controlWrites=1" not in checked.stdout
     ):
         raise RuntimeError(
-            "Direct-Normal fail-closed check-bit regression failed: "
-            f"exit={rejected.returncode} stdout={rejected.stdout!r} stderr={rejected.stderr!r}"
+            "Direct-Normal IEDScout Check=0xC0 compatibility regression failed: "
+            f"exit={checked.returncode} stdout={checked.stdout!r} stderr={checked.stderr!r}"
         )
 
     accepted = subprocess.run(
@@ -333,7 +340,7 @@ def run_direct_normal_control_regression(
             "Direct-Normal process status did not persist for a second external association: "
             f"exit={status.returncode} stdout={status.stdout!r} stderr={status.stderr!r}"
         )
-    return discovery.stdout.strip() + "\n" + rejected.stdout.strip() + "\n" + accepted.stdout.strip()
+    return discovery.stdout.strip() + "\n" + checked.stdout.strip() + "\n" + accepted.stdout.strip()
 
 
 def run_control_action(
