@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ariec61850/mms/static_dispatcher.hpp"
+#include "ariec61850/mms/services.hpp"
 
 #include <algorithm>
 #include <array>
@@ -488,6 +489,63 @@ int main() {
             !identifier_equals(identifier, dual_names[index])) {
             return 21;
         }
+    }
+
+    // Exact IEC 61850 objects must keep their authoritative positional
+    // TypeSpecification even when flattened descendants also exist. A
+    // synthetic rebuild sorts ordinary child names and would otherwise turn
+    // {stVal,q,t} into {q,stVal,t}, while Read still returns the exact value.
+    mms::MmsTypeSpecification exact_sps_type;
+    exact_sps_type.kind = mms::MmsTypeKind::structure;
+    exact_sps_type.children = {
+        mms::MmsTypeSpecification{mms::MmsTypeKind::boolean, "stVal"},
+        mms::MmsTypeSpecification{mms::MmsTypeKind::bit_string, "q"},
+        mms::MmsTypeSpecification{mms::MmsTypeKind::utc_time, "t"}};
+    const auto exact_sps_type_bytes =
+        mms::MmsServiceCodec::encode_type_specification(exact_sps_type);
+    constexpr std::array<std::uint8_t, 2U> kBitStringType{0x84U, 0x00U};
+    constexpr std::array<std::uint8_t, 2U> kUtcTimeType{0x91U, 0x00U};
+    const std::array<mms::MmsStaticObjectEntry, 4U> exact_order_objects{
+        mms::MmsStaticObjectEntry{
+            "LDH", "GGIO1$ST$Ind1", exact_sps_type_bytes,
+            read_boolean, &hierarchy_value, false},
+        mms::MmsStaticObjectEntry{
+            "LDH", "GGIO1$ST$Ind1$q", kBitStringType,
+            read_boolean, &hierarchy_value, false},
+        mms::MmsStaticObjectEntry{
+            "LDH", "GGIO1$ST$Ind1$stVal", kBooleanType,
+            read_boolean, &hierarchy_value, false},
+        mms::MmsStaticObjectEntry{
+            "LDH", "GGIO1$ST$Ind1$t", kUtcTimeType,
+            read_boolean, &hierarchy_value, false}};
+    const mms::MmsStaticObjectTable exact_order_table{exact_order_objects};
+    const mms::MmsStaticApplicationDispatcher exact_order_dispatcher{
+        exact_order_table, hierarchy_policy};
+    if (!exact_order_table.valid()) {
+        return 23;
+    }
+
+    mms::MmsVariableAccessAttributesRequest exact_order_request;
+    exact_order_request.invoke_id = 24U;
+    exact_order_request.name =
+        mms::MmsObjectName::domain_specific("LDH", "GGIO1$ST$Ind1");
+    const auto exact_order_request_pdu =
+        mms::MmsServiceCodec::encode_variable_access_attributes_request_pdu(
+            exact_order_request);
+    dispatched = exact_order_dispatcher.dispatch(
+        exact_order_request_pdu, response, workspace);
+    mms::MmsVariableAccessAttributesResponseView exact_order_response;
+    if (!dispatched.success() ||
+        !mms::MmsServiceSpanCodec::try_decode_variable_access_attributes_response(
+            std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
+            exact_order_response) ||
+        exact_order_response.invoke_id != 24U ||
+        exact_order_response.type_specification.size() != exact_sps_type_bytes.size() ||
+        !std::equal(
+            exact_order_response.type_specification.begin(),
+            exact_order_response.type_specification.end(),
+            exact_sps_type_bytes.begin())) {
+        return 24;
     }
 
     for (std::uint32_t iteration = 0U; iteration < 20'000U; ++iteration) {
