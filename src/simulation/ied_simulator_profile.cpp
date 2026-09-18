@@ -181,12 +181,26 @@ namespace {
     return candidate.empty() || ascii_equal(candidate, source_ied);
 }
 
+[[nodiscard]] bool attribute_leaf_is(
+    const std::string_view path,
+    const std::string_view expected) noexcept {
+    const auto separator = path.find_last_of('.');
+    const auto leaf = separator == std::string_view::npos
+        ? path
+        : path.substr(separator + 1U);
+    return ascii_equal(leaf, expected);
+}
+
 [[nodiscard]] std::string display_type(const scl::SclDataSetEntry& entry) {
-    if (entry.is_quality || ascii_ends_with(entry.da_name, "q") ||
+    // q/t are semantic terminal DataAttribute names, not arbitrary suffixes.
+    // The former ends_with("t") rule misclassified orCat, orIdent,
+    // sboTimeout, operTimeout and Test as Timestamp, corrupting the live MMS
+    // TypeSpecification seen by OMICRON IEDScout.
+    if (entry.is_quality || attribute_leaf_is(entry.da_name, "q") ||
         ascii_equal(entry.basic_type, "Quality")) {
         return "Quality";
     }
-    if (entry.is_timestamp || ascii_ends_with(entry.da_name, "t") ||
+    if (entry.is_timestamp || attribute_leaf_is(entry.da_name, "t") ||
         ascii_equal(entry.basic_type, "Timestamp")) {
         return "Timestamp";
     }
