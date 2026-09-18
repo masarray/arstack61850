@@ -247,7 +247,7 @@ def main() -> int:
                     "--item",
                     "GGIO1$ST$Digital1$stVal",
                     "--count",
-                    "4",
+                    "3",
                     "--delay-ms",
                     "500",
                     "--timeout-ms",
@@ -265,9 +265,12 @@ def main() -> int:
             atomic_write(model, manifest(2, True))
             remaining_stdout, probe_stderr = probe.communicate(timeout=10)
             reads = [first, *remaining_stdout.splitlines()]
-            if probe.returncode != 0 or not any("value=true" in line for line in reads[1:]):
+            refreshed_reads = [
+                line for line in reads[1:] if "value=true" in line
+            ]
+            if probe.returncode != 0 or len(refreshed_reads) != 2:
                 raise RuntimeError(
-                    "live MMS value did not refresh on the existing association:\n"
+                    "live MMS value did not remain refreshed on the existing association:\n"
                     + "\n".join(reads)
                     + f"\nstderr:\n{probe_stderr}"
                 )
