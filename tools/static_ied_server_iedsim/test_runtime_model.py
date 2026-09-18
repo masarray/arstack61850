@@ -139,6 +139,19 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="arstack-iedsim-runtime-") as directory:
         model = Path(directory) / "runtime.model"
         atomic_write(model, manifest(1, False))
+        server_stdout_path = Path(directory) / "server.stdout.log"
+        server_stderr_path = Path(directory) / "server.stderr.log"
+        server_stdout_handle = server_stdout_path.open("w+", encoding="utf-8")
+        server_stderr_handle = server_stderr_path.open("w+", encoding="utf-8")
+
+        def collect_server_logs() -> tuple[str, str]:
+            server_stdout_handle.flush()
+            server_stderr_handle.flush()
+            return (
+                server_stdout_path.read_text(encoding="utf-8", errors="replace"),
+                server_stderr_path.read_text(encoding="utf-8", errors="replace"),
+            )
+
         server = subprocess.Popen(
             [
                 args.server,
@@ -153,8 +166,8 @@ def main() -> int:
                 "--max-active",
                 "32",
             ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=server_stdout_handle,
+            stderr=server_stderr_handle,
             text=True,
             creationflags=creation_flags(),
         )
@@ -404,14 +417,20 @@ def main() -> int:
             # evidence so platform-specific disposable-client teardown timing is
             # not confused with IEC 61850 model/report parity.
             server.kill()
-            server_stdout, server_stderr = server.communicate(timeout=8)
+            server.wait(timeout=8)
+            server_stdout, server_stderr = collect_server_logs()
         except BaseException as error:
             server.kill()
-            server_stdout, server_stderr = server.communicate()
+            server.wait(timeout=8)
+            server_stdout, server_stderr = collect_server_logs()
+            server_stdout_handle.close()
+            server_stderr_handle.close()
             raise RuntimeError(
                 f"{error}\n--- server stdout ---\n{server_stdout}"
                 f"\n--- server stderr ---\n{server_stderr}"
             ) from error
+        server_stdout_handle.close()
+        server_stderr_handle.close()
 
     if (
         "kind=server_ready" not in server_stdout
