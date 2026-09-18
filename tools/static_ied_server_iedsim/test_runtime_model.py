@@ -282,17 +282,21 @@ def main() -> int:
             )
             digital_report_shape = (
                 "report_values=36 "
-                "first_value_shape=structure(boolean,bit-string,utc-time) "
-                "uniform_value_shape=true"
+                "first_value_shape=structure(boolean,bit-string,utc-time)"
             )
+            digital_report_value = "first_value={true,"
             if (
                 report.returncode != 0
                 or digital_report_shape not in report.stdout
+                or digital_report_value not in report.stdout
+                or "uniform_value_shape=true" not in report.stdout
             ):
                 raise RuntimeError(
                     "Digital URCB GI structured DataSet projection mismatch: "
-                    f"expected={digital_report_shape!r} exit={report.returncode} "
-                    f"stdout={report.stdout!r} stderr={report.stderr!r}"
+                    f"expectedShape={digital_report_shape!r} "
+                    f"expectedLiveValue={digital_report_value!r} "
+                    f"exit={report.returncode} stdout={report.stdout!r} "
+                    f"stderr={report.stderr!r}"
                 )
 
             analog_report = subprocess.run(
@@ -316,16 +320,16 @@ def main() -> int:
             analog_report_shape = (
                 "report_values=22 "
                 "first_value_shape="
-                "structure(structure(integer,floating-point),bit-string,utc-time) "
-                "uniform_value_shape=true"
+                "structure(structure(integer,floating-point),bit-string,utc-time)"
             )
             if (
                 analog_report.returncode != 0
                 or analog_report_shape not in analog_report.stdout
+                or "uniform_value_shape=true" not in analog_report.stdout
             ):
                 raise RuntimeError(
                     "Analog URCB GI structured DataSet projection mismatch: "
-                    f"expected={analog_report_shape!r} "
+                    f"expectedShape={analog_report_shape!r} "
                     f"exit={analog_report.returncode} "
                     f"stdout={analog_report.stdout!r} "
                     f"stderr={analog_report.stderr!r}"
@@ -352,7 +356,8 @@ def main() -> int:
         "urcbGiDigital=36 urcbGiAnalog=22 reportBackedTotal=58 "
         "digitalReportShape=structure(boolean,bit-string,utc-time) "
         "analogReportShape=structure(structure(integer,floating-point),bit-string,utc-time) "
-        "valueTransition=false->true associationPreserved=true"
+        "digitalReportLiveValue=true valueTransition=false->true "
+        "associationPreserved=true"
     )
     return 0
 
