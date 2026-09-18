@@ -6,6 +6,7 @@
 #include <QCommandLineParser>
 #include <QDebug>
 #include <QGuiApplication>
+#include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QQuickWindow>
@@ -56,6 +57,7 @@ int main(int argc, char* argv[]) {
     QCoreApplication::setOrganizationName(QStringLiteral("ARStack61850"));
     QCoreApplication::setApplicationName(QStringLiteral("ARStack IED Lab"));
     QCoreApplication::setApplicationVersion(QStringLiteral("0.2.0"));
+    app.setWindowIcon(QIcon(QStringLiteral(":/iedsim/assets/app-icon.png")));
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("ARStack IEC 61850 multi-IED simulation lab"));
