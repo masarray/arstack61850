@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdint>
 #include <exception>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <span>
@@ -156,6 +157,7 @@ void print_usage() {
         << "  --count N       Read repeatedly on one MMS association (default 1).\n"
         << "  --with-type     Read GetVariableAccessAttributes and print type shape.\n"
         << "  --delay-ms N    Delay between reads (default 500).\n"
+        << "  --signal-after-first PATH  Create PATH after Read #1 completes.\n"
         << "  --timeout-ms N  Connect/request timeout (default 5000).\n"
         << "  -h, --help      Show this help.\n";
 }
@@ -183,6 +185,7 @@ int main(const int argc, char** argv) {
         bool with_type{};
         std::chrono::milliseconds delay{500};
         std::chrono::milliseconds timeout{5'000};
+        std::string signal_after_first;
         while (argument < argc) {
             const std::string option = argv[argument++];
             if (option == "--help" || option == "-h") {
@@ -204,6 +207,11 @@ int main(const int argc, char** argv) {
             } else if (option == "--delay-ms") {
                 delay = std::chrono::milliseconds{static_cast<std::int64_t>(
                     parse_size(option, value, 60'000U))};
+            } else if (option == "--signal-after-first") {
+                signal_after_first = value;
+                if (signal_after_first.empty()) {
+                    throw std::invalid_argument("--signal-after-first requires a non-empty path.");
+                }
             } else if (option == "--timeout-ms") {
                 timeout = std::chrono::milliseconds{static_cast<std::int64_t>(
                     parse_size(option, value, 120'000U))};
@@ -279,6 +287,17 @@ int main(const int argc, char** argv) {
             std::cout << " value=" << mms::MmsDataCodec::to_display_string(value)
                       << '\n' << std::flush;
             std::cout.flush();
+            if (index == 0U && !signal_after_first.empty()) {
+                std::ofstream signal{signal_after_first, std::ios::binary | std::ios::trunc};
+                if (!signal) {
+                    throw std::runtime_error("Unable to create --signal-after-first file.");
+                }
+                signal << "read-1\n";
+                signal.flush();
+                if (!signal) {
+                    throw std::runtime_error("Unable to flush --signal-after-first file.");
+                }
+            }
             if (index + 1U < count) std::this_thread::sleep_for(delay);
         }
         session.disconnect();
