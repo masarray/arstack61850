@@ -981,7 +981,8 @@ QVariantMap IedSimulatorController::valueMap(
     item.insert(QStringLiteral("writable"), true);
     item.insert(QStringLiteral("changed"), false);
     item.insert(QStringLiteral("updated"), QStringLiteral("—"));
-    if (point.display_type == "Enumeration" && point.cdc == "DPC") {
+    if (point.display_type == "Enumeration" &&
+        (point.cdc == "DPC" || point.cdc == "DPS")) {
         item.insert(
             QStringLiteral("options"),
             QStringList{
