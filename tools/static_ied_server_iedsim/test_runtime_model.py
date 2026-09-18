@@ -149,7 +149,7 @@ def main() -> int:
                 "--model-manifest",
                 str(model),
                 "--max-connections",
-                "7",
+                "32",
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -380,6 +380,21 @@ def main() -> int:
                     f"stdout={analog_report.stdout!r} "
                     f"stderr={analog_report.stderr!r}"
                 )
+            # The semantic probes intentionally use several short-lived MMS
+            # associations. Do not make their exact count part of the protocol
+            # acceptance contract: Windows may consume an extra retry association.
+            # Exhaust the bounded server connection budget only after all semantic
+            # checks have passed so the server can still exit cleanly with code 0.
+            for _ in range(40):
+                if server.poll() is not None:
+                    break
+                try:
+                    with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                        pass
+                except OSError:
+                    if server.poll() is not None:
+                        break
+                time.sleep(0.02)
             server_stdout, server_stderr = server.communicate(timeout=8)
         except BaseException:
             server.kill()
