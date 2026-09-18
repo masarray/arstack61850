@@ -277,7 +277,7 @@ int main(const int argc, char** argv) {
                 std::cout << " data_bit_widths=" << width_list(data_widths);
             }
             std::cout << " value=" << mms::MmsDataCodec::to_display_string(value)
-                      << '\n';
+                      << '\n' << std::flush;
             std::cout.flush();
             if (index + 1U < count) std::this_thread::sleep_for(delay);
         }
