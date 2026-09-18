@@ -221,6 +221,7 @@ int main(const int argc, char** argv) {
         session.connect(endpoint);
 
         std::string type_shape_text;
+        std::string type_bit_widths_text;
         if (with_type) {
             const auto invoke_id = session.association().next_invoke_id();
             mms::MmsVariableAccessAttributesRequest request;
@@ -238,23 +239,6 @@ int main(const int argc, char** argv) {
                 mms::MmsServiceCodec::decode_variable_access_attributes_response(
                     response_payload(exchange), invoke_id);
             type_shape_text = type_shape(response.type);
-        }
-
-        std::string type_bit_widths_text;
-        if (with_type) {
-            const auto invoke_id = session.association().next_invoke_id();
-            (void)invoke_id;
-            mms::MmsVariableAccessAttributesRequest request;
-            request.invoke_id = session.association().next_invoke_id();
-            request.name = mms::MmsObjectName::domain_specific(domain, item);
-            const auto encoded =
-                mms::MmsServiceCodec::encode_variable_access_attributes_request_p_data(
-                    request, session.association().negotiated().presentation_context_id);
-            const auto exchange =
-                session.association().exchange_confirmed(encoded, request.invoke_id);
-            const auto response =
-                mms::MmsServiceCodec::decode_variable_access_attributes_response(
-                    response_payload(exchange), request.invoke_id);
             std::vector<std::uint32_t> widths;
             collect_type_bit_widths(response.type, widths);
             type_bit_widths_text = width_list(widths);
