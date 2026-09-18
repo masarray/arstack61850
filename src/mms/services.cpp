@@ -195,8 +195,13 @@ std::vector<std::uint8_t> encode_type_impl(
             if (*type.size == 0U) {
                 throw MmsFormatError("Variable-length MMS TypeSpecification bound must be positive.");
             }
-            return BerWriter::encode_signed_integer(
+            auto encoded = BerWriter::encode_signed_integer(
                 -static_cast<std::int64_t>(*type.size));
+            // OMICRON IEDScout emits variable maximum lengths in at least a
+            // two-octet signed field.  In the golden capture Octet64 is
+            // 89 02 FF C0 (not the mathematically minimal 89 01 C0).
+            if (encoded.size() == 1U) encoded.insert(encoded.begin(), 0xFFU);
+            return encoded;
         }
         return positive_integer_content(*type.size);
     };
