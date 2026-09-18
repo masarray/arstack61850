@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 namespace {
 namespace mms = ar::iec61850::mms;
