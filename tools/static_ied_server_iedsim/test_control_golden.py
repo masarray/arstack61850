@@ -134,14 +134,17 @@ def main() -> int:
 
         server_stdout = stdout_path.read_text(encoding="utf-8", errors="replace")
         server_stderr = stderr_path.read_text(encoding="utf-8", errors="replace")
+        termination_index = server_stdout.find("kind=command_termination")
+        feedback_index = server_stdout.find("kind=control_process_feedback")
         if (
-            "kind=command_termination" not in server_stdout
+            termination_index < 0
+            or feedback_index < 0
             or "positive=true" not in server_stdout
-            or "kind=control_process_feedback" not in server_stdout
             or "value=on" not in server_stdout
+            or termination_index >= feedback_index
         ):
             raise RuntimeError(
-                "server did not expose golden command-termination/process-feedback evidence:\n"
+                "server did not preserve golden CommandTermination-before-process-feedback order:\n"
                 f"{server_stdout}\n{server_stderr}"
             )
 

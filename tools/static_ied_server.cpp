@@ -2509,57 +2509,6 @@ void serve_connection(
             return;
         }
 
-        // A successful control Oper is also a process-state transition in the
-        // simulator. Synchronize the underlying SCL ManifestValue so exact
-        // process Read plus whole-FCD BRCB/URCB feedback observe the same state.
-        if (manifest_model != nullptr) {
-            for (std::size_t index = 0U; index < direct_control_bindings.size(); ++index) {
-                auto& binding = direct_control_bindings[index];
-                if (binding.state == nullptr ||
-                    index >= direct_control_accept_counts.size() ||
-                    index >= manifest_model->direct_control_storage.size()) {
-                    continue;
-                }
-                if (binding.state->accepted_operations <= direct_control_accept_counts[index]) {
-                    continue;
-                }
-                direct_control_accept_counts[index] = binding.state->accepted_operations;
-                if (binding.state->last_test) continue;
-
-                const auto& control = manifest_model->direct_control_storage[index];
-                const auto found = manifest_model->value_indices.find(
-                    object_key(control.domain, control.status_item));
-                if (found == manifest_model->value_indices.end()) continue;
-                auto& status = manifest_model->values[found->second];
-                const auto next_text = control.cdc == "DPC"
-                    ? (binding.state->value != 0U ? std::string{"on"} : std::string{"off"})
-                    : (binding.state->value != 0U ? std::string{"true"} : std::string{"false"});
-                if (status.text != next_text) {
-                    status.text = next_text;
-                    status.data = mms::MmsSimulatorManifestCodec::data(
-                        status.type, status.raw_type, status.normalized_type, status.text);
-                    status.encoded = mms::MmsDataCodec::encode(*status.data);
-                    rebuild_manifest_root_values(*manifest_model);
-
-                    const std::array<std::size_t, 1U> changed{found->second};
-                    const auto changed_ms = monotonic_ms();
-                    if (urcb_runtime != nullptr) {
-                        notify_urcb_changes(
-                            *manifest_model, changed, *urcb_runtime, data_sets, changed_ms);
-                    }
-                    notify_brcb_changes(
-                        *manifest_model, changed, brcb_runtimes, changed_ms);
-                    std::osyncstream{std::cout}
-                        << "IEDSIM_EVENT kind=control_process_feedback association="
-                        << association_id << " object=" << control.selection_reference
-                        << " value=" << next_text
-                        << " ctlNum="
-                        << static_cast<unsigned>(binding.state->last_control_number)
-                        << '\n';
-                }
-            }
-        }
-
         const auto now_ms = monotonic_ms();
         if (manifest_model != nullptr && session.pending_output_bytes() == 0U) {
             for (std::size_t index = 0U; index < direct_control_bindings.size(); ++index) {
@@ -2631,6 +2580,58 @@ void serve_connection(
                 break;
             }
         }
+        // Match the IEDScout enhanced-control wire lifecycle: positive Oper
+        // response first, then positive CommandTermination, then commit process
+        // state and notify RCB feedback. Direct-Normal controls have no pending
+        // termination, so they still commit in this same loop iteration.
+        if (manifest_model != nullptr) {
+            for (std::size_t index = 0U; index < direct_control_bindings.size(); ++index) {
+                auto& binding = direct_control_bindings[index];
+                if (binding.state == nullptr ||
+                    index >= direct_control_accept_counts.size() ||
+                    index >= manifest_model->direct_control_storage.size()) {
+                    continue;
+                }
+                if (binding.state->accepted_operations <= direct_control_accept_counts[index]) {
+                    continue;
+                }
+                direct_control_accept_counts[index] = binding.state->accepted_operations;
+                if (binding.state->last_test) continue;
+
+                const auto& control = manifest_model->direct_control_storage[index];
+                const auto found = manifest_model->value_indices.find(
+                    object_key(control.domain, control.status_item));
+                if (found == manifest_model->value_indices.end()) continue;
+                auto& status = manifest_model->values[found->second];
+                const auto next_text = control.cdc == "DPC"
+                    ? (binding.state->value != 0U ? std::string{"on"} : std::string{"off"})
+                    : (binding.state->value != 0U ? std::string{"true"} : std::string{"false"});
+                if (status.text != next_text) {
+                    status.text = next_text;
+                    status.data = mms::MmsSimulatorManifestCodec::data(
+                        status.type, status.raw_type, status.normalized_type, status.text);
+                    status.encoded = mms::MmsDataCodec::encode(*status.data);
+                    rebuild_manifest_root_values(*manifest_model);
+
+                    const std::array<std::size_t, 1U> changed{found->second};
+                    const auto changed_ms = monotonic_ms();
+                    if (urcb_runtime != nullptr) {
+                        notify_urcb_changes(
+                            *manifest_model, changed, *urcb_runtime, data_sets, changed_ms);
+                    }
+                    notify_brcb_changes(
+                        *manifest_model, changed, brcb_runtimes, changed_ms);
+                    std::osyncstream{std::cout}
+                        << "IEDSIM_EVENT kind=control_process_feedback association="
+                        << association_id << " object=" << control.selection_reference
+                        << " value=" << next_text
+                        << " ctlNum="
+                        << static_cast<unsigned>(binding.state->last_control_number)
+                        << '\n';
+                }
+            }
+        }
+
         if (!brcb_runtimes.empty()) {
             const auto binary_time = report_binary_time();
             for (auto& brcb : brcb_runtimes) {
