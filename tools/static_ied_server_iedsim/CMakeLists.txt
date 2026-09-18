@@ -123,6 +123,17 @@ add_test(
         --urcb-probe $<TARGET_FILE:ariec61850_iedscout_parity_urcb_gi_probe>)
 
 add_test(
+    NAME iedscout_parity_full_discovery_large_model
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_LIST_DIR}/test_iedscout_full_discovery.py"
+        --server $<TARGET_FILE:ariec61850_static_ied_server_iedsim>
+        --discovery $<TARGET_FILE:ariec61850_iedscout_parity_live_discover>)
+set_tests_properties(
+    iedscout_parity_full_discovery_large_model
+    PROPERTIES TIMEOUT 20)
+
+add_test(
     NAME iedscout_parity_dpc_control
     COMMAND
         ${Python3_EXECUTABLE}
