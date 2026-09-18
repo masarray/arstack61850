@@ -170,11 +170,31 @@ def main() -> int:
                 port,
                 "GGIO1$ST$Digital1",
             )
-            if structured.returncode != 0 or "value=" not in structured.stdout:
+            digital_shape = "shape=structure(boolean,bit-string,utc-time)"
+            if structured.returncode != 0 or digital_shape not in structured.stdout:
                 raise RuntimeError(
-                    "whole-DO MMS STRUCTURE read failed: "
-                    f"exit={structured.returncode} stdout={structured.stdout!r} "
-                    f"stderr={structured.stderr!r}"
+                    "whole-DO IEC 61850 SPS ordering mismatch: "
+                    f"expected={digital_shape!r} exit={structured.returncode} "
+                    f"stdout={structured.stdout!r} stderr={structured.stderr!r}"
+                )
+
+            # Nested constructed attributes are positional too.  Model a typical
+            # analogue value as mag{i,f}, followed by Quality and Timestamp, and
+            # prove both the outer and inner declaration order survive MMS Read.
+            analog = run_read_probe(
+                args.read_probe,
+                port,
+                "GGIO1$MX$Analog1",
+            )
+            analog_shape = (
+                "shape=structure(structure(integer,floating-point),"
+                "bit-string,utc-time)"
+            )
+            if analog.returncode != 0 or analog_shape not in analog.stdout:
+                raise RuntimeError(
+                    "nested IEC 61850 analogue ordering mismatch: "
+                    f"expected={analog_shape!r} exit={analog.returncode} "
+                    f"stdout={analog.stdout!r} stderr={analog.stderr!r}"
                 )
 
             probe = subprocess.Popen(
@@ -228,8 +248,9 @@ def main() -> int:
         )
     print(
         "IEDSIM_RUNTIME_MODEL_PASS datasets=2 digitalMembers=36 analogMembers=22 "
-        "wholeDoStructureReadable=true valueTransition=false->true "
-        "associationPreserved=true"
+        "digitalShape=structure(boolean,bit-string,utc-time) "
+        "analogShape=structure(structure(integer,floating-point),bit-string,utc-time) "
+        "valueTransition=false->true associationPreserved=true"
     )
     return 0
 
