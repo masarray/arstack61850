@@ -129,7 +129,7 @@ def main() -> int:
                 "--model-manifest",
                 str(model),
                 "--max-connections",
-                "3",
+                "5",
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
