@@ -641,7 +641,11 @@ struct SyntheticChildRank final {
     // their exact TypeSpecification rather than applying this rank recursively.
     if (prefix.find("$CO$") != std::string_view::npos &&
         static_cast<std::size_t>(std::count(
-            prefix.begin(), prefix.end(), static_cast<char>('
+            prefix.begin(), prefix.end(), '$')) == 2U) {
+        return {kIedScoutControlServiceOrder};
+    }
+    return {};
+}
 
 [[nodiscard]] SyntheticChildRank synthetic_child_rank(
     const std::string_view prefix,
@@ -673,7 +677,7 @@ struct SyntheticChildRank final {
 [[nodiscard]] bool use_declaration_order(
     const std::string_view prefix) noexcept {
     // IEDScout preserves the engineering declaration order at the LN root,
-    // functional-constraint namespace, DO and DA levels.  Every structural
+    // functional-constraint namespace, DO and DA levels. Every structural
     // object imported from SCL carries source_order; runtime-only service
     // objects receive an explicit order from their owning control/RCB.
     return !prefix.empty();
@@ -749,7 +753,24 @@ struct SyntheticChildren final {
             // at controlled Logical-Node roots only: CO is inserted immediately
             // after ST (or after MX/ST when MX is present), before CF. Preserve
             // every other FC's source order.
-            if (prefix.find('
+            if (prefix.find('$') == std::string_view::npos) {
+                const auto left_name = left.prefix.substr(prefix.size() + 1U);
+                const auto right_name = right.prefix.substr(prefix.size() + 1U);
+                if (left_name == "CO" && right_name != "CO") {
+                    return right_name != "MX" && right_name != "ST";
+                }
+                if (right_name == "CO" && left_name != "CO") {
+                    return left_name == "MX" || left_name == "ST";
+                }
+            }
+            return declaration_order_less(
+                left.declaration_order,
+                left.prefix,
+                right.declaration_order,
+                right.prefix);
+        }
+        return left.prefix < right.prefix;
+    });
     return result;
 }
 
