@@ -2674,8 +2674,15 @@ struct WorkerSlot final {
 };
 
 [[nodiscard]] WorkerSlot* available_worker(std::vector<WorkerSlot>& workers) {
+    // Prefer never-used/reaped slots before joining a just-completed worker.
+    // On Windows a worker can have emitted client_closed while its thread is
+    // still finishing transport/model teardown; joining that slot directly in
+    // the accept loop can transiently stop new associations even though other
+    // worker capacity is available.
     for (auto& worker : workers) {
         if (!worker.thread.joinable()) return &worker;
+    }
+    for (auto& worker : workers) {
         if (worker.done != nullptr && worker.done->load(std::memory_order_acquire)) {
             worker.thread.join();
             worker.done.reset();
