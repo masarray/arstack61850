@@ -221,6 +221,17 @@ using mms::MmsTypeSpecification;
     case ControlValueKind::unsigned_integer:
         result = std::get<std::uint64_t>(value.value()) != 0U;
         break;
+    case ControlValueKind::double_point: {
+        const auto point = std::get<DoublePointValue>(value.value());
+        if (point == DoublePointValue::off) {
+            result = false;
+        } else if (point == DoublePointValue::on) {
+            result = true;
+        } else {
+            return failure(MmsControlBuildStatus::value_out_of_range, path);
+        }
+        break;
+    }
     default:
         return failure(MmsControlBuildStatus::type_mismatch, path);
     }
