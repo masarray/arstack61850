@@ -267,7 +267,36 @@ int main(int argc, char* argv[]) {
 
     const int selected = selectEligibleRcb(reports, false, exactUrcb);
     if (selected < 0 || reports.selectedDataSetMembers().isEmpty()) {
-        qCritical() << "REPORTS_WORKBENCH_FAIL eligible_urcb";
+        QStringList controls;
+        for (const auto& value : reportControls) {
+            const auto item = value.toMap();
+            controls.push_back(
+                item.value(QStringLiteral("reference")).toString() +
+                QStringLiteral("|probe=") +
+                (item.value(QStringLiteral("probeOk")).toBool()
+                    ? QStringLiteral("ok")
+                    : QStringLiteral("fail")) +
+                QStringLiteral("|dataset=") +
+                item.value(QStringLiteral("dataSet")).toString() +
+                QStringLiteral("|error=") +
+                item.value(QStringLiteral("probeError")).toString());
+        }
+        QStringList sets;
+        for (const auto& value : dataSets) {
+            const auto item = value.toMap();
+            sets.push_back(
+                item.value(QStringLiteral("reference")).toString() +
+                QStringLiteral("|members=") +
+                QString::number(item.value(QStringLiteral("memberCount")).toInt()) +
+                QStringLiteral("|directory=") +
+                (item.value(QStringLiteral("directoryAvailable")).toBool()
+                    ? QStringLiteral("yes")
+                    : QStringLiteral("no")));
+        }
+        qCritical().noquote()
+            << "REPORTS_WORKBENCH_FAIL eligible_urcb"
+            << "controls=" + controls.join(QLatin1Char(','))
+            << "datasets=" + sets.join(QLatin1Char(','));
         return 10;
     }
     const int memberCount = reports.selectedDataSetMembers().size();
