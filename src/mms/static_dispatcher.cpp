@@ -602,6 +602,7 @@ struct SyntheticMeasureResult final {
 struct SyntheticChild final {
     std::string_view prefix{};
     const MmsStaticObjectEntry* exact{};
+    std::size_t declaration_order{std::numeric_limits<std::size_t>::max()};
     bool found{};
 };
 
@@ -664,6 +665,20 @@ struct SyntheticChildRank final {
     return left < right;
 }
 
+[[nodiscard]] bool declaration_order_less(
+    const std::size_t left_order,
+    const std::string_view left,
+    const std::size_t right_order,
+    const std::string_view right) noexcept {
+    constexpr auto unspecified = std::numeric_limits<std::size_t>::max();
+    if (left_order != unspecified || right_order != unspecified) {
+        if (left_order == unspecified) return false;
+        if (right_order == unspecified) return true;
+        if (left_order != right_order) return left_order < right_order;
+    }
+    return left < right;
+}
+
 [[nodiscard]] SyntheticChild next_synthetic_child(
     const MmsStaticObjectTable& objects,
     const std::string_view domain,
@@ -671,22 +686,61 @@ struct SyntheticChildRank final {
     const std::string_view after,
     const bool have_after) noexcept {
     SyntheticChild result;
+    const bool semantic_order = !semantic_child_order(prefix).empty();
+
+    auto after_order = std::numeric_limits<std::size_t>::max();
+    if (have_after && !semantic_order) {
+        for (const auto& candidate : objects.objects()) {
+            if (candidate.domain != domain || !is_descendant_item(candidate.item, prefix)) {
+                continue;
+            }
+            const auto child = immediate_child_prefix(candidate.item, prefix);
+            if (child == after) {
+                after_order = std::min(after_order, candidate.declaration_order);
+            }
+        }
+    }
+
     for (const auto& candidate : objects.objects()) {
         if (candidate.domain != domain || !is_descendant_item(candidate.item, prefix)) {
             continue;
         }
         const auto child = immediate_child_prefix(candidate.item, prefix);
-        if (child.empty() ||
-            (have_after && !synthetic_child_less(prefix, after, child))) {
+        if (child.empty() || (have_after && child == after)) continue;
+
+        if (have_after) {
+            if (semantic_order) {
+                if (!synthetic_child_less(prefix, after, child)) continue;
+            } else if (
+                after_order != std::numeric_limits<std::size_t>::max() &&
+                candidate.declaration_order != std::numeric_limits<std::size_t>::max()) {
+                if (candidate.declaration_order <= after_order) continue;
+            } else if (!synthetic_child_less(prefix, after, child)) {
+                continue;
+            }
+        }
+
+        if (result.found && child == result.prefix) {
+            result.declaration_order =
+                std::min(result.declaration_order, candidate.declaration_order);
+            if (candidate.item == child) result.exact = &candidate;
             continue;
         }
-        if (!result.found || synthetic_child_less(prefix, child, result.prefix)) {
-            result.found = true;
-            result.prefix = child;
-            result.exact = candidate.item == child ? &candidate : nullptr;
-            continue;
-        }
-        if (child == result.prefix && candidate.item == child) result.exact = &candidate;
+
+        const bool better = !result.found ||
+            (semantic_order
+                ? synthetic_child_less(prefix, child, result.prefix)
+                : declaration_order_less(
+                    candidate.declaration_order,
+                    child,
+                    result.declaration_order,
+                    result.prefix));
+        if (!better) continue;
+
+        result.found = true;
+        result.prefix = child;
+        result.exact = candidate.item == child ? &candidate : nullptr;
+        result.declaration_order = candidate.declaration_order;
     }
     return result;
 }
