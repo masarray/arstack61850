@@ -67,6 +67,11 @@ def manifest(revision: int, value: bool) -> str:
         "TESTIEDLD0/LLN0$RP$Structured01\tTESTIEDLD0\tLLN0$Digital\t"
         "1\t0\t0\t124\t0\t0"
     )
+    lines.append(
+        "RCB\tTESTIEDLD0\tLLN0$RP$StructuredAnalog01\t0\t"
+        "TESTIEDLD0/LLN0$RP$StructuredAnalog01\tTESTIEDLD0\tLLN0$Analog\t"
+        "1\t0\t0\t124\t0\t0"
+    )
     lines.append("")
     return "\n".join(lines)
 
@@ -135,7 +140,7 @@ def main() -> int:
                 "--model-manifest",
                 str(model),
                 "--max-connections",
-                "5",
+                "6",
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -275,15 +280,55 @@ def main() -> int:
                 check=False,
                 creationflags=creation_flags(),
             )
-            report_shape = (
+            digital_report_shape = (
                 "report_values=36 "
-                "first_value_shape=structure(boolean,bit-string,utc-time)"
+                "first_value_shape=structure(boolean,bit-string,utc-time) "
+                "uniform_value_shape=true"
             )
-            if report.returncode != 0 or report_shape not in report.stdout:
+            if (
+                report.returncode != 0
+                or digital_report_shape not in report.stdout
+            ):
                 raise RuntimeError(
-                    "URCB GI structured DataSet report projection mismatch: "
-                    f"expected={report_shape!r} exit={report.returncode} "
+                    "Digital URCB GI structured DataSet projection mismatch: "
+                    f"expected={digital_report_shape!r} exit={report.returncode} "
                     f"stdout={report.stdout!r} stderr={report.stderr!r}"
+                )
+
+            analog_report = subprocess.run(
+                [
+                    args.urcb_probe,
+                    "127.0.0.1",
+                    str(port),
+                    "--domain",
+                    "TESTIEDLD0",
+                    "--rcb",
+                    "LLN0$RP$StructuredAnalog01",
+                    "--timeout-ms",
+                    "5000",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+                creationflags=creation_flags(),
+            )
+            analog_report_shape = (
+                "report_values=22 "
+                "first_value_shape="
+                "structure(structure(integer,floating-point),bit-string,utc-time) "
+                "uniform_value_shape=true"
+            )
+            if (
+                analog_report.returncode != 0
+                or analog_report_shape not in analog_report.stdout
+            ):
+                raise RuntimeError(
+                    "Analog URCB GI structured DataSet projection mismatch: "
+                    f"expected={analog_report_shape!r} "
+                    f"exit={analog_report.returncode} "
+                    f"stdout={analog_report.stdout!r} "
+                    f"stderr={analog_report.stderr!r}"
                 )
             server_stdout, server_stderr = server.communicate(timeout=8)
         except BaseException:
@@ -304,7 +349,9 @@ def main() -> int:
         "IEDSIM_RUNTIME_MODEL_PASS datasets=2 digitalMembers=36 analogMembers=22 "
         "digitalTypeDataOrder=structure(boolean,bit-string,utc-time) "
         "analogTypeDataOrder=structure(structure(integer,floating-point),bit-string,utc-time) "
-        "urcbGiValues=36 urcbFirstValue=structure(boolean,bit-string,utc-time) "
+        "urcbGiDigital=36 urcbGiAnalog=22 reportBackedTotal=58 "
+        "digitalReportShape=structure(boolean,bit-string,utc-time) "
+        "analogReportShape=structure(structure(integer,floating-point),bit-string,utc-time) "
         "valueTransition=false->true associationPreserved=true"
     )
     return 0
