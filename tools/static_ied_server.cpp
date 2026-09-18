@@ -2074,6 +2074,10 @@ void serve_connection(
             binding.sbo_timeout_ms = 10'000U;
             binding.now_ms = report_now_ms;
             binding.now_context = nullptr;
+            // Golden IEDScout accepts ARSAS Check=0xC0 for this simulator
+            // control path (synchro + interlock requested).
+            binding.policy.allow_synchro_check = true;
+            binding.policy.allow_interlock_check = true;
 
             bool status_found{};
             bool ctl_model_found{};
