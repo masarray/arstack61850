@@ -58,6 +58,43 @@ namespace mms = ar::iec61850::mms;
     return "unknown";
 }
 
+[[nodiscard]] std::string_view type_kind_name(const mms::MmsTypeKind kind) noexcept {
+    switch (kind) {
+    case mms::MmsTypeKind::array: return "array";
+    case mms::MmsTypeKind::structure: return "structure";
+    case mms::MmsTypeKind::boolean: return "boolean";
+    case mms::MmsTypeKind::bit_string: return "bit-string";
+    case mms::MmsTypeKind::integer: return "integer";
+    case mms::MmsTypeKind::unsigned_integer: return "unsigned";
+    case mms::MmsTypeKind::floating_point: return "floating-point";
+    case mms::MmsTypeKind::octet_string: return "octet-string";
+    case mms::MmsTypeKind::visible_string: return "visible-string";
+    case mms::MmsTypeKind::binary_time: return "binary-time";
+    case mms::MmsTypeKind::bcd: return "bcd";
+    case mms::MmsTypeKind::boolean_array: return "boolean-array";
+    case mms::MmsTypeKind::object_id: return "object-id";
+    case mms::MmsTypeKind::mms_string: return "mms-string";
+    case mms::MmsTypeKind::utc_time: return "utc-time";
+    case mms::MmsTypeKind::unknown: return "unknown";
+    }
+    return "unknown";
+}
+
+[[nodiscard]] std::string type_shape(const mms::MmsTypeSpecification& type) {
+    std::string result{type_kind_name(type.kind)};
+    if (type.kind != mms::MmsTypeKind::array &&
+        type.kind != mms::MmsTypeKind::structure) {
+        return result;
+    }
+    result.push_back('(');
+    for (std::size_t index = 0U; index < type.children.size(); ++index) {
+        if (index != 0U) result.push_back(',');
+        result += type_shape(type.children[index]);
+    }
+    result.push_back(')');
+    return result;
+}
+
 [[nodiscard]] std::string data_shape(const mms::MmsDataValue& value) {
     std::string result{data_kind_name(value.kind())};
     if (value.kind() != mms::MmsDataKind::array &&
@@ -78,6 +115,7 @@ void print_usage() {
         << "Usage: ariec61850_mms_read_probe <host> [port] --domain NAME --item NAME [options]\n\n"
         << "Options:\n"
         << "  --count N       Read repeatedly on one MMS association (default 1).\n"
+        << "  --with-type     Read GetVariableAccessAttributes and print type shape.\n"
         << "  --delay-ms N    Delay between reads (default 500).\n"
         << "  --timeout-ms N  Connect/request timeout (default 5000).\n"
         << "  -h, --help      Show this help.\n";
@@ -103,6 +141,7 @@ int main(const int argc, char** argv) {
         std::string domain;
         std::string item;
         std::size_t count{1U};
+        bool with_type{};
         std::chrono::milliseconds delay{500};
         std::chrono::milliseconds timeout{5'000};
         while (argument < argc) {
@@ -110,6 +149,10 @@ int main(const int argc, char** argv) {
             if (option == "--help" || option == "-h") {
                 print_usage();
                 return 0;
+            }
+            if (option == "--with-type") {
+                with_type = true;
+                continue;
             }
             if (argument >= argc) throw std::invalid_argument(option + " requires a value.");
             const std::string value = argv[argument++];
@@ -138,6 +181,27 @@ int main(const int argc, char** argv) {
         association_options.request_timeout = timeout;
         mms::MmsTcpLiveDiscoverySession session{{}, association_options};
         session.connect(endpoint);
+
+        std::string type_shape_text;
+        if (with_type) {
+            const auto invoke_id = session.association().next_invoke_id();
+            mms::MmsVariableAccessAttributesRequest request;
+            request.invoke_id = invoke_id;
+            request.name = mms::MmsObjectName::domain_specific(domain, item);
+            const auto encoded =
+                mms::MmsServiceCodec::encode_variable_access_attributes_request_p_data(
+                    request, session.association().negotiated().presentation_context_id);
+            const auto exchange = session.association().exchange_confirmed(encoded, invoke_id);
+            if (exchange.envelope.kind != mms::MmsPduKind::confirmed_response) {
+                throw std::runtime_error(
+                    "GetVariableAccessAttributes did not return Confirmed-Response.");
+            }
+            const auto response =
+                mms::MmsServiceCodec::decode_variable_access_attributes_response(
+                    response_payload(exchange), invoke_id);
+            type_shape_text = type_shape(response.type);
+        }
+
         for (std::size_t index = 0U; index < count; ++index) {
             const auto invoke_id = session.association().next_invoke_id();
             mms::MmsReadRequest request;
@@ -156,8 +220,11 @@ int main(const int argc, char** argv) {
             }
             const auto& value = *response.results[0].value;
             std::cout << "MMS_READ index=" << (index + 1U)
-                      << " reference=" << domain << '/' << item
-                      << " shape=" << data_shape(value)
+                      << " reference=" << domain << '/' << item;
+            if (with_type) {
+                std::cout << " type=" << type_shape_text;
+            }
+            std::cout << " shape=" << data_shape(value)
                       << " value=" << mms::MmsDataCodec::to_display_string(value)
                       << '\n';
             std::cout.flush();
