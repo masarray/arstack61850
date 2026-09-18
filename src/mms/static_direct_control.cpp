@@ -262,14 +262,16 @@ void release_selection(MmsStaticDirectBooleanControlBinding& binding) noexcept {
         (!command.interlock_check || binding.policy.allow_interlock_check);
 }
 
-[[nodiscard]] wire::EncodeResult encode_unsigned_model(
+[[nodiscard]] wire::EncodeResult encode_integer_model(
     const std::uint8_t model,
     const std::span<std::uint8_t> destination) noexcept {
+    // IEDScout exposes ctlModel as MMS INTEGER(8), not UNSIGNED.  Values 0..4
+    // are positive one-octet INTEGER encodings, so no sign-extension is needed.
     constexpr std::size_t required = 3U;
     if (destination.size() < required) {
         return {wire::EncodeStatus::buffer_too_small, 0U, required};
     }
-    destination[0] = 0x86U;
+    destination[0] = 0x85U;
     destination[1] = 0x01U;
     destination[2] = model;
     return {wire::EncodeStatus::ok, required, required};
@@ -413,7 +415,7 @@ wire::EncodeResult mms_static_direct_boolean_read_state(
 wire::EncodeResult mms_static_direct_normal_read_ctl_model(
     const void*,
     const std::span<std::uint8_t> destination) noexcept {
-    return encode_unsigned_model(1U, destination);
+    return encode_integer_model(1U, destination);
 }
 
 wire::EncodeResult mms_static_control_read_ctl_model(
@@ -423,7 +425,7 @@ wire::EncodeResult mms_static_control_read_ctl_model(
         return {wire::EncodeStatus::value_out_of_range, 0U, 3U};
     }
     const auto& binding = *static_cast<const MmsStaticDirectBooleanControlBinding*>(context);
-    return encode_unsigned_model(static_cast<std::uint8_t>(binding.model), destination);
+    return encode_integer_model(static_cast<std::uint8_t>(binding.model), destination);
 }
 
 wire::EncodeResult mms_static_sbo_normal_read(
