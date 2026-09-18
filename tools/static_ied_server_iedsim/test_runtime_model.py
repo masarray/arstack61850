@@ -270,6 +270,7 @@ def main() -> int:
                     f"stderr={dpc.stderr!r}"
                 )
 
+            first_read_signal = root / "first-read.signal"
             probe = subprocess.Popen(
                 [
                     args.read_probe,
@@ -283,6 +284,8 @@ def main() -> int:
                     "3",
                     "--delay-ms",
                     "500",
+                    "--signal-after-first",
+                    str(first_read_signal),
                     "--timeout-ms",
                     "3000",
                 ],
@@ -291,21 +294,30 @@ def main() -> int:
                 text=True,
                 creationflags=creation_flags(),
             )
-            assert probe.stdout is not None
-            first = probe.stdout.readline().strip()
-            if "value=false" not in first:
-                raise RuntimeError(f"initial MMS value mismatch: {first}")
+            signal_deadline = time.monotonic() + 5.0
+            while not first_read_signal.exists() and time.monotonic() < signal_deadline:
+                if probe.poll() is not None:
+                    break
+                time.sleep(0.02)
+            if not first_read_signal.exists():
+                probe_stdout, probe_stderr = probe.communicate(timeout=5)
+                raise RuntimeError(
+                    "first same-association MMS read was not signaled: "
+                    f"exit={probe.returncode} stdout={probe_stdout!r} stderr={probe_stderr!r}"
+                )
             atomic_write(model, manifest(2, True))
-            remaining_stdout, probe_stderr = probe.communicate(timeout=10)
-            reads = [first, *remaining_stdout.splitlines()]
-            refreshed_reads = [
-                line for line in reads[1:] if "value=true" in line
-            ]
-            if probe.returncode != 0 or len(refreshed_reads) != 2:
+            probe_stdout, probe_stderr = probe.communicate(timeout=10)
+            reads = [line for line in probe_stdout.splitlines() if line.startswith("MMS_READ ")]
+            if (
+                probe.returncode != 0
+                or len(reads) != 3
+                or "value=false" not in reads[0]
+                or sum("value=true" in line for line in reads[1:]) != 2
+            ):
                 raise RuntimeError(
                     "live MMS value did not remain refreshed on the existing association:\n"
                     + "\n".join(reads)
-                    + f"\nstderr:\n{probe_stderr}"
+                    + f"\nexit={probe.returncode} stderr:\n{probe_stderr}"
                 )
 
             report = subprocess.run(
