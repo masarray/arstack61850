@@ -347,7 +347,7 @@ void read_callbacks_match_mms_types() {
     read = mms_static_direct_normal_read_ctl_model(nullptr, bytes);
     CHECK(read.success());
     CHECK(read.bytes_written == 3U);
-    CHECK(bytes[0] == 0x86U && bytes[1] == 0x01U && bytes[2] == 0x01U);
+    CHECK(bytes[0] == 0x85U && bytes[1] == 0x01U && bytes[2] == 0x01U);
 
     MmsStaticDirectBooleanControlState configured_state{};
     MmsStaticDirectBooleanControlBinding configured_binding;
@@ -356,7 +356,7 @@ void read_callbacks_match_mms_types() {
     bytes.fill(0U);
     read = mms_static_control_read_ctl_model(&configured_binding, bytes);
     CHECK(read.success());
-    CHECK(bytes[0] == 0x86U && bytes[1] == 0x01U && bytes[2] == 0x04U);
+    CHECK(bytes[0] == 0x85U && bytes[1] == 0x01U && bytes[2] == 0x04U);
 
     read = mms_static_control_read_unavailable(nullptr, bytes);
     CHECK(!read.success());
