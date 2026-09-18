@@ -96,6 +96,43 @@ namespace mms = ar::iec61850::mms;
     return result;
 }
 
+void collect_type_bit_widths(
+    const mms::MmsTypeSpecification& type,
+    std::vector<std::uint32_t>& widths) {
+    if (type.kind == mms::MmsTypeKind::bit_string && type.size.has_value()) {
+        widths.push_back(*type.size);
+    }
+    for (const auto& child : type.children) {
+        collect_type_bit_widths(child, widths);
+    }
+}
+
+void collect_data_bit_widths(
+    const mms::MmsDataValue& value,
+    std::vector<std::uint32_t>& widths) {
+    if (value.kind() == mms::MmsDataKind::bit_string) {
+        const auto& raw = value.raw_value();
+        if (!raw.empty()) {
+            const auto storage_bits =
+                static_cast<std::uint32_t>((raw.size() - 1U) * 8U);
+            const auto unused = static_cast<std::uint32_t>(raw.front());
+            if (unused <= storage_bits) widths.push_back(storage_bits - unused);
+        }
+    }
+    for (const auto& child : value.children()) {
+        collect_data_bit_widths(child, widths);
+    }
+}
+
+[[nodiscard]] std::string width_list(const std::vector<std::uint32_t>& widths) {
+    std::string result;
+    for (std::size_t index = 0U; index < widths.size(); ++index) {
+        if (index != 0U) result.push_back(',');
+        result += std::to_string(widths[index]);
+    }
+    return result;
+}
+
 [[nodiscard]] std::string data_shape(const mms::MmsDataValue& value) {
     std::string result{data_kind_name(value.kind())};
     if (value.kind() != mms::MmsDataKind::array &&
@@ -203,6 +240,26 @@ int main(const int argc, char** argv) {
             type_shape_text = type_shape(response.type);
         }
 
+        std::string type_bit_widths_text;
+        if (with_type) {
+            const auto invoke_id = session.association().next_invoke_id();
+            (void)invoke_id;
+            mms::MmsVariableAccessAttributesRequest request;
+            request.invoke_id = session.association().next_invoke_id();
+            request.name = mms::MmsObjectName::domain_specific(domain, item);
+            const auto encoded =
+                mms::MmsServiceCodec::encode_variable_access_attributes_request_p_data(
+                    request, session.association().negotiated().presentation_context_id);
+            const auto exchange =
+                session.association().exchange_confirmed(encoded, request.invoke_id);
+            const auto response =
+                mms::MmsServiceCodec::decode_variable_access_attributes_response(
+                    response_payload(exchange), request.invoke_id);
+            std::vector<std::uint32_t> widths;
+            collect_type_bit_widths(response.type, widths);
+            type_bit_widths_text = width_list(widths);
+        }
+
         for (std::size_t index = 0U; index < count; ++index) {
             const auto invoke_id = session.association().next_invoke_id();
             mms::MmsReadRequest request;
@@ -224,9 +281,17 @@ int main(const int argc, char** argv) {
                       << " reference=" << domain << '/' << item;
             if (with_type) {
                 std::cout << " type=" << type_shape_text;
+                if (!type_bit_widths_text.empty()) {
+                    std::cout << " type_bit_widths=" << type_bit_widths_text;
+                }
             }
-            std::cout << " shape=" << data_shape(value)
-                      << " value=" << mms::MmsDataCodec::to_display_string(value)
+            std::vector<std::uint32_t> data_widths;
+            collect_data_bit_widths(value, data_widths);
+            std::cout << " shape=" << data_shape(value);
+            if (!data_widths.empty()) {
+                std::cout << " data_bit_widths=" << width_list(data_widths);
+            }
+            std::cout << " value=" << mms::MmsDataCodec::to_display_string(value)
                       << '\n';
             std::cout.flush();
             if (index + 1U < count) std::this_thread::sleep_for(delay);
