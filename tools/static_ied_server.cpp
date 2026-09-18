@@ -2468,6 +2468,9 @@ void serve_connection(
                 << " accepted="
                 << (result.status == mms::MmsStaticServerSessionStatus::application_rejected
                         ? "false" : "true")
+                << " rx_bytes=" << result.bytes_received
+                << " tx_bytes=" << result.bytes_sent
+                << " pending_tx=" << session.pending_output_bytes()
                 << '\n';
         }
         if (result.terminal()) {
