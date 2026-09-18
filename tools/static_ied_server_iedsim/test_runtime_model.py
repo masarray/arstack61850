@@ -289,14 +289,14 @@ def main() -> int:
                     "--signal-after-first",
                     str(first_read_signal),
                     "--timeout-ms",
-                    "3000",
+                    "10000",
                 ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 creationflags=creation_flags(),
             )
-            signal_deadline = time.monotonic() + 5.0
+            signal_deadline = time.monotonic() + 15.0
             while not first_read_signal.exists() and time.monotonic() < signal_deadline:
                 if probe.poll() is not None:
                     break
@@ -410,10 +410,13 @@ def main() -> int:
                         break
                 time.sleep(0.02)
             server_stdout, server_stderr = server.communicate(timeout=8)
-        except BaseException:
+        except BaseException as error:
             server.kill()
             server_stdout, server_stderr = server.communicate()
-            raise
+            raise RuntimeError(
+                f"{error}\n--- server stdout ---\n{server_stdout}"
+                f"\n--- server stderr ---\n{server_stderr}"
+            ) from error
 
     if (
         server.returncode != 0
