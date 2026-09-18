@@ -79,6 +79,7 @@ def run_read_probe(
     *,
     count: int = 1,
     delay_ms: int = 0,
+    with_type: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     command = [
         executable,
@@ -95,6 +96,8 @@ def run_read_probe(
     ]
     if delay_ms:
         command.extend(["--delay-ms", str(delay_ms)])
+    if with_type:
+        command.append("--with-type")
     return subprocess.run(
         command,
         capture_output=True,
@@ -170,13 +173,21 @@ def main() -> int:
                 args.read_probe,
                 port,
                 "GGIO1$ST$Digital1",
+                with_type=True,
             )
-            digital_shape = "shape=structure(boolean,bit-string,utc-time)"
-            if structured.returncode != 0 or digital_shape not in structured.stdout:
+            digital_signature = "structure(boolean,bit-string,utc-time)"
+            digital_type = f"type={digital_signature}"
+            digital_shape = f"shape={digital_signature}"
+            if (
+                structured.returncode != 0
+                or digital_type not in structured.stdout
+                or digital_shape not in structured.stdout
+            ):
                 raise RuntimeError(
-                    "whole-DO IEC 61850 SPS ordering mismatch: "
-                    f"expected={digital_shape!r} exit={structured.returncode} "
-                    f"stdout={structured.stdout!r} stderr={structured.stderr!r}"
+                    "whole-DO IEC 61850 SPS type/data ordering mismatch: "
+                    f"expectedType={digital_type!r} expectedData={digital_shape!r} "
+                    f"exit={structured.returncode} stdout={structured.stdout!r} "
+                    f"stderr={structured.stderr!r}"
                 )
 
             # Nested constructed attributes are positional too.  Model a typical
@@ -186,16 +197,23 @@ def main() -> int:
                 args.read_probe,
                 port,
                 "GGIO1$MX$Analog1",
+                with_type=True,
             )
-            analog_shape = (
-                "shape=structure(structure(integer,floating-point),"
-                "bit-string,utc-time)"
+            analog_signature = (
+                "structure(structure(integer,floating-point),bit-string,utc-time)"
             )
-            if analog.returncode != 0 or analog_shape not in analog.stdout:
+            analog_type = f"type={analog_signature}"
+            analog_shape = f"shape={analog_signature}"
+            if (
+                analog.returncode != 0
+                or analog_type not in analog.stdout
+                or analog_shape not in analog.stdout
+            ):
                 raise RuntimeError(
-                    "nested IEC 61850 analogue ordering mismatch: "
-                    f"expected={analog_shape!r} exit={analog.returncode} "
-                    f"stdout={analog.stdout!r} stderr={analog.stderr!r}"
+                    "nested IEC 61850 analogue type/data ordering mismatch: "
+                    f"expectedType={analog_type!r} expectedData={analog_shape!r} "
+                    f"exit={analog.returncode} stdout={analog.stdout!r} "
+                    f"stderr={analog.stderr!r}"
                 )
 
             probe = subprocess.Popen(
@@ -249,8 +267,8 @@ def main() -> int:
         )
     print(
         "IEDSIM_RUNTIME_MODEL_PASS datasets=2 digitalMembers=36 analogMembers=22 "
-        "digitalShape=structure(boolean,bit-string,utc-time) "
-        "analogShape=structure(structure(integer,floating-point),bit-string,utc-time) "
+        "digitalTypeDataOrder=structure(boolean,bit-string,utc-time) "
+        "analogTypeDataOrder=structure(structure(integer,floating-point),bit-string,utc-time) "
         "valueTransition=false->true associationPreserved=true"
     )
     return 0
