@@ -53,6 +53,7 @@ namespace mms = ar::iec61850::mms;
     case mms::MmsDataKind::binary_time: return "binary-time";
     case mms::MmsDataKind::bcd: return "bcd";
     case mms::MmsDataKind::boolean_array: return "boolean-array";
+    case mms::MmsDataKind::object_id: return "object-id";
     case mms::MmsDataKind::mms_string: return "mms-string";
     case mms::MmsDataKind::utc_time: return "utc-time";
     case mms::MmsDataKind::unknown: return "unknown";
