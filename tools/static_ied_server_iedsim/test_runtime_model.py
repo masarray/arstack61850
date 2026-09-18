@@ -54,7 +54,8 @@ def manifest(revision: int, value: bool) -> str:
         object_name = f"Analog{index}"
         lines.extend(
             [
-                f"OBJ\tTESTIEDLD0\tGGIO1$MX${object_name}$mag$i\tINT32\tInt32\t{index}",\n                f"OBJ\tTESTIEDLD0\tGGIO1$MX${object_name}$mag$f\tFLOAT32\tFloat32\t{index}.5",
+                f"OBJ\tTESTIEDLD0\tGGIO1$MX${object_name}$mag$i\tINT32\tInt32\t{index}",
+                f"OBJ\tTESTIEDLD0\tGGIO1$MX${object_name}$mag$f\tFLOAT32\tFloat32\t{index}.5",
                 f"OBJ\tTESTIEDLD0\tGGIO1$MX${object_name}$q\tQUALITY\tQuality\tgood",
                 f"OBJ\tTESTIEDLD0\tGGIO1$MX${object_name}$t\tTimestamp\tTimestamp\tunix-ms:1720000000000",
                 f"DS\tTESTIEDLD0\tLLN0$Analog\tTESTIEDLD0\tGGIO1$MX${object_name}",
