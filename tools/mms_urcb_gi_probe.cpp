@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "ariec61850/mms/data_codec.hpp"
 #include "ariec61850/mms/live_discovery.hpp"
 #include "ariec61850/mms/reporting.hpp"
 #include "ariec61850/mms/services.hpp"
