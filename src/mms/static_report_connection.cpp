@@ -3,6 +3,7 @@
 #include "ariec61850/mms/static_report_connection.hpp"
 
 #include "ariec61850/osi/cotp_span.hpp"
+#include "ariec61850/osi/cotp_tpkt_stream.hpp"
 #include "ariec61850/osi/presentation_span.hpp"
 #include "ariec61850/osi/tpkt_span.hpp"
 
@@ -14,18 +15,6 @@
 
 namespace ar::iec61850::mms {
 namespace {
-
-[[nodiscard]] bool add_size(
-    const std::size_t base,
-    const std::size_t extra,
-    std::size_t& total) noexcept {
-    if (extra > std::numeric_limits<std::size_t>::max() - base) {
-        total = 0U;
-        return false;
-    }
-    total = base + extra;
-    return true;
-}
 
 [[nodiscard]] MmsStaticReportConnectionResult make_result(
     const MmsStaticReportConnectionStatus status,
@@ -43,10 +32,19 @@ namespace {
 [[nodiscard]] bool final_frame_size(
     const std::uint32_t presentation_context_id,
     const std::size_t mms_bytes,
+    const std::size_t negotiated_tpdu_size_bytes,
     std::size_t& required) noexcept {
+    required = 0U;
     const auto fully_encoded = osi::PresentationSpanCodec::fully_encoded_data_size(
         presentation_context_id, mms_bytes);
-    return fully_encoded && add_size(*fully_encoded, 11U, required);
+    osi::CotpTpktDataStreamPlan plan;
+    if (!fully_encoded ||
+        !osi::CotpTpktDataStreamSpanCodec::try_plan(
+            *fully_encoded, negotiated_tpdu_size_bytes, plan)) {
+        return false;
+    }
+    required = plan.required_bytes;
+    return true;
 }
 
 [[nodiscard]] MmsStaticReportConnectionResult response_capacity(
@@ -108,6 +106,7 @@ MmsStaticReportConnectionResult MmsStaticReportConnection::poll(
             if (!final_frame_size(
                     connection.mms_presentation_context_id(),
                     encoded.required_bytes,
+                    connection.negotiated_tpdu_size_bytes(),
                     final_required)) {
                 return make_result(
                     MmsStaticReportConnectionStatus::report_encode_failed,
@@ -132,16 +131,20 @@ MmsStaticReportConnectionResult MmsStaticReportConnection::poll(
         true);
     if (!p_data.success()) {
         if (p_data.status == wire::EncodeStatus::buffer_too_small) {
-            std::size_t final_required{};
-            if (!add_size(p_data.required_bytes, 7U, final_required)) {
+            osi::CotpTpktDataStreamPlan stream_plan;
+            if (!osi::CotpTpktDataStreamSpanCodec::try_plan(
+                    p_data.required_bytes,
+                    connection.negotiated_tpdu_size_bytes(),
+                    stream_plan)) {
                 return make_result(
                     MmsStaticReportConnectionStatus::report_encode_failed,
                     MmsStaticUrcbStatus::report_encode_failed,
                     plan);
             }
             auto result = workspace_capacity(
-                plan, MmsStaticUrcbStatus::workspace_too_small, final_required);
-            result.required_response_bytes = final_required;
+                plan, MmsStaticUrcbStatus::workspace_too_small,
+                p_data.required_bytes);
+            result.required_response_bytes = stream_plan.required_bytes;
             return result;
         }
         return make_result(
@@ -150,48 +153,23 @@ MmsStaticReportConnectionResult MmsStaticReportConnection::poll(
             plan);
     }
 
-    std::size_t final_required{};
-    if (!add_size(p_data.bytes_written, 7U, final_required)) {
-        return make_result(
-            MmsStaticReportConnectionStatus::report_encode_failed,
-            MmsStaticUrcbStatus::report_encode_failed,
-            plan);
-    }
-    if (response.size() < final_required) {
-        return response_capacity(
-            plan, MmsStaticUrcbStatus::response_buffer_too_small, final_required);
-    }
-    if (workspace.size() < final_required) {
-        auto result = workspace_capacity(
-            plan, MmsStaticUrcbStatus::workspace_too_small, final_required);
-        result.required_response_bytes = final_required;
-        return result;
-    }
-
-    // P-DATA currently resides in workspace. COTP consumes it into response;
-    // after that source is no longer needed, so workspace can safely become
-    // the TPKT staging destination.
-    const auto cotp = osi::CotpSpanCodec::encode_data_into(
+    const auto framed = osi::CotpTpktDataStreamSpanCodec::encode_into(
         workspace.first(p_data.bytes_written),
-        response.first(final_required - osi::TpktSpanCodec::header_length));
-    if (!cotp.success()) {
+        connection.negotiated_tpdu_size_bytes(),
+        response);
+    if (!framed.success()) {
+        if (framed.status == wire::EncodeStatus::buffer_too_small) {
+            return response_capacity(
+                plan, MmsStaticUrcbStatus::response_buffer_too_small,
+                framed.required_bytes);
+        }
         return make_result(
             MmsStaticReportConnectionStatus::report_encode_failed,
             MmsStaticUrcbStatus::report_encode_failed,
             plan);
     }
 
-    const auto tpkt = osi::TpktSpanCodec::encode_into(
-        response.first(cotp.bytes_written),
-        workspace.first(final_required));
-    if (!tpkt.success() || tpkt.bytes_written != final_required) {
-        return make_result(
-            MmsStaticReportConnectionStatus::report_encode_failed,
-            MmsStaticUrcbStatus::report_encode_failed,
-            plan);
-    }
-
-    // Commit only after the complete TPKT image exists. If capacity failed at
+    // Commit only after the complete segmented COTP/TPKT stream exists. If capacity failed at
     // any earlier stage, the same plan/SqNum can be retried without a gap.
     const auto committed = reports.commit(plan, now_ms);
     if (committed != MmsStaticUrcbStatus::ok) {
@@ -201,14 +179,13 @@ MmsStaticReportConnectionResult MmsStaticReportConnection::poll(
             plan);
     }
 
-    std::copy_n(workspace.begin(), tpkt.bytes_written, response.begin());
     auto result = make_result(
         MmsStaticReportConnectionStatus::response_ready,
         MmsStaticUrcbStatus::ok,
         plan);
-    result.bytes_written = tpkt.bytes_written;
-    result.required_response_bytes = final_required;
-    result.required_workspace_bytes = final_required;
+    result.bytes_written = framed.bytes_written;
+    result.required_response_bytes = framed.required_bytes;
+    result.required_workspace_bytes = p_data.bytes_written;
     return result;
 }
 

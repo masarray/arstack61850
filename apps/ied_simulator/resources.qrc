@@ -3,6 +3,7 @@
         <file alias="InterVariable.ttf">../arstack_studio/assets/InterVariable.ttf</file>
         <file alias="LUCIDE_LICENSE.txt">../arstack_studio/assets/LUCIDE_LICENSE.txt</file>
         <file alias="black-fascia-ied.svg">assets/black-fascia-ied.svg</file>
+        <file alias="app-icon.png">../../assets/favicon-96x96.png</file>
         <file alias="activity.svg">../arstack_studio/assets/lucide/activity.svg</file>
         <file alias="chevron-down.svg">../arstack_studio/assets/lucide/chevron-down.svg</file>
         <file alias="chevron-up.svg">../arstack_studio/assets/lucide/chevron-up.svg</file>
@@ -15,5 +16,8 @@
         <file alias="square.svg">../arstack_studio/assets/lucide/square.svg</file>
         <file alias="upload.svg">../arstack_studio/assets/lucide/upload.svg</file>
         <file alias="x.svg">../arstack_studio/assets/lucide/x.svg</file>
+    </qresource>
+    <qresource prefix="/iedsim">
+        <file alias="InteropWorkspaceV2.qml">qml/InteropWorkspaceV2.qml</file>
     </qresource>
 </RCC>

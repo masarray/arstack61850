@@ -40,6 +40,26 @@ using MmsStaticAssociationClosedCallback = void (*)(
     std::uint64_t association_id,
     std::uint64_t now_ms) noexcept;
 
+// Host-side escape hatch for confirmed services that require resources the
+// portable MMS core intentionally does not own (for example a filesystem).
+// The callback encodes a complete MMS ConfirmedResponse/ConfirmedError PDU
+// into `response`. `handled=false` delegates to the normal dispatcher/fallback.
+// Keeping this at the already-decoded confirmed-service boundary preserves
+// negotiated MMS sizing, Presentation wrapping and COTP segmentation in one
+// connection runtime instead of duplicating transport logic in host adapters.
+struct MmsStaticConfirmedServiceExtensionResult final {
+    bool handled{};
+    wire::EncodeResult encoded{};
+};
+
+using MmsStaticConfirmedServiceCallback = MmsStaticConfirmedServiceExtensionResult (*)(
+    void* context,
+    MmsWireConfirmedService service,
+    std::uint32_t invoke_id,
+    bool service_constructed,
+    std::span<const std::uint8_t> service_value,
+    std::span<std::uint8_t> response) noexcept;
+
 struct MmsStaticConnectionPolicy final {
     static constexpr std::size_t maximum_owner_bytes = 16U;
 
@@ -62,6 +82,13 @@ struct MmsStaticConnectionPolicy final {
     const void* now_context{};
     MmsStaticAssociationClosedCallback association_closed{};
     void* association_closed_context{};
+
+    // Optional host-owned confirmed-service bridge. The callback must not
+    // retain request spans. Stateful/destructive backends should make retries
+    // with the same invoke ID idempotent because capacity failures leave the
+    // input frame unconsumed and may cause the callback to be entered again.
+    MmsStaticConfirmedServiceCallback confirmed_service{};
+    void* confirmed_service_context{};
 
     // Appended for aggregate source compatibility. When non-empty, this is the
     // adapter-owned COTP Data reassembly buffer. Otherwise the runtime may

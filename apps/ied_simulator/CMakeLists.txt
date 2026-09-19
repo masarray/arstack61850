@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(ARStackIedSimulator VERSION 0.1.0 LANGUAGES CXX)
+project(ARStackIedSimulator VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -28,12 +28,53 @@ qt_add_executable(arstack_ied_simulator
     resources.qrc
 )
 
+if(WIN32)
+    set(ARSTACK_APP_ICON "${CMAKE_CURRENT_LIST_DIR}/../../assets/favicon.ico")
+    configure_file(
+        "${CMAKE_CURRENT_LIST_DIR}/packaging/windows/arstack_ied_simulator.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/arstack_ied_simulator.rc"
+        @ONLY)
+    target_sources(
+        arstack_ied_simulator
+        PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/arstack_ied_simulator.rc")
+endif()
+
 qt_add_qml_module(arstack_ied_simulator
     URI ARStack.IedSimulator
     VERSION 1.0
     SOURCES
+        src/IedActivityModel.cpp
+        src/IedActivityModel.hpp
+        src/IedRuntimeGuardrails.cpp
+        src/IedRuntimeGuardrails.hpp
+        src/IedPointStore.cpp
+        src/IedPointStore.hpp
         src/IedFleetController.cpp
+        src/IedFleetControllerAsync.cpp
         src/IedFleetController.hpp
+        src/IedCommissioningModel.cpp
+        src/IedCommissioningRuntime.cpp
+        src/IedGoosePublication.cpp
+        src/IedCommissioningModel.hpp
+        src/IedNavigationModel.cpp
+        src/IedNavigationModel.hpp
+        src/IedSignalModel.cpp
+        src/IedSignalModel.hpp
+        src/MmsLiveTreeModel.cpp
+        src/MmsLiveTreeModel.hpp
+        src/MmsClientController.cpp
+        src/MmsClientController.hpp
+        src/MmsReportController.cpp
+        src/MmsReportController.hpp
+        src/MmsSettingGroupPolicy.hpp
+        src/MmsFileSettingsController.cpp
+        src/MmsFileSettingsController.hpp
+        src/SclWorkspaceController.cpp
+        src/SclWorkspaceController.hpp
+        src/GooseMonitorController.cpp
+        src/GooseMonitorController.hpp
+        src/ProductHardeningController.cpp
+        src/ProductHardeningController.hpp
     QML_FILES
         qml/Main.qml
         qml/AppTheme.qml
@@ -46,6 +87,15 @@ qt_add_qml_module(arstack_ied_simulator
         qml/RuntimeWorkspace.qml
         qml/IedExplorer.qml
         qml/FleetWorkspace.qml
+        qml/InteropWorkspace.qml
+        qml/MmsClientWorkspace.qml
+        qml/ReportsWorkspace.qml
+        qml/FilesWorkspace.qml
+        qml/SettingsWorkspace.qml
+        qml/SclWorkspace.qml
+        qml/GooseWorkspace.qml
+        qml/ActivityMonitor.qml
+        qml/CommissioningWorkspace.qml
 )
 
 target_link_libraries(arstack_ied_simulator PRIVATE
@@ -62,6 +112,210 @@ target_include_directories(arstack_ied_simulator PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src)
 
 target_compile_features(arstack_ied_simulator PRIVATE cxx_std_20)
+
+add_executable(ied_setting_control_manifest_qa
+    src/ied_setting_control_manifest_qa.cpp)
+target_link_libraries(ied_setting_control_manifest_qa PRIVATE
+    Qt6::Core)
+target_include_directories(ied_setting_control_manifest_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src
+    ${CMAKE_CURRENT_LIST_DIR}/../../include)
+target_compile_features(ied_setting_control_manifest_qa PRIVATE cxx_std_20)
+
+add_executable(ied_simulator_guardrails_qa
+    src/ied_simulator_guardrails_qa.cpp
+    src/IedActivityModel.cpp
+    src/IedActivityModel.hpp
+    src/IedRuntimeGuardrails.cpp
+    src/IedRuntimeGuardrails.hpp)
+target_link_libraries(ied_simulator_guardrails_qa PRIVATE
+    Qt6::Core
+    Qt6::Qml)
+target_include_directories(ied_simulator_guardrails_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_simulator_guardrails_qa PRIVATE cxx_std_20)
+
+add_executable(ied_simulator_responsiveness_qa
+    src/ied_simulator_responsiveness_qa.cpp
+    src/IedActivityModel.cpp
+    src/IedActivityModel.hpp
+    src/IedRuntimeGuardrails.cpp
+    src/IedRuntimeGuardrails.hpp
+    src/IedPointStore.cpp
+    src/IedPointStore.hpp
+    src/IedFleetController.cpp
+    src/IedFleetControllerAsync.cpp
+    src/IedFleetController.hpp
+    src/IedSignalModel.cpp
+    src/IedSignalModel.hpp)
+target_link_libraries(ied_simulator_responsiveness_qa PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Network
+    Qt6::Qml
+    ARIEC61850::core)
+target_include_directories(ied_simulator_responsiveness_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_simulator_responsiveness_qa PRIVATE cxx_std_20)
+
+add_executable(ied_simulator_commissioning_qa
+    src/ied_simulator_commissioning_qa.cpp
+    src/IedCommissioningModel.cpp
+    src/IedCommissioningRuntime.cpp
+    src/IedGoosePublication.cpp
+    src/IedCommissioningModel.hpp
+    src/IedActivityModel.cpp
+    src/IedActivityModel.hpp
+    src/IedRuntimeGuardrails.cpp
+    src/IedRuntimeGuardrails.hpp
+    src/IedPointStore.cpp
+    src/IedPointStore.hpp
+    src/IedFleetController.cpp
+    src/IedFleetControllerAsync.cpp
+    src/IedFleetController.hpp)
+target_link_libraries(ied_simulator_commissioning_qa PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Network
+    Qt6::Qml
+    ARIEC61850::core)
+target_include_directories(ied_simulator_commissioning_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_simulator_commissioning_qa PRIVATE cxx_std_20)
+
+add_executable(ied_simulator_runtime_commissioning_qa
+    src/ied_simulator_runtime_commissioning_qa.cpp
+    src/IedCommissioningModel.cpp
+    src/IedCommissioningRuntime.cpp
+    src/IedGoosePublication.cpp
+    src/IedCommissioningModel.hpp
+    src/IedActivityModel.cpp
+    src/IedActivityModel.hpp
+    src/IedRuntimeGuardrails.cpp
+    src/IedRuntimeGuardrails.hpp
+    src/IedPointStore.cpp
+    src/IedPointStore.hpp
+    src/IedFleetController.cpp
+    src/IedFleetControllerAsync.cpp
+    src/IedFleetController.hpp)
+target_link_libraries(ied_simulator_runtime_commissioning_qa PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Network
+    Qt6::Qml
+    ARIEC61850::core)
+target_include_directories(ied_simulator_runtime_commissioning_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_simulator_runtime_commissioning_qa PRIVATE cxx_std_20)
+
+add_executable(ied_simulator_goose_publication_qa
+    src/ied_simulator_goose_publication_qa.cpp)
+target_link_libraries(ied_simulator_goose_publication_qa PRIVATE
+    ARIEC61850::core)
+target_compile_features(ied_simulator_goose_publication_qa PRIVATE cxx_std_20)
+
+add_executable(ied_goose_workspace_qa
+    src/ied_goose_workspace_qa.cpp
+    src/GooseMonitorController.cpp
+    src/GooseMonitorController.hpp)
+target_link_libraries(ied_goose_workspace_qa PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Network
+    Qt6::Qml
+    ARIEC61850::core)
+target_include_directories(ied_goose_workspace_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_goose_workspace_qa PRIVATE cxx_std_20)
+
+add_executable(ied_mms_client_workbench_qa
+    src/ied_mms_client_workbench_qa.cpp
+    src/MmsLiveTreeModel.cpp
+    src/MmsLiveTreeModel.hpp
+    src/MmsClientController.cpp
+    src/MmsClientController.hpp
+    src/IedActivityModel.cpp
+    src/IedActivityModel.hpp
+    src/IedRuntimeGuardrails.cpp
+    src/IedRuntimeGuardrails.hpp
+    src/IedPointStore.cpp
+    src/IedPointStore.hpp
+    src/IedFleetController.cpp
+    src/IedFleetControllerAsync.cpp
+    src/IedFleetController.hpp)
+target_link_libraries(ied_mms_client_workbench_qa PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Network
+    Qt6::Qml
+    ariec61850_ied_simulator_server_core
+    ARIEC61850::core)
+target_include_directories(ied_mms_client_workbench_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_mms_client_workbench_qa PRIVATE cxx_std_20)
+
+add_executable(ied_report_workspace_qa
+    src/ied_report_workspace_qa.cpp
+    src/MmsReportController.cpp
+    src/MmsReportController.hpp
+    src/IedActivityModel.cpp
+    src/IedActivityModel.hpp
+    src/IedRuntimeGuardrails.cpp
+    src/IedRuntimeGuardrails.hpp
+    src/IedPointStore.cpp
+    src/IedPointStore.hpp
+    src/IedFleetController.cpp
+    src/IedFleetControllerAsync.cpp
+    src/IedFleetController.hpp
+    src/IedSignalModel.cpp
+    src/IedSignalModel.hpp)
+target_link_libraries(ied_report_workspace_qa PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Network
+    Qt6::Qml
+    ARIEC61850::core)
+target_include_directories(ied_report_workspace_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_report_workspace_qa PRIVATE cxx_std_20)
+
+add_executable(ied_file_settings_workspace_qa
+    src/ied_file_settings_workspace_qa.cpp
+    src/MmsFileSettingsController.cpp
+    src/MmsFileSettingsController.hpp
+    src/MmsSettingGroupPolicy.hpp)
+target_link_libraries(ied_file_settings_workspace_qa PRIVATE
+    Qt6::Core
+    Qt6::Network
+    Qt6::Qml
+    ariec61850_ied_simulator_server_core
+    ARIEC61850::core)
+target_include_directories(ied_file_settings_workspace_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_file_settings_workspace_qa PRIVATE cxx_std_20)
+
+add_executable(ied_scl_workspace_qa
+    src/ied_scl_workspace_qa.cpp
+    src/SclWorkspaceController.cpp
+    src/SclWorkspaceController.hpp)
+target_link_libraries(ied_scl_workspace_qa PRIVATE
+    Qt6::Core
+    Qt6::Qml
+    ARIEC61850::core)
+target_include_directories(ied_scl_workspace_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_scl_workspace_qa PRIVATE cxx_std_20)
+
+add_executable(ied_product_hardening_qa
+    src/ied_product_hardening_qa.cpp
+    src/ProductHardeningController.cpp
+    src/ProductHardeningController.hpp)
+target_link_libraries(ied_product_hardening_qa PRIVATE
+    Qt6::Core
+    Qt6::Qml)
+target_include_directories(ied_product_hardening_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_product_hardening_qa PRIVATE cxx_std_20)
 
 # The regular library intentionally keeps a strict portable connection runtime.
 # The desktop simulator needs the separate compatibility runtime validated
@@ -88,6 +342,7 @@ add_library(ariec61850_ied_simulator_server_core STATIC
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_write.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_data_set_table.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_direct_control.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_setting_group.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_dispatcher.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/connection_runtime_iedsim.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/mms/static_server_session.cpp
@@ -113,6 +368,15 @@ if(WIN32)
     target_link_libraries(ariec61850_ied_simulator_server PRIVATE ws2_32)
 endif()
 target_compile_features(ariec61850_ied_simulator_server PRIVATE cxx_std_20)
+add_dependencies(ied_simulator_responsiveness_qa ariec61850_ied_simulator_server)
+add_dependencies(ied_mms_client_workbench_qa ariec61850_ied_simulator_server)
+add_dependencies(ied_report_workspace_qa ariec61850_ied_simulator_server)
+add_dependencies(ied_file_settings_workspace_qa ariec61850_ied_simulator_server)
+add_dependencies(
+    ied_simulator_runtime_commissioning_qa
+    ariec61850_ied_simulator_server
+    ariec61850_mms_read_probe
+    ariec61850_mms_brcb_event_probe)
 
 # The public-wire URCB/BRCB regression clients are root ARIEC61850 tool targets.
 # Reuse them here instead of defining GUI-local copies so the same sources are
@@ -122,6 +386,7 @@ add_dependencies(
     ariec61850_ied_simulator_server
     ariec61850_mms_urcb_gi_probe
     ariec61850_mms_brcb_event_probe
+    ariec61850_mms_sgcb_probe
     ariec61850_control_interop_probe)
 
 if(WIN32)

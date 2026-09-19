@@ -117,11 +117,22 @@ struct MmsFileCloseResponse final {
     std::uint32_t invoke_id{};
 };
 
+struct MmsFileDeleteRequest final {
+    std::uint32_t invoke_id{};
+    std::string remote_path;
+    bool rooted_backslash{true};
+};
+
+struct MmsFileDeleteResponse final {
+    std::uint32_t invoke_id{};
+};
+
 class MmsFileServiceCodec final {
 public:
     static constexpr std::int32_t file_open_service_tag = 72;
     static constexpr std::int32_t file_read_service_tag = 73;
     static constexpr std::int32_t file_close_service_tag = 74;
+    static constexpr std::int32_t file_delete_service_tag = 76;
     static constexpr std::int32_t file_directory_service_tag = 77;
     static constexpr std::size_t maximum_path_bytes = 1'024U;
     static constexpr std::size_t maximum_directory_entries = 65'536U;
@@ -166,6 +177,15 @@ public:
         const MmsFileCloseRequest& request,
         std::uint32_t presentation_context_id = 3U);
     [[nodiscard]] static MmsFileCloseResponse decode_file_close_response(
+        std::span<const std::uint8_t> presentation_or_mms_payload,
+        std::uint32_t expected_invoke_id);
+
+    [[nodiscard]] static std::vector<std::uint8_t> encode_file_delete_request_pdu(
+        const MmsFileDeleteRequest& request);
+    [[nodiscard]] static std::vector<std::uint8_t> encode_file_delete_request_p_data(
+        const MmsFileDeleteRequest& request,
+        std::uint32_t presentation_context_id = 3U);
+    [[nodiscard]] static MmsFileDeleteResponse decode_file_delete_response(
         std::span<const std::uint8_t> presentation_or_mms_payload,
         std::uint32_t expected_invoke_id);
 };
@@ -244,6 +264,14 @@ struct MmsFileTransferResult final {
     std::vector<MmsFileDiagnostic> fallback_attempt_diagnostics;
 };
 
+struct MmsFileDeleteResult final {
+    bool success{};
+    std::string remote_path;
+    MmsFileFailureKind failure_kind{MmsFileFailureKind::none};
+    std::string message;
+    std::vector<MmsFileDiagnostic> diagnostics;
+};
+
 class MmsFileServiceChannel {
 public:
     virtual ~MmsFileServiceChannel() = default;
@@ -295,6 +323,14 @@ public:
         MmsFileSink& sink,
         MmsFileTransferOptions options = {},
         MmsFileProgressSink* progress = nullptr,
+        std::stop_token stop_token = {});
+
+    // Destructive by design: one call maps to one MMS FileDelete request.
+    // There is deliberately no adaptive retry because a destructive request
+    // must never be replayed under an alternate pathname after an ambiguous result.
+    [[nodiscard]] MmsFileDeleteResult remove(
+        const std::string& remote_path,
+        bool rooted_backslash = true,
         std::stop_token stop_token = {});
 
 private:

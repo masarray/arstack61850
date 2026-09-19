@@ -97,6 +97,15 @@ jobs:
       - name: Build embedded profile
         run: cmake --build build-embedded --parallel
 
+      - name: Diagnose external IEC 61850 client RCB-root retained smoke
+        shell: bash
+        run: |
+          set +e
+          ./build-embedded/ariec61850_embedded_mms_interop_rcb_root_smoke
+          rc=$?
+          echo "INTEROP_RCB_ROOT_EXIT=$rc"
+          exit 0
+
       - name: Test embedded full-link smoke
         run: ctest --test-dir build-embedded --output-on-failure
 

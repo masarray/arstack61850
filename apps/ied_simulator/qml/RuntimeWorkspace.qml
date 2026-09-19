@@ -409,7 +409,7 @@ Item {
             Layout.fillHeight: true
             spacing: 3
 
-            // IEDScout-inspired navigation rail: service groups and full LD/LN
+            // external-client-inspired navigation rail: service groups and full LD/LN
             // hierarchy live together so the operator never loses model context.
             Rectangle {
                 visible: root.navigationVisible

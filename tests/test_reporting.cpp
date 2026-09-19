@@ -55,8 +55,8 @@ MmsInformationReport realistic_report(
     const std::array<std::uint8_t, 6> time{0x01U, 0x02U, 0x03U, 0x04U, 0x05U, 0x06U};
     const std::array<std::uint8_t, 8> entry{0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U};
     const std::array<std::uint8_t, 1> inclusion{0xC0U};
-    const std::array<std::uint8_t, 1> reason_a{0x80U};
-    const std::array<std::uint8_t, 1> reason_b{0x10U};
+    const std::array<std::uint8_t, 1> reason_a{0x40U};
+    const std::array<std::uint8_t, 1> reason_b{0x08U};
 
     MmsInformationReport report;
     auto add = [&report](MmsDataValue value) {
@@ -75,10 +75,10 @@ MmsInformationReport realistic_report(
         add(MmsDataValue::boolean(more_segments));
     }
     add(MmsDataValue::bit_string(6U, inclusion));
-    add(MmsDataValue::boolean(true));
-    add(MmsDataValue::boolean(false));
     add(MmsDataValue::visible_string("LD0/GGIO1.Ind1.stVal"));
     add(MmsDataValue::visible_string("LD0/GGIO1.Ind2.stVal"));
+    add(MmsDataValue::boolean(true));
+    add(MmsDataValue::boolean(false));
     add(MmsDataValue::bit_string(2U, reason_a));
     add(MmsDataValue::bit_string(2U, reason_b));
     return report;
@@ -171,6 +171,67 @@ void exact_report_mapping_decodes_optional_fields() {
     require(frame.decoder_mode == "opt-fields-exact", "Unexpected report decoder mode.");
 }
 
+void standard_reason_and_trigger_bit_numbering_is_exact() {
+    struct Case final {
+        std::uint8_t mask;
+        const char* name;
+    };
+    constexpr std::array<Case, 5U> cases{{
+        {0x40U, "data-change"},
+        {0x20U, "quality-change"},
+        {0x10U, "data-update"},
+        {0x08U, "integrity"},
+        {0x04U, "general-interrogation"},
+    }};
+
+    for (const auto& test : cases) {
+        auto report = realistic_report();
+        const std::array<std::uint8_t, 1U> reason{test.mask};
+        report.items[13U].value = MmsDataValue::bit_string(2U, reason);
+        const auto frame = MmsReportFrameMapper::map(report, {});
+        require(frame.values[0].reason_for_inclusion.has(test.name),
+                std::string{"ReasonForInclusion mask did not map to "} + test.name + '.');
+
+        MmsReportControlCandidate candidate;
+        candidate.domain = "LD0";
+        candidate.logical_node = "LLN0";
+        candidate.functional_constraint = "RP";
+        candidate.name = "urcb01";
+        const std::array<std::string, 1U> attrs{"TrgOps"};
+        MmsReadResponse response;
+        response.invoke_id = 33U;
+        response.results = {{MmsDataValue::bit_string(2U, reason), std::nullopt}};
+        const auto state = MmsReportControlStateMapper::map_read_response(
+            candidate, attrs, response, nullptr);
+        require(state.trigger_options.has(test.name),
+                std::string{"TrgOps mask did not map to "} + test.name + '.');
+    }
+
+    const std::array<std::uint8_t, 1U> reserved{0x80U};
+    auto report = realistic_report();
+    report.items[13U].value = MmsDataValue::bit_string(2U, reserved);
+    const auto frame = MmsReportFrameMapper::map(report, {});
+    require(frame.values[0].reason_for_inclusion.names.empty(),
+            "Reserved ReasonForInclusion bit was assigned a semantic reason.");
+    require(frame.values[0].reason_for_inclusion.set_bit_indexes ==
+                std::vector<std::size_t>{0U},
+            "Reserved ReasonForInclusion bit was not preserved as raw evidence.");
+
+    MmsReportControlCandidate candidate;
+    candidate.domain = "LD0";
+    candidate.logical_node = "LLN0";
+    candidate.functional_constraint = "RP";
+    candidate.name = "urcb01";
+    const std::array<std::string, 1U> attrs{"TrgOps"};
+    MmsReadResponse response;
+    response.invoke_id = 34U;
+    response.results = {{MmsDataValue::bit_string(2U, reserved), std::nullopt}};
+    const auto state = MmsReportControlStateMapper::map_read_response(
+        candidate, attrs, response, nullptr);
+    require(state.trigger_options.names.empty() &&
+                state.trigger_options.set_bit_indexes == std::vector<std::size_t>{0U},
+            "Reserved TrgOps bit was assigned a standard semantic trigger.");
+}
 
 void csharp_exact_report_shape_maps_byte_semantics() {
     const std::array<std::uint8_t, 2> options{0x7BU, 0x80U};
@@ -201,13 +262,81 @@ void csharp_exact_report_shape_maps_byte_semantics() {
             "C# exact OptFlds incorrectly enabled data-reference.");
     require(frame.header.data_set_reference == "LD0/LLN0$DataSet", "C# exact DatSet changed.");
     require(frame.values.size() == 2U, "C# exact included value count mismatch.");
-    require(frame.values[0].reason_for_inclusion.has("application-trigger"),
-            "C# exact reason bit mapping failed.");
+    require(frame.values[0].reason_for_inclusion.has("general-interrogation"),
+            "C# exact GI reason bit mapping failed.");
+}
+
+void canonical_report_payload_order_matrix() {
+    struct Case final {
+        bool data_reference;
+        bool reason;
+        std::uint8_t option_mask;
+    };
+    constexpr std::array<Case, 4U> cases{{
+        {false, false, 0x00U},
+        {true,  false, 0x04U},
+        {false, true,  0x10U},
+        {true,  true,  0x14U},
+    }};
+    const std::array<std::uint8_t, 1U> inclusion{0xC0U};
+    const std::array<std::uint8_t, 1U> reason_a{0x40U};
+    const std::array<std::uint8_t, 1U> reason_b{0x08U};
+    const auto directory = MmsDataSetDirectoryCodec::decode_response(
+        MmsDataSetDirectoryCodec::encode_response_pdu(directory_fixture()), 9U);
+
+    for (const auto& test : cases) {
+        const std::array<std::uint8_t, 2U> options{test.option_mask, 0x00U};
+        MmsInformationReport report;
+        auto add = [&report](MmsDataValue value) {
+            report.items.push_back({report.items.size(), std::move(value), std::nullopt});
+        };
+        add(MmsDataValue::visible_string("LD0/LLN0.RP.matrix"));
+        add(MmsDataValue::bit_string(6U, options));
+        add(MmsDataValue::bit_string(6U, inclusion));
+        if (test.data_reference) {
+            add(MmsDataValue::visible_string("LD0/GGIO1.Ind1.stVal"));
+            add(MmsDataValue::visible_string("LD0/GGIO1.Ind2.stVal"));
+        }
+        add(MmsDataValue::boolean(true));
+        add(MmsDataValue::boolean(false));
+        if (test.reason) {
+            add(MmsDataValue::bit_string(2U, reason_a));
+            add(MmsDataValue::bit_string(2U, reason_b));
+        }
+
+        const auto frame = MmsReportFrameMapper::map(report, directory.members);
+        require(frame.values.size() == 2U, "Canonical report matrix value count mismatch.");
+        require(frame.values[0].value && frame.values[1].value &&
+                    frame.values[0].value->kind() == MmsDataKind::boolean &&
+                    frame.values[1].value->kind() == MmsDataKind::boolean &&
+                    std::get<bool>(frame.values[0].value->value()) &&
+                    !std::get<bool>(frame.values[1].value->value()),
+                "Canonical report matrix consumed metadata as a process value.");
+        require(test.data_reference
+                    ? frame.values[0].data_reference == "LD0/GGIO1.Ind1.stVal" &&
+                      frame.values[1].data_reference == "LD0/GGIO1.Ind2.stVal"
+                    : frame.values[0].data_reference.empty() &&
+                      frame.values[1].data_reference.empty(),
+                "Canonical report matrix DataRef projection mismatch.");
+        require(test.reason
+                    ? frame.values[0].reason_for_inclusion.has("data-change") &&
+                      frame.values[1].reason_for_inclusion.has("integrity")
+                    : frame.values[0].reason_for_inclusion.names.empty() &&
+                      frame.values[1].reason_for_inclusion.names.empty(),
+                "Canonical report matrix ReasonForInclusion projection mismatch.");
+    }
+
+    // Reject the legacy false-green layout where a process value precedes DataRef.
+    auto legacy = realistic_report();
+    std::swap(legacy.items[9U], legacy.items[11U]);
+    require_throws([&legacy, &directory] {
+        static_cast<void>(MmsReportFrameMapper::map(legacy, directory.members));
+    }, "Legacy Value-before-DataRef report layout was silently accepted.");
 }
 
 void report_failure_result_is_preserved() {
     auto report = realistic_report();
-    report.items[9U] = {9U, std::nullopt, 3U};
+    report.items[11U] = {11U, std::nullopt, 3U};
     const auto directory = MmsDataSetDirectoryCodec::decode_response(
         MmsDataSetDirectoryCodec::encode_response_pdu(directory_fixture()), 9U);
     const auto frame = MmsReportFrameMapper::map(report, directory.members);
@@ -316,6 +445,8 @@ int main() {
         {"InformationReport", information_report_round_trip},
         {"InformationReport variableListName", information_report_variable_list_name_is_supported},
         {"exact report mapping", exact_report_mapping_decodes_optional_fields},
+        {"canonical report payload order", canonical_report_payload_order_matrix},
+        {"report reason bit numbering", standard_reason_and_trigger_bit_numbering_is_exact},
         {"C# exact report shape", csharp_exact_report_shape_maps_byte_semantics},
         {"report failure result", report_failure_result_is_preserved},
         {"RCB state mapping", rcb_read_mapping_classifies_availability},

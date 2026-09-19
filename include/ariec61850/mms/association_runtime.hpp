@@ -105,6 +105,26 @@ struct MmsAssociationAttemptEvidence final {
                            const MmsAssociationAttemptEvidence&) = default;
 };
 
+// Explicit server/called-side OSI association addressing. This is intentionally
+// separate from endpoint host/port and from generic compatibility defaults so a
+// trusted SCL engineering context can reach COTP/Session/Presentation/ACSE
+// unchanged without redefining the local engineering-station identity.
+struct MmsAssociationAddressing final {
+    // ASN.1 OBJECT IDENTIFIER arcs, e.g. {1, 1, 1, 999, 1}. Empty means use the
+    // existing compatibility default called AP-title.
+    std::vector<std::uint32_t> called_ap_title;
+    std::optional<std::uint32_t> called_ae_qualifier;
+
+    // Server-side selectors. Empty means preserve the existing default at that
+    // layer. Calling/source selectors remain compatibility defaults.
+    std::vector<std::uint8_t> called_p_selector;
+    std::vector<std::uint8_t> called_s_selector;
+    std::vector<std::uint8_t> called_t_selector;
+
+    friend bool operator==(const MmsAssociationAddressing&,
+                           const MmsAssociationAddressing&) = default;
+};
+
 struct MmsAssociationOptions final {
     std::chrono::milliseconds connect_timeout{5'000};
     std::chrono::milliseconds request_timeout{5'000};
@@ -113,6 +133,11 @@ struct MmsAssociationOptions final {
     std::size_t maximum_receive_chunks_per_operation{4'096U};
     std::size_t maximum_queued_information_reports{1'024U};
     std::size_t maximum_events{1'024U};
+
+    // When present, association setup uses one explicit engineering profile and
+    // does not silently retry generic AP-title profiles. Missing individual
+    // fields inside the profile retain the historical per-layer defaults.
+    std::optional<MmsAssociationAddressing> addressing;
 };
 
 struct MmsNegotiatedAssociation final {

@@ -126,6 +126,7 @@ private:
     std::optional<MmsReportControlState> last_rcb_state_;
     bool enabled_by_runtime_{};
     bool reservation_touched_{};
+    bool restore_enabled_required_{};
     bool cleanup_required_{};
     std::uint64_t received_reports_{};
     std::uint64_t decode_failures_{};

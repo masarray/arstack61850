@@ -225,7 +225,9 @@ bool MmsDataSetSpanCodec::try_decode_get_named_variable_list_attributes_request(
     }
     MmsObjectNameView name;
     if (!MmsServiceSpanCodec::try_decode_object_name_view(confirmed.service_value, name) ||
-        name.kind != MmsObjectNameViewKind::domain_specific) {
+        (name.kind != MmsObjectNameViewKind::domain_specific &&
+         name.kind != MmsObjectNameViewKind::vmd_specific &&
+         name.kind != MmsObjectNameViewKind::aa_specific)) {
         return false;
     }
     request.invoke_id = confirmed.invoke_id;

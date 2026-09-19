@@ -86,6 +86,7 @@ add_library(ariec61850_mms_server_core
     src/mms/static_write.cpp
     src/mms/static_data_set_table.cpp
     src/mms/static_direct_control.cpp
+    src/mms/static_setting_group.cpp
     src/mms/static_dispatcher.cpp
     src/mms/connection_runtime.cpp
     src/mms/static_server_session.cpp
@@ -193,6 +194,12 @@ if(ARIEC61850_BUILD_TOOLS)
     target_compile_features(ariec61850_mms_brcb_event_probe PRIVATE cxx_std_20)
     ariec61850_apply_warnings(ariec61850_mms_brcb_event_probe)
     ariec61850_apply_sanitizers(ariec61850_mms_brcb_event_probe)
+
+    add_executable(ariec61850_mms_sgcb_probe tools/mms_sgcb_probe.cpp)
+    target_link_libraries(ariec61850_mms_sgcb_probe PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_mms_sgcb_probe PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_mms_sgcb_probe)
+    ariec61850_apply_sanitizers(ariec61850_mms_sgcb_probe)
 
     add_executable(ariec61850_control_interop_probe tools/control_interop_probe.cpp)
     target_link_libraries(ariec61850_control_interop_probe PRIVATE ARIEC61850::core)
@@ -387,6 +394,13 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_warnings(ariec61850_rcb_selection_tests)
     ariec61850_apply_sanitizers(ariec61850_rcb_selection_tests)
     add_test(NAME ariec61850_rcb_selection_tests COMMAND ariec61850_rcb_selection_tests)
+
+    add_executable(ariec61850_mms_static_setting_group_tests tests/test_mms_static_setting_group.cpp)
+    target_link_libraries(ariec61850_mms_static_setting_group_tests PRIVATE ARIEC61850::mms_server_core)
+    target_compile_features(ariec61850_mms_static_setting_group_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_mms_static_setting_group_tests)
+    ariec61850_apply_sanitizers(ariec61850_mms_static_setting_group_tests)
+    add_test(NAME ariec61850_mms_static_setting_group_tests COMMAND ariec61850_mms_static_setting_group_tests)
 
     add_executable(ariec61850_control_block_read_tests tests/test_control_block_read.cpp)
     target_link_libraries(ariec61850_control_block_read_tests PRIVATE ARIEC61850::core)

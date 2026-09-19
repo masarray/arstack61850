@@ -74,10 +74,14 @@ def main() -> int:
 
     document = json.loads(client.stdout)
     coverage = document.get("coverage", {})
+    # This fixture exposes LLN0.Mod, LPHD1.PhyHealth, and eight GGIO1
+    # indications through the composed GVAA hierarchy. Assert the complete
+    # model so a future root-LN discovery regression cannot silently pass.
     expected = {
         "logicalDeviceCount": 1,
-        "dataObjectCount": 8,
-        "dataAttributeCount": 8,
+        "logicalNodeCount": 3,
+        "dataObjectCount": 10,
+        "dataAttributeCount": 10,
         "dataSetCount": 1,
     }
     mismatches = {

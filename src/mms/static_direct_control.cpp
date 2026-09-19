@@ -48,10 +48,18 @@ namespace {
     asn1::BerTlvView or_cat;
     asn1::BerTlvView or_ident;
     if (!read_next(origin.value, offset, or_cat) ||
-        !context_tag(or_cat, 6, false)) {
+        !(context_tag(or_cat, 5, false) || context_tag(or_cat, 6, false))) {
         return false;
     }
-    const auto category_value = asn1::BerSpanReader::read_unsigned_integer(or_cat);
+    std::optional<std::uint64_t> category_value;
+    if (context_tag(or_cat, 5, false)) {
+        const auto signed_category = asn1::BerSpanReader::read_signed_integer(or_cat);
+        if (signed_category && *signed_category >= 0) {
+            category_value = static_cast<std::uint64_t>(*signed_category);
+        }
+    } else {
+        category_value = asn1::BerSpanReader::read_unsigned_integer(or_cat);
+    }
     if (!category_value || *category_value > 0xFFU) {
         return false;
     }
@@ -222,15 +230,19 @@ void release_selection(MmsStaticDirectBooleanControlBinding& binding) noexcept {
     return false;
 }
 
-[[nodiscard]] bool same_command(
+[[nodiscard]] bool same_selected_sequence(
     const MmsStaticDirectBooleanOperate& left,
     const MmsStaticDirectBooleanOperate& right,
     const bool compare_check) noexcept {
+    // IEC 61850 enhanced SBO correlation is based on the selected command
+    // identity. OMICRON IEDScout emits a fresh T for Oper (and may do so for
+    // Cancel) rather than replaying the SBOw timestamp, so T is intentionally
+    // not part of selection identity. The accepted Oper itself is still kept
+    // intact for CommandTermination correlation.
     if (left.control_value != right.control_value ||
         left.origin_category != right.origin_category ||
         left.origin_identifier_size != right.origin_identifier_size ||
         left.control_number != right.control_number ||
-        left.timestamp != right.timestamp ||
         left.test != right.test) {
         return false;
     }
@@ -248,20 +260,26 @@ void release_selection(MmsStaticDirectBooleanControlBinding& binding) noexcept {
 [[nodiscard]] bool valid_command(
     const MmsStaticDirectBooleanControlBinding& binding,
     const MmsStaticDirectBooleanOperate& command) noexcept {
-    return command.origin_category <= 8U && command.control_number != 0U &&
+    // ctlNum is an IEC 61850 wire value supplied by the remote client. Keep
+    // zero valid on the server path: OMICRON IEDScout uses ctlNum=0 in real
+    // SBOw/Oper traffic. ARStack's client-side auto-allocation policy (1..255)
+    // is separate and remains unchanged.
+    return command.origin_category <= 8U &&
         (!command.test || binding.policy.allow_test) &&
         (!command.synchro_check || binding.policy.allow_synchro_check) &&
         (!command.interlock_check || binding.policy.allow_interlock_check);
 }
 
-[[nodiscard]] wire::EncodeResult encode_unsigned_model(
+[[nodiscard]] wire::EncodeResult encode_integer_model(
     const std::uint8_t model,
     const std::span<std::uint8_t> destination) noexcept {
+    // IEDScout exposes ctlModel as MMS INTEGER(8), not UNSIGNED.  Values 0..4
+    // are positive one-octet INTEGER encodings, so no sign-extension is needed.
     constexpr std::size_t required = 3U;
     if (destination.size() < required) {
         return {wire::EncodeStatus::buffer_too_small, 0U, required};
     }
-    destination[0] = 0x86U;
+    destination[0] = 0x85U;
     destination[1] = 0x01U;
     destination[2] = model;
     return {wire::EncodeStatus::ok, required, required};
@@ -333,7 +351,7 @@ void release_selection(MmsStaticDirectBooleanControlBinding& binding) noexcept {
     }
     if (binding.model == MmsStaticControlModel::sbo_enhanced &&
         (!binding.state->selected_with_value ||
-         !same_command(binding.state->selected_command, operate, true))) {
+         !same_selected_sequence(binding.state->selected_command, operate, true))) {
         ++binding.state->rejected_operations;
         return {false, binding.policy.invalid_value_failure_code};
     }
@@ -405,7 +423,7 @@ wire::EncodeResult mms_static_direct_boolean_read_state(
 wire::EncodeResult mms_static_direct_normal_read_ctl_model(
     const void*,
     const std::span<std::uint8_t> destination) noexcept {
-    return encode_unsigned_model(1U, destination);
+    return encode_integer_model(1U, destination);
 }
 
 wire::EncodeResult mms_static_control_read_ctl_model(
@@ -415,7 +433,7 @@ wire::EncodeResult mms_static_control_read_ctl_model(
         return {wire::EncodeStatus::value_out_of_range, 0U, 3U};
     }
     const auto& binding = *static_cast<const MmsStaticDirectBooleanControlBinding*>(context);
-    return encode_unsigned_model(static_cast<std::uint8_t>(binding.model), destination);
+    return encode_integer_model(static_cast<std::uint8_t>(binding.model), destination);
 }
 
 wire::EncodeResult mms_static_sbo_normal_read(
@@ -516,7 +534,7 @@ MmsStaticWriteResult mms_static_boolean_write_cancel_contextual(
     }
     if (binding->model == MmsStaticControlModel::sbo_enhanced &&
         (!binding->state->selected_with_value ||
-         !same_command(binding->state->selected_command, command, false))) {
+         !same_selected_sequence(binding->state->selected_command, command, false))) {
         ++binding->state->rejected_operations;
         return {false, binding->policy.invalid_value_failure_code};
     }

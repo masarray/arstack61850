@@ -10,7 +10,7 @@ diff --git a/src/osi/presentation.cpp b/src/osi/presentation.cpp
 -                    if (normal.encoded_tag == 0xA5U) {
 +                    if (normal.encoded_tag == 0x83U) {
 +                        // responding-presentation-selector is optional in a CPA.
-+                        // IEDScout and other IEC 61850 servers commonly echo a
++                        // external IEC 61850 server and other IEC 61850 servers commonly echo a
 +                        // four-byte selector before the context-result list.
 +                        if (saw_responding_selector) {
 +                            throw PresentationFormatError(

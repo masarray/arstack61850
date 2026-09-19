@@ -161,6 +161,11 @@ ByteVector close_response(const std::uint32_t invoke_id) {
         invoke_id, mms::MmsFileServiceCodec::file_close_service_tag, false, {});
 }
 
+ByteVector delete_response(const std::uint32_t invoke_id) {
+    return confirmed_response(
+        invoke_id, mms::MmsFileServiceCodec::file_delete_service_tag, false, {});
+}
+
 class FakeChannel final : public mms::MmsFileServiceChannel {
 public:
     using Step = std::function<ByteVector(
@@ -262,7 +267,11 @@ void codec_encodes_file_directory_high_tag_and_continuation() {
 
     const auto root = mms::MmsFileServiceCodec::encode_file_directory_request_pdu(
         {8U, "/", {}});
-    CHECK(mms::MmsPduCodec::decode_confirmed_request(root).service_value.empty());
+    const auto decoded_root = mms::MmsPduCodec::decode_confirmed_request(root);
+    CHECK(decoded_root.service_tag == 77);
+    // Captured IEDScout root request service value: A0 02 19 00.
+    CHECK(decoded_root.service_value ==
+          (ByteVector{0xA0U, 0x02U, 0x19U, 0x00U}));
 }
 
 void codec_decodes_directory_attributes_and_preserves_order() {
@@ -294,6 +303,22 @@ void codec_normalizes_paths_and_round_trips_signed_frsm() {
         {18U, "FRA00019", 0U, false}).empty());
     CHECK(mms::MmsFileServiceCodec::rooted_backslash_path(
         "COMTRADE/FRA00028.dat") == "\\COMTRADE\\FRA00028.dat");
+
+    // Captured IEDScout FileOpen uses a rooted backslash filename and position 0.
+    const auto iedscout_open = mms::MmsFileServiceCodec::encode_file_open_request_pdu(
+        {123U, "ligne_1.DAT", 0U, true});
+    const auto decoded_iedscout_open = mms::MmsPduCodec::decode_confirmed_request(
+        iedscout_open);
+    CHECK(decoded_iedscout_open.service_tag == 72);
+    const auto iedscout_fields = asn1::BerReader::read_children(
+        decoded_iedscout_open.service_value);
+    CHECK(iedscout_fields.size() == 2U);
+    const auto iedscout_names = asn1::BerReader::read_children(
+        iedscout_fields.front().value);
+    CHECK(iedscout_names.size() == 1U);
+    CHECK(asn1::BerReader::read_ascii_string(iedscout_names.front()) ==
+          "\\ligne_1.DAT");
+    CHECK(asn1::BerReader::read_unsigned_integer(iedscout_fields[1]) == 0U);
     check_throws<std::invalid_argument>([] {
         static_cast<void>(mms::MmsFileServiceCodec::encode_file_open_request_pdu(
             {1U, "../secret.cfg", 0U, false}));
@@ -327,6 +352,31 @@ void codec_normalizes_paths_and_round_trips_signed_frsm() {
         open_response(21U, std::numeric_limits<std::int32_t>::min(), 4'096U), 21U);
     CHECK(opened.frsm_id == std::numeric_limits<std::int32_t>::min());
     CHECK(opened.file_size_bytes == 4'096U);
+}
+
+void codec_matches_iedscout_filedelete_golden_shape() {
+    const auto request = mms::MmsFileServiceCodec::encode_file_delete_request_pdu(
+        {0x95U, "30_248202310947607_FRA00030.cfg", true});
+    const auto decoded = mms::MmsPduCodec::decode_confirmed_request(request);
+    CHECK(decoded.invoke_id == 0x95U);
+    CHECK(decoded.service_tag == 76);
+    CHECK(decoded.service() == mms::MmsConfirmedService::file_delete);
+    CHECK(decoded.service_constructed);
+    const auto fields = asn1::BerReader::read_children(decoded.service_value);
+    CHECK(fields.size() == 1U);
+    CHECK(fields.front().encoded_tag == 0x19U);
+    CHECK(asn1::BerReader::read_ascii_string(fields.front()) ==
+          "\\30_248202310947607_FRA00030.cfg");
+
+    const auto response = delete_response(0x95U);
+    const auto decoded_response = mms::MmsPduCodec::decode_confirmed_response(
+        mms::MmsPduCodec::extract_mms_payload(response));
+    CHECK(decoded_response.service_tag == 76);
+    CHECK(decoded_response.service() == mms::MmsConfirmedService::file_delete);
+    CHECK(!decoded_response.service_constructed);
+    CHECK(decoded_response.service_value.empty());
+    CHECK(mms::MmsFileServiceCodec::decode_file_delete_response(
+        response, 0x95U).invoke_id == 0x95U);
 }
 
 void codec_rejects_invoke_mismatch_malformed_and_trailing_data() {
@@ -380,6 +430,31 @@ void directory_runtime_paginates_deduplicates_and_detects_no_progress() {
     const auto failed = repeated_runtime.list_directory();
     CHECK(!failed.success);
     CHECK(failed.failure_kind == mms::MmsFileFailureKind::protocol);
+}
+
+void runtime_filedelete_is_single_shot_and_never_adaptive() {
+    FakeChannel channel;
+    channel.respond(delete_response(1U));
+    mms::MmsFileTransferRuntime runtime{channel};
+    const auto result = runtime.remove("FRA00030.dat");
+    CHECK(result.success);
+    CHECK(result.remote_path == "FRA00030.dat");
+    CHECK(channel.sent.size() == 1U);
+    CHECK(sent_service_tag(channel.sent.front()) == 76);
+
+    const auto sent = mms::MmsPduCodec::decode_confirmed_request(
+        mms::MmsPduCodec::extract_mms_payload(channel.sent.front()));
+    const auto names = asn1::BerReader::read_children(sent.service_value);
+    CHECK(names.size() == 1U);
+    CHECK(asn1::BerReader::read_ascii_string(names.front()) == "\\FRA00030.dat");
+
+    FakeChannel missing;
+    missing.respond(confirmed_error(1U, 11, 7U));
+    mms::MmsFileTransferRuntime missing_runtime{missing};
+    const auto failed = missing_runtime.remove("missing.cfg");
+    CHECK(!failed.success);
+    CHECK(failed.failure_kind == mms::MmsFileFailureKind::confirmed_error);
+    CHECK(missing.sent.size() == 1U);
 }
 
 void runtime_streams_multiple_blocks_and_closes_negative_frsm() {
@@ -616,8 +691,10 @@ int main() {
         {"codec file-directory request", codec_encodes_file_directory_high_tag_and_continuation},
         {"codec file-directory response", codec_decodes_directory_attributes_and_preserves_order},
         {"codec path and signed FRSM", codec_normalizes_paths_and_round_trips_signed_frsm},
+        {"codec IEDScout FileDelete", codec_matches_iedscout_filedelete_golden_shape},
         {"codec malformed evidence", codec_rejects_invoke_mismatch_malformed_and_trailing_data},
         {"directory bounded pagination", directory_runtime_paginates_deduplicates_and_detects_no_progress},
+        {"runtime single-shot FileDelete", runtime_filedelete_is_single_shot_and_never_adaptive},
         {"runtime streaming and close", runtime_streams_multiple_blocks_and_closes_negative_frsm},
         {"runtime zero declared size", runtime_treats_zero_fileopen_size_as_unavailable},
         {"runtime bounds and sink", runtime_bounds_empty_blocks_sizes_operations_and_sink_failures},

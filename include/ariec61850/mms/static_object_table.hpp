@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string_view>
 
@@ -41,6 +42,13 @@ using MmsStaticContextualWriteCallback = MmsStaticWriteResult (*)(
     std::span<const std::uint8_t> encoded_data,
     const MmsStaticRequestAccessContext& access) noexcept;
 
+enum class MmsStaticWriteSemantic : std::uint8_t {
+    ordinary,
+    rcb_configuration,
+    rcb_enable,
+    rcb_general_interrogation,
+};
+
 struct MmsStaticObjectEntry final {
     std::string_view domain;
     std::string_view item;
@@ -54,6 +62,18 @@ struct MmsStaticObjectEntry final {
     // Appended for source compatibility with existing aggregate initializers.
     // A contextual callback takes precedence over the legacy write callback.
     MmsStaticContextualWriteCallback contextual_write{};
+
+    // Optional semantic transaction metadata. Objects sharing a non-null
+    // group can be applied in a safe state-machine order while WriteResult
+    // entries remain aligned with the original MMS variable list.
+    const void* write_transaction_group{};
+    MmsStaticWriteSemantic write_semantic{MmsStaticWriteSemantic::ordinary};
+
+    // Optional declaration/source order used when the dispatcher must
+    // synthesize an ancestor Structure from flattened descendants.  Keeping
+    // this at the end preserves existing aggregate initializers.  Unspecified
+    // entries retain the legacy lexical fallback.
+    std::size_t declaration_order{std::numeric_limits<std::size_t>::max()};
 
     [[nodiscard]] constexpr bool writable() const noexcept {
         return write != nullptr || contextual_write != nullptr;

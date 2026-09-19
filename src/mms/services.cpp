@@ -190,7 +190,20 @@ std::vector<std::uint8_t> encode_type_impl(
     }
 
     const auto size_content = [&type]() {
-        return type.size ? positive_integer_content(*type.size) : std::vector<std::uint8_t>{};
+        if (!type.size) return std::vector<std::uint8_t>{};
+        if (type.variable_length) {
+            if (*type.size == 0U) {
+                throw MmsFormatError("Variable-length MMS TypeSpecification bound must be positive.");
+            }
+            auto encoded = BerWriter::encode_signed_integer(
+                -static_cast<std::int64_t>(*type.size));
+            // OMICRON IEDScout emits variable maximum lengths in at least a
+            // two-octet signed field.  In the golden capture Octet64 is
+            // 89 02 FF C0 (not the mathematically minimal 89 01 C0).
+            if (encoded.size() == 1U) encoded.insert(encoded.begin(), 0xFFU);
+            return encoded;
+        }
+        return positive_integer_content(*type.size);
     };
 
     switch (type.kind) {
@@ -262,11 +275,28 @@ std::vector<std::uint8_t> encode_type_impl(
     throw MmsFormatError("Cannot encode an unknown MMS TypeSpecification.");
 }
 
-std::optional<std::uint32_t> read_optional_size(const BerTlv& tlv) {
-    if (tlv.value.empty()) {
-        return std::nullopt;
+struct DecodedTypeSize final {
+    std::optional<std::uint32_t> size;
+    bool variable{};
+};
+
+DecodedTypeSize read_optional_size(const BerTlv& tlv) {
+    if (tlv.value.empty()) return {};
+
+    const auto value = BerReader::read_signed_integer(tlv);
+    if (!value) {
+        throw MmsFormatError("MMS type size is not a signed INTEGER.");
     }
-    return read_u32(tlv, "MMS type size");
+    const bool variable = *value < 0;
+    const auto magnitude = variable
+        ? static_cast<std::uint64_t>(-(*value + 1)) + 1U
+        : static_cast<std::uint64_t>(*value);
+    if (magnitude > std::numeric_limits<std::uint32_t>::max()) {
+        throw MmsFormatError("MMS type size is outside the supported 32-bit range.");
+    }
+    return {
+        static_cast<std::uint32_t>(magnitude),
+        variable};
 }
 
 MmsTypeSpecification decode_type_impl(
@@ -375,7 +405,17 @@ MmsTypeSpecification decode_type_impl(
     default:
         throw MmsFormatError("Unsupported MMS TypeSpecification tag.");
     }
-    result.size = read_optional_size(tlv);
+    const auto decoded_size = read_optional_size(tlv);
+    result.size = decoded_size.size;
+    result.variable_length = decoded_size.variable;
+    if (result.variable_length &&
+        result.kind != MmsTypeKind::octet_string &&
+        result.kind != MmsTypeKind::visible_string &&
+        result.kind != MmsTypeKind::mms_string &&
+        result.kind != MmsTypeKind::object_id) {
+        throw MmsFormatError(
+            "Negative MMS TypeSpecification size is only valid for variable-length string/octet types.");
+    }
     return result;
 }
 

@@ -1,4 +1,4 @@
-name: IEDScout Parity Server CI
+name: IEC 61850 Interoperability Server CI
 
 on:
   pull_request:
@@ -6,13 +6,19 @@ on:
       - 'tools/static_ied_server_iedsim/**'
       - 'tools/static_ied_server.cpp'
       - 'tools/static_ied_server_sigpipe.cpp'
+      - 'tools/mms_read_probe.cpp'
+      - 'tools/mms_urcb_gi_probe.cpp'
       - 'src/asn1/ber_span_reader.cpp'
       - 'src/osi/**'
       - 'src/acse/**'
       - 'src/mms/**'
       - 'include/ariec61850/**'
-      - '.github/workflows/iedscout-parity-server-ci.yml'
+      - '.github/workflows/interoperability-server-ci.yml'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   linux:
@@ -32,19 +38,19 @@ jobs:
             echo "CXX=g++" >> "$GITHUB_ENV"
           fi
       - name: Configure
-        run: cmake -S tools/static_ied_server_iedsim -B build-iedscout-parity -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S tools/static_ied_server_iedsim -B build-interop-parity -DCMAKE_BUILD_TYPE=Release
       - name: Build
-        run: cmake --build build-iedscout-parity --parallel
+        run: cmake --build build-interop-parity --parallel
       - name: Test
-        run: ctest --test-dir build-iedscout-parity --output-on-failure
+        run: ctest --test-dir build-interop-parity --output-on-failure
 
   windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - name: Configure
-        run: cmake -S tools/static_ied_server_iedsim -B build-iedscout-parity
+        run: cmake -S tools/static_ied_server_iedsim -B build-interop-parity
       - name: Build
-        run: cmake --build build-iedscout-parity --config Release --parallel
+        run: cmake --build build-interop-parity --config Release --parallel
       - name: Test
-        run: ctest --test-dir build-iedscout-parity -C Release --output-on-failure
+        run: ctest --test-dir build-interop-parity -C Release --output-on-failure

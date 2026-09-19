@@ -19,7 +19,7 @@ namespace {
 
 using namespace ar::iec61850;
 
-enum class Command : std::uint8_t { list, download };
+enum class Command : std::uint8_t { list, download, remove };
 
 struct Options final {
     mms::MmsEndpoint endpoint;
@@ -107,12 +107,13 @@ void usage() {
     std::cout
         << "Usage:\n"
         << "  ariec61850_file_transfer <host> [port] [list] [options]\n"
-        << "  ariec61850_file_transfer <host> [port] download --remote PATH --output FILE [options]\n\n"
+        << "  ariec61850_file_transfer <host> [port] download --remote PATH --output FILE [options]\n"
+        << "  ariec61850_file_transfer <host> [port] delete --remote PATH [options]\n\n"
         << "List options:\n"
         << "  --directory PATH       Root is used by default.\n"
         << "  --max-pages N          Default 64.\n"
         << "  --max-entries N        Default 65536.\n\n"
-        << "Download options:\n"
+        << "Download/delete options:\n"
         << "  --remote PATH          Explicit remote file to read.\n"
         << "  --output FILE          Explicit local destination.\n"
         << "  --max-bytes N          Default 536870912.\n"
@@ -123,8 +124,8 @@ void usage() {
         << "  --json                 Print machine-readable evidence.\n"
         << "  --json-output FILE     Also write JSON evidence to a local file.\n"
         << "  --help                 Show this help.\n\n"
-        << "The default command is read-only FileDirectory. Download must be explicit;\n"
-        << "this tool never uploads, deletes, renames, or mutates remote files.\n";
+        << "The default command is read-only FileDirectory. Download and FileDelete\n"
+        << "must be explicit; this tool never uploads or renames remote files.\n";
 }
 
 [[nodiscard]] Options parse_options(const int argc, char** argv) {
@@ -137,6 +138,7 @@ void usage() {
     int index = 2;
     if (index < argc && std::string_view{argv[index]} != "list" &&
         std::string_view{argv[index]} != "download" &&
+        std::string_view{argv[index]} != "delete" &&
         std::string_view{argv[index]}.rfind("--", 0U) != 0U) {
         options.endpoint.port = parse_port(argv[index++]);
     }
@@ -144,6 +146,9 @@ void usage() {
         ++index;
     } else if (index < argc && std::string_view{argv[index]} == "download") {
         options.command = Command::download;
+        ++index;
+    } else if (index < argc && std::string_view{argv[index]} == "delete") {
+        options.command = Command::remove;
         ++index;
     }
 
@@ -180,6 +185,9 @@ void usage() {
         (options.remote_path.empty() || options.output_path.empty())) {
         throw std::invalid_argument(
             "download requires both --remote PATH and --output FILE.");
+    }
+    if (options.command == Command::remove && options.remote_path.empty()) {
+        throw std::invalid_argument("delete requires --remote PATH.");
     }
     return options;
 }
@@ -312,6 +320,17 @@ public:
     return output.str();
 }
 
+[[nodiscard]] std::string delete_json(
+    const mms::MmsFileDeleteResult& result) {
+    std::ostringstream output;
+    output << "{\"schemaVersion\":\"ariec61850-mms-file-delete-v1\","
+           << "\"destructive\":true,\"success\":"
+           << (result.success ? "true" : "false") << ','
+           << "\"remotePath\":\"" << json_escape(result.remote_path) << "\","
+           << "\"message\":\"" << json_escape(result.message) << "\"}";
+    return output.str();
+}
+
 void emit_json(const std::string& json, const Options& options) {
     if (options.json) {
         std::cout << json << '\n';
@@ -378,7 +397,7 @@ int main(int argc, char** argv) {
                 }
             }
             if (!result.success) result_code = exit_code(result.failure_kind);
-        } else {
+        } else if (options.command == Command::download) {
             FileSink sink{options.output_path};
             ConsoleProgress progress;
             mms::MmsFileTransferOptions transfer_options;
@@ -390,6 +409,11 @@ int main(int argc, char** argv) {
                 options.remote_path, sink, transfer_options, &progress);
             const auto json = transfer_json(result);
             emit_json(json, options);
+            if (!options.json) std::cout << result.message << '\n';
+            if (!result.success) result_code = exit_code(result.failure_kind);
+        } else {
+            const auto result = runtime.remove(options.remote_path);
+            emit_json(delete_json(result), options);
             if (!options.json) std::cout << result.message << '\n';
             if (!result.success) result_code = exit_code(result.failure_kind);
         }

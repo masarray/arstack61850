@@ -74,6 +74,50 @@ def run_probe(read_probe: str, port: int, item: str) -> subprocess.CompletedProc
     )
 
 
+
+
+def measure_same_association_read_latency(
+    read_probe: str,
+    port: int,
+    item: str,
+    count: int = 100,
+) -> tuple[float, float]:
+    """Measure a bounded burst on one established MMS association."""
+    started = time.monotonic()
+    result = subprocess.run(
+        probe_command(read_probe, port, item)
+        + [
+            "--count",
+            str(count),
+            "--delay-ms",
+            "1",
+            "--timeout-ms",
+            "3000",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=6,
+        check=False,
+        creationflags=creation_flags(),
+    )
+    elapsed = time.monotonic() - started
+    observed = result.stdout.count("MMS_READ index=")
+    if result.returncode != 0 or observed != count:
+        raise RuntimeError(
+            "same-association read latency burst failed: "
+            f"exit={result.returncode} reads={observed}/{count} "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+    # This is deliberately a generous CI guard, not a real-time claim. It catches
+    # pathological multi-second request/response latency while tolerating shared
+    # runner scheduling and process startup variance.
+    if elapsed >= 2.5:
+        raise RuntimeError(
+            f"same-association 100-read burst exceeded latency budget: {elapsed:.3f}s"
+        )
+    return elapsed, (elapsed * 1000.0 / count)
+
+
 def run_urcb_gi_probe(urcb_probe: str, port: int) -> str:
     result = subprocess.run(
         [
@@ -219,8 +263,10 @@ def run_direct_normal_control_regression(
             f"exit={discovery.returncode} stdout={discovery.stdout!r} stderr={discovery.stderr!r}"
         )
 
-    # Prove fail-closed Check handling before the accepted command.
-    rejected = subprocess.run(
+    # IEDScout accepts ARSAS Check=0xC0 (synchro + interlock requested).
+    # Keep this compatibility explicit instead of treating valid Check bits as
+    # an object-value-invalid condition.
+    checked = subprocess.run(
         common
         + [
             "--action",
@@ -229,6 +275,10 @@ def run_direct_normal_control_regression(
             "on",
             "--value-kind",
             "bool",
+            "--interlock-check",
+            "on",
+            "--synchro-check",
+            "on",
             "--arm",
             "IEC61850-LAB-CONTROL",
         ],
@@ -239,14 +289,15 @@ def run_direct_normal_control_regression(
         creationflags=creation_flags(),
     )
     if (
-        rejected.returncode != 4
-        or "accepted=false" not in rejected.stdout
-        or "mmsFailure=11:object-value-invalid" not in rejected.stdout
-        or "STATUS_AFTER false" not in rejected.stdout
+        checked.returncode != 0
+        or "completion=accepted" not in checked.stdout
+        or "accepted=true" not in checked.stdout
+        or "STATUS_AFTER true" not in checked.stdout
+        or "NO_RETRY_EVIDENCE controlWrites=1" not in checked.stdout
     ):
         raise RuntimeError(
-            "Direct-Normal fail-closed check-bit regression failed: "
-            f"exit={rejected.returncode} stdout={rejected.stdout!r} stderr={rejected.stderr!r}"
+            "Direct-Normal IEDScout Check=0xC0 compatibility regression failed: "
+            f"exit={checked.returncode} stdout={checked.stdout!r} stderr={checked.stderr!r}"
         )
 
     accepted = subprocess.run(
@@ -289,7 +340,7 @@ def run_direct_normal_control_regression(
             "Direct-Normal process status did not persist for a second external association: "
             f"exit={status.returncode} stdout={status.stdout!r} stderr={status.stderr!r}"
         )
-    return discovery.stdout.strip() + "\n" + rejected.stdout.strip() + "\n" + accepted.stdout.strip()
+    return discovery.stdout.strip() + "\n" + checked.stdout.strip() + "\n" + accepted.stdout.strip()
 
 
 def run_control_action(
@@ -566,6 +617,7 @@ def main() -> int:
     port = free_port()
     environment = dict(os.environ)
     environment["QT_QPA_PLATFORM"] = "offscreen"
+    environment["ARSTACK_IEDSIM_TRACE_SERVER"] = "1"
     with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as app_log:
         app = subprocess.Popen(
             [
@@ -600,7 +652,7 @@ def main() -> int:
                     manifest_text = manifest_path.read_text(encoding="utf-8")
                 except (FileNotFoundError, PermissionError, UnicodeDecodeError):
                     manifest_text = ""
-                mapped_value = "TCTR1$MX$Amp$instMag$i\tINT32\tNumber\t42"
+                mapped_value = "TCTR1$MX$Amp$instMag$i\tINT32\tNumber\t0"
                 structural_only_value = (
                     "TCTR1$MX$AmpUnmapped$instMag$i\tINT32\tNumber\t0"
                 )
@@ -619,7 +671,7 @@ def main() -> int:
                     "CTL\tMU01LD0\tGGIO1\tSPCSO4\tSPC\t4",
                 )
                 if (
-                    manifest_text.startswith("ARSTACK_IED_MODEL\t2\t2\n")
+                    manifest_text.startswith("ARSTACK_IED_MODEL\t2\t1\n")
                     and mapped_value in manifest_text
                     and structural_only_value in manifest_text
                     and "XCBR1$ST$Pos$q\tQuality\tQuality\tgood" in manifest_text
@@ -636,7 +688,7 @@ def main() -> int:
                 time.sleep(0.1)
             else:
                 raise RuntimeError(
-                    "GUI did not publish revision 2 with edited/full model leaves, reporting metadata, and configured control metadata"
+                    "GUI did not keep the startup manifest at revision 1 while preserving full model/report/control metadata"
                 )
 
             deadline = time.monotonic() + 10.0
@@ -690,6 +742,11 @@ def main() -> int:
                 port,
                 "TCTR1$MX$Amp$instMag$i",
             )
+            read_burst_seconds, read_burst_average_ms = measure_same_association_read_latency(
+                read_probe,
+                port,
+                "TCTR1$MX$Amp$instMag$i",
+            )
             urcb_output = run_urcb_gi_probe(urcb_probe, port)
             brcb_output = run_brcb_event_probe(
                 brcb_probe,
@@ -710,17 +767,28 @@ def main() -> int:
                 port,
                 manifest_path,
                 "XCBR1$ST$Pos$t",
-                "value=unix-ms=0 UTC",
+                "value=unix-ms=",
                 "1700000000123",
                 "value=unix-ms=1700000000123 UTC",
             )
 
             app.wait(timeout=47)
+            app_log.flush()
+            app_log.seek(0)
+            app_output = app_log.read()
+            if "IEDSIM_LIVE_ACK generation=" not in app_output:
+                raise RuntimeError("GUI edit was not acknowledged by the live runtime data plane")
+            if "tcp_nodelay=true" not in app_output:
+                raise RuntimeError("accepted MMS sockets did not prove TCP_NODELAY enabled")
             print(
                 "IEDSIM_GUI_LIVE_VALUE_PASS "
+                "hot_delta=acknowledged manifest_hot_rewrites=0 "
                 "edited=MU01LD0/TCTR1$MX$Amp$instMag$i:42 "
                 "structural=MU01LD0/TCTR1$MX$AmpUnmapped$instMag$i:0 "
                 f"concurrent_association_seconds={concurrent_seconds:.3f} "
+                f"read_burst_100_seconds={read_burst_seconds:.3f} "
+                f"read_burst_average_ms={read_burst_average_ms:.3f} "
+                "tcp_nodelay=pass "
                 "control_direct_normal=pass "
                 "control_sbo_normal=pass "
                 "control_direct_enhanced=pass "
@@ -728,7 +796,7 @@ def main() -> int:
                 "urcb_gi=pass "
                 "brcb_event=pass "
                 "quality=same-association:030000->03C110 "
-                "timestamp=same-association:0->1700000000123"
+                "timestamp=same-association:current->1700000000123"
             )
             print(control_output)
             print(sbo_enhanced_output)

@@ -4,6 +4,7 @@
 #include "ariec61850/mms/static_direct_control.hpp"
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <span>
@@ -41,19 +42,27 @@ struct TestClock final {
     const std::uint8_t ctl_num,
     const bool test,
     const std::uint8_t check_bits = 0U,
-    const std::uint8_t origin_category = 2U) {
+    const std::uint8_t origin_category = 2U,
+    const bool integer_origin_category = false,
+    const std::int64_t timestamp_ms = 0) {
     constexpr std::array<std::uint8_t, 3U> origin_id{'H', 'M', 'I'};
     constexpr std::array<std::uint8_t, 1U> no_check{0U};
     const std::array<std::uint8_t, 1U> check_byte{check_bits};
 
+    const auto encoded_origin_category = integer_origin_category
+        ? MmsDataValue::integer(origin_category)
+        : MmsDataValue::unsigned_integer(origin_category);
     auto oper = MmsDataValue::structure({
         MmsDataValue::boolean(value),
         MmsDataValue::structure({
-            MmsDataValue::unsigned_integer(origin_category),
+            encoded_origin_category,
             MmsDataValue::octet_string(origin_id),
         }),
         MmsDataValue::unsigned_integer(ctl_num),
-        MmsDataValue::utc_time(Iec61850UtcTime{}),
+        MmsDataValue::utc_time(Iec61850UtcTime{
+            std::chrono::system_clock::time_point{
+                std::chrono::milliseconds{timestamp_ms}},
+            0U}),
         MmsDataValue::boolean(test),
         MmsDataValue::bit_string(
             6U,
@@ -136,6 +145,17 @@ void valid_oper_updates_live_state() {
     CHECK(state.rejected_operations == 0U);
 }
 
+void golden_iedscout_integer_origin_and_checks_decode() {
+    const auto bytes = make_oper(true, 41U, false, 0xC0U, 2U, true);
+    MmsStaticDirectBooleanOperate decoded;
+    CHECK(try_decode_static_direct_boolean_operate(bytes, decoded));
+    CHECK(decoded.control_value);
+    CHECK(decoded.origin_category == 2U);
+    CHECK(decoded.control_number == 41U);
+    CHECK(decoded.synchro_check);
+    CHECK(decoded.interlock_check);
+}
+
 void test_oper_is_non_mutating() {
     MmsStaticDirectBooleanControlState state{};
     state.value = 1U;
@@ -177,14 +197,17 @@ void invalid_shape_and_values_are_rejected() {
     CHECK(!result.success);
     CHECK(result.failure_code == 7U);
 
+    // ctlNum=0 is valid on the incoming server wire. OMICRON IEDScout uses it.
     result = mms_static_direct_boolean_write_oper(&binding, make_oper(true, 0U, false));
-    CHECK(!result.success);
-    CHECK(result.failure_code == 11U);
+    CHECK(result.success);
+    CHECK(state.last_control_number == 0U);
 
     result = mms_static_direct_boolean_write_oper(&binding, make_oper(true, 11U, false, 0U, 9U));
     CHECK(!result.success);
     CHECK(result.failure_code == 11U);
-    CHECK(state.value == 0U);
+    // The preceding valid ctlNum=0 Oper already published true; the invalid
+    // origin must not mutate that accepted state.
+    CHECK(state.value == 1U);
 }
 
 [[nodiscard]] bool reject_backend(void*, bool) noexcept {
@@ -297,6 +320,67 @@ void sbo_enhanced_requires_exact_selected_sequence() {
     CHECK(shared.selected_association_id.load() == 0U);
 }
 
+void iedscout_sbo_enhanced_accepts_ctl_num_zero_and_fresh_oper_timestamp() {
+    TestClock clock{100U};
+    MmsStaticDirectBooleanSharedState shared{};
+    MmsStaticDirectBooleanControlState state{};
+    auto binding = make_binding(
+        state, shared, MmsStaticControlModel::sbo_enhanced, 61U, clock);
+    binding.policy.allow_synchro_check = true;
+    binding.policy.allow_interlock_check = true;
+
+    // Captured OMICRON IEDScout behavior:
+    // SBOw uses ctlNum=0 and T1; Oper keeps the selected identity but sends T2.
+    const auto selected = mms_static_boolean_write_sbow_contextual(
+        &binding,
+        make_oper(true, 0U, false, 0xC0U, 2U, true, 1'789'779'196'609LL),
+        access_for(61U));
+    CHECK(selected.success);
+    CHECK(state.selected_with_value);
+    CHECK(state.selected_command.control_number == 0U);
+    const auto selected_timestamp = state.selected_command.timestamp;
+
+    const auto operated = mms_static_boolean_write_oper_contextual(
+        &binding,
+        make_oper(true, 0U, false, 0xC0U, 2U, true, 1'789'779'197'488LL),
+        access_for(61U));
+    CHECK(operated.success);
+    CHECK(shared.value.load() == 1U);
+    CHECK(state.pending_termination);
+    CHECK(state.termination_command.control_number == 0U);
+    CHECK(state.termination_command.timestamp != selected_timestamp);
+    CHECK(shared.selected_association_id.load() == 0U);
+
+    // The relaxation is only for T and zero ctlNum. Selected value/origin/
+    // ctlNum/Check remain immutable.
+    state.pending_termination = false;
+    CHECK(mms_static_boolean_write_sbow_contextual(
+        &binding,
+        make_oper(false, 0U, false, 0xC0U, 2U, true, 1'789'779'200'000LL),
+        access_for(61U)).success);
+
+    const auto ctl_num_mismatch = mms_static_boolean_write_oper_contextual(
+        &binding,
+        make_oper(false, 1U, false, 0xC0U, 2U, true, 1'789'779'201'000LL),
+        access_for(61U));
+    CHECK(!ctl_num_mismatch.success);
+    CHECK(ctl_num_mismatch.failure_code == 11U);
+
+    const auto origin_mismatch = mms_static_boolean_write_oper_contextual(
+        &binding,
+        make_oper(false, 0U, false, 0xC0U, 3U, true, 1'789'779'201'000LL),
+        access_for(61U));
+    CHECK(!origin_mismatch.success);
+    CHECK(origin_mismatch.failure_code == 11U);
+
+    const auto check_mismatch = mms_static_boolean_write_oper_contextual(
+        &binding,
+        make_oper(false, 0U, false, 0x80U, 2U, true, 1'789'779'201'000LL),
+        access_for(61U));
+    CHECK(!check_mismatch.success);
+    CHECK(check_mismatch.failure_code == 11U);
+}
+
 void sbo_enhanced_cancel_and_association_close_release_owner() {
     TestClock clock{};
     MmsStaticDirectBooleanSharedState shared{};
@@ -332,7 +416,7 @@ void read_callbacks_match_mms_types() {
     read = mms_static_direct_normal_read_ctl_model(nullptr, bytes);
     CHECK(read.success());
     CHECK(read.bytes_written == 3U);
-    CHECK(bytes[0] == 0x86U && bytes[1] == 0x01U && bytes[2] == 0x01U);
+    CHECK(bytes[0] == 0x85U && bytes[1] == 0x01U && bytes[2] == 0x01U);
 
     MmsStaticDirectBooleanControlState configured_state{};
     MmsStaticDirectBooleanControlBinding configured_binding;
@@ -341,7 +425,7 @@ void read_callbacks_match_mms_types() {
     bytes.fill(0U);
     read = mms_static_control_read_ctl_model(&configured_binding, bytes);
     CHECK(read.success());
-    CHECK(bytes[0] == 0x86U && bytes[1] == 0x01U && bytes[2] == 0x04U);
+    CHECK(bytes[0] == 0x85U && bytes[1] == 0x01U && bytes[2] == 0x04U);
 
     read = mms_static_control_read_unavailable(nullptr, bytes);
     CHECK(!read.success());
@@ -352,6 +436,7 @@ void read_callbacks_match_mms_types() {
 int main() {
     try {
         valid_oper_updates_live_state();
+        golden_iedscout_integer_origin_and_checks_decode();
         test_oper_is_non_mutating();
         unsupported_check_bits_fail_closed();
         invalid_shape_and_values_are_rejected();
@@ -359,6 +444,7 @@ int main() {
         sbo_normal_enforces_owner_cancel_and_timeout();
         direct_enhanced_queues_one_termination();
         sbo_enhanced_requires_exact_selected_sequence();
+        iedscout_sbo_enhanced_accepts_ctl_num_zero_and_fresh_oper_timestamp();
         sbo_enhanced_cancel_and_association_close_release_owner();
         read_callbacks_match_mms_types();
         std::cout << "MMS static direct-control tests passed.\n";

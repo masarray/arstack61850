@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ariec61850/mms/static_dispatcher.hpp"
+#include "ariec61850/mms/services.hpp"
 
 #include <algorithm>
 #include <array>
@@ -81,6 +82,15 @@ constexpr std::array<std::uint8_t, 44U> kReadWithSpecificationRequest{
 
 constexpr std::array<std::uint8_t, 15U> kReadResponse{
     0xA1U, 0x0DU, 0x02U, 0x01U, 0x0CU,
+    0xA4U, 0x08U, 0xA1U, 0x06U,
+    0x83U, 0x01U, 0xFFU,
+    0x85U, 0x01U, 0x2AU};
+
+// ARIEC61850 golden behavior that is proven with IEDScout: the request may set
+// specificationWithResult, while the response remains the compact
+// listOfAccessResult form and does not synthesize variableAccessSpecification.
+constexpr std::array<std::uint8_t, 15U> kReadWithSpecificationResponse{
+    0xA1U, 0x0DU, 0x02U, 0x01U, 0x0DU,
     0xA4U, 0x08U, 0xA1U, 0x06U,
     0x83U, 0x01U, 0xFFU,
     0x85U, 0x01U, 0x2AU};
@@ -252,10 +262,28 @@ int main() {
 
     dispatched = dispatcher.dispatch(
         kReadWithSpecificationRequest, response, workspace);
-    if (dispatched.status != mms::MmsStaticDispatchStatus::unsupported_request ||
+    if (!dispatched.success() ||
         dispatched.service != mms::MmsWireConfirmedService::read ||
-        dispatched.invoke_id != 13U) {
+        dispatched.invoke_id != 13U ||
+        dispatched.bytes_written != kReadWithSpecificationResponse.size() ||
+        !matches(
+            std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
+            kReadWithSpecificationResponse)) {
         return 30;
+    }
+
+    mms::MmsReadResponseView specification_read_response;
+    mms::MmsReadAccessResultView specification_read_result;
+    if (!mms::MmsServiceSpanCodec::try_decode_read_response(
+            std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
+            specification_read_response) ||
+        specification_read_response.invoke_id != 13U ||
+        specification_read_response.result_count != 2U ||
+        !specification_read_response.try_result(0U, specification_read_result) ||
+        !specification_read_result.success ||
+        !specification_read_response.try_result(1U, specification_read_result) ||
+        !specification_read_result.success) {
+        return 31;
     }
 
     std::array<std::uint8_t, 2U> tiny_workspace{};
@@ -408,10 +436,28 @@ int main() {
         return 19;
     }
 
+    // IEDScout-compatible dual-directory mode now advertises every virtual
+    // hierarchy prefix, not only the concrete flattened leaf aliases. Give the
+    // smoke enough page capacity to validate the complete sorted namespace in
+    // one response; pagination is covered separately by the dedicated profile.
     auto dual_directory_policy = hierarchy_policy;
+    dual_directory_policy.maximum_names_per_response = 16U;
     dual_directory_policy.advertise_flattened_child_aliases = true;
+    constexpr std::array<mms::MmsStaticDirectoryEntry, 11U> dual_directory_index{{
+        {"LDH", "GGIO1"},
+        {"LDH", "GGIO1$ST"},
+        {"LDH", "GGIO1$ST$Ind1"},
+        {"LDH", "GGIO1$ST$Ind1$stVal"},
+        {"LDH", "LLN0"},
+        {"LDH", "LLN0$ST"},
+        {"LDH", "LLN0$ST$Mod"},
+        {"LDH", "LLN0$ST$Mod$stVal"},
+        {"LDH", "Orphan"},
+        {"LDH", "Orphan$ST"},
+        {"LDH", "Orphan$ST$stVal"}}};
     const mms::MmsStaticApplicationDispatcher dual_directory_dispatcher{
         hierarchy_table,
+        std::span<const mms::MmsStaticDirectoryEntry>{dual_directory_index},
         dual_directory_policy};
     dispatched = dual_directory_dispatcher.dispatch(
         kNamedVariableDirectoryRequest,
@@ -422,21 +468,133 @@ int main() {
         !mms::MmsServiceSpanCodec::try_decode_get_name_list_response(
             std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
             dual_directory) ||
-        dual_directory.identifier_count != 5U ||
+        dual_directory.identifier_count != 11U ||
         dual_directory.more_follows) {
         return 20;
     }
-    constexpr std::array<std::string_view, 5U> dual_names{
-        "LLN0",
-        "LLN0$ST$Mod$stVal",
+    constexpr std::array<std::string_view, 11U> dual_names{
         "GGIO1",
+        "GGIO1$ST",
+        "GGIO1$ST$Ind1",
         "GGIO1$ST$Ind1$stVal",
+        "LLN0",
+        "LLN0$ST",
+        "LLN0$ST$Mod",
+        "LLN0$ST$Mod$stVal",
+        "Orphan",
+        "Orphan$ST",
         "Orphan$ST$stVal"};
     for (std::size_t index = 0U; index < dual_names.size(); ++index) {
         if (!dual_directory.try_identifier(index, identifier) ||
             !identifier_equals(identifier, dual_names[index])) {
             return 21;
         }
+    }
+
+    // Exact IEC 61850 objects must keep their authoritative positional
+    // TypeSpecification even when flattened descendants also exist. A
+    // synthetic rebuild sorts ordinary child names and would otherwise turn
+    // {stVal,q,t} into {q,stVal,t}, while Read still returns the exact value.
+    mms::MmsTypeSpecification exact_sps_type;
+    exact_sps_type.kind = mms::MmsTypeKind::structure;
+    exact_sps_type.children.resize(3U);
+    exact_sps_type.children[0].kind = mms::MmsTypeKind::boolean;
+    exact_sps_type.children[0].name = "stVal";
+    exact_sps_type.children[1].kind = mms::MmsTypeKind::bit_string;
+    exact_sps_type.children[1].name = "q";
+    exact_sps_type.children[2].kind = mms::MmsTypeKind::utc_time;
+    exact_sps_type.children[2].name = "t";
+    const auto exact_sps_type_bytes =
+        mms::MmsServiceCodec::encode_type_specification(exact_sps_type);
+    constexpr std::array<std::uint8_t, 2U> kBitStringType{0x84U, 0x00U};
+    constexpr std::array<std::uint8_t, 2U> kUtcTimeType{0x91U, 0x00U};
+    const std::array<mms::MmsStaticObjectEntry, 4U> exact_order_objects{
+        mms::MmsStaticObjectEntry{
+            "LDH", "GGIO1$ST$Ind1", exact_sps_type_bytes,
+            read_boolean, &hierarchy_value, false},
+        mms::MmsStaticObjectEntry{
+            "LDH", "GGIO1$ST$Ind1$q", kBitStringType,
+            read_boolean, &hierarchy_value, false},
+        mms::MmsStaticObjectEntry{
+            "LDH", "GGIO1$ST$Ind1$stVal", kBooleanType,
+            read_boolean, &hierarchy_value, false},
+        mms::MmsStaticObjectEntry{
+            "LDH", "GGIO1$ST$Ind1$t", kUtcTimeType,
+            read_boolean, &hierarchy_value, false}};
+    const mms::MmsStaticObjectTable exact_order_table{exact_order_objects};
+    const mms::MmsStaticApplicationDispatcher exact_order_dispatcher{
+        exact_order_table, hierarchy_policy};
+    if (!exact_order_table.valid()) {
+        return 23;
+    }
+
+    mms::MmsVariableAccessAttributesRequest exact_order_request;
+    exact_order_request.invoke_id = 24U;
+    exact_order_request.name =
+        mms::MmsObjectName::domain_specific("LDH", "GGIO1$ST$Ind1");
+    const auto exact_order_request_pdu =
+        mms::MmsServiceCodec::encode_variable_access_attributes_request_pdu(
+            exact_order_request);
+    dispatched = exact_order_dispatcher.dispatch(
+        exact_order_request_pdu, response, workspace);
+    mms::MmsVariableAccessAttributesResponseView exact_order_response;
+    if (!dispatched.success() ||
+        !mms::MmsServiceSpanCodec::try_decode_variable_access_attributes_response(
+            std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
+            exact_order_response) ||
+        exact_order_response.invoke_id != 24U ||
+        exact_order_response.type_specification.size() != exact_sps_type_bytes.size() ||
+        !std::equal(
+            exact_order_response.type_specification.begin(),
+            exact_order_response.type_specification.end(),
+            exact_sps_type_bytes.begin())) {
+        return 24;
+    }
+
+    // Synthetic ancestors must follow SCL/source declaration order rather
+    // than table/alphabetic order. Deliberately store q before stVal, then
+    // declare stVal as the earlier source member.
+    std::array<mms::MmsStaticObjectEntry, 3U> synthetic_order_objects{
+        mms::MmsStaticObjectEntry{
+            "LDH", "GGIO2$ST$Ind1$q", kBitStringType,
+            read_boolean, &hierarchy_value, false},
+        mms::MmsStaticObjectEntry{
+            "LDH", "GGIO2$ST$Ind1$stVal", kBooleanType,
+            read_boolean, &hierarchy_value, false},
+        mms::MmsStaticObjectEntry{
+            "LDH", "GGIO2$ST$Ind1$t", kUtcTimeType,
+            read_boolean, &hierarchy_value, false}};
+    synthetic_order_objects[0].declaration_order = 1U;
+    synthetic_order_objects[1].declaration_order = 0U;
+    synthetic_order_objects[2].declaration_order = 2U;
+    const mms::MmsStaticObjectTable synthetic_order_table{synthetic_order_objects};
+    const mms::MmsStaticApplicationDispatcher synthetic_order_dispatcher{
+        synthetic_order_table, hierarchy_policy};
+    if (!synthetic_order_table.valid()) {
+        return 25;
+    }
+
+    mms::MmsVariableAccessAttributesRequest synthetic_order_request;
+    synthetic_order_request.invoke_id = 26U;
+    synthetic_order_request.name =
+        mms::MmsObjectName::domain_specific("LDH", "GGIO2$ST$Ind1");
+    const auto synthetic_order_request_pdu =
+        mms::MmsServiceCodec::encode_variable_access_attributes_request_pdu(
+            synthetic_order_request);
+    dispatched = synthetic_order_dispatcher.dispatch(
+        synthetic_order_request_pdu, response, workspace);
+    mms::MmsVariableAccessAttributesResponseView synthetic_order_response;
+    if (!dispatched.success() ||
+        !mms::MmsServiceSpanCodec::try_decode_variable_access_attributes_response(
+            std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
+            synthetic_order_response) ||
+        synthetic_order_response.invoke_id != 26U ||
+        synthetic_order_response.type_specification.size() != exact_sps_type_bytes.size() ||
+        !std::equal(
+            synthetic_order_response.type_specification.begin(),
+            synthetic_order_response.type_specification.end(),
+            exact_sps_type_bytes.begin())) {
+        return 26;
     }
 
     for (std::uint32_t iteration = 0U; iteration < 20'000U; ++iteration) {

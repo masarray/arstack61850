@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 cmake_minimum_required(VERSION 3.20)
 
 project(ARIEC61850EmbeddedCore
@@ -11,9 +13,9 @@ option(ARIEC61850_EMBEDDED_WARNINGS_AS_ERRORS "Treat embedded-profile warnings a
 
 set(ARIEC61850_ROOT "${CMAKE_CURRENT_LIST_DIR}/..")
 
-# Keep this source list deliberately small. It is the MCU portability boundary:
-# wire codecs and protocol state only, with no TCP host transport, live discovery,
-# PCAP, COMTRADE, SCL parsing, filesystem, JSON or CLI tooling.
+# MCU portability boundary: protocol/wire/state sources only. Host transports,
+# filesystem/PCAP/SCL/CLI layers stay out. Retain the owning codecs used by the
+# embedded regression harness alongside the allocation-free span/server path.
 set(ARIEC61850_EMBEDDED_SOURCES
     ${ARIEC61850_ROOT}/src/asn1/ber.cpp
     ${ARIEC61850_ROOT}/src/ethernet/ethernet.cpp
@@ -40,6 +42,7 @@ set(ARIEC61850_EMBEDDED_SOURCES
     ${ARIEC61850_ROOT}/src/osi/session_span.cpp
     ${ARIEC61850_ROOT}/src/osi/presentation_span.cpp
     ${ARIEC61850_ROOT}/src/acse/association_span.cpp
+    ${ARIEC61850_ROOT}/src/acse/association_compat_span.cpp
 
     ${ARIEC61850_ROOT}/src/mms/utc_time.cpp
     ${ARIEC61850_ROOT}/src/mms/data_value.cpp
@@ -51,6 +54,7 @@ set(ARIEC61850_EMBEDDED_SOURCES
     ${ARIEC61850_ROOT}/src/mms/file_service.cpp
 
     ${ARIEC61850_ROOT}/src/mms/pdu_span.cpp
+    ${ARIEC61850_ROOT}/src/mms/pdu_compat_span.cpp
     ${ARIEC61850_ROOT}/src/mms/services_span.cpp
     ${ARIEC61850_ROOT}/src/mms/write_span.cpp
     ${ARIEC61850_ROOT}/src/mms/data_set_span.cpp
@@ -58,10 +62,15 @@ set(ARIEC61850_EMBEDDED_SOURCES
     ${ARIEC61850_ROOT}/src/mms/buffered_selective_information_report_span.cpp
     ${ARIEC61850_ROOT}/src/mms/static_object_table.cpp
     ${ARIEC61850_ROOT}/src/mms/static_write.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_direct_control.cpp
     ${ARIEC61850_ROOT}/src/mms/static_data_set_table.cpp
     ${ARIEC61850_ROOT}/src/mms/static_dispatcher.cpp
     ${ARIEC61850_ROOT}/src/mms/connection_runtime.cpp
     ${ARIEC61850_ROOT}/src/mms/static_server_session.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_information_report.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_report_connection.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_urcb_runtime.cpp
+    ${ARIEC61850_ROOT}/src/mms/static_urcb_objects.cpp
     ${ARIEC61850_ROOT}/src/mms/static_brcb_runtime.cpp
     ${ARIEC61850_ROOT}/src/mms/static_brcb_control.cpp
     ${ARIEC61850_ROOT}/src/mms/static_brcb_objects.cpp
@@ -133,6 +142,13 @@ foreach(server_smoke IN ITEMS
         mms_static_model
         mms_write
         mms_dispatcher
+        mms_interop_bulk_read
+        mms_interop_pagination
+        mms_interop_fc_root_read
+        mms_interop_rcb_root
+        mms_interop_rcb_control
+        mms_interop_composed_gvaa
+        mms_urcb_event
         mms_connection_runtime
         mms_negotiated_limits
         mms_data_set

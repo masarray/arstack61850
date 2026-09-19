@@ -76,6 +76,25 @@ public:
         bool enabled,
         std::uint64_t now_ms) noexcept;
 
+    [[nodiscard]] MmsStaticBrcbControlStatus set_optional_fields(
+        const MmsStaticBrcbClientIdentity& client,
+        std::span<const std::uint8_t> optional_fields,
+        std::uint64_t now_ms) noexcept;
+
+    [[nodiscard]] MmsStaticBrcbControlStatus set_trigger_options(
+        const MmsStaticBrcbClientIdentity& client,
+        std::uint8_t trigger_options,
+        std::uint64_t now_ms) noexcept;
+
+    [[nodiscard]] MmsStaticBrcbControlStatus set_integrity_period(
+        const MmsStaticBrcbClientIdentity& client,
+        std::uint32_t integrity_period_ms,
+        std::uint64_t now_ms) noexcept;
+
+    [[nodiscard]] MmsStaticBrcbControlStatus request_general_interrogation(
+        const MmsStaticBrcbClientIdentity& client,
+        std::uint64_t now_ms) noexcept;
+
     [[nodiscard]] MmsStaticBrcbControlStatus replay_from(
         const MmsStaticBrcbClientIdentity& client,
         std::span<const std::uint8_t> entry_id,
