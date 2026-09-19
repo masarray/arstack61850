@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('IEDScoutToARStack', 'ARStackToIED')]
+    [ValidateSet('ExternalClientToARStack', 'ARStackToIED')]
     [string]$Mode,
 
     [Parameter(Mandatory = $true)]
