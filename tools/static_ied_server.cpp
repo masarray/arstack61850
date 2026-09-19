@@ -676,11 +676,13 @@ struct EncodedValue final {
 [[nodiscard]] mms::MmsTypeSpecification control_scalar(
     const mms::MmsTypeKind kind,
     std::string name,
-    const std::optional<std::uint32_t> size = std::nullopt) {
+    const std::optional<std::uint32_t> size = std::nullopt,
+    const bool variable_length = false) {
     mms::MmsTypeSpecification result;
     result.kind = kind;
     result.name = std::move(name);
     result.size = size;
+    result.variable_length = variable_length;
     return result;
 }
 
@@ -701,10 +703,10 @@ struct EncodedValue final {
     fields.reserve(include_check ? 6U : 5U);
     fields.push_back(control_scalar(mms::MmsTypeKind::boolean, "ctlVal"));
     fields.push_back(control_structure("origin", {
-        control_scalar(mms::MmsTypeKind::integer, "orCat"),
-        control_scalar(mms::MmsTypeKind::octet_string, "orIdent", 64U),
+        control_scalar(mms::MmsTypeKind::integer, "orCat", 8U),
+        control_scalar(mms::MmsTypeKind::octet_string, "orIdent", 64U, true),
     }));
-    fields.push_back(control_scalar(mms::MmsTypeKind::unsigned_integer, "ctlNum"));
+    fields.push_back(control_scalar(mms::MmsTypeKind::unsigned_integer, "ctlNum", 8U));
     fields.push_back(control_scalar(mms::MmsTypeKind::utc_time, "T"));
     fields.push_back(control_scalar(mms::MmsTypeKind::boolean, "Test"));
     if (include_check) {
@@ -728,7 +730,7 @@ struct EncodedValue final {
 
 [[nodiscard]] std::vector<std::uint8_t> sbo_reference_type_specification() {
     return mms::MmsServiceCodec::encode_type_specification(
-        control_scalar(mms::MmsTypeKind::visible_string, "SBO", 129U));
+        control_scalar(mms::MmsTypeKind::visible_string, "SBO", 129U, true));
 }
 
 struct ConnectionBuffers final {
@@ -815,6 +817,7 @@ struct ManifestDirectControlStorage final {
     std::vector<std::uint8_t> cancel_type_specification;
     std::shared_ptr<mms::MmsStaticDirectBooleanSharedState> shared_state;
     std::size_t service_object_count{};
+    std::size_t service_order{std::numeric_limits<std::size_t>::max()};
 };
 
 constexpr std::size_t kMaximumSimulatorDirectControls = 64U;
@@ -1068,6 +1071,7 @@ void rebuild_manifest_roots(ManifestModel& model) {
         const auto& tree = model.root_trees[index];
         if (tree.children.empty()) continue;
         auto& root = model.values[value_index];
+        root.source_order = node_source_order(tree, model);
         root.type = node_type(tree, model, {});
         root.data = node_data(tree, model);
         root.type_specification = mms::MmsServiceCodec::encode_type_specification(root.type);
@@ -1413,6 +1417,12 @@ void rebuild_manifest_root_values(ManifestModel& model) {
         control.shared_state->value.store(initial ? 1U : 0U, std::memory_order_relaxed);
         control.service_object_count =
             (parsed.control_model == 2U || parsed.control_model == 4U) ? 3U : 1U;
+        const auto ctl_model_order = model.values[ctl_model->second].source_order;
+        const auto status_order = status_value.source_order;
+        control.service_order =
+            ctl_model_order != std::numeric_limits<std::size_t>::max() && ctl_model_order > 0U
+                ? ctl_model_order - 1U
+                : status_order;
         model.direct_control_storage.push_back(std::move(control));
     }
 
@@ -1986,41 +1996,44 @@ void notify_brcb_changes(
 
 [[nodiscard]] std::vector<mms::MmsStaticDirectoryEntry> build_directory_index(
     const mms::MmsStaticObjectTable& objects) {
+    std::vector<const mms::MmsStaticObjectEntry*> ordered;
+    ordered.reserve(objects.objects().size());
+    for (const auto& object : objects.objects()) ordered.push_back(&object);
+    std::stable_sort(
+        ordered.begin(), ordered.end(),
+        [](const mms::MmsStaticObjectEntry* left,
+           const mms::MmsStaticObjectEntry* right) noexcept {
+            if (left->domain != right->domain) return left->domain < right->domain;
+            if (left->declaration_order != right->declaration_order) {
+                return left->declaration_order < right->declaration_order;
+            }
+            return left->item < right->item;
+        });
+
     std::vector<mms::MmsStaticDirectoryEntry> directory;
     std::size_t estimated{};
-    for (const auto& object : objects.objects()) {
+    for (const auto* object : ordered) {
         estimated += 1U + static_cast<std::size_t>(
-            std::count(object.item.begin(), object.item.end(), '$'));
+            std::count(object->item.begin(), object->item.end(), '$'));
     }
     directory.reserve(estimated);
-    for (const auto& object : objects.objects()) {
-        std::size_t prefix_end = object.item.find('$');
+    std::set<std::pair<std::string_view, std::string_view>> seen;
+    for (const auto* object : ordered) {
+        std::size_t prefix_end = object->item.find('$');
         while (true) {
-            const auto prefix = object.item.substr(
+            const auto prefix = object->item.substr(
                 0U,
-                prefix_end == std::string_view::npos ? object.item.size() : prefix_end);
-            if (!prefix.empty()) directory.push_back({object.domain, prefix});
-            if (prefix_end == std::string_view::npos || prefix_end + 1U >= object.item.size()) {
+                prefix_end == std::string_view::npos ? object->item.size() : prefix_end);
+            if (!prefix.empty() && seen.emplace(object->domain, prefix).second) {
+                directory.push_back({object->domain, prefix});
+            }
+            if (prefix_end == std::string_view::npos ||
+                prefix_end + 1U >= object->item.size()) {
                 break;
             }
-            prefix_end = object.item.find('$', prefix_end + 1U);
+            prefix_end = object->item.find('$', prefix_end + 1U);
         }
     }
-    std::sort(
-        directory.begin(), directory.end(),
-        [](const mms::MmsStaticDirectoryEntry& left,
-           const mms::MmsStaticDirectoryEntry& right) noexcept {
-            if (left.domain != right.domain) return left.domain < right.domain;
-            return left.item < right.item;
-        });
-    directory.erase(
-        std::unique(
-            directory.begin(), directory.end(),
-            [](const mms::MmsStaticDirectoryEntry& left,
-               const mms::MmsStaticDirectoryEntry& right) noexcept {
-                return left.domain == right.domain && left.item == right.item;
-            }),
-        directory.end());
     return directory;
 }
 
@@ -2059,7 +2072,7 @@ void serve_connection(
         direct_control_bindings.resize(manifest_model->direct_control_storage.size());
         direct_control_accept_counts.resize(manifest_model->direct_control_storage.size());
         direct_control_objects.assign(object_table.objects().begin(), object_table.objects().end());
-        static constexpr std::array<std::uint8_t, 2U> unsigned_type{0x86U, 0x00U};
+        static constexpr std::array<std::uint8_t, 3U> integer8_type{0x85U, 0x01U, 0x08U};
 
         for (std::size_t index = 0U; index < manifest_model->direct_control_storage.size(); ++index) {
             auto& control = manifest_model->direct_control_storage[index];
@@ -2096,7 +2109,7 @@ void serve_connection(
                     // both expose the correct 2-bit process state.
                     status_found = true;
                 } else if (object.item == control.ctl_model_item) {
-                    object.type_specification = std::span<const std::uint8_t>{unsigned_type};
+                    object.type_specification = std::span<const std::uint8_t>{integer8_type};
                     object.read = mms::mms_static_control_read_ctl_model;
                     object.context = &binding;
                     object.write = nullptr;
@@ -2109,15 +2122,28 @@ void serve_connection(
                 throw std::runtime_error("Configured command control is missing ST/CF backing objects.");
             }
 
+            const bool select_before_operate =
+                control.control_model == 2U || control.control_model == 4U;
+            const auto service_order = [&](const std::size_t offset) noexcept {
+                constexpr auto unspecified = std::numeric_limits<std::size_t>::max();
+                if (control.service_order == unspecified ||
+                    offset > unspecified - control.service_order) {
+                    return unspecified;
+                }
+                return control.service_order + offset;
+            };
+
             if (control.control_model == 2U) {
-                direct_control_objects.push_back(mms::MmsStaticObjectEntry{
+                auto service = mms::MmsStaticObjectEntry{
                     control.domain,
                     control.sbo_item,
                     control.sbo_type_specification,
                     mms::mms_static_sbo_normal_read,
-                    &binding});
+                    &binding};
+                service.declaration_order = service_order(0U);
+                direct_control_objects.push_back(service);
             } else if (control.control_model == 4U) {
-                direct_control_objects.push_back(mms::MmsStaticObjectEntry{
+                auto service = mms::MmsStaticObjectEntry{
                     control.domain,
                     control.sbow_item,
                     control.sbow_type_specification,
@@ -2126,10 +2152,12 @@ void serve_connection(
                     false,
                     nullptr,
                     &binding,
-                    mms::mms_static_boolean_write_sbow_contextual});
+                    mms::mms_static_boolean_write_sbow_contextual};
+                service.declaration_order = service_order(0U);
+                direct_control_objects.push_back(service);
             }
 
-            direct_control_objects.push_back(mms::MmsStaticObjectEntry{
+            auto operate_service = mms::MmsStaticObjectEntry{
                 control.domain,
                 control.oper_item,
                 control.oper_type_specification,
@@ -2138,10 +2166,12 @@ void serve_connection(
                 false,
                 nullptr,
                 &binding,
-                mms::mms_static_boolean_write_oper_contextual});
+                mms::mms_static_boolean_write_oper_contextual};
+            operate_service.declaration_order = service_order(select_before_operate ? 1U : 0U);
+            direct_control_objects.push_back(operate_service);
 
             if (control.control_model == 2U || control.control_model == 4U) {
-                direct_control_objects.push_back(mms::MmsStaticObjectEntry{
+                auto service = mms::MmsStaticObjectEntry{
                     control.domain,
                     control.cancel_item,
                     control.cancel_type_specification,
@@ -2150,7 +2180,9 @@ void serve_connection(
                     false,
                     nullptr,
                     &binding,
-                    mms::mms_static_boolean_write_cancel_contextual});
+                    mms::mms_static_boolean_write_cancel_contextual};
+                service.declaration_order = service_order(2U);
+                direct_control_objects.push_back(service);
             }
         }
         // MmsStaticObjectTable requires strict (domain,item) ordering. The

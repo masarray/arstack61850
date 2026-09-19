@@ -211,39 +211,38 @@ namespace {
     const MmsConfirmedPduView& confirmed,
     const MmsGetNameListRequestView& request,
     const std::span<std::uint8_t> response) noexcept {
+    // The host IED-simulator directory intentionally preserves SCL/IEDScout
+    // declaration order instead of lexical item order.  Continuation therefore
+    // follows the exact emitted sequence rather than lower_bound() semantics.
     const auto domain = as_text(request.domain_id);
-    const auto first = std::lower_bound(
-        directory.begin(), directory.end(), domain,
-        [](const MmsStaticDirectoryEntry& entry, const std::string_view value) noexcept {
-            return entry.domain < value;
-        });
-    const auto last = std::upper_bound(
-        first, directory.end(), domain,
-        [](const std::string_view value, const MmsStaticDirectoryEntry& entry) noexcept {
-            return value < entry.domain;
-        });
-
-    auto cursor = first;
-    if (!request.continue_after.empty()) {
-        const auto continuation = as_text(request.continue_after);
-        const auto found = std::lower_bound(
-            first, last, continuation,
-            [](const MmsStaticDirectoryEntry& entry, const std::string_view value) noexcept {
-                return entry.item < value;
-            });
-        if (found == last || found->item != continuation) {
-            return make_status(MmsStaticDispatchStatus::object_not_found, confirmed);
-        }
-        cursor = found + 1;
-    }
+    const auto continuation = as_text(request.continue_after);
+    bool emit = continuation.empty();
+    bool continuation_found = emit;
+    bool more_follows = false;
 
     std::array<std::string_view, MmsServiceSpanCodec::maximum_identifiers> page{};
     std::size_t page_count{};
-    while (cursor != last && page_count < policy.maximum_names_per_response) {
-        page[page_count++] = cursor->item;
-        ++cursor;
+    for (const auto& entry : directory) {
+        if (entry.domain != domain) continue;
+        if (!emit) {
+            if (entry.item == continuation) {
+                continuation_found = true;
+                emit = true;
+            }
+            continue;
+        }
+        if (!continuation.empty() && entry.item == continuation) continue;
+        if (page_count < policy.maximum_names_per_response) {
+            page[page_count++] = entry.item;
+            continue;
+        }
+        more_follows = true;
+        break;
     }
-    const bool more_follows = cursor != last;
+
+    if (!continuation_found) {
+        return make_status(MmsStaticDispatchStatus::object_not_found, confirmed);
+    }
     if (page_count == 0U) {
         const std::span<const std::string_view> empty;
         return make_encoded(
@@ -578,6 +577,8 @@ constexpr std::array<std::string_view, 15U> kBrcbAttributeOrder{
     "RptID", "RptEna", "DatSet", "ConfRev", "OptFlds", "BufTm", "SqNum",
     "TrgOps", "IntgPd", "GI", "PurgeBuf", "EntryID", "TimeofEntry",
     "ResvTms", "Owner"};
+constexpr std::array<std::string_view, 4U> kIedScoutControlServiceOrder{
+    "SBO", "SBOw", "Oper", "Cancel"};
 
 enum class SyntheticReadStatus : std::uint8_t {
     ok,
@@ -635,6 +636,13 @@ struct SyntheticChildRank final {
     if (prefix.find("$BR$") != std::string_view::npos) {
         return {kBrcbAttributeOrder};
     }
+    // OMICRON IEDScout exposes control-service alternatives in this exact
+    // order at LN$CO$DO. Deeper service structures remain positional.
+    if (prefix.find("$CO$") != std::string_view::npos &&
+        static_cast<std::size_t>(std::count(
+            prefix.begin(), prefix.end(), static_cast<char>(0x24))) == 2U) {
+        return {kIedScoutControlServiceOrder};
+    }
     return {};
 }
 
@@ -667,14 +675,11 @@ struct SyntheticChildRank final {
 
 [[nodiscard]] bool use_declaration_order(
     const std::string_view prefix) noexcept {
-    // SCL declaration order is positional inside constructed Data Objects/Data
-    // Attributes (LN$FC$DO...). LN roots and FC namespaces are discovery
-    // namespaces rather than positional values.
-    return static_cast<std::size_t>(
-        std::count(
-            prefix.begin(),
-            prefix.end(),
-            static_cast<char>(0x24))) >= 2U;
+    // IEDScout preserves the engineering declaration order at the LN root,
+    // functional-constraint namespace, DO and DA levels.  Every structural
+    // object imported from SCL carries source_order; runtime-only service
+    // objects receive an explicit order from their owning control/RCB.
+    return !prefix.empty();
 }
 
 [[nodiscard]] bool declaration_order_less(
@@ -691,72 +696,78 @@ struct SyntheticChildRank final {
     return left < right;
 }
 
-[[nodiscard]] SyntheticChild next_synthetic_child(
+struct SyntheticChildren final {
+    std::array<SyntheticChild, MmsServiceSpanCodec::maximum_identifiers> values{};
+    std::size_t count{};
+    bool overflow{};
+};
+
+[[nodiscard]] SyntheticChildren collect_synthetic_children(
     const MmsStaticObjectTable& objects,
     const std::string_view domain,
-    const std::string_view prefix,
-    const std::string_view after,
-    const bool have_after) noexcept {
-    SyntheticChild result;
+    const std::string_view prefix) noexcept {
+    SyntheticChildren result;
     const bool semantic_order = !semantic_child_order(prefix).empty();
     const bool declaration_order = !semantic_order && use_declaration_order(prefix);
-
-    auto after_order = std::numeric_limits<std::size_t>::max();
-    if (have_after && declaration_order) {
-        for (const auto& candidate : objects.objects()) {
-            if (candidate.domain != domain || !is_descendant_item(candidate.item, prefix)) {
-                continue;
-            }
-            const auto child = immediate_child_prefix(candidate.item, prefix);
-            if (child == after) {
-                after_order = std::min(after_order, candidate.declaration_order);
-            }
-        }
-    }
 
     for (const auto& candidate : objects.objects()) {
         if (candidate.domain != domain || !is_descendant_item(candidate.item, prefix)) {
             continue;
         }
         const auto child = immediate_child_prefix(candidate.item, prefix);
-        if (child.empty() || (have_after && child == after)) continue;
+        if (child.empty()) continue;
 
-        if (have_after) {
-            if (semantic_order) {
-                if (!synthetic_child_less(prefix, after, child)) continue;
-            } else if (declaration_order &&
-                after_order != std::numeric_limits<std::size_t>::max() &&
-                candidate.declaration_order != std::numeric_limits<std::size_t>::max()) {
-                if (candidate.declaration_order <= after_order) continue;
-            } else if (!synthetic_child_less(prefix, after, child)) {
-                continue;
+        SyntheticChild* existing = nullptr;
+        for (std::size_t index = 0U; index < result.count; ++index) {
+            if (result.values[index].prefix == child) {
+                existing = &result.values[index];
+                break;
             }
         }
-
-        if (result.found && child == result.prefix) {
-            result.declaration_order =
-                std::min(result.declaration_order, candidate.declaration_order);
-            if (candidate.item == child) result.exact = &candidate;
+        if (existing != nullptr) {
+            existing->declaration_order =
+                std::min(existing->declaration_order, candidate.declaration_order);
+            if (candidate.item == child) existing->exact = &candidate;
             continue;
         }
-
-        const bool better = !result.found ||
-            (semantic_order
-                ? synthetic_child_less(prefix, child, result.prefix)
-                : declaration_order
-                    ? declaration_order_less(
-                        candidate.declaration_order,
-                        child,
-                        result.declaration_order,
-                        result.prefix)
-                    : synthetic_child_less(prefix, child, result.prefix));
-        if (!better) continue;
-
-        result.found = true;
-        result.prefix = child;
-        result.exact = candidate.item == child ? &candidate : nullptr;
-        result.declaration_order = candidate.declaration_order;
+        if (result.count >= result.values.size()) {
+            result.overflow = true;
+            return result;
+        }
+        auto& inserted = result.values[result.count++];
+        inserted.found = true;
+        inserted.prefix = child;
+        inserted.exact = candidate.item == child ? &candidate : nullptr;
+        inserted.declaration_order = candidate.declaration_order;
     }
+
+    auto begin = result.values.begin();
+    auto end = begin + static_cast<std::ptrdiff_t>(result.count);
+    std::sort(begin, end, [&](const SyntheticChild& left, const SyntheticChild& right) noexcept {
+        if (semantic_order) {
+            return synthetic_child_less(prefix, left.prefix, right.prefix);
+        }
+        if (declaration_order) {
+            // Golden IEDScout places CO immediately after ST (or after MX/ST
+            // when MX is present) at controlled LN roots, before CF.
+            if (prefix.find(static_cast<char>(0x24)) == std::string_view::npos) {
+                const auto left_name = left.prefix.substr(prefix.size() + 1U);
+                const auto right_name = right.prefix.substr(prefix.size() + 1U);
+                if (left_name == "CO" && right_name != "CO") {
+                    return right_name != "MX" && right_name != "ST";
+                }
+                if (right_name == "CO" && left_name != "CO") {
+                    return left_name == "MX" || left_name == "ST";
+                }
+            }
+            return declaration_order_less(
+                left.declaration_order,
+                left.prefix,
+                right.declaration_order,
+                right.prefix);
+        }
+        return left.prefix < right.prefix;
+    });
     return result;
 }
 
@@ -782,13 +793,15 @@ struct SyntheticChildRank final {
     }
 
     std::size_t content_bytes = 0U;
-    std::string_view after;
-    bool have_after = false;
-    bool found_child = false;
-    while (true) {
-        const auto child = next_synthetic_child(objects, domain, prefix, after, have_after);
-        if (!child.found) break;
-        found_child = true;
+    const auto children = collect_synthetic_children(objects, domain, prefix);
+    if (children.overflow) {
+        return {SyntheticReadStatus::backend_failure, 0U, 0U};
+    }
+    if (children.count == 0U) {
+        return {SyntheticReadStatus::not_found, 0U, 0U};
+    }
+    for (std::size_t index = 0U; index < children.count; ++index) {
+        const auto& child = children.values[index];
         const auto measured = child.exact != nullptr
             ? measure_exact_object(*child.exact)
             : measure_synthetic_subtree(objects, domain, child.prefix, depth + 1U);
@@ -798,11 +811,7 @@ struct SyntheticChildRank final {
             return {SyntheticReadStatus::backend_failure, 0U, 0U};
         }
         content_bytes += measured.encoded_bytes;
-        after = child.prefix;
-        have_after = true;
     }
-
-    if (!found_child) return {SyntheticReadStatus::not_found, 0U, 0U};
     const auto encoded = asn1::BerSpanWriter::tlv_size(2, content_bytes);
     if (!encoded) return {SyntheticReadStatus::backend_failure, 0U, 0U};
     return {SyntheticReadStatus::ok, content_bytes, *encoded};
@@ -828,12 +837,13 @@ struct SyntheticChildRank final {
         return {SyntheticReadStatus::backend_failure, 0U, measured.encoded_bytes};
     }
     std::size_t offset = writer.size();
-    std::string_view after;
-    bool have_after = false;
+    const auto children = collect_synthetic_children(objects, domain, prefix);
+    if (children.overflow) {
+        return {SyntheticReadStatus::backend_failure, 0U, measured.encoded_bytes};
+    }
 
-    while (true) {
-        const auto child = next_synthetic_child(objects, domain, prefix, after, have_after);
-        if (!child.found) break;
+    for (std::size_t index = 0U; index < children.count; ++index) {
+        const auto& child = children.values[index];
         if (child.exact != nullptr) {
             const auto read = child.exact->read(
                 child.exact->context,
@@ -869,8 +879,6 @@ struct SyntheticChildRank final {
             }
             offset += nested.bytes_written;
         }
-        after = child.prefix;
-        have_after = true;
     }
 
     if (offset != measured.encoded_bytes || !valid_mms_data(destination.first(offset))) {
@@ -917,13 +925,15 @@ struct SyntheticTypeEncodeResult final {
     }
 
     std::size_t component_bytes = 0U;
-    std::string_view after;
-    bool have_after = false;
-    bool found_child = false;
-    while (true) {
-        const auto child = next_synthetic_child(objects, domain, prefix, after, have_after);
-        if (!child.found) break;
-        found_child = true;
+    const auto children = collect_synthetic_children(objects, domain, prefix);
+    if (children.overflow) {
+        return {SyntheticTypeStatus::backend_failure, 0U, 0U, 0U};
+    }
+    if (children.count == 0U) {
+        return {SyntheticTypeStatus::not_found, 0U, 0U, 0U};
+    }
+    for (std::size_t index = 0U; index < children.count; ++index) {
+        const auto& child = children.values[index];
 
         std::size_t child_type_bytes = 0U;
         if (child.exact != nullptr) {
@@ -952,11 +962,7 @@ struct SyntheticTypeEncodeResult final {
         if (!component || !checked_add(component_bytes, *component)) {
             return {SyntheticTypeStatus::backend_failure, 0U, 0U, 0U};
         }
-        after = child.prefix;
-        have_after = true;
     }
-
-    if (!found_child) return {SyntheticTypeStatus::not_found, 0U, 0U, 0U};
     const auto list = asn1::BerSpanWriter::tlv_size(1, component_bytes);
     if (!list) return {SyntheticTypeStatus::backend_failure, 0U, 0U, 0U};
     const auto structure = asn1::BerSpanWriter::tlv_size(2, *list);
@@ -1014,11 +1020,12 @@ struct SyntheticTypeEncodeResult final {
         return {SyntheticTypeStatus::backend_failure, 0U, measured.encoded_bytes};
     }
 
-    std::string_view after;
-    bool have_after = false;
-    while (true) {
-        const auto child = next_synthetic_child(objects, domain, prefix, after, have_after);
-        if (!child.found) break;
+    const auto children = collect_synthetic_children(objects, domain, prefix);
+    if (children.overflow) {
+        return {SyntheticTypeStatus::backend_failure, 0U, measured.encoded_bytes};
+    }
+    for (std::size_t index = 0U; index < children.count; ++index) {
+        const auto& child = children.values[index];
 
         std::size_t child_type_bytes = 0U;
         SyntheticTypeMeasureResult nested_measure;
@@ -1070,8 +1077,6 @@ struct SyntheticTypeEncodeResult final {
             }
             offset += nested.bytes_written;
         }
-        after = child.prefix;
-        have_after = true;
     }
 
     if (offset != measured.encoded_bytes ||
@@ -1100,9 +1105,8 @@ struct SyntheticTypeEncodeResult final {
     // its Data with identical component order. Re-synthesizing ordinary
     // descendants can reorder IEC 61850 structures such as {stVal,q,t}.
     //
-    // Logical Node roots are the exception: their static exact object can
-    // predate per-association RP/BR/SG/CO objects, so roots still need final
-    // table synthesis below.
+    // Logical Node roots are synthesized from the final per-association table
+    // because runtime service objects (CO/RP/BR/SG) may extend the SCL tree.
     if (exact != nullptr &&
         request.name.kind == MmsObjectNameViewKind::domain_specific &&
         request_item.find(static_cast<char>(0x24)) != std::string_view::npos) {

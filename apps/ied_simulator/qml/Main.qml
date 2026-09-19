@@ -168,6 +168,18 @@ ApplicationWindow {
                 anchors.rightMargin: 12
                 spacing: 4
 
+                Image {
+                    source: "qrc:/iedsim/assets/app-icon.png"
+                    sourceSize.width: 22
+                    sourceSize.height: 22
+                    Layout.preferredWidth: 22
+                    Layout.preferredHeight: 22
+                    fillMode: Image.PreserveAspectFit
+                    smooth: true
+                    mipmap: true
+                    Layout.rightMargin: 3
+                }
+
                 Label {
                     text: "ARStack IEC 61850"
                     color: appTheme.navigationText
