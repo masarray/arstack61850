@@ -224,7 +224,7 @@ void IedCommissioningModel::rebuild() {
         ++gooseCount_;
     }
 
-    // Setting-group navigation mirrors the IEDScout concept without inventing
+    // Setting-group navigation mirrors the external-client concept without inventing
     // SGCB metadata that the bounded SCL parser does not expose separately.
     // A Logical Device is included only when the parsed model contains either
     // FC=SE setting values or the standard SGCB data object.
