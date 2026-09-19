@@ -26,7 +26,6 @@ constexpr std::string_view kUrcbRptId{
 constexpr std::string_view kBrcbRptId{
     "AA1E1F06R4/Application/LLN0$BR$Buffer"};
 constexpr std::uint32_t kConfRev = 100'001U;
-constexpr std::array<std::uint8_t, 2U> kIedScoutGenericOptFlds{0x7BU, 0x80U};
 constexpr std::array<std::uint8_t, 2U> kExpectedUrcbOptFlds{0x78U, 0x80U};
 constexpr std::array<std::uint8_t, 2U> kExpectedBrcbOptFlds{0x79U, 0x80U};
 constexpr std::array<std::uint8_t, 6U> kReportTime{
@@ -153,9 +152,10 @@ int main() {
         return 2;
     }
 
-    // Real IEDScout URCB acceptance capture:
-    // RptID ...$RP$Unbuffer, OptFlds 78 80, SqNum=1,
-    // DataSet Analog, ConfRev=100001, 22/22 included, GI reason.
+    // Real IEDScout static-URCB acceptance capture:
+    // IEDScout did not rewrite OptFlds. The configured/effective report profile
+    // emits OptFlds 78 80, SqNum=1, DataSet Analog, ConfRev=100001,
+    // 22/22 included members and GI ReasonForInclusion.
     const std::array<mms::MmsStaticUrcbDefinition, 1U> urcb_definitions{{
         {
             kDomain,
@@ -164,7 +164,7 @@ int main() {
             kDomain,
             kAnalogDataSet,
             kConfRev,
-            kIedScoutGenericOptFlds,
+            kExpectedUrcbOptFlds,
             0U,
             0x7CU,
             0U,
