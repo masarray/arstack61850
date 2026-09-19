@@ -10,6 +10,7 @@
 #include "ariec61850/osi/session_span.hpp"
 #include "ariec61850/osi/tpkt_span.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -76,7 +77,7 @@ template <std::size_t N>
     const std::span<std::uint8_t> response,
     const std::span<std::uint8_t> workspace,
     const std::span<std::uint8_t> scratch) noexcept {
-    constexpr std::array<std::uint8_t, 1U> tpdu_size{0x0AU};
+    constexpr std::array<std::uint8_t, 1U> tpdu_size{0x07U};
     constexpr std::array<std::uint8_t, 2U> source_tsap{0x00U, 0x01U};
     constexpr std::array<std::uint8_t, 2U> destination_tsap{0x00U, 0x01U};
     const std::array<osi::CotpParameterView, 3U> parameters{
@@ -123,15 +124,37 @@ template <std::size_t N>
 
 [[nodiscard]] bool decode_report_frame(
     const std::span<const std::uint8_t> frame,
-    mms::MmsInformationReportView& report) noexcept {
-    osi::TpktFrameView tpkt;
-    osi::CotpTpduView cotp;
+    mms::MmsInformationReportView& report,
+    std::size_t* segment_count = nullptr) noexcept {
+    std::array<std::uint8_t, 2048U> reassembled{};
+    std::size_t input_offset{};
+    std::size_t reassembled_size{};
+    std::size_t segments{};
+    while (input_offset < frame.size()) {
+        const auto remaining = frame.subspan(input_offset);
+        const auto peek = osi::TpktSpanCodec::peek_frame(remaining);
+        if (!peek.ready() || peek.frame_bytes == 0U) return false;
+        osi::TpktFrameView tpkt;
+        osi::CotpTpduView cotp;
+        if (!osi::TpktSpanCodec::try_decode_view(remaining.first(peek.frame_bytes), tpkt) ||
+            !osi::CotpSpanCodec::try_decode_view(tpkt.payload, cotp) ||
+            cotp.kind != osi::CotpWireKind::data ||
+            cotp.user_data.size() > reassembled.size() - reassembled_size) {
+            return false;
+        }
+        std::copy(cotp.user_data.begin(), cotp.user_data.end(),
+            reassembled.begin() + static_cast<std::ptrdiff_t>(reassembled_size));
+        reassembled_size += cotp.user_data.size();
+        input_offset += peek.frame_bytes;
+        ++segments;
+        if ((input_offset == frame.size()) != cotp.end_of_transmission) return false;
+    }
+    if (segment_count != nullptr) *segment_count = segments;
     osi::SessionDataTransferView session;
     osi::PresentationPdvView pdv;
-    return osi::TpktSpanCodec::try_decode_view(frame, tpkt) &&
-        osi::CotpSpanCodec::try_decode_view(tpkt.payload, cotp) &&
-        cotp.kind == osi::CotpWireKind::data && cotp.end_of_transmission &&
-        osi::SessionSpanCodec::try_decode_data_transfer_view(cotp.user_data, session) &&
+    return segments != 0U &&
+        osi::SessionSpanCodec::try_decode_data_transfer_view(
+            std::span<const std::uint8_t>{reassembled}.first(reassembled_size), session) &&
         osi::PresentationSpanCodec::try_decode_fully_encoded_data_view(
             session.presentation_payload, pdv) &&
         pdv.context_id == 3U &&
@@ -177,6 +200,42 @@ int main() {
     const std::array<mms::MmsStaticDataSetEntry, 1U> data_set_entries{
         mms::MmsStaticDataSetEntry{"LD0", "LLN0$Events", members, false}};
     const mms::MmsStaticDataSetTable data_sets{data_set_entries};
+
+    const std::array<mms::MmsStaticUrcbDefinition, 1U> unconfigured_definitions{
+        mms::MmsStaticUrcbDefinition{
+            "LD0",
+            "LLN0$RP$Spare01",
+            "LD0/LLN0$RP$Spare",
+            {},
+            {},
+            1U,
+            {0x00U, 0x00U},
+            0U,
+            0x04U,
+            0U}};
+    std::array<mms::MmsStaticUrcbState, 1U> unconfigured_states{};
+    mms::MmsStaticUrcbRuntime unconfigured_reports{
+        unconfigured_definitions, unconfigured_states, object_table, data_sets};
+    if (!unconfigured_reports.initialize()) {
+        return 40;
+    }
+    const auto* unconfigured_state = unconfigured_reports.state(0U);
+    if (unconfigured_state == nullptr ||
+        !unconfigured_state->data_set_domain().empty() ||
+        !unconfigured_state->data_set_item().empty()) {
+        return 41;
+    }
+    if (unconfigured_reports.set_enabled(0U, true, 10U) !=
+        mms::MmsStaticUrcbStatus::data_set_not_found) {
+        return 42;
+    }
+    if (unconfigured_reports.set_data_set(0U, "LD0", "LLN0$Events") !=
+            mms::MmsStaticUrcbStatus::ok ||
+        unconfigured_reports.set_enabled(0U, true, 10U) !=
+            mms::MmsStaticUrcbStatus::ok) {
+        return 43;
+    }
+
     const mms::MmsStaticApplicationDispatcher dispatcher{object_table, data_sets};
     mms::MmsStaticConnectionRuntime connection{dispatcher};
 
@@ -184,19 +243,41 @@ int main() {
         mms::MmsStaticUrcbDefinition{
             "LD0",
             "LLN0$RP$Events",
-            "LD0/LLN0$RP$Events",
+            "LD0/LLN0$RP$Events_P0_3_Negotiated_TPDU_Segmentation_Proof",
             "LD0",
             "LLN0$Events",
             7U,
             {0x7CU, 0x80U},
             0U,
-            0x08U,
+            0x0CU,
             1'000U}};
     std::array<mms::MmsStaticUrcbState, 1U> states{};
     mms::MmsStaticUrcbRuntime reports{
         definitions, states, object_table, data_sets};
     if (!reports.initialize()) {
         return 1;
+    }
+
+    constexpr std::array<std::uint8_t, 2U> iedscout_generic_optflds{0x7BU, 0x80U};
+    constexpr std::array<std::uint8_t, 2U> effective_urcb_optflds{0x78U, 0x80U};
+    constexpr std::array<std::uint8_t, 2U> unsupported_segmentation{0x78U, 0xC0U};
+    constexpr std::array<std::uint8_t, 2U> original_optflds{0x7CU, 0x80U};
+    if (reports.set_optional_fields(0U, iedscout_generic_optflds) !=
+            mms::MmsStaticUrcbStatus::ok) {
+        return 44;
+    }
+    const auto* compatibility_state = reports.state(0U);
+    if (compatibility_state == nullptr ||
+        compatibility_state->optional_fields != effective_urcb_optflds) {
+        return 45;
+    }
+    if (reports.set_optional_fields(0U, unsupported_segmentation) !=
+            mms::MmsStaticUrcbStatus::invalid_value) {
+        return 46;
+    }
+    if (reports.set_optional_fields(0U, original_optflds) !=
+            mms::MmsStaticUrcbStatus::ok) {
+        return 47;
     }
 
     std::array<std::uint8_t, 2048U> request{};
@@ -252,9 +333,12 @@ int main() {
     }
 
     mms::MmsInformationReportView report;
+    std::size_t report_segments{};
     if (!decode_report_frame(
-            std::span<const std::uint8_t>{response}.first(poll.bytes_written), report) ||
-        report.item_count != 13U) {
+            std::span<const std::uint8_t>{response}.first(poll.bytes_written),
+            report,
+            &report_segments) ||
+        report_segments < 2U || report.item_count != 13U) {
         return 9;
     }
     mms::MmsReadAccessResultView item;

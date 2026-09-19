@@ -17,8 +17,15 @@ enum class MmsStaticBrcbAttribute : std::uint8_t {
     report_enabled,
     data_set,
     conf_revision,
+    optional_fields,
+    buffer_time,
+    sequence_number,
+    trigger_options,
+    integrity_period,
+    general_interrogation,
     purge_buffer,
     entry_id,
+    time_of_entry,
     reservation_time,
     owner,
 };
@@ -38,7 +45,10 @@ struct MmsStaticBrcbObjectContext final {
 // opaque association/Owner identity.
 class MmsStaticBrcbObjectBank final {
 public:
-    static constexpr std::size_t attributes_per_control_block = 8U;
+    // Golden IEDScout-compatible BRCB facade:
+    // RptID,RptEna,DatSet,ConfRev,OptFlds,BufTm,SqNum,TrgOps,IntgPd,GI,
+    // PurgeBuf,EntryID,TimeofEntry,ResvTms,Owner.
+    static constexpr std::size_t attributes_per_control_block = 15U;
 
     MmsStaticBrcbObjectBank(
         const MmsStaticBrcbDefinition& definition,

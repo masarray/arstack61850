@@ -6,6 +6,7 @@
 #include "ariec61850/mms/pdu_span.hpp"
 #include "ariec61850/mms/services_span.hpp"
 #include "ariec61850/osi/cotp_span.hpp"
+#include "ariec61850/osi/cotp_tpkt_stream.hpp"
 #include "ariec61850/osi/presentation_span.hpp"
 #include "ariec61850/osi/session_span.hpp"
 #include "ariec61850/osi/tpkt_span.hpp"
@@ -29,11 +30,11 @@ constexpr std::uint32_t kServerMaximumNestingLevel = 5U;
 constexpr std::array<std::uint8_t, 4U> kConservativeStructureType{
     0xA2U, 0x02U, 0xA1U, 0x00U};
 
-// FileDirectory-Response service value: listOfDirectoryEntry [0] empty,
-// moreFollows [1] FALSE. Mirrors the deterministic behavior of the proven
-// ARIEC61850 engineering-client simulator without claiming file-server support.
-constexpr std::array<std::uint8_t, 5U> kEmptyFileDirectoryFields{
-    0xA0U, 0x00U, 0x81U, 0x01U, 0x00U};
+// IEDScout golden empty FileDirectory response: [0] contains an empty
+// SEQUENCE OF DirectoryEntry. moreFollows is DEFAULT FALSE and therefore omitted.
+// Exact service value: A0 02 30 00.
+constexpr std::array<std::uint8_t, 4U> kEmptyFileDirectoryFields{
+    0xA0U, 0x02U, 0x30U, 0x00U};
 
 [[nodiscard]] MmsStaticConnectionResult make_result(
     const MmsStaticConnectionStatus status,
@@ -111,22 +112,17 @@ constexpr std::array<std::uint8_t, 5U> kEmptyFileDirectoryFields{
     std::size_t& maximum_user_data,
     std::size_t& segment_count,
     std::size_t& required) noexcept {
-    maximum_user_data = 0U;
-    segment_count = 0U;
-    required = 0U;
-    if (negotiated_tpdu_size_bytes <= 3U) {
+    osi::CotpTpktDataStreamPlan plan;
+    if (!osi::CotpTpktDataStreamSpanCodec::try_plan(
+            payload_bytes, negotiated_tpdu_size_bytes, plan)) {
+        maximum_user_data = 0U;
+        segment_count = 0U;
+        required = 0U;
         return false;
     }
-
-    maximum_user_data = negotiated_tpdu_size_bytes - 3U;
-    segment_count = payload_bytes == 0U
-        ? 1U
-        : 1U + ((payload_bytes - 1U) / maximum_user_data);
-    if (segment_count >
-        (std::numeric_limits<std::size_t>::max() - payload_bytes) / 7U) {
-        return false;
-    }
-    required = payload_bytes + segment_count * 7U;
+    maximum_user_data = plan.maximum_user_data;
+    segment_count = plan.segment_count;
+    required = plan.required_bytes;
     return true;
 }
 
@@ -136,58 +132,24 @@ constexpr std::array<std::uint8_t, 5U> kEmptyFileDirectoryFields{
     const MmsStaticConnectionState state,
     const std::size_t negotiated_tpdu_size_bytes,
     const std::span<std::uint8_t> response) noexcept {
-    std::size_t maximum_user_data{};
-    std::size_t segment_count{};
-    std::size_t required{};
-    if (!cotp_stream_size(
-            session_or_presentation.size(),
-            negotiated_tpdu_size_bytes,
-            maximum_user_data,
-            segment_count,
-            required)) {
-        return make_result(MmsStaticConnectionStatus::peer_limit_exceeded, state, consumed);
-    }
-    if (response.size() < required) {
-        return make_response_capacity(state, required);
-    }
-
-    std::size_t input_offset = 0U;
-    std::size_t output_offset = 0U;
-    for (std::size_t segment = 0U; segment < segment_count; ++segment) {
-        const auto remaining = session_or_presentation.size() - input_offset;
-        const auto chunk_size = std::min(remaining, maximum_user_data);
-        const auto final_segment = segment + 1U == segment_count;
-        const auto frame_bytes = chunk_size + 7U;
-        if (frame_bytes > std::numeric_limits<std::uint16_t>::max()) {
-            return make_result(MmsStaticConnectionStatus::backend_failure, state);
+    const auto encoded = osi::CotpTpktDataStreamSpanCodec::encode_into(
+        session_or_presentation, negotiated_tpdu_size_bytes, response);
+    if (!encoded.success()) {
+        if (encoded.status == wire::EncodeStatus::buffer_too_small) {
+            return make_response_capacity(state, encoded.required_bytes);
         }
-
-        auto frame = response.subspan(output_offset, frame_bytes);
-        const auto cotp = osi::CotpSpanCodec::encode_data_into(
-            session_or_presentation.subspan(input_offset, chunk_size),
-            frame.subspan(osi::TpktSpanCodec::header_length),
-            final_segment,
-            0U);
-        if (!cotp.success() || cotp.bytes_written != chunk_size + 3U) {
-            return make_result(MmsStaticConnectionStatus::backend_failure, state);
-        }
-
-        frame[0] = 0x03U;
-        frame[1] = 0x00U;
-        frame[2] = static_cast<std::uint8_t>((frame_bytes >> 8U) & 0xFFU);
-        frame[3] = static_cast<std::uint8_t>(frame_bytes & 0xFFU);
-        input_offset += chunk_size;
-        output_offset += frame_bytes;
-    }
-
-    if (input_offset != session_or_presentation.size() || output_offset != required) {
-        return make_result(MmsStaticConnectionStatus::backend_failure, state);
+        return make_result(
+            negotiated_tpdu_size_bytes == 0U
+                ? MmsStaticConnectionStatus::peer_limit_exceeded
+                : MmsStaticConnectionStatus::backend_failure,
+            state,
+            consumed);
     }
     return make_result(
         MmsStaticConnectionStatus::response_ready,
         state,
         consumed,
-        required);
+        encoded.bytes_written);
 }
 
 [[nodiscard]] MmsStaticConnectionResult application_rejected(
@@ -744,6 +706,32 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
                 MmsStaticDispatchStatus::response_ready,
                 MmsWireConfirmedService::identify,
                 confirmed.invoke_id));
+        }
+
+        if (policy_.confirmed_service != nullptr) {
+            const auto extension = policy_.confirmed_service(
+                policy_.confirmed_service_context,
+                confirmed.service(),
+                confirmed.invoke_id,
+                confirmed.service_constructed,
+                confirmed.service_value,
+                response);
+            if (extension.handled) {
+                return finish(wrap_mms_response(
+                    extension.encoded,
+                    peek.frame_bytes,
+                    state_,
+                    mms_presentation_context_id_,
+                    negotiated_mms_pdu_size_,
+                    negotiated_tpdu_size_bytes_,
+                    response,
+                    workspace,
+                    extension.encoded.success()
+                        ? MmsStaticDispatchStatus::response_ready
+                        : MmsStaticDispatchStatus::backend_failure,
+                    confirmed.service(),
+                    confirmed.invoke_id));
+            }
         }
 
         if (confirmed.service() == MmsWireConfirmedService::file_directory) {

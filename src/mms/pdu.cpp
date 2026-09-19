@@ -365,6 +365,11 @@ MmsConfirmedService MmsConfirmedRequest::service() const noexcept {
     case 5: return MmsConfirmedService::write;
     case 6: return MmsConfirmedService::get_variable_access_attributes;
     case 12: return MmsConfirmedService::get_named_variable_list_attributes;
+    case 72: return MmsConfirmedService::file_open;
+    case 73: return MmsConfirmedService::file_read;
+    case 74: return MmsConfirmedService::file_close;
+    case 76: return MmsConfirmedService::file_delete;
+    case 77: return MmsConfirmedService::file_directory;
     default: return MmsConfirmedService::unknown;
     }
 }
@@ -377,6 +382,11 @@ MmsConfirmedService MmsConfirmedResponse::service() const noexcept {
     case 5: return MmsConfirmedService::write;
     case 6: return MmsConfirmedService::get_variable_access_attributes;
     case 12: return MmsConfirmedService::get_named_variable_list_attributes;
+    case 72: return MmsConfirmedService::file_open;
+    case 73: return MmsConfirmedService::file_read;
+    case 74: return MmsConfirmedService::file_close;
+    case 76: return MmsConfirmedService::file_delete;
+    case 77: return MmsConfirmedService::file_directory;
     default: return MmsConfirmedService::unknown;
     }
 }

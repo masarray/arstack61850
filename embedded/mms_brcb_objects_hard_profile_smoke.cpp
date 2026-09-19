@@ -19,6 +19,9 @@ constexpr std::array<std::uint8_t, 3U> kTrue{0x83U, 0x01U, 0xFFU};
 constexpr std::array<std::uint8_t, 3U> kFalse{0x83U, 0x01U, 0x00U};
 constexpr std::array<std::uint8_t, 3U> kFiveSeconds{0x85U, 0x01U, 0x05U};
 constexpr std::array<std::uint8_t, 3U> kZeroSeconds{0x85U, 0x01U, 0x00U};
+constexpr std::array<std::uint8_t, 4U> kTriggerAll{0x84U, 0x02U, 0x02U, 0x7CU};
+constexpr std::array<std::uint8_t, 5U> kIedScoutOptionalFields{
+    0x84U, 0x03U, 0x06U, 0x7BU, 0x80U};
 
 [[nodiscard]] wire::EncodeResult read_boolean(
     const void* context,
@@ -145,6 +148,32 @@ constexpr std::array<std::uint8_t, 3U> kZeroSeconds{0x85U, 0x01U, 0x00U};
         : !result.success && result.failure_code == expected_failure;
 }
 
+[[nodiscard]] bool dispatch_trigger_enable_transaction(
+    const mms::MmsStaticApplicationDispatcher& dispatcher,
+    const mms::MmsStaticRequestAccessContext& client,
+    std::uint8_t& invoke) noexcept {
+    std::array<std::uint8_t, 62U> request{
+        0xA0U,0x3CU,0x02U,0x01U,0x00U,0xA5U,0x37U,0xA0U,0x2CU,
+        0x30U,0x14U,0xA0U,0x12U,0xA1U,0x10U,0x1AU,0x03U,0x4CU,0x44U,0x30U,
+        0x1AU,0x09U,0x42U,0x31U,0x24U,0x52U,0x70U,0x74U,0x45U,0x6EU,0x61U,
+        0x30U,0x14U,0xA0U,0x12U,0xA1U,0x10U,0x1AU,0x03U,0x4CU,0x44U,0x30U,
+        0x1AU,0x09U,0x42U,0x31U,0x24U,0x54U,0x72U,0x67U,0x4FU,0x70U,0x73U,
+        0xA0U,0x07U,0x83U,0x01U,0xFFU,0x84U,0x02U,0x02U,0x7CU};
+    request[4] = invoke++;
+    std::array<std::uint8_t, 128U> response{};
+    std::array<std::uint8_t, 256U> workspace{};
+    const auto dispatched = dispatcher.dispatch(request, response, workspace, client);
+    if (!dispatched.success()) return false;
+    mms::MmsWriteResponseView decoded;
+    mms::MmsWriteAccessResultView first;
+    mms::MmsWriteAccessResultView second;
+    return mms::MmsServiceSpanCodec::try_decode_write_response(
+               std::span<const std::uint8_t>{response}.first(dispatched.bytes_written),
+               decoded) &&
+        decoded.result_count == 2U && decoded.try_result(0U, first) &&
+        decoded.try_result(1U, second) && first.success && second.success;
+}
+
 [[nodiscard]] std::array<std::uint8_t, 10U> octet_data(
     const std::span<const std::uint8_t> value) noexcept {
     std::array<std::uint8_t, 10U> encoded{};
@@ -196,9 +225,9 @@ int main() {
     }
     mms::MmsStaticBrcbControl control{reports};
 
-    std::array<mms::MmsStaticObjectEntry, 9U> object_storage{};
-    std::array<mms::MmsStaticBrcbObjectContext, 8U> context_storage{};
-    std::array<char, 128U> name_storage{};
+    std::array<mms::MmsStaticObjectEntry, 16U> object_storage{};
+    std::array<mms::MmsStaticBrcbObjectContext, 15U> context_storage{};
+    std::array<char, 320U> name_storage{};
     std::uint64_t now = 100U;
     mms::MmsStaticBrcbObjectBank bank{
         definition,
@@ -210,11 +239,14 @@ int main() {
         name_storage,
         read_now,
         &now};
-    if (!bank.initialize() || bank.object_count() != 9U || !bank.table().valid()) {
+    if (!bank.initialize() || bank.object_count() != 16U || !bank.table().valid()) {
         return 2;
     }
 
-    const mms::MmsStaticApplicationDispatcher dispatcher{bank.table(), data_set_table};
+    mms::MmsStaticDispatchPolicy dispatch_policy;
+    dispatch_policy.maximum_write_variables = 16U;
+    const mms::MmsStaticApplicationDispatcher dispatcher{
+        bank.table(), data_set_table, dispatch_policy};
     const std::array<std::uint8_t, 2U> owner_a{0xAAU, 0x01U};
     const std::array<std::uint8_t, 2U> owner_b{0xBBU, 0x01U};
     const auto a = access(101U, owner_a);
@@ -271,6 +303,22 @@ int main() {
         return 11;
     }
 
+    if (!dispatch_write(
+            dispatcher, "B1$OptFlds", kIedScoutOptionalFields, a, true, 0U, invoke) ||
+        reports.optional_fields()[0] != 0x7BU ||
+        reports.optional_fields()[1] != 0x80U) {
+        return 89;
+    }
+    if (kTriggerAll[3] != 0x7CU ||
+        !dispatch_trigger_enable_transaction(dispatcher, a, invoke) ||
+        !reports.enabled() || reports.trigger_options() != 0x7CU) {
+        return 90;
+    }
+    if (!dispatch_write(dispatcher, "B1$RptEna", kFalse, a, true, 0U, invoke) ||
+        reports.enabled()) {
+        return 91;
+    }
+
     if (!dispatch_write(dispatcher, "B1$ResvTms", kFiveSeconds, a, true, 0U, invoke)) {
         return 12;
     }
@@ -321,7 +369,7 @@ int main() {
     }
 
     std::array<std::uint8_t, 32U> read_buffer{};
-    const auto& entry_object = object_storage[1U + 5U];
+    const auto& entry_object = object_storage[1U + 11U];
     const auto entry_read = entry_object.read(entry_object.context, read_buffer);
     if (!entry_read.success() || entry_read.bytes_written != 10U ||
         read_buffer[0] != 0x89U || read_buffer[1] != 0x08U ||
@@ -329,7 +377,7 @@ int main() {
             [](const std::uint8_t byte) { return byte == 0U; })) {
         return 21;
     }
-    const auto& purge_object = object_storage[1U + 4U];
+    const auto& purge_object = object_storage[1U + 10U];
     const auto purge_read = purge_object.read(purge_object.context, read_buffer);
     if (!purge_read.success() || purge_read.bytes_written != 3U ||
         read_buffer[0] != 0x83U || read_buffer[2] != 0x00U) {

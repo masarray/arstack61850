@@ -1,0 +1,38 @@
+name: P0.2 runtime fixture correction
+
+on:
+  push:
+    branches:
+      - feat/ied-sim-ux-performance-foundation
+    paths:
+      - .github/workflows/p0-2-runtime-fixture-correction.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/ied-sim-ux-performance-foundation
+          fetch-depth: 0
+      - name: Correct canonical report fixture
+        run: python tools/p0_2_runtime_fixture_patch.py
+      - name: Configure regression
+        run: cmake -S . -B build-p02-runtime -DCMAKE_BUILD_TYPE=Release
+      - name: Build runtime and reporting tests
+        run: cmake --build build-p02-runtime --target ariec61850_mms_runtime_tests ariec61850_reporting_tests --parallel
+      - name: Run runtime and reporting tests
+        run: ctest --test-dir build-p02-runtime -R '^(ariec61850_mms_runtime_tests|ariec61850_reporting_tests)$' --output-on-failure
+      - name: Commit verified fixture correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "ARStack P0 Bot"
+          git config user.email "actions@github.com"
+          git add tests/test_mms_runtime.cpp
+          git diff --cached --check
+          git commit -m "test(mms): align runtime report fixture with canonical payload order"
+          git push origin HEAD:feat/ied-sim-ux-performance-foundation

@@ -12,10 +12,12 @@ set(ARIEC61850_BUILD_FUZZERS OFF CACHE BOOL "" FORCE)
 
 add_subdirectory(${ARIEC61850_ROOT} ariec61850-core)
 
-add_executable(ariec61850_control_interop_probe
-    ${ARIEC61850_ROOT}/tools/control_interop_probe.cpp)
-target_link_libraries(ariec61850_control_interop_probe PRIVATE ARIEC61850::core)
-target_compile_features(ariec61850_control_interop_probe PRIVATE cxx_std_20)
+if(NOT TARGET ariec61850_control_interop_probe)
+    add_executable(ariec61850_control_interop_probe
+        ${ARIEC61850_ROOT}/tools/control_interop_probe.cpp)
+    target_link_libraries(ariec61850_control_interop_probe PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_control_interop_probe PRIVATE cxx_std_20)
+endif()
 
 add_executable(ariec61850_control_inventory_probe
     ${ARIEC61850_ROOT}/tools/control_inventory_probe.cpp)

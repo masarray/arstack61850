@@ -38,6 +38,7 @@ add_library(ariec61850_mms_r12_server_core STATIC
     "${ARSTACK_ROOT}/src/mms/write_span.cpp"
     "${ARSTACK_ROOT}/src/mms/data_set_span.cpp"
     "${ARSTACK_ROOT}/src/mms/information_report_span.cpp"
+    "${ARSTACK_ROOT}/src/mms/buffered_selective_information_report_span.cpp"
     "${ARSTACK_ROOT}/src/mms/static_object_table.cpp"
     "${ARSTACK_ROOT}/src/mms/static_write.cpp"
     "${ARSTACK_ROOT}/src/mms/static_data_set_table.cpp"

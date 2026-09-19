@@ -371,32 +371,6 @@ struct EncodedValue final { std::span<const std::uint8_t> bytes; };
     }));
 }
 
-[[nodiscard]] std::vector<std::uint8_t> build_lln0_type() {
-    return mms::MmsServiceCodec::encode_type_specification(structure("", {
-        structure("RP", {
-            structure("Outputs01", {
-                scalar(mms::MmsTypeKind::visible_string, "RptID", 255U),
-                scalar(mms::MmsTypeKind::boolean, "RptEna"),
-                scalar(mms::MmsTypeKind::boolean, "Resv"),
-                scalar(mms::MmsTypeKind::visible_string, "DatSet", 255U),
-                scalar(mms::MmsTypeKind::unsigned_integer, "ConfRev", 32U),
-                scalar(mms::MmsTypeKind::bit_string, "OptFlds", 10U),
-                scalar(mms::MmsTypeKind::unsigned_integer, "BufTm", 32U),
-                scalar(mms::MmsTypeKind::bit_string, "TrgOps", 6U),
-                scalar(mms::MmsTypeKind::unsigned_integer, "IntgPd", 32U),
-                scalar(mms::MmsTypeKind::boolean, "GI"),
-                scalar(mms::MmsTypeKind::unsigned_integer, "SqNum", 32U),
-            }),
-        }),
-    }));
-}
-
-[[nodiscard]] wire::EncodeResult read_unavailable(
-    const void*,
-    const std::span<std::uint8_t>) noexcept {
-    return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
-}
-
 [[nodiscard]] bool serve_client(
     SocketHandle client,
     const mms::MmsStaticApplicationDispatcher& dispatcher,
@@ -463,19 +437,17 @@ int main(int argc, char** argv) {
 
     constexpr std::string_view domain{"ESP32S3IOLD0"};
     constexpr std::array<std::uint8_t, 2U> boolean_type{0x83U, 0x00U};
-    const auto lln0_type = build_lln0_type();
     const auto ggio_type = build_ggio_type();
     const EncodedValue ggio_root{ggio_type};
 
     std::array<std::uint8_t, 8U> values{};
     std::array<std::string, 8U> status_items{};
-    std::array<mms::MmsStaticObjectEntry, 10U> base_objects{};
-    base_objects[0] = {domain, "LLN0", lln0_type, read_unavailable, nullptr};
-    base_objects[1] = {domain, "GGIO1", ggio_type, read_encoded, &ggio_root};
+    std::array<mms::MmsStaticObjectEntry, 9U> base_objects{};
+    base_objects[0] = {domain, "GGIO1", ggio_type, read_encoded, &ggio_root};
     for (std::size_t index = 0U; index < 8U; ++index) {
         values[index] = static_cast<std::uint8_t>((options.output_mask >> index) & 0x01U);
         status_items[index] = "GGIO1$ST$SPCSO" + std::to_string(index + 1U) + "$stVal";
-        base_objects[index + 2U] = {
+        base_objects[index + 1U] = {
             domain, status_items[index], boolean_type, read_boolean, &values[index]
         };
     }
@@ -502,7 +474,7 @@ int main(int argc, char** argv) {
     if (!urcbs.initialize()) return 4;
 
     std::array<mms::MmsStaticObjectEntry, 21U> object_storage{};
-    std::array<mms::MmsStaticUrcbObjectContext, 11U> context_storage{};
+    std::array<mms::MmsStaticUrcbObjectContext, 12U> context_storage{};
     std::array<char, 512U> name_storage{};
     mms::MmsStaticUrcbObjectBank object_bank{
         urcbs, base_objects, object_storage, context_storage, name_storage,

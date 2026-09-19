@@ -1,0 +1,335 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#include "ariec61850/scl/parser.hpp"
+#include "ariec61850/simulation/ied_simulator_engine.hpp"
+#include "ariec61850/simulation/ied_simulator_profile.hpp"
+
+#include <algorithm>
+#include <filesystem>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <utility>
+
+namespace {
+
+#define CHECK(condition) do { \
+    if (!(condition)) { \
+        throw std::runtime_error(std::string{"CHECK failed: "} + #condition + \
+                                 " at " + __FILE__ + ":" + std::to_string(__LINE__)); \
+    } \
+} while (false)
+
+std::filesystem::path fixture(const std::string& name) {
+    return std::filesystem::path{ARIEC61850_SOURCE_DIR} / "tests" / "fixtures" / "scl" / name;
+}
+
+const ar::iec61850::simulation::IedSimulatorPoint* find_point(
+    const ar::iec61850::simulation::IedSimulatorProfile& profile,
+    const std::string& mms_item) {
+    for (const auto& device : profile.logical_devices) {
+        for (const auto& node : device.logical_nodes) {
+            const auto found = std::find_if(
+                node.points.begin(), node.points.end(),
+                [&mms_item](const auto& point) { return point.mms_item == mms_item; });
+            if (found != node.points.end()) return &*found;
+        }
+    }
+    return nullptr;
+}
+
+void profile_builder_preserves_full_structural_model() {
+    using namespace ar::iec61850;
+    const auto document = scl::SclParser{}.load(fixture("minimal-station-brcb.scd"));
+    const auto built = simulation::IedSimulatorProfileBuilder::build(document);
+
+    CHECK(built.source_ied_name == "MU01");
+    CHECK(built.selected_ied_name == "MU01");
+    CHECK(built.profile.name == "MU01");
+    CHECK(built.profile.vendor == "AR");
+    CHECK(built.profile.logical_devices.size() == 1U);
+    CHECK(built.profile.logical_node_count() == 4U);
+    CHECK(built.profile.point_count() >= 23U);
+    CHECK(built.structural_data_attribute_count == built.profile.point_count());
+    CHECK(built.profile.data_sets.size() == 2U);
+    CHECK(built.profile.report_control_blocks.size() == 2U);
+    CHECK(built.profile.data_set_member_count() == 5U);
+
+    const auto* structural_only = find_point(
+        built.profile, "TCTR1$MX$AmpUnmapped$instMag$i");
+    CHECK(structural_only != nullptr);
+    CHECK(structural_only->mms_domain == "MU01LD0");
+    CHECK(structural_only->basic_type == "INT32");
+    CHECK(structural_only->display_type == "Number");
+    CHECK(structural_only->initial_value == "0");
+
+    const auto* position = find_point(built.profile, "XCBR1$ST$Pos$stVal");
+    CHECK(position != nullptr);
+    CHECK(position->display_type == "Boolean");
+    CHECK(position->initial_value == "false");
+
+    const auto* control_model = find_point(built.profile, "GGIO1$CF$SPCSO4$ctlModel");
+    CHECK(control_model != nullptr);
+    CHECK(control_model->display_type == "Enumeration");
+    CHECK(control_model->initial_value == "4");
+
+    const auto urcb = std::find_if(
+        built.profile.report_control_blocks.begin(),
+        built.profile.report_control_blocks.end(),
+        [](const auto& report) { return !report.buffered; });
+    const auto brcb = std::find_if(
+        built.profile.report_control_blocks.begin(),
+        built.profile.report_control_blocks.end(),
+        [](const auto& report) { return report.buffered; });
+    CHECK(urcb != built.profile.report_control_blocks.end());
+    CHECK(brcb != built.profile.report_control_blocks.end());
+    CHECK(urcb->mode() == "URCB");
+    CHECK(brcb->mode() == "BRCB");
+    CHECK(urcb->mms_item == "LLN0$RP$URCB01");
+    CHECK(brcb->mms_item == "LLN0$BR$BRCB01");
+}
+
+void profile_builder_remaps_runtime_identity_and_filters_qt() {
+    using namespace ar::iec61850;
+    const auto document = scl::SclParser{}.load(fixture("minimal-station-brcb.scd"));
+    simulation::IedSimulatorProfileFromSclOptions options;
+    options.ied_name = "MU01";
+    options.runtime_ied_name = "SIM01";
+    options.include_quality_and_timestamp_points = false;
+    const auto built = simulation::IedSimulatorProfileBuilder::build(document, options);
+
+    CHECK(built.source_ied_name == "MU01");
+    CHECK(built.selected_ied_name == "SIM01");
+    CHECK(built.profile.name == "SIM01");
+    CHECK(!built.profile.logical_devices.empty());
+    CHECK(built.profile.logical_devices.front().name == "SIM01LD0");
+    CHECK(built.skipped_member_count == 3U);
+    CHECK(built.profile.data_set_member_count() == 2U);
+    CHECK(find_point(built.profile, "XCBR1$ST$Pos$q") == nullptr);
+    CHECK(find_point(built.profile, "XCBR1$ST$Pos$t") == nullptr);
+    CHECK(!built.profile.report_control_blocks.empty());
+    CHECK(built.profile.report_control_blocks.front().mms_domain == "SIM01LD0");
+}
+
+void profile_builder_seeds_iec61850_semantic_initial_values() {
+    using namespace ar::iec61850;
+
+    scl::SclDocument document;
+    document.source_name = "semantic-initial-values.scd";
+
+    scl::SclIed ied;
+    ied.name = "IEDSEM";
+    ied.manufacturer = "AR";
+    document.ieds.push_back(std::move(ied));
+
+    scl::SclLogicalNode xcbr;
+    xcbr.ied_name = "IEDSEM";
+    xcbr.ld_inst = "LD0";
+    xcbr.ln_class = "XCBR";
+    xcbr.ln_inst = "1";
+    xcbr.name = "XCBR1";
+    document.logical_nodes.push_back(std::move(xcbr));
+
+    scl::SclLogicalNode ggio;
+    ggio.ied_name = "IEDSEM";
+    ggio.ld_inst = "LD0";
+    ggio.ln_class = "GGIO";
+    ggio.ln_inst = "1";
+    ggio.name = "GGIO1";
+    document.logical_nodes.push_back(std::move(ggio));
+
+    const auto append = [&](std::string ln_class,
+                            std::string ln_inst,
+                            std::string do_name,
+                            std::string da_name,
+                            std::string fc,
+                            std::string cdc,
+                            std::string basic_type,
+                            const bool quality = false,
+                            const bool timestamp = false) {
+        scl::SclDataSetEntry entry;
+        entry.ied_name = "IEDSEM";
+        entry.ld_inst = "LD0";
+        entry.ln_class = std::move(ln_class);
+        entry.ln_inst = std::move(ln_inst);
+        entry.do_name = std::move(do_name);
+        entry.da_name = std::move(da_name);
+        entry.functional_constraint = std::move(fc);
+        entry.cdc = std::move(cdc);
+        entry.basic_type = std::move(basic_type);
+        entry.is_quality = quality;
+        entry.is_timestamp = timestamp;
+        document.model_entries.push_back(std::move(entry));
+    };
+
+    append("XCBR", "1", "Pos", "stVal", "ST", "DPC", "Dbpos");
+    append("XCBR", "1", "Pos", "q", "ST", "DPC", "Quality", true, false);
+    append("XCBR", "1", "Pos", "t", "ST", "DPC", "Timestamp", false, true);
+    append("GGIO", "1", "Ind1", "stVal", "ST", "SPS", "BOOLEAN");
+
+    simulation::IedSimulatorProfileFromSclOptions options;
+    options.ied_name = "IEDSEM";
+    options.simulation_start_unix_ms = 1'720'000'000'000ULL;
+    const auto built = simulation::IedSimulatorProfileBuilder::build(document, options);
+
+    const auto* pos = find_point(built.profile, "XCBR1$ST$Pos$stVal");
+    CHECK(pos != nullptr);
+    CHECK(pos->basic_type == "Dbpos");
+    CHECK(pos->display_type == "Enumeration");
+    CHECK(pos->initial_value == "intermediate-state");
+
+    const auto* quality = find_point(built.profile, "XCBR1$ST$Pos$q");
+    CHECK(quality != nullptr);
+    CHECK(quality->display_type == "Quality");
+    CHECK(quality->initial_value == "good");
+
+    const auto* timestamp = find_point(built.profile, "XCBR1$ST$Pos$t");
+    CHECK(timestamp != nullptr);
+    CHECK(timestamp->display_type == "Timestamp");
+    CHECK(timestamp->initial_value == "unix-ms:1720000000000");
+
+    const auto* sps = find_point(built.profile, "GGIO1$ST$Ind1$stVal");
+    CHECK(sps != nullptr);
+    CHECK(sps->display_type == "Boolean");
+    CHECK(sps->initial_value == "false");
+}
+
+void profile_builder_does_not_suffix_match_timestamp_or_quality() {
+    using namespace ar::iec61850;
+
+    scl::SclDocument document;
+    document.source_name = "iedscout-type-regression.scd";
+    scl::SclIed ied;
+    ied.name = "IEDTYPE";
+    document.ieds.push_back(std::move(ied));
+
+    scl::SclLogicalNode cswi;
+    cswi.ied_name = "IEDTYPE";
+    cswi.ld_inst = "LD0";
+    cswi.ln_class = "CSWI";
+    cswi.ln_inst = "1";
+    cswi.name = "CSWI1";
+    document.logical_nodes.push_back(std::move(cswi));
+
+    const auto append = [&](std::string do_name,
+                            std::string da_name,
+                            std::string fc,
+                            std::string cdc,
+                            std::string basic_type,
+                            const bool quality = false,
+                            const bool timestamp = false) {
+        scl::SclDataSetEntry entry;
+        entry.ied_name = "IEDTYPE";
+        entry.ld_inst = "LD0";
+        entry.ln_class = "CSWI";
+        entry.ln_inst = "1";
+        entry.do_name = std::move(do_name);
+        entry.da_name = std::move(da_name);
+        entry.functional_constraint = std::move(fc);
+        entry.cdc = std::move(cdc);
+        entry.basic_type = std::move(basic_type);
+        entry.is_quality = quality;
+        entry.is_timestamp = timestamp;
+        document.model_entries.push_back(std::move(entry));
+    };
+
+    append("Pos", "origin.orCat", "ST", "DPC", "INT8");
+    append("Pos", "origin.orIdent", "ST", "DPC", "Octet64");
+    append("Pos", "sboTimeout", "CF", "DPC", "INT32U");
+    append("Pos", "operTimeout", "CF", "DPC", "INT32U");
+    append("LocSta", "Oper.Test", "CO", "SPC", "BOOLEAN");
+    append("Pos", "q", "ST", "DPC", "Quality", true, false);
+    append("Pos", "t", "ST", "DPC", "Timestamp", false, true);
+
+    simulation::IedSimulatorProfileFromSclOptions options;
+    options.ied_name = "IEDTYPE";
+    const auto built = simulation::IedSimulatorProfileBuilder::build(document, options);
+
+    const auto* or_cat = find_point(built.profile, "CSWI1$ST$Pos$origin$orCat");
+    const auto* or_ident = find_point(built.profile, "CSWI1$ST$Pos$origin$orIdent");
+    const auto* sbo_timeout = find_point(built.profile, "CSWI1$CF$Pos$sboTimeout");
+    const auto* oper_timeout = find_point(built.profile, "CSWI1$CF$Pos$operTimeout");
+    const auto* test = find_point(built.profile, "CSWI1$CO$LocSta$Oper$Test");
+    const auto* q = find_point(built.profile, "CSWI1$ST$Pos$q");
+    const auto* t = find_point(built.profile, "CSWI1$ST$Pos$t");
+
+    CHECK(or_cat != nullptr && or_cat->display_type == "Number");
+    CHECK(or_ident != nullptr && or_ident->display_type == "Octet64");
+    CHECK(sbo_timeout != nullptr && sbo_timeout->display_type == "Number");
+    CHECK(oper_timeout != nullptr && oper_timeout->display_type == "Number");
+    CHECK(test != nullptr && test->display_type == "Boolean");
+    CHECK(q != nullptr && q->display_type == "Quality");
+    CHECK(t != nullptr && t->display_type == "Timestamp");
+}
+
+void engine_supports_case_insensitive_manual_state_and_deterministic_steps() {
+    using namespace ar::iec61850::simulation;
+    auto profile = IedSimulatorProfile::create_default_feeder_profile();
+    IedSimulatorEngine engine{std::move(profile)};
+
+    const auto* initial = engine.find_point_state("ied1ld0/xcbr1.pos.stval");
+    CHECK(initial != nullptr);
+    CHECK(initial->value == "closed");
+    CHECK(initial->timestamp_unix_milliseconds == 0U);
+
+    const auto mutation = engine.set_point_value(
+        "IED1LD0/XCBR1$ST$Pos$stVal",
+        "open",
+        "questionable",
+        "Manual",
+        1700000000123ULL);
+    CHECK(mutation.has_value());
+    CHECK(mutation->previous_value == "closed");
+    CHECK(mutation->new_value == "open");
+    CHECK(mutation->reason == "data-change");
+
+    const auto* updated = engine.find_point_state("XCBR1.Pos.stVal");
+    CHECK(updated != nullptr);
+    CHECK(updated->value == "open");
+    CHECK(updated->quality == "questionable");
+    CHECK(updated->origin == "Manual");
+    CHECK(updated->timestamp_unix_milliseconds == 1700000000123ULL);
+
+    engine.reset(1000U);
+    engine.start();
+    CHECK(engine.running());
+    const auto first_events = engine.step(1100U);
+    CHECK(!first_events.empty());
+    const auto* phase_a = engine.find_point_state("IED1LD0/MMXU1.PhV.phsA.cVal.mag.f");
+    CHECK(phase_a != nullptr);
+    CHECK(phase_a->value != "230000");
+    CHECK(phase_a->timestamp_unix_milliseconds == 1100U);
+    CHECK(engine.step_index() == 1U);
+
+    const auto snapshot = engine.snapshot(1200U);
+    CHECK(snapshot.profile_name == "AR Demo Feeder IED");
+    CHECK(snapshot.logical_device_count == 1U);
+    CHECK(snapshot.logical_node_count == 2U);
+    CHECK(snapshot.point_count == 4U);
+    CHECK(snapshot.points.size() == 4U);
+
+    engine.stop();
+    CHECK(!engine.running());
+}
+
+} // namespace
+
+int main() {
+    try {
+        profile_builder_preserves_full_structural_model();
+        std::cout << "[PASS] simulator full structural profile\n";
+        profile_builder_remaps_runtime_identity_and_filters_qt();
+        std::cout << "[PASS] simulator runtime identity/filtering\n";
+        profile_builder_seeds_iec61850_semantic_initial_values();
+        std::cout << "[PASS] simulator IEC 61850 semantic initial values\n";
+        profile_builder_does_not_suffix_match_timestamp_or_quality();
+        std::cout << "[PASS] simulator exact q/t attribute classification\n";
+        engine_supports_case_insensitive_manual_state_and_deterministic_steps();
+        std::cout << "[PASS] simulator deterministic engine\n";
+        std::cout << "Passed 5/5 simulator runtime tests.\n";
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << "[FAIL] " << error.what() << '\n';
+        return 1;
+    }
+}

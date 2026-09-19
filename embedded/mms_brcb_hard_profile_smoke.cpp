@@ -77,6 +77,25 @@ constexpr std::array<std::uint8_t, 6U> kReportTime{
     return true;
 }
 
+[[nodiscard]] bool decode_visible_string(
+    const mms::MmsReadAccessResultView& item,
+    const std::string_view expected) noexcept {
+    if (!item.success) return false;
+    asn1::BerTlvView tlv;
+    if (!asn1::BerSpanReader::try_read_exact(item.encoded_data, tlv) ||
+        tlv.tag_class != asn1::BerClass::context_specific ||
+        tlv.tag_number != 10 || tlv.constructed || tlv.value.size() != expected.size()) {
+        return false;
+    }
+    for (std::size_t index = 0U; index < expected.size(); ++index) {
+        if (tlv.value[index] != static_cast<std::uint8_t>(
+                static_cast<unsigned char>(expected[index]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 [[nodiscard]] bool expected_entry(
     const std::array<std::uint8_t, mms::MmsInformationReportSpanCodec::entry_id_bytes>& entry,
     const std::uint64_t value) noexcept {
@@ -87,6 +106,15 @@ constexpr std::array<std::uint8_t, 6U> kReportTime{
         }
     }
     return true;
+}
+
+[[nodiscard]] bool front_report(
+    mms::MmsStaticBrcbRuntime& runtime,
+    mms::MmsStaticBrcbEntryView& entry,
+    mms::MmsInformationReportView& report) noexcept {
+    return runtime.front(entry) &&
+        mms::MmsInformationReportSpanCodec::try_decode_information_report(
+            entry.mms_pdu, report);
 }
 
 } // namespace
@@ -147,6 +175,7 @@ int main() {
     }
     mms::MmsStaticBrcbCapturePlan plan;
     if (runtime.next_due(119U, plan) || !runtime.next_due(120U, plan) ||
+        plan.reason != mms::MmsStaticBrcbCaptureReason::event ||
         plan.entry_number != 1U || plan.sequence_number != 1U || plan.buffer_overflow) {
         return 4;
     }
@@ -179,10 +208,12 @@ int main() {
     if (!report.try_item(5U, item) || !decode_boolean(item, boolean_value) || boolean_value ||
         !report.try_item(6U, item) || !decode_octet_string(item, capture.entry_id) ||
         !report.try_item(8U, item) || !decode_bit_string(item, 5U, 0xA0U) ||
+        !report.try_item(9U, item) || !decode_visible_string(item, "LD0/X1") ||
+        !report.try_item(10U, item) || !decode_visible_string(item, "LD0/X3") ||
         !report.try_item(11U, item) || !decode_boolean(item, boolean_value) || !boolean_value ||
         !report.try_item(12U, item) || !decode_boolean(item, boolean_value) || !boolean_value ||
-        !report.try_item(13U, item) || !decode_bit_string(item, 2U, 0x80U) ||
-        !report.try_item(14U, item) || !decode_bit_string(item, 2U, 0x40U)) {
+        !report.try_item(13U, item) || !decode_bit_string(item, 2U, 0x40U) ||
+        !report.try_item(14U, item) || !decode_bit_string(item, 2U, 0x20U)) {
         return 8;
     }
 
@@ -232,7 +263,6 @@ int main() {
         return 15;
     }
 
-    // Entry 2 was the oldest undelivered report and was lost. Entry 3 is now front.
     if (!runtime.front(entry) || entry.entry_id.size() != 8U || entry.entry_id[7] != 3U ||
         runtime.commit_delivery(entry.entry_id) != mms::MmsStaticBrcbStatus::ok ||
         !runtime.front(entry) || entry.entry_id[7] != 4U || !entry.buffer_overflow ||
@@ -250,7 +280,6 @@ int main() {
         return 17;
     }
 
-    // Delivered entries remain replayable until buffer eviction or PurgeBuf.
     if (runtime.replay_from(fourth_id) != mms::MmsStaticBrcbStatus::ok ||
         runtime.queue_size() != 1U || !runtime.front(entry) || entry.entry_id[7U] != 4U ||
         runtime.commit_delivery(fourth_id) != mms::MmsStaticBrcbStatus::ok ||
@@ -269,7 +298,6 @@ int main() {
         return 19;
     }
 
-    // Repeated capture/delivery proves bounded retained-history behavior and EntryID progression.
     for (std::uint32_t iteration = 0U; iteration < 10'000U; ++iteration) {
         const auto now = static_cast<std::uint64_t>(1'000U + (iteration * 25U));
         if (runtime.notify(0U, mms::MmsStaticBrcbEventReason::data_update, now) !=
@@ -289,6 +317,90 @@ int main() {
         runtime.notify(0U, mms::MmsStaticBrcbEventReason::data_change, 999'999U) !=
             mms::MmsStaticBrcbStatus::temporarily_unavailable) {
         return 22;
+    }
+
+    // Periodic integrity and GI are independent full-DataSet producers feeding
+    // the same retained queue. A GI must not clear an already pending event.
+    const mms::MmsStaticBrcbDefinition scheduled_definition{
+        "LD0",
+        "LLN0$BR$Scheduled",
+        "LD0/LLN0$BR$Scheduled",
+        "LD0",
+        "LLN0$Events",
+        12U,
+        {0x7FU, 0x80U},
+        20U,
+        0x7CU,
+        100U};
+    std::array<std::array<std::uint8_t, 1024U>, 6U> scheduled_storage{};
+    std::array<mms::MmsStaticBrcbSlot, 6U> scheduled_slots{
+        mms::MmsStaticBrcbSlot{scheduled_storage[0]},
+        mms::MmsStaticBrcbSlot{scheduled_storage[1]},
+        mms::MmsStaticBrcbSlot{scheduled_storage[2]},
+        mms::MmsStaticBrcbSlot{scheduled_storage[3]},
+        mms::MmsStaticBrcbSlot{scheduled_storage[4]},
+        mms::MmsStaticBrcbSlot{scheduled_storage[5]}};
+    mms::MmsStaticBrcbPendingState scheduled_pending{};
+    mms::MmsStaticBrcbRuntime scheduled{
+        scheduled_definition, scheduled_pending, scheduled_slots,
+        object_table, data_set_table};
+    if (!scheduled.initialize() ||
+        scheduled.set_enabled(true) != mms::MmsStaticBrcbStatus::ok ||
+        scheduled.next_due(1'000U, plan) ||
+        scheduled.next_due(1'099U, plan) ||
+        !scheduled.next_due(1'100U, plan) ||
+        plan.reason != mms::MmsStaticBrcbCaptureReason::integrity) {
+        return 23;
+    }
+    capture = scheduled.capture(plan, kReportTime, staging, workspace);
+    if (!capture.success() || capture.included_member_count != 3U ||
+        !front_report(scheduled, entry, report) || report.item_count != 18U ||
+        !report.try_item(8U, item) || !decode_bit_string(item, 5U, 0xE0U) ||
+        !report.try_item(15U, item) || !decode_bit_string(item, 2U, 0x08U) ||
+        !report.try_item(16U, item) || !decode_bit_string(item, 2U, 0x08U) ||
+        !report.try_item(17U, item) || !decode_bit_string(item, 2U, 0x08U) ||
+        scheduled.commit_delivery(entry.entry_id) != mms::MmsStaticBrcbStatus::ok) {
+        return 24;
+    }
+
+    if (scheduled.notify(0U, mms::MmsStaticBrcbEventReason::data_change, 1'150U) !=
+            mms::MmsStaticBrcbStatus::ok ||
+        scheduled.request_general_interrogation() != mms::MmsStaticBrcbStatus::ok ||
+        !scheduled.next_due(1'170U, plan) ||
+        plan.reason != mms::MmsStaticBrcbCaptureReason::general_interrogation) {
+        return 25;
+    }
+    capture = scheduled.capture(plan, kReportTime, staging, workspace);
+    if (!capture.success() || capture.included_member_count != 3U ||
+        !front_report(scheduled, entry, report) || report.item_count != 18U ||
+        !report.try_item(15U, item) || !decode_bit_string(item, 2U, 0x04U) ||
+        !report.try_item(16U, item) || !decode_bit_string(item, 2U, 0x04U) ||
+        !report.try_item(17U, item) || !decode_bit_string(item, 2U, 0x04U) ||
+        scheduled.commit_delivery(entry.entry_id) != mms::MmsStaticBrcbStatus::ok) {
+        return 26;
+    }
+
+    if (!scheduled.next_due(1'170U, plan) ||
+        plan.reason != mms::MmsStaticBrcbCaptureReason::event) {
+        return 27;
+    }
+    capture = scheduled.capture(plan, kReportTime, staging, workspace);
+    if (!capture.success() || capture.included_member_count != 1U ||
+        !front_report(scheduled, entry, report) || report.item_count != 12U ||
+        !report.try_item(11U, item) || !decode_bit_string(item, 2U, 0x40U) ||
+        scheduled.commit_delivery(entry.entry_id) != mms::MmsStaticBrcbStatus::ok) {
+        return 28;
+    }
+
+    if (!scheduled.next_due(1'200U, plan) ||
+        plan.reason != mms::MmsStaticBrcbCaptureReason::integrity) {
+        return 29;
+    }
+    capture = scheduled.capture(plan, kReportTime, staging, workspace);
+    if (!capture.success() || capture.included_member_count != 3U ||
+        !front_report(scheduled, entry, report) ||
+        !report.try_item(15U, item) || !decode_bit_string(item, 2U, 0x08U)) {
+        return 30;
     }
 
     return 0;

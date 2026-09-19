@@ -516,13 +516,14 @@ std::vector<std::uint8_t> MmsFileServiceCodec::encode_file_directory_request_pdu
     BerWriter body;
     const auto directory = normalize_remote_path(request.directory_name, true);
     const auto continuation = normalize_remote_path(request.continue_after, true);
-    if (!directory.empty()) {
-        const auto name = graphic_string(directory);
-        body.write_tlv(BerClass::context_specific, true, 0, name);
-    }
+    // Captured IEDScout root FileDirectory request keeps fileSpecification
+    // present and encodes root as one empty GraphicString: A0 02 19 00.
+    // Do not omit [0] for root; several engineering clients use this wire shape.
+    const auto name = graphic_string(directory);
+    body.write_tlv(BerClass::context_specific, true, 0, name);
     if (!continuation.empty()) {
-        const auto name = graphic_string(continuation);
-        body.write_tlv(BerClass::context_specific, true, 1, name);
+        const auto continuation_name = graphic_string(continuation);
+        body.write_tlv(BerClass::context_specific, true, 1, continuation_name);
     }
     return MmsPduCodec::encode_confirmed_request(
         {request.invoke_id, file_directory_service_tag, true, body.to_vector()});
@@ -743,6 +744,47 @@ MmsFileCloseResponse MmsFileServiceCodec::decode_file_close_response(
     return {service.invoke_id};
 }
 
+std::vector<std::uint8_t> MmsFileServiceCodec::encode_file_delete_request_pdu(
+    const MmsFileDeleteRequest& request) {
+    validate_invoke_id(request.invoke_id);
+    const auto normalized = normalize_remote_path(request.remote_path);
+    const auto wire_path = request.rooted_backslash
+        ? rooted_backslash_path(normalized)
+        : normalized;
+    // Captured IEDScout FileDelete [76] carries the GraphicString directly
+    // inside the constructed service value: BF 4C <len> 19 <len> "\path".
+    return MmsPduCodec::encode_confirmed_request(
+        {request.invoke_id, file_delete_service_tag, true, graphic_string(wire_path)});
+}
+
+std::vector<std::uint8_t> MmsFileServiceCodec::encode_file_delete_request_p_data(
+    const MmsFileDeleteRequest& request,
+    const std::uint32_t presentation_context_id) {
+    return MmsPduCodec::wrap_p_data(
+        encode_file_delete_request_pdu(request), presentation_context_id);
+}
+
+MmsFileDeleteResponse MmsFileServiceCodec::decode_file_delete_response(
+    const std::span<const std::uint8_t> payload,
+    const std::uint32_t expected_invoke_id) {
+    const auto service = decode_service_response(
+        payload, expected_invoke_id, file_delete_service_tag, "FileDelete");
+    if (!service.service_value.empty()) {
+        throw_file_error({
+            "FileDelete",
+            MmsFileFailureKind::malformed_response,
+            false,
+            "FileDelete successful response must be empty.",
+            service.invoke_id,
+            std::nullopt,
+            std::nullopt,
+            std::nullopt,
+            {},
+            hex_preview(payload)});
+    }
+    return {service.invoke_id};
+}
+
 std::uint32_t MmsAssociationFileServiceChannel::next_invoke_id() {
     return association_.next_invoke_id();
 }
@@ -902,6 +944,83 @@ MmsFileDirectoryResult MmsFileTransferRuntime::list_directory(
                 options.maximum_diagnostics, options.maximum_diagnostic_bytes);
             break;
         }
+    }
+    return result;
+}
+
+MmsFileDeleteResult MmsFileTransferRuntime::remove(
+    const std::string& remote_path,
+    const bool rooted_backslash,
+    const std::stop_token stop_token) {
+    MmsFileDeleteResult result;
+    try {
+        result.remote_path = MmsFileServiceCodec::normalize_remote_path(remote_path);
+    } catch (const std::exception& exception) {
+        result.failure_kind = MmsFileFailureKind::invalid_argument;
+        result.message = exception.what();
+        return result;
+    }
+    if (stop_token.stop_requested()) {
+        result.failure_kind = MmsFileFailureKind::cancelled;
+        result.message = "FileDelete cancelled before request dispatch.";
+        return result;
+    }
+
+    const auto invoke_id = channel_.next_invoke_id();
+    std::vector<std::uint8_t> encoded;
+    try {
+        encoded = MmsFileServiceCodec::encode_file_delete_request_p_data(
+            {invoke_id, result.remote_path, rooted_backslash},
+            channel_.presentation_context_id());
+        const auto response_payload = channel_.exchange_confirmed(
+            encoded, invoke_id, stop_token);
+        static_cast<void>(MmsFileServiceCodec::decode_file_delete_response(
+            response_payload, invoke_id));
+        append_diagnostic(result.diagnostics, {
+            "FileDelete",
+            MmsFileFailureKind::none,
+            true,
+            "FileDelete completed for one physical remote path.",
+            invoke_id,
+            std::nullopt,
+            std::nullopt,
+            std::nullopt,
+            hex_preview(encoded),
+            hex_preview(response_payload)},
+            8U, codec_hex_preview_bytes);
+        result.success = true;
+        result.message = "FileDelete completed.";
+        return result;
+    } catch (const MmsFileServiceError& exception) {
+        auto diagnostic = exception.diagnostic();
+        diagnostic.request_hex = hex_preview(encoded);
+        append_diagnostic(result.diagnostics, std::move(diagnostic),
+            8U, codec_hex_preview_bytes);
+        result.failure_kind = exception.diagnostic().failure_kind;
+        result.message = exception.what();
+    } catch (const MmsTransportCancelledError& exception) {
+        auto diagnostic = exception_diagnostic(
+            "FileDelete", invoke_id, hex_preview(encoded), exception,
+            MmsFileFailureKind::cancelled);
+        result.failure_kind = diagnostic.failure_kind;
+        result.message = diagnostic.message;
+        append_diagnostic(result.diagnostics, std::move(diagnostic),
+            8U, codec_hex_preview_bytes);
+    } catch (const MmsTransportTimeoutError& exception) {
+        auto diagnostic = exception_diagnostic(
+            "FileDelete", invoke_id, hex_preview(encoded), exception,
+            MmsFileFailureKind::timed_out);
+        result.failure_kind = diagnostic.failure_kind;
+        result.message = diagnostic.message;
+        append_diagnostic(result.diagnostics, std::move(diagnostic),
+            8U, codec_hex_preview_bytes);
+    } catch (const std::exception& exception) {
+        auto diagnostic = exception_diagnostic(
+            "FileDelete", invoke_id, hex_preview(encoded), exception);
+        result.failure_kind = diagnostic.failure_kind;
+        result.message = diagnostic.message;
+        append_diagnostic(result.diagnostics, std::move(diagnostic),
+            8U, codec_hex_preview_bytes);
     }
     return result;
 }

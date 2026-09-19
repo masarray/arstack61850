@@ -35,6 +35,12 @@ jobs:
         run: cmake --build build --parallel
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Build SCL-assisted connect wire profile
+        run: |
+          cmake -S tests/scl_assisted_profile -B build-scl -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-scl --target scl_assisted_connect_profile --parallel
+      - name: Run SCL-assisted connect wire profile
+        run: ./build-scl/scl_assisted_connect_profile
       - name: Cross-language model parity tool self-test
         run: python3 tools/compare_live_model_json.py --self-test
       - name: Read-only evidence runner syntax and CLI smoke
@@ -57,6 +63,12 @@ jobs:
         run: cmake --build build --config Release --parallel
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Build SCL-assisted connect wire profile
+        run: |
+          cmake -S tests/scl_assisted_profile -B build-scl -A x64
+          cmake --build build-scl --config Release --target scl_assisted_connect_profile --parallel
+      - name: Run SCL-assisted connect wire profile
+        run: .\build-scl\Release\scl_assisted_connect_profile.exe
       - name: Evidence tooling self-tests
         run: |
           python tools/compare_live_model_json.py --self-test
