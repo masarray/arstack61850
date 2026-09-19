@@ -23,7 +23,7 @@ function(parity_strict_warnings target)
     endif()
 endfunction()
 
-add_library(ariec61850_iedscout_parity_server_core STATIC
+add_library(ariec61850_interop_parity_server_core STATIC
     "${ARSTACK_ROOT}/src/asn1/ber_span_reader.cpp"
     "${ARSTACK_ROOT}/src/osi/tpkt_span.cpp"
     "${ARSTACK_ROOT}/src/osi/cotp_span.cpp"
@@ -43,16 +43,16 @@ add_library(ariec61850_iedscout_parity_server_core STATIC
     "${ARSTACK_ROOT}/src/mms/static_dispatcher.cpp"
     "${ARSTACK_ROOT}/src/mms/connection_runtime_iedsim.cpp"
     "${ARSTACK_ROOT}/src/mms/static_server_session.cpp")
-target_include_directories(ariec61850_iedscout_parity_server_core PUBLIC
+target_include_directories(ariec61850_interop_parity_server_core PUBLIC
     "${ARSTACK_ROOT}/include")
-target_compile_features(ariec61850_iedscout_parity_server_core PUBLIC cxx_std_20)
-parity_strict_warnings(ariec61850_iedscout_parity_server_core)
+target_compile_features(ariec61850_interop_parity_server_core PUBLIC cxx_std_20)
+parity_strict_warnings(ariec61850_interop_parity_server_core)
 
 add_executable(ariec61850_static_ied_server_iedsim
     "${ARSTACK_ROOT}/tools/static_ied_server.cpp"
     "${ARSTACK_ROOT}/tools/static_ied_server_sigpipe.cpp")
 target_link_libraries(ariec61850_static_ied_server_iedsim PRIVATE
-    ariec61850_iedscout_parity_server_core
+    ariec61850_interop_parity_server_core
     ARIEC61850::core)
 if(WIN32)
     target_link_libraries(ariec61850_static_ied_server_iedsim PRIVATE ws2_32)
@@ -60,38 +60,38 @@ endif()
 target_compile_features(ariec61850_static_ied_server_iedsim PRIVATE cxx_std_20)
 parity_strict_warnings(ariec61850_static_ied_server_iedsim)
 
-add_executable(ariec61850_iedscout_parity_live_discover
+add_executable(ariec61850_interop_parity_live_discover
     "${ARSTACK_ROOT}/tools/live_discover.cpp")
-target_link_libraries(ariec61850_iedscout_parity_live_discover PRIVATE
+target_link_libraries(ariec61850_interop_parity_live_discover PRIVATE
     ARIEC61850::core)
-target_compile_features(ariec61850_iedscout_parity_live_discover PRIVATE cxx_std_20)
-parity_strict_warnings(ariec61850_iedscout_parity_live_discover)
+target_compile_features(ariec61850_interop_parity_live_discover PRIVATE cxx_std_20)
+parity_strict_warnings(ariec61850_interop_parity_live_discover)
 
-add_executable(ariec61850_iedscout_parity_read_probe
+add_executable(ariec61850_interop_parity_read_probe
     "${ARSTACK_ROOT}/tools/mms_read_probe.cpp")
-target_link_libraries(ariec61850_iedscout_parity_read_probe PRIVATE
+target_link_libraries(ariec61850_interop_parity_read_probe PRIVATE
     ARIEC61850::core)
-target_compile_features(ariec61850_iedscout_parity_read_probe PRIVATE cxx_std_20)
-parity_strict_warnings(ariec61850_iedscout_parity_read_probe)
+target_compile_features(ariec61850_interop_parity_read_probe PRIVATE cxx_std_20)
+parity_strict_warnings(ariec61850_interop_parity_read_probe)
 
 enable_testing()
-add_test(NAME iedscout_parity_server_help
+add_test(NAME interop_parity_server_help
     COMMAND ariec61850_static_ied_server_iedsim --help)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(
-    NAME iedscout_parity_server_loopback
+    NAME interop_parity_server_loopback
     COMMAND
         ${Python3_EXECUTABLE}
         "${CMAKE_CURRENT_LIST_DIR}/test_loopback.py"
         --server $<TARGET_FILE:ariec61850_static_ied_server_iedsim>
-        --client $<TARGET_FILE:ariec61850_iedscout_parity_live_discover>)
+        --client $<TARGET_FILE:ariec61850_interop_parity_live_discover>)
 
 add_test(
-    NAME iedscout_parity_runtime_model
+    NAME interop_parity_runtime_model
     COMMAND
         ${Python3_EXECUTABLE}
         "${CMAKE_CURRENT_LIST_DIR}/test_runtime_model.py"
         --server $<TARGET_FILE:ariec61850_static_ied_server_iedsim>
-        --discovery $<TARGET_FILE:ariec61850_iedscout_parity_live_discover>
-        --read-probe $<TARGET_FILE:ariec61850_iedscout_parity_read_probe>)
+        --discovery $<TARGET_FILE:ariec61850_interop_parity_live_discover>
+        --read-probe $<TARGET_FILE:ariec61850_interop_parity_read_probe>)
