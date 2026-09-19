@@ -127,6 +127,7 @@ bool ProductHardeningController::loadState() {
 
     QJsonParseError parseError;
     const auto document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    file.close();
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
         setStateFault(QStringLiteral("Persisted state ignored: malformed JSON."));
         emit stateChanged();
