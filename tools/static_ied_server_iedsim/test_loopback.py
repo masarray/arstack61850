@@ -98,7 +98,7 @@ def main() -> int:
     ):
         raise RuntimeError(f"server lifecycle evidence missing:\n{server_stdout}")
 
-    print("IEDSCOUT_PARITY_LOOPBACK_PASS domain=ESP32S3IOLD0 dataset=EventData")
+    print("INTEROP_PARITY_LOOPBACK_PASS domain=ESP32S3IOLD0 dataset=EventData")
     return 0
 
 
