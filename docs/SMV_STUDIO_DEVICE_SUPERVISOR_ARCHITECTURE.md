@@ -352,4 +352,4 @@ Do not attempt all UI and control changes in one patch. Implement in this order:
 
 ## Product behavior reference
 
-OMICRON DANEO Control is used here only as a product-behavior reference: integrated device/software control, coherent status, live observation, and actionable device diagnostics. ARStack must not imitate proprietary protocols or vendor-specific traces. The implementation remains based on ARStack's explicit IEC 61850 and device-control contracts.
+a commercial device-control application is used here only as a product-behavior reference: integrated device/software control, coherent status, live observation, and actionable device diagnostics. ARStack must not imitate proprietary protocols or vendor-specific traces. The implementation remains based on ARStack's explicit IEC 61850 and device-control contracts.
