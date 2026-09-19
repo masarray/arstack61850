@@ -75,10 +75,10 @@ MmsInformationReport realistic_report(
         add(MmsDataValue::boolean(more_segments));
     }
     add(MmsDataValue::bit_string(6U, inclusion));
-    add(MmsDataValue::boolean(true));
-    add(MmsDataValue::boolean(false));
     add(MmsDataValue::visible_string("LD0/GGIO1.Ind1.stVal"));
     add(MmsDataValue::visible_string("LD0/GGIO1.Ind2.stVal"));
+    add(MmsDataValue::boolean(true));
+    add(MmsDataValue::boolean(false));
     add(MmsDataValue::bit_string(2U, reason_a));
     add(MmsDataValue::bit_string(2U, reason_b));
     return report;
@@ -207,7 +207,7 @@ void csharp_exact_report_shape_maps_byte_semantics() {
 
 void report_failure_result_is_preserved() {
     auto report = realistic_report();
-    report.items[9U] = {9U, std::nullopt, 3U};
+    report.items[11U] = {11U, std::nullopt, 3U};
     const auto directory = MmsDataSetDirectoryCodec::decode_response(
         MmsDataSetDirectoryCodec::encode_response_pdu(directory_fixture()), 9U);
     const auto frame = MmsReportFrameMapper::map(report, directory.members);

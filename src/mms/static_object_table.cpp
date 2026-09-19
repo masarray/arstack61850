@@ -58,7 +58,7 @@ bool MmsStaticObjectTable::valid() const noexcept {
         const auto& object = objects_[index];
         if (!visible_ascii(object.domain) || !visible_ascii(object.item) ||
             !valid_type_specification(object.type_specification) ||
-            object.read == nullptr) {
+            (object.read == nullptr && object.contextual_read == nullptr)) {
             return false;
         }
         for (std::size_t other = index + 1U; other < objects_.size(); ++other) {

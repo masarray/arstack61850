@@ -1,0 +1,45 @@
+name: IED Simulator P4 Stateful Runtime
+
+on:
+  push:
+    branches: [agent/p4-thirdparty-interop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stateful-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout ARStack61850
+        uses: actions/checkout@v4
+
+      - name: Configure parity runtime core
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S tools/static_ied_server_iedsim -B build-p4-stateful -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-p4-stateful --target ariec61850_iedscout_parity_server_core --parallel 2
+          CORE=$(find build-p4-stateful -type f -name 'libariec61850_iedscout_parity_server_core.a' | head -1)
+          test -n "$CORE"
+          echo "SERVER_CORE=$CORE" >> "$GITHUB_ENV"
+
+      - name: Run exact libiec61850 stateful association-discovery vector
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++20 -Wall -Wextra -Wpedantic -Werror -Iinclude \
+            tests/interop/p4_libiec61850_stateful_runtime.cpp "$SERVER_CORE" -lpthread \
+            -o p4-stateful-runtime-probe
+          ./p4-stateful-runtime-probe
+
+      - name: Run coalesced libiec61850 vector through server session
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++20 -Wall -Wextra -Wpedantic -Werror -Iinclude \
+            tests/interop/p4_libiec61850_server_session.cpp "$SERVER_CORE" -lpthread \
+            -o p4-server-session-probe
+          ./p4-server-session-probe
