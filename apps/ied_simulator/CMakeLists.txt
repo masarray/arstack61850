@@ -87,7 +87,7 @@ qt_add_qml_module(arstack_ied_simulator
         qml/RuntimeWorkspace.qml
         qml/IedExplorer.qml
         qml/FleetWorkspace.qml
-        qml/IedScoutWorkspace.qml
+        qml/InteropWorkspace.qml
         qml/MmsClientWorkspace.qml
         qml/ReportsWorkspace.qml
         qml/FilesWorkspace.qml
