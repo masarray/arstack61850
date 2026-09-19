@@ -4,7 +4,7 @@
 
 Phase 4D-C5 was exercised against `192.168.1.10:102`. The endpoint was verified locally before any Write:
 
-- listener process: OMICRON IEDScout 4 (`IEDScout.exe`);
+- listener process: an external IEC 61850 engineering client;
 - network path: local `KM_Test` address with traffic captured through Npcap loopback;
 - control object: `BCU7SLCTRL/CSWI1.Pos`;
 - association profile: `BalancedApTitle`;
@@ -25,11 +25,11 @@ This is simulator interoperability evidence, not physical-plant or IEC 61850 con
 
 The status values are MMS two-bit bit strings represented by the harness as raw bytes: `0x0680` means six unused bits with payload `10`, while `0x0640` carries payload `01`.
 
-The live `ctlModel` was rediscovered before every action. IEDScout exposed SBO enhanced (`4`) for the selection cases and Direct enhanced (`3`) for the later operate cases. A mismatched `select-operate` request was rejected locally before any Write when the rediscovered model was Direct enhanced.
+The live `ctlModel` was rediscovered before every action. external IEC 61850 client exposed SBO enhanced (`4`) for the selection cases and Direct enhanced (`3`) for the later operate cases. A mismatched `select-operate` request was rejected locally before any Write when the rediscovered model was Direct enhanced.
 
 ## Live-discovered interoperability repair
 
-The negative path exposed two IEDScout `LastApplError` variants:
+The negative path exposed two external IEC 61850 client `LastApplError` variants:
 
 1. VMD-specific `LastApplError` with omitted `ctlObj`;
 2. an embedded exact CO object root such as `BCU7SLCTRL/CSWI1$CO$Pos`, without an `Oper` leaf.
@@ -62,5 +62,5 @@ These bullets describe the scope of this locally retained, hash-identified captu
 
 - GCC/Clang profiles must pass on the integration PR; only MSVC was available locally.
 - Direct normal and SBO normal were not exposed by this tested control object during the retained cases.
-- Association-loss and multi-client contention were not forced against the running IEDScout process.
+- Association-loss and multi-client contention were not forced against the running external IEC 61850 client process.
 - Physical IED behavior remains unclaimed.
