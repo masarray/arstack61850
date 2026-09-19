@@ -62,7 +62,7 @@ target_compile_features(arstack_ied_simulator PRIVATE cxx_std_20)
 
 # The regular library intentionally keeps a strict portable connection runtime.
 # The desktop simulator needs the separate compatibility runtime validated
-# against IEDScout-style AARQ, selector, browse, Identify and FileDirectory
+# against external-client AARQ, selector, browse, Identify and FileDirectory
 # traffic.  Keep the two runtimes isolated so the embedded core is unchanged.
 add_library(ariec61850_ied_simulator_server_core STATIC
     ${CMAKE_CURRENT_LIST_DIR}/../../src/asn1/ber_span_reader.cpp
