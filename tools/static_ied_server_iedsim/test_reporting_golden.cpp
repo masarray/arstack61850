@@ -329,6 +329,7 @@ int main() {
         mms::MmsReportFrameMapper::map(brcb_event_report, {});
     if (brcb_event_frame.header.sequence_number != 2U ||
         !entry_id_is(brcb_event_frame.header.entry_id, 2U) ||
+        !exact_optflds(brcb_event_frame.header, kExpectedBrcbOptFlds) ||
         brcb_event_frame.included_data_set_indexes !=
             std::vector<std::size_t>{changed_member} ||
         brcb_event_frame.values.size() != 1U ||
@@ -337,6 +338,48 @@ int main() {
         brcb_event_frame.raw_access_result_count != 10U) {
         return 17;
     }
+    if (brcb.commit_delivery(brcb_entry.entry_id) !=
+        mms::MmsStaticBrcbStatus::ok) {
+        return 18;
+    }
+
+    // The second accepted command toggles the same process member back and
+    // produces the next buffered report. The real capture advanced both
+    // sequence number and EntryID to 3 without resetting the RCB stream.
+    values[changed_member] = 0U;
+    if (brcb.notify(
+            changed_member,
+            mms::MmsStaticBrcbEventReason::data_change,
+            4'000U) != mms::MmsStaticBrcbStatus::ok ||
+        brcb.next_due(4'099U, brcb_plan) ||
+        !brcb.next_due(4'100U, brcb_plan) ||
+        brcb_plan.sequence_number != 3U ||
+        brcb_plan.entry_number != 3U ||
+        brcb_plan.reason != mms::MmsStaticBrcbCaptureReason::event) {
+        return 19;
+    }
+    const auto brcb_event_two = brcb.capture(
+        brcb_plan, kReportTime, brcb_staging, brcb_workspace);
+    if (!brcb_event_two.success() ||
+        brcb_event_two.included_member_count != 1U ||
+        !brcb.front(brcb_entry)) {
+        return 20;
+    }
+    const auto brcb_event_two_report =
+        mms::MmsInformationReportCodec::decode(brcb_entry.mms_pdu);
+    const auto brcb_event_two_frame =
+        mms::MmsReportFrameMapper::map(brcb_event_two_report, {});
+    if (brcb_event_two_frame.header.sequence_number != 3U ||
+        !entry_id_is(brcb_event_two_frame.header.entry_id, 3U) ||
+        !exact_optflds(brcb_event_two_frame.header, kExpectedBrcbOptFlds) ||
+        brcb_event_two_frame.included_data_set_indexes !=
+            std::vector<std::size_t>{changed_member} ||
+        brcb_event_two_frame.values.size() != 1U ||
+        !brcb_event_two_frame.values[0].reason_for_inclusion.has(
+            "data-change") ||
+        brcb_event_two_frame.raw_access_result_count != 10U) {
+        return 21;
+    }
 
     std::cout
         << "IEDSCOUT_REPORTING_GOLDEN_PASS "
@@ -344,6 +387,6 @@ int main() {
         << "brcbMembers=36 brcbOptFlds=7980 "
         << "brcbGiSqNum=1 brcbGiEntryID=1 "
         << "eventIndex=33 eventReason=data-change "
-        << "eventSqNum=2 eventEntryID=2\n";
+        << "eventSqNum=2,3 eventEntryID=2,3\n";
     return 0;
 }
