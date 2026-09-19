@@ -190,9 +190,12 @@ bool ProductHardeningController::loadState() {
         ? QStringLiteral("Legacy product state migrated to the four-workspace shell.")
         : QStringLiteral("Persisted product state restored safely.");
 
-    if (schema == legacyStateSchemaVersion && !persistState()) {
-        emit stateChanged();
-        return false;
+    if (schema == legacyStateSchemaVersion) {
+        if (!persistState()) {
+            emit stateChanged();
+            return false;
+        }
+        settingsStatus_ = QStringLiteral("Legacy product state migrated to the four-workspace shell.");
     }
 
     emit stateChanged();
