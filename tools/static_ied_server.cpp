@@ -1217,7 +1217,7 @@ int main(int argc, char** argv) {
                   << " domains=" << domain_names.size()
                   << " datasets=" << data_set_span.size()
                   << " truncated=" << truncated
-                  << " profile=iedscout" << '\n';
+                  << " profile=interop" << '\n';
         std::cout.flush();
 
         std::size_t connection_count = 0U;
