@@ -18,7 +18,7 @@ Status terms are intentionally conservative:
 | MMS client | GetNameList domains/variables | Live-proven | Large live inventories and pagination are exercised. |
 | MMS client | GetVariableAccessAttributes | Live-proven | Live model and C5 control discovery consume exact MMS TypeSpecification evidence. |
 | MMS client | Read | Live-proven | Discovery, reporting, control descriptor, timeout, and status reads are exercised live. |
-| MMS client | Write codec/runtime | Live-proven / guarded simulator | C5 sent explicitly armed `SBOw`, `Cancel`, and `Oper` Writes to IEDScout with JSON/PCAP accounting; physical IED control remains pending. |
+| MMS client | Write codec/runtime | Live-proven / guarded simulator | C5 sent explicitly armed `SBOw`, `Cancel`, and `Oper` Writes to external IEC 61850 client with JSON/PCAP accounting; physical IED control remains pending. |
 | MMS client | GetNamedVariableListAttributes | Live-proven | Dynamic DataSet verification and report binding use the exact ordered directory. |
 | MMS client | GO/SV/SG/LG exact-attribute deep Read | Live-proven | OCR7SR12 SGCB deep read accepted 5/5 attributes without mutation. |
 | Live model | LD/LN/DO/DA projection | Live-proven | OCR7SR12 structural/type comparison with the C# oracle has zero blocking findings. |
@@ -36,16 +36,16 @@ Status terms are intentionally conservative:
 | Reporting | BRCB retained replay / EntryID / PurgeBuf | Offline-tested | Bounded history, replay/resume/rewind, PurgeBuf, overflow, and replay-gap behavior are implemented. |
 | Reporting | BRCB Owner / ResvTms / association lifecycle | Offline-tested | Multi-client ownership, reconnect/expiry, and association-loss semantics are hard-profile tested. |
 | Reporting | BRCB recovery image v2 | Offline-tested / physical NVM pending | Recovery preserves retained window/cursor/gap with v1 restore; flash endurance and power-loss hardware evidence are separate. |
-| Control | `ctlModel` discovery | Live-proven / simulator | C5 rediscovered live `ctlModel` and exact command types before each action on IEDScout. |
+| Control | `ctlModel` discovery | Live-proven / simulator | C5 rediscovered live `ctlModel` and exact command types before each action on external IEC 61850 client. |
 | Control | Direct normal | Live-proven / simulator | The retained C5 acceptance record covers OFF and ON with exactly one `Oper` Write per deliberate action. |
 | Control | SBO normal | Live-proven / simulator | The retained C5 acceptance record covers Select Read followed by exactly one `Oper`, plus explicit Select/Cancel with no following `Oper`. |
-| Control | Direct enhanced | Live-proven / simulator | IEDScout OFF and ON-restore each sent one `Oper`, received positive CommandTermination, and changed/restored status without retry. |
+| Control | Direct enhanced | Live-proven / simulator | external IEC 61850 client OFF and ON-restore each sent one `Oper`, received positive CommandTermination, and changed/restored status without retry. |
 | Control | SBO enhanced | Live-proven / simulator | Retained evidence covers `SBOw -> Oper -> CommandTermination` in both directions, plus a separate accepted `SBOw -> Cancel` case. |
 | Control | `Oper` / `SBOw` / `Cancel` live-type binding | Live-proven / simulator | Exact Boolean structures from live GVAA were sent successfully; unknown vendor fields still fail closed. |
 | Control | Control value types | Offline-tested | SPC/DPC/integer/unsigned/floating/step binding is conservative; DPC uses network bit order. |
 | Control | Ownership / immutable sequence | Offline-tested | Second-client takeover, expiry, mismatch, authorization revocation, and association-loss cleanup are covered. |
 | Control | CommandTermination | Live-proven / simulator | Positive enhanced termination is exact-control correlated; ordinary ST/MX reports cannot complete a command. |
-| Control | LastApplError / ControlError / AddCause | Live-proven / simulator | IEDScout negative path decoded DataAccessError 3, ControlError 3, and AddCause 8; generic reports require exact origin/ctlNum correlation. |
+| Control | LastApplError / ControlError / AddCause | Live-proven / simulator | external IEC 61850 client negative path decoded DataAccessError 3, ControlError 3, and AddCause 8; generic reports require exact origin/ctlNum correlation. |
 | Control | Automatic command retry | Disabled / live-proven | Every live case reconciled the exact Write count with PCAP; no automatic retry occurred. |
 | Control | Live interoperability harness | Live-proven / simulator | Read-only default, exact arm token, typed values, JSON evidence, PCAP reconciliation, and state restoration are exercised. |
 | GOOSE | PDU / Ethernet encode-decode | Offline-tested | Golden vectors, deterministic tests, and fuzz corpus; physical multi-vendor acceptance is separate. |
