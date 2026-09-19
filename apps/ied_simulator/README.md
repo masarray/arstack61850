@@ -1,5 +1,7 @@
 # ARStack IED Simulator
 
+**Stable release candidate: v0.2.0.** The current candidate has passed the retained cross-platform release matrix and a real OMICRON IEDScout interoperability retest using the SIPROTEC CID profile exercised by the parity work.
+
 `arstack_ied_simulator` is the Qt/QML desktop shell for the portable IEC 61850
 server stack. It keeps the commissioning flow and the live value workspace in
 one executable while reusing the repository SCL parser and MMS server.
@@ -28,22 +30,11 @@ Multiple associations can be served concurrently. TCP/COTP/ACSE/MMS activity
 and value synchronization are reported back to the GUI.
 
 ReportControl blocks are carried from SCL into the same simulator endpoint.
-The current regression-covered reporting slice includes URCB `RptEna` + GI
-with unsolicited `InformationReport`, and BRCB `RptEna` + DataSet-member
-change capture after `BufTm` with buffered `InformationReport` and `EntryID`.
-The BRCB adapter uses the existing bounded native BRCB runtime and only commits
-a staged retained entry after the complete frame is accepted by the socket.
-Simulator BRCB retained storage is currently association-local; cross-association
-retained replay/reconnect persistence is not claimed by this application layer
-yet even though the portable core has the lower-level ownership/replay
-primitives.
+The regression-covered reporting path includes URCB reservation/enable/GI and BRCB enable/GI/event delivery with `EntryID`, ordered DataSet membership, ReasonForInclusion, ConfRev, SqNum progression, and retained buffered delivery semantics. The accepted OMICRON IEDScout retest exercised URCB and BRCB reporting against the SIPROTEC CID profile used for parity work.
 
-This phase does not yet claim dynamic DataSet creation/deletion in the simulator,
-full RCB attribute/configuration parity, client-originated IEC 61850 control
-handling, GOOSE transmission, or host file-service transfer. The GOOSE and file
-selectors in the current shell must therefore not be interpreted as evidence
-that those server-side services are active. Those paths remain separate parity
-slices and require independent wire regressions before being marked complete.
+Client-originated IEC 61850 controls are supported for the guarded Direct/SBO normal and enhanced paths implemented by the shared control stack. The accepted IEDScout retest proved SBO Enhanced Open/Close with external `ctlNum=0`, positive CommandTermination before process feedback, and BRCB event delivery after feedback. The desktop workbench also includes the regression-covered GOOSE Monitor/Publisher, bounded MMS file download service, Setting Group ActSG workflow, and SCL export/conversion workspaces.
+
+Intentional release boundaries remain: dynamic DataSet creation/deletion is not claimed; MMS remote file upload/delete/rename is not claimed; full `EditSG -> SE edits -> CnfEdit` is not claimed; canonical SCL conversion does not claim lossless unknown vendor extensions; and the OMICRON/SIPROTEC result is vendor-specific interoperability evidence rather than universal IEC 61850 conformance certification.
 
 ## Windows build
 
