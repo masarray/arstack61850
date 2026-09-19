@@ -230,15 +230,19 @@ void release_selection(MmsStaticDirectBooleanControlBinding& binding) noexcept {
     return false;
 }
 
-[[nodiscard]] bool same_command(
+[[nodiscard]] bool same_selected_sequence(
     const MmsStaticDirectBooleanOperate& left,
     const MmsStaticDirectBooleanOperate& right,
     const bool compare_check) noexcept {
+    // IEC 61850 enhanced SBO correlation is based on the selected command
+    // identity. OMICRON IEDScout emits a fresh T for Oper (and may do so for
+    // Cancel) rather than replaying the SBOw timestamp, so T is intentionally
+    // not part of selection identity. The accepted Oper itself is still kept
+    // intact for CommandTermination correlation.
     if (left.control_value != right.control_value ||
         left.origin_category != right.origin_category ||
         left.origin_identifier_size != right.origin_identifier_size ||
         left.control_number != right.control_number ||
-        left.timestamp != right.timestamp ||
         left.test != right.test) {
         return false;
     }
@@ -256,7 +260,11 @@ void release_selection(MmsStaticDirectBooleanControlBinding& binding) noexcept {
 [[nodiscard]] bool valid_command(
     const MmsStaticDirectBooleanControlBinding& binding,
     const MmsStaticDirectBooleanOperate& command) noexcept {
-    return command.origin_category <= 8U && command.control_number != 0U &&
+    // ctlNum is an IEC 61850 wire value supplied by the remote client. Keep
+    // zero valid on the server path: OMICRON IEDScout uses ctlNum=0 in real
+    // SBOw/Oper traffic. ARStack's client-side auto-allocation policy (1..255)
+    // is separate and remains unchanged.
+    return command.origin_category <= 8U &&
         (!command.test || binding.policy.allow_test) &&
         (!command.synchro_check || binding.policy.allow_synchro_check) &&
         (!command.interlock_check || binding.policy.allow_interlock_check);
@@ -343,7 +351,7 @@ void release_selection(MmsStaticDirectBooleanControlBinding& binding) noexcept {
     }
     if (binding.model == MmsStaticControlModel::sbo_enhanced &&
         (!binding.state->selected_with_value ||
-         !same_command(binding.state->selected_command, operate, true))) {
+         !same_selected_sequence(binding.state->selected_command, operate, true))) {
         ++binding.state->rejected_operations;
         return {false, binding.policy.invalid_value_failure_code};
     }
@@ -526,7 +534,7 @@ MmsStaticWriteResult mms_static_boolean_write_cancel_contextual(
     }
     if (binding->model == MmsStaticControlModel::sbo_enhanced &&
         (!binding->state->selected_with_value ||
-         !same_command(binding->state->selected_command, command, false))) {
+         !same_selected_sequence(binding->state->selected_command, command, false))) {
         ++binding->state->rejected_operations;
         return {false, binding->policy.invalid_value_failure_code};
     }
