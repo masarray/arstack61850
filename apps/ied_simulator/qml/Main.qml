@@ -301,7 +301,7 @@ ApplicationWindow {
                 Loader {
                     id: simulatorWorkspaceLoader
                     anchors.fill: parent
-                    source: "qrc:/iedsim/IedScoutWorkspaceV2.qml"
+                    source: "qrc:/iedsim/InteropWorkspaceV2.qml"
                     onLoaded: {
                         item.theme = appTheme
                         item.backend = simulator
