@@ -69,10 +69,10 @@ jobs:
           cmake --build build-p03-brcb --target ariec61850_hard_mms_negotiated_limits_smoke ariec61850_hard_mms_brcb_connection_smoke --parallel
           ctest --test-dir build-p03-brcb -R 'ariec61850_hard_mms_(negotiated_limits|brcb_connection)_smoke' --output-on-failure
 
-      - name: Configure IEDScout production server path
+      - name: Configure external IEC 61850 client production server path
         run: cmake -S tools/static_ied_server_iedsim -B build-p03-iedsim -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build IEDScout production server path
+      - name: Build external IEC 61850 client production server path
         run: cmake --build build-p03-iedsim --parallel
 
       - name: Commit verified P0.3 source only
