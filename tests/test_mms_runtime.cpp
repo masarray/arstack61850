@@ -212,8 +212,8 @@ void queue_handshake(ScriptedTransport& transport) {
     add(mms::MmsDataValue::octet_string(entry));
     add(mms::MmsDataValue::unsigned_integer(1U));
     add(mms::MmsDataValue::bit_string(7U, inclusion));
-    add(mms::MmsDataValue::boolean(true));
     add(mms::MmsDataValue::visible_string("LD0/PTOC1.Str.stVal"));
+    add(mms::MmsDataValue::boolean(true));
     add(mms::MmsDataValue::bit_string(2U, reason));
     return report;
 }
@@ -259,6 +259,49 @@ void association_lifecycle_routes_reports_and_confirmed_results() {
     CHECK(runtime.state() == mms::MmsAssociationRuntimeState::disconnected);
     CHECK(!transport.connected());
     CHECK(transport.close_count() >= 1U);
+}
+
+
+void association_consumes_coalesced_buffered_tpkt_before_socket_wait() {
+    ScriptedTransport transport;
+    queue_handshake(transport);
+    mms::MmsAssociationRuntime runtime{transport};
+    runtime.connect({"127.0.0.1", 102U});
+
+    const auto invoke_id = runtime.next_invoke_id();
+    mms::MmsReadRequest request;
+    request.invoke_id = invoke_id;
+    request.variables.push_back(
+        mms::MmsObjectName::domain_specific("LD0", "LLN0$ST$Mod$stVal"));
+    const auto request_bytes = mms::MmsServiceCodec::encode_read_request_p_data(request);
+
+    mms::MmsReadResponse response;
+    response.invoke_id = invoke_id;
+    response.results.push_back({mms::MmsDataValue::boolean(true), std::nullopt});
+    const auto response_frame = wrap_application(
+        mms::MmsServiceCodec::encode_read_response_p_data(response));
+    const auto report_frame = wrap_application(
+        mms::MmsInformationReportCodec::encode_p_data(make_report()));
+
+    ByteVector coalesced = response_frame;
+    coalesced.insert(coalesced.end(), report_frame.begin(), report_frame.end());
+    transport.push_receive(std::move(coalesced));
+
+    const auto exchange = runtime.exchange_confirmed(request_bytes, invoke_id);
+    CHECK(exchange.envelope.kind == mms::MmsPduKind::confirmed_response);
+    CHECK(runtime.queued_information_report_count() == 0U);
+
+    // There are deliberately no further scripted socket bytes. The report is
+    // already a complete second TPKT frame buffered by the first receive().
+    // This must succeed without waiting for another transport receive.
+    mms::MmsPduEnvelope envelope;
+    CHECK(runtime.try_poll_once_for(std::chrono::milliseconds{1}, envelope));
+    CHECK(envelope.information_report);
+    CHECK(runtime.queued_information_report_count() == 1U);
+
+    ByteVector queued_report;
+    CHECK(runtime.try_pop_information_report(queued_report));
+    CHECK(mms::MmsInformationReportCodec::is_information_report(queued_report));
 }
 
 void association_retries_legacy_profile_after_balanced_rejection() {
@@ -361,18 +404,20 @@ void confirmed_exchange_timeout_closes_transport_and_can_reconnect() {
 
 void queue_probe_response(
     ScriptedTransport& transport,
-    const std::uint32_t invoke_id) {
+    const std::uint32_t invoke_id,
+    const bool enabled = false,
+    const bool reserved = false) {
     mms::MmsReadResponse response;
     response.invoke_id = invoke_id;
     response.results = {
         {mms::MmsDataValue::visible_string("RPT-A"), std::nullopt},
-        {mms::MmsDataValue::boolean(false), std::nullopt},
+        {mms::MmsDataValue::boolean(enabled), std::nullopt},
         {mms::MmsDataValue::visible_string("LD0/LLN0.DataSet"), std::nullopt},
         {mms::MmsDataValue::unsigned_integer(1U), std::nullopt},
         {mms::MmsDataValue::bit_string(0U, ByteVector{0x5AU, 0x00U}), std::nullopt},
         {mms::MmsDataValue::bit_string(0U, ByteVector{0x40U}), std::nullopt},
         {mms::MmsDataValue::boolean(false), std::nullopt},
-        {mms::MmsDataValue::boolean(false), std::nullopt},
+        {mms::MmsDataValue::boolean(reserved), std::nullopt},
     };
     transport.push_receive(wrap_application(
         mms::MmsServiceCodec::encode_read_response_p_data(response)));
@@ -452,12 +497,13 @@ void queue_static_preclaim_response(
 
 void queue_static_subscription_probe_response(
     ScriptedTransport& transport,
-    const std::uint32_t invoke_id) {
+    const std::uint32_t invoke_id,
+    const bool enabled = false) {
     mms::MmsReadResponse response;
     response.invoke_id = invoke_id;
     response.results = {
         {mms::MmsDataValue::visible_string("RPT-FALLBACK"), std::nullopt},
-        {mms::MmsDataValue::boolean(false), std::nullopt},
+        {mms::MmsDataValue::boolean(enabled), std::nullopt},
         {mms::MmsDataValue::visible_string("LD0/LLN0.DataSet"), std::nullopt},
         {mms::MmsDataValue::unsigned_integer(1U), std::nullopt},
         {mms::MmsDataValue::boolean(false), std::nullopt},
@@ -479,9 +525,10 @@ void static_session_skips_contended_preferred_and_subscribes_fallback() {
 
     queue_static_preclaim_response(transport, 1U, true);
     queue_static_preclaim_response(transport, 2U, false);
-    queue_static_subscription_probe_response(transport, 3U);
+    queue_static_subscription_probe_response(transport, 3U, false);
     queue_write_success(transport, 4U); // RptEna=true
-    queue_write_success(transport, 5U); // GI=true
+    queue_static_subscription_probe_response(transport, 5U, true); // verified enabled
+    queue_write_success(transport, 6U); // GI=true
 
     mms::MmsStaticReportSessionOptions options;
     options.selection.preferred_rcb_reference = preferred.reference;
@@ -515,14 +562,14 @@ void static_session_skips_contended_preferred_and_subscribes_fallback() {
     CHECK(session.poll_once());
     CHECK(session.snapshot().subscription->received_reports == 1U);
 
-    queue_write_success(transport, 6U); // RptEna=false
+    queue_write_success(transport, 7U); // RptEna=false
     session.stop();
     const auto stopped = session.snapshot();
     CHECK(!stopped.active);
     CHECK(stopped.subscription->state ==
           mms::MmsReportSubscriptionState::stopped);
     CHECK(!stopped.subscription->cleanup_required);
-    CHECK(transport.sent().size() == 8U); // CR, AARQ, 3 reads, 3 writes
+    CHECK(transport.sent().size() == 9U); // CR, AARQ, 4 reads, 3 writes
 }
 
 void static_session_rejects_data_set_rebinding() {
@@ -546,10 +593,12 @@ void subscription_runtime_reserves_enables_receives_and_cleans_up() {
     mms::MmsAssociationRuntime association{transport};
     association.connect({"127.0.0.1", 102U});
 
-    queue_probe_response(transport, 1U);
+    queue_probe_response(transport, 1U, false, false);
     queue_write_success(transport, 2U); // Resv=true
-    queue_write_success(transport, 3U); // RptEna=true
-    queue_write_success(transport, 4U); // GI=true
+    queue_probe_response(transport, 3U, false, true); // verified reservation
+    queue_write_success(transport, 4U); // RptEna=true
+    queue_probe_response(transport, 5U, true, true); // verified enabled
+    queue_write_success(transport, 6U); // GI=true
 
     mms::MmsReportSubscriptionRuntime subscription{
         association, make_urcb_candidate(), make_directory()};
@@ -567,8 +616,8 @@ void subscription_runtime_reserves_enables_receives_and_cleans_up() {
     CHECK(observed.decode_failures == 0U);
     CHECK(observed.streams.size() == 1U);
 
-    queue_write_success(transport, 5U); // RptEna=false
-    queue_write_success(transport, 6U); // Resv=false
+    queue_write_success(transport, 7U); // RptEna=false
+    queue_write_success(transport, 8U); // Resv=false
     subscription.stop();
     const auto stopped = subscription.snapshot();
     CHECK(stopped.state == mms::MmsReportSubscriptionState::stopped);
@@ -583,10 +632,12 @@ void subscription_marks_cleanup_required_when_association_is_lost() {
     mms::MmsAssociationRuntime association{transport};
     association.connect({"127.0.0.1", 102U});
 
-    queue_probe_response(transport, 1U);
-    queue_write_success(transport, 2U);
-    queue_write_success(transport, 3U);
-    queue_write_success(transport, 4U);
+    queue_probe_response(transport, 1U, false, false);
+    queue_write_success(transport, 2U); // Resv=true
+    queue_probe_response(transport, 3U, false, true); // verified reservation
+    queue_write_success(transport, 4U); // RptEna=true
+    queue_probe_response(transport, 5U, true, true); // verified enabled
+    queue_write_success(transport, 6U); // GI=true
 
     mms::MmsReportSubscriptionRuntime subscription{
         association, make_urcb_candidate(), make_directory()};
@@ -633,6 +684,7 @@ void subscription_does_not_take_over_an_enabled_rcb() {
 int main() {
     const std::vector<std::pair<std::string, std::function<void()>>> tests{
         {"association lifecycle and routing", association_lifecycle_routes_reports_and_confirmed_results},
+        {"coalesced TPKT buffered receive", association_consumes_coalesced_buffered_tpkt_before_socket_wait},
         {"association profile fallback", association_retries_legacy_profile_after_balanced_rejection},
         {"association cancellation and reconnect", association_rejects_cancelled_connect_and_can_reconnect},
         {"confirmed exchange timeout closes transport and reconnects", confirmed_exchange_timeout_closes_transport_and_can_reconnect},

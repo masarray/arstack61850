@@ -17,8 +17,11 @@ namespace ar::iec61850::mms {
 namespace {
 
 constexpr std::array<std::uint8_t, 2U> kBooleanType{0x83U, 0x00U};
+constexpr std::array<std::uint8_t, 3U> kUnsigned8Type{0x86U, 0x01U, 0x08U};
 constexpr std::array<std::uint8_t, 3U> kUnsigned32Type{0x86U, 0x01U, 0x20U};
-constexpr std::array<std::uint8_t, 4U> kVisible255Type{0x8AU, 0x02U, 0x00U, 0xFFU};
+// Golden IEDScout server uses the variable-length VisibleString(129) form.
+constexpr std::array<std::uint8_t, 4U> kVisible129Type{0x8AU, 0x02U, 0xFFU, 0x7FU};
+constexpr std::array<std::uint8_t, 4U> kVariableOctet64Type{0x89U, 0x02U, 0xFFU, 0xC0U};
 constexpr std::array<std::uint8_t, 3U> kBitString10Type{0x84U, 0x01U, 0x0AU};
 constexpr std::array<std::uint8_t, 3U> kBitString6Type{0x84U, 0x01U, 0x06U};
 
@@ -32,10 +35,11 @@ constexpr std::array<MmsStaticUrcbAttribute,
         MmsStaticUrcbAttribute::conf_revision,
         MmsStaticUrcbAttribute::optional_fields,
         MmsStaticUrcbAttribute::buffer_time,
+        MmsStaticUrcbAttribute::sequence_number,
         MmsStaticUrcbAttribute::trigger_options,
         MmsStaticUrcbAttribute::integrity_period,
         MmsStaticUrcbAttribute::general_interrogation,
-        MmsStaticUrcbAttribute::sequence_number};
+        MmsStaticUrcbAttribute::owner};
 
 constexpr std::array<std::string_view,
                      MmsStaticUrcbObjectBank::attributes_per_control_block>
@@ -47,10 +51,11 @@ constexpr std::array<std::string_view,
         "ConfRev",
         "OptFlds",
         "BufTm",
+        "SqNum",
         "TrgOps",
         "IntgPd",
         "GI",
-        "SqNum"};
+        "Owner"};
 
 constexpr std::uint32_t kHardwareFault = 1U;
 constexpr std::uint32_t kTemporarilyUnavailable = 2U;
@@ -83,7 +88,7 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
     switch (attribute) {
     case MmsStaticUrcbAttribute::report_id:
     case MmsStaticUrcbAttribute::data_set:
-        return kVisible255Type;
+        return kVisible129Type;
     case MmsStaticUrcbAttribute::report_enabled:
     case MmsStaticUrcbAttribute::reserved:
     case MmsStaticUrcbAttribute::general_interrogation:
@@ -91,12 +96,15 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
     case MmsStaticUrcbAttribute::conf_revision:
     case MmsStaticUrcbAttribute::buffer_time:
     case MmsStaticUrcbAttribute::integrity_period:
-    case MmsStaticUrcbAttribute::sequence_number:
         return kUnsigned32Type;
+    case MmsStaticUrcbAttribute::sequence_number:
+        return kUnsigned8Type;
     case MmsStaticUrcbAttribute::optional_fields:
         return kBitString10Type;
     case MmsStaticUrcbAttribute::trigger_options:
         return kBitString6Type;
+    case MmsStaticUrcbAttribute::owner:
+        return kVariableOctet64Type;
     }
     return {};
 }
@@ -104,7 +112,21 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
 [[nodiscard]] bool writable_attribute(
     const MmsStaticUrcbAttribute attribute) noexcept {
     return attribute != MmsStaticUrcbAttribute::conf_revision &&
-        attribute != MmsStaticUrcbAttribute::sequence_number;
+        attribute != MmsStaticUrcbAttribute::sequence_number &&
+        attribute != MmsStaticUrcbAttribute::owner;
+}
+
+[[nodiscard]] MmsStaticWriteSemantic write_semantic(
+    const MmsStaticUrcbAttribute attribute) noexcept {
+    if (attribute == MmsStaticUrcbAttribute::report_enabled) {
+        return MmsStaticWriteSemantic::rcb_enable;
+    }
+    if (attribute == MmsStaticUrcbAttribute::general_interrogation) {
+        return MmsStaticWriteSemantic::rcb_general_interrogation;
+    }
+    return writable_attribute(attribute)
+        ? MmsStaticWriteSemantic::rcb_configuration
+        : MmsStaticWriteSemantic::ordinary;
 }
 
 [[nodiscard]] wire::EncodeResult capacity_result(
@@ -191,6 +213,11 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
     const std::string_view domain,
     const std::string_view item,
     const std::span<std::uint8_t> destination) noexcept {
+    if (domain.empty() || item.empty()) {
+        return domain.empty() && item.empty()
+            ? encode_visible({}, destination)
+            : wire::EncodeResult{wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
     if (domain.size() > std::numeric_limits<std::size_t>::max() - 1U - item.size()) {
         return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
     }
@@ -241,6 +268,26 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
     return capacity;
 }
 
+[[nodiscard]] wire::EncodeResult encode_octets(
+    const std::span<const std::uint8_t> bytes,
+    const std::span<std::uint8_t> destination) noexcept {
+    const auto total = asn1::BerSpanWriter::tlv_size(9, bytes.size());
+    if (!total) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    const auto capacity = capacity_result(*total, destination);
+    if (!capacity.success()) {
+        return capacity;
+    }
+    asn1::BerSpanWriter writer{destination.first(*total)};
+    if (!writer.write_tlv_header(
+            asn1::BerClass::context_specific, false, 9, bytes.size()) ||
+        !writer.write_bytes(bytes) || writer.size() != *total) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, *total};
+    }
+    return capacity;
+}
+
 [[nodiscard]] wire::EncodeResult read_urcb_attribute(
     const void* raw_context,
     const std::span<std::uint8_t> destination) noexcept {
@@ -269,6 +316,8 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
         return encode_bit_string(6U, state->optional_fields, destination);
     case MmsStaticUrcbAttribute::buffer_time:
         return encode_unsigned(state->buffer_time_ms, destination);
+    case MmsStaticUrcbAttribute::sequence_number:
+        return encode_unsigned(state->sequence_number, destination);
     case MmsStaticUrcbAttribute::trigger_options: {
         const std::array<std::uint8_t, 1U> trigger{state->trigger_options};
         return encode_bit_string(2U, trigger, destination);
@@ -277,8 +326,13 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
         return encode_unsigned(state->integrity_period_ms, destination);
     case MmsStaticUrcbAttribute::general_interrogation:
         return encode_boolean(state->general_interrogation_pending, destination);
-    case MmsStaticUrcbAttribute::sequence_number:
-        return encode_unsigned(state->sequence_number, destination);
+    case MmsStaticUrcbAttribute::owner: {
+        // The portable URCB runtime is per-association, so no cross-association
+        // Owner identity is retained here. Expose the standards-compatible
+        // empty Owner value instead of omitting the required field.
+        const std::span<const std::uint8_t> empty_owner;
+        return encode_octets(empty_owner, destination);
+    }
     }
     return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
 }
@@ -494,6 +548,7 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
     }
     case MmsStaticUrcbAttribute::conf_revision:
     case MmsStaticUrcbAttribute::sequence_number:
+    case MmsStaticUrcbAttribute::owner:
         return {false, kObjectAccessDenied};
     }
     return {false, kHardwareFault};
@@ -598,6 +653,9 @@ bool MmsStaticUrcbObjectBank::initialize() noexcept {
                 now_context_};
 
             const auto attribute = kAttributes[attribute_index];
+            const auto writable = writable_attribute(attribute);
+            const auto* transaction_group = static_cast<const void*>(
+                &context_storage_[urcb_index * attributes_per_control_block]);
             object_storage_[object_offset] = MmsStaticObjectEntry{
                 definition->domain,
                 std::string_view{name, name_size},
@@ -605,8 +663,11 @@ bool MmsStaticUrcbObjectBank::initialize() noexcept {
                 read_urcb_attribute,
                 &context,
                 false,
-                writable_attribute(attribute) ? write_urcb_attribute : nullptr,
-                writable_attribute(attribute) ? &context : nullptr};
+                writable ? write_urcb_attribute : nullptr,
+                writable ? &context : nullptr,
+                nullptr,
+                writable ? transaction_group : nullptr,
+                writable ? write_semantic(attribute) : MmsStaticWriteSemantic::ordinary};
 
             name_offset += name_size;
             ++context_offset;

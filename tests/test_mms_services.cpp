@@ -5,6 +5,7 @@
 #include "ariec61850/mms/invoke_router.hpp"
 #include "ariec61850/mms/pdu.hpp"
 #include "ariec61850/mms/services.hpp"
+#include "ariec61850/mms/simulator_manifest_codec.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -216,6 +217,63 @@ void type_specification_and_attributes_round_trip() {
         response_p_data, 31U) == response);
 }
 
+void iedscout_variable_length_type_bounds_round_trip() {
+    MmsTypeSpecification visible255;
+    visible255.kind = MmsTypeKind::visible_string;
+    visible255.size = 255U;
+    visible255.variable_length = true;
+    CHECK(MmsServiceCodec::encode_type_specification(visible255) ==
+        from_hex("8A 02 FF 01"));
+    CHECK(MmsServiceCodec::decode_type_specification(
+        MmsServiceCodec::encode_type_specification(visible255)) == visible255);
+
+    MmsTypeSpecification octet64;
+    octet64.kind = MmsTypeKind::octet_string;
+    octet64.size = 64U;
+    octet64.variable_length = true;
+    CHECK(MmsServiceCodec::encode_type_specification(octet64) ==
+        from_hex("89 02 FF C0"));
+    CHECK(MmsServiceCodec::decode_type_specification(
+        MmsServiceCodec::encode_type_specification(octet64)) == octet64);
+
+    MmsTypeSpecification visible129;
+    visible129.kind = MmsTypeKind::visible_string;
+    visible129.size = 129U;
+    visible129.variable_length = true;
+    CHECK(MmsServiceCodec::encode_type_specification(visible129) ==
+        from_hex("8A 02 FF 7F"));
+}
+
+void simulator_manifest_type_mapping_prefers_scl_btype() {
+    using ar::iec61850::mms::MmsSimulatorManifestCodec;
+
+    const auto timeout = MmsSimulatorManifestCodec::type("INT32U", "Timestamp");
+    CHECK(timeout.kind == MmsTypeKind::unsigned_integer);
+    CHECK(timeout.size == 32U);
+    CHECK(!timeout.variable_length);
+
+    const auto origin_category = MmsSimulatorManifestCodec::type("INT8", "Timestamp");
+    CHECK(origin_category.kind == MmsTypeKind::integer);
+    CHECK(origin_category.size == 8U);
+
+    const auto origin_identifier = MmsSimulatorManifestCodec::type("Octet64", "Timestamp");
+    CHECK(origin_identifier.kind == MmsTypeKind::octet_string);
+    CHECK(origin_identifier.size == 64U);
+    CHECK(origin_identifier.variable_length);
+
+    const auto test = MmsSimulatorManifestCodec::type("BOOLEAN", "Timestamp");
+    CHECK(test.kind == MmsTypeKind::boolean);
+
+    const auto enumeration = MmsSimulatorManifestCodec::type("Enum", "Enumeration");
+    CHECK(enumeration.kind == MmsTypeKind::integer);
+    CHECK(enumeration.size == 8U);
+
+    const auto vendor = MmsSimulatorManifestCodec::type("VisString255", "VisString255");
+    CHECK(vendor.kind == MmsTypeKind::visible_string);
+    CHECK(vendor.size == 255U);
+    CHECK(vendor.variable_length);
+}
+
 void array_type_specification_round_trips() {
     MmsTypeSpecification element;
     element.kind = MmsTypeKind::visible_string;
@@ -367,6 +425,8 @@ int main() {
         {"ObjectName choices", object_names_round_trip_all_choices},
         {"GetNameList", get_name_list_request_response_round_trip},
         {"VariableAccessAttributes and structure type", type_specification_and_attributes_round_trip},
+        {"IEDScout variable-length TypeSpecification", iedscout_variable_length_type_bounds_round_trip},
+        {"simulator SCL bType wire authority", simulator_manifest_type_mapping_prefers_scl_btype},
         {"array TypeSpecification", array_type_specification_round_trips},
         {"Read multi-access results", read_request_and_multi_access_response_round_trip},
         {"Read direct primitive", read_decoder_accepts_direct_primitive_data},

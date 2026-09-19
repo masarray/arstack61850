@@ -17,11 +17,16 @@ namespace ar::iec61850::mms {
 namespace {
 
 constexpr std::array<std::uint8_t, 2U> kBooleanType{0x83U, 0x00U};
+constexpr std::array<std::uint8_t, 3U> kUnsigned16Type{0x86U, 0x01U, 0x10U};
 constexpr std::array<std::uint8_t, 3U> kUnsigned32Type{0x86U, 0x01U, 0x20U};
 constexpr std::array<std::uint8_t, 3U> kInteger16Type{0x85U, 0x01U, 0x10U};
-constexpr std::array<std::uint8_t, 3U> kOctetString8Type{0x89U, 0x01U, 0x08U};
-constexpr std::array<std::uint8_t, 3U> kOctetString16Type{0x89U, 0x01U, 0x10U};
-constexpr std::array<std::uint8_t, 4U> kVisible255Type{0x8AU, 0x02U, 0x00U, 0xFFU};
+constexpr std::array<std::uint8_t, 4U> kVariableOctet8Type{0x89U, 0x02U, 0xFFU, 0xF8U};
+constexpr std::array<std::uint8_t, 4U> kVariableOctet64Type{0x89U, 0x02U, 0xFFU, 0xC0U};
+constexpr std::array<std::uint8_t, 4U> kVisible129Type{0x8AU, 0x02U, 0xFFU, 0x7FU};
+constexpr std::array<std::uint8_t, 3U> kBitString10Type{0x84U, 0x01U, 0x0AU};
+constexpr std::array<std::uint8_t, 3U> kBitString6Type{0x84U, 0x01U, 0x06U};
+// Golden IEDScout TypeSpecification for TimeofEntry is binary-time timeOfDay(1).
+constexpr std::array<std::uint8_t, 3U> kBinaryTimeType{0x8CU, 0x01U, 0x01U};
 
 constexpr std::array<MmsStaticBrcbAttribute,
                      MmsStaticBrcbObjectBank::attributes_per_control_block>
@@ -30,8 +35,15 @@ constexpr std::array<MmsStaticBrcbAttribute,
         MmsStaticBrcbAttribute::report_enabled,
         MmsStaticBrcbAttribute::data_set,
         MmsStaticBrcbAttribute::conf_revision,
+        MmsStaticBrcbAttribute::optional_fields,
+        MmsStaticBrcbAttribute::buffer_time,
+        MmsStaticBrcbAttribute::sequence_number,
+        MmsStaticBrcbAttribute::trigger_options,
+        MmsStaticBrcbAttribute::integrity_period,
+        MmsStaticBrcbAttribute::general_interrogation,
         MmsStaticBrcbAttribute::purge_buffer,
         MmsStaticBrcbAttribute::entry_id,
+        MmsStaticBrcbAttribute::time_of_entry,
         MmsStaticBrcbAttribute::reservation_time,
         MmsStaticBrcbAttribute::owner};
 
@@ -42,8 +54,15 @@ constexpr std::array<std::string_view,
         "RptEna",
         "DatSet",
         "ConfRev",
+        "OptFlds",
+        "BufTm",
+        "SqNum",
+        "TrgOps",
+        "IntgPd",
+        "GI",
         "PurgeBuf",
         "EntryID",
+        "TimeofEntry",
         "ResvTms",
         "Owner"};
 
@@ -71,27 +90,55 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
     switch (attribute) {
     case MmsStaticBrcbAttribute::report_id:
     case MmsStaticBrcbAttribute::data_set:
-        return kVisible255Type;
+        return kVisible129Type;
     case MmsStaticBrcbAttribute::report_enabled:
+    case MmsStaticBrcbAttribute::general_interrogation:
     case MmsStaticBrcbAttribute::purge_buffer:
         return kBooleanType;
     case MmsStaticBrcbAttribute::conf_revision:
+    case MmsStaticBrcbAttribute::buffer_time:
+    case MmsStaticBrcbAttribute::integrity_period:
         return kUnsigned32Type;
+    case MmsStaticBrcbAttribute::sequence_number:
+        return kUnsigned16Type;
+    case MmsStaticBrcbAttribute::optional_fields:
+        return kBitString10Type;
+    case MmsStaticBrcbAttribute::trigger_options:
+        return kBitString6Type;
     case MmsStaticBrcbAttribute::entry_id:
-        return kOctetString8Type;
+        return kVariableOctet8Type;
+    case MmsStaticBrcbAttribute::time_of_entry:
+        return kBinaryTimeType;
     case MmsStaticBrcbAttribute::reservation_time:
         return kInteger16Type;
     case MmsStaticBrcbAttribute::owner:
-        return kOctetString16Type;
+        return kVariableOctet64Type;
     }
     return {};
 }
 
 [[nodiscard]] bool writable_attribute(const MmsStaticBrcbAttribute attribute) noexcept {
     return attribute == MmsStaticBrcbAttribute::report_enabled ||
+        attribute == MmsStaticBrcbAttribute::optional_fields ||
+        attribute == MmsStaticBrcbAttribute::trigger_options ||
+        attribute == MmsStaticBrcbAttribute::integrity_period ||
+        attribute == MmsStaticBrcbAttribute::general_interrogation ||
         attribute == MmsStaticBrcbAttribute::purge_buffer ||
         attribute == MmsStaticBrcbAttribute::entry_id ||
         attribute == MmsStaticBrcbAttribute::reservation_time;
+}
+
+[[nodiscard]] MmsStaticWriteSemantic write_semantic(
+    const MmsStaticBrcbAttribute attribute) noexcept {
+    if (attribute == MmsStaticBrcbAttribute::report_enabled) {
+        return MmsStaticWriteSemantic::rcb_enable;
+    }
+    if (attribute == MmsStaticBrcbAttribute::general_interrogation) {
+        return MmsStaticWriteSemantic::rcb_general_interrogation;
+    }
+    return writable_attribute(attribute)
+        ? MmsStaticWriteSemantic::rcb_configuration
+        : MmsStaticWriteSemantic::ordinary;
 }
 
 [[nodiscard]] wire::EncodeResult capacity_result(
@@ -231,6 +278,32 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
     return capacity;
 }
 
+[[nodiscard]] wire::EncodeResult encode_bit_string(
+    const std::uint8_t unused_bits,
+    const std::span<const std::uint8_t> bytes,
+    const std::span<std::uint8_t> destination) noexcept {
+    if (unused_bits > 7U || bytes.size() == std::numeric_limits<std::size_t>::max()) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    const auto content_size = bytes.size() + 1U;
+    const auto total = asn1::BerSpanWriter::tlv_size(4, content_size);
+    if (!total) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    const auto capacity = capacity_result(*total, destination);
+    if (!capacity.success()) {
+        return capacity;
+    }
+    asn1::BerSpanWriter writer{destination.first(*total)};
+    if (!writer.write_tlv_header(
+            asn1::BerClass::context_specific, false, 4, content_size) ||
+        !writer.write_byte(unused_bits) || !writer.write_bytes(bytes) ||
+        writer.size() != *total) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, *total};
+    }
+    return capacity;
+}
+
 [[nodiscard]] wire::EncodeResult encode_octets(
     const std::span<const std::uint8_t> bytes,
     const std::span<std::uint8_t> destination) noexcept {
@@ -245,6 +318,29 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
     asn1::BerSpanWriter writer{destination.first(*total)};
     if (!writer.write_tlv_header(
             asn1::BerClass::context_specific, false, 9, bytes.size()) ||
+        !writer.write_bytes(bytes) || writer.size() != *total) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, *total};
+    }
+    return capacity;
+}
+
+[[nodiscard]] wire::EncodeResult encode_binary_time(
+    const std::span<const std::uint8_t> bytes,
+    const std::span<std::uint8_t> destination) noexcept {
+    if (bytes.size() != MmsInformationReportSpanCodec::binary_time_bytes) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    const auto total = asn1::BerSpanWriter::tlv_size(12, bytes.size());
+    if (!total) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    const auto capacity = capacity_result(*total, destination);
+    if (!capacity.success()) {
+        return capacity;
+    }
+    asn1::BerSpanWriter writer{destination.first(*total)};
+    if (!writer.write_tlv_header(
+            asn1::BerClass::context_specific, false, 12, bytes.size()) ||
         !writer.write_bytes(bytes) || writer.size() != *total) {
         return {wire::EncodeStatus::value_out_of_range, 0U, *total};
     }
@@ -272,11 +368,29 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
             destination);
     case MmsStaticBrcbAttribute::conf_revision:
         return encode_unsigned(context->definition->conf_revision, destination);
+    case MmsStaticBrcbAttribute::optional_fields:
+        return encode_bit_string(6U, context->reports->optional_fields(), destination);
+    case MmsStaticBrcbAttribute::buffer_time:
+        return encode_unsigned(context->definition->buffer_time_ms, destination);
+    case MmsStaticBrcbAttribute::sequence_number:
+        return encode_unsigned(context->reports->sequence_number(), destination);
+    case MmsStaticBrcbAttribute::trigger_options: {
+        const std::array<std::uint8_t, 1U> trigger{context->reports->trigger_options()};
+        return encode_bit_string(2U, trigger, destination);
+    }
+    case MmsStaticBrcbAttribute::integrity_period:
+        return encode_unsigned(context->reports->integrity_period_ms(), destination);
+    case MmsStaticBrcbAttribute::general_interrogation:
+        return encode_boolean(context->reports->general_interrogation_pending(), destination);
     case MmsStaticBrcbAttribute::purge_buffer:
         return encode_boolean(false, destination);
     case MmsStaticBrcbAttribute::entry_id: {
         const auto entry_id = context->reports->latest_entry_id();
         return encode_octets(entry_id, destination);
+    }
+    case MmsStaticBrcbAttribute::time_of_entry: {
+        const auto time_of_entry = context->reports->latest_time_of_entry();
+        return encode_binary_time(time_of_entry, destination);
     }
     case MmsStaticBrcbAttribute::reservation_time: {
         const auto state = context->control->state(now_ms(*context));
@@ -300,6 +414,48 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
         return false;
     }
     value = tlv.value[0] != 0U;
+    return true;
+}
+
+[[nodiscard]] bool decode_bit_string(
+    const std::span<const std::uint8_t> encoded,
+    const std::uint8_t expected_unused_bits,
+    const std::size_t expected_bytes,
+    std::span<const std::uint8_t>& bytes) noexcept {
+    bytes = {};
+    asn1::BerTlvView tlv;
+    if (!asn1::BerSpanReader::try_read_exact(encoded, tlv) ||
+        tlv.tag_class != asn1::BerClass::context_specific ||
+        tlv.tag_number != 4 || tlv.constructed ||
+        tlv.value.size() != expected_bytes + 1U ||
+        tlv.value[0] != expected_unused_bits) {
+        return false;
+    }
+    bytes = tlv.value.subspan(1U);
+    if (!bytes.empty() && expected_unused_bits != 0U) {
+        const auto mask = static_cast<std::uint8_t>((1U << expected_unused_bits) - 1U);
+        if ((bytes.back() & mask) != 0U) {
+            bytes = {};
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool decode_unsigned32(
+    const std::span<const std::uint8_t> encoded,
+    std::uint32_t& value) noexcept {
+    value = 0U;
+    asn1::BerTlvView tlv;
+    if (!asn1::BerSpanReader::try_read_exact(encoded, tlv) ||
+        tlv.tag_class != asn1::BerClass::context_specific ||
+        tlv.tag_number != 6 || tlv.constructed ||
+        tlv.value.empty() || tlv.value.size() > sizeof(std::uint32_t)) {
+        return false;
+    }
+    for (const auto byte : tlv.value) {
+        value = static_cast<std::uint32_t>((value << 8U) | byte);
+    }
     return true;
 }
 
@@ -418,6 +574,67 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
         return map_control_status(
             context->control->set_report_enabled(client, value, now));
     }
+    case MmsStaticBrcbAttribute::optional_fields: {
+        std::span<const std::uint8_t> bytes;
+        if (!decode_bit_string(encoded_data, 6U, 2U, bytes)) {
+            return {false, kTypeInconsistent};
+        }
+        constexpr std::uint8_t allowed_first = 0x7FU;
+        constexpr std::uint8_t allowed_second = 0x80U;
+        if ((bytes[0] & static_cast<std::uint8_t>(~allowed_first)) != 0U ||
+            (bytes[1] & static_cast<std::uint8_t>(~allowed_second)) != 0U) {
+            return {false, kObjectValueInvalid};
+        }
+        const auto claim = ensure_claimed(*context, client, now);
+        if (claim != MmsStaticBrcbControlStatus::ok) {
+            return map_control_status(claim);
+        }
+        return map_control_status(
+            context->control->set_optional_fields(client, bytes, now));
+    }
+    case MmsStaticBrcbAttribute::trigger_options: {
+        std::span<const std::uint8_t> bytes;
+        if (!decode_bit_string(encoded_data, 2U, 1U, bytes)) {
+            return {false, kTypeInconsistent};
+        }
+        constexpr std::uint8_t allowed = 0xFCU;
+        if ((bytes[0] & static_cast<std::uint8_t>(~allowed)) != 0U) {
+            return {false, kObjectValueInvalid};
+        }
+        const auto claim = ensure_claimed(*context, client, now);
+        if (claim != MmsStaticBrcbControlStatus::ok) {
+            return map_control_status(claim);
+        }
+        return map_control_status(
+            context->control->set_trigger_options(client, bytes[0], now));
+    }
+    case MmsStaticBrcbAttribute::integrity_period: {
+        std::uint32_t value{};
+        if (!decode_unsigned32(encoded_data, value)) {
+            return {false, kTypeInconsistent};
+        }
+        const auto claim = ensure_claimed(*context, client, now);
+        if (claim != MmsStaticBrcbControlStatus::ok) {
+            return map_control_status(claim);
+        }
+        return map_control_status(
+            context->control->set_integrity_period(client, value, now));
+    }
+    case MmsStaticBrcbAttribute::general_interrogation: {
+        bool value = false;
+        if (!decode_boolean(encoded_data, value)) {
+            return {false, kTypeInconsistent};
+        }
+        if (!value) {
+            return {true, 0U};
+        }
+        const auto claim = ensure_claimed(*context, client, now);
+        if (claim != MmsStaticBrcbControlStatus::ok) {
+            return map_control_status(claim);
+        }
+        return map_control_status(
+            context->control->request_general_interrogation(client, now));
+    }
     case MmsStaticBrcbAttribute::purge_buffer: {
         bool value = false;
         if (!decode_boolean(encoded_data, value)) {
@@ -461,6 +678,9 @@ constexpr std::uint32_t kObjectValueInvalid = 11U;
     case MmsStaticBrcbAttribute::report_id:
     case MmsStaticBrcbAttribute::data_set:
     case MmsStaticBrcbAttribute::conf_revision:
+    case MmsStaticBrcbAttribute::buffer_time:
+    case MmsStaticBrcbAttribute::sequence_number:
+    case MmsStaticBrcbAttribute::time_of_entry:
     case MmsStaticBrcbAttribute::owner:
         return {false, kObjectAccessDenied};
     }
@@ -553,7 +773,9 @@ bool MmsStaticBrcbObjectBank::initialize() noexcept {
             false,
             nullptr,
             writable ? &context : nullptr,
-            writable ? write_brcb_attribute : nullptr};
+            writable ? write_brcb_attribute : nullptr,
+            writable ? static_cast<const void*>(control_) : nullptr,
+            writable ? write_semantic(attribute) : MmsStaticWriteSemantic::ordinary};
 
         name_offset += name_size;
         ++object_offset;

@@ -30,6 +30,25 @@ std::uint32_t read_u32_be(const std::span<const std::uint8_t> bytes) noexcept {
            static_cast<std::uint32_t>(bytes[3]);
 }
 
+std::uint64_t read_u64_be(const std::span<const std::uint8_t> bytes) noexcept {
+    std::uint64_t value{};
+    for (std::size_t index = 0U; index < 8U; ++index) {
+        value = (value << 8U) | static_cast<std::uint64_t>(bytes[index]);
+    }
+    return value;
+}
+
+std::vector<std::uint8_t> encode_double_precision_float(const double value) {
+    std::vector<std::uint8_t> result(9U);
+    result[0] = 0x0BU; // ISO 9506 floating-point exponent width for IEEE binary64.
+    const auto raw = std::bit_cast<std::uint64_t>(value);
+    for (std::size_t index = 0U; index < 8U; ++index) {
+        const auto shift = static_cast<unsigned>((7U - index) * 8U);
+        result[index + 1U] = static_cast<std::uint8_t>((raw >> shift) & 0xFFU);
+    }
+    return result;
+}
+
 std::string bytes_to_hex(const std::span<const std::uint8_t> bytes) {
     std::ostringstream stream;
     stream << std::uppercase << std::hex << std::setfill('0');
@@ -92,7 +111,7 @@ MmsDataValue MmsDataCodec::decode(const asn1::BerTlv& tlv) {
         return MmsDataValue::unsigned_integer(
             asn1::BerReader::read_unsigned_integer(tlv).value_or(0));
     case 7:
-        return MmsDataValue::floating_point(decode_floating_point(tlv.value));
+        return decode_floating_point(tlv.value);
     case 9:
         return MmsDataValue::octet_string(tlv.value);
     case 10:
@@ -190,17 +209,14 @@ std::vector<std::uint8_t> MmsDataCodec::encode_content(const MmsDataValue& value
     case MmsDataKind::unsigned_integer:
         return asn1::BerWriter::encode_unsigned_integer(
             std::get<std::uint64_t>(value.value()));
-    case MmsDataKind::floating_point: {
-        float result = 0.0F;
+    case MmsDataKind::floating_point:
         if (const auto* single = std::get_if<float>(&value.value())) {
-            result = *single;
-        } else if (const auto* double_value = std::get_if<double>(&value.value())) {
-            result = static_cast<float>(*double_value);
-        } else {
-            throw std::invalid_argument("MMS floating-point scalar is missing.");
+            return asn1::BerWriter::encode_single_precision_float(*single);
         }
-        return asn1::BerWriter::encode_single_precision_float(result);
-    }
+        if (const auto* double_value = std::get_if<double>(&value.value())) {
+            return encode_double_precision_float(*double_value);
+        }
+        throw std::invalid_argument("MMS floating-point scalar is missing.");
     case MmsDataKind::visible_string:
     case MmsDataKind::mms_string:
         return asn1::BerWriter::encode_ascii(std::get<std::string>(value.value()));
@@ -246,15 +262,25 @@ MmsDataValue MmsDataCodec::decode_bit_string(
     return MmsDataValue::bit_string(bytes[0], bytes.subspan(1U));
 }
 
-float MmsDataCodec::decode_floating_point(
+MmsDataValue MmsDataCodec::decode_floating_point(
     const std::span<const std::uint8_t> bytes) noexcept {
+    if (bytes.size() == 9U) {
+        return MmsDataValue::floating_point(
+            std::bit_cast<double>(read_u64_be(bytes.subspan(1U, 8U))));
+    }
+    if (bytes.size() == 8U) {
+        return MmsDataValue::floating_point(
+            std::bit_cast<double>(read_u64_be(bytes)));
+    }
     if (bytes.size() == 5U) {
-        return std::bit_cast<float>(read_u32_be(bytes.subspan(1U, 4U)));
+        return MmsDataValue::floating_point(
+            std::bit_cast<float>(read_u32_be(bytes.subspan(1U, 4U))));
     }
     if (bytes.size() == 4U) {
-        return std::bit_cast<float>(read_u32_be(bytes));
+        return MmsDataValue::floating_point(
+            std::bit_cast<float>(read_u32_be(bytes)));
     }
-    return std::numeric_limits<float>::quiet_NaN();
+    return MmsDataValue::floating_point(std::numeric_limits<float>::quiet_NaN());
 }
 
 } // namespace ar::iec61850::mms

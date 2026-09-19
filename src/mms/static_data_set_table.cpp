@@ -102,15 +102,36 @@ bool MmsStaticDataSetTable::valid_against(
 
 const MmsStaticDataSetEntry* MmsStaticDataSetTable::find(
     const MmsObjectNameView& name) const noexcept {
-    if (name.kind != MmsObjectNameViewKind::domain_specific) {
+    if (name.kind == MmsObjectNameViewKind::domain_specific) {
+        for (const auto& data_set : data_sets_) {
+            if (equals(name.domain, data_set.domain) && equals(name.item, data_set.item)) {
+                return &data_set;
+            }
+        }
         return nullptr;
     }
-    for (const auto& data_set : data_sets_) {
-        if (equals(name.domain, data_set.domain) && equals(name.item, data_set.item)) {
-            return &data_set;
-        }
+
+    if ((name.kind != MmsObjectNameViewKind::vmd_specific &&
+         name.kind != MmsObjectNameViewKind::aa_specific) ||
+        name.item.empty()) {
+        return nullptr;
     }
-    return nullptr;
+
+    // IEDScout probes named-variable-list attributes with both VMD-specific and
+    // AA-specific ObjectName forms such as LLN0$Digital. Resolve either
+    // compatibility form only when the item is unique across logical-device
+    // domains. Ambiguity stays an explicit miss instead of picking arbitrarily.
+    const MmsStaticDataSetEntry* match = nullptr;
+    for (const auto& data_set : data_sets_) {
+        if (!equals(name.item, data_set.item)) {
+            continue;
+        }
+        if (match != nullptr) {
+            return nullptr;
+        }
+        match = &data_set;
+    }
+    return match;
 }
 
 } // namespace ar::iec61850::mms

@@ -12,6 +12,11 @@
 namespace ar::iec61850::mms {
 namespace {
 
+constexpr std::uint8_t kTriggerOptionsUnusedBits = 2U;
+constexpr std::uint8_t kOptionalFieldsUnusedBits = 6U;
+constexpr std::size_t kTriggerOptionsBytes = 1U;
+constexpr std::size_t kOptionalFieldsBytes = 2U;
+
 [[nodiscard]] bool contains_attribute(
     const MmsReportControlCandidate& candidate,
     const std::string& attribute) {
@@ -28,6 +33,31 @@ namespace {
         return exchange.presentation_payload;
     }
     return exchange.envelope.mms_payload;
+}
+
+[[nodiscard]] bool valid_bit_payload(
+    const std::span<const std::uint8_t> payload,
+    const std::size_t expected_bytes,
+    const std::uint8_t unused_bits) noexcept {
+    if (payload.size() != expected_bytes || payload.empty() || unused_bits > 7U) {
+        return false;
+    }
+    if (unused_bits == 0U) {
+        return true;
+    }
+    const auto mask = static_cast<std::uint8_t>((1U << unused_bits) - 1U);
+    return (payload.back() & mask) == 0U;
+}
+
+[[nodiscard]] bool bit_field_matches(
+    const MmsReportBitField& live,
+    const std::span<const std::uint8_t> desired,
+    const std::uint8_t unused_bits) noexcept {
+    if (live.raw.size() != desired.size() + 1U || live.raw.empty() ||
+        live.raw.front() != unused_bits) {
+        return false;
+    }
+    return std::equal(desired.begin(), desired.end(), live.raw.begin() + 1);
 }
 
 } // namespace
@@ -50,6 +80,24 @@ MmsReportSubscriptionRuntime::MmsReportSubscriptionRuntime(
     if (options_.maximum_events == 0U) {
         throw std::invalid_argument(
             "Report subscription event limit must be positive.");
+    }
+    if (options_.write_trigger_options &&
+        !valid_bit_payload(
+            options_.trigger_options,
+            kTriggerOptionsBytes,
+            kTriggerOptionsUnusedBits)) {
+        throw std::invalid_argument(
+            "TrgOps must contain exactly six IEC 61850 bits in one octet; "
+            "the two unused low bits must be zero.");
+    }
+    if (options_.write_optional_fields &&
+        !valid_bit_payload(
+            options_.optional_fields,
+            kOptionalFieldsBytes,
+            kOptionalFieldsUnusedBits)) {
+        throw std::invalid_argument(
+            "OptFlds must contain exactly ten IEC 61850 bits in two octets; "
+            "the six unused low bits must be zero.");
     }
 }
 
@@ -162,6 +210,7 @@ void MmsReportSubscriptionRuntime::start(
 
     enabled_by_runtime_ = false;
     reservation_touched_ = false;
+    restore_enabled_required_ = false;
     cleanup_required_ = false;
     monitor_.clear();
     received_reports_ = 0U;
@@ -171,23 +220,56 @@ void MmsReportSubscriptionRuntime::start(
         set_state(MmsReportSubscriptionState::probing,
                   "Probing RCB state before any write.");
         const auto current = probe(stop_token);
-        const auto enabled_elsewhere = current.report_enabled.value_or(false) &&
-            current.availability != MmsRcbAvailability::used_by_caller;
-        if (enabled_elsewhere) {
-            throw MmsReportSubscriptionError(
-                "RCB is already enabled and is treated as owned by another session.");
-        }
-        if (current.availability == MmsRcbAvailability::in_use) {
-            throw MmsReportSubscriptionError(
-                "RCB is reserved or enabled by another session.");
-        }
-        if (current.report_enabled.value_or(false) &&
-            !options_.allow_reenable_caller_owned) {
+        const auto was_enabled = current.report_enabled.value_or(false);
+        const auto caller_owned_enabled =
+            was_enabled && options_.allow_reenable_caller_owned;
+
+        if (was_enabled && !caller_owned_enabled) {
             throw MmsReportSubscriptionError(
                 "RCB is already enabled; explicit caller-owned re-enable permission is required.");
         }
+        if (current.availability == MmsRcbAvailability::in_use &&
+            !caller_owned_enabled) {
+            throw MmsReportSubscriptionError(
+                "RCB is reserved or enabled by another session.");
+        }
 
-        if (!candidate_.buffered && options_.reserve_unbuffered_rcb &&
+        std::string desired_data_set;
+        if (options_.write_data_set_reference) {
+            if (options_.data_set_reference.empty()) {
+                throw MmsReportSubscriptionError(
+                    "DataSet write was requested without a DataSet reference.");
+            }
+            desired_data_set = MmsDataSetDirectoryCodec::to_report_attribute_value(
+                options_.data_set_reference);
+        }
+
+        const auto data_set_changed = options_.write_data_set_reference &&
+            current.data_set_reference != desired_data_set;
+        const auto trigger_options_changed = options_.write_trigger_options &&
+            !bit_field_matches(
+                current.trigger_options,
+                options_.trigger_options,
+                kTriggerOptionsUnusedBits);
+        const auto optional_fields_changed = options_.write_optional_fields &&
+            !bit_field_matches(
+                current.optional_fields,
+                options_.optional_fields,
+                kOptionalFieldsUnusedBits);
+        const auto configuration_changed =
+            data_set_changed || trigger_options_changed || optional_fields_changed;
+
+        if (was_enabled && configuration_changed) {
+            set_state(MmsReportSubscriptionState::configuring,
+                      "Disabling caller-owned RCB before configuration delta write.");
+            write_attribute("RptEna", MmsDataValue::boolean(false), stop_token);
+            restore_enabled_required_ = true;
+            add_event(MmsReportSubscriptionEventKind::disabled,
+                      "Caller-owned RCB disabled for verified reconfiguration.");
+        }
+
+        if (!was_enabled && !candidate_.buffered &&
+            options_.reserve_unbuffered_rcb &&
             contains_attribute(candidate_, "Resv")) {
             set_state(MmsReportSubscriptionState::reserving,
                       "Reserving unbuffered RCB.");
@@ -198,45 +280,99 @@ void MmsReportSubscriptionRuntime::start(
         }
 
         set_state(MmsReportSubscriptionState::configuring,
-                  "Applying requested RCB configuration.");
-        if (options_.write_data_set_reference) {
-            if (options_.data_set_reference.empty()) {
-                throw MmsReportSubscriptionError(
-                    "DataSet write was requested without a DataSet reference.");
-            }
+                  configuration_changed
+                      ? "Applying only changed RCB configuration attributes."
+                      : "Live RCB configuration already matches requested values; no configuration write required.");
+        if (data_set_changed) {
             write_attribute(
                 "DatSet",
-                MmsDataValue::visible_string(
-                    MmsDataSetDirectoryCodec::to_report_attribute_value(
-                        options_.data_set_reference)),
+                MmsDataValue::visible_string(desired_data_set),
                 stop_token);
         }
-        if (options_.write_trigger_options) {
+        if (trigger_options_changed) {
             write_attribute(
                 "TrgOps",
-                MmsDataValue::bit_string(0U, options_.trigger_options),
+                MmsDataValue::bit_string(
+                    kTriggerOptionsUnusedBits,
+                    options_.trigger_options),
                 stop_token);
         }
-        if (options_.write_optional_fields) {
+        if (optional_fields_changed) {
             write_attribute(
                 "OptFlds",
-                MmsDataValue::bit_string(0U, options_.optional_fields),
+                MmsDataValue::bit_string(
+                    kOptionalFieldsUnusedBits,
+                    options_.optional_fields),
                 stop_token);
         }
 
-        set_state(MmsReportSubscriptionState::enabling,
-                  "Enabling RCB with RptEna=true.");
-        write_attribute("RptEna", MmsDataValue::boolean(true), stop_token);
-        enabled_by_runtime_ = true;
-        add_event(MmsReportSubscriptionEventKind::enabled,
-                  "RCB enabled by this runtime.");
+        if (configuration_changed || reservation_touched_) {
+            set_state(MmsReportSubscriptionState::probing,
+                      "Verifying RCB state after configuration/reservation writes.");
+            const auto verified = probe(stop_token);
+            if (data_set_changed && verified.data_set_reference != desired_data_set) {
+                throw MmsReportSubscriptionError(
+                    "RCB DataSet read-back verification failed.");
+            }
+            if (trigger_options_changed &&
+                !bit_field_matches(
+                    verified.trigger_options,
+                    options_.trigger_options,
+                    kTriggerOptionsUnusedBits)) {
+                throw MmsReportSubscriptionError(
+                    "RCB TrgOps read-back verification failed.");
+            }
+            if (optional_fields_changed &&
+                !bit_field_matches(
+                    verified.optional_fields,
+                    options_.optional_fields,
+                    kOptionalFieldsUnusedBits)) {
+                throw MmsReportSubscriptionError(
+                    "RCB OptFlds read-back verification failed.");
+            }
+            if (reservation_touched_ &&
+                contains_attribute(candidate_, "Resv") &&
+                !verified.reserved.value_or(false)) {
+                throw MmsReportSubscriptionError(
+                    "URCB reservation read-back verification failed.");
+            }
+        }
+
+        if (!was_enabled || configuration_changed) {
+            set_state(MmsReportSubscriptionState::enabling,
+                      "Enabling RCB only after configuration read-back verification.");
+            write_attribute("RptEna", MmsDataValue::boolean(true), stop_token);
+            if (was_enabled) {
+                restore_enabled_required_ = true;
+            } else {
+                enabled_by_runtime_ = true;
+            }
+
+            set_state(MmsReportSubscriptionState::probing,
+                      "Verifying RptEna after enable write.");
+            const auto enabled_state = probe(stop_token);
+            if (!enabled_state.report_enabled.value_or(false)) {
+                throw MmsReportSubscriptionError(
+                    "RCB enable read-back verification failed.");
+            }
+            if (was_enabled) {
+                restore_enabled_required_ = false;
+            }
+            add_event(MmsReportSubscriptionEventKind::enabled,
+                      was_enabled
+                          ? "Caller-owned RCB re-enabled after verified reconfiguration."
+                          : "RCB enabled by this runtime after verified configuration.");
+        } else {
+            add_event(MmsReportSubscriptionEventKind::enabled,
+                      "Caller-owned RCB was already enabled; redundant RptEna write skipped.");
+        }
 
         if (options_.trigger_general_interrogation &&
             contains_attribute(candidate_, "GI")) {
             try {
                 write_attribute("GI", MmsDataValue::boolean(true), stop_token);
                 add_event(MmsReportSubscriptionEventKind::general_interrogation_sent,
-                          "General interrogation requested after RCB enable.");
+                          "General interrogation requested after verified RCB enable.");
             } catch (const std::exception& exception) {
                 add_event(MmsReportSubscriptionEventKind::cleanup_deferred,
                           "RCB remains enabled, but GI write failed: " +
@@ -248,7 +384,15 @@ void MmsReportSubscriptionRuntime::start(
                   "Persistent report subscription is active.");
     } catch (const std::exception& exception) {
         if (association_.associated()) {
-            if (enabled_by_runtime_) {
+            if (restore_enabled_required_) {
+                const auto restored = try_write_attribute_noexcept(
+                    "RptEna", MmsDataValue::boolean(true), stop_token);
+                if (restored) {
+                    restore_enabled_required_ = false;
+                    add_event(MmsReportSubscriptionEventKind::enabled,
+                              "Caller-owned RCB enable state restored after failed reconfiguration.");
+                }
+            } else if (enabled_by_runtime_) {
                 const auto disabled = try_write_attribute_noexcept(
                     "RptEna", MmsDataValue::boolean(false), stop_token);
                 enabled_by_runtime_ = !disabled;
@@ -259,7 +403,8 @@ void MmsReportSubscriptionRuntime::start(
                 reservation_touched_ = !released;
             }
         }
-        cleanup_required_ = enabled_by_runtime_ || reservation_touched_;
+        cleanup_required_ =
+            enabled_by_runtime_ || reservation_touched_ || restore_enabled_required_;
         fail(exception.what());
         throw;
     }
@@ -275,7 +420,8 @@ void MmsReportSubscriptionRuntime::stop(
               "Stopping persistent report subscription.");
 
     if (!association_.associated()) {
-        cleanup_required_ = enabled_by_runtime_ || reservation_touched_;
+        cleanup_required_ =
+            enabled_by_runtime_ || reservation_touched_ || restore_enabled_required_;
         if (cleanup_required_) {
             state_ = MmsReportSubscriptionState::cleanup_required;
             add_event(MmsReportSubscriptionEventKind::cleanup_deferred,
@@ -288,6 +434,16 @@ void MmsReportSubscriptionRuntime::stop(
     }
 
     bool cleanup_ok = true;
+    if (restore_enabled_required_) {
+        if (try_write_attribute_noexcept(
+                "RptEna", MmsDataValue::boolean(true), stop_token)) {
+            restore_enabled_required_ = false;
+            add_event(MmsReportSubscriptionEventKind::enabled,
+                      "Caller-owned RCB enable state restored.");
+        } else {
+            cleanup_ok = false;
+        }
+    }
     if (enabled_by_runtime_) {
         if (try_write_attribute_noexcept(
                 "RptEna", MmsDataValue::boolean(false), stop_token)) {
@@ -309,7 +465,8 @@ void MmsReportSubscriptionRuntime::stop(
         }
     }
 
-    cleanup_required_ = !cleanup_ok || enabled_by_runtime_ || reservation_touched_;
+    cleanup_required_ = !cleanup_ok || enabled_by_runtime_ ||
+        reservation_touched_ || restore_enabled_required_;
     if (cleanup_required_) {
         state_ = MmsReportSubscriptionState::cleanup_required;
         add_event(MmsReportSubscriptionEventKind::cleanup_deferred,
@@ -330,7 +487,6 @@ bool MmsReportSubscriptionRuntime::poll_once(
     const auto ingested = drain_queued_reports();
     return envelope.information_report || ingested != 0U;
 }
-
 
 void MmsReportSubscriptionRuntime::run(const std::stop_token stop_token) {
     if (!active()) {

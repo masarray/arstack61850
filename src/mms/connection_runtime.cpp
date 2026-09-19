@@ -7,6 +7,7 @@
 #include "ariec61850/mms/pdu_span.hpp"
 #include "ariec61850/mms/services_span.hpp"
 #include "ariec61850/osi/cotp_span.hpp"
+#include "ariec61850/osi/cotp_tpkt_stream.hpp"
 #include "ariec61850/osi/presentation_span.hpp"
 #include "ariec61850/osi/session_span.hpp"
 #include "ariec61850/osi/tpkt_span.hpp"
@@ -102,54 +103,43 @@ constexpr std::uint32_t kServerMaximumNestingLevel = 5U;
     const std::size_t consumed,
     const MmsStaticConnectionState state,
     const std::size_t negotiated_tpdu_size_bytes,
-    const std::span<std::uint8_t> response,
-    const std::span<std::uint8_t> workspace) noexcept {
-    std::size_t cotp_required{};
-    if (!add_overhead(session_or_presentation.size(), 3U, cotp_required)) {
-        return make_result(MmsStaticConnectionStatus::backend_failure, state);
-    }
-    if (negotiated_tpdu_size_bytes == 0U ||
-        cotp_required > negotiated_tpdu_size_bytes) {
+    const std::span<std::uint8_t> response) noexcept {
+    const auto encoded = osi::CotpTpktDataStreamSpanCodec::encode_into(
+        session_or_presentation, negotiated_tpdu_size_bytes, response);
+    if (!encoded.success()) {
+        if (encoded.status == wire::EncodeStatus::buffer_too_small) {
+            return make_response_capacity(state, encoded.required_bytes);
+        }
         return make_result(
-            MmsStaticConnectionStatus::peer_limit_exceeded, state, consumed);
+            negotiated_tpdu_size_bytes == 0U
+                ? MmsStaticConnectionStatus::peer_limit_exceeded
+                : MmsStaticConnectionStatus::backend_failure,
+            state,
+            consumed);
     }
-
-    std::size_t required{};
-    if (!add_overhead(cotp_required, osi::TpktSpanCodec::header_length, required)) {
-        return make_result(MmsStaticConnectionStatus::backend_failure, state);
-    }
-    if (response.size() < required) {
-        return make_response_capacity(state, required);
-    }
-    if (workspace.size() < required) {
-        return make_workspace_capacity(state, required);
-    }
-
-    const auto cotp = osi::CotpSpanCodec::encode_data_into(
-        session_or_presentation,
-        response.first(required - osi::TpktSpanCodec::header_length));
-    if (!cotp.success()) {
-        if (cotp.status == wire::EncodeStatus::buffer_too_small) {
-            return make_response_capacity(
-                state, cotp.required_bytes + osi::TpktSpanCodec::header_length);
-        }
-        return make_result(MmsStaticConnectionStatus::backend_failure, state);
-    }
-
-    const auto tpkt = osi::TpktSpanCodec::encode_into(
-        response.first(cotp.bytes_written), workspace.first(required));
-    if (!tpkt.success() || tpkt.bytes_written != required) {
-        if (tpkt.status == wire::EncodeStatus::buffer_too_small) {
-            return make_workspace_capacity(state, tpkt.required_bytes);
-        }
-        return make_result(MmsStaticConnectionStatus::backend_failure, state);
-    }
-    std::copy_n(workspace.begin(), tpkt.bytes_written, response.begin());
     return make_result(
         MmsStaticConnectionStatus::response_ready,
         state,
         consumed,
-        tpkt.bytes_written);
+        encoded.bytes_written);
+}
+
+[[nodiscard]] bool framed_mms_response_size(
+    const std::uint32_t presentation_context_id,
+    const std::size_t mms_bytes,
+    const std::size_t negotiated_tpdu_size_bytes,
+    std::size_t& required) noexcept {
+    required = 0U;
+    const auto fully_encoded = osi::PresentationSpanCodec::fully_encoded_data_size(
+        presentation_context_id, mms_bytes);
+    osi::CotpTpktDataStreamPlan plan;
+    if (!fully_encoded ||
+        !osi::CotpTpktDataStreamSpanCodec::try_plan(
+            *fully_encoded, negotiated_tpdu_size_bytes, plan)) {
+        return false;
+    }
+    required = plan.required_bytes;
+    return true;
 }
 
 [[nodiscard]] MmsConfirmedRequestRejectReason reject_reason_for(
@@ -258,6 +248,7 @@ constexpr std::uint32_t kServerMaximumNestingLevel = 5U;
     const MmsConfirmedPduView& confirmed,
     const MmsStaticApplicationDispatcher& dispatcher,
     const std::uint32_t presentation_context_id,
+    const std::size_t negotiated_tpdu_size_bytes,
     std::size_t& mms_required,
     std::size_t& frame_required) noexcept {
     mms_required = 0U;
@@ -288,10 +279,13 @@ constexpr std::uint32_t kServerMaximumNestingLevel = 5U;
         return false;
     }
     mms_required = probe.required_bytes;
-    const auto fully_encoded = osi::PresentationSpanCodec::fully_encoded_data_size(
-        presentation_context_id, probe.required_bytes);
-    return fully_encoded && add_overhead(*fully_encoded, 11U, frame_required);
+    return framed_mms_response_size(
+        presentation_context_id,
+        probe.required_bytes,
+        negotiated_tpdu_size_bytes,
+        frame_required);
 }
+
 
 } // namespace
 
@@ -500,8 +494,7 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
             peek.frame_bytes,
             MmsStaticConnectionState::established,
             negotiated_tpdu_size_bytes_,
-            response,
-            workspace);
+            response);
         if (!wrapped.response_ready()) {
             return wrapped;
         }
@@ -546,13 +539,11 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
                 confirmed,
                 dispatcher_,
                 mms_presentation_context_id_,
+                negotiated_tpdu_size_bytes_,
                 write_mms_required,
                 write_frame_required)) {
             if (negotiated_mms_pdu_size_ == 0U ||
-                write_mms_required > negotiated_mms_pdu_size_ ||
-                write_frame_required < osi::TpktSpanCodec::header_length ||
-                write_frame_required - osi::TpktSpanCodec::header_length >
-                    negotiated_tpdu_size_bytes_) {
+                write_mms_required > negotiated_mms_pdu_size_) {
                 return make_result(
                     MmsStaticConnectionStatus::peer_limit_exceeded,
                     state_,
@@ -567,15 +558,44 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
         }
     }
 
-    const auto application = dispatcher_.dispatch(
-        pdv.single_asn1_type, response, workspace, policy_.access_context());
+    MmsStaticDispatchResult application;
+    bool extension_handled{};
+    if (is_confirmed_request && policy_.confirmed_service != nullptr) {
+        const auto extension = policy_.confirmed_service(
+            policy_.confirmed_service_context,
+            confirmed.service(),
+            confirmed.invoke_id,
+            confirmed.service_constructed,
+            confirmed.service_value,
+            response);
+        extension_handled = extension.handled;
+        if (extension.handled) {
+            application.service = confirmed.service();
+            application.invoke_id = confirmed.invoke_id;
+            application.bytes_written = extension.encoded.bytes_written;
+            application.required_bytes = extension.encoded.required_bytes;
+            if (extension.encoded.success()) {
+                application.status = MmsStaticDispatchStatus::response_ready;
+            } else if (extension.encoded.status == wire::EncodeStatus::buffer_too_small) {
+                application.status = MmsStaticDispatchStatus::response_buffer_too_small;
+            } else {
+                application.status = MmsStaticDispatchStatus::backend_failure;
+            }
+        }
+    }
+    if (!extension_handled) {
+        application = dispatcher_.dispatch(
+            pdv.single_asn1_type, response, workspace, policy_.access_context());
+    }
     std::size_t mms_response_bytes = application.bytes_written;
     if (!application.success()) {
         if (application.status == MmsStaticDispatchStatus::response_buffer_too_small) {
-            const auto fully_encoded = osi::PresentationSpanCodec::fully_encoded_data_size(
-                mms_presentation_context_id_, application.required_bytes);
             std::size_t required{};
-            if (fully_encoded && add_overhead(*fully_encoded, 11U, required)) {
+            if (framed_mms_response_size(
+                    mms_presentation_context_id_,
+                    application.required_bytes,
+                    negotiated_tpdu_size_bytes_,
+                    required)) {
                 auto result = make_response_capacity(state_, required);
                 result.application_status = application.status;
                 result.application_service = application.service;
@@ -623,10 +643,12 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
                 response);
         if (!rejected.success()) {
             if (rejected.status == wire::EncodeStatus::buffer_too_small) {
-                const auto fully_encoded = osi::PresentationSpanCodec::fully_encoded_data_size(
-                    mms_presentation_context_id_, rejected.required_bytes);
                 std::size_t required{};
-                if (fully_encoded && add_overhead(*fully_encoded, 11U, required)) {
+                if (framed_mms_response_size(
+                        mms_presentation_context_id_,
+                        rejected.required_bytes,
+                        negotiated_tpdu_size_bytes_,
+                        required)) {
                     auto result = make_response_capacity(state_, required);
                     result.application_status = application.status;
                     result.application_service = application.service;
@@ -655,10 +677,7 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
         true);
     if (!p_data.success()) {
         if (p_data.status == wire::EncodeStatus::buffer_too_small) {
-            std::size_t required{};
-            if (add_overhead(p_data.required_bytes, 7U, required)) {
-                return make_workspace_capacity(state_, required);
-            }
+            return make_workspace_capacity(state_, p_data.required_bytes);
         }
         state_ = MmsStaticConnectionState::fault;
         return make_result(MmsStaticConnectionStatus::backend_failure, state_);
@@ -669,8 +688,7 @@ MmsStaticConnectionResult MmsStaticConnectionRuntime::process_tcp_window(
         peek.frame_bytes,
         state_,
         negotiated_tpdu_size_bytes_,
-        response,
-        workspace);
+        response);
     if (wrapped.response_ready()) {
         wrapped.application_status = application.status;
         wrapped.application_service = application.service;

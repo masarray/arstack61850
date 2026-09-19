@@ -6,6 +6,28 @@
                     }
                     document.report_controls.push_back(std::move(report));
                 }
+
+                if (is(logical_node, "LN0")) {
+                    for (const auto* control : direct_children(logical_node, "SettingControl")) {
+                        SclSettingControl setting;
+                        setting.ied_name = ied_name;
+                        setting.ld_inst = ld_inst;
+                        setting.logical_node_path = logical_node_path;
+                        setting.control_block_reference =
+                            ied_name + ld_inst + "/" + logical_node_path + "$SP$SGCB";
+                        setting.number_of_setting_groups =
+                            optional_uint_attribute(*control, "numOfSGs");
+                        setting.active_setting_group =
+                            optional_uint_attribute(*control, "actSG");
+                        if (!setting.valid()) {
+                            document.warnings.push_back(
+                                "SettingControl '" + setting.control_block_reference +
+                                "' has invalid or missing numOfSGs/actSG and will not be "
+                                "operational in simulator service projection.");
+                        }
+                        document.setting_controls.push_back(std::move(setting));
+                    }
+                }
             }
         }
     }

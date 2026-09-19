@@ -27,6 +27,49 @@ struct SclIed final {
     friend bool operator==(const SclIed&, const SclIed&) = default;
 };
 
+// MMS/OSI communication context carried by Communication/SubNetwork/ConnectedAP.
+// The server-side selectors are kept separately from the client compatibility
+// defaults because SCL describes the selected IED AccessPoint, not the local
+// engineering station identity.
+struct SclMmsAccessPoint final {
+    std::string ied_name;
+    std::string access_point_name;
+    std::string ip_address;
+    std::uint16_t tcp_port{102U};
+
+    // AP-title is stored as OID arcs rather than pre-encoded BER so the SCL
+    // model remains transport/codec independent. Empty means not supplied.
+    std::vector<std::uint32_t> ap_title;
+    std::optional<std::uint32_t> ae_qualifier;
+    std::vector<std::uint8_t> p_selector;
+    std::vector<std::uint8_t> s_selector;
+    std::vector<std::uint8_t> t_selector;
+
+    // A malformed explicitly supplied OSI field must not silently degrade to a
+    // generic association profile. Parser users can still inspect the SCL, while
+    // online consumers fail closed when selecting this AccessPoint.
+    bool association_parameters_present{};
+    bool association_parameters_valid{true};
+    std::string association_error;
+
+    friend bool operator==(const SclMmsAccessPoint&, const SclMmsAccessPoint&) = default;
+};
+
+struct SclLogicalNode final {
+    std::string ied_name;
+    std::string ld_inst;
+    std::string prefix;
+    std::string ln_class;
+    std::string ln_inst;
+    std::string name;
+
+    [[nodiscard]] std::string mms_domain() const {
+        return ied_name + ld_inst;
+    }
+
+    friend bool operator==(const SclLogicalNode&, const SclLogicalNode&) = default;
+};
+
 struct SclDataSetEntry final {
     std::size_t index{};
     std::string signal_reference;
@@ -45,6 +88,11 @@ struct SclDataSetEntry final {
     bool is_quality{};
     bool is_timestamp{};
 
+    // Instance-level DAI/Val value from SCL when one is explicitly configured.
+    // This is intentionally separate from runtime state: simulator adapters use it
+    // to seed configured semantics such as CF$...$ctlModel without inventing defaults.
+    std::string configured_value;
+
     friend bool operator==(const SclDataSetEntry&, const SclDataSetEntry&) = default;
 };
 
@@ -55,7 +103,15 @@ struct SclDataSet final {
     std::string logical_node_path;
     std::string name;
     std::string reference;
+
+    // Canonical SCL FCDA membership. A whole-DataObject FCDA intentionally keeps
+    // da_name empty and therefore remains one MMS DataSet member.
     std::vector<SclDataSetEntry> entries;
+
+    // Ordered leaf projection used by payload-oriented profiles such as SV and
+    // the current GOOSE publisher path. This view may contain several entries
+    // for one configured whole-DataObject FCDA.
+    std::vector<SclDataSetEntry> expanded_entries;
 
     friend bool operator==(const SclDataSet&, const SclDataSet&) = default;
 };
@@ -139,12 +195,40 @@ struct SclReportControl final {
     std::string control_block_reference;
     bool buffered{};
     bool indexed{true};
+
+    // IEC 61850 SCL ReportControl/RptEnabled@max.  This is the maximum number
+    // of simultaneously addressable client instances represented by an indexed
+    // ReportControl.  Keep the SCL definition count separate from the compiled
+    // runtime RCB instance count; an indexed definition with max=N exposes N
+    // concrete RCB object instances.  Missing/zero max is normalized to one by
+    // the parser so downstream compilers never need to invent a value.
+    std::uint32_t max_clients{1U};
+
     std::uint32_t configuration_revision{};
     std::uint32_t buffer_time_milliseconds{};
     std::uint32_t integrity_period_milliseconds{};
     std::vector<SclDataSetEntry> entries;
 
     friend bool operator==(const SclReportControl&, const SclReportControl&) = default;
+};
+
+struct SclSettingControl final {
+    std::string ied_name;
+    std::string ld_inst;
+    std::string logical_node_path;
+    std::string control_block_reference;
+    std::optional<std::uint32_t> number_of_setting_groups;
+    std::optional<std::uint32_t> active_setting_group;
+
+    [[nodiscard]] bool valid() const noexcept {
+        return number_of_setting_groups.has_value() &&
+            active_setting_group.has_value() &&
+            *number_of_setting_groups != 0U &&
+            *active_setting_group != 0U &&
+            *active_setting_group <= *number_of_setting_groups;
+    }
+
+    friend bool operator==(const SclSettingControl&, const SclSettingControl&) = default;
 };
 
 struct SclConflict final {
@@ -163,10 +247,28 @@ struct SclDocument final {
     std::string header_revision;
     SclEdition edition{SclEdition::unknown};
     std::vector<SclIed> ieds;
+
+    // Communication/SubNetwork/ConnectedAP MMS endpoint and OSI association
+    // context. This stays in the canonical SCL model so desktop/client layers do
+    // not reparse XML or guess vendor-specific addressing independently.
+    std::vector<SclMmsAccessPoint> mms_access_points;
+
+    // Structural logical-node inventory from the same bounded parser used for
+    // all other SCL data. UI/server layers must consume this instead of
+    // reparsing the source XML independently.
+    std::vector<SclLogicalNode> logical_nodes;
+
+    // Complete structural LD/LN/DO/DA(BDA) leaf projection derived from
+    // DataTypeTemplates. Unlike DataSet entries this inventory is not reduced
+    // to signals referenced by service bindings; simulator/server consumers
+    // use it as the authoritative SCL data-model leaf catalog.
+    std::vector<SclDataSetEntry> model_entries;
+
     std::vector<SclDataSet> data_sets;
     std::vector<SclGooseStream> goose_streams;
     std::vector<SclSampledValuesStream> sampled_values_streams;
     std::vector<SclReportControl> report_controls;
+    std::vector<SclSettingControl> setting_controls;
     std::vector<std::string> warnings;
     std::vector<SclConflict> conflicts;
 

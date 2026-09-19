@@ -37,12 +37,23 @@ add_library(ariec61850_interop_parity_server_core STATIC
     "${ARSTACK_ROOT}/src/mms/write_span.cpp"
     "${ARSTACK_ROOT}/src/mms/data_set_span.cpp"
     "${ARSTACK_ROOT}/src/mms/information_report_span.cpp"
+    "${ARSTACK_ROOT}/src/mms/buffered_selective_information_report_span.cpp"
     "${ARSTACK_ROOT}/src/mms/static_object_table.cpp"
     "${ARSTACK_ROOT}/src/mms/static_write.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_direct_control.cpp"
     "${ARSTACK_ROOT}/src/mms/static_data_set_table.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_setting_group.cpp"
     "${ARSTACK_ROOT}/src/mms/static_dispatcher.cpp"
     "${ARSTACK_ROOT}/src/mms/connection_runtime_iedsim.cpp"
-    "${ARSTACK_ROOT}/src/mms/static_server_session.cpp")
+    "${ARSTACK_ROOT}/src/mms/static_server_session.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_information_report.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_report_connection.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_urcb_objects.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_urcb_runtime.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_brcb_runtime.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_brcb_control.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_brcb_objects.cpp"
+    "${ARSTACK_ROOT}/src/mms/static_brcb_connection.cpp")
 target_include_directories(ariec61850_interop_parity_server_core PUBLIC
     "${ARSTACK_ROOT}/include")
 target_compile_features(ariec61850_interop_parity_server_core PUBLIC cxx_std_20)
@@ -74,6 +85,49 @@ target_link_libraries(ariec61850_interop_parity_read_probe PRIVATE
 target_compile_features(ariec61850_interop_parity_read_probe PRIVATE cxx_std_20)
 parity_strict_warnings(ariec61850_interop_parity_read_probe)
 
+add_executable(ariec61850_interop_parity_type_probe
+    "${ARSTACK_ROOT}/tools/mms_type_probe.cpp")
+target_link_libraries(ariec61850_interop_parity_type_probe PRIVATE
+    ARIEC61850::core)
+target_compile_features(ariec61850_interop_parity_type_probe PRIVATE cxx_std_20)
+parity_strict_warnings(ariec61850_interop_parity_type_probe)
+
+add_executable(ariec61850_interop_parity_urcb_gi_probe
+    "${ARSTACK_ROOT}/tools/mms_urcb_gi_probe.cpp")
+target_link_libraries(ariec61850_interop_parity_urcb_gi_probe PRIVATE
+    ARIEC61850::core)
+target_compile_features(ariec61850_interop_parity_urcb_gi_probe PRIVATE cxx_std_20)
+parity_strict_warnings(ariec61850_interop_parity_urcb_gi_probe)
+
+add_executable(ariec61850_interop_parity_control_probe
+    "${ARSTACK_ROOT}/tools/control_interop_probe.cpp")
+target_link_libraries(ariec61850_interop_parity_control_probe PRIVATE
+    ARIEC61850::core)
+target_compile_features(ariec61850_interop_parity_control_probe PRIVATE cxx_std_20)
+parity_strict_warnings(ariec61850_interop_parity_control_probe)
+
+add_executable(ariec61850_interop_control_wire_probe
+    "${ARSTACK_ROOT}/tools/interop_control_wire_probe.cpp")
+target_link_libraries(ariec61850_interop_control_wire_probe PRIVATE
+    ARIEC61850::core)
+target_compile_features(ariec61850_interop_control_wire_probe PRIVATE cxx_std_20)
+parity_strict_warnings(ariec61850_interop_control_wire_probe)
+
+add_executable(ariec61850_interop_reporting_golden_test
+    "${CMAKE_CURRENT_LIST_DIR}/test_reporting_golden.cpp")
+target_link_libraries(ariec61850_interop_reporting_golden_test PRIVATE
+    ariec61850_interop_parity_server_core
+    ARIEC61850::core)
+target_compile_features(ariec61850_interop_reporting_golden_test PRIVATE cxx_std_20)
+parity_strict_warnings(ariec61850_interop_reporting_golden_test)
+
+add_executable(ariec61850_interop_reporting_wire_probe
+    "${ARSTACK_ROOT}/tools/interop_reporting_wire_probe.cpp")
+target_link_libraries(ariec61850_interop_reporting_wire_probe PRIVATE
+    ARIEC61850::core)
+target_compile_features(ariec61850_interop_reporting_wire_probe PRIVATE cxx_std_20)
+parity_strict_warnings(ariec61850_interop_reporting_wire_probe)
+
 enable_testing()
 add_test(NAME interop_parity_server_help
     COMMAND ariec61850_static_ied_server_iedsim --help)
@@ -94,4 +148,85 @@ add_test(
         "${CMAKE_CURRENT_LIST_DIR}/test_runtime_model.py"
         --server $<TARGET_FILE:ariec61850_static_ied_server_iedsim>
         --discovery $<TARGET_FILE:ariec61850_interop_parity_live_discover>
-        --read-probe $<TARGET_FILE:ariec61850_interop_parity_read_probe>)
+        --read-probe $<TARGET_FILE:ariec61850_interop_parity_read_probe>
+        --urcb-probe $<TARGET_FILE:ariec61850_interop_parity_urcb_gi_probe>)
+
+add_test(
+    NAME interop_parity_full_discovery_large_model
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_LIST_DIR}/test_interop_full_discovery.py"
+        --server $<TARGET_FILE:ariec61850_static_ied_server_iedsim>
+        --discovery $<TARGET_FILE:ariec61850_interop_parity_live_discover>)
+set_tests_properties(
+    interop_parity_full_discovery_large_model
+    PROPERTIES TIMEOUT 20)
+
+add_test(
+    NAME interop_parity_cswi1_type_golden
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_LIST_DIR}/test_cswi1_type_golden.py"
+        --server $<TARGET_FILE:ariec61850_static_ied_server_iedsim>
+        --type-probe $<TARGET_FILE:ariec61850_interop_parity_type_probe>)
+set_tests_properties(
+    interop_parity_cswi1_type_golden
+    PROPERTIES TIMEOUT 20)
+
+add_test(
+    NAME interop_parity_dpc_control
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_LIST_DIR}/test_control_golden.py"
+        --server $<TARGET_FILE:ariec61850_static_ied_server_iedsim>
+        --control-probe $<TARGET_FILE:ariec61850_interop_parity_control_probe>)
+
+add_test(
+    NAME interop_parity_real_control_wire
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_LIST_DIR}/test_interop_control_wire.py"
+        --server $<TARGET_FILE:ariec61850_static_ied_server_iedsim>
+        --wire-probe $<TARGET_FILE:ariec61850_interop_control_wire_probe>)
+set_tests_properties(
+    interop_parity_real_control_wire
+    PROPERTIES TIMEOUT 20)
+
+add_test(
+    NAME interop_parity_reporting_golden
+    COMMAND ariec61850_interop_reporting_golden_test)
+set_tests_properties(
+    interop_parity_reporting_golden
+    PROPERTIES TIMEOUT 20)
+
+add_test(
+    NAME interop_parity_reporting_wire
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_LIST_DIR}/test_reporting_wire.py"
+        --server $<TARGET_FILE:ariec61850_static_ied_server_iedsim>
+        --wire-probe $<TARGET_FILE:ariec61850_interop_reporting_wire_probe>)
+set_tests_properties(
+    interop_parity_reporting_wire
+    PROPERTIES TIMEOUT 30)
+add_executable(ariec61850_interop_parity_file_transfer
+    "${ARSTACK_ROOT}/tools/file_transfer.cpp")
+target_link_libraries(ariec61850_interop_parity_file_transfer PRIVATE ARIEC61850::core)
+target_compile_features(ariec61850_interop_parity_file_transfer PRIVATE cxx_std_20)
+parity_strict_warnings(ariec61850_interop_parity_file_transfer)
+
+add_executable(ariec61850_interop_host_file_service_test
+    "${ARSTACK_ROOT}/tools/static_file_service_backend_test.cpp")
+target_link_libraries(ariec61850_interop_host_file_service_test PRIVATE ARIEC61850::core)
+target_compile_features(ariec61850_interop_host_file_service_test PRIVATE cxx_std_20)
+parity_strict_warnings(ariec61850_interop_host_file_service_test)
+
+add_test(NAME interop_host_file_service
+    COMMAND ariec61850_interop_host_file_service_test)
+add_test(
+    NAME interop_file_service_loopback
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_LIST_DIR}/test_file_service.py"
+        --server $<TARGET_FILE:ariec61850_static_ied_server_iedsim>
+        --client $<TARGET_FILE:ariec61850_interop_parity_file_transfer>)

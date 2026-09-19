@@ -89,6 +89,12 @@ struct MmsTypeSpecification final {
     std::optional<std::uint32_t> exponent_width;
     std::vector<MmsTypeSpecification> children;
 
+    // MMS TypeDescription uses a negative size to express a maximum
+    // variable-length string/octet bound (for example VisibleString -255).
+    // Keep the public magnitude unsigned and carry the sign semantic
+    // explicitly so fixed-width integer/bit-string users remain unchanged.
+    bool variable_length{};
+
     [[nodiscard]] std::string mms_type_name() const;
     [[nodiscard]] std::string scl_basic_type() const;
     [[nodiscard]] std::string signature() const;

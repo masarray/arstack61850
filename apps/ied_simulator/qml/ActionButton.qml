@@ -29,7 +29,12 @@ Button {
         }
         Label {
             text: control.text
-            color: control.enabled ? theme.text : theme.muted
+            color: {
+                if (!control.enabled) return theme.muted
+                if (control.primary) return "#ffffff"
+                if (control.danger && control.hovered) return "#ffffff"
+                return theme.text
+            }
             font.family: control.font.family
             font.pixelSize: theme.labelSize
             font.weight: Font.DemiBold
@@ -48,8 +53,8 @@ Button {
         }
         color: {
             if (!control.enabled) return theme.chrome
-            if (control.primary) return control.pressed ? "#286fca" : (control.hovered ? theme.accentHover : theme.accent)
-            if (control.danger) return control.hovered ? theme.redSoft : theme.surfaceRaised
+            if (control.primary) return control.pressed ? theme.navigationDark : (control.hovered ? theme.accentHover : theme.accent)
+            if (control.danger) return control.hovered ? theme.red : theme.surface
             return control.pressed ? theme.surfaceSoft : (control.hovered ? theme.surfaceRaised : theme.surface)
         }
     }
