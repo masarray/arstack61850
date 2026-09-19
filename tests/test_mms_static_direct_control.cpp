@@ -205,7 +205,9 @@ void invalid_shape_and_values_are_rejected() {
     result = mms_static_direct_boolean_write_oper(&binding, make_oper(true, 11U, false, 0U, 9U));
     CHECK(!result.success);
     CHECK(result.failure_code == 11U);
-    CHECK(state.value == 0U);
+    // The preceding valid ctlNum=0 Oper already published true; the invalid
+    // origin must not mutate that accepted state.
+    CHECK(state.value == 1U);
 }
 
 [[nodiscard]] bool reject_backend(void*, bool) noexcept {
