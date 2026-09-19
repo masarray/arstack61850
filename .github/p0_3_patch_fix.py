@@ -46,7 +46,7 @@ if old not in text:
     raise SystemExit('connection_policy helper patch point missing')
 text = text.replace(old, new, 1)
 
-anchor = '''# URCB server regression: use the IEDScout-like 1024-byte offer in production,
+anchor = '''# URCB server regression: use the external-client-like 1024-byte offer in production,
 # but force 128 here plus a long RptID so the InformationReport definitely spans
 # multiple TPKTs. Reassemble only inside the test decoder.
 '''
