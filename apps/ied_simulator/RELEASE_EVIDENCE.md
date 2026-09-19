@@ -1,5 +1,13 @@
 # IEDScout Product Release Evidence
 
+## v0.2.0 stable-release candidate
+
+Current promotion branch includes the accepted IEDScout parity baseline through P1 reporting golden parity. External OMICRON IEDScout retest on 2026-09-19 using `Siprotec_084F06BCU_AA1E1F06R4.cid` demonstrated full discovery of 32 logical devices / 4925 typed points, URCB and BRCB report delivery, SBO Enhanced Open/Close with external `ctlNum=0`, positive CommandTermination before process feedback, and BRCB SqNum progression 1 -> 2 -> 3. The same diagnostic also retained successful control with ctlNum 1/2 on a second client path.
+
+This evidence is specific to the tested OMICRON IEDScout + SIPROTEC CID profile. It is not an IEC 61850 conformance certificate and is not generalized into universal multi-vendor interoperability.
+
+P1 regression head `68cad00fed15bf77104593c93bfd66d5c5590d1c` passed all eight triggered workflows, including IEDScout Parity 11/11 on Linux GCC, Linux Clang and Windows/MSVC. P1 was merged into the accepted baseline as `17a6932633328daef8647fc6e4b18a053df6b4e1` before stable-release promotion.
+
 This document is the release-candidate evidence ledger for the ARStack IEC 61850 desktop workbench. It deliberately distinguishes what is proven live, what is proven against the deterministic simulator/runtime harnesses, what is offline/model tested, and what is not claimed.
 
 ## Evidence classes
@@ -16,12 +24,12 @@ A feature may have more than one evidence class. The strongest applicable class 
 | Product surface | Evidence class | Proven release behavior | Important boundary |
 | --- | --- | --- | --- |
 | IED Connection | LIVE-PROVEN + SIMULATOR-PROVEN | persistent MMS association; live discovery; exact-type Read; guarded SP/CF/DC/SE scalar Write; verification Read; stale-generation rejection; 24-cycle reconnect/clean-disconnect soak | no automatic Write retry; startup restores endpoint but deliberately does not auto-connect |
-| Reports | SIMULATOR-PROVEN | DataSet/URCB/BRCB inventory; enable/GI/disable-release; retained cleanup/reacquire; decoded report stream; EntryID/overflow indicators | replay/rewind mutation is not claimed where the reusable client runtime does not expose it |
+| Reports | LIVE-PROVEN + SIMULATOR-PROVEN | DataSet/URCB/BRCB inventory; enable/GI/disable-release; decoded report stream; EntryID/ConfRev/SqNum/ReasonForInclusion; OMICRON IEDScout URCB/BRCB acceptance on the tested SIPROTEC profile | replay/rewind mutation is not claimed where the reusable client runtime does not expose it |
 | Files | SIMULATOR-PROVEN | bounded FileDirectory pagination and streaming download with FileClose/partial-output cleanup | remote upload/delete/rename are NOT CLAIMED |
 | Settings | SIMULATOR-PROVEN | SGCB inventory/deep read; guarded ActSG activation followed by verification Read | full EditSG -> SE edits -> CnfEdit transaction is NOT CLAIMED |
 | SCL | OFFLINE-TESTED + LIVE-UI-PROVEN | exact-source Save As; deterministic canonical reconstruction; Ed1/Ed2/Ed2.1 normalized conversion; guarded SCD/ICD/CID; semantic round trip | canonical conversion does not claim lossless unknown vendor XML/extensions; exact-source Save As is the vendor-lossless path |
 | GOOSE Monitor/Publisher | LIVE-PROVEN + SIMULATOR-PROVEN | explicit NIC binding; real Layer-2 publisher path; APPID/MAC/VLAN/goID/DataSet/ConfRev; stNum/sqNum/TTL; bounded monitor tables; PCAP export | Windows raw Ethernet requires Npcap runtime availability |
-| Simulator | LIVE-PROVEN + SIMULATOR-PROVEN | child MMS server lifecycle; multi-IED same-port/distinct-address coexistence; live value plane; direct/SBO normal and enhanced controls; URCB/BRCB; bounded start/stop/restart | broader Sampled Values/PTP/embedded platform roadmap is not a desktop RC blocker |
+| Simulator | LIVE-PROVEN + SIMULATOR-PROVEN | child MMS server lifecycle; multi-IED same-port/distinct-address coexistence; live value plane; direct/SBO normal and enhanced controls; URCB/BRCB; OMICRON IEDScout discovery/report/control acceptance for the tested SIPROTEC CID; bounded start/stop/restart | broader Sampled Values/PTP/embedded platform roadmap is not a desktop RC blocker; vendor-specific acceptance is not universal conformance |
 | Product persistence | OFFLINE-TESTED + UI-PROVEN | atomic versioned state; workspace restore; eight-entry deduplicated recent endpoint list; corrupt/unknown state fail-closed recovery | automatic connection on startup is intentionally disabled |
 | Diagnostics | OFFLINE-TESTED + UI-PROVEN | bounded activity retention plus atomic diagnostics export with a 2 MiB payload guard | diagnostics export is operational evidence, not a protocol trace substitute |
 | Windows package | DEPLOYED/INSTALLED-PROVEN | `windeployqt` staging; portable ZIP; NSIS installer; silent install; staged and installed smoke test; helper server and Qt runtime verification | installer does not silently redistribute Npcap; runtime guidance remains explicit |
@@ -81,9 +89,9 @@ The release package does **not** bundle or silently redistribute Npcap.
 
 ## External-vendor interoperability status
 
-No third-party vendor IED or proprietary vendor simulator is attached to the automated GitHub runner used for this release track. Therefore **multi-vendor field interoperability is NOT CLAIMED as automated release evidence**. The RC evidence instead records real MMS wire behavior, deterministic ARStack server/client interoperability, real Layer-2 GOOSE encoding/publication evidence, control/report/file/settings protocol harnesses, and explicit vendor-neutral fail-closed boundaries.
+The stable-release candidate now includes **vendor-specific external interoperability evidence** from OMICRON IEDScout using the SIPROTEC CID profile exercised throughout the parity work. The retained diagnostic proves full model discovery, URCB/BRCB reporting, SBO Enhanced Open/Close with IEDScout `ctlNum=0`, positive CommandTermination ordering, process feedback, and BRCB event progression.
 
-When external vendor hardware/simulators are available, results should be appended as vendor-specific evidence rather than retroactively relabeling simulator proof as vendor proof. Lack of attached vendor hardware is not used to fabricate a pass or fail.
+This evidence is deliberately scoped. No physical relay was attached to the GitHub runner, and the OMICRON/SIPROTEC result is not relabelled as universal multi-vendor interoperability or IEC 61850 conformance certification. Additional vendor hardware/simulator results should be appended as separate profile-specific evidence.
 
 ## Known intentional limitations at RC
 
@@ -92,7 +100,7 @@ When external vendor hardware/simulators are available, results should be append
 - Lossless unknown vendor XML/extensions during canonical SCL conversion: **NOT CLAIMED**; exact-source Save As preserves the source bytes.
 - Automatic field-device connection after application restart: intentionally disabled.
 - Windows raw Ethernet without Npcap: unavailable by design and surfaced with operator guidance.
-- Third-party vendor hardware/proprietary simulator interoperability: **NOT CLAIMED** until such devices are actually attached and evidenced.
+- Universal multi-vendor interoperability: **NOT CLAIMED**. OMICRON IEDScout + the tested SIPROTEC CID profile is externally evidenced; other vendor/device profiles require their own acceptance evidence.
 - Sampled Values runtime simulation, PTP, ESP/embedded and broader process-bus platform work remain separate ARStack platform tracks and are not desktop RC prerequisites.
 
 ## Packaging artifacts
