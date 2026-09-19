@@ -142,12 +142,12 @@ foreach(server_smoke IN ITEMS
         mms_static_model
         mms_write
         mms_dispatcher
-        mms_iedscout_bulk_read
-        mms_iedscout_pagination
-        mms_iedscout_fc_root_read
-        mms_iedscout_rcb_root
-        mms_iedscout_rcb_control
-        mms_iedscout_composed_gvaa
+        mms_interop_bulk_read
+        mms_interop_pagination
+        mms_interop_fc_root_read
+        mms_interop_rcb_root
+        mms_interop_rcb_control
+        mms_interop_composed_gvaa
         mms_urcb_event
         mms_connection_runtime
         mms_negotiated_limits
