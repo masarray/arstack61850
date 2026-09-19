@@ -1346,7 +1346,7 @@ void rebuild_manifest_root_values(ManifestModel& model) {
     // control-service objects. Structural ST/CF leaves remain sourced from SCL;
     // CO$SBO/SBOw/Oper/Cancel are service objects owned by the server runtime.
     // DPC process stVal remains DBPOS (2-bit BIT STRING); only the CO service
-    // ctlVal follows the IEDScout wire contract and is BOOLEAN Open/Close.
+    // ctlVal follows the external IEC 61850 client wire contract and is BOOLEAN Open/Close.
     const auto oper_type = direct_boolean_oper_type_specification();
     const auto sbow_type = direct_boolean_sbow_type_specification();
     const auto cancel_type = direct_boolean_cancel_type_specification();
@@ -2063,7 +2063,7 @@ void serve_connection(
     std::unique_ptr<filehost::StaticFileServiceSession> file_session;
 
     mms::MmsStaticDispatchPolicy dispatch_policy;
-    // IEDScout can configure an RCB and re-enable it in one MMS Write.
+    // external IEC 61850 client can configure an RCB and re-enable it in one MMS Write.
     // Keep the host transaction bounded to one complete BRCB attribute set.
     dispatch_policy.maximum_write_variables = 16U;
     const mms::MmsStaticObjectTable* dispatch_objects = &object_table;
@@ -2087,7 +2087,7 @@ void serve_connection(
             binding.sbo_timeout_ms = 10'000U;
             binding.now_ms = report_now_ms;
             binding.now_context = nullptr;
-            // Golden IEDScout accepts ARSAS Check=0xC0 for this simulator
+            // Golden external IEC 61850 client accepts ARSAS Check=0xC0 for this simulator
             // control path (synchro + interlock requested).
             binding.policy.allow_synchro_check = true;
             binding.policy.allow_interlock_check = true;
@@ -2612,7 +2612,7 @@ void serve_connection(
                 break;
             }
         }
-        // Match the IEDScout enhanced-control wire lifecycle: positive Oper
+        // Match the external IEC 61850 client enhanced-control wire lifecycle: positive Oper
         // response first, then positive CommandTermination, then commit process
         // state and notify RCB feedback. Direct-Normal controls have no pending
         // termination, so they still commit in this same loop iteration.
@@ -2961,7 +2961,7 @@ int main(int argc, char** argv) {
             << " max_active=" << options.maximum_active_connections
             << " files=" << (file_root ? "enabled" : "disabled")
             << " file_delete=" << (options.allow_file_delete ? "enabled" : "disabled")
-            << " profile=iedscout" << '\n';
+            << " profile=interop" << '\n';
 
         LiveUpdateBus live_updates{options.live_generation};
         LiveInputState live_input;
