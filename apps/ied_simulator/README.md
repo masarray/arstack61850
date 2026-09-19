@@ -9,7 +9,7 @@ one executable while reusing the repository SCL parser and MMS server.
 1. Import an SCL, CID, SCD, IID, or ICD engineering file.
 2. Review parsed IEDs and model/service counts.
 3. Select the local interface, MMS port, GOOSE option, and file-service folder.
-4. Start the bundled IEDScout-compatible `ariec61850_ied_simulator_server`.
+4. Start the bundled IEC 61850 interoperability `ariec61850_ied_simulator_server`.
 5. Use the runtime workspace to switch between imported IEDs and edit resolved
    DataSet/report/GOOSE members with type-aware controls, quality, origin, and
    undo history.
@@ -40,7 +40,7 @@ The app target also builds `ariec61850_ied_simulator_server`. Keep both
 executables beside each other when packaging.
 
 The discovery status becomes green only after the server emits listener-ready
-evidence. Use **Copy diagnostics** to capture the endpoint, IEDScout association
+evidence. Use **Copy diagnostics** to capture the endpoint, external IEC 61850 client association
 profile, process state, model counts, and recent protocol activity.
 
 ## Runtime interoperability test
