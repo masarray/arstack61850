@@ -116,6 +116,7 @@ parity_strict_warnings(ariec61850_iedscout_control_wire_probe)
 add_executable(ariec61850_iedscout_reporting_golden_test
     "${CMAKE_CURRENT_LIST_DIR}/test_reporting_golden.cpp")
 target_link_libraries(ariec61850_iedscout_reporting_golden_test PRIVATE
+    ariec61850_iedscout_parity_server_core
     ARIEC61850::core)
 target_compile_features(ariec61850_iedscout_reporting_golden_test PRIVATE cxx_std_20)
 parity_strict_warnings(ariec61850_iedscout_reporting_golden_test)
