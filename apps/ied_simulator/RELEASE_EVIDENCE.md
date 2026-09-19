@@ -2,7 +2,7 @@
 
 ## v0.2.0 stable-release candidate
 
-Current promotion branch includes the accepted external IEC 61850 client parity baseline through P1 reporting golden parity. External external vendor external IEC 61850 client retest on 2026-09-19 using `Siprotec_084F06BCU_AA1E1F06R4.cid` demonstrated full discovery of 32 logical devices / 4925 typed points, URCB and BRCB report delivery, SBO Enhanced Open/Close with external `ctlNum=0`, positive CommandTermination before process feedback, and BRCB SqNum progression 1 -> 2 -> 3. The same diagnostic also retained successful control with ctlNum 1/2 on a second client path.
+Current promotion branch includes the accepted external IEC 61850 client parity baseline through P1 reporting golden parity. External external vendor external IEC 61850 client retest on 2026-09-19 using `reference IEC 61850 model_084F06BCU_AA1E1F06R4.cid` demonstrated full discovery of 32 logical devices / 4925 typed points, URCB and BRCB report delivery, SBO Enhanced Open/Close with external `ctlNum=0`, positive CommandTermination before process feedback, and BRCB SqNum progression 1 -> 2 -> 3. The same diagnostic also retained successful control with ctlNum 1/2 on a second client path.
 
 This evidence is specific to the tested external vendor external IEC 61850 client + reference IEC 61850 model CID profile. It is not an IEC 61850 conformance certificate and is not generalized into universal multi-vendor interoperability.
 
