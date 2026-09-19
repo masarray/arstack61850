@@ -85,12 +85,12 @@ jobs:
           ./build-ied-simulator-qt/ied_report_workspace_qa
           ./tests/fixtures/scl/minimal-station-brcb.scd
 
-      - name: IEDScout indexed RCB production-path gate
+      - name: external IEC 61850 client indexed RCB production-path gate
         env:
           QT_QPA_PLATFORM: offscreen
         run: >-
           ./build-ied-simulator-qt/ied_report_workspace_qa
-          ./tests/fixtures/scl/iedscout-indexed-reports.scd
+          ./tests/fixtures/scl/interop-indexed-reports.scd
 
       - name: File transfer + Setting Groups workspace gates
         env:
@@ -106,14 +106,14 @@ jobs:
           --server ./build-ied-simulator-qt/ariec61850_ied_simulator_server
           --build-dir ./build-ied-simulator-qt
 
-      - name: IEDScout synthetic golden runtime gate
+      - name: external IEC 61850 client synthetic golden runtime gate
         env:
           QT_QPA_PLATFORM: offscreen
         run: >-
-          python3 apps/ied_simulator/test_iedscout_golden_synthetic.py
+          python3 apps/ied_simulator/test_interop_golden_synthetic.py
           --app ./build-ied-simulator-qt/arstack_ied_simulator
           --build-dir ./build-ied-simulator-qt
-          --scl ./tests/fixtures/scl/iedscout-golden-synthetic.cid
+          --scl ./tests/fixtures/scl/interop-golden-synthetic.cid
 
       - name: SCL workspace preservation + conversion-policy gates
         env:
