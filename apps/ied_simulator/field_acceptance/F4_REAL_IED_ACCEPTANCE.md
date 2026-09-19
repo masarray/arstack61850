@@ -1,12 +1,12 @@
-# F4 — Real IED / IEDScout External Acceptance
+# F4 — Real IED / external IEC 61850 client External Acceptance
 
 F4 is the external interoperability gate for PR #82. Internal simulator/loopback CI is necessary but is **not** external acceptance.
 
 ## Acceptance lanes
 
-### A. IEDScout -> ARStack simulator server (mandatory for issue #95)
+### A. external IEC 61850 client -> ARStack simulator server (mandatory for issue #95)
 
-Use the same CID/SCL model used for the golden IEDScout capture. Run the ARStack Workbench/server in normal/process mode, then connect OMICRON IEDScout to the ARStack endpoint.
+Use the same CID/SCL model used for the golden external IEC 61850 client capture. Run the ARStack Workbench/server in normal/process mode, then connect external vendor external IEC 61850 client to the ARStack endpoint.
 
 Required evidence:
 
@@ -55,11 +55,11 @@ Install Wireshark/Npcap so `dumpcap.exe` is available. List capture interfaces:
 
 Note the numeric interface id. Start the ARStack server/Workbench or make the real IED reachable **before** starting evidence collection.
 
-Example, IEDScout testing ARStack on loopback:
+Example, external IEC 61850 client testing ARStack on loopback:
 
 ```powershell
 .\collect-f4-evidence.ps1 `
-  -Mode IEDScoutToARStack `
+  -Mode ExternalClientToARStack `
   -TargetIp 127.0.0.1 `
   -InterfaceId 1 `
   -DurationSeconds 180
@@ -79,4 +79,4 @@ During the capture, execute the acceptance steps above. The collector writes a t
 
 ## Pass / close rule
 
-Internal CI may mark the F4 **RC ready**, but issue #95 stays open until lane A is executed with real IEDScout and the captured evidence shows the required discovery/reporting behavior without an association-loss blocker. A simulator-only result must never be relabelled as external IEDScout acceptance.
+Internal CI may mark the F4 **RC ready**, but issue #95 stays open until lane A is executed with real external IEC 61850 client and the captured evidence shows the required discovery/reporting behavior without an association-loss blocker. A simulator-only result must never be relabelled as external external IEC 61850 client acceptance.
