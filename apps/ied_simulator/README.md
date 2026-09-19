@@ -1,6 +1,6 @@
 # ARStack IED Simulator
 
-**Stable release candidate: v0.2.0.** The current candidate has passed the retained cross-platform release matrix and a real OMICRON IEDScout interoperability retest using the SIPROTEC CID profile exercised by the parity work.
+**Stable release candidate: v0.2.0.** The current candidate has passed the retained cross-platform release matrix and a real external vendor external IEC 61850 client interoperability retest using the reference IEC 61850 model CID profile exercised by the parity work.
 
 `arstack_ied_simulator` is the Qt/QML desktop shell for the portable IEC 61850
 server stack. It keeps the commissioning flow and the live value workspace in
@@ -11,7 +11,7 @@ one executable while reusing the repository SCL parser and MMS server.
 1. Import an SCL, CID, SCD, IID, or ICD engineering file.
 2. Review parsed IEDs and model/service counts.
 3. Select the local interface, MMS port, GOOSE option, and file-service folder.
-4. Start the bundled IEDScout-compatible `ariec61850_ied_simulator_server`.
+4. Start the bundled IEC 61850 interoperability `ariec61850_ied_simulator_server`.
 5. Use the runtime workspace to switch between imported IEDs and edit resolved
    SCL leaf values with type-aware controls, quality, origin, and undo history.
 
@@ -30,11 +30,11 @@ Multiple associations can be served concurrently. TCP/COTP/ACSE/MMS activity
 and value synchronization are reported back to the GUI.
 
 ReportControl blocks are carried from SCL into the same simulator endpoint.
-The regression-covered reporting path includes URCB reservation/enable/GI and BRCB enable/GI/event delivery with `EntryID`, ordered DataSet membership, ReasonForInclusion, ConfRev, SqNum progression, and retained buffered delivery semantics. The accepted OMICRON IEDScout retest exercised URCB and BRCB reporting against the SIPROTEC CID profile used for parity work.
+The regression-covered reporting path includes URCB reservation/enable/GI and BRCB enable/GI/event delivery with `EntryID`, ordered DataSet membership, ReasonForInclusion, ConfRev, SqNum progression, and retained buffered delivery semantics. The accepted external vendor external IEC 61850 client retest exercised URCB and BRCB reporting against the reference IEC 61850 model CID profile used for parity work.
 
-Client-originated IEC 61850 controls are supported for the guarded Direct/SBO normal and enhanced paths implemented by the shared control stack. The accepted IEDScout retest proved SBO Enhanced Open/Close with external `ctlNum=0`, positive CommandTermination before process feedback, and BRCB event delivery after feedback. The desktop workbench also includes the regression-covered GOOSE Monitor/Publisher, bounded MMS file download service, Setting Group ActSG workflow, and SCL export/conversion workspaces.
+Client-originated IEC 61850 controls are supported for the guarded Direct/SBO normal and enhanced paths implemented by the shared control stack. The accepted external IEC 61850 client retest proved SBO Enhanced Open/Close with external `ctlNum=0`, positive CommandTermination before process feedback, and BRCB event delivery after feedback. The desktop workbench also includes the regression-covered GOOSE Monitor/Publisher, bounded MMS file download service, Setting Group ActSG workflow, and SCL export/conversion workspaces.
 
-Intentional release boundaries remain: dynamic DataSet creation/deletion is not claimed; MMS remote file upload/delete/rename is not claimed; full `EditSG -> SE edits -> CnfEdit` is not claimed; canonical SCL conversion does not claim lossless unknown vendor extensions; and the OMICRON/SIPROTEC result is vendor-specific interoperability evidence rather than universal IEC 61850 conformance certification.
+Intentional release boundaries remain: dynamic DataSet creation/deletion is not claimed; MMS remote file upload/delete/rename is not claimed; full `EditSG -> SE edits -> CnfEdit` is not claimed; canonical SCL conversion does not claim lossless unknown vendor extensions; and the external vendor/reference IEC 61850 model result is vendor-specific interoperability evidence rather than universal IEC 61850 conformance certification.
 
 ## Windows build
 
@@ -50,7 +50,7 @@ URCB/BRCB regression probes. Keep the simulator and server executables beside
 each other when packaging.
 
 The discovery status becomes green only after the server emits listener-ready
-evidence. Use **Copy diagnostics** to capture the endpoint, IEDScout association
+evidence. Use **Copy diagnostics** to capture the endpoint, external IEC 61850 client association
 profile, process state, model counts, and recent protocol activity.
 
 ## Runtime interoperability test
