@@ -61,14 +61,17 @@ private:
         int port{102};
     };
 
-    static constexpr int stateSchemaVersion = 1;
+    static constexpr int legacyStateSchemaVersion = 1;
+    static constexpr int stateSchemaVersion = 2;
     static constexpr int maximumRecentEndpoints = 8;
     static constexpr int minimumWorkspaceIndex = 0;
-    static constexpr int maximumWorkspaceIndex = 6;
+    static constexpr int maximumWorkspaceIndex = 3;
+    static constexpr int legacyMaximumWorkspaceIndex = 6;
 
     [[nodiscard]] static QString defaultStatePath();
     [[nodiscard]] static QString normalizedHost(const QString& value);
     [[nodiscard]] static QString endpointLabel(const Endpoint& endpoint);
+    [[nodiscard]] static int migrateLegacyWorkspaceIndex(int value) noexcept;
     [[nodiscard]] bool loadState();
     [[nodiscard]] bool persistState();
     void resetDefaults();

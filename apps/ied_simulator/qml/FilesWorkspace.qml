@@ -9,6 +9,8 @@ Item {
     required property var theme
     required property var files
 
+    property bool showConnectionHeader: true
+
     property string selectedRemotePath: ""
     property bool selectedIsDirectory: false
 
@@ -40,8 +42,9 @@ Item {
         spacing: 10
 
         SurfaceCard {
+            visible: root.showConnectionHeader
             Layout.fillWidth: true
-            Layout.preferredHeight: 72
+            Layout.preferredHeight: root.showConnectionHeader ? 72 : 0
             theme: root.theme
 
             RowLayout {

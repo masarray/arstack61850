@@ -9,6 +9,8 @@ Item {
     required property var theme
     required property var client
 
+    property bool showConnectionHeader: true
+
     property var selected: client.treeModel.selectedNode
     property string pendingWrite: ""
 
@@ -47,8 +49,9 @@ Item {
         spacing: 0
 
         Rectangle {
+            visible: root.showConnectionHeader
             Layout.fillWidth: true
-            Layout.preferredHeight: 54
+            Layout.preferredHeight: root.showConnectionHeader ? 54 : 0
             color: theme.chrome
             border.width: 1
             border.color: theme.lineSoft

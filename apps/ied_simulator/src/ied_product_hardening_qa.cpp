@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
             std::cerr << "Safe default product state contract failed.\n";
             return 3;
         }
-        state.setWorkspaceIndex(4);
+        state.setWorkspaceIndex(2);
         for (int index = 1; index <= 10; ++index) {
             if (!state.rememberEndpoint(QStringLiteral("192.0.2.%1").arg(index), 100 + index)) {
                 std::cerr << "Could not persist recent endpoint.\n";
@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
             return 6;
         }
         state.setWorkspaceIndex(99);
-        if (state.workspaceIndex() != 4 || state.rememberEndpoint(QString{}, 102) ||
+        if (state.workspaceIndex() != 2 || state.rememberEndpoint(QString{}, 102) ||
             state.rememberEndpoint(QStringLiteral("relay.local"), 0)) {
             std::cerr << "Invalid workspace/endpoint did not fail closed.\n";
             return 7;
@@ -66,7 +66,7 @@ int main(int argc, char** argv) {
 
     {
         ProductHardeningController restored(path);
-        if (!restored.settingsHealthy() || restored.workspaceIndex() != 4 ||
+        if (!restored.settingsHealthy() || restored.workspaceIndex() != 2 ||
             restored.recentEndpoints().size() != 8 || restored.lastHost() != QStringLiteral("192.0.2.9") ||
             restored.lastPort() != 109 || restored.automaticReconnectOnStartup()) {
             std::cerr << "Restart persistence contract failed.\n";
@@ -95,11 +95,38 @@ int main(int argc, char** argv) {
     }
 
     {
+        QJsonObject legacy;
+        legacy.insert(QStringLiteral("schema"), 1);
+        legacy.insert(QStringLiteral("workspaceIndex"), 6);
+        legacy.insert(QStringLiteral("recentEndpoints"),
+                      QJsonArray{endpoint(QStringLiteral("legacy.local"), 102)});
+        if (!writeJson(path, legacy)) return 10;
+
+        ProductHardeningController migrated(path);
+        if (!migrated.settingsHealthy() || migrated.workspaceIndex() != 3 ||
+            migrated.lastHost() != QStringLiteral("legacy.local") ||
+            !migrated.settingsStatus().contains(QStringLiteral("migrated"), Qt::CaseInsensitive)) {
+            std::cerr << "Legacy seven-workspace state migration failed.\n";
+            return 11;
+        }
+
+        QFile migratedFile(path);
+        if (!migratedFile.open(QIODevice::ReadOnly)) return 12;
+        const auto migratedDocument = QJsonDocument::fromJson(migratedFile.readAll());
+        if (!migratedDocument.isObject() ||
+            migratedDocument.object().value(QStringLiteral("schema")).toInt(-1) != 2 ||
+            migratedDocument.object().value(QStringLiteral("workspaceIndex")).toInt(-1) != 3) {
+            std::cerr << "Migrated product state was not rewritten as schema 2.\n";
+            return 13;
+        }
+    }
+
+    {
         QFile corrupt(path);
         if (!corrupt.open(QIODevice::WriteOnly | QIODevice::Truncate) || corrupt.write("{not-json") < 0 ||
             !corrupt.flush()) {
             std::cerr << "Could not create corrupt product state.\n";
-            return 10;
+            return 20;
         }
         // QSaveFile replaces the target during commit. Windows correctly refuses
         // that replacement while another writer still owns an open handle to the
@@ -113,18 +140,18 @@ int main(int argc, char** argv) {
         if (damaged.settingsHealthy() || damaged.workspaceIndex() != 0 ||
             !damaged.recentEndpoints().isEmpty()) {
             std::cerr << "Corrupt state was not ignored fail-closed.\n";
-            return 11;
+            return 21;
         }
-        damaged.setWorkspaceIndex(6);
+        damaged.setWorkspaceIndex(3);
         if (!damaged.settingsHealthy() || !damaged.rememberEndpoint(QStringLiteral("recovered.local"), 102)) {
             std::cerr << "Crash-safe state recovery failed.\n";
-            return 12;
+            return 22;
         }
         ProductHardeningController recovered(path);
-        if (!recovered.settingsHealthy() || recovered.workspaceIndex() != 6 ||
+        if (!recovered.settingsHealthy() || recovered.workspaceIndex() != 3 ||
             recovered.lastHost() != QStringLiteral("recovered.local")) {
             std::cerr << "Recovered product state did not survive restart.\n";
-            return 13;
+            return 23;
         }
     }
 
@@ -133,12 +160,12 @@ int main(int argc, char** argv) {
         unsupported.insert(QStringLiteral("schema"), 99);
         unsupported.insert(QStringLiteral("workspaceIndex"), 1);
         unsupported.insert(QStringLiteral("recentEndpoints"), QJsonArray{});
-        if (!writeJson(path, unsupported)) return 14;
+        if (!writeJson(path, unsupported)) return 24;
         ProductHardeningController rejected(path);
         if (rejected.settingsHealthy() || rejected.workspaceIndex() != 0 ||
             !rejected.recentEndpoints().isEmpty()) {
             std::cerr << "Unsupported schema was not rejected.\n";
-            return 15;
+            return 25;
         }
     }
 
@@ -148,23 +175,24 @@ int main(int argc, char** argv) {
             tooMany.append(endpoint(QStringLiteral("198.51.100.%1").arg(index + 1), 102));
         }
         QJsonObject unbounded;
-        unbounded.insert(QStringLiteral("schema"), 1);
+        unbounded.insert(QStringLiteral("schema"), 2);
         unbounded.insert(QStringLiteral("workspaceIndex"), 0);
         unbounded.insert(QStringLiteral("recentEndpoints"), tooMany);
-        if (!writeJson(path, unbounded)) return 16;
+        if (!writeJson(path, unbounded)) return 26;
         ProductHardeningController rejected(path);
         if (rejected.settingsHealthy() || !rejected.recentEndpoints().isEmpty()) {
             std::cerr << "Unbounded persisted recents were not rejected.\n";
-            return 17;
+            return 27;
         }
     }
 
     std::cout << "PRODUCT_HARDENING_PASS"
               << " state=atomic"
-              << " workspace_restore=4"
+              << " workspace_restore=2"
               << " recent=8"
               << " dedupe=pass"
               << " bounded_recent=8"
+              << " legacy_workspace_migration=pass"
               << " crash_recovery=pass"
               << " auto_reconnect=false"
               << " npcap_policy=explicit\n";
