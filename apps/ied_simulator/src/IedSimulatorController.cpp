@@ -365,7 +365,7 @@ bool IedSimulatorController::startSimulation() {
     serverProcess_.start();
     appendActivity(
         QStringLiteral("Server"),
-        QStringLiteral("Starting IEDScout-compatible MMS endpoint for %1 on %2:%3.")
+        QStringLiteral("Starting IEC 61850 interoperability MMS endpoint for %1 on %2:%3.")
             .arg(selectedIed().value(QStringLiteral("name")).toString(), listenAddress_)
             .arg(port_));
     return true;
@@ -471,7 +471,7 @@ QString IedSimulatorController::diagnosticsText() const {
                  : QStringLiteral("running"))
         .arg(serverProcess_.processId());
     text += QStringLiteral(
-        "IEDScout profile: Authentication=None; AP-title=1,1,1,999,1; "
+        "Interoperability profile: Authentication=None; AP-title=1,1,1,999,1; "
         "AE-qualifier=12; P-selector=00 00 00 01; S-selector=00 01; T-selector=00 01\n");
     text += QStringLiteral(
         "Counts: IED=%1; LD=%2; DO=%3; DA/BDA=%4; "
