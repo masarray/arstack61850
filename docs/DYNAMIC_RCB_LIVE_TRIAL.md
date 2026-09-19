@@ -35,7 +35,7 @@ The canonical `LD/LN.DataSet` reference used for directory services is
 converted to the IEC 61850 RCB attribute value `LD/LN$DataSet` before the
 `DatSet` write.
 Incoming reports accept both `listOfVariable [0]` and the
-`variableListName [1]` form used by IEDScout, while still decoding only the
+`variableListName [1]` form used by external IEC 61850 client, while still decoding only the
 trailing `listOfAccessResult` as report data.
 
 Cleanup traffic is allowed after a failed mutation, but the user action itself
