@@ -106,6 +106,13 @@ target_link_libraries(ariec61850_iedscout_parity_control_probe PRIVATE
 target_compile_features(ariec61850_iedscout_parity_control_probe PRIVATE cxx_std_20)
 parity_strict_warnings(ariec61850_iedscout_parity_control_probe)
 
+add_executable(ariec61850_iedscout_control_wire_probe
+    "${ARSTACK_ROOT}/tools/iedscout_control_wire_probe.cpp")
+target_link_libraries(ariec61850_iedscout_control_wire_probe PRIVATE
+    ARIEC61850::core)
+target_compile_features(ariec61850_iedscout_control_wire_probe PRIVATE cxx_std_20)
+parity_strict_warnings(ariec61850_iedscout_control_wire_probe)
+
 enable_testing()
 add_test(NAME iedscout_parity_server_help
     COMMAND ariec61850_static_ied_server_iedsim --help)
@@ -158,6 +165,17 @@ add_test(
         "${CMAKE_CURRENT_LIST_DIR}/test_control_golden.py"
         --server $<TARGET_FILE:ariec61850_static_ied_server_iedsim>
         --control-probe $<TARGET_FILE:ariec61850_iedscout_parity_control_probe>)
+
+add_test(
+    NAME iedscout_parity_real_control_wire
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_LIST_DIR}/test_iedscout_control_wire.py"
+        --server $<TARGET_FILE:ariec61850_static_ied_server_iedsim>
+        --wire-probe $<TARGET_FILE:ariec61850_iedscout_control_wire_probe>)
+set_tests_properties(
+    iedscout_parity_real_control_wire
+    PROPERTIES TIMEOUT 20)
 add_executable(ariec61850_iedscout_parity_file_transfer
     "${ARSTACK_ROOT}/tools/file_transfer.cpp")
 target_link_libraries(ariec61850_iedscout_parity_file_transfer PRIVATE ARIEC61850::core)
