@@ -6,7 +6,7 @@ Date/time: `______________________________`
 
 Operator: `______________________________`
 
-Scenario: `[ ] IEDScout -> ARStack   [ ] ARStack -> real IED`
+Scenario: `[ ] external IEC 61850 client -> ARStack   [ ] ARStack -> real IED`
 
 Target / endpoint: `______________________________`
 
@@ -14,7 +14,7 @@ SCL/CID identity: `______________________________`
 
 PCAP/PCAPNG SHA-256: `______________________________`
 
-## A. IEDScout -> ARStack simulator server
+## A. external IEC 61850 client -> ARStack simulator server
 
 - [ ] ARStack running in normal/process mode.
 - [ ] MMS association completes.
