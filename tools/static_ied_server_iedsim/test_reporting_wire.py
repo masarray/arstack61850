@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Server-level static RCB commissioning parity with the accepted IEDScout capture."""
+"""Server-level static RCB commissioning parity with the accepted external IEC 61850 client capture."""
 
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ def manifest() -> str:
             f"DS\t{DOMAIN}\tLLN0$Analog\t{DOMAIN}\t{item}"
         )
 
-    # Static commissioning values reproduce the accepted IEDScout session.
+    # Static commissioning values reproduce the accepted external IEC 61850 client session.
     # No OptFlds rewrite is made by the client probe.
     lines.append(
         "RCB\t" + DOMAIN + "\tLLN0$RP$Unbuffer01\t0\t"
@@ -153,13 +153,13 @@ def main() -> int:
                 urcb = run_probe(args.wire_probe, port, "urcb")
                 if (
                     urcb.returncode != 0
-                    or "IEDSCOUT_REPORTING_WIRE_PASS mode=urcb" not in urcb.stdout
+                    or "INTEROP_REPORTING_WIRE_PASS mode=urcb" not in urcb.stdout
                     or "members=22" not in urcb.stdout
                     or "groupedWrite=TrgOps,RptEna" not in urcb.stdout
                     or "reservation=urcb-only" not in urcb.stdout
                 ):
                     raise RuntimeError(
-                        "URCB IEDScout commissioning parity failed: "
+                        "URCB interoperability commissioning parity failed: "
                         f"exit={urcb.returncode} stdout={urcb.stdout!r} "
                         f"stderr={urcb.stderr!r}"
                     )
@@ -167,13 +167,13 @@ def main() -> int:
                 brcb = run_probe(args.wire_probe, port, "brcb")
                 if (
                     brcb.returncode != 0
-                    or "IEDSCOUT_REPORTING_WIRE_PASS mode=brcb" not in brcb.stdout
+                    or "INTEROP_REPORTING_WIRE_PASS mode=brcb" not in brcb.stdout
                     or "members=36" not in brcb.stdout
                     or "groupedWrite=TrgOps,RptEna" not in brcb.stdout
                     or "reservation=none" not in brcb.stdout
                 ):
                     raise RuntimeError(
-                        "BRCB IEDScout commissioning parity failed: "
+                        "BRCB interoperability commissioning parity failed: "
                         f"exit={brcb.returncode} stdout={brcb.stdout!r} "
                         f"stderr={brcb.stderr!r}"
                     )
@@ -196,7 +196,7 @@ def main() -> int:
         )
 
     print(
-        "IEDSCOUT_REPORTING_COMMISSIONING_PASS "
+        "INTEROP_REPORTING_COMMISSIONING_PASS "
         "urcb=Resv,grouped-TrgOps-RptEna,GI,report "
         "brcb=grouped-TrgOps-RptEna,GI,report "
         "urcbMembers=22 brcbMembers=36"
