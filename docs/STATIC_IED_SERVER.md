@@ -52,7 +52,7 @@ The public `ARIEC61850::mms_server_core` also contains the bounded BRCB R1-R3
 runtime, ownership/lifecycle objects, retained replay/recovery, and negotiated
 outbound-limit enforcement for InformationReport delivery. The current
 `ariec61850_static_ied_server` reference model does **not** yet instantiate or
-schedule those BRCB objects, so a desktop IEDScout browse/read pass must not be
+schedule those BRCB objects, so a desktop external IEC 61850 client browse/read pass must not be
 reported as live BRCB interoperability.
 
 ## ESP32/lwIP integration boundary
@@ -69,7 +69,7 @@ maximum concurrent association count remain product-profile decisions.
 - The desktop adapter serves connections sequentially. The core is per-session
   and supports platform-owned multi-client orchestration, but the adapter does
   not yet schedule multiple clients concurrently.
-- Physical IEDScout browse/read acceptance is not yet recorded.
+- Physical external IEC 61850 client browse/read acceptance is not yet recorded.
 - The reference values are startup constants; a board adapter still needs to
   bind the eight GGIO values to debounced input snapshots.
 - The desktop reference adapter does not yet expose BRCB reporting or control
