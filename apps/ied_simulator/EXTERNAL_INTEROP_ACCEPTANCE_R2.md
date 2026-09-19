@@ -2,13 +2,13 @@
 
 Date: 2026-09-17
 
-This ledger records external external vendor external IEC 61850 client evidence separately from synthetic/CI evidence. It is intentionally conservative: capabilities are only marked accepted when observed with the real client.
+This ledger records external IEC 61850 client evidence separately from synthetic/CI evidence. It is intentionally conservative: capabilities are only marked accepted when observed with the real client.
 
 ## Locked external baseline
 
 Tested Windows runtime lineage: `b8cfe4442e1c570de4158657599ba72962873bca` (runtime-identical CI-only follow-up `23130da7fbfb1d748dc63e26f8676bc549936a0d`).
 
-Model: `Siprotec_084F06BCU_AA1E1F06R4.cid`
+Model: `reference IEC 61850 model_084F06BCU_AA1E1F06R4.cid`
 Endpoint: `192.168.81.103:102`
 
 Observed with real external IEC 61850 client:
