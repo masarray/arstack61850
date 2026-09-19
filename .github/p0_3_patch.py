@@ -478,7 +478,7 @@ replace_once(
     "    if (!tiny_association.response_ready() ||\n        tiny_tpdu.negotiated_tpdu_size_bytes() != 128U ||\n        tiny_tpdu.state() != mms::MmsStaticConnectionState::established ||\n        !validate_segmented_stream(\n            std::span<const std::uint8_t>{response}.first(tiny_association.bytes_written),\n            128U,\n            true)) {\n        return 3;\n    }\n    const auto tiny_read_tpkt = build_mms_tpkt(\n        kReadRequest, request, presentation, scratch);\n    if (!tiny_read_tpkt.success()) return 21;\n    const auto tiny_read_result = tiny_tpdu.process_tcp_window(\n        std::span<const std::uint8_t>{request}.first(tiny_read_tpkt.bytes_written),\n        response,\n        workspace);\n    if (!tiny_read_result.response_ready() ||\n        !validate_segmented_stream(\n            std::span<const std::uint8_t>{response}.first(tiny_read_result.bytes_written),\n            128U,\n            true)) {\n        return 22;\n    }")
 
 
-# URCB server regression: use the IEDScout-like 1024-byte offer in production,
+# URCB server regression: use the external-client-like 1024-byte offer in production,
 # but force 128 here plus a long RptID so the InformationReport definitely spans
 # multiple TPKTs. Reassemble only inside the test decoder.
 replace_once(
