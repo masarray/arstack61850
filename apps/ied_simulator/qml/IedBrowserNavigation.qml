@@ -11,6 +11,7 @@ Rectangle {
     required property var client
     required property var reports
     required property var utilities
+    required property var engineering
 
     property int section: 0
     property string sectionTitle: "Data Model"
@@ -139,6 +140,7 @@ Rectangle {
                 NavButton {
                     targetSection: 5
                     title: "GOOSE"
+                    countText: engineering.loaded ? String(engineering.gooseCount) : ""
                 }
 
                 NavButton {
