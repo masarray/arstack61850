@@ -9,6 +9,7 @@ Rectangle {
     required property var theme
     required property var session
     required property var client
+    required property var context
     required property var reports
     required property var utilities
     required property var engineering
@@ -28,11 +29,11 @@ Rectangle {
 
     function configuredGooseCount() {
         var streams = engineering.gooseStreams
-        if (!client.iedName.length)
+        if (!context.iedName.length)
             return streams.length
         var count = 0
         for (var index = 0; index < streams.length; ++index) {
-            if (String(streams[index].iedName) === client.iedName)
+            if (String(streams[index].iedName) === context.iedName)
                 ++count
         }
         return count
@@ -213,7 +214,8 @@ Rectangle {
                 NavButton {
                     targetSection: 3
                     title: "Setting Groups"
-                    countText: utilities.connected ? String(utilities.settingGroupCount) : ""
+                    countText: utilities.connected ? String(utilities.settingGroupCount)
+                               : context.loaded ? String(context.settingGroupCount) : ""
                 }
 
                 Loader {
@@ -267,7 +269,8 @@ Rectangle {
                 NavButton {
                     targetSection: 1
                     title: "DataSets"
-                    countText: reports.connected ? String(reports.dataSets.length) : ""
+                    countText: reports.connected ? String(reports.dataSets.length)
+                               : context.loaded ? String(context.dataSetCount) : ""
                 }
 
                 Loader {
@@ -322,7 +325,7 @@ Rectangle {
                 NavButton {
                     targetSection: 0
                     title: "Data Model"
-                    countText: client.connected ? String(client.treeModel.totalNodeCount) : ""
+                    countText: context.loaded ? String(context.treeModel.totalNodeCount) : ""
                 }
 
                 ColumnLayout {
@@ -338,7 +341,7 @@ Rectangle {
                         Layout.topMargin: 5
                         Layout.bottomMargin: 5
                         placeholderText: "Filter model"
-                        enabled: client.connected
+                        enabled: context.loaded
                         onTextChanged: searchDebounce.restart()
                     }
 
@@ -346,7 +349,7 @@ Rectangle {
                         id: searchDebounce
                         interval: 100
                         repeat: false
-                        onTriggered: client.treeModel.filterText = modelSearch.text
+                        onTriggered: context.treeModel.filterText = modelSearch.text
                     }
 
                     ListView {
@@ -356,7 +359,7 @@ Rectangle {
                         clip: true
                         reuseItems: true
                         cacheBuffer: 0
-                        model: client.treeModel
+                        model: context.treeModel
                         ScrollBar.vertical: ScrollBar {}
 
                         delegate: Rectangle {
@@ -408,16 +411,16 @@ Rectangle {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 onClicked: function(event) {
-                                    client.treeModel.selectRow(index)
+                                    context.treeModel.selectRow(index)
                                     if (model.hasChildren && event.x < 44 + model.depth * 12)
-                                        client.treeModel.toggle(index)
+                                        context.treeModel.toggle(index)
                                     root.choose(0, "Data Model")
                                 }
                                 onDoubleClicked: {
                                     if (model.hasChildren)
-                                        client.treeModel.toggle(index)
-                                    else
-                                        client.readSelected()
+                                        context.treeModel.toggle(index)
+                                    else if (client.connected)
+                                        client.readEngineeringSelected()
                                 }
                             }
                         }

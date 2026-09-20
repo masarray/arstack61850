@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 
 Item {
@@ -9,6 +10,7 @@ Item {
     required property var theme
     required property var session
     required property var client
+    required property var context
     required property var reports
     required property var utilities
     required property var engineering
@@ -16,7 +18,7 @@ Item {
 
     property int activeSection: 0
     property string activeSectionTitle: "Data Model"
-    property var selectedModelNode: client.treeModel.selectedNode
+    property var selectedModelNode: context.treeModel.selectedNode
 
     function ensureActiveService() {
         if (!session.connected)
@@ -70,6 +72,14 @@ Item {
         }
     }
 
+    FileDialog {
+        id: browserSclDialog
+        title: "Open IEC 61850 engineering model"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["IEC 61850 engineering files (*.scl *.cid *.scd *.iid *.icd)", "All files (*)"]
+        onAccepted: engineering.openFile(selectedFile)
+    }
+
     Rectangle { anchors.fill: parent; color: root.theme.background }
 
     ColumnLayout {
@@ -99,10 +109,20 @@ Item {
                         font.weight: Font.DemiBold
                     }
                     Label {
-                        text: "One endpoint · persistent engineering navigation"
+                        text: context.loaded
+                              ? context.authority + " · persistent engineering navigation"
+                              : "Open SCL or discover one IED endpoint"
                         color: root.theme.muted
                         font.pixelSize: 8
                     }
+                }
+
+                Button {
+                    text: "Open SCL"
+                    enabled: !session.configurationLocked && !engineering.busy
+                    onClicked: browserSclDialog.open()
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Open SCL/CID/SCD/IID/ICD into the persistent Browser model."
                 }
 
                 TextField {
@@ -127,13 +147,30 @@ Item {
                 }
 
                 Button {
-                    text: session.connected ? "Connected" : session.busy ? "Connecting..." : "Connect"
+                    text: context.loaded && context.authorityKey === "scl" ? "Connect SCL" : "Connect model"
+                    visible: context.loaded
+                    enabled: !session.connected && !session.busy && !context.selectionRequired
+                    onClicked: {
+                        session.host = hostField.text
+                        session.port = portField.value
+                        session.connectUsingEngineeringContext()
+                    }
+                    ToolTip.visible: hovered
+                    ToolTip.text: context.authorityKey === "scl"
+                                  ? "Connect using the active trusted SCL model."
+                                  : "Reconnect/discover the active IED endpoint."
+                }
+
+                Button {
+                    text: session.busy && !session.connected ? "Discovering…" : "Discover IED"
                     enabled: !session.connected && !session.busy
                     onClicked: {
                         session.host = hostField.text
                         session.port = portField.value
-                        session.connectToIed()
+                        session.discoverAndConnect()
                     }
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Ignore trusted SCL for this connect, discover the live MMS model, and publish it into this Browser context."
                 }
 
                 Button {
@@ -170,22 +207,65 @@ Item {
                 Item { Layout.fillWidth: true }
 
                 ColumnLayout {
-                    visible: session.connected
+                    visible: context.loaded
                     spacing: 0
                     Label {
                         Layout.alignment: Qt.AlignRight
-                        text: client.iedName.length ? client.iedName : "Online IED"
+                        text: context.iedName.length ? context.iedName
+                              : context.selectionRequired ? "Select active IED" : "IED model"
                         color: root.theme.text
                         font.pixelSize: 10
                         font.weight: Font.DemiBold
                     }
                     Label {
                         Layout.alignment: Qt.AlignRight
-                        text: client.logicalDeviceCount + " LD · " + client.logicalNodeCount + " LN · "
-                              + client.dataAttributeCount + " DA"
+                        text: context.logicalDeviceCount + " LD · " + context.logicalNodeCount + " LN · "
+                              + context.dataAttributeCount + " DA · "
+                              + (context.online ? "ONLINE" : "OFFLINE")
                         color: root.theme.muted
                         font.pixelSize: 8
                     }
+                }
+            }
+        }
+
+        Rectangle {
+            visible: context.selectionRequired
+            Layout.fillWidth: true
+            Layout.preferredHeight: context.selectionRequired ? 42 : 0
+            color: root.theme.amberSoft
+            border.width: 1
+            border.color: root.theme.amber
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 14
+                anchors.rightMargin: 14
+                spacing: 8
+                Label {
+                    text: "Multi-IED SCL · select the active IED"
+                    color: root.theme.text
+                    font.pixelSize: 9
+                    font.weight: Font.DemiBold
+                }
+                ComboBox {
+                    id: activeIedPicker
+                    Layout.preferredWidth: 220
+                    model: context.candidateIeds
+                    enabled: !session.configurationLocked
+                }
+                Button {
+                    text: "Use IED"
+                    enabled: !session.configurationLocked
+                             && activeIedPicker.currentIndex >= 0
+                    onClicked: context.selectIed(activeIedPicker.currentText)
+                }
+                Item { Layout.fillWidth: true }
+                Label {
+                    text: context.lastError
+                    color: root.theme.muted
+                    font.pixelSize: 8
+                    elide: Text.ElideRight
                 }
             }
         }
@@ -205,6 +285,7 @@ Item {
                 theme: root.theme
                 session: root.session
                 client: root.client
+                context: root.context
                 reports: root.reports
                 utilities: root.utilities
                 engineering: root.engineering
@@ -269,7 +350,7 @@ Item {
                             text: client.operationBusy ? "Reading…" : "Read"
                             enabled: client.connected && !client.operationBusy
                                      && root.selectedModelNode.readable === true
-                            onClicked: client.readSelected()
+                            onClicked: client.readEngineeringSelected()
                         }
 
                         Button {
@@ -318,6 +399,7 @@ Item {
                     MmsClientWorkspace {
                         theme: root.theme
                         client: root.client
+                        modelProvider: root.context
                         showConnectionHeader: false
                         showNavigationPanel: false
                     }
@@ -349,7 +431,7 @@ Item {
 
                     BrowserGoosePane {
                         theme: root.theme
-                        client: root.client
+                        context: root.context
                         engineering: root.engineering
                     }
                 }
@@ -391,8 +473,8 @@ Item {
                             font.pixelSize: 8
                         }
                         Label {
-                            visible: root.activeSection === 0 && client.connected
-                            text: client.treeModel.visibleNodeCount + "/" + client.treeModel.totalNodeCount + " nodes"
+                            visible: root.activeSection === 0 && context.loaded
+                            text: context.treeModel.visibleNodeCount + "/" + context.treeModel.totalNodeCount + " nodes"
                             color: session.lastError.length ? root.theme.red : root.theme.navigationMuted
                             font.pixelSize: 8
                         }

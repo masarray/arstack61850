@@ -57,6 +57,7 @@ ApplicationWindow {
         client: mmsClient
         reports: reports
         utilities: utilities
+        engineeringContext: iedContext
     }
     SclWorkspaceController {
         id: sclWorkspace
@@ -279,6 +280,7 @@ ApplicationWindow {
                 theme: appTheme
                 workspace: sclWorkspace
                 hardening: hardening
+                browserSession: browserSession
                 onBrowserRequested: root.workspaceIndex = 1
                 onEndpointRequested: function(host, port) {
                     if (!browserSession.configurationLocked) {
@@ -296,6 +298,7 @@ ApplicationWindow {
                 productState: hardening
                 session: browserSession
                 client: mmsClient
+                context: iedContext
                 reports: reports
                 utilities: utilities
                 engineering: sclWorkspace

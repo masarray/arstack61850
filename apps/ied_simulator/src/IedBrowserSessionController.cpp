@@ -53,6 +53,26 @@ void IedBrowserSessionController::setReports(MmsReportController* value) {
     emit stateChanged();
 }
 
+void IedBrowserSessionController::setEngineeringContext(IedEngineeringContextController* value) {
+    if (engineeringContext_ == value) return;
+    if (engineeringContext_) disconnect(engineeringContext_, nullptr, this, nullptr);
+    engineeringContext_ = value;
+    if (engineeringContext_) {
+        connect(
+            engineeringContext_,
+            &IedEngineeringContextController::contextChanged,
+            this,
+            [this] {
+                if (!configurationLocked()) applyEngineeringEndpoint();
+                emit stateChanged();
+            });
+    }
+    syncConfiguration();
+    if (!configurationLocked()) applyEngineeringEndpoint();
+    emit servicesChanged();
+    emit stateChanged();
+}
+
 void IedBrowserSessionController::setUtilities(MmsFileSettingsController* value) {
     if (utilities_ == value) return;
     if (utilities_) disconnect(utilities_, nullptr, this, nullptr);
@@ -158,6 +178,7 @@ void IedBrowserSessionController::syncConfiguration() {
         client_->setHost(host_);
         client_->setPort(port_);
         client_->setTrustedSclPath(trustedSclPath_);
+        client_->setEngineeringContext(engineeringContext_);
     }
     if (reports_) {
         reports_->setHost(host_);
@@ -167,6 +188,53 @@ void IedBrowserSessionController::syncConfiguration() {
         utilities_->setHost(host_);
         utilities_->setPort(port_);
     }
+}
+
+bool IedBrowserSessionController::applyEngineeringEndpoint() {
+    if (!engineeringContext_ || !engineeringContext_->loaded() ||
+        engineeringContext_->selectionRequired() || configurationLocked()) {
+        return false;
+    }
+    const auto host = engineeringContext_->endpointHost().trimmed();
+    const auto port = engineeringContext_->endpointPort();
+    if (host.isEmpty() || port < 1 || port > 65'535) return false;
+    setHost(host);
+    setPort(port);
+    return host_ == host && port_ == port;
+}
+
+bool IedBrowserSessionController::connectUsingEngineeringContext() {
+    if (!engineeringContext_ || !engineeringContext_->loaded()) {
+        coordinatorError_ = QStringLiteral("Open or discover an IED model before connecting this Browser context.");
+        emit stateChanged();
+        return false;
+    }
+    if (engineeringContext_->selectionRequired()) {
+        coordinatorError_ = QStringLiteral("Select the active IED from the engineering model before connecting.");
+        emit stateChanged();
+        return false;
+    }
+    if (configurationLocked()) return connected();
+
+    if (engineeringContext_->authorityKey() == QStringLiteral("scl")) {
+        const auto source = engineeringContext_->sourcePath().trimmed();
+        if (source.isEmpty()) {
+            coordinatorError_ = QStringLiteral("The active SCL context has no trusted local source path.");
+            emit stateChanged();
+            return false;
+        }
+        setTrustedSclPath(source);
+    } else {
+        setTrustedSclPath({});
+    }
+    static_cast<void>(applyEngineeringEndpoint());
+    return connectToIed();
+}
+
+bool IedBrowserSessionController::discoverAndConnect() {
+    if (configurationLocked()) return connected();
+    setTrustedSclPath({});
+    return connectToIed();
 }
 
 bool IedBrowserSessionController::connectToIed() {
