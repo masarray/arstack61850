@@ -210,6 +210,11 @@ bool SclWorkspaceController::exportEngineeringContext(
         engineeringContext_->selectionRequired()) {
         return false;
     }
+    if (engineeringContext_->authorityKey() != QStringLiteral("live-discovery")) {
+        setFailure(QStringLiteral(
+            "Opened SCL sources must use exact-source Save As; discovery reconstruction is not substituted."));
+        return false;
+    }
     const auto* liveModel = engineeringContext_->modelSnapshot();
     if (liveModel == nullptr) {
         setFailure(QStringLiteral("No canonical IED model is available for Save SCL."));
