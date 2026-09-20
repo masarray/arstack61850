@@ -12,6 +12,7 @@ Item {
     required property var reports
     required property var utilities
     required property var engineering
+    required property var productState
 
     property int activeSection: 0
     property string activeSectionTitle: "Data Model"
@@ -47,7 +48,19 @@ Item {
         return "IED / GOOSE"
     }
 
+    function selectSection(section, title) {
+        root.activeSection = section
+        root.activeSectionTitle = title
+    }
+
     onActiveSectionChanged: ensureActiveService()
+
+    Shortcut { sequence: "Alt+1"; enabled: root.visible; onActivated: root.selectSection(0, "Data Model") }
+    Shortcut { sequence: "Alt+2"; enabled: root.visible; onActivated: root.selectSection(1, "DataSets") }
+    Shortcut { sequence: "Alt+3"; enabled: root.visible; onActivated: root.selectSection(2, "Reports") }
+    Shortcut { sequence: "Alt+4"; enabled: root.visible; onActivated: root.selectSection(3, "Setting Groups") }
+    Shortcut { sequence: "Alt+5"; enabled: root.visible; onActivated: root.selectSection(4, "Files") }
+    Shortcut { sequence: "Alt+6"; enabled: root.visible; onActivated: root.selectSection(5, "GOOSE") }
 
     Connections {
         target: session
@@ -177,14 +190,18 @@ Item {
             }
         }
 
-        RowLayout {
+        SplitView {
+            id: browserSplit
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 0
+            orientation: Qt.Horizontal
 
             IedBrowserNavigation {
-                Layout.preferredWidth: Math.max(300, Math.min(360, root.width * 0.27))
-                Layout.fillHeight: true
+                id: browserNavigation
+                SplitView.preferredWidth: root.productState.browserNavigationWidth
+                SplitView.minimumWidth: 240
+                SplitView.maximumWidth: 520
+                SplitView.fillHeight: true
                 theme: root.theme
                 session: root.session
                 client: root.client
@@ -193,14 +210,26 @@ Item {
                 engineering: root.engineering
                 section: root.activeSection
                 onSectionRequested: function(section, title) {
-                    root.activeSection = section
-                    root.activeSectionTitle = title
+                    root.selectSection(section, title)
+                }
+                onWidthChanged: splitterPersist.restart()
+            }
+
+            Timer {
+                id: splitterPersist
+                interval: 250
+                repeat: false
+                onTriggered: {
+                    const candidate = Math.round(browserNavigation.width)
+                    if (candidate >= 240 && candidate <= 520
+                            && Math.abs(candidate - root.productState.browserNavigationWidth) >= 2)
+                        root.productState.browserNavigationWidth = candidate
                 }
             }
 
             ColumnLayout {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
+                SplitView.fillWidth: true
+                SplitView.fillHeight: true
                 spacing: 0
 
                 Rectangle {
@@ -322,6 +351,51 @@ Item {
                         theme: root.theme
                         client: root.client
                         engineering: root.engineering
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 24
+                    color: session.lastError.length ? root.theme.redSoft : root.theme.statusChrome
+                    border.width: 1
+                    border.color: session.lastError.length ? root.theme.red : root.theme.lineSoft
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        spacing: 8
+
+                        Rectangle {
+                            width: 6
+                            height: 6
+                            radius: 3
+                            color: session.lastError.length ? root.theme.red
+                                                           : session.connected ? root.theme.green
+                                                                               : session.busy ? root.theme.amber
+                                                                                              : root.theme.muted
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: session.lastError.length
+                                  ? session.lastError
+                                  : session.stateText + " · " + root.activeSectionTitle
+                            color: session.lastError.length ? root.theme.red : root.theme.navigationText
+                            font.pixelSize: 8
+                            elide: Text.ElideRight
+                        }
+                        Label {
+                            text: session.endpoint
+                            color: session.lastError.length ? root.theme.red : root.theme.navigationMuted
+                            font.pixelSize: 8
+                        }
+                        Label {
+                            visible: root.activeSection === 0 && client.connected
+                            text: client.treeModel.visibleNodeCount + "/" + client.treeModel.totalNodeCount + " nodes"
+                            color: session.lastError.length ? root.theme.red : root.theme.navigationMuted
+                            font.pixelSize: 8
+                        }
                     }
                 }
             }
