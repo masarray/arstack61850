@@ -437,7 +437,7 @@ Item {
         width: Math.min(480, Math.max(320, root.width - 32))
         implicitWidth: 480
         standardButtons: Dialog.Ok | Dialog.Cancel
-        onAccepted: client.writeSelected(root.pendingWrite)
+        onAccepted: root.writeCurrentSelection(root.pendingWrite)
         contentItem: ColumnLayout {
             spacing: 8
             Label { Layout.fillWidth: true; text: root.text(root.selected.reference); color: theme.text; font.pixelSize: 10; wrapMode: Text.WrapAnywhere }
