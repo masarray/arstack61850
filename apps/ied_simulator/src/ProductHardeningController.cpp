@@ -127,6 +127,7 @@ bool ProductHardeningController::npcapRequired() const noexcept {
 
 void ProductHardeningController::resetDefaults() {
     workspaceIndex_ = 0;
+    browserNavigationWidth_ = defaultBrowserNavigationWidth;
     recent_.clear();
     recentResources_.clear();
 }
@@ -168,6 +169,7 @@ bool ProductHardeningController::loadState() {
     const auto object = document.object();
     const auto schema = object.value(QStringLiteral("schema")).toInt(-1);
     if (schema != stateSchemaVersion &&
+        schema != fileHomeStateSchemaVersion &&
         schema != previousStateSchemaVersion &&
         schema != legacyStateSchemaVersion) {
         setStateFault(QStringLiteral("Persisted state ignored: unsupported schema."));
@@ -218,7 +220,7 @@ bool ProductHardeningController::loadState() {
     }
 
     std::vector<QString> loadedResources;
-    if (schema == stateSchemaVersion) {
+    if (schema == stateSchemaVersion || schema == fileHomeStateSchemaVersion) {
         const auto resources = object.value(QStringLiteral("recentResources"));
         if (!resources.isArray() || resources.toArray().size() > maximumRecentResources) {
             setStateFault(QStringLiteral("Persisted state ignored: recent resource list is invalid or unbounded."));
@@ -242,7 +244,19 @@ bool ProductHardeningController::loadState() {
         }
     }
 
+    int browserNavigationWidth = defaultBrowserNavigationWidth;
+    if (schema == stateSchemaVersion) {
+        browserNavigationWidth = object.value(QStringLiteral("browserNavigationWidth")).toInt(-1);
+        if (browserNavigationWidth < minimumBrowserNavigationWidth ||
+            browserNavigationWidth > maximumBrowserNavigationWidth) {
+            setStateFault(QStringLiteral("Persisted state ignored: Browser navigation width is outside bounds."));
+            emit stateChanged();
+            return false;
+        }
+    }
+
     workspaceIndex_ = workspace;
+    browserNavigationWidth_ = browserNavigationWidth;
     recent_ = std::move(loaded);
     recentResources_ = std::move(loadedResources);
     settingsHealthy_ = true;
@@ -251,6 +265,8 @@ bool ProductHardeningController::loadState() {
         settingsStatus_ = QStringLiteral("Legacy product state migrated to the four-workspace File/Home schema.");
     } else if (schema == previousStateSchemaVersion) {
         settingsStatus_ = QStringLiteral("Product state migrated to File/Home engineering-resource history.");
+    } else if (schema == fileHomeStateSchemaVersion) {
+        settingsStatus_ = QStringLiteral("Product state migrated to persistent Browser layout state.");
     } else {
         settingsStatus_ = QStringLiteral("Persisted product state restored safely.");
     }
@@ -262,7 +278,9 @@ bool ProductHardeningController::loadState() {
         }
         settingsStatus_ = schema == legacyStateSchemaVersion
             ? QStringLiteral("Legacy product state migrated to the four-workspace File/Home schema.")
-            : QStringLiteral("Product state migrated to File/Home engineering-resource history.");
+            : schema == previousStateSchemaVersion
+                ? QStringLiteral("Product state migrated to File/Home engineering-resource history.")
+                : QStringLiteral("Product state migrated to persistent Browser layout state.");
     }
 
     emit stateChanged();
@@ -290,6 +308,7 @@ bool ProductHardeningController::persistState() {
     QJsonObject object;
     object.insert(QStringLiteral("schema"), stateSchemaVersion);
     object.insert(QStringLiteral("workspaceIndex"), workspaceIndex_);
+    object.insert(QStringLiteral("browserNavigationWidth"), browserNavigationWidth_);
     object.insert(QStringLiteral("recentEndpoints"), recent);
     object.insert(QStringLiteral("recentResources"), resources);
     const auto payload = QJsonDocument(object).toJson(QJsonDocument::Compact);
@@ -312,6 +331,18 @@ bool ProductHardeningController::persistState() {
     settingsHealthy_ = true;
     settingsStatus_ = QStringLiteral("Product state saved atomically.");
     return true;
+}
+
+void ProductHardeningController::setBrowserNavigationWidth(const int value) {
+    if (value < minimumBrowserNavigationWidth || value > maximumBrowserNavigationWidth) {
+        settingsStatus_ = QStringLiteral("Rejected invalid Browser navigation width.");
+        emit stateChanged();
+        return;
+    }
+    if (browserNavigationWidth_ == value) return;
+    browserNavigationWidth_ = value;
+    (void)persistState();
+    emit stateChanged();
 }
 
 void ProductHardeningController::setWorkspaceIndex(const int value) {
