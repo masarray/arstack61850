@@ -62,7 +62,8 @@ def main() -> int:
     # Publisher/stimulation remains explicitly owned by Simulator commissioning.
     require(commissioning, "startSelectedGoosePublication()", "CommissioningWorkspace")
     require(commissioning, "stopSelectedGoosePublication()", "CommissioningWorkspace")
-    require(commissioning, 'kindFilter: "GOOSE"', "CommissioningWorkspace")
+    require(commissioning, '"GOOSE"', "CommissioningWorkspace")
+    require(commissioning, "commissioningModel.kindFilter = currentText", "CommissioningWorkspace")
 
     print(
         "SNIFFER_OWNERSHIP_PASS "
