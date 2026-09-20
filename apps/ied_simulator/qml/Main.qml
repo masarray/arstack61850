@@ -88,6 +88,8 @@ ApplicationWindow {
             // accepted the engineering file. Failed/unfinished imports never
             // become a trusted connection source.
             browserSession.trustedSclPath = sclWorkspace.loaded ? sclWorkspace.sourcePath : ""
+            if (sclWorkspace.loaded && sclWorkspace.sourcePath.length > 0)
+                hardening.rememberResource(sclWorkspace.sourcePath)
         }
     }
 
@@ -270,6 +272,17 @@ ApplicationWindow {
             FileWorkspace {
                 theme: appTheme
                 workspace: sclWorkspace
+                hardening: hardening
+                onBrowserRequested: root.workspaceIndex = 1
+                onEndpointRequested: function(host, port) {
+                    if (!browserSession.configurationLocked) {
+                        browserSession.host = host
+                        browserSession.port = port
+                    }
+                    root.workspaceIndex = 1
+                }
+                onSimulatorRequested: root.workspaceIndex = 2
+                onSnifferRequested: root.workspaceIndex = 3
             }
 
             IedBrowserWorkspace {
