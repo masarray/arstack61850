@@ -25,6 +25,15 @@ SclWorkspaceController::SclWorkspaceController(QObject* parent)
     ioPool_.setExpiryTimeout(-1);
 }
 
+void SclWorkspaceController::setEngineeringContext(IedEngineeringContextController* value) {
+    if (engineeringContext_ == value) return;
+    engineeringContext_ = value;
+    emit engineeringContextChanged();
+    if (engineeringContext_ && document_) {
+        engineeringContext_->publishSclDocument(*document_, sourcePath_);
+    }
+}
+
 SclWorkspaceController::~SclWorkspaceController() {
     if (stopSource_) stopSource_->request_stop();
     ioPool_.clear();
@@ -240,6 +249,18 @@ bool SclWorkspaceController::openFile(const QUrl& fileUrl) {
             self->sourceName_ = info.fileName();
             self->sourceFormat_ = info.suffix().toLower();
             self->lastError_.clear();
+            if (self->engineeringContext_) {
+                const auto published = self->engineeringContext_->publishSclDocument(
+                    *self->document_, self->sourcePath_);
+                self->appendDiagnostic(
+                    published
+                        ? QStringLiteral("IED engineering context published · %1")
+                              .arg(self->engineeringContext_->selectionRequired()
+                                       ? QStringLiteral("IED selection required")
+                                       : self->engineeringContext_->iedName())
+                        : QStringLiteral("IED engineering context rejected · %1")
+                              .arg(self->engineeringContext_->lastError()));
+            }
             self->appendDiagnostic(QStringLiteral("Opened %1 · %2 · %3 bytes")
                 .arg(self->sourceName_, self->editionText())
                 .arg(self->sourceBytes_.size()));

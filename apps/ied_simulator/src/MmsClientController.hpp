@@ -2,6 +2,7 @@
 #pragma once
 
 #include "MmsLiveTreeModel.hpp"
+#include "IedEngineeringContextController.hpp"
 
 #include <QObject>
 #include <QThreadPool>
@@ -18,6 +19,7 @@ class MmsClientController : public QObject {
     Q_PROPERTY(QString host READ host WRITE setHost NOTIFY configurationChanged)
     Q_PROPERTY(int port READ port WRITE setPort NOTIFY configurationChanged)
     Q_PROPERTY(QString trustedSclPath READ trustedSclPath WRITE setTrustedSclPath NOTIFY configurationChanged)
+    Q_PROPERTY(IedEngineeringContextController* engineeringContext READ engineeringContext WRITE setEngineeringContext NOTIFY engineeringContextChanged)
     Q_PROPERTY(bool trustedSclAvailable READ trustedSclAvailable NOTIFY configurationChanged)
     Q_PROPERTY(QString trustedSclHealth READ trustedSclHealth NOTIFY stateChanged)
     Q_PROPERTY(bool trustedSclDegraded READ trustedSclDegraded NOTIFY stateChanged)
@@ -48,6 +50,7 @@ public:
     [[nodiscard]] int port() const noexcept { return port_; }
     [[nodiscard]] QString trustedSclPath() const { return trustedSclPath_; }
     [[nodiscard]] bool trustedSclAvailable() const noexcept { return !trustedSclPath_.isEmpty(); }
+    [[nodiscard]] IedEngineeringContextController* engineeringContext() const noexcept { return engineeringContext_; }
     [[nodiscard]] QString trustedSclHealth() const {
         if (lastError_.contains(QStringLiteral("SCL online identity incompatible"), Qt::CaseInsensitive)) {
             return QStringLiteral("incompatible");
@@ -70,6 +73,7 @@ public:
     void setHost(const QString& value);
     void setPort(int value);
     void setTrustedSclPath(const QString& value);
+    void setEngineeringContext(IedEngineeringContextController* value);
 
     [[nodiscard]] bool connected() const noexcept;
     [[nodiscard]] bool busy() const noexcept;
@@ -99,6 +103,7 @@ public:
 
 signals:
     void configurationChanged();
+    void engineeringContextChanged();
     void stateChanged();
     void modelChanged();
     void diagnosticsChanged();
@@ -116,6 +121,7 @@ private:
     QString host_{QStringLiteral("127.0.0.1")};
     int port_{102};
     QString trustedSclPath_;
+    IedEngineeringContextController* engineeringContext_{};
     State state_{State::disconnected};
     bool operationBusy_{};
     QString iedName_;

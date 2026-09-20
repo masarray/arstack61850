@@ -158,6 +158,12 @@ void MmsClientController::setPort(const int value) {
     emit configurationChanged();
 }
 
+void MmsClientController::setEngineeringContext(IedEngineeringContextController* value) {
+    if (engineeringContext_ == value) return;
+    engineeringContext_ = value;
+    emit engineeringContextChanged();
+}
+
 void MmsClientController::setTrustedSclPath(const QString& value) {
     const auto normalized = value.trimmed();
     if (trustedSclPath_ == normalized) return;
@@ -251,6 +257,7 @@ bool MmsClientController::connectToIed() {
     operationBusy_ = false;
     lastError_.clear();
     clearModelState();
+    if (engineeringContext_) engineeringContext_->setRuntimeOnline(false);
     appendDiagnostic(QStringLiteral("Connect %1:%2 · generation %3 · model source %4")
                          .arg(requestedHost)
                          .arg(requestedPort)
@@ -355,7 +362,7 @@ bool MmsClientController::connectToIed() {
                 if (self) {
                     QMetaObject::invokeMethod(
                         self,
-                        [self, generation, model, snapshot, initialValues, associationProfile, healthSummary] {
+                        [self, generation, model, snapshot, initialValues, associationProfile, healthSummary, requestedTrustedSclPath] {
                             if (!self || self->generation_ != generation) return;
                             self->treeModel_.applyDocument(*model);
                             for (const auto& value : *initialValues) {
@@ -376,6 +383,10 @@ bool MmsClientController::connectToIed() {
                                 static_cast<int>(model->coverage.data_attribute_count);
                             self->state_ = State::connected;
                             self->lastError_.clear();
+                            if (self->engineeringContext_) {
+                                self->engineeringContext_->publishTrustedSclOnline(
+                                    *model, requestedTrustedSclPath);
+                            }
                             self->appendDiagnostic(healthSummary);
                             self->appendDiagnostic(
                                 QStringLiteral(
@@ -421,6 +432,9 @@ bool MmsClientController::connectToIed() {
                     self->dataAttributeCount_ = static_cast<int>(model->coverage.data_attribute_count);
                     self->state_ = State::connected;
                     self->lastError_.clear();
+                    if (self->engineeringContext_) {
+                        self->engineeringContext_->publishLiveDiscovery(*model);
+                    }
                     self->appendDiagnostic(
                         QStringLiteral("Discovery complete · %1 LD · %2 LN · %3 DA")
                             .arg(self->logicalDeviceCount_)
@@ -442,6 +456,7 @@ bool MmsClientController::connectToIed() {
                     if (!self || self->generation_ != generation) return;
                     self->state_ = State::faulted;
                     self->lastError_ = message;
+                    if (self->engineeringContext_) self->engineeringContext_->setRuntimeOnline(false);
                     self->appendDiagnostic(QStringLiteral("Connection failed · %1").arg(message));
                     emit self->stateChanged();
                 }, Qt::QueuedConnection);
@@ -460,7 +475,8 @@ void MmsClientController::disconnectFromIed() {
     operationBusy_ = false;
     lastError_.clear();
     clearModelState();
-    appendDiagnostic(QStringLiteral("Disconnected · session generation invalidated."));
+    if (engineeringContext_) engineeringContext_->setRuntimeOnline(false);
+    appendDiagnostic(QStringLiteral("Disconnected · session generation invalidated; engineering context retained."));
     emit stateChanged();
 
     const auto worker = workerState_;
