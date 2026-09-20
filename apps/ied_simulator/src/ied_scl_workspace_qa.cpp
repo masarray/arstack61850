@@ -180,7 +180,10 @@ int main(int argc, char** argv) {
         return 16;
     }
 
-    for (const auto& extension : {QStringLiteral("icd"), QStringLiteral("cid")}) {
+    for (const auto& extension : {
+             QStringLiteral("iid"),
+             QStringLiteral("icd"),
+             QStringLiteral("cid")}) {
         const QString path = temp.filePath(QStringLiteral("converted.") + extension);
         if (!workspace.exportCanonical(QUrl::fromLocalFile(path), QStringLiteral("preserve")) ||
             !waitFor([&] { return !workspace.busy(); }) || !workspace.lastExportVerified() ||
@@ -190,7 +193,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    const QString unsupported = temp.filePath(QStringLiteral("rejected.iid"));
+    const QString unsupported = temp.filePath(QStringLiteral("rejected.ssd"));
     if (workspace.exportCanonical(QUrl::fromLocalFile(unsupported), QStringLiteral("preserve")) ||
         workspace.lastError().isEmpty() || QFile::exists(unsupported)) {
         std::cerr << "Unsupported canonical profile did not fail closed.\n";

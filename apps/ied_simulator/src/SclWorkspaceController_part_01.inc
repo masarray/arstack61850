@@ -27,8 +27,20 @@ SclWorkspaceController::SclWorkspaceController(QObject* parent)
 
 void SclWorkspaceController::setEngineeringContext(IedEngineeringContextController* value) {
     if (engineeringContext_ == value) return;
+    if (engineeringContext_) disconnect(engineeringContext_, nullptr, this, nullptr);
     engineeringContext_ = value;
+    if (engineeringContext_) {
+        connect(
+            engineeringContext_,
+            &IedEngineeringContextController::contextChanged,
+            this,
+            [this] {
+                emit workspaceChanged();
+                emit stateChanged();
+            });
+    }
     emit engineeringContextChanged();
+    emit workspaceChanged();
     if (engineeringContext_ && document_) {
         engineeringContext_->publishSclDocument(*document_, sourcePath_);
     }

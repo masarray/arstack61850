@@ -18,6 +18,7 @@ namespace ar::iec61850::scl {
 
 enum class SclExportProfile {
     scd,
+    iid,
     icd,
     cid,
 };
@@ -114,6 +115,7 @@ inline std::string edition_attributes(const SclEdition edition) {
 inline std::string profile_name(const SclExportProfile profile) {
     switch (profile) {
     case SclExportProfile::scd: return "SCD";
+    case SclExportProfile::iid: return "IID";
     case SclExportProfile::icd: return "ICD";
     case SclExportProfile::cid: return "CID";
     }

@@ -80,6 +80,20 @@ Item {
         onAccepted: engineering.openFile(selectedFile)
     }
 
+    FileDialog {
+        id: saveSclDialog
+        title: "Save canonical IED model"
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "iid"
+        nameFilters: [
+            "IEC 61850 IID (*.iid)",
+            "IEC 61850 ICD (*.icd)",
+            "IEC 61850 CID (*.cid)",
+            "IEC 61850 SCD (*.scd)"
+        ]
+        onAccepted: engineering.exportEngineeringContext(selectedFile, "ed2")
+    }
+
     Rectangle { anchors.fill: parent; color: root.theme.background }
 
     ColumnLayout {
@@ -123,6 +137,18 @@ Item {
                     onClicked: browserSclDialog.open()
                     ToolTip.visible: hovered
                     ToolTip.text: "Open SCL/CID/SCD/IID/ICD into the persistent Browser model."
+                }
+
+                Button {
+                    text: engineering.busy ? "Saving…" : "Save SCL"
+                    visible: context.loaded && context.authorityKey === "live-discovery"
+                    enabled: engineering.engineeringContextExportSupported
+                             && !engineering.busy
+                    onClicked: saveSclDialog.open()
+                    ToolTip.visible: hovered
+                    ToolTip.text: context.online
+                                  ? "Save the cached canonical IED model locally; no rediscovery is performed."
+                                  : "Save the persistent canonical IED model while offline."
                 }
 
                 TextField {

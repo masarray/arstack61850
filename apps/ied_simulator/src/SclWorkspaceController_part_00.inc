@@ -2,6 +2,7 @@
 #include "SclWorkspaceController.hpp"
 
 #include "ariec61850/scl/exporter.hpp"
+#include "ariec61850/scl/live_model_projection.hpp"
 #include "ariec61850/scl/parser.hpp"
 
 #include <QFile>
@@ -61,6 +62,7 @@ std::optional<scl::SclEdition> requestedEdition(
 std::optional<scl::SclExportProfile> profileFromPath(const QString& path) {
     const auto suffix = QFileInfo(path).suffix().toLower();
     if (suffix == QStringLiteral("scd")) return scl::SclExportProfile::scd;
+    if (suffix == QStringLiteral("iid")) return scl::SclExportProfile::iid;
     if (suffix == QStringLiteral("icd")) return scl::SclExportProfile::icd;
     if (suffix == QStringLiteral("cid")) return scl::SclExportProfile::cid;
     return std::nullopt;
@@ -69,6 +71,7 @@ std::optional<scl::SclExportProfile> profileFromPath(const QString& path) {
 QString profileLabel(const scl::SclExportProfile profile) {
     switch (profile) {
     case scl::SclExportProfile::scd: return QStringLiteral("SCD");
+    case scl::SclExportProfile::iid: return QStringLiteral("IID");
     case scl::SclExportProfile::icd: return QStringLiteral("ICD");
     case scl::SclExportProfile::cid: return QStringLiteral("CID");
     }
@@ -191,6 +194,14 @@ bool modeledSemanticsEquivalent(const scl::SclDocument& left, const scl::SclDocu
            reportsEquivalent(left.report_controls, right.report_controls) &&
            gooseEquivalent(left.goose_streams, right.goose_streams) &&
            sampledValuesEquivalent(left.sampled_values_streams, right.sampled_values_streams);
+}
+
+bool discoveredProjectionEquivalent(
+    const scl::SclDocument& left,
+    const scl::SclDocument& right) {
+    return modeledSemanticsEquivalent(left, right) &&
+           left.mms_access_points == right.mms_access_points &&
+           left.setting_controls == right.setting_controls;
 }
 
 struct OpenResult final {

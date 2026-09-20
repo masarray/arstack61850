@@ -396,6 +396,22 @@ target_include_directories(ied_engineering_context_qa PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(ied_engineering_context_qa PRIVATE cxx_std_20)
 
+add_executable(ied_discovery_scl_export_qa
+    src/ied_discovery_scl_export_qa.cpp
+    src/SclWorkspaceController.cpp
+    src/SclWorkspaceController.hpp
+    src/IedEngineeringContextController.cpp
+    src/IedEngineeringContextController.hpp
+    src/MmsLiveTreeModel.cpp
+    src/MmsLiveTreeModel.hpp)
+target_link_libraries(ied_discovery_scl_export_qa PRIVATE
+    Qt6::Core
+    Qt6::Qml
+    ARIEC61850::core)
+target_include_directories(ied_discovery_scl_export_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_discovery_scl_export_qa PRIVATE cxx_std_20)
+
 # The regular library intentionally keeps a strict portable connection runtime.
 # The desktop simulator needs the separate compatibility runtime validated
 # against common engineering-client AARQ, selector, browse, Identify and
