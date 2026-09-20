@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QUrl>
 #include <QtQmlIntegration/qqmlintegration.h>
 
 #include <vector>
@@ -14,6 +15,7 @@ class ProductHardeningController : public QObject {
 
     Q_PROPERTY(int workspaceIndex READ workspaceIndex WRITE setWorkspaceIndex NOTIFY stateChanged)
     Q_PROPERTY(QStringList recentEndpoints READ recentEndpoints NOTIFY stateChanged)
+    Q_PROPERTY(QStringList recentResources READ recentResources NOTIFY stateChanged)
     Q_PROPERTY(QString lastHost READ lastHost NOTIFY stateChanged)
     Q_PROPERTY(int lastPort READ lastPort NOTIFY stateChanged)
     Q_PROPERTY(QString statePath READ statePath CONSTANT)
@@ -33,6 +35,7 @@ public:
     void setWorkspaceIndex(int value);
 
     [[nodiscard]] QStringList recentEndpoints() const;
+    [[nodiscard]] QStringList recentResources() const;
     [[nodiscard]] QString lastHost() const;
     [[nodiscard]] int lastPort() const noexcept;
     [[nodiscard]] QString statePath() const { return statePath_; }
@@ -48,6 +51,13 @@ public:
     Q_INVOKABLE void clearRecentEndpoints();
     Q_INVOKABLE QString recentHost(int index) const;
     Q_INVOKABLE int recentPort(int index) const;
+
+    Q_INVOKABLE bool rememberResource(const QString& path);
+    Q_INVOKABLE void clearRecentResources();
+    Q_INVOKABLE QString recentResourcePath(int index) const;
+    Q_INVOKABLE QUrl recentResourceUrl(int index) const;
+    Q_INVOKABLE bool recentResourceExists(int index) const;
+
     Q_INVOKABLE bool reload();
     Q_INVOKABLE void refreshRuntimeReadiness();
 
@@ -62,14 +72,18 @@ private:
     };
 
     static constexpr int legacyStateSchemaVersion = 1;
-    static constexpr int stateSchemaVersion = 2;
+    static constexpr int previousStateSchemaVersion = 2;
+    static constexpr int stateSchemaVersion = 3;
     static constexpr int maximumRecentEndpoints = 8;
+    static constexpr int maximumRecentResources = 8;
+    static constexpr int maximumResourcePathCharacters = 4096;
     static constexpr int minimumWorkspaceIndex = 0;
     static constexpr int maximumWorkspaceIndex = 3;
     static constexpr int legacyMaximumWorkspaceIndex = 6;
 
     [[nodiscard]] static QString defaultStatePath();
     [[nodiscard]] static QString normalizedHost(const QString& value);
+    [[nodiscard]] static QString normalizedResourcePath(const QString& value);
     [[nodiscard]] static QString endpointLabel(const Endpoint& endpoint);
     [[nodiscard]] static int migrateLegacyWorkspaceIndex(int value) noexcept;
     [[nodiscard]] bool loadState();
@@ -80,6 +94,7 @@ private:
     QString statePath_;
     int workspaceIndex_{};
     std::vector<Endpoint> recent_;
+    std::vector<QString> recentResources_;
     bool settingsHealthy_{true};
     QString settingsStatus_{QStringLiteral("Product state ready.")};
     bool npcapAvailable_{};
