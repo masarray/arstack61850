@@ -309,6 +309,7 @@ Item {
                         theme: root.theme
                         settings: root.utilities
                         showConnectionHeader: false
+                        showInventoryPanel: false
                     }
 
                     FilesWorkspace {
