@@ -386,6 +386,10 @@ bool MmsClientController::connectToIed() {
                             if (self->engineeringContext_) {
                                 self->engineeringContext_->publishTrustedSclOnline(
                                     *model, requestedTrustedSclPath);
+                                for (const auto& value : *initialValues) {
+                                    self->engineeringContext_->treeModel()->applyReadValue(
+                                        snapshotKey(value), QString::fromStdString(value.display));
+                                }
                             }
                             self->appendDiagnostic(healthSummary);
                             self->appendDiagnostic(
@@ -512,7 +516,13 @@ void MmsClientController::startRead(
             if (self) {
                 QMetaObject::invokeMethod(self, [self, generation, values, operationName] {
                     if (!self || self->generation_ != generation) return;
-                    for (const auto& value : values) self->treeModel_.applyReadValue(value.key, value.display);
+                    for (const auto& value : values) {
+                        self->treeModel_.applyReadValue(value.key, value.display);
+                        if (self->engineeringContext_) {
+                            self->engineeringContext_->treeModel()->applyReadValue(
+                                value.key, value.display);
+                        }
+                    }
                     self->setOperationBusy(false);
                     self->lastError_.clear();
                     self->appendDiagnostic(
@@ -548,6 +558,46 @@ bool MmsClientController::refreshVisible(const int firstRow, const int lastRow) 
     if (targets.isEmpty()) return false;
     startRead(targets, QStringLiteral("Refresh visible"));
     return true;
+}
+
+bool MmsClientController::readEngineeringSelected() {
+    if (!connected() || operationBusy_ || !engineeringContext_ || !engineeringContext_->loaded()) {
+        return false;
+    }
+    const auto targets = engineeringContext_->treeModel()->selectedReadTargets();
+    if (targets.isEmpty()) return false;
+    startRead(targets, QStringLiteral("Read engineering selection"));
+    return true;
+}
+
+bool MmsClientController::refreshEngineeringVisible(const int firstRow, const int lastRow) {
+    if (!connected() || operationBusy_ || !engineeringContext_ || !engineeringContext_->loaded()) {
+        return false;
+    }
+    const auto targets =
+        engineeringContext_->treeModel()->readTargetsForVisibleRange(firstRow, lastRow, 64);
+    if (targets.isEmpty()) return false;
+    startRead(targets, QStringLiteral("Refresh engineering model"));
+    return true;
+}
+
+bool MmsClientController::writeEngineeringSelected(const QString& textValue) {
+    if (!connected() || operationBusy_ || !engineeringContext_ || !engineeringContext_->loaded()) {
+        return false;
+    }
+    const auto selection = engineeringContext_->treeModel()->selectionSnapshot();
+    if (!selection || selection->domain.isEmpty() || selection->item.isEmpty()) {
+        lastError_ = QStringLiteral("Select a writable engineering-model DataAttribute first.");
+        emit stateChanged();
+        return false;
+    }
+    if (!treeModel_.selectMmsItem(selection->domain, selection->item)) {
+        lastError_ = QStringLiteral(
+            "The selected engineering-model attribute is not present in the active MMS session.");
+        emit stateChanged();
+        return false;
+    }
+    return writeSelected(textValue);
 }
 
 bool MmsClientController::writeSelected(const QString& textValue) {
@@ -604,7 +654,13 @@ bool MmsClientController::writeSelected(const QString& textValue) {
             if (self) {
                 QMetaObject::invokeMethod(self, [self, generation, reference, values] {
                     if (!self || self->generation_ != generation) return;
-                    for (const auto& read : values) self->treeModel_.applyReadValue(read.key, read.display);
+                    for (const auto& read : values) {
+                        self->treeModel_.applyReadValue(read.key, read.display);
+                        if (self->engineeringContext_) {
+                            self->engineeringContext_->treeModel()->applyReadValue(
+                                read.key, read.display);
+                        }
+                    }
                     self->setOperationBusy(false);
                     self->lastError_.clear();
                     self->appendDiagnostic(QStringLiteral("Guarded Write verified · %1").arg(reference));

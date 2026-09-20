@@ -6,16 +6,16 @@ import QtQuick.Layouts
 Rectangle {
     id: root
     required property var theme
-    required property var client
+    required property var context
     required property var engineering
 
     property var visibleStreams: {
         var all = engineering.gooseStreams
-        if (!client.iedName.length)
+        if (!context.iedName.length)
             return all
         var filtered = []
         for (var index = 0; index < all.length; ++index) {
-            if (String(all[index].iedName) === client.iedName)
+            if (String(all[index].iedName) === context.iedName)
                 filtered.push(all[index])
         }
         return filtered

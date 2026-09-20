@@ -9,10 +9,13 @@ Item {
     required property var theme
     required property var client
 
+    property var modelProvider: client
     property bool showConnectionHeader: true
     property bool showNavigationPanel: true
 
-    property var selected: client.treeModel.selectedNode
+    property var selected: modelProvider.treeModel.selectedNode
+    property bool modelAvailable: modelProvider && modelProvider.treeModel
+                                  && modelProvider.treeModel.totalNodeCount > 0
     property string pendingWrite: ""
 
     function text(value) {
@@ -31,6 +34,28 @@ Item {
         if (client.trustedSclHealth === "degraded") return theme.amber
         if (client.trustedSclHealth === "incompatible") return theme.red
         return theme.muted
+    }
+
+    function usingEngineeringModel() {
+        return modelProvider !== client
+    }
+
+    function readCurrentSelection() {
+        if (usingEngineeringModel())
+            return client.readEngineeringSelected()
+        return client.readSelected()
+    }
+
+    function refreshCurrentVisible(firstRow, lastRow) {
+        if (usingEngineeringModel())
+            return client.refreshEngineeringVisible(firstRow, lastRow)
+        return client.refreshVisible(firstRow, lastRow)
+    }
+
+    function writeCurrentSelection(value) {
+        if (usingEngineeringModel())
+            return client.writeEngineeringSelected(value)
+        return client.writeSelected(value)
     }
 
     function firstVisibleRow() {
@@ -183,19 +208,19 @@ Item {
                             id: searchField
                             Layout.fillWidth: true
                             placeholderText: "Search reference, FC, type or value"
-                            enabled: client.connected
+                            enabled: root.modelAvailable
                             onTextChanged: searchDebounce.restart()
                         }
                         Button {
                             text: "Refresh visible"
                             enabled: client.connected && !client.operationBusy && tree.count > 0
-                            onClicked: client.refreshVisible(root.firstVisibleRow(), root.lastVisibleRow())
+                            onClicked: root.refreshCurrentVisible(root.firstVisibleRow(), root.lastVisibleRow())
                         }
                         Timer {
                             id: searchDebounce
                             interval: 100
                             repeat: false
-                            onTriggered: client.treeModel.filterText = searchField.text
+                            onTriggered: root.modelProvider.treeModel.filterText = searchField.text
                         }
                     }
 
@@ -208,7 +233,7 @@ Item {
                         clip: true
                         reuseItems: true
                         cacheBuffer: 0
-                        model: client.treeModel
+                        model: root.modelProvider.treeModel
                         ScrollBar.vertical: ScrollBar { }
 
                         delegate: Rectangle {
@@ -267,12 +292,13 @@ Item {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 onClicked: function(event) {
-                                    client.treeModel.selectRow(index)
-                                    if (model.hasChildren && event.x < 38 + model.depth * 14) client.treeModel.toggle(index)
+                                    root.modelProvider.treeModel.selectRow(index)
+                                    if (model.hasChildren && event.x < 38 + model.depth * 14)
+                                        root.modelProvider.treeModel.toggle(index)
                                 }
                                 onDoubleClicked: {
-                                    if (model.hasChildren) client.treeModel.toggle(index)
-                                    else client.readSelected()
+                                    if (model.hasChildren) root.modelProvider.treeModel.toggle(index)
+                                    else root.readCurrentSelection()
                                 }
                             }
                         }
@@ -346,7 +372,7 @@ Item {
                             Button {
                                 text: client.operationBusy ? "Reading…" : "Read"
                                 enabled: client.connected && !client.operationBusy && root.selected.readable === true
-                                onClicked: client.readSelected()
+                                onClicked: root.readCurrentSelection()
                             }
                             TextField {
                                 id: writeValue

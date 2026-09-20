@@ -20,6 +20,7 @@ class IedBrowserSessionController : public QObject {
     Q_PROPERTY(MmsClientController* client READ client WRITE setClient NOTIFY servicesChanged)
     Q_PROPERTY(MmsReportController* reports READ reports WRITE setReports NOTIFY servicesChanged)
     Q_PROPERTY(MmsFileSettingsController* utilities READ utilities WRITE setUtilities NOTIFY servicesChanged)
+    Q_PROPERTY(IedEngineeringContextController* engineeringContext READ engineeringContext WRITE setEngineeringContext NOTIFY servicesChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY stateChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY stateChanged)
     Q_PROPERTY(bool configurationLocked READ configurationLocked NOTIFY stateChanged)
@@ -36,6 +37,9 @@ public:
     [[nodiscard]] MmsClientController* client() const noexcept { return client_; }
     [[nodiscard]] MmsReportController* reports() const noexcept { return reports_; }
     [[nodiscard]] MmsFileSettingsController* utilities() const noexcept { return utilities_; }
+    [[nodiscard]] IedEngineeringContextController* engineeringContext() const noexcept {
+        return engineeringContext_;
+    }
 
     void setHost(const QString& value);
     void setPort(int value);
@@ -43,6 +47,7 @@ public:
     void setClient(MmsClientController* value);
     void setReports(MmsReportController* value);
     void setUtilities(MmsFileSettingsController* value);
+    void setEngineeringContext(IedEngineeringContextController* value);
 
     [[nodiscard]] bool connected() const noexcept;
     [[nodiscard]] bool busy() const noexcept;
@@ -51,6 +56,9 @@ public:
     [[nodiscard]] QString stateText() const;
     [[nodiscard]] QString lastError() const;
 
+    Q_INVOKABLE bool applyEngineeringEndpoint();
+    Q_INVOKABLE bool connectUsingEngineeringContext();
+    Q_INVOKABLE bool discoverAndConnect();
     Q_INVOKABLE bool connectToIed();
     Q_INVOKABLE void disconnectFromIed();
     Q_INVOKABLE bool ensureReportsConnected();
@@ -73,4 +81,5 @@ private:
     QPointer<MmsClientController> client_;
     QPointer<MmsReportController> reports_;
     QPointer<MmsFileSettingsController> utilities_;
+    QPointer<IedEngineeringContextController> engineeringContext_;
 };

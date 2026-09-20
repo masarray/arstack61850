@@ -12,10 +12,38 @@ int main(int argc, char** argv) {
     MmsReportController reports;
     MmsFileSettingsController utilities;
     IedBrowserSessionController browser;
+    IedEngineeringContextController engineeringContext;
 
     browser.setClient(&client);
     browser.setReports(&reports);
     browser.setUtilities(&utilities);
+    browser.setEngineeringContext(&engineeringContext);
+
+    ar::iec61850::scl::SclDocument document;
+    document.source_name = "browser-context.cid";
+    document.edition = ar::iec61850::scl::SclEdition::edition2;
+    document.ieds.push_back({"BROWSERIED", "ARStack", "QA", "1"});
+    ar::iec61850::scl::SclMmsAccessPoint accessPoint;
+    accessPoint.ied_name = "BROWSERIED";
+    accessPoint.access_point_name = "AP1";
+    accessPoint.ip_address = "192.0.2.77";
+    accessPoint.tcp_port = 8102;
+    document.mms_access_points.push_back(accessPoint);
+    ar::iec61850::scl::SclLogicalNode lln0;
+    lln0.ied_name = "BROWSERIED";
+    lln0.ld_inst = "LD0";
+    lln0.ln_class = "LLN0";
+    lln0.name = "LLN0";
+    document.logical_nodes.push_back(lln0);
+
+    if (!engineeringContext.publishSclDocument(
+            document, QStringLiteral("/tmp/browser-context.cid")) ||
+        browser.host() != QStringLiteral("192.0.2.77") ||
+        browser.port() != 8102 ||
+        client.engineeringContext() != &engineeringContext) {
+        std::cerr << "Canonical Browser engineering-context adoption failed.\n";
+        return 2;
+    }
 
     browser.setHost(QStringLiteral("192.0.2.40"));
     browser.setPort(8102);
@@ -28,7 +56,7 @@ int main(int argc, char** argv) {
         reports.port() != browser.port() || utilities.port() != browser.port() ||
         client.trustedSclPath() != browser.trustedSclPath()) {
         std::cerr << "Browser endpoint/trusted-SCL propagation failed.\n";
-        return 2;
+        return 3;
     }
 
     browser.setHost(QStringLiteral("[2001:db8::40]"));
@@ -38,19 +66,19 @@ int main(int argc, char** argv) {
         client.host() != browser.host() || reports.host() != browser.host() ||
         utilities.host() != browser.host()) {
         std::cerr << "Browser IPv6 endpoint normalization/propagation failed.\n";
-        return 3;
+        return 4;
     }
 
     browser.setPort(0);
     if (browser.port() != 102 || browser.lastError().isEmpty()) {
         std::cerr << "Invalid Browser port did not fail closed.\n";
-        return 4;
+        return 5;
     }
 
     browser.setHost(QStringLiteral("invalid host"));
     if (browser.host() != QStringLiteral("2001:db8::40") || browser.lastError().isEmpty()) {
         std::cerr << "Invalid Browser host did not fail closed.\n";
-        return 5;
+        return 6;
     }
 
     browser.setHost(QStringLiteral("relay.local"));
@@ -59,18 +87,20 @@ int main(int argc, char** argv) {
         reports.host() != QStringLiteral("relay.local") ||
         utilities.host() != QStringLiteral("relay.local")) {
         std::cerr << "Browser recovery after invalid configuration failed.\n";
-        return 6;
+        return 7;
     }
 
     browser.disconnectFromIed();
     if (browser.connected() || client.connected() || reports.connected() || utilities.connected()) {
         std::cerr << "Coordinated Browser disconnect contract failed.\n";
-        return 7;
+        return 8;
     }
 
     std::cout << "IED_BROWSER_SESSION_PASS"
               << " endpoint=relay.local:102"
               << " propagation=pass"
+              << " canonical_context=pass"
+              << " engineering_endpoint=pass"
               << " trusted_scl=pass"
               << " invalid_endpoint=fail_closed"
               << " disconnect=coordinated\n";

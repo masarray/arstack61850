@@ -10,6 +10,7 @@ Item {
     required property var theme
     required property var workspace
     required property var hardening
+    required property var browserSession
 
     property int viewIndex: 0
 
@@ -43,8 +44,10 @@ Item {
         fileMode: FileDialog.OpenFile
         nameFilters: ["IEC 61850 engineering files (*.scl *.cid *.scd *.iid *.icd)", "All files (*)"]
         onAccepted: {
-            if (workspace.openFile(selectedFile))
+            if (workspace.openFile(selectedFile)) {
                 root.viewIndex = 1
+                root.browserRequested()
+            }
         }
     }
 
@@ -104,7 +107,7 @@ Item {
                     theme: root.theme
                     text: "Open SCL"
                     primary: !workspace.loaded
-                    enabled: !workspace.busy
+                    enabled: !workspace.busy && !browserSession.configurationLocked
                     onClicked: openDialog.open()
                 }
 
@@ -173,13 +176,19 @@ Item {
                                 Label { text: "Engineering file"; color: root.theme.text; font.pixelSize: 10; font.weight: Font.DemiBold }
                                 Label {
                                     Layout.fillWidth: true
-                                    text: "Open SCL / CID / SCD / IID / ICD without changing protocol runtime."
+                                    text: "Open SCL / CID / SCD / IID / ICD and continue in the unified IED Browser."
                                     color: root.theme.muted
                                     font.pixelSize: 8
                                     wrapMode: Text.WordWrap
                                 }
                                 Item { Layout.fillHeight: true }
-                                ActionButton { theme: root.theme; text: "Open SCL"; primary: true; onClicked: openDialog.open() }
+                                ActionButton {
+                                    theme: root.theme
+                                    text: "Open SCL"
+                                    primary: true
+                                    enabled: !workspace.busy && !browserSession.configurationLocked
+                                    onClicked: openDialog.open()
+                                }
                             }
                         }
 
@@ -346,10 +355,14 @@ Item {
                                             id: resourceMouse
                                             anchors.fill: parent
                                             hoverEnabled: true
-                                            enabled: hardening.recentResourceExists(index) && !workspace.busy
+                                            enabled: hardening.recentResourceExists(index)
+                                                     && !workspace.busy
+                                                     && !browserSession.configurationLocked
                                             onClicked: {
-                                                if (workspace.openFile(hardening.recentResourceUrl(index)))
+                                                if (workspace.openFile(hardening.recentResourceUrl(index))) {
                                                     root.viewIndex = 1
+                                                    root.browserRequested()
+                                                }
                                             }
                                         }
                                     }

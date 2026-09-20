@@ -28,6 +28,8 @@ class IedEngineeringContextController : public QObject {
     Q_PROPERTY(QStringList candidateIeds READ candidateIeds NOTIFY contextChanged)
     Q_PROPERTY(QString accessPointName READ accessPointName NOTIFY contextChanged)
     Q_PROPERTY(QString endpoint READ endpoint NOTIFY contextChanged)
+    Q_PROPERTY(QString endpointHost READ endpointHost NOTIFY contextChanged)
+    Q_PROPERTY(int endpointPort READ endpointPort NOTIFY contextChanged)
     Q_PROPERTY(QString structuralFingerprint READ structuralFingerprint NOTIFY contextChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY contextChanged)
     Q_PROPERTY(bool online READ online NOTIFY runtimeChanged)
@@ -59,6 +61,12 @@ public:
     [[nodiscard]] QStringList candidateIeds() const { return candidateIeds_; }
     [[nodiscard]] QString accessPointName() const { return accessPointName_; }
     [[nodiscard]] QString endpoint() const { return endpoint_; }
+    [[nodiscard]] QString endpointHost() const {
+        return model_ ? QString::fromStdString(model_->endpoint.host) : QString{};
+    }
+    [[nodiscard]] int endpointPort() const noexcept {
+        return model_ ? static_cast<int>(model_->endpoint.port) : 102;
+    }
     [[nodiscard]] QString structuralFingerprint() const { return structuralFingerprint_; }
     [[nodiscard]] QString lastError() const { return lastError_; }
     [[nodiscard]] bool online() const noexcept { return online_; }
