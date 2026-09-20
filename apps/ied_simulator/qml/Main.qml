@@ -278,6 +278,7 @@ ApplicationWindow {
                 client: mmsClient
                 reports: reports
                 utilities: utilities
+                engineering: sclWorkspace
             }
 
             Item {
