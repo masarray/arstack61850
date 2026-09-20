@@ -10,6 +10,7 @@
 #include <QLibrary>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QUrl>
 
 #include <algorithm>
 #include <utility>
@@ -47,6 +48,28 @@ QString ProductHardeningController::normalizedHost(const QString& value) {
     return host;
 }
 
+QString ProductHardeningController::normalizedResourcePath(const QString& value) {
+    const auto candidate = value.trimmed();
+    if (candidate.isEmpty() || candidate.size() > maximumResourcePathCharacters) return {};
+
+    QString path;
+    const QUrl url(candidate);
+    if (url.isValid() && url.isLocalFile()) {
+        path = url.toLocalFile();
+    } else {
+        if (!QDir::isAbsolutePath(candidate)) return {};
+        path = candidate;
+    }
+
+    for (const auto character : path) {
+        if (character.category() == QChar::Other_Control) return {};
+    }
+
+    path = QDir::cleanPath(path);
+    if (path.isEmpty() || path.size() > maximumResourcePathCharacters || !QDir::isAbsolutePath(path)) return {};
+    return QFileInfo(path).absoluteFilePath();
+}
+
 QString ProductHardeningController::endpointLabel(const Endpoint& endpoint) {
     const auto host = endpoint.host.contains(QLatin1Char(':'))
         ? QStringLiteral("[%1]").arg(endpoint.host)
@@ -79,6 +102,13 @@ QStringList ProductHardeningController::recentEndpoints() const {
     return result;
 }
 
+QStringList ProductHardeningController::recentResources() const {
+    QStringList result;
+    result.reserve(static_cast<qsizetype>(recentResources_.size()));
+    for (const auto& path : recentResources_) result.push_back(path);
+    return result;
+}
+
 QString ProductHardeningController::lastHost() const {
     return recent_.empty() ? QString{} : recent_.front().host;
 }
@@ -98,6 +128,7 @@ bool ProductHardeningController::npcapRequired() const noexcept {
 void ProductHardeningController::resetDefaults() {
     workspaceIndex_ = 0;
     recent_.clear();
+    recentResources_.clear();
 }
 
 void ProductHardeningController::setStateFault(const QString& message) {
@@ -136,7 +167,9 @@ bool ProductHardeningController::loadState() {
 
     const auto object = document.object();
     const auto schema = object.value(QStringLiteral("schema")).toInt(-1);
-    if (schema != stateSchemaVersion && schema != legacyStateSchemaVersion) {
+    if (schema != stateSchemaVersion &&
+        schema != previousStateSchemaVersion &&
+        schema != legacyStateSchemaVersion) {
         setStateFault(QStringLiteral("Persisted state ignored: unsupported schema."));
         emit stateChanged();
         return false;
@@ -184,19 +217,52 @@ bool ProductHardeningController::loadState() {
         loaded.push_back({host, port});
     }
 
+    std::vector<QString> loadedResources;
+    if (schema == stateSchemaVersion) {
+        const auto resources = object.value(QStringLiteral("recentResources"));
+        if (!resources.isArray() || resources.toArray().size() > maximumRecentResources) {
+            setStateFault(QStringLiteral("Persisted state ignored: recent resource list is invalid or unbounded."));
+            emit stateChanged();
+            return false;
+        }
+        loadedResources.reserve(static_cast<std::size_t>(resources.toArray().size()));
+        for (const auto& value : resources.toArray()) {
+            if (!value.isString()) {
+                setStateFault(QStringLiteral("Persisted state ignored: malformed recent engineering resource."));
+                emit stateChanged();
+                return false;
+            }
+            const auto path = normalizedResourcePath(value.toString());
+            if (path.isEmpty()) {
+                setStateFault(QStringLiteral("Persisted state ignored: invalid recent engineering resource."));
+                emit stateChanged();
+                return false;
+            }
+            loadedResources.push_back(path);
+        }
+    }
+
     workspaceIndex_ = workspace;
     recent_ = std::move(loaded);
+    recentResources_ = std::move(loadedResources);
     settingsHealthy_ = true;
-    settingsStatus_ = schema == legacyStateSchemaVersion
-        ? QStringLiteral("Legacy product state migrated to the four-workspace shell.")
-        : QStringLiteral("Persisted product state restored safely.");
 
     if (schema == legacyStateSchemaVersion) {
+        settingsStatus_ = QStringLiteral("Legacy product state migrated to the four-workspace File/Home schema.");
+    } else if (schema == previousStateSchemaVersion) {
+        settingsStatus_ = QStringLiteral("Product state migrated to File/Home engineering-resource history.");
+    } else {
+        settingsStatus_ = QStringLiteral("Persisted product state restored safely.");
+    }
+
+    if (schema != stateSchemaVersion) {
         if (!persistState()) {
             emit stateChanged();
             return false;
         }
-        settingsStatus_ = QStringLiteral("Legacy product state migrated to the four-workspace shell.");
+        settingsStatus_ = schema == legacyStateSchemaVersion
+            ? QStringLiteral("Legacy product state migrated to the four-workspace File/Home schema.")
+            : QStringLiteral("Product state migrated to File/Home engineering-resource history.");
     }
 
     emit stateChanged();
@@ -218,10 +284,14 @@ bool ProductHardeningController::persistState() {
         recent.append(item);
     }
 
+    QJsonArray resources;
+    for (const auto& path : recentResources_) resources.append(path);
+
     QJsonObject object;
     object.insert(QStringLiteral("schema"), stateSchemaVersion);
     object.insert(QStringLiteral("workspaceIndex"), workspaceIndex_);
     object.insert(QStringLiteral("recentEndpoints"), recent);
+    object.insert(QStringLiteral("recentResources"), resources);
     const auto payload = QJsonDocument(object).toJson(QJsonDocument::Compact);
 
     QSaveFile output(statePath_);
@@ -292,6 +362,56 @@ QString ProductHardeningController::recentHost(const int index) const {
 int ProductHardeningController::recentPort(const int index) const {
     if (index < 0 || index >= static_cast<int>(recent_.size())) return 0;
     return recent_[static_cast<std::size_t>(index)].port;
+}
+
+bool ProductHardeningController::rememberResource(const QString& pathValue) {
+    const auto path = normalizedResourcePath(pathValue);
+    if (path.isEmpty()) {
+        settingsStatus_ = QStringLiteral("Rejected invalid engineering-resource path.");
+        emit stateChanged();
+        return false;
+    }
+
+#ifdef Q_OS_WIN
+    constexpr auto pathCaseSensitivity = Qt::CaseInsensitive;
+#else
+    constexpr auto pathCaseSensitivity = Qt::CaseSensitive;
+#endif
+
+    const auto duplicate = std::find_if(recentResources_.begin(), recentResources_.end(), [&](const QString& existing) {
+        return existing.compare(path, pathCaseSensitivity) == 0;
+    });
+    if (duplicate != recentResources_.end()) recentResources_.erase(duplicate);
+    recentResources_.insert(recentResources_.begin(), path);
+    if (recentResources_.size() > static_cast<std::size_t>(maximumRecentResources)) {
+        recentResources_.resize(static_cast<std::size_t>(maximumRecentResources));
+    }
+
+    const auto persisted = persistState();
+    emit stateChanged();
+    return persisted;
+}
+
+void ProductHardeningController::clearRecentResources() {
+    if (recentResources_.empty()) return;
+    recentResources_.clear();
+    (void)persistState();
+    emit stateChanged();
+}
+
+QString ProductHardeningController::recentResourcePath(const int index) const {
+    if (index < 0 || index >= static_cast<int>(recentResources_.size())) return {};
+    return recentResources_[static_cast<std::size_t>(index)];
+}
+
+QUrl ProductHardeningController::recentResourceUrl(const int index) const {
+    const auto path = recentResourcePath(index);
+    return path.isEmpty() ? QUrl{} : QUrl::fromLocalFile(path);
+}
+
+bool ProductHardeningController::recentResourceExists(const int index) const {
+    const auto path = recentResourcePath(index);
+    return !path.isEmpty() && QFileInfo::exists(path) && QFileInfo(path).isFile();
 }
 
 bool ProductHardeningController::reload() {
