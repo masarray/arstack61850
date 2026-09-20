@@ -141,7 +141,7 @@ Item {
 
                 Button {
                     text: engineering.busy ? "Saving…" : "Save SCL"
-                    visible: context.loaded
+                    visible: context.loaded && context.authorityKey === "live-discovery"
                     enabled: engineering.engineeringContextExportSupported
                              && !engineering.busy
                     onClicked: saveSclDialog.open()
