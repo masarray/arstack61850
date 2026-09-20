@@ -44,6 +44,7 @@ class SclWorkspaceController : public QObject {
     Q_PROPERTY(bool reconstructionSupported READ reconstructionSupported NOTIFY workspaceChanged)
     Q_PROPERTY(bool editionConversionSupported READ editionConversionSupported NOTIFY workspaceChanged)
     Q_PROPERTY(bool profileConversionSupported READ profileConversionSupported NOTIFY workspaceChanged)
+    Q_PROPERTY(bool engineeringContextExportSupported READ engineeringContextExportSupported NOTIFY workspaceChanged)
     Q_PROPERTY(QStringList preservationReport READ preservationReport NOTIFY workspaceChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY stateChanged)
     Q_PROPERTY(bool lastExportVerified READ lastExportVerified NOTIFY exportChanged)
@@ -79,6 +80,10 @@ public:
     [[nodiscard]] bool reconstructionSupported() const noexcept;
     [[nodiscard]] bool editionConversionSupported() const noexcept;
     [[nodiscard]] bool profileConversionSupported() const noexcept;
+    [[nodiscard]] bool engineeringContextExportSupported() const noexcept {
+        return engineeringContext_ != nullptr && engineeringContext_->loaded() &&
+               !engineeringContext_->selectionRequired();
+    }
     [[nodiscard]] QStringList preservationReport() const;
     [[nodiscard]] QString lastError() const { return lastError_; }
     [[nodiscard]] bool lastExportVerified() const noexcept { return lastExportVerified_; }
@@ -91,6 +96,9 @@ public:
     Q_INVOKABLE bool openFile(const QUrl& fileUrl);
     Q_INVOKABLE bool saveAs(const QUrl& fileUrl, const QString& targetEdition = QStringLiteral("preserve"));
     Q_INVOKABLE bool exportCanonical(const QUrl& fileUrl, const QString& targetEdition = QStringLiteral("preserve"));
+    Q_INVOKABLE bool exportEngineeringContext(
+        const QUrl& fileUrl,
+        const QString& targetEdition = QStringLiteral("ed2"));
     Q_INVOKABLE void cancelOperation();
     Q_INVOKABLE QString diagnosticsText() const;
 

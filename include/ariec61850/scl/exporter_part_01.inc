@@ -26,7 +26,9 @@ inline bool validate_model(
         error = "Canonical SCL export requires a resolved DataTypeTemplates leaf model.";
         return false;
     }
-    if ((options.profile == SclExportProfile::icd || options.profile == SclExportProfile::cid) &&
+    if ((options.profile == SclExportProfile::iid ||
+         options.profile == SclExportProfile::icd ||
+         options.profile == SclExportProfile::cid) &&
         document.ieds.size() != 1U) {
         error = profile_name(options.profile) + " export requires exactly one modeled IED.";
         return false;
@@ -211,10 +213,17 @@ inline void write_address(
 }
 
 inline void write_communication(std::ostringstream& out, const SclDocument& document) {
-    if (document.goose_streams.empty() && document.sampled_values_streams.empty()) return;
+    if (document.mms_access_points.empty() &&
+        document.goose_streams.empty() &&
+        document.sampled_values_streams.empty()) {
+        return;
+    }
     out << "  <Communication>\n"
         << "    <SubNetwork name=\"ARStackCanonical\" type=\"8-MMS\">\n";
     for (const auto& ied : document.ieds) {
+        const auto access_point = std::find_if(
+            document.mms_access_points.begin(), document.mms_access_points.end(),
+            [&](const auto& value) { return value.ied_name == ied.name; });
         bool has_stream = false;
         for (const auto& stream : document.goose_streams) {
             if (stream.ied_name == ied.name) { has_stream = true; break; }
@@ -224,7 +233,43 @@ inline void write_communication(std::ostringstream& out, const SclDocument& docu
                 if (stream.ied_name == ied.name) { has_stream = true; break; }
             }
         }
-        if (!has_stream) continue;
-        out << "      <ConnectedAP iedName=\"" << xml_escape(ied.name) << "\" apName=\"AP1\">\n";
+        if (access_point == document.mms_access_points.end() && !has_stream) continue;
+        const auto ap_name =
+            access_point != document.mms_access_points.end() &&
+            !access_point->access_point_name.empty()
+                ? access_point->access_point_name
+                : std::string{"AP1"};
+        out << "      <ConnectedAP iedName=\"" << xml_escape(ied.name)
+            << "\" apName=\"" << xml_escape(ap_name) << "\">\n";
+        if (access_point != document.mms_access_points.end() &&
+            (!access_point->ip_address.empty() || access_point->tcp_port != 102U)) {
+            out << "        <Address>\n";
+            if (!access_point->ip_address.empty()) {
+                out << "          <P type=\"IP\">"
+                    << xml_escape(access_point->ip_address) << "</P>\n";
+            }
+            if (access_point->tcp_port != 102U) {
+                out << "          <P type=\"IP-Port\">"
+                    << access_point->tcp_port << "</P>\n";
+            }
+            out << "        </Address>\n";
+        }
         for (const auto& stream : document.goose_streams) {
             if (stream.ied_name != ied.name) continue;
+            out << "        <GSE ldInst=\"" << xml_escape(stream.ld_inst)
+                << "\" cbName=\"" << xml_escape(stream.control_name) << "\">\n";
+            write_address(out, stream.address, 10);
+            out << "        </GSE>\n";
+        }
+        for (const auto& stream : document.sampled_values_streams) {
+            if (stream.ied_name != ied.name) continue;
+            out << "        <SMV ldInst=\"" << xml_escape(stream.ld_inst)
+                << "\" cbName=\"" << xml_escape(stream.control_name) << "\">\n";
+            write_address(out, stream.address, 10);
+            out << "        </SMV>\n";
+        }
+        out << "      </ConnectedAP>\n";
+    }
+    out << "    </SubNetwork>\n"
+        << "  </Communication>\n";
+}

@@ -1,21 +1,3 @@
-            out << "        <GSE ldInst=\"" << xml_escape(stream.ld_inst)
-                << "\" cbName=\"" << xml_escape(stream.control_name) << "\">\n";
-            write_address(out, stream.address, 10);
-            out << "        </GSE>\n";
-        }
-        for (const auto& stream : document.sampled_values_streams) {
-            if (stream.ied_name != ied.name) continue;
-            out << "        <SMV ldInst=\"" << xml_escape(stream.ld_inst)
-                << "\" cbName=\"" << xml_escape(stream.control_name) << "\">\n";
-            write_address(out, stream.address, 10);
-            out << "        </SMV>\n";
-        }
-        out << "      </ConnectedAP>\n";
-    }
-    out << "    </SubNetwork>\n"
-        << "  </Communication>\n";
-}
-
 inline void write_fcda(std::ostringstream& out, const SclDataSetEntry& entry) {
     out << "              <FCDA";
     if (!entry.ied_name.empty()) out << " iedName=\"" << xml_escape(entry.ied_name) << "\"";
@@ -144,6 +126,24 @@ inline void write_configured_values(
     write_instance_node(out, root, 12, true);
 }
 
+inline void write_setting_control(
+    std::ostringstream& out,
+    const SclDocument& document,
+    const SclLogicalNode& ln) {
+    if (!same_text(ln.ln_class, "LLN0")) return;
+    const auto found = std::find_if(
+        document.setting_controls.begin(), document.setting_controls.end(),
+        [&](const auto& setting) {
+            return setting.ied_name == ln.ied_name &&
+                   setting.ld_inst == ln.ld_inst &&
+                   setting.logical_node_path == ln.name &&
+                   setting.valid();
+        });
+    if (found == document.setting_controls.end()) return;
+    out << "            <SettingControl numOfSGs=\"" << *found->number_of_setting_groups
+        << "\" actSG=\"" << *found->active_setting_group << "\" />\n";
+}
+
 inline void write_logical_node(
     std::ostringstream& out,
     const SclDocument& document,
@@ -156,6 +156,7 @@ inline void write_logical_node(
     out << " lnType=\"" << xml_escape(ln_type_id(ln)) << "\">\n";
     write_data_sets(out, document, ln);
     write_goose_and_smv(out, document, ln);
+    write_setting_control(out, document, ln);
     write_reports(out, document, ln);
     write_configured_values(out, document, ln);
     out << "          </" << (zero ? "LN0" : "LN") << ">\n";
@@ -167,7 +168,16 @@ inline void write_ieds(std::ostringstream& out, const SclDocument& document) {
         if (!ied.manufacturer.empty()) out << " manufacturer=\"" << xml_escape(ied.manufacturer) << "\"";
         if (!ied.type.empty()) out << " type=\"" << xml_escape(ied.type) << "\"";
         if (!ied.config_version.empty()) out << " configVersion=\"" << xml_escape(ied.config_version) << "\"";
-        out << ">\n    <AccessPoint name=\"AP1\">\n      <Server>\n";
+        const auto access_point = std::find_if(
+            document.mms_access_points.begin(), document.mms_access_points.end(),
+            [&](const auto& value) { return value.ied_name == ied.name; });
+        const auto ap_name =
+            access_point != document.mms_access_points.end() &&
+            !access_point->access_point_name.empty()
+                ? access_point->access_point_name
+                : std::string{"AP1"};
+        out << ">\n    <AccessPoint name=\"" << xml_escape(ap_name)
+            << "\">\n      <Server>\n";
 
         std::vector<std::string> ld_order;
         for (const auto& ln : document.logical_nodes) {
