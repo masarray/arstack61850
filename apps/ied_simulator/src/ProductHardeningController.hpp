@@ -14,6 +14,7 @@ class ProductHardeningController : public QObject {
     QML_ELEMENT
 
     Q_PROPERTY(int workspaceIndex READ workspaceIndex WRITE setWorkspaceIndex NOTIFY stateChanged)
+    Q_PROPERTY(int browserNavigationWidth READ browserNavigationWidth WRITE setBrowserNavigationWidth NOTIFY stateChanged)
     Q_PROPERTY(QStringList recentEndpoints READ recentEndpoints NOTIFY stateChanged)
     Q_PROPERTY(QStringList recentResources READ recentResources NOTIFY stateChanged)
     Q_PROPERTY(QString lastHost READ lastHost NOTIFY stateChanged)
@@ -33,6 +34,8 @@ public:
 
     [[nodiscard]] int workspaceIndex() const noexcept { return workspaceIndex_; }
     void setWorkspaceIndex(int value);
+    [[nodiscard]] int browserNavigationWidth() const noexcept { return browserNavigationWidth_; }
+    void setBrowserNavigationWidth(int value);
 
     [[nodiscard]] QStringList recentEndpoints() const;
     [[nodiscard]] QStringList recentResources() const;
@@ -73,13 +76,17 @@ private:
 
     static constexpr int legacyStateSchemaVersion = 1;
     static constexpr int previousStateSchemaVersion = 2;
-    static constexpr int stateSchemaVersion = 3;
+    static constexpr int fileHomeStateSchemaVersion = 3;
+    static constexpr int stateSchemaVersion = 4;
     static constexpr int maximumRecentEndpoints = 8;
     static constexpr int maximumRecentResources = 8;
     static constexpr int maximumResourcePathCharacters = 4096;
     static constexpr int minimumWorkspaceIndex = 0;
     static constexpr int maximumWorkspaceIndex = 3;
     static constexpr int legacyMaximumWorkspaceIndex = 6;
+    static constexpr int defaultBrowserNavigationWidth = 320;
+    static constexpr int minimumBrowserNavigationWidth = 240;
+    static constexpr int maximumBrowserNavigationWidth = 520;
 
     [[nodiscard]] static QString defaultStatePath();
     [[nodiscard]] static QString normalizedHost(const QString& value);
@@ -93,6 +100,7 @@ private:
 
     QString statePath_;
     int workspaceIndex_{};
+    int browserNavigationWidth_{defaultBrowserNavigationWidth};
     std::vector<Endpoint> recent_;
     std::vector<QString> recentResources_;
     bool settingsHealthy_{true};
