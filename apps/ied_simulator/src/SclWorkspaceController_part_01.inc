@@ -81,6 +81,41 @@ int SclWorkspaceController::gooseCount() const noexcept {
     return document_ ? static_cast<int>(document_->goose_streams.size()) : 0;
 }
 
+QVariantList SclWorkspaceController::gooseStreams() const {
+    QVariantList result;
+    if (!document_) return result;
+    result.reserve(static_cast<qsizetype>(document_->goose_streams.size()));
+    for (const auto& stream : document_->goose_streams) {
+        QVariantMap item;
+        item.insert(QStringLiteral("iedName"), QString::fromStdString(stream.ied_name));
+        item.insert(QStringLiteral("ldInst"), QString::fromStdString(stream.ld_inst));
+        item.insert(QStringLiteral("name"), QString::fromStdString(stream.control_name));
+        item.insert(QStringLiteral("reference"), QString::fromStdString(stream.control_block_reference));
+        item.insert(QStringLiteral("dataSet"), QString::fromStdString(stream.data_set_reference));
+        item.insert(QStringLiteral("goId"), QString::fromStdString(stream.go_id));
+        item.insert(QStringLiteral("confRev"), static_cast<qulonglong>(stream.configuration_revision));
+        item.insert(QStringLiteral("appId"), QString::fromStdString(stream.address.app_id_text));
+        item.insert(QStringLiteral("destinationMac"), QString::fromStdString(stream.address.destination_mac_text));
+        item.insert(QStringLiteral("vlanId"),
+                    stream.address.vlan_id ? QVariant::fromValue(static_cast<int>(*stream.address.vlan_id))
+                                           : QVariant{});
+        item.insert(QStringLiteral("vlanPriority"),
+                    stream.address.vlan_priority
+                        ? QVariant::fromValue(static_cast<int>(*stream.address.vlan_priority))
+                        : QVariant{});
+        item.insert(QStringLiteral("minTimeMs"), static_cast<qulonglong>(stream.min_time_milliseconds));
+        item.insert(QStringLiteral("maxTimeMs"), static_cast<qulonglong>(stream.max_time_milliseconds));
+        QStringList members;
+        members.reserve(static_cast<qsizetype>(stream.entries.size()));
+        for (const auto& entry : stream.entries) {
+            members.push_back(QString::fromStdString(entry.signal_reference));
+        }
+        item.insert(QStringLiteral("members"), members);
+        result.push_back(item);
+    }
+    return result;
+}
+
 int SclWorkspaceController::smvCount() const noexcept {
     return document_ ? static_cast<int>(document_->sampled_values_streams.size()) : 0;
 }
