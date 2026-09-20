@@ -62,6 +62,8 @@ qt_add_qml_module(arstack_ied_simulator
         src/IedSignalModel.hpp
         src/MmsLiveTreeModel.cpp
         src/MmsLiveTreeModel.hpp
+        src/IedEngineeringContextController.cpp
+        src/IedEngineeringContextController.hpp
         src/MmsClientController.cpp
         src/MmsClientController.hpp
         src/IedBrowserSessionController.cpp
@@ -240,6 +242,8 @@ add_executable(ied_mms_client_workbench_qa
     src/ied_mms_client_workbench_qa.cpp
     src/MmsLiveTreeModel.cpp
     src/MmsLiveTreeModel.hpp
+    src/IedEngineeringContextController.cpp
+    src/IedEngineeringContextController.hpp
     src/MmsClientController.cpp
     src/MmsClientController.hpp
     src/IedActivityModel.cpp
@@ -305,7 +309,11 @@ target_compile_features(ied_file_settings_workspace_qa PRIVATE cxx_std_20)
 add_executable(ied_scl_workspace_qa
     src/ied_scl_workspace_qa.cpp
     src/SclWorkspaceController.cpp
-    src/SclWorkspaceController.hpp)
+    src/SclWorkspaceController.hpp
+    src/IedEngineeringContextController.cpp
+    src/IedEngineeringContextController.hpp
+    src/MmsLiveTreeModel.cpp
+    src/MmsLiveTreeModel.hpp)
 target_link_libraries(ied_scl_workspace_qa PRIVATE
     Qt6::Core
     Qt6::Qml
@@ -331,6 +339,8 @@ add_executable(ied_browser_session_qa
     src/IedBrowserSessionController.hpp
     src/MmsLiveTreeModel.cpp
     src/MmsLiveTreeModel.hpp
+    src/IedEngineeringContextController.cpp
+    src/IedEngineeringContextController.hpp
     src/MmsClientController.cpp
     src/MmsClientController.hpp
     src/MmsReportController.cpp
@@ -371,6 +381,20 @@ target_link_libraries(ied_browser_large_model_qa PRIVATE
 target_include_directories(ied_browser_large_model_qa PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(ied_browser_large_model_qa PRIVATE cxx_std_20)
+
+add_executable(ied_engineering_context_qa
+    src/ied_engineering_context_qa.cpp
+    src/IedEngineeringContextController.cpp
+    src/IedEngineeringContextController.hpp
+    src/MmsLiveTreeModel.cpp
+    src/MmsLiveTreeModel.hpp)
+target_link_libraries(ied_engineering_context_qa PRIVATE
+    Qt6::Core
+    Qt6::Qml
+    ARIEC61850::core)
+target_include_directories(ied_engineering_context_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_engineering_context_qa PRIVATE cxx_std_20)
 
 # The regular library intentionally keeps a strict portable connection runtime.
 # The desktop simulator needs the separate compatibility runtime validated

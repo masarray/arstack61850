@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "IedEngineeringContextController.hpp"
 #include "ariec61850/scl/model.hpp"
 
 #include <QObject>
@@ -20,6 +21,7 @@ class SclWorkspaceController : public QObject {
     QML_ELEMENT
 
     Q_PROPERTY(bool loaded READ loaded NOTIFY workspaceChanged)
+    Q_PROPERTY(IedEngineeringContextController* engineeringContext READ engineeringContext WRITE setEngineeringContext NOTIFY engineeringContextChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY stateChanged)
     Q_PROPERTY(QString stateText READ stateText NOTIFY stateChanged)
     Q_PROPERTY(QString sourcePath READ sourcePath NOTIFY workspaceChanged)
@@ -54,6 +56,7 @@ public:
     ~SclWorkspaceController() override;
 
     [[nodiscard]] bool loaded() const noexcept { return document_.has_value(); }
+    [[nodiscard]] IedEngineeringContextController* engineeringContext() const noexcept { return engineeringContext_; }
     [[nodiscard]] bool busy() const noexcept { return busy_; }
     [[nodiscard]] QString stateText() const;
     [[nodiscard]] QString sourcePath() const { return sourcePath_; }
@@ -83,6 +86,8 @@ public:
     [[nodiscard]] QString lastExportMode() const { return lastExportMode_; }
     [[nodiscard]] qulonglong generation() const noexcept { return generation_; }
 
+    void setEngineeringContext(IedEngineeringContextController* value);
+
     Q_INVOKABLE bool openFile(const QUrl& fileUrl);
     Q_INVOKABLE bool saveAs(const QUrl& fileUrl, const QString& targetEdition = QStringLiteral("preserve"));
     Q_INVOKABLE bool exportCanonical(const QUrl& fileUrl, const QString& targetEdition = QStringLiteral("preserve"));
@@ -91,6 +96,7 @@ public:
 
 signals:
     void stateChanged();
+    void engineeringContextChanged();
     void workspaceChanged();
     void exportChanged();
     void diagnosticsChanged();
@@ -101,6 +107,7 @@ private:
     void setFailure(const QString& text);
 
     std::optional<ar::iec61850::scl::SclDocument> document_;
+    IedEngineeringContextController* engineeringContext_{};
     QByteArray sourceBytes_;
     QString sourcePath_;
     QString sourceName_;

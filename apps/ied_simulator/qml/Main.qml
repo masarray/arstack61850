@@ -30,6 +30,10 @@ ApplicationWindow {
         id: hardening
         objectName: "productHardeningBackend"
     }
+    IedEngineeringContextController {
+        id: iedContext
+        objectName: "iedEngineeringContextBackend"
+    }
     IedFleetController {
         id: simulator
         objectName: "simulatorBackend"
@@ -37,6 +41,7 @@ ApplicationWindow {
     MmsClientController {
         id: mmsClient
         objectName: "mmsClientBackend"
+        engineeringContext: iedContext
     }
     MmsReportController {
         id: reports
@@ -56,6 +61,7 @@ ApplicationWindow {
     SclWorkspaceController {
         id: sclWorkspace
         objectName: "sclWorkspaceBackend"
+        engineeringContext: iedContext
     }
     GooseMonitorController {
         id: gooseMonitor

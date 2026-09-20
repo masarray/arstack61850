@@ -61,7 +61,7 @@ jobs:
       - name: Build
         run: >-
           cmake --build build-ied-simulator-qt
-          --target arstack_ied_simulator ariec61850_mms_read_probe ariec61850_live_discover ariec61850_mms_sgcb_probe ied_setting_control_manifest_qa ied_simulator_guardrails_qa ied_simulator_responsiveness_qa ied_simulator_commissioning_qa ied_simulator_runtime_commissioning_qa ied_simulator_goose_publication_qa ied_goose_workspace_qa ied_mms_client_workbench_qa ied_report_workspace_qa ied_file_settings_workspace_qa ied_scl_workspace_qa ied_product_hardening_qa ied_browser_session_qa ied_browser_large_model_qa --parallel 2
+          --target arstack_ied_simulator ariec61850_mms_read_probe ariec61850_live_discover ariec61850_mms_sgcb_probe ied_setting_control_manifest_qa ied_simulator_guardrails_qa ied_simulator_responsiveness_qa ied_simulator_commissioning_qa ied_simulator_runtime_commissioning_qa ied_simulator_goose_publication_qa ied_goose_workspace_qa ied_mms_client_workbench_qa ied_report_workspace_qa ied_file_settings_workspace_qa ied_scl_workspace_qa ied_product_hardening_qa ied_browser_session_qa ied_browser_large_model_qa ied_engineering_context_qa --parallel 2
 
       - name: Bounded activity and child-output guardrails
         run: ./build-ied-simulator-qt/ied_simulator_guardrails_qa
@@ -136,6 +136,11 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: ./build-ied-simulator-qt/ied_browser_large_model_qa
+
+      - name: Canonical IED engineering context gates
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ./build-ied-simulator-qt/ied_engineering_context_qa
 
       - name: Prove interactive SCL import uses bounded async path
         env:

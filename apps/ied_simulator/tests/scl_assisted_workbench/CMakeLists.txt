@@ -18,6 +18,8 @@ add_executable(ied_mms_scl_assisted_workbench_qa
     ${CMAKE_CURRENT_LIST_DIR}/../../src/ied_mms_scl_assisted_workbench_qa.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/MmsClientController.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/MmsClientController.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/IedEngineeringContextController.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/IedEngineeringContextController.hpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/MmsLiveTreeModel.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../src/MmsLiveTreeModel.hpp)
 
