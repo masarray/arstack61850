@@ -8,6 +8,7 @@
 #include <QStringList>
 #include <QThreadPool>
 #include <QUrl>
+#include <QVariantList>
 #include <QtQmlIntegration/qqmlintegration.h>
 
 #include <memory>
@@ -35,6 +36,7 @@ class SclWorkspaceController : public QObject {
     Q_PROPERTY(int dataSetCount READ dataSetCount NOTIFY workspaceChanged)
     Q_PROPERTY(int reportCount READ reportCount NOTIFY workspaceChanged)
     Q_PROPERTY(int gooseCount READ gooseCount NOTIFY workspaceChanged)
+    Q_PROPERTY(QVariantList gooseStreams READ gooseStreams NOTIFY workspaceChanged)
     Q_PROPERTY(int smvCount READ smvCount NOTIFY workspaceChanged)
     Q_PROPERTY(bool exactSourceSaveSupported READ exactSourceSaveSupported NOTIFY workspaceChanged)
     Q_PROPERTY(bool reconstructionSupported READ reconstructionSupported NOTIFY workspaceChanged)
@@ -68,6 +70,7 @@ public:
     [[nodiscard]] int dataSetCount() const noexcept;
     [[nodiscard]] int reportCount() const noexcept;
     [[nodiscard]] int gooseCount() const noexcept;
+    [[nodiscard]] QVariantList gooseStreams() const;
     [[nodiscard]] int smvCount() const noexcept;
     [[nodiscard]] bool exactSourceSaveSupported() const noexcept { return loaded() && !sourceBytes_.isEmpty(); }
     [[nodiscard]] bool reconstructionSupported() const noexcept;
