@@ -22,9 +22,20 @@ Rectangle {
     border.color: theme.lineSoft
 
     function choose(sectionValue, titleValue) {
-        root.section = sectionValue
         root.sectionTitle = titleValue
         root.sectionRequested(sectionValue, titleValue)
+    }
+
+    function configuredGooseCount() {
+        var streams = engineering.gooseStreams
+        if (!client.iedName.length)
+            return streams.length
+        var count = 0
+        for (var index = 0; index < streams.length; ++index) {
+            if (String(streams[index].iedName) === client.iedName)
+                ++count
+        }
+        return count
     }
 
     function ensureSectionService() {
@@ -140,7 +151,7 @@ Rectangle {
                 NavButton {
                     targetSection: 5
                     title: "GOOSE"
-                    countText: engineering.loaded ? String(engineering.gooseCount) : ""
+                    countText: engineering.loaded ? String(root.configuredGooseCount()) : ""
                 }
 
                 NavButton {
