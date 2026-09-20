@@ -10,7 +10,7 @@
 #include <QString>
 #include <QtQmlIntegration/qqmlintegration.h>
 
-class IedBrowserSessionController final : public QObject {
+class IedBrowserSessionController : public QObject {
     Q_OBJECT
     QML_ELEMENT
 
