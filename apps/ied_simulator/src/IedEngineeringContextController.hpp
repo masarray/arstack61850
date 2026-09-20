@@ -13,7 +13,7 @@
 
 #include <memory>
 
-class IedEngineeringContextController final : public QObject {
+class IedEngineeringContextController : public QObject {
     Q_OBJECT
     QML_ELEMENT
 
