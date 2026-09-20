@@ -82,7 +82,8 @@ public:
     [[nodiscard]] bool profileConversionSupported() const noexcept;
     [[nodiscard]] bool engineeringContextExportSupported() const noexcept {
         return engineeringContext_ != nullptr && engineeringContext_->loaded() &&
-               !engineeringContext_->selectionRequired();
+               !engineeringContext_->selectionRequired() &&
+               engineeringContext_->authorityKey() == QStringLiteral("live-discovery");
     }
     [[nodiscard]] QStringList preservationReport() const;
     [[nodiscard]] QString lastError() const { return lastError_; }
