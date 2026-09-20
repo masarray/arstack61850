@@ -10,6 +10,7 @@ Item {
     required property var reports
 
     property bool showConnectionHeader: true
+    property bool showInventoryPanel: true
 
     function text(value) {
         return value === undefined || value === null || String(value).length === 0 ? "—" : String(value)
@@ -113,7 +114,8 @@ Item {
             spacing: 0
 
             Rectangle {
-                Layout.preferredWidth: Math.max(310, root.width * 0.26)
+                visible: root.showInventoryPanel
+                Layout.preferredWidth: root.showInventoryPanel ? Math.max(310, root.width * 0.26) : 0
                 Layout.fillHeight: true
                 color: theme.chrome
                 border.width: 1

@@ -10,6 +10,7 @@ Item {
     required property var client
 
     property bool showConnectionHeader: true
+    property bool showNavigationPanel: true
 
     property var selected: client.treeModel.selectedNode
     property string pendingWrite: ""
@@ -161,7 +162,8 @@ Item {
             spacing: 0
 
             Rectangle {
-                Layout.preferredWidth: Math.max(390, root.width * 0.44)
+                visible: root.showNavigationPanel
+                Layout.preferredWidth: root.showNavigationPanel ? Math.max(390, root.width * 0.44) : 0
                 Layout.fillHeight: true
                 color: theme.chrome
                 border.width: 1

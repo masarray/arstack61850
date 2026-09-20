@@ -11,16 +11,40 @@ Item {
     required property var client
     required property var reports
     required property var utilities
+    required property var engineering
 
     property int activeSection: 0
+    property string activeSectionTitle: "Data Model"
+    property var selectedModelNode: client.treeModel.selectedNode
 
     function ensureActiveService() {
         if (!session.connected)
             return
-        if (activeSection === 1)
+        if (activeSection === 1 || activeSection === 2)
             session.ensureReportsConnected()
-        else if (activeSection === 2 || activeSection === 3)
+        else if (activeSection === 3 || activeSection === 4)
             session.ensureUtilitiesConnected()
+    }
+
+    function breadcrumb() {
+        if (activeSection === 0) {
+            var ref = selectedModelNode.reference || selectedModelNode.label || ""
+            return ref.length ? "IED / Data Model / " + ref : "IED / Data Model"
+        }
+        if (activeSection === 1) {
+            if (reports.selectedDataSetIndex >= 0 && reports.selectedDataSetIndex < reports.dataSets.length)
+                return "IED / DataSets / " + (reports.dataSets[reports.selectedDataSetIndex].reference || "")
+            return "IED / DataSets"
+        }
+        if (activeSection === 2)
+            return reports.selectedRcb.reference ? "IED / Reports / " + reports.selectedRcb.reference : "IED / Reports"
+        if (activeSection === 3)
+            return utilities.selectedSettingGroup.reference
+                    ? "IED / Setting Groups / " + utilities.selectedSettingGroup.reference
+                    : "IED / Setting Groups"
+        if (activeSection === 4)
+            return "IED / Files" + (utilities.currentDirectory.length ? " / " + utilities.currentDirectory : "")
+        return "IED / GOOSE"
     }
 
     onActiveSectionChanged: ensureActiveService()
@@ -30,33 +54,6 @@ Item {
         function onStateChanged() {
             if (session.connected)
                 root.ensureActiveService()
-        }
-    }
-
-    component SectionButton: Button {
-        id: control
-        required property int section
-        checkable: true
-        checked: root.activeSection === section
-        implicitHeight: 30
-        implicitWidth: Math.max(112, label.implicitWidth + 24)
-        onClicked: root.activeSection = section
-
-        contentItem: Label {
-            id: label
-            text: control.text
-            color: control.checked ? "#ffffff" : root.theme.textSoft
-            font.pixelSize: 9
-            font.weight: control.checked ? Font.DemiBold : Font.Normal
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-        }
-        background: Rectangle {
-            radius: 5
-            color: control.checked ? root.theme.accent
-                                   : control.hovered ? root.theme.surfaceRaised : "transparent"
-            border.width: control.checked ? 0 : 1
-            border.color: root.theme.lineSoft
         }
     }
 
@@ -89,7 +86,7 @@ Item {
                         font.weight: Font.DemiBold
                     }
                     Label {
-                        text: "One endpoint · contextual IEC 61850 services"
+                        text: "One endpoint · persistent engineering navigation"
                         color: root.theme.muted
                         font.pixelSize: 8
                     }
@@ -180,62 +177,153 @@ Item {
             }
         }
 
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 40
-            color: root.theme.surface
-            border.width: 1
-            border.color: root.theme.lineSoft
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 10
-                anchors.rightMargin: 10
-                spacing: 6
-
-                SectionButton { section: 0; text: "Data Model" }
-                SectionButton { section: 1; text: "Reports" }
-                SectionButton { section: 2; text: "Files" }
-                SectionButton { section: 3; text: "Setting Groups" }
-                Item { Layout.fillWidth: true }
-                Label {
-                    text: activeSection === 0 ? "Model discovery / read / guarded write"
-                          : activeSection === 1 ? "URCB / BRCB service"
-                          : activeSection === 2 ? "Read-only MMS file service"
-                                                : "SGCB inspection / guarded ActSG"
-                    color: root.theme.muted
-                    font.pixelSize: 8
-                }
-            }
-        }
-
-        StackLayout {
+        RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            currentIndex: root.activeSection
+            spacing: 0
 
-            MmsClientWorkspace {
+            IedBrowserNavigation {
+                Layout.preferredWidth: Math.max(300, Math.min(360, root.width * 0.27))
+                Layout.fillHeight: true
                 theme: root.theme
+                session: root.session
                 client: root.client
-                showConnectionHeader: false
-            }
-
-            ReportsWorkspace {
-                theme: root.theme
                 reports: root.reports
-                showConnectionHeader: false
+                utilities: root.utilities
+                engineering: root.engineering
+                section: root.activeSection
+                onSectionRequested: function(section, title) {
+                    root.activeSection = section
+                    root.activeSectionTitle = title
+                }
             }
 
-            FilesWorkspace {
-                theme: root.theme
-                files: root.utilities
-                showConnectionHeader: false
-            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 0
 
-            SettingsWorkspace {
-                theme: root.theme
-                settings: root.utilities
-                showConnectionHeader: false
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 44
+                    color: root.theme.surface
+                    border.width: 1
+                    border.color: root.theme.lineSoft
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 12
+                        anchors.rightMargin: 10
+                        spacing: 7
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 0
+                            Label {
+                                Layout.fillWidth: true
+                                text: root.activeSectionTitle
+                                color: root.theme.text
+                                font.pixelSize: 10
+                                font.weight: Font.DemiBold
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: root.breadcrumb()
+                                color: root.theme.muted
+                                font.pixelSize: 8
+                                elide: Text.ElideMiddle
+                            }
+                        }
+
+                        Button {
+                            visible: root.activeSection === 0
+                            text: client.operationBusy ? "Reading…" : "Read"
+                            enabled: client.connected && !client.operationBusy
+                                     && root.selectedModelNode.readable === true
+                            onClicked: client.readSelected()
+                        }
+
+                        Button {
+                            visible: root.activeSection === 2
+                            text: "Enable + GI"
+                            enabled: reports.connected && !reports.busy && !reports.active
+                                     && reports.selectedRcbIndex >= 0
+                            onClicked: reports.enableSelected(true)
+                        }
+
+                        Button {
+                            visible: root.activeSection === 2
+                            text: "Disable"
+                            enabled: reports.connected && reports.active && !reports.busy
+                            onClicked: reports.disableSelected()
+                        }
+
+                        Button {
+                            visible: root.activeSection === 3
+                            text: "Refresh"
+                            enabled: utilities.connected && !utilities.operationBusy
+                            onClicked: utilities.refreshSettingGroups()
+                        }
+
+                        Button {
+                            visible: root.activeSection === 4
+                            text: "Browse root"
+                            enabled: utilities.connected && !utilities.operationBusy
+                            onClicked: utilities.browseDirectory("")
+                        }
+
+                        Label {
+                            visible: root.activeSection === 5
+                            text: "Configured model view"
+                            color: root.theme.muted
+                            font.pixelSize: 8
+                        }
+                    }
+                }
+
+                StackLayout {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    currentIndex: root.activeSection
+
+                    MmsClientWorkspace {
+                        theme: root.theme
+                        client: root.client
+                        showConnectionHeader: false
+                        showNavigationPanel: false
+                    }
+
+                    BrowserDataSetPane {
+                        theme: root.theme
+                        reports: root.reports
+                    }
+
+                    ReportsWorkspace {
+                        theme: root.theme
+                        reports: root.reports
+                        showConnectionHeader: false
+                        showInventoryPanel: false
+                    }
+
+                    SettingsWorkspace {
+                        theme: root.theme
+                        settings: root.utilities
+                        showConnectionHeader: false
+                        showInventoryPanel: false
+                    }
+
+                    FilesWorkspace {
+                        theme: root.theme
+                        files: root.utilities
+                        showConnectionHeader: false
+                    }
+
+                    BrowserGoosePane {
+                        theme: root.theme
+                        client: root.client
+                        engineering: root.engineering
+                    }
+                }
             }
         }
     }
