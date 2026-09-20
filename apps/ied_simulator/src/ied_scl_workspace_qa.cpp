@@ -98,6 +98,19 @@ int main(int argc, char** argv) {
         return 6;
     }
 
+    const auto gooseProjection = workspace.gooseStreams();
+    if (workspace.gooseCount() < 1 || gooseProjection.size() != workspace.gooseCount()) {
+        std::cerr << "Configured GOOSE workspace projection is incomplete.\n";
+        return 27;
+    }
+    const auto firstGoose = gooseProjection.constFirst().toMap();
+    if (firstGoose.value(QStringLiteral("reference")).toString().isEmpty() ||
+        firstGoose.value(QStringLiteral("dataSet")).toString().isEmpty() ||
+        firstGoose.value(QStringLiteral("members")).toStringList().isEmpty()) {
+        std::cerr << "Configured GOOSE workspace projection lost identity or DataSet membership.\n";
+        return 28;
+    }
+
     const QString exact = temp.filePath(QStringLiteral("exact.scd"));
     if (!workspace.saveAs(QUrl::fromLocalFile(exact), QStringLiteral("preserve")) ||
         !waitFor([&] { return !workspace.busy(); }) || !workspace.lastExportVerified() ||
@@ -258,6 +271,7 @@ int main(int argc, char** argv) {
               << " icd=pass"
               << " cid=pass"
               << " semantic_roundtrip=pass"
+              << " goose_browser_projection=pass"
               << " ieds=" << workspace.iedCount()
               << " lns=" << workspace.logicalNodeCount()
               << " leaves=" << workspace.modelLeafCount() << '\n';
