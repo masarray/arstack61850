@@ -467,7 +467,7 @@ inline SclLiveModelProjectionResult project_live_model_to_scl(
         if (const auto* dataSet = findDataSet(control.data_set_reference)) {
             projected.data_set_name = dataSet->name;
             projected.data_set_reference = dataSet->reference;
-            projected.entries = dataSet->entries;
+            projected.entries = dataSet->expanded_entries.empty()\n                ? dataSet->entries\n                : dataSet->expanded_entries;
         }
         if (const auto value = parse_u32(control.configuration_revision)) {
             projected.configuration_revision = *value;
@@ -502,7 +502,7 @@ inline SclLiveModelProjectionResult project_live_model_to_scl(
         if (const auto* dataSet = findDataSet(control.data_set_reference)) {
             projected.data_set_name = dataSet->name;
             projected.data_set_reference = dataSet->reference;
-            projected.entries = dataSet->entries;
+            projected.entries = dataSet->expanded_entries.empty()\n                ? dataSet->entries\n                : dataSet->expanded_entries;
         }
         if (const auto value = parse_u32(control.configuration_revision)) {
             projected.configuration_revision = *value;
