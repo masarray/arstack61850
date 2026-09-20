@@ -40,12 +40,13 @@ int main(int argc, char** argv) {
         ProductHardeningController state(path);
         if (!state.settingsHealthy() || state.workspaceIndex() != 0 ||
             !state.recentEndpoints().isEmpty() || !state.recentResources().isEmpty() ||
-            state.automaticReconnectOnStartup()) {
+            state.browserNavigationWidth() != 320 || state.automaticReconnectOnStartup()) {
             std::cerr << "Safe default product state contract failed.\n";
             return 3;
         }
 
         state.setWorkspaceIndex(2);
+        state.setBrowserNavigationWidth(388);
         for (int index = 1; index <= 10; ++index) {
             if (!state.rememberEndpoint(QStringLiteral("192.0.2.%1").arg(index), 100 + index)) {
                 std::cerr << "Could not persist recent endpoint.\n";
@@ -88,7 +89,8 @@ int main(int argc, char** argv) {
         }
 
         state.setWorkspaceIndex(99);
-        if (state.workspaceIndex() != 2 || state.rememberEndpoint(QString{}, 102) ||
+        state.setBrowserNavigationWidth(900);
+        if (state.workspaceIndex() != 2 || state.browserNavigationWidth() != 388 || state.rememberEndpoint(QString{}, 102) ||
             state.rememberEndpoint(QStringLiteral("relay.local"), 0) ||
             state.rememberResource(QStringLiteral("relative-model.scd")) ||
             state.rememberResource(QStringLiteral("https://example.invalid/model.scd"))) {
@@ -100,7 +102,7 @@ int main(int argc, char** argv) {
     {
         ProductHardeningController restored(path);
         if (!restored.settingsHealthy() || restored.workspaceIndex() != 2 ||
-            restored.recentEndpoints().size() != 8 || restored.lastHost() != QStringLiteral("192.0.2.9") ||
+            restored.browserNavigationWidth() != 388 || restored.recentEndpoints().size() != 8 || restored.lastHost() != QStringLiteral("192.0.2.9") ||
             restored.lastPort() != 109 || restored.recentResources().size() != 8 ||
             restored.recentResourcePath(0) != absolutePath(temp.filePath(QStringLiteral("model-9.scd"))) ||
             restored.automaticReconnectOnStartup()) {
@@ -150,10 +152,11 @@ int main(int argc, char** argv) {
         if (!migratedFile.open(QIODevice::ReadOnly)) return 22;
         const auto migratedDocument = QJsonDocument::fromJson(migratedFile.readAll());
         if (!migratedDocument.isObject() ||
-            migratedDocument.object().value(QStringLiteral("schema")).toInt(-1) != 3 ||
+            migratedDocument.object().value(QStringLiteral("schema")).toInt(-1) != 4 ||
             migratedDocument.object().value(QStringLiteral("workspaceIndex")).toInt(-1) != 3 ||
-            !migratedDocument.object().value(QStringLiteral("recentResources")).isArray()) {
-            std::cerr << "Migrated legacy state was not rewritten as schema 3.\n";
+            !migratedDocument.object().value(QStringLiteral("recentResources")).isArray() ||
+            migratedDocument.object().value(QStringLiteral("browserNavigationWidth")).toInt(-1) != 320) {
+            std::cerr << "Migrated legacy state was not rewritten as schema 4.\n";
             return 23;
         }
     }
@@ -179,10 +182,40 @@ int main(int argc, char** argv) {
         if (!migratedFile.open(QIODevice::ReadOnly)) return 26;
         const auto migratedDocument = QJsonDocument::fromJson(migratedFile.readAll());
         if (!migratedDocument.isObject() ||
-            migratedDocument.object().value(QStringLiteral("schema")).toInt(-1) != 3 ||
-            !migratedDocument.object().value(QStringLiteral("recentResources")).isArray()) {
-            std::cerr << "P1 state was not rewritten as schema 3.\n";
+            migratedDocument.object().value(QStringLiteral("schema")).toInt(-1) != 4 ||
+            !migratedDocument.object().value(QStringLiteral("recentResources")).isArray() ||
+            migratedDocument.object().value(QStringLiteral("browserNavigationWidth")).toInt(-1) != 320) {
+            std::cerr << "P1 state was not rewritten as schema 4.\n";
             return 27;
+        }
+    }
+
+    {
+        QJsonObject p3;
+        p3.insert(QStringLiteral("schema"), 3);
+        p3.insert(QStringLiteral("workspaceIndex"), 1);
+        p3.insert(QStringLiteral("recentEndpoints"),
+                  QJsonArray{endpoint(QStringLiteral("p3.local"), 102)});
+        p3.insert(QStringLiteral("recentResources"), QJsonArray{});
+        if (!writeJson(path, p3)) return 28;
+
+        ProductHardeningController migrated(path);
+        if (!migrated.settingsHealthy() || migrated.workspaceIndex() != 1 ||
+            migrated.browserNavigationWidth() != 320 ||
+            migrated.lastHost() != QStringLiteral("p3.local") ||
+            !migrated.settingsStatus().contains(QStringLiteral("migrated"), Qt::CaseInsensitive)) {
+            std::cerr << "P3 schema-3 Browser layout migration failed.\n";
+            return 29;
+        }
+
+        QFile migratedFile(path);
+        if (!migratedFile.open(QIODevice::ReadOnly)) return 30;
+        const auto migratedDocument = QJsonDocument::fromJson(migratedFile.readAll());
+        if (!migratedDocument.isObject() ||
+            migratedDocument.object().value(QStringLiteral("schema")).toInt(-1) != 4 ||
+            migratedDocument.object().value(QStringLiteral("browserNavigationWidth")).toInt(-1) != 320) {
+            std::cerr << "P3 state was not rewritten as schema 4.\n";
+            return 31;
         }
     }
 
@@ -285,6 +318,8 @@ int main(int argc, char** argv) {
               << " bounded_recent=8"
               << " legacy_workspace_migration=pass"
               << " p1_schema_migration=pass"
+              << " p3_layout_migration=pass"
+              << " browser_splitter_persistence=pass"
               << " crash_recovery=pass"
               << " auto_reconnect=false"
               << " npcap_policy=explicit\n";
