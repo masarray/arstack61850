@@ -9,9 +9,27 @@ Rectangle {
     required property var client
     required property var engineering
 
-    property int selectedIndex: engineering.gooseStreams.length > 0 ? 0 : -1
-    property var selectedStream: selectedIndex >= 0 && selectedIndex < engineering.gooseStreams.length
-                                 ? engineering.gooseStreams[selectedIndex] : ({})
+    property var visibleStreams: {
+        var all = engineering.gooseStreams
+        if (!client.iedName.length)
+            return all
+        var filtered = []
+        for (var index = 0; index < all.length; ++index) {
+            if (String(all[index].iedName) === client.iedName)
+                filtered.push(all[index])
+        }
+        return filtered
+    }
+    property int selectedIndex: -1
+    property var selectedStream: selectedIndex >= 0 && selectedIndex < visibleStreams.length
+                                 ? visibleStreams[selectedIndex] : ({})
+
+    onVisibleStreamsChanged: {
+        if (!visibleStreams.length)
+            selectedIndex = -1
+        else if (selectedIndex < 0 || selectedIndex >= visibleStreams.length)
+            selectedIndex = 0
+    }
 
     color: theme.background
 
@@ -22,7 +40,7 @@ Rectangle {
     Connections {
         target: engineering
         function onWorkspaceChanged() {
-            root.selectedIndex = engineering.gooseStreams.length > 0 ? 0 : -1
+            root.selectedIndex = root.visibleStreams.length > 0 ? 0 : -1
         }
     }
 
@@ -54,7 +72,7 @@ Rectangle {
                     Label {
                         Layout.fillWidth: true
                         text: engineering.loaded
-                              ? engineering.sourceName + " · " + engineering.gooseCount + " stream(s)"
+                              ? engineering.sourceName + " · " + root.visibleStreams.length + " stream(s)"
                               : "No engineering model loaded"
                         color: theme.muted
                         font.pixelSize: 8
@@ -69,7 +87,7 @@ Rectangle {
                     Layout.fillHeight: true
                     clip: true
                     reuseItems: true
-                    model: engineering.gooseStreams
+                    model: root.visibleStreams
                     ScrollBar.vertical: ScrollBar {}
 
                     delegate: Rectangle {
