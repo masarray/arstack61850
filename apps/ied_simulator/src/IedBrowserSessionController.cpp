@@ -1,0 +1,223 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include "IedBrowserSessionController.hpp"
+
+#include <QChar>
+
+namespace {
+bool hasActiveReportSession(const MmsReportController* reports) {
+    return reports && (reports->connected() || reports->busy() || reports->cleanupRequired());
+}
+
+bool hasActiveUtilitySession(const MmsFileSettingsController* utilities) {
+    return utilities && (utilities->connected() || utilities->busy());
+}
+} // namespace
+
+IedBrowserSessionController::IedBrowserSessionController(QObject* parent)
+    : QObject(parent) {}
+
+QString IedBrowserSessionController::normalizedHost(const QString& value) {
+    auto host = value.trimmed();
+    if (host.startsWith(QLatin1Char('[')) && host.endsWith(QLatin1Char(']')) && host.size() > 2) {
+        host = host.mid(1, host.size() - 2);
+    }
+    if (host.isEmpty() || host.size() > 255) return {};
+    for (const auto character : host) {
+        if (character.isSpace() || character.category() == QChar::Other_Control) return {};
+    }
+    return host;
+}
+
+void IedBrowserSessionController::connectServiceSignals(QObject* service) {
+    if (!service) return;
+    connect(service, SIGNAL(stateChanged()), this, SIGNAL(stateChanged()), Qt::UniqueConnection);
+}
+
+void IedBrowserSessionController::setClient(MmsClientController* value) {
+    if (client_ == value) return;
+    if (client_) disconnect(client_, nullptr, this, nullptr);
+    client_ = value;
+    connectServiceSignals(client_);
+    syncConfiguration();
+    emit servicesChanged();
+    emit stateChanged();
+}
+
+void IedBrowserSessionController::setReports(MmsReportController* value) {
+    if (reports_ == value) return;
+    if (reports_) disconnect(reports_, nullptr, this, nullptr);
+    reports_ = value;
+    connectServiceSignals(reports_);
+    syncConfiguration();
+    emit servicesChanged();
+    emit stateChanged();
+}
+
+void IedBrowserSessionController::setUtilities(MmsFileSettingsController* value) {
+    if (utilities_ == value) return;
+    if (utilities_) disconnect(utilities_, nullptr, this, nullptr);
+    utilities_ = value;
+    connectServiceSignals(utilities_);
+    syncConfiguration();
+    emit servicesChanged();
+    emit stateChanged();
+}
+
+bool IedBrowserSessionController::connected() const noexcept {
+    return client_ && client_->connected();
+}
+
+bool IedBrowserSessionController::busy() const noexcept {
+    return (client_ && client_->busy()) ||
+           (reports_ && reports_->busy()) ||
+           (utilities_ && utilities_->busy());
+}
+
+bool IedBrowserSessionController::configurationLocked() const noexcept {
+    return connected() || busy() || hasActiveReportSession(reports_) || hasActiveUtilitySession(utilities_);
+}
+
+QString IedBrowserSessionController::endpoint() const {
+    const auto displayHost = host_.contains(QLatin1Char(':'))
+        ? QStringLiteral("[%1]").arg(host_)
+        : host_;
+    return QStringLiteral("%1:%2").arg(displayHost).arg(port_);
+}
+
+QString IedBrowserSessionController::stateText() const {
+    if (!coordinatorError_.isEmpty()) return QStringLiteral("Configuration error");
+    if (!client_) return QStringLiteral("Browser unavailable");
+    if (reports_ && reports_->cleanupRequired()) return QStringLiteral("Report cleanup required");
+    if (client_->connected()) {
+        if ((reports_ && reports_->busy()) || (utilities_ && utilities_->busy())) {
+            return QStringLiteral("Connected · opening service");
+        }
+        return QStringLiteral("Connected");
+    }
+    return client_->stateText();
+}
+
+QString IedBrowserSessionController::lastError() const {
+    if (!coordinatorError_.isEmpty()) return coordinatorError_;
+    if (client_ && !client_->lastError().isEmpty()) return client_->lastError();
+    if (reports_ && !reports_->lastError().isEmpty()) return reports_->lastError();
+    if (utilities_ && !utilities_->lastError().isEmpty()) return utilities_->lastError();
+    return {};
+}
+
+void IedBrowserSessionController::setHost(const QString& value) {
+    const auto normalized = normalizedHost(value);
+    if (normalized.isEmpty()) {
+        coordinatorError_ = QStringLiteral("A non-empty host without whitespace/control characters is required.");
+        emit stateChanged();
+        return;
+    }
+    if (host_ == normalized) return;
+    if (configurationLocked()) {
+        coordinatorError_ = QStringLiteral("Disconnect the IED Browser before changing the endpoint.");
+        emit stateChanged();
+        return;
+    }
+    host_ = normalized;
+    coordinatorError_.clear();
+    syncConfiguration();
+    emit configurationChanged();
+    emit stateChanged();
+}
+
+void IedBrowserSessionController::setPort(const int value) {
+    if (value < 1 || value > 65'535) {
+        coordinatorError_ = QStringLiteral("TCP port must be in range 1..65535.");
+        emit stateChanged();
+        return;
+    }
+    if (port_ == value) return;
+    if (configurationLocked()) {
+        coordinatorError_ = QStringLiteral("Disconnect the IED Browser before changing the endpoint.");
+        emit stateChanged();
+        return;
+    }
+    port_ = value;
+    coordinatorError_.clear();
+    syncConfiguration();
+    emit configurationChanged();
+    emit stateChanged();
+}
+
+void IedBrowserSessionController::setTrustedSclPath(const QString& value) {
+    const auto normalized = value.trimmed();
+    if (trustedSclPath_ == normalized) return;
+    trustedSclPath_ = normalized;
+    coordinatorError_.clear();
+    syncConfiguration();
+    emit configurationChanged();
+}
+
+void IedBrowserSessionController::syncConfiguration() {
+    if (client_) {
+        client_->setHost(host_);
+        client_->setPort(port_);
+        client_->setTrustedSclPath(trustedSclPath_);
+    }
+    if (reports_) {
+        reports_->setHost(host_);
+        reports_->setPort(port_);
+    }
+    if (utilities_) {
+        utilities_->setHost(host_);
+        utilities_->setPort(port_);
+    }
+}
+
+bool IedBrowserSessionController::connectToIed() {
+    if (!client_) {
+        coordinatorError_ = QStringLiteral("IED Browser model service is unavailable.");
+        emit stateChanged();
+        return false;
+    }
+    if (normalizedHost(host_).isEmpty() || port_ < 1 || port_ > 65'535) {
+        coordinatorError_ = QStringLiteral("A valid IED Browser endpoint is required.");
+        emit stateChanged();
+        return false;
+    }
+    if (connected()) return true;
+    if (busy()) return false;
+
+    // P0 keeps proven service associations separate internally. A new logical
+    // Browser connect always starts from a clean auxiliary-service state.
+    if (reports_ && (reports_->connected() || reports_->cleanupRequired())) {
+        reports_->disconnectFromIed();
+    }
+    if (utilities_ && utilities_->connected()) {
+        utilities_->disconnectFromIed();
+    }
+    syncConfiguration();
+    coordinatorError_.clear();
+    const auto started = client_->connectToIed();
+    emit stateChanged();
+    return started;
+}
+
+void IedBrowserSessionController::disconnectFromIed() {
+    coordinatorError_.clear();
+    if (reports_) reports_->disconnectFromIed();
+    if (utilities_) utilities_->disconnectFromIed();
+    if (client_) client_->disconnectFromIed();
+    emit stateChanged();
+}
+
+bool IedBrowserSessionController::ensureReportsConnected() {
+    if (!connected() || !reports_) return false;
+    if (reports_->connected()) return true;
+    if (reports_->busy() || reports_->cleanupRequired()) return false;
+    syncConfiguration();
+    return reports_->connectToIed();
+}
+
+bool IedBrowserSessionController::ensureUtilitiesConnected() {
+    if (!connected() || !utilities_) return false;
+    if (utilities_->connected()) return true;
+    if (utilities_->busy()) return false;
+    syncConfiguration();
+    return utilities_->connectToIed();
+}

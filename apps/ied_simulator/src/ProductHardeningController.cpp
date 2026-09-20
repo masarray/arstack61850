@@ -54,6 +54,24 @@ QString ProductHardeningController::endpointLabel(const Endpoint& endpoint) {
     return QStringLiteral("%1:%2").arg(host).arg(endpoint.port);
 }
 
+int ProductHardeningController::migrateLegacyWorkspaceIndex(const int value) noexcept {
+    switch (value) {
+    case 0: // IED Connection
+    case 1: // Reports
+    case 2: // Files
+    case 3: // Settings
+        return 1; // IED Browser
+    case 4:
+        return 0; // File / SCL resource workspace
+    case 5:
+        return 2; // IED Simulator
+    case 6:
+        return 3; // Sniffer
+    default:
+        return 0;
+    }
+}
+
 QStringList ProductHardeningController::recentEndpoints() const {
     QStringList result;
     result.reserve(static_cast<qsizetype>(recent_.size()));
@@ -109,6 +127,7 @@ bool ProductHardeningController::loadState() {
 
     QJsonParseError parseError;
     const auto document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    file.close();
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
         setStateFault(QStringLiteral("Persisted state ignored: malformed JSON."));
         emit stateChanged();
@@ -116,17 +135,28 @@ bool ProductHardeningController::loadState() {
     }
 
     const auto object = document.object();
-    if (object.value(QStringLiteral("schema")).toInt(-1) != stateSchemaVersion) {
+    const auto schema = object.value(QStringLiteral("schema")).toInt(-1);
+    if (schema != stateSchemaVersion && schema != legacyStateSchemaVersion) {
         setStateFault(QStringLiteral("Persisted state ignored: unsupported schema."));
         emit stateChanged();
         return false;
     }
-    const auto workspace = object.value(QStringLiteral("workspaceIndex")).toInt(-1);
-    if (workspace < minimumWorkspaceIndex || workspace > maximumWorkspaceIndex) {
+
+    const auto storedWorkspace = object.value(QStringLiteral("workspaceIndex")).toInt(-1);
+    if (schema == legacyStateSchemaVersion) {
+        if (storedWorkspace < minimumWorkspaceIndex || storedWorkspace > legacyMaximumWorkspaceIndex) {
+            setStateFault(QStringLiteral("Persisted state ignored: legacy workspace index is outside bounds."));
+            emit stateChanged();
+            return false;
+        }
+    } else if (storedWorkspace < minimumWorkspaceIndex || storedWorkspace > maximumWorkspaceIndex) {
         setStateFault(QStringLiteral("Persisted state ignored: workspace index is outside bounds."));
         emit stateChanged();
         return false;
     }
+    const auto workspace = schema == legacyStateSchemaVersion
+        ? migrateLegacyWorkspaceIndex(storedWorkspace)
+        : storedWorkspace;
 
     const auto recent = object.value(QStringLiteral("recentEndpoints"));
     if (!recent.isArray() || recent.toArray().size() > maximumRecentEndpoints) {
@@ -157,7 +187,18 @@ bool ProductHardeningController::loadState() {
     workspaceIndex_ = workspace;
     recent_ = std::move(loaded);
     settingsHealthy_ = true;
-    settingsStatus_ = QStringLiteral("Persisted product state restored safely.");
+    settingsStatus_ = schema == legacyStateSchemaVersion
+        ? QStringLiteral("Legacy product state migrated to the four-workspace shell.")
+        : QStringLiteral("Persisted product state restored safely.");
+
+    if (schema == legacyStateSchemaVersion) {
+        if (!persistState()) {
+            emit stateChanged();
+            return false;
+        }
+        settingsStatus_ = QStringLiteral("Legacy product state migrated to the four-workspace shell.");
+    }
+
     emit stateChanged();
     return true;
 }

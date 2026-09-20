@@ -8,6 +8,8 @@ Item {
     required property var theme
     required property var settings
 
+    property bool showConnectionHeader: true
+
     function valueOrDash(name) {
         var value = settings.selectedSettingGroup[name]
         if (value === undefined || value === null || value === "")
@@ -30,8 +32,9 @@ Item {
         spacing: 10
 
         SurfaceCard {
+            visible: root.showConnectionHeader
             Layout.fillWidth: true
-            Layout.preferredHeight: 72
+            Layout.preferredHeight: root.showConnectionHeader ? 72 : 0
             theme: root.theme
 
             RowLayout {

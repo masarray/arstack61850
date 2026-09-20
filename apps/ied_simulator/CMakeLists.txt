@@ -64,6 +64,8 @@ qt_add_qml_module(arstack_ied_simulator
         src/MmsLiveTreeModel.hpp
         src/MmsClientController.cpp
         src/MmsClientController.hpp
+        src/IedBrowserSessionController.cpp
+        src/IedBrowserSessionController.hpp
         src/MmsReportController.cpp
         src/MmsReportController.hpp
         src/MmsSettingGroupPolicy.hpp
@@ -88,6 +90,9 @@ qt_add_qml_module(arstack_ied_simulator
         qml/IedExplorer.qml
         qml/FleetWorkspace.qml
         qml/InteropWorkspace.qml
+        qml/FileWorkspace.qml
+        qml/IedBrowserWorkspace.qml
+        qml/SnifferWorkspace.qml
         qml/MmsClientWorkspace.qml
         qml/ReportsWorkspace.qml
         qml/FilesWorkspace.qml
@@ -316,6 +321,41 @@ target_link_libraries(ied_product_hardening_qa PRIVATE
 target_include_directories(ied_product_hardening_qa PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(ied_product_hardening_qa PRIVATE cxx_std_20)
+
+add_executable(ied_browser_session_qa
+    src/ied_browser_session_qa.cpp
+    src/IedBrowserSessionController.cpp
+    src/IedBrowserSessionController.hpp
+    src/MmsLiveTreeModel.cpp
+    src/MmsLiveTreeModel.hpp
+    src/MmsClientController.cpp
+    src/MmsClientController.hpp
+    src/MmsReportController.cpp
+    src/MmsReportController.hpp
+    src/MmsFileSettingsController.cpp
+    src/MmsFileSettingsController.hpp
+    src/MmsSettingGroupPolicy.hpp
+    src/IedActivityModel.cpp
+    src/IedActivityModel.hpp
+    src/IedRuntimeGuardrails.cpp
+    src/IedRuntimeGuardrails.hpp
+    src/IedPointStore.cpp
+    src/IedPointStore.hpp
+    src/IedFleetController.cpp
+    src/IedFleetControllerAsync.cpp
+    src/IedFleetController.hpp
+    src/IedSignalModel.cpp
+    src/IedSignalModel.hpp)
+target_link_libraries(ied_browser_session_qa PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Network
+    Qt6::Qml
+    ariec61850_ied_simulator_server_core
+    ARIEC61850::core)
+target_include_directories(ied_browser_session_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_browser_session_qa PRIVATE cxx_std_20)
 
 # The regular library intentionally keeps a strict portable connection runtime.
 # The desktop simulator needs the separate compatibility runtime validated

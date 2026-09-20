@@ -46,6 +46,13 @@ ApplicationWindow {
         id: utilities
         objectName: "mmsFileSettingsBackend"
     }
+    IedBrowserSessionController {
+        id: browserSession
+        objectName: "iedBrowserSessionBackend"
+        client: mmsClient
+        reports: reports
+        utilities: utilities
+    }
     SclWorkspaceController {
         id: sclWorkspace
         objectName: "sclWorkspaceBackend"
@@ -57,8 +64,8 @@ ApplicationWindow {
 
     Component.onCompleted: {
         if (hardening.lastHost.length > 0) {
-            mmsClient.host = hardening.lastHost
-            mmsClient.port = hardening.lastPort
+            browserSession.host = hardening.lastHost
+            browserSession.port = hardening.lastPort
         }
         root.workspaceIndex = hardening.workspaceIndex
         root.mmsWasConnected = mmsClient.connected
@@ -69,7 +76,7 @@ ApplicationWindow {
         target: mmsClient
         function onStateChanged() {
             if (mmsClient.connected && !root.mmsWasConnected)
-                hardening.rememberEndpoint(mmsClient.host, mmsClient.port)
+                hardening.rememberEndpoint(browserSession.host, browserSession.port)
             root.mmsWasConnected = mmsClient.connected
         }
     }
@@ -80,7 +87,7 @@ ApplicationWindow {
             // Arm the SCL-assisted online path only after the bounded parser has
             // accepted the engineering file. Failed/unfinished imports never
             // become a trusted connection source.
-            mmsClient.trustedSclPath = sclWorkspace.loaded ? sclWorkspace.sourcePath : ""
+            browserSession.trustedSclPath = sclWorkspace.loaded ? sclWorkspace.sourcePath : ""
         }
     }
 
@@ -88,7 +95,7 @@ ApplicationWindow {
         target: simulator
         function onModelChanged() {
             if (root.simulatorAutoSelectPending && simulator.imported) {
-                root.workspaceIndex = 5
+                root.workspaceIndex = 2
                 root.simulatorAutoSelectPending = false
             }
         }
@@ -115,17 +122,14 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+2"; onActivated: root.workspaceIndex = 1 }
     Shortcut { sequence: "Ctrl+3"; onActivated: root.workspaceIndex = 2 }
     Shortcut { sequence: "Ctrl+4"; onActivated: root.workspaceIndex = 3 }
-    Shortcut { sequence: "Ctrl+5"; onActivated: root.workspaceIndex = 4 }
-    Shortcut { sequence: "Ctrl+6"; onActivated: root.workspaceIndex = 5 }
-    Shortcut { sequence: "Ctrl+7"; onActivated: root.workspaceIndex = 6 }
     Shortcut {
         sequence: "Ctrl+Shift+A"
-        enabled: root.workspaceIndex === 5
+        enabled: root.workspaceIndex === 2
         onActivated: activityMonitor.opened ? activityMonitor.close() : activityMonitor.open()
     }
     Shortcut {
         sequence: "Ctrl+Shift+C"
-        enabled: root.workspaceIndex === 5 && simulator.imported
+        enabled: root.workspaceIndex === 2 && simulator.imported
         onActivated: commissioningWorkspace.opened ? commissioningWorkspace.close() : commissioningWorkspace.open()
     }
 
@@ -188,27 +192,24 @@ ApplicationWindow {
                     Layout.rightMargin: 8
                 }
 
-                WorkspaceButton { workspace: 0; text: "IED Connection" }
-                WorkspaceButton { workspace: 1; text: "Reports" }
-                WorkspaceButton { workspace: 2; text: "Files" }
-                WorkspaceButton { workspace: 3; text: "Settings" }
-                WorkspaceButton { workspace: 4; text: "SCL" }
-                WorkspaceButton { workspace: 5; text: "Simulator" }
-                WorkspaceButton { workspace: 6; text: "GOOSE" }
+                WorkspaceButton { workspace: 0; text: "File" }
+                WorkspaceButton { workspace: 1; text: "IED Browser" }
+                WorkspaceButton { workspace: 2; text: "IED Simulator" }
+                WorkspaceButton { workspace: 3; text: "Sniffer" }
                 Item { Layout.fillWidth: true }
 
                 ComboBox {
                     id: recentConnectionPicker
-                    visible: root.workspaceIndex === 0 && hardening.recentEndpoints.length > 0
+                    visible: root.workspaceIndex === 1 && hardening.recentEndpoints.length > 0
                     Layout.preferredWidth: 160
                     model: hardening.recentEndpoints
-                    enabled: !mmsClient.connected && !mmsClient.busy
+                    enabled: !browserSession.configurationLocked
                     onActivated: {
                         const recentHost = hardening.recentHost(currentIndex)
                         const recentPort = hardening.recentPort(currentIndex)
                         if (recentHost.length > 0 && recentPort > 0) {
-                            mmsClient.host = recentHost
-                            mmsClient.port = recentPort
+                            browserSession.host = recentHost
+                            browserSession.port = recentPort
                         }
                     }
                     ToolTip.visible: hovered
@@ -239,28 +240,22 @@ ApplicationWindow {
 
                 Label {
                     text: root.workspaceIndex === 0
-                          ? mmsClient.stateText
+                          ? sclWorkspace.stateText
                           : root.workspaceIndex === 1
-                            ? reports.stateText
-                            : (root.workspaceIndex === 2 || root.workspaceIndex === 3)
-                              ? utilities.stateText
-                              : root.workspaceIndex === 4
-                                ? sclWorkspace.stateText
-                                : root.workspaceIndex === 6
-                                  ? (gooseMonitor.capturing ? "GOOSE MONITOR LIVE" : "GOOSE")
-                                  : (simulator.running ? "SIMULATOR LIVE" : "SIMULATOR")
-                    color: root.workspaceIndex === 0 && mmsClient.connected
+                            ? browserSession.stateText
+                            : root.workspaceIndex === 2
+                              ? (simulator.running ? "SIMULATOR LIVE" : "SIMULATOR")
+                              : (gooseMonitor.capturing ? "SNIFFER LIVE" : "SNIFFER")
+                    color: root.workspaceIndex === 0 && sclWorkspace.loaded && !sclWorkspace.lastError.length
                            ? "#9ff0c1"
-                           : root.workspaceIndex === 1 && reports.active
+                           : root.workspaceIndex === 1 && browserSession.connected
                              ? "#9ff0c1"
-                             : root.workspaceIndex === 1 && reports.cleanupRequired
+                             : root.workspaceIndex === 1 && browserSession.lastError.length
                                ? "#ff9ca5"
-                               : (root.workspaceIndex === 2 || root.workspaceIndex === 3) && utilities.connected
+                               : root.workspaceIndex === 2 && simulator.running
                                  ? "#9ff0c1"
-                                 : root.workspaceIndex === 4 && sclWorkspace.loaded && !sclWorkspace.lastError.length
-                                   ? "#9ff0c1"
-                                   : root.workspaceIndex === 6 && gooseMonitor.capturing
-                                     ? "#9ff0c1" : appTheme.navigationMuted
+                                 : root.workspaceIndex === 3 && gooseMonitor.capturing
+                                   ? "#9ff0c1" : appTheme.navigationMuted
                     font.pixelSize: 8
                     font.weight: Font.DemiBold
                 }
@@ -272,29 +267,17 @@ ApplicationWindow {
             Layout.fillHeight: true
             currentIndex: root.workspaceIndex
 
-            MmsClientWorkspace {
-                theme: appTheme
-                client: mmsClient
-            }
-
-            ReportsWorkspace {
-                theme: appTheme
-                reports: reports
-            }
-
-            FilesWorkspace {
-                theme: appTheme
-                files: utilities
-            }
-
-            SettingsWorkspace {
-                theme: appTheme
-                settings: utilities
-            }
-
-            SclWorkspace {
+            FileWorkspace {
                 theme: appTheme
                 workspace: sclWorkspace
+            }
+
+            IedBrowserWorkspace {
+                theme: appTheme
+                session: browserSession
+                client: mmsClient
+                reports: reports
+                utilities: utilities
             }
 
             Item {
@@ -313,11 +296,11 @@ ApplicationWindow {
                 }
             }
 
-            GooseWorkspace {
+            SnifferWorkspace {
                 theme: appTheme
                 simulator: simulator
                 monitor: gooseMonitor
-                onOpenSimulatorRequested: root.workspaceIndex = 5
+                onOpenSimulatorRequested: root.workspaceIndex = 2
             }
         }
     }
@@ -325,7 +308,7 @@ ApplicationWindow {
     Rectangle {
         id: commissioningLauncher
         z: 20
-        visible: root.workspaceIndex === 5 && simulator.imported && !commissioningWorkspace.opened
+        visible: root.workspaceIndex === 2 && simulator.imported && !commissioningWorkspace.opened
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.rightMargin: 12
@@ -376,7 +359,7 @@ ApplicationWindow {
     Rectangle {
         id: activityLauncher
         z: 20
-        visible: root.workspaceIndex === 5 && !activityMonitor.opened
+        visible: root.workspaceIndex === 2 && !activityMonitor.opened
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.rightMargin: 12

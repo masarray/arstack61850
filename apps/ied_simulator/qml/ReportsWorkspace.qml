@@ -9,6 +9,8 @@ Item {
     required property var theme
     required property var reports
 
+    property bool showConnectionHeader: true
+
     function text(value) {
         return value === undefined || value === null || String(value).length === 0 ? "—" : String(value)
     }
@@ -20,8 +22,9 @@ Item {
         spacing: 0
 
         Rectangle {
+            visible: root.showConnectionHeader
             Layout.fillWidth: true
-            Layout.preferredHeight: 54
+            Layout.preferredHeight: root.showConnectionHeader ? 54 : 0
             color: theme.chrome
             border.width: 1
             border.color: theme.lineSoft
