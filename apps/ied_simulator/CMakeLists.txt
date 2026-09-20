@@ -360,6 +360,18 @@ target_include_directories(ied_browser_session_qa PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(ied_browser_session_qa PRIVATE cxx_std_20)
 
+add_executable(ied_browser_large_model_qa
+    src/ied_browser_large_model_qa.cpp
+    src/MmsLiveTreeModel.cpp
+    src/MmsLiveTreeModel.hpp)
+target_link_libraries(ied_browser_large_model_qa PRIVATE
+    Qt6::Core
+    Qt6::Qml
+    ARIEC61850::core)
+target_include_directories(ied_browser_large_model_qa PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(ied_browser_large_model_qa PRIVATE cxx_std_20)
+
 # The regular library intentionally keeps a strict portable connection runtime.
 # The desktop simulator needs the separate compatibility runtime validated
 # against common engineering-client AARQ, selector, browse, Identify and
