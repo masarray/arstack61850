@@ -92,6 +92,9 @@ qt_add_qml_module(arstack_ied_simulator
         qml/InteropWorkspace.qml
         qml/FileWorkspace.qml
         qml/IedBrowserWorkspace.qml
+        qml/IedBrowserNavigation.qml
+        qml/BrowserDataSetPane.qml
+        qml/BrowserGoosePane.qml
         qml/SnifferWorkspace.qml
         qml/MmsClientWorkspace.qml
         qml/ReportsWorkspace.qml
