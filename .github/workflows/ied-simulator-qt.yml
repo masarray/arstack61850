@@ -188,10 +188,17 @@ jobs:
           ./tests/fixtures/scl/minimal-station-brcb.scd
           ./goose-publication-evidence.pcap
 
-      - name: GOOSE monitor + publisher workspace gates
+      - name: GOOSE Sniffer decode and supervision gates
         run: >-
           ./build-ied-simulator-qt/ied_goose_workspace_qa
           ./goose-publication-evidence.pcap
+
+      - name: Sniffer versus Simulator ownership policy
+        run: >-
+          python3 apps/ied_simulator/test_sniffer_ownership.py
+          apps/ied_simulator/qml/SnifferWorkspace.qml
+          apps/ied_simulator/qml/GooseWorkspace.qml
+          apps/ied_simulator/qml/CommissioningWorkspace.qml
 
       - name: Upload GOOSE wire evidence
         uses: actions/upload-artifact@v4

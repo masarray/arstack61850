@@ -312,9 +312,7 @@ ApplicationWindow {
 
             SnifferWorkspace {
                 theme: appTheme
-                simulator: simulator
                 monitor: gooseMonitor
-                onOpenSimulatorRequested: root.workspaceIndex = 2
             }
         }
     }
