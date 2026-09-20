@@ -287,6 +287,7 @@ ApplicationWindow {
 
             IedBrowserWorkspace {
                 theme: appTheme
+                productState: hardening
                 session: browserSession
                 client: mmsClient
                 reports: reports
