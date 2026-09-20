@@ -55,7 +55,7 @@ Rectangle {
         required property string title
         property string countText: ""
         Layout.fillWidth: true
-        implicitHeight: 34
+        implicitHeight: 27
         color: root.section === targetSection ? root.theme.accentSoft
                                               : navMouse.containsMouse ? root.theme.surfaceRaised : "transparent"
         border.width: root.section === targetSection ? 1 : 0
@@ -173,7 +173,7 @@ Rectangle {
                                     required property int index
                                     required property var modelData
                                     Layout.fillWidth: true
-                                    implicitHeight: 30
+                                    implicitHeight: 27
                                     color: reports.selectedRcbIndex === index
                                            ? root.theme.surfaceRaised : reportMouse.containsMouse ? root.theme.surface : "transparent"
                                     RowLayout {
@@ -229,7 +229,7 @@ Rectangle {
                                     required property int index
                                     required property var modelData
                                     Layout.fillWidth: true
-                                    implicitHeight: 30
+                                    implicitHeight: 27
                                     color: utilities.selectedSettingGroupIndex === index
                                            ? root.theme.surfaceRaised : sgMouse.containsMouse ? root.theme.surface : "transparent"
                                     Label {
@@ -283,7 +283,7 @@ Rectangle {
                                     required property int index
                                     required property var modelData
                                     Layout.fillWidth: true
-                                    implicitHeight: 31
+                                    implicitHeight: 27
                                     color: reports.selectedDataSetIndex === index
                                            ? root.theme.surfaceRaised : dsMouse.containsMouse ? root.theme.surface : "transparent"
                                     RowLayout {
@@ -363,7 +363,7 @@ Rectangle {
                             id: modelRow
                             required property int index
                             width: modelTree.width
-                            height: 29
+                            height: 25
                             color: model.selected ? root.theme.accentSoft
                                                   : modelMouse.containsMouse ? root.theme.surfaceRaised : "transparent"
                             border.width: model.selected ? 1 : 0
@@ -371,7 +371,7 @@ Rectangle {
 
                             RowLayout {
                                 anchors.fill: parent
-                                anchors.leftMargin: 22 + model.depth * 13
+                                anchors.leftMargin: 18 + model.depth * 12
                                 anchors.rightMargin: 7
                                 spacing: 4
                                 Label {
@@ -394,6 +394,13 @@ Rectangle {
                                     font.pixelSize: 8
                                     elide: Text.ElideMiddle
                                 }
+                                Label {
+                                    Layout.preferredWidth: 34
+                                    text: model.functionalConstraint || ""
+                                    color: root.theme.muted
+                                    font.pixelSize: 7
+                                    horizontalAlignment: Text.AlignRight
+                                }
                             }
 
                             MouseArea {
@@ -402,7 +409,7 @@ Rectangle {
                                 hoverEnabled: true
                                 onClicked: function(event) {
                                     client.treeModel.selectRow(index)
-                                    if (model.hasChildren && event.x < 48 + model.depth * 13)
+                                    if (model.hasChildren && event.x < 44 + model.depth * 12)
                                         client.treeModel.toggle(index)
                                     root.choose(0, "Data Model")
                                 }
