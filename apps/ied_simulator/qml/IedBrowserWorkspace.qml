@@ -11,6 +11,7 @@ Item {
     required property var client
     required property var reports
     required property var utilities
+    required property var engineering
 
     property int activeSection: 0
     property string activeSectionTitle: "Data Model"
@@ -189,6 +190,7 @@ Item {
                 client: root.client
                 reports: root.reports
                 utilities: root.utilities
+                engineering: root.engineering
                 section: root.activeSection
                 onSectionRequested: function(section, title) {
                     root.activeSection = section
@@ -318,6 +320,7 @@ Item {
                     BrowserGoosePane {
                         theme: root.theme
                         client: root.client
+                        engineering: root.engineering
                     }
                 }
             }
