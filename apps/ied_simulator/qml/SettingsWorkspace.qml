@@ -9,6 +9,7 @@ Item {
     required property var settings
 
     property bool showConnectionHeader: true
+    property bool showInventoryPanel: true
 
     function valueOrDash(name) {
         var value = settings.selectedSettingGroup[name]
@@ -120,7 +121,8 @@ Item {
             spacing: 10
 
             SurfaceCard {
-                Layout.preferredWidth: 340
+                visible: root.showInventoryPanel
+                Layout.preferredWidth: root.showInventoryPanel ? 340 : 0
                 Layout.fillHeight: true
                 theme: root.theme
 
