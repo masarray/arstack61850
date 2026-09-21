@@ -368,6 +368,156 @@ int IedEngineeringContextController::gooseCount() const noexcept { return model_
 int IedEngineeringContextController::sampledValueCount() const noexcept { return model_ ? static_cast<int>(model_->sampled_value_control_blocks.size()) : 0; }
 int IedEngineeringContextController::settingGroupCount() const noexcept { return model_ ? static_cast<int>(model_->setting_group_controls.size()) : 0; }
 
+QVariantList IedEngineeringContextController::dataSets() const {
+    QVariantList result;
+    if (!model_) return result;
+    result.reserve(static_cast<qsizetype>(model_->data_sets.size()));
+    for (const auto& dataSet : model_->data_sets) {
+        QVariantMap item;
+        item.insert(QStringLiteral("reference"), QString::fromStdString(dataSet.reference));
+        item.insert(QStringLiteral("domain"), QString::fromStdString(dataSet.domain));
+        item.insert(QStringLiteral("logicalNode"), QString::fromStdString(dataSet.logical_node));
+        item.insert(QStringLiteral("name"), QString::fromStdString(dataSet.name));
+        item.insert(QStringLiteral("deletable"),
+                    dataSet.deletable ? QVariant::fromValue(*dataSet.deletable) : QVariant{});
+        QStringList members;
+        members.reserve(static_cast<qsizetype>(dataSet.members.size()));
+        for (const auto& member : dataSet.members) {
+            auto text = QString::fromStdString(member.reference);
+            if (!member.functional_constraint.empty()) {
+                text += QStringLiteral("  [") +
+                    QString::fromStdString(member.functional_constraint) +
+                    QLatin1Char(']');
+            }
+            members.push_back(text);
+        }
+        item.insert(QStringLiteral("members"), members);
+        item.insert(QStringLiteral("memberCount"), members.size());
+        QStringList reportUsers;
+        for (const auto& reference : dataSet.used_by_report_controls)
+            reportUsers.push_back(QString::fromStdString(reference));
+        item.insert(QStringLiteral("usedByReports"), reportUsers);
+        result.push_back(item);
+    }
+    return result;
+}
+
+QVariantList IedEngineeringContextController::reportControls() const {
+    QVariantList result;
+    if (!model_) return result;
+    result.reserve(static_cast<qsizetype>(model_->report_controls.size()));
+    for (const auto& control : model_->report_controls) {
+        QVariantMap item;
+        item.insert(QStringLiteral("reference"), QString::fromStdString(control.reference));
+        item.insert(QStringLiteral("mode"), control.buffered ? QStringLiteral("BRCB") : QStringLiteral("URCB"));
+        item.insert(QStringLiteral("buffered"), control.buffered);
+        item.insert(QStringLiteral("domain"), QString::fromStdString(control.domain));
+        item.insert(QStringLiteral("logicalNode"), QString::fromStdString(control.logical_node));
+        item.insert(QStringLiteral("name"), QString::fromStdString(control.name));
+        item.insert(QStringLiteral("dataSet"), QString::fromStdString(control.data_set_reference));
+        item.insert(QStringLiteral("reportId"), QString::fromStdString(control.report_id));
+        item.insert(QStringLiteral("confRev"), QString::fromStdString(control.configuration_revision));
+        item.insert(QStringLiteral("bufTm"), QString::fromStdString(control.buffer_time_ms));
+        item.insert(QStringLiteral("intgPd"), QString::fromStdString(control.integrity_period_ms));
+        item.insert(QStringLiteral("enabled"), QString::fromStdString(control.enabled_state));
+        item.insert(QStringLiteral("reserved"), QString::fromStdString(control.reservation_state));
+        item.insert(QStringLiteral("probeOk"), false);
+        item.insert(QStringLiteral("engineeringOnly"), true);
+        result.push_back(item);
+    }
+    return result;
+}
+
+QVariantList IedEngineeringContextController::gooseStreams() const {
+    QVariantList result;
+    if (!model_) return result;
+
+    if (authority_ == Authority::openedScl && sclSource_) {
+        for (const auto& stream : sclSource_->goose_streams) {
+            if (QString::fromStdString(stream.ied_name) != iedName_) continue;
+            QVariantMap item;
+            item.insert(QStringLiteral("iedName"), QString::fromStdString(stream.ied_name));
+            item.insert(QStringLiteral("ldInst"), QString::fromStdString(stream.ld_inst));
+            item.insert(QStringLiteral("name"), QString::fromStdString(stream.control_name));
+            item.insert(QStringLiteral("reference"), QString::fromStdString(stream.control_block_reference));
+            item.insert(QStringLiteral("dataSet"), QString::fromStdString(stream.data_set_reference));
+            item.insert(QStringLiteral("goId"), QString::fromStdString(stream.go_id));
+            item.insert(QStringLiteral("confRev"), static_cast<qulonglong>(stream.configuration_revision));
+            item.insert(QStringLiteral("appId"), QString::fromStdString(stream.address.app_id_text));
+            item.insert(QStringLiteral("destinationMac"), QString::fromStdString(stream.address.destination_mac_text));
+            item.insert(QStringLiteral("vlanId"),
+                        stream.address.vlan_id ? QVariant::fromValue(static_cast<int>(*stream.address.vlan_id))
+                                               : QVariant{});
+            item.insert(QStringLiteral("vlanPriority"),
+                        stream.address.vlan_priority
+                            ? QVariant::fromValue(static_cast<int>(*stream.address.vlan_priority))
+                            : QVariant{});
+            item.insert(QStringLiteral("minTimeMs"), static_cast<qulonglong>(stream.min_time_milliseconds));
+            item.insert(QStringLiteral("maxTimeMs"), static_cast<qulonglong>(stream.max_time_milliseconds));
+            QStringList members;
+            for (const auto& entry : stream.entries)
+                members.push_back(QString::fromStdString(entry.signal_reference));
+            item.insert(QStringLiteral("members"), members);
+            result.push_back(item);
+        }
+        return result;
+    }
+
+    result.reserve(static_cast<qsizetype>(model_->goose_control_blocks.size()));
+    for (const auto& control : model_->goose_control_blocks) {
+        QVariantMap item;
+        item.insert(QStringLiteral("iedName"), iedName_);
+        item.insert(QStringLiteral("name"), QString::fromStdString(control.name));
+        item.insert(QStringLiteral("reference"), QString::fromStdString(control.reference));
+        item.insert(QStringLiteral("dataSet"), QString::fromStdString(control.data_set_reference));
+        item.insert(QStringLiteral("goId"), QString::fromStdString(control.control_id));
+        item.insert(QStringLiteral("confRev"), QString::fromStdString(control.configuration_revision));
+        item.insert(QStringLiteral("appId"), QString::fromStdString(control.app_id));
+        item.insert(QStringLiteral("destinationMac"), QString{});
+        item.insert(QStringLiteral("vlanId"), QVariant{});
+        item.insert(QStringLiteral("vlanPriority"), QVariant{});
+        item.insert(QStringLiteral("minTimeMs"), QString::fromStdString(control.minimum_time_ms));
+        item.insert(QStringLiteral("maxTimeMs"), QString::fromStdString(control.maximum_time_ms));
+        QStringList members;
+        const auto dataSet = std::find_if(
+            model_->data_sets.begin(), model_->data_sets.end(),
+            [&](const auto& candidate) {
+                return candidate.reference == control.data_set_reference;
+            });
+        if (dataSet != model_->data_sets.end()) {
+            for (const auto& member : dataSet->members)
+                members.push_back(QString::fromStdString(member.reference));
+        }
+        item.insert(QStringLiteral("members"), members);
+        result.push_back(item);
+    }
+    return result;
+}
+
+QVariantList IedEngineeringContextController::settingGroups() const {
+    QVariantList result;
+    if (!model_) return result;
+    result.reserve(static_cast<qsizetype>(model_->setting_group_controls.size()));
+    for (const auto& control : model_->setting_group_controls) {
+        QVariantMap item;
+        item.insert(QStringLiteral("reference"), QString::fromStdString(control.reference));
+        item.insert(QStringLiteral("domain"), QString::fromStdString(control.domain));
+        item.insert(QStringLiteral("logicalNode"), QString::fromStdString(control.logical_node));
+        item.insert(QStringLiteral("name"), QString::fromStdString(control.name));
+        item.insert(QStringLiteral("functionalConstraints"), QString::fromStdString(control.functional_constraint));
+        item.insert(QStringLiteral("complete"), false);
+        item.insert(QStringLiteral("attributes"), QVariantList{});
+        item.insert(QStringLiteral("attributeCount"), 0);
+        item.insert(QStringLiteral("canActivate"), false);
+        item.insert(QStringLiteral("activationBlockedReason"),
+                    QStringLiteral("Go Online to read and verify this canonical Setting Group control."));
+        item.insert(QStringLiteral("fullEditSupported"), false);
+        item.insert(QStringLiteral("engineeringOnly"), true);
+        result.push_back(item);
+    }
+    return result;
+}
+
 void IedEngineeringContextController::applyModel(std::shared_ptr<mms::MmsLiveModelDocument> model) {
     model_ = std::move(model);
     if (!model_) {
