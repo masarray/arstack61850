@@ -334,6 +334,7 @@ ApplicationWindow {
                 context: iedContext
                 reports: reports
                 utilities: utilities
+                controls: controls
                 engineering: sclWorkspace
             }
 
