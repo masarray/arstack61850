@@ -222,6 +222,7 @@ DiscoveryUi buildDiscoveryUi(
             if (evidence.state) {
                 const auto& state = *evidence.state;
                 map.insert(QStringLiteral("dataSet"), QString::fromStdString(state.data_set_reference));
+                map.insert(QStringLiteral("canonicalDataSet"), QString::fromStdString(state.data_set_reference));
                 map.insert(QStringLiteral("reportId"), QString::fromStdString(state.report_id));
                 map.insert(QStringLiteral("confRev"), numberText(state.configuration_revision));
                 map.insert(QStringLiteral("bufTm"), numberText(state.buffer_time_ms));
@@ -1006,7 +1007,6 @@ bool MmsReportController::createDynamicDataSet(
                         self->state_ = State::ready;
                         self->lastError_.clear();
                         self->dataSets_ = ui.dataSets;
-                        self->reportControls_ = ui.reportControls;
                         self->staticCandidates_ = ui.staticCandidates;
                         self->dynamicCandidates_ = ui.dynamicCandidates;
                         self->associationProfile_ = ui.associationProfile;
@@ -1153,7 +1153,6 @@ bool MmsReportController::deleteDynamicDataSet(
                         self->state_ = State::ready;
                         self->lastError_.clear();
                         self->dataSets_ = ui.dataSets;
-                        self->reportControls_ = ui.reportControls;
                         self->staticCandidates_ = ui.staticCandidates;
                         self->dynamicCandidates_ = ui.dynamicCandidates;
                         self->associationProfile_ = ui.associationProfile;
@@ -1268,11 +1267,21 @@ bool MmsReportController::enableSelectedAuthored(
 
     const auto currentDataSet =
         selectedRcb_.value(QStringLiteral("dataSet")).toString().trimmed();
-    if (!targetOwnedDynamic &&
-        !sameDataSetReference(targetDataSet, currentDataSet)) {
+    const auto canonicalDataSet =
+        selectedRcb_.value(QStringLiteral("canonicalDataSet")).toString().trimmed();
+    const bool currentBindingAuthoredDynamic =
+        selectedRcb_.value(QStringLiteral("dynamicBinding")).toBool();
+    const bool restoringCanonicalBinding =
+        currentBindingAuthoredDynamic &&
+        !canonicalDataSet.isEmpty() &&
+        sameDataSetReference(targetDataSet, canonicalDataSet);
+    const bool bindingChanged =
+        !sameDataSetReference(targetDataSet, currentDataSet);
+    if (bindingChanged && !targetOwnedDynamic && !restoringCanonicalBinding) {
         lastError_ = QStringLiteral(
             "Static/non-owned DataSet binding is immutable in Browser authoring. "
-            "Create an owned dynamic DataSet to rebind the RCB.");
+            "Only an owned dynamic DataSet may replace it; an ARStack-authored "
+            "dynamic binding may be explicitly restored to its canonical static DataSet.");
         emit stateChanged();
         return false;
     }
@@ -1298,7 +1307,8 @@ bool MmsReportController::enableSelectedAuthored(
     ioPool_.start([
         self, worker, stop, generation, selectedRow, rcbReference,
         targetDataSet, triggerOptions, optionalFields, requestGeneralInterrogation,
-        targetOwnedDynamic, writeTriggerOptions, writeOptionalFields,
+        targetOwnedDynamic, restoringCanonicalBinding, bindingChanged,
+        writeTriggerOptions, writeOptionalFields,
         trgOps = std::move(trgOps), optFlds = std::move(optFlds)
     ]() mutable {
         try {
@@ -1328,11 +1338,16 @@ bool MmsReportController::enableSelectedAuthored(
             }
 
             ReportUi ui;
-            if (targetOwnedDynamic) {
-                if (!worker->dynamicDataSets ||
-                    !worker->dynamicDataSets->owns(targetDataSet.toStdString())) {
+            if (bindingChanged || targetOwnedDynamic) {
+                if (targetOwnedDynamic &&
+                    (!worker->dynamicDataSets ||
+                     !worker->dynamicDataSets->owns(targetDataSet.toStdString()))) {
                     throw std::runtime_error(
                         "Dynamic DataSet ownership is no longer valid for this association.");
+                }
+                if (restoringCanonicalBinding && targetOwnedDynamic) {
+                    throw std::runtime_error(
+                        "Canonical restore target cannot simultaneously be classified as an owned dynamic DataSet.");
                 }
 
                 const mms::MmsReportControlCandidate* candidate = nullptr;
@@ -1423,7 +1438,8 @@ bool MmsReportController::enableSelectedAuthored(
                     self,
                     [self, generation, selectedRow, ui, targetDataSet,
                      triggerOptions, optionalFields,
-                     requestGeneralInterrogation, targetOwnedDynamic] {
+                     requestGeneralInterrogation, targetOwnedDynamic,
+                     restoringCanonicalBinding] {
                         if (!self || self->generation_ != generation) return;
                         self->operationBusy_ = false;
                         self->active_ = ui.active;
@@ -1459,11 +1475,14 @@ bool MmsReportController::enableSelectedAuthored(
                                 ? State::cleanup_required
                                 : State::active;
                         self->appendDiagnostic(
-                            requestGeneralInterrogation
+                            restoringCanonicalBinding
                                 ? QStringLiteral(
-                                      "Authored RCB configuration verified; enabled; GI requested.")
-                                : QStringLiteral(
-                                      "Authored RCB configuration verified and enabled."));
+                                      "Authored RCB restored to canonical static DataSet; configuration verified and enabled.")
+                                : (requestGeneralInterrogation
+                                       ? QStringLiteral(
+                                             "Authored RCB configuration verified; enabled; GI requested.")
+                                       : QStringLiteral(
+                                             "Authored RCB configuration verified and enabled.")));
                         emit self->inventoryChanged();
                         emit self->reportsChanged();
                         emit self->stateChanged();
