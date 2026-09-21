@@ -317,7 +317,7 @@ Dialog {
             }
 
             Rectangle {
-                visible: Object.keys(controls.lastResult).length > 0
+                visible: controls.lastResult.completion !== undefined
                 Layout.fillWidth: true
                 implicitHeight: resultColumn.implicitHeight + 18
                 radius: 6
