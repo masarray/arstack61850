@@ -395,6 +395,19 @@ Item {
 
                         Button {
                             visible: root.activeSection === 0
+                            text: "Control…"
+                            enabled: session.connected
+                                     && root.selectedModelNode.controlCandidate === true
+                                     && !controls.busy
+                            onClicked: controlDialog.openFor(root.selectedModelNode)
+                            ToolTip.visible: hovered
+                            ToolTip.text: root.selectedModelNode.controlCandidate === true
+                                          ? "Open guarded IEC 61850 Control for the canonical selected object."
+                                          : "Select a command-ready FC=CO DataAttribute."
+                        }
+
+                        Button {
+                            visible: root.activeSection === 0
                             text: "Add to Global Data"
                             enabled: root.selectedModelNode.kind === "DA"
                                      && root.selectedModelNode.readable === true
@@ -534,6 +547,13 @@ Item {
                     context: root.context
                     reports: root.reports
                     utilities: root.utilities
+                }
+
+                BrowserControlDialog {
+                    id: controlDialog
+                    theme: root.theme
+                    session: root.session
+                    controls: root.controls
                 }
             }
         }
