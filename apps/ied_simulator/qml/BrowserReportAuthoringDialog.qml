@@ -33,9 +33,14 @@ Dialog {
         var ds = selectedDataSetMap()
         if (!ds || !ds.reference)
             return false
-        if (reports.selectedRcb.dataSet === ds.reference)
+        var rcb = reports.selectedRcb
+        if (rcb.dataSet === ds.reference)
             return true
-        return ds.dynamicOwned === true
+        if (ds.dynamicOwned === true)
+            return true
+        return rcb.dynamicBinding === true
+            && rcb.canonicalDataSet
+            && rcb.canonicalDataSet === ds.reference
     }
 
     function triggerNames() {
@@ -208,7 +213,8 @@ Dialog {
                     anchors.fill: parent
                     anchors.margins: 8
                     text: "Binding to a different static/non-owned DataSet is blocked. "
-                          + "Only an association-owned dynamic DataSet may replace RCB DatSet."
+                          + "Only an association-owned dynamic DataSet may replace RCB DatSet. "
+                          + "If ARStack previously applied a dynamic binding, its canonical static binding may be restored explicitly."
                     color: theme.red
                     font.pixelSize: 8
                     wrapMode: Text.WordWrap
@@ -265,7 +271,7 @@ Dialog {
                     anchors.fill: parent
                     anchors.margins: 8
                     text: "Draft-only until Enable is confirmed. Static binding never rewrites DatSet. "
-                          + "For an owned dynamic DataSet, DatSet + TrgOps + OptFlds are written only through "
+                          + "For an owned dynamic DataSet—or an explicit restore to the canonical static binding—DatSet + TrgOps + OptFlds are written only through "
                           + "the proven report runtime, read back, and only then RptEna is written."
                     color: theme.muted
                     font.pixelSize: 8
