@@ -80,7 +80,7 @@ std::vector<std::uint8_t> triggerPayload(const QStringList& names) {
         const auto name = raw.trimmed();
         if (name.isEmpty() || !unique.insert(name).second) continue;
         const auto it = std::find_if(bits.begin(), bits.end(), [&name](const auto& item) {
-            return item.first == name;
+            return item.first.toString() == name;
         });
         if (it == bits.end()) {
             throw std::invalid_argument(
@@ -114,7 +114,7 @@ std::vector<std::uint8_t> optionalPayload(const QStringList& names) {
         const auto name = raw.trimmed();
         if (name.isEmpty() || !unique.insert(name).second) continue;
         const auto it = std::find_if(bits.begin(), bits.end(), [&name](const auto& item) {
-            return item.name == name;
+            return item.name.toString() == name;
         });
         if (it == bits.end()) {
             throw std::invalid_argument(
@@ -1164,7 +1164,7 @@ bool MmsReportController::deleteDynamicDataSet(
                                 : std::clamp(
                                       self->selectedDataSetIndex_,
                                       0,
-                                      self->dataSets_.size() - 1);
+                                      static_cast<int>(self->dataSets_.size()) - 1);
                         self->refreshSelection();
                         self->appendDiagnostic(
                             QStringLiteral("Owned dynamic DataSet deleted · %1")
