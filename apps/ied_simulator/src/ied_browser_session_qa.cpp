@@ -69,6 +69,8 @@ int main(int argc, char** argv) {
     report.data_set_reference = dataSet.reference;
     report.data_set_binding_status =
         ar::iec61850::scl::SclDataSetBindingStatus::resolved;
+    report.indexed = true;
+    report.max_clients = 2U;
     report.control_block_reference =
         "BROWSERIEDLD0/LLN0.RP.StatusReport";
     document.report_controls.push_back(report);
@@ -107,14 +109,25 @@ int main(int argc, char** argv) {
         reports.engineeringContext() != &engineeringContext ||
         utilities.engineeringContext() != &engineeringContext ||
         engineeringContext.dataSets().size() != 1 ||
-        engineeringContext.reportControls().size() != 1 ||
+        engineeringContext.reportControls().size() != 2 ||
         engineeringContext.gooseStreams().size() != 1 ||
         engineeringContext.settingGroups().size() != 1 ||
         reports.dataSets().size() != 1 ||
-        reports.reportControls().size() != 1 ||
+        reports.reportControls().size() != 2 ||
         utilities.settingGroupCount() != 1) {
         std::cerr << "Canonical Browser engineering-context adoption failed.\n";
         return 2;
+    }
+
+    const auto canonicalReports = engineeringContext.reportControls();
+    const auto firstReportRef =
+        canonicalReports.at(0).toMap().value(QStringLiteral("reference")).toString();
+    const auto secondReportRef =
+        canonicalReports.at(1).toMap().value(QStringLiteral("reference")).toString();
+    if (!firstReportRef.endsWith(QStringLiteral("StatusReport01")) ||
+        !secondReportRef.endsWith(QStringLiteral("StatusReport02"))) {
+        std::cerr << "Indexed SCL RCB canonical expansion failed.\n";
+        return 10;
     }
 
     const auto gooseProjection = engineeringContext.gooseStreams();
@@ -184,6 +197,7 @@ int main(int argc, char** argv) {
               << " propagation=pass"
               << " canonical_context=pass"
               << " service_reuse=pass"
+              << " indexed_rcb_expansion=pass"
               << " offline_service_inventory=pass"
               << " engineering_endpoint=pass"
               << " trusted_scl=pass"
