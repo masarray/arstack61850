@@ -107,6 +107,28 @@ int main(int argc, char** argv) {
         return 6;
     }
 
+    const auto monitoredNode =
+        model.nodeForReference(QStringLiteral("LD4/LLN19$MX$DO99$DA4"));
+    if (monitoredNode.value(QStringLiteral("reference")).toString() !=
+            QStringLiteral("LD4/LLN19$MX$DO99$DA4") ||
+        monitoredNode.value(QStringLiteral("readable")).toBool() != true) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL canonical_reference_lookup\n";
+        return 7;
+    }
+
+    QStringList monitoredReferences;
+    for (int doIndex = 0; doIndex < 100; ++doIndex) {
+        monitoredReferences.push_back(
+            QStringLiteral("LD4/LLN19$MX$DO%1$DA4").arg(doIndex));
+    }
+    const auto boundedTargets =
+        model.readTargetsForReferences(monitoredReferences, 64);
+    if (boundedTargets.size() != 64) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL monitored_target_bound="
+                  << boundedTargets.size() << "\n";
+        return 8;
+    }
+
     const bool passes = applyMs <= 5000 && filterMs <= 1500 && selectMs <= 500;
     std::cout << "IED_BROWSER_LARGE_MODEL_" << (passes ? "PASS" : "FAIL")
               << " nodes=" << model.totalNodeCount()
@@ -115,5 +137,5 @@ int main(int argc, char** argv) {
               << " filter_ms=" << filterMs
               << " select_ms=" << selectMs
               << " eager_expansion=false\n";
-    return passes ? 0 : 7;
+    return passes ? 0 : 9;
 }
