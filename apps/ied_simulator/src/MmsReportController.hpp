@@ -31,6 +31,7 @@ class MmsReportController : public QObject {
     Q_PROPERTY(QVariantList reportControls READ reportControls NOTIFY inventoryChanged)
     Q_PROPERTY(QVariantList staticCandidates READ staticCandidates NOTIFY inventoryChanged)
     Q_PROPERTY(QVariantList dynamicCandidates READ dynamicCandidates NOTIFY inventoryChanged)
+    Q_PROPERTY(QStringList ownedDynamicDataSets READ ownedDynamicDataSets NOTIFY inventoryChanged)
     Q_PROPERTY(int selectedRcbIndex READ selectedRcbIndex NOTIFY selectionChanged)
     Q_PROPERTY(int selectedDataSetIndex READ selectedDataSetIndex NOTIFY selectionChanged)
     Q_PROPERTY(QVariantMap selectedRcb READ selectedRcb NOTIFY selectionChanged)
@@ -62,6 +63,7 @@ public:
     [[nodiscard]] QVariantList reportControls() const { return reportControls_; }
     [[nodiscard]] QVariantList staticCandidates() const { return staticCandidates_; }
     [[nodiscard]] QVariantList dynamicCandidates() const { return dynamicCandidates_; }
+    [[nodiscard]] QStringList ownedDynamicDataSets() const { return ownedDynamicDataSets_; }
     [[nodiscard]] int selectedRcbIndex() const noexcept { return selectedRcbIndex_; }
     [[nodiscard]] int selectedDataSetIndex() const noexcept { return selectedDataSetIndex_; }
     [[nodiscard]] QVariantMap selectedRcb() const { return selectedRcb_; }
@@ -77,6 +79,15 @@ public:
     Q_INVOKABLE bool selectRcb(int row);
     Q_INVOKABLE bool selectDataSet(int row);
     Q_INVOKABLE bool enableSelected(bool requestGeneralInterrogation = true);
+    Q_INVOKABLE bool enableSelectedAuthored(
+        const QString& dataSetReference,
+        const QStringList& triggerOptions,
+        const QStringList& optionalFields,
+        bool requestGeneralInterrogation = true);
+    Q_INVOKABLE bool createDynamicDataSet(
+        const QString& dataSetReference,
+        const QVariantList& canonicalMembers);
+    Q_INVOKABLE bool deleteDynamicDataSet(const QString& dataSetReference);
     Q_INVOKABLE bool disableSelected();
     Q_INVOKABLE bool retryCleanup();
     Q_INVOKABLE QString diagnosticsText() const;
@@ -96,6 +107,7 @@ private:
         connecting,
         discovering,
         ready,
+        authoring,
         enabling,
         active,
         disabling,
@@ -125,6 +137,7 @@ private:
     QVariantList reportControls_;
     QVariantList staticCandidates_;
     QVariantList dynamicCandidates_;
+    QStringList ownedDynamicDataSets_;
     int selectedRcbIndex_{-1};
     int selectedDataSetIndex_{-1};
     QVariantMap selectedRcb_;
