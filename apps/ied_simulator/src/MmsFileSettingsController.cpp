@@ -116,7 +116,69 @@ mms::MmsObjectName controlVariable(
     }
 
     auto path = attributePath;
-    std::replace(path.begin(), path.end(), '.', '
+    std::replace(path.begin(), path.end(), '.', '$');
+    const auto fc = control.functional_constraint.empty()
+        ? std::string{"SP"}
+        : control.functional_constraint;
+    return mms::MmsObjectName::domain_specific(
+        control.domain,
+        control.logical_node + "$" + fc + "$" +
+            (control.name.empty() ? std::string{"SGCB"} : control.name) +
+            "$" + path);
+}
+
+std::vector<mms::MmsControlBlockCandidate> buildContextSettingGroups(
+    const mms::MmsLiveModelDocument& model) {
+    static const std::vector<std::string> standardAttributes{
+        "NumOfSG", "ActSG", "EditSG", "CnfEdit", "LActTm"};
+
+    std::vector<mms::MmsControlBlockCandidate> result;
+    result.reserve(model.setting_group_controls.size());
+    for (const auto& control : model.setting_group_controls) {
+        mms::MmsControlBlockCandidate candidate;
+        candidate.kind = mms::MmsControlBlockKind::setting_group;
+        candidate.domain = control.domain;
+        candidate.logical_node = control.logical_node;
+        candidate.functional_constraint = control.functional_constraint.empty()
+            ? "SP"
+            : control.functional_constraint;
+        candidate.name = control.name.empty() ? "SGCB" : control.name;
+        candidate.reference = control.reference.empty()
+            ? candidate.domain + "/" + candidate.logical_node + "." +
+                candidate.functional_constraint + "." + candidate.name
+            : control.reference;
+
+        if (!control.runtime_attributes.empty()) {
+            for (const auto& attribute : control.runtime_attributes) {
+                candidate.attributes.push_back({
+                    attribute.attribute_path,
+                    controlVariable(
+                        control, attribute.attribute_path, attribute.mms_reference)});
+            }
+        } else {
+            const auto& attributes = control.attributes.empty()
+                ? standardAttributes
+                : control.attributes;
+            for (const auto& attribute : attributes) {
+                candidate.attributes.push_back({
+                    attribute,
+                    controlVariable(control, attribute)});
+            }
+        }
+
+        if (candidate.attributes.size() > 16U) {
+            candidate.attributes.resize(16U);
+        }
+        result.push_back(std::move(candidate));
+    }
+    if (result.size() > 64U) {
+        throw std::runtime_error(
+            "Canonical Setting Group inventory exceeds the desktop bound of 64 SGCBs.");
+    }
+    return result;
+}
+
+QString displayValue(const mms::MmsControlBlockAttributeReadEvidence* attribute) {
     if (attribute == nullptr || !attribute->value) return {};
     return QString::fromStdString(mms::MmsDataCodec::to_display_string(*attribute->value));
 }
