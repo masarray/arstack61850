@@ -581,6 +581,21 @@ bool MmsClientController::refreshEngineeringVisible(const int firstRow, const in
     return true;
 }
 
+bool MmsClientController::refreshEngineeringReferences(const QStringList& references) {
+    if (!connected() || operationBusy_ || !engineeringContext_ || !engineeringContext_->loaded()) {
+        return false;
+    }
+    const auto targets =
+        engineeringContext_->treeModel()->readTargetsForReferences(references, 64);
+    if (targets.isEmpty()) {
+        lastError_ = QStringLiteral("No monitored references resolve to readable DataAttributes in the active engineering context.");
+        emit stateChanged();
+        return false;
+    }
+    startRead(targets, QStringLiteral("Refresh Global Data"));
+    return true;
+}
+
 bool MmsClientController::writeEngineeringSelected(const QString& textValue) {
     if (!connected() || operationBusy_ || !engineeringContext_ || !engineeringContext_->loaded()) {
         return false;
