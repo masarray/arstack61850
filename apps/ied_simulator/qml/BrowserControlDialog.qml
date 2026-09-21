@@ -369,6 +369,17 @@ Dialog {
                         color: theme.muted
                         font.pixelSize: 7
                     }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: controls.lastResult.statusValue !== undefined
+                        text: "Status read-back"
+                              + (controls.lastResult.statusFunctionalConstraint !== undefined
+                                 ? " [" + controls.lastResult.statusFunctionalConstraint + "]" : "")
+                              + ": " + root.text(controls.lastResult.statusValue)
+                        color: theme.textSoft
+                        font.pixelSize: 8
+                        font.weight: Font.DemiBold
+                    }
                 }
             }
 
