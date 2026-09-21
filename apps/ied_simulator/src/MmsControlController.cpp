@@ -32,7 +32,7 @@ bool authorizeExplicitOperatorAction(
     return true;
 }
 
-QString modelName(const control::ControlModel model) {
+QString controlModelName(const control::ControlModel model) {
     switch (model) {
     case control::ControlModel::status_only: return QStringLiteral("status-only");
     case control::ControlModel::direct_normal: return QStringLiteral("direct-normal");
@@ -371,7 +371,7 @@ bool MmsControlController::prepareObject(const QString& objectReference) {
             for (const auto& item : descriptor.discovery_evidence) {
                 evidence.push_back(QString::fromStdString(item));
             }
-            const auto uiModel = modelName(descriptor.model);
+            const auto uiModel = controlModelName(descriptor.model);
             const auto uiCdc = QString::fromStdString(descriptor.cdc);
             const auto requiresSelect = descriptor.requires_select();
             const auto enhanced = descriptor.enhanced();
