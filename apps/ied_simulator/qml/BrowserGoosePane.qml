@@ -7,19 +7,8 @@ Rectangle {
     id: root
     required property var theme
     required property var context
-    required property var engineering
 
-    property var visibleStreams: {
-        var all = engineering.gooseStreams
-        if (!context.iedName.length)
-            return all
-        var filtered = []
-        for (var index = 0; index < all.length; ++index) {
-            if (String(all[index].iedName) === context.iedName)
-                filtered.push(all[index])
-        }
-        return filtered
-    }
+    property var visibleStreams: context.gooseStreams
     property int selectedIndex: -1
     property var selectedStream: selectedIndex >= 0 && selectedIndex < visibleStreams.length
                                  ? visibleStreams[selectedIndex] : ({})
@@ -38,8 +27,8 @@ Rectangle {
     }
 
     Connections {
-        target: engineering
-        function onWorkspaceChanged() {
+        target: context
+        function onContextChanged() {
             root.selectedIndex = root.visibleStreams.length > 0 ? 0 : -1
         }
     }
@@ -71,8 +60,8 @@ Rectangle {
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: engineering.loaded
-                              ? engineering.sourceName + " · " + root.visibleStreams.length + " stream(s)"
+                        text: context.loaded
+                              ? context.sourceName + " · " + root.visibleStreams.length + " stream(s)"
                               : "No engineering model loaded"
                         color: theme.muted
                         font.pixelSize: 8
