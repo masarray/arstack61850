@@ -51,7 +51,8 @@ Item {
                     : root.activeIedLabel() + " / Setting Groups"
         if (activeSection === 4)
             return root.activeIedLabel() + " / Files" + (utilities.currentDirectory.length ? " / " + utilities.currentDirectory : "")
-        return root.activeIedLabel() + " / GOOSE"
+        if (activeSection === 5) return root.activeIedLabel() + " / GOOSE"
+        return root.activeIedLabel() + " / Global Data"
     }
 
     function selectSection(section, title) {
@@ -67,6 +68,7 @@ Item {
     Shortcut { sequence: "Alt+4"; enabled: root.visible; onActivated: root.selectSection(3, "Setting Groups") }
     Shortcut { sequence: "Alt+5"; enabled: root.visible; onActivated: root.selectSection(4, "Files") }
     Shortcut { sequence: "Alt+6"; enabled: root.visible; onActivated: root.selectSection(5, "GOOSE") }
+    Shortcut { sequence: "Alt+7"; enabled: root.visible; onActivated: root.selectSection(6, "Global Data") }
 
     Connections {
         target: session
@@ -318,6 +320,7 @@ Item {
                 context: root.context
                 reports: root.reports
                 utilities: root.utilities
+                globalDataCount: globalDataPane.watchCount
                 section: root.activeSection
                 onSectionRequested: function(section, title) {
                     root.selectSection(section, title)
@@ -391,6 +394,27 @@ Item {
                         }
 
                         Button {
+                            visible: root.activeSection === 0
+                            text: "Add to Global Data"
+                            enabled: root.selectedModelNode.kind === "DA"
+                                     && root.selectedModelNode.readable === true
+                            onClicked: globalDataPane.addSelectedData(root.selectedModelNode)
+                        }
+
+                        Button {
+                            visible: root.activeSection === 1
+                            text: "Add to Global Data"
+                            enabled: reports.selectedDataSetIndex >= 0
+                                     && reports.selectedDataSetIndex < reports.dataSets.length
+                            onClicked: {
+                                var selected = reports.dataSets[reports.selectedDataSetIndex]
+                                globalDataPane.addDataSet(
+                                    selected.reference || "",
+                                    reports.selectedDataSetMembers)
+                            }
+                        }
+
+                        Button {
                             visible: root.activeSection === 2
                             text: "Enable + GI"
                             enabled: reports.connected && !reports.busy && !reports.active
@@ -403,6 +427,13 @@ Item {
                             text: "Disable"
                             enabled: reports.connected && reports.active && !reports.busy
                             onClicked: reports.disableSelected()
+                        }
+
+                        Button {
+                            visible: root.activeSection === 2
+                            text: "Add to Global Data"
+                            enabled: reports.selectedRcbIndex >= 0
+                            onClicked: globalDataPane.addReport(reports.selectedRcb)
                         }
 
                         Button {
@@ -424,6 +455,21 @@ Item {
                             text: "Configured model view"
                             color: root.theme.muted
                             font.pixelSize: 8
+                        }
+
+                        Button {
+                            visible: root.activeSection === 5
+                            text: "Add to Global Data"
+                            enabled: goosePane.selectedIndex >= 0
+                            onClicked: globalDataPane.addGoose(goosePane.selectedStream)
+                        }
+
+                        Button {
+                            visible: root.activeSection === 6
+                            text: client.operationBusy ? "Refreshing…" : "Refresh watched"
+                            enabled: client.connected && !client.operationBusy
+                                     && globalDataPane.watchCount > 0
+                            onClicked: globalDataPane.refreshWatched()
                         }
                     }
                 }
@@ -467,8 +513,17 @@ Item {
                     }
 
                     BrowserGoosePane {
+                        id: goosePane
                         theme: root.theme
                         context: root.context
+                    }
+
+                    BrowserGlobalDataPane {
+                        id: globalDataPane
+                        theme: root.theme
+                        context: root.context
+                        client: root.client
+                        reports: root.reports
                     }
                 }
 
