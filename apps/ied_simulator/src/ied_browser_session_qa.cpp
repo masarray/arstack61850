@@ -36,13 +36,96 @@ int main(int argc, char** argv) {
     lln0.name = "LLN0";
     document.logical_nodes.push_back(lln0);
 
+    ar::iec61850::scl::SclDataSetEntry status;
+    status.signal_reference = "BROWSERIEDLD0/LLN0.Mod.stVal";
+    status.ied_name = "BROWSERIED";
+    status.ld_inst = "LD0";
+    status.ln_class = "LLN0";
+    status.do_name = "Mod";
+    status.da_name = "stVal";
+    status.functional_constraint = "ST";
+    status.cdc = "INC";
+    status.basic_type = "INT32";
+    status.type_id = "DO_INC";
+    document.model_entries.push_back(status);
+
+    ar::iec61850::scl::SclDataSet dataSet;
+    dataSet.key = "BROWSERIEDLD0/LLN0.Status";
+    dataSet.ied_name = "BROWSERIED";
+    dataSet.ld_inst = "LD0";
+    dataSet.logical_node_path = "LLN0";
+    dataSet.name = "Status";
+    dataSet.reference = "BROWSERIEDLD0/LLN0.Status";
+    dataSet.entries.push_back(status);
+    document.data_sets.push_back(dataSet);
+
+    ar::iec61850::scl::SclReportControl report;
+    report.ied_name = "BROWSERIED";
+    report.ld_inst = "LD0";
+    report.logical_node_path = "LLN0";
+    report.name = "StatusReport";
+    report.report_id = "BROWSERIED/Status";
+    report.data_set_name = "Status";
+    report.data_set_reference = dataSet.reference;
+    report.data_set_binding_status =
+        ar::iec61850::scl::SclDataSetBindingStatus::resolved;
+    report.control_block_reference =
+        "BROWSERIEDLD0/LLN0.RP.StatusReport";
+    document.report_controls.push_back(report);
+
+    ar::iec61850::scl::SclGooseStream goose;
+    goose.kind = "GOOSE";
+    goose.ied_name = "BROWSERIED";
+    goose.ld_inst = "LD0";
+    goose.control_name = "StatusGoose";
+    goose.control_block_reference =
+        "BROWSERIEDLD0/LLN0.GO.StatusGoose";
+    goose.data_set_name = "Status";
+    goose.data_set_reference = dataSet.reference;
+    goose.go_id = "BROWSERIED/StatusGoose";
+    goose.configuration_revision = 1;
+    goose.address.app_id_text = "1001";
+    goose.address.destination_mac_text = "01-0C-CD-01-00-01";
+    goose.entries.push_back(status);
+    document.goose_streams.push_back(goose);
+
+    ar::iec61850::scl::SclSettingControl setting;
+    setting.ied_name = "BROWSERIED";
+    setting.ld_inst = "LD0";
+    setting.logical_node_path = "LLN0";
+    setting.control_block_reference =
+        "BROWSERIEDLD0/LLN0.SG.SGCB";
+    setting.number_of_setting_groups = 4;
+    setting.active_setting_group = 1;
+    document.setting_controls.push_back(setting);
+
     if (!engineeringContext.publishSclDocument(
             document, QStringLiteral("/tmp/browser-context.cid")) ||
         browser.host() != QStringLiteral("192.0.2.77") ||
         browser.port() != 8102 ||
-        client.engineeringContext() != &engineeringContext) {
+        client.engineeringContext() != &engineeringContext ||
+        reports.engineeringContext() != &engineeringContext ||
+        utilities.engineeringContext() != &engineeringContext ||
+        engineeringContext.dataSets().size() != 1 ||
+        engineeringContext.reportControls().size() != 1 ||
+        engineeringContext.gooseStreams().size() != 1 ||
+        engineeringContext.settingGroups().size() != 1 ||
+        reports.dataSets().size() != 1 ||
+        reports.reportControls().size() != 1 ||
+        utilities.settingGroupCount() != 1) {
         std::cerr << "Canonical Browser engineering-context adoption failed.\n";
         return 2;
+    }
+
+    const auto gooseProjection = engineeringContext.gooseStreams();
+    if (gooseProjection.constFirst().toMap()
+            .value(QStringLiteral("destinationMac")).toString() !=
+            QStringLiteral("01-0C-CD-01-00-01") ||
+        reports.selectedDataSetMembers().size() != 1 ||
+        utilities.selectedSettingGroup().value(
+            QStringLiteral("engineeringOnly")).toBool() != true) {
+        std::cerr << "Canonical Browser service projection failed.\n";
+        return 9;
     }
 
     browser.setHost(QStringLiteral("192.0.2.40"));
@@ -100,6 +183,8 @@ int main(int argc, char** argv) {
               << " endpoint=relay.local:102"
               << " propagation=pass"
               << " canonical_context=pass"
+              << " service_reuse=pass"
+              << " offline_service_inventory=pass"
               << " engineering_endpoint=pass"
               << " trusted_scl=pass"
               << " invalid_endpoint=fail_closed"
