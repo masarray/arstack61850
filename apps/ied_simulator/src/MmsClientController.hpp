@@ -101,6 +101,7 @@ public:
     Q_INVOKABLE bool writeSelected(const QString& textValue);
     Q_INVOKABLE bool readEngineeringSelected();
     Q_INVOKABLE bool refreshEngineeringVisible(int firstRow, int lastRow);
+    Q_INVOKABLE bool refreshEngineeringReferences(const QStringList& references);
     Q_INVOKABLE bool writeEngineeringSelected(const QString& textValue);
     Q_INVOKABLE QString diagnosticsText() const;
 
