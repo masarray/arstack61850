@@ -12,7 +12,7 @@
 #include <memory>
 #include <stop_token>
 
-class MmsControlController final : public QObject {
+class MmsControlController : public QObject {
     Q_OBJECT
     QML_ELEMENT
 
