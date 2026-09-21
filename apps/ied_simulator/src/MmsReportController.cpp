@@ -1240,6 +1240,32 @@ bool MmsReportController::enableSelectedAuthored(
             break;
         }
     }
+    const auto attributes =
+        selectedRcb_.value(QStringLiteral("attributes")).toStringList();
+    const bool writeTriggerOptions =
+        attributes.contains(QStringLiteral("TrgOps"));
+    const bool writeOptionalFields =
+        attributes.contains(QStringLiteral("OptFlds"));
+    if (!writeTriggerOptions && !triggerOptions.isEmpty()) {
+        lastError_ = QStringLiteral(
+            "Selected RCB does not expose TrgOps for authoring.");
+        emit stateChanged();
+        return false;
+    }
+    if (!writeOptionalFields && !optionalFields.isEmpty()) {
+        lastError_ = QStringLiteral(
+            "Selected RCB does not expose OptFlds for authoring.");
+        emit stateChanged();
+        return false;
+    }
+    if (targetOwnedDynamic &&
+        !attributes.contains(QStringLiteral("DatSet"))) {
+        lastError_ = QStringLiteral(
+            "Selected RCB does not expose DatSet for dynamic binding.");
+        emit stateChanged();
+        return false;
+    }
+
     const auto currentDataSet =
         selectedRcb_.value(QStringLiteral("dataSet")).toString().trimmed();
     if (!targetOwnedDynamic &&
@@ -1272,7 +1298,8 @@ bool MmsReportController::enableSelectedAuthored(
     ioPool_.start([
         self, worker, stop, generation, selectedRow, rcbReference,
         targetDataSet, triggerOptions, optionalFields, requestGeneralInterrogation,
-        targetOwnedDynamic, trgOps = std::move(trgOps), optFlds = std::move(optFlds)
+        targetOwnedDynamic, writeTriggerOptions, writeOptionalFields,
+        trgOps = std::move(trgOps), optFlds = std::move(optFlds)
     ]() mutable {
         try {
             if (!worker->session || !worker->session->associated() ||
@@ -1343,9 +1370,9 @@ bool MmsReportController::enableSelectedAuthored(
                 options.reserve_unbuffered_rcb = true;
                 options.write_data_set_reference = true;
                 options.data_set_reference = targetDataSet.toStdString();
-                options.write_trigger_options = true;
+                options.write_trigger_options = writeTriggerOptions;
                 options.trigger_options = trgOps;
-                options.write_optional_fields = true;
+                options.write_optional_fields = writeOptionalFields;
                 options.optional_fields = optFlds;
                 options.maximum_events = 256U;
                 options.monitor_options.maximum_streams = 64U;
@@ -1372,9 +1399,9 @@ bool MmsReportController::enableSelectedAuthored(
                     requestGeneralInterrogation;
                 options.subscription.reserve_unbuffered_rcb = true;
                 options.subscription.write_data_set_reference = false;
-                options.subscription.write_trigger_options = true;
+                options.subscription.write_trigger_options = writeTriggerOptions;
                 options.subscription.trigger_options = trgOps;
-                options.subscription.write_optional_fields = true;
+                options.subscription.write_optional_fields = writeOptionalFields;
                 options.subscription.optional_fields = optFlds;
                 options.subscription.maximum_events = 256U;
                 options.subscription.monitor_options.maximum_streams = 64U;
