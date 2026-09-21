@@ -282,6 +282,16 @@ QVariantMap MmsLiveTreeModel::nodeMap(const int nodeIndex) const {
     result.insert(QStringLiteral("timestamp"), siblingValue(nodeIndex, QStringLiteral("t")));
     result.insert(QStringLiteral("writable"), node.writable);
     result.insert(QStringLiteral("readable"), node.kind == NodeKind::dataAttribute && !node.item.isEmpty());
+    QString objectReference;
+    if (node.kind == NodeKind::dataAttribute && node.parent >= 0 && node.parent < nodes_.size()) {
+        objectReference = nodes_.at(node.parent).reference;
+    }
+    result.insert(QStringLiteral("objectReference"), objectReference);
+    result.insert(
+        QStringLiteral("controlCandidate"),
+        node.kind == NodeKind::dataAttribute &&
+            node.functionalConstraint.compare(QStringLiteral("CO"), Qt::CaseInsensitive) == 0 &&
+            !objectReference.isEmpty());
     return result;
 }
 

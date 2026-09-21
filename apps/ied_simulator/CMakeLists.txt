@@ -66,6 +66,8 @@ qt_add_qml_module(arstack_ied_simulator
         src/IedEngineeringContextController.hpp
         src/MmsClientController.cpp
         src/MmsClientController.hpp
+        src/MmsControlController.cpp
+        src/MmsControlController.hpp
         src/IedBrowserSessionController.cpp
         src/IedBrowserSessionController.hpp
         src/MmsReportController.cpp
@@ -99,6 +101,7 @@ qt_add_qml_module(arstack_ied_simulator
         qml/BrowserDataSetPane.qml
         qml/BrowserGoosePane.qml
         qml/BrowserGlobalDataPane.qml
+        qml/BrowserControlDialog.qml
         qml/SnifferWorkspace.qml
         qml/MmsClientWorkspace.qml
         qml/ReportsWorkspace.qml
@@ -353,6 +356,8 @@ add_executable(ied_browser_session_qa
     src/IedEngineeringContextController.hpp
     src/MmsClientController.cpp
     src/MmsClientController.hpp
+    src/MmsControlController.cpp
+    src/MmsControlController.hpp
     src/MmsReportController.cpp
     src/MmsReportController.hpp
     src/MmsFileSettingsController.cpp
