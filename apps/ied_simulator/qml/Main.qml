@@ -47,6 +47,11 @@ ApplicationWindow {
         id: reports
         objectName: "mmsReportBackend"
     }
+    MmsControlController {
+        id: controls
+        objectName: "mmsControlBackend"
+        engineeringContext: iedContext
+    }
     MmsFileSettingsController {
         id: utilities
         objectName: "mmsFileSettingsBackend"
@@ -57,6 +62,7 @@ ApplicationWindow {
         client: mmsClient
         reports: reports
         utilities: utilities
+        controls: controls
         engineeringContext: iedContext
     }
     SclWorkspaceController {
