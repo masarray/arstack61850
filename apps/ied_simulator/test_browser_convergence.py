@@ -13,7 +13,7 @@ workspace_required = [
     'text: "MODEL"',
     'text: "COMMANDS"',
     'text: "Online"',
-    'text: "Discover IED"',
+    '"Discover IED"',
     'client.readEngineeringSelected()',
     'BrowserStatusConsole {',
     'modelProvider: root.context',
