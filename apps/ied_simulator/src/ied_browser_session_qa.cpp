@@ -11,12 +11,14 @@ int main(int argc, char** argv) {
     MmsClientController client;
     MmsReportController reports;
     MmsFileSettingsController utilities;
+    MmsControlController controls;
     IedBrowserSessionController browser;
     IedEngineeringContextController engineeringContext;
 
     browser.setClient(&client);
     browser.setReports(&reports);
     browser.setUtilities(&utilities);
+    browser.setControls(&controls);
     browser.setEngineeringContext(&engineeringContext);
 
     ar::iec61850::scl::SclDocument document;
@@ -108,6 +110,7 @@ int main(int argc, char** argv) {
         client.engineeringContext() != &engineeringContext ||
         reports.engineeringContext() != &engineeringContext ||
         utilities.engineeringContext() != &engineeringContext ||
+        controls.engineeringContext() != &engineeringContext ||
         engineeringContext.dataSets().size() != 1 ||
         engineeringContext.reportControls().size() != 2 ||
         engineeringContext.gooseStreams().size() != 1 ||
@@ -148,8 +151,10 @@ int main(int argc, char** argv) {
     if (browser.host() != QStringLiteral("192.0.2.40") || browser.port() != 8102 ||
         browser.endpoint() != QStringLiteral("192.0.2.40:8102") ||
         client.host() != browser.host() || reports.host() != browser.host() ||
-        utilities.host() != browser.host() || client.port() != browser.port() ||
+        utilities.host() != browser.host() || controls.host() != browser.host() ||
+        client.port() != browser.port() ||
         reports.port() != browser.port() || utilities.port() != browser.port() ||
+        controls.port() != browser.port() ||
         client.trustedSclPath() != browser.trustedSclPath()) {
         std::cerr << "Browser endpoint/trusted-SCL propagation failed.\n";
         return 3;
@@ -160,7 +165,7 @@ int main(int argc, char** argv) {
     if (browser.host() != QStringLiteral("2001:db8::40") ||
         browser.endpoint() != QStringLiteral("[2001:db8::40]:102") ||
         client.host() != browser.host() || reports.host() != browser.host() ||
-        utilities.host() != browser.host()) {
+        utilities.host() != browser.host() || controls.host() != browser.host()) {
         std::cerr << "Browser IPv6 endpoint normalization/propagation failed.\n";
         return 4;
     }
@@ -181,13 +186,14 @@ int main(int argc, char** argv) {
     if (browser.host() != QStringLiteral("relay.local") || !browser.lastError().isEmpty() ||
         client.host() != QStringLiteral("relay.local") ||
         reports.host() != QStringLiteral("relay.local") ||
-        utilities.host() != QStringLiteral("relay.local")) {
+        utilities.host() != QStringLiteral("relay.local") ||
+        controls.host() != QStringLiteral("relay.local")) {
         std::cerr << "Browser recovery after invalid configuration failed.\n";
         return 7;
     }
 
     browser.disconnectFromIed();
-    if (browser.connected() || client.connected() || reports.connected() || utilities.connected()) {
+    if (browser.connected() || client.connected() || reports.connected() || utilities.connected() || controls.connected()) {
         std::cerr << "Coordinated Browser disconnect contract failed.\n";
         return 8;
     }
@@ -197,6 +203,7 @@ int main(int argc, char** argv) {
               << " propagation=pass"
               << " canonical_context=pass"
               << " service_reuse=pass"
+              << " control_service=coordinated"
               << " indexed_rcb_expansion=pass"
               << " offline_service_inventory=pass"
               << " engineering_endpoint=pass"
