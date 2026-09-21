@@ -159,6 +159,17 @@ jobs:
           apps/ied_simulator/src/MmsLiveTreeModel.hpp
           apps/ied_simulator/src/MmsLiveTreeModel.cpp
 
+      - name: P6B Browser IEC 61850 Control UX contract
+        run: >-
+          python3 apps/ied_simulator/test_browser_control_ux.py
+          apps/ied_simulator/qml/IedBrowserWorkspace.qml
+          apps/ied_simulator/qml/BrowserControlDialog.qml
+          apps/ied_simulator/src/MmsControlController.cpp
+          apps/ied_simulator/src/IedBrowserSessionController.cpp
+          apps/ied_simulator/src/MmsLiveTreeModel.cpp
+          apps/ied_simulator/qml/Main.qml
+          apps/ied_simulator/CMakeLists.txt
+
       - name: IED Browser session ownership gates
         env:
           QT_QPA_PLATFORM: offscreen
