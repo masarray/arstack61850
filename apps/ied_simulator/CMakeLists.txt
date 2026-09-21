@@ -356,6 +356,8 @@ add_executable(ied_browser_session_qa
     src/IedEngineeringContextController.hpp
     src/MmsClientController.cpp
     src/MmsClientController.hpp
+    src/MmsControlController.cpp
+    src/MmsControlController.hpp
     src/MmsReportController.cpp
     src/MmsReportController.hpp
     src/MmsFileSettingsController.cpp
