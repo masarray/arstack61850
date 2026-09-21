@@ -2,8 +2,10 @@
 #include "MmsReportController.hpp"
 
 #include "ariec61850/mms/data_codec.hpp"
+#include "ariec61850/mms/dynamic_data_set.hpp"
 #include "ariec61850/mms/live_discovery.hpp"
 #include "ariec61850/mms/rcb_selection.hpp"
+#include "ariec61850/mms/report_subscription_runtime.hpp"
 #include "ariec61850/mms/static_report_session.hpp"
 
 #include <QByteArray>
@@ -11,6 +13,8 @@
 #include <QPointer>
 
 #include <algorithm>
+#include <array>
+#include <set>
 #include <chrono>
 #include <optional>
 #include <span>
@@ -60,6 +64,71 @@ bool sameDataSetReference(const QString& left, const QString& right) {
     } catch (...) {
         return false;
     }
+}
+
+std::vector<std::uint8_t> triggerPayload(const QStringList& names) {
+    static const std::array<std::pair<QStringView, std::uint8_t>, 5> bits{{
+        {u"data-change", 0x40U},
+        {u"quality-change", 0x20U},
+        {u"data-update", 0x10U},
+        {u"integrity", 0x08U},
+        {u"general-interrogation", 0x04U},
+    }};
+    std::set<QString> unique;
+    std::uint8_t value{};
+    for (const auto& raw : names) {
+        const auto name = raw.trimmed();
+        if (name.isEmpty() || !unique.insert(name).second) continue;
+        const auto it = std::find_if(bits.begin(), bits.end(), [&name](const auto& item) {
+            return item.first == name;
+        });
+        if (it == bits.end()) {
+            throw std::invalid_argument(
+                "Unknown IEC 61850 TrgOps name: " + name.toStdString());
+        }
+        value = static_cast<std::uint8_t>(value | it->second);
+    }
+    return {value};
+}
+
+std::vector<std::uint8_t> optionalPayload(const QStringList& names) {
+    struct Bit final {
+        QStringView name;
+        int byte;
+        std::uint8_t mask;
+    };
+    static const std::array<Bit, 9> bits{{
+        {u"sequence-number", 0, 0x40U},
+        {u"report-time-stamp", 0, 0x20U},
+        {u"reason-for-inclusion", 0, 0x10U},
+        {u"data-set-name", 0, 0x08U},
+        {u"data-reference", 0, 0x04U},
+        {u"buffer-overflow", 0, 0x02U},
+        {u"entry-id", 0, 0x01U},
+        {u"configuration-revision", 1, 0x80U},
+        {u"segmentation", 1, 0x40U},
+    }};
+    std::set<QString> unique;
+    std::vector<std::uint8_t> value(2U, 0U);
+    for (const auto& raw : names) {
+        const auto name = raw.trimmed();
+        if (name.isEmpty() || !unique.insert(name).second) continue;
+        const auto it = std::find_if(bits.begin(), bits.end(), [&name](const auto& item) {
+            return item.name == name;
+        });
+        if (it == bits.end()) {
+            throw std::invalid_argument(
+                "Unknown IEC 61850 OptFlds name: " + name.toStdString());
+        }
+        value[static_cast<std::size_t>(it->byte)] =
+            static_cast<std::uint8_t>(
+                value[static_cast<std::size_t>(it->byte)] | it->mask);
+    }
+    return value;
+}
+
+QString bitNamesText(const QStringList& names) {
+    return names.isEmpty() ? QStringLiteral("none") : names.join(QStringLiteral(", "));
 }
 
 QVariantMap candidateMap(const mms::MmsRcbCandidateEvaluation& candidate) {
@@ -380,6 +449,8 @@ struct MmsReportController::WorkerState final {
     std::unique_ptr<mms::MmsTcpLiveDiscoverySession> session;
     std::shared_ptr<mms::MmsLiveDiscoveryResult> discovery;
     std::unique_ptr<mms::MmsStaticReportSessionRuntime> report;
+    std::unique_ptr<mms::MmsReportSubscriptionRuntime> authoredReport;
+    std::unique_ptr<mms::MmsDynamicDataSetRuntime> dynamicDataSets;
 };
 
 MmsReportController::MmsReportController(QObject* parent)
@@ -445,6 +516,7 @@ QString MmsReportController::stateText() const {
     case State::connecting: return QStringLiteral("Connecting");
     case State::discovering: return QStringLiteral("Attaching reports");
     case State::ready: return QStringLiteral("Ready");
+    case State::authoring: return QStringLiteral("Authoring DataSet");
     case State::enabling: return QStringLiteral("Enabling RCB");
     case State::active: return QStringLiteral("Report subscription active");
     case State::disabling: return QStringLiteral("Releasing RCB");
@@ -476,6 +548,7 @@ void MmsReportController::clearInventory() {
     reportControls_.clear();
     staticCandidates_.clear();
     dynamicCandidates_.clear();
+    ownedDynamicDataSets_.clear();
     associationProfile_.clear();
     selectedRcbIndex_ = -1;
     selectedDataSetIndex_ = -1;
