@@ -14,6 +14,7 @@ Rectangle {
     required property var utilities
 
     property int section: 0
+    property int globalDataCount: 0
     property string sectionTitle: "Data Model"
     signal sectionRequested(int section, string title)
 
@@ -351,6 +352,12 @@ Rectangle {
                     targetSection: 0
                     title: "Data Model"
                     countText: context.loaded ? String(context.treeModel.totalNodeCount) : ""
+                }
+
+                NavButton {
+                    targetSection: 6
+                    title: "Global Data"
+                    countText: root.globalDataCount > 0 ? String(root.globalDataCount) : ""
                 }
 
                 ColumnLayout {
