@@ -12,7 +12,6 @@ Rectangle {
     required property var context
     required property var reports
     required property var utilities
-    required property var engineering
 
     property int section: 0
     property string sectionTitle: "Data Model"
@@ -25,18 +24,6 @@ Rectangle {
     function choose(sectionValue, titleValue) {
         root.sectionTitle = titleValue
         root.sectionRequested(sectionValue, titleValue)
-    }
-
-    function configuredGooseCount() {
-        var streams = engineering.gooseStreams
-        if (!context.iedName.length)
-            return streams.length
-        var count = 0
-        for (var index = 0; index < streams.length; ++index) {
-            if (String(streams[index].iedName) === context.iedName)
-                ++count
-        }
-        return count
     }
 
     function ensureSectionService() {
@@ -192,18 +179,18 @@ Rectangle {
                 NavButton {
                     targetSection: 5
                     title: "GOOSE"
-                    countText: engineering.loaded ? String(root.configuredGooseCount()) : ""
+                    countText: context.loaded ? String(context.gooseCount) : ""
                 }
 
                 NavButton {
                     targetSection: 2
                     title: "Reports"
-                    countText: reports.connected ? String(reports.reportControls.length) : ""
+                    countText: context.loaded ? String(context.reportCount) : ""
                 }
 
                 Loader {
                     Layout.fillWidth: true
-                    active: root.section === 2 && reports.connected
+                    active: root.section === 2 && reports.reportControls.length > 0
                     visible: active
                     sourceComponent: Component {
                         ColumnLayout {
@@ -254,13 +241,12 @@ Rectangle {
                 NavButton {
                     targetSection: 3
                     title: "Setting Groups"
-                    countText: utilities.connected ? String(utilities.settingGroupCount)
-                               : context.loaded ? String(context.settingGroupCount) : ""
+                    countText: context.loaded ? String(context.settingGroupCount) : ""
                 }
 
                 Loader {
                     Layout.fillWidth: true
-                    active: root.section === 3 && utilities.connected
+                    active: root.section === 3 && utilities.settingGroupCount > 0
                     visible: active
                     sourceComponent: Component {
                         ColumnLayout {
@@ -309,13 +295,12 @@ Rectangle {
                 NavButton {
                     targetSection: 1
                     title: "DataSets"
-                    countText: reports.connected ? String(reports.dataSets.length)
-                               : context.loaded ? String(context.dataSetCount) : ""
+                    countText: context.loaded ? String(context.dataSetCount) : ""
                 }
 
                 Loader {
                     Layout.fillWidth: true
-                    active: root.section === 1 && reports.connected
+                    active: root.section === 1 && reports.dataSets.length > 0
                     visible: active
                     sourceComponent: Component {
                         ColumnLayout {
