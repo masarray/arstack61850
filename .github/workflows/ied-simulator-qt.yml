@@ -133,6 +133,13 @@ jobs:
           apps/ied_simulator/qml/FileWorkspace.qml
           apps/ied_simulator/qml/Main.qml
 
+      - name: IEDScout-style Browser convergence contract
+        run: >-
+          python3 apps/ied_simulator/test_browser_convergence.py
+          apps/ied_simulator/qml/IedBrowserWorkspace.qml
+          apps/ied_simulator/qml/IedBrowserNavigation.qml
+          apps/ied_simulator/qml/BrowserStatusConsole.qml
+
       - name: IED Browser session ownership gates
         env:
           QT_QPA_PLATFORM: offscreen

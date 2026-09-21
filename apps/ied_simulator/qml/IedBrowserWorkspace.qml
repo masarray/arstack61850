@@ -20,6 +20,10 @@ Item {
     property string activeSectionTitle: "Data Model"
     property var selectedModelNode: context.treeModel.selectedNode
 
+    function activeIedLabel() {
+        return context.iedName && context.iedName.length ? context.iedName : "IED"
+    }
+
     function ensureActiveService() {
         if (!session.connected)
             return
@@ -32,22 +36,22 @@ Item {
     function breadcrumb() {
         if (activeSection === 0) {
             var ref = selectedModelNode.reference || selectedModelNode.label || ""
-            return ref.length ? "IED / Data Model / " + ref : "IED / Data Model"
+            return ref.length ? root.activeIedLabel() + " / Data Model / " + ref : root.activeIedLabel() + " / Data Model"
         }
         if (activeSection === 1) {
             if (reports.selectedDataSetIndex >= 0 && reports.selectedDataSetIndex < reports.dataSets.length)
-                return "IED / DataSets / " + (reports.dataSets[reports.selectedDataSetIndex].reference || "")
-            return "IED / DataSets"
+                return root.activeIedLabel() + " / DataSets / " + (reports.dataSets[reports.selectedDataSetIndex].reference || "")
+            return root.activeIedLabel() + " / DataSets"
         }
         if (activeSection === 2)
-            return reports.selectedRcb.reference ? "IED / Reports / " + reports.selectedRcb.reference : "IED / Reports"
+            return reports.selectedRcb.reference ? root.activeIedLabel() + " / Reports / " + reports.selectedRcb.reference : root.activeIedLabel() + " / Reports"
         if (activeSection === 3)
             return utilities.selectedSettingGroup.reference
-                    ? "IED / Setting Groups / " + utilities.selectedSettingGroup.reference
-                    : "IED / Setting Groups"
+                    ? root.activeIedLabel() + " / Setting Groups / " + utilities.selectedSettingGroup.reference
+                    : root.activeIedLabel() + " / Setting Groups"
         if (activeSection === 4)
-            return "IED / Files" + (utilities.currentDirectory.length ? " / " + utilities.currentDirectory : "")
-        return "IED / GOOSE"
+            return root.activeIedLabel() + " / Files" + (utilities.currentDirectory.length ? " / " + utilities.currentDirectory : "")
+        return root.activeIedLabel() + " / GOOSE"
     }
 
     function selectSection(section, title) {
@@ -102,7 +106,7 @@ Item {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 58
+            Layout.preferredHeight: 62
             color: root.theme.chrome
             border.width: 1
             border.color: root.theme.lineSoft
@@ -117,14 +121,14 @@ Item {
                     Layout.preferredWidth: 155
                     spacing: 1
                     Label {
-                        text: "IED BROWSER"
+                        text: "MODEL"
                         color: root.theme.text
                         font.pixelSize: 11
                         font.weight: Font.DemiBold
                     }
                     Label {
                         text: context.loaded
-                              ? context.authority + " · persistent engineering navigation"
+                              ? root.activeIedLabel() + " · " + context.authority
                               : "Open SCL or discover one IED endpoint"
                         color: root.theme.muted
                         font.pixelSize: 8
@@ -173,7 +177,7 @@ Item {
                 }
 
                 Button {
-                    text: context.loaded && context.authorityKey === "scl" ? "Connect SCL" : "Connect model"
+                    text: "Online"
                     visible: context.loaded
                     enabled: !session.connected && !session.busy && !context.selectionRequired
                     onClicked: {
@@ -352,6 +356,14 @@ Item {
                         anchors.rightMargin: 10
                         spacing: 7
 
+                        Label {
+                            text: "COMMANDS"
+                            color: root.theme.muted
+                            font.pixelSize: 7
+                            font.weight: Font.DemiBold
+                            Layout.rightMargin: 2
+                        }
+
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 0
@@ -462,49 +474,13 @@ Item {
                     }
                 }
 
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 24
-                    color: session.lastError.length ? root.theme.redSoft : root.theme.statusChrome
-                    border.width: 1
-                    border.color: session.lastError.length ? root.theme.red : root.theme.lineSoft
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 10
-                        anchors.rightMargin: 10
-                        spacing: 8
-
-                        Rectangle {
-                            width: 6
-                            height: 6
-                            radius: 3
-                            color: session.lastError.length ? root.theme.red
-                                                           : session.connected ? root.theme.green
-                                                                               : session.busy ? root.theme.amber
-                                                                                              : root.theme.muted
-                        }
-                        Label {
-                            Layout.fillWidth: true
-                            text: session.lastError.length
-                                  ? session.lastError
-                                  : session.stateText + " · " + root.activeSectionTitle
-                            color: session.lastError.length ? root.theme.red : root.theme.navigationText
-                            font.pixelSize: 8
-                            elide: Text.ElideRight
-                        }
-                        Label {
-                            text: session.endpoint
-                            color: session.lastError.length ? root.theme.red : root.theme.navigationMuted
-                            font.pixelSize: 8
-                        }
-                        Label {
-                            visible: root.activeSection === 0 && context.loaded
-                            text: context.treeModel.visibleNodeCount + "/" + context.treeModel.totalNodeCount + " nodes"
-                            color: session.lastError.length ? root.theme.red : root.theme.navigationMuted
-                            font.pixelSize: 8
-                        }
-                    }
+                BrowserStatusConsole {
+                    theme: root.theme
+                    session: root.session
+                    client: root.client
+                    context: root.context
+                    reports: root.reports
+                    utilities: root.utilities
                 }
             }
         }
