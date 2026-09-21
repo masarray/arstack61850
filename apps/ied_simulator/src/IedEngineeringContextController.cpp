@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "IedEngineeringContextController.hpp"
+#include "IedReportControlManifest.hpp"
 
 #include <QFileInfo>
 
@@ -7,6 +8,7 @@
 #include <cctype>
 #include <map>
 #include <string>
+#include <stdexcept>
 #include <utility>
 
 namespace mms = ar::iec61850::mms;
@@ -204,25 +206,57 @@ mms::MmsLiveModelDocument buildSclEngineeringModel(
         model.data_sets.push_back(std::move(projected));
     }
 
+    constexpr std::size_t kMaximumCanonicalReportControls = 1'024U;
     for (const auto& control : document.report_controls) {
         if (control.ied_name != iedName) continue;
-        mms::MmsLiveReportControl projected;
-        projected.reference = control.control_block_reference;
-        projected.domain = iedName + control.ld_inst;
-        projected.logical_node = control.logical_node_path;
-        projected.name = control.name;
-        projected.buffered = control.buffered;
-        projected.data_set_reference = control.data_set_reference;
-        switch (control.data_set_binding_status) {
-        case scl::SclDataSetBindingStatus::resolved: projected.data_set_binding_status = "Bound"; break;
-        case scl::SclDataSetBindingStatus::resolved_empty: projected.data_set_binding_status = "Unbound"; break;
-        default: projected.data_set_binding_status = "NotRead"; break;
+        const auto names = arstack::iedsim::concreteReportControlNames(
+            QString::fromStdString(control.name),
+            control.indexed,
+            control.max_clients);
+        if (names.size() >
+                static_cast<qsizetype>(kMaximumCanonicalReportControls) ||
+            model.report_controls.size() >
+                kMaximumCanonicalReportControls -
+                    static_cast<std::size_t>(names.size())) {
+            throw std::runtime_error(
+                "Opened SCL expands beyond the canonical Browser bound of 1024 RCB instances.");
         }
-        projected.report_id = control.report_id;
-        projected.configuration_revision = std::to_string(control.configuration_revision);
-        projected.buffer_time_ms = std::to_string(control.buffer_time_milliseconds);
-        projected.integrity_period_ms = std::to_string(control.integrity_period_milliseconds);
-        model.report_controls.push_back(std::move(projected));
+
+        const auto baseReference = control.control_block_reference;
+        const auto tail = baseReference.find_last_of('.');
+        for (const auto& concreteNameValue : names) {
+            const auto concreteName = concreteNameValue.toStdString();
+            mms::MmsLiveReportControl projected;
+            projected.domain = iedName + control.ld_inst;
+            projected.logical_node = control.logical_node_path;
+            projected.name = concreteName;
+            projected.reference =
+                tail == std::string::npos
+                    ? projected.domain + "/" + projected.logical_node +
+                        (control.buffered ? ".BR." : ".RP.") + concreteName
+                    : baseReference.substr(0U, tail + 1U) + concreteName;
+            projected.buffered = control.buffered;
+            projected.data_set_reference = control.data_set_reference;
+            switch (control.data_set_binding_status) {
+            case scl::SclDataSetBindingStatus::resolved:
+                projected.data_set_binding_status = "Bound";
+                break;
+            case scl::SclDataSetBindingStatus::resolved_empty:
+                projected.data_set_binding_status = "Unbound";
+                break;
+            default:
+                projected.data_set_binding_status = "NotRead";
+                break;
+            }
+            projected.report_id = control.report_id;
+            projected.configuration_revision =
+                std::to_string(control.configuration_revision);
+            projected.buffer_time_ms =
+                std::to_string(control.buffer_time_milliseconds);
+            projected.integrity_period_ms =
+                std::to_string(control.integrity_period_milliseconds);
+            model.report_controls.push_back(std::move(projected));
+        }
     }
 
     for (const auto& stream : document.goose_streams) {
