@@ -470,14 +470,20 @@ bool MmsControlController::startAction(
 
             auto map = resultMap(result);
             const auto& descriptor = worker->controlSession->descriptor();
-            if (descriptor.status_object.has_value()) {
-                const auto status = worker->transport->read(
-                    descriptor.status_object.value(), stop->get_token());
-                if (status.has_value()) {
-                    map.insert(QStringLiteral("statusValue"), controlValueText(status.value()));
+            if (descriptor.status_object.has_value() && worker->transport->associated()) {
+                try {
+                    const auto status = worker->transport->read(
+                        descriptor.status_object.value(), stop->get_token());
+                    if (status.has_value()) {
+                        map.insert(QStringLiteral("statusValue"), controlValueText(status.value()));
+                        map.insert(
+                            QStringLiteral("statusFunctionalConstraint"),
+                            QString::fromStdString(descriptor.status_functional_constraint));
+                    }
+                } catch (const std::exception& statusException) {
                     map.insert(
-                        QStringLiteral("statusFunctionalConstraint"),
-                        QString::fromStdString(descriptor.status_functional_constraint));
+                        QStringLiteral("statusReadError"),
+                        QString::fromUtf8(statusException.what()));
                 }
             }
             const auto selectionActive = worker->controlSession->has_active_selection();
