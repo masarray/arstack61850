@@ -6,6 +6,7 @@
 #include <QAbstractListModel>
 #include <QHash>
 #include <QString>
+#include <QStringList>
 #include <QVariantMap>
 #include <QVector>
 #include <QtQmlIntegration/qqmlintegration.h>
@@ -76,6 +77,7 @@ public:
     Q_INVOKABLE void selectRow(int row);
     Q_INVOKABLE void toggle(int row);
     Q_INVOKABLE bool selectMmsItem(const QString& domain, const QString& item);
+    Q_INVOKABLE QVariantMap nodeForReference(const QString& reference) const;
     Q_INVOKABLE void clear();
 
     void applyDocument(const ar::iec61850::mms::MmsLiveModelDocument& document);
@@ -84,6 +86,9 @@ public:
     [[nodiscard]] QVector<ReadTarget> readTargetsForVisibleRange(
         int firstRow,
         int lastRow,
+        int maximumTargets = 64) const;
+    [[nodiscard]] QVector<ReadTarget> readTargetsForReferences(
+        const QStringList& references,
         int maximumTargets = 64) const;
     void applyReadValue(const QString& key, const QString& displayValue);
 
@@ -125,6 +130,7 @@ private:
     void appendVisibleSubtree(int nodeIndex, const QVector<bool>* included);
     [[nodiscard]] int visibleRowForNode(int nodeIndex) const noexcept;
     [[nodiscard]] QString siblingValue(int nodeIndex, const QString& leafName) const;
+    [[nodiscard]] QVariantMap nodeMap(int nodeIndex) const;
     [[nodiscard]] QVector<ReadTarget> readTargetsForNode(int nodeIndex) const;
     [[nodiscard]] int appendNode(Node node);
 
