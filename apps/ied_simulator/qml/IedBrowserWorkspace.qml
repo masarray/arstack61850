@@ -461,7 +461,12 @@ Item {
                             text: "Enable + GI"
                             enabled: reports.connected && !reports.busy && !reports.active
                                      && reports.selectedRcbIndex >= 0
+                                     && reports.selectedRcb.dynamicBinding !== true
                             onClicked: reports.enableSelected(true)
+                            ToolTip.visible: hovered
+                            ToolTip.text: reports.selectedRcb.dynamicBinding === true
+                                          ? "Restore the canonical static binding through Author… before using the legacy static enable path."
+                                          : "Enable the selected static RCB and request GI."
                         }
 
                         Button {
