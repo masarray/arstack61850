@@ -403,11 +403,11 @@ QString reportValueText(const mms::MmsReportValue& item) {
         .arg(reference, value, reasons.isEmpty() ? QString{} : QStringLiteral("  · ") + reasons);
 }
 
-ReportUi buildReportUi(const mms::MmsStaticReportSessionSnapshot& snapshot) {
+ReportUi buildSubscriptionUi(
+    const mms::MmsReportSubscriptionSnapshot& subscription,
+    const bool active) {
     ReportUi ui;
-    ui.active = snapshot.active;
-    if (!snapshot.subscription) return ui;
-    const auto& subscription = *snapshot.subscription;
+    ui.active = active;
     ui.receivedCount = subscription.received_reports;
     ui.cleanupRequired = subscription.cleanup_required;
     for (const auto& event : subscription.events) {
@@ -415,8 +415,10 @@ ReportUi buildReportUi(const mms::MmsStaticReportSessionSnapshot& snapshot) {
     }
     while (ui.events.size() > 256) ui.events.removeFirst();
 
-    for (auto streamIt = subscription.streams.rbegin(); streamIt != subscription.streams.rend(); ++streamIt) {
-        for (auto frameIt = streamIt->recent_frames.rbegin(); frameIt != streamIt->recent_frames.rend(); ++frameIt) {
+    for (auto streamIt = subscription.streams.rbegin();
+         streamIt != subscription.streams.rend(); ++streamIt) {
+        for (auto frameIt = streamIt->recent_frames.rbegin();
+             frameIt != streamIt->recent_frames.rend(); ++frameIt) {
             if (ui.reports.size() >= kMaximumVisibleReports) break;
             const auto& frame = *frameIt;
             QVariantMap map;
@@ -443,6 +445,22 @@ ReportUi buildReportUi(const mms::MmsStaticReportSessionSnapshot& snapshot) {
     }
     return ui;
 }
+
+ReportUi buildReportUi(const mms::MmsStaticReportSessionSnapshot& snapshot) {
+    if (!snapshot.subscription) {
+        ReportUi ui;
+        ui.active = snapshot.active;
+        return ui;
+    }
+    return buildSubscriptionUi(*snapshot.subscription, snapshot.active);
+}
+
+ReportUi buildReportUi(const mms::MmsReportSubscriptionSnapshot& snapshot) {
+    return buildSubscriptionUi(
+        snapshot,
+        snapshot.state == mms::MmsReportSubscriptionState::active);
+}
+
 } // namespace
 
 struct MmsReportController::WorkerState final {
