@@ -771,10 +771,20 @@ void MmsReportController::disconnectFromIed() {
         if (worker->report) {
             worker->report->stop(cleanupStop->get_token());
             const auto snapshot = worker->report->snapshot();
-            cleanupRequired = snapshot.subscription && snapshot.subscription->cleanup_required;
+            cleanupRequired =
+                snapshot.subscription &&
+                snapshot.subscription->cleanup_required;
+        }
+        if (worker->authoredReport) {
+            worker->authoredReport->stop(cleanupStop->get_token());
+            cleanupRequired =
+                cleanupRequired ||
+                worker->authoredReport->snapshot().cleanup_required;
         }
         if (worker->session) worker->session->disconnect(cleanupStop->get_token());
         worker->report.reset();
+        worker->authoredReport.reset();
+        worker->dynamicDataSets.reset();
         worker->discovery.reset();
         worker->session.reset();
         if (cleanupRequired && self) {
@@ -1562,11 +1572,18 @@ bool MmsReportController::disableSelected() {
     const auto worker = workerState_;
     ioPool_.start([self, worker, stop, generation] {
         try {
-            if (!worker->report) throw std::runtime_error("No report subscription is active.");
-            worker->report->stop(stop->get_token());
-            const auto snapshot = worker->report->snapshot();
-            const auto ui = buildReportUi(snapshot);
-            if (!ui.cleanupRequired) worker->report.reset();
+            ReportUi ui;
+            if (worker->report) {
+                worker->report->stop(stop->get_token());
+                ui = buildReportUi(worker->report->snapshot());
+                if (!ui.cleanupRequired) worker->report.reset();
+            } else if (worker->authoredReport) {
+                worker->authoredReport->stop(stop->get_token());
+                ui = buildReportUi(worker->authoredReport->snapshot());
+                if (!ui.cleanupRequired) worker->authoredReport.reset();
+            } else {
+                throw std::runtime_error("No report subscription is active.");
+            }
             if (self) {
                 QMetaObject::invokeMethod(self, [self, generation, ui] {
                     if (!self || self->generation_ != generation) return;
@@ -1617,12 +1634,23 @@ bool MmsReportController::retryCleanup() {
     const auto worker = workerState_;
     ioPool_.start([self, worker, stop, generation] {
         try {
-            if (!worker->session || !worker->session->associated() || !worker->report) {
+            if (!worker->session || !worker->session->associated()) {
                 throw std::runtime_error("Cleanup retry requires the original active MMS association.");
             }
-            worker->report->stop(stop->get_token());
-            const auto ui = buildReportUi(worker->report->snapshot());
-            if (!ui.cleanupRequired) worker->report.reset();
+            ReportUi ui;
+            if (worker->report) {
+                worker->report->stop(stop->get_token());
+                ui = buildReportUi(worker->report->snapshot());
+                if (!ui.cleanupRequired) worker->report.reset();
+            } else if (worker->authoredReport) {
+                static_cast<void>(worker->authoredReport->retry_cleanup(
+                    stop->get_token()));
+                ui = buildReportUi(worker->authoredReport->snapshot());
+                if (!ui.cleanupRequired) worker->authoredReport.reset();
+            } else {
+                throw std::runtime_error(
+                    "Cleanup retry has no retained report runtime.");
+            }
             if (self) {
                 QMetaObject::invokeMethod(self, [self, generation, ui] {
                     if (!self || self->generation_ != generation) return;
@@ -1667,14 +1695,29 @@ void MmsReportController::schedulePoll() {
     const QPointer<MmsReportController> self{this};
     ioPool_.start([self, worker, stop, generation] {
         try {
-            if (!worker->session || !worker->session->associated() || !worker->report || !worker->report->active()) {
-                throw std::runtime_error("Report poll requires an active MMS association and RCB subscription.");
+            if (!worker->session || !worker->session->associated()) {
+                throw std::runtime_error(
+                    "Report poll requires an active MMS association.");
+            }
+            const bool staticActive =
+                worker->report && worker->report->active();
+            const bool authoredActive =
+                worker->authoredReport && worker->authoredReport->active();
+            if (!staticActive && !authoredActive) {
+                throw std::runtime_error(
+                    "Report poll requires an active RCB subscription.");
             }
             mms::MmsPduEnvelope envelope;
             static_cast<void>(worker->session->association().try_poll_once_for(
                 std::chrono::milliseconds{40}, envelope, stop->get_token()));
-            static_cast<void>(worker->report->drain_queued_reports());
-            const auto ui = buildReportUi(worker->report->snapshot());
+            ReportUi ui;
+            if (staticActive) {
+                static_cast<void>(worker->report->drain_queued_reports());
+                ui = buildReportUi(worker->report->snapshot());
+            } else {
+                static_cast<void>(worker->authoredReport->drain_queued_reports());
+                ui = buildReportUi(worker->authoredReport->snapshot());
+            }
             if (self) {
                 QMetaObject::invokeMethod(self, [self, generation, ui] {
                     if (!self || self->generation_ != generation) return;
@@ -1699,6 +1742,9 @@ void MmsReportController::schedulePoll() {
             if (worker->report) {
                 worker->report->stop();
                 ui = buildReportUi(worker->report->snapshot());
+            } else if (worker->authoredReport) {
+                worker->authoredReport->stop();
+                ui = buildReportUi(worker->authoredReport->snapshot());
             }
             if (self) {
                 const auto message = QString::fromUtf8(exception.what());
