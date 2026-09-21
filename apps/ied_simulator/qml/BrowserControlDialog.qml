@@ -364,8 +364,8 @@ Dialog {
                     Label {
                         Layout.fillWidth: true
                         visible: controls.lastResult.addCause !== undefined
-                        text: "ControlError=" + root.text(controls.lastResult.controlError)
-                              + " · AddCause=" + root.text(controls.lastResult.addCause)
+                        text: "ControlError=" + root.text(controls.lastResult.controlErrorName)
+                              + " · AddCause=" + root.text(controls.lastResult.addCauseName)
                         color: theme.muted
                         font.pixelSize: 7
                     }
