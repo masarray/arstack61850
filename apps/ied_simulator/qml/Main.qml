@@ -89,6 +89,21 @@ ApplicationWindow {
     }
 
     Connections {
+        target: iedContext
+        function onContextChanged() {
+            if (iedContext.loaded
+                    && iedContext.authorityKey === "live-discovery"
+                    && iedContext.endpointHost.length > 0
+                    && iedContext.endpointPort > 0) {
+                hardening.rememberDiscoveredIed(
+                    iedContext.iedName,
+                    iedContext.endpointHost,
+                    iedContext.endpointPort)
+            }
+        }
+    }
+
+    Connections {
         target: sclWorkspace
         function onWorkspaceChanged() {
             // Arm the SCL-assisted online path only after the bounded parser has
@@ -209,20 +224,21 @@ ApplicationWindow {
 
                 ComboBox {
                     id: recentConnectionPicker
-                    visible: root.workspaceIndex === 1 && hardening.recentEndpoints.length > 0
-                    Layout.preferredWidth: 160
-                    model: hardening.recentEndpoints
+                    visible: root.workspaceIndex === 1 && hardening.recentDiscoveredIeds.length > 0
+                    Layout.preferredWidth: 220
+                    model: hardening.recentDiscoveredIeds
                     enabled: !browserSession.configurationLocked
                     onActivated: {
-                        const recentHost = hardening.recentHost(currentIndex)
-                        const recentPort = hardening.recentPort(currentIndex)
+                        const recentHost = hardening.recentDiscoveredIedHost(currentIndex)
+                        const recentPort = hardening.recentDiscoveredIedPort(currentIndex)
                         if (recentHost.length > 0 && recentPort > 0) {
                             browserSession.host = recentHost
                             browserSession.port = recentPort
+                            browserSession.trustedSclPath = ""
                         }
                     }
                     ToolTip.visible: hovered
-                    ToolTip.text: "Recent MMS endpoints · restored without auto-connect"
+                    ToolTip.text: "Recently discovered IEDs · address restored without auto-connect"
                 }
 
                 Label {
@@ -281,11 +297,22 @@ ApplicationWindow {
                 workspace: sclWorkspace
                 hardening: hardening
                 browserSession: browserSession
+                context: iedContext
                 onBrowserRequested: root.workspaceIndex = 1
+                onDiscoverRequested: function(host, port) {
+                    if (!browserSession.configurationLocked) {
+                        browserSession.host = host
+                        browserSession.port = port
+                        browserSession.trustedSclPath = ""
+                        root.workspaceIndex = 1
+                        browserSession.discoverAndConnect()
+                    }
+                }
                 onEndpointRequested: function(host, port) {
                     if (!browserSession.configurationLocked) {
                         browserSession.host = host
                         browserSession.port = port
+                        browserSession.trustedSclPath = ""
                     }
                     root.workspaceIndex = 1
                 }

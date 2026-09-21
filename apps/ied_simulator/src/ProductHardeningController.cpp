@@ -48,6 +48,15 @@ QString ProductHardeningController::normalizedHost(const QString& value) {
     return host;
 }
 
+QString ProductHardeningController::normalizedIedName(const QString& value) {
+    const auto name = value.trimmed();
+    if (name.isEmpty() || name.size() > maximumIedNameCharacters) return {};
+    for (const auto character : name) {
+        if (character.category() == QChar::Other_Control) return {};
+    }
+    return name;
+}
+
 QString ProductHardeningController::normalizedResourcePath(const QString& value) {
     const auto candidate = value.trimmed();
     if (candidate.isEmpty() || candidate.size() > maximumResourcePathCharacters) return {};
@@ -75,6 +84,13 @@ QString ProductHardeningController::endpointLabel(const Endpoint& endpoint) {
         ? QStringLiteral("[%1]").arg(endpoint.host)
         : endpoint.host;
     return QStringLiteral("%1:%2").arg(host).arg(endpoint.port);
+}
+
+QString ProductHardeningController::discoveredIedLabel(const DiscoveredIed& ied) {
+    const auto endpoint = endpointLabel(ied.endpoint);
+    return ied.iedName.isEmpty()
+        ? endpoint
+        : QStringLiteral("%1 (%2)").arg(ied.iedName, endpoint);
 }
 
 int ProductHardeningController::migrateLegacyWorkspaceIndex(const int value) noexcept {
@@ -109,6 +125,13 @@ QStringList ProductHardeningController::recentResources() const {
     return result;
 }
 
+QStringList ProductHardeningController::recentDiscoveredIeds() const {
+    QStringList result;
+    result.reserve(static_cast<qsizetype>(recentDiscoveredIeds_.size()));
+    for (const auto& ied : recentDiscoveredIeds_) result.push_back(discoveredIedLabel(ied));
+    return result;
+}
+
 QString ProductHardeningController::lastHost() const {
     return recent_.empty() ? QString{} : recent_.front().host;
 }
@@ -130,6 +153,7 @@ void ProductHardeningController::resetDefaults() {
     browserNavigationWidth_ = defaultBrowserNavigationWidth;
     recent_.clear();
     recentResources_.clear();
+    recentDiscoveredIeds_.clear();
 }
 
 void ProductHardeningController::setStateFault(const QString& message) {
@@ -169,6 +193,7 @@ bool ProductHardeningController::loadState() {
     const auto object = document.object();
     const auto schema = object.value(QStringLiteral("schema")).toInt(-1);
     if (schema != stateSchemaVersion &&
+        schema != browserLayoutStateSchemaVersion &&
         schema != fileHomeStateSchemaVersion &&
         schema != previousStateSchemaVersion &&
         schema != legacyStateSchemaVersion) {
@@ -220,7 +245,9 @@ bool ProductHardeningController::loadState() {
     }
 
     std::vector<QString> loadedResources;
-    if (schema == stateSchemaVersion || schema == fileHomeStateSchemaVersion) {
+    if (schema == stateSchemaVersion ||
+        schema == browserLayoutStateSchemaVersion ||
+        schema == fileHomeStateSchemaVersion) {
         const auto resources = object.value(QStringLiteral("recentResources"));
         if (!resources.isArray() || resources.toArray().size() > maximumRecentResources) {
             setStateFault(QStringLiteral("Persisted state ignored: recent resource list is invalid or unbounded."));
@@ -244,8 +271,43 @@ bool ProductHardeningController::loadState() {
         }
     }
 
-    int browserNavigationWidth = defaultBrowserNavigationWidth;
+    std::vector<DiscoveredIed> loadedDiscoveredIeds;
     if (schema == stateSchemaVersion) {
+        const auto discovered = object.value(QStringLiteral("recentDiscoveredIeds"));
+        if (!discovered.isArray() || discovered.toArray().size() > maximumRecentDiscoveredIeds) {
+            setStateFault(QStringLiteral("Persisted state ignored: discovered IED history is invalid or unbounded."));
+            emit stateChanged();
+            return false;
+        }
+        loadedDiscoveredIeds.reserve(static_cast<std::size_t>(discovered.toArray().size()));
+        for (const auto& value : discovered.toArray()) {
+            if (!value.isObject()) {
+                setStateFault(QStringLiteral("Persisted state ignored: malformed discovered IED history."));
+                emit stateChanged();
+                return false;
+            }
+            const auto item = value.toObject();
+            const auto rawName = item.value(QStringLiteral("iedName")).toString().trimmed();
+            const auto iedName = normalizedIedName(rawName);
+            const auto host = normalizedHost(item.value(QStringLiteral("host")).toString());
+            const auto port = item.value(QStringLiteral("port")).toInt(0);
+            if ((!rawName.isEmpty() && iedName.isEmpty()) ||
+                host.isEmpty() || port < 1 || port > 65'535) {
+                setStateFault(QStringLiteral("Persisted state ignored: invalid discovered IED history entry."));
+                emit stateChanged();
+                return false;
+            }
+            loadedDiscoveredIeds.push_back({iedName, {host, port}});
+        }
+    } else {
+        loadedDiscoveredIeds.reserve(loaded.size());
+        for (const auto& endpoint : loaded) {
+            loadedDiscoveredIeds.push_back({{}, endpoint});
+        }
+    }
+
+    int browserNavigationWidth = defaultBrowserNavigationWidth;
+    if (schema == stateSchemaVersion || schema == browserLayoutStateSchemaVersion) {
         browserNavigationWidth = object.value(QStringLiteral("browserNavigationWidth")).toInt(-1);
         if (browserNavigationWidth < minimumBrowserNavigationWidth ||
             browserNavigationWidth > maximumBrowserNavigationWidth) {
@@ -259,6 +321,7 @@ bool ProductHardeningController::loadState() {
     browserNavigationWidth_ = browserNavigationWidth;
     recent_ = std::move(loaded);
     recentResources_ = std::move(loadedResources);
+    recentDiscoveredIeds_ = std::move(loadedDiscoveredIeds);
     settingsHealthy_ = true;
 
     if (schema == legacyStateSchemaVersion) {
@@ -267,6 +330,8 @@ bool ProductHardeningController::loadState() {
         settingsStatus_ = QStringLiteral("Product state migrated to File/Home engineering-resource history.");
     } else if (schema == fileHomeStateSchemaVersion) {
         settingsStatus_ = QStringLiteral("Product state migrated to persistent Browser layout state.");
+    } else if (schema == browserLayoutStateSchemaVersion) {
+        settingsStatus_ = QStringLiteral("Product state migrated to identity-aware discovered IED history.");
     } else {
         settingsStatus_ = QStringLiteral("Persisted product state restored safely.");
     }
@@ -280,7 +345,9 @@ bool ProductHardeningController::loadState() {
             ? QStringLiteral("Legacy product state migrated to the four-workspace File/Home schema.")
             : schema == previousStateSchemaVersion
                 ? QStringLiteral("Product state migrated to File/Home engineering-resource history.")
-                : QStringLiteral("Product state migrated to persistent Browser layout state.");
+                : schema == fileHomeStateSchemaVersion
+                    ? QStringLiteral("Product state migrated to persistent Browser layout state.")
+                    : QStringLiteral("Product state migrated to identity-aware discovered IED history.");
     }
 
     emit stateChanged();
@@ -305,12 +372,22 @@ bool ProductHardeningController::persistState() {
     QJsonArray resources;
     for (const auto& path : recentResources_) resources.append(path);
 
+    QJsonArray discoveredIeds;
+    for (const auto& ied : recentDiscoveredIeds_) {
+        QJsonObject item;
+        item.insert(QStringLiteral("iedName"), ied.iedName);
+        item.insert(QStringLiteral("host"), ied.endpoint.host);
+        item.insert(QStringLiteral("port"), ied.endpoint.port);
+        discoveredIeds.append(item);
+    }
+
     QJsonObject object;
     object.insert(QStringLiteral("schema"), stateSchemaVersion);
     object.insert(QStringLiteral("workspaceIndex"), workspaceIndex_);
     object.insert(QStringLiteral("browserNavigationWidth"), browserNavigationWidth_);
     object.insert(QStringLiteral("recentEndpoints"), recent);
     object.insert(QStringLiteral("recentResources"), resources);
+    object.insert(QStringLiteral("recentDiscoveredIeds"), discoveredIeds);
     const auto payload = QJsonDocument(object).toJson(QJsonDocument::Compact);
 
     QSaveFile output(statePath_);
@@ -393,6 +470,59 @@ QString ProductHardeningController::recentHost(const int index) const {
 int ProductHardeningController::recentPort(const int index) const {
     if (index < 0 || index >= static_cast<int>(recent_.size())) return 0;
     return recent_[static_cast<std::size_t>(index)].port;
+}
+
+bool ProductHardeningController::rememberDiscoveredIed(
+    const QString& iedNameValue,
+    const QString& hostValue,
+    const int port) {
+    const auto rawName = iedNameValue.trimmed();
+    const auto iedName = normalizedIedName(rawName);
+    const auto host = normalizedHost(hostValue);
+    if ((!rawName.isEmpty() && iedName.isEmpty()) ||
+        host.isEmpty() || port < 1 || port > 65'535) {
+        settingsStatus_ = QStringLiteral("Rejected invalid discovered IED history entry.");
+        emit stateChanged();
+        return false;
+    }
+
+    const auto duplicate = std::find_if(
+        recentDiscoveredIeds_.begin(),
+        recentDiscoveredIeds_.end(),
+        [&](const DiscoveredIed& ied) {
+            return ied.endpoint.port == port &&
+                   ied.endpoint.host.compare(host, Qt::CaseInsensitive) == 0;
+        });
+    if (duplicate != recentDiscoveredIeds_.end()) recentDiscoveredIeds_.erase(duplicate);
+    recentDiscoveredIeds_.insert(recentDiscoveredIeds_.begin(), {iedName, {host, port}});
+    if (recentDiscoveredIeds_.size() > static_cast<std::size_t>(maximumRecentDiscoveredIeds)) {
+        recentDiscoveredIeds_.resize(static_cast<std::size_t>(maximumRecentDiscoveredIeds));
+    }
+    const auto persisted = persistState();
+    emit stateChanged();
+    return persisted;
+}
+
+void ProductHardeningController::clearRecentDiscoveredIeds() {
+    if (recentDiscoveredIeds_.empty()) return;
+    recentDiscoveredIeds_.clear();
+    (void)persistState();
+    emit stateChanged();
+}
+
+QString ProductHardeningController::recentDiscoveredIedName(const int index) const {
+    if (index < 0 || index >= static_cast<int>(recentDiscoveredIeds_.size())) return {};
+    return recentDiscoveredIeds_[static_cast<std::size_t>(index)].iedName;
+}
+
+QString ProductHardeningController::recentDiscoveredIedHost(const int index) const {
+    if (index < 0 || index >= static_cast<int>(recentDiscoveredIeds_.size())) return {};
+    return recentDiscoveredIeds_[static_cast<std::size_t>(index)].endpoint.host;
+}
+
+int ProductHardeningController::recentDiscoveredIedPort(const int index) const {
+    if (index < 0 || index >= static_cast<int>(recentDiscoveredIeds_.size())) return 0;
+    return recentDiscoveredIeds_[static_cast<std::size_t>(index)].endpoint.port;
 }
 
 bool ProductHardeningController::rememberResource(const QString& pathValue) {

@@ -127,6 +127,12 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: ./build-ied-simulator-qt/ied_product_hardening_qa
 
+      - name: IEDScout-style File/Home workflow contract
+        run: >-
+          python3 apps/ied_simulator/test_file_home_workflow.py
+          apps/ied_simulator/qml/FileWorkspace.qml
+          apps/ied_simulator/qml/Main.qml
+
       - name: IED Browser session ownership gates
         env:
           QT_QPA_PLATFORM: offscreen

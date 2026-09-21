@@ -40,6 +40,7 @@ int main(int argc, char** argv) {
         ProductHardeningController state(path);
         if (!state.settingsHealthy() || state.workspaceIndex() != 0 ||
             !state.recentEndpoints().isEmpty() || !state.recentResources().isEmpty() ||
+            !state.recentDiscoveredIeds().isEmpty() ||
             state.browserNavigationWidth() != 320 || state.automaticReconnectOnStartup()) {
             std::cerr << "Safe default product state contract failed.\n";
             return 3;
@@ -88,10 +89,40 @@ int main(int argc, char** argv) {
             return 9;
         }
 
+        for (int index = 1; index <= 10; ++index) {
+            if (!state.rememberDiscoveredIed(
+                    QStringLiteral("IED_%1").arg(index),
+                    QStringLiteral("198.51.100.%1").arg(index),
+                    102)) {
+                std::cerr << "Could not persist discovered IED history.\n";
+                return 46;
+            }
+        }
+        if (state.recentDiscoveredIeds().size() != 8 ||
+            state.recentDiscoveredIedName(0) != QStringLiteral("IED_10") ||
+            state.recentDiscoveredIedHost(0) != QStringLiteral("198.51.100.10") ||
+            state.recentDiscoveredIedPort(0) != 102 ||
+            state.recentDiscoveredIeds().front() != QStringLiteral("IED_10 (198.51.100.10:102)")) {
+            std::cerr << "Discovered IED identity/order contract failed.\n";
+            return 47;
+        }
+        const auto discoveredCount = state.recentDiscoveredIeds().size();
+        if (!state.rememberDiscoveredIed(
+                QStringLiteral("IED_9_RENAMED"),
+                QStringLiteral("198.51.100.9"),
+                102) ||
+            state.recentDiscoveredIeds().size() != discoveredCount ||
+            state.recentDiscoveredIedName(0) != QStringLiteral("IED_9_RENAMED")) {
+            std::cerr << "Discovered IED endpoint dedupe contract failed.\n";
+            return 48;
+        }
+
         state.setWorkspaceIndex(99);
         state.setBrowserNavigationWidth(900);
         if (state.workspaceIndex() != 2 || state.browserNavigationWidth() != 388 || state.rememberEndpoint(QString{}, 102) ||
             state.rememberEndpoint(QStringLiteral("relay.local"), 0) ||
+            state.rememberDiscoveredIed(QStringLiteral("IED_BAD"), QString{}, 102) ||
+            state.rememberDiscoveredIed(QStringLiteral("IED_BAD"), QStringLiteral("relay.local"), 0) ||
             state.rememberResource(QStringLiteral("relative-model.scd")) ||
             state.rememberResource(QStringLiteral("https://example.invalid/model.scd"))) {
             std::cerr << "Invalid workspace/endpoint/resource did not fail closed.\n";
@@ -104,6 +135,8 @@ int main(int argc, char** argv) {
         if (!restored.settingsHealthy() || restored.workspaceIndex() != 2 ||
             restored.browserNavigationWidth() != 388 || restored.recentEndpoints().size() != 8 || restored.lastHost() != QStringLiteral("192.0.2.9") ||
             restored.lastPort() != 109 || restored.recentResources().size() != 8 ||
+            restored.recentDiscoveredIeds().size() != 8 ||
+            restored.recentDiscoveredIedName(0) != QStringLiteral("IED_9_RENAMED") ||
             restored.recentResourcePath(0) != absolutePath(temp.filePath(QStringLiteral("model-9.scd"))) ||
             restored.automaticReconnectOnStartup()) {
             std::cerr << "Restart persistence contract failed.\n";
@@ -143,6 +176,7 @@ int main(int argc, char** argv) {
         if (!migrated.settingsHealthy() || migrated.workspaceIndex() != 3 ||
             migrated.lastHost() != QStringLiteral("legacy.local") ||
             !migrated.recentResources().isEmpty() ||
+            migrated.recentDiscoveredIeds().size() != 1 ||
             !migrated.settingsStatus().contains(QStringLiteral("migrated"), Qt::CaseInsensitive)) {
             std::cerr << "Legacy seven-workspace state migration failed.\n";
             return 21;
@@ -152,11 +186,11 @@ int main(int argc, char** argv) {
         if (!migratedFile.open(QIODevice::ReadOnly)) return 22;
         const auto migratedDocument = QJsonDocument::fromJson(migratedFile.readAll());
         if (!migratedDocument.isObject() ||
-            migratedDocument.object().value(QStringLiteral("schema")).toInt(-1) != 4 ||
+            migratedDocument.object().value(QStringLiteral("schema")).toInt(-1) != 5 ||
             migratedDocument.object().value(QStringLiteral("workspaceIndex")).toInt(-1) != 3 ||
             !migratedDocument.object().value(QStringLiteral("recentResources")).isArray() ||
             migratedDocument.object().value(QStringLiteral("browserNavigationWidth")).toInt(-1) != 320) {
-            std::cerr << "Migrated legacy state was not rewritten as schema 4.\n";
+            std::cerr << "Migrated legacy state was not rewritten as schema 5.\n";
             return 23;
         }
     }
@@ -173,6 +207,7 @@ int main(int argc, char** argv) {
         if (!migrated.settingsHealthy() || migrated.workspaceIndex() != 1 ||
             migrated.lastHost() != QStringLiteral("p1.local") ||
             !migrated.recentResources().isEmpty() ||
+            migrated.recentDiscoveredIeds().size() != 1 ||
             !migrated.settingsStatus().contains(QStringLiteral("migrated"), Qt::CaseInsensitive)) {
             std::cerr << "P1 schema-2 state migration failed.\n";
             return 25;
@@ -182,10 +217,10 @@ int main(int argc, char** argv) {
         if (!migratedFile.open(QIODevice::ReadOnly)) return 26;
         const auto migratedDocument = QJsonDocument::fromJson(migratedFile.readAll());
         if (!migratedDocument.isObject() ||
-            migratedDocument.object().value(QStringLiteral("schema")).toInt(-1) != 4 ||
+            migratedDocument.object().value(QStringLiteral("schema")).toInt(-1) != 5 ||
             !migratedDocument.object().value(QStringLiteral("recentResources")).isArray() ||
             migratedDocument.object().value(QStringLiteral("browserNavigationWidth")).toInt(-1) != 320) {
-            std::cerr << "P1 state was not rewritten as schema 4.\n";
+            std::cerr << "P1 state was not rewritten as schema 5.\n";
             return 27;
         }
     }
@@ -203,6 +238,7 @@ int main(int argc, char** argv) {
         if (!migrated.settingsHealthy() || migrated.workspaceIndex() != 1 ||
             migrated.browserNavigationWidth() != 320 ||
             migrated.lastHost() != QStringLiteral("p3.local") ||
+            migrated.recentDiscoveredIeds().size() != 1 ||
             !migrated.settingsStatus().contains(QStringLiteral("migrated"), Qt::CaseInsensitive)) {
             std::cerr << "P3 schema-3 Browser layout migration failed.\n";
             return 29;
@@ -212,10 +248,41 @@ int main(int argc, char** argv) {
         if (!migratedFile.open(QIODevice::ReadOnly)) return 30;
         const auto migratedDocument = QJsonDocument::fromJson(migratedFile.readAll());
         if (!migratedDocument.isObject() ||
-            migratedDocument.object().value(QStringLiteral("schema")).toInt(-1) != 4 ||
+            migratedDocument.object().value(QStringLiteral("schema")).toInt(-1) != 5 ||
             migratedDocument.object().value(QStringLiteral("browserNavigationWidth")).toInt(-1) != 320) {
-            std::cerr << "P3 state was not rewritten as schema 4.\n";
+            std::cerr << "P3 state was not rewritten as schema 5.\n";
             return 31;
+        }
+    }
+
+    {
+        QJsonObject p4;
+        p4.insert(QStringLiteral("schema"), 4);
+        p4.insert(QStringLiteral("workspaceIndex"), 1);
+        p4.insert(QStringLiteral("browserNavigationWidth"), 360);
+        p4.insert(QStringLiteral("recentEndpoints"),
+                  QJsonArray{endpoint(QStringLiteral("p4.local"), 102)});
+        p4.insert(QStringLiteral("recentResources"), QJsonArray{});
+        if (!writeJson(path, p4)) return 49;
+
+        ProductHardeningController migrated(path);
+        if (!migrated.settingsHealthy() ||
+            migrated.browserNavigationWidth() != 360 ||
+            migrated.recentDiscoveredIeds().size() != 1 ||
+            migrated.recentDiscoveredIedHost(0) != QStringLiteral("p4.local") ||
+            !migrated.settingsStatus().contains(QStringLiteral("migrated"), Qt::CaseInsensitive)) {
+            std::cerr << "P4 schema-4 discovered IED history migration failed.\n";
+            return 50;
+        }
+
+        QFile migratedFile(path);
+        if (!migratedFile.open(QIODevice::ReadOnly)) return 51;
+        const auto migratedDocument = QJsonDocument::fromJson(migratedFile.readAll());
+        if (!migratedDocument.isObject() ||
+            migratedDocument.object().value(QStringLiteral("schema")).toInt(-1) != 5 ||
+            !migratedDocument.object().value(QStringLiteral("recentDiscoveredIeds")).isArray()) {
+            std::cerr << "P4 state was not rewritten as schema 5.\n";
+            return 52;
         }
     }
 
@@ -236,7 +303,8 @@ int main(int argc, char** argv) {
 
         ProductHardeningController damaged(path);
         if (damaged.settingsHealthy() || damaged.workspaceIndex() != 0 ||
-            !damaged.recentEndpoints().isEmpty() || !damaged.recentResources().isEmpty()) {
+            !damaged.recentEndpoints().isEmpty() || !damaged.recentResources().isEmpty() ||
+            !damaged.recentDiscoveredIeds().isEmpty()) {
             std::cerr << "Corrupt state was not ignored fail-closed.\n";
             return 31;
         }
@@ -313,12 +381,15 @@ int main(int argc, char** argv) {
               << " workspace_restore=2"
               << " endpoint_recent=8"
               << " resource_recent=8"
+              << " discovered_ied_recent=8"
+              << " discovered_ied_identity=pass"
               << " endpoint_dedupe=pass"
               << " resource_dedupe=pass"
               << " bounded_recent=8"
               << " legacy_workspace_migration=pass"
               << " p1_schema_migration=pass"
               << " p3_layout_migration=pass"
+              << " p4_discovered_ied_migration=pass"
               << " browser_splitter_persistence=pass"
               << " crash_recovery=pass"
               << " auto_reconnect=false"
@@ -329,6 +400,7 @@ int main(int argc, char** argv) {
               << " invalid_workspace=rejected"
               << " invalid_endpoint=rejected"
               << " invalid_resource=rejected"
+              << " invalid_discovered_ied=rejected"
               << " unbounded_endpoint_recent=rejected"
               << " unbounded_resource_recent=rejected\n";
     return 0;
