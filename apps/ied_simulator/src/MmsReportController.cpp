@@ -10,8 +10,6 @@
 #include <QMetaObject>
 #include <QPointer>
 
-#include <charconv>
-
 #include <algorithm>
 #include <chrono>
 #include <optional>
