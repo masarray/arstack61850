@@ -264,10 +264,10 @@ QString MmsLiveTreeModel::siblingValue(const int nodeIndex, const QString& wante
     return {};
 }
 
-QVariantMap MmsLiveTreeModel::selectedNode() const {
+QVariantMap MmsLiveTreeModel::nodeMap(const int nodeIndex) const {
     QVariantMap result;
-    if (selectedNode_ < 0 || selectedNode_ >= nodes_.size()) return result;
-    const auto& node = nodes_.at(selectedNode_);
+    if (nodeIndex < 0 || nodeIndex >= nodes_.size()) return result;
+    const auto& node = nodes_.at(nodeIndex);
     result.insert(QStringLiteral("kind"), kindName(node.kind));
     result.insert(QStringLiteral("label"), node.label);
     result.insert(QStringLiteral("reference"), node.reference);
@@ -278,11 +278,26 @@ QVariantMap MmsLiveTreeModel::selectedNode() const {
     result.insert(QStringLiteral("sclType"), node.sclType);
     result.insert(QStringLiteral("typeStatus"), node.typeStatus);
     result.insert(QStringLiteral("value"), node.value);
-    result.insert(QStringLiteral("quality"), siblingValue(selectedNode_, QStringLiteral("q")));
-    result.insert(QStringLiteral("timestamp"), siblingValue(selectedNode_, QStringLiteral("t")));
+    result.insert(QStringLiteral("quality"), siblingValue(nodeIndex, QStringLiteral("q")));
+    result.insert(QStringLiteral("timestamp"), siblingValue(nodeIndex, QStringLiteral("t")));
     result.insert(QStringLiteral("writable"), node.writable);
     result.insert(QStringLiteral("readable"), node.kind == NodeKind::dataAttribute && !node.item.isEmpty());
     return result;
+}
+
+QVariantMap MmsLiveTreeModel::selectedNode() const {
+    return nodeMap(selectedNode_);
+}
+
+QVariantMap MmsLiveTreeModel::nodeForReference(const QString& reference) const {
+    const auto wanted = reference.trimmed();
+    if (wanted.isEmpty()) return {};
+    for (int index = 0; index < nodes_.size(); ++index) {
+        const auto& node = nodes_.at(index);
+        if (node.kind != NodeKind::dataAttribute) continue;
+        if (node.reference == wanted) return nodeMap(index);
+    }
+    return {};
 }
 
 void MmsLiveTreeModel::selectRow(const int row) {
@@ -380,6 +395,58 @@ QVector<MmsLiveTreeModel::ReadTarget> MmsLiveTreeModel::readTargetsForVisibleRan
         const auto key = nodeKey(node.domain, node.item);
         if (seen.contains(key)) continue;
         seen.insert(key);
+        result.push_back({key, node.domain, node.item});
+    }
+    return result;
+}
+
+QVector<MmsLiveTreeModel::ReadTarget> MmsLiveTreeModel::readTargetsForReferences(
+    const QStringList& references, const int maximumTargets) const {
+    QVector<ReadTarget> result;
+    if (references.isEmpty() || maximumTargets <= 0) return result;
+
+    QStringList wanted;
+    QSet<QString> seenReferences;
+    for (const auto& raw : references) {
+        const auto reference = raw.trimmed();
+        if (reference.isEmpty() || seenReferences.contains(reference)) continue;
+        seenReferences.insert(reference);
+        wanted.push_back(reference);
+    }
+
+    QSet<QString> seenTargets;
+    const auto matchesRequestedReference = [&wanted](const QString& nodeReference) {
+        for (const auto& reference : wanted) {
+            if (nodeReference == reference) return true;
+            if (nodeReference.startsWith(reference + QLatin1Char('.'))) return true;
+            if (nodeReference.startsWith(reference + QLatin1Char('
+
+void MmsLiveTreeModel::applyReadValue(const QString& key, const QString& displayValue) {
+    const auto found = mmsIndex_.constFind(key);
+    if (found == mmsIndex_.cend()) return;
+    const auto nodeIndex = found.value();
+    auto& node = nodes_[nodeIndex];
+    if (node.value == displayValue) return;
+    node.value = displayValue;
+    const auto row = visibleRowForNode(nodeIndex);
+    if (row >= 0) emit dataChanged(index(row), index(row), {ValueRole});
+    if (!filterText_.trimmed().isEmpty()) rebuildVisible();
+    if (nodeIndex == selectedNode_ || (selectedNode_ >= 0 && node.parent == nodes_.at(selectedNode_).parent)) {
+        emit selectionChanged();
+    }
+}
+))) return true;
+        }
+        return false;
+    };
+
+    for (const auto& node : nodes_) {
+        if (result.size() >= maximumTargets) break;
+        if (node.kind != NodeKind::dataAttribute || node.domain.isEmpty() || node.item.isEmpty()) continue;
+        if (!matchesRequestedReference(node.reference)) continue;
+        const auto key = nodeKey(node.domain, node.item);
+        if (seenTargets.contains(key)) continue;
+        seenTargets.insert(key);
         result.push_back({key, node.domain, node.item});
     }
     return result;
