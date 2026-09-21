@@ -642,7 +642,10 @@ bool MmsReportController::connectToIed() {
     ioPool_.start([self, worker, stop, generation, requestedHost, requestedPort, contextModel] {
         try {
             if (worker->report) worker->report->stop();
+            if (worker->authoredReport) worker->authoredReport->stop();
             worker->report.reset();
+            worker->authoredReport.reset();
+            worker->dynamicDataSets.reset();
             if (worker->session) worker->session->disconnect();
             worker->session.reset();
             worker->discovery.reset();
@@ -684,6 +687,11 @@ bool MmsReportController::connectToIed() {
             const auto profile = QString::fromStdString(
                 session->association().active_association_profile());
             const auto ui = buildDiscoveryUi(*discovery, profile);
+            mms::MmsDynamicDataSetOptions dynamicOptions;
+            dynamicOptions.maximum_members = 64U;
+            dynamicOptions.verify_after_create = true;
+            worker->dynamicDataSets = std::make_unique<mms::MmsDynamicDataSetRuntime>(
+                session->association(), dynamicOptions);
             worker->discovery = discovery;
             worker->session = std::move(session);
 
@@ -710,6 +718,8 @@ bool MmsReportController::connectToIed() {
         } catch (const std::exception& exception) {
             if (worker->session) worker->session->disconnect();
             worker->report.reset();
+            worker->authoredReport.reset();
+            worker->dynamicDataSets.reset();
             worker->session.reset();
             worker->discovery.reset();
             if (self) {
