@@ -830,6 +830,362 @@ bool MmsReportController::selectDataSet(const int row) {
     return true;
 }
 
+bool MmsReportController::createDynamicDataSet(
+    const QString& dataSetReference,
+    const QVariantList& canonicalMembers) {
+    if (!connected() || busy() || active_ || cleanupRequired_) return false;
+    if (!engineeringContext_ || !engineeringContext_->loaded() ||
+        engineeringContext_->selectionRequired()) {
+        lastError_ = QStringLiteral(
+            "Dynamic DataSet authoring requires one active canonical engineering context.");
+        emit stateChanged();
+        return false;
+    }
+    const auto requestedReference = dataSetReference.trimmed();
+    if (requestedReference.isEmpty()) {
+        lastError_ = QStringLiteral("Dynamic DataSet reference is required.");
+        emit stateChanged();
+        return false;
+    }
+    if (canonicalMembers.isEmpty() || canonicalMembers.size() > 64) {
+        lastError_ = QStringLiteral(
+            "Dynamic DataSet requires 1..64 canonical DataAttribute members.");
+        emit stateChanged();
+        return false;
+    }
+
+    std::vector<mms::MmsObjectName> members;
+    QStringList canonicalReferences;
+    QStringList functionalConstraints;
+    std::set<std::string, std::less<>> seen;
+    members.reserve(static_cast<std::size_t>(canonicalMembers.size()));
+    try {
+        for (const auto& value : canonicalMembers) {
+            const auto supplied = value.toMap();
+            const auto reference = supplied.value(QStringLiteral("reference")).toString().trimmed();
+            if (reference.isEmpty()) {
+                throw std::invalid_argument(
+                    "Dynamic DataSet member has no canonical DataAttribute reference.");
+            }
+            const auto canonical =
+                engineeringContext_->treeModel()->nodeForReference(reference);
+            if (canonical.value(QStringLiteral("kind")).toString() != QStringLiteral("DA") ||
+                !canonical.value(QStringLiteral("readable")).toBool()) {
+                throw std::invalid_argument(
+                    "Dynamic DataSet members must resolve to readable canonical DataAttributes.");
+            }
+            const auto domain =
+                canonical.value(QStringLiteral("mmsDomain")).toString().trimmed();
+            const auto item =
+                canonical.value(QStringLiteral("mmsItem")).toString().trimmed();
+            if (domain.isEmpty() || item.isEmpty()) {
+                throw std::invalid_argument(
+                    "Canonical DataAttribute has no exact MMS domain/item identity.");
+            }
+            const auto suppliedDomain =
+                supplied.value(QStringLiteral("mmsDomain")).toString().trimmed();
+            const auto suppliedItem =
+                supplied.value(QStringLiteral("mmsItem")).toString().trimmed();
+            if ((!suppliedDomain.isEmpty() && suppliedDomain != domain) ||
+                (!suppliedItem.isEmpty() && suppliedItem != item)) {
+                throw std::invalid_argument(
+                    "Dynamic DataSet member MMS identity differs from the canonical engineering context.");
+            }
+            const auto key = (domain + QLatin1Char('/') + item).toStdString();
+            if (!seen.insert(key).second) {
+                throw std::invalid_argument(
+                    "Dynamic DataSet contains a duplicate MMS member.");
+            }
+            members.push_back(mms::MmsObjectName::domain_specific(
+                domain.toStdString(), item.toStdString()));
+            canonicalReferences.push_back(reference);
+            functionalConstraints.push_back(
+                canonical.value(QStringLiteral("functionalConstraint")).toString());
+        }
+    } catch (const std::exception& exception) {
+        lastError_ = QString::fromUtf8(exception.what());
+        emit stateChanged();
+        return false;
+    }
+
+    const auto generation = generation_;
+    const auto stop = stopSource_;
+    const auto worker = workerState_;
+    const QPointer<MmsReportController> self{this};
+    operationBusy_ = true;
+    state_ = State::authoring;
+    lastError_.clear();
+    appendDiagnostic(
+        QStringLiteral("Define dynamic DataSet requested · %1 · %2 member(s)")
+            .arg(requestedReference)
+            .arg(members.size()));
+    emit stateChanged();
+
+    ioPool_.start([
+        self, worker, stop, generation, requestedReference,
+        members = std::move(members), canonicalReferences,
+        functionalConstraints
+    ]() mutable {
+        try {
+            if (!worker->session || !worker->session->associated() ||
+                !worker->discovery || !worker->dynamicDataSets) {
+                throw std::runtime_error(
+                    "Dynamic DataSet create requires the active Browser report association.");
+            }
+            const auto created = worker->dynamicDataSets->create(
+                requestedReference.toStdString(), members, stop->get_token());
+            if (!created.verified_directory.has_value()) {
+                throw std::runtime_error(
+                    "Dynamic DataSet create returned no verified directory.");
+            }
+
+            auto candidate = dataSetCandidateFromReference(created.data_set_reference);
+            mms::MmsDataSetDirectoryEvidence evidence;
+            evidence.candidate = candidate;
+            evidence.directory = *created.verified_directory;
+            for (std::size_t index = 0U;
+                 index < evidence.directory->members.size() &&
+                 index < static_cast<std::size_t>(canonicalReferences.size());
+                 ++index) {
+                auto& member = evidence.directory->members[index];
+                member.user_reference =
+                    canonicalReferences.at(static_cast<int>(index)).toStdString();
+                member.functional_constraint =
+                    functionalConstraints.at(static_cast<int>(index)).toStdString();
+                member.logical_node = candidate.logical_node;
+            }
+
+            auto& inventory = worker->discovery->report_inventory.data_sets;
+            inventory.erase(
+                std::remove_if(
+                    inventory.begin(), inventory.end(),
+                    [&candidate](const auto& item) {
+                        return item.reference == candidate.reference;
+                    }),
+                inventory.end());
+            inventory.push_back(candidate);
+
+            auto& directories = worker->discovery->data_set_directories;
+            directories.erase(
+                std::remove_if(
+                    directories.begin(), directories.end(),
+                    [&candidate](const auto& item) {
+                        return item.candidate.reference == candidate.reference;
+                    }),
+                directories.end());
+            directories.push_back(std::move(evidence));
+
+            QStringList owned;
+            for (const auto& reference :
+                 worker->dynamicDataSets->owned_data_sets()) {
+                owned.push_back(QString::fromStdString(reference));
+            }
+            const auto profile = QString::fromStdString(
+                worker->session->association().active_association_profile());
+            auto ui = buildDiscoveryUi(*worker->discovery, profile);
+            ui.dataSets = markOwnedDataSets(ui.dataSets, owned);
+            const auto normalized =
+                QString::fromStdString(created.data_set_reference);
+
+            if (self) {
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, generation, ui, owned, normalized] {
+                        if (!self || self->generation_ != generation) return;
+                        self->operationBusy_ = false;
+                        self->state_ = State::ready;
+                        self->lastError_.clear();
+                        self->dataSets_ = ui.dataSets;
+                        self->reportControls_ = ui.reportControls;
+                        self->staticCandidates_ = ui.staticCandidates;
+                        self->dynamicCandidates_ = ui.dynamicCandidates;
+                        self->associationProfile_ = ui.associationProfile;
+                        self->ownedDynamicDataSets_ = owned;
+                        for (int row = 0; row < self->dataSets_.size(); ++row) {
+                            if (sameDataSetReference(
+                                    self->dataSets_.at(row).toMap()
+                                        .value(QStringLiteral("reference"))
+                                        .toString(),
+                                    normalized)) {
+                                self->selectedDataSetIndex_ = row;
+                                break;
+                            }
+                        }
+                        self->refreshSelection();
+                        self->appendDiagnostic(
+                            QStringLiteral(
+                                "Dynamic DataSet created + verified · %1")
+                                .arg(normalized));
+                        emit self->inventoryChanged();
+                        emit self->stateChanged();
+                    },
+                    Qt::QueuedConnection);
+            }
+        } catch (const std::exception& exception) {
+            if (self) {
+                const auto message = QString::fromUtf8(exception.what());
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, generation, message] {
+                        if (!self || self->generation_ != generation) return;
+                        self->operationBusy_ = false;
+                        self->state_ = State::ready;
+                        self->lastError_ = message;
+                        self->appendDiagnostic(
+                            QStringLiteral("Dynamic DataSet create failed · %1")
+                                .arg(message));
+                        emit self->stateChanged();
+                    },
+                    Qt::QueuedConnection);
+            }
+        }
+    });
+    return true;
+}
+
+bool MmsReportController::deleteDynamicDataSet(
+    const QString& dataSetReference) {
+    if (!connected() || busy() || active_ || cleanupRequired_) return false;
+    const auto reference = dataSetReference.trimmed();
+    if (reference.isEmpty()) return false;
+
+    bool owned = false;
+    for (const auto& item : ownedDynamicDataSets_) {
+        if (sameDataSetReference(reference, item)) {
+            owned = true;
+            break;
+        }
+    }
+    if (!owned) {
+        lastError_ = QStringLiteral(
+            "Refusing to delete a DataSet not created by this report association.");
+        emit stateChanged();
+        return false;
+    }
+    for (const auto& item : reportControls_) {
+        const auto map = item.toMap();
+        if (sameDataSetReference(
+                reference,
+                map.value(QStringLiteral("dataSet")).toString())) {
+            lastError_ = QStringLiteral(
+                "Rebind the RCB away from this dynamic DataSet before deleting it.");
+            emit stateChanged();
+            return false;
+        }
+    }
+
+    const auto generation = generation_;
+    const auto stop = stopSource_;
+    const auto worker = workerState_;
+    const QPointer<MmsReportController> self{this};
+    operationBusy_ = true;
+    state_ = State::authoring;
+    lastError_.clear();
+    appendDiagnostic(
+        QStringLiteral("Delete owned dynamic DataSet requested · %1")
+            .arg(reference));
+    emit stateChanged();
+
+    ioPool_.start([self, worker, stop, generation, reference] {
+        try {
+            if (!worker->session || !worker->session->associated() ||
+                !worker->discovery || !worker->dynamicDataSets) {
+                throw std::runtime_error(
+                    "Dynamic DataSet delete requires the active report association.");
+            }
+            const auto response = worker->dynamicDataSets->remove(
+                reference.toStdString(),
+                mms::MmsDynamicDataSetDeletePolicy::owned_only,
+                stop->get_token());
+            if (!response.deleted() &&
+                response.number_matched.value_or(1U) != 0U) {
+                throw std::runtime_error(
+                    "DeleteNamedVariableList did not confirm deletion.");
+            }
+
+            const auto removeReference = reference;
+            auto& inventory = worker->discovery->report_inventory.data_sets;
+            inventory.erase(
+                std::remove_if(
+                    inventory.begin(), inventory.end(),
+                    [&removeReference](const auto& item) {
+                        return sameDataSetReference(
+                            QString::fromStdString(item.reference),
+                            removeReference);
+                    }),
+                inventory.end());
+            auto& directories = worker->discovery->data_set_directories;
+            directories.erase(
+                std::remove_if(
+                    directories.begin(), directories.end(),
+                    [&removeReference](const auto& item) {
+                        return sameDataSetReference(
+                            QString::fromStdString(item.candidate.reference),
+                            removeReference);
+                    }),
+                directories.end());
+
+            QStringList ownedReferences;
+            for (const auto& item : worker->dynamicDataSets->owned_data_sets()) {
+                ownedReferences.push_back(QString::fromStdString(item));
+            }
+            const auto profile = QString::fromStdString(
+                worker->session->association().active_association_profile());
+            auto ui = buildDiscoveryUi(*worker->discovery, profile);
+            ui.dataSets = markOwnedDataSets(ui.dataSets, ownedReferences);
+
+            if (self) {
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, generation, ui, ownedReferences, reference] {
+                        if (!self || self->generation_ != generation) return;
+                        self->operationBusy_ = false;
+                        self->state_ = State::ready;
+                        self->lastError_.clear();
+                        self->dataSets_ = ui.dataSets;
+                        self->reportControls_ = ui.reportControls;
+                        self->staticCandidates_ = ui.staticCandidates;
+                        self->dynamicCandidates_ = ui.dynamicCandidates;
+                        self->associationProfile_ = ui.associationProfile;
+                        self->ownedDynamicDataSets_ = ownedReferences;
+                        self->selectedDataSetIndex_ =
+                            self->dataSets_.isEmpty()
+                                ? -1
+                                : std::clamp(
+                                      self->selectedDataSetIndex_,
+                                      0,
+                                      self->dataSets_.size() - 1);
+                        self->refreshSelection();
+                        self->appendDiagnostic(
+                            QStringLiteral("Owned dynamic DataSet deleted · %1")
+                                .arg(reference));
+                        emit self->inventoryChanged();
+                        emit self->stateChanged();
+                    },
+                    Qt::QueuedConnection);
+            }
+        } catch (const std::exception& exception) {
+            if (self) {
+                const auto message = QString::fromUtf8(exception.what());
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, generation, message] {
+                        if (!self || self->generation_ != generation) return;
+                        self->operationBusy_ = false;
+                        self->state_ = State::ready;
+                        self->lastError_ = message;
+                        self->appendDiagnostic(
+                            QStringLiteral("Dynamic DataSet delete failed · %1")
+                                .arg(message));
+                        emit self->stateChanged();
+                    },
+                    Qt::QueuedConnection);
+            }
+        }
+    });
+    return true;
+}
+
 bool MmsReportController::enableSelected(const bool requestGeneralInterrogation) {
     if (!connected() || busy() || active_ || cleanupRequired_ || selectedRcb_.isEmpty()) return false;
     const auto reference = selectedRcb_.value(QStringLiteral("reference")).toString();
