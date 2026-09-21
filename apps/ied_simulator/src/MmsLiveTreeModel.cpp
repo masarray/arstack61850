@@ -419,23 +419,7 @@ QVector<MmsLiveTreeModel::ReadTarget> MmsLiveTreeModel::readTargetsForReferences
         for (const auto& reference : wanted) {
             if (nodeReference == reference) return true;
             if (nodeReference.startsWith(reference + QLatin1Char('.'))) return true;
-            if (nodeReference.startsWith(reference + QLatin1Char('
-
-void MmsLiveTreeModel::applyReadValue(const QString& key, const QString& displayValue) {
-    const auto found = mmsIndex_.constFind(key);
-    if (found == mmsIndex_.cend()) return;
-    const auto nodeIndex = found.value();
-    auto& node = nodes_[nodeIndex];
-    if (node.value == displayValue) return;
-    node.value = displayValue;
-    const auto row = visibleRowForNode(nodeIndex);
-    if (row >= 0) emit dataChanged(index(row), index(row), {ValueRole});
-    if (!filterText_.trimmed().isEmpty()) rebuildVisible();
-    if (nodeIndex == selectedNode_ || (selectedNode_ >= 0 && node.parent == nodes_.at(selectedNode_).parent)) {
-        emit selectionChanged();
-    }
-}
-))) return true;
+            if (nodeReference.startsWith(reference + QLatin1Char('$'))) return true;
         }
         return false;
     };
