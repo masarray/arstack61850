@@ -149,6 +149,16 @@ jobs:
           apps/ied_simulator/qml/IedBrowserNavigation.qml
           apps/ied_simulator/qml/BrowserGoosePane.qml
 
+      - name: P6A Browser Global Data contract
+        run: >-
+          python3 apps/ied_simulator/test_browser_global_data.py
+          apps/ied_simulator/qml/IedBrowserWorkspace.qml
+          apps/ied_simulator/qml/IedBrowserNavigation.qml
+          apps/ied_simulator/qml/BrowserGlobalDataPane.qml
+          apps/ied_simulator/src/MmsClientController.cpp
+          apps/ied_simulator/src/MmsLiveTreeModel.hpp
+          apps/ied_simulator/src/MmsLiveTreeModel.cpp
+
       - name: IED Browser session ownership gates
         env:
           QT_QPA_PLATFORM: offscreen
