@@ -10,6 +10,7 @@
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
+#include <QVariantMap>
 #include <QtQmlIntegration/qqmlintegration.h>
 
 #include <memory>
