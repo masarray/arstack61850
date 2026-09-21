@@ -13,6 +13,7 @@ Item {
     required property var context
     required property var reports
     required property var utilities
+    required property var controls
     required property var engineering
     required property var productState
 
