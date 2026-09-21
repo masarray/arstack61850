@@ -158,6 +158,26 @@ control::OriginCategory originCategory(const int value) {
     return static_cast<control::OriginCategory>(value);
 }
 
+QString controlValueText(const mms::MmsDataValue& value) {
+    switch (value.kind()) {
+    case mms::MmsDataKind::boolean:
+        return std::get<bool>(value.value()) ? QStringLiteral("true") : QStringLiteral("false");
+    case mms::MmsDataKind::integer:
+        return QString::number(static_cast<qlonglong>(std::get<std::int64_t>(value.value())));
+    case mms::MmsDataKind::unsigned_integer:
+        return QString::number(static_cast<qulonglong>(std::get<std::uint64_t>(value.value())));
+    case mms::MmsDataKind::floating_point: {
+        const auto* number = std::get_if<double>(&value.value());
+        return number ? QString::number(*number, 'g', 12) : QStringLiteral("<float>");
+    }
+    case mms::MmsDataKind::visible_string:
+    case mms::MmsDataKind::mms_string:
+        return QString::fromStdString(std::get<std::string>(value.value()));
+    default:
+        return QStringLiteral("<typed status>");
+    }
+}
+
 QVariantMap resultMap(const control::ControlActionResult& result) {
     QVariantMap map;
     map.insert(QStringLiteral("completion"), completionName(result.completion));
@@ -448,7 +468,18 @@ bool MmsControlController::startAction(
                 break;
             }
 
-            const auto map = resultMap(result);
+            auto map = resultMap(result);
+            const auto& descriptor = worker->controlSession->descriptor();
+            if (descriptor.status_object.has_value()) {
+                const auto status = worker->transport->read(
+                    descriptor.status_object.value(), stop->get_token());
+                if (status.has_value()) {
+                    map.insert(QStringLiteral("statusValue"), controlValueText(status.value()));
+                    map.insert(
+                        QStringLiteral("statusFunctionalConstraint"),
+                        QString::fromStdString(descriptor.status_functional_constraint));
+                }
+            }
             const auto selectionActive = worker->controlSession->has_active_selection();
             if (self) {
                 QMetaObject::invokeMethod(self, [self, generation, map, selectionActive] {
