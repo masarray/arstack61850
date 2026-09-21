@@ -9,6 +9,8 @@
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QVariantList>
+#include <QVariantMap>
 #include <QtQmlIntegration/qqmlintegration.h>
 
 #include <memory>
@@ -45,6 +47,10 @@ class IedEngineeringContextController : public QObject {
     Q_PROPERTY(int gooseCount READ gooseCount NOTIFY contextChanged)
     Q_PROPERTY(int sampledValueCount READ sampledValueCount NOTIFY contextChanged)
     Q_PROPERTY(int settingGroupCount READ settingGroupCount NOTIFY contextChanged)
+    Q_PROPERTY(QVariantList dataSets READ dataSets NOTIFY contextChanged)
+    Q_PROPERTY(QVariantList reportControls READ reportControls NOTIFY contextChanged)
+    Q_PROPERTY(QVariantList gooseStreams READ gooseStreams NOTIFY contextChanged)
+    Q_PROPERTY(QVariantList settingGroups READ settingGroups NOTIFY contextChanged)
     Q_PROPERTY(MmsLiveTreeModel* treeModel READ treeModel CONSTANT)
 
 public:
@@ -83,6 +89,10 @@ public:
     [[nodiscard]] int gooseCount() const noexcept;
     [[nodiscard]] int sampledValueCount() const noexcept;
     [[nodiscard]] int settingGroupCount() const noexcept;
+    [[nodiscard]] QVariantList dataSets() const;
+    [[nodiscard]] QVariantList reportControls() const;
+    [[nodiscard]] QVariantList gooseStreams() const;
+    [[nodiscard]] QVariantList settingGroups() const;
     [[nodiscard]] MmsLiveTreeModel* treeModel() noexcept { return &treeModel_; }
 
     bool publishSclDocument(

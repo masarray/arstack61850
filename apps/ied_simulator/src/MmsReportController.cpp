@@ -194,6 +194,123 @@ DiscoveryUi buildDiscoveryUi(
     return ui;
 }
 
+
+mms::MmsObjectName contextObjectName(
+    const std::string& reference,
+    const std::string& fallbackDomain,
+    const std::string& fallbackItem) {
+    const auto slash = reference.find('/');
+    if (slash != std::string::npos && slash > 0U && slash + 1U < reference.size()) {
+        return mms::MmsObjectName::domain_specific(
+            reference.substr(0U, slash), reference.substr(slash + 1U));
+    }
+    return mms::MmsObjectName::domain_specific(fallbackDomain, fallbackItem);
+}
+
+std::span<const std::uint8_t> confirmedPayload(
+    const mms::MmsConfirmedExchangeResult& exchange) {
+    return exchange.presentation_payload.empty()
+        ? std::span<const std::uint8_t>{exchange.envelope.mms_payload}
+        : std::span<const std::uint8_t>{exchange.presentation_payload};
+}
+
+mms::MmsLiveDiscoveryResult buildContextDiscoverySeed(
+    const mms::MmsLiveModelDocument& model) {
+    mms::MmsLiveDiscoveryResult result;
+    result.endpoint = model.endpoint;
+    result.association_profile = "CanonicalEngineeringContext";
+
+    for (const auto& dataSet : model.data_sets) {
+        mms::MmsDataSetCandidate candidate;
+        candidate.domain = dataSet.domain;
+        candidate.logical_node = dataSet.logical_node;
+        candidate.name = dataSet.name;
+        candidate.reference = dataSet.reference;
+        candidate.raw_mms_name = dataSet.logical_node +
+            (dataSet.name.empty() ? std::string{} : "$" + dataSet.name);
+        result.report_inventory.data_sets.push_back(candidate);
+
+        mms::MmsDataSetDirectoryEvidence evidence;
+        evidence.candidate = candidate;
+        mms::MmsDataSetDirectoryResponse directory;
+        directory.deletable = dataSet.deletable.value_or(false);
+        directory.members.reserve(dataSet.members.size());
+        for (const auto& member : dataSet.members) {
+            mms::MmsDataSetDirectoryMember projected;
+            projected.object_name = contextObjectName(
+                member.mms_reference, dataSet.domain, member.reference);
+            projected.mms_reference = member.mms_reference.empty()
+                ? projected.object_name.reference()
+                : member.mms_reference;
+            projected.user_reference = member.reference.empty()
+                ? projected.mms_reference
+                : member.reference;
+            projected.functional_constraint = member.functional_constraint;
+            projected.logical_node = dataSet.logical_node;
+            projected.confidence = 100U;
+            directory.members.push_back(std::move(projected));
+        }
+        evidence.directory = std::move(directory);
+        result.data_set_directories.push_back(std::move(evidence));
+    }
+
+    static const std::vector<std::string> reportAttributes{
+        "DatSet", "RptID", "ConfRev", "IntgPd", "BufTm", "SqNum",
+        "RptEna", "Resv", "ResvTms", "Owner", "EntryID", "TimeOfEntry",
+        "TrgOps", "OptFlds"};
+
+    for (const auto& control : model.report_controls) {
+        mms::MmsReportControlCandidate candidate;
+        candidate.domain = control.domain;
+        candidate.logical_node = control.logical_node;
+        candidate.functional_constraint = control.buffered ? "BR" : "RP";
+        candidate.name = control.name;
+        candidate.reference = control.reference;
+        candidate.buffered = control.buffered;
+        candidate.attributes = reportAttributes;
+        result.report_inventory.report_controls.push_back(std::move(candidate));
+    }
+    return result;
+}
+
+void probeContextReportControls(
+    mms::MmsAssociationRuntime& association,
+    mms::MmsLiveDiscoveryResult& discovery,
+    const std::stop_token stopToken) {
+    if (discovery.report_inventory.report_controls.size() > 1'024U) {
+        throw std::runtime_error(
+            "Canonical report inventory exceeds the desktop bound of 1024 RCBs.");
+    }
+    discovery.report_controls.clear();
+    discovery.report_controls.reserve(discovery.report_inventory.report_controls.size());
+    for (const auto& candidate : discovery.report_inventory.report_controls) {
+        if (stopToken.stop_requested()) {
+            throw std::runtime_error("Canonical report service attach cancelled.");
+        }
+        mms::MmsReportControlEvidence evidence;
+        evidence.candidate = candidate;
+        evidence.requested_attributes = candidate.attributes;
+        try {
+            const auto invokeId = association.next_invoke_id();
+            const auto request = mms::MmsReportControlStateMapper::build_read_request(
+                invokeId, candidate, evidence.requested_attributes);
+            const auto encoded = mms::MmsServiceCodec::encode_read_request_p_data(
+                request, association.negotiated().presentation_context_id);
+            const auto exchange = association.exchange_confirmed(
+                encoded, invokeId, stopToken);
+            const auto response = mms::MmsServiceCodec::decode_read_response(
+                confirmedPayload(exchange), invokeId);
+            evidence.state = mms::MmsReportControlStateMapper::map_read_response(
+                candidate, evidence.requested_attributes, response);
+        } catch (const std::exception& exception) {
+            evidence.error = exception.what();
+            discovery.diagnostics.push_back(
+                candidate.reference + ": targeted RCB attach read failed: " + evidence.error);
+        }
+        discovery.report_controls.push_back(std::move(evidence));
+    }
+}
+
 struct ReportUi final {
     QVariantList reports;
     QStringList events;
@@ -295,6 +412,23 @@ void MmsReportController::setPort(const int value) {
     emit configurationChanged();
 }
 
+void MmsReportController::setEngineeringContext(IedEngineeringContextController* value) {
+    if (engineeringContext_ == value) return;
+    if (engineeringContext_) disconnect(engineeringContext_, nullptr, this, nullptr);
+    engineeringContext_ = value;
+    if (engineeringContext_) {
+        connect(
+            engineeringContext_,
+            &IedEngineeringContextController::contextChanged,
+            this,
+            [this] {
+                if (!connected() && !busy()) adoptEngineeringInventory();
+            });
+    }
+    emit engineeringContextChanged();
+    if (!connected() && !busy()) adoptEngineeringInventory();
+}
+
 bool MmsReportController::connected() const noexcept {
     return state_ == State::ready || state_ == State::enabling || state_ == State::active ||
         state_ == State::disabling || state_ == State::cleanup_required;
@@ -309,7 +443,7 @@ QString MmsReportController::stateText() const {
     switch (state_) {
     case State::disconnected: return QStringLiteral("Disconnected");
     case State::connecting: return QStringLiteral("Connecting");
-    case State::discovering: return QStringLiteral("Discovering reports");
+    case State::discovering: return QStringLiteral("Attaching reports");
     case State::ready: return QStringLiteral("Ready");
     case State::enabling: return QStringLiteral("Enabling RCB");
     case State::active: return QStringLiteral("Report subscription active");
@@ -355,6 +489,31 @@ void MmsReportController::clearInventory() {
     emit reportsChanged();
 }
 
+void MmsReportController::adoptEngineeringInventory() {
+    if (!engineeringContext_ || !engineeringContext_->loaded() ||
+        engineeringContext_->selectionRequired() ||
+        engineeringContext_->modelSnapshot() == nullptr) {
+        clearInventory();
+        return;
+    }
+
+    const auto seed = buildContextDiscoverySeed(*engineeringContext_->modelSnapshot());
+    const auto ui = buildDiscoveryUi(seed, QString{});
+    dataSets_ = ui.dataSets;
+    reportControls_ = ui.reportControls;
+    staticCandidates_.clear();
+    dynamicCandidates_.clear();
+    associationProfile_.clear();
+    selectedRcbIndex_ = reportControls_.isEmpty() ? -1 : 0;
+    selectedDataSetIndex_ = dataSets_.isEmpty() ? -1 : 0;
+    receivedReports_.clear();
+    events_.clear();
+    receivedReportCount_ = 0;
+    refreshSelection();
+    emit inventoryChanged();
+    emit reportsChanged();
+}
+
 bool MmsReportController::connectToIed() {
     if (busy() || connected()) return false;
     if (host_.trimmed().isEmpty() || port_ < 1 || port_ > 65'535) {
@@ -375,13 +534,21 @@ bool MmsReportController::connectToIed() {
     pollPending_ = false;
     lastError_.clear();
     clearInventory();
+    if (engineeringContext_) adoptEngineeringInventory();
+    std::shared_ptr<mms::MmsLiveModelDocument> contextModel;
+    if (engineeringContext_ && engineeringContext_->loaded() &&
+        !engineeringContext_->selectionRequired() &&
+        engineeringContext_->modelSnapshot() != nullptr) {
+        contextModel = std::make_shared<mms::MmsLiveModelDocument>(
+            *engineeringContext_->modelSnapshot());
+    }
     appendDiagnostic(QStringLiteral("Reports connect %1:%2 · generation %3")
         .arg(requestedHost).arg(requestedPort).arg(generation));
     emit stateChanged();
 
     const QPointer<MmsReportController> self{this};
     const auto worker = workerState_;
-    ioPool_.start([self, worker, stop, generation, requestedHost, requestedPort] {
+    ioPool_.start([self, worker, stop, generation, requestedHost, requestedPort, contextModel] {
         try {
             if (worker->report) worker->report->stop();
             worker->report.reset();
@@ -406,13 +573,25 @@ bool MmsReportController::connectToIed() {
                 }, Qt::QueuedConnection);
             }
 
-            mms::MmsLiveDiscoveryOptions options;
-            options.maximum_variable_type_probes = 8'192U;
-            options.maximum_data_set_directories = 4'096U;
-            options.maximum_report_control_probes = 1'024U;
-            auto discovery = std::make_shared<mms::MmsLiveDiscoveryResult>(
-                session->discover(options, stop->get_token()));
-            const auto profile = QString::fromStdString(session->association().active_association_profile());
+            std::shared_ptr<mms::MmsLiveDiscoveryResult> discovery;
+            if (contextModel) {
+                discovery = std::make_shared<mms::MmsLiveDiscoveryResult>(
+                    buildContextDiscoverySeed(*contextModel));
+                probeContextReportControls(
+                    session->association(), *discovery, stop->get_token());
+            } else {
+                // Standalone Reports workspace compatibility path. Browser-owned
+                // services always receive engineeringContext and therefore skip
+                // this full discovery path.
+                mms::MmsLiveDiscoveryOptions options;
+                options.maximum_variable_type_probes = 8'192U;
+                options.maximum_data_set_directories = 4'096U;
+                options.maximum_report_control_probes = 1'024U;
+                discovery = std::make_shared<mms::MmsLiveDiscoveryResult>(
+                    session->discover(options, stop->get_token()));
+            }
+            const auto profile = QString::fromStdString(
+                session->association().active_association_profile());
             const auto ui = buildDiscoveryUi(*discovery, profile);
             worker->discovery = discovery;
             worker->session = std::move(session);
@@ -431,7 +610,7 @@ bool MmsReportController::connectToIed() {
                     if (!self->reportControls_.isEmpty()) self->selectedRcbIndex_ = 0;
                     else if (!self->dataSets_.isEmpty()) self->selectedDataSetIndex_ = 0;
                     self->refreshSelection();
-                    self->appendDiagnostic(QStringLiteral("Report discovery complete · %1 DataSet · %2 RCB")
+                    self->appendDiagnostic(QStringLiteral("Report service attach complete · %1 DataSet · %2 RCB")
                         .arg(self->dataSets_.size()).arg(self->reportControls_.size()));
                     emit self->inventoryChanged();
                     emit self->stateChanged();
@@ -449,7 +628,7 @@ bool MmsReportController::connectToIed() {
                     self->state_ = State::faulted;
                     self->operationBusy_ = false;
                     self->lastError_ = message;
-                    self->appendDiagnostic(QStringLiteral("Report discovery failed · %1").arg(message));
+                    self->appendDiagnostic(QStringLiteral("Report service attach failed · %1").arg(message));
                     emit self->stateChanged();
                 }, Qt::QueuedConnection);
             }
@@ -471,7 +650,8 @@ void MmsReportController::disconnectFromIed() {
     state_ = State::disconnected;
     lastError_.clear();
     clearInventory();
-    appendDiagnostic(QStringLiteral("Reports disconnected · session generation invalidated."));
+    adoptEngineeringInventory();
+    appendDiagnostic(QStringLiteral("Reports disconnected · runtime association released; canonical inventory retained."));
     emit stateChanged();
 
     const QPointer<MmsReportController> self{this};

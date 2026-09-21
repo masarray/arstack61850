@@ -318,7 +318,6 @@ Item {
                 context: root.context
                 reports: root.reports
                 utilities: root.utilities
-                engineering: root.engineering
                 section: root.activeSection
                 onSectionRequested: function(section, title) {
                     root.selectSection(section, title)
@@ -470,7 +469,6 @@ Item {
                     BrowserGoosePane {
                         theme: root.theme
                         context: root.context
-                        engineering: root.engineering
                     }
                 }
 

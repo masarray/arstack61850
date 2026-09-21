@@ -269,6 +269,10 @@ target_compile_features(ied_mms_client_workbench_qa PRIVATE cxx_std_20)
 
 add_executable(ied_report_workspace_qa
     src/ied_report_workspace_qa.cpp
+    src/MmsLiveTreeModel.cpp
+    src/MmsLiveTreeModel.hpp
+    src/IedEngineeringContextController.cpp
+    src/IedEngineeringContextController.hpp
     src/MmsReportController.cpp
     src/MmsReportController.hpp
     src/IedActivityModel.cpp
@@ -294,6 +298,10 @@ target_compile_features(ied_report_workspace_qa PRIVATE cxx_std_20)
 
 add_executable(ied_file_settings_workspace_qa
     src/ied_file_settings_workspace_qa.cpp
+    src/MmsLiveTreeModel.cpp
+    src/MmsLiveTreeModel.hpp
+    src/IedEngineeringContextController.cpp
+    src/IedEngineeringContextController.hpp
     src/MmsFileSettingsController.cpp
     src/MmsFileSettingsController.hpp
     src/MmsSettingGroupPolicy.hpp)

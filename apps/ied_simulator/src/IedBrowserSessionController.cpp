@@ -183,10 +183,12 @@ void IedBrowserSessionController::syncConfiguration() {
     if (reports_) {
         reports_->setHost(host_);
         reports_->setPort(port_);
+        reports_->setEngineeringContext(engineeringContext_);
     }
     if (utilities_) {
         utilities_->setHost(host_);
         utilities_->setPort(port_);
+        utilities_->setEngineeringContext(engineeringContext_);
     }
 }
 

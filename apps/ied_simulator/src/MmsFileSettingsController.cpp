@@ -102,6 +102,72 @@ std::vector<mms::MmsControlBlockCandidate> mergedSettingGroups(
     return result;
 }
 
+mms::MmsObjectName controlVariable(
+    const mms::MmsLiveControlBlock& control,
+    const std::string& attributePath,
+    const std::string& explicitReference = {}) {
+    const auto slash = explicitReference.find('/');
+    if (slash != std::string::npos && slash > 0U &&
+        slash + 1U < explicitReference.size()) {
+        return mms::MmsObjectName::domain_specific(
+            explicitReference.substr(0U, slash),
+            explicitReference.substr(slash + 1U));
+    }
+    auto path = attributePath;
+    std::replace(path.begin(), path.end(), '.', '$');
+    const auto fc = control.functional_constraint.empty()
+        ? std::string{"SP"} : control.functional_constraint;
+    return mms::MmsObjectName::domain_specific(
+        control.domain,
+        control.logical_node + "$" + fc + "$" +
+            (control.name.empty() ? std::string{"SGCB"} : control.name) +
+            "$" + path);
+}
+
+std::vector<mms::MmsControlBlockCandidate> buildContextSettingGroups(
+    const mms::MmsLiveModelDocument& model) {
+    static const std::vector<std::string> standardAttributes{
+        "NumOfSG", "ActSG", "EditSG", "CnfEdit", "LActTm"};
+    std::vector<mms::MmsControlBlockCandidate> result;
+    result.reserve(model.setting_group_controls.size());
+    for (const auto& control : model.setting_group_controls) {
+        mms::MmsControlBlockCandidate candidate;
+        candidate.kind = mms::MmsControlBlockKind::setting_group;
+        candidate.domain = control.domain;
+        candidate.logical_node = control.logical_node;
+        candidate.functional_constraint = control.functional_constraint.empty()
+            ? "SP" : control.functional_constraint;
+        candidate.name = control.name.empty() ? "SGCB" : control.name;
+        candidate.reference = control.reference.empty()
+            ? candidate.domain + "/" + candidate.logical_node + "." +
+                candidate.functional_constraint + "." + candidate.name
+            : control.reference;
+
+        if (!control.runtime_attributes.empty()) {
+            for (const auto& attribute : control.runtime_attributes) {
+                candidate.attributes.push_back({
+                    attribute.attribute_path,
+                    controlVariable(
+                        control, attribute.attribute_path, attribute.mms_reference)});
+            }
+        } else {
+            const auto& attributes = control.attributes.empty()
+                ? standardAttributes : control.attributes;
+            for (const auto& attribute : attributes) {
+                candidate.attributes.push_back({
+                    attribute, controlVariable(control, attribute)});
+            }
+        }
+        if (candidate.attributes.size() > 16U) candidate.attributes.resize(16U);
+        result.push_back(std::move(candidate));
+    }
+    if (result.size() > 64U) {
+        throw std::runtime_error(
+            "Canonical Setting Group inventory exceeds the desktop bound of 64 SGCBs.");
+    }
+    return result;
+}
+
 QString displayValue(const mms::MmsControlBlockAttributeReadEvidence* attribute) {
     if (attribute == nullptr || !attribute->value) return {};
     return QString::fromStdString(mms::MmsDataCodec::to_display_string(*attribute->value));
@@ -319,6 +385,24 @@ void MmsFileSettingsController::setPort(const int value) {
     emit configurationChanged();
 }
 
+void MmsFileSettingsController::setEngineeringContext(
+    IedEngineeringContextController* value) {
+    if (engineeringContext_ == value) return;
+    if (engineeringContext_) disconnect(engineeringContext_, nullptr, this, nullptr);
+    engineeringContext_ = value;
+    if (engineeringContext_) {
+        connect(
+            engineeringContext_,
+            &IedEngineeringContextController::contextChanged,
+            this,
+            [this] {
+                if (!connected() && !busy()) adoptEngineeringInventory();
+            });
+    }
+    emit engineeringContextChanged();
+    if (!connected() && !busy()) adoptEngineeringInventory();
+}
+
 bool MmsFileSettingsController::connected() const noexcept {
     return state_ == State::connected;
 }
@@ -331,7 +415,7 @@ QString MmsFileSettingsController::stateText() const {
     switch (state_) {
     case State::disconnected: return QStringLiteral("Disconnected");
     case State::connecting: return QStringLiteral("Connecting");
-    case State::discovering: return QStringLiteral("Discovering SGCB");
+    case State::discovering: return QStringLiteral("Attaching services");
     case State::connected: return operationBusy_ ? QStringLiteral("Working") : QStringLiteral("Connected");
     case State::faulted: return QStringLiteral("Faulted");
     }
@@ -392,6 +476,22 @@ void MmsFileSettingsController::clearRemoteState() {
     emit selectionChanged();
 }
 
+void MmsFileSettingsController::adoptEngineeringInventory() {
+    settingGroups_.clear();
+    selectedSettingGroupIndex_ = -1;
+    selectedSettingGroup_.clear();
+    if (engineeringContext_ && engineeringContext_->loaded() &&
+        !engineeringContext_->selectionRequired()) {
+        settingGroups_ = engineeringContext_->settingGroups();
+        if (!settingGroups_.isEmpty()) {
+            selectedSettingGroupIndex_ = 0;
+            refreshSelectedSettingGroup();
+        }
+    }
+    emit settingsChanged();
+    emit selectionChanged();
+}
+
 void MmsFileSettingsController::refreshSelectedSettingGroup() {
     if (selectedSettingGroupIndex_ < 0 ||
         selectedSettingGroupIndex_ >= settingGroups_.size()) {
@@ -420,13 +520,21 @@ bool MmsFileSettingsController::connectToIed() {
     operationBusy_ = false;
     lastError_.clear();
     clearRemoteState();
+    adoptEngineeringInventory();
+    std::shared_ptr<mms::MmsLiveModelDocument> contextModel;
+    if (engineeringContext_ && engineeringContext_->loaded() &&
+        !engineeringContext_->selectionRequired() &&
+        engineeringContext_->modelSnapshot() != nullptr) {
+        contextModel = std::make_shared<mms::MmsLiveModelDocument>(
+            *engineeringContext_->modelSnapshot());
+    }
     appendDiagnostic(QStringLiteral("Connect utility session %1:%2 · generation %3")
         .arg(requestedHost).arg(requestedPort).arg(generation));
     emit stateChanged();
 
     const QPointer<MmsFileSettingsController> self{this};
     const auto worker = workerState_;
-    ioPool_.start([self, worker, sessionStop, generation, requestedHost, requestedPort] {
+    ioPool_.start([self, worker, sessionStop, generation, requestedHost, requestedPort, contextModel] {
         try {
             if (worker->session) worker->session->disconnect();
             worker->session.reset();
@@ -445,22 +553,31 @@ bool MmsFileSettingsController::connectToIed() {
                 QMetaObject::invokeMethod(self, [self, generation] {
                     if (!self || self->generation_ != generation) return;
                     self->state_ = State::discovering;
-                    self->appendDiagnostic(QStringLiteral("Association accepted; discovering Setting Groups."));
+                    self->appendDiagnostic(QStringLiteral("Association accepted; attaching canonical utility services."));
                     emit self->stateChanged();
                 }, Qt::QueuedConnection);
             }
 
-            mms::MmsLiveDiscoveryOptions options;
-            options.probe_variable_types = false;
-            options.read_data_set_directories = false;
-            options.probe_report_controls = false;
-            options.maximum_pages_per_query = 256U;
-            options.maximum_domains = 4'096U;
-            options.maximum_names_per_domain = 65'536U;
-            const auto discovery = session->discover(options, sessionStop->get_token());
-            auto candidates = mergedSettingGroups(discovery.names);
-            if (candidates.size() > 64U) {
-                throw std::runtime_error("Setting Group inventory exceeds the desktop bound of 64 SGCBs.");
+            std::vector<mms::MmsControlBlockCandidate> candidates;
+            if (contextModel) {
+                candidates = buildContextSettingGroups(*contextModel);
+            } else {
+                // Standalone Utilities compatibility path. Browser-owned
+                // services receive engineeringContext and skip this discovery.
+                mms::MmsLiveDiscoveryOptions options;
+                options.probe_variable_types = false;
+                options.read_data_set_directories = false;
+                options.probe_report_controls = false;
+                options.maximum_pages_per_query = 256U;
+                options.maximum_domains = 4'096U;
+                options.maximum_names_per_domain = 65'536U;
+                const auto discovery =
+                    session->discover(options, sessionStop->get_token());
+                candidates = mergedSettingGroups(discovery.names);
+                if (candidates.size() > 64U) {
+                    throw std::runtime_error(
+                        "Setting Group inventory exceeds the desktop bound of 64 SGCBs.");
+                }
             }
             const auto settings = readSettingGroups(
                 session->association(), candidates, sessionStop->get_token());
@@ -481,7 +598,7 @@ bool MmsFileSettingsController::connectToIed() {
                         self->state_ = State::connected;
                         self->lastError_.clear();
                         self->appendDiagnostic(
-                            QStringLiteral("Utility discovery complete · %1 SGCB(s)")
+                            QStringLiteral("Utility service attach complete · %1 SGCB(s)")
                                 .arg(settings.size()));
                         emit self->settingsChanged();
                         emit self->stateChanged();
@@ -518,8 +635,9 @@ void MmsFileSettingsController::disconnectFromIed() {
     downloadActive_ = false;
     lastError_.clear();
     clearRemoteState();
+    adoptEngineeringInventory();
     emit transferChanged();
-    appendDiagnostic(QStringLiteral("Utility session disconnected · generation invalidated."));
+    appendDiagnostic(QStringLiteral("Utility session disconnected · runtime association released; canonical inventory retained."));
     emit stateChanged();
 
     const auto worker = workerState_;
