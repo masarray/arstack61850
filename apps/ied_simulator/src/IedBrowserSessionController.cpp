@@ -11,6 +11,10 @@ bool hasActiveReportSession(const MmsReportController* reports) {
 bool hasActiveUtilitySession(const MmsFileSettingsController* utilities) {
     return utilities && (utilities->connected() || utilities->busy());
 }
+
+bool hasActiveControlSession(const MmsControlController* controls) {
+    return controls && (controls->connected() || controls->busy());
+}
 } // namespace
 
 IedBrowserSessionController::IedBrowserSessionController(QObject* parent)
@@ -53,6 +57,16 @@ void IedBrowserSessionController::setReports(MmsReportController* value) {
     emit stateChanged();
 }
 
+void IedBrowserSessionController::setControls(MmsControlController* value) {
+    if (controls_ == value) return;
+    if (controls_) disconnect(controls_, nullptr, this, nullptr);
+    controls_ = value;
+    connectServiceSignals(controls_);
+    syncConfiguration();
+    emit servicesChanged();
+    emit stateChanged();
+}
+
 void IedBrowserSessionController::setEngineeringContext(IedEngineeringContextController* value) {
     if (engineeringContext_ == value) return;
     if (engineeringContext_) disconnect(engineeringContext_, nullptr, this, nullptr);
@@ -90,11 +104,12 @@ bool IedBrowserSessionController::connected() const noexcept {
 bool IedBrowserSessionController::busy() const noexcept {
     return (client_ && client_->busy()) ||
            (reports_ && reports_->busy()) ||
-           (utilities_ && utilities_->busy());
+           (utilities_ && utilities_->busy()) ||
+           (controls_ && controls_->busy());
 }
 
 bool IedBrowserSessionController::configurationLocked() const noexcept {
-    return connected() || busy() || hasActiveReportSession(reports_) || hasActiveUtilitySession(utilities_);
+    return connected() || busy() || hasActiveReportSession(reports_) || hasActiveUtilitySession(utilities_) || hasActiveControlSession(controls_);
 }
 
 QString IedBrowserSessionController::endpoint() const {
@@ -109,7 +124,8 @@ QString IedBrowserSessionController::stateText() const {
     if (!client_) return QStringLiteral("Browser unavailable");
     if (reports_ && reports_->cleanupRequired()) return QStringLiteral("Report cleanup required");
     if (client_->connected()) {
-        if ((reports_ && reports_->busy()) || (utilities_ && utilities_->busy())) {
+        if ((reports_ && reports_->busy()) || (utilities_ && utilities_->busy()) ||
+            (controls_ && controls_->busy())) {
             return QStringLiteral("Connected · opening service");
         }
         return QStringLiteral("Connected");
@@ -122,6 +138,7 @@ QString IedBrowserSessionController::lastError() const {
     if (client_ && !client_->lastError().isEmpty()) return client_->lastError();
     if (reports_ && !reports_->lastError().isEmpty()) return reports_->lastError();
     if (utilities_ && !utilities_->lastError().isEmpty()) return utilities_->lastError();
+    if (controls_ && !controls_->lastError().isEmpty()) return controls_->lastError();
     return {};
 }
 
@@ -189,6 +206,11 @@ void IedBrowserSessionController::syncConfiguration() {
         utilities_->setHost(host_);
         utilities_->setPort(port_);
         utilities_->setEngineeringContext(engineeringContext_);
+    }
+    if (controls_) {
+        controls_->setHost(host_);
+        controls_->setPort(port_);
+        controls_->setEngineeringContext(engineeringContext_);
     }
 }
 
@@ -261,6 +283,9 @@ bool IedBrowserSessionController::connectToIed() {
     if (utilities_ && utilities_->connected()) {
         utilities_->disconnectFromIed();
     }
+    if (controls_ && (controls_->connected() || controls_->busy())) {
+        controls_->disconnectFromIed();
+    }
     syncConfiguration();
     coordinatorError_.clear();
     const auto started = client_->connectToIed();
@@ -272,6 +297,7 @@ void IedBrowserSessionController::disconnectFromIed() {
     coordinatorError_.clear();
     if (reports_) reports_->disconnectFromIed();
     if (utilities_) utilities_->disconnectFromIed();
+    if (controls_) controls_->disconnectFromIed();
     if (client_) client_->disconnectFromIed();
     emit stateChanged();
 }
@@ -290,4 +316,11 @@ bool IedBrowserSessionController::ensureUtilitiesConnected() {
     if (utilities_->busy()) return false;
     syncConfiguration();
     return utilities_->connectToIed();
+}
+
+bool IedBrowserSessionController::prepareControlObject(const QString& objectReference) {
+    if (!connected() || !controls_) return false;
+    if (controls_->busy()) return false;
+    syncConfiguration();
+    return controls_->prepareObject(objectReference);
 }
