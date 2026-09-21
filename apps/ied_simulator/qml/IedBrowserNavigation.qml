@@ -64,7 +64,7 @@ Rectangle {
 
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 10
+            anchors.leftMargin: 24
             anchors.rightMargin: 8
             spacing: 7
             Label {
@@ -102,7 +102,7 @@ Rectangle {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 56
+            Layout.preferredHeight: 42
             color: root.theme.statusChrome
             border.width: 1
             border.color: root.theme.lineSoft
@@ -111,31 +111,21 @@ Rectangle {
                 anchors.fill: parent
                 anchors.leftMargin: 10
                 anchors.rightMargin: 10
-                anchors.topMargin: 7
-                anchors.bottomMargin: 7
-                spacing: 1
+                anchors.topMargin: 6
+                anchors.bottomMargin: 6
+                spacing: 0
                 Label {
                     Layout.fillWidth: true
-                    text: client.iedName.length ? client.iedName : "IED"
-                    color: root.theme.text
-                    font.pixelSize: 10
+                    text: "ENGINEERING EXPLORER"
+                    color: root.theme.navigationText
+                    font.pixelSize: 9
                     font.weight: Font.DemiBold
-                    elide: Text.ElideRight
                 }
                 Label {
                     Layout.fillWidth: true
-                    text: session.endpoint
-                    color: root.theme.muted
-                    font.pixelSize: 8
-                    elide: Text.ElideMiddle
-                }
-                Label {
-                    Layout.fillWidth: true
-                    text: session.connected
-                          ? client.logicalDeviceCount + " LD · " + client.logicalNodeCount + " LN"
-                          : "Offline"
-                    color: session.connected ? root.theme.green : root.theme.muted
-                    font.pixelSize: 8
+                    text: "One active IED context"
+                    color: root.theme.navigationMuted
+                    font.pixelSize: 7
                 }
             }
         }
@@ -148,6 +138,56 @@ Rectangle {
             ColumnLayout {
                 width: Math.max(0, parent.width)
                 spacing: 0
+
+                Rectangle {
+                    id: iedRoot
+                    Layout.fillWidth: true
+                    implicitHeight: 39
+                    color: root.theme.surfaceSoft
+                    border.width: 1
+                    border.color: root.theme.lineSoft
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 8
+                        spacing: 6
+
+                        Label {
+                            text: "▾"
+                            color: root.theme.accent
+                            font.pixelSize: 10
+                            Layout.preferredWidth: 12
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 0
+                            Label {
+                                Layout.fillWidth: true
+                                text: context.iedName.length ? context.iedName : "IED"
+                                color: root.theme.text
+                                font.pixelSize: 9
+                                font.weight: Font.DemiBold
+                                elide: Text.ElideRight
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: context.loaded
+                                      ? context.authority + " · " + (context.endpoint.length ? context.endpoint : session.endpoint)
+                                      : "No engineering model loaded"
+                                color: root.theme.muted
+                                font.pixelSize: 7
+                                elide: Text.ElideMiddle
+                            }
+                        }
+                        Label {
+                            text: context.online ? "ONLINE" : "OFFLINE"
+                            color: context.online ? root.theme.green : root.theme.muted
+                            font.pixelSize: 7
+                            font.weight: Font.DemiBold
+                        }
+                    }
+                }
 
                 NavButton {
                     targetSection: 5
@@ -374,7 +414,7 @@ Rectangle {
 
                             RowLayout {
                                 anchors.fill: parent
-                                anchors.leftMargin: 18 + model.depth * 12
+                                anchors.leftMargin: 30 + model.depth * 12
                                 anchors.rightMargin: 7
                                 spacing: 4
                                 Label {
