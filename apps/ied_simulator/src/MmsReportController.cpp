@@ -528,7 +528,7 @@ void MmsReportController::setEngineeringContext(IedEngineeringContextController*
 }
 
 bool MmsReportController::connected() const noexcept {
-    return state_ == State::ready || state_ == State::enabling || state_ == State::active ||
+    return state_ == State::ready || state_ == State::authoring || state_ == State::enabling || state_ == State::active ||
         state_ == State::disabling || state_ == State::cleanup_required;
 }
 
