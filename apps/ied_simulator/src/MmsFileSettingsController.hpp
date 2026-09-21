@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "IedEngineeringContextController.hpp"
+
 #include <QObject>
 #include <QThreadPool>
 #include <QVariantList>
@@ -17,6 +19,7 @@ class MmsFileSettingsController : public QObject {
 
     Q_PROPERTY(QString host READ host WRITE setHost NOTIFY configurationChanged)
     Q_PROPERTY(int port READ port WRITE setPort NOTIFY configurationChanged)
+    Q_PROPERTY(IedEngineeringContextController* engineeringContext READ engineeringContext WRITE setEngineeringContext NOTIFY engineeringContextChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY stateChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY stateChanged)
     Q_PROPERTY(bool operationBusy READ operationBusy NOTIFY stateChanged)
@@ -52,6 +55,8 @@ public:
     [[nodiscard]] int port() const noexcept { return port_; }
     void setHost(const QString& value);
     void setPort(int value);
+    [[nodiscard]] IedEngineeringContextController* engineeringContext() const noexcept { return engineeringContext_; }
+    void setEngineeringContext(IedEngineeringContextController* value);
 
     [[nodiscard]] bool connected() const noexcept;
     [[nodiscard]] bool busy() const noexcept;
@@ -93,6 +98,7 @@ public:
 
 signals:
     void configurationChanged();
+    void engineeringContextChanged();
     void stateChanged();
     void filesChanged();
     void transferChanged();
@@ -106,6 +112,7 @@ private:
 
     void appendDiagnostic(const QString& text);
     void clearRemoteState();
+    void adoptEngineeringInventory();
     void refreshSelectedSettingGroup();
     void setOperationBusy(bool value);
     [[nodiscard]] std::shared_ptr<std::stop_source> replaceSessionStopSource();
@@ -113,6 +120,7 @@ private:
 
     QString host_{QStringLiteral("127.0.0.1")};
     int port_{102};
+    IedEngineeringContextController* engineeringContext_{};
     State state_{State::disconnected};
     bool operationBusy_{};
     QString lastError_;
