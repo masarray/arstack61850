@@ -167,8 +167,13 @@ QString controlValueText(const mms::MmsDataValue& value) {
     case mms::MmsDataKind::unsigned_integer:
         return QString::number(static_cast<qulonglong>(std::get<std::uint64_t>(value.value())));
     case mms::MmsDataKind::floating_point: {
-        const auto* number = std::get_if<double>(&value.value());
-        return number ? QString::number(*number, 'g', 12) : QStringLiteral("<float>");
+        if (const auto* number = std::get_if<float>(&value.value())) {
+            return QString::number(static_cast<double>(*number), 'g', 9);
+        }
+        if (const auto* number = std::get_if<double>(&value.value())) {
+            return QString::number(*number, 'g', 12);
+        }
+        return QStringLiteral("<float>");
     }
     case mms::MmsDataKind::visible_string:
     case mms::MmsDataKind::mms_string:
