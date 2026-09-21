@@ -578,6 +578,7 @@ Item {
 
                     SurfaceCard {
                         Layout.fillWidth: true
+                        Layout.preferredHeight: 112
                         theme: root.theme
                         ColumnLayout {
                             anchors.fill: parent
@@ -608,6 +609,7 @@ Item {
 
                     SurfaceCard {
                         Layout.fillWidth: true
+                        Layout.preferredHeight: 112
                         theme: root.theme
                         ColumnLayout {
                             anchors.fill: parent
@@ -631,6 +633,7 @@ Item {
 
                     SurfaceCard {
                         Layout.fillWidth: true
+                        Layout.preferredHeight: 112
                         theme: root.theme
                         ColumnLayout {
                             anchors.fill: parent

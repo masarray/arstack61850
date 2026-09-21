@@ -234,6 +234,7 @@ ApplicationWindow {
                         if (recentHost.length > 0 && recentPort > 0) {
                             browserSession.host = recentHost
                             browserSession.port = recentPort
+                            browserSession.trustedSclPath = ""
                         }
                     }
                     ToolTip.visible: hovered
