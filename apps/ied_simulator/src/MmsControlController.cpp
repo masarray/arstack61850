@@ -44,6 +44,50 @@ QString modelName(const control::ControlModel model) {
     return QStringLiteral("unknown");
 }
 
+QString controlErrorName(const control::ControlError value) {
+    switch (value) {
+    case control::ControlError::no_error: return QStringLiteral("no-error");
+    case control::ControlError::unknown: return QStringLiteral("unknown");
+    case control::ControlError::timeout_test: return QStringLiteral("timeout-test");
+    case control::ControlError::operator_test: return QStringLiteral("operator-test");
+    }
+    return QStringLiteral("unknown");
+}
+
+QString addCauseName(const control::AddCause value) {
+    switch (value) {
+    case control::AddCause::unknown: return QStringLiteral("unknown");
+    case control::AddCause::not_supported: return QStringLiteral("not-supported");
+    case control::AddCause::blocked_by_switching_hierarchy: return QStringLiteral("blocked-by-switching-hierarchy");
+    case control::AddCause::select_failed: return QStringLiteral("select-failed");
+    case control::AddCause::invalid_position: return QStringLiteral("invalid-position");
+    case control::AddCause::position_reached: return QStringLiteral("position-reached");
+    case control::AddCause::parameter_change_in_execution: return QStringLiteral("parameter-change-in-execution");
+    case control::AddCause::step_limit: return QStringLiteral("step-limit");
+    case control::AddCause::blocked_by_mode: return QStringLiteral("blocked-by-mode");
+    case control::AddCause::blocked_by_process: return QStringLiteral("blocked-by-process");
+    case control::AddCause::blocked_by_interlocking: return QStringLiteral("blocked-by-interlocking");
+    case control::AddCause::blocked_by_synchrocheck: return QStringLiteral("blocked-by-synchrocheck");
+    case control::AddCause::command_already_in_execution: return QStringLiteral("command-already-in-execution");
+    case control::AddCause::blocked_by_health: return QStringLiteral("blocked-by-health");
+    case control::AddCause::one_of_n_control: return QStringLiteral("one-of-n-control");
+    case control::AddCause::abortion_by_cancel: return QStringLiteral("abortion-by-cancel");
+    case control::AddCause::time_limit_over: return QStringLiteral("time-limit-over");
+    case control::AddCause::abortion_by_trip: return QStringLiteral("abortion-by-trip");
+    case control::AddCause::object_not_selected: return QStringLiteral("object-not-selected");
+    case control::AddCause::object_already_selected: return QStringLiteral("object-already-selected");
+    case control::AddCause::no_access_authority: return QStringLiteral("no-access-authority");
+    case control::AddCause::ended_with_overshoot: return QStringLiteral("ended-with-overshoot");
+    case control::AddCause::abortion_due_to_deviation: return QStringLiteral("abortion-due-to-deviation");
+    case control::AddCause::abortion_by_communication_loss: return QStringLiteral("abortion-by-communication-loss");
+    case control::AddCause::abortion_by_command: return QStringLiteral("abortion-by-command");
+    case control::AddCause::none: return QStringLiteral("none");
+    case control::AddCause::inconsistent_parameters: return QStringLiteral("inconsistent-parameters");
+    case control::AddCause::locked_by_other_client: return QStringLiteral("locked-by-other-client");
+    }
+    return QStringLiteral("unknown");
+}
+
 QString completionName(const control::ControlCompletionState state) {
     switch (state) {
     case control::ControlCompletionState::accepted: return QStringLiteral("accepted");
@@ -192,7 +236,9 @@ QVariantMap resultMap(const control::ControlActionResult& result) {
     map.insert(QStringLiteral("positiveTermination"), result.positive_termination);
     map.insert(QStringLiteral("controlNumber"), result.control_number);
     map.insert(QStringLiteral("controlError"), static_cast<int>(result.control_error));
+    map.insert(QStringLiteral("controlErrorName"), controlErrorName(result.control_error));
     map.insert(QStringLiteral("addCause"), static_cast<int>(result.add_cause));
+    map.insert(QStringLiteral("addCauseName"), addCauseName(result.add_cause));
     map.insert(QStringLiteral("rawControlError"), static_cast<qlonglong>(result.raw_control_error));
     map.insert(QStringLiteral("rawAddCause"), static_cast<qlonglong>(result.raw_add_cause));
     if (result.mms_failure_code.has_value()) {
