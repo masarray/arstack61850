@@ -38,7 +38,10 @@ ar::iec61850::mms::MmsLiveModelDocument makeLargeModel() {
                     MmsLiveDataAttribute attribute;
                     attribute.attribute_path = object.name + ".DA" + std::to_string(daIndex);
                     attribute.object_reference = object.reference;
-                    attribute.functional_constraint = daIndex == 0 ? "ST" : "MX";
+                    attribute.functional_constraint =
+                        (ldIndex == 0 && lnIndex == 0 && doIndex == 0 && daIndex == 0)
+                            ? "CO"
+                            : (daIndex == 0 ? "ST" : "MX");
                     attribute.mms_item_name =
                         ln.name + "$" + attribute.functional_constraint + "$" +
                         object.name + "$DA" + std::to_string(daIndex);
@@ -107,6 +110,20 @@ int main(int argc, char** argv) {
         return 6;
     }
 
+    if (!model.selectMmsItem(
+            QStringLiteral("LD0"),
+            QStringLiteral("LLN0$CO$DO0$DA0"))) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL control_candidate_select\n";
+        return 9;
+    }
+    const auto controlNode = model.selectedNode();
+    if (controlNode.value(QStringLiteral("controlCandidate")).toBool() != true ||
+        controlNode.value(QStringLiteral("objectReference")).toString() !=
+            QStringLiteral("LD0/LLN0.DO0")) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL canonical_control_root\n";
+        return 10;
+    }
+
     const auto monitoredNode =
         model.nodeForReference(QStringLiteral("LD4/LLN19$MX$DO99$DA4"));
     if (monitoredNode.value(QStringLiteral("reference")).toString() !=
@@ -137,5 +154,5 @@ int main(int argc, char** argv) {
               << " filter_ms=" << filterMs
               << " select_ms=" << selectMs
               << " eager_expansion=false\n";
-    return passes ? 0 : 9;
+    return passes ? 0 : 11;
 }
