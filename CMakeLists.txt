@@ -17,6 +17,7 @@ add_library(ariec61850_core
     src/time_sync/ptp.cpp
     src/time_sync/ptp_monitor.cpp
     src/capture/pcap.cpp
+    src/capture/passive_mms.cpp
     src/goose/retransmission_schedule.cpp
     src/goose/pdu_codec.cpp
     src/goose/frame_codec.cpp
@@ -315,6 +316,11 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_warnings(ariec61850_comtrade_tests)
     ariec61850_apply_sanitizers(ariec61850_comtrade_tests)
     add_test(NAME ariec61850_comtrade_tests COMMAND ariec61850_comtrade_tests)
+
+    add_executable(ariec61850_passive_mms_tests tests/test_passive_mms.cpp)
+    target_link_libraries(ariec61850_passive_mms_tests PRIVATE ARIEC61850::core)
+    ariec61850_apply_sanitizers(ariec61850_passive_mms_tests)
+    add_test(NAME ariec61850_passive_mms_tests COMMAND ariec61850_passive_mms_tests)
 
     add_executable(ariec61850_osi_transport_tests tests/test_osi_transport.cpp)
     target_link_libraries(ariec61850_osi_transport_tests PRIVATE ARIEC61850::core)

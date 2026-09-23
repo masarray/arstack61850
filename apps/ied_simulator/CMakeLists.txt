@@ -79,6 +79,8 @@ qt_add_qml_module(arstack_ied_simulator
         src/SclWorkspaceController.hpp
         src/GooseMonitorController.cpp
         src/GooseMonitorController.hpp
+        src/MmsPassiveSnifferController.cpp
+        src/MmsPassiveSnifferController.hpp
         src/ProductHardeningController.cpp
         src/ProductHardeningController.hpp
     QML_FILES
@@ -105,6 +107,7 @@ qt_add_qml_module(arstack_ied_simulator
         qml/BrowserDataSetAuthoringDialog.qml
         qml/BrowserReportAuthoringDialog.qml
         qml/SnifferWorkspace.qml
+        qml/MmsSnifferWorkspace.qml
         qml/MmsClientWorkspace.qml
         qml/ReportsWorkspace.qml
         qml/FilesWorkspace.qml

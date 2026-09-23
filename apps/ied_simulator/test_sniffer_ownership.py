@@ -48,6 +48,8 @@ def main() -> int:
         forbid(goose, token, "GooseWorkspace")
 
     require(sniffer, "GooseMonitorController monitor", "SnifferWorkspace")
+    require(sniffer, "MmsPassiveSnifferController", "SnifferWorkspace")
+    require(sniffer, "MmsSnifferWorkspace", "SnifferWorkspace")
     require(goose, "GooseMonitorController monitor", "GooseWorkspace")
     require(goose, "root.monitor.startCapture()", "GooseWorkspace")
     require(goose, "root.monitor.stopCapture()", "GooseWorkspace")
@@ -68,7 +70,7 @@ def main() -> int:
     print(
         "SNIFFER_OWNERSHIP_PASS "
         "sniffer=passive goose_capture=true pcap=true "
-        "publisher=simulator_commissioning mms_sniffer=false"
+        "publisher=simulator_commissioning mms_sniffer=passive"
     )
     return 0
 
