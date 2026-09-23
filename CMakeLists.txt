@@ -17,6 +17,7 @@ add_library(ariec61850_core
     src/time_sync/ptp.cpp
     src/time_sync/ptp_monitor.cpp
     src/capture/pcap.cpp
+    src/capture/passive_mms.cpp
     src/goose/retransmission_schedule.cpp
     src/goose/pdu_codec.cpp
     src/goose/frame_codec.cpp
