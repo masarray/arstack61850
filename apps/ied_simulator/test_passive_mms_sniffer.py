@@ -12,7 +12,7 @@ decoder, receiver, controller, qml, sniffer, cmake = [
 
 required = {
     "decoder": (decoder, (
-        "PassiveMmsDecoder::ingest", "TpktFrameCodec::decode", "CotpFrameCodec::decode",
+        "PassiveMmsDecoder::ingest", "stream.tpkt.try_pop", "CotpFrameCodec::decode",
         "SessionCodec::try_decode_data_transfer", "MmsPduCodec::decode_envelope",
         "decoded_reports", "out_of_order", "retransmissions",
         "maximum_pending_segments", "maximum_flows", "maximum_events",
