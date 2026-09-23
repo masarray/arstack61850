@@ -74,7 +74,7 @@ for token in (
     "reports.deleteDynamicDataSet(",
     "id: createConfirm",
     "id: deleteDialog",
-    "association-owned",
+    "Only DataSets created by this live report association",
 ):
     require(dataset_dialog, token, "DataSet authoring dialog")
 
