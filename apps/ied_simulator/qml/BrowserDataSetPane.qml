@@ -36,6 +36,40 @@ Rectangle {
             wrapMode: Text.WrapAnywhere
         }
 
+        RowLayout {
+            Layout.fillWidth: true
+            visible: reports.selectedDataSetIndex >= 0
+                     && reports.selectedDataSetIndex < reports.dataSets.length
+            Rectangle {
+                Layout.preferredWidth: 104
+                Layout.preferredHeight: 22
+                radius: 11
+                color: reports.dataSets[reports.selectedDataSetIndex].dynamicOwned === true
+                       ? theme.greenSoft : theme.surface
+                border.width: 1
+                border.color: reports.dataSets[reports.selectedDataSetIndex].dynamicOwned === true
+                              ? theme.green : theme.lineSoft
+                Label {
+                    anchors.centerIn: parent
+                    text: reports.dataSets[reports.selectedDataSetIndex].dynamicOwned === true
+                          ? "DYNAMIC OWNED" : "STATIC / READ-ONLY"
+                    color: reports.dataSets[reports.selectedDataSetIndex].dynamicOwned === true
+                           ? theme.green : theme.muted
+                    font.pixelSize: 7
+                    font.weight: Font.Bold
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                text: reports.dataSets[reports.selectedDataSetIndex].dynamicOwned === true
+                      ? "Created and verified on this live association; eligible for owned-only delete."
+                      : "Membership is immutable in Browser authoring."
+                color: theme.muted
+                font.pixelSize: 8
+                elide: Text.ElideRight
+            }
+        }
+
         Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: theme.lineSoft }
 
         RowLayout {

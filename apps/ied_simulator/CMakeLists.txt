@@ -102,6 +102,8 @@ qt_add_qml_module(arstack_ied_simulator
         qml/BrowserGoosePane.qml
         qml/BrowserGlobalDataPane.qml
         qml/BrowserControlDialog.qml
+        qml/BrowserDataSetAuthoringDialog.qml
+        qml/BrowserReportAuthoringDialog.qml
         qml/SnifferWorkspace.qml
         qml/MmsClientWorkspace.qml
         qml/ReportsWorkspace.qml

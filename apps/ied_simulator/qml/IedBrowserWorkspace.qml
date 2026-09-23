@@ -416,6 +416,16 @@ Item {
                         }
 
                         Button {
+                            visible: root.activeSection === 0
+                            text: "Add to DataSet draft…"
+                            enabled: root.selectedModelNode.kind === "DA"
+                                     && root.selectedModelNode.readable === true
+                                     && root.selectedModelNode.mmsDomain
+                                     && root.selectedModelNode.mmsItem
+                            onClicked: dataSetAuthorDialog.addSelected(root.selectedModelNode)
+                        }
+
+                        Button {
                             visible: root.activeSection === 1
                             text: "Add to Global Data"
                             enabled: reports.selectedDataSetIndex >= 0
@@ -429,11 +439,43 @@ Item {
                         }
 
                         Button {
+                            visible: root.activeSection === 1
+                            text: "New dynamic…"
+                            enabled: reports.connected && !reports.busy && !reports.active
+                            onClicked: dataSetAuthorDialog.newDraft()
+                        }
+
+                        Button {
+                            visible: root.activeSection === 1
+                            text: "Delete owned…"
+                            enabled: reports.connected && !reports.busy && !reports.active
+                                     && reports.selectedDataSetIndex >= 0
+                                     && reports.selectedDataSetIndex < reports.dataSets.length
+                                     && reports.dataSets[reports.selectedDataSetIndex].dynamicOwned === true
+                            onClicked: dataSetAuthorDialog.requestDelete(
+                                reports.dataSets[reports.selectedDataSetIndex])
+                        }
+
+                        Button {
                             visible: root.activeSection === 2
                             text: "Enable + GI"
                             enabled: reports.connected && !reports.busy && !reports.active
                                      && reports.selectedRcbIndex >= 0
+                                     && reports.selectedRcb.dynamicBinding !== true
                             onClicked: reports.enableSelected(true)
+                            ToolTip.visible: hovered
+                            ToolTip.text: reports.selectedRcb.dynamicBinding === true
+                                          ? "Restore the canonical static binding through Author… before using the legacy static enable path."
+                                          : "Enable the selected static RCB and request GI."
+                        }
+
+                        Button {
+                            visible: root.activeSection === 2
+                            text: "Author…"
+                            enabled: reports.connected && !reports.busy && !reports.active
+                                     && reports.selectedRcbIndex >= 0
+                                     && reports.dataSets.length > 0
+                            onClicked: reportAuthorDialog.openForSelected()
                         }
 
                         Button {
@@ -555,6 +597,18 @@ Item {
                     theme: root.theme
                     session: root.session
                     controls: root.controls
+                }
+
+                BrowserDataSetAuthoringDialog {
+                    id: dataSetAuthorDialog
+                    theme: root.theme
+                    reports: root.reports
+                }
+
+                BrowserReportAuthoringDialog {
+                    id: reportAuthorDialog
+                    theme: root.theme
+                    reports: root.reports
                 }
             }
         }

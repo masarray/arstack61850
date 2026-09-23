@@ -180,7 +180,18 @@ int main(int argc, char* argv[]) {
     const bool noConnectionEnableRejected = !negative.enableSelected(true);
     const bool inactiveDisableRejected = !negative.disableSelected();
     const bool invalidSelectionRejected = !negative.selectRcb(0) && !negative.selectDataSet(0);
-    if (!noConnectionEnableRejected || !inactiveDisableRejected || !invalidSelectionRejected) {
+    const bool authoredEnableRejected = !negative.enableSelectedAuthored(
+        QStringLiteral("LD0/LLN0.Test"),
+        {QStringLiteral("data-change")},
+        {QStringLiteral("sequence-number")},
+        false);
+    const bool dynamicCreateRejected = !negative.createDynamicDataSet(
+        QStringLiteral("LD0/LLN0.Test"), {});
+    const bool dynamicDeleteRejected = !negative.deleteDynamicDataSet(
+        QStringLiteral("LD0/LLN0.Test"));
+    if (!noConnectionEnableRejected || !inactiveDisableRejected ||
+        !invalidSelectionRejected || !authoredEnableRejected ||
+        !dynamicCreateRejected || !dynamicDeleteRejected) {
         qCritical() << "REPORTS_WORKBENCH_FAIL negative_preconditions";
         return 3;
     }
@@ -231,6 +242,18 @@ int main(int argc, char* argv[]) {
         qCritical() << "REPORTS_WORKBENCH_FAIL inventory"
                     << dataSets.size() << reportControls.size() << staticCandidates.size();
         return 8;
+    }
+    for (const auto& value : dataSets) {
+        const auto item = value.toMap();
+        if (item.value(QStringLiteral("dynamicOwned")).toBool() ||
+            !item.value(QStringLiteral("immutable")).toBool()) {
+            qCritical() << "REPORTS_WORKBENCH_FAIL static_dataset_mutability";
+            return 27;
+        }
+    }
+    if (!reports.ownedDynamicDataSets().isEmpty()) {
+        qCritical() << "REPORTS_WORKBENCH_FAIL unexpected_dynamic_ownership";
+        return 28;
     }
     if (!verifyIedScoutIndexedInventory(sclPath, reportControls)) {
         QStringList actual;
@@ -356,6 +379,44 @@ int main(int argc, char* argv[]) {
         return 18;
     }
 
+    if (selectEligibleRcb(reports, false, exactUrcb) < 0) {
+        qCritical() << "REPORTS_WORKBENCH_FAIL authored_urcb_select";
+        return 29;
+    }
+    const auto authoredDataSet =
+        reports.selectedRcb().value(QStringLiteral("dataSet")).toString();
+    const QStringList authoredTriggers{
+        QStringLiteral("data-change"),
+        QStringLiteral("quality-change"),
+        QStringLiteral("integrity"),
+        QStringLiteral("general-interrogation")};
+    const QStringList authoredOptional{
+        QStringLiteral("sequence-number"),
+        QStringLiteral("report-time-stamp"),
+        QStringLiteral("reason-for-inclusion"),
+        QStringLiteral("data-set-name"),
+        QStringLiteral("data-reference"),
+        QStringLiteral("configuration-revision")};
+    if (!reports.enableSelectedAuthored(
+            authoredDataSet,
+            authoredTriggers,
+            authoredOptional,
+            true) ||
+        !waitUntil([&reports] { return reports.active() && !reports.busy(); }, 8'000) ||
+        !waitUntil([&reports] { return reports.receivedReportCount() > 0; }, 5'000)) {
+        qCritical().noquote() << "REPORTS_WORKBENCH_FAIL authored_static_enable"
+                              << reports.lastError()
+                              << reports.diagnosticsText();
+        return 30;
+    }
+    if (!reports.disableSelected() ||
+        !waitUntil([&reports] { return !reports.active() && !reports.busy(); }, 6'000) ||
+        reports.cleanupRequired()) {
+        qCritical().noquote() << "REPORTS_WORKBENCH_FAIL authored_static_cleanup"
+                              << reports.lastError();
+        return 31;
+    }
+
     qulonglong brcbGiReports = 0;
     if (iedScoutFixture) {
         if (selectEligibleRcb(reports, true, exactBrcb) < 0 ||
@@ -409,7 +470,9 @@ int main(int argc, char* argv[]) {
         << "brcb_inventory=pass"
         << "entryid_indicator=pass"
         << "cleanup=pass"
-        << "active_reconnect_cleanup=pass";
+        << "active_reconnect_cleanup=pass"
+        << "authored_static_rcb=pass"
+        << "static_dataset_immutable=pass";
     qInfo().noquote()
         << "REPORTS_WORKBENCH_NEGATIVE_PASS"
         << "no_connection_enable=rejected"
@@ -417,6 +480,7 @@ int main(int argc, char* argv[]) {
         << "invalid_selection=rejected"
         << "strict_single_candidate=true"
         << "idle_poll_nonfatal=true"
-        << "reconnect_reacquire=true";
+        << "reconnect_reacquire=true"
+        << "dynamic_offline_actions=rejected";
     return 0;
 }

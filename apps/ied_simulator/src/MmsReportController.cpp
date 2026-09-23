@@ -2,8 +2,10 @@
 #include "MmsReportController.hpp"
 
 #include "ariec61850/mms/data_codec.hpp"
+#include "ariec61850/mms/dynamic_data_set.hpp"
 #include "ariec61850/mms/live_discovery.hpp"
 #include "ariec61850/mms/rcb_selection.hpp"
+#include "ariec61850/mms/report_subscription_runtime.hpp"
 #include "ariec61850/mms/static_report_session.hpp"
 
 #include <QByteArray>
@@ -11,6 +13,8 @@
 #include <QPointer>
 
 #include <algorithm>
+#include <array>
+#include <set>
 #include <chrono>
 #include <optional>
 #include <span>
@@ -60,6 +64,112 @@ bool sameDataSetReference(const QString& left, const QString& right) {
     } catch (...) {
         return false;
     }
+}
+
+std::vector<std::uint8_t> triggerPayload(const QStringList& names) {
+    static const std::array<std::pair<QStringView, std::uint8_t>, 5> bits{{
+        {u"data-change", 0x40U},
+        {u"quality-change", 0x20U},
+        {u"data-update", 0x10U},
+        {u"integrity", 0x08U},
+        {u"general-interrogation", 0x04U},
+    }};
+    std::set<QString> unique;
+    std::uint8_t value{};
+    for (const auto& raw : names) {
+        const auto name = raw.trimmed();
+        if (name.isEmpty() || !unique.insert(name).second) continue;
+        const auto it = std::find_if(bits.begin(), bits.end(), [&name](const auto& item) {
+            return item.first.toString() == name;
+        });
+        if (it == bits.end()) {
+            throw std::invalid_argument(
+                "Unknown IEC 61850 TrgOps name: " + name.toStdString());
+        }
+        value = static_cast<std::uint8_t>(value | it->second);
+    }
+    return {value};
+}
+
+std::vector<std::uint8_t> optionalPayload(const QStringList& names) {
+    struct Bit final {
+        QStringView name;
+        int byte;
+        std::uint8_t mask;
+    };
+    static const std::array<Bit, 9> bits{{
+        {u"sequence-number", 0, 0x40U},
+        {u"report-time-stamp", 0, 0x20U},
+        {u"reason-for-inclusion", 0, 0x10U},
+        {u"data-set-name", 0, 0x08U},
+        {u"data-reference", 0, 0x04U},
+        {u"buffer-overflow", 0, 0x02U},
+        {u"entry-id", 0, 0x01U},
+        {u"configuration-revision", 1, 0x80U},
+        {u"segmentation", 1, 0x40U},
+    }};
+    std::set<QString> unique;
+    std::vector<std::uint8_t> value(2U, 0U);
+    for (const auto& raw : names) {
+        const auto name = raw.trimmed();
+        if (name.isEmpty() || !unique.insert(name).second) continue;
+        const auto it = std::find_if(bits.begin(), bits.end(), [&name](const auto& item) {
+            return item.name.toString() == name;
+        });
+        if (it == bits.end()) {
+            throw std::invalid_argument(
+                "Unknown IEC 61850 OptFlds name: " + name.toStdString());
+        }
+        value[static_cast<std::size_t>(it->byte)] =
+            static_cast<std::uint8_t>(
+                value[static_cast<std::size_t>(it->byte)] | it->mask);
+    }
+    return value;
+}
+
+QString bitNamesText(const QStringList& names) {
+    return names.isEmpty() ? QStringLiteral("none") : names.join(QStringLiteral(", "));
+}
+
+mms::MmsDataSetCandidate dataSetCandidateFromReference(const std::string& reference) {
+    const auto objectName = mms::MmsDataSetDirectoryCodec::parse_data_set_reference(reference);
+    if (objectName.kind != mms::MmsObjectNameKind::domain_specific ||
+        objectName.domain.empty() || objectName.item.empty()) {
+        throw std::invalid_argument("Dynamic DataSet requires a domain-specific reference.");
+    }
+    const auto separator = objectName.item.find('$');
+    if (separator == std::string::npos || separator == 0U ||
+        separator + 1U >= objectName.item.size()) {
+        throw std::invalid_argument(
+            "Dynamic DataSet reference must resolve to LD/LN.DataSetName.");
+    }
+    mms::MmsDataSetCandidate candidate;
+    candidate.domain = objectName.domain;
+    candidate.logical_node = objectName.item.substr(0U, separator);
+    candidate.name = objectName.item.substr(separator + 1U);
+    candidate.reference = mms::MmsDataSetDirectoryCodec::to_iec_reference(objectName);
+    candidate.raw_mms_name = objectName.item;
+    return candidate;
+}
+
+QVariantList markOwnedDataSets(
+    QVariantList dataSets,
+    const QStringList& ownedReferences) {
+    for (int row = 0; row < dataSets.size(); ++row) {
+        auto map = dataSets.at(row).toMap();
+        const auto reference = map.value(QStringLiteral("reference")).toString();
+        bool owned = false;
+        for (const auto& candidate : ownedReferences) {
+            if (sameDataSetReference(reference, candidate)) {
+                owned = true;
+                break;
+            }
+        }
+        map.insert(QStringLiteral("dynamicOwned"), owned);
+        map.insert(QStringLiteral("immutable"), !owned);
+        dataSets[row] = map;
+    }
+    return dataSets;
 }
 
 QVariantMap candidateMap(const mms::MmsRcbCandidateEvaluation& candidate) {
@@ -118,6 +228,8 @@ DiscoveryUi buildDiscoveryUi(
         }
         map.insert(QStringLiteral("directoryAvailable"), directoryAvailable);
         map.insert(QStringLiteral("deletable"), deletable);
+        map.insert(QStringLiteral("dynamicOwned"), false);
+        map.insert(QStringLiteral("immutable"), true);
         map.insert(QStringLiteral("memberCount"), members.size());
         map.insert(QStringLiteral("members"), members);
         ui.dataSets.push_back(map);
@@ -144,6 +256,7 @@ DiscoveryUi buildDiscoveryUi(
             if (evidence.state) {
                 const auto& state = *evidence.state;
                 map.insert(QStringLiteral("dataSet"), QString::fromStdString(state.data_set_reference));
+                map.insert(QStringLiteral("canonicalDataSet"), QString::fromStdString(state.data_set_reference));
                 map.insert(QStringLiteral("reportId"), QString::fromStdString(state.report_id));
                 map.insert(QStringLiteral("confRev"), numberText(state.configuration_revision));
                 map.insert(QStringLiteral("bufTm"), numberText(state.buffer_time_ms));
@@ -334,11 +447,11 @@ QString reportValueText(const mms::MmsReportValue& item) {
         .arg(reference, value, reasons.isEmpty() ? QString{} : QStringLiteral("  · ") + reasons);
 }
 
-ReportUi buildReportUi(const mms::MmsStaticReportSessionSnapshot& snapshot) {
+ReportUi buildSubscriptionUi(
+    const mms::MmsReportSubscriptionSnapshot& subscription,
+    const bool active) {
     ReportUi ui;
-    ui.active = snapshot.active;
-    if (!snapshot.subscription) return ui;
-    const auto& subscription = *snapshot.subscription;
+    ui.active = active;
     ui.receivedCount = subscription.received_reports;
     ui.cleanupRequired = subscription.cleanup_required;
     for (const auto& event : subscription.events) {
@@ -346,8 +459,10 @@ ReportUi buildReportUi(const mms::MmsStaticReportSessionSnapshot& snapshot) {
     }
     while (ui.events.size() > 256) ui.events.removeFirst();
 
-    for (auto streamIt = subscription.streams.rbegin(); streamIt != subscription.streams.rend(); ++streamIt) {
-        for (auto frameIt = streamIt->recent_frames.rbegin(); frameIt != streamIt->recent_frames.rend(); ++frameIt) {
+    for (auto streamIt = subscription.streams.rbegin();
+         streamIt != subscription.streams.rend(); ++streamIt) {
+        for (auto frameIt = streamIt->recent_frames.rbegin();
+             frameIt != streamIt->recent_frames.rend(); ++frameIt) {
             if (ui.reports.size() >= kMaximumVisibleReports) break;
             const auto& frame = *frameIt;
             QVariantMap map;
@@ -374,12 +489,30 @@ ReportUi buildReportUi(const mms::MmsStaticReportSessionSnapshot& snapshot) {
     }
     return ui;
 }
+
+ReportUi buildReportUi(const mms::MmsStaticReportSessionSnapshot& snapshot) {
+    if (!snapshot.subscription) {
+        ReportUi ui;
+        ui.active = snapshot.active;
+        return ui;
+    }
+    return buildSubscriptionUi(*snapshot.subscription, snapshot.active);
+}
+
+ReportUi buildReportUi(const mms::MmsReportSubscriptionSnapshot& snapshot) {
+    return buildSubscriptionUi(
+        snapshot,
+        snapshot.state == mms::MmsReportSubscriptionState::active);
+}
+
 } // namespace
 
 struct MmsReportController::WorkerState final {
     std::unique_ptr<mms::MmsTcpLiveDiscoverySession> session;
     std::shared_ptr<mms::MmsLiveDiscoveryResult> discovery;
     std::unique_ptr<mms::MmsStaticReportSessionRuntime> report;
+    std::unique_ptr<mms::MmsReportSubscriptionRuntime> authoredReport;
+    std::unique_ptr<mms::MmsDynamicDataSetRuntime> dynamicDataSets;
 };
 
 MmsReportController::MmsReportController(QObject* parent)
@@ -430,7 +563,7 @@ void MmsReportController::setEngineeringContext(IedEngineeringContextController*
 }
 
 bool MmsReportController::connected() const noexcept {
-    return state_ == State::ready || state_ == State::enabling || state_ == State::active ||
+    return state_ == State::ready || state_ == State::authoring || state_ == State::enabling || state_ == State::active ||
         state_ == State::disabling || state_ == State::cleanup_required;
 }
 
@@ -445,6 +578,7 @@ QString MmsReportController::stateText() const {
     case State::connecting: return QStringLiteral("Connecting");
     case State::discovering: return QStringLiteral("Attaching reports");
     case State::ready: return QStringLiteral("Ready");
+    case State::authoring: return QStringLiteral("Authoring DataSet");
     case State::enabling: return QStringLiteral("Enabling RCB");
     case State::active: return QStringLiteral("Report subscription active");
     case State::disabling: return QStringLiteral("Releasing RCB");
@@ -476,6 +610,7 @@ void MmsReportController::clearInventory() {
     reportControls_.clear();
     staticCandidates_.clear();
     dynamicCandidates_.clear();
+    ownedDynamicDataSets_.clear();
     associationProfile_.clear();
     selectedRcbIndex_ = -1;
     selectedDataSetIndex_ = -1;
@@ -551,7 +686,10 @@ bool MmsReportController::connectToIed() {
     ioPool_.start([self, worker, stop, generation, requestedHost, requestedPort, contextModel] {
         try {
             if (worker->report) worker->report->stop();
+            if (worker->authoredReport) worker->authoredReport->stop();
             worker->report.reset();
+            worker->authoredReport.reset();
+            worker->dynamicDataSets.reset();
             if (worker->session) worker->session->disconnect();
             worker->session.reset();
             worker->discovery.reset();
@@ -593,6 +731,11 @@ bool MmsReportController::connectToIed() {
             const auto profile = QString::fromStdString(
                 session->association().active_association_profile());
             const auto ui = buildDiscoveryUi(*discovery, profile);
+            mms::MmsDynamicDataSetOptions dynamicOptions;
+            dynamicOptions.maximum_members = 64U;
+            dynamicOptions.verify_after_create = true;
+            worker->dynamicDataSets = std::make_unique<mms::MmsDynamicDataSetRuntime>(
+                session->association(), dynamicOptions);
             worker->discovery = discovery;
             worker->session = std::move(session);
 
@@ -619,6 +762,8 @@ bool MmsReportController::connectToIed() {
         } catch (const std::exception& exception) {
             if (worker->session) worker->session->disconnect();
             worker->report.reset();
+            worker->authoredReport.reset();
+            worker->dynamicDataSets.reset();
             worker->session.reset();
             worker->discovery.reset();
             if (self) {
@@ -661,10 +806,20 @@ void MmsReportController::disconnectFromIed() {
         if (worker->report) {
             worker->report->stop(cleanupStop->get_token());
             const auto snapshot = worker->report->snapshot();
-            cleanupRequired = snapshot.subscription && snapshot.subscription->cleanup_required;
+            cleanupRequired =
+                snapshot.subscription &&
+                snapshot.subscription->cleanup_required;
+        }
+        if (worker->authoredReport) {
+            worker->authoredReport->stop(cleanupStop->get_token());
+            cleanupRequired =
+                cleanupRequired ||
+                worker->authoredReport->snapshot().cleanup_required;
         }
         if (worker->session) worker->session->disconnect(cleanupStop->get_token());
         worker->report.reset();
+        worker->authoredReport.reset();
+        worker->dynamicDataSets.reset();
         worker->discovery.reset();
         worker->session.reset();
         if (cleanupRequired && self) {
@@ -720,6 +875,678 @@ bool MmsReportController::selectDataSet(const int row) {
     return true;
 }
 
+bool MmsReportController::createDynamicDataSet(
+    const QString& dataSetReference,
+    const QVariantList& canonicalMembers) {
+    if (!connected() || busy() || active_ || cleanupRequired_) return false;
+    if (!engineeringContext_ || !engineeringContext_->loaded() ||
+        engineeringContext_->selectionRequired()) {
+        lastError_ = QStringLiteral(
+            "Dynamic DataSet authoring requires one active canonical engineering context.");
+        emit stateChanged();
+        return false;
+    }
+    const auto requestedReference = dataSetReference.trimmed();
+    if (requestedReference.isEmpty()) {
+        lastError_ = QStringLiteral("Dynamic DataSet reference is required.");
+        emit stateChanged();
+        return false;
+    }
+    if (canonicalMembers.isEmpty() || canonicalMembers.size() > 64) {
+        lastError_ = QStringLiteral(
+            "Dynamic DataSet requires 1..64 canonical DataAttribute members.");
+        emit stateChanged();
+        return false;
+    }
+
+    std::vector<mms::MmsObjectName> members;
+    QStringList canonicalReferences;
+    QStringList functionalConstraints;
+    std::set<std::string, std::less<>> seen;
+    members.reserve(static_cast<std::size_t>(canonicalMembers.size()));
+    try {
+        for (const auto& value : canonicalMembers) {
+            const auto supplied = value.toMap();
+            const auto reference = supplied.value(QStringLiteral("reference")).toString().trimmed();
+            if (reference.isEmpty()) {
+                throw std::invalid_argument(
+                    "Dynamic DataSet member has no canonical DataAttribute reference.");
+            }
+            const auto canonical =
+                engineeringContext_->treeModel()->nodeForReference(reference);
+            if (canonical.value(QStringLiteral("kind")).toString() != QStringLiteral("DA") ||
+                !canonical.value(QStringLiteral("readable")).toBool()) {
+                throw std::invalid_argument(
+                    "Dynamic DataSet members must resolve to readable canonical DataAttributes.");
+            }
+            const auto domain =
+                canonical.value(QStringLiteral("mmsDomain")).toString().trimmed();
+            const auto item =
+                canonical.value(QStringLiteral("mmsItem")).toString().trimmed();
+            if (domain.isEmpty() || item.isEmpty()) {
+                throw std::invalid_argument(
+                    "Canonical DataAttribute has no exact MMS domain/item identity.");
+            }
+            const auto suppliedDomain =
+                supplied.value(QStringLiteral("mmsDomain")).toString().trimmed();
+            const auto suppliedItem =
+                supplied.value(QStringLiteral("mmsItem")).toString().trimmed();
+            if ((!suppliedDomain.isEmpty() && suppliedDomain != domain) ||
+                (!suppliedItem.isEmpty() && suppliedItem != item)) {
+                throw std::invalid_argument(
+                    "Dynamic DataSet member MMS identity differs from the canonical engineering context.");
+            }
+            const auto key = (domain + QLatin1Char('/') + item).toStdString();
+            if (!seen.insert(key).second) {
+                throw std::invalid_argument(
+                    "Dynamic DataSet contains a duplicate MMS member.");
+            }
+            members.push_back(mms::MmsObjectName::domain_specific(
+                domain.toStdString(), item.toStdString()));
+            canonicalReferences.push_back(reference);
+            functionalConstraints.push_back(
+                canonical.value(QStringLiteral("functionalConstraint")).toString());
+        }
+    } catch (const std::exception& exception) {
+        lastError_ = QString::fromUtf8(exception.what());
+        emit stateChanged();
+        return false;
+    }
+
+    const auto generation = generation_;
+    const auto stop = stopSource_;
+    const auto worker = workerState_;
+    const QPointer<MmsReportController> self{this};
+    operationBusy_ = true;
+    state_ = State::authoring;
+    lastError_.clear();
+    appendDiagnostic(
+        QStringLiteral("Define dynamic DataSet requested · %1 · %2 member(s)")
+            .arg(requestedReference)
+            .arg(members.size()));
+    emit stateChanged();
+
+    ioPool_.start([
+        self, worker, stop, generation, requestedReference,
+        members = std::move(members), canonicalReferences,
+        functionalConstraints
+    ]() mutable {
+        try {
+            if (!worker->session || !worker->session->associated() ||
+                !worker->discovery || !worker->dynamicDataSets) {
+                throw std::runtime_error(
+                    "Dynamic DataSet create requires the active Browser report association.");
+            }
+            const auto created = worker->dynamicDataSets->create(
+                requestedReference.toStdString(), members, stop->get_token());
+            if (!created.verified_directory.has_value()) {
+                throw std::runtime_error(
+                    "Dynamic DataSet create returned no verified directory.");
+            }
+
+            auto candidate = dataSetCandidateFromReference(created.data_set_reference);
+            mms::MmsDataSetDirectoryEvidence evidence;
+            evidence.candidate = candidate;
+            evidence.directory = *created.verified_directory;
+            for (std::size_t index = 0U;
+                 index < evidence.directory->members.size() &&
+                 index < static_cast<std::size_t>(canonicalReferences.size());
+                 ++index) {
+                auto& member = evidence.directory->members[index];
+                member.user_reference =
+                    canonicalReferences.at(static_cast<int>(index)).toStdString();
+                member.functional_constraint =
+                    functionalConstraints.at(static_cast<int>(index)).toStdString();
+                member.logical_node = candidate.logical_node;
+            }
+
+            auto& inventory = worker->discovery->report_inventory.data_sets;
+            inventory.erase(
+                std::remove_if(
+                    inventory.begin(), inventory.end(),
+                    [&candidate](const auto& item) {
+                        return item.reference == candidate.reference;
+                    }),
+                inventory.end());
+            inventory.push_back(candidate);
+
+            auto& directories = worker->discovery->data_set_directories;
+            directories.erase(
+                std::remove_if(
+                    directories.begin(), directories.end(),
+                    [&candidate](const auto& item) {
+                        return item.candidate.reference == candidate.reference;
+                    }),
+                directories.end());
+            directories.push_back(std::move(evidence));
+
+            QStringList owned;
+            for (const auto& reference :
+                 worker->dynamicDataSets->owned_data_sets()) {
+                owned.push_back(QString::fromStdString(reference));
+            }
+            const auto profile = QString::fromStdString(
+                worker->session->association().active_association_profile());
+            auto ui = buildDiscoveryUi(*worker->discovery, profile);
+            ui.dataSets = markOwnedDataSets(ui.dataSets, owned);
+            const auto normalized =
+                QString::fromStdString(created.data_set_reference);
+
+            if (self) {
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, generation, ui, owned, normalized] {
+                        if (!self || self->generation_ != generation) return;
+                        self->operationBusy_ = false;
+                        self->state_ = State::ready;
+                        self->lastError_.clear();
+                        self->dataSets_ = ui.dataSets;
+                        self->staticCandidates_ = ui.staticCandidates;
+                        self->dynamicCandidates_ = ui.dynamicCandidates;
+                        self->associationProfile_ = ui.associationProfile;
+                        self->ownedDynamicDataSets_ = owned;
+                        for (int row = 0; row < self->dataSets_.size(); ++row) {
+                            if (sameDataSetReference(
+                                    self->dataSets_.at(row).toMap()
+                                        .value(QStringLiteral("reference"))
+                                        .toString(),
+                                    normalized)) {
+                                self->selectedDataSetIndex_ = row;
+                                break;
+                            }
+                        }
+                        self->refreshSelection();
+                        self->appendDiagnostic(
+                            QStringLiteral(
+                                "Dynamic DataSet created + verified · %1")
+                                .arg(normalized));
+                        emit self->inventoryChanged();
+                        emit self->stateChanged();
+                    },
+                    Qt::QueuedConnection);
+            }
+        } catch (const std::exception& exception) {
+            if (self) {
+                const auto message = QString::fromUtf8(exception.what());
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, generation, message] {
+                        if (!self || self->generation_ != generation) return;
+                        self->operationBusy_ = false;
+                        self->state_ = State::ready;
+                        self->lastError_ = message;
+                        self->appendDiagnostic(
+                            QStringLiteral("Dynamic DataSet create failed · %1")
+                                .arg(message));
+                        emit self->stateChanged();
+                    },
+                    Qt::QueuedConnection);
+            }
+        }
+    });
+    return true;
+}
+
+bool MmsReportController::deleteDynamicDataSet(
+    const QString& dataSetReference) {
+    if (!connected() || busy() || active_ || cleanupRequired_) return false;
+    const auto reference = dataSetReference.trimmed();
+    if (reference.isEmpty()) return false;
+
+    bool owned = false;
+    for (const auto& item : ownedDynamicDataSets_) {
+        if (sameDataSetReference(reference, item)) {
+            owned = true;
+            break;
+        }
+    }
+    if (!owned) {
+        lastError_ = QStringLiteral(
+            "Refusing to delete a DataSet not created by this report association.");
+        emit stateChanged();
+        return false;
+    }
+    for (const auto& item : reportControls_) {
+        const auto map = item.toMap();
+        if (sameDataSetReference(
+                reference,
+                map.value(QStringLiteral("dataSet")).toString())) {
+            lastError_ = QStringLiteral(
+                "Rebind the RCB away from this dynamic DataSet before deleting it.");
+            emit stateChanged();
+            return false;
+        }
+    }
+
+    const auto generation = generation_;
+    const auto stop = stopSource_;
+    const auto worker = workerState_;
+    const QPointer<MmsReportController> self{this};
+    operationBusy_ = true;
+    state_ = State::authoring;
+    lastError_.clear();
+    appendDiagnostic(
+        QStringLiteral("Delete owned dynamic DataSet requested · %1")
+            .arg(reference));
+    emit stateChanged();
+
+    ioPool_.start([self, worker, stop, generation, reference] {
+        try {
+            if (!worker->session || !worker->session->associated() ||
+                !worker->discovery || !worker->dynamicDataSets) {
+                throw std::runtime_error(
+                    "Dynamic DataSet delete requires the active report association.");
+            }
+            const auto response = worker->dynamicDataSets->remove(
+                reference.toStdString(),
+                mms::MmsDynamicDataSetDeletePolicy::owned_only,
+                stop->get_token());
+            if (!response.deleted() &&
+                response.number_matched.value_or(1U) != 0U) {
+                throw std::runtime_error(
+                    "DeleteNamedVariableList did not confirm deletion.");
+            }
+
+            const auto removeReference = reference;
+            auto& inventory = worker->discovery->report_inventory.data_sets;
+            inventory.erase(
+                std::remove_if(
+                    inventory.begin(), inventory.end(),
+                    [&removeReference](const auto& item) {
+                        return sameDataSetReference(
+                            QString::fromStdString(item.reference),
+                            removeReference);
+                    }),
+                inventory.end());
+            auto& directories = worker->discovery->data_set_directories;
+            directories.erase(
+                std::remove_if(
+                    directories.begin(), directories.end(),
+                    [&removeReference](const auto& item) {
+                        return sameDataSetReference(
+                            QString::fromStdString(item.candidate.reference),
+                            removeReference);
+                    }),
+                directories.end());
+
+            QStringList ownedReferences;
+            for (const auto& item : worker->dynamicDataSets->owned_data_sets()) {
+                ownedReferences.push_back(QString::fromStdString(item));
+            }
+            const auto profile = QString::fromStdString(
+                worker->session->association().active_association_profile());
+            auto ui = buildDiscoveryUi(*worker->discovery, profile);
+            ui.dataSets = markOwnedDataSets(ui.dataSets, ownedReferences);
+
+            if (self) {
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, generation, ui, ownedReferences, reference] {
+                        if (!self || self->generation_ != generation) return;
+                        self->operationBusy_ = false;
+                        self->state_ = State::ready;
+                        self->lastError_.clear();
+                        self->dataSets_ = ui.dataSets;
+                        self->staticCandidates_ = ui.staticCandidates;
+                        self->dynamicCandidates_ = ui.dynamicCandidates;
+                        self->associationProfile_ = ui.associationProfile;
+                        self->ownedDynamicDataSets_ = ownedReferences;
+                        self->selectedDataSetIndex_ =
+                            self->dataSets_.isEmpty()
+                                ? -1
+                                : std::clamp(
+                                      self->selectedDataSetIndex_,
+                                      0,
+                                      static_cast<int>(self->dataSets_.size()) - 1);
+                        self->refreshSelection();
+                        self->appendDiagnostic(
+                            QStringLiteral("Owned dynamic DataSet deleted · %1")
+                                .arg(reference));
+                        emit self->inventoryChanged();
+                        emit self->stateChanged();
+                    },
+                    Qt::QueuedConnection);
+            }
+        } catch (const std::exception& exception) {
+            if (self) {
+                const auto message = QString::fromUtf8(exception.what());
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, generation, message] {
+                        if (!self || self->generation_ != generation) return;
+                        self->operationBusy_ = false;
+                        self->state_ = State::ready;
+                        self->lastError_ = message;
+                        self->appendDiagnostic(
+                            QStringLiteral("Dynamic DataSet delete failed · %1")
+                                .arg(message));
+                        emit self->stateChanged();
+                    },
+                    Qt::QueuedConnection);
+            }
+        }
+    });
+    return true;
+}
+
+bool MmsReportController::enableSelectedAuthored(
+    const QString& dataSetReference,
+    const QStringList& triggerOptions,
+    const QStringList& optionalFields,
+    const bool requestGeneralInterrogation) {
+    if (!connected() || busy() || active_ || cleanupRequired_ ||
+        selectedRcb_.isEmpty()) {
+        return false;
+    }
+    const auto rcbReference =
+        selectedRcb_.value(QStringLiteral("reference")).toString().trimmed();
+    const auto targetDataSet = dataSetReference.trimmed();
+    if (rcbReference.isEmpty() || targetDataSet.isEmpty()) {
+        lastError_ = QStringLiteral(
+            "Authored report enable requires an RCB and DataSet reference.");
+        emit stateChanged();
+        return false;
+    }
+    if (requestGeneralInterrogation &&
+        !triggerOptions.contains(QStringLiteral("general-interrogation"))) {
+        lastError_ = QStringLiteral(
+            "Enable + GI requires general-interrogation in authored TrgOps.");
+        emit stateChanged();
+        return false;
+    }
+
+    std::vector<std::uint8_t> trgOps;
+    std::vector<std::uint8_t> optFlds;
+    try {
+        trgOps = triggerPayload(triggerOptions);
+        optFlds = optionalPayload(optionalFields);
+    } catch (const std::exception& exception) {
+        lastError_ = QString::fromUtf8(exception.what());
+        emit stateChanged();
+        return false;
+    }
+
+    bool targetOwnedDynamic = false;
+    for (const auto& reference : ownedDynamicDataSets_) {
+        if (sameDataSetReference(targetDataSet, reference)) {
+            targetOwnedDynamic = true;
+            break;
+        }
+    }
+    const auto attributes =
+        selectedRcb_.value(QStringLiteral("attributes")).toStringList();
+    const bool writeTriggerOptions =
+        attributes.contains(QStringLiteral("TrgOps"));
+    const bool writeOptionalFields =
+        attributes.contains(QStringLiteral("OptFlds"));
+    if (!writeTriggerOptions && !triggerOptions.isEmpty()) {
+        lastError_ = QStringLiteral(
+            "Selected RCB does not expose TrgOps for authoring.");
+        emit stateChanged();
+        return false;
+    }
+    if (!writeOptionalFields && !optionalFields.isEmpty()) {
+        lastError_ = QStringLiteral(
+            "Selected RCB does not expose OptFlds for authoring.");
+        emit stateChanged();
+        return false;
+    }
+    if (targetOwnedDynamic &&
+        !attributes.contains(QStringLiteral("DatSet"))) {
+        lastError_ = QStringLiteral(
+            "Selected RCB does not expose DatSet for dynamic binding.");
+        emit stateChanged();
+        return false;
+    }
+
+    const auto currentDataSet =
+        selectedRcb_.value(QStringLiteral("dataSet")).toString().trimmed();
+    const auto canonicalDataSet =
+        selectedRcb_.value(QStringLiteral("canonicalDataSet")).toString().trimmed();
+    const bool currentBindingAuthoredDynamic =
+        selectedRcb_.value(QStringLiteral("dynamicBinding")).toBool();
+    const bool restoringCanonicalBinding =
+        currentBindingAuthoredDynamic &&
+        !canonicalDataSet.isEmpty() &&
+        sameDataSetReference(targetDataSet, canonicalDataSet);
+    const bool bindingChanged =
+        !sameDataSetReference(targetDataSet, currentDataSet);
+    if (bindingChanged && !targetOwnedDynamic && !restoringCanonicalBinding) {
+        lastError_ = QStringLiteral(
+            "Static/non-owned DataSet binding is immutable in Browser authoring. "
+            "Only an owned dynamic DataSet may replace it; an ARStack-authored "
+            "dynamic binding may be explicitly restored to its canonical static DataSet.");
+        emit stateChanged();
+        return false;
+    }
+
+    const auto generation = generation_;
+    const auto stop = stopSource_;
+    const auto worker = workerState_;
+    const auto selectedRow = selectedRcbIndex_;
+    const QPointer<MmsReportController> self{this};
+    operationBusy_ = true;
+    state_ = State::enabling;
+    lastError_.clear();
+    appendDiagnostic(
+        QStringLiteral(
+            "Authored RCB enable · %1 · DataSet %2 · TrgOps [%3] · OptFlds [%4]")
+            .arg(
+                rcbReference,
+                targetDataSet,
+                bitNamesText(triggerOptions),
+                bitNamesText(optionalFields)));
+    emit stateChanged();
+
+    ioPool_.start([
+        self, worker, stop, generation, selectedRow, rcbReference,
+        targetDataSet, triggerOptions, optionalFields, requestGeneralInterrogation,
+        targetOwnedDynamic, restoringCanonicalBinding, bindingChanged,
+        writeTriggerOptions, writeOptionalFields,
+        trgOps = std::move(trgOps), optFlds = std::move(optFlds)
+    ]() mutable {
+        try {
+            if (!worker->session || !worker->session->associated() ||
+                !worker->discovery) {
+                throw std::runtime_error(
+                    "MMS report association is not active.");
+            }
+            if (worker->report) {
+                const auto previous = worker->report->snapshot();
+                if (previous.active ||
+                    (previous.subscription &&
+                     previous.subscription->cleanup_required)) {
+                    throw std::runtime_error(
+                        "Previous static report subscription still owns state or requires cleanup.");
+                }
+                worker->report.reset();
+            }
+            if (worker->authoredReport) {
+                const auto previous = worker->authoredReport->snapshot();
+                if (worker->authoredReport->active() ||
+                    previous.cleanup_required) {
+                    throw std::runtime_error(
+                        "Previous authored report subscription still owns state or requires cleanup.");
+                }
+                worker->authoredReport.reset();
+            }
+
+            ReportUi ui;
+            if (bindingChanged || targetOwnedDynamic) {
+                if (targetOwnedDynamic &&
+                    (!worker->dynamicDataSets ||
+                     !worker->dynamicDataSets->owns(targetDataSet.toStdString()))) {
+                    throw std::runtime_error(
+                        "Dynamic DataSet ownership is no longer valid for this association.");
+                }
+                if (restoringCanonicalBinding && targetOwnedDynamic) {
+                    throw std::runtime_error(
+                        "Canonical restore target cannot simultaneously be classified as an owned dynamic DataSet.");
+                }
+
+                const mms::MmsReportControlCandidate* candidate = nullptr;
+                for (const auto& item :
+                     worker->discovery->report_inventory.report_controls) {
+                    if (item.reference == rcbReference.toStdString()) {
+                        candidate = &item;
+                        break;
+                    }
+                }
+                if (candidate == nullptr) {
+                    throw std::runtime_error(
+                        "Selected RCB is not present in the attached report inventory.");
+                }
+
+                const mms::MmsDataSetDirectoryResponse* directory = nullptr;
+                for (const auto& item :
+                     worker->discovery->data_set_directories) {
+                    if (!item.directory.has_value()) continue;
+                    if (sameDataSetReference(
+                            QString::fromStdString(item.candidate.reference),
+                            targetDataSet)) {
+                        directory = &*item.directory;
+                        break;
+                    }
+                }
+                if (directory == nullptr || directory->members.empty()) {
+                    throw std::runtime_error(
+                        "Owned dynamic DataSet directory is unavailable or empty.");
+                }
+
+                mms::MmsReportSubscriptionOptions options;
+                options.trigger_general_interrogation =
+                    requestGeneralInterrogation;
+                options.reserve_unbuffered_rcb = true;
+                options.write_data_set_reference = true;
+                options.data_set_reference = targetDataSet.toStdString();
+                options.write_trigger_options = writeTriggerOptions;
+                options.trigger_options = trgOps;
+                options.write_optional_fields = writeOptionalFields;
+                options.optional_fields = optFlds;
+                options.maximum_events = 256U;
+                options.monitor_options.maximum_streams = 64U;
+                options.monitor_options.maximum_frames_per_stream = 64U;
+
+                auto report =
+                    std::make_unique<mms::MmsReportSubscriptionRuntime>(
+                        worker->session->association(),
+                        *candidate,
+                        *directory,
+                        options);
+                report->start(stop->get_token());
+                ui = buildReportUi(report->snapshot());
+                worker->authoredReport = std::move(report);
+            } else {
+                mms::MmsStaticReportSessionOptions options;
+                options.selection.preferred_rcb_reference =
+                    rcbReference.toStdString();
+                options.selection.strict_rcb = true;
+                options.selection.allow_urcb_fallback = true;
+                options.selection.allow_polling_fallback = false;
+                options.maximum_candidate_attempts = 1U;
+                options.subscription.trigger_general_interrogation =
+                    requestGeneralInterrogation;
+                options.subscription.reserve_unbuffered_rcb = true;
+                options.subscription.write_data_set_reference = false;
+                options.subscription.write_trigger_options = writeTriggerOptions;
+                options.subscription.trigger_options = trgOps;
+                options.subscription.write_optional_fields = writeOptionalFields;
+                options.subscription.optional_fields = optFlds;
+                options.subscription.maximum_events = 256U;
+                options.subscription.monitor_options.maximum_streams = 64U;
+                options.subscription.monitor_options.maximum_frames_per_stream = 64U;
+
+                auto report =
+                    std::make_unique<mms::MmsStaticReportSessionRuntime>(
+                        worker->session->association(),
+                        *worker->discovery,
+                        options);
+                report->prepare(stop->get_token());
+                report->start(stop->get_token());
+                ui = buildReportUi(report->snapshot());
+                worker->report = std::move(report);
+            }
+
+            if (self) {
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, generation, selectedRow, ui, targetDataSet,
+                     triggerOptions, optionalFields,
+                     requestGeneralInterrogation, targetOwnedDynamic,
+                     restoringCanonicalBinding] {
+                        if (!self || self->generation_ != generation) return;
+                        self->operationBusy_ = false;
+                        self->active_ = ui.active;
+                        self->cleanupRequired_ = ui.cleanupRequired;
+                        self->receivedReports_ = ui.reports;
+                        self->events_ = ui.events;
+                        self->receivedReportCount_ = ui.receivedCount;
+                        if (selectedRow >= 0 &&
+                            selectedRow < self->reportControls_.size()) {
+                            auto map =
+                                self->reportControls_.at(selectedRow).toMap();
+                            map.insert(
+                                QStringLiteral("dataSet"),
+                                targetDataSet);
+                            map.insert(
+                                QStringLiteral("triggerOptions"),
+                                bitNamesText(triggerOptions));
+                            map.insert(
+                                QStringLiteral("optionalFields"),
+                                bitNamesText(optionalFields));
+                            map.insert(
+                                QStringLiteral("authored"),
+                                true);
+                            map.insert(
+                                QStringLiteral("dynamicBinding"),
+                                targetOwnedDynamic);
+                            self->reportControls_[selectedRow] = map;
+                            self->selectedRcbIndex_ = selectedRow;
+                            self->refreshSelection();
+                        }
+                        self->state_ =
+                            ui.cleanupRequired
+                                ? State::cleanup_required
+                                : State::active;
+                        self->appendDiagnostic(
+                            restoringCanonicalBinding
+                                ? QStringLiteral(
+                                      "Authored RCB restored to canonical static DataSet; configuration verified and enabled.")
+                                : (requestGeneralInterrogation
+                                       ? QStringLiteral(
+                                             "Authored RCB configuration verified; enabled; GI requested.")
+                                       : QStringLiteral(
+                                             "Authored RCB configuration verified and enabled.")));
+                        emit self->inventoryChanged();
+                        emit self->reportsChanged();
+                        emit self->stateChanged();
+                        if (self->active_) self->pollTimer_.start();
+                    },
+                    Qt::QueuedConnection);
+            }
+        } catch (const std::exception& exception) {
+            if (self) {
+                const auto message = QString::fromUtf8(exception.what());
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, generation, message] {
+                        if (!self || self->generation_ != generation) return;
+                        self->operationBusy_ = false;
+                        self->active_ = false;
+                        self->lastError_ = message;
+                        self->state_ = State::faulted;
+                        self->appendDiagnostic(
+                            QStringLiteral("Authored RCB enable failed · %1")
+                                .arg(message));
+                        emit self->stateChanged();
+                    },
+                    Qt::QueuedConnection);
+            }
+        }
+    });
+    return true;
+}
+
 bool MmsReportController::enableSelected(const bool requestGeneralInterrogation) {
     if (!connected() || busy() || active_ || cleanupRequired_ || selectedRcb_.isEmpty()) return false;
     const auto reference = selectedRcb_.value(QStringLiteral("reference")).toString();
@@ -745,6 +1572,13 @@ bool MmsReportController::enableSelected(const bool requestGeneralInterrogation)
                     throw std::runtime_error("Previous report subscription still owns state or requires cleanup.");
                 }
                 worker->report.reset();
+            }
+            if (worker->authoredReport) {
+                const auto previous = worker->authoredReport->snapshot();
+                if (worker->authoredReport->active() || previous.cleanup_required) {
+                    throw std::runtime_error("Previous authored report subscription still owns state or requires cleanup.");
+                }
+                worker->authoredReport.reset();
             }
 
             mms::MmsStaticReportSessionOptions options;
@@ -818,11 +1652,18 @@ bool MmsReportController::disableSelected() {
     const auto worker = workerState_;
     ioPool_.start([self, worker, stop, generation] {
         try {
-            if (!worker->report) throw std::runtime_error("No report subscription is active.");
-            worker->report->stop(stop->get_token());
-            const auto snapshot = worker->report->snapshot();
-            const auto ui = buildReportUi(snapshot);
-            if (!ui.cleanupRequired) worker->report.reset();
+            ReportUi ui;
+            if (worker->report) {
+                worker->report->stop(stop->get_token());
+                ui = buildReportUi(worker->report->snapshot());
+                if (!ui.cleanupRequired) worker->report.reset();
+            } else if (worker->authoredReport) {
+                worker->authoredReport->stop(stop->get_token());
+                ui = buildReportUi(worker->authoredReport->snapshot());
+                if (!ui.cleanupRequired) worker->authoredReport.reset();
+            } else {
+                throw std::runtime_error("No report subscription is active.");
+            }
             if (self) {
                 QMetaObject::invokeMethod(self, [self, generation, ui] {
                     if (!self || self->generation_ != generation) return;
@@ -873,12 +1714,23 @@ bool MmsReportController::retryCleanup() {
     const auto worker = workerState_;
     ioPool_.start([self, worker, stop, generation] {
         try {
-            if (!worker->session || !worker->session->associated() || !worker->report) {
+            if (!worker->session || !worker->session->associated()) {
                 throw std::runtime_error("Cleanup retry requires the original active MMS association.");
             }
-            worker->report->stop(stop->get_token());
-            const auto ui = buildReportUi(worker->report->snapshot());
-            if (!ui.cleanupRequired) worker->report.reset();
+            ReportUi ui;
+            if (worker->report) {
+                worker->report->stop(stop->get_token());
+                ui = buildReportUi(worker->report->snapshot());
+                if (!ui.cleanupRequired) worker->report.reset();
+            } else if (worker->authoredReport) {
+                static_cast<void>(worker->authoredReport->retry_cleanup(
+                    stop->get_token()));
+                ui = buildReportUi(worker->authoredReport->snapshot());
+                if (!ui.cleanupRequired) worker->authoredReport.reset();
+            } else {
+                throw std::runtime_error(
+                    "Cleanup retry has no retained report runtime.");
+            }
             if (self) {
                 QMetaObject::invokeMethod(self, [self, generation, ui] {
                     if (!self || self->generation_ != generation) return;
@@ -923,14 +1775,29 @@ void MmsReportController::schedulePoll() {
     const QPointer<MmsReportController> self{this};
     ioPool_.start([self, worker, stop, generation] {
         try {
-            if (!worker->session || !worker->session->associated() || !worker->report || !worker->report->active()) {
-                throw std::runtime_error("Report poll requires an active MMS association and RCB subscription.");
+            if (!worker->session || !worker->session->associated()) {
+                throw std::runtime_error(
+                    "Report poll requires an active MMS association.");
+            }
+            const bool staticActive =
+                worker->report && worker->report->active();
+            const bool authoredActive =
+                worker->authoredReport && worker->authoredReport->active();
+            if (!staticActive && !authoredActive) {
+                throw std::runtime_error(
+                    "Report poll requires an active RCB subscription.");
             }
             mms::MmsPduEnvelope envelope;
             static_cast<void>(worker->session->association().try_poll_once_for(
                 std::chrono::milliseconds{40}, envelope, stop->get_token()));
-            static_cast<void>(worker->report->drain_queued_reports());
-            const auto ui = buildReportUi(worker->report->snapshot());
+            ReportUi ui;
+            if (staticActive) {
+                static_cast<void>(worker->report->drain_queued_reports());
+                ui = buildReportUi(worker->report->snapshot());
+            } else {
+                static_cast<void>(worker->authoredReport->drain_queued_reports());
+                ui = buildReportUi(worker->authoredReport->snapshot());
+            }
             if (self) {
                 QMetaObject::invokeMethod(self, [self, generation, ui] {
                     if (!self || self->generation_ != generation) return;
@@ -955,6 +1822,9 @@ void MmsReportController::schedulePoll() {
             if (worker->report) {
                 worker->report->stop();
                 ui = buildReportUi(worker->report->snapshot());
+            } else if (worker->authoredReport) {
+                worker->authoredReport->stop();
+                ui = buildReportUi(worker->authoredReport->snapshot());
             }
             if (self) {
                 const auto message = QString::fromUtf8(exception.what());

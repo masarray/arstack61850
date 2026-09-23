@@ -170,6 +170,16 @@ jobs:
           apps/ied_simulator/qml/Main.qml
           apps/ied_simulator/CMakeLists.txt
 
+      - name: P6C Dynamic DataSet + Report Authoring contract
+        run: >-
+          python3 apps/ied_simulator/test_browser_report_authoring.py
+          apps/ied_simulator/src/MmsReportController.cpp
+          apps/ied_simulator/qml/IedBrowserWorkspace.qml
+          apps/ied_simulator/qml/BrowserDataSetAuthoringDialog.qml
+          apps/ied_simulator/qml/BrowserReportAuthoringDialog.qml
+          apps/ied_simulator/qml/BrowserDataSetPane.qml
+          apps/ied_simulator/src/MmsReportController.hpp
+
       - name: IED Browser session ownership gates
         env:
           QT_QPA_PLATFORM: offscreen
