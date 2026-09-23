@@ -137,7 +137,41 @@ mms::MmsDataSetCandidate dataSetCandidateFromReference(const std::string& refere
         objectName.domain.empty() || objectName.item.empty()) {
         throw std::invalid_argument("Dynamic DataSet requires a domain-specific reference.");
     }
-    const auto separator = objectName.item.find('
+    const auto separator = objectName.item.find('$');
+    if (separator == std::string::npos || separator == 0U ||
+        separator + 1U >= objectName.item.size()) {
+        throw std::invalid_argument(
+            "Dynamic DataSet reference must resolve to LD/LN.DataSetName.");
+    }
+    mms::MmsDataSetCandidate candidate;
+    candidate.domain = objectName.domain;
+    candidate.logical_node = objectName.item.substr(0U, separator);
+    candidate.name = objectName.item.substr(separator + 1U);
+    candidate.reference = mms::MmsDataSetDirectoryCodec::to_iec_reference(objectName);
+    candidate.raw_mms_name = objectName.item;
+    return candidate;
+}
+
+QVariantList markOwnedDataSets(
+    QVariantList dataSets,
+    const QStringList& ownedReferences) {
+    for (int row = 0; row < dataSets.size(); ++row) {
+        auto map = dataSets.at(row).toMap();
+        const auto reference = map.value(QStringLiteral("reference")).toString();
+        bool owned = false;
+        for (const auto& candidate : ownedReferences) {
+            if (sameDataSetReference(reference, candidate)) {
+                owned = true;
+                break;
+            }
+        }
+        map.insert(QStringLiteral("dynamicOwned"), owned);
+        map.insert(QStringLiteral("immutable"), !owned);
+        dataSets[row] = map;
+    }
+    return dataSets;
+}
+
 QVariantMap candidateMap(const mms::MmsRcbCandidateEvaluation& candidate) {
     QVariantMap map;
     map.insert(QStringLiteral("reference"), QString::fromStdString(candidate.reference));
