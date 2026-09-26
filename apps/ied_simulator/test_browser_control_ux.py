@@ -84,11 +84,21 @@ for token in (
 ):
     require(tree, token, "Canonical tree control projection")
 
-for token in (
-    'MmsControlController {',
-    'controls: controls',
-):
-    require(main, token, "Application shell")
+# P6E turns the previous singleton into an independently owned controller
+# per IED slot. Both shell shapes must still wire the proven P6B service.
+if 'IedBrowserFleetController {' in main:
+    for token in (
+        'controls: fleet.controlsAt(index)',
+        'session: fleet.sessionAt(index)',
+        'context: fleet.contextAt(index)',
+    ):
+        require(main, token, "Per-IED application shell")
+else:
+    for token in (
+        'MmsControlController {',
+        'controls: controls',
+    ):
+        require(main, token, "Application shell")
 
 for token in (
     'src/MmsControlController.cpp',
