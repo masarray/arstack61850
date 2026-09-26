@@ -21,6 +21,7 @@ ApplicationWindow {
     property bool mmsWasConnected: false
     property bool simulatorAutoSelectPending: true
     property bool allIedMonitor: false
+    property var browserFleet: fleet
     property var iedContext: fleet.activeContext
     property var mmsClient: fleet.activeClient
     property var reports: fleet.activeReports
@@ -462,22 +463,22 @@ ApplicationWindow {
                             Repeater {
                                 id: iedBrowserRepeater
                                 objectName: "iedBrowserRepeater"
-                                model: fleet
+                                model: root.browserFleet
                                 IedBrowserWorkspace {
                                     required property int index
                                     objectName: "iedBrowserView_" + index
                                     anchors.fill: parent
-                                    visible: index === fleet.activeIndex
+                                    visible: index === root.browserFleet.activeIndex
                                     theme: appTheme
                                     productState: hardening
-                                    fleet: fleet
-                                    session: fleet.sessionAt(index)
-                                    client: fleet.clientAt(index)
-                                    context: fleet.contextAt(index)
-                                    reports: fleet.reportsAt(index)
-                                    utilities: fleet.utilitiesAt(index)
-                                    controls: fleet.controlsAt(index)
-                                    engineering: fleet.engineeringAt(index)
+                                    fleet: root.browserFleet
+                                    session: root.browserFleet.sessionAt(index)
+                                    client: root.browserFleet.clientAt(index)
+                                    context: root.browserFleet.contextAt(index)
+                                    reports: root.browserFleet.reportsAt(index)
+                                    utilities: root.browserFleet.utilitiesAt(index)
+                                    controls: root.browserFleet.controlsAt(index)
+                                    engineering: root.browserFleet.engineeringAt(index)
                                     onWatchedDataChanged: fleetGlobalData.refreshRows()
                                 }
                             }
@@ -486,7 +487,7 @@ ApplicationWindow {
                         FleetGlobalDataPane {
                             id: fleetGlobalData
                             theme: appTheme
-                            fleet: fleet
+                            fleet: root.browserFleet
                             browserViews: iedBrowserRepeater
                             onIedRequested: function(index) {
                                 fleet.switchTo(index)
