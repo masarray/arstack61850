@@ -386,6 +386,7 @@ Rectangle {
 
                     ListView {
                         id: modelTree
+                        objectName: "iedBrowserSignalTree"
                         Layout.fillWidth: true
                         Layout.preferredHeight: Math.max(260, Math.min(contentHeight, 620))
                         clip: true
