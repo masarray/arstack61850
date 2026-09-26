@@ -398,6 +398,9 @@ Rectangle {
                         delegate: Rectangle {
                             id: modelRow
                             required property int index
+                            // Required properties disable legacy context-role injection.
+                            // Explicitly bind the role object used by model.* below.
+                            required property var model
                             width: modelTree.width
                             height: 25
                             color: model.selected ? root.theme.accentSoft
