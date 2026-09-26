@@ -20,6 +20,7 @@ ApplicationWindow {
     property bool persistenceReady: false
     property bool mmsWasConnected: false
     property bool simulatorAutoSelectPending: true
+    property bool allIedMonitor: false
     property var iedContext: fleet.activeContext
     property var mmsClient: fleet.activeClient
     property var reports: fleet.activeReports
@@ -64,6 +65,7 @@ ApplicationWindow {
         target: fleet
         function onActiveChanged() {
             root.mmsWasConnected = mmsClient.connected
+            root.allIedMonitor = false
         }
     }
 
@@ -379,7 +381,10 @@ ApplicationWindow {
                                     MouseArea {
                                         anchors.fill: parent
                                         anchors.rightMargin: 27
-                                        onClicked: fleet.switchTo(index)
+                                        onClicked: {
+                                            root.allIedMonitor = false
+                                            fleet.switchTo(index)
+                                        }
                                     }
                                     ToolTip.visible: tabMouse.containsMouse
                                     ToolTip.text: endpoint
@@ -390,6 +395,18 @@ ApplicationWindow {
                                         acceptedButtons: Qt.NoButton
                                     }
                                 }
+                            }
+                            Button {
+                                text: "All IEDs · Global Data"
+                                checkable: true
+                                checked: root.allIedMonitor
+                                onClicked: {
+                                    root.allIedMonitor = !root.allIedMonitor
+                                    if (root.allIedMonitor)
+                                        fleetGlobalData.refreshRows()
+                                }
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Combined live values from the independent per-IED watchlists; no hidden polling."
                             }
                             Button {
                                 text: "+ IED"
@@ -418,28 +435,47 @@ ApplicationWindow {
                     StackLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        currentIndex: fleet.activeIndex
+                        currentIndex: root.allIedMonitor ? 1 : 0
 
-                    // Every delegate remains alive while its IED slot exists:
-                    // independent navigation, Global Data, report and control
-                    // dialogs never migrate to another IED on tab switch.
-                    Repeater {
-                        model: fleet
-                        IedBrowserWorkspace {
-                            required property int index
+                        StackLayout {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            currentIndex: fleet.activeIndex
+
+                            // Delegates persist per slot: each IED retains its own
+                            // navigation and P6A Global Data watchlist.
+                            Repeater {
+                                id: iedBrowserRepeater
+                                model: fleet
+                                IedBrowserWorkspace {
+                                    required property int index
+                                    theme: appTheme
+                                    productState: hardening
+                                    fleet: fleet
+                                    session: fleet.sessionAt(index)
+                                    client: fleet.clientAt(index)
+                                    context: fleet.contextAt(index)
+                                    reports: fleet.reportsAt(index)
+                                    utilities: fleet.utilitiesAt(index)
+                                    controls: fleet.controlsAt(index)
+                                    engineering: fleet.engineeringAt(index)
+                                    onWatchedDataChanged: fleetGlobalData.refreshRows()
+                                }
+                            }
+                        }
+
+                        FleetGlobalDataPane {
+                            id: fleetGlobalData
                             theme: appTheme
-                            productState: hardening
                             fleet: fleet
-                            session: fleet.sessionAt(index)
-                            client: fleet.clientAt(index)
-                            context: fleet.contextAt(index)
-                            reports: fleet.reportsAt(index)
-                            utilities: fleet.utilitiesAt(index)
-                            controls: fleet.controlsAt(index)
-                            engineering: fleet.engineeringAt(index)
+                            browserViews: iedBrowserRepeater
+                            onIedRequested: function(index) {
+                                fleet.switchTo(index)
+                                root.allIedMonitor = false
+                            }
                         }
                     }
-                    }
+
                 }
             }
 
