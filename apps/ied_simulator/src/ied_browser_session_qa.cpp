@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "IedBrowserSessionController.hpp"
+#include "IedBrowserFleetController.hpp"
 
 #include <QCoreApplication>
 
@@ -196,6 +197,127 @@ int main(int argc, char** argv) {
     if (browser.connected() || client.connected() || reports.connected() || utilities.connected() || controls.connected()) {
         std::cerr << "Coordinated Browser disconnect contract failed.\n";
         return 8;
+    }
+
+    // P6E: each live Browser service and canonical engineering authority is
+    // independently owned. Switching the presentation never retargets a
+    // previously created controller or destroys another IED's model.
+    IedBrowserFleetController fleet;
+    auto multi = document;
+    multi.ieds.push_back({"BACKUPIED", "ARStack", "QA", "1"});
+    auto secondAccessPoint = accessPoint;
+    secondAccessPoint.ied_name = "BACKUPIED";
+    secondAccessPoint.ip_address = "192.0.2.88";
+    multi.mms_access_points.push_back(secondAccessPoint);
+    auto secondLn = lln0;
+    secondLn.ied_name = "BACKUPIED";
+    multi.logical_nodes.push_back(secondLn);
+    auto secondStatus = status;
+    secondStatus.ied_name = "BACKUPIED";
+    secondStatus.signal_reference = "BACKUPIEDLD0/LLN0.Mod.stVal";
+    multi.model_entries.push_back(secondStatus);
+
+    if (fleet.workspaceCount() != 1 || fleet.activeIndex() != 0 ||
+        !fleet.activeContext()->publishSclDocument(
+            multi, QStringLiteral("/tmp/multi-ied.scd"),
+            QStringLiteral("BROWSERIED"))) {
+        std::cerr << "P6E initial canonical workspace failed.\\n";
+        return 20;
+    }
+    auto* originalContext = fleet.activeContext();
+    auto* originalSession = fleet.activeSession();
+    auto* originalClient = fleet.activeClient();
+    auto* originalReports = fleet.activeReports();
+    auto* originalControls = fleet.activeControls();
+    auto* originalUtilities = fleet.activeUtilities();
+    auto* originalEngineering = fleet.activeEngineering();
+    if (originalSession->host() != QStringLiteral("192.0.2.77") ||
+        !fleet.openSclIedInNewWorkspace(QStringLiteral("BACKUPIED")) ||
+        fleet.workspaceCount() != 2 || fleet.activeIndex() != 1 ||
+        fleet.activeContext() == originalContext ||
+        fleet.activeClient() == originalClient ||
+        fleet.activeReports() == originalReports ||
+        fleet.activeControls() == originalControls ||
+        fleet.activeUtilities() == originalUtilities ||
+        fleet.activeEngineering() == originalEngineering ||
+        fleet.activeSession() == originalSession ||
+        fleet.activeContext()->iedName() != QStringLiteral("BACKUPIED") ||
+        fleet.activeSession()->host() != QStringLiteral("192.0.2.88") ||
+        fleet.activeClient()->engineeringContext() != fleet.activeContext() ||
+        fleet.activeReports()->engineeringContext() != fleet.activeContext() ||
+        fleet.activeControls()->engineeringContext() != fleet.activeContext() ||
+        fleet.activeUtilities()->engineeringContext() != fleet.activeContext() ||
+        fleet.activeSession()->trustedSclPath() != QStringLiteral("/tmp/multi-ied.scd")) {
+        std::cerr << "P6E independent context/service fork failed.\\n";
+        return 21;
+    }
+    auto* secondContext = fleet.activeContext();
+    auto* secondSession = fleet.activeSession();
+    secondSession->setHost(QStringLiteral("192.0.2.199"));
+    if (!fleet.switchTo(0) ||
+        fleet.activeContext() != originalContext ||
+        fleet.activeSession() != originalSession ||
+        fleet.activeClient() != originalClient ||
+        fleet.activeContext()->iedName() != QStringLiteral("BROWSERIED") ||
+        fleet.activeSession()->host() != QStringLiteral("192.0.2.77") ||
+        fleet.activeContext()->treeModel() == secondContext->treeModel()) {
+        std::cerr << "P6E switch leaked the other IED endpoint or tree.\\n";
+        return 22;
+    }
+    if (!fleet.openSclIedInNewWorkspace(QStringLiteral("BACKUPIED")) ||
+        fleet.workspaceCount() != 2 || fleet.activeIndex() != 1 ||
+        fleet.activeContext() != secondContext ||
+        fleet.activeSession()->host() != QStringLiteral("192.0.2.199")) {
+        std::cerr << "P6E duplicate SCL IED was not deduplicated.\\n";
+        return 23;
+    }
+    if (!fleet.newWorkspace() || fleet.workspaceCount() != 3 ||
+        fleet.activeContext()->hasSource() ||
+        !fleet.prepareForNewSource() || fleet.workspaceCount() != 3) {
+        std::cerr << "P6E new/empty workspace allocation failed.\\n";
+        return 24;
+    }
+    if (!fleet.activeContext()->publishSclDocument(
+            document, QStringLiteral("/tmp/another.cid")) ||
+        !fleet.prepareForNewSource() || fleet.workspaceCount() != 4 ||
+        fleet.activeContext()->hasSource() ||
+        fleet.contextAt(0) != originalContext ||
+        fleet.contextAt(1) != secondContext) {
+        std::cerr << "P6E new source overwrote an existing workspace.\\n";
+        return 25;
+    }
+    if (!fleet.closeWorkspace(2) || fleet.workspaceCount() != 3 ||
+        fleet.contextAt(0) != originalContext ||
+        fleet.contextAt(1) != secondContext ||
+        fleet.activeContext() == nullptr ||
+        !fleet.switchTo(1) ||
+        fleet.activeSession() != secondSession ||
+        fleet.activeSession()->host() != QStringLiteral("192.0.2.199")) {
+        std::cerr << "P6E offline close or index adjustment failed.\\n";
+        return 26;
+    }
+    while (fleet.workspaceCount() < IedBrowserFleetController::maximumWorkspaces) {
+        if (!fleet.newWorkspace()) {
+            std::cerr << "P6E bounded slot creation failed.\\n";
+            return 27;
+        }
+    }
+    if (fleet.newWorkspace() || fleet.lastError().isEmpty() ||
+        fleet.workspaceCount() != IedBrowserFleetController::maximumWorkspaces ||
+        fleet.switchTo(-1)) {
+        std::cerr << "P6E workspace capacity/invalid-index guard failed.\\n";
+        return 28;
+    }
+    while (fleet.workspaceCount() > 1) {
+        if (!fleet.closeWorkspace(fleet.workspaceCount() - 1)) {
+            std::cerr << "P6E offline workspace close failed.\\n";
+            return 29;
+        }
+    }
+    if (fleet.closeWorkspace(0) || fleet.workspaceCount() != 1 ||
+        fleet.activeContext() != originalContext) {
+        std::cerr << "P6E final workspace invariant failed.\\n";
+        return 30;
     }
 
     std::cout << "IED_BROWSER_SESSION_PASS"
