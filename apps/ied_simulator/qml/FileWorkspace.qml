@@ -439,10 +439,8 @@ Item {
                                             hoverEnabled: true
                                             enabled: hardening.recentResourceExists(index)
                                                      && !workspace.busy
-                                                     && !browserSession.configurationLocked
                                             onClicked: {
-                                                if (workspace.openFile(hardening.recentResourceUrl(index)))
-                                                    root.browserRequested()
+                                                root.openSourceRequested(hardening.recentResourceUrl(index))
                                             }
                                         }
                                     }
@@ -530,7 +528,7 @@ Item {
                                             id: discoveredMouse
                                             anchors.fill: parent
                                             hoverEnabled: true
-                                            enabled: !browserSession.configurationLocked
+                                            enabled: true
                                             onClicked: root.endpointRequested(
                                                 hardening.recentDiscoveredIedHost(index),
                                                 hardening.recentDiscoveredIedPort(index))
