@@ -224,6 +224,9 @@ bool IedBrowserFleetController::openSclIedInNewWorkspace(const QString& iedName)
         // Each cloned context retains the exact file provenance for its own
         // independent SCL-assisted association, without re-reading the file.
         activeSession()->setTrustedSclPath(sourcePath);
+        // Preserve exact source bytes when this SCL came from a parsed file.
+        // No file reload is needed and the selected IED is not republished.
+        static_cast<void>(activeEngineering()->adoptSourceFrom(*original->engineering));
         return true;
     }
     const auto error = activeContext()->lastError();
