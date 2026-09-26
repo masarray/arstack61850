@@ -94,6 +94,11 @@ public:
 
     void setEngineeringContext(IedEngineeringContextController* value);
 
+    // Fork the already-validated exact SCL source into another IED slot.
+    // This copies source evidence without reparsing or republishing a different
+    // active IED over that slot's canonical engineering model.
+    bool adoptSourceFrom(const SclWorkspaceController& source);
+
     Q_INVOKABLE bool openFile(const QUrl& fileUrl);
     Q_INVOKABLE bool saveAs(const QUrl& fileUrl, const QString& targetEdition = QStringLiteral("preserve"));
     Q_INVOKABLE bool exportCanonical(const QUrl& fileUrl, const QString& targetEdition = QStringLiteral("preserve"));
