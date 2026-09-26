@@ -38,6 +38,8 @@ require(fleet_cpp, (
     "bool IedBrowserFleetController::closeWorkspace(",
     "entry->reports->cleanupRequired()",
     "activeEngineering()->adoptSourceFrom(*original->engineering)",
+    "auto retired = std::move(entries_[static_cast<std::size_t>(index)])",
+    "retired.reset();",
 ), "fleet authority")
 require(fleet_hpp, (
     "QAbstractListModel",
