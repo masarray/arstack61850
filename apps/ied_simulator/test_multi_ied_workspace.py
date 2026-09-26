@@ -58,7 +58,7 @@ require(main, (
     "property var browserSession: fleet.activeSession",
     "property var sclWorkspace: fleet.activeEngineering",
     "model: fleet",
-    "visible: index === fleet.activeIndex",
+    "visible: index === root.browserFleet.activeIndex",
     "anchors.fill: parent",
     'objectName: "iedBrowserView_" + index',
     "fleet.contextAt(index)",
@@ -118,6 +118,23 @@ for typename in (
 ):
     if f"{typename} {{" in main:
         raise SystemExit(f"P6E_FAIL singleton {typename} remained in Main.qml")
+# QML required property 'fleet' in IedBrowserWorkspace shadows Main's
+# id 'fleet': `fleet: fleet` resolves to itself and leaves every Browser
+# service/context undefined, rendering the exact blank signal screenshot.
+require(main, (
+    "property var browserFleet: fleet",
+    "fleet: root.browserFleet",
+    "session: root.browserFleet.sessionAt(index)",
+    "client: root.browserFleet.clientAt(index)",
+    "context: root.browserFleet.contextAt(index)",
+    "reports: root.browserFleet.reportsAt(index)",
+    "utilities: root.browserFleet.utilitiesAt(index)",
+    "controls: root.browserFleet.controlsAt(index)",
+    "engineering: root.browserFleet.engineeringAt(index)",
+), "non-shadowed Browser context/service routing")
+if "fleet: fleet" in main:
+    raise SystemExit("P6E_FAIL QML fleet self-shadowing would empty the Browser")
+
 # A StackLayout containing a Repeater has an extra layout child and can
 # render slot N-1 while the active tab points at slot N.
 if "currentIndex: fleet.activeIndex" in main or \
@@ -126,7 +143,7 @@ if "currentIndex: fleet.activeIndex" in main or \
 require(main, (
     'id: perIedBrowserHost',
     'id: iedBrowserRepeater',
-    'visible: index === fleet.activeIndex',
+    'visible: index === root.browserFleet.activeIndex',
     'objectName: "iedBrowserView_" + index',
 ), "exact active Browser panel routing")
 
