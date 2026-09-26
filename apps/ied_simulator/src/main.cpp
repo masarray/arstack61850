@@ -486,7 +486,7 @@ int main(int argc, char* argv[]) {
                     QStringLiteral("iedBrowserView_0"));
                 auto* const second = rootObject->findChild<QQuickItem*>(
                     QStringLiteral("iedBrowserView_1"));
-                const auto* const selected = fleet->contextAt(1);
+                auto* const selected = fleet->contextAt(1);
                 auto* const signalList = second
                     ? second->findChild<QQuickItem*>(QStringLiteral("iedBrowserSignalTree"))
                     : nullptr;
