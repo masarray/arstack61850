@@ -288,7 +288,7 @@ ApplicationWindow {
                 theme: appTheme
                 workspace: sclWorkspace
                 hardening: hardening
-                browserSession: browserSession
+                browserSession: root.browserSession
                 context: iedContext
                 onBrowserRequested: root.workspaceIndex = 1
                 onOpenSourceRequested: function(fileUrl) {
