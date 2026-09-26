@@ -220,7 +220,12 @@ bool IedBrowserFleetController::openSclIedInNewWorkspace(const QString& iedName)
     }
     const auto* source = original->context->sourceSclDocument();
     if (!newWorkspace()) return false;
-    if (activeContext()->publishSclDocument(*source, sourcePath, name)) return true;
+    if (activeContext()->publishSclDocument(*source, sourcePath, name)) {
+        // Each cloned context retains the exact file provenance for its own
+        // independent SCL-assisted association, without re-reading the file.
+        activeSession()->setTrustedSclPath(sourcePath);
+        return true;
+    }
     const auto error = activeContext()->lastError();
     const auto createdIndex = activeIndex_;
     // Failed source creation is discarded; the original slot remains intact.
