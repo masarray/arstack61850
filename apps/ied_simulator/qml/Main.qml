@@ -20,6 +20,13 @@ ApplicationWindow {
     property bool persistenceReady: false
     property bool mmsWasConnected: false
     property bool simulatorAutoSelectPending: true
+    property var iedContext: fleet.activeContext
+    property var mmsClient: fleet.activeClient
+    property var reports: fleet.activeReports
+    property var controls: fleet.activeControls
+    property var utilities: fleet.activeUtilities
+    property var browserSession: fleet.activeSession
+    property var sclWorkspace: fleet.activeEngineering
 
     onWorkspaceIndexChanged: {
         if (root.persistenceReady) hardening.workspaceIndex = root.workspaceIndex
@@ -30,45 +37,13 @@ ApplicationWindow {
         id: hardening
         objectName: "productHardeningBackend"
     }
-    IedEngineeringContextController {
-        id: iedContext
-        objectName: "iedEngineeringContextBackend"
+    IedBrowserFleetController {
+        id: fleet
+        objectName: "iedBrowserFleetBackend"
     }
     IedFleetController {
         id: simulator
         objectName: "simulatorBackend"
-    }
-    MmsClientController {
-        id: mmsClient
-        objectName: "mmsClientBackend"
-        engineeringContext: iedContext
-    }
-    MmsReportController {
-        id: reports
-        objectName: "mmsReportBackend"
-    }
-    MmsControlController {
-        id: controls
-        objectName: "mmsControlBackend"
-        engineeringContext: iedContext
-    }
-    MmsFileSettingsController {
-        id: utilities
-        objectName: "mmsFileSettingsBackend"
-    }
-    IedBrowserSessionController {
-        id: browserSession
-        objectName: "iedBrowserSessionBackend"
-        client: mmsClient
-        reports: reports
-        utilities: utilities
-        controls: controls
-        engineeringContext: iedContext
-    }
-    SclWorkspaceController {
-        id: sclWorkspace
-        objectName: "sclWorkspaceBackend"
-        engineeringContext: iedContext
     }
     GooseMonitorController {
         id: gooseMonitor
@@ -83,6 +58,13 @@ ApplicationWindow {
         root.workspaceIndex = hardening.workspaceIndex
         root.mmsWasConnected = mmsClient.connected
         root.persistenceReady = true
+    }
+
+    Connections {
+        target: fleet
+        function onActiveChanged() {
+            root.mmsWasConnected = mmsClient.connected
+        }
     }
 
     Connections {
@@ -141,6 +123,8 @@ ApplicationWindow {
         title: "Open IEC 61850 engineering model"
         nameFilters: ["IEC 61850 engineering files (*.scl *.cid *.scd *.iid *.icd)", "All files (*)"]
         onAccepted: {
+            if (!fleet.prepareForNewSource())
+                return
             simulator.loadFileAsync(selectedFile)
             sclWorkspace.openFile(selectedFile)
         }
@@ -326,16 +310,137 @@ ApplicationWindow {
                 onSnifferRequested: root.workspaceIndex = 3
             }
 
-            IedBrowserWorkspace {
-                theme: appTheme
-                productState: hardening
-                session: browserSession
-                client: mmsClient
-                context: iedContext
-                reports: reports
-                utilities: utilities
-                controls: controls
-                engineering: sclWorkspace
+            Item {
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 0
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 34
+                        color: appTheme.chrome
+                        border.width: 1
+                        border.color: appTheme.lineSoft
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 8
+                            anchors.rightMargin: 8
+                            spacing: 6
+                            ListView {
+                                id: iedWorkspaceTabs
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                orientation: ListView.Horizontal
+                                clip: true
+                                spacing: 4
+                                model: fleet
+                                delegate: Rectangle {
+                                    required property int index
+                                    required property string label
+                                    required property bool online
+                                    required property bool busy
+                                    required property string endpoint
+                                    width: Math.min(200, Math.max(125, tabTitle.implicitWidth + 63))
+                                    height: 29
+                                    radius: 4
+                                    color: index === fleet.activeIndex
+                                           ? appTheme.accentSoft : appTheme.surface
+                                    border.width: 1
+                                    border.color: index === fleet.activeIndex
+                                                  ? appTheme.accent : appTheme.lineSoft
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 7
+                                        anchors.rightMargin: 4
+                                        spacing: 4
+                                        Rectangle {
+                                            width: 6; height: 6; radius: 3
+                                            color: online ? appTheme.green
+                                                   : busy ? appTheme.amber : appTheme.muted
+                                        }
+                                        Label {
+                                            id: tabTitle
+                                            Layout.fillWidth: true
+                                            text: label
+                                            elide: Text.ElideRight
+                                            color: appTheme.text
+                                            font.pixelSize: 9
+                                        }
+                                        Button {
+                                            text: "×"
+                                            implicitWidth: 22
+                                            implicitHeight: 23
+                                            enabled: fleet.workspaceCount > 1 && !online && !busy
+                                            onClicked: fleet.closeWorkspace(index)
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "Close this offline IED workspace; disconnect active services first."
+                                        }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        anchors.rightMargin: 27
+                                        onClicked: fleet.switchTo(index)
+                                    }
+                                    ToolTip.visible: tabMouse.containsMouse
+                                    ToolTip.text: endpoint
+                                    MouseArea {
+                                        id: tabMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        acceptedButtons: Qt.NoButton
+                                    }
+                                }
+                            }
+                            Button {
+                                text: "+ IED"
+                                enabled: fleet.workspaceCount < 8
+                                onClicked: fleet.newWorkspace()
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Create an independent IED context and Browser session (max 8)."
+                            }
+                            Label {
+                                visible: fleet.lastError.length > 0
+                                text: fleet.lastError
+                                color: appTheme.red
+                                font.pixelSize: 8
+                                Layout.maximumWidth: 260
+                                elide: Text.ElideRight
+                                ToolTip.visible: fleetErrorMouse.containsMouse
+                                ToolTip.text: fleet.lastError
+                                MouseArea {
+                                    id: fleetErrorMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                }
+                            }
+                        }
+                    }
+                    StackLayout {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        currentIndex: fleet.activeIndex
+
+                    // Every delegate remains alive while its IED slot exists:
+                    // independent navigation, Global Data, report and control
+                    // dialogs never migrate to another IED on tab switch.
+                    Repeater {
+                        model: fleet
+                        IedBrowserWorkspace {
+                            required property int index
+                            theme: appTheme
+                            productState: hardening
+                            fleet: fleet
+                            session: fleet.sessionAt(index)
+                            client: fleet.clientAt(index)
+                            context: fleet.contextAt(index)
+                            reports: fleet.reportsAt(index)
+                            utilities: fleet.utilitiesAt(index)
+                            controls: fleet.controlsAt(index)
+                            engineering: fleet.engineeringAt(index)
+                        }
+                    }
+                    }
+                }
             }
 
             Item {
