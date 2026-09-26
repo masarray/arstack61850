@@ -46,6 +46,29 @@ void SclWorkspaceController::setEngineeringContext(IedEngineeringContextControll
     }
 }
 
+bool SclWorkspaceController::adoptSourceFrom(const SclWorkspaceController& source) {
+    if (busy_ || source.busy_ || !source.document_ || source.sourcePath_.isEmpty() ||
+        !engineeringContext_ ||
+        engineeringContext_->authorityKey() != QStringLiteral("scl") ||
+        engineeringContext_->sourcePath() != source.sourcePath_) {
+        return false;
+    }
+    document_ = source.document_;
+    sourceBytes_ = source.sourceBytes_;
+    sourcePath_ = source.sourcePath_;
+    sourceName_ = source.sourceName_;
+    sourceFormat_ = source.sourceFormat_;
+    lastError_.clear();
+    lastExportVerified_ = false;
+    lastExportPath_.clear();
+    lastExportMode_.clear();
+    appendDiagnostic(QStringLiteral("Adopted verified SCL source for independent IED workspace."));
+    emit workspaceChanged();
+    emit exportChanged();
+    emit stateChanged();
+    return true;
+}
+
 SclWorkspaceController::~SclWorkspaceController() {
     if (stopSource_) stopSource_->request_stop();
     ioPool_.clear();
