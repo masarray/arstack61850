@@ -22,6 +22,11 @@ Item {
     property string activeSectionTitle: "Data Model"
     property var selectedModelNode: context.treeModel.selectedNode
 
+    signal watchedDataChanged()
+
+    function watchedRows() { return globalDataPane.snapshotRows() }
+    function refreshWatchedGlobalData() { return globalDataPane.refreshWatched() }
+
     function activeIedLabel() {
         return context.iedName && context.iedName.length ? context.iedName : "IED"
     }
@@ -60,6 +65,11 @@ Item {
     function selectSection(section, title) {
         root.activeSection = section
         root.activeSectionTitle = title
+    }
+
+    Connections {
+        target: globalDataPane
+        function onWatchSnapshotChanged() { root.watchedDataChanged() }
     }
 
     onActiveSectionChanged: ensureActiveService()
