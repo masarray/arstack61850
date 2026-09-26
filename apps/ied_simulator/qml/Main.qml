@@ -125,10 +125,9 @@ ApplicationWindow {
         title: "Open IEC 61850 engineering model"
         nameFilters: ["IEC 61850 engineering files (*.scl *.cid *.scd *.iid *.icd)", "All files (*)"]
         onAccepted: {
-            if (!fleet.prepareForNewSource())
-                return
             simulator.loadFileAsync(selectedFile)
-            sclWorkspace.openFile(selectedFile)
+            if (fleet.prepareForNewSource())
+                sclWorkspace.openFile(selectedFile)
         }
     }
 
@@ -291,7 +290,15 @@ ApplicationWindow {
                 browserSession: browserSession
                 context: iedContext
                 onBrowserRequested: root.workspaceIndex = 1
+                onOpenSourceRequested: function(fileUrl) {
+                    if (!fleet.prepareForNewSource())
+                        return
+                    if (sclWorkspace.openFile(fileUrl))
+                        root.workspaceIndex = 1
+                }
                 onDiscoverRequested: function(host, port) {
+                    if (!fleet.prepareForNewSource())
+                        return
                     if (!browserSession.configurationLocked) {
                         browserSession.host = host
                         browserSession.port = port
@@ -301,6 +308,8 @@ ApplicationWindow {
                     }
                 }
                 onEndpointRequested: function(host, port) {
+                    if (!fleet.prepareForNewSource())
+                        return
                     if (!browserSession.configurationLocked) {
                         browserSession.host = host
                         browserSession.port = port
