@@ -454,7 +454,7 @@ ApplicationWindow {
 
                             // A Repeater is itself an Item. Putting it inside a
                             // StackLayout adds a layout child before its delegates:
-                            // currentIndex: fleet.activeIndex can show a different
+                            // indexing by the fleet slot can show a different
                             // IED's panel from the selected tab. Keep delegates as
                             // siblings in a plain Item, size them explicitly, and
                             // show exactly the active slot. Hidden views retain
