@@ -446,18 +446,28 @@ ApplicationWindow {
                         Layout.fillHeight: true
                         currentIndex: root.allIedMonitor ? 1 : 0
 
-                        StackLayout {
+                        Item {
+                            id: perIedBrowserHost
+                            objectName: "perIedBrowserHost"
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            currentIndex: fleet.activeIndex
 
-                            // Delegates persist per slot: each IED retains its own
-                            // navigation and P6A Global Data watchlist.
+                            // A Repeater is itself an Item. Putting it inside a
+                            // StackLayout adds a layout child before its delegates:
+                            // currentIndex: fleet.activeIndex can show a different
+                            // IED's panel from the selected tab. Keep delegates as
+                            // siblings in a plain Item, size them explicitly, and
+                            // show exactly the active slot. Hidden views retain
+                            // their per-IED navigation and Global Data watchlists.
                             Repeater {
                                 id: iedBrowserRepeater
+                                objectName: "iedBrowserRepeater"
                                 model: fleet
                                 IedBrowserWorkspace {
                                     required property int index
+                                    objectName: "iedBrowserView_" + index
+                                    anchors.fill: parent
+                                    visible: index === fleet.activeIndex
                                     theme: appTheme
                                     productState: hardening
                                     fleet: fleet
