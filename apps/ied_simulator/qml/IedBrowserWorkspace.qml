@@ -8,6 +8,7 @@ Item {
     id: root
 
     required property var theme
+    required property var fleet
     required property var session
     required property var client
     required property var context
@@ -20,6 +21,11 @@ Item {
     property int activeSection: 0
     property string activeSectionTitle: "Data Model"
     property var selectedModelNode: context.treeModel.selectedNode
+
+    signal watchedDataChanged()
+
+    function watchedRows() { return globalDataPane.snapshotRows() }
+    function refreshWatchedGlobalData() { return globalDataPane.refreshWatched() }
 
     function activeIedLabel() {
         return context.iedName && context.iedName.length ? context.iedName : "IED"
@@ -61,6 +67,11 @@ Item {
         root.activeSectionTitle = title
     }
 
+    Connections {
+        target: globalDataPane
+        function onWatchSnapshotChanged() { root.watchedDataChanged() }
+    }
+
     onActiveSectionChanged: ensureActiveService()
 
     Shortcut { sequence: "Alt+1"; enabled: root.visible; onActivated: root.selectSection(0, "Data Model") }
@@ -84,7 +95,10 @@ Item {
         title: "Open IEC 61850 engineering model"
         fileMode: FileDialog.OpenFile
         nameFilters: ["IEC 61850 engineering files (*.scl *.cid *.scd *.iid *.icd)", "All files (*)"]
-        onAccepted: engineering.openFile(selectedFile)
+        onAccepted: {
+            if (fleet.prepareForNewSource())
+                fleet.activeEngineering.openFile(selectedFile)
+        }
     }
 
     FileDialog {
@@ -263,9 +277,9 @@ Item {
         }
 
         Rectangle {
-            visible: context.selectionRequired
+            visible: context.authorityKey === "scl" && context.candidateIeds.length > 1
             Layout.fillWidth: true
-            Layout.preferredHeight: context.selectionRequired ? 42 : 0
+            Layout.preferredHeight: visible ? 42 : 0
             color: root.theme.amberSoft
             border.width: 1
             border.color: root.theme.amber
@@ -276,7 +290,9 @@ Item {
                 anchors.rightMargin: 14
                 spacing: 8
                 Label {
-                    text: "Multi-IED SCL · select the active IED"
+                    text: context.selectionRequired
+                          ? "Multi-IED SCL · select active IED"
+                          : "Multi-IED SCL · open another IED in its own workspace"
                     color: root.theme.text
                     font.pixelSize: 9
                     font.weight: Font.DemiBold
@@ -289,9 +305,18 @@ Item {
                 }
                 Button {
                     text: "Use IED"
+                    visible: context.selectionRequired
                     enabled: !session.configurationLocked
                              && activeIedPicker.currentIndex >= 0
                     onClicked: context.selectIed(activeIedPicker.currentText)
+                }
+                Button {
+                    text: "Open in new workspace"
+                    enabled: activeIedPicker.currentIndex >= 0
+                             && fleet.workspaceCount < 8
+                    onClicked: fleet.openSclIedInNewWorkspace(activeIedPicker.currentText)
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Keep this IED intact; open the selected IED from the same SCL source in a separate Browser slot."
                 }
                 Item { Layout.fillWidth: true }
                 Label {

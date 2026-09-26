@@ -16,6 +16,7 @@ Item {
     property int viewIndex: 0
 
     signal browserRequested()
+    signal openSourceRequested(url fileUrl)
     signal discoverRequested(string host, int port)
     signal endpointRequested(string host, int port)
     signal simulatorRequested()
@@ -32,10 +33,7 @@ Item {
         title: "Open IEC 61850 engineering model"
         fileMode: FileDialog.OpenFile
         nameFilters: ["IEC 61850 engineering files (*.scl *.cid *.scd *.iid *.icd)", "All files (*)"]
-        onAccepted: {
-            if (workspace.openFile(selectedFile))
-                root.browserRequested()
-        }
+        onAccepted: root.openSourceRequested(selectedFile)
     }
 
     Dialog {
@@ -164,14 +162,14 @@ Item {
                     theme: root.theme
                     text: "Open SCL"
                     primary: true
-                    enabled: !workspace.busy && !browserSession.configurationLocked
+                    enabled: !workspace.busy
                     onClicked: openDialog.open()
                 }
 
                 ActionButton {
                     theme: root.theme
                     text: "Discover IED"
-                    enabled: !browserSession.configurationLocked
+                    enabled: true
                     onClicked: discoverDialog.open()
                 }
 
@@ -245,7 +243,7 @@ Item {
                                     theme: root.theme
                                     text: "Open SCL"
                                     primary: true
-                                    enabled: !workspace.busy && !browserSession.configurationLocked
+                                    enabled: !workspace.busy
                                     onClicked: openDialog.open()
                                 }
                             }
@@ -271,7 +269,7 @@ Item {
                                 ActionButton {
                                     theme: root.theme
                                     text: "Discover IED"
-                                    enabled: !browserSession.configurationLocked
+                                    enabled: true
                                     onClicked: discoverDialog.open()
                                 }
                             }
@@ -441,10 +439,8 @@ Item {
                                             hoverEnabled: true
                                             enabled: hardening.recentResourceExists(index)
                                                      && !workspace.busy
-                                                     && !browserSession.configurationLocked
                                             onClicked: {
-                                                if (workspace.openFile(hardening.recentResourceUrl(index)))
-                                                    root.browserRequested()
+                                                root.openSourceRequested(hardening.recentResourceUrl(index))
                                             }
                                         }
                                     }
@@ -532,7 +528,7 @@ Item {
                                             id: discoveredMouse
                                             anchors.fill: parent
                                             hoverEnabled: true
-                                            enabled: !browserSession.configurationLocked
+                                            enabled: true
                                             onClicked: root.endpointRequested(
                                                 hardening.recentDiscoveredIedHost(index),
                                                 hardening.recentDiscoveredIedPort(index))

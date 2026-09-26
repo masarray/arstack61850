@@ -112,6 +112,12 @@ public:
         return model_.get();
     }
 
+    // Read-only SCL authority for opening another IED from the same source in
+    // a distinct workspace; the originating context retains its own model.
+    [[nodiscard]] const ar::iec61850::scl::SclDocument* sourceSclDocument() const noexcept {
+        return authority_ == Authority::openedScl ? sclSource_.get() : nullptr;
+    }
+
 signals:
     void contextChanged();
     void runtimeChanged();

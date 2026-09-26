@@ -13,12 +13,30 @@ Rectangle {
 
     readonly property int maximumEntries: 256
     readonly property int watchCount: watchModel.count
+    signal watchSnapshotChanged()
     property int boundContextGeneration: context.contextGeneration
     property string statusMessage: "Add DataAttributes, DataSets, Reports, or configured GOOSE from the Browser."
 
     color: theme.background
 
     ListModel { id: watchModel }
+
+    function snapshotRows() {
+        var entries = []
+        for (var i = 0; i < watchModel.count; ++i) {
+            var row = watchModel.get(i)
+            entries.push({
+                "kind": row.kind,
+                "reference": row.reference,
+                "detail": row.detail,
+                "value": row.value,
+                "quality": row.quality,
+                "timestamp": row.timestamp,
+                "status": row.status
+            })
+        }
+        return entries
+    }
 
     function indexFor(kind, reference) {
         for (var i = 0; i < watchModel.count; ++i) {
@@ -102,6 +120,7 @@ Rectangle {
         if (row < 0 || row >= watchModel.count)
             return
         watchModel.remove(row)
+        root.watchSnapshotChanged()
         statusMessage = watchModel.count > 0
             ? String(watchModel.count) + " monitored object(s)."
             : "Global Data is empty."
@@ -109,6 +128,7 @@ Rectangle {
 
     function clearAll() {
         watchModel.clear()
+        root.watchSnapshotChanged()
         statusMessage = "Global Data cleared."
     }
 
@@ -178,6 +198,7 @@ Rectangle {
                 watchModel.setProperty(i, "status", context.online ? "CONFIGURED" : "OFFLINE")
             }
         }
+        root.watchSnapshotChanged()
     }
 
     Connections {
