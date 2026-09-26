@@ -252,6 +252,7 @@ bool IedBrowserFleetController::closeWorkspace(const int index) {
             "Disconnect this IED and finish pending service operations before closing its workspace."));
     }
     beginRemoveRows({}, index, index);
+    auto retired = std::move(entries_[static_cast<std::size_t>(index)]);
     entries_.erase(entries_.begin() + index);
     endRemoveRows();
     clearError();
@@ -259,5 +260,8 @@ bool IedBrowserFleetController::closeWorkspace(const int index) {
     if (activeIndex_ > index) --activeIndex_;
     else if (activeIndex_ == index) activeIndex_ = std::min(index, workspaceCount() - 1);
     emit activeChanged();
+    // Retire services only AFTER Qt views process the row removal and all
+    // active QObject bindings have been retargeted away from the removed IED.
+    retired.reset();
     return true;
 }
