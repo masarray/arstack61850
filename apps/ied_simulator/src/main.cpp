@@ -484,10 +484,19 @@ int main(int argc, char* argv[]) {
                 rootObject->setProperty("allIedMonitor", false);
                 QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
 
-                auto* const first = rootObject->findChild<QQuickItem*>(
-                    QStringLiteral("iedBrowserView_0"));
-                auto* const second = rootObject->findChild<QQuickItem*>(
-                    QStringLiteral("iedBrowserView_1"));
+                auto* const browserHost = rootObject->findChild<QQuickItem*>(
+                    QStringLiteral("perIedBrowserHost"));
+                const auto browserViewAt = [browserHost](const int index) -> QQuickItem* {
+                    if (!browserHost) return nullptr;
+                    const auto expected =
+                        QStringLiteral("iedBrowserView_%1").arg(index);
+                    for (auto* item : browserHost->childItems()) {
+                        if (item && item->objectName() == expected) return item;
+                    }
+                    return nullptr;
+                };
+                auto* const first = browserViewAt(0);
+                auto* const second = browserViewAt(1);
                 auto* const selected = fleet->contextAt(1);
                 auto* const signalList = second
                     ? second->findChild<QQuickItem*>(QStringLiteral("iedBrowserSignalTree"))
@@ -516,6 +525,8 @@ int main(int argc, char* argv[]) {
                     qCritical().noquote()
                         << "BROWSER_FLEET_ROUTING_DIAG"
                         << "activeIndex=" << fleet->activeIndex()
+                        << "host=" << static_cast<void*>(browserHost)
+                        << "visualChildren=" << (browserHost ? browserHost->childItems().size() : -1)
                         << "first=" << static_cast<void*>(first)
                         << "second=" << static_cast<void*>(second)
                         << "signalList=" << static_cast<void*>(signalList)
@@ -561,8 +572,7 @@ int main(int argc, char* argv[]) {
                     return;
                 }
                 QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
-                auto* const retained = rootObject->findChild<QQuickItem*>(
-                    QStringLiteral("iedBrowserView_0"));
+                auto* const retained = browserViewAt(0);
                 if (fleet->workspaceCount() != 1 || fleet->activeIndex() != 0 ||
                     !retained || !retained->isVisible() ||
                     fleet->activeContext() != selected ||
