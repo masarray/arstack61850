@@ -487,7 +487,13 @@ int main(int argc, char* argv[]) {
                 auto* const second = rootObject->findChild<QQuickItem*>(
                     QStringLiteral("iedBrowserView_1"));
                 const auto* const selected = fleet->contextAt(1);
-                if (!first || !second || first->isVisible() || !second->isVisible() ||
+                auto* const signalList = second
+                    ? second->findChild<QQuickItem*>(QStringLiteral("iedBrowserSignalTree"))
+                    : nullptr;
+                if (!first || !second || !signalList ||
+                    signalList->property("count").toInt() < 3 ||
+                    signalList->width() < 100 || !signalList->isVisible() ||
+                    first->isVisible() || !second->isVisible() ||
                     !selected || !selected->loaded() || selected->online() ||
                     selected->iedName() != QStringLiteral("QA_IED_B") ||
                     selected->treeModel()->totalNodeCount() < 5 ||
@@ -512,7 +518,8 @@ int main(int argc, char* argv[]) {
                 }
                 QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
                 if (first->isVisible() || !second->isVisible() ||
-                    !selected->loaded() || selected->treeModel()->visibleNodeCount() < 3) {
+                    !selected->loaded() || selected->treeModel()->visibleNodeCount() < 3 ||
+                    signalList->property("count").toInt() < 3) {
                     fail("offline_signal_tree_lost_after_switch", 68);
                     return;
                 }
