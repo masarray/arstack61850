@@ -13,6 +13,8 @@
 #include <QQuickWindow>
 #include <QQuickItem>
 #include <QEventLoop>
+#include <QElapsedTimer>
+#include <QThread>
 #include <QTimer>
 #include <QUrl>
 
@@ -490,16 +492,46 @@ int main(int argc, char* argv[]) {
                 auto* const signalList = second
                     ? second->findChild<QQuickItem*>(QStringLiteral("iedBrowserSignalTree"))
                     : nullptr;
-                if (!first || !second || !signalList ||
-                    signalList->property("count").toInt() < 3 ||
-                    signalList->width() < 100 || !signalList->isVisible() ||
-                    first->isVisible() || !second->isVisible() ||
-                    !selected || !selected->loaded() || selected->online() ||
-                    selected->iedName() != QStringLiteral("QA_IED_B") ||
-                    selected->treeModel()->totalNodeCount() < 5 ||
-                    selected->treeModel()->visibleNodeCount() < 3 ||
-                    second->width() < 100 || second->height() < 100 ||
-                    second->property("context").value<QObject*>() != selected) {
+
+                const auto renderedReady = [&]() {
+                    return first && second && signalList && selected &&
+                        signalList->property("count").toInt() >= 3 &&
+                        signalList->width() >= 100 && signalList->isVisible() &&
+                        !first->isVisible() && second->isVisible() &&
+                        selected->loaded() && !selected->online() &&
+                        selected->iedName() == QStringLiteral("QA_IED_B") &&
+                        selected->treeModel()->totalNodeCount() >= 5 &&
+                        selected->treeModel()->visibleNodeCount() >= 3 &&
+                        second->width() >= 100 && second->height() >= 100 &&
+                        second->property("context").value<QObject*>() == selected;
+                };
+
+                QElapsedTimer routingSettle;
+                routingSettle.start();
+                while (!renderedReady() && routingSettle.elapsed() < 1'000) {
+                    QCoreApplication::processEvents(QEventLoop::AllEvents, 25);
+                    QThread::msleep(10);
+                }
+                if (!renderedReady()) {
+                    qCritical().noquote()
+                        << "BROWSER_FLEET_ROUTING_DIAG"
+                        << "activeIndex=" << fleet->activeIndex()
+                        << "first=" << static_cast<void*>(first)
+                        << "second=" << static_cast<void*>(second)
+                        << "signalList=" << static_cast<void*>(signalList)
+                        << "firstVisible=" << (first ? first->isVisible() : false)
+                        << "secondVisible=" << (second ? second->isVisible() : false)
+                        << "secondSize=" << (second ? second->width() : -1.0)
+                        << "x" << (second ? second->height() : -1.0)
+                        << "listVisible=" << (signalList ? signalList->isVisible() : false)
+                        << "listCount=" << (signalList ? signalList->property("count").toInt() : -1)
+                        << "listWidth=" << (signalList ? signalList->width() : -1.0)
+                        << "selectedLoaded=" << (selected ? selected->loaded() : false)
+                        << "selectedIed=" << (selected ? selected->iedName() : QStringLiteral("<null>"))
+                        << "totalNodes=" << (selected ? selected->treeModel()->totalNodeCount() : -1)
+                        << "visibleNodes=" << (selected ? selected->treeModel()->visibleNodeCount() : -1)
+                        << "contextMatch=" << (second && selected
+                            ? second->property("context").value<QObject*>() == selected : false);
                     fail("active_tab_panel_or_offline_signals_mismatch", 64);
                     return;
                 }
