@@ -70,11 +70,11 @@ int main() {
     mms::MmsStaticUrcbRuntime runtime{
         definitions, states, object_table, data_set_table};
     if (!runtime.initialize()) return 3;
-    constexpr std::array<std::uint8_t, 2U> iedscout_generic_optflds{0x7BU, 0x80U};
+    constexpr std::array<std::uint8_t, 2U> reference_client_generic_optflds{0x7BU, 0x80U};
     constexpr std::array<std::uint8_t, 2U> effective_urcb_optflds{0x78U, 0x80U};
     constexpr std::array<std::uint8_t, 2U> unsupported_segmentation{0x78U, 0xC0U};
     constexpr std::array<std::uint8_t, 2U> original_optflds{0x5CU, 0x80U};
-    if (runtime.set_optional_fields(0U, iedscout_generic_optflds) !=
+    if (runtime.set_optional_fields(0U, reference_client_generic_optflds) !=
             mms::MmsStaticUrcbStatus::ok) return 15;
     const auto* compatibility_state = runtime.state(0U);
     if (compatibility_state == nullptr ||

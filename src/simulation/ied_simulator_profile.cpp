@@ -195,7 +195,7 @@ namespace {
     // q/t are semantic terminal DataAttribute names, not arbitrary suffixes.
     // The former ends_with("t") rule misclassified orCat, orIdent,
     // sboTimeout, operTimeout and Test as Timestamp, corrupting the live MMS
-    // TypeSpecification seen by OMICRON IEDScout.
+    // TypeSpecification seen by reference vendor ReferenceClient.
     if (entry.is_quality || attribute_leaf_is(entry.da_name, "q") ||
         ascii_equal(entry.basic_type, "Quality")) {
         return "Quality";

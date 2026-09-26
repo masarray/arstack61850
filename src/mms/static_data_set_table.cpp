@@ -117,7 +117,7 @@ const MmsStaticDataSetEntry* MmsStaticDataSetTable::find(
         return nullptr;
     }
 
-    // IEDScout probes named-variable-list attributes with both VMD-specific and
+    // ReferenceClient probes named-variable-list attributes with both VMD-specific and
     // AA-specific ObjectName forms such as LLN0$Digital. Resolve either
     // compatibility form only when the item is unique across logical-device
     // domains. Ambiguity stays an explicit miss instead of picking arbitrarily.

@@ -127,13 +127,13 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: ./build-ied-simulator-qt/ied_product_hardening_qa
 
-      - name: IEDScout-style File/Home workflow contract
+      - name: ReferenceClient-style File/Home workflow contract
         run: >-
           python3 apps/ied_simulator/test_file_home_workflow.py
           apps/ied_simulator/qml/FileWorkspace.qml
           apps/ied_simulator/qml/Main.qml
 
-      - name: IEDScout-style Browser convergence contract
+      - name: ReferenceClient-style Browser convergence contract
         run: >-
           python3 apps/ied_simulator/test_browser_convergence.py
           apps/ied_simulator/qml/IedBrowserWorkspace.qml

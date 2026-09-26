@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exact OMICRON IEDScout CSWI1 TypeSpecification golden regression."""
+"""Exact reference vendor ReferenceClient CSWI1 TypeSpecification golden regression."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def manifest() -> str:
         "ARSTACK_IED_MODEL\t2\t1",
         f"LN\t{d}\tCSWI1",
 
-        # ST — exact leaf order/type shape captured from OMICRON IEDScout.
+        # ST — exact leaf order/type shape captured from reference vendor ReferenceClient.
         f"OBJ\t{d}\tCSWI1$ST$Mod$stVal\tENUM\tEnumeration\t1",
         f"OBJ\t{d}\tCSWI1$ST$Mod$q\tQUALITY\tQuality\tgood",
         f"OBJ\t{d}\tCSWI1$ST$Mod$t\tTimestamp\tTimestamp\tunix-ms:1720000000000",
@@ -61,13 +61,13 @@ def manifest() -> str:
 
         # Keep engineering declaration order deliberately as the failed ARStack
         # capture (CF/DC/EX/OR before CO). Dispatcher parity must still project
-        # the IEDScout root order ST,CO,CF,DC,EX,OR.
+        # the ReferenceClient root order ST,CO,CF,DC,EX,OR.
         f"OBJ\t{d}\tCSWI1$CF$Mod$ctlModel\tENUM\tEnumeration\t0",
         f"OBJ\t{d}\tCSWI1$CF$Pos$ctlModel\tENUM\tEnumeration\t4",
         f"OBJ\t{d}\tCSWI1$CF$Pos$sboTimeout\tINT32U\tNumber\t10000",
         f"OBJ\t{d}\tCSWI1$CF$Pos$operTimeout\tINT32U\tNumber\t10000",
         f"OBJ\t{d}\tCSWI1$CF$LocSta$ctlModel\tENUM\tEnumeration\t1",
-        f"OBJ\t{d}\tCSWI1$DC$NamPlt$vendor\tVisString255\tText\tSiemens",
+        f"OBJ\t{d}\tCSWI1$DC$NamPlt$vendor\tVisString255\tText\tVendor A",
         f"OBJ\t{d}\tCSWI1$DC$NamPlt$swRev\tVisString255\tText\t1",
         f"OBJ\t{d}\tCSWI1$DC$NamPlt$d\tVisString255\tText\tCSWI",
         f"OBJ\t{d}\tCSWI1$DC$NamPlt$configRev\tVisString255\tText\t1",
@@ -303,7 +303,7 @@ def main() -> int:
             )
 
         print(
-            "IEDSCOUT_CSWI1_TYPE_GOLDEN_PASS "
+            "GOLDEN_CSWI1_TYPE_GOLDEN_PASS "
             "leaves=72 root=ST,CO,CF,DC,EX,OR "
             "control=SBO,SBOw,Oper,Cancel mismatches=0"
         )

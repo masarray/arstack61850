@@ -516,7 +516,7 @@ std::vector<std::uint8_t> MmsFileServiceCodec::encode_file_directory_request_pdu
     BerWriter body;
     const auto directory = normalize_remote_path(request.directory_name, true);
     const auto continuation = normalize_remote_path(request.continue_after, true);
-    // Captured IEDScout root FileDirectory request keeps fileSpecification
+    // Captured ReferenceClient root FileDirectory request keeps fileSpecification
     // present and encodes root as one empty GraphicString: A0 02 19 00.
     // Do not omit [0] for root; several engineering clients use this wire shape.
     const auto name = graphic_string(directory);
@@ -751,7 +751,7 @@ std::vector<std::uint8_t> MmsFileServiceCodec::encode_file_delete_request_pdu(
     const auto wire_path = request.rooted_backslash
         ? rooted_backslash_path(normalized)
         : normalized;
-    // Captured IEDScout FileDelete [76] carries the GraphicString directly
+    // Captured ReferenceClient FileDelete [76] carries the GraphicString directly
     // inside the constructed service value: BF 4C <len> 19 <len> "\path".
     return MmsPduCodec::encode_confirmed_request(
         {request.invoke_id, file_delete_service_tag, true, graphic_string(wire_path)});

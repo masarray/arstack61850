@@ -20,7 +20,7 @@ constexpr std::array<std::uint8_t, 3U> kFalse{0x83U, 0x01U, 0x00U};
 constexpr std::array<std::uint8_t, 3U> kFiveSeconds{0x85U, 0x01U, 0x05U};
 constexpr std::array<std::uint8_t, 3U> kZeroSeconds{0x85U, 0x01U, 0x00U};
 constexpr std::array<std::uint8_t, 4U> kTriggerAll{0x84U, 0x02U, 0x02U, 0x7CU};
-constexpr std::array<std::uint8_t, 5U> kIedScoutOptionalFields{
+constexpr std::array<std::uint8_t, 5U> kReferenceClientOptionalFields{
     0x84U, 0x03U, 0x06U, 0x7BU, 0x80U};
 
 [[nodiscard]] wire::EncodeResult read_boolean(
@@ -304,7 +304,7 @@ int main() {
     }
 
     if (!dispatch_write(
-            dispatcher, "B1$OptFlds", kIedScoutOptionalFields, a, true, 0U, invoke) ||
+            dispatcher, "B1$OptFlds", kReferenceClientOptionalFields, a, true, 0U, invoke) ||
         reports.optional_fields()[0] != 0x7BU ||
         reports.optional_fields()[1] != 0x80U) {
         return 89;

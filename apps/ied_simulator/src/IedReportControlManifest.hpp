@@ -30,7 +30,7 @@ inline QStringList concreteReportControlNames(
 
     // IEC 61850 SCL keeps one ReportControl definition while RptEnabled@max
     // describes the number of concrete MMS RCB instances. Engineering clients
-    // such as IEDScout address those instances with a two-digit suffix
+    // such as ReferenceClient address those instances with a two-digit suffix
     // (Buffer01, Buffer02, Unbuffer01, ...). Keep the SCL model definition-level
     // and expand only at the runtime-manifest boundary.
     const auto count = std::max<std::uint32_t>(1U, maxClients);

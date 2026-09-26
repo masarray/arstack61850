@@ -140,7 +140,7 @@ public:
     static constexpr std::size_t maximum_identifier_bytes = 1'024U;
     static constexpr std::size_t maximum_identifiers = 128U;
 
-    // IEDScout performs bounded bulk reads while walking a full IEC 61850 model.
+    // ReferenceClient performs bounded bulk reads while walking a full IEC 61850 model.
     // The proven ARIEC61850 trace for the SIPROTEC reference model contains a
     // single 78-variable Read request. Keep the portable span profile bounded,
     // but leave enough headroom for that real discovery pattern.

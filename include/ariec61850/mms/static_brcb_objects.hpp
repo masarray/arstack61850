@@ -45,7 +45,7 @@ struct MmsStaticBrcbObjectContext final {
 // opaque association/Owner identity.
 class MmsStaticBrcbObjectBank final {
 public:
-    // Golden IEDScout-compatible BRCB facade:
+    // Golden ReferenceClient-compatible BRCB facade:
     // RptID,RptEna,DatSet,ConfRev,OptFlds,BufTm,SqNum,TrgOps,IntgPd,GI,
     // PurgeBuf,EntryID,TimeofEntry,ResvTms,Owner.
     static constexpr std::size_t attributes_per_control_block = 15U;

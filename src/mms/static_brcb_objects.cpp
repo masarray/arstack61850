@@ -25,7 +25,7 @@ constexpr std::array<std::uint8_t, 4U> kVariableOctet64Type{0x89U, 0x02U, 0xFFU,
 constexpr std::array<std::uint8_t, 4U> kVisible129Type{0x8AU, 0x02U, 0xFFU, 0x7FU};
 constexpr std::array<std::uint8_t, 3U> kBitString10Type{0x84U, 0x01U, 0x0AU};
 constexpr std::array<std::uint8_t, 3U> kBitString6Type{0x84U, 0x01U, 0x06U};
-// Golden IEDScout TypeSpecification for TimeofEntry is binary-time timeOfDay(1).
+// Golden ReferenceClient TypeSpecification for TimeofEntry is binary-time timeOfDay(1).
 constexpr std::array<std::uint8_t, 3U> kBinaryTimeType{0x8CU, 0x01U, 0x01U};
 
 constexpr std::array<MmsStaticBrcbAttribute,

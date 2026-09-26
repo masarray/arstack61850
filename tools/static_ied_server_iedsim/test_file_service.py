@@ -107,7 +107,7 @@ def main() -> int:
                     f"server diagnostics missing {missing}\nstdout={stdout}\nstderr={stderr}"
                 )
             print(
-                "IEDSCOUT_FILE_SERVER_LOOPBACK_PASS "
+                "GOLDEN_FILE_SERVER_LOOPBACK_PASS "
                 "directory=pass open=pass read=pass close=pass delete=pass "
                 "refresh=pass segmented_payload=70000"
             )

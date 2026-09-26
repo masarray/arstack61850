@@ -121,7 +121,7 @@ void dpc_binding_matches_network_bit_order() {
     CHECK(result.value->raw_value()[1] == 0x40U); // DPC Off == binary 01.
 }
 
-void dpc_open_close_bind_to_iedscout_boolean_ctlval() {
+void dpc_open_close_bind_to_reference_client_boolean_ctlval() {
     const auto specification = scalar(MmsTypeKind::boolean, "ctlVal");
 
     auto build = MmsControlStructureBuilder::bind_control_value(
@@ -272,7 +272,7 @@ void step_position_and_analogue_structures_follow_live_shape() {
 int main() {
     try {
         dpc_binding_matches_network_bit_order();
-        dpc_open_close_bind_to_iedscout_boolean_ctlval();
+        dpc_open_close_bind_to_reference_client_boolean_ctlval();
         operate_matches_csharp_structure_contract_and_golden_wire();
         sbow_uses_same_exact_sequence_contract();
         cancel_allows_optional_check_but_not_vendor_guessing();

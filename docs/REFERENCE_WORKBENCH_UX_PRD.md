@@ -1,16 +1,16 @@
 # ARStack IEC 61850 Workbench
-# IEDScout-Inspired GUI, Workflow, and Behaviour PRD
+# Reference-Client-Inspired GUI, Workflow, and Behaviour PRD
 
 Status: Proposed
 Owner: ARStack IEC 61850 Workbench
-Source branch: `main-iedscout-workbench-prd`
+Source branch: `main-workbench-ux-prd`
 Date: 2026-09-26
 
 ## 1. Executive summary
 
 ARStack has a growing IEC 61850 protocol and engineering foundation, but its current Browser experience does not yet give an operator the coherent commissioning workflow expected from a mature IED tool. The product must become a dependable engineering workstation rather than a collection of disconnected feature panels.
 
-This PRD adopts the functional mental model documented by IEDScout 4.20:
+This PRD adopts the functional mental model documented by a mature IEC 61850 engineering client:
 
 ```text
 File / Discover
@@ -23,13 +23,13 @@ File / Discover
     -> save evidence or move to the next service
 ```
 
-The implementation must not copy OMICRON branding, icons, exact ribbon geometry, colors, illustrations, wording, or proprietary visual assets. ARStack should retain its own calm graphite and teal visual system while matching the useful workflow invariants: context continuity, progressive discovery, master-detail browsing, contextual commands, direct monitoring, visible operation feedback, and safe failure recovery.
+The implementation must not copy any reference vendor branding, icons, exact ribbon geometry, colors, illustrations, wording, or proprietary visual assets. ARStack should retain its own calm graphite and teal visual system while matching the useful workflow invariants: context continuity, progressive discovery, master-detail browsing, contextual commands, direct monitoring, visible operation feedback, and safe failure recovery.
 
 ## 2. Evidence and source basis
 
 The requirements below were derived from the local installed documentation:
 
-1. **Working with IEDScout 4.20 - Practical Example of Use**, 36 pages, OMICRON electronics, 2016.
+1. **Working with a mature IEC 61850 engineering client 4.20 - Practical Example of Use**, 36 pages, vendor reference manual, 2016.
    - Pages 6-7: screen model and Browser/Simulator pane responsibilities.
    - Pages 8-13: configuration, discovery, IED selection, navigation tree, offline/online browsing, descriptions, DataSet and quality expansion.
    - Pages 14-18: Details pane, Activity Monitor, subscription, drag-and-drop semantics, zoom and polling.
@@ -37,15 +37,10 @@ The requirements below were derived from the local installed documentation:
    - Pages 23-27: Sniffer filtering/export, Write, and guarded Control Select -> Operate workflow.
    - Pages 28-31: test/simulation indication, Save SCL, IED simulation, and GOOSE handoff.
    - Pages 33-35: File Transfer and Setting Groups.
-2. **IEDScout What's New in Version 4.20**, 3 pages, OMICRON electronics, 2016.
+2. **What's New in the reference engineering client Version 4.20**, 3 pages, vendor update note, 2016.
    - Page 2: fast discovery with a usable partial model while background analysis continues, large-model SCL browsing, File Transfer, Setting Group insight, improved Activity Monitor path/zoom, intelligent IED naming, TimeQuality editing, simulator File Transfer, SGCB and substitution support, diagnostics, and legacy MMS compatibility.
 
-The source PDFs remain installed at:
-
-- `C:\Program Files\OMICRON\IEDScout 4\IEDScout_Application_Example.pdf`
-- `C:\Program Files\OMICRON\IEDScout 4\Documentation\English\IEDScout_Whats_New.pdf`
-
-The documents are treated as workflow evidence and product behaviour reference, not as permission to reproduce OMICRON's protected branding or assets.
+The source PDFs were read from the local installation supplied by the user. No copies, vendor assets, trademarks, or proprietary screenshots are added to this repository. The documents are treated only as workflow evidence and product behaviour reference.
 
 ## 3. Problem statement
 
@@ -83,7 +78,7 @@ The key product failure is not the lack of one more feature. It is the absence o
 
 ## 5. Non-goals and boundaries
 
-- Do not clone IEDScout pixel-for-pixel or reuse OMICRON trademarks, icons, illustrations, screenshots, or proprietary copy.
+- Do not clone any reference tool pixel-for-pixel or reuse vendor trademarks, icons, illustrations, screenshots, or proprietary copy.
 - Do not create a second semantic SCL/IED model to make the UI easier. All UI views must project the canonical model.
 - Do not make direct MMS reads look like report evidence. Report success still requires real InformationReport evidence.
 - Do not claim universal IEC 61850 conformance from a visual similarity or a synthetic simulator result.

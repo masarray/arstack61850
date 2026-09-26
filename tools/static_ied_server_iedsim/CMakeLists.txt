@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(ARStack61850IedScoutParityServer LANGUAGES CXX)
+project(ARStack61850ReferenceClientParityServer LANGUAGES CXX)
 
 get_filename_component(ARSTACK_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 

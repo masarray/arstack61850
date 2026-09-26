@@ -263,7 +263,7 @@ def run_direct_normal_control_regression(
             f"exit={discovery.returncode} stdout={discovery.stdout!r} stderr={discovery.stderr!r}"
         )
 
-    # IEDScout accepts ARSAS Check=0xC0 (synchro + interlock requested).
+    # ReferenceClient accepts ARSAS Check=0xC0 (synchro + interlock requested).
     # Keep this compatibility explicit instead of treating valid Check bits as
     # an object-value-invalid condition.
     checked = subprocess.run(
@@ -296,7 +296,7 @@ def run_direct_normal_control_regression(
         or "NO_RETRY_EVIDENCE controlWrites=1" not in checked.stdout
     ):
         raise RuntimeError(
-            "Direct-Normal IEDScout Check=0xC0 compatibility regression failed: "
+            "Direct-Normal ReferenceClient Check=0xC0 compatibility regression failed: "
             f"exit={checked.returncode} stdout={checked.stdout!r} stderr={checked.stderr!r}"
         )
 

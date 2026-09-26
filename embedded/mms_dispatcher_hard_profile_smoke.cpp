@@ -86,7 +86,7 @@ constexpr std::array<std::uint8_t, 15U> kReadResponse{
     0x83U, 0x01U, 0xFFU,
     0x85U, 0x01U, 0x2AU};
 
-// ARIEC61850 golden behavior that is proven with IEDScout: the request may set
+// ARIEC61850 golden behavior that is proven with ReferenceClient: the request may set
 // specificationWithResult, while the response remains the compact
 // listOfAccessResult form and does not synthesize variableAccessSpecification.
 constexpr std::array<std::uint8_t, 15U> kReadWithSpecificationResponse{
@@ -436,7 +436,7 @@ int main() {
         return 19;
     }
 
-    // IEDScout-compatible dual-directory mode now advertises every virtual
+    // ReferenceClient-compatible dual-directory mode now advertises every virtual
     // hierarchy prefix, not only the concrete flattened leaf aliases. Give the
     // smoke enough page capacity to validate the complete sorted namespace in
     // one response; pagination is covered separately by the dedicated profile.

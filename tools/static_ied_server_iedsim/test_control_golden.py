@@ -150,7 +150,7 @@ def main() -> int:
             )
 
         print(
-            "IEDSCOUT_DPC_CONTROL_GOLDEN_PASS "
+            "GOLDEN_DPC_CONTROL_GOLDEN_PASS "
             "sequence=SBOw,Oper,CommandTermination,ProcessFeedback "
             "ctlVal=boolean process=DBPOS2 originCat=integer "
             "check=sync+interlock"

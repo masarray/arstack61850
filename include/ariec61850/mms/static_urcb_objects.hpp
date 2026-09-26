@@ -37,7 +37,7 @@ struct MmsStaticUrcbObjectContext final {
 
 class MmsStaticUrcbObjectBank final {
 public:
-    // IEC 61850 / IEDScout-compatible URCB facade:
+    // IEC 61850 / ReferenceClient-compatible URCB facade:
     // RptID,RptEna,Resv,DatSet,ConfRev,OptFlds,BufTm,SqNum,
     // TrgOps,IntgPd,GI,Owner.
     static constexpr std::size_t attributes_per_control_block = 12U;

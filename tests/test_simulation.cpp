@@ -198,7 +198,7 @@ void profile_builder_does_not_suffix_match_timestamp_or_quality() {
     using namespace ar::iec61850;
 
     scl::SclDocument document;
-    document.source_name = "iedscout-type-regression.scd";
+    document.source_name = "reference_client-type-regression.scd";
     scl::SclIed ied;
     ied.name = "IEDTYPE";
     document.ieds.push_back(std::move(ied));

@@ -211,7 +211,7 @@ namespace {
     const MmsConfirmedPduView& confirmed,
     const MmsGetNameListRequestView& request,
     const std::span<std::uint8_t> response) noexcept {
-    // The host IED-simulator directory intentionally preserves SCL/IEDScout
+    // The host IED-simulator directory intentionally preserves SCL/ReferenceClient
     // declaration order instead of lexical item order.  Continuation therefore
     // follows the exact emitted sequence rather than lower_bound() semantics.
     const auto domain = as_text(request.domain_id);
@@ -577,7 +577,7 @@ constexpr std::array<std::string_view, 15U> kBrcbAttributeOrder{
     "RptID", "RptEna", "DatSet", "ConfRev", "OptFlds", "BufTm", "SqNum",
     "TrgOps", "IntgPd", "GI", "PurgeBuf", "EntryID", "TimeofEntry",
     "ResvTms", "Owner"};
-constexpr std::array<std::string_view, 4U> kIedScoutControlServiceOrder{
+constexpr std::array<std::string_view, 4U> kReferenceClientControlServiceOrder{
     "SBO", "SBOw", "Oper", "Cancel"};
 
 enum class SyntheticReadStatus : std::uint8_t {
@@ -636,12 +636,12 @@ struct SyntheticChildRank final {
     if (prefix.find("$BR$") != std::string_view::npos) {
         return {kBrcbAttributeOrder};
     }
-    // OMICRON IEDScout exposes control-service alternatives in this exact
+    // reference vendor ReferenceClient exposes control-service alternatives in this exact
     // order at LN$CO$DO. Deeper service structures remain positional.
     if (prefix.find("$CO$") != std::string_view::npos &&
         static_cast<std::size_t>(std::count(
             prefix.begin(), prefix.end(), static_cast<char>(0x24))) == 2U) {
-        return {kIedScoutControlServiceOrder};
+        return {kReferenceClientControlServiceOrder};
     }
     return {};
 }
@@ -675,7 +675,7 @@ struct SyntheticChildRank final {
 
 [[nodiscard]] bool use_declaration_order(
     const std::string_view prefix) noexcept {
-    // IEDScout preserves the engineering declaration order at the LN root,
+    // ReferenceClient preserves the engineering declaration order at the LN root,
     // functional-constraint namespace, DO and DA levels.  Every structural
     // object imported from SCL carries source_order; runtime-only service
     // objects receive an explicit order from their owning control/RCB.
@@ -748,7 +748,7 @@ struct SyntheticChildren final {
             return synthetic_child_less(prefix, left.prefix, right.prefix);
         }
         if (declaration_order) {
-            // Golden IEDScout places CO immediately after ST (or after MX/ST
+            // Golden ReferenceClient places CO immediately after ST (or after MX/ST
             // when MX is present) at controlled LN roots, before CF.
             if (prefix.find(static_cast<char>(0x24)) == std::string_view::npos) {
                 const auto left_name = left.prefix.substr(prefix.size() + 1U);

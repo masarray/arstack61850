@@ -217,7 +217,7 @@ void type_specification_and_attributes_round_trip() {
         response_p_data, 31U) == response);
 }
 
-void iedscout_variable_length_type_bounds_round_trip() {
+void reference_client_variable_length_type_bounds_round_trip() {
     MmsTypeSpecification visible255;
     visible255.kind = MmsTypeKind::visible_string;
     visible255.size = 255U;
@@ -425,7 +425,7 @@ int main() {
         {"ObjectName choices", object_names_round_trip_all_choices},
         {"GetNameList", get_name_list_request_response_round_trip},
         {"VariableAccessAttributes and structure type", type_specification_and_attributes_round_trip},
-        {"IEDScout variable-length TypeSpecification", iedscout_variable_length_type_bounds_round_trip},
+        {"ReferenceClient variable-length TypeSpecification", reference_client_variable_length_type_bounds_round_trip},
         {"simulator SCL bType wire authority", simulator_manifest_type_mapping_prefers_scl_btype},
         {"array TypeSpecification", array_type_specification_round_trips},
         {"Read multi-access results", read_request_and_multi_access_response_round_trip},

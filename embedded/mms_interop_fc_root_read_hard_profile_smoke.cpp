@@ -21,7 +21,7 @@ constexpr std::array<std::uint8_t, 3U> kTrue{0x83U, 0x01U, 0xFFU};
 // discovery against the known-good ARIEC61850 simulator. Invoke 2 reads six
 // Functional Constraint roots in AA1E1F06R4ADD:
 // LLN0$CF, LLN0$DC, LLN0$EX, LLN0$RP, LLN0$SP, LLN0$ST.
-constexpr std::array<std::uint8_t, 198U> kIedScoutInvoke2{
+constexpr std::array<std::uint8_t, 198U> kReferenceClientInvoke2{
     0xA0U, 0x81U, 0xC3U, 0x02U, 0x01U, 0x02U, 0xA4U, 0x81U, 0xBDU, 0x80U, 0x01U, 0x00U,
     0xA1U, 0x81U, 0xB7U, 0xA0U, 0x81U, 0xB4U, 0x30U, 0x1CU, 0xA0U, 0x1AU, 0xA1U, 0x18U,
     0x1AU, 0x0DU, 0x41U, 0x41U, 0x31U, 0x45U, 0x31U, 0x46U, 0x30U, 0x36U, 0x52U, 0x34U,
@@ -86,7 +86,7 @@ int main() {
     const mms::MmsStaticApplicationDispatcher dispatcher{table};
     std::array<std::uint8_t, 8'192U> response{};
     std::array<std::uint8_t, 8'192U> workspace{};
-    const auto dispatched = dispatcher.dispatch(kIedScoutInvoke2, response, workspace);
+    const auto dispatched = dispatcher.dispatch(kReferenceClientInvoke2, response, workspace);
     if (!dispatched.success() ||
         dispatched.service != mms::MmsWireConfirmedService::read ||
         dispatched.invoke_id != 2U || dispatched.bytes_written == 0U) {

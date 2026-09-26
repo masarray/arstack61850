@@ -69,7 +69,7 @@ public:
             return result;
         }
         if (raw == "ENUM") {
-            // OMICRON IEDScout advertises IEC 61850 Enum leaves as INTEGER(8)
+            // reference vendor ReferenceClient advertises IEC 61850 Enum leaves as INTEGER(8)
             // for the captured SIPROTEC model (Mod/Beh/Health/ctlModel).
             result.kind = MmsTypeKind::integer;
             result.size = 8U;

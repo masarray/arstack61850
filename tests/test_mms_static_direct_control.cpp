@@ -145,7 +145,7 @@ void valid_oper_updates_live_state() {
     CHECK(state.rejected_operations == 0U);
 }
 
-void golden_iedscout_integer_origin_and_checks_decode() {
+void golden_reference_client_integer_origin_and_checks_decode() {
     const auto bytes = make_oper(true, 41U, false, 0xC0U, 2U, true);
     MmsStaticDirectBooleanOperate decoded;
     CHECK(try_decode_static_direct_boolean_operate(bytes, decoded));
@@ -197,7 +197,7 @@ void invalid_shape_and_values_are_rejected() {
     CHECK(!result.success);
     CHECK(result.failure_code == 7U);
 
-    // ctlNum=0 is valid on the incoming server wire. OMICRON IEDScout uses it.
+    // ctlNum=0 is valid on the incoming server wire. reference vendor ReferenceClient uses it.
     result = mms_static_direct_boolean_write_oper(&binding, make_oper(true, 0U, false));
     CHECK(result.success);
     CHECK(state.last_control_number == 0U);
@@ -320,7 +320,7 @@ void sbo_enhanced_requires_exact_selected_sequence() {
     CHECK(shared.selected_association_id.load() == 0U);
 }
 
-void iedscout_sbo_enhanced_accepts_ctl_num_zero_and_fresh_oper_timestamp() {
+void reference_client_sbo_enhanced_accepts_ctl_num_zero_and_fresh_oper_timestamp() {
     TestClock clock{100U};
     MmsStaticDirectBooleanSharedState shared{};
     MmsStaticDirectBooleanControlState state{};
@@ -329,7 +329,7 @@ void iedscout_sbo_enhanced_accepts_ctl_num_zero_and_fresh_oper_timestamp() {
     binding.policy.allow_synchro_check = true;
     binding.policy.allow_interlock_check = true;
 
-    // Captured OMICRON IEDScout behavior:
+    // Captured reference vendor ReferenceClient behavior:
     // SBOw uses ctlNum=0 and T1; Oper keeps the selected identity but sends T2.
     const auto selected = mms_static_boolean_write_sbow_contextual(
         &binding,
@@ -436,7 +436,7 @@ void read_callbacks_match_mms_types() {
 int main() {
     try {
         valid_oper_updates_live_state();
-        golden_iedscout_integer_origin_and_checks_decode();
+        golden_reference_client_integer_origin_and_checks_decode();
         test_oper_is_non_mutating();
         unsupported_check_bits_fail_closed();
         invalid_shape_and_values_are_rejected();
@@ -444,7 +444,7 @@ int main() {
         sbo_normal_enforces_owner_cancel_and_timeout();
         direct_enhanced_queues_one_termination();
         sbo_enhanced_requires_exact_selected_sequence();
-        iedscout_sbo_enhanced_accepts_ctl_num_zero_and_fresh_oper_timestamp();
+        reference_client_sbo_enhanced_accepts_ctl_num_zero_and_fresh_oper_timestamp();
         sbo_enhanced_cancel_and_association_close_release_owner();
         read_callbacks_match_mms_types();
         std::cout << "MMS static direct-control tests passed.\n";

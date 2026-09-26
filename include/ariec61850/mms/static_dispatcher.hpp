@@ -24,7 +24,7 @@ enum class MmsStaticDispatchStatus : std::uint8_t {
 };
 
 struct MmsStaticDispatchPolicy final {
-    // The measured IEDScout server discovery profile emits at most 100
+    // The measured ReferenceClient server discovery profile emits at most 100
     // identifiers per GetNameList page. Keep the portable default aligned with
     // that profile; tests/embedded users may still choose a smaller bound.
     std::size_t maximum_names_per_response{100U};
@@ -76,7 +76,7 @@ public:
 
     // directory must be unique, grouped by domain in the desired wire order,
     // and remain alive for the dispatcher lifetime. Host IED-simulator profiles
-    // preserve SCL/IEDScout declaration order; embedded profiles may omit the
+    // preserve SCL/ReferenceClient declaration order; embedded profiles may omit the
     // directory and retain the fixed-buffer scan path without host-side heap
     // requirements.
     MmsStaticApplicationDispatcher(

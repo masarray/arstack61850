@@ -313,7 +313,7 @@ void simulator_compiles_semantic_defaults_and_indexed_report_instances() {
     constexpr std::string_view xml = R"xml(
 <SCL xmlns="http://www.iec.ch/61850/2003/SCL" version="2007" revision="B">
   <Header id="SIM_DEFAULTS" version="1" revision="A"/>
-  <IED name="IED1" manufacturer="SIEMENS" type="SIM" configVersion="CFG-7">
+  <IED name="IED1" manufacturer="VENDOR_A" type="SIM" configVersion="CFG-7">
     <AccessPoint name="P1"><Server><LDevice inst="LD0">
       <LN0 lnClass="LLN0" lnType="LLN0Type">
         <DataSet name="ds"><FCDA ldInst="LD0" lnClass="LLN0" doName="Mod" daName="stVal" fc="ST"/></DataSet>
@@ -384,7 +384,7 @@ void simulator_compiles_semantic_defaults_and_indexed_report_instances() {
     CHECK(point("LLN0$ST$Health$stVal").initial_value == "1");
     CHECK(point("LLN0$ST$Mod$q").initial_value == "good");
     CHECK(point("LLN0$ST$Mod$t").initial_value == "unix-ms:1700000000123");
-    CHECK(point("LLN0$DC$NamPlt$vendor").initial_value == "SIEMENS");
+    CHECK(point("LLN0$DC$NamPlt$vendor").initial_value == "VENDOR_A");
     CHECK(point("LLN0$DC$NamPlt$configRev").initial_value == "CFG-7");
 
     // Semantic defaults are object-aware: an unrelated Enum still receives the

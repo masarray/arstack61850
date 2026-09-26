@@ -20,8 +20,8 @@
 #include <functional>
 
 namespace {
-bool isIedScoutIndexedFixture(const QString& sclPath) {
-    return QFileInfo(sclPath).fileName() == QStringLiteral("iedscout-indexed-reports.scd");
+bool isReferenceClientIndexedFixture(const QString& sclPath) {
+    return QFileInfo(sclPath).fileName() == QStringLiteral("reference_client-indexed-reports.scd");
 }
 
 bool verifyIndexedRcbManifestExpansion() {
@@ -82,10 +82,10 @@ bool verifyIndexedRcbManifestExpansion() {
     return brcbExpanded && urcbExpanded && nonIndexedStable;
 }
 
-bool verifyIedScoutIndexedInventory(
+bool verifyReferenceClientIndexedInventory(
     const QString& sclPath,
     const QVariantList& reportControls) {
-    if (!isIedScoutIndexedFixture(sclPath)) return true;
+    if (!isReferenceClientIndexedFixture(sclPath)) return true;
 
     QSet<QString> references;
     bool allConcreteInstancesReadable = true;
@@ -97,8 +97,8 @@ bool verifyIedScoutIndexedInventory(
 
         const bool buffered = item.value(QStringLiteral("buffered")).toBool();
         const auto expectedReportId = buffered
-            ? QStringLiteral("IEDSCOUT01LD0/LLN0$BR$Buffer")
-            : QStringLiteral("IEDSCOUT01LD0/LLN0$RP$Unbuffer");
+            ? QStringLiteral("GOLDEN01LD0/LLN0$BR$Buffer")
+            : QStringLiteral("GOLDEN01LD0/LLN0$RP$Unbuffer");
         allConcreteInstancesReadable = allConcreteInstancesReadable &&
             item.value(QStringLiteral("probeOk")).toBool() &&
             !item.value(QStringLiteral("dataSet")).toString().isEmpty() &&
@@ -106,10 +106,10 @@ bool verifyIedScoutIndexedInventory(
     }
 
     static const QSet<QString> expected{
-        QStringLiteral("IEDSCOUT01LD0/LLN0.Buffer01"),
-        QStringLiteral("IEDSCOUT01LD0/LLN0.Buffer02"),
-        QStringLiteral("IEDSCOUT01LD0/LLN0.Unbuffer01"),
-        QStringLiteral("IEDSCOUT01LD0/LLN0.Unbuffer02")};
+        QStringLiteral("GOLDEN01LD0/LLN0.Buffer01"),
+        QStringLiteral("GOLDEN01LD0/LLN0.Buffer02"),
+        QStringLiteral("GOLDEN01LD0/LLN0.Unbuffer01"),
+        QStringLiteral("GOLDEN01LD0/LLN0.Unbuffer02")};
     return references == expected && allConcreteInstancesReadable;
 }
 
@@ -198,12 +198,12 @@ int main(int argc, char* argv[]) {
 
     IedFleetController simulator;
     const QString sclPath = QString::fromLocal8Bit(argv[1]);
-    const bool iedScoutFixture = isIedScoutIndexedFixture(sclPath);
-    const QString exactUrcb = iedScoutFixture
-        ? QStringLiteral("IEDSCOUT01LD0/LLN0.Unbuffer01")
+    const bool referenceClientFixture = isReferenceClientIndexedFixture(sclPath);
+    const QString exactUrcb = referenceClientFixture
+        ? QStringLiteral("GOLDEN01LD0/LLN0.Unbuffer01")
         : QString{};
-    const QString exactBrcb = iedScoutFixture
-        ? QStringLiteral("IEDSCOUT01LD0/LLN0.Buffer01")
+    const QString exactBrcb = referenceClientFixture
+        ? QStringLiteral("GOLDEN01LD0/LLN0.Buffer01")
         : QString{};
     if (!loadAsync(simulator, sclPath)) {
         qCritical().noquote() << "REPORTS_WORKBENCH_FAIL import" << simulator.fatalError();
@@ -255,7 +255,7 @@ int main(int argc, char* argv[]) {
         qCritical() << "REPORTS_WORKBENCH_FAIL unexpected_dynamic_ownership";
         return 28;
     }
-    if (!verifyIedScoutIndexedInventory(sclPath, reportControls)) {
+    if (!verifyReferenceClientIndexedInventory(sclPath, reportControls)) {
         QStringList actual;
         for (const auto& value : reportControls) {
             const auto item = value.toMap();
@@ -265,7 +265,7 @@ int main(int argc, char* argv[]) {
                 (item.value(QStringLiteral("probeOk")).toBool() ? QStringLiteral("ok") : QStringLiteral("fail")) +
                 QStringLiteral("|rptID=") + item.value(QStringLiteral("reportId")).toString());
         }
-        qCritical().noquote() << "REPORTS_WORKBENCH_FAIL iedscout_indexed_inventory"
+        qCritical().noquote() << "REPORTS_WORKBENCH_FAIL reference_client_indexed_inventory"
                               << actual.join(QLatin1Char(','));
         return 21;
     }
@@ -418,7 +418,7 @@ int main(int argc, char* argv[]) {
     }
 
     qulonglong brcbGiReports = 0;
-    if (iedScoutFixture) {
+    if (referenceClientFixture) {
         if (selectEligibleRcb(reports, true, exactBrcb) < 0 ||
             reports.selectedDataSetMembers().isEmpty()) {
             qCritical() << "REPORTS_WORKBENCH_FAIL eligible_brcb";
@@ -464,9 +464,9 @@ int main(int argc, char* argv[]) {
         << "urcb_gi_reports=" + QString::number(reportCountAfterGi)
         << "brcb_gi_reports=" + QString::number(brcbGiReports)
         << "rcb_manifest_instances=pass"
-        << QStringLiteral("iedscout_indexed_inventory=%1").arg(iedScoutFixture ? QStringLiteral("pass") : QStringLiteral("n/a"))
+        << QStringLiteral("reference_client_indexed_inventory=%1").arg(referenceClientFixture ? QStringLiteral("pass") : QStringLiteral("n/a"))
         << "urcb=pass"
-        << QStringLiteral("brcb_gi=%1").arg(iedScoutFixture ? QStringLiteral("pass") : QStringLiteral("n/a"))
+        << QStringLiteral("brcb_gi=%1").arg(referenceClientFixture ? QStringLiteral("pass") : QStringLiteral("n/a"))
         << "brcb_inventory=pass"
         << "entryid_indicator=pass"
         << "cleanup=pass"

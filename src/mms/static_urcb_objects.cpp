@@ -19,7 +19,7 @@ namespace {
 constexpr std::array<std::uint8_t, 2U> kBooleanType{0x83U, 0x00U};
 constexpr std::array<std::uint8_t, 3U> kUnsigned8Type{0x86U, 0x01U, 0x08U};
 constexpr std::array<std::uint8_t, 3U> kUnsigned32Type{0x86U, 0x01U, 0x20U};
-// Golden IEDScout server uses the variable-length VisibleString(129) form.
+// Golden ReferenceClient server uses the variable-length VisibleString(129) form.
 constexpr std::array<std::uint8_t, 4U> kVisible129Type{0x8AU, 0x02U, 0xFFU, 0x7FU};
 constexpr std::array<std::uint8_t, 4U> kVariableOctet64Type{0x89U, 0x02U, 0xFFU, 0xC0U};
 constexpr std::array<std::uint8_t, 3U> kBitString10Type{0x84U, 0x01U, 0x0AU};
