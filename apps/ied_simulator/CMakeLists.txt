@@ -70,6 +70,8 @@ qt_add_qml_module(arstack_ied_simulator
         src/MmsControlController.hpp
         src/IedBrowserSessionController.cpp
         src/IedBrowserSessionController.hpp
+        src/IedBrowserFleetController.cpp
+        src/IedBrowserFleetController.hpp
         src/MmsReportController.cpp
         src/MmsReportController.hpp
         src/MmsSettingGroupPolicy.hpp
@@ -355,6 +357,10 @@ add_executable(ied_browser_session_qa
     src/ied_browser_session_qa.cpp
     src/IedBrowserSessionController.cpp
     src/IedBrowserSessionController.hpp
+    src/IedBrowserFleetController.cpp
+    src/IedBrowserFleetController.hpp
+    src/SclWorkspaceController.cpp
+    src/SclWorkspaceController.hpp
     src/MmsLiveTreeModel.cpp
     src/MmsLiveTreeModel.hpp
     src/IedEngineeringContextController.cpp
