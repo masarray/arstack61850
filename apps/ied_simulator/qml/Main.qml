@@ -21,6 +21,7 @@ ApplicationWindow {
     property bool mmsWasConnected: false
     property bool simulatorAutoSelectPending: true
     property bool allIedMonitor: false
+    property var browserFleet: fleet
     property var iedContext: fleet.activeContext
     property var mmsClient: fleet.activeClient
     property var reports: fleet.activeReports
@@ -287,7 +288,7 @@ ApplicationWindow {
                 theme: appTheme
                 workspace: sclWorkspace
                 hardening: hardening
-                browserSession: browserSession
+                browserSession: root.browserSession
                 context: iedContext
                 onBrowserRequested: root.workspaceIndex = 1
                 onOpenSourceRequested: function(fileUrl) {
@@ -446,28 +447,38 @@ ApplicationWindow {
                         Layout.fillHeight: true
                         currentIndex: root.allIedMonitor ? 1 : 0
 
-                        StackLayout {
+                        Item {
+                            id: perIedBrowserHost
+                            objectName: "perIedBrowserHost"
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            currentIndex: fleet.activeIndex
 
-                            // Delegates persist per slot: each IED retains its own
-                            // navigation and P6A Global Data watchlist.
+                            // A Repeater is itself an Item. Putting it inside a
+                            // StackLayout adds a layout child before its delegates:
+                            // indexing by the fleet slot can show a different
+                            // IED's panel from the selected tab. Keep delegates as
+                            // siblings in a plain Item, size them explicitly, and
+                            // show exactly the active slot. Hidden views retain
+                            // their per-IED navigation and Global Data watchlists.
                             Repeater {
                                 id: iedBrowserRepeater
-                                model: fleet
+                                objectName: "iedBrowserRepeater"
+                                model: root.browserFleet
                                 IedBrowserWorkspace {
                                     required property int index
+                                    objectName: "iedBrowserView_" + index
+                                    anchors.fill: parent
+                                    visible: index === root.browserFleet.activeIndex
                                     theme: appTheme
                                     productState: hardening
-                                    fleet: fleet
-                                    session: fleet.sessionAt(index)
-                                    client: fleet.clientAt(index)
-                                    context: fleet.contextAt(index)
-                                    reports: fleet.reportsAt(index)
-                                    utilities: fleet.utilitiesAt(index)
-                                    controls: fleet.controlsAt(index)
-                                    engineering: fleet.engineeringAt(index)
+                                    fleet: root.browserFleet
+                                    session: root.browserFleet.sessionAt(index)
+                                    client: root.browserFleet.clientAt(index)
+                                    context: root.browserFleet.contextAt(index)
+                                    reports: root.browserFleet.reportsAt(index)
+                                    utilities: root.browserFleet.utilitiesAt(index)
+                                    controls: root.browserFleet.controlsAt(index)
+                                    engineering: root.browserFleet.engineeringAt(index)
                                     onWatchedDataChanged: fleetGlobalData.refreshRows()
                                 }
                             }
@@ -476,7 +487,7 @@ ApplicationWindow {
                         FleetGlobalDataPane {
                             id: fleetGlobalData
                             theme: appTheme
-                            fleet: fleet
+                            fleet: root.browserFleet
                             browserViews: iedBrowserRepeater
                             onIedRequested: function(index) {
                                 fleet.switchTo(index)

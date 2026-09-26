@@ -42,6 +42,11 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: ./build-ied-simulator-release/ied_product_hardening_qa
 
+      - name: P0 rendered fleet Browser and offline signal routing
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ./build-ied-simulator-release/arstack_ied_simulator --qa-browser-routing
+
       - name: MMS reconnect association soak
         env:
           QT_QPA_PLATFORM: offscreen

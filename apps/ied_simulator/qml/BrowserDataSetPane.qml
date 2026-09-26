@@ -7,6 +7,9 @@ Rectangle {
     id: root
     required property var theme
     required property var reports
+    readonly property var selectedDataSet: reports.selectedDataSetIndex >= 0
+                                           && reports.selectedDataSetIndex < reports.dataSets.length
+                                           ? reports.dataSets[reports.selectedDataSetIndex] : ({})
 
     color: theme.background
 
@@ -44,16 +47,16 @@ Rectangle {
                 Layout.preferredWidth: 104
                 Layout.preferredHeight: 22
                 radius: 11
-                color: reports.dataSets[reports.selectedDataSetIndex].dynamicOwned === true
+                color: root.selectedDataSet.dynamicOwned === true
                        ? theme.greenSoft : theme.surface
                 border.width: 1
-                border.color: reports.dataSets[reports.selectedDataSetIndex].dynamicOwned === true
+                border.color: root.selectedDataSet.dynamicOwned === true
                               ? theme.green : theme.lineSoft
                 Label {
                     anchors.centerIn: parent
-                    text: reports.dataSets[reports.selectedDataSetIndex].dynamicOwned === true
+                    text: root.selectedDataSet.dynamicOwned === true
                           ? "DYNAMIC OWNED" : "STATIC / READ-ONLY"
-                    color: reports.dataSets[reports.selectedDataSetIndex].dynamicOwned === true
+                    color: root.selectedDataSet.dynamicOwned === true
                            ? theme.green : theme.muted
                     font.pixelSize: 7
                     font.weight: Font.Bold
@@ -61,7 +64,7 @@ Rectangle {
             }
             Label {
                 Layout.fillWidth: true
-                text: reports.dataSets[reports.selectedDataSetIndex].dynamicOwned === true
+                text: root.selectedDataSet.dynamicOwned === true
                       ? "Created and verified on this live association; eligible for owned-only delete."
                       : "Membership is immutable in Browser authoring."
                 color: theme.muted
