@@ -58,7 +58,9 @@ require(main, (
     "property var browserSession: fleet.activeSession",
     "property var sclWorkspace: fleet.activeEngineering",
     "model: fleet",
-    "currentIndex: fleet.activeIndex",
+    "visible: index === fleet.activeIndex",
+    "anchors.fill: parent",
+    'objectName: "iedBrowserView_" + index',
     "fleet.contextAt(index)",
     "fleet.sessionAt(index)",
     "fleet.clientAt(index)",
@@ -116,6 +118,18 @@ for typename in (
 ):
     if f"{typename} {{" in main:
         raise SystemExit(f"P6E_FAIL singleton {typename} remained in Main.qml")
+# A StackLayout containing a Repeater has an extra layout child and can
+# render slot N-1 while the active tab points at slot N.
+if "currentIndex: fleet.activeIndex" in main or \
+        "currentIndex: fleet.activeIndex + 1" in main:
+    raise SystemExit("P6E_FAIL Repeater delegates must not use StackLayout indexing")
+require(main, (
+    'id: perIedBrowserHost',
+    'id: iedBrowserRepeater',
+    'visible: index === fleet.activeIndex',
+    'objectName: "iedBrowserView_" + index',
+), "exact active Browser panel routing")
+
 if "Timer {" in all_data:
     raise SystemExit("P6E_FAIL aggregate Global Data timer/polling introduced")
 if "setEngineeringContext(fleet.activeContext)" in main:
