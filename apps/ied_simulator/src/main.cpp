@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "IedFleetController.hpp"
+#include "IedBrowserFleetController.hpp"
 
 #include <QCommandLineOption>
 #include <QCommandLineParser>
@@ -10,6 +11,8 @@
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QQuickItem>
+#include <QEventLoop>
 #include <QTimer>
 #include <QUrl>
 
@@ -99,6 +102,9 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption smokeOption{
         QStringLiteral("smoke-test"),
         QStringLiteral("Load the QML scene, wait briefly, and exit.")};
+    const QCommandLineOption qaBrowserRoutingOption{
+        QStringLiteral("qa-browser-routing"),
+        QStringLiteral("QA: verify the rendered active IED Browser and its offline signal tree match the selected fleet slot.")};
     const QCommandLineOption portOption{
         QStringLiteral("port"),
         QStringLiteral("Override the default MMS listen port."),
@@ -125,6 +131,7 @@ int main(int argc, char* argv[]) {
         startIedOption,
         screenshotOption,
         smokeOption,
+        qaBrowserRoutingOption,
         portOption,
         setFirstValueOption,
         qaLiveBurstOption,
@@ -417,6 +424,119 @@ int main(int argc, char* argv[]) {
                 });
                 liveTimer->start();
             }
+        }
+        if (parser.isSet(qaBrowserRoutingOption)) {
+            QTimer::singleShot(150, &app, [&app, rootObject] {
+                auto fail = [&app](const char* reason, const int code) {
+                    qCritical().noquote() << "BROWSER_FLEET_ROUTING_FAIL" << reason;
+                    app.exit(code);
+                };
+                auto* const fleet = rootObject->findChild<IedBrowserFleetController*>(
+                    QStringLiteral("iedBrowserFleetBackend"));
+                if (!fleet || fleet->workspaceCount() != 1 || !fleet->contextAt(0)) {
+                    fail("initial_fleet", 61);
+                    return;
+                }
+
+                // Deliberately reproduce the reported mismatch: an unselected
+                // multi-IED SCL in slot 0 and a fully loaded, offline IED in
+                // slot 1. The active tab and rendered Browser MUST be slot 1.
+                ar::iec61850::scl::SclDocument document;
+                document.source_name = "fleet-routing-qa.scd";
+                document.edition = ar::iec61850::scl::SclEdition::edition2;
+                for (const std::string name : {"QA_IED_A", "QA_IED_B"}) {
+                    document.ieds.push_back({name, "ARStack", "BrowserQA", "1"});
+                    ar::iec61850::scl::SclLogicalNode node;
+                    node.ied_name = name;
+                    node.ld_inst = "LD0";
+                    node.ln_class = "LLN0";
+                    node.name = "LLN0";
+                    document.logical_nodes.push_back(std::move(node));
+                    ar::iec61850::scl::SclDataSetEntry signal;
+                    signal.ied_name = name;
+                    signal.ld_inst = "LD0";
+                    signal.ln_class = "LLN0";
+                    signal.do_name = "Mod";
+                    signal.da_name = "stVal";
+                    signal.functional_constraint = "ST";
+                    signal.basic_type = "INT32";
+                    signal.cdc = "INC";
+                    signal.signal_reference = name + "LD0/LLN0.Mod.stVal";
+                    document.model_entries.push_back(std::move(signal));
+                }
+                if (!fleet->contextAt(0)->publishSclDocument(
+                        document, QStringLiteral("/qa/fleet-routing.scd")) ||
+                    !fleet->contextAt(0)->selectionRequired() ||
+                    fleet->contextAt(0)->loaded()) {
+                    fail("unselected_source_boundary", 62);
+                    return;
+                }
+                if (!fleet->newWorkspace() || fleet->activeIndex() != 1 ||
+                    !fleet->contextAt(1)->publishSclDocument(
+                        document, QStringLiteral("/qa/fleet-routing.scd"),
+                        QStringLiteral("QA_IED_B"))) {
+                    fail("second_source", 63);
+                    return;
+                }
+                rootObject->setProperty("workspaceIndex", 1);
+                rootObject->setProperty("allIedMonitor", false);
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+                auto* const first = rootObject->findChild<QQuickItem*>(
+                    QStringLiteral("iedBrowserView_0"));
+                auto* const second = rootObject->findChild<QQuickItem*>(
+                    QStringLiteral("iedBrowserView_1"));
+                const auto* const selected = fleet->contextAt(1);
+                if (!first || !second || first->isVisible() || !second->isVisible() ||
+                    !selected || !selected->loaded() || selected->online() ||
+                    selected->iedName() != QStringLiteral("QA_IED_B") ||
+                    selected->treeModel()->totalNodeCount() < 5 ||
+                    selected->treeModel()->visibleNodeCount() < 3 ||
+                    second->width() < 100 || second->height() < 100 ||
+                    second->property("context").value<QObject*>() != selected) {
+                    fail("active_tab_panel_or_offline_signals_mismatch", 64);
+                    return;
+                }
+                if (!fleet->switchTo(0)) {
+                    fail("switch_to_pending_source", 65);
+                    return;
+                }
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+                if (!first->isVisible() || second->isVisible()) {
+                    fail("wrong_panel_after_switch", 66);
+                    return;
+                }
+                if (!fleet->switchTo(1)) {
+                    fail("switch_back_to_loaded_ied", 67);
+                    return;
+                }
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+                if (first->isVisible() || !second->isVisible() ||
+                    !selected->loaded() || selected->treeModel()->visibleNodeCount() < 3) {
+                    fail("offline_signal_tree_lost_after_switch", 68);
+                    return;
+                }
+
+                if (!fleet->closeWorkspace(0)) {
+                    fail("close_inactive_workspace", 69);
+                    return;
+                }
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+                auto* const retained = rootObject->findChild<QQuickItem*>(
+                    QStringLiteral("iedBrowserView_0"));
+                if (fleet->workspaceCount() != 1 || fleet->activeIndex() != 0 ||
+                    !retained || !retained->isVisible() ||
+                    fleet->activeContext() != selected ||
+                    fleet->activeContext()->treeModel()->visibleNodeCount() < 3) {
+                    fail("active_model_lost_after_reindex", 70);
+                    return;
+                }
+                qInfo().noquote()
+                    << "BROWSER_FLEET_ROUTING_PASS active_tab=QA_IED_B"
+                    << "offline_signals=visible"
+                    << "switching=pass reindex=pass cross_ied_panel=false";
+                app.exit(0);
+            });
         }
         if (parser.isSet(screenshotOption)) {
             const auto outputPath = parser.value(screenshotOption);
