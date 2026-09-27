@@ -30,6 +30,10 @@ require(
         'text: "Model values"',
         'text: root.client.operationBusy ? "Reading…" : "Read visible"',
         "model: root.modelProvider.treeModel",
+        'objectName: "iedBrowserValueTable"',
+        'objectName: "iedBrowserValueName_" + valueRow.index',
+        "required property int index",
+        "required property var model",
         "root.refreshCurrentVisible(root.firstVisibleRow(), root.lastVisibleRow())",
         'text: "OBSERVED VALUE"',
         'text: "ENGINEERING IDENTITY"',
@@ -44,6 +48,9 @@ require(
     datasets,
     (
         "context.treeModel.nodeForReference(reference)",
+        "readonly property var selectedDataSet:",
+        "(reports.dataSets[reports.selectedDataSetIndex] || null)",
+        "root.selectedDataSet !== null",
         "root.client.refreshEngineeringReferences(reports.selectedDataSetMembers)",
         "signal inspectRequested(string reference)",
         'text: "Ordered members and observed values"',
@@ -63,6 +70,9 @@ require(
     ),
     "browser routing",
 )
+
+if "reports.dataSets[reports.selectedDataSetIndex].dynamicOwned" in datasets:
+    raise SystemExit("BROWSER_OBSERVATION_FAIL unguarded DataSet ownership selection")
 
 if "ListModel {" in inspector or "ListModel {" in datasets:
     raise SystemExit(

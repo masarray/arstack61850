@@ -426,6 +426,7 @@ Item {
 
                         ListView {
                             id: valueTable
+                            objectName: "iedBrowserValueTable"
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             clip: true
@@ -441,6 +442,8 @@ Item {
                             delegate: Rectangle {
                                 id: valueRow
                                 required property int index
+                                // Bind the complete model role object alongside the index.
+                                required property var model
                                 width: valueTable.width
                                 height: 31
                                 color: model.selected
@@ -485,6 +488,7 @@ Item {
                                             }
                                         }
                                         Label {
+                                            objectName: "iedBrowserValueName_" + valueRow.index
                                             Layout.fillWidth: true
                                             text: model.label
                                             color: theme.text

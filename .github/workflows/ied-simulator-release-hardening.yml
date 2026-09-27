@@ -11,6 +11,11 @@ on:
       - 'apps/ied_simulator/**'
       - '.github/workflows/ied-simulator-release-hardening.yml'
 
+# Superseded commits must not occupy CI runners or mask the exact-head result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -42,6 +47,17 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: ./build-ied-simulator-release/ied_product_hardening_qa
 
+      - name: P0 rendered fleet Browser and offline signal routing
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -o pipefail
+          ./build-ied-simulator-release/arstack_ied_simulator --qa-browser-routing 2>&1 | tee browser-routing.log
+          if grep -E 'ReferenceError:|TypeError:|Binding loop detected' browser-routing.log; then
+            echo '::error::Qt Browser emitted an unresolved runtime binding diagnostic'
+            exit 1
+          fi
+
       - name: MMS reconnect association soak
         env:
           QT_QPA_PLATFORM: offscreen
@@ -59,6 +75,8 @@ jobs:
           --cycles 12
 
   windows-release-package:
+    # Do not publish a Windows RC if rendered Linux Browser QA is red.
+    needs: linux-release-soak
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4

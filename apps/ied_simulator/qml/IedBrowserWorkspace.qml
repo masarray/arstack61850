@@ -121,163 +121,184 @@ Item {
         anchors.fill: parent
         spacing: 0
 
+        // Two distinct, compact tool rows keep every label and command visible
+        // at the supported 1024px window width. The old single RowLayout was
+        // wider than its container, leaving ghost/blank controls in the GUI.
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 68
+            id: browserCommandBar
+            objectName: "iedBrowserCommandBar"
+            Layout.preferredHeight: 96
             color: root.theme.chrome
             border.width: 1
             border.color: root.theme.lineSoft
 
-            RowLayout {
+            ColumnLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 14
-                anchors.rightMargin: 14
-                spacing: 8
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
+                anchors.topMargin: 7
+                anchors.bottomMargin: 7
+                spacing: 5
 
-                ColumnLayout {
-                    Layout.preferredWidth: 168
-                    spacing: 1
-                    Label {
-                        text: "MODEL"
-                        color: root.theme.text
-                        font.pixelSize: root.theme.labelSize
-                        font.weight: Font.DemiBold
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 35
+                    spacing: 8
+
+                    ColumnLayout {
+                        Layout.preferredWidth: 240
+                        spacing: 1
+                        Label {
+                            text: "MODEL"
+                            color: root.theme.text
+                            font.pixelSize: root.theme.labelSize
+                            font.weight: Font.DemiBold
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: context.loaded
+                                  ? root.activeIedLabel() + " · " + context.authority
+                                  : "Open SCL or discover one IED endpoint"
+                            color: root.theme.muted
+                            font.pixelSize: root.theme.captionSize
+                            elide: Text.ElideRight
+                        }
                     }
+
+                    ActionButton {
+                        theme: root.theme
+                        text: "Open SCL"
+                        enabled: !session.configurationLocked && !engineering.busy
+                        onClicked: browserSclDialog.open()
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Open SCL/CID/SCD/IID/ICD into the persistent Browser model."
+                    }
+                    ActionButton {
+                        theme: root.theme
+                        text: engineering.busy ? "Saving…" : "Save SCL"
+                        visible: context.loaded && context.authorityKey === "live-discovery"
+                        enabled: engineering.engineeringContextExportSupported && !engineering.busy
+                        onClicked: saveSclDialog.open()
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Save the cached canonical IED model locally; no rediscovery is performed."
+                    }
+                    Item { Layout.fillWidth: true }
+                    ColumnLayout {
+                        visible: context.loaded
+                        spacing: 0
+                        Label {
+                            Layout.alignment: Qt.AlignRight
+                            text: context.iedName.length ? context.iedName
+                                  : context.selectionRequired ? "Select active IED" : "IED model"
+                            color: root.theme.text
+                            font.pixelSize: root.theme.labelSize
+                            font.weight: Font.DemiBold
+                        }
+                        Label {
+                            Layout.alignment: Qt.AlignRight
+                            text: context.logicalDeviceCount + " LD · " + context.logicalNodeCount + " LN · "
+                                  + context.dataAttributeCount + " DA · "
+                                  + (context.online ? "ONLINE" : "OFFLINE")
+                            color: root.theme.muted
+                            font.pixelSize: root.theme.captionSize
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 37
+                    spacing: 8
+
                     Label {
-                        text: context.loaded
-                              ? root.activeIedLabel() + " · " + context.authority
-                              : "Open SCL or discover one IED endpoint"
-                        color: root.theme.muted
+                        text: "IED endpoint"
+                        color: root.theme.textSoft
                         font.pixelSize: root.theme.captionSize
                     }
-                }
-
-                ActionButton {
-                    theme: root.theme
-                    text: "Open SCL"
-                    enabled: !session.configurationLocked && !engineering.busy
-                    onClicked: browserSclDialog.open()
-                    ToolTip.visible: hovered
-                    ToolTip.text: "Open SCL/CID/SCD/IID/ICD into the persistent Browser model."
-                }
-
-                ActionButton {
-                    theme: root.theme
-                    text: engineering.busy ? "Saving…" : "Save SCL"
-                    visible: context.loaded && context.authorityKey === "live-discovery"
-                    enabled: engineering.engineeringContextExportSupported
-                             && !engineering.busy
-                    onClicked: saveSclDialog.open()
-                    ToolTip.visible: hovered
-                    ToolTip.text: context.online
-                                  ? "Save the cached canonical IED model locally; no rediscovery is performed."
-                                  : "Save the persistent canonical IED model while offline."
-                }
-
-                TextField {
-                    id: hostField
-                    Layout.preferredWidth: 190
-                    text: session.host
-                    placeholderText: "IED IP / hostname"
-                    selectByMouse: true
-                    enabled: !session.configurationLocked
-                    onEditingFinished: session.host = text
-                }
-
-                SpinBox {
-                    id: portField
-                    Layout.preferredWidth: 102
-                    from: 1
-                    to: 65535
-                    value: session.port
-                    editable: true
-                    enabled: !session.configurationLocked
-                    onValueModified: session.port = value
-                }
-
-                ActionButton {
-                    theme: root.theme
-                    text: "Online"
-                    visible: context.loaded
-                    enabled: !session.connected && !session.busy && !context.selectionRequired
-                    primary: enabled
-                    onClicked: {
-                        session.host = hostField.text
-                        session.port = portField.value
-                        session.connectUsingEngineeringContext()
+                    TextField {
+                        id: hostField
+                        objectName: "iedBrowserHostField"
+                        Layout.preferredWidth: 190
+                        placeholderText: "IED IP / hostname"
+                        text: session.host
+                        selectByMouse: true
+                        enabled: !session.configurationLocked
+                        onEditingFinished: session.host = text
                     }
-                    ToolTip.visible: hovered
-                    ToolTip.text: context.authorityKey === "scl"
-                                  ? "Connect using the active trusted SCL model."
-                                  : "Reconnect/discover the active IED endpoint."
-                }
-
-                ActionButton {
-                    theme: root.theme
-                    text: session.busy && !session.connected ? "Discovering…" : "Discover IED"
-                    enabled: !session.connected && !session.busy
-                    onClicked: {
-                        session.host = hostField.text
-                        session.port = portField.value
-                        session.discoverAndConnect()
+                    SpinBox {
+                        id: portField
+                        objectName: "iedBrowserPortField"
+                        Layout.preferredWidth: 102
+                        from: 1
+                        to: 65535
+                        value: session.port
+                        editable: true
+                        enabled: !session.configurationLocked
+                        onValueModified: session.port = value
                     }
-                    ToolTip.visible: hovered
-                    ToolTip.text: "Ignore trusted SCL for this connect, discover the live MMS model, and publish it into this Browser context."
-                }
-
-                ActionButton {
-                    theme: root.theme
-                    text: "Disconnect"
-                    enabled: session.connected || session.busy
-                    danger: true
-                    onClicked: session.disconnectFromIed()
-                }
-
-                Rectangle {
-                    width: 8
-                    height: 8
-                    radius: 4
-                    color: session.lastError.length ? root.theme.red
-                                                   : session.connected ? root.theme.green
-                                                                       : session.busy ? root.theme.amber
-                                                                                      : root.theme.muted
-                }
-
-                ColumnLayout {
-                    spacing: 0
+                    ActionButton {
+                        theme: root.theme
+                        text: "Online"
+                        visible: context.loaded && !session.connected
+                        enabled: !session.busy && !context.selectionRequired
+                        primary: enabled
+                        onClicked: {
+                            session.host = hostField.text
+                            session.port = portField.value
+                            session.connectUsingEngineeringContext()
+                        }
+                        ToolTip.visible: hovered
+                        ToolTip.text: context.authorityKey === "scl"
+                                      ? "Connect using the active trusted SCL model."
+                                      : "Reconnect/discover the active IED endpoint."
+                    }
+                    ActionButton {
+                        theme: root.theme
+                        text: session.busy && !session.connected ? "Discovering…" : "Discover IED"
+                        visible: !session.connected
+                        enabled: !session.busy
+                        onClicked: {
+                            session.host = hostField.text
+                            session.port = portField.value
+                            session.discoverAndConnect()
+                        }
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Discover the live MMS model and publish it into this Browser context."
+                    }
+                    ActionButton {
+                        theme: root.theme
+                        text: "Disconnect"
+                        visible: session.connected || session.busy
+                        enabled: session.connected || session.busy
+                        danger: true
+                        onClicked: session.disconnectFromIed()
+                    }
+                    Rectangle {
+                        width: 7
+                        height: 7
+                        radius: 4
+                        color: session.lastError.length ? root.theme.red
+                                                       : session.connected ? root.theme.green
+                                                                           : session.busy ? root.theme.amber
+                                                                                          : root.theme.muted
+                    }
                     Label {
-                        text: session.stateText
+                        objectName: "iedBrowserSessionStatus"
+                        Layout.fillWidth: true
+                        text: session.lastError.length ? session.lastError
+                              : session.stateText + (session.endpoint.length ? " · " + session.endpoint : "")
                         color: session.lastError.length ? root.theme.red : root.theme.textSoft
-                        font.pixelSize: root.theme.labelSize
-                        font.weight: Font.DemiBold
-                    }
-                    Label {
-                        text: session.endpoint
-                        color: root.theme.muted
                         font.pixelSize: root.theme.captionSize
-                    }
-                }
-
-                Item { Layout.fillWidth: true }
-
-                ColumnLayout {
-                    visible: context.loaded
-                    spacing: 0
-                    Label {
-                        Layout.alignment: Qt.AlignRight
-                        text: context.iedName.length ? context.iedName
-                              : context.selectionRequired ? "Select active IED" : "IED model"
-                        color: root.theme.text
-                        font.pixelSize: root.theme.labelSize
-                        font.weight: Font.DemiBold
-                    }
-                    Label {
-                        Layout.alignment: Qt.AlignRight
-                        text: context.logicalDeviceCount + " LD · " + context.logicalNodeCount + " LN · "
-                              + context.dataAttributeCount + " DA · "
-                              + (context.online ? "ONLINE" : "OFFLINE")
-                        color: root.theme.muted
-                        font.pixelSize: root.theme.captionSize
+                        elide: Text.ElideRight
+                        ToolTip.visible: sessionStatusMouse.containsMouse
+                        ToolTip.text: text
+                        MouseArea {
+                            id: sessionStatusMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            acceptedButtons: Qt.NoButton
+                        }
                     }
                 }
             }

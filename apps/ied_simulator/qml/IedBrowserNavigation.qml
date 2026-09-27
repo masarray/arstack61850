@@ -387,6 +387,7 @@ Rectangle {
 
                     ListView {
                         id: modelTree
+                        objectName: "iedBrowserSignalTree"
                         Layout.fillWidth: true
                         Layout.preferredHeight: Math.max(260, Math.min(contentHeight, 620))
                         clip: true
@@ -398,6 +399,8 @@ Rectangle {
                         delegate: Rectangle {
                             id: modelRow
                             required property int index
+                            // Required delegate properties disable implicit model context roles.
+                            required property var model
                             width: modelTree.width
                             height: 30
                             color: model.selected ? root.theme.accentSoft
