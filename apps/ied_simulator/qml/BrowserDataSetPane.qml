@@ -11,8 +11,10 @@ Rectangle {
     required property var client
 
     property int valueRevision: 0
+    property string routeMessage: ""
 
     signal inspectRequested(string reference)
+    signal inspectStaticReportRequested()
 
     color: theme.background
 
@@ -96,6 +98,15 @@ Rectangle {
             }
         }
 
+        Label {
+            Layout.fillWidth: true
+            visible: root.routeMessage.length > 0
+            text: root.routeMessage
+            color: theme.amber
+            font.pixelSize: theme.captionSize
+            wrapMode: Text.WordWrap
+        }
+
         RowLayout {
             Layout.fillWidth: true
             Label {
@@ -105,6 +116,17 @@ Rectangle {
                 font.weight: Font.DemiBold
             }
             Item { Layout.fillWidth: true }
+            ActionButton {
+                theme: root.theme
+                text: "Inspect bound RCB…"
+                enabled: root.selectedDataSet !== null
+                         && root.selectedDataSet.immutable === true
+                         && root.selectedDataSet.dynamicOwned !== true
+                         && reports.selectedDataSetMembers.length > 0
+                onClicked: root.inspectStaticReportRequested()
+                ToolTip.visible: hovered
+                ToolTip.text: "Navigate to an RCB bound to this exact static DataSet. No write, enable or GI."
+            }
             ActionButton {
                 theme: root.theme
                 text: root.client.operationBusy ? "Reading…" : "Read members"
