@@ -167,6 +167,7 @@ Rectangle {
 
         ListView {
             id: memberList
+            objectName: "iedBrowserDataSetMembers"
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
