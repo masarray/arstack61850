@@ -47,7 +47,7 @@ require(
 require(
     datasets,
     (
-        "context.treeModel.nodeForReference(reference)",
+        "context.treeModel.nodeForReference(root.memberReference(reference))",
         "readonly property var selectedDataSet:",
         "selectedDataSetReference",
         "dataSetCatalog[i].reference === selectedDataSetReference",
