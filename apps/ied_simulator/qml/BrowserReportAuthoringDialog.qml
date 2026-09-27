@@ -321,6 +321,7 @@ Dialog {
 
     Dialog {
         id: confirmEnable
+        width: 540
         title: "Confirm authored RCB enable"
         modal: true
         anchors.centerIn: Overlay.overlay
