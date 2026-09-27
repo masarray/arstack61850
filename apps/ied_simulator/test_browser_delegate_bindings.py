@@ -15,15 +15,18 @@ workspace = Path(sys.argv[2]).read_text(encoding="utf-8")
 
 required_main = (
     "property var browserFleet: fleet",
-    "property int slotIndex: index",
-    "fleet: browserFleet",
-    "session: browserFleet.sessionAt(slotIndex)",
-    "client: browserFleet.clientAt(slotIndex)",
-    "context: browserFleet.contextAt(slotIndex)",
-    "reports: browserFleet.reportsAt(slotIndex)",
-    "utilities: browserFleet.utilitiesAt(slotIndex)",
-    "controls: browserFleet.controlsAt(slotIndex)",
-    "engineering: browserFleet.engineeringAt(slotIndex)",
+    'id: perIedBrowserHost',
+    'objectName: "iedBrowserView_" + index',
+    "anchors.fill: parent",
+    "visible: index === root.browserFleet.activeIndex",
+    "fleet: root.browserFleet",
+    "session: root.browserFleet.sessionAt(index)",
+    "client: root.browserFleet.clientAt(index)",
+    "context: root.browserFleet.contextAt(index)",
+    "reports: root.browserFleet.reportsAt(index)",
+    "utilities: root.browserFleet.utilitiesAt(index)",
+    "controls: root.browserFleet.controlsAt(index)",
+    "engineering: root.browserFleet.engineeringAt(index)",
 )
 missing = [token for token in required_main if token not in main]
 if missing:
