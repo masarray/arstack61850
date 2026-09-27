@@ -103,6 +103,7 @@ qt_add_qml_module(arstack_ied_simulator
         qml/IedBrowserNavigation.qml
         qml/BrowserStatusConsole.qml
         qml/BrowserDataSetPane.qml
+        qml/BrowserSignalCatalog.qml
         qml/BrowserGoosePane.qml
         qml/BrowserGlobalDataPane.qml
         qml/FleetGlobalDataPane.qml
