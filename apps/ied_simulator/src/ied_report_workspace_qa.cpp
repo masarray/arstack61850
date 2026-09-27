@@ -359,10 +359,7 @@ int main(int argc, char* argv[]) {
         reports.staticRouteDataSet() != staticRoute ||
         reports.selectedRcb().value(QStringLiteral("reference")).toString() != originalRcb ||
         !reports.selectedRcb().value(QStringLiteral("probeOk")).toBool() ||
-        !reports.selectedRcb().value(QStringLiteral("dataSet")).toString().contains(
-            reports.selectedDataSetMembers().isEmpty()
-                ? QStringLiteral("__missing__")
-                : QString{})) {
+        reports.selectedDataSetMembers().isEmpty()) {
         qCritical().noquote() << "REPORTS_WORKBENCH_FAIL static_route_restore"
                               << "route=" << reports.staticRouteDataSet()
                               << "rcb=" << reports.selectedRcb().value(QStringLiteral("reference")).toString()
