@@ -28,6 +28,9 @@ ApplicationWindow {
     property var utilities: fleet.activeUtilities
     property var browserSession: fleet.activeSession
     property var sclWorkspace: fleet.activeEngineering
+    // Keep the outer fleet authority unambiguous inside Repeater delegates.
+    // A delegate property named `fleet` must never bind to itself.
+    property var browserFleet: fleet
 
     onWorkspaceIndexChanged: {
         if (root.persistenceReady) hardening.workspaceIndex = root.workspaceIndex
@@ -457,17 +460,17 @@ ApplicationWindow {
                                 id: iedBrowserRepeater
                                 model: fleet
                                 IedBrowserWorkspace {
-                                    required property int index
+                                    property int slotIndex: index
                                     theme: appTheme
                                     productState: hardening
-                                    fleet: fleet
-                                    session: fleet.sessionAt(index)
-                                    client: fleet.clientAt(index)
-                                    context: fleet.contextAt(index)
-                                    reports: fleet.reportsAt(index)
-                                    utilities: fleet.utilitiesAt(index)
-                                    controls: fleet.controlsAt(index)
-                                    engineering: fleet.engineeringAt(index)
+                                    fleet: browserFleet
+                                    session: browserFleet.sessionAt(slotIndex)
+                                    client: browserFleet.clientAt(slotIndex)
+                                    context: browserFleet.contextAt(slotIndex)
+                                    reports: browserFleet.reportsAt(slotIndex)
+                                    utilities: browserFleet.utilitiesAt(slotIndex)
+                                    controls: browserFleet.controlsAt(slotIndex)
+                                    engineering: browserFleet.engineeringAt(slotIndex)
                                     onWatchedDataChanged: fleetGlobalData.refreshRows()
                                 }
                             }
@@ -476,10 +479,10 @@ ApplicationWindow {
                         FleetGlobalDataPane {
                             id: fleetGlobalData
                             theme: appTheme
-                            fleet: fleet
+                            fleet: browserFleet
                             browserViews: iedBrowserRepeater
                             onIedRequested: function(index) {
-                                fleet.switchTo(index)
+                                browserFleet.switchTo(index)
                                 root.allIedMonitor = false
                             }
                         }

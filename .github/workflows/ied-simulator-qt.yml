@@ -288,6 +288,12 @@ jobs:
           apps/ied_simulator/src/SclWorkspaceController_part_01.inc
           apps/ied_simulator/src/MmsReportController.cpp
 
+      - name: Browser delegate service binding regression contract
+        run: >-
+          python3 apps/ied_simulator/test_browser_delegate_bindings.py
+          apps/ied_simulator/qml/Main.qml
+          apps/ied_simulator/qml/IedBrowserWorkspace.qml
+
       - name: P6D passive MMS capture and decoder contract
         run: >-
           python3 apps/ied_simulator/test_passive_mms_sniffer.py
