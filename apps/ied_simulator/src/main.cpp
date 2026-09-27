@@ -7,6 +7,7 @@
 #include <QCommandLineParser>
 #include <QDebug>
 #include <QGuiApplication>
+#include <QImage>
 #include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
