@@ -535,18 +535,22 @@ MmsReportController::~MmsReportController() {
 void MmsReportController::setHost(const QString& value) {
     const auto normalized = value.trimmed();
     if (host_ == normalized) return;
+    const bool routeChanged = !pendingStaticDataSetReference_.isEmpty();
     host_ = normalized;
     pendingStaticDataSetReference_.clear();
     pendingStaticContextFingerprint_.clear();
     emit configurationChanged();
+    if (routeChanged) emit selectionChanged();
 }
 
 void MmsReportController::setPort(const int value) {
     if (value < 1 || value > 65'535 || port_ == value) return;
+    const bool routeChanged = !pendingStaticDataSetReference_.isEmpty();
     port_ = value;
     pendingStaticDataSetReference_.clear();
     pendingStaticContextFingerprint_.clear();
     emit configurationChanged();
+    if (routeChanged) emit selectionChanged();
 }
 
 void MmsReportController::setEngineeringContext(IedEngineeringContextController* value) {
@@ -555,8 +559,10 @@ void MmsReportController::setEngineeringContext(IedEngineeringContextController*
     engineeringContext_ = value;
     // A route belongs to one engineering authority only. Never carry a
     // DataSet selection across a different IED/context pointer.
+    const bool routeChanged = !pendingStaticDataSetReference_.isEmpty();
     pendingStaticDataSetReference_.clear();
     pendingStaticContextFingerprint_.clear();
+    if (routeChanged) emit selectionChanged();
     if (engineeringContext_) {
         connect(
             engineeringContext_,
