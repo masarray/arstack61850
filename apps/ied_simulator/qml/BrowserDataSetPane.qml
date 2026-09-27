@@ -200,7 +200,7 @@ Rectangle {
                     Label {
                         objectName: "iedBrowserDataSetMember_" + memberRow.index
                         Layout.fillWidth: true
-                        text: modelData
+                        text: memberRow.modelData
                         color: theme.text
                         font.pixelSize: theme.labelSize
                         elide: Text.ElideMiddle
