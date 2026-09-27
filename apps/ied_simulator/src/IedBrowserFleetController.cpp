@@ -269,8 +269,11 @@ bool IedBrowserFleetController::closeWorkspace(const int index) {
     // through the next event-loop turn so visual teardown can complete.
     // Capture a copyable shared owner because Qt stores the callback.
     const auto retiredLifetime = std::shared_ptr<Entry>(std::move(retired));
-    QTimer::singleShot(0, this, [retiredLifetime] {
-        // The lifetime guard is released after queued QML delegate removal.
+    // Let the Qt Quick removal complete through a rendered frame before the
+    // old controller set is retired. This is a bounded teardown grace period,
+    // not a timer for MMS requests or reporting.
+    QTimer::singleShot(50, this, [retiredLifetime] {
+        // The retired Entry dies after the old visual delegate is detached.
     });
     return true;
 }
