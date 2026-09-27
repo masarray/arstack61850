@@ -11,6 +11,11 @@ on:
       - 'apps/ied_simulator/**'
       - '.github/workflows/ied-simulator-release-hardening.yml'
 
+# Superseded commits must not occupy CI runners or mask the exact-head result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
