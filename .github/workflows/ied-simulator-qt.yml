@@ -71,6 +71,11 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: ./build-ied-simulator-qt/arstack_ied_simulator --smoke-test
 
+      - name: P0 rendered fleet Browser and offline signal routing
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ./build-ied-simulator-qt/arstack_ied_simulator --qa-browser-routing
+
       - name: MMS client discovery workbench gates
         env:
           QT_QPA_PLATFORM: offscreen
