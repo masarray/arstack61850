@@ -538,7 +538,7 @@ void MmsReportController::setHost(const QString& value) {
     const bool routeChanged = !pendingStaticDataSetReference_.isEmpty();
     host_ = normalized;
     pendingStaticDataSetReference_.clear();
-    pendingStaticContextFingerprint_.clear();
+    pendingStaticAuthorityKey_.clear();
     emit configurationChanged();
     if (routeChanged) emit selectionChanged();
 }
@@ -548,7 +548,7 @@ void MmsReportController::setPort(const int value) {
     const bool routeChanged = !pendingStaticDataSetReference_.isEmpty();
     port_ = value;
     pendingStaticDataSetReference_.clear();
-    pendingStaticContextFingerprint_.clear();
+    pendingStaticAuthorityKey_.clear();
     emit configurationChanged();
     if (routeChanged) emit selectionChanged();
 }
@@ -561,7 +561,7 @@ void MmsReportController::setEngineeringContext(IedEngineeringContextController*
     // DataSet selection across a different IED/context pointer.
     const bool routeChanged = !pendingStaticDataSetReference_.isEmpty();
     pendingStaticDataSetReference_.clear();
-    pendingStaticContextFingerprint_.clear();
+    pendingStaticAuthorityKey_.clear();
     if (routeChanged) emit selectionChanged();
     if (engineeringContext_) {
         connect(
@@ -661,12 +661,12 @@ void MmsReportController::adoptEngineeringInventory() {
     const auto seed = buildContextDiscoverySeed(canonical);
     auto ui = buildDiscoveryUi(seed, QString{});
     if (!pendingStaticDataSetReference_.isEmpty() &&
-        (pendingStaticContextFingerprint_.isEmpty() ||
-         pendingStaticContextFingerprint_ != staticRouteAuthorityKey())) {
+        (pendingStaticAuthorityKey_.isEmpty() ||
+         pendingStaticAuthorityKey_ != staticRouteAuthorityKey())) {
         appendDiagnostic(QStringLiteral(
             "Cleared stale static DataSet route after engineering context changed."));
         pendingStaticDataSetReference_.clear();
-        pendingStaticContextFingerprint_.clear();
+        pendingStaticAuthorityKey_.clear();
     }
     // An opened SCL model has no live RCB probe response yet. Preserve its
     // verified canonical DatSet binding for read-only Browser navigation.
@@ -942,7 +942,7 @@ void MmsReportController::refreshSelection() {
 bool MmsReportController::selectRcb(const int row) {
     if (row < 0 || row >= reportControls_.size()) return false;
     pendingStaticDataSetReference_.clear();
-    pendingStaticContextFingerprint_.clear();
+    pendingStaticAuthorityKey_.clear();
     selectedRcbIndex_ = row;
     refreshSelection();
     return true;
@@ -955,7 +955,7 @@ bool MmsReportController::selectDataSet(const int row) {
     if (!pendingStaticDataSetReference_.isEmpty() &&
         !sameDataSetReference(pendingStaticDataSetReference_, reference)) {
         pendingStaticDataSetReference_.clear();
-        pendingStaticContextFingerprint_.clear();
+        pendingStaticAuthorityKey_.clear();
     }
     selectedDataSetIndex_ = row;
     selectedDataSetMembers_ = dataSets_.at(row).toMap()
@@ -1017,7 +1017,7 @@ bool MmsReportController::selectStaticRcbForDataSet(const int row) {
         return false;
     }
     pendingStaticDataSetReference_ = reference;
-    pendingStaticContextFingerprint_ = authorityKey;
+    pendingStaticAuthorityKey_ = authorityKey;
     emit selectionChanged();
     return true;
 }
