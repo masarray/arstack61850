@@ -78,6 +78,9 @@ public:
     Q_INVOKABLE bool reconnect();
     Q_INVOKABLE bool selectRcb(int row);
     Q_INVOKABLE bool selectDataSet(int row);
+    // Read-only route from canonical ordered static DataSet to its bound RCB.
+    // Never selects an arbitrary RCB and never writes/rebinds DatSet.
+    Q_INVOKABLE bool selectStaticRcbForDataSet(int row);
     Q_INVOKABLE bool enableSelected(bool requestGeneralInterrogation = true);
     Q_INVOKABLE bool enableSelectedAuthored(
         const QString& dataSetReference,
