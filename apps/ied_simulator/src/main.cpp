@@ -517,7 +517,13 @@ int main(int argc, char* argv[]) {
                         selected->treeModel()->totalNodeCount() >= 5 &&
                         selected->treeModel()->visibleNodeCount() >= 3 &&
                         second->width() >= 100 && second->height() >= 100 &&
-                        second->property("context").value<QObject*>() == selected;
+                        second->property("context").value<QObject*>() == selected &&
+                        second->property("client").value<QObject*>() == fleet->clientAt(1) &&
+                        second->property("session").value<QObject*>() == fleet->sessionAt(1) &&
+                        second->property("reports").value<QObject*>() == fleet->reportsAt(1) &&
+                        second->property("utilities").value<QObject*>() == fleet->utilitiesAt(1) &&
+                        second->property("controls").value<QObject*>() == fleet->controlsAt(1) &&
+                        second->property("engineering").value<QObject*>() == fleet->engineeringAt(1);
                 };
 
                 QElapsedTimer routingSettle;
@@ -549,6 +555,10 @@ int main(int argc, char* argv[]) {
                         << "selectedIed=" << (selected ? selected->iedName() : QStringLiteral("<null>"))
                         << "totalNodes=" << (selected ? selected->treeModel()->totalNodeCount() : -1)
                         << "visibleNodes=" << (selected ? selected->treeModel()->visibleNodeCount() : -1)
+                        << "clientMatch=" << (second && fleet->clientAt(1)
+                            ? second->property("client").value<QObject*>() == fleet->clientAt(1) : false)
+                        << "sessionMatch=" << (second && fleet->sessionAt(1)
+                            ? second->property("session").value<QObject*>() == fleet->sessionAt(1) : false)
                         << "contextMatch=" << (second && selected
                             ? second->property("context").value<QObject*>() == selected : false);
                     fail("active_tab_panel_or_offline_signals_mismatch", 64);
