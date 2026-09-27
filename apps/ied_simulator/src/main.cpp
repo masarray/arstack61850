@@ -504,13 +504,21 @@ int main(int argc, char* argv[]) {
                 auto* const valueList = second
                     ? second->findChild<QQuickItem*>(QStringLiteral("iedBrowserValueTable"))
                     : nullptr;
-                // A non-empty ListView is not sufficient: verify the rendered
-                // delegate's actual Name label resolves from the model role.
+                // ListView delegates are visual children of its contentItem.
+                // QObject::findChild does not reliably traverse that visual tree,
+                // so inspect QQuickItem::childItems instead of weakening the QA.
                 const auto firstValueText = [valueList]() -> QString {
                     if (!valueList) return {};
-                    auto* const name = valueList->findChild<QObject*>(
-                        QStringLiteral("iedBrowserValueName_0"));
-                    return name ? name->property("text").toString() : QString{};
+                    const auto target = QStringLiteral("iedBrowserValueName_0");
+                    QVector<QQuickItem*> pending{valueList};
+                    while (!pending.isEmpty()) {
+                        auto* const item = pending.takeLast();
+                        if (!item) continue;
+                        if (item->objectName() == target)
+                            return item->property("text").toString();
+                        for (auto* child : item->childItems()) pending.push_back(child);
+                    }
+                    return {};
                 };
 
                 const auto renderedReady = [&]() {
@@ -554,6 +562,8 @@ int main(int argc, char* argv[]) {
                         << "valueCount=" << (valueList ? valueList->property("count").toInt() : -1)
                         << "valueVisible=" << (valueList ? valueList->isVisible() : false)
                         << "firstValue=" << firstValueText()
+                        << "expectedValue=" << selected->treeModel()->data(
+                            selected->treeModel()->index(0, 0), MmsLiveTreeModel::LabelRole).toString()
                         << "firstVisible=" << (first ? first->isVisible() : false)
                         << "secondVisible=" << (second ? second->isVisible() : false)
                         << "secondSize=" << (second ? second->width() : -1.0)
