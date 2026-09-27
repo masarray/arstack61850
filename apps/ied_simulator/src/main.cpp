@@ -469,6 +469,17 @@ int main(int argc, char* argv[]) {
                     signal.basic_type = "INT32";
                     signal.cdc = "INC";
                     signal.signal_reference = name + "LD0/LLN0.Mod.stVal";
+                    // One real canonical DataSet per synthetic IED: the GUI
+                    // must browse its exact ordered membership while offline.
+                    ar::iec61850::scl::SclDataSet dataSet;
+                    dataSet.key = name + "LD0/LLN0.QASet";
+                    dataSet.ied_name = name;
+                    dataSet.ld_inst = "LD0";
+                    dataSet.logical_node_path = "LLN0";
+                    dataSet.name = "QASet";
+                    dataSet.reference = name + "LD0/LLN0.QASet";
+                    dataSet.entries.push_back(signal);
+                    document.data_sets.push_back(std::move(dataSet));
                     document.model_entries.push_back(std::move(signal));
                 }
                 if (!fleet->contextAt(0)->publishSclDocument(
@@ -589,6 +600,59 @@ int main(int argc, char* argv[]) {
                     fail("active_tab_panel_or_offline_signals_mismatch", 64);
                     return;
                 }
+                // R1A: the same canonical SCL DataSet must render its ordered
+                // members without a live report association or MMS polling.
+                const auto canonicalReference =
+                    QStringLiteral("QA_IED_BLD0/LLN0.QASet");
+                second->setProperty("selectedCatalogReference", canonicalReference);
+                second->setProperty("activeSection", 1);
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+                auto* const catalogMembers = second->findChild<QQuickItem*>(
+                    QStringLiteral("iedBrowserDataSetMembers"));
+                const auto firstMemberText = [catalogMembers]() -> QString {
+                    if (!catalogMembers) return {};
+                    QVector<QQuickItem*> pending{catalogMembers};
+                    while (!pending.isEmpty()) {
+                        auto* const item = pending.takeLast();
+                        if (!item) continue;
+                        if (item->objectName() ==
+                            QStringLiteral("iedBrowserDataSetMember_0"))
+                            return item->property("text").toString();
+                        for (auto* child : item->childItems()) pending.push_back(child);
+                    }
+                    return {};
+                };
+                QElapsedTimer catalogSettle;
+                catalogSettle.start();
+                while (catalogMembers && catalogMembers->isVisible() &&
+                       firstMemberText().isEmpty() && catalogSettle.elapsed() < 1'000) {
+                    QCoreApplication::processEvents(QEventLoop::AllEvents, 25);
+                    QThread::msleep(10);
+                }
+                if (selected->dataSetCount() != 1 || !catalogMembers ||
+                    !catalogMembers->isVisible() ||
+                    catalogMembers->property("count").toInt() != 1 ||
+                    second->property("selectedCatalogReference").toString() != canonicalReference ||
+                    firstMemberText() !=
+                        QStringLiteral("QA_IED_BLD0/LLN0.Mod.stVal  [ST]")) {
+                    qCritical().noquote()
+                        << "BROWSER_DATASET_CATALOG_DIAG"
+                        << "count=" << (catalogMembers
+                            ? catalogMembers->property("count").toInt() : -1)
+                        << "visible=" << (catalogMembers ? catalogMembers->isVisible() : false)
+                        << "size=" << (catalogMembers ? catalogMembers->width() : -1)
+                        << "x" << (catalogMembers ? catalogMembers->height() : -1)
+                        << "member=" << firstMemberText()
+                        << "reference=" << second->property("selectedCatalogReference").toString();
+                    fail("offline_canonical_dataset_members_not_rendered", 71);
+                    return;
+                }
+                qInfo().noquote()
+                    << "BROWSER_DATASET_CATALOG_PASS source=opened_scl"
+                    << "ordered_members=1 read_only=true offline=true";
+                second->setProperty("activeSection", 0);
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
                 if (!fleet->switchTo(0)) {
                     fail("switch_to_pending_source", 65);
                     return;
