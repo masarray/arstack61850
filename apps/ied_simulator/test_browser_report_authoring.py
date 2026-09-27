@@ -39,6 +39,8 @@ for token in (
     "Static/non-owned DataSet binding is immutable",
     "bool MmsReportController::selectStaticRcbForDataSet(",
     "sameDataSetReference(bound, reference)",
+    'dataSet.value(QStringLiteral("directoryAvailable")).toBool()',
+    'dataSet.value(QStringLiteral("deletable")).toBool()',
     "control.value(QStringLiteral(\"dynamicBinding\")).toBool()",
 ):
     require(controller, token, "Report controller")
@@ -112,6 +114,8 @@ for token in (
     "Membership is immutable",
     "signal inspectStaticReportRequested()",
     'text: "Inspect bound RCB…"',
+    "root.selectedDataSet.directoryAvailable === true",
+    "root.selectedDataSet.deletable !== true",
 ):
     require(dataset_pane, token, "DataSet pane")
 
