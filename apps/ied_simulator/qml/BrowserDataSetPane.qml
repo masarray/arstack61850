@@ -25,11 +25,11 @@ Rectangle {
     function memberReference(member) {
         // The canonical catalog shows FC as evidence, not as part of its
         // DataAttribute key. Preserve the displayed member order and label.
-        return String(member || "").replace(/\\s+\\[[^\\]]+\\]$/, "")
+        return String(member || "").replace(/\s+\[[^\]]+\]$/, "")
     }
 
     function memberFc(member) {
-        var matched = String(member || "").match(/\\[([^\\]]+)\\]$/)
+        var matched = String(member || "").match(/\[([^\]]+)\]$/)
         return matched ? matched[1] : ""
     }
 
