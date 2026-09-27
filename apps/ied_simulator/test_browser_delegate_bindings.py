@@ -15,6 +15,7 @@ workspace = Path(sys.argv[2]).read_text(encoding="utf-8")
 
 required_main = (
     "property var browserFleet: fleet",
+    "browserSession: root.browserSession",
     'id: perIedBrowserHost',
     'objectName: "iedBrowserView_" + index',
     "anchors.fill: parent",
@@ -37,6 +38,7 @@ if any(
     line == "fleet: fleet"
     or line.startswith("session: fleet.")
     or line.startswith("client: fleet.")
+    or line == "browserSession: browserSession"
     for line in delegate_lines
 ):
     raise SystemExit("BROWSER_DELEGATE_FAIL self-binding fleet authority")
