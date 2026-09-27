@@ -93,19 +93,27 @@ Item {
         function onWatchSnapshotChanged() { root.watchedDataChanged() }
     }
 
+    function offerSignalCatalog() {
+        // An asynchronous discovery can finish in a background IED tab.
+        // Never display a hidden tab's modal over the operator's active IED.
+        if (!root.visible || root.fleet.activeContext !== root.context ||
+            !context.loaded || context.selectionRequired ||
+            context.authorityKey !== "live-discovery" || context.dataSetCount <= 0)
+            return
+        const key = context.structuralFingerprint + "|" + context.iedName
+        if (!context.structuralFingerprint.length || key === root.offeredCatalogKey)
+            return
+        root.offeredCatalogKey = key
+        signalCatalogDialog.open()
+    }
+
     onActiveSectionChanged: ensureActiveService()
+    onVisibleChanged: {
+        if (root.visible) root.offerSignalCatalog()
+    }
     Connections {
         target: context
-        function onContextChanged() {
-            if (!context.loaded || context.selectionRequired ||
-                context.authorityKey !== "live-discovery" || context.dataSetCount <= 0)
-                return
-            const key = context.structuralFingerprint + "|" + context.iedName
-            if (!context.structuralFingerprint.length || key === root.offeredCatalogKey)
-                return
-            root.offeredCatalogKey = key
-            signalCatalogDialog.open()
-        }
+        function onContextChanged() { root.offerSignalCatalog() }
     }
 
     Connections {
