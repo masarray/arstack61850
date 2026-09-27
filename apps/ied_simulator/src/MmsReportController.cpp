@@ -789,6 +789,7 @@ bool MmsReportController::connectToIed() {
                         if (!self->selectStaticRcbForReference(
                                 self->pendingStaticDataSetReference_, true)) {
                             self->selectedRcbIndex_ = -1;
+                            self->refreshSelection();
                             self->lastError_ = QStringLiteral(
                                 "Selected static DataSet has no verified live RCB binding; "
                                 "reporting remains disabled.");
