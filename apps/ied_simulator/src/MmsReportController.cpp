@@ -632,8 +632,36 @@ void MmsReportController::adoptEngineeringInventory() {
         return;
     }
 
-    const auto seed = buildContextDiscoverySeed(*engineeringContext_->modelSnapshot());
-    const auto ui = buildDiscoveryUi(seed, QString{});
+    const auto& canonical = *engineeringContext_->modelSnapshot();
+    const auto seed = buildContextDiscoverySeed(canonical);
+    auto ui = buildDiscoveryUi(seed, QString{});
+    // An opened SCL model has no live RCB probe response yet. Preserve its
+    // verified canonical DatSet binding for read-only Browser navigation.
+    // Never mark the RCB as probed or writable based on file evidence alone.
+    for (const auto& control : canonical.report_controls) {
+        const auto bound = QString::fromStdString(control.data_set_reference);
+        if (bound.isEmpty()) continue;
+        const auto knownStaticDataSet = std::any_of(
+            canonical.data_sets.begin(), canonical.data_sets.end(),
+            [&bound](const auto& dataSet) {
+                return sameDataSetReference(
+                    QString::fromStdString(dataSet.reference), bound) &&
+                    !dataSet.members.empty() && !dataSet.deletable.value_or(false);
+            });
+        if (!knownStaticDataSet) continue;
+        for (auto& projected : ui.reportControls) {
+            auto map = projected.toMap();
+            if (map.value(QStringLiteral("reference")).toString() !=
+                QString::fromStdString(control.reference)) {
+                continue;
+            }
+            map.insert(QStringLiteral("dataSet"), bound);
+            map.insert(QStringLiteral("canonicalDataSet"), bound);
+            map.insert(QStringLiteral("bindingSource"), QStringLiteral("CanonicalEngineeringContext"));
+            projected = map;
+            break;
+        }
+    }
     dataSets_ = ui.dataSets;
     reportControls_ = ui.reportControls;
     staticCandidates_.clear();
