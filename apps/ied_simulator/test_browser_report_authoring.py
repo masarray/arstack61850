@@ -39,7 +39,7 @@ for token in (
     "Static/non-owned DataSet binding is immutable",
     "bool MmsReportController::selectStaticRcbForDataSet(",
     "QString MmsReportController::staticRouteAuthorityKey() const",
-    "pendingStaticContextFingerprint_",
+    "pendingStaticAuthorityKey_",
     "Selected static DataSet has no verified live RCB binding",
     "sameDataSetReference(bound, reference)",
     'dataSet.value(QStringLiteral("directoryAvailable")).toBool()',
