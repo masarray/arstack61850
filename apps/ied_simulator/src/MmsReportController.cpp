@@ -536,12 +536,16 @@ void MmsReportController::setHost(const QString& value) {
     const auto normalized = value.trimmed();
     if (host_ == normalized) return;
     host_ = normalized;
+    pendingStaticDataSetReference_.clear();
+    pendingStaticContextFingerprint_.clear();
     emit configurationChanged();
 }
 
 void MmsReportController::setPort(const int value) {
     if (value < 1 || value > 65'535 || port_ == value) return;
     port_ = value;
+    pendingStaticDataSetReference_.clear();
+    pendingStaticContextFingerprint_.clear();
     emit configurationChanged();
 }
 
@@ -564,6 +568,17 @@ void MmsReportController::setEngineeringContext(IedEngineeringContextController*
     }
     emit engineeringContextChanged();
     if (!connected() && !busy()) adoptEngineeringInventory();
+}
+
+QString MmsReportController::staticRouteAuthorityKey() const {
+    if (engineeringContext_ && engineeringContext_->loaded() &&
+        !engineeringContext_->selectionRequired() &&
+        !engineeringContext_->structuralFingerprint().isEmpty()) {
+        return QStringLiteral("context:") + engineeringContext_->structuralFingerprint();
+    }
+    const auto host = host_.trimmed().toLower();
+    if (host.isEmpty() || port_ < 1 || port_ > 65'535) return {};
+    return QStringLiteral("endpoint:%1:%2").arg(host).arg(port_);
 }
 
 bool MmsReportController::connected() const noexcept {
@@ -641,7 +656,7 @@ void MmsReportController::adoptEngineeringInventory() {
     auto ui = buildDiscoveryUi(seed, QString{});
     if (!pendingStaticDataSetReference_.isEmpty() &&
         (pendingStaticContextFingerprint_.isEmpty() ||
-         pendingStaticContextFingerprint_ != engineeringContext_->structuralFingerprint())) {
+         pendingStaticContextFingerprint_ != staticRouteAuthorityKey())) {
         appendDiagnostic(QStringLiteral(
             "Cleared stale static DataSet route after engineering context changed."));
         pendingStaticDataSetReference_.clear();
@@ -990,14 +1005,13 @@ bool MmsReportController::selectStaticRcbForDataSet(const int row) {
     if (row < 0 || row >= dataSets_.size()) return false;
     const auto reference = dataSets_.at(row).toMap()
         .value(QStringLiteral("reference")).toString();
-    if (!engineeringContext_ || !engineeringContext_->loaded() ||
-        engineeringContext_->selectionRequired() ||
-        engineeringContext_->structuralFingerprint().isEmpty() ||
+    const auto authorityKey = staticRouteAuthorityKey();
+    if (authorityKey.isEmpty() ||
         !selectStaticRcbForReference(reference, false)) {
         return false;
     }
     pendingStaticDataSetReference_ = reference;
-    pendingStaticContextFingerprint_ = engineeringContext_->structuralFingerprint();
+    pendingStaticContextFingerprint_ = authorityKey;
     emit selectionChanged();
     return true;
 }
