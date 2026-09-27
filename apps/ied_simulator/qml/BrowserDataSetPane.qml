@@ -198,6 +198,7 @@ Rectangle {
                         font.pixelSize: theme.captionSize
                     }
                     Label {
+                        objectName: "iedBrowserDataSetMember_" + memberRow.index
                         Layout.fillWidth: true
                         text: modelData
                         color: theme.text
