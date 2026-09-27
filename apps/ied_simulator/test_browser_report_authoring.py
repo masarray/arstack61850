@@ -73,6 +73,7 @@ for token in (
     "function openDatasetSignals()",
     "function inspectBoundStaticRcb()",
     "reports.selectStaticRcbForDataSet(reports.selectedDataSetIndex)",
+    "routeMessage: root.datasetRouteStatus",
     'objectName: "iedBrowserSignalCatalog"',
     'text: "Dataset Signals"',
     'text: "Browse Data Model"',
@@ -111,7 +112,6 @@ for token in (
     "Membership is immutable",
     "signal inspectStaticReportRequested()",
     'text: "Inspect bound RCB…"',
-    "routeMessage: root.datasetRouteStatus",
 ):
     require(dataset_pane, token, "DataSet pane")
 
