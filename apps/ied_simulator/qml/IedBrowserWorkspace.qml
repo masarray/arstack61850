@@ -21,6 +21,9 @@ Item {
     property int activeSection: 0
     property string activeSectionTitle: "Data Model"
     property var selectedModelNode: context.treeModel.selectedNode
+    property string offeredCatalogKey: ""
+    property string datasetRouteStatus: ""
+
 
     signal watchedDataChanged()
 
@@ -29,6 +32,24 @@ Item {
 
     function activeIedLabel() {
         return context.iedName && context.iedName.length ? context.iedName : "IED"
+    }
+
+    // Shared read-only entry after either Open SCL or live MMS discovery.
+    function openDatasetSignals() {
+        if (!context.loaded || context.selectionRequired) return false
+        root.datasetRouteStatus = ""
+        root.selectSection(1, "Dataset Signals")
+        return true
+    }
+
+    function inspectBoundStaticRcb() {
+        if (!reports.selectStaticRcbForDataSet(reports.selectedDataSetIndex)) {
+            root.datasetRouteStatus = "No verified static RCB is bound to this DataSet. Membership remains read-only."
+            return false
+        }
+        root.datasetRouteStatus = ""
+        root.selectSection(2, "Reports")
+        return true
     }
 
     function ensureActiveService() {
@@ -73,6 +94,24 @@ Item {
     }
 
     onActiveSectionChanged: ensureActiveService()
+    Connections {
+        target: context
+        function onContextChanged() {
+            if (!context.loaded || context.selectionRequired ||
+                context.authorityKey !== "live-discovery" || context.dataSetCount <= 0)
+                return
+            const key = context.structuralFingerprint + "|" + context.iedName
+            if (!context.structuralFingerprint.length || key === root.offeredCatalogKey)
+                return
+            root.offeredCatalogKey = key
+            signalCatalogDialog.open()
+        }
+    }
+
+    Connections {
+        target: reports
+        function onSelectionChanged() { root.datasetRouteStatus = "" }
+    }
 
     Shortcut { sequence: "Alt+1"; enabled: root.visible; onActivated: root.selectSection(0, "Data Model") }
     Shortcut { sequence: "Alt+2"; enabled: root.visible; onActivated: root.selectSection(1, "DataSets") }
@@ -87,6 +126,53 @@ Item {
         function onStateChanged() {
             if (session.connected)
                 root.ensureActiveService()
+        }
+    }
+
+    // A discovery creates a model, not a subscription. This catalog only
+    // chooses the next view; no polling, DataSet write, RCB enable or GI.
+    Dialog {
+        id: signalCatalogDialog
+        objectName: "iedBrowserSignalCatalog"
+        title: "Signal Catalog"
+        modal: true
+        width: 430
+        anchors.centerIn: Overlay.overlay
+        standardButtons: Dialog.NoButton
+        contentItem: ColumnLayout {
+            spacing: 10
+            Label {
+                Layout.fillWidth: true
+                text: context.iedName + " · " + context.dataSetCount
+                      + " discovered DataSet(s)"
+                color: root.theme.text
+                font.pixelSize: root.theme.labelSize
+                wrapMode: Text.WordWrap
+            }
+            Label {
+                Layout.fillWidth: true
+                text: "Choose ordered static Dataset Signals, or browse the complete IED model. Neither choice enables reporting."
+                color: root.theme.textSoft
+                font.pixelSize: root.theme.captionSize
+                wrapMode: Text.WordWrap
+            }
+            ActionButton {
+                theme: root.theme
+                text: "Dataset Signals"
+                enabled: context.dataSetCount > 0
+                onClicked: {
+                    root.openDatasetSignals()
+                    signalCatalogDialog.close()
+                }
+            }
+            ActionButton {
+                theme: root.theme
+                text: "Browse Data Model"
+                onClicked: {
+                    root.selectSection(0, "Data Model")
+                    signalCatalogDialog.close()
+                }
+            }
         }
     }
 
@@ -173,6 +259,14 @@ Item {
                         onClicked: browserSclDialog.open()
                         ToolTip.visible: hovered
                         ToolTip.text: "Open SCL/CID/SCD/IID/ICD into the persistent Browser model."
+                    }
+                    ActionButton {
+                        theme: root.theme
+                        text: "Signal Catalog"
+                        visible: context.loaded && !context.selectionRequired
+                        onClicked: signalCatalogDialog.open()
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Choose Dataset Signals or the complete Data Model; no automatic RCB enable."
                     }
                     ActionButton {
                         theme: root.theme
@@ -601,6 +695,8 @@ Item {
                         reports: root.reports
                         context: root.context
                         client: root.client
+                        routeMessage: root.datasetRouteStatus
+                        onInspectStaticReportRequested: root.inspectBoundStaticRcb()
                         onInspectRequested: function(reference) {
                             if (root.context.treeModel.selectReference(reference))
                                 root.selectSection(0, "Data Model")
