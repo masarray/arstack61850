@@ -733,10 +733,32 @@ int main(int argc, char* argv[]) {
                     fail("discovery_catalog_rendered_route", 73);
                     return;
                 }
+                // Popup overlays outlive the visual IED panel. A tab switch
+                // must close the old IED's modal instead of hijacking the new tab.
+                if (!fleet->newWorkspace() || fleet->activeIndex() != 1) {
+                    fail("catalog_background_tab_setup", 74);
+                    return;
+                }
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+                if (retained->isVisible() || catalog->property("visible").toBool()) {
+                    fail("background_catalog_stole_active_tab", 75);
+                    return;
+                }
+                if (!fleet->switchTo(0)) {
+                    fail("catalog_return_to_ied", 76);
+                    return;
+                }
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+                if (!retained->isVisible() || catalog->property("visible").toBool() ||
+                    fleet->activeContext() != selected ||
+                    activeReports->active()) {
+                    fail("catalog_tab_return_state", 77);
+                    return;
+                }
                 qInfo().noquote()
                     << "BROWSER_SIGNAL_CATALOG_PASS discovery_modal=visible"
                     << "offline_dataset=visible canonical_members=ordered"
-                    << "static_rcb=matched no_write=true no_gi=true";
+                    << "static_rcb=matched no_write=true no_gi=true background_tab=isolated";
                 qInfo().noquote()
                     << "BROWSER_FLEET_ROUTING_PASS active_tab=QA_IED_B"
                     << "offline_signals=visible" << "model_values=visible" << "value_label=bound" << "toolbar_1024=visible"
