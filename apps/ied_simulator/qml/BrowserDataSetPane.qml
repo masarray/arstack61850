@@ -118,7 +118,7 @@ Rectangle {
             Item { Layout.fillWidth: true }
             ActionButton {
                 theme: root.theme
-                text: "Inspect bound RCB…"
+                text: "Static Reporting…"
                 enabled: root.selectedDataSet !== null
                          && root.selectedDataSet.directoryAvailable === true
                          && root.selectedDataSet.deletable !== true
@@ -127,7 +127,7 @@ Rectangle {
                          && reports.selectedDataSetMembers.length > 0
                 onClicked: root.inspectStaticReportRequested()
                 ToolTip.visible: hovered
-                ToolTip.text: "Navigate to an RCB bound to this exact static DataSet. No write, enable or GI."
+                ToolTip.text: "Prepare this exact static DataSet in the shared Reports path. Selection only: no DatSet write, enable or GI."
             }
             ActionButton {
                 theme: root.theme

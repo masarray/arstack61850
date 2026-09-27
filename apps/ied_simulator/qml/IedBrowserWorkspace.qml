@@ -617,6 +617,23 @@ Item {
                                 reports.dataSets[reports.selectedDataSetIndex])
                         }
 
+                        Label {
+                            visible: root.activeSection === 2 && reports.staticRouteDataSet.length > 0
+                            text: "STATIC · " + reports.staticRouteDataSet
+                            color: root.theme.green
+                            font.pixelSize: root.theme.captionSize
+                            elide: Text.ElideMiddle
+                            Layout.maximumWidth: 220
+                            ToolTip.visible: staticRouteMouse.containsMouse
+                            ToolTip.text: "Exact canonical DataSet selected for report-only static reporting. Enable + GI remains explicit."
+                            MouseArea {
+                                id: staticRouteMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.NoButton
+                            }
+                        }
+
                         Button {
                             visible: root.activeSection === 2
                             text: "Enable + GI"
