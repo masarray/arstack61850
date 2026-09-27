@@ -28,6 +28,9 @@ navigation_required = [
     'title: "DataSets"',
     'title: "Data Model"',
     'context.treeModel',
+    'objectName: "iedBrowserSignalTree"',
+    'required property int index',
+    'required property var model',
 ]
 status_required = [
     'readonly property int maximumEntries: 80',
