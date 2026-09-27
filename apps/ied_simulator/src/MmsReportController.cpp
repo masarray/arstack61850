@@ -880,7 +880,10 @@ bool MmsReportController::selectStaticRcbForDataSet(const int row) {
     const auto dataSet = dataSets_.at(row).toMap();
     const auto reference = dataSet.value(QStringLiteral("reference")).toString();
     // A browse pivot is not authorization to modify a dynamic/foreign DataSet.
-    if (reference.isEmpty() || dataSet.value(QStringLiteral("dynamicOwned")).toBool() ||
+    if (reference.isEmpty() ||
+        !dataSet.value(QStringLiteral("directoryAvailable")).toBool() ||
+        dataSet.value(QStringLiteral("deletable")).toBool() ||
+        dataSet.value(QStringLiteral("dynamicOwned")).toBool() ||
         !dataSet.value(QStringLiteral("immutable")).toBool() ||
         dataSet.value(QStringLiteral("members")).toStringList().isEmpty()) {
         return false;
