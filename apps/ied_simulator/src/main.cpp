@@ -504,6 +504,14 @@ int main(int argc, char* argv[]) {
                 auto* const valueList = second
                     ? second->findChild<QQuickItem*>(QStringLiteral("iedBrowserValueTable"))
                     : nullptr;
+                // A non-empty ListView is not sufficient: verify the rendered
+                // delegate's actual Name label resolves from the model role.
+                const auto firstValueText = [valueList]() -> QString {
+                    if (!valueList) return {};
+                    auto* const name = valueList->findChild<QObject*>(
+                        QStringLiteral("iedBrowserValueName_0"));
+                    return name ? name->property("text").toString() : QString{};
+                };
 
                 const auto renderedReady = [&]() {
                     return first && second && signalList && valueList && selected &&
@@ -511,6 +519,7 @@ int main(int argc, char* argv[]) {
                         signalList->width() >= 100 && signalList->isVisible() &&
                         valueList->property("count").toInt() >= 3 &&
                         valueList->width() >= 100 && valueList->isVisible() &&
+                        firstValueText() == QStringLiteral("QA_IED_B") &&
                         !first->isVisible() && second->isVisible() &&
                         selected->loaded() && !selected->online() &&
                         selected->iedName() == QStringLiteral("QA_IED_B") &&
@@ -544,6 +553,7 @@ int main(int argc, char* argv[]) {
                         << "valueList=" << static_cast<void*>(valueList)
                         << "valueCount=" << (valueList ? valueList->property("count").toInt() : -1)
                         << "valueVisible=" << (valueList ? valueList->isVisible() : false)
+                        << "firstValue=" << firstValueText()
                         << "firstVisible=" << (first ? first->isVisible() : false)
                         << "secondVisible=" << (second ? second->isVisible() : false)
                         << "secondSize=" << (second ? second->width() : -1.0)
@@ -601,7 +611,7 @@ int main(int argc, char* argv[]) {
                 }
                 qInfo().noquote()
                     << "BROWSER_FLEET_ROUTING_PASS active_tab=QA_IED_B"
-                    << "offline_signals=visible" << "model_values=visible"
+                    << "offline_signals=visible" << "model_values=visible" << "value_label=bound"
                     << "switching=pass reindex=pass cross_ied_panel=false";
                 app.exit(0);
             });
