@@ -40,7 +40,7 @@ require(fleet_cpp, (
     "activeEngineering()->adoptSourceFrom(*original->engineering)",
     "auto retired = std::move(entries_[static_cast<std::size_t>(index)])",
     "std::shared_ptr<Entry>(std::move(retired))",
-    "QTimer::singleShot(0, this, [retiredLifetime]",
+    "QTimer::singleShot(50, this, [retiredLifetime]",
 ), "fleet authority")
 require(fleet_hpp, (
     "QAbstractListModel",
