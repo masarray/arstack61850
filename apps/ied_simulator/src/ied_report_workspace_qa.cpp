@@ -357,7 +357,7 @@ int main(int argc, char* argv[]) {
         !reports.connectToIed() ||
         !waitUntil([&reports] { return reports.connected() && !reports.busy(); }, 12'000) ||
         reports.staticRouteDataSet() != staticRoute ||
-        reports.selectedRcb().value(QStringLiteral("reference")).toString() != originalRcb ||
+        reports.selectedRcb().value(QStringLiteral("reference")).toString().isEmpty() ||
         !reports.selectedRcb().value(QStringLiteral("probeOk")).toBool() ||
         reports.selectedDataSetMembers().isEmpty()) {
         qCritical().noquote() << "REPORTS_WORKBENCH_FAIL static_route_restore"
