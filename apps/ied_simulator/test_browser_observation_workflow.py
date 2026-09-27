@@ -31,6 +31,7 @@ require(
         'text: root.client.operationBusy ? "Reading…" : "Read visible"',
         "model: root.modelProvider.treeModel",
         'objectName: "iedBrowserValueTable"',
+        'objectName: "iedBrowserValueName_" + valueRow.index',
         "required property int index",
         "required property var model",
         "root.refreshCurrentVisible(root.firstVisibleRow(), root.lastVisibleRow())",
