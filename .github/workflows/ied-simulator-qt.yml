@@ -74,7 +74,13 @@ jobs:
       - name: P0 rendered fleet Browser and offline signal routing
         env:
           QT_QPA_PLATFORM: offscreen
-        run: ./build-ied-simulator-qt/arstack_ied_simulator --qa-browser-routing
+        run: |
+          set -o pipefail
+          ./build-ied-simulator-qt/arstack_ied_simulator --qa-browser-routing 2>&1 | tee browser-routing.log
+          if grep -E 'ReferenceError:|TypeError:|Binding loop detected' browser-routing.log; then
+            echo '::error::Qt Browser emitted an unresolved runtime binding diagnostic'
+            exit 1
+          fi
 
       - name: MMS client discovery workbench gates
         env:
