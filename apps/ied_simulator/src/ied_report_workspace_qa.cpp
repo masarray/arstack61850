@@ -337,15 +337,48 @@ int main(int argc, char* argv[]) {
         !reports.selectStaticRcbForDataSet(-1) &&
         !reports.selectStaticRcbForDataSet(dataSets.size()) &&
         reports.selectedRcbIndex() == matchedRcb;
-    if (!staticPivotValid || !invalidPivotRejected || !reports.selectRcb(selected) ||
+    const auto staticRoute = reports.staticRouteDataSet();
+    if (!staticPivotValid || !invalidPivotRejected ||
+        staticRoute.isEmpty() ||
         reports.selectedRcb().value(QStringLiteral("reference")).toString() != originalRcb) {
         qCritical() << "REPORTS_WORKBENCH_FAIL dataset_signals_static_rcb_pivot"
-                    << staticDataSetRow << matchedRcb << originalRcb;
+                    << staticDataSetRow << matchedRcb << originalRcb << staticRoute;
         return 29;
     }
     qInfo() << "DATASET_SIGNALS_STATIC_PIVOT_PASS"
             << "dataset=" << staticDataSetRow << "bound_rcb=" << matchedRcb
             << "read_only=true no_gi=true";
+
+    // The user's Dataset Signals choice is made before/while auxiliary report
+    // service attachment in the Browser. Reconnect must restore that exact
+    // static route after live RCB probing instead of snapping to row 0.
+    reports.disconnectFromIed();
+    if (!waitUntil([&reports] { return !reports.connected() && !reports.busy(); }, 8'000) ||
+        !reports.connectToIed() ||
+        !waitUntil([&reports] { return reports.connected() && !reports.busy(); }, 12'000) ||
+        reports.staticRouteDataSet() != staticRoute ||
+        reports.selectedRcb().value(QStringLiteral("reference")).toString() != originalRcb ||
+        !reports.selectedRcb().value(QStringLiteral("probeOk")).toBool() ||
+        !reports.selectedRcb().value(QStringLiteral("dataSet")).toString().contains(
+            reports.selectedDataSetMembers().isEmpty()
+                ? QStringLiteral("__missing__")
+                : QString{})) {
+        qCritical().noquote() << "REPORTS_WORKBENCH_FAIL static_route_restore"
+                              << "route=" << reports.staticRouteDataSet()
+                              << "rcb=" << reports.selectedRcb().value(QStringLiteral("reference")).toString()
+                              << "probe=" << reports.selectedRcb().value(QStringLiteral("probeOk")).toBool()
+                              << "error=" << reports.lastError();
+        return 30;
+    }
+    if (!sameDataSetReference(
+            reports.selectedRcb().value(QStringLiteral("dataSet")).toString(),
+            staticRoute)) {
+        qCritical() << "REPORTS_WORKBENCH_FAIL static_route_dataset_changed";
+        return 31;
+    }
+    qInfo() << "STATIC_REPORT_ROUTE_RESTORE_PASS"
+            << staticRoute << "rcb=" << reports.selectedRcb().value(QStringLiteral("reference")).toString()
+            << "live_probe=true";
 
     const int memberCount = reports.selectedDataSetMembers().size();
 
