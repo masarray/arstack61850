@@ -12,6 +12,10 @@ Rectangle {
     required property var context
     required property var reports
     required property var utilities
+    required property var dataSetCatalog
+    required property string selectedDataSetReference
+
+    signal dataSetRequested(string reference)
 
     property int section: 0
     property int globalDataCount: 0
@@ -301,19 +305,19 @@ Rectangle {
 
                 Loader {
                     Layout.fillWidth: true
-                    active: root.section === 1 && reports.dataSets.length > 0
+                    active: root.section === 1 && root.dataSetCatalog.length > 0
                     visible: active
                     sourceComponent: Component {
                         ColumnLayout {
                             spacing: 0
                             Repeater {
-                                model: reports.dataSets
+                                model: root.dataSetCatalog
                                 delegate: Rectangle {
                                     required property int index
                                     required property var modelData
                                     Layout.fillWidth: true
                                     implicitHeight: 30
-                                    color: reports.selectedDataSetIndex === index
+                                    color: root.selectedDataSetReference === modelData.reference
                                            ? root.theme.surfaceRaised : dsMouse.containsMouse ? root.theme.surface : "transparent"
                                     RowLayout {
                                         anchors.fill: parent
@@ -338,8 +342,7 @@ Rectangle {
                                         anchors.fill: parent
                                         hoverEnabled: true
                                         onClicked: {
-                                            reports.selectDataSet(index)
-                                            root.choose(1, "DataSets")
+                                            root.dataSetRequested(modelData.reference)
                                         }
                                     }
                                 }
