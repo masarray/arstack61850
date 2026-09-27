@@ -918,8 +918,15 @@ bool MmsReportController::selectRcb(const int row) {
 
 bool MmsReportController::selectDataSet(const int row) {
     if (row < 0 || row >= dataSets_.size()) return false;
+    const auto reference = dataSets_.at(row).toMap()
+        .value(QStringLiteral("reference")).toString();
+    if (!pendingStaticDataSetReference_.isEmpty() &&
+        !sameDataSetReference(pendingStaticDataSetReference_, reference)) {
+        pendingStaticDataSetReference_.clear();
+    }
     selectedDataSetIndex_ = row;
-    selectedDataSetMembers_ = dataSets_.at(row).toMap().value(QStringLiteral("members")).toStringList();
+    selectedDataSetMembers_ = dataSets_.at(row).toMap()
+        .value(QStringLiteral("members")).toStringList();
     emit selectionChanged();
     return true;
 }
