@@ -11,6 +11,11 @@ status = Path(sys.argv[3]).read_text(encoding="utf-8")
 
 workspace_required = [
     'text: "MODEL"',
+    'objectName: "iedBrowserCommandBar"',
+    'Layout.preferredHeight: 96',
+    'objectName: "iedBrowserHostField"',
+    'objectName: "iedBrowserPortField"',
+    'objectName: "iedBrowserSessionStatus"',
     'text: "COMMANDS"',
     'text: "Online"',
     '"Discover IED"',
@@ -48,6 +53,11 @@ for label, source, required in [
     missing = [token for token in required if token not in source]
     if missing:
         raise SystemExit("BROWSER_CONVERGENCE_FAIL " + label + " missing=" + ",".join(missing))
+
+if "Layout.preferredHeight: 68" in workspace:
+    raise SystemExit("BROWSER_CONVERGENCE_FAIL overfull single-row toolbar restored")
+if workspace.count("id: hostField") != 1 or workspace.count("id: portField") != 1:
+    raise SystemExit("BROWSER_CONVERGENCE_FAIL endpoint controls duplicated")
 
 if "client.treeModel" in navigation:
     raise SystemExit("BROWSER_CONVERGENCE_FAIL navigation regressed to session-owned model")
