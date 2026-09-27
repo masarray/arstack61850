@@ -421,6 +421,20 @@ void offline_monitor_enforces_frame_and_stream_limits() {
     }), "Monitor frame limit was not enforced.");
 }
 
+void empty_bit_string_unused_bits_fail_closed() {
+    auto options = realistic_report();
+    options.items[1U].value = MmsDataValue::bit_string(1U, {});
+    require_throws([&options] {
+        static_cast<void>(MmsReportFrameMapper::map(options, {}));
+    }, "Empty OptFlds payload with unused bits was accepted.");
+
+    auto inclusion = realistic_report();
+    inclusion.items[8U].value = MmsDataValue::bit_string(7U, {});
+    require_throws([&inclusion] {
+        static_cast<void>(MmsReportFrameMapper::map(inclusion, {}));
+    }, "Empty inclusion payload with unused bits was accepted.");
+}
+
 void malformed_and_bound_paths_are_rejected() {
     require_throws([] {
         static_cast<void>(MmsInformationReportCodec::decode(std::array<std::uint8_t, 2>{0xA3U, 0x00U}));
@@ -453,6 +467,7 @@ int main() {
         {"sequence continuity", sequence_tracker_detects_gap_duplicate_and_changes},
         {"segmentation continuity", segmentation_continuity_is_tracked},
         {"bounded monitor", offline_monitor_enforces_frame_and_stream_limits},
+        {"empty BIT STRING unused bits", empty_bit_string_unused_bits_fail_closed},
         {"malformed and bounds", malformed_and_bound_paths_are_rejected},
     };
     std::size_t passed = 0U;
