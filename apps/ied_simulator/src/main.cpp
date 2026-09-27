@@ -151,6 +151,11 @@ int main(int argc, char* argv[]) {
 
     if (!engine.rootObjects().isEmpty()) {
         auto* const rootObject = engine.rootObjects().constFirst();
+        // Qt Quick views must detach before their C++ per-IED services die,
+        // including when the user closes the application window normally.
+        QObject::connect(&app, &QCoreApplication::aboutToQuit, rootObject, [rootObject] {
+            QMetaObject::invokeMethod(rootObject, "prepareForShutdown");
+        });
         auto* const backend = rootObject->findChild<QObject*>(QStringLiteral("simulatorBackend"));
         int defaultPort = 102;
         if (backend != nullptr && parser.isSet(portOption)) {
