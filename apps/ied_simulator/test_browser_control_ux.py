@@ -88,9 +88,9 @@ for token in (
 # per IED slot. Both shell shapes must still wire the proven P6B service.
 if 'IedBrowserFleetController {' in main:
     for token in (
-        'controls: fleet.controlsAt(index)',
-        'session: fleet.sessionAt(index)',
-        'context: fleet.contextAt(index)',
+        'controls: root.browserFleet.controlsAt(index)',
+        'session: root.browserFleet.sessionAt(index)',
+        'context: root.browserFleet.contextAt(index)',
     ):
         require(main, token, "Per-IED application shell")
 else:
