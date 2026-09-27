@@ -179,7 +179,8 @@ int main(int argc, char* argv[]) {
     MmsReportController negative;
     const bool noConnectionEnableRejected = !negative.enableSelected(true);
     const bool inactiveDisableRejected = !negative.disableSelected();
-    const bool invalidSelectionRejected = !negative.selectRcb(0) && !negative.selectDataSet(0);
+    const bool invalidSelectionRejected = !negative.selectRcb(0) && !negative.selectDataSet(0) &&
+        !negative.selectStaticRcbForDataSet(0);
     const bool authoredEnableRejected = !negative.enableSelectedAuthored(
         QStringLiteral("LD0/LLN0.Test"),
         {QStringLiteral("data-change")},
@@ -322,6 +323,30 @@ int main(int argc, char* argv[]) {
             << "datasets=" + sets.join(QLatin1Char(','));
         return 10;
     }
+    // Dataset Signals → Reports must only select a canonical static match.
+    // Selecting is read-only and must not enable reporting or rewrite DatSet.
+    const int staticDataSetRow = reports.selectedDataSetIndex();
+    const auto originalRcb = reports.selectedRcb().value(QStringLiteral("reference")).toString();
+    const bool staticPivotValid = staticDataSetRow >= 0 &&
+        reports.selectStaticRcbForDataSet(staticDataSetRow) &&
+        reports.selectedDataSetIndex() == staticDataSetRow &&
+        !reports.selectedDataSetMembers().isEmpty() &&
+        !reports.active();
+    const int matchedRcb = reports.selectedRcbIndex();
+    const bool invalidPivotRejected =
+        !reports.selectStaticRcbForDataSet(-1) &&
+        !reports.selectStaticRcbForDataSet(dataSets.size()) &&
+        reports.selectedRcbIndex() == matchedRcb;
+    if (!staticPivotValid || !invalidPivotRejected || !reports.selectRcb(selected) ||
+        reports.selectedRcb().value(QStringLiteral("reference")).toString() != originalRcb) {
+        qCritical() << "REPORTS_WORKBENCH_FAIL dataset_signals_static_rcb_pivot"
+                    << staticDataSetRow << matchedRcb << originalRcb;
+        return 29;
+    }
+    qInfo() << "DATASET_SIGNALS_STATIC_PIVOT_PASS"
+            << "dataset=" << staticDataSetRow << "bound_rcb=" << matchedRcb
+            << "read_only=true no_gi=true";
+
     const int memberCount = reports.selectedDataSetMembers().size();
 
     if (!reports.enableSelected(true) ||
