@@ -25,7 +25,12 @@ Rectangle {
         return context.treeModel.nodeForReference(reference)
     }
 
-    readonly property var selectedDataSet: reports && reports.dataSets\n        && reports.selectedDataSetIndex >= 0\n        && reports.selectedDataSetIndex < reports.dataSets.length\n        ? reports.dataSets[reports.selectedDataSetIndex] : null\n\n    function hasValue(value) {
+    readonly property var selectedDataSet: reports && reports.dataSets
+        && reports.selectedDataSetIndex >= 0
+        && reports.selectedDataSetIndex < reports.dataSets.length
+        ? reports.dataSets[reports.selectedDataSetIndex] : null
+
+    function hasValue(value) {
         return value !== undefined && value !== null && String(value).length > 0
     }
 
@@ -50,8 +55,8 @@ Rectangle {
 
         Label {
             Layout.fillWidth: true
-            text: reports.selectedDataSetIndex >= 0 && reports.selectedDataSetIndex < reports.dataSets.length
-                  ? root.text(reports.dataSets[reports.selectedDataSetIndex].reference)
+            text: root.selectedDataSet !== null
+                  ? root.text(root.selectedDataSet.reference)
                   : "Select a DataSet in the navigation tree."
             color: theme.textSoft
             font.pixelSize: theme.labelSize
@@ -60,8 +65,7 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            visible: reports.selectedDataSetIndex >= 0
-                     && reports.selectedDataSetIndex < reports.dataSets.length
+            visible: root.selectedDataSet !== null
             Rectangle {
                 Layout.preferredWidth: 104
                 Layout.preferredHeight: 22
