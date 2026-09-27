@@ -488,6 +488,7 @@ Item {
                                             }
                                         }
                                         Label {
+                                            objectName: "iedBrowserValueName_" + valueRow.index
                                             Layout.fillWidth: true
                                             text: model.label
                                             color: theme.text
