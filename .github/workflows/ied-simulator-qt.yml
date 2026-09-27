@@ -38,6 +38,11 @@ on:
       - 'CMakeLists.txt'
       - '.github/workflows/ied-simulator-qt.yml'
 
+# Superseded commits must not occupy CI runners or mask the exact-head result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
