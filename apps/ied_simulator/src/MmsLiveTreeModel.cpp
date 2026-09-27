@@ -90,6 +90,7 @@ int MmsLiveTreeModel::appendNode(Node node) {
     const auto index = nodes_.size();
     if (node.parent >= 0 && node.parent < nodes_.size()) nodes_[node.parent].children.push_back(index);
     if (!node.domain.isEmpty() && !node.item.isEmpty()) mmsIndex_.insert(nodeKey(node.domain, node.item), index);
+    if (!node.reference.isEmpty()) referenceIndex_.insert(node.reference, index);
     nodes_.push_back(std::move(node));
     return index;
 }
@@ -99,6 +100,7 @@ void MmsLiveTreeModel::applyDocument(const ar::iec61850::mms::MmsLiveModelDocume
     nodes_.clear();
     visible_.clear();
     mmsIndex_.clear();
+    referenceIndex_.clear();
     selectedNode_ = -1;
 
     Node root;
@@ -180,6 +182,7 @@ void MmsLiveTreeModel::clear() {
     nodes_.clear();
     visible_.clear();
     mmsIndex_.clear();
+    referenceIndex_.clear();
     selectedNode_ = -1;
     endResetModel();
     emit countsChanged();
@@ -302,12 +305,8 @@ QVariantMap MmsLiveTreeModel::selectedNode() const {
 QVariantMap MmsLiveTreeModel::nodeForReference(const QString& reference) const {
     const auto wanted = reference.trimmed();
     if (wanted.isEmpty()) return {};
-    for (int index = 0; index < nodes_.size(); ++index) {
-        const auto& node = nodes_.at(index);
-        if (node.kind != NodeKind::dataAttribute) continue;
-        if (node.reference == wanted) return nodeMap(index);
-    }
-    return {};
+    const auto found = referenceIndex_.constFind(wanted);
+    return found == referenceIndex_.cend() ? QVariantMap{} : nodeMap(found.value());
 }
 
 void MmsLiveTreeModel::selectRow(const int row) {
@@ -334,6 +333,21 @@ void MmsLiveTreeModel::toggle(const int row) {
 bool MmsLiveTreeModel::selectMmsItem(const QString& domain, const QString& item) {
     const auto found = mmsIndex_.constFind(nodeKey(domain, item));
     if (found == mmsIndex_.cend()) return false;
+    selectedNode_ = found.value();
+    for (int cursor = nodes_.at(selectedNode_).parent; cursor >= 0; cursor = nodes_.at(cursor).parent) {
+        nodes_[cursor].expanded = true;
+    }
+    rebuildVisible();
+    emit selectionChanged();
+    return true;
+}
+
+bool MmsLiveTreeModel::selectReference(const QString& reference) {
+    const auto wanted = reference.trimmed();
+    if (wanted.isEmpty()) return false;
+    const auto found = referenceIndex_.constFind(wanted);
+    if (found == referenceIndex_.cend()) return false;
+
     selectedNode_ = found.value();
     for (int cursor = nodes_.at(selectedNode_).parent; cursor >= 0; cursor = nodes_.at(cursor).parent) {
         nodes_[cursor].expanded = true;

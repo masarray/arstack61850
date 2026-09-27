@@ -44,7 +44,7 @@ Rectangle {
         required property string title
         property string countText: ""
         Layout.fillWidth: true
-        implicitHeight: 27
+        implicitHeight: 32
         color: root.section === targetSection ? root.theme.accentSoft
                                               : navMouse.containsMouse ? root.theme.surfaceRaised : "transparent"
         border.width: root.section === targetSection ? 1 : 0
@@ -52,27 +52,27 @@ Rectangle {
 
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 24
-            anchors.rightMargin: 8
+            anchors.leftMargin: 14
+            anchors.rightMargin: 10
             spacing: 7
             Label {
                 text: root.section === nav.targetSection ? "▾" : "›"
                 color: root.section === nav.targetSection ? root.theme.accent : root.theme.muted
-                font.pixelSize: 11
+                font.pixelSize: 12
                 Layout.preferredWidth: 12
             }
             Label {
                 Layout.fillWidth: true
                 text: nav.title
                 color: root.section === nav.targetSection ? root.theme.text : root.theme.textSoft
-                font.pixelSize: 9
+                font.pixelSize: root.theme.labelSize
                 font.weight: root.section === nav.targetSection ? Font.DemiBold : Font.Normal
             }
             Label {
                 visible: nav.countText.length > 0
                 text: nav.countText
                 color: root.theme.muted
-                font.pixelSize: 8
+                font.pixelSize: root.theme.captionSize
             }
         }
 
@@ -90,7 +90,7 @@ Rectangle {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 42
+            Layout.preferredHeight: 48
             color: root.theme.statusChrome
             border.width: 1
             border.color: root.theme.lineSoft
@@ -106,14 +106,14 @@ Rectangle {
                     Layout.fillWidth: true
                     text: "ENGINEERING EXPLORER"
                     color: root.theme.navigationText
-                    font.pixelSize: 9
+                    font.pixelSize: root.theme.labelSize
                     font.weight: Font.DemiBold
                 }
                 Label {
                     Layout.fillWidth: true
-                    text: "One active IED context"
+                    text: "Services, model, values and evidence"
                     color: root.theme.navigationMuted
-                    font.pixelSize: 7
+                    font.pixelSize: root.theme.captionSize
                 }
             }
         }
@@ -130,7 +130,7 @@ Rectangle {
                 Rectangle {
                     id: iedRoot
                     Layout.fillWidth: true
-                    implicitHeight: 39
+                    implicitHeight: 54
                     color: root.theme.surfaceSoft
                     border.width: 1
                     border.color: root.theme.lineSoft
@@ -154,7 +154,7 @@ Rectangle {
                                 Layout.fillWidth: true
                                 text: context.iedName.length ? context.iedName : "IED"
                                 color: root.theme.text
-                                font.pixelSize: 9
+                                font.pixelSize: root.theme.labelSize
                                 font.weight: Font.DemiBold
                                 elide: Text.ElideRight
                             }
@@ -164,14 +164,14 @@ Rectangle {
                                       ? context.authority + " · " + (context.endpoint.length ? context.endpoint : session.endpoint)
                                       : "No engineering model loaded"
                                 color: root.theme.muted
-                                font.pixelSize: 7
+                                font.pixelSize: root.theme.captionSize
                                 elide: Text.ElideMiddle
                             }
                         }
                         Label {
                             text: context.online ? "ONLINE" : "OFFLINE"
                             color: context.online ? root.theme.green : root.theme.muted
-                            font.pixelSize: 7
+                            font.pixelSize: root.theme.captionSize
                             font.weight: Font.DemiBold
                         }
                     }
@@ -202,7 +202,7 @@ Rectangle {
                                     required property int index
                                     required property var modelData
                                     Layout.fillWidth: true
-                                    implicitHeight: 27
+                                    implicitHeight: 30
                                     color: reports.selectedRcbIndex === index
                                            ? root.theme.surfaceRaised : reportMouse.containsMouse ? root.theme.surface : "transparent"
                                     RowLayout {
@@ -213,14 +213,14 @@ Rectangle {
                                         Label {
                                             text: modelData.buffered ? "B" : "U"
                                             color: modelData.buffered ? root.theme.amber : root.theme.accent
-                                            font.pixelSize: 7
+                                            font.pixelSize: root.theme.captionSize
                                             font.weight: Font.Bold
                                         }
                                         Label {
                                             Layout.fillWidth: true
                                             text: modelData.reference || "Report"
                                             color: root.theme.textSoft
-                                            font.pixelSize: 8
+                                            font.pixelSize: root.theme.captionSize
                                             elide: Text.ElideMiddle
                                         }
                                     }
@@ -258,7 +258,7 @@ Rectangle {
                                     required property int index
                                     required property var modelData
                                     Layout.fillWidth: true
-                                    implicitHeight: 27
+                                    implicitHeight: 30
                                     color: utilities.selectedSettingGroupIndex === index
                                            ? root.theme.surfaceRaised : sgMouse.containsMouse ? root.theme.surface : "transparent"
                                     Label {
@@ -268,7 +268,7 @@ Rectangle {
                                         verticalAlignment: Text.AlignVCenter
                                         text: modelData.reference || "SGCB"
                                         color: root.theme.textSoft
-                                        font.pixelSize: 8
+                                        font.pixelSize: root.theme.captionSize
                                         elide: Text.ElideMiddle
                                     }
                                     MouseArea {
@@ -312,7 +312,7 @@ Rectangle {
                                     required property int index
                                     required property var modelData
                                     Layout.fillWidth: true
-                                    implicitHeight: 27
+                                    implicitHeight: 30
                                     color: reports.selectedDataSetIndex === index
                                            ? root.theme.surfaceRaised : dsMouse.containsMouse ? root.theme.surface : "transparent"
                                     RowLayout {
@@ -324,13 +324,13 @@ Rectangle {
                                             Layout.fillWidth: true
                                             text: modelData.reference || "DataSet"
                                             color: root.theme.textSoft
-                                            font.pixelSize: 8
+                                            font.pixelSize: root.theme.captionSize
                                             elide: Text.ElideMiddle
                                         }
                                         Label {
                                             text: modelData.members ? String(modelData.members.length) : ""
                                             color: root.theme.muted
-                                            font.pixelSize: 7
+                                            font.pixelSize: root.theme.captionSize
                                         }
                                     }
                                     MouseArea {
@@ -373,6 +373,7 @@ Rectangle {
                         Layout.topMargin: 5
                         Layout.bottomMargin: 5
                         placeholderText: "Filter model"
+                        implicitHeight: 34
                         enabled: context.loaded
                         onTextChanged: searchDebounce.restart()
                     }
@@ -398,7 +399,7 @@ Rectangle {
                             id: modelRow
                             required property int index
                             width: modelTree.width
-                            height: 25
+                            height: 30
                             color: model.selected ? root.theme.accentSoft
                                                   : modelMouse.containsMouse ? root.theme.surfaceRaised : "transparent"
                             border.width: model.selected ? 1 : 0
@@ -406,34 +407,34 @@ Rectangle {
 
                             RowLayout {
                                 anchors.fill: parent
-                                anchors.leftMargin: 30 + model.depth * 12
-                                anchors.rightMargin: 7
-                                spacing: 4
+                                anchors.leftMargin: 12 + model.depth * 13
+                                anchors.rightMargin: 9
+                                spacing: 5
                                 Label {
                                     Layout.preferredWidth: 11
                                     text: model.hasChildren ? (model.expanded ? "▾" : "▸") : ""
                                     color: root.theme.muted
-                                    font.pixelSize: 9
+                                    font.pixelSize: 10
                                 }
                                 Label {
                                     Layout.preferredWidth: 22
                                     text: model.kind
                                     color: model.kind === "DA" ? root.theme.accent : root.theme.muted
-                                    font.pixelSize: 7
+                                    font.pixelSize: 8
                                     font.weight: Font.DemiBold
                                 }
                                 Label {
                                     Layout.fillWidth: true
                                     text: model.label
                                     color: root.theme.textSoft
-                                    font.pixelSize: 8
+                                    font.pixelSize: root.theme.captionSize
                                     elide: Text.ElideMiddle
                                 }
                                 Label {
                                     Layout.preferredWidth: 34
                                     text: model.functionalConstraint || ""
                                     color: root.theme.muted
-                                    font.pixelSize: 7
+                                    font.pixelSize: 9
                                     horizontalAlignment: Text.AlignRight
                                 }
                             }
@@ -443,8 +444,10 @@ Rectangle {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 onClicked: function(event) {
+                                    const wasExpanded = model.expanded
                                     context.treeModel.selectRow(index)
-                                    if (model.hasChildren && event.x < 44 + model.depth * 12)
+                                    if (model.hasChildren
+                                            && (!wasExpanded || event.x < 42 + model.depth * 13))
                                         context.treeModel.toggle(index)
                                     root.choose(0, "Data Model")
                                 }

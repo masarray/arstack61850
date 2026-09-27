@@ -59,13 +59,23 @@ Item {
     }
 
     function firstVisibleRow() {
-        var index = tree.indexAt(4, tree.contentY + 4)
+        var activeView = root.showNavigationPanel ? tree : valueTable
+        var index = activeView.indexAt(4, activeView.contentY + 4)
         return index >= 0 ? index : 0
     }
 
     function lastVisibleRow() {
-        var index = tree.indexAt(4, tree.contentY + tree.height - 4)
-        return index >= 0 ? index : Math.max(0, tree.count - 1)
+        var activeView = root.showNavigationPanel ? tree : valueTable
+        var index = activeView.indexAt(4, activeView.contentY + activeView.height - 4)
+        return index >= 0 ? index : Math.max(0, activeView.count - 1)
+    }
+
+    function revealSelection() {
+        if (!valueTable || valueTable.count <= 0)
+            return
+        const row = root.modelProvider.treeModel.selectedRow
+        if (row >= 0)
+            valueTable.positionViewAtIndex(row, ListView.Contain)
     }
 
     Rectangle { anchors.fill: parent; color: theme.background }
@@ -306,127 +316,447 @@ Item {
                 }
             }
 
-            Rectangle {
+            SplitView {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                color: theme.background
+                orientation: Qt.Horizontal
 
-                ScrollView {
-                    anchors.fill: parent
-                    contentWidth: availableWidth
+                Rectangle {
+                    SplitView.fillWidth: true
+                    SplitView.fillHeight: true
+                    SplitView.minimumWidth: 420
+                    color: theme.surface
+                    border.width: 1
+                    border.color: theme.lineSoft
+
                     ColumnLayout {
-                        width: Math.max(0, parent.width - 36)
-                        x: 18
-                        spacing: 10
+                        anchors.fill: parent
+                        spacing: 0
 
-                        Label {
-                            text: root.text(root.selected.kind) + "  " + root.text(root.selected.label)
-                            color: theme.text
-                            font.pixelSize: 15
-                            font.weight: Font.DemiBold
-                        }
-                        Label {
+                        Rectangle {
                             Layout.fillWidth: true
-                            text: root.text(root.selected.reference)
-                            color: theme.muted
-                            font.pixelSize: 9
-                            wrapMode: Text.WrapAnywhere
+                            Layout.preferredHeight: 48
+                            color: theme.chrome
+                            border.width: 1
+                            border.color: theme.lineSoft
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 10
+                                spacing: 8
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 0
+                                    Label {
+                                        text: "Model values"
+                                        color: theme.text
+                                        font.pixelSize: theme.labelSize
+                                        font.weight: Font.DemiBold
+                                    }
+                                    Label {
+                                        text: root.modelAvailable
+                                              ? root.modelProvider.treeModel.visibleNodeCount + " visible · "
+                                                + root.modelProvider.treeModel.totalNodeCount + " model nodes"
+                                              : "Open an engineering model or discover an IED"
+                                        color: theme.muted
+                                        font.pixelSize: theme.captionSize
+                                    }
+                                }
+                                ActionButton {
+                                    theme: root.theme
+                                    text: root.client.operationBusy ? "Reading…" : "Read visible"
+                                    enabled: root.client.connected && !root.client.operationBusy && valueTable.count > 0
+                                    onClicked: root.refreshCurrentVisible(root.firstVisibleRow(), root.lastVisibleRow())
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Read the visible attributes only. The request is bounded to 64 targets."
+                                }
+                                ActionButton {
+                                    theme: root.theme
+                                    text: "Locate selection"
+                                    enabled: root.modelAvailable && root.modelProvider.treeModel.selectedRow >= 0
+                                    onClicked: root.revealSelection()
+                                }
+                            }
                         }
-                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: theme.lineSoft }
 
-                        GridLayout {
+                        Rectangle {
                             Layout.fillWidth: true
-                            columns: 2
-                            columnSpacing: 16
-                            rowSpacing: 8
-                            Label { text: "MMS item"; color: theme.muted; font.pixelSize: 9 }
-                            Label { Layout.fillWidth: true; text: root.text(root.selected.mmsDomain) + " / " + root.text(root.selected.mmsItem); color: theme.textSoft; font.pixelSize: 9; elide: Text.ElideMiddle }
-                            Label { text: "FC"; color: theme.muted; font.pixelSize: 9 }
-                            Label { text: root.text(root.selected.functionalConstraint); color: theme.textSoft; font.pixelSize: 9 }
-                            Label { text: "MMS type"; color: theme.muted; font.pixelSize: 9 }
-                            Label { text: root.text(root.selected.mmsType); color: theme.textSoft; font.pixelSize: 9 }
-                            Label { text: "SCL type"; color: theme.muted; font.pixelSize: 9 }
-                            Label { text: root.text(root.selected.sclType); color: theme.textSoft; font.pixelSize: 9 }
-                            Label { text: "Type evidence"; color: theme.muted; font.pixelSize: 9 }
-                            Label { text: root.text(root.selected.typeStatus); color: root.selected.typeStatus === "Exact" ? theme.green : theme.amber; font.pixelSize: 9 }
+                            Layout.preferredHeight: 30
+                            color: theme.surfaceRaised
+                            border.width: 1
+                            border.color: theme.lineSoft
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 10
+                                spacing: 0
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: "Name"
+                                    color: theme.textSoft
+                                    font.pixelSize: theme.captionSize
+                                    font.weight: Font.DemiBold
+                                }
+                                Label {
+                                    Layout.preferredWidth: 48
+                                    text: "FC"
+                                    color: theme.textSoft
+                                    font.pixelSize: theme.captionSize
+                                    font.weight: Font.DemiBold
+                                }
+                                Label {
+                                    Layout.preferredWidth: Math.max(120, valueTable.width * 0.24)
+                                    text: "Value"
+                                    color: theme.textSoft
+                                    font.pixelSize: theme.captionSize
+                                    font.weight: Font.DemiBold
+                                }
+                                Label {
+                                    Layout.preferredWidth: Math.max(104, valueTable.width * 0.18)
+                                    text: "Type"
+                                    color: theme.textSoft
+                                    font.pixelSize: theme.captionSize
+                                    font.weight: Font.DemiBold
+                                }
+                            }
                         }
 
-                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: theme.lineSoft }
-
-                        GridLayout {
+                        ListView {
+                            id: valueTable
                             Layout.fillWidth: true
-                            columns: 2
-                            columnSpacing: 16
-                            rowSpacing: 8
-                            Label { text: "Value"; color: theme.muted; font.pixelSize: 9 }
-                            Label { text: root.text(root.selected.value); color: theme.text; font.pixelSize: 11; font.weight: Font.DemiBold }
-                            Label { text: "Quality"; color: theme.muted; font.pixelSize: 9 }
-                            Label { text: root.text(root.selected.quality); color: theme.textSoft; font.pixelSize: 9 }
-                            Label { text: "Timestamp"; color: theme.muted; font.pixelSize: 9 }
-                            Label { text: root.text(root.selected.timestamp); color: theme.textSoft; font.pixelSize: 9 }
+                            Layout.fillHeight: true
+                            clip: true
+                            reuseItems: true
+                            cacheBuffer: 0
+                            model: root.modelProvider.treeModel
+                            currentIndex: root.modelProvider.treeModel.selectedRow
+                            boundsBehavior: Flickable.StopAtBounds
+                            keyNavigationEnabled: true
+                            activeFocusOnTab: true
+                            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                            delegate: Rectangle {
+                                id: valueRow
+                                required property int index
+                                width: valueTable.width
+                                height: 31
+                                color: model.selected
+                                       ? theme.accentSoft
+                                       : valueMouse.containsMouse ? theme.surfaceRaised
+                                                                  : index % 2 ? theme.chrome : theme.surface
+                                border.width: model.selected ? 1 : 0
+                                border.color: theme.accent
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 10
+                                    spacing: 0
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Layout.leftMargin: Math.max(0, model.depth - 1) * 14
+                                        spacing: 6
+
+                                        Label {
+                                            Layout.preferredWidth: 12
+                                            text: model.hasChildren ? (model.expanded ? "▾" : "▸") : ""
+                                            color: theme.muted
+                                            font.pixelSize: 10
+                                        }
+                                        Rectangle {
+                                            Layout.preferredWidth: 25
+                                            Layout.preferredHeight: 18
+                                            radius: 3
+                                            color: model.kind === "DA" ? theme.accentSoft
+                                                   : model.kind === "DO" ? theme.surfaceSoft
+                                                                         : theme.surfaceRaised
+                                            border.width: 1
+                                            border.color: model.kind === "DA" ? theme.accent : theme.line
+                                            Label {
+                                                anchors.centerIn: parent
+                                                text: model.kind
+                                                color: model.kind === "DA" ? theme.accent : theme.textSoft
+                                                font.pixelSize: 8
+                                                font.weight: Font.DemiBold
+                                            }
+                                        }
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: model.label
+                                            color: theme.text
+                                            font.pixelSize: theme.labelSize
+                                            font.weight: model.kind === "IED" || model.kind === "LD" || model.kind === "LN"
+                                                         ? Font.DemiBold : Font.Normal
+                                            elide: Text.ElideMiddle
+                                        }
+                                    }
+
+                                    Label {
+                                        Layout.preferredWidth: 48
+                                        text: model.functionalConstraint || ""
+                                        color: theme.muted
+                                        font.pixelSize: theme.captionSize
+                                    }
+                                    Label {
+                                        Layout.preferredWidth: Math.max(120, valueTable.width * 0.24)
+                                        text: model.value && model.value.length ? model.value : "—"
+                                        color: model.value && model.value.length ? theme.text : theme.muted
+                                        font.pixelSize: theme.labelSize
+                                        font.weight: model.value && model.value.length ? Font.Medium : Font.Normal
+                                        elide: Text.ElideRight
+                                    }
+                                    Label {
+                                        Layout.preferredWidth: Math.max(104, valueTable.width * 0.18)
+                                        text: model.sclType || model.mmsType || ""
+                                        color: model.typeStatus === "Exact" ? theme.textSoft : theme.muted
+                                        font.pixelSize: theme.captionSize
+                                        elide: Text.ElideRight
+                                    }
+                                }
+
+                                MouseArea {
+                                    id: valueMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    onClicked: function(event) {
+                                        const wasExpanded = model.expanded
+                                        root.modelProvider.treeModel.selectRow(index)
+                                        if (model.hasChildren
+                                                && (!wasExpanded
+                                                    || event.x < 58 + Math.max(0, model.depth - 1) * 14))
+                                            root.modelProvider.treeModel.toggle(index)
+                                    }
+                                    onDoubleClicked: {
+                                        if (model.hasChildren)
+                                            root.modelProvider.treeModel.toggle(index)
+                                        else if (model.kind === "DA")
+                                            root.readCurrentSelection()
+                                    }
+                                }
+
+                                ToolTip.visible: valueMouse.containsMouse
+                                ToolTip.text: model.reference || model.label
+                                ToolTip.delay: 700
+                            }
+
+                            Label {
+                                anchors.centerIn: parent
+                                visible: valueTable.count === 0
+                                width: Math.min(420, parent.width - 48)
+                                text: root.modelAvailable
+                                      ? "No nodes match the current filter."
+                                      : "Load or discover an IED to inspect its canonical model and live values."
+                                color: theme.muted
+                                font.pixelSize: theme.bodySize
+                                horizontalAlignment: Text.AlignHCenter
+                                wrapMode: Text.WordWrap
+                            }
+
+                            Keys.onReturnPressed: {
+                                if (currentIndex >= 0) {
+                                    root.modelProvider.treeModel.selectRow(currentIndex)
+                                    if (root.selected.kind === "DA")
+                                        root.readCurrentSelection()
+                                }
+                            }
                         }
+                    }
+                }
 
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 8
-                            Button {
-                                text: client.operationBusy ? "Reading…" : "Read"
-                                enabled: client.connected && !client.operationBusy && root.selected.readable === true
+                Rectangle {
+                    SplitView.preferredWidth: 318
+                    SplitView.minimumWidth: 278
+                    SplitView.maximumWidth: 430
+                    SplitView.fillHeight: true
+                    color: theme.chrome
+                    border.width: 1
+                    border.color: theme.lineSoft
+
+                    ScrollView {
+                        anchors.fill: parent
+                        contentWidth: availableWidth
+
+                        ColumnLayout {
+                            width: Math.max(0, parent.width - 32)
+                            x: 16
+                            spacing: 12
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Layout.topMargin: 14
+                                spacing: 8
+                                Rectangle {
+                                    Layout.preferredWidth: 32
+                                    Layout.preferredHeight: 24
+                                    radius: 4
+                                    color: root.selected.kind === "DA" ? theme.accentSoft : theme.surfaceRaised
+                                    border.width: 1
+                                    border.color: root.selected.kind === "DA" ? theme.accent : theme.line
+                                    Label {
+                                        anchors.centerIn: parent
+                                        text: root.text(root.selected.kind)
+                                        color: root.selected.kind === "DA" ? theme.accent : theme.textSoft
+                                        font.pixelSize: theme.captionSize
+                                        font.weight: Font.DemiBold
+                                    }
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: root.text(root.selected.label)
+                                    color: theme.text
+                                    font.pixelSize: theme.subtitleSize
+                                    font.weight: Font.DemiBold
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: root.text(root.selected.reference)
+                                color: theme.muted
+                                font.pixelSize: theme.captionSize
+                                wrapMode: Text.WrapAnywhere
+                            }
+
+                            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: theme.lineSoft }
+
+                            Label {
+                                text: "OBSERVED VALUE"
+                                color: theme.muted
+                                font.pixelSize: theme.captionSize
+                                font.weight: Font.DemiBold
+                                font.letterSpacing: 0.5
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: root.text(root.selected.value)
+                                color: theme.text
+                                font.pixelSize: 18
+                                font.weight: Font.DemiBold
+                                wrapMode: Text.WrapAnywhere
+                            }
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: 2
+                                columnSpacing: 12
+                                rowSpacing: 7
+                                Label { text: "Quality"; color: theme.muted; font.pixelSize: theme.captionSize }
+                                Label { Layout.fillWidth: true; text: root.text(root.selected.quality); color: root.selected.quality === "good" ? theme.green : theme.textSoft; font.pixelSize: theme.labelSize; elide: Text.ElideRight }
+                                Label { text: "Timestamp"; color: theme.muted; font.pixelSize: theme.captionSize }
+                                Label { Layout.fillWidth: true; text: root.text(root.selected.timestamp); color: theme.textSoft; font.pixelSize: theme.labelSize; wrapMode: Text.WrapAnywhere }
+                            }
+
+                            ActionButton {
+                                theme: root.theme
+                                Layout.fillWidth: true
+                                text: root.client.operationBusy ? "Reading selected…" : "Read selected"
+                                primary: root.selected.readable === true
+                                enabled: root.client.connected && !root.client.operationBusy && root.selected.readable === true
                                 onClicked: root.readCurrentSelection()
+                            }
+
+                            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: theme.lineSoft }
+
+                            Label {
+                                text: "ENGINEERING IDENTITY"
+                                color: theme.muted
+                                font.pixelSize: theme.captionSize
+                                font.weight: Font.DemiBold
+                                font.letterSpacing: 0.5
+                            }
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: 2
+                                columnSpacing: 12
+                                rowSpacing: 7
+                                Label { text: "FC"; color: theme.muted; font.pixelSize: theme.captionSize }
+                                Label { Layout.fillWidth: true; text: root.text(root.selected.functionalConstraint); color: theme.textSoft; font.pixelSize: theme.labelSize }
+                                Label { text: "MMS type"; color: theme.muted; font.pixelSize: theme.captionSize }
+                                Label { Layout.fillWidth: true; text: root.text(root.selected.mmsType); color: theme.textSoft; font.pixelSize: theme.labelSize; elide: Text.ElideRight }
+                                Label { text: "SCL type"; color: theme.muted; font.pixelSize: theme.captionSize }
+                                Label { Layout.fillWidth: true; text: root.text(root.selected.sclType); color: theme.textSoft; font.pixelSize: theme.labelSize; elide: Text.ElideRight }
+                                Label { text: "Evidence"; color: theme.muted; font.pixelSize: theme.captionSize }
+                                Label { Layout.fillWidth: true; text: root.text(root.selected.typeStatus); color: root.selected.typeStatus === "Exact" ? theme.green : theme.amber; font.pixelSize: theme.labelSize }
+                                Label { text: "MMS item"; color: theme.muted; font.pixelSize: theme.captionSize }
+                                Label { Layout.fillWidth: true; text: root.text(root.selected.mmsDomain) + " / " + root.text(root.selected.mmsItem); color: theme.textSoft; font.pixelSize: theme.captionSize; wrapMode: Text.WrapAnywhere }
+                            }
+
+                            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: theme.lineSoft }
+
+                            Label {
+                                text: "WRITE"
+                                color: theme.muted
+                                font.pixelSize: theme.captionSize
+                                font.weight: Font.DemiBold
+                                font.letterSpacing: 0.5
                             }
                             TextField {
                                 id: writeValue
                                 Layout.fillWidth: true
-                                placeholderText: root.selected.writable === true ? "New scalar value" : "Read-only / unsupported Write type"
+                                placeholderText: root.selected.writable === true
+                                                 ? "Enter a scalar value"
+                                                 : "Read-only or unsupported type"
                                 enabled: client.connected && !client.operationBusy && root.selected.writable === true
+                                selectByMouse: true
                                 onTextChanged: root.pendingWrite = text
                             }
-                            Button {
-                                text: "Write…"
+                            ActionButton {
+                                theme: root.theme
+                                Layout.fillWidth: true
+                                text: "Review write…"
                                 enabled: writeValue.enabled && writeValue.text.length > 0
                                 onClicked: writeConfirm.open()
                             }
-                        }
+                            Label {
+                                Layout.fillWidth: true
+                                visible: root.selected.writable !== true && root.selected.kind === "DA"
+                                text: "Generic write remains fail-closed. Only exact scalar SP/CF/DC/SE attributes are eligible."
+                                color: theme.muted
+                                font.pixelSize: theme.captionSize
+                                wrapMode: Text.WordWrap
+                            }
 
-                        Label {
-                            Layout.fillWidth: true
-                            visible: root.selected.writable !== true && root.selected.kind === "DA"
-                            text: "Write is fail-closed: only exact scalar MMS types in FC SP/CF/DC/SE are enabled. ST/MX/CO and unknown/structured types are never written through this generic path."
-                            color: theme.muted
-                            font.pixelSize: 8
-                            wrapMode: Text.WordWrap
-                        }
+                            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: theme.lineSoft }
 
-                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: theme.lineSoft }
-
-                        Label {
-                            text: "SESSION"
-                            color: theme.muted
-                            font.pixelSize: 8
-                            font.weight: Font.DemiBold
+                            Label {
+                                text: "SESSION"
+                                color: theme.muted
+                                font.pixelSize: theme.captionSize
+                                font.weight: Font.DemiBold
+                                font.letterSpacing: 0.5
+                            }
+                            Label { Layout.fillWidth: true; text: client.endpoint; color: theme.textSoft; font.pixelSize: theme.labelSize; elide: Text.ElideMiddle }
+                            Label { Layout.fillWidth: true; text: "Association · " + root.text(client.associationProfile); color: theme.muted; font.pixelSize: theme.captionSize; wrapMode: Text.WordWrap }
+                            Label {
+                                visible: client.trustedSclHealth.length > 0
+                                text: "Trusted SCL · " + client.trustedSclHealth.toUpperCase()
+                                color: root.sclHealthColor()
+                                font.pixelSize: theme.captionSize
+                                font.weight: Font.DemiBold
+                            }
+                            Label { Layout.fillWidth: true; text: root.text(client.modelSummary); color: theme.muted; font.pixelSize: theme.captionSize; wrapMode: Text.WordWrap }
+                            Label {
+                                Layout.fillWidth: true
+                                text: client.lastError.length ? client.lastError : client.lastDiagnostic
+                                color: client.lastError.length ? theme.red : theme.muted
+                                font.pixelSize: theme.captionSize
+                                wrapMode: Text.WordWrap
+                            }
+                            Item { Layout.preferredHeight: 14 }
                         }
-                        Label { text: client.endpoint; color: theme.textSoft; font.pixelSize: 9 }
-                        Label { text: "Association: " + root.text(client.associationProfile); color: theme.muted; font.pixelSize: 8 }
-                        Label {
-                            visible: client.trustedSclHealth.length > 0
-                            text: "Trusted SCL health: " + client.trustedSclHealth.toUpperCase()
-                            color: root.sclHealthColor()
-                            font.pixelSize: 8
-                            font.weight: Font.DemiBold
-                        }
-                        Label { Layout.fillWidth: true; text: root.text(client.modelSummary); color: theme.muted; font.pixelSize: 8; wrapMode: Text.WordWrap }
-                        Label {
-                            Layout.fillWidth: true
-                            text: client.lastError.length ? client.lastError : client.lastDiagnostic
-                            color: client.lastError.length ? theme.red : theme.muted
-                            font.pixelSize: 8
-                            wrapMode: Text.WordWrap
-                        }
-                        Item { Layout.fillHeight: true }
                     }
                 }
             }
         }
+    }
+
+    Connections {
+        target: root.modelProvider.treeModel
+        function onSelectionChanged() { Qt.callLater(root.revealSelection) }
     }
 
     Dialog {

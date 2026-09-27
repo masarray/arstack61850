@@ -123,7 +123,7 @@ Item {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 62
+            Layout.preferredHeight: 68
             color: root.theme.chrome
             border.width: 1
             border.color: root.theme.lineSoft
@@ -135,12 +135,12 @@ Item {
                 spacing: 8
 
                 ColumnLayout {
-                    Layout.preferredWidth: 155
+                    Layout.preferredWidth: 168
                     spacing: 1
                     Label {
                         text: "MODEL"
                         color: root.theme.text
-                        font.pixelSize: 11
+                        font.pixelSize: root.theme.labelSize
                         font.weight: Font.DemiBold
                     }
                     Label {
@@ -148,11 +148,12 @@ Item {
                               ? root.activeIedLabel() + " · " + context.authority
                               : "Open SCL or discover one IED endpoint"
                         color: root.theme.muted
-                        font.pixelSize: 8
+                        font.pixelSize: root.theme.captionSize
                     }
                 }
 
-                Button {
+                ActionButton {
+                    theme: root.theme
                     text: "Open SCL"
                     enabled: !session.configurationLocked && !engineering.busy
                     onClicked: browserSclDialog.open()
@@ -160,7 +161,8 @@ Item {
                     ToolTip.text: "Open SCL/CID/SCD/IID/ICD into the persistent Browser model."
                 }
 
-                Button {
+                ActionButton {
+                    theme: root.theme
                     text: engineering.busy ? "Saving…" : "Save SCL"
                     visible: context.loaded && context.authorityKey === "live-discovery"
                     enabled: engineering.engineeringContextExportSupported
@@ -174,7 +176,7 @@ Item {
 
                 TextField {
                     id: hostField
-                    Layout.preferredWidth: 205
+                    Layout.preferredWidth: 190
                     text: session.host
                     placeholderText: "IED IP / hostname"
                     selectByMouse: true
@@ -193,10 +195,12 @@ Item {
                     onValueModified: session.port = value
                 }
 
-                Button {
+                ActionButton {
+                    theme: root.theme
                     text: "Online"
                     visible: context.loaded
                     enabled: !session.connected && !session.busy && !context.selectionRequired
+                    primary: enabled
                     onClicked: {
                         session.host = hostField.text
                         session.port = portField.value
@@ -208,7 +212,8 @@ Item {
                                   : "Reconnect/discover the active IED endpoint."
                 }
 
-                Button {
+                ActionButton {
+                    theme: root.theme
                     text: session.busy && !session.connected ? "Discovering…" : "Discover IED"
                     enabled: !session.connected && !session.busy
                     onClicked: {
@@ -220,9 +225,11 @@ Item {
                     ToolTip.text: "Ignore trusted SCL for this connect, discover the live MMS model, and publish it into this Browser context."
                 }
 
-                Button {
+                ActionButton {
+                    theme: root.theme
                     text: "Disconnect"
                     enabled: session.connected || session.busy
+                    danger: true
                     onClicked: session.disconnectFromIed()
                 }
 
@@ -241,13 +248,13 @@ Item {
                     Label {
                         text: session.stateText
                         color: session.lastError.length ? root.theme.red : root.theme.textSoft
-                        font.pixelSize: 9
+                        font.pixelSize: root.theme.labelSize
                         font.weight: Font.DemiBold
                     }
                     Label {
                         text: session.endpoint
                         color: root.theme.muted
-                        font.pixelSize: 8
+                        font.pixelSize: root.theme.captionSize
                     }
                 }
 
@@ -261,7 +268,7 @@ Item {
                         text: context.iedName.length ? context.iedName
                               : context.selectionRequired ? "Select active IED" : "IED model"
                         color: root.theme.text
-                        font.pixelSize: 10
+                        font.pixelSize: root.theme.labelSize
                         font.weight: Font.DemiBold
                     }
                     Label {
@@ -270,7 +277,7 @@ Item {
                               + context.dataAttributeCount + " DA · "
                               + (context.online ? "ONLINE" : "OFFLINE")
                         color: root.theme.muted
-                        font.pixelSize: 8
+                        font.pixelSize: root.theme.captionSize
                     }
                 }
             }
@@ -337,8 +344,8 @@ Item {
             IedBrowserNavigation {
                 id: browserNavigation
                 SplitView.preferredWidth: root.productState.browserNavigationWidth
-                SplitView.minimumWidth: 240
-                SplitView.maximumWidth: 520
+                SplitView.minimumWidth: 276
+                SplitView.maximumWidth: 560
                 SplitView.fillHeight: true
                 theme: root.theme
                 session: root.session
@@ -399,14 +406,14 @@ Item {
                                 Layout.fillWidth: true
                                 text: root.activeSectionTitle
                                 color: root.theme.text
-                                font.pixelSize: 10
+                                font.pixelSize: root.theme.labelSize
                                 font.weight: Font.DemiBold
                             }
                             Label {
                                 Layout.fillWidth: true
                                 text: root.breadcrumb()
                                 color: root.theme.muted
-                                font.pixelSize: 8
+                                font.pixelSize: root.theme.captionSize
                                 elide: Text.ElideMiddle
                             }
                         }
@@ -571,6 +578,12 @@ Item {
                     BrowserDataSetPane {
                         theme: root.theme
                         reports: root.reports
+                        context: root.context
+                        client: root.client
+                        onInspectRequested: function(reference) {
+                            if (root.context.treeModel.selectReference(reference))
+                                root.selectSection(0, "Data Model")
+                        }
                     }
 
                     ReportsWorkspace {

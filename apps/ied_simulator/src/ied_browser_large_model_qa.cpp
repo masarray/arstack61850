@@ -133,6 +133,18 @@ int main(int argc, char** argv) {
         return 7;
     }
 
+    if (!model.selectReference(QStringLiteral("LD4/LLN19.DO99"))) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL object_reference_select\n";
+        return 12;
+    }
+    const auto selectedObject = model.selectedNode();
+    if (selectedObject.value(QStringLiteral("kind")).toString() != QStringLiteral("DO") ||
+        selectedObject.value(QStringLiteral("reference")).toString() !=
+            QStringLiteral("LD4/LLN19.DO99")) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL object_reference_projection\n";
+        return 13;
+    }
+
     QStringList monitoredReferences;
     for (int doIndex = 0; doIndex < 100; ++doIndex) {
         monitoredReferences.push_back(

@@ -151,8 +151,8 @@ ApplicationWindow {
     component WorkspaceButton: Button {
         id: control
         required property int workspace
-        implicitHeight: 28
-        implicitWidth: Math.max(96, label.implicitWidth + 20)
+        implicitHeight: 30
+        implicitWidth: Math.max(104, label.implicitWidth + 24)
         checkable: true
         checked: root.workspaceIndex === workspace
         onClicked: root.workspaceIndex = workspace
@@ -160,13 +160,13 @@ ApplicationWindow {
             id: label
             text: control.text
             color: control.checked ? "#ffffff" : appTheme.navigationMuted
-            font.pixelSize: 9
+            font.pixelSize: appTheme.captionSize
             font.weight: control.checked ? Font.DemiBold : Font.Normal
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
         }
         background: Rectangle {
-            radius: 4
+            radius: 5
             color: control.checked ? appTheme.accent : control.hovered ? "#263833" : "transparent"
             border.width: 0
         }
@@ -178,7 +178,7 @@ ApplicationWindow {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 38
+            Layout.preferredHeight: 42
             color: appTheme.navigationDark
 
             RowLayout {
@@ -202,7 +202,7 @@ ApplicationWindow {
                 Label {
                     text: "ARStack IEC 61850"
                     color: appTheme.navigationText
-                    font.pixelSize: 11
+                    font.pixelSize: appTheme.labelSize
                     font.weight: Font.DemiBold
                     Layout.rightMargin: 8
                 }
@@ -375,7 +375,7 @@ ApplicationWindow {
                                             text: label
                                             elide: Text.ElideRight
                                             color: appTheme.text
-                                            font.pixelSize: 9
+                            font.pixelSize: appTheme.captionSize
                                         }
                                         Button {
                                             text: "×"

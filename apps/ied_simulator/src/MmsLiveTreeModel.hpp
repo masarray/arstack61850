@@ -77,6 +77,7 @@ public:
     Q_INVOKABLE void selectRow(int row);
     Q_INVOKABLE void toggle(int row);
     Q_INVOKABLE bool selectMmsItem(const QString& domain, const QString& item);
+    Q_INVOKABLE bool selectReference(const QString& reference);
     Q_INVOKABLE QVariantMap nodeForReference(const QString& reference) const;
     Q_INVOKABLE void clear();
 
@@ -137,6 +138,7 @@ private:
     QVector<Node> nodes_;
     QVector<int> visible_;
     QHash<QString, int> mmsIndex_;
+    QHash<QString, int> referenceIndex_;
     QString filterText_;
     int selectedNode_{-1};
 };

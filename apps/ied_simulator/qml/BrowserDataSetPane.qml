@@ -7,6 +7,12 @@ Rectangle {
     id: root
     required property var theme
     required property var reports
+    required property var context
+    required property var client
+
+    property int valueRevision: 0
+
+    signal inspectRequested(string reference)
 
     color: theme.background
 
@@ -14,15 +20,31 @@ Rectangle {
         return value === undefined || value === null || String(value).length === 0 ? "—" : String(value)
     }
 
+    function resolvedNode(reference) {
+        root.valueRevision
+        return context.treeModel.nodeForReference(reference)
+    }
+
+    function hasValue(value) {
+        return value !== undefined && value !== null && String(value).length > 0
+    }
+
+    Connections {
+        target: context.treeModel
+        function onDataChanged() { root.valueRevision += 1 }
+        function onModelReset() { root.valueRevision += 1 }
+        function onSelectionChanged() { root.valueRevision += 1 }
+    }
+
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 16
-        spacing: 10
+        anchors.margins: 12
+        spacing: 8
 
         Label {
-            text: "DataSet"
+            text: "DataSet members"
             color: theme.text
-            font.pixelSize: 15
+            font.pixelSize: theme.subtitleSize
             font.weight: Font.DemiBold
         }
 
@@ -32,7 +54,7 @@ Rectangle {
                   ? root.text(reports.dataSets[reports.selectedDataSetIndex].reference)
                   : "Select a DataSet in the navigation tree."
             color: theme.textSoft
-            font.pixelSize: 10
+            font.pixelSize: theme.labelSize
             wrapMode: Text.WrapAnywhere
         }
 
@@ -70,25 +92,53 @@ Rectangle {
             }
         }
 
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: theme.lineSoft }
-
         RowLayout {
             Layout.fillWidth: true
             Label {
-                text: "Ordered members"
+                text: "Ordered members and observed values"
                 color: theme.text
-                font.pixelSize: 10
+                font.pixelSize: theme.labelSize
                 font.weight: Font.DemiBold
             }
             Item { Layout.fillWidth: true }
+            ActionButton {
+                theme: root.theme
+                text: root.client.operationBusy ? "Reading…" : "Read members"
+                enabled: root.client.connected && !root.client.operationBusy
+                         && reports.selectedDataSetMembers.length > 0
+                onClicked: root.client.refreshEngineeringReferences(reports.selectedDataSetMembers)
+                ToolTip.visible: hovered
+                ToolTip.text: "Read the ordered DataSet members through the canonical model. Requests remain bounded by the client controller."
+            }
             Label {
                 text: String(reports.selectedDataSetMembers.length)
                 color: theme.muted
-                font.pixelSize: 9
+                font.pixelSize: theme.captionSize
+            }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 30
+            color: theme.surfaceRaised
+            border.width: 1
+            border.color: theme.lineSoft
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
+                spacing: 8
+                Label { Layout.preferredWidth: 36; text: "#"; color: theme.textSoft; font.pixelSize: theme.captionSize; font.weight: Font.DemiBold }
+                Label { Layout.fillWidth: true; text: "Member"; color: theme.textSoft; font.pixelSize: theme.captionSize; font.weight: Font.DemiBold }
+                Label { Layout.preferredWidth: 48; text: "FC"; color: theme.textSoft; font.pixelSize: theme.captionSize; font.weight: Font.DemiBold }
+                Label { Layout.preferredWidth: 160; text: "Value"; color: theme.textSoft; font.pixelSize: theme.captionSize; font.weight: Font.DemiBold }
+                Label { Layout.preferredWidth: 108; text: "Type"; color: theme.textSoft; font.pixelSize: theme.captionSize; font.weight: Font.DemiBold }
             }
         }
 
         ListView {
+            id: memberList
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
@@ -98,30 +148,77 @@ Rectangle {
             ScrollBar.vertical: ScrollBar {}
 
             delegate: Rectangle {
+                id: memberRow
                 required property int index
                 required property string modelData
+                property var resolved: root.resolvedNode(modelData)
                 width: ListView.view.width
                 height: 32
-                color: index % 2 ? theme.surfaceSoft : theme.surface
+                color: memberMouse.containsMouse ? theme.surfaceRaised
+                                                  : index % 2 ? theme.chrome : theme.surface
+                border.width: 0
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: 10
                     anchors.rightMargin: 10
                     spacing: 8
                     Label {
-                        Layout.preferredWidth: 34
+                        Layout.preferredWidth: 36
                         text: String(index + 1)
                         color: theme.muted
-                        font.pixelSize: 8
+                        font.pixelSize: theme.captionSize
                     }
                     Label {
                         Layout.fillWidth: true
                         text: modelData
-                        color: theme.textSoft
-                        font.pixelSize: 9
+                        color: theme.text
+                        font.pixelSize: theme.labelSize
                         elide: Text.ElideMiddle
                     }
+                    Label {
+                        Layout.preferredWidth: 48
+                        text: memberRow.resolved.functionalConstraint || ""
+                        color: theme.muted
+                        font.pixelSize: theme.captionSize
+                    }
+                    Label {
+                        Layout.preferredWidth: 160
+                        text: root.text(memberRow.resolved.value)
+                        color: root.hasValue(memberRow.resolved.value) ? theme.text : theme.muted
+                        font.pixelSize: theme.labelSize
+                        font.weight: root.hasValue(memberRow.resolved.value) ? Font.Medium : Font.Normal
+                        elide: Text.ElideRight
+                    }
+                    Label {
+                        Layout.preferredWidth: 108
+                        text: memberRow.resolved.sclType || memberRow.resolved.mmsType || ""
+                        color: theme.textSoft
+                        font.pixelSize: theme.captionSize
+                        elide: Text.ElideRight
+                    }
                 }
+
+                MouseArea {
+                    id: memberMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    enabled: memberRow.resolved.reference
+                    onDoubleClicked: root.inspectRequested(memberRow.resolved.reference)
+                }
+
+                ToolTip.visible: memberMouse.containsMouse
+                ToolTip.text: memberMouse.enabled
+                              ? "Double-click to inspect this member in Data Model"
+                              : modelData
+                ToolTip.delay: 650
+            }
+
+            Label {
+                anchors.centerIn: parent
+                visible: memberList.count === 0
+                text: "Select a DataSet to inspect its ordered members."
+                color: theme.muted
+                font.pixelSize: theme.bodySize
             }
         }
     }
