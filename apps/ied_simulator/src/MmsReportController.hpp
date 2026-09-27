@@ -149,6 +149,7 @@ private:
     QVariantMap selectedRcb_;
     QStringList selectedDataSetMembers_;
     QString pendingStaticDataSetReference_;
+    QString pendingStaticContextFingerprint_;
     QVariantList receivedReports_;
     QStringList events_;
     QStringList diagnostics_;
