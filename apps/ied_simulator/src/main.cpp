@@ -485,6 +485,9 @@ int main(int argc, char* argv[]) {
                     fail("second_source", 63);
                     return;
                 }
+                // Exercise the actual minimum supported desktop width, not
+                // just the 1360px default where overfull toolbars appear fine.
+                rootObject->setProperty("width", 1024);
                 rootObject->setProperty("workspaceIndex", 1);
                 rootObject->setProperty("allIedMonitor", false);
                 QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
@@ -503,6 +506,28 @@ int main(int argc, char* argv[]) {
                 auto* const first = browserViewAt(0);
                 auto* const second = browserViewAt(1);
                 auto* const selected = fleet->contextAt(1);
+                auto* const commandBar = second
+                    ? second->findChild<QQuickItem*>(QStringLiteral("iedBrowserCommandBar"))
+                    : nullptr;
+                auto* const hostField = second
+                    ? second->findChild<QQuickItem*>(QStringLiteral("iedBrowserHostField"))
+                    : nullptr;
+                auto* const portField = second
+                    ? second->findChild<QQuickItem*>(QStringLiteral("iedBrowserPortField"))
+                    : nullptr;
+                auto* const sessionStatus = second
+                    ? second->findChild<QQuickItem*>(QStringLiteral("iedBrowserSessionStatus"))
+                    : nullptr;
+                const auto toolbarFits = [&]() {
+                    if (!commandBar || !hostField || !portField || !sessionStatus) return false;
+                    if (commandBar->height() < 90 || commandBar->width() < 980) return false;
+                    const auto left = hostField->mapToScene(QPointF{}).x();
+                    const auto port = portField->mapToScene(QPointF{}).x();
+                    const auto right = sessionStatus->mapToScene(
+                        QPointF{sessionStatus->width(), 0}).x();
+                    return left >= 0 && port > left && right <= 1024 &&
+                        sessionStatus->width() >= 50 && sessionStatus->isVisible();
+                };
                 auto* const signalList = second
                     ? second->findChild<QQuickItem*>(QStringLiteral("iedBrowserSignalTree"))
                     : nullptr;
@@ -528,6 +553,7 @@ int main(int argc, char* argv[]) {
 
                 const auto renderedReady = [&]() {
                     return first && second && signalList && valueList && selected &&
+                        toolbarFits() &&
                         signalList->property("count").toInt() >= 3 &&
                         signalList->width() >= 100 && signalList->isVisible() &&
                         valueList->property("count").toInt() >= 3 &&
@@ -558,6 +584,8 @@ int main(int argc, char* argv[]) {
                     qCritical().noquote()
                         << "BROWSER_FLEET_ROUTING_DIAG"
                         << "activeIndex=" << fleet->activeIndex()
+                        << "toolbarFits1024=" << toolbarFits()
+                        << "statusWidth=" << (sessionStatus ? sessionStatus->width() : -1)
                         << "host=" << static_cast<void*>(browserHost)
                         << "visualChildren=" << (browserHost ? browserHost->childItems().size() : -1)
                         << "first=" << static_cast<void*>(first)
@@ -626,7 +654,7 @@ int main(int argc, char* argv[]) {
                 }
                 qInfo().noquote()
                     << "BROWSER_FLEET_ROUTING_PASS active_tab=QA_IED_B"
-                    << "offline_signals=visible" << "model_values=visible" << "value_label=bound"
+                    << "offline_signals=visible" << "model_values=visible" << "value_label=bound" << "toolbar_1024=visible"
                     << "switching=pass reindex=pass cross_ied_panel=false";
                 app.exit(0);
             });
