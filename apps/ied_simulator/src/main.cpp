@@ -676,13 +676,33 @@ int main(int argc, char* argv[]) {
                 // Exercise the actual QML post-discovery route, rather than
                 // accepting source-token assertions for a Dialog never opened.
                 auto* const activeReports = fleet->reportsAt(0);
-                if (!activeReports || !activeReports->selectDataSet(0) ||
-                    activeReports->selectedDataSetMembers().isEmpty() ||
-                    !QMetaObject::invokeMethod(retained, "openDatasetSignals") ||
-                    retained->property("activeSection").toInt() != 1 ||
-                    !activeReports->selectStaticRcbForDataSet(0) ||
+                const bool selectedDataSet = activeReports && activeReports->selectDataSet(0);
+                const bool openedDataset = QMetaObject::invokeMethod(
+                    retained, "openDatasetSignals");
+                const bool matchedStaticRcb = selectedDataSet &&
+                    activeReports->selectStaticRcbForDataSet(0);
+                if (!selectedDataSet || activeReports->selectedDataSetMembers().isEmpty() ||
+                    !openedDataset || retained->property("activeSection").toInt() != 1 ||
+                    !matchedStaticRcb ||
                     activeReports->selectedRcb().value(QStringLiteral("reference")).toString().isEmpty() ||
+                    activeReports->selectedRcb().value(QStringLiteral("probeOk")).toBool() ||
+                    activeReports->selectedRcb().value(QStringLiteral("bindingSource")).toString() !=
+                        QStringLiteral("CanonicalEngineeringContext") ||
                     activeReports->active()) {
+                    qCritical().noquote() << "BROWSER_DATASET_ROUTE_DIAG"
+                        << "dataSets=" << (activeReports ? activeReports->dataSets().size() : -1)
+                        << "members=" << (activeReports ? activeReports->selectedDataSetMembers().size() : -1)
+                        << "reports=" << (activeReports ? activeReports->reportControls().size() : -1)
+                        << "selected=" << selectedDataSet
+                        << "opened=" << openedDataset
+                        << "rcbMatched=" << matchedStaticRcb
+                        << "bound=" << (activeReports
+                            ? activeReports->selectedRcb().value(QStringLiteral("dataSet")).toString()
+                            : QString{})
+                        << "probeOk=" << (activeReports
+                            ? activeReports->selectedRcb().value(QStringLiteral("probeOk")).toBool()
+                            : false)
+                        << "section=" << retained->property("activeSection").toInt();
                     fail("offline_dataset_signals_route", 71);
                     return;
                 }
