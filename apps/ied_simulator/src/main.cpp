@@ -433,7 +433,9 @@ int main(int argc, char* argv[]) {
             }
         }
         if (parser.isSet(qaBrowserRoutingOption)) {
-            QTimer::singleShot(150, &app, [&app, rootObject] {
+            const auto routingScreenshotPath = parser.isSet(screenshotOption)
+                ? parser.value(screenshotOption) : QString{};
+            QTimer::singleShot(150, &app, [&app, rootObject, routingScreenshotPath] {
                 auto fail = [&app](const char* reason, const int code) {
                     qCritical().noquote() << "BROWSER_FLEET_ROUTING_FAIL" << reason;
                     app.exit(code);
@@ -763,6 +765,15 @@ int main(int argc, char* argv[]) {
                     << "BROWSER_FLEET_ROUTING_PASS active_tab=QA_IED_B"
                     << "offline_signals=visible" << "model_values=visible" << "value_label=bound" << "toolbar_1024=visible"
                     << "switching=pass reindex=pass cross_ied_panel=false";
+                if (!routingScreenshotPath.isEmpty()) {
+                    auto* const window = qobject_cast<QQuickWindow*>(rootObject);
+                    const auto image = window ? window->grabWindow() : QImage{};
+                    if (image.isNull() || !image.save(routingScreenshotPath)) {
+                        fail("browser_screenshot_save", 78);
+                        return;
+                    }
+                    qInfo().noquote() << "BROWSER_SCREENSHOT_PASS" << routingScreenshotPath;
+                }
                 app.exit(0);
             });
         }
