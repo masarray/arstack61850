@@ -34,6 +34,7 @@ class MmsReportController : public QObject {
     Q_PROPERTY(QStringList ownedDynamicDataSets READ ownedDynamicDataSets NOTIFY inventoryChanged)
     Q_PROPERTY(int selectedRcbIndex READ selectedRcbIndex NOTIFY selectionChanged)
     Q_PROPERTY(int selectedDataSetIndex READ selectedDataSetIndex NOTIFY selectionChanged)
+    Q_PROPERTY(QString staticRouteDataSet READ staticRouteDataSet NOTIFY selectionChanged)
     Q_PROPERTY(QVariantMap selectedRcb READ selectedRcb NOTIFY selectionChanged)
     Q_PROPERTY(QStringList selectedDataSetMembers READ selectedDataSetMembers NOTIFY selectionChanged)
     Q_PROPERTY(QVariantList receivedReports READ receivedReports NOTIFY reportsChanged)
@@ -66,6 +67,7 @@ public:
     [[nodiscard]] QStringList ownedDynamicDataSets() const { return ownedDynamicDataSets_; }
     [[nodiscard]] int selectedRcbIndex() const noexcept { return selectedRcbIndex_; }
     [[nodiscard]] int selectedDataSetIndex() const noexcept { return selectedDataSetIndex_; }
+    [[nodiscard]] QString staticRouteDataSet() const { return pendingStaticDataSetReference_; }
     [[nodiscard]] QVariantMap selectedRcb() const { return selectedRcb_; }
     [[nodiscard]] QStringList selectedDataSetMembers() const { return selectedDataSetMembers_; }
     [[nodiscard]] QVariantList receivedReports() const { return receivedReports_; }
@@ -123,6 +125,7 @@ private:
     void clearInventory();
     void adoptEngineeringInventory();
     void refreshSelection();
+    bool selectStaticRcbForReference(const QString& reference, bool requireLiveProbe);
     void schedulePoll();
     [[nodiscard]] std::shared_ptr<std::stop_source> replaceStopSource();
 
@@ -145,6 +148,7 @@ private:
     int selectedDataSetIndex_{-1};
     QVariantMap selectedRcb_;
     QStringList selectedDataSetMembers_;
+    QString pendingStaticDataSetReference_;
     QVariantList receivedReports_;
     QStringList events_;
     QStringList diagnostics_;
