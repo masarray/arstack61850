@@ -110,10 +110,16 @@ Item {
     onActiveSectionChanged: ensureActiveService()
     onVisibleChanged: {
         if (root.visible) root.offerSignalCatalog()
+        else signalCatalogDialog.close()
     }
     Connections {
         target: context
-        function onContextChanged() { root.offerSignalCatalog() }
+        function onContextChanged() {
+            if (!context.loaded || context.selectionRequired ||
+                context.authorityKey !== "live-discovery")
+                signalCatalogDialog.close()
+            root.offerSignalCatalog()
+        }
     }
 
     Connections {
