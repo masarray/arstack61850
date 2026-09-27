@@ -9,6 +9,8 @@ Rectangle {
     required property var reports
     required property var context
     required property var client
+    required property var dataSetCatalog
+    required property string selectedDataSetReference
 
     property int valueRevision: 0
 
@@ -20,15 +22,37 @@ Rectangle {
         return value === undefined || value === null || String(value).length === 0 ? "—" : String(value)
     }
 
-    function resolvedNode(reference) {
-        root.valueRevision
-        return context.treeModel.nodeForReference(reference)
+    function memberReference(member) {
+        // The canonical catalog shows FC as evidence, not as part of its
+        // DataAttribute key. Preserve the displayed member order and label.
+        return String(member || "").replace(/\\s+\\[[^\\]]+\\]$/, "")
     }
 
-    readonly property var selectedDataSet: reports && reports.dataSets
-        && reports.selectedDataSetIndex >= 0
-        && reports.selectedDataSetIndex < reports.dataSets.length
-        ? (reports.dataSets[reports.selectedDataSetIndex] || null) : null
+    function memberFc(member) {
+        var matched = String(member || "").match(/\\[([^\\]]+)\\]$/)
+        return matched ? matched[1] : ""
+    }
+
+    function resolvedNode(reference) {
+        root.valueRevision
+        return context.treeModel.nodeForReference(root.memberReference(reference))
+    }
+
+    readonly property var selectedDataSet: {
+        for (var i = 0; i < dataSetCatalog.length; ++i) {
+            if (dataSetCatalog[i].reference === selectedDataSetReference)
+                return dataSetCatalog[i]
+        }
+        return null
+    }
+    readonly property var selectedDataSetMembers: selectedDataSet
+        ? (selectedDataSet.members || []) : []
+    readonly property var readableMemberReferences: {
+        var result = []
+        for (var i = 0; i < selectedDataSetMembers.length; ++i)
+            result.push(root.memberReference(selectedDataSetMembers[i]))
+        return result
+    }
 
     function hasValue(value) {
         return value !== undefined && value !== null && String(value).length > 0
@@ -109,13 +133,13 @@ Rectangle {
                 theme: root.theme
                 text: root.client.operationBusy ? "Reading…" : "Read members"
                 enabled: root.client.connected && !root.client.operationBusy
-                         && reports.selectedDataSetMembers.length > 0
-                onClicked: root.client.refreshEngineeringReferences(reports.selectedDataSetMembers)
+                         && root.readableMemberReferences.length > 0
+                onClicked: root.client.refreshEngineeringReferences(root.readableMemberReferences)
                 ToolTip.visible: hovered
                 ToolTip.text: "Read the ordered DataSet members through the canonical model. Requests remain bounded by the client controller."
             }
             Label {
-                text: String(reports.selectedDataSetMembers.length)
+                text: String(root.selectedDataSetMembers.length)
                 color: theme.muted
                 font.pixelSize: theme.captionSize
             }
@@ -147,7 +171,7 @@ Rectangle {
             Layout.fillHeight: true
             clip: true
             reuseItems: true
-            model: reports.selectedDataSetMembers
+            model: root.selectedDataSetMembers
             spacing: 1
             ScrollBar.vertical: ScrollBar {}
 
@@ -181,7 +205,7 @@ Rectangle {
                     }
                     Label {
                         Layout.preferredWidth: 48
-                        text: memberRow.resolved.functionalConstraint || ""
+                        text: memberRow.resolved.functionalConstraint || root.memberFc(modelData)
                         color: theme.muted
                         font.pixelSize: theme.captionSize
                     }
