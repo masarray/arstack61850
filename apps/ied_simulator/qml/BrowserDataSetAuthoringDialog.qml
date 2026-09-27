@@ -285,6 +285,7 @@ Dialog {
 
     Dialog {
         id: createConfirm
+        width: 510
         title: "Confirm dynamic DataSet create"
         modal: true
         anchors.centerIn: Overlay.overlay
@@ -303,6 +304,7 @@ Dialog {
 
     Dialog {
         id: deleteDialog
+        width: 510
         title: "Confirm dynamic DataSet delete"
         modal: true
         anchors.centerIn: Overlay.overlay
