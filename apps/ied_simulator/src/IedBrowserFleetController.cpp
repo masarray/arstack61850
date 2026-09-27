@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "IedBrowserFleetController.hpp"
 
+#include <QTimer>
+
 #include <algorithm>
 #include <utility>
 
@@ -260,8 +262,15 @@ bool IedBrowserFleetController::closeWorkspace(const int index) {
     if (activeIndex_ > index) --activeIndex_;
     else if (activeIndex_ == index) activeIndex_ = std::min(index, workspaceCount() - 1);
     emit activeChanged();
-    // Retire services only AFTER Qt views process the row removal and all
-    // active QObject bindings have been retargeted away from the removed IED.
-    retired.reset();
+    // QML Repeater removal and its nested delegates may finish after
+    // endRemoveRows() returns. Destroying QObject services synchronously here
+    // nulls dozens of still-live required QML properties, even though the
+    // remaining IED and its canonical model are correct. Keep this Entry alive
+    // through the next event-loop turn so visual teardown can complete.
+    // Capture a copyable shared owner because Qt stores the callback.
+    const auto retiredLifetime = std::shared_ptr<Entry>(std::move(retired));
+    QTimer::singleShot(0, this, [retiredLifetime] {
+        // The lifetime guard is released after queued QML delegate removal.
+    });
     return true;
 }
