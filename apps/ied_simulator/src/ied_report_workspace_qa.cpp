@@ -367,9 +367,7 @@ int main(int argc, char* argv[]) {
                               << "error=" << reports.lastError();
         return 30;
     }
-    if (!sameDataSetReference(
-            reports.selectedRcb().value(QStringLiteral("dataSet")).toString(),
-            staticRoute)) {
+    if (reports.selectedRcb().value(QStringLiteral("dataSet")).toString() != staticRoute) {
         qCritical() << "REPORTS_WORKBENCH_FAIL static_route_dataset_changed";
         return 31;
     }
