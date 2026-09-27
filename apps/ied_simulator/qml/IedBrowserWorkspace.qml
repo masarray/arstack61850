@@ -126,6 +126,8 @@ Item {
         // wider than its container, leaving ghost/blank controls in the GUI.
         Rectangle {
             Layout.fillWidth: true
+            id: browserCommandBar
+            objectName: "iedBrowserCommandBar"
             Layout.preferredHeight: 96
             color: root.theme.chrome
             border.width: 1
@@ -216,6 +218,7 @@ Item {
                     }
                     TextField {
                         id: hostField
+                        objectName: "iedBrowserHostField"
                         Layout.preferredWidth: 190
                         placeholderText: "IED IP / hostname"
                         text: session.host
@@ -225,6 +228,7 @@ Item {
                     }
                     SpinBox {
                         id: portField
+                        objectName: "iedBrowserPortField"
                         Layout.preferredWidth: 102
                         from: 1
                         to: 65535
@@ -280,6 +284,7 @@ Item {
                                                                                           : root.theme.muted
                     }
                     Label {
+                        objectName: "iedBrowserSessionStatus"
                         Layout.fillWidth: true
                         text: session.lastError.length ? session.lastError
                               : session.stateText + (session.endpoint.length ? " · " + session.endpoint : "")
