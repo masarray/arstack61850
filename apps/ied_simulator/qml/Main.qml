@@ -475,6 +475,18 @@ ApplicationWindow {
                                 model: root.browserFleet
                                 IedBrowserWorkspace {
                                     required property int index
+                                    // One independently owned controller set belongs to this
+                                    // delegate for its entire lifetime. Repeater reindex/removal
+                                    // must NEVER rebind an outgoing IED to another slot or null.
+                                    Component.onCompleted: {
+                                        session = root.browserFleet.sessionAt(index)
+                                        client = root.browserFleet.clientAt(index)
+                                        context = root.browserFleet.contextAt(index)
+                                        reports = root.browserFleet.reportsAt(index)
+                                        utilities = root.browserFleet.utilitiesAt(index)
+                                        controls = root.browserFleet.controlsAt(index)
+                                        engineering = root.browserFleet.engineeringAt(index)
+                                    }
                                     objectName: "iedBrowserView_" + index
                                     anchors.fill: parent
                                     visible: index === root.browserFleet.activeIndex
