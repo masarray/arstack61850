@@ -75,6 +75,8 @@ jobs:
           --cycles 12
 
   windows-release-package:
+    # Do not publish a Windows RC if rendered Linux Browser QA is red.
+    needs: linux-release-soak
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
