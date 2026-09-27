@@ -37,6 +37,9 @@ for token in (
     "options.selection.allow_polling_fallback = false",
     "Enable + GI requires general-interrogation in authored TrgOps",
     "Static/non-owned DataSet binding is immutable",
+    "bool MmsReportController::selectStaticRcbForDataSet(",
+    "sameDataSetReference(bound, reference)",
+    "control.value(QStringLiteral(\"dynamicBinding\")).toBool()",
 ):
     require(controller, token, "Report controller")
 
@@ -67,6 +70,12 @@ for token in (
     'text: "Author…"',
     "BrowserDataSetAuthoringDialog {",
     "BrowserReportAuthoringDialog {",
+    "function openDatasetSignals()",
+    "function inspectBoundStaticRcb()",
+    "reports.selectStaticRcbForDataSet(reports.selectedDataSetIndex)",
+    'objectName: "iedBrowserSignalCatalog"',
+    'text: "Dataset Signals"',
+    'text: "Browse Data Model"',
 ):
     require(workspace, token, "Browser workspace")
 
@@ -100,12 +109,16 @@ for token in (
     "DYNAMIC OWNED",
     "STATIC / READ-ONLY",
     "Membership is immutable",
+    "signal inspectStaticReportRequested()",
+    'text: "Inspect bound RCB…"',
+    "routeMessage: root.datasetRouteStatus",
 ):
     require(dataset_pane, token, "DataSet pane")
 
 for token in (
     "ownedDynamicDataSets",
     "enableSelectedAuthored",
+    "selectStaticRcbForDataSet",
     "createDynamicDataSet",
     "deleteDynamicDataSet",
 ):
