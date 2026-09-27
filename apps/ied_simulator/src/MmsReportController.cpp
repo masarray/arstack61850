@@ -17,6 +17,7 @@
 #include <set>
 #include <chrono>
 #include <optional>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <utility>
@@ -990,18 +991,54 @@ bool MmsReportController::selectStaticRcbForReference(
         return false;
     }
 
+    QString preferredReference;
+    if (requireLiveProbe) {
+        int bestRank = std::numeric_limits<int>::min();
+        bool sawBoundEvaluation = false;
+        for (const auto& value : staticCandidates_) {
+            const auto candidate = value.toMap();
+            if (!sameDataSetReference(
+                    reference, candidate.value(QStringLiteral("dataSet")).toString())) {
+                continue;
+            }
+            sawBoundEvaluation = true;
+            if (!candidate.value(QStringLiteral("selectable")).toBool()) continue;
+            const int rank =
+                candidate.value(QStringLiteral("score")).toInt() +
+                (candidate.value(QStringLiteral("preferred")).toBool() ? 1'000'000 : 0);
+            if (preferredReference.isEmpty() || rank > bestRank) {
+                bestRank = rank;
+                preferredReference = candidate.value(QStringLiteral("reference")).toString();
+            }
+        }
+        // The pool selector explicitly evaluated bound RCBs but found none safe.
+        // Do not bypass that decision with a raw first-row fallback.
+        if (sawBoundEvaluation && preferredReference.isEmpty()) return false;
+    }
+
     for (int rcbRow = 0; rcbRow < reportControls_.size(); ++rcbRow) {
         const auto control = reportControls_.at(rcbRow).toMap();
         const auto bound = control.value(QStringLiteral("dataSet")).toString();
+        const auto controlReference =
+            control.value(QStringLiteral("reference")).toString();
         if (bound.isEmpty() ||
             control.value(QStringLiteral("dynamicBinding")).toBool() ||
             (requireLiveProbe && !control.value(QStringLiteral("probeOk")).toBool()) ||
+            (!preferredReference.isEmpty() && controlReference != preferredReference) ||
             !sameDataSetReference(bound, reference)) {
             continue;
         }
         selectedDataSetIndex_ = dataSetRow;
         selectedRcbIndex_ = rcbRow;
         refreshSelection();
+        appendDiagnostic(QStringLiteral(
+            "Static DataSet route selected · %1 → %2%3")
+            .arg(
+                reference,
+                controlReference,
+                requireLiveProbe
+                    ? QStringLiteral(" · live verified")
+                    : QStringLiteral(" · canonical")));
         return true;
     }
     return false;
