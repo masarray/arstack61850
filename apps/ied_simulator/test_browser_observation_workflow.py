@@ -49,9 +49,11 @@ require(
     (
         "context.treeModel.nodeForReference(reference)",
         "readonly property var selectedDataSet:",
-        "(reports.dataSets[reports.selectedDataSetIndex] || null)",
+        "selectedDataSetReference",
+        "dataSetCatalog[i].reference === selectedDataSetReference",
         "root.selectedDataSet !== null",
-        "root.client.refreshEngineeringReferences(reports.selectedDataSetMembers)",
+        "root.client.refreshEngineeringReferences(root.readableMemberReferences)",
+        "objectName: \"iedBrowserDataSetMembers\"",
         "signal inspectRequested(string reference)",
         'text: "Ordered members and observed values"',
         'text: root.client.operationBusy ? "Reading…" : "Read members"',
@@ -73,6 +75,8 @@ require(
 
 if "reports.dataSets[reports.selectedDataSetIndex].dynamicOwned" in datasets:
     raise SystemExit("BROWSER_OBSERVATION_FAIL unguarded DataSet ownership selection")
+if "model: reports.selectedDataSetMembers" in datasets:
+    raise SystemExit("BROWSER_OBSERVATION_FAIL offline DataSet path bypassed")
 
 if "ListModel {" in inspector or "ListModel {" in datasets:
     raise SystemExit(
