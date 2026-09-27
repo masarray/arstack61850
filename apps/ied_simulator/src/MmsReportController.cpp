@@ -875,6 +875,31 @@ bool MmsReportController::selectDataSet(const int row) {
     return true;
 }
 
+bool MmsReportController::selectStaticRcbForDataSet(const int row) {
+    if (row < 0 || row >= dataSets_.size()) return false;
+    const auto dataSet = dataSets_.at(row).toMap();
+    const auto reference = dataSet.value(QStringLiteral("reference")).toString();
+    // A browse pivot is not authorization to modify a dynamic/foreign DataSet.
+    if (reference.isEmpty() || dataSet.value(QStringLiteral("dynamicOwned")).toBool() ||
+        !dataSet.value(QStringLiteral("immutable")).toBool() ||
+        dataSet.value(QStringLiteral("members")).toStringList().isEmpty()) {
+        return false;
+    }
+    for (int rcbRow = 0; rcbRow < reportControls_.size(); ++rcbRow) {
+        const auto control = reportControls_.at(rcbRow).toMap();
+        const auto bound = control.value(QStringLiteral("dataSet")).toString();
+        if (bound.isEmpty() || control.value(QStringLiteral("dynamicBinding")).toBool() ||
+            !sameDataSetReference(bound, reference)) {
+            continue;
+        }
+        // Selection changes only after a verified exact canonical match.
+        selectedRcbIndex_ = rcbRow;
+        refreshSelection();
+        return true;
+    }
+    return false;
+}
+
 bool MmsReportController::createDynamicDataSet(
     const QString& dataSetReference,
     const QVariantList& canonicalMembers) {
