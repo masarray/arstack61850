@@ -15,6 +15,8 @@ workspace = Path(sys.argv[2]).read_text(encoding="utf-8")
 
 required_main = (
     "property var browserFleet: fleet",
+    "function prepareForShutdown()",
+    "iedBrowserRepeater.model = null",
     "browserSession: root.browserSession",
     'id: perIedBrowserHost',
     'objectName: "iedBrowserView_" + index',
