@@ -22,6 +22,79 @@ Item {
     property string activeSectionTitle: "Data Model"
     property var selectedModelNode: context.treeModel.selectedNode
 
+    // Read-only canonical inventory is available even without an MMS association.
+    // A live directory may add verified membership and owned dynamic entries.
+    // Both Open SCL and Discovery use this same selected-reference path.
+    property string selectedCatalogReference: ""
+    property var lastPromptedCatalogGeneration: -1
+    readonly property var dataSetCatalog: {
+        var canonical = context.loaded ? context.dataSets : []
+        var live = reports.connected ? reports.dataSets : []
+        var result = []
+        for (var i = 0; i < canonical.length; ++i) {
+            var item = canonical[i]
+            var matching = null
+            for (var j = 0; j < live.length; ++j) {
+                if (live[j].reference === item.reference) {
+                    matching = live[j]
+                    break
+                }
+            }
+            result.push(matching && matching.directoryAvailable === true
+                        ? matching : item)
+        }
+        for (var k = 0; k < live.length; ++k) {
+            var exists = false
+            for (var n = 0; n < result.length; ++n) {
+                if (result[n].reference === live[k].reference) {
+                    exists = true
+                    break
+                }
+            }
+            if (!exists)
+                result.push(live[k])
+        }
+        return result
+    }
+    readonly property var selectedCatalogDataSet: {
+        for (var i = 0; i < dataSetCatalog.length; ++i) {
+            if (dataSetCatalog[i].reference === selectedCatalogReference)
+                return dataSetCatalog[i]
+        }
+        return dataSetCatalog.length ? dataSetCatalog[0] : null
+    }
+    readonly property string effectiveCatalogReference: selectedCatalogDataSet
+        ? selectedCatalogDataSet.reference : ""
+
+    function chooseCatalogDataSet(reference) {
+        var found = false
+        for (var i = 0; i < dataSetCatalog.length; ++i) {
+            if (dataSetCatalog[i].reference === reference) {
+                found = true
+                break
+            }
+        }
+        if (!found)
+            return false
+        root.selectedCatalogReference = reference
+        // Selection only: do not connect, create, rebind or enable an RCB.
+        if (reports.connected) {
+            for (var j = 0; j < reports.dataSets.length; ++j) {
+                if (reports.dataSets[j].reference === reference) {
+                    reports.selectDataSet(j)
+                    break
+                }
+            }
+        }
+        root.selectSection(1, "DataSets")
+        return true
+    }
+
+    function openSignalCatalog() {
+        if (context.loaded && !context.selectionRequired)
+            signalCatalogDialog.open()
+    }
+
     signal watchedDataChanged()
 
     function watchedRows() { return globalDataPane.snapshotRows() }
@@ -70,6 +143,26 @@ Item {
     Connections {
         target: globalDataPane
         function onWatchSnapshotChanged() { root.watchedDataChanged() }
+    }
+
+    Connections {
+        target: context
+        function onContextChanged() {
+            // A discovery (not a reconnect or an offline SCL open) surfaces
+            // its catalog once per canonical generation. Other IED tabs are
+            // not interrupted by a dialog belonging to an inactive slot.
+            if (!root.visible || !context.loaded
+                    || context.authorityKey !== "live-discovery"
+                    || context.dataSetCount <= 0
+                    || root.lastPromptedCatalogGeneration === context.contextGeneration)
+                return
+            root.lastPromptedCatalogGeneration = context.contextGeneration
+            Qt.callLater(function() {
+                if (root.visible && context.loaded
+                        && context.authorityKey === "live-discovery")
+                    root.openSignalCatalog()
+            })
+        }
     }
 
     onActiveSectionChanged: ensureActiveService()
