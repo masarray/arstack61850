@@ -469,6 +469,17 @@ int main(int argc, char* argv[]) {
                     signal.basic_type = "INT32";
                     signal.cdc = "INC";
                     signal.signal_reference = name + "LD0/LLN0.Mod.stVal";
+                    // One real canonical DataSet per synthetic IED: the GUI
+                    // must browse its exact ordered membership while offline.
+                    ar::iec61850::scl::SclDataSet dataSet;
+                    dataSet.key = name + "LD0/LLN0.QASet";
+                    dataSet.ied_name = name;
+                    dataSet.ld_inst = "LD0";
+                    dataSet.logical_node_path = "LLN0";
+                    dataSet.name = "QASet";
+                    dataSet.reference = name + "LD0/LLN0.QASet";
+                    dataSet.entries.push_back(signal);
+                    document.data_sets.push_back(std::move(dataSet));
                     document.model_entries.push_back(std::move(signal));
                 }
                 if (!fleet->contextAt(0)->publishSclDocument(
