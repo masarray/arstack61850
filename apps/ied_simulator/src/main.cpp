@@ -469,6 +469,27 @@ int main(int argc, char* argv[]) {
                     signal.basic_type = "INT32";
                     signal.cdc = "INC";
                     signal.signal_reference = name + "LD0/LLN0.Mod.stVal";
+                    ar::iec61850::scl::SclDataSet dataSet;
+                    dataSet.key = name + "LD0/LLN0.Status";
+                    dataSet.ied_name = name;
+                    dataSet.ld_inst = "LD0";
+                    dataSet.logical_node_path = "LLN0";
+                    dataSet.name = "Status";
+                    dataSet.reference = dataSet.key;
+                    dataSet.entries.push_back(signal);
+                    document.data_sets.push_back(dataSet);
+                    ar::iec61850::scl::SclReportControl report;
+                    report.ied_name = name;
+                    report.ld_inst = "LD0";
+                    report.logical_node_path = "LLN0";
+                    report.name = "StatusReport";
+                    report.report_id = name + "/Status";
+                    report.data_set_name = "Status";
+                    report.data_set_reference = dataSet.reference;
+                    report.data_set_binding_status =
+                        ar::iec61850::scl::SclDataSetBindingStatus::resolved;
+                    report.control_block_reference = name + "LD0/LLN0.RP.StatusReport";
+                    document.report_controls.push_back(report);
                     document.model_entries.push_back(std::move(signal));
                 }
                 if (!fleet->contextAt(0)->publishSclDocument(
@@ -652,6 +673,92 @@ int main(int argc, char* argv[]) {
                     fail("active_model_lost_after_reindex", 70);
                     return;
                 }
+                // Exercise the actual QML post-discovery route, rather than
+                // accepting source-token assertions for a Dialog never opened.
+                auto* const activeReports = fleet->reportsAt(0);
+                const bool selectedDataSet = activeReports && activeReports->selectDataSet(0);
+                const bool openedDataset = QMetaObject::invokeMethod(
+                    retained, "openDatasetSignals");
+                const bool matchedStaticRcb = selectedDataSet &&
+                    activeReports->selectStaticRcbForDataSet(0);
+                if (!selectedDataSet || activeReports->selectedDataSetMembers().isEmpty() ||
+                    !openedDataset || retained->property("activeSection").toInt() != 1 ||
+                    !matchedStaticRcb ||
+                    activeReports->selectedRcb().value(QStringLiteral("reference")).toString().isEmpty() ||
+                    activeReports->selectedRcb().value(QStringLiteral("probeOk")).toBool() ||
+                    activeReports->selectedRcb().value(QStringLiteral("bindingSource")).toString() !=
+                        QStringLiteral("CanonicalEngineeringContext") ||
+                    activeReports->active()) {
+                    qCritical().noquote() << "BROWSER_DATASET_ROUTE_DIAG"
+                        << "dataSets=" << (activeReports ? activeReports->dataSets().size() : -1)
+                        << "members=" << (activeReports ? activeReports->selectedDataSetMembers().size() : -1)
+                        << "reports=" << (activeReports ? activeReports->reportControls().size() : -1)
+                        << "selected=" << selectedDataSet
+                        << "opened=" << openedDataset
+                        << "rcbMatched=" << matchedStaticRcb
+                        << "bound=" << (activeReports
+                            ? activeReports->selectedRcb().value(QStringLiteral("dataSet")).toString()
+                            : QString{})
+                        << "probeOk=" << (activeReports
+                            ? activeReports->selectedRcb().value(QStringLiteral("probeOk")).toBool()
+                            : false)
+                        << "section=" << retained->property("activeSection").toInt();
+                    fail("offline_dataset_signals_route", 71);
+                    return;
+                }
+                const auto* const snapshot = selected->modelSnapshot();
+                if (!snapshot || snapshot->data_sets.empty() ||
+                    snapshot->report_controls.empty()) {
+                    fail("canonical_catalog_fixture_missing", 72);
+                    return;
+                }
+                auto liveModel = *snapshot;
+                liveModel.source = "LiveMmsDiscovery";
+                selected->publishLiveDiscovery(liveModel);
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+                auto* const catalog = retained->findChild<QObject*>(
+                    QStringLiteral("iedBrowserSignalCatalog"));
+                if (!catalog || !catalog->property("visible").toBool() ||
+                    !selected->loaded() ||
+                    selected->authorityKey() != QStringLiteral("live-discovery") ||
+                    !QMetaObject::invokeMethod(retained, "openDatasetSignals") ||
+                    retained->property("activeSection").toInt() != 1 ||
+                    activeReports->selectedDataSetMembers().isEmpty() ||
+                    activeReports->active()) {
+                    qCritical().noquote() << "BROWSER_SIGNAL_CATALOG_DIAG"
+                        << "catalog=" << static_cast<void*>(catalog)
+                        << "visible=" << (catalog ? catalog->property("visible").toBool() : false)
+                        << "dataSets=" << activeReports->dataSets().size()
+                        << "section=" << retained->property("activeSection").toInt();
+                    fail("discovery_catalog_rendered_route", 73);
+                    return;
+                }
+                // Popup overlays outlive the visual IED panel. A tab switch
+                // must close the old IED's modal instead of hijacking the new tab.
+                if (!fleet->newWorkspace() || fleet->activeIndex() != 1) {
+                    fail("catalog_background_tab_setup", 74);
+                    return;
+                }
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+                if (retained->isVisible() || catalog->property("visible").toBool()) {
+                    fail("background_catalog_stole_active_tab", 75);
+                    return;
+                }
+                if (!fleet->switchTo(0)) {
+                    fail("catalog_return_to_ied", 76);
+                    return;
+                }
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+                if (!retained->isVisible() || catalog->property("visible").toBool() ||
+                    fleet->activeContext() != selected ||
+                    activeReports->active()) {
+                    fail("catalog_tab_return_state", 77);
+                    return;
+                }
+                qInfo().noquote()
+                    << "BROWSER_SIGNAL_CATALOG_PASS discovery_modal=visible"
+                    << "offline_dataset=visible canonical_members=ordered"
+                    << "static_rcb=matched no_write=true no_gi=true background_tab=isolated";
                 qInfo().noquote()
                     << "BROWSER_FLEET_ROUTING_PASS active_tab=QA_IED_B"
                     << "offline_signals=visible" << "model_values=visible" << "value_label=bound" << "toolbar_1024=visible"

@@ -632,8 +632,36 @@ void MmsReportController::adoptEngineeringInventory() {
         return;
     }
 
-    const auto seed = buildContextDiscoverySeed(*engineeringContext_->modelSnapshot());
-    const auto ui = buildDiscoveryUi(seed, QString{});
+    const auto& canonical = *engineeringContext_->modelSnapshot();
+    const auto seed = buildContextDiscoverySeed(canonical);
+    auto ui = buildDiscoveryUi(seed, QString{});
+    // An opened SCL model has no live RCB probe response yet. Preserve its
+    // verified canonical DatSet binding for read-only Browser navigation.
+    // Never mark the RCB as probed or writable based on file evidence alone.
+    for (const auto& control : canonical.report_controls) {
+        const auto bound = QString::fromStdString(control.data_set_reference);
+        if (bound.isEmpty()) continue;
+        const auto knownStaticDataSet = std::any_of(
+            canonical.data_sets.begin(), canonical.data_sets.end(),
+            [&bound](const auto& dataSet) {
+                return sameDataSetReference(
+                    QString::fromStdString(dataSet.reference), bound) &&
+                    !dataSet.members.empty() && !dataSet.deletable.value_or(false);
+            });
+        if (!knownStaticDataSet) continue;
+        for (auto& projected : ui.reportControls) {
+            auto map = projected.toMap();
+            if (map.value(QStringLiteral("reference")).toString() !=
+                QString::fromStdString(control.reference)) {
+                continue;
+            }
+            map.insert(QStringLiteral("dataSet"), bound);
+            map.insert(QStringLiteral("canonicalDataSet"), bound);
+            map.insert(QStringLiteral("bindingSource"), QStringLiteral("CanonicalEngineeringContext"));
+            projected = map;
+            break;
+        }
+    }
     dataSets_ = ui.dataSets;
     reportControls_ = ui.reportControls;
     staticCandidates_.clear();
@@ -873,6 +901,34 @@ bool MmsReportController::selectDataSet(const int row) {
     selectedDataSetMembers_ = dataSets_.at(row).toMap().value(QStringLiteral("members")).toStringList();
     emit selectionChanged();
     return true;
+}
+
+bool MmsReportController::selectStaticRcbForDataSet(const int row) {
+    if (row < 0 || row >= dataSets_.size()) return false;
+    const auto dataSet = dataSets_.at(row).toMap();
+    const auto reference = dataSet.value(QStringLiteral("reference")).toString();
+    // A browse pivot is not authorization to modify a dynamic/foreign DataSet.
+    if (reference.isEmpty() ||
+        !dataSet.value(QStringLiteral("directoryAvailable")).toBool() ||
+        dataSet.value(QStringLiteral("deletable")).toBool() ||
+        dataSet.value(QStringLiteral("dynamicOwned")).toBool() ||
+        !dataSet.value(QStringLiteral("immutable")).toBool() ||
+        dataSet.value(QStringLiteral("members")).toStringList().isEmpty()) {
+        return false;
+    }
+    for (int rcbRow = 0; rcbRow < reportControls_.size(); ++rcbRow) {
+        const auto control = reportControls_.at(rcbRow).toMap();
+        const auto bound = control.value(QStringLiteral("dataSet")).toString();
+        if (bound.isEmpty() || control.value(QStringLiteral("dynamicBinding")).toBool() ||
+            !sameDataSetReference(bound, reference)) {
+            continue;
+        }
+        // Selection changes only after a verified exact canonical match.
+        selectedRcbIndex_ = rcbRow;
+        refreshSelection();
+        return true;
+    }
+    return false;
 }
 
 bool MmsReportController::createDynamicDataSet(
