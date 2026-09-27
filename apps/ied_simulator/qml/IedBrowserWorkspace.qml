@@ -119,8 +119,8 @@ Item {
             return ref.length ? root.activeIedLabel() + " / Data Model / " + ref : root.activeIedLabel() + " / Data Model"
         }
         if (activeSection === 1) {
-            if (reports.selectedDataSetIndex >= 0 && reports.selectedDataSetIndex < reports.dataSets.length)
-                return root.activeIedLabel() + " / DataSets / " + (reports.dataSets[reports.selectedDataSetIndex].reference || "")
+            if (root.selectedCatalogDataSet)
+                return root.activeIedLabel() + " / DataSets / " + root.selectedCatalogDataSet.reference
             return root.activeIedLabel() + " / DataSets"
         }
         if (activeSection === 2)
@@ -448,6 +448,11 @@ Item {
                 utilities: root.utilities
                 globalDataCount: globalDataPane.watchCount
                 section: root.activeSection
+                dataSetCatalog: root.dataSetCatalog
+                selectedDataSetReference: root.effectiveCatalogReference
+                onDataSetRequested: function(reference) {
+                    root.chooseCatalogDataSet(reference)
+                }
                 onSectionRequested: function(section, title) {
                     root.selectSection(section, title)
                 }
@@ -520,6 +525,14 @@ Item {
                         }
 
                         Button {
+                            objectName: "iedBrowserSignalCatalogAction"
+                            visible: root.activeSection === 0 || root.activeSection === 1
+                            text: "Signal Catalog…"
+                            enabled: context.loaded && !context.selectionRequired
+                            onClicked: root.openSignalCatalog()
+                        }
+
+                        Button {
                             visible: root.activeSection === 0
                             text: "Control…"
                             enabled: session.connected
@@ -553,14 +566,10 @@ Item {
                         Button {
                             visible: root.activeSection === 1
                             text: "Add to Global Data"
-                            enabled: reports.selectedDataSetIndex >= 0
-                                     && reports.selectedDataSetIndex < reports.dataSets.length
-                            onClicked: {
-                                var selected = reports.dataSets[reports.selectedDataSetIndex]
-                                globalDataPane.addDataSet(
-                                    selected.reference || "",
-                                    reports.selectedDataSetMembers)
-                            }
+                            enabled: root.selectedCatalogDataSet !== null
+                            onClicked: globalDataPane.addDataSet(
+                                root.selectedCatalogDataSet.reference,
+                                root.selectedCatalogDataSet.members || [])
                         }
 
                         Button {
@@ -673,6 +682,8 @@ Item {
                         reports: root.reports
                         context: root.context
                         client: root.client
+                        dataSetCatalog: root.dataSetCatalog
+                        selectedDataSetReference: root.effectiveCatalogReference
                         onInspectRequested: function(reference) {
                             if (root.context.treeModel.selectReference(reference))
                                 root.selectSection(0, "Data Model")
@@ -728,6 +739,16 @@ Item {
                     theme: root.theme
                     session: root.session
                     controls: root.controls
+                }
+
+                BrowserSignalCatalog {
+                    id: signalCatalogDialog
+                    theme: root.theme
+                    context: root.context
+                    onDataSetRequested: function(reference) {
+                        root.chooseCatalogDataSet(reference)
+                    }
+                    onBrowseRequested: root.selectSection(0, "Data Model")
                 }
 
                 BrowserDataSetAuthoringDialog {
