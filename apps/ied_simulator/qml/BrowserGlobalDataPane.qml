@@ -144,7 +144,9 @@ Rectangle {
                 candidates = row.membersText.split("\n")
             }
             for (var j = 0; j < candidates.length; ++j) {
-                var reference = candidates[j]
+                // FC is display evidence in a DataSet member, not part of
+                // the canonical read key. Keep the watchlist text unchanged.
+                var reference = String(candidates[j]).replace(/\s+\[[^\]]+\]$/, "")
                 if (reference.length === 0 || seen[reference])
                     continue
                 seen[reference] = true
