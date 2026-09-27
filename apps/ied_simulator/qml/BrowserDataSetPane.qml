@@ -120,6 +120,8 @@ Rectangle {
                 theme: root.theme
                 text: "Inspect bound RCB…"
                 enabled: root.selectedDataSet !== null
+                         && root.selectedDataSet.directoryAvailable === true
+                         && root.selectedDataSet.deletable !== true
                          && root.selectedDataSet.immutable === true
                          && root.selectedDataSet.dynamicOwned !== true
                          && reports.selectedDataSetMembers.length > 0
