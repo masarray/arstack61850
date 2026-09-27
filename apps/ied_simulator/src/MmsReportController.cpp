@@ -552,6 +552,7 @@ void MmsReportController::setEngineeringContext(IedEngineeringContextController*
     // A route belongs to one engineering authority only. Never carry a
     // DataSet selection across a different IED/context pointer.
     pendingStaticDataSetReference_.clear();
+    pendingStaticContextFingerprint_.clear();
     if (engineeringContext_) {
         connect(
             engineeringContext_,
@@ -638,6 +639,14 @@ void MmsReportController::adoptEngineeringInventory() {
     const auto& canonical = *engineeringContext_->modelSnapshot();
     const auto seed = buildContextDiscoverySeed(canonical);
     auto ui = buildDiscoveryUi(seed, QString{});
+    if (!pendingStaticDataSetReference_.isEmpty() &&
+        (pendingStaticContextFingerprint_.isEmpty() ||
+         pendingStaticContextFingerprint_ != engineeringContext_->structuralFingerprint())) {
+        appendDiagnostic(QStringLiteral(
+            "Cleared stale static DataSet route after engineering context changed."));
+        pendingStaticDataSetReference_.clear();
+        pendingStaticContextFingerprint_.clear();
+    }
     // An opened SCL model has no live RCB probe response yet. Preserve its
     // verified canonical DatSet binding for read-only Browser navigation.
     // Never mark the RCB as probed or writable based on file evidence alone.
@@ -912,6 +921,7 @@ void MmsReportController::refreshSelection() {
 bool MmsReportController::selectRcb(const int row) {
     if (row < 0 || row >= reportControls_.size()) return false;
     pendingStaticDataSetReference_.clear();
+    pendingStaticContextFingerprint_.clear();
     selectedRcbIndex_ = row;
     refreshSelection();
     return true;
@@ -924,6 +934,7 @@ bool MmsReportController::selectDataSet(const int row) {
     if (!pendingStaticDataSetReference_.isEmpty() &&
         !sameDataSetReference(pendingStaticDataSetReference_, reference)) {
         pendingStaticDataSetReference_.clear();
+        pendingStaticContextFingerprint_.clear();
     }
     selectedDataSetIndex_ = row;
     selectedDataSetMembers_ = dataSets_.at(row).toMap()
@@ -979,8 +990,14 @@ bool MmsReportController::selectStaticRcbForDataSet(const int row) {
     if (row < 0 || row >= dataSets_.size()) return false;
     const auto reference = dataSets_.at(row).toMap()
         .value(QStringLiteral("reference")).toString();
-    if (!selectStaticRcbForReference(reference, false)) return false;
+    if (!engineeringContext_ || !engineeringContext_->loaded() ||
+        engineeringContext_->selectionRequired() ||
+        engineeringContext_->structuralFingerprint().isEmpty() ||
+        !selectStaticRcbForReference(reference, false)) {
+        return false;
+    }
     pendingStaticDataSetReference_ = reference;
+    pendingStaticContextFingerprint_ = engineeringContext_->structuralFingerprint();
     emit selectionChanged();
     return true;
 }
