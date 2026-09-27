@@ -126,6 +126,7 @@ private:
     void adoptEngineeringInventory();
     void refreshSelection();
     bool selectStaticRcbForReference(const QString& reference, bool requireLiveProbe);
+    [[nodiscard]] QString staticRouteAuthorityKey() const;
     void schedulePoll();
     [[nodiscard]] std::shared_ptr<std::stop_source> replaceStopSource();
 
