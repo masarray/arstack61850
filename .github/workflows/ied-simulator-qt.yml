@@ -360,6 +360,22 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Capture IED Browser visual regression
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          ./build-ied-simulator-qt/arstack_ied_simulator
+          --qa-browser-routing
+          --screenshot ./ied-browser-workbench.png
+
+      - name: Upload IED Browser screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: ied-browser-workbench
+          path: ied-browser-workbench.png
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Prove GUI value is visible through MMS
         run: >-
           python3 apps/ied_simulator/test_gui_live_value.py
