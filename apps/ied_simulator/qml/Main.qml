@@ -134,6 +134,13 @@ ApplicationWindow {
         }
     }
 
+    // Detach rendered Browser delegates while their per-IED service owners
+    // remain alive. Destroying the fleet first during application exit
+    // otherwise nulls nested QML properties and raises runtime TypeErrors.
+    function prepareForShutdown() {
+        iedBrowserRepeater.model = null
+    }
+
     function importModel() { sclDialog.open() }
 
     Shortcut { sequence: "Ctrl+1"; onActivated: root.workspaceIndex = 0 }
