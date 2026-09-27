@@ -367,8 +367,13 @@ int main(int argc, char* argv[]) {
                               << "error=" << reports.lastError();
         return 30;
     }
-    if (reports.selectedRcb().value(QStringLiteral("dataSet")).toString() != staticRoute) {
-        qCritical() << "REPORTS_WORKBENCH_FAIL static_route_dataset_changed";
+    const auto restoredDataSets = reports.dataSets();
+    const int restoredDataSetRow = reports.selectedDataSetIndex();
+    if (restoredDataSetRow < 0 || restoredDataSetRow >= restoredDataSets.size() ||
+        restoredDataSets.at(restoredDataSetRow).toMap()
+            .value(QStringLiteral("reference")).toString() != staticRoute) {
+        qCritical() << "REPORTS_WORKBENCH_FAIL static_route_dataset_changed"
+                    << restoredDataSetRow << staticRoute;
         return 31;
     }
     qInfo() << "STATIC_REPORT_ROUTE_RESTORE_PASS"
