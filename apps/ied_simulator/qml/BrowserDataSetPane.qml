@@ -28,7 +28,7 @@ Rectangle {
     readonly property var selectedDataSet: reports && reports.dataSets
         && reports.selectedDataSetIndex >= 0
         && reports.selectedDataSetIndex < reports.dataSets.length
-        ? reports.dataSets[reports.selectedDataSetIndex] : null
+        ? (reports.dataSets[reports.selectedDataSetIndex] || null) : null
 
     function hasValue(value) {
         return value !== undefined && value !== null && String(value).length > 0
