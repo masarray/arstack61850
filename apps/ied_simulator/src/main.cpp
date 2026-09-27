@@ -622,6 +622,13 @@ int main(int argc, char* argv[]) {
                     }
                     return {};
                 };
+                QElapsedTimer catalogSettle;
+                catalogSettle.start();
+                while (catalogMembers && catalogMembers->isVisible() &&
+                       firstMemberText().isEmpty() && catalogSettle.elapsed() < 1'000) {
+                    QCoreApplication::processEvents(QEventLoop::AllEvents, 25);
+                    QThread::msleep(10);
+                }
                 if (selected->dataSetCount() != 1 || !catalogMembers ||
                     !catalogMembers->isVisible() ||
                     catalogMembers->property("count").toInt() != 1 ||
@@ -632,6 +639,9 @@ int main(int argc, char* argv[]) {
                         << "BROWSER_DATASET_CATALOG_DIAG"
                         << "count=" << (catalogMembers
                             ? catalogMembers->property("count").toInt() : -1)
+                        << "visible=" << (catalogMembers ? catalogMembers->isVisible() : false)
+                        << "size=" << (catalogMembers ? catalogMembers->width() : -1)
+                        << "x" << (catalogMembers ? catalogMembers->height() : -1)
                         << "member=" << firstMemberText()
                         << "reference=" << second->property("selectedCatalogReference").toString();
                     fail("offline_canonical_dataset_members_not_rendered", 71);
