@@ -549,6 +549,9 @@ void MmsReportController::setEngineeringContext(IedEngineeringContextController*
     if (engineeringContext_ == value) return;
     if (engineeringContext_) disconnect(engineeringContext_, nullptr, this, nullptr);
     engineeringContext_ = value;
+    // A route belongs to one engineering authority only. Never carry a
+    // DataSet selection across a different IED/context pointer.
+    pendingStaticDataSetReference_.clear();
     if (engineeringContext_) {
         connect(
             engineeringContext_,
@@ -669,6 +672,10 @@ void MmsReportController::adoptEngineeringInventory() {
     associationProfile_.clear();
     selectedRcbIndex_ = reportControls_.isEmpty() ? -1 : 0;
     selectedDataSetIndex_ = dataSets_.isEmpty() ? -1 : 0;
+    if (!pendingStaticDataSetReference_.isEmpty() &&
+        !selectStaticRcbForReference(pendingStaticDataSetReference_, false)) {
+        selectedRcbIndex_ = -1;
+    }
     receivedReports_.clear();
     events_.clear();
     receivedReportCount_ = 0;
@@ -778,9 +785,22 @@ bool MmsReportController::connectToIed() {
                     self->state_ = State::ready;
                     self->operationBusy_ = false;
                     self->lastError_.clear();
-                    if (!self->reportControls_.isEmpty()) self->selectedRcbIndex_ = 0;
-                    else if (!self->dataSets_.isEmpty()) self->selectedDataSetIndex_ = 0;
-                    self->refreshSelection();
+                    if (!self->pendingStaticDataSetReference_.isEmpty()) {
+                        if (!self->selectStaticRcbForReference(
+                                self->pendingStaticDataSetReference_, true)) {
+                            self->selectedRcbIndex_ = -1;
+                            self->lastError_ = QStringLiteral(
+                                "Selected static DataSet has no verified live RCB binding; "
+                                "reporting remains disabled.");
+                            self->appendDiagnostic(self->lastError_);
+                        }
+                    } else if (!self->reportControls_.isEmpty()) {
+                        self->selectedRcbIndex_ = 0;
+                        self->refreshSelection();
+                    } else if (!self->dataSets_.isEmpty()) {
+                        self->selectedDataSetIndex_ = 0;
+                        self->refreshSelection();
+                    }
                     self->appendDiagnostic(QStringLiteral("Report service attach complete · %1 DataSet · %2 RCB")
                         .arg(self->dataSets_.size()).arg(self->reportControls_.size()));
                     emit self->inventoryChanged();
@@ -890,6 +910,7 @@ void MmsReportController::refreshSelection() {
 
 bool MmsReportController::selectRcb(const int row) {
     if (row < 0 || row >= reportControls_.size()) return false;
+    pendingStaticDataSetReference_.clear();
     selectedRcbIndex_ = row;
     refreshSelection();
     return true;
@@ -903,12 +924,24 @@ bool MmsReportController::selectDataSet(const int row) {
     return true;
 }
 
-bool MmsReportController::selectStaticRcbForDataSet(const int row) {
-    if (row < 0 || row >= dataSets_.size()) return false;
-    const auto dataSet = dataSets_.at(row).toMap();
-    const auto reference = dataSet.value(QStringLiteral("reference")).toString();
-    // A browse pivot is not authorization to modify a dynamic/foreign DataSet.
-    if (reference.isEmpty() ||
+bool MmsReportController::selectStaticRcbForReference(
+    const QString& reference,
+    const bool requireLiveProbe) {
+    if (reference.trimmed().isEmpty()) return false;
+
+    int dataSetRow = -1;
+    QVariantMap dataSet;
+    for (int row = 0; row < dataSets_.size(); ++row) {
+        const auto candidate = dataSets_.at(row).toMap();
+        if (!sameDataSetReference(
+                reference, candidate.value(QStringLiteral("reference")).toString())) {
+            continue;
+        }
+        dataSetRow = row;
+        dataSet = candidate;
+        break;
+    }
+    if (dataSetRow < 0 ||
         !dataSet.value(QStringLiteral("directoryAvailable")).toBool() ||
         dataSet.value(QStringLiteral("deletable")).toBool() ||
         dataSet.value(QStringLiteral("dynamicOwned")).toBool() ||
@@ -916,19 +949,32 @@ bool MmsReportController::selectStaticRcbForDataSet(const int row) {
         dataSet.value(QStringLiteral("members")).toStringList().isEmpty()) {
         return false;
     }
+
     for (int rcbRow = 0; rcbRow < reportControls_.size(); ++rcbRow) {
         const auto control = reportControls_.at(rcbRow).toMap();
         const auto bound = control.value(QStringLiteral("dataSet")).toString();
-        if (bound.isEmpty() || control.value(QStringLiteral("dynamicBinding")).toBool() ||
+        if (bound.isEmpty() ||
+            control.value(QStringLiteral("dynamicBinding")).toBool() ||
+            (requireLiveProbe && !control.value(QStringLiteral("probeOk")).toBool()) ||
             !sameDataSetReference(bound, reference)) {
             continue;
         }
-        // Selection changes only after a verified exact canonical match.
+        selectedDataSetIndex_ = dataSetRow;
         selectedRcbIndex_ = rcbRow;
         refreshSelection();
         return true;
     }
     return false;
+}
+
+bool MmsReportController::selectStaticRcbForDataSet(const int row) {
+    if (row < 0 || row >= dataSets_.size()) return false;
+    const auto reference = dataSets_.at(row).toMap()
+        .value(QStringLiteral("reference")).toString();
+    if (!selectStaticRcbForReference(reference, false)) return false;
+    pendingStaticDataSetReference_ = reference;
+    emit selectionChanged();
+    return true;
 }
 
 bool MmsReportController::createDynamicDataSet(
