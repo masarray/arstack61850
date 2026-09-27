@@ -79,6 +79,8 @@ for token in (
     "else signalCatalogDialog.close()",
     "function inspectBoundStaticRcb()",
     "reports.selectStaticRcbForDataSet(reports.selectedDataSetIndex)",
+    "reports.staticRouteDataSet.length > 0",
+    'text: "STATIC · " + reports.staticRouteDataSet',
     "routeMessage: root.datasetRouteStatus",
     'objectName: "iedBrowserSignalCatalog"',
     'text: "Dataset Signals"',
@@ -117,7 +119,7 @@ for token in (
     "STATIC / READ-ONLY",
     "Membership is immutable",
     "signal inspectStaticReportRequested()",
-    'text: "Inspect bound RCB…"',
+    'text: "Static Reporting…"',
     "root.selectedDataSet.directoryAvailable === true",
     "root.selectedDataSet.deletable !== true",
 ):
@@ -127,6 +129,7 @@ for token in (
     "ownedDynamicDataSets",
     "enableSelectedAuthored",
     "selectStaticRcbForDataSet",
+    "staticRouteDataSet",
     "createDynamicDataSet",
     "deleteDynamicDataSet",
 ):
