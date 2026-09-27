@@ -76,6 +76,7 @@ for token in (
     "function offerSignalCatalog()",
     "root.fleet.activeContext !== root.context",
     "onVisibleChanged:",
+    "else signalCatalogDialog.close()",
     "function inspectBoundStaticRcb()",
     "reports.selectStaticRcbForDataSet(reports.selectedDataSetIndex)",
     "routeMessage: root.datasetRouteStatus",
