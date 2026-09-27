@@ -501,11 +501,16 @@ int main(int argc, char* argv[]) {
                 auto* const signalList = second
                     ? second->findChild<QQuickItem*>(QStringLiteral("iedBrowserSignalTree"))
                     : nullptr;
+                auto* const valueList = second
+                    ? second->findChild<QQuickItem*>(QStringLiteral("iedBrowserValueTable"))
+                    : nullptr;
 
                 const auto renderedReady = [&]() {
-                    return first && second && signalList && selected &&
+                    return first && second && signalList && valueList && selected &&
                         signalList->property("count").toInt() >= 3 &&
                         signalList->width() >= 100 && signalList->isVisible() &&
+                        valueList->property("count").toInt() >= 3 &&
+                        valueList->width() >= 100 && valueList->isVisible() &&
                         !first->isVisible() && second->isVisible() &&
                         selected->loaded() && !selected->online() &&
                         selected->iedName() == QStringLiteral("QA_IED_B") &&
@@ -530,6 +535,9 @@ int main(int argc, char* argv[]) {
                         << "first=" << static_cast<void*>(first)
                         << "second=" << static_cast<void*>(second)
                         << "signalList=" << static_cast<void*>(signalList)
+                        << "valueList=" << static_cast<void*>(valueList)
+                        << "valueCount=" << (valueList ? valueList->property("count").toInt() : -1)
+                        << "valueVisible=" << (valueList ? valueList->isVisible() : false)
                         << "firstVisible=" << (first ? first->isVisible() : false)
                         << "secondVisible=" << (second ? second->isVisible() : false)
                         << "secondSize=" << (second ? second->width() : -1.0)
@@ -562,7 +570,8 @@ int main(int argc, char* argv[]) {
                 QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
                 if (first->isVisible() || !second->isVisible() ||
                     !selected->loaded() || selected->treeModel()->visibleNodeCount() < 3 ||
-                    signalList->property("count").toInt() < 3) {
+                    signalList->property("count").toInt() < 3 ||
+                    valueList->property("count").toInt() < 3) {
                     fail("offline_signal_tree_lost_after_switch", 68);
                     return;
                 }
@@ -582,7 +591,7 @@ int main(int argc, char* argv[]) {
                 }
                 qInfo().noquote()
                     << "BROWSER_FLEET_ROUTING_PASS active_tab=QA_IED_B"
-                    << "offline_signals=visible"
+                    << "offline_signals=visible" << "model_values=visible"
                     << "switching=pass reindex=pass cross_ied_panel=false";
                 app.exit(0);
             });
