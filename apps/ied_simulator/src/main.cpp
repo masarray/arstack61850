@@ -469,6 +469,27 @@ int main(int argc, char* argv[]) {
                     signal.basic_type = "INT32";
                     signal.cdc = "INC";
                     signal.signal_reference = name + "LD0/LLN0.Mod.stVal";
+                    ar::iec61850::scl::SclDataSet dataSet;
+                    dataSet.key = name + "LD0/LLN0.Status";
+                    dataSet.ied_name = name;
+                    dataSet.ld_inst = "LD0";
+                    dataSet.logical_node_path = "LLN0";
+                    dataSet.name = "Status";
+                    dataSet.reference = dataSet.key;
+                    dataSet.entries.push_back(signal);
+                    document.data_sets.push_back(dataSet);
+                    ar::iec61850::scl::SclReportControl report;
+                    report.ied_name = name;
+                    report.ld_inst = "LD0";
+                    report.logical_node_path = "LLN0";
+                    report.name = "StatusReport";
+                    report.report_id = name + "/Status";
+                    report.data_set_name = "Status";
+                    report.data_set_reference = dataSet.reference;
+                    report.data_set_binding_status =
+                        ar::iec61850::scl::SclDataSetBindingStatus::resolved;
+                    report.control_block_reference = name + "LD0/LLN0.RP.StatusReport";
+                    document.report_controls.push_back(report);
                     document.model_entries.push_back(std::move(signal));
                 }
                 if (!fleet->contextAt(0)->publishSclDocument(
@@ -652,6 +673,50 @@ int main(int argc, char* argv[]) {
                     fail("active_model_lost_after_reindex", 70);
                     return;
                 }
+                // Exercise the actual QML post-discovery route, rather than
+                // accepting source-token assertions for a Dialog never opened.
+                auto* const activeReports = fleet->reportsAt(0);
+                if (!activeReports || !activeReports->selectDataSet(0) ||
+                    activeReports->selectedDataSetMembers().isEmpty() ||
+                    !QMetaObject::invokeMethod(retained, "openDatasetSignals") ||
+                    retained->property("activeSection").toInt() != 1 ||
+                    !activeReports->selectStaticRcbForDataSet(0) ||
+                    activeReports->selectedRcb().value(QStringLiteral("reference")).toString().isEmpty() ||
+                    activeReports->active()) {
+                    fail("offline_dataset_signals_route", 71);
+                    return;
+                }
+                const auto* const snapshot = selected->modelSnapshot();
+                if (!snapshot || snapshot->data_sets.empty() ||
+                    snapshot->report_controls.empty()) {
+                    fail("canonical_catalog_fixture_missing", 72);
+                    return;
+                }
+                auto liveModel = *snapshot;
+                liveModel.source = "LiveMmsDiscovery";
+                selected->publishLiveDiscovery(liveModel);
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+                auto* const catalog = retained->findChild<QObject*>(
+                    QStringLiteral("iedBrowserSignalCatalog"));
+                if (!catalog || !catalog->property("visible").toBool() ||
+                    !selected->loaded() ||
+                    selected->authorityKey() != QStringLiteral("live-discovery") ||
+                    !QMetaObject::invokeMethod(retained, "openDatasetSignals") ||
+                    retained->property("activeSection").toInt() != 1 ||
+                    activeReports->selectedDataSetMembers().isEmpty() ||
+                    activeReports->active()) {
+                    qCritical().noquote() << "BROWSER_SIGNAL_CATALOG_DIAG"
+                        << "catalog=" << static_cast<void*>(catalog)
+                        << "visible=" << (catalog ? catalog->property("visible").toBool() : false)
+                        << "dataSets=" << activeReports->dataSets().size()
+                        << "section=" << retained->property("activeSection").toInt();
+                    fail("discovery_catalog_rendered_route", 73);
+                    return;
+                }
+                qInfo().noquote()
+                    << "BROWSER_SIGNAL_CATALOG_PASS discovery_modal=visible"
+                    << "offline_dataset=visible canonical_members=ordered"
+                    << "static_rcb=matched no_write=true no_gi=true";
                 qInfo().noquote()
                     << "BROWSER_FLEET_ROUTING_PASS active_tab=QA_IED_B"
                     << "offline_signals=visible" << "model_values=visible" << "value_label=bound" << "toolbar_1024=visible"
