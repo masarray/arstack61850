@@ -65,7 +65,7 @@ function installProfileUi() {
       <button class="btn secondary" id="validateProfileButton">Validate</button>
     </div>
     <div class="scaling-row" id="scalingRow" hidden>
-      <div class="scaling-note">Engineering scaling is not assumed from generic SCL. Set the conversion used for this test profile.</div>
+      <div class="scaling-note" id="scalingNote">Engineering scaling is not assumed from generic SCL. Set the conversion used for this test profile.</div>
       <label>Current <input id="currentScale" type="number" min="0.000001" step="1" value="1000" /><span>counts / A</span></label>
       <label>Voltage <input id="voltageScale" type="number" min="0.000001" step="1" value="100" /><span>counts / V</span></label>
     </div>
@@ -146,7 +146,48 @@ function installProfileUi() {
   };
 }
 
+function compiledIec61869CountsPerUnit(profile, quantity) {
+  const channel = profile?.iec61869?.channels?.find((item) => item.quantity === quantity);
+  const numerator = Number(channel?.scaleNumerator);
+  const denominator = Number(channel?.scaleDenominator);
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) ||
+      numerator <= 0 || denominator <= 0) return null;
+  return denominator / numerator;
+}
+
+function applyScalingAuthority(profile) {
+  const is61869 = profile?.profileFamily === "iec61869-9" && Boolean(profile?.iec61869);
+  const currentInput = $("currentScale");
+  const voltageInput = $("voltageScale");
+  currentInput.disabled = is61869;
+  voltageInput.disabled = is61869;
+
+  if (is61869) {
+    const current = compiledIec61869CountsPerUnit(profile, "current");
+    const voltage = compiledIec61869CountsPerUnit(profile, "voltage");
+    if (current) {
+      profileBridge.currentCountsPerAmp = current;
+      currentInput.value = String(current);
+    }
+    if (voltage) {
+      profileBridge.voltageCountsPerVolt = voltage;
+      voltageInput.value = String(voltage);
+    }
+    $("scalingNote").textContent =
+      "IEC 61869-9 scaling comes from the compiled standards profile and is read-only here.";
+    return;
+  }
+
+  $("scalingNote").textContent =
+    "Generic/lab scaling is explicit test context; it is not an IEC profile claim.";
+}
+
 function updateScaling() {
+  const profile = selectedCompiledStream()?.profile;
+  if (profile?.profileFamily === "iec61869-9" && profile?.iec61869) {
+    applyScalingAuthority(profile);
+    return;
+  }
   const current = Number($("currentScale").value);
   const voltage = Number($("voltageScale").value);
   if (Number.isFinite(current) && current > 0) profileBridge.currentCountsPerAmp = current;
@@ -237,6 +278,7 @@ function renderProfileSelection() {
     `${stream.deviceSupport} · ${p.transportMode || "—"}`;
   $("counterConfirm").hidden = stream.compatibilityClass === "A";
   $("scalingRow").hidden = false;
+  applyScalingAuthority(p);
   if (stream.compatibilityClass !== "A" && p.counterModulus) {
     $("counterModulus").value = String(p.counterModulus);
     $("counterConfirmed").checked = false;

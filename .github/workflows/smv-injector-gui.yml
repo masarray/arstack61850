@@ -59,6 +59,33 @@ jobs:
           grep -q 'navigator.serial' apps/smv_injector_gui/app.js
           grep -q '/api/scl/inspect' apps/smv_injector_gui/profile_bridge.js
 
+      - name: IEC 61869-9 authority boundary
+        shell: bash
+        run: |
+          core=include/ariec61850/sampled_values/iec61869_9_profile.hpp
+          publisher=include/ariec61850/sampled_values/publisher_profile.hpp
+          device=include/ariec61850/sampled_values/esp32p4_profile_support.hpp
+          bridge=apps/smv_injector_gui/profile_bridge.js
+          studio=apps/arstack_studio/qml/ProfileInspector.qml
+
+          grep -q 'iec61869_9_current_scale' "$core"
+          grep -q 'iec61869_9_voltage_scale' "$core"
+          grep -q 'resolve_iec61869_9_profile' "$publisher"
+          grep -q 'profile.profile_family == SvProfileFamily::iec61869_9' "$device"
+          grep -q 'compiledIec61869CountsPerUnit' "$bridge"
+          grep -q 'compiled standards profile and is read-only' "$bridge"
+          grep -q 'iec61869CurrentScale' "$studio"
+          grep -q 'iec61869VoltageScale' "$studio"
+
+          if grep -Eqi 'ABB|Siemens|Hitachi|OMICRON' "$core" "$publisher"; then
+            echo 'Vendor-specific IEC 61869-9 protocol branch is forbidden' >&2
+            exit 1
+          fi
+          if grep -Eq '0\.001|0\.01|1 mA/count|10 mV/count' "$studio"; then
+            echo 'Studio QML must consume compiled scale evidence, not own IEC 61869-9 constants' >&2
+            exit 1
+          fi
+
       - name: Build smart SCL profile engine
         shell: bash
         run: |
