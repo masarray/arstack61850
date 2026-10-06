@@ -4,6 +4,8 @@
 
 #include "DeviceIoWorker.hpp"
 
+#include "ariec61850/ethernet/ethernet.hpp"
+
 #include <QDateTime>
 #include <QDebug>
 #include <QMetaObject>
@@ -669,7 +671,9 @@ bool DeviceController::deployProfile(const QVariantMap& profile) {
     const QString idHex = utf8Hex(svId);
     const QString dataSetHex = includeDataSet ? utf8Hex(dataSet) : QStringLiteral("-");
     if (svId.isEmpty() || idHex.isEmpty() || idHex.size() > 180 || dataSetHex.size() > 170 ||
-        mac.size() != 12 || appId == 0U || appId > 65535U || vlanId > 4095U || pcp > 7U ||
+        mac.size() != 12 || appId == 0U || appId > 65535U ||
+        vlanId > ar::iec61850::ethernet::maximum_vlan_id ||
+        pcp > ar::iec61850::ethernet::maximum_vlan_priority ||
         rate == 0U || rate > 65535U || modulus == 0U || modulus > 65535U || noAsdu != 1U) {
         setError(QStringLiteral("Compiled profile exceeds the current bounded device bridge."));
         return false;

@@ -115,6 +115,25 @@ void sampled_values_frame_round_trips_vlan_process_bus_header() {
     CHECK(SampledValuesFrameCodec::try_decode(encoded, decoded));
     CHECK(decoded == frame);
 
+    auto priority_tagged = frame;
+    priority_tagged.vlan = ethernet::VlanTag{4U, 0U};
+    CHECK(SampledValuesFrameCodec::encoded_size(priority_tagged).has_value());
+
+    auto maximum_vlan = frame;
+    maximum_vlan.vlan = ethernet::VlanTag{7U, 4094U};
+    CHECK(SampledValuesFrameCodec::encoded_size(maximum_vlan).has_value());
+
+    auto reserved_vlan = frame;
+    reserved_vlan.vlan = ethernet::VlanTag{4U, 4095U};
+    CHECK(!SampledValuesFrameCodec::encoded_size(reserved_vlan).has_value());
+    bool reserved_vlan_rejected = false;
+    try {
+        static_cast<void>(SampledValuesFrameCodec::encode(reserved_vlan));
+    } catch (const std::out_of_range&) {
+        reserved_vlan_rejected = true;
+    }
+    CHECK(reserved_vlan_rejected);
+
     auto wrong_ethertype = encoded;
     wrong_ethertype[16] = 0x88U;
     wrong_ethertype[17] = 0xB8U;

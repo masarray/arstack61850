@@ -283,6 +283,21 @@ void transport_specific_change_is_visible_as_health_warning() {
     CHECK(resolve_smp_synch(report, true) == SmpSynchValue::local_synchronized);
 }
 
+void ethernet_builder_enforces_canonical_vlan_boundaries() {
+    using namespace ar::iec61850::time_sync;
+    const std::array<std::uint8_t, 6> source{0x02U, 0x00U, 0x00U, 0x00U, 0x00U, 0x01U};
+    const auto message = PtpCodec::build_sync(make_options());
+
+    CHECK(!PtpCodec::build_ethernet_frame(
+        ptp_general_multicast_mac, source, message, std::uint16_t{0U}, std::uint8_t{4U}).empty());
+    CHECK(!PtpCodec::build_ethernet_frame(
+        ptp_general_multicast_mac, source, message, std::uint16_t{4094U}, std::uint8_t{7U}).empty());
+    CHECK(PtpCodec::build_ethernet_frame(
+        ptp_general_multicast_mac, source, message, std::uint16_t{4095U}, std::uint8_t{4U}).empty());
+    CHECK(PtpCodec::build_ethernet_frame(
+        ptp_general_multicast_mac, source, message, std::uint16_t{100U}, std::uint8_t{8U}).empty());
+}
+
 void malformed_or_non_ptp_frames_are_rejected() {
     using namespace ar::iec61850::time_sync;
     PtpFrame frame;
@@ -308,6 +323,7 @@ int main() {
         {"PTP VLAN/QinQ/transportSpecific analyzer parser", ethernet_vlan_qinq_and_transport_specific_are_parsed_for_analyzer_use},
         {"PTP monitor health and smpSynch", passive_monitor_health_drives_conservative_smp_synch_policy},
         {"PTP transportSpecific stability", transport_specific_change_is_visible_as_health_warning},
+        {"PTP Ethernet VLAN boundaries", ethernet_builder_enforces_canonical_vlan_boundaries},
         {"PTP malformed input", malformed_or_non_ptp_frames_are_rejected},
     };
 

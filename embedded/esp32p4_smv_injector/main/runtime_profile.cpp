@@ -2,6 +2,8 @@
 
 #include "runtime_profile.hpp"
 
+#include "ariec61850/ethernet/ethernet.hpp"
+
 #include "freertos/FreeRTOS.h"
 
 #include <algorithm>
@@ -46,7 +48,9 @@ bool runtime_profile_validate(const RuntimePublisherProfile& profile) noexcept {
         profile.sv_id[0] == '\0') {
         return false;
     }
-    if (profile.vlan_present && (profile.vlan_id > 4095U || profile.vlan_priority > 7U)) {
+    if (profile.vlan_present &&
+        (!ar::iec61850::ethernet::is_valid_vlan_id(profile.vlan_id) ||
+         !ar::iec61850::ethernet::is_valid_vlan_priority(profile.vlan_priority))) {
         return false;
     }
     if (profile.include_data_set && profile.data_set_reference[0] == '\0') {

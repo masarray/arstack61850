@@ -6,6 +6,8 @@
 #include "runtime_profile.hpp"
 #include "smp_synch_lab.hpp"
 
+#include "ariec61850/ethernet/ethernet.hpp"
+
 #include "esp_log.h"
 #include "sdkconfig.h"
 
@@ -311,8 +313,10 @@ void handle_profile_command(char* arguments) noexcept {
         if (!parse_u32(appid_text, appid) || appid == 0U || appid > 65535U ||
             !decode_mac(mac_text, mac) ||
             !parse_u32(vlan_present_text, vlan_present) || vlan_present > 1U ||
-            !parse_u32(vlan_id_text, vlan_id) || vlan_id > 4095U ||
-            !parse_u32(pcp_text, pcp) || pcp > 7U || !no_extra(&save)) {
+            !parse_u32(vlan_id_text, vlan_id) ||
+            vlan_id > ar::iec61850::ethernet::maximum_vlan_id ||
+            !parse_u32(pcp_text, pcp) ||
+            pcp > ar::iec61850::ethernet::maximum_vlan_priority || !no_extra(&save)) {
             ESP_LOGE(kTag, "Invalid PROFILE L2 payload");
             return;
         }

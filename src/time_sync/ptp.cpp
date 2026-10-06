@@ -226,7 +226,8 @@ std::vector<std::uint8_t> PtpCodec::build_ethernet_frame(
     const std::span<const std::uint8_t> ptp_message,
     const std::optional<std::uint16_t> vlan_id,
     const std::uint8_t vlan_priority) {
-    if (vlan_priority > 7U || (vlan_id.has_value() && *vlan_id > 4095U)) {
+    if (!ethernet::is_valid_vlan_priority(vlan_priority) ||
+        (vlan_id.has_value() && !ethernet::is_valid_vlan_id(*vlan_id))) {
         return {};
     }
 

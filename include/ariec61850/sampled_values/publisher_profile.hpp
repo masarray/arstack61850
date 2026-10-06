@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "ariec61850/ethernet/ethernet.hpp"
 #include "ariec61850/scl/model.hpp"
 
 #include <array>
@@ -134,10 +135,10 @@ public:
             profile.vlan_present = true;
             profile.vlan_id = *stream.address.vlan_id;
             profile.vlan_priority = *stream.address.vlan_priority;
-            if (profile.vlan_id > 4095U) {
-                result.errors.push_back("SV VLAN ID exceeds the 12-bit Ethernet VLAN range.");
+            if (!ethernet::is_valid_vlan_id(profile.vlan_id)) {
+                result.errors.push_back("SV VLAN ID must be 0..4094; VID 4095 is reserved.");
             }
-            if (profile.vlan_priority > 7U) {
+            if (!ethernet::is_valid_vlan_priority(profile.vlan_priority)) {
                 result.errors.push_back("SV VLAN priority exceeds the 3-bit Ethernet PCP range.");
             }
         }
