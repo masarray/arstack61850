@@ -745,6 +745,24 @@ void iec61869_9_profile_resolves_variant_dataset_and_exact_scaling() {
             return error.find("AmpSv current pairs to precede") != std::string::npos;
         }));
 
+    auto secured_profile = preferred;
+    secured_profile.smv_options.security = true;
+    const auto secured_result =
+        SvPublisherProfileCompiler::compile(secured_profile, context);
+    CHECK(secured_result.ok());
+    CHECK(secured_result.profile.has_value());
+    CHECK(secured_result.profile->profile_family_resolution ==
+          SvProfileFamilyResolution::incomplete);
+    CHECK(secured_result.profile->iec61869_9.has_value());
+    CHECK(std::any_of(
+        secured_result.warnings.begin(), secured_result.warnings.end(),
+        [](const std::string& warning) {
+            return warning.find("IEC 62351-6") != std::string::npos &&
+                   warning.find("deployment") != std::string::npos;
+        }));
+    CHECK(classify_esp32p4_sv_profile(*secured_result.profile) ==
+          Esp32P4SvProfileSupport::unsupported_profile_family);
+
     auto future_synch_source = preferred;
     future_synch_source.smv_options.element_present = true;
     future_synch_source.smv_options.synch_source_id = true;

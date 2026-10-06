@@ -505,11 +505,14 @@ private:
                     "IEC 61869-9:2016 requires SmvOpts dataSet=false.");
                 published_profile_valid = false;
             }
-            if (profile.asdu_options.security) {
-                result.errors.push_back(
-                    "IEC 61869-9:2016 published profile authority does not enable the "
-                    "SV security optional field; IEC 62351-6 support is a separate future capability.");
-                published_profile_valid = false;
+            const bool security_profile_requires_external_authority =
+                profile.asdu_options.security;
+            if (security_profile_requires_external_authority) {
+                result.warnings.push_back(
+                    "IEC 61869-9 stream requests IEC 62351-6 Sampled Values security. "
+                    "The base IEC 61869-9 semantics remain inspectable, but ARStack does not "
+                    "yet model the IEC 62351-6 wire/security authority, so deployment and "
+                    "a complete profile claim remain blocked.");
             }
 
             const auto resolved = resolve_iec61869_9_profile(stream.entries, profile.timing);
@@ -556,6 +559,10 @@ private:
                     "IEC 61869-9 published-2016 profile is otherwise resolved, but SynchSrcID "
                     "belongs to draft/future amendment semantics and cannot promote a "
                     "published-2016 conformance claim.");
+                return;
+            }
+            if (security_profile_requires_external_authority) {
+                profile.profile_family_resolution = SvProfileFamilyResolution::incomplete;
                 return;
             }
 
