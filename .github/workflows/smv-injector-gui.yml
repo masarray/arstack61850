@@ -104,10 +104,9 @@ jobs:
           grep -q '"compatibilityClass":"A"' /tmp/profile-a.json
           grep -q '"profileFamily":"iec61850-9-2"' /tmp/profile-a.json
           grep -q '"deviceSupport":"ready"' /tmp/profile-a.json
-          if build-smv-gui/ariec61850_smv_profile_inspect "$fixture" --profile-family iec61869-9 --counter-modulus 4800 > /tmp/profile-61869-invalid.json; then
-            echo "generic Amp/Vol fixture must not resolve as IEC 61869-9" >&2
-            exit 1
-          fi
+          build-smv-gui/ariec61850_smv_profile_inspect "$fixture" --profile-family iec61869-9 --counter-modulus 4800 > /tmp/profile-61869-invalid.json
+          grep -q '"compatibilityClass":"C"' /tmp/profile-61869-invalid.json
+          grep -q '"profile":null' /tmp/profile-61869-invalid.json
           grep -q 'TCTR.AmpSv.instMag.i or TVTR.VolSv.instMag.i' /tmp/profile-61869-invalid.json
 
           fixture_61869=tests/fixtures/scl/sv-61869-f4800s2-i4u4.scd
