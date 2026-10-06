@@ -110,6 +110,62 @@ struct Iec61869_9ProfileResolution final {
         "U" + std::to_string(variant.voltage_quantity_count);
 }
 
+[[nodiscard]] constexpr std::optional<SvSampleMode>
+iec61869_9_published_2016_sampling_basis(
+    const std::uint32_t sample_rate_hz,
+    const std::uint16_t asdus_per_frame) noexcept {
+    // IEC 61869-9:2016 retains per-nominal-period encoding for the
+    // backward-compatible families and the 96 kHz DC workaround. Preferred
+    // 4.8/14.4 kHz families use samples-per-second.
+    if ((sample_rate_hz == 4800U && asdus_per_frame == 2U) ||
+        (sample_rate_hz == 14400U && asdus_per_frame == 6U)) {
+        return SvSampleMode::samples_per_second;
+    }
+    if ((sample_rate_hz == 4000U && asdus_per_frame == 1U) ||
+        (sample_rate_hz == 4800U && asdus_per_frame == 1U) ||
+        (sample_rate_hz == 5760U && asdus_per_frame == 1U) ||
+        (sample_rate_hz == 12800U && asdus_per_frame == 8U) ||
+        (sample_rate_hz == 15360U && asdus_per_frame == 8U) ||
+        (sample_rate_hz == 96000U && asdus_per_frame == 1U)) {
+        return SvSampleMode::samples_per_period;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] constexpr bool
+iec61869_9_published_2016_configured_rate_matches(
+    const Iec61869_9Variant& variant,
+    const SvPublicationTiming& timing) noexcept {
+    if (timing.sampling_basis == SvSampleMode::samples_per_second) {
+        return timing.configured_sample_rate == variant.sample_rate_hz;
+    }
+    if (timing.sampling_basis != SvSampleMode::samples_per_period) return false;
+
+    switch (variant.sample_rate_hz) {
+    case 4000U:
+        return variant.asdus_per_frame == 1U &&
+               timing.configured_sample_rate == 80U;
+    case 4800U:
+        return variant.asdus_per_frame == 1U &&
+               (timing.configured_sample_rate == 80U ||
+                timing.configured_sample_rate == 96U);
+    case 5760U:
+        return variant.asdus_per_frame == 1U &&
+               timing.configured_sample_rate == 96U;
+    case 12800U:
+        return variant.asdus_per_frame == 8U &&
+               timing.configured_sample_rate == 256U;
+    case 15360U:
+        return variant.asdus_per_frame == 8U &&
+               timing.configured_sample_rate == 256U;
+    case 96000U:
+        return variant.asdus_per_frame == 1U &&
+               timing.configured_sample_rate == 9600U;
+    default:
+        return false;
+    }
+}
+
 [[nodiscard]] constexpr std::optional<Iec61869_9VariantClass>
 iec61869_9_variant_class(
     const std::uint32_t sample_rate_hz,

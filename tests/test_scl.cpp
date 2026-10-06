@@ -500,6 +500,12 @@ void iec61869_9_profile_resolves_variant_dataset_and_exact_scaling() {
         quality.do_name = measurement.do_name;
     }
     preferred.no_asdu = 2U;
+    preferred.smv_options.element_present = true;
+    preferred.smv_options.sample_synchronized = true;
+    preferred.smv_options.refresh_time = false;
+    preferred.smv_options.sample_rate = false;
+    preferred.smv_options.data_set = false;
+    preferred.smv_options.security = false;
 
     SvPublisherProfileCompileContext context;
     context.profile_family = SvProfileFamily::iec61869_9;
@@ -602,6 +608,80 @@ void iec61869_9_profile_resolves_variant_dataset_and_exact_scaling() {
               Iec61869_9VariantClass::preferred});
     CHECK(!iec61869_9_variant_class(5000U, 2U).has_value());
 
+    CHECK(iec61869_9_published_2016_sampling_basis(4800U, 2U) ==
+          std::optional<SvSampleMode>{SvSampleMode::samples_per_second});
+    CHECK(iec61869_9_published_2016_sampling_basis(14400U, 6U) ==
+          std::optional<SvSampleMode>{SvSampleMode::samples_per_second});
+    CHECK(iec61869_9_published_2016_sampling_basis(4000U, 1U) ==
+          std::optional<SvSampleMode>{SvSampleMode::samples_per_period});
+    CHECK(iec61869_9_published_2016_sampling_basis(96000U, 1U) ==
+          std::optional<SvSampleMode>{SvSampleMode::samples_per_period});
+
+    auto backward_50hz = preferred;
+    backward_50hz.sample_rate = 80U;
+    backward_50hz.sample_mode = "SmpPerPeriod";
+    backward_50hz.no_asdu = 1U;
+    context.nominal_frequency_millihz = 50'000U;
+    context.sample_counter_modulus = static_cast<std::uint16_t>(4000U);
+    const auto backward_50hz_result =
+        SvPublisherProfileCompiler::compile(backward_50hz, context);
+    CHECK(backward_50hz_result.ok());
+    CHECK(backward_50hz_result.profile->iec61869_9->variant.has_value());
+    CHECK(iec61869_9_variant_code(
+              *backward_50hz_result.profile->iec61869_9->variant) ==
+          "F4000S1I4U4");
+    CHECK(!backward_50hz_result.profile->iec61869_9->variant->preferred());
+
+    auto wrong_backward_basis = backward_50hz;
+    wrong_backward_basis.sample_rate = 4000U;
+    wrong_backward_basis.sample_mode = "SmpPerSec";
+    context.nominal_frequency_millihz.reset();
+    const auto wrong_backward_basis_result =
+        SvPublisherProfileCompiler::compile(wrong_backward_basis, context);
+    CHECK(!wrong_backward_basis_result.ok());
+    CHECK(std::any_of(
+        wrong_backward_basis_result.errors.begin(),
+        wrong_backward_basis_result.errors.end(),
+        [](const std::string& error) {
+            return error.find("SmpMod does not match") != std::string::npos;
+        }));
+
+    auto unicast = preferred;
+    unicast.multicast = false;
+    const auto unicast_result =
+        SvPublisherProfileCompiler::compile(unicast, context);
+    CHECK(!unicast_result.ok());
+    CHECK(std::any_of(
+        unicast_result.errors.begin(), unicast_result.errors.end(),
+        [](const std::string& error) {
+            return error.find("requires a multicast") != std::string::npos;
+        }));
+
+    auto missing_sync_option = preferred;
+    missing_sync_option.smv_options.sample_synchronized = false;
+    const auto missing_sync_option_result =
+        SvPublisherProfileCompiler::compile(missing_sync_option, context);
+    CHECK(!missing_sync_option_result.ok());
+    CHECK(std::any_of(
+        missing_sync_option_result.errors.begin(),
+        missing_sync_option_result.errors.end(),
+        [](const std::string& error) {
+            return error.find("sampleSynchronized=true") != std::string::npos;
+        }));
+
+    auto forbidden_sample_rate_option = preferred;
+    forbidden_sample_rate_option.smv_options.sample_rate = true;
+    const auto forbidden_sample_rate_option_result =
+        SvPublisherProfileCompiler::compile(forbidden_sample_rate_option, context);
+    CHECK(!forbidden_sample_rate_option_result.ok());
+    CHECK(std::any_of(
+        forbidden_sample_rate_option_result.errors.begin(),
+        forbidden_sample_rate_option_result.errors.end(),
+        [](const std::string& error) {
+            return error.find("sampleRate=false") != std::string::npos;
+        }));
+
+    context.nominal_frequency_millihz.reset();
     auto high_rate = preferred;
     high_rate.sample_rate = 14400U;
     high_rate.no_asdu = 6U;

@@ -479,6 +479,39 @@ private:
         }
 
         case SvProfileFamily::iec61869_9: {
+            bool published_profile_valid = true;
+            if (profile.transport_mode != SvTransportMode::multicast) {
+                result.errors.push_back(
+                    "IEC 61869-9:2016 requires a multicast sampled value control block.");
+                published_profile_valid = false;
+            }
+            if (!profile.asdu_options.sample_synchronized) {
+                result.errors.push_back(
+                    "IEC 61869-9:2016 requires SmvOpts sampleSynchronized=true.");
+                published_profile_valid = false;
+            }
+            if (profile.asdu_options.refresh_time) {
+                result.errors.push_back(
+                    "IEC 61869-9:2016 requires SmvOpts refreshTime=false.");
+                published_profile_valid = false;
+            }
+            if (profile.asdu_options.sample_rate) {
+                result.errors.push_back(
+                    "IEC 61869-9:2016 requires SmvOpts sampleRate=false.");
+                published_profile_valid = false;
+            }
+            if (profile.asdu_options.data_set) {
+                result.errors.push_back(
+                    "IEC 61869-9:2016 requires SmvOpts dataSet=false.");
+                published_profile_valid = false;
+            }
+            if (profile.asdu_options.security) {
+                result.errors.push_back(
+                    "IEC 61869-9:2016 published profile authority does not enable the "
+                    "SV security optional field; IEC 62351-6 support is a separate future capability.");
+                published_profile_valid = false;
+            }
+
             const auto resolved = resolve_iec61869_9_profile(stream.entries, profile.timing);
             result.errors.insert(
                 result.errors.end(), resolved.errors.begin(), resolved.errors.end());
@@ -494,11 +527,35 @@ private:
                 return;
             }
 
+            if (resolved.profile.variant.has_value()) {
+                const auto& variant = *resolved.profile.variant;
+                const auto expected_basis = iec61869_9_published_2016_sampling_basis(
+                    variant.sample_rate_hz, variant.asdus_per_frame);
+                if (!expected_basis.has_value() ||
+                    profile.timing.sampling_basis != *expected_basis) {
+                    result.errors.push_back(
+                        "IEC 61869-9:2016 SmpMod does not match the selected F/S variant.");
+                    published_profile_valid = false;
+                } else if (!iec61869_9_published_2016_configured_rate_matches(
+                               variant, profile.timing)) {
+                    result.errors.push_back(
+                        "IEC 61869-9:2016 configured SmpRate does not match the "
+                        "published encoding rule for the selected F/S variant.");
+                    published_profile_valid = false;
+                }
+            }
+
+            if (!published_profile_valid) {
+                profile.profile_family_resolution = SvProfileFamilyResolution::unresolved;
+                return;
+            }
+
             if (profile.asdu_options.synch_source_id) {
                 profile.profile_family_resolution = SvProfileFamilyResolution::incomplete;
                 result.warnings.push_back(
-                    "IEC 61869-9 published-2016 profile is resolved, but SynchSrcID is treated "
-                    "as draft/future amendment semantics and is not promoted to published conformance.");
+                    "IEC 61869-9 published-2016 profile is otherwise resolved, but SynchSrcID "
+                    "belongs to draft/future amendment semantics and cannot promote a "
+                    "published-2016 conformance claim.");
                 return;
             }
 
@@ -507,9 +564,9 @@ private:
                 : SvProfileFamilyResolution::incomplete;
             if (resolved.complete()) {
                 result.warnings.push_back(
-                    "IEC 61869-9 dataset, fixed engineering scaling and FfSsIiUu variant "
-                    "semantics are resolved on the host; current ESP32-P4 deployment support "
-                    "remains a separate device-capability gate.");
+                    "IEC 61869-9:2016 dataset, optional-field policy, fixed engineering "
+                    "scaling and FfSsIiUu variant semantics are resolved on the host; "
+                    "current ESP32-P4 deployment support remains a separate device-capability gate.");
             }
             return;
         }

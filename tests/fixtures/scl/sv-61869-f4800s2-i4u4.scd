@@ -41,7 +41,8 @@
             <SampledValueControl multicast="true" name="MSVCB01" datSet="PhsMeas1"
                 confRev="1" smvID="MU_61869/MU01/LLN0.MSVCB01"
                 smpRate="4800" nofASDU="2" smpMod="SmpPerSec">
-              <SmvOpts sampleRate="true"/>
+              <SmvOpts refreshTime="false" sampleSynchronized="true"
+                  sampleRate="false" dataSet="false" security="false"/>
             </SampledValueControl>
           </LN0>
           <LN prefix="I01A" lnClass="TCTR" inst="1" lnType="TCTR_61869"/>
