@@ -695,6 +695,35 @@ void iec61869_9_profile_resolves_variant_dataset_and_exact_scaling() {
           "F14400S6I4U4");
     CHECK(high_rate_result.profile->iec61869_9->variant->preferred());
 
+    auto high_bandwidth_dc = preferred;
+    high_bandwidth_dc.sample_rate = 9600U;
+    high_bandwidth_dc.sample_mode = "SmpPerPeriod";
+    high_bandwidth_dc.no_asdu = 1U;
+    context.nominal_frequency_millihz = 10'000U;
+    context.sample_counter_modulus.reset();
+    const auto high_bandwidth_dc_result =
+        SvPublisherProfileCompiler::compile(high_bandwidth_dc, context);
+    CHECK(high_bandwidth_dc_result.ok());
+    CHECK(high_bandwidth_dc_result.profile.has_value());
+    CHECK(high_bandwidth_dc_result.profile->iec61869_9.has_value());
+    CHECK(high_bandwidth_dc_result.profile->iec61869_9->variant.has_value());
+    CHECK(iec61869_9_variant_code(
+              *high_bandwidth_dc_result.profile->iec61869_9->variant) ==
+          "F96000S1I4U4");
+    CHECK(high_bandwidth_dc_result.profile->iec61869_9->variant->preferred());
+    CHECK(high_bandwidth_dc_result.profile->sample_counter_policy ==
+          SvSampleCounterPolicy::unresolved);
+    CHECK(!high_bandwidth_dc_result.profile->sample_counter_modulus.has_value());
+    CHECK(std::any_of(
+        high_bandwidth_dc_result.warnings.begin(),
+        high_bandwidth_dc_result.warnings.end(),
+        [](const std::string& warning) {
+            return warning.find("sample-counter wrap policy is unresolved") !=
+                   std::string::npos;
+        }));
+
+    context.nominal_frequency_millihz.reset();
+
     auto nonstandard_rate = preferred;
     nonstandard_rate.sample_rate = 5000U;
     context.sample_counter_modulus = static_cast<std::uint16_t>(5000U);
