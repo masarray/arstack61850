@@ -3,6 +3,7 @@
 #pragma once
 
 #include "ariec61850/ethernet/ethernet.hpp"
+#include "ariec61850/sampled_values/iec61869_9_profile.hpp"
 #include "ariec61850/sampled_values/profile_family.hpp"
 #include "ariec61850/sampled_values/timing_semantics.hpp"
 #include "ariec61850/scl/model.hpp"
@@ -66,7 +67,7 @@ struct SvPublisherProfileCompileContext final {
 };
 
 struct SvPublisherProfile final {
-    std::uint32_t schema_version{3U};
+    std::uint32_t schema_version{4U};
     std::string control_block_reference;
     std::string sv_id;
     std::string data_set_reference;
@@ -86,6 +87,7 @@ struct SvPublisherProfile final {
     SvSampleCounterPolicy sample_counter_policy{SvSampleCounterPolicy::unresolved};
     std::optional<std::uint16_t> sample_counter_modulus;
     SvAsduOptions asdu_options;
+    std::optional<Iec61869_9Profile> iec61869_9;
 
     std::vector<SvPublisherChannel> channels;
     std::size_t payload_size_bytes{};
@@ -368,7 +370,7 @@ public:
             });
         }
         profile.payload_size_bytes = payload_size;
-        apply_profile_family_rules(profile, result);
+        apply_profile_family_rules(stream, profile, result);
 
         if (result.errors.empty()) {
             result.profile = std::move(profile);
@@ -426,6 +428,7 @@ private:
     }
 
     static void apply_profile_family_rules(
+        const scl::SclSampledValuesStream& stream,
         SvPublisherProfile& profile,
         SvPublisherProfileCompileResult& result) {
         switch (profile.profile_family) {
@@ -475,15 +478,41 @@ private:
             return;
         }
 
-        case SvProfileFamily::iec61869_9:
-            // P1.1 deliberately stops at transport/address family identity.
-            // Scaling, configurable variant constraints and full IEC 61869-9
-            // dataset rules are a later authority and must not be guessed here.
-            profile.profile_family_resolution = SvProfileFamilyResolution::incomplete;
-            result.warnings.push_back(
-                "IEC 61869-9 family selected: transport/address semantics are represented, "
-                "but scaling and variant rules are not yet complete; deployment remains blocked.");
+        case SvProfileFamily::iec61869_9: {
+            const auto resolved = resolve_iec61869_9_profile(stream.entries, profile.timing);
+            result.errors.insert(
+                result.errors.end(), resolved.errors.begin(), resolved.errors.end());
+            result.warnings.insert(
+                result.warnings.end(), resolved.warnings.begin(), resolved.warnings.end());
+
+            if (resolved.valid_dataset()) {
+                profile.iec61869_9 = resolved.profile;
+            }
+
+            if (!resolved.errors.empty()) {
+                profile.profile_family_resolution = SvProfileFamilyResolution::unresolved;
+                return;
+            }
+
+            if (profile.asdu_options.synch_source_id) {
+                profile.profile_family_resolution = SvProfileFamilyResolution::incomplete;
+                result.warnings.push_back(
+                    "IEC 61869-9 published-2016 profile is resolved, but SynchSrcID is treated "
+                    "as draft/future amendment semantics and is not promoted to published conformance.");
+                return;
+            }
+
+            profile.profile_family_resolution = resolved.complete()
+                ? SvProfileFamilyResolution::resolved
+                : SvProfileFamilyResolution::incomplete;
+            if (resolved.complete()) {
+                result.warnings.push_back(
+                    "IEC 61869-9 dataset, fixed engineering scaling and FfSsIiUu variant "
+                    "semantics are resolved on the host; current ESP32-P4 deployment support "
+                    "remains a separate device-capability gate.");
+            }
             return;
+        }
         }
     }
 
