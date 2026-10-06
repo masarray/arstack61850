@@ -4,6 +4,7 @@ const profileBridge = {
   file: null,
   inspection: null,
   selectedIndex: 0,
+  profileFamilies: {},
   deployed: false,
   deploying: false,
   currentCountsPerAmp: 1000,
@@ -42,6 +43,12 @@ function installProfileUi() {
     </div>
     <div class="bridge-grid">
       <label class="bridge-field bridge-stream"><span>SV stream</span><select id="streamSelect" disabled><option>Import SCL / CID first</option></select></label>
+      <label class="bridge-field"><span>Profile family</span><select id="profileFamilySelect">
+        <option value="">Select family…</option>
+        <option value="iec61850-9-2">IEC 61850-9-2</option>
+        <option value="9-2le">Legacy 9-2LE</option>
+        <option value="iec61869-9">IEC 61869-9</option>
+      </select></label>
       <div class="bridge-field"><span>Destination</span><strong id="bridgeMac">—</strong></div>
       <div class="bridge-field"><span>APPID</span><strong id="bridgeAppid">—</strong></div>
       <div class="bridge-field"><span>Sample rate</span><strong id="bridgeRate">—</strong></div>
@@ -74,6 +81,13 @@ function installProfileUi() {
     profileBridge.deployed = false;
     renderProfileSelection();
   });
+  $("profileFamilySelect").addEventListener("change", async () => {
+    const family = $("profileFamilySelect").value;
+    if (family) profileBridge.profileFamilies[profileBridge.selectedIndex] = family;
+    else delete profileBridge.profileFamilies[profileBridge.selectedIndex];
+    profileBridge.deployed = false;
+    await inspectEngineeringFile(null);
+  });
   $("validateProfileButton").addEventListener("click", validateCounterPolicy);
   $("deployProfileButton").addEventListener("click", deploySelectedProfile);
   $("currentScale").addEventListener("change", updateScaling);
@@ -83,6 +97,8 @@ function installProfileUi() {
     const file = els.sclFile.files?.[0];
     if (!file) return;
     profileBridge.file = file;
+    profileBridge.profileFamilies = {};
+    $("profileFamilySelect").value = "";
     profileBridge.deployed = false;
     await inspectEngineeringFile(null);
   });
@@ -145,8 +161,15 @@ async function inspectEngineeringFile(counterModulus) {
   els.sclState.textContent = `${file.name} · compiling…`;
   $("bridgeMessages").textContent = "Running smart IEC 61850 profile compiler…";
   try {
-    const query = counterModulus ? `?counterModulus=${encodeURIComponent(counterModulus)}` : "";
-    const response = await fetch(`/api/scl/inspect${query}`, {
+    const query = new URLSearchParams();
+    if (counterModulus) query.set("counterModulus", String(counterModulus));
+    const familyOverrides = Object.entries(profileBridge.profileFamilies)
+      .filter(([, family]) => Boolean(family))
+      .map(([index, family]) => `${index}:${family}`)
+      .join(",");
+    if (familyOverrides) query.set("profileFamilies", familyOverrides);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    const response = await fetch(`/api/scl/inspect${suffix}`, {
       method: "POST",
       headers: { "Content-Type": "application/xml", "X-File-Name": file.name },
       body: await file.arrayBuffer(),
@@ -201,13 +224,17 @@ function renderProfileSelection() {
   }
 
   $("bridgeTitle").textContent = p.svID || stream.controlBlockReference || "SV profile";
+  $("profileFamilySelect").value =
+    profileBridge.profileFamilies[profileBridge.selectedIndex]
+    || (p.profileFamily === "unspecified" ? "" : p.profileFamily);
   $("compatBadge").textContent = `CLASS ${stream.compatibilityClass}`;
   $("compatBadge").dataset.class = stream.compatibilityClass;
   $("bridgeMac").textContent = p.destinationMac;
   $("bridgeAppid").textContent = `0x${Number(p.appID).toString(16).toUpperCase().padStart(4, "0")}`;
   $("bridgeRate").textContent = p.publisherRateHz ? `${p.publisherRateHz} fps` : `${p.sampleRate} ${p.sampleMode}`;
   $("bridgePayload").textContent = `${p.payloadBytes} B · ${p.channels.length} leaves`;
-  $("bridgeSupport").textContent = stream.deviceSupport;
+  $("bridgeSupport").textContent =
+    `${stream.deviceSupport} · ${p.transportMode || "—"}`;
   $("counterConfirm").hidden = stream.compatibilityClass === "A";
   $("scalingRow").hidden = false;
   if (stream.compatibilityClass !== "A" && p.counterModulus) {

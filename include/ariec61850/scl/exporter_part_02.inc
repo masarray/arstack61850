@@ -71,9 +71,9 @@ inline void write_goose_and_smv(
             << " nofASDU=\"" << stream.no_asdu << "\"";
         if (!stream.sample_mode.empty()) out << " smpMod=\"" << xml_escape(stream.sample_mode) << "\"";
         if (!stream.smv_options.element_present) {
-            out << " multicast=\"true\" />\n";
+            out << " multicast=\"" << bool_text(stream.multicast) << "\" />\n";
         } else {
-            out << " multicast=\"true\">\n"
+            out << " multicast=\"" << bool_text(stream.multicast) << "\">\n"
                 << "              <SmvOpts refreshTime=\"" << bool_text(stream.smv_options.refresh_time)
                 << "\" sampleSynchronized=\"" << bool_text(stream.smv_options.sample_synchronized)
                 << "\" sampleRate=\"" << bool_text(stream.smv_options.sample_rate)

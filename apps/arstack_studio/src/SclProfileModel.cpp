@@ -19,10 +19,15 @@ using ar::iec61850::sampled_values::Esp32P4SvProfileSupport;
 using ar::iec61850::sampled_values::SvPublisherProfile;
 using ar::iec61850::sampled_values::SvPublisherProfileCompileContext;
 using ar::iec61850::sampled_values::SvPublisherProfileCompiler;
+using ar::iec61850::sampled_values::SvProfileFamily;
+using ar::iec61850::sampled_values::SvProfileFamilyResolution;
 using ar::iec61850::sampled_values::SvSampleCounterPolicy;
 using ar::iec61850::sampled_values::SvSampleMode;
 using ar::iec61850::sampled_values::classify_esp32p4_sv_profile;
 using ar::iec61850::sampled_values::esp32p4_sv_profile_support_name;
+using ar::iec61850::sampled_values::sv_profile_family_name;
+using ar::iec61850::sampled_values::sv_profile_family_resolution_name;
+using ar::iec61850::sampled_values::sv_transport_mode_name;
 
 constexpr std::uint16_t kReferenceCounterModulus = 4000;
 constexpr auto kReferenceResource = ":/arstack/templates/arstack_4i4v_9-2le_reference.scd";
@@ -57,6 +62,16 @@ QString sampleModeText(const SvSampleMode mode) {
     case SvSampleMode::seconds_per_sample: return QStringLiteral("SecPerSample");
     default: return QStringLiteral("Unknown");
     }
+}
+
+QString profileFamilyText(const SvProfileFamily family) {
+    const auto value = sv_profile_family_name(family);
+    return QString::fromLatin1(value.data(), static_cast<qsizetype>(value.size()));
+}
+
+QString profileFamilyResolutionText(const SvProfileFamilyResolution resolution) {
+    const auto value = sv_profile_family_resolution_name(resolution);
+    return QString::fromLatin1(value.data(), static_cast<qsizetype>(value.size()));
 }
 
 QString counterPolicyText(const SvSampleCounterPolicy policy) {
@@ -193,6 +208,10 @@ void SclProfileModel::installDocument(
         ? std::optional<std::uint16_t>{kReferenceCounterModulus}
         : std::nullopt;
     confirmedNominalFrequencyMilliHz_.reset();
+    profileFamilies_.assign(
+        document_->sampled_values_streams.size(),
+        referenceTemplate ? SvProfileFamily::legacy_9_2le
+                          : SvProfileFamily::unspecified);
     rows_.clear();
     selectedIndex_ = -1;
     fatalError_.clear();
@@ -254,6 +273,7 @@ void SclProfileModel::clear() {
     document_.reset();
     confirmedCounterModulus_.reset();
     confirmedNominalFrequencyMilliHz_.reset();
+    profileFamilies_.clear();
     rows_.clear();
     selectedIndex_ = -1;
     fatalError_.clear();
@@ -299,6 +319,37 @@ void SclProfileModel::clearNominalFrequency() {
     rebuildRows();
 }
 
+bool SclProfileModel::selectProfileFamily(const QString& familyKey) {
+    if (!document_.has_value() || selectedIndex_ < 0 ||
+        selectedIndex_ >= static_cast<int>(profileFamilies_.size())) {
+        return false;
+    }
+    const auto key = familyKey.trimmed().toLower();
+    SvProfileFamily selected = SvProfileFamily::unspecified;
+    if (key.isEmpty() || key == QStringLiteral("unspecified")) {
+        selected = SvProfileFamily::unspecified;
+    } else if (key == QStringLiteral("iec61850-9-2")) {
+        selected = SvProfileFamily::iec61850_9_2;
+    } else if (key == QStringLiteral("9-2le")) {
+        selected = SvProfileFamily::legacy_9_2le;
+    } else if (key == QStringLiteral("iec61869-9")) {
+        selected = SvProfileFamily::iec61869_9;
+    } else {
+        return false;
+    }
+
+    // The built-in reference is an explicitly named 9-2LE compatibility
+    // artifact, not a family-detection heuristic.
+    if (referenceTemplateActive_ && selected != SvProfileFamily::legacy_9_2le) {
+        return false;
+    }
+    auto& current = profileFamilies_[static_cast<std::size_t>(selectedIndex_)];
+    if (current == selected) return true;
+    current = selected;
+    rebuildRows();
+    return true;
+}
+
 void SclProfileModel::rebuildRows() {
     if (!document_.has_value()) return;
 
@@ -307,8 +358,13 @@ void SclProfileModel::rebuildRows() {
     rows_.clear();
     rows_.reserve(document_->sampled_values_streams.size());
 
-    for (const auto& stream : document_->sampled_values_streams) {
+    for (std::size_t streamIndex = 0U;
+         streamIndex < document_->sampled_values_streams.size(); ++streamIndex) {
+        const auto& stream = document_->sampled_values_streams[streamIndex];
         SvPublisherProfileCompileContext context;
+        context.profile_family = streamIndex < profileFamilies_.size()
+            ? profileFamilies_[streamIndex]
+            : SvProfileFamily::unspecified;
         context.sample_counter_modulus = confirmedCounterModulus_;
         context.nominal_frequency_millihz = confirmedNominalFrequencyMilliHz_;
         auto compiled = SvPublisherProfileCompiler::compile(stream, context);
@@ -327,6 +383,7 @@ void SclProfileModel::rebuildRows() {
             row.profile = std::move(compiled.profile);
             const auto& profile = *row.profile;
             row.compatibilityClass =
+                profile.profile_family_resolution == SvProfileFamilyResolution::resolved &&
                 profile.timing.resolved() &&
                 profile.sample_counter_policy == SvSampleCounterPolicy::explicit_modulus
                     ? QStringLiteral("A")
@@ -356,6 +413,13 @@ QVariantMap SclProfileModel::profileToVariantMap(const SvPublisherProfile& p) co
     map.insert(QStringLiteral("appId"), static_cast<int>(p.app_id));
     map.insert(QStringLiteral("appIdHex"),
         QStringLiteral("0x%1").arg(p.app_id, 4, 16, QLatin1Char('0')).toUpper());
+    map.insert(QStringLiteral("profileFamily"), profileFamilyText(p.profile_family));
+    map.insert(QStringLiteral("profileFamilyResolution"),
+        profileFamilyResolutionText(p.profile_family_resolution));
+    const auto transportMode = sv_transport_mode_name(p.transport_mode);
+    map.insert(QStringLiteral("transportMode"),
+        QString::fromLatin1(
+            transportMode.data(), static_cast<qsizetype>(transportMode.size())));
     map.insert(QStringLiteral("vlanPresent"), p.vlan_present);
     map.insert(QStringLiteral("vlanId"), static_cast<int>(p.vlan_id));
     map.insert(QStringLiteral("vlanPriority"), static_cast<int>(p.vlan_priority));

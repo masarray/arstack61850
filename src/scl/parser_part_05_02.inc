@@ -8,6 +8,22 @@
                             ? data_set->entries
                             : data_set->expanded_entries;
                     }
+                    const auto multicast_text = attribute(control, "multicast");
+                    if (multicast_text.empty() || same(multicast_text, "true")) {
+                        stream.multicast = true;
+                        stream.multicast_valid = true;
+                    } else if (same(multicast_text, "false")) {
+                        stream.multicast = false;
+                        stream.multicast_valid = true;
+                    } else {
+                        document.warnings.push_back(
+                            "SV " + stream.control_block_reference +
+                            " has invalid multicast='" + multicast_text +
+                            "'; default true is retained for inspection only and deployment/export is blocked.");
+                        stream.multicast = true;
+                        stream.multicast_valid = false;
+                    }
+
                     stream.sample_rate = ushort_attribute(*control, "smpRate");
                     stream.sample_mode = attribute(control, "smpMod");
                     stream.no_asdu = std::max<std::uint16_t>(

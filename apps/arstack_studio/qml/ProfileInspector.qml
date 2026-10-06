@@ -190,6 +190,15 @@ SurfacePanel {
                     Label { Layout.fillWidth: true; text: panel.profile.dataSetReference || "—"; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: panel.theme.captionSize; elide: Text.ElideMiddle }
                     Label { text: "MAC / APPID"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize }
                     Label { Layout.fillWidth: true; text: (panel.profile.destinationMac || "—") + " · " + (panel.profile.appIdHex || "—"); color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: panel.theme.captionSize; elide: Text.ElideRight }
+                    Label { text: "Profile"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize }
+                    Label {
+                        Layout.fillWidth: true
+                        text: (panel.profile.profileFamily || "unspecified") + " · " + (panel.profile.transportMode || "—")
+                        color: panel.profile.profileFamilyResolution === "resolved" ? panel.theme.textSoft : panel.theme.amber
+                        font.family: panel.monoFont
+                        font.pixelSize: panel.theme.captionSize
+                        elide: Text.ElideRight
+                    }
                     Label { text: "Sampling"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize }
                     Label {
                         text: panel.profile.sampleRate
@@ -248,6 +257,54 @@ SurfacePanel {
                 font.pixelSize: panel.theme.captionSize
                 font.weight: Font.DemiBold
                 font.letterSpacing: 0.9
+            }
+
+            ColumnLayout {
+                visible: !panel.profiles.referenceTemplateActive
+                Layout.fillWidth: true
+                spacing: 5
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Profile family is explicit. ARStack never infers it from vendor, filename, svID, or DataSet shape."
+                    color: panel.theme.muted
+                    font.family: panel.uiFont
+                    font.pixelSize: panel.theme.captionSize
+                    wrapMode: Text.WordWrap
+                }
+
+                ComboBox {
+                    id: profileFamilySelector
+                    Layout.fillWidth: true
+                    enabled: panel.session && panel.session.engineeringEditable
+                    model: ["Select family…", "IEC 61850-9-2", "Legacy 9-2LE", "IEC 61869-9"]
+                    currentIndex: panel.profile.profileFamily === "iec61850-9-2" ? 1
+                                  : panel.profile.profileFamily === "9-2le" ? 2
+                                  : panel.profile.profileFamily === "iec61869-9" ? 3 : 0
+                    font.family: panel.uiFont
+                    font.pixelSize: panel.theme.labelSize
+                    onActivated: {
+                        var keys = ["unspecified", "iec61850-9-2", "9-2le", "iec61869-9"]
+                        if (panel.profiles.selectProfileFamily(keys[currentIndex])) {
+                            panel.controller.profileDirty = true
+                            panel.controller.showMessage("SV profile family updated.", false)
+                        }
+                    }
+                }
+            }
+
+            ColumnLayout {
+                visible: panel.profile.profileFamilyResolution === "incomplete"
+                Layout.fillWidth: true
+                spacing: 5
+                Label {
+                    Layout.fillWidth: true
+                    text: "IEC 61869-9 transport/address semantics are represented, but scaling and variant rules are not complete yet. Device deployment remains blocked."
+                    color: panel.theme.amber
+                    font.family: panel.uiFont
+                    font.pixelSize: panel.theme.captionSize
+                    wrapMode: Text.WordWrap
+                }
             }
 
             ColumnLayout {

@@ -6,6 +6,7 @@ on:
       - 'apps/smv_injector_gui/**'
       - 'tools/smv_profile_inspect.cpp'
       - 'include/ariec61850/sampled_values/publisher_profile.hpp'
+      - 'include/ariec61850/sampled_values/profile_family.hpp'
       - 'include/ariec61850/scl/**'
       - 'src/scl/**'
       - 'tests/fixtures/scl/**'
@@ -15,6 +16,7 @@ on:
       - 'apps/smv_injector_gui/**'
       - 'tools/smv_profile_inspect.cpp'
       - 'include/ariec61850/sampled_values/publisher_profile.hpp'
+      - 'include/ariec61850/sampled_values/profile_family.hpp'
       - 'include/ariec61850/scl/**'
       - 'src/scl/**'
       - 'tests/fixtures/scl/**'
@@ -67,10 +69,28 @@ jobs:
           fixture=tests/fixtures/scl/sv-4800-structured-4i4v.scd
           build-smv-gui/ariec61850_smv_profile_inspect "$fixture" > /tmp/profile-b.json
           grep -q '"compatibilityClass":"B"' /tmp/profile-b.json
+          grep -q '"deviceSupport":"needs-profile-family-confirmation"' /tmp/profile-b.json
           grep -q '"publisherRateHz":4800' /tmp/profile-b.json
-          build-smv-gui/ariec61850_smv_profile_inspect "$fixture" --counter-modulus 4800 > /tmp/profile-a.json
+          build-smv-gui/ariec61850_smv_profile_inspect "$fixture" --profile-family iec61850-9-2 --counter-modulus 4800 > /tmp/profile-a.json
           grep -q '"compatibilityClass":"A"' /tmp/profile-a.json
+          grep -q '"profileFamily":"iec61850-9-2"' /tmp/profile-a.json
           grep -q '"deviceSupport":"ready"' /tmp/profile-a.json
+          build-smv-gui/ariec61850_smv_profile_inspect "$fixture" --profile-family iec61869-9 --counter-modulus 4800 > /tmp/profile-61869.json
+          grep -q '"compatibilityClass":"B"' /tmp/profile-61869.json
+          grep -q '"profileFamilyResolution":"incomplete"' /tmp/profile-61869.json
+          grep -q '"deviceSupport":"unsupported-profile-family"' /tmp/profile-61869.json
+
+          multi=tests/fixtures/scl/compact-multi-stream.scd
+          build-smv-gui/ariec61850_smv_profile_inspect "$multi" --stream-profile-family 0:iec61850-9-2 --counter-modulus 4000 > /tmp/profile-multi.json
+          python3 - <<'PY'
+          import json
+          data = json.load(open('/tmp/profile-multi.json', encoding='utf-8'))
+          assert len(data['streams']) >= 2
+          assert data['streams'][0]['profile']['profileFamily'] == 'iec61850-9-2'
+          for stream in data['streams'][1:]:
+              assert stream['profile']['profileFamily'] == 'unspecified'
+              assert stream['compatibilityClass'] == 'B'
+          PY
 
       - name: Local backend smoke
         shell: bash
@@ -86,7 +106,7 @@ jobs:
           curl --fail --silent -X POST \
             -H 'X-File-Name: fixture.scd' \
             --data-binary @tests/fixtures/scl/sv-4800-structured-4i4v.scd \
-            'http://127.0.0.1:8765/api/scl/inspect?counterModulus=4800' >/tmp/api.json
+            'http://127.0.0.1:8765/api/scl/inspect?counterModulus=4800&profileFamilies=0:iec61850-9-2' >/tmp/api.json
           grep -q '"deviceSupport":"ready"' /tmp/api.json
 
   windows-launcher-smoke:
@@ -108,7 +128,7 @@ jobs:
         run: |
           $tool = Join-Path $PWD 'build-smv-gui\ariec61850_smv_profile_inspect.exe'
           if (-not (Test-Path $tool)) { throw "profile compiler missing: $tool" }
-          & $tool 'tests\fixtures\scl\sv-4800-structured-4i4v.scd' '--counter-modulus' '4800' | Tee-Object -FilePath profile-a.json
+          & $tool 'tests\fixtures\scl\sv-4800-structured-4i4v.scd' '--profile-family' 'iec61850-9-2' '--counter-modulus' '4800' | Tee-Object -FilePath profile-a.json
           if (-not (Select-String -Path profile-a.json -SimpleMatch '"deviceSupport":"ready"')) {
             throw 'Windows profile compiler did not produce a deployable Class-A fixture result'
           }

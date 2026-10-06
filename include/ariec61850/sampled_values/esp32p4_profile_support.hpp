@@ -3,16 +3,15 @@
 
 #include "ariec61850/sampled_values/publisher_profile.hpp"
 
-#include <array>
-#include <cctype>
-#include <string>
 #include <string_view>
 
 namespace ar::iec61850::sampled_values {
 
 enum class Esp32P4SvProfileSupport {
     ready,
+    needs_profile_family_confirmation,
     needs_counter_confirmation,
+    unsupported_profile_family,
     unsupported_layout,
 };
 
@@ -21,8 +20,12 @@ enum class Esp32P4SvProfileSupport {
     switch (support) {
     case Esp32P4SvProfileSupport::ready:
         return "ready";
+    case Esp32P4SvProfileSupport::needs_profile_family_confirmation:
+        return "needs-profile-family-confirmation";
     case Esp32P4SvProfileSupport::needs_counter_confirmation:
         return "needs-counter-confirmation";
+    case Esp32P4SvProfileSupport::unsupported_profile_family:
+        return "unsupported-profile-family";
     case Esp32P4SvProfileSupport::unsupported_layout:
         return "unsupported-layout";
     }
@@ -30,114 +33,19 @@ enum class Esp32P4SvProfileSupport {
 }
 
 namespace detail {
-[[nodiscard]] inline std::string sv_support_lower_copy(const std::string_view text) {
-    std::string result;
-    result.reserve(text.size());
-    for (const char ch : text) {
-        result.push_back(static_cast<char>(
-            std::tolower(static_cast<unsigned char>(ch))));
-    }
-    return result;
-}
-
-[[nodiscard]] inline bool sv_reference_matches_either(
-    const std::string_view reference,
-    const std::string_view canonical,
-    const std::string_view legacy_9_2le) {
-    return reference.find(canonical) != std::string_view::npos ||
-           reference.find(legacy_9_2le) != std::string_view::npos;
-}
-
 [[nodiscard]] inline bool esp32p4_4i4v_layout_matches(
     const SvPublisherProfile& profile) {
     const auto frame_rate_hz = profile.timing.exact_frame_rate_hz();
     if (profile.timing.sampling_basis != SvSampleMode::samples_per_second ||
-        profile.timing.asdus_per_frame != 1U || profile.payload_size_bytes != 64U ||
-        profile.channels.size() != 16U || !frame_rate_hz.has_value() ||
-        *frame_rate_hz == 0U || *frame_rate_hz > 65535U) {
+        profile.timing.asdus_per_frame != 1U ||
+        !legacy_9_2le_4i4v_layout_matches(profile) ||
+        !frame_rate_hz.has_value() || *frame_rate_hz == 0U ||
+        *frame_rate_hz > 65535U) {
         return false;
     }
     if (profile.asdu_options.refresh_time || profile.asdu_options.security ||
         profile.asdu_options.synch_source_id) {
         return false;
-    }
-
-    // The current ESP32-P4 runtime emits a fixed wire order:
-    // IA, IB, IC, IN, UA, UB, UC, UN, with one Quality word after each value.
-    // Do not accept a merely shape-compatible DataSet: that would silently map
-    // unrelated INT32 members onto the fixed injector channels.
-    //
-    // Both Amp/Vol and the 9-2LE-style AmpSv/VolSv DO naming are accepted only
-    // when the LN class/instance, order, width, basic type and Quality pairing
-    // all match the same proven 4I+4V runtime layout.
-    constexpr std::array<std::string_view, 8> expected_values{
-        "tctr1.amp.instmag.i",
-        "tctr2.amp.instmag.i",
-        "tctr3.amp.instmag.i",
-        "tctr4.amp.instmag.i",
-        "tvtr1.vol.instmag.i",
-        "tvtr2.vol.instmag.i",
-        "tvtr3.vol.instmag.i",
-        "tvtr4.vol.instmag.i",
-    };
-    constexpr std::array<std::string_view, 8> expected_values_9_2le{
-        "tctr1.ampsv.instmag.i",
-        "tctr2.ampsv.instmag.i",
-        "tctr3.ampsv.instmag.i",
-        "tctr4.ampsv.instmag.i",
-        "tvtr1.volsv.instmag.i",
-        "tvtr2.volsv.instmag.i",
-        "tvtr3.volsv.instmag.i",
-        "tvtr4.volsv.instmag.i",
-    };
-    constexpr std::array<std::string_view, 8> expected_qualities{
-        "tctr1.amp.q",
-        "tctr2.amp.q",
-        "tctr3.amp.q",
-        "tctr4.amp.q",
-        "tvtr1.vol.q",
-        "tvtr2.vol.q",
-        "tvtr3.vol.q",
-        "tvtr4.vol.q",
-    };
-    constexpr std::array<std::string_view, 8> expected_qualities_9_2le{
-        "tctr1.ampsv.q",
-        "tctr2.ampsv.q",
-        "tctr3.ampsv.q",
-        "tctr4.ampsv.q",
-        "tvtr1.volsv.q",
-        "tvtr2.volsv.q",
-        "tvtr3.volsv.q",
-        "tvtr4.volsv.q",
-    };
-
-    for (std::size_t i = 0U; i < profile.channels.size(); ++i) {
-        const auto& channel = profile.channels[i];
-        if (channel.wire_width_bytes != 4U) return false;
-        if ((i % 2U) == 0U) {
-            if (channel.is_quality || sv_support_lower_copy(channel.basic_type) != "int32") {
-                return false;
-            }
-        } else if (!channel.is_quality) {
-            return false;
-        }
-    }
-
-    for (std::size_t signal = 0U; signal < expected_values.size(); ++signal) {
-        const auto value_reference =
-            sv_support_lower_copy(profile.channels[signal * 2U].signal_reference);
-        const auto quality_reference =
-            sv_support_lower_copy(profile.channels[signal * 2U + 1U].signal_reference);
-        if (!sv_reference_matches_either(
-                value_reference,
-                expected_values[signal],
-                expected_values_9_2le[signal]) ||
-            !sv_reference_matches_either(
-                quality_reference,
-                expected_qualities[signal],
-                expected_qualities_9_2le[signal])) {
-            return false;
-        }
     }
     return true;
 }
@@ -148,6 +56,14 @@ namespace detail {
 // the embedded-device deployment gate and deliberately fails closed.
 [[nodiscard]] inline Esp32P4SvProfileSupport classify_esp32p4_sv_profile(
     const SvPublisherProfile& profile) {
+    if (profile.profile_family == SvProfileFamily::unspecified ||
+        profile.profile_family_resolution == SvProfileFamilyResolution::unresolved) {
+        return Esp32P4SvProfileSupport::needs_profile_family_confirmation;
+    }
+    if (profile.profile_family == SvProfileFamily::iec61869_9 ||
+        profile.profile_family_resolution != SvProfileFamilyResolution::resolved) {
+        return Esp32P4SvProfileSupport::unsupported_profile_family;
+    }
     if (!detail::esp32p4_4i4v_layout_matches(profile)) {
         return Esp32P4SvProfileSupport::unsupported_layout;
     }
