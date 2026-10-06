@@ -465,14 +465,13 @@ void sampled_values_profile_family_and_transport_are_explicit() {
 
     context.profile_family = SvProfileFamily::iec61869_9;
     const auto iec61869 = SvPublisherProfileCompiler::compile(source, context);
-    CHECK(iec61869.ok());
-    CHECK(iec61869.profile.has_value());
-    CHECK(iec61869.profile->profile_family_resolution ==
-          SvProfileFamilyResolution::incomplete);
+    CHECK(!iec61869.ok());
+    CHECK(!iec61869.profile.has_value());
     CHECK(std::any_of(
-        iec61869.warnings.begin(), iec61869.warnings.end(),
-        [](const std::string& warning) {
-            return warning.find("deployment remains blocked") != std::string::npos;
+        iec61869.errors.begin(), iec61869.errors.end(),
+        [](const std::string& error) {
+            return error.find("TCTR.AmpSv.instMag.i or TVTR.VolSv.instMag.i") !=
+                   std::string::npos;
         }));
 
     context.profile_family = SvProfileFamily::unspecified;
