@@ -252,7 +252,10 @@ private:
         if (normalized == "smppersec") {
             return SvSampleMode::samples_per_second;
         }
-        if (normalized == "secpersample") {
+        // IEC 61850-6:2024 uses SecPerSample. Older SCL schema bindings and
+        // deployed engineering tools also expose the legacy token SecPerSmp;
+        // both carry the same sampling semantics and are accepted deliberately.
+        if (normalized == "secpersample" || normalized == "secpersmp") {
             return SvSampleMode::seconds_per_sample;
         }
         return SvSampleMode::unknown;

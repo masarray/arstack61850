@@ -299,7 +299,7 @@ int main(int argc, char** argv) {
         std::cout << '\n';
         return 0;
     } catch (const std::exception& error) {
-        std::cout << "{\"schemaVersion\":1,\"fatalError\":";
+        std::cout << "{\"schemaVersion\":2,\"fatalError\":";
         quoted(std::cout, error.what());
         std::cout << "}\n";
         return 1;

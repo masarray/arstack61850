@@ -385,6 +385,17 @@ void publisher_profile_separates_sampling_from_frame_cadence() {
     CHECK(slow_stream.profile->timing.frames_per_second->numerator == 1U);
     CHECK(slow_stream.profile->timing.frames_per_second->denominator == 2U);
     CHECK(!slow_stream.profile->timing.exact_frame_rate_hz().has_value());
+
+    auto legacy_seconds_per_sample = seconds_per_sample;
+    legacy_seconds_per_sample.sample_mode = "SecPerSmp";
+    const auto legacy_slow_stream =
+        SvPublisherProfileCompiler::compile(legacy_seconds_per_sample, context);
+    CHECK(legacy_slow_stream.ok());
+    CHECK(legacy_slow_stream.profile.has_value());
+    CHECK(legacy_slow_stream.profile->timing.sampling_basis ==
+          SvSampleMode::seconds_per_sample);
+    CHECK(legacy_slow_stream.profile->timing.samples_per_second ==
+          slow_stream.profile->timing.samples_per_second);
 }
 
 void dataset_reference_resolver_accepts_canonical_and_local_forms() {
