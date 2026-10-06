@@ -541,6 +541,41 @@ void iec61869_9_profile_resolves_variant_dataset_and_exact_scaling() {
     CHECK(classify_esp32p4_sv_profile(profile) ==
           Esp32P4SvProfileSupport::unsupported_profile_family);
 
+    auto three_phase = preferred;
+    three_phase.entries.erase(
+        three_phase.entries.begin() + 14, three_phase.entries.begin() + 16);
+    three_phase.entries.erase(
+        three_phase.entries.begin() + 6, three_phase.entries.begin() + 8);
+    const auto three_phase_result =
+        SvPublisherProfileCompiler::compile(three_phase, context);
+    CHECK(three_phase_result.ok());
+    CHECK(three_phase_result.profile->iec61869_9->variant.has_value());
+    CHECK(iec61869_9_variant_code(
+              *three_phase_result.profile->iec61869_9->variant) ==
+          "F4800S2I3U3");
+
+    auto current_only = preferred;
+    current_only.entries.erase(
+        current_only.entries.begin() + 2, current_only.entries.end());
+    const auto current_only_result =
+        SvPublisherProfileCompiler::compile(current_only, context);
+    CHECK(current_only_result.ok());
+    CHECK(current_only_result.profile->iec61869_9->variant.has_value());
+    CHECK(iec61869_9_variant_code(
+              *current_only_result.profile->iec61869_9->variant) ==
+          "F4800S2I1U0");
+
+    const auto fixture_61869 =
+        SclParser{}.load(fixture("sv-61869-f4800s2-i4u4.scd"));
+    CHECK(fixture_61869.sampled_values_streams.size() == 1U);
+    const auto fixture_result = SvPublisherProfileCompiler::compile(
+        fixture_61869.sampled_values_streams.front(), context);
+    CHECK(fixture_result.ok());
+    CHECK(fixture_result.profile->iec61869_9->variant.has_value());
+    CHECK(iec61869_9_variant_code(
+              *fixture_result.profile->iec61869_9->variant) ==
+          "F4800S2I4U4");
+
     CHECK(iec61869_9_variant_class(4000U, 1U) ==
           std::optional<Iec61869_9VariantClass>{
               Iec61869_9VariantClass::backward_compatible});
