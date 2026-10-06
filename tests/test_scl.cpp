@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "ariec61850/sampled_values/esp32p4_profile_support.hpp"
 #include "ariec61850/sampled_values/publisher_profile.hpp"
 #include "ariec61850/sampled_values/rational_schedule.hpp"
 #include "ariec61850/scl/dataset_reference.hpp"
