@@ -12,6 +12,7 @@
 #include "ariec61850/sampled_values/stream_supervisor.hpp"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <chrono>
 #include <cstdint>
@@ -104,6 +105,42 @@ void sampled_values_frame_round_trips_vlan_process_bus_header() {
         SampledValuesPdu{{make_reference_asdu()}}};
 
     const auto encoded = SampledValuesFrameCodec::encode(frame);
+    std::vector<std::uint8_t> encoded_with_layout(encoded.size());
+    std::array<SampledValueAsduEncodeLayout, 1> frame_layout{};
+    const auto layout_result = SampledValuesFrameCodec::encode_into_with_layout(
+        frame, encoded_with_layout, frame_layout);
+    CHECK(layout_result.success());
+    CHECK(layout_result.bytes_written == encoded.size());
+    CHECK(encoded_with_layout == encoded);
+    CHECK(frame_layout[0].sample_count.present);
+    CHECK(frame_layout[0].sample_count.value_size == 1U);
+    CHECK(encoded[frame_layout[0].sample_count.value_offset] == 120U);
+    CHECK(frame_layout[0].configuration_revision.present);
+    CHECK(frame_layout[0].configuration_revision.value_size == 1U);
+    CHECK(encoded[frame_layout[0].configuration_revision.value_offset] == 3U);
+    CHECK(frame_layout[0].reference_time.present);
+    CHECK(frame_layout[0].reference_time.value_size == 8U);
+    CHECK(frame_layout[0].sample_synchronization.present);
+    CHECK(frame_layout[0].sample_synchronization.value_size == 1U);
+    CHECK(encoded[frame_layout[0].sample_synchronization.value_offset] == 2U);
+    CHECK(frame_layout[0].sample_rate.present);
+    CHECK(frame_layout[0].sample_payload.present);
+    CHECK(frame_layout[0].sample_payload.value_size == 16U);
+    CHECK(frame_layout[0].sample_mode.present);
+
+    auto untagged_frame = frame;
+    untagged_frame.vlan.reset();
+    const auto untagged_size = SampledValuesFrameCodec::encoded_size(untagged_frame);
+    CHECK(untagged_size.has_value());
+    std::vector<std::uint8_t> untagged_bytes(*untagged_size);
+    std::array<SampledValueAsduEncodeLayout, 1> untagged_layout{};
+    CHECK(SampledValuesFrameCodec::encode_into_with_layout(
+              untagged_frame, untagged_bytes, untagged_layout).success());
+    CHECK(frame_layout[0].sample_count.value_offset ==
+          untagged_layout[0].sample_count.value_offset + 4U);
+    CHECK(frame_layout[0].sample_payload.value_offset ==
+          untagged_layout[0].sample_payload.value_offset + 4U);
+
     CHECK(to_hex(encoded) ==
           "010CCD040001020000000002810080C888BA4001006800000000"
           "605E800101A259305780134D55303146312F4C4C4E30244D535643423031"
@@ -159,6 +196,41 @@ void sampled_values_codec_handles_multiple_asdus_and_rejects_malformed_input() {
 
     const SampledValuesPdu pdu{{first, second}};
     const auto encoded = SampledValuesPduCodec::encode(pdu);
+    std::vector<std::uint8_t> encoded_with_layout(encoded.size());
+    std::array<SampledValueAsduEncodeLayout, 2> layouts{};
+    const auto layout_result = SampledValuesPduCodec::encode_into_with_layout(
+        pdu, encoded_with_layout, layouts);
+    CHECK(layout_result.success());
+    CHECK(encoded_with_layout == encoded);
+    CHECK(layouts[0].sample_count.present);
+    CHECK(layouts[1].sample_count.present);
+    CHECK(layouts[0].sample_count.value_offset < layouts[1].sample_count.value_offset);
+    CHECK(layouts[0].reference_time.present);
+    CHECK(layouts[0].sample_rate.present);
+    CHECK(layouts[0].sample_mode.present);
+    CHECK(!layouts[1].reference_time.present);
+    CHECK(!layouts[1].sample_rate.present);
+    CHECK(!layouts[1].sample_mode.present);
+    CHECK(layouts[0].sample_payload.present);
+    CHECK(layouts[1].sample_payload.present);
+    CHECK(layouts[0].sample_payload.value_size == first.sample_payload.size());
+    CHECK(layouts[1].sample_payload.value_size == second.sample_payload.size());
+
+    std::array<SampledValueAsduEncodeLayout, 1> insufficient_layout{};
+    CHECK(!SampledValuesPduCodec::encode_into_with_layout(
+              pdu, encoded_with_layout, insufficient_layout).success());
+
+    auto patched = encoded_with_layout;
+    CHECK(layouts[0].sample_count.value_size == 1U);
+    CHECK(layouts[1].sample_count.value_size == 1U);
+    patched[layouts[0].sample_count.value_offset] = 122U;
+    patched[layouts[1].sample_count.value_offset] = 123U;
+    SampledValuesPdu patched_decoded;
+    CHECK(SampledValuesPduCodec::try_decode(patched, patched_decoded));
+    CHECK(patched_decoded.asdus.size() == 2U);
+    CHECK(patched_decoded.asdus[0].sample_count == 122U);
+    CHECK(patched_decoded.asdus[1].sample_count == 123U);
+
     SampledValuesPdu decoded;
     CHECK(SampledValuesPduCodec::try_decode(encoded, decoded));
     CHECK(decoded == pdu);

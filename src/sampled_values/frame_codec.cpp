@@ -26,6 +26,26 @@ void write_u16_be(
     destination[offset + 1U] = static_cast<std::uint8_t>(value & 0xFFU);
 }
 
+void shift_region(
+    SampledValuesEncodedFieldRegion& region,
+    const std::size_t delta) noexcept {
+    if (region.present) {
+        region.value_offset += delta;
+    }
+}
+
+void shift_layout(
+    SampledValueAsduEncodeLayout& layout,
+    const std::size_t delta) noexcept {
+    shift_region(layout.sample_count, delta);
+    shift_region(layout.configuration_revision, delta);
+    shift_region(layout.reference_time, delta);
+    shift_region(layout.sample_synchronization, delta);
+    shift_region(layout.sample_rate, delta);
+    shift_region(layout.sample_payload, delta);
+    shift_region(layout.sample_mode, delta);
+}
+
 [[nodiscard]] std::optional<std::uint16_t> vlan_tci(
     const ethernet::VlanTag& vlan) noexcept {
     if (!ethernet::is_valid_vlan_priority(vlan.priority_code_point) ||
@@ -67,6 +87,19 @@ std::optional<std::size_t> SampledValuesFrameCodec::encoded_size(
 wire::EncodeResult SampledValuesFrameCodec::encode_into(
     const SampledValuesFrame& frame,
     const std::span<std::uint8_t> destination) noexcept {
+    return encode_into_with_layout(frame, destination, {});
+}
+
+wire::EncodeResult SampledValuesFrameCodec::encode_into_with_layout(
+    const SampledValuesFrame& frame,
+    const std::span<std::uint8_t> destination,
+    const std::span<SampledValueAsduEncodeLayout> layouts) noexcept {
+    if (!layouts.empty() && layouts.size() < frame.pdu.asdus.size()) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    for (auto& layout : layouts) {
+        layout = {};
+    }
     const auto required = encoded_size(frame);
     if (!required) {
         return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
@@ -109,10 +142,15 @@ wire::EncodeResult SampledValuesFrameCodec::encode_into(
     write_u16_be(destination, offset + 6U, frame.reserved2);
     offset += ethernet::ProcessBusFrameCodec::header_length;
 
-    const auto pdu_result = SampledValuesPduCodec::encode_into(
-        frame.pdu, destination.subspan(offset, *apdu_size));
+    const auto pdu_offset = offset;
+    const auto pdu_result = SampledValuesPduCodec::encode_into_with_layout(
+        frame.pdu, destination.subspan(offset, *apdu_size), layouts);
     if (!pdu_result.success() || pdu_result.bytes_written != *apdu_size) {
+        for (auto& layout : layouts) layout = {};
         return {pdu_result.status, 0U, *required};
+    }
+    for (std::size_t index = 0U; index < frame.pdu.asdus.size() && index < layouts.size(); ++index) {
+        shift_layout(layouts[index], pdu_offset);
     }
     offset += pdu_result.bytes_written;
     return {wire::EncodeStatus::ok, offset, *required};

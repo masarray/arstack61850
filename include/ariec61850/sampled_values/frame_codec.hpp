@@ -3,6 +3,7 @@
 #pragma once
 
 #include "ariec61850/sampled_values/frame.hpp"
+#include "ariec61850/sampled_values/pdu_codec.hpp"
 #include "ariec61850/wire/encode_result.hpp"
 
 #include <cstddef>
@@ -21,6 +22,13 @@ public:
     [[nodiscard]] static wire::EncodeResult encode_into(
         const SampledValuesFrame& frame,
         std::span<std::uint8_t> destination) noexcept;
+
+    // Layout offsets returned here are absolute offsets into the encoded
+    // Ethernet frame. Empty layout span disables metadata collection.
+    [[nodiscard]] static wire::EncodeResult encode_into_with_layout(
+        const SampledValuesFrame& frame,
+        std::span<std::uint8_t> destination,
+        std::span<SampledValueAsduEncodeLayout> layouts) noexcept;
 
     // Host convenience wrapper. Embedded SV publishers should use encode_into
     // with a persistent Ethernet-sized buffer.

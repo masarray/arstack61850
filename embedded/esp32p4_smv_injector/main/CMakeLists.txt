@@ -38,9 +38,3 @@ if(CONFIG_AR_PTP_LAB_TX)
         "-Dar_ptp_lab_get_status=ar_ptp_source_get_status")
 endif()
 
-# Only the deterministic SV publisher translation unit is intercepted. The shim
-# patches the already encoded smpSynch byte immediately before transmit; PTP and
-# every other Ethernet user continue calling ESP-IDF's esp_eth_transmit directly.
-set_property(SOURCE "app_main.cpp" APPEND PROPERTY COMPILE_OPTIONS
-    "-include" "${CMAKE_CURRENT_LIST_DIR}/smp_synch_lab.hpp"
-    "-DAR_SMP_SYNCH_INTERCEPT_TX=1")
