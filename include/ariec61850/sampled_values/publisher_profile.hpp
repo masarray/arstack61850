@@ -3,6 +3,7 @@
 #pragma once
 
 #include "ariec61850/ethernet/ethernet.hpp"
+#include "ariec61850/sampled_values/profile_family.hpp"
 #include "ariec61850/sampled_values/timing_semantics.hpp"
 #include "ariec61850/scl/model.hpp"
 
@@ -50,6 +51,10 @@ struct SvPublisherChannel final {
 };
 
 struct SvPublisherProfileCompileContext final {
+    // Profile family is never inferred from vendor, filename, svID or DataSet
+    // shape. Unspecified remains inspectable but non-deployable.
+    SvProfileFamily profile_family{SvProfileFamily::unspecified};
+
     // SCL describes sampling semantics but does not universally establish
     // every runtime sample-counter wrap policy. A standards/profile rule or
     // independently observed evidence may validate a modulus explicitly.
@@ -61,13 +66,17 @@ struct SvPublisherProfileCompileContext final {
 };
 
 struct SvPublisherProfile final {
-    std::uint32_t schema_version{2U};
+    std::uint32_t schema_version{3U};
     std::string control_block_reference;
     std::string sv_id;
     std::string data_set_reference;
 
     std::array<std::uint8_t, 6> destination_mac{};
     std::uint16_t app_id{};
+    SvTransportMode transport_mode{SvTransportMode::multicast};
+    SvProfileFamily profile_family{SvProfileFamily::unspecified};
+    SvProfileFamilyResolution profile_family_resolution{
+        SvProfileFamilyResolution::unresolved};
     bool vlan_present{};
     std::uint16_t vlan_id{};
     std::uint8_t vlan_priority{};
@@ -83,6 +92,119 @@ struct SvPublisherProfile final {
 
     friend bool operator==(const SvPublisherProfile&, const SvPublisherProfile&) = default;
 };
+
+namespace detail {
+[[nodiscard]] inline std::string profile_lower_copy(const std::string_view text) {
+    std::string result;
+    result.reserve(text.size());
+    for (const char ch : text) {
+        result.push_back(static_cast<char>(
+            std::tolower(static_cast<unsigned char>(ch))));
+    }
+    return result;
+}
+
+[[nodiscard]] inline bool profile_reference_matches_either(
+    const std::string_view reference,
+    const std::string_view canonical,
+    const std::string_view legacy_9_2le) {
+    return reference.find(canonical) != std::string_view::npos ||
+           reference.find(legacy_9_2le) != std::string_view::npos;
+}
+} // namespace detail
+
+// Shared semantic authority for the proven fixed 9-2LE-style 4I+4V layout.
+// Device classifiers consume this instead of maintaining a second copy.
+[[nodiscard]] inline bool legacy_9_2le_4i4v_layout_matches(
+    const SvPublisherProfile& profile) {
+    if (profile.payload_size_bytes != 64U || profile.channels.size() != 16U) {
+        return false;
+    }
+
+    constexpr std::array<std::string_view, 8> expected_values{
+        "tctr1.amp.instmag.i",
+        "tctr2.amp.instmag.i",
+        "tctr3.amp.instmag.i",
+        "tctr4.amp.instmag.i",
+        "tvtr1.vol.instmag.i",
+        "tvtr2.vol.instmag.i",
+        "tvtr3.vol.instmag.i",
+        "tvtr4.vol.instmag.i",
+    };
+    constexpr std::array<std::string_view, 8> expected_values_9_2le{
+        "tctr1.ampsv.instmag.i",
+        "tctr2.ampsv.instmag.i",
+        "tctr3.ampsv.instmag.i",
+        "tctr4.ampsv.instmag.i",
+        "tvtr1.volsv.instmag.i",
+        "tvtr2.volsv.instmag.i",
+        "tvtr3.volsv.instmag.i",
+        "tvtr4.volsv.instmag.i",
+    };
+    constexpr std::array<std::string_view, 8> expected_qualities{
+        "tctr1.amp.q",
+        "tctr2.amp.q",
+        "tctr3.amp.q",
+        "tctr4.amp.q",
+        "tvtr1.vol.q",
+        "tvtr2.vol.q",
+        "tvtr3.vol.q",
+        "tvtr4.vol.q",
+    };
+    constexpr std::array<std::string_view, 8> expected_qualities_9_2le{
+        "tctr1.ampsv.q",
+        "tctr2.ampsv.q",
+        "tctr3.ampsv.q",
+        "tctr4.ampsv.q",
+        "tvtr1.volsv.q",
+        "tvtr2.volsv.q",
+        "tvtr3.volsv.q",
+        "tvtr4.volsv.q",
+    };
+
+    for (std::size_t i = 0U; i < profile.channels.size(); ++i) {
+        const auto& channel = profile.channels[i];
+        if (channel.wire_width_bytes != 4U) return false;
+        if ((i % 2U) == 0U) {
+            if (channel.is_quality ||
+                detail::profile_lower_copy(channel.basic_type) != "int32") {
+                return false;
+            }
+        } else if (!channel.is_quality) {
+            return false;
+        }
+    }
+
+    for (std::size_t signal = 0U; signal < expected_values.size(); ++signal) {
+        const auto value_reference = detail::profile_lower_copy(
+            profile.channels[signal * 2U].signal_reference);
+        const auto quality_reference = detail::profile_lower_copy(
+            profile.channels[signal * 2U + 1U].signal_reference);
+        if (!detail::profile_reference_matches_either(
+                value_reference,
+                expected_values[signal],
+                expected_values_9_2le[signal]) ||
+            !detail::profile_reference_matches_either(
+                quality_reference,
+                expected_qualities[signal],
+                expected_qualities_9_2le[signal])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] inline bool legacy_9_2le_timing_matches(
+    const SvPublicationTiming& timing) noexcept {
+    if (!timing.resolved()) return true;
+    const auto sample_rate = timing.exact_sample_rate_hz();
+    if (!sample_rate.has_value()) return false;
+    const auto asdus = timing.asdus_per_frame;
+    return (*sample_rate == 4000U && asdus == 1U) ||
+           (*sample_rate == 4800U && asdus == 1U) ||
+           (*sample_rate == 12800U && asdus == 8U) ||
+           (*sample_rate == 15360U && asdus == 8U);
+}
 
 struct SvPublisherProfileCompileResult final {
     std::optional<SvPublisherProfile> profile;
@@ -104,6 +226,9 @@ public:
 
         profile.control_block_reference = stream.control_block_reference;
         profile.sv_id = stream.sv_id.empty() ? stream.smv_id : stream.sv_id;
+        profile.profile_family = context.profile_family;
+        profile.transport_mode =
+            stream.multicast ? SvTransportMode::multicast : SvTransportMode::unicast;
         profile.data_set_reference = stream.data_set_reference;
         profile.configuration_revision = stream.configuration_revision;
         profile.timing = resolve_sv_publication_timing(
@@ -117,11 +242,25 @@ public:
             result.errors.push_back("SV stream has no valid destination MAC address.");
         } else {
             profile.destination_mac = *stream.address.destination_mac;
+            if (profile.transport_mode == SvTransportMode::multicast) {
+                if (!is_iec_sv_multicast_mac(profile.destination_mac)) {
+                    result.errors.push_back(
+                        "Multicast SV destination MAC must be within "
+                        "01-0C-CD-04-00-00..01-0C-CD-04-01-FF.");
+                }
+            } else if (!is_valid_sv_unicast_mac(profile.destination_mac)) {
+                result.errors.push_back(
+                    "Unicast SV destination MAC must be a nonzero unicast Ethernet address.");
+            }
         }
         if (!stream.address.app_id.has_value()) {
             result.errors.push_back("SV stream has no valid APPID.");
         } else {
             profile.app_id = *stream.address.app_id;
+            if (!is_valid_sv_app_id(profile.app_id)) {
+                result.errors.push_back(
+                    "SV APPID must be within the IEC 61850-9-2 allocation 0x4000..0x7FFF.");
+            }
         }
 
         const bool has_vlan_id = stream.address.vlan_id.has_value();
@@ -224,6 +363,7 @@ public:
             });
         }
         profile.payload_size_bytes = payload_size;
+        apply_profile_family_rules(profile, result);
 
         if (result.errors.empty()) {
             result.profile = std::move(profile);
@@ -233,13 +373,7 @@ public:
 
 private:
     [[nodiscard]] static std::string lower_copy(const std::string_view text) {
-        std::string result;
-        result.reserve(text.size());
-        for (const char ch : text) {
-            result.push_back(static_cast<char>(
-                std::tolower(static_cast<unsigned char>(ch))));
-        }
-        return result;
+        return detail::profile_lower_copy(text);
     }
 
     [[nodiscard]] static SvSampleMode parse_sample_mode(const std::string_view text) {
@@ -284,6 +418,68 @@ private:
             return static_cast<std::uint16_t>(8U);
         }
         return std::nullopt;
+    }
+
+    static void apply_profile_family_rules(
+        SvPublisherProfile& profile,
+        SvPublisherProfileCompileResult& result) {
+        switch (profile.profile_family) {
+        case SvProfileFamily::unspecified:
+            profile.profile_family_resolution = SvProfileFamilyResolution::unresolved;
+            result.warnings.push_back(
+                "SV profile family is unspecified; select IEC 61850-9-2, "
+                "legacy 9-2LE, or IEC 61869-9 explicitly before deployment.");
+            return;
+
+        case SvProfileFamily::iec61850_9_2:
+            profile.profile_family_resolution = SvProfileFamilyResolution::resolved;
+            return;
+
+        case SvProfileFamily::legacy_9_2le: {
+            bool valid = true;
+            if (profile.transport_mode != SvTransportMode::multicast) {
+                result.errors.push_back(
+                    "Legacy 9-2LE compatibility target requires multicast Sampled Values.");
+                valid = false;
+            }
+            if (profile.app_id != 0x4000U) {
+                result.errors.push_back(
+                    "Legacy 9-2LE compatibility target requires APPID 0x4000.");
+                valid = false;
+            }
+            if (!legacy_9_2le_4i4v_layout_matches(profile)) {
+                result.errors.push_back(
+                    "Legacy 9-2LE compatibility target requires the fixed 4I+4V "
+                    "INT32+Quality DataSet layout.");
+                valid = false;
+            }
+            if (!legacy_9_2le_timing_matches(profile.timing)) {
+                result.errors.push_back(
+                    "Legacy 9-2LE compatibility target requires the supported "
+                    "80/256 samples-per-cycle packetization families.");
+                valid = false;
+            }
+            profile.profile_family_resolution = valid
+                ? SvProfileFamilyResolution::resolved
+                : SvProfileFamilyResolution::unresolved;
+            if (valid) {
+                result.warnings.push_back(
+                    "Legacy 9-2LE compatibility rules are applied as an explicit "
+                    "interoperability target; this is not a formal UCA conformance claim.");
+            }
+            return;
+        }
+
+        case SvProfileFamily::iec61869_9:
+            // P1.1 deliberately stops at transport/address family identity.
+            // Scaling, configurable variant constraints and full IEC 61869-9
+            // dataset rules are a later authority and must not be guessed here.
+            profile.profile_family_resolution = SvProfileFamilyResolution::incomplete;
+            result.warnings.push_back(
+                "IEC 61869-9 family selected: transport/address semantics are represented, "
+                "but scaling and variant rules are not yet complete; deployment remains blocked.");
+            return;
+        }
     }
 
     [[nodiscard]] static SvAsduOptions compile_options(

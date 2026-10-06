@@ -8,6 +8,19 @@
                             ? data_set->entries
                             : data_set->expanded_entries;
                     }
+                    const auto multicast_text = attribute(control, "multicast");
+                    if (multicast_text.empty() || same(multicast_text, "true")) {
+                        stream.multicast = true;
+                    } else if (same(multicast_text, "false")) {
+                        stream.multicast = false;
+                    } else {
+                        document.warnings.push_back(
+                            "SV " + stream.control_block_reference +
+                            " has invalid multicast='" + multicast_text +
+                            "'; IEC 61850-6 default true retained.");
+                        stream.multicast = true;
+                    }
+
                     stream.sample_rate = ushort_attribute(*control, "smpRate");
                     stream.sample_mode = attribute(control, "smpMod");
                     stream.no_asdu = std::max<std::uint16_t>(

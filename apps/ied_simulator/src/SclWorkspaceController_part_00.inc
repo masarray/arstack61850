@@ -173,7 +173,8 @@ bool sampledValuesEquivalent(
             lhs.data_set_name != rhs.data_set_name || lhs.data_set_reference != rhs.data_set_reference ||
             lhs.configuration_revision != rhs.configuration_revision || !(lhs.address == rhs.address) ||
             !entriesEquivalent(lhs.entries, rhs.entries) || lhs.sv_id != rhs.sv_id ||
-            lhs.smv_id != rhs.smv_id || lhs.sample_rate != rhs.sample_rate ||
+            lhs.smv_id != rhs.smv_id || lhs.multicast != rhs.multicast ||
+            lhs.sample_rate != rhs.sample_rate ||
             lhs.sample_mode != rhs.sample_mode || lhs.no_asdu != rhs.no_asdu ||
             !(lhs.smv_options == rhs.smv_options)) {
             return false;

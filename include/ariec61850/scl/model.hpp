@@ -168,6 +168,12 @@ struct SclSmvOptions final {
 struct SclSampledValuesStream final : SclProcessBusStream {
     std::string sv_id;
     std::string smv_id;
+
+    // IEC 61850-6 SampledValueControl@multicast defaults to true when omitted.
+    // Preserve the resolved engineering semantic so exporters/profile compilers
+    // do not silently force one transport mode.
+    bool multicast{true};
+
     std::uint16_t sample_rate{};
     std::string sample_mode;
     std::uint16_t no_asdu{1U};

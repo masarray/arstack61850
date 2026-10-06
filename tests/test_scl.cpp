@@ -197,6 +197,7 @@ void parser_compiles_structured_4800_sv_profile_without_drift() {
     }
 
     SvPublisherProfileCompileContext context;
+    context.profile_family = SvProfileFamily::iec61850_9_2;
     context.sample_counter_modulus = static_cast<std::uint16_t>(4800U);
     const auto compiled = SvPublisherProfileCompiler::compile(stream, context);
     CHECK(compiled.ok());
@@ -206,7 +207,10 @@ void parser_compiles_structured_4800_sv_profile_without_drift() {
     CHECK(profile.vlan_present);
     CHECK(profile.vlan_id == 0U);
     CHECK(profile.vlan_priority == 4U);
-    CHECK(profile.schema_version == 2U);
+    CHECK(profile.schema_version == 3U);
+    CHECK(profile.profile_family == SvProfileFamily::iec61850_9_2);
+    CHECK(profile.profile_family_resolution == SvProfileFamilyResolution::resolved);
+    CHECK(profile.transport_mode == SvTransportMode::multicast);
     CHECK(profile.configuration_revision == 100U);
     CHECK(profile.timing.sampling_basis == SvSampleMode::samples_per_second);
     CHECK(profile.timing.configured_sample_rate == 4800U);
@@ -282,6 +286,7 @@ void publisher_profile_separates_sampling_from_frame_cadence() {
     const auto source = document.sampled_values_streams.front();
 
     SvPublisherProfileCompileContext context;
+    context.profile_family = SvProfileFamily::iec61850_9_2;
     context.sample_counter_modulus = static_cast<std::uint16_t>(4800U);
 
     auto two_asdu = source;
@@ -396,6 +401,106 @@ void publisher_profile_separates_sampling_from_frame_cadence() {
           SvSampleMode::seconds_per_sample);
     CHECK(legacy_slow_stream.profile->timing.samples_per_second ==
           slow_stream.profile->timing.samples_per_second);
+}
+
+void sampled_values_profile_family_and_transport_are_explicit() {
+    using namespace ar::iec61850::sampled_values;
+    using namespace ar::iec61850::scl;
+
+    const auto document = SclParser{}.load(fixture("sv-4800-structured-4i4v.scd"));
+    CHECK(document.sampled_values_streams.size() == 1U);
+    const auto source = document.sampled_values_streams.front();
+    CHECK(source.multicast);
+
+    SvPublisherProfileCompileContext context;
+    context.profile_family = SvProfileFamily::iec61850_9_2;
+    context.sample_counter_modulus = static_cast<std::uint16_t>(4800U);
+
+    const auto generic = SvPublisherProfileCompiler::compile(source, context);
+    CHECK(generic.ok());
+    CHECK(generic.profile.has_value());
+    CHECK(generic.profile->profile_family == SvProfileFamily::iec61850_9_2);
+    CHECK(generic.profile->profile_family_resolution == SvProfileFamilyResolution::resolved);
+    CHECK(generic.profile->transport_mode == SvTransportMode::multicast);
+    CHECK(is_valid_sv_app_id(generic.profile->app_id));
+    CHECK(is_iec_sv_multicast_mac(generic.profile->destination_mac));
+
+    auto unicast = source;
+    unicast.multicast = false;
+    unicast.address.destination_mac =
+        std::array<std::uint8_t, 6>{0x02U, 0x00U, 0x00U, 0x00U, 0x00U, 0x01U};
+    unicast.address.destination_mac_text = "02:00:00:00:00:01";
+    const auto unicast_compiled = SvPublisherProfileCompiler::compile(unicast, context);
+    CHECK(unicast_compiled.ok());
+    CHECK(unicast_compiled.profile.has_value());
+    CHECK(unicast_compiled.profile->transport_mode == SvTransportMode::unicast);
+
+    auto bad_multicast = source;
+    bad_multicast.address.destination_mac =
+        std::array<std::uint8_t, 6>{0x01U, 0x0CU, 0xCDU, 0x05U, 0x00U, 0x01U};
+    CHECK(!SvPublisherProfileCompiler::compile(bad_multicast, context).ok());
+
+    auto bad_unicast = source;
+    bad_unicast.multicast = false;
+    CHECK(!SvPublisherProfileCompiler::compile(bad_unicast, context).ok());
+
+    auto bad_appid = source;
+    bad_appid.address.app_id = static_cast<std::uint16_t>(0x3FFFU);
+    CHECK(!SvPublisherProfileCompiler::compile(bad_appid, context).ok());
+
+    context.profile_family = SvProfileFamily::legacy_9_2le;
+    CHECK(!SvPublisherProfileCompiler::compile(source, context).ok());
+
+    auto legacy = source;
+    legacy.address.app_id = static_cast<std::uint16_t>(0x4000U);
+    legacy.address.app_id_text = "4000";
+    const auto legacy_result = SvPublisherProfileCompiler::compile(legacy, context);
+    CHECK(legacy_result.ok());
+    CHECK(legacy_result.profile.has_value());
+    CHECK(legacy_result.profile->profile_family_resolution ==
+          SvProfileFamilyResolution::resolved);
+    CHECK(legacy_9_2le_4i4v_layout_matches(*legacy_result.profile));
+    CHECK(legacy_9_2le_timing_matches(legacy_result.profile->timing));
+
+    context.profile_family = SvProfileFamily::iec61869_9;
+    const auto iec61869 = SvPublisherProfileCompiler::compile(source, context);
+    CHECK(iec61869.ok());
+    CHECK(iec61869.profile.has_value());
+    CHECK(iec61869.profile->profile_family_resolution ==
+          SvProfileFamilyResolution::incomplete);
+    CHECK(std::any_of(
+        iec61869.warnings.begin(), iec61869.warnings.end(),
+        [](const std::string& warning) {
+            return warning.find("deployment remains blocked") != std::string::npos;
+        }));
+
+    context.profile_family = SvProfileFamily::unspecified;
+    const auto unspecified = SvPublisherProfileCompiler::compile(source, context);
+    CHECK(unspecified.ok());
+    CHECK(unspecified.profile.has_value());
+    CHECK(unspecified.profile->profile_family_resolution ==
+          SvProfileFamilyResolution::unresolved);
+}
+
+void parser_preserves_sampled_value_multicast_semantics() {
+    using namespace ar::iec61850::scl;
+
+    constexpr std::string_view xml = R"xml(
+<SCL xmlns="http://www.iec.ch/61850/2003/SCL" version="2007" revision="B">
+  <IED name="IED1"><AccessPoint><Server><LDevice inst="LD0">
+    <LN0 lnClass="LLN0">
+      <SampledValueControl name="UCAST" smvID="UCAST" smpRate="4000"
+          smpMod="SmpPerSec" nofASDU="1" multicast="false"/>
+      <SampledValueControl name="DEFAULT" smvID="DEFAULT" smpRate="4000"
+          smpMod="SmpPerSec" nofASDU="1"/>
+    </LN0>
+  </LDevice></Server></AccessPoint></IED>
+</SCL>)xml";
+
+    const auto document = SclParser{}.parse(xml, "sv-transport.scd");
+    CHECK(document.sampled_values_streams.size() == 2U);
+    CHECK(!document.sampled_values_streams[0].multicast);
+    CHECK(document.sampled_values_streams[1].multicast);
 }
 
 void dataset_reference_resolver_accepts_canonical_and_local_forms() {
@@ -679,6 +784,8 @@ int main() {
         {"SCL multi-stream", parser_extracts_multiple_sampled_values_streams_and_conflicts},
         {"SCL structured 4800 SV profile", parser_compiles_structured_4800_sv_profile_without_drift},
         {"SV sampling and frame cadence semantics", publisher_profile_separates_sampling_from_frame_cadence},
+        {"SV profile family and transport semantics", sampled_values_profile_family_and_transport_are_explicit},
+        {"SCL SV multicast semantics", parser_preserves_sampled_value_multicast_semantics},
         {"SCL dataset references", dataset_reference_resolver_accepts_canonical_and_local_forms},
         {"SCL configured control model", parser_preserves_configured_control_model_value},
         {"Simulator semantic defaults and indexed RCBs", simulator_compiles_semantic_defaults_and_indexed_report_instances},
