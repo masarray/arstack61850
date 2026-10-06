@@ -28,7 +28,8 @@ void write_u16_be(
 
 [[nodiscard]] std::optional<std::uint16_t> vlan_tci(
     const ethernet::VlanTag& vlan) noexcept {
-    if (vlan.priority_code_point > 7U || vlan.vlan_id > 4094U) {
+    if (!ethernet::is_valid_vlan_priority(vlan.priority_code_point) ||
+        !ethernet::is_valid_vlan_id(vlan.vlan_id)) {
         return std::nullopt;
     }
     const auto value =

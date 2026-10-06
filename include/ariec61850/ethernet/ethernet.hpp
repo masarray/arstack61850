@@ -16,6 +16,20 @@ inline constexpr std::uint16_t goose_ethertype = 0x88B8;
 inline constexpr std::uint16_t sampled_values_ethertype = 0x88BA;
 inline constexpr std::uint16_t ptp_ethertype = 0x88F7;
 
+// IEEE 802.1Q VID 4095 is reserved. VID 0 remains valid at the generic
+// Ethernet layer for priority-tagged frames; profile-specific users may impose
+// a narrower policy without changing the wire invariant.
+inline constexpr std::uint16_t maximum_vlan_id = 4094U;
+inline constexpr std::uint8_t maximum_vlan_priority = 7U;
+
+[[nodiscard]] constexpr bool is_valid_vlan_id(const std::uint16_t vlan_id) noexcept {
+    return vlan_id <= maximum_vlan_id;
+}
+
+[[nodiscard]] constexpr bool is_valid_vlan_priority(const std::uint8_t priority) noexcept {
+    return priority <= maximum_vlan_priority;
+}
+
 class MacAddress final {
 public:
     MacAddress() = default;

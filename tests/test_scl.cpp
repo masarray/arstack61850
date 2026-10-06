@@ -216,6 +216,24 @@ void parser_compiles_structured_4800_sv_profile_without_drift() {
     CHECK(profile.payload_size_bytes == 64U);
     CHECK(profile.asdu_options.element_present);
 
+    auto maximum_vlan_stream = stream;
+    maximum_vlan_stream.address.vlan_id = static_cast<std::uint16_t>(4094U);
+    const auto maximum_vlan = SvPublisherProfileCompiler::compile(maximum_vlan_stream, context);
+    CHECK(maximum_vlan.ok());
+    CHECK(maximum_vlan.profile.has_value());
+    CHECK(maximum_vlan.profile->vlan_id == 4094U);
+
+    auto reserved_vlan_stream = stream;
+    reserved_vlan_stream.address.vlan_id = static_cast<std::uint16_t>(4095U);
+    const auto reserved_vlan = SvPublisherProfileCompiler::compile(reserved_vlan_stream, context);
+    CHECK(!reserved_vlan.ok());
+    CHECK(!reserved_vlan.profile.has_value());
+    CHECK(std::any_of(
+        reserved_vlan.errors.begin(), reserved_vlan.errors.end(),
+        [](const std::string& error) {
+            return error.find("0..4094") != std::string::npos;
+        }));
+
     RationalTickSchedule schedule_4800{1'000'000U, 4800U};
     std::uint64_t total_ticks{};
     std::uint32_t intervals_208{};

@@ -115,10 +115,10 @@ std::string MacAddress::to_string() const {
 }
 
 std::uint16_t VlanTag::to_tag_control_information() const {
-    if (priority_code_point > 7U) {
+    if (!is_valid_vlan_priority(priority_code_point)) {
         throw std::out_of_range("VLAN priority must be 0..7.");
     }
-    if (vlan_id > 4094U) {
+    if (!is_valid_vlan_id(vlan_id)) {
         throw std::out_of_range("VLAN ID must be 0..4094.");
     }
 
@@ -182,7 +182,7 @@ bool EthernetFrameCodec::try_decode(const std::span<const std::uint8_t> bytes,
             VlanTag::from_tag_control_information(read_u16_be(bytes, 14U));
         // IEEE 802.1Q reserves VID 4095. Keep try_decode closed under encode:
         // every successfully decoded VlanTag must be valid for re-encoding.
-        if (decoded_vlan.vlan_id > 4094U) {
+        if (!is_valid_vlan_id(decoded_vlan.vlan_id)) {
             return false;
         }
         vlan = decoded_vlan;
