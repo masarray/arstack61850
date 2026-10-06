@@ -39,6 +39,13 @@ inline bool validate_model(
             return false;
         }
     }
+    for (const auto& stream : document.sampled_values_streams) {
+        if (!stream.multicast_valid) {
+            error = "Canonical SCL export rejected " + stream.control_block_reference +
+                ": SampledValueControl@multicast was explicitly malformed in the source.";
+            return false;
+        }
+    }
     for (const auto& entry : document.model_entries) {
         if (entry.ied_name.empty() || entry.ld_inst.empty() || entry.ln_class.empty() ||
             entry.do_name.empty() || entry.da_name.empty() ||

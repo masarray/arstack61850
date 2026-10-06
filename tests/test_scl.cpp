@@ -484,6 +484,7 @@ void sampled_values_profile_family_and_transport_are_explicit() {
 }
 
 void parser_preserves_sampled_value_multicast_semantics() {
+    using namespace ar::iec61850::sampled_values;
     using namespace ar::iec61850::scl;
 
     constexpr std::string_view xml = R"xml(
@@ -494,14 +495,33 @@ void parser_preserves_sampled_value_multicast_semantics() {
           smpMod="SmpPerSec" nofASDU="1" multicast="false"/>
       <SampledValueControl name="DEFAULT" smvID="DEFAULT" smpRate="4000"
           smpMod="SmpPerSec" nofASDU="1"/>
+      <SampledValueControl name="MALFORMED" smvID="MALFORMED" smpRate="4000"
+          smpMod="SmpPerSec" nofASDU="1" multicast="bogus"/>
     </LN0>
   </LDevice></Server></AccessPoint></IED>
 </SCL>)xml";
 
     const auto document = SclParser{}.parse(xml, "sv-transport.scd");
-    CHECK(document.sampled_values_streams.size() == 2U);
+    CHECK(document.sampled_values_streams.size() == 3U);
     CHECK(!document.sampled_values_streams[0].multicast);
+    CHECK(document.sampled_values_streams[0].multicast_valid);
     CHECK(document.sampled_values_streams[1].multicast);
+    CHECK(document.sampled_values_streams[1].multicast_valid);
+    CHECK(document.sampled_values_streams[2].multicast);
+    CHECK(!document.sampled_values_streams[2].multicast_valid);
+    CHECK(std::any_of(document.warnings.begin(), document.warnings.end(), [](const std::string& warning) {
+        return warning.find("multicast='bogus'") != std::string::npos &&
+               warning.find("deployment/export is blocked") != std::string::npos;
+    }));
+
+    SvPublisherProfileCompileContext malformed_context;
+    malformed_context.profile_family = SvProfileFamily::iec61850_9_2;
+    const auto malformed = SvPublisherProfileCompiler::compile(
+        document.sampled_values_streams[2], malformed_context);
+    CHECK(!malformed.ok());
+    CHECK(std::any_of(malformed.errors.begin(), malformed.errors.end(), [](const std::string& error) {
+        return error.find("invalid explicit multicast attribute") != std::string::npos;
+    }));
 
     auto canonical_document =
         SclParser{}.load(fixture("sv-4800-structured-4i4v.scd"));
@@ -516,6 +536,12 @@ void parser_preserves_sampled_value_multicast_semantics() {
     const auto reparsed = SclParser{}.parse(exported.xml, "sv-transport-roundtrip.scd");
     CHECK(reparsed.sampled_values_streams.size() == 1U);
     CHECK(!reparsed.sampled_values_streams.front().multicast);
+    CHECK(reparsed.sampled_values_streams.front().multicast_valid);
+
+    canonical_document.sampled_values_streams.front().multicast_valid = false;
+    const auto invalid_export = SclExporter::canonical(canonical_document, options);
+    CHECK(!invalid_export.success);
+    CHECK(invalid_export.error.find("multicast was explicitly malformed") != std::string::npos);
 }
 
 void dataset_reference_resolver_accepts_canonical_and_local_forms() {

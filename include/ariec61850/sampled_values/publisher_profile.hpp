@@ -229,6 +229,11 @@ public:
         profile.profile_family = context.profile_family;
         profile.transport_mode =
             stream.multicast ? SvTransportMode::multicast : SvTransportMode::unicast;
+        if (!stream.multicast_valid) {
+            result.errors.push_back(
+                "SV SampledValueControl has an invalid explicit multicast attribute; "
+                "transport mode must not be inferred from malformed engineering input.");
+        }
         profile.data_set_reference = stream.data_set_reference;
         profile.configuration_revision = stream.configuration_revision;
         profile.timing = resolve_sv_publication_timing(
