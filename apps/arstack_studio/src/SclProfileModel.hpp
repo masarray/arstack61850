@@ -64,6 +64,7 @@ public:
     Q_INVOKABLE void clearCounterConfirmation();
     Q_INVOKABLE bool confirmNominalFrequencyHz(int frequencyHz);
     Q_INVOKABLE void clearNominalFrequency();
+    Q_INVOKABLE bool selectProfileFamily(const QString& familyKey);
 
 signals:
     void sourceChanged();
@@ -91,6 +92,8 @@ private:
     std::optional<ar::iec61850::scl::SclDocument> document_;
     std::optional<std::uint16_t> confirmedCounterModulus_;
     std::optional<std::uint32_t> confirmedNominalFrequencyMilliHz_;
+    ar::iec61850::sampled_values::SvProfileFamily profileFamily_{
+        ar::iec61850::sampled_values::SvProfileFamily::unspecified};
     std::vector<Row> rows_;
     int selectedIndex_{-1};
     QString fatalError_;

@@ -3,6 +3,7 @@
 #include "ariec61850/sampled_values/publisher_profile.hpp"
 #include "ariec61850/sampled_values/rational_schedule.hpp"
 #include "ariec61850/scl/dataset_reference.hpp"
+#include "ariec61850/scl/exporter.hpp"
 #include "ariec61850/scl/parser.hpp"
 #include "ariec61850/simulation/ied_simulator_profile.hpp"
 
@@ -501,6 +502,20 @@ void parser_preserves_sampled_value_multicast_semantics() {
     CHECK(document.sampled_values_streams.size() == 2U);
     CHECK(!document.sampled_values_streams[0].multicast);
     CHECK(document.sampled_values_streams[1].multicast);
+
+    auto canonical_document =
+        SclParser{}.load(fixture("sv-4800-structured-4i4v.scd"));
+    CHECK(canonical_document.sampled_values_streams.size() == 1U);
+    canonical_document.sampled_values_streams.front().multicast = false;
+    SclCanonicalExportOptions options;
+    options.edition = canonical_document.edition;
+    options.profile = SclExportProfile::scd;
+    const auto exported = SclExporter::canonical(canonical_document, options);
+    CHECK(exported.success);
+    CHECK(exported.xml.find("multicast=\"false\"") != std::string::npos);
+    const auto reparsed = SclParser{}.parse(exported.xml, "sv-transport-roundtrip.scd");
+    CHECK(reparsed.sampled_values_streams.size() == 1U);
+    CHECK(!reparsed.sampled_values_streams.front().multicast);
 }
 
 void dataset_reference_resolver_accepts_canonical_and_local_forms() {

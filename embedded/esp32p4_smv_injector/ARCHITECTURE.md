@@ -52,7 +52,8 @@ The current physically exercised flow is:
 engineering file
     -> C++ SCL parser
     -> resolved SV stream
-    -> Class A after required counter-policy confirmation
+    -> explicit profile-family selection
+    -> Class A after family/timing/counter-policy resolution
     -> Deploy while STOPPED
     -> ESP32-P4 profile commit
     -> START
@@ -82,6 +83,8 @@ SvPublisherProfile
   dataSetReference
   destinationMac
   appId
+  transportMode
+  profileFamily / familyResolution
   vlanPresent / vlanId / vlanPriority
   confRev
   configuredSampleRate / samplingBasis
@@ -94,6 +97,8 @@ SvPublisherProfile
 
 The first embedded bridge intentionally supports a bounded subset:
 
+- an explicitly resolved supported profile family; unresolved family context fails closed;
+- IEC 61869-9 remains non-deployable until its scaling/variant authority is complete;
 - one ASDU per Ethernet frame;
 - resolved absolute sample cadence and frame cadence from `SmpPerSec`;
 - explicit validated sample-counter modulus;

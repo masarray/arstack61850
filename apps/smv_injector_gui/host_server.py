@@ -94,6 +94,12 @@ class Handler(SimpleHTTPRequestHandler):
         body = self.rfile.read(length)
         query = urllib.parse.parse_qs(parsed.query)
         counter = query.get("counterModulus", [None])[0]
+        profile_family = query.get("profileFamily", [None])[0]
+        if profile_family is not None and profile_family not in {
+            "iec61850-9-2", "9-2le", "iec61869-9"
+        }:
+            self._json(400, {"fatalError": "Unsupported SV profile family."})
+            return
         if counter is not None:
             try:
                 value = int(counter, 10)
@@ -114,6 +120,8 @@ class Handler(SimpleHTTPRequestHandler):
                 temp_path = pathlib.Path(handle.name)
 
             command = [str(self.server.profile_tool), str(temp_path)]
+            if profile_family is not None:
+                command += ["--profile-family", profile_family]
             if counter is not None:
                 command += ["--counter-modulus", counter]
             completed = subprocess.run(

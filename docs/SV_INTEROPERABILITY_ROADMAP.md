@@ -97,11 +97,14 @@ The practical product rule is: **parse broadly, explain normalization, deploy na
 4. **Optional fields are profile data.** `SmvOpts` is preserved so canonical ASDU field presence is not inferred from what a particular analyzer prefers.
 5. **Timing is rational, not truncated.** A requested rate such as 4800 samples/s must not become a fixed 208 us period. The scheduler distributes integer timer ticks so long-term rate has no truncation drift.
 6. **Sampling cadence is not frame cadence.** `SmpRate` and `SmpMod` define sampling semantics; `nofASDU` defines how many consecutive ASDUs are carried by one publication. The host derives both samples/s and Ethernet frames/s explicitly instead of storing one ambiguous publisher rate.
-7. **Counter policy is independently validated.** `SmpPerSec` can establish sample cadence, but it must not be treated as universal proof of the `smpCnt` wrap rule. A rate-sized modulus may be shown as a candidate for inspection; device deployment requires an applicable profile rule or observed-evidence confirmation.
-8. **Synchronization is evidence-driven.** Configuration and packet shape cannot promote `smpSynch`; measured clock state controls synchronization claims.
-9. **Diagnostic traffic is separate.** Bench mirrors/probes must never change canonical stream identity or semantics.
-10. **Regression evidence is vendor-neutral.** Real lab configurations may inform anonymous fixtures, but proprietary configuration files, commercial names and product comparisons are not committed.
-11. **Tolerance is bounded.** Representation quirks can be normalized when equivalence is known; unresolved mandatory semantics remain non-deployable.
+7. **Transport intent is preserved.** `SampledValueControl@multicast` is engineering data. Missing means the IEC 61850-6 default `true`; an explicit `false` remains unicast through parse, compile and export rather than being rewritten as multicast.
+8. **Profile family is explicit.** Generic IEC 61850-9-2, legacy 9-2LE compatibility and IEC 61869-9 are separate rule families. ARStack never selects one from vendor, filename, `svID` or DataSet shape.
+9. **SV addressing is standards-gated.** APPID must be in the SV allocation `0x4000..0x7FFF`; multicast SV uses the IEC SV multicast MAC block, while unicast requires a nonzero unicast destination.
+10. **Counter policy is independently validated.** `SmpPerSec` can establish sample cadence, but it must not be treated as universal proof of the `smpCnt` wrap rule. A rate-sized modulus may be shown as a candidate for inspection; device deployment requires an applicable profile rule or observed-evidence confirmation.
+11. **Synchronization is evidence-driven.** Configuration and packet shape cannot promote `smpSynch`; measured clock state controls synchronization claims.
+12. **Diagnostic traffic is separate.** Bench mirrors/probes must never change canonical stream identity or semantics.
+13. **Regression evidence is vendor-neutral.** Real lab configurations may inform anonymous fixtures, but proprietary configuration files, commercial names and product comparisons are not committed.
+14. **Tolerance is bounded.** Representation quirks can be normalized when equivalence is known; unresolved mandatory semantics remain non-deployable.
 
 ## Compatibility classes
 
@@ -109,7 +112,9 @@ The practical product rule is: **parse broadly, explain normalization, deploy na
 
 A stream can be compiled completely:
 
-- destination MAC and APPID resolved;
+- destination MAC and APPID resolved and valid for the configured SV transport;
+- multicast/unicast intent preserved from engineering data;
+- profile family explicitly selected and its implemented rules resolved;
 - VLAN binding either complete or absent;
 - svID resolved;
 - sample rate/mode understood;
@@ -129,7 +134,8 @@ The stream is structurally understood but deployment needs additional context. E
 - samples-per-period mode without nominal system frequency;
 - an unresolved sample-counter wrap policy;
 - a capture-derived runtime behavior that conflicts with an older engineering file;
-- a profile family whose optional-field semantics require an explicit selection.
+- a profile family that has not been selected explicitly;
+- IEC 61869-9 selected before its scaling/variant rules are completely implemented and evidenced.
 
 Class B is not guessed. The host UI/CLI must request, resolve or validate the missing context explicitly before deployment.
 

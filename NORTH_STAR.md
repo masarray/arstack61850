@@ -102,11 +102,13 @@ ARStack must track standards explicitly rather than use “IEC 61850” as a gen
 | Redundancy | IEC 62439-3 | PRP/HSR observation, publication and validation roadmap |
 | IEC 61850 security | IEC 62351-6 | Security-aware future protocol/tooling boundary |
 
-Profile labels are not interchangeable:
+Profile labels are not interchangeable and are never inferred from vendor, filename, `svID`, or DataSet shape:
 
-1. **Generic IEC 61850-9-2 / SCL-driven** — exact selected SCL stream drives the output.
-2. **IEC 61869-9** — only when its constraints are explicitly implemented and evidenced.
+1. **Generic IEC 61850-9-2 / SCL-driven** — exact selected SCL stream and its multicast/unicast engineering intent drive the output.
+2. **IEC 61869-9** — representable as an explicit family, but deployable only when its scaling/variant constraints are explicitly implemented and evidenced.
 3. **Legacy 9-2LE compatibility** — an explicit compatibility mode, never silently promoted to the generic standard.
+
+SV link identity is also gated independently: APPID belongs to the SV allocation and multicast publication must use the IEC Sampled Values multicast MAC block. Device capability remains a separate gate from standards/profile validity.
 
 ## 5. Core architecture principles
 
