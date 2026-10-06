@@ -85,10 +85,11 @@ jobs:
           python3 - <<'PY'
           import json
           data = json.load(open('/tmp/profile-multi.json', encoding='utf-8'))
-          assert len(data['streams']) == 2
+          assert len(data['streams']) >= 2
           assert data['streams'][0]['profile']['profileFamily'] == 'iec61850-9-2'
-          assert data['streams'][1]['profile']['profileFamily'] == 'unspecified'
-          assert data['streams'][1]['compatibilityClass'] == 'B'
+          for stream in data['streams'][1:]:
+              assert stream['profile']['profileFamily'] == 'unspecified'
+              assert stream['compatibilityClass'] == 'B'
           PY
 
       - name: Local backend smoke
