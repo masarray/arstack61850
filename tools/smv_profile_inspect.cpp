@@ -144,6 +144,12 @@ void emit_profile(std::ostream& out, const SvPublisherProfile& p) {
     out << "\"frameRateDenominator\":";
     if (p.timing.frames_per_second) out << p.timing.frames_per_second->denominator; else out << "null";
     out << ',';
+    out << "\"sampleRateHz\":";
+    if (const auto rate = p.timing.exact_sample_rate_hz()) out << *rate; else out << "null";
+    out << ',';
+    out << "\"frameRateHz\":";
+    if (const auto rate = p.timing.exact_frame_rate_hz()) out << *rate; else out << "null";
+    out << ',';
     out << "\"publisherRateHz\":";
     if (const auto rate = p.timing.exact_frame_rate_hz()) out << *rate; else out << "null";
     out << ',';
@@ -181,7 +187,8 @@ void emit_profile(std::ostream& out, const SvPublisherProfile& p) {
 void emit_document(
     std::ostream& out,
     const SclDocument& document,
-    const std::optional<std::uint16_t> counter_modulus) {
+    const std::optional<std::uint16_t> counter_modulus,
+    const std::optional<std::uint32_t> nominal_frequency_millihz) {
     out << '{';
     out << "\"schemaVersion\":2,";
     out << "\"source\":"; quoted(out, document.source_name); out << ',';
@@ -205,6 +212,7 @@ void emit_document(
         const auto& stream = document.sampled_values_streams[index];
         SvPublisherProfileCompileContext context;
         context.sample_counter_modulus = counter_modulus;
+        context.nominal_frequency_millihz = nominal_frequency_millihz;
         const auto compiled = SvPublisherProfileCompiler::compile(stream, context);
 
         std::string compatibility{"C"};
@@ -235,6 +243,16 @@ void emit_document(
     out << "]}";
 }
 
+std::optional<std::uint32_t> parse_u32_nonzero(const std::string_view text) {
+    try {
+        const auto value = std::stoull(std::string{text});
+        if (value == 0U || value > std::numeric_limits<std::uint32_t>::max()) return std::nullopt;
+        return static_cast<std::uint32_t>(value);
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
 std::optional<std::uint16_t> parse_u16(const std::string_view text) {
     try {
         const auto value = std::stoul(std::string{text});
@@ -248,11 +266,12 @@ std::optional<std::uint16_t> parse_u16(const std::string_view text) {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cerr << "usage: ariec61850_smv_profile_inspect <SCL-file> [--counter-modulus N]\n";
+        std::cerr << "usage: ariec61850_smv_profile_inspect <SCL-file> [--counter-modulus N] [--nominal-frequency-hz N]\n";
         return 2;
     }
 
     std::optional<std::uint16_t> counter_modulus;
+    std::optional<std::uint32_t> nominal_frequency_millihz;
     for (int i = 2; i < argc; ++i) {
         if (std::string_view{argv[i]} == "--counter-modulus" && i + 1 < argc) {
             counter_modulus = parse_u16(argv[++i]);
@@ -260,6 +279,13 @@ int main(int argc, char** argv) {
                 std::cerr << "invalid counter modulus\n";
                 return 2;
             }
+        } else if (std::string_view{argv[i]} == "--nominal-frequency-hz" && i + 1 < argc) {
+            const auto frequency_hz = parse_u32_nonzero(argv[++i]);
+            if (!frequency_hz || *frequency_hz > std::numeric_limits<std::uint32_t>::max() / 1000U) {
+                std::cerr << "invalid nominal frequency\n";
+                return 2;
+            }
+            nominal_frequency_millihz = *frequency_hz * 1000U;
         } else {
             std::cerr << "unknown argument\n";
             return 2;
@@ -269,7 +295,7 @@ int main(int argc, char** argv) {
     try {
         const auto document = ar::iec61850::scl::SclParser{}.load(
             std::filesystem::path{argv[1]});
-        emit_document(std::cout, document, counter_modulus);
+        emit_document(std::cout, document, counter_modulus, nominal_frequency_millihz);
         std::cout << '\n';
         return 0;
     } catch (const std::exception& error) {

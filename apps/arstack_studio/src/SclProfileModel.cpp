@@ -192,6 +192,7 @@ void SclProfileModel::installDocument(
     confirmedCounterModulus_ = referenceTemplate
         ? std::optional<std::uint16_t>{kReferenceCounterModulus}
         : std::nullopt;
+    confirmedNominalFrequencyMilliHz_.reset();
     rows_.clear();
     selectedIndex_ = -1;
     fatalError_.clear();
@@ -252,6 +253,7 @@ void SclProfileModel::clear() {
     beginResetModel();
     document_.reset();
     confirmedCounterModulus_.reset();
+    confirmedNominalFrequencyMilliHz_.reset();
     rows_.clear();
     selectedIndex_ = -1;
     fatalError_.clear();
@@ -284,6 +286,19 @@ void SclProfileModel::clearCounterConfirmation() {
     rebuildRows();
 }
 
+bool SclProfileModel::confirmNominalFrequencyHz(const int frequencyHz) {
+    if (!document_.has_value() || frequencyHz <= 0 || frequencyHz > 1000) return false;
+    confirmedNominalFrequencyMilliHz_ = static_cast<std::uint32_t>(frequencyHz) * 1000U;
+    rebuildRows();
+    return true;
+}
+
+void SclProfileModel::clearNominalFrequency() {
+    if (!confirmedNominalFrequencyMilliHz_.has_value()) return;
+    confirmedNominalFrequencyMilliHz_.reset();
+    rebuildRows();
+}
+
 void SclProfileModel::rebuildRows() {
     if (!document_.has_value()) return;
 
@@ -295,6 +310,7 @@ void SclProfileModel::rebuildRows() {
     for (const auto& stream : document_->sampled_values_streams) {
         SvPublisherProfileCompileContext context;
         context.sample_counter_modulus = confirmedCounterModulus_;
+        context.nominal_frequency_millihz = confirmedNominalFrequencyMilliHz_;
         auto compiled = SvPublisherProfileCompiler::compile(stream, context);
 
         Row row;
@@ -367,7 +383,16 @@ QVariantMap SclProfileModel::profileToVariantMap(const SvPublisherProfile& p) co
         p.timing.frames_per_second.has_value()
             ? QVariant::fromValue(static_cast<qulonglong>(p.timing.frames_per_second->denominator))
             : QVariant{});
+    const auto sampleRateHz = p.timing.exact_sample_rate_hz();
     const auto frameRate = p.timing.exact_frame_rate_hz();
+    map.insert(QStringLiteral("sampleRateHz"),
+        sampleRateHz.has_value()
+            ? QVariant::fromValue(static_cast<qulonglong>(*sampleRateHz))
+            : QVariant{});
+    map.insert(QStringLiteral("frameRateHz"),
+        frameRate.has_value()
+            ? QVariant::fromValue(static_cast<qulonglong>(*frameRate))
+            : QVariant{});
     map.insert(QStringLiteral("publisherRate"),
         frameRate.has_value()
             ? QVariant::fromValue(static_cast<qulonglong>(*frameRate))
