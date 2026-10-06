@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -196,7 +197,8 @@ void emit_profile(std::ostream& out, const SvPublisherProfile& p) {
 void emit_document(
     std::ostream& out,
     const SclDocument& document,
-    const SvProfileFamily profile_family,
+    const SvProfileFamily default_profile_family,
+    const std::map<std::size_t, SvProfileFamily>& stream_profile_families,
     const std::optional<std::uint16_t> counter_modulus,
     const std::optional<std::uint32_t> nominal_frequency_millihz) {
     out << '{';
@@ -221,7 +223,10 @@ void emit_document(
         if (index != 0U) out << ',';
         const auto& stream = document.sampled_values_streams[index];
         SvPublisherProfileCompileContext context;
-        context.profile_family = profile_family;
+        const auto selected_family = stream_profile_families.find(index);
+        context.profile_family = selected_family != stream_profile_families.end()
+            ? selected_family->second
+            : default_profile_family;
         context.sample_counter_modulus = counter_modulus;
         context.nominal_frequency_millihz = nominal_frequency_millihz;
         const auto compiled = SvPublisherProfileCompiler::compile(stream, context);
@@ -263,6 +268,29 @@ std::optional<SvProfileFamily> parse_profile_family(const std::string_view text)
     return std::nullopt;
 }
 
+std::optional<std::pair<std::size_t, SvProfileFamily>> parse_stream_profile_family(
+    const std::string_view text) {
+    const auto separator = text.find(':');
+    if (separator == std::string_view::npos || separator == 0U ||
+        separator + 1U >= text.size()) {
+        return std::nullopt;
+    }
+    try {
+        const auto index_value = std::stoull(std::string{text.substr(0U, separator)});
+        if (index_value > std::numeric_limits<std::size_t>::max()) {
+            return std::nullopt;
+        }
+        const auto family = parse_profile_family(text.substr(separator + 1U));
+        if (!family.has_value() || *family == SvProfileFamily::unspecified) {
+            return std::nullopt;
+        }
+        return std::pair<std::size_t, SvProfileFamily>{
+            static_cast<std::size_t>(index_value), *family};
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
 std::optional<std::uint32_t> parse_u32_nonzero(const std::string_view text) {
     try {
         const auto value = std::stoull(std::string{text});
@@ -286,11 +314,12 @@ std::optional<std::uint16_t> parse_u16(const std::string_view text) {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cerr << "usage: ariec61850_smv_profile_inspect <SCL-file> [--profile-family iec61850-9-2|9-2le|iec61869-9] [--counter-modulus N] [--nominal-frequency-hz N]\n";
+        std::cerr << "usage: ariec61850_smv_profile_inspect <SCL-file> [--profile-family FAMILY] [--stream-profile-family INDEX:FAMILY] [--counter-modulus N] [--nominal-frequency-hz N]\n";
         return 2;
     }
 
     SvProfileFamily profile_family = SvProfileFamily::unspecified;
+    std::map<std::size_t, SvProfileFamily> stream_profile_families;
     std::optional<std::uint16_t> counter_modulus;
     std::optional<std::uint32_t> nominal_frequency_millihz;
     for (int i = 2; i < argc; ++i) {
@@ -301,6 +330,13 @@ int main(int argc, char** argv) {
                 return 2;
             }
             profile_family = *parsed;
+        } else if (std::string_view{argv[i]} == "--stream-profile-family" && i + 1 < argc) {
+            const auto parsed = parse_stream_profile_family(argv[++i]);
+            if (!parsed.has_value()) {
+                std::cerr << "invalid stream profile family\n";
+                return 2;
+            }
+            stream_profile_families[parsed->first] = parsed->second;
         } else if (std::string_view{argv[i]} == "--counter-modulus" && i + 1 < argc) {
             counter_modulus = parse_u16(argv[++i]);
             if (!counter_modulus) {
@@ -323,8 +359,16 @@ int main(int argc, char** argv) {
     try {
         const auto document = ar::iec61850::scl::SclParser{}.load(
             std::filesystem::path{argv[1]});
+        for (const auto& [index, family] : stream_profile_families) {
+            (void)family;
+            if (index >= document.sampled_values_streams.size()) {
+                std::cerr << "stream profile family index out of range\n";
+                return 2;
+            }
+        }
         emit_document(
-            std::cout, document, profile_family, counter_modulus, nominal_frequency_millihz);
+            std::cout, document, profile_family, stream_profile_families,
+            counter_modulus, nominal_frequency_millihz);
         std::cout << '\n';
         return 0;
     } catch (const std::exception& error) {

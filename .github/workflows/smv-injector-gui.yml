@@ -80,6 +80,17 @@ jobs:
           grep -q '"profileFamilyResolution":"incomplete"' /tmp/profile-61869.json
           grep -q '"deviceSupport":"unsupported-profile-family"' /tmp/profile-61869.json
 
+          multi=tests/fixtures/scl/compact-multi-stream.scd
+          build-smv-gui/ariec61850_smv_profile_inspect "$multi" --stream-profile-family 0:iec61850-9-2 --counter-modulus 4000 > /tmp/profile-multi.json
+          python3 - <<'PY'
+          import json
+          data = json.load(open('/tmp/profile-multi.json', encoding='utf-8'))
+          assert len(data['streams']) == 2
+          assert data['streams'][0]['profile']['profileFamily'] == 'iec61850-9-2'
+          assert data['streams'][1]['profile']['profileFamily'] == 'unspecified'
+          assert data['streams'][1]['compatibilityClass'] == 'B'
+          PY
+
       - name: Local backend smoke
         shell: bash
         run: |
@@ -94,7 +105,7 @@ jobs:
           curl --fail --silent -X POST \
             -H 'X-File-Name: fixture.scd' \
             --data-binary @tests/fixtures/scl/sv-4800-structured-4i4v.scd \
-            'http://127.0.0.1:8765/api/scl/inspect?counterModulus=4800&profileFamily=iec61850-9-2' >/tmp/api.json
+            'http://127.0.0.1:8765/api/scl/inspect?counterModulus=4800&profileFamilies=0:iec61850-9-2' >/tmp/api.json
           grep -q '"deviceSupport":"ready"' /tmp/api.json
 
   windows-launcher-smoke:

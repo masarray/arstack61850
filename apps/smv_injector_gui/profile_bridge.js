@@ -4,7 +4,7 @@ const profileBridge = {
   file: null,
   inspection: null,
   selectedIndex: 0,
-  profileFamily: "",
+  profileFamilies: {},
   deployed: false,
   deploying: false,
   currentCountsPerAmp: 1000,
@@ -82,7 +82,9 @@ function installProfileUi() {
     renderProfileSelection();
   });
   $("profileFamilySelect").addEventListener("change", async () => {
-    profileBridge.profileFamily = $("profileFamilySelect").value;
+    const family = $("profileFamilySelect").value;
+    if (family) profileBridge.profileFamilies[profileBridge.selectedIndex] = family;
+    else delete profileBridge.profileFamilies[profileBridge.selectedIndex];
     profileBridge.deployed = false;
     await inspectEngineeringFile(null);
   });
@@ -95,7 +97,7 @@ function installProfileUi() {
     const file = els.sclFile.files?.[0];
     if (!file) return;
     profileBridge.file = file;
-    profileBridge.profileFamily = "";
+    profileBridge.profileFamilies = {};
     $("profileFamilySelect").value = "";
     profileBridge.deployed = false;
     await inspectEngineeringFile(null);
@@ -161,7 +163,11 @@ async function inspectEngineeringFile(counterModulus) {
   try {
     const query = new URLSearchParams();
     if (counterModulus) query.set("counterModulus", String(counterModulus));
-    if (profileBridge.profileFamily) query.set("profileFamily", profileBridge.profileFamily);
+    const familyOverrides = Object.entries(profileBridge.profileFamilies)
+      .filter(([, family]) => Boolean(family))
+      .map(([index, family]) => `${index}:${family}`)
+      .join(",");
+    if (familyOverrides) query.set("profileFamilies", familyOverrides);
     const suffix = query.toString() ? `?${query.toString()}` : "";
     const response = await fetch(`/api/scl/inspect${suffix}`, {
       method: "POST",
@@ -218,9 +224,9 @@ function renderProfileSelection() {
   }
 
   $("bridgeTitle").textContent = p.svID || stream.controlBlockReference || "SV profile";
-  $("profileFamilySelect").value = p.profileFamily === "unspecified"
-    ? profileBridge.profileFamily
-    : p.profileFamily;
+  $("profileFamilySelect").value =
+    profileBridge.profileFamilies[profileBridge.selectedIndex]
+    || (p.profileFamily === "unspecified" ? "" : p.profileFamily);
   $("compatBadge").textContent = `CLASS ${stream.compatibilityClass}`;
   $("compatBadge").dataset.class = stream.compatibilityClass;
   $("bridgeMac").textContent = p.destinationMac;

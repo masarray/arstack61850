@@ -52,8 +52,8 @@ The current physically exercised flow is:
 engineering file
     -> C++ SCL parser
     -> resolved SV stream
-    -> explicit profile-family selection
-    -> Class A after family/timing/counter-policy resolution
+    -> explicit per-stream profile-family selection
+    -> Class A after that stream's family/timing/counter-policy resolution
     -> Deploy while STOPPED
     -> ESP32-P4 profile commit
     -> START

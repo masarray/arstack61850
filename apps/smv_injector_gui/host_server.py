@@ -95,11 +95,20 @@ class Handler(SimpleHTTPRequestHandler):
         query = urllib.parse.parse_qs(parsed.query)
         counter = query.get("counterModulus", [None])[0]
         profile_family = query.get("profileFamily", [None])[0]
-        if profile_family is not None and profile_family not in {
-            "iec61850-9-2", "9-2le", "iec61869-9"
-        }:
+        allowed_families = {"iec61850-9-2", "9-2le", "iec61869-9"}
+        if profile_family is not None and profile_family not in allowed_families:
             self._json(400, {"fatalError": "Unsupported SV profile family."})
             return
+        stream_family_tokens = []
+        family_overrides = query.get("profileFamilies", [None])[0]
+        if family_overrides:
+            for token in family_overrides.split(","):
+                index, separator, family = token.partition(":")
+                if (not separator or not index.isdigit() or
+                        family not in allowed_families):
+                    self._json(400, {"fatalError": "Invalid per-stream SV profile family."})
+                    return
+                stream_family_tokens.append(f"{int(index)}:{family}")
         if counter is not None:
             try:
                 value = int(counter, 10)
@@ -122,6 +131,8 @@ class Handler(SimpleHTTPRequestHandler):
             command = [str(self.server.profile_tool), str(temp_path)]
             if profile_family is not None:
                 command += ["--profile-family", profile_family]
+            for token in stream_family_tokens:
+                command += ["--stream-profile-family", token]
             if counter is not None:
                 command += ["--counter-modulus", counter]
             completed = subprocess.run(

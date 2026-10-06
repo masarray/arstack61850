@@ -208,9 +208,10 @@ void SclProfileModel::installDocument(
         ? std::optional<std::uint16_t>{kReferenceCounterModulus}
         : std::nullopt;
     confirmedNominalFrequencyMilliHz_.reset();
-    profileFamily_ = referenceTemplate
-        ? SvProfileFamily::legacy_9_2le
-        : SvProfileFamily::unspecified;
+    profileFamilies_.assign(
+        document_->sampled_values_streams.size(),
+        referenceTemplate ? SvProfileFamily::legacy_9_2le
+                          : SvProfileFamily::unspecified);
     rows_.clear();
     selectedIndex_ = -1;
     fatalError_.clear();
@@ -272,7 +273,7 @@ void SclProfileModel::clear() {
     document_.reset();
     confirmedCounterModulus_.reset();
     confirmedNominalFrequencyMilliHz_.reset();
-    profileFamily_ = SvProfileFamily::unspecified;
+    profileFamilies_.clear();
     rows_.clear();
     selectedIndex_ = -1;
     fatalError_.clear();
@@ -319,7 +320,10 @@ void SclProfileModel::clearNominalFrequency() {
 }
 
 bool SclProfileModel::selectProfileFamily(const QString& familyKey) {
-    if (!document_.has_value()) return false;
+    if (!document_.has_value() || selectedIndex_ < 0 ||
+        selectedIndex_ >= static_cast<int>(profileFamilies_.size())) {
+        return false;
+    }
     const auto key = familyKey.trimmed().toLower();
     SvProfileFamily selected = SvProfileFamily::unspecified;
     if (key.isEmpty() || key == QStringLiteral("unspecified")) {
@@ -339,8 +343,9 @@ bool SclProfileModel::selectProfileFamily(const QString& familyKey) {
     if (referenceTemplateActive_ && selected != SvProfileFamily::legacy_9_2le) {
         return false;
     }
-    if (profileFamily_ == selected) return true;
-    profileFamily_ = selected;
+    auto& current = profileFamilies_[static_cast<std::size_t>(selectedIndex_)];
+    if (current == selected) return true;
+    current = selected;
     rebuildRows();
     return true;
 }
@@ -353,9 +358,13 @@ void SclProfileModel::rebuildRows() {
     rows_.clear();
     rows_.reserve(document_->sampled_values_streams.size());
 
-    for (const auto& stream : document_->sampled_values_streams) {
+    for (std::size_t streamIndex = 0U;
+         streamIndex < document_->sampled_values_streams.size(); ++streamIndex) {
+        const auto& stream = document_->sampled_values_streams[streamIndex];
         SvPublisherProfileCompileContext context;
-        context.profile_family = profileFamily_;
+        context.profile_family = streamIndex < profileFamilies_.size()
+            ? profileFamilies_[streamIndex]
+            : SvProfileFamily::unspecified;
         context.sample_counter_modulus = confirmedCounterModulus_;
         context.nominal_frequency_millihz = confirmedNominalFrequencyMilliHz_;
         auto compiled = SvPublisherProfileCompiler::compile(stream, context);
