@@ -20,6 +20,7 @@ using ar::iec61850::sampled_values::SvPublisherProfileCompileContext;
 using ar::iec61850::sampled_values::SvPublisherProfileCompiler;
 using ar::iec61850::sampled_values::SvSampleCounterPolicy;
 using ar::iec61850::sampled_values::SvSampleMode;
+using ar::iec61850::sampled_values::SvTimingResolution;
 using ar::iec61850::sampled_values::classify_esp32p4_sv_profile;
 using ar::iec61850::sampled_values::esp32p4_sv_profile_support_name;
 using ar::iec61850::scl::SclDocument;
@@ -77,8 +78,22 @@ std::string sample_mode_name(const SvSampleMode mode) {
     switch (mode) {
     case SvSampleMode::samples_per_second: return "SmpPerSec";
     case SvSampleMode::samples_per_period: return "SmpPerPeriod";
+    case SvSampleMode::seconds_per_sample: return "SecPerSample";
     default: return "unknown";
     }
+}
+
+std::string timing_resolution_name(const SvTimingResolution resolution) {
+    switch (resolution) {
+    case SvTimingResolution::resolved: return "resolved";
+    case SvTimingResolution::needs_nominal_frequency: return "needs-nominal-frequency";
+    case SvTimingResolution::invalid_sample_rate: return "invalid-sample-rate";
+    case SvTimingResolution::invalid_asdu_count: return "invalid-asdu-count";
+    case SvTimingResolution::unsupported_sample_mode: return "unsupported-sample-mode";
+    case SvTimingResolution::invalid_nominal_frequency: return "invalid-nominal-frequency";
+    case SvTimingResolution::arithmetic_overflow: return "arithmetic-overflow";
+    }
+    return "unsupported-sample-mode";
 }
 
 std::string counter_policy_name(const SvSampleCounterPolicy policy) {
@@ -111,12 +126,28 @@ void emit_profile(std::ostream& out, const SvPublisherProfile& p) {
     out << "\"vlanID\":" << p.vlan_id << ',';
     out << "\"vlanPriority\":" << static_cast<unsigned>(p.vlan_priority) << ',';
     out << "\"confRev\":" << p.configuration_revision << ',';
-    out << "\"sampleRate\":" << p.sample_rate_value << ',';
-    out << "\"sampleMode\":"; quoted(out, sample_mode_name(p.sample_mode)); out << ',';
-    out << "\"publisherRateHz\":";
-    if (p.publisher_rate_hz) out << *p.publisher_rate_hz; else out << "null";
+    out << "\"sampleRate\":" << p.timing.configured_sample_rate << ',';
+    out << "\"sampleMode\":"; quoted(out, sample_mode_name(p.timing.sampling_basis)); out << ',';
+    out << "\"timingResolution\":"; quoted(out, timing_resolution_name(p.timing.resolution)); out << ',';
+    out << "\"nominalFrequencyMilliHz\":";
+    if (p.timing.nominal_frequency_millihz) out << *p.timing.nominal_frequency_millihz; else out << "null";
     out << ',';
-    out << "\"nofASDU\":" << p.no_asdu << ',';
+    out << "\"sampleRatePerSecondNumerator\":";
+    if (p.timing.samples_per_second) out << p.timing.samples_per_second->numerator; else out << "null";
+    out << ',';
+    out << "\"sampleRatePerSecondDenominator\":";
+    if (p.timing.samples_per_second) out << p.timing.samples_per_second->denominator; else out << "null";
+    out << ',';
+    out << "\"frameRateNumerator\":";
+    if (p.timing.frames_per_second) out << p.timing.frames_per_second->numerator; else out << "null";
+    out << ',';
+    out << "\"frameRateDenominator\":";
+    if (p.timing.frames_per_second) out << p.timing.frames_per_second->denominator; else out << "null";
+    out << ',';
+    out << "\"publisherRateHz\":";
+    if (const auto rate = p.timing.exact_frame_rate_hz()) out << *rate; else out << "null";
+    out << ',';
+    out << "\"nofASDU\":" << p.timing.asdus_per_frame << ',';
     out << "\"counterPolicy\":"; quoted(out, counter_policy_name(p.sample_counter_policy)); out << ',';
     out << "\"counterModulus\":";
     if (p.sample_counter_modulus) out << *p.sample_counter_modulus; else out << "null";
@@ -152,7 +183,7 @@ void emit_document(
     const SclDocument& document,
     const std::optional<std::uint16_t> counter_modulus) {
     out << '{';
-    out << "\"schemaVersion\":1,";
+    out << "\"schemaVersion\":2,";
     out << "\"source\":"; quoted(out, document.source_name); out << ',';
     out << "\"edition\":"; quoted(out, edition_name(document.edition)); out << ',';
     out << "\"headerID\":"; quoted(out, document.header_id); out << ',';
@@ -180,8 +211,10 @@ void emit_document(
         std::string device_support{"blocked"};
         if (compiled.ok()) {
             const auto& profile = *compiled.profile;
-            compatibility = profile.sample_counter_policy == SvSampleCounterPolicy::explicit_modulus
-                ? "A" : "B";
+            compatibility =
+                profile.timing.resolved() &&
+                profile.sample_counter_policy == SvSampleCounterPolicy::explicit_modulus
+                    ? "A" : "B";
             device_support = std::string{
                 esp32p4_sv_profile_support_name(classify_esp32p4_sv_profile(profile))};
         }

@@ -28,7 +28,7 @@ DataSet + type resolver                       |
                            |
                            +-- L2 address / VLAN / APPID
                            +-- svID / confRev / nofASDU
-                           +-- sample-rate and sample-mode semantics
+                           +-- sampling basis / sample cadence / ASDU packetization / frame cadence
                            +-- SmvOpts field-presence policy
                            +-- ordered wire leaf layout
                            +-- validated sample-counter policy
@@ -96,11 +96,12 @@ The practical product rule is: **parse broadly, explain normalization, deploy na
 3. **Unsupported means rejected, not guessed.** Unknown basic types, ambiguous DataSet bindings, incomplete address bindings and unresolved structures must produce explicit diagnostics.
 4. **Optional fields are profile data.** `SmvOpts` is preserved so canonical ASDU field presence is not inferred from what a particular analyzer prefers.
 5. **Timing is rational, not truncated.** A requested rate such as 4800 samples/s must not become a fixed 208 us period. The scheduler distributes integer timer ticks so long-term rate has no truncation drift.
-6. **Counter policy is independently validated.** `SmpPerSec` can establish publisher rate, but it must not be treated as universal proof of the `smpCnt` wrap rule. A rate-sized modulus may be shown as a candidate for inspection; device deployment requires an applicable profile rule or observed-evidence confirmation.
-7. **Synchronization is evidence-driven.** Configuration and packet shape cannot promote `smpSynch`; measured clock state controls synchronization claims.
-8. **Diagnostic traffic is separate.** Bench mirrors/probes must never change canonical stream identity or semantics.
-9. **Regression evidence is vendor-neutral.** Real lab configurations may inform anonymous fixtures, but proprietary configuration files, commercial names and product comparisons are not committed.
-10. **Tolerance is bounded.** Representation quirks can be normalized when equivalence is known; unresolved mandatory semantics remain non-deployable.
+6. **Sampling cadence is not frame cadence.** `SmpRate` and `SmpMod` define sampling semantics; `nofASDU` defines how many consecutive ASDUs are carried by one publication. The host derives both samples/s and Ethernet frames/s explicitly instead of storing one ambiguous publisher rate.
+7. **Counter policy is independently validated.** `SmpPerSec` can establish sample cadence, but it must not be treated as universal proof of the `smpCnt` wrap rule. A rate-sized modulus may be shown as a candidate for inspection; device deployment requires an applicable profile rule or observed-evidence confirmation.
+8. **Synchronization is evidence-driven.** Configuration and packet shape cannot promote `smpSynch`; measured clock state controls synchronization claims.
+9. **Diagnostic traffic is separate.** Bench mirrors/probes must never change canonical stream identity or semantics.
+10. **Regression evidence is vendor-neutral.** Real lab configurations may inform anonymous fixtures, but proprietary configuration files, commercial names and product comparisons are not committed.
+11. **Tolerance is bounded.** Representation quirks can be normalized when equivalence is known; unresolved mandatory semantics remain non-deployable.
 
 ## Compatibility classes
 

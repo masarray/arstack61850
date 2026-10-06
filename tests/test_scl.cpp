@@ -206,9 +206,19 @@ void parser_compiles_structured_4800_sv_profile_without_drift() {
     CHECK(profile.vlan_present);
     CHECK(profile.vlan_id == 0U);
     CHECK(profile.vlan_priority == 4U);
+    CHECK(profile.schema_version == 2U);
     CHECK(profile.configuration_revision == 100U);
-    CHECK(profile.sample_mode == SvSampleMode::samples_per_second);
-    CHECK(profile.publisher_rate_hz == std::optional<std::uint32_t>{4800U});
+    CHECK(profile.timing.sampling_basis == SvSampleMode::samples_per_second);
+    CHECK(profile.timing.configured_sample_rate == 4800U);
+    CHECK(profile.timing.asdus_per_frame == 1U);
+    CHECK(profile.timing.resolved());
+    CHECK(profile.timing.samples_per_second.has_value());
+    CHECK(profile.timing.samples_per_second->numerator == 4800U);
+    CHECK(profile.timing.samples_per_second->denominator == 1U);
+    CHECK(profile.timing.frames_per_second.has_value());
+    CHECK(profile.timing.frames_per_second->numerator == 4800U);
+    CHECK(profile.timing.frames_per_second->denominator == 1U);
+    CHECK(profile.timing.exact_frame_rate_hz() == std::optional<std::uint32_t>{4800U});
     CHECK(profile.sample_counter_policy == SvSampleCounterPolicy::explicit_modulus);
     CHECK(profile.sample_counter_modulus == std::optional<std::uint16_t>{
         static_cast<std::uint16_t>(4800U)});
@@ -261,6 +271,120 @@ void parser_compiles_structured_4800_sv_profile_without_drift() {
         total_ticks += interval;
     }
     CHECK(total_ticks == 1'000'000U);
+}
+
+void publisher_profile_separates_sampling_from_frame_cadence() {
+    using namespace ar::iec61850::sampled_values;
+    using namespace ar::iec61850::scl;
+
+    const auto document = SclParser{}.load(fixture("sv-4800-structured-4i4v.scd"));
+    CHECK(document.sampled_values_streams.size() == 1U);
+    const auto source = document.sampled_values_streams.front();
+
+    SvPublisherProfileCompileContext context;
+    context.sample_counter_modulus = static_cast<std::uint16_t>(4800U);
+
+    auto two_asdu = source;
+    two_asdu.no_asdu = 2U;
+    const auto two_asdu_compiled = SvPublisherProfileCompiler::compile(two_asdu, context);
+    CHECK(two_asdu_compiled.ok());
+    CHECK(two_asdu_compiled.profile.has_value());
+    const auto& two_asdu_timing = two_asdu_compiled.profile->timing;
+    CHECK(two_asdu_timing.configured_sample_rate == 4800U);
+    CHECK(two_asdu_timing.asdus_per_frame == 2U);
+    CHECK(two_asdu_timing.exact_sample_rate_hz() == std::optional<std::uint32_t>{4800U});
+    CHECK(two_asdu_timing.exact_frame_rate_hz() == std::optional<std::uint32_t>{2400U});
+
+    auto six_asdu = source;
+    six_asdu.sample_rate = 14400U;
+    six_asdu.no_asdu = 6U;
+    context.sample_counter_modulus = static_cast<std::uint16_t>(14400U);
+    const auto six_asdu_compiled = SvPublisherProfileCompiler::compile(six_asdu, context);
+    CHECK(six_asdu_compiled.ok());
+    CHECK(six_asdu_compiled.profile.has_value());
+    CHECK(six_asdu_compiled.profile->timing.exact_sample_rate_hz() ==
+          std::optional<std::uint32_t>{14400U});
+    CHECK(six_asdu_compiled.profile->timing.exact_frame_rate_hz() ==
+          std::optional<std::uint32_t>{2400U});
+
+    auto per_period = source;
+    per_period.sample_mode = "SmpPerPeriod";
+    per_period.sample_rate = 80U;
+    per_period.no_asdu = 1U;
+    context.sample_counter_modulus = static_cast<std::uint16_t>(4000U);
+    context.nominal_frequency_millihz.reset();
+    const auto unresolved = SvPublisherProfileCompiler::compile(per_period, context);
+    CHECK(unresolved.ok());
+    CHECK(unresolved.profile.has_value());
+    CHECK(unresolved.profile->timing.resolution ==
+          SvTimingResolution::needs_nominal_frequency);
+    CHECK(!unresolved.profile->timing.samples_per_second.has_value());
+    CHECK(!unresolved.profile->timing.frames_per_second.has_value());
+    CHECK(std::any_of(
+        unresolved.warnings.begin(), unresolved.warnings.end(),
+        [](const std::string& warning) {
+            return warning.find("nominal-system-frequency") != std::string::npos;
+        }));
+
+    auto default_per_period = per_period;
+    default_per_period.sample_mode.clear();
+    const auto default_mode = SvPublisherProfileCompiler::compile(default_per_period, context);
+    CHECK(default_mode.ok());
+    CHECK(default_mode.profile.has_value());
+    CHECK(default_mode.profile->timing.sampling_basis == SvSampleMode::samples_per_period);
+    CHECK(default_mode.profile->timing.resolution ==
+          SvTimingResolution::needs_nominal_frequency);
+
+    context.nominal_frequency_millihz = 50000U;
+    const auto fifty_hz = SvPublisherProfileCompiler::compile(per_period, context);
+    CHECK(fifty_hz.ok());
+    CHECK(fifty_hz.profile.has_value());
+    CHECK(fifty_hz.profile->timing.resolved());
+    CHECK(fifty_hz.profile->timing.exact_sample_rate_hz() ==
+          std::optional<std::uint32_t>{4000U});
+    CHECK(fifty_hz.profile->timing.exact_frame_rate_hz() ==
+          std::optional<std::uint32_t>{4000U});
+
+    context.nominal_frequency_millihz = 60000U;
+    context.sample_counter_modulus = static_cast<std::uint16_t>(4800U);
+    const auto sixty_hz = SvPublisherProfileCompiler::compile(per_period, context);
+    CHECK(sixty_hz.ok());
+    CHECK(sixty_hz.profile.has_value());
+    CHECK(sixty_hz.profile->timing.exact_sample_rate_hz() ==
+          std::optional<std::uint32_t>{4800U});
+    CHECK(sixty_hz.profile->timing.exact_frame_rate_hz() ==
+          std::optional<std::uint32_t>{4800U});
+
+    auto eight_asdu = per_period;
+    eight_asdu.sample_rate = 256U;
+    eight_asdu.no_asdu = 8U;
+    context.nominal_frequency_millihz = 50000U;
+    context.sample_counter_modulus = static_cast<std::uint16_t>(12800U);
+    const auto legacy_measurement = SvPublisherProfileCompiler::compile(eight_asdu, context);
+    CHECK(legacy_measurement.ok());
+    CHECK(legacy_measurement.profile.has_value());
+    CHECK(legacy_measurement.profile->timing.exact_sample_rate_hz() ==
+          std::optional<std::uint32_t>{12800U});
+    CHECK(legacy_measurement.profile->timing.exact_frame_rate_hz() ==
+          std::optional<std::uint32_t>{1600U});
+
+    auto seconds_per_sample = source;
+    seconds_per_sample.sample_mode = "SecPerSample";
+    seconds_per_sample.sample_rate = 2U;
+    seconds_per_sample.no_asdu = 1U;
+    context.nominal_frequency_millihz.reset();
+    context.sample_counter_modulus = static_cast<std::uint16_t>(1U);
+    const auto slow_stream = SvPublisherProfileCompiler::compile(seconds_per_sample, context);
+    CHECK(slow_stream.ok());
+    CHECK(slow_stream.profile.has_value());
+    CHECK(slow_stream.profile->timing.sampling_basis == SvSampleMode::seconds_per_sample);
+    CHECK(slow_stream.profile->timing.samples_per_second.has_value());
+    CHECK(slow_stream.profile->timing.samples_per_second->numerator == 1U);
+    CHECK(slow_stream.profile->timing.samples_per_second->denominator == 2U);
+    CHECK(slow_stream.profile->timing.frames_per_second.has_value());
+    CHECK(slow_stream.profile->timing.frames_per_second->numerator == 1U);
+    CHECK(slow_stream.profile->timing.frames_per_second->denominator == 2U);
+    CHECK(!slow_stream.profile->timing.exact_frame_rate_hz().has_value());
 }
 
 void dataset_reference_resolver_accepts_canonical_and_local_forms() {
@@ -543,6 +667,7 @@ int main() {
         {"SCL minimal station", parser_extracts_minimal_station_semantics},
         {"SCL multi-stream", parser_extracts_multiple_sampled_values_streams_and_conflicts},
         {"SCL structured 4800 SV profile", parser_compiles_structured_4800_sv_profile_without_drift},
+        {"SV sampling and frame cadence semantics", publisher_profile_separates_sampling_from_frame_cadence},
         {"SCL dataset references", dataset_reference_resolver_accepts_canonical_and_local_forms},
         {"SCL configured control model", parser_preserves_configured_control_model_value},
         {"Simulator semantic defaults and indexed RCBs", simulator_compiles_semantic_defaults_and_indexed_report_instances},

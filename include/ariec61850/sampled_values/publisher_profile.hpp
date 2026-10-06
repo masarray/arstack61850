@@ -3,6 +3,7 @@
 #pragma once
 
 #include "ariec61850/ethernet/ethernet.hpp"
+#include "ariec61850/sampled_values/timing_semantics.hpp"
 #include "ariec61850/scl/model.hpp"
 
 #include <array>
@@ -17,12 +18,6 @@
 #include <vector>
 
 namespace ar::iec61850::sampled_values {
-
-enum class SvSampleMode : std::uint8_t {
-    unknown,
-    samples_per_period,
-    samples_per_second,
-};
 
 enum class SvSampleCounterPolicy : std::uint8_t {
     unresolved,
@@ -59,10 +54,14 @@ struct SvPublisherProfileCompileContext final {
     // every runtime sample-counter wrap policy. A standards/profile rule or
     // independently observed evidence may validate a modulus explicitly.
     std::optional<std::uint16_t> sample_counter_modulus;
+
+    // SmpPerPeriod needs an explicit nominal-system-frequency context before
+    // it can be resolved into samples/s and Ethernet frame cadence.
+    std::optional<std::uint32_t> nominal_frequency_millihz;
 };
 
 struct SvPublisherProfile final {
-    std::uint32_t schema_version{1U};
+    std::uint32_t schema_version{2U};
     std::string control_block_reference;
     std::string sv_id;
     std::string data_set_reference;
@@ -74,10 +73,7 @@ struct SvPublisherProfile final {
     std::uint8_t vlan_priority{};
 
     std::uint32_t configuration_revision{};
-    std::uint32_t sample_rate_value{};
-    SvSampleMode sample_mode{SvSampleMode::unknown};
-    std::optional<std::uint32_t> publisher_rate_hz;
-    std::uint16_t no_asdu{1U};
+    SvPublicationTiming timing;
     SvSampleCounterPolicy sample_counter_policy{SvSampleCounterPolicy::unresolved};
     std::optional<std::uint16_t> sample_counter_modulus;
     SvAsduOptions asdu_options;
@@ -110,9 +106,11 @@ public:
         profile.sv_id = stream.sv_id.empty() ? stream.smv_id : stream.sv_id;
         profile.data_set_reference = stream.data_set_reference;
         profile.configuration_revision = stream.configuration_revision;
-        profile.sample_rate_value = stream.sample_rate;
-        profile.sample_mode = parse_sample_mode(stream.sample_mode);
-        profile.no_asdu = stream.no_asdu;
+        profile.timing = resolve_sv_publication_timing(
+            parse_sample_mode(stream.sample_mode),
+            stream.sample_rate,
+            stream.no_asdu,
+            context.nominal_frequency_millihz);
         profile.asdu_options = compile_options(stream.smv_options);
 
         if (!stream.address.destination_mac.has_value()) {
@@ -146,20 +144,29 @@ public:
         if (profile.sv_id.empty()) {
             result.errors.push_back("SV stream has no svID/smvID.");
         }
-        if (profile.no_asdu == 0U) {
-            result.errors.push_back("SV nofASDU must be greater than zero.");
-        }
-        if (profile.sample_rate_value == 0U) {
-            result.errors.push_back("SV sample rate is zero or missing.");
-        }
 
-        if (profile.sample_mode == SvSampleMode::samples_per_second) {
-            profile.publisher_rate_hz = profile.sample_rate_value;
-        } else if (profile.sample_mode == SvSampleMode::samples_per_period) {
+        switch (profile.timing.resolution) {
+        case SvTimingResolution::resolved:
+            break;
+        case SvTimingResolution::needs_nominal_frequency:
             result.warnings.push_back(
-                "SmpPerPeriod requires a nominal-system-frequency input before an absolute publisher rate can be scheduled.");
-        } else {
+                "SmpPerPeriod requires an explicit nominal-system-frequency input before samples/s and Ethernet frame cadence are known.");
+            break;
+        case SvTimingResolution::invalid_sample_rate:
+            result.errors.push_back("SV sample rate is zero or missing.");
+            break;
+        case SvTimingResolution::invalid_asdu_count:
+            result.errors.push_back("SV nofASDU must be greater than zero.");
+            break;
+        case SvTimingResolution::unsupported_sample_mode:
             result.errors.push_back("SV sample mode is missing or unsupported.");
+            break;
+        case SvTimingResolution::invalid_nominal_frequency:
+            result.errors.push_back("SV nominal system frequency must be greater than zero.");
+            break;
+        case SvTimingResolution::arithmetic_overflow:
+            result.errors.push_back("SV timing semantics exceed the supported numeric range.");
+            break;
         }
 
         if (context.sample_counter_modulus.has_value()) {
@@ -170,9 +177,9 @@ public:
                 profile.sample_counter_modulus = context.sample_counter_modulus;
             }
         } else if (
-            profile.sample_mode == SvSampleMode::samples_per_second &&
-            profile.sample_rate_value > 0U &&
-            profile.sample_rate_value <= std::numeric_limits<std::uint16_t>::max()) {
+            profile.timing.sampling_basis == SvSampleMode::samples_per_second &&
+            profile.timing.configured_sample_rate > 0U &&
+            profile.timing.configured_sample_rate <= std::numeric_limits<std::uint16_t>::max()) {
             // Several second-aligned interoperability families use a one-second
             // sample-count cycle. Preserve that useful candidate for inspection,
             // but mark it non-authoritative: device deployment must validate the
@@ -180,7 +187,7 @@ public:
             profile.sample_counter_policy =
                 SvSampleCounterPolicy::candidate_sample_rate_modulus;
             profile.sample_counter_modulus =
-                static_cast<std::uint16_t>(profile.sample_rate_value);
+                static_cast<std::uint16_t>(profile.timing.configured_sample_rate);
             result.warnings.push_back(
                 "SV sample-counter modulus equals the SmpPerSec rate only as an unvalidated candidate; confirm it from the applicable profile rule or observed evidence before deployment.");
         } else {
@@ -237,11 +244,16 @@ private:
 
     [[nodiscard]] static SvSampleMode parse_sample_mode(const std::string_view text) {
         const auto normalized = lower_copy(text);
+        // IEC 61850-6 defines SmpPerPeriod as the SCL default when smpMod is
+        // omitted. Keep that configured default explicit in the compiled model.
+        if (normalized.empty() || normalized == "smpperperiod") {
+            return SvSampleMode::samples_per_period;
+        }
         if (normalized == "smppersec") {
             return SvSampleMode::samples_per_second;
         }
-        if (normalized == "smpperperiod") {
-            return SvSampleMode::samples_per_period;
+        if (normalized == "secpersample") {
+            return SvSampleMode::seconds_per_sample;
         }
         return SvSampleMode::unknown;
     }
