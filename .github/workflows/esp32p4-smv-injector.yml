@@ -84,6 +84,16 @@ jobs:
           from pathlib import Path
 
           source = Path('main/app_main.cpp').read_text(encoding='utf-8')
+          cmake = Path('main/CMakeLists.txt').read_text(encoding='utf-8')
+          smp_synch = Path('main/smp_synch_lab.cpp').read_text(encoding='utf-8')
+          assert 'find_fixed_field' not in source
+          assert 'AR_SMP_SYNCH_INTERCEPT_TX' not in cmake
+          assert 'encode_into_with_layout' in source
+          assert 'sample_synchronization_offset' in source
+          assert 'smp_synch_lab_decision()' in source
+          assert 'wire_field_offsets.hpp' not in smp_synch
+          assert 'esp_eth_transmit' not in smp_synch
+          assert 'observe_canonical_tx_result' not in smp_synch
           start_begin = source.index('if (take_start_request())')
           start_end = source.index('if (!live_tx_running())', start_begin)
           start_block = source[start_begin:start_end]
@@ -99,7 +109,7 @@ jobs:
           assert 'kTransportFailureStopThreshold = 400U' in source
           assert 'live_control_force_stop();' in source
           assert 'SV transport fault:' in source
-          print('Realtime boundary policy: PASS - post-log timer start + elapsed-time telemetry + 100 ms fail-closed canonical TX')
+          print('Realtime boundary policy: PASS - encoder-owned WirePlan + direct smpSynch patch + one canonical TX failure authority')
           PY
 
       - name: Build firmware
