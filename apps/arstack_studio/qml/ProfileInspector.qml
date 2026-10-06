@@ -190,8 +190,24 @@ SurfacePanel {
                     Label { Layout.fillWidth: true; text: panel.profile.dataSetReference || "—"; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: panel.theme.captionSize; elide: Text.ElideMiddle }
                     Label { text: "MAC / APPID"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize }
                     Label { Layout.fillWidth: true; text: (panel.profile.destinationMac || "—") + " · " + (panel.profile.appIdHex || "—"); color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: panel.theme.captionSize; elide: Text.ElideRight }
-                    Label { text: "Rate"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize }
-                    Label { text: panel.profile.publisherRate ? panel.profile.publisherRate + " fps" : "—"; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: panel.theme.captionSize }
+                    Label { text: "Sampling"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize }
+                    Label {
+                        text: panel.profile.sampleRate
+                              ? panel.profile.sampleRate + " · " + (panel.profile.sampleMode || "—")
+                              : "—"
+                        color: panel.theme.textSoft
+                        font.family: panel.monoFont
+                        font.pixelSize: panel.theme.captionSize
+                    }
+                    Label { text: "Frames"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize }
+                    Label {
+                        text: panel.profile.frameRateHz
+                              ? panel.profile.frameRateHz + " fps · " + panel.profile.nofASDU + " ASDU/frame"
+                              : "unresolved · " + (panel.profile.nofASDU || "—") + " ASDU/frame"
+                        color: panel.profile.frameRateHz ? panel.theme.textSoft : panel.theme.amber
+                        font.family: panel.monoFont
+                        font.pixelSize: panel.theme.captionSize
+                    }
                     Label { text: "VLAN"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize }
                     Label { text: panel.profile.vlanPresent ? "PCP " + panel.profile.vlanPriority + " · VID " + panel.profile.vlanId : "untagged"; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: panel.theme.captionSize }
                     Label { text: "Payload"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize }
@@ -223,37 +239,106 @@ SurfacePanel {
         ColumnLayout {
             visible: panel.profile.compatibilityClass === "B"
             Layout.fillWidth: true
-            spacing: 5
-            Label { text: "COUNTER POLICY"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize; font.weight: Font.DemiBold; font.letterSpacing: 0.9 }
+            spacing: 7
+
             Label {
-                Layout.fillWidth: true
-                text: "Confirm the evidenced smpCnt modulus before deployment."
+                text: "PROFILE CONTEXT"
                 color: panel.theme.muted
                 font.family: panel.uiFont
                 font.pixelSize: panel.theme.captionSize
-                wrapMode: Text.WordWrap
+                font.weight: Font.DemiBold
+                font.letterSpacing: 0.9
             }
-            RowLayout {
+
+            ColumnLayout {
+                visible: panel.profile.timingResolved === false
+                         && panel.profile.sampleMode === "SmpPerPeriod"
                 Layout.fillWidth: true
-                NumericField {
-                    id: counterField
+                spacing: 5
+                Label {
                     Layout.fillWidth: true
-                    enabled: panel.session && panel.session.engineeringEditable
-                    theme: panel.theme
-                    monoFont: panel.monoFont
-                    compact: true
-                    text: panel.profile.counterModulus || ""
-                    validator: IntValidator { bottom: 1; top: 65535 }
+                    text: "SmpPerPeriod needs the nominal system frequency before sample and frame cadence can be resolved."
+                    color: panel.theme.muted
+                    font.family: panel.uiFont
+                    font.pixelSize: panel.theme.captionSize
+                    wrapMode: Text.WordWrap
                 }
-                CalmButton {
-                    theme: panel.theme
-                    uiFont: panel.uiFont
-                    text: "Confirm"
-                    enabled: panel.session && panel.session.engineeringEditable
-                    onClicked: {
-                        if (counterField.acceptableInput && panel.profiles.confirmCounterModulus(parseInt(counterField.text))) {
-                            panel.controller.profileDirty = true
-                            panel.controller.showMessage("Sample-counter modulus confirmed.", false)
+                RowLayout {
+                    Layout.fillWidth: true
+                    NumericField {
+                        id: timingFrequencyField
+                        Layout.fillWidth: true
+                        enabled: panel.session && panel.session.engineeringEditable
+                        theme: panel.theme
+                        monoFont: panel.monoFont
+                        compact: true
+                        text: panel.profile.nominalFrequencyMilliHz
+                              ? String(Number(panel.profile.nominalFrequencyMilliHz) / 1000) : ""
+                        validator: IntValidator { bottom: 1; top: 1000 }
+                    }
+                    Label {
+                        text: "Hz"
+                        color: panel.theme.muted
+                        font.family: panel.monoFont
+                        font.pixelSize: panel.theme.captionSize
+                    }
+                    CalmButton {
+                        theme: panel.theme
+                        uiFont: panel.uiFont
+                        text: "Apply"
+                        enabled: panel.session && panel.session.engineeringEditable
+                        onClicked: {
+                            if (timingFrequencyField.acceptableInput
+                                    && panel.profiles.confirmNominalFrequencyHz(parseInt(timingFrequencyField.text))) {
+                                panel.controller.profileDirty = true
+                                panel.controller.showMessage("Nominal system frequency applied.", false)
+                            }
+                        }
+                    }
+                }
+            }
+
+            ColumnLayout {
+                visible: panel.profile.counterPolicy !== "explicit"
+                Layout.fillWidth: true
+                spacing: 5
+                Label {
+                    text: "COUNTER POLICY"
+                    color: panel.theme.muted
+                    font.family: panel.uiFont
+                    font.pixelSize: panel.theme.captionSize
+                    font.weight: Font.DemiBold
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: "Confirm the evidenced smpCnt modulus before deployment."
+                    color: panel.theme.muted
+                    font.family: panel.uiFont
+                    font.pixelSize: panel.theme.captionSize
+                    wrapMode: Text.WordWrap
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    NumericField {
+                        id: counterField
+                        Layout.fillWidth: true
+                        enabled: panel.session && panel.session.engineeringEditable
+                        theme: panel.theme
+                        monoFont: panel.monoFont
+                        compact: true
+                        text: panel.profile.counterModulus || ""
+                        validator: IntValidator { bottom: 1; top: 65535 }
+                    }
+                    CalmButton {
+                        theme: panel.theme
+                        uiFont: panel.uiFont
+                        text: "Confirm"
+                        enabled: panel.session && panel.session.engineeringEditable
+                        onClicked: {
+                            if (counterField.acceptableInput && panel.profiles.confirmCounterModulus(parseInt(counterField.text))) {
+                                panel.controller.profileDirty = true
+                                panel.controller.showMessage("Sample-counter modulus confirmed.", false)
+                            }
                         }
                     }
                 }

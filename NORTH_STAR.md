@@ -135,7 +135,8 @@ SvPublisherProfile
   nofAsdu
   SmvOpts field-presence policy
   dataSetReference
-  samplingBasis / sampleRate
+  samplingBasis / configuredSampleRate
+  ASDUsPerFrame / derivedFrameCadence
   sampleCounterPolicy
   synchronizationPolicy
   channels[]

@@ -62,6 +62,8 @@ public:
     Q_INVOKABLE void selectStream(int row);
     Q_INVOKABLE bool confirmCounterModulus(int modulus);
     Q_INVOKABLE void clearCounterConfirmation();
+    Q_INVOKABLE bool confirmNominalFrequencyHz(int frequencyHz);
+    Q_INVOKABLE void clearNominalFrequency();
 
 signals:
     void sourceChanged();
@@ -88,6 +90,7 @@ private:
 
     std::optional<ar::iec61850::scl::SclDocument> document_;
     std::optional<std::uint16_t> confirmedCounterModulus_;
+    std::optional<std::uint32_t> confirmedNominalFrequencyMilliHz_;
     std::vector<Row> rows_;
     int selectedIndex_{-1};
     QString fatalError_;

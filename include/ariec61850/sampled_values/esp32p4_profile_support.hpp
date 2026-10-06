@@ -50,9 +50,11 @@ namespace detail {
 
 [[nodiscard]] inline bool esp32p4_4i4v_layout_matches(
     const SvPublisherProfile& profile) {
-    if (profile.no_asdu != 1U || profile.payload_size_bytes != 64U ||
-        profile.channels.size() != 16U || !profile.publisher_rate_hz.has_value() ||
-        *profile.publisher_rate_hz == 0U || *profile.publisher_rate_hz > 65535U) {
+    const auto frame_rate_hz = profile.timing.exact_frame_rate_hz();
+    if (profile.timing.sampling_basis != SvSampleMode::samples_per_second ||
+        profile.timing.asdus_per_frame != 1U || profile.payload_size_bytes != 64U ||
+        profile.channels.size() != 16U || !frame_rate_hz.has_value() ||
+        *frame_rate_hz == 0U || *frame_rate_hz > 65535U) {
         return false;
     }
     if (profile.asdu_options.refresh_time || profile.asdu_options.security ||

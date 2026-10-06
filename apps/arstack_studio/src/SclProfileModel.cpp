@@ -54,6 +54,7 @@ QString sampleModeText(const SvSampleMode mode) {
     switch (mode) {
     case SvSampleMode::samples_per_second: return QStringLiteral("SmpPerSec");
     case SvSampleMode::samples_per_period: return QStringLiteral("SmpPerPeriod");
+    case SvSampleMode::seconds_per_sample: return QStringLiteral("SecPerSample");
     default: return QStringLiteral("Unknown");
     }
 }
@@ -101,10 +102,12 @@ QVariant SclProfileModel::data(const QModelIndex& index, const int role) const {
     case SvIdRole: return qstring(p.sv_id);
     case DestinationMacRole: return macText(p.destination_mac);
     case AppIdRole: return static_cast<int>(p.app_id);
-    case PublisherRateRole:
-        return p.publisher_rate_hz.has_value()
-            ? QVariant::fromValue(static_cast<qulonglong>(*p.publisher_rate_hz))
+    case PublisherRateRole: {
+        const auto frameRate = p.timing.exact_frame_rate_hz();
+        return frameRate.has_value()
+            ? QVariant::fromValue(static_cast<qulonglong>(*frameRate))
             : QVariant{};
+    }
     case PayloadBytesRole: return static_cast<qulonglong>(p.payload_size_bytes);
     case CounterPolicyRole: return counterPolicyText(p.sample_counter_policy);
     case CounterModulusRole:
@@ -189,6 +192,7 @@ void SclProfileModel::installDocument(
     confirmedCounterModulus_ = referenceTemplate
         ? std::optional<std::uint16_t>{kReferenceCounterModulus}
         : std::nullopt;
+    confirmedNominalFrequencyMilliHz_.reset();
     rows_.clear();
     selectedIndex_ = -1;
     fatalError_.clear();
@@ -249,6 +253,7 @@ void SclProfileModel::clear() {
     beginResetModel();
     document_.reset();
     confirmedCounterModulus_.reset();
+    confirmedNominalFrequencyMilliHz_.reset();
     rows_.clear();
     selectedIndex_ = -1;
     fatalError_.clear();
@@ -281,6 +286,19 @@ void SclProfileModel::clearCounterConfirmation() {
     rebuildRows();
 }
 
+bool SclProfileModel::confirmNominalFrequencyHz(const int frequencyHz) {
+    if (!document_.has_value() || frequencyHz <= 0 || frequencyHz > 1000) return false;
+    confirmedNominalFrequencyMilliHz_ = static_cast<std::uint32_t>(frequencyHz) * 1000U;
+    rebuildRows();
+    return true;
+}
+
+void SclProfileModel::clearNominalFrequency() {
+    if (!confirmedNominalFrequencyMilliHz_.has_value()) return;
+    confirmedNominalFrequencyMilliHz_.reset();
+    rebuildRows();
+}
+
 void SclProfileModel::rebuildRows() {
     if (!document_.has_value()) return;
 
@@ -292,6 +310,7 @@ void SclProfileModel::rebuildRows() {
     for (const auto& stream : document_->sampled_values_streams) {
         SvPublisherProfileCompileContext context;
         context.sample_counter_modulus = confirmedCounterModulus_;
+        context.nominal_frequency_millihz = confirmedNominalFrequencyMilliHz_;
         auto compiled = SvPublisherProfileCompiler::compile(stream, context);
 
         Row row;
@@ -308,6 +327,7 @@ void SclProfileModel::rebuildRows() {
             row.profile = std::move(compiled.profile);
             const auto& profile = *row.profile;
             row.compatibilityClass =
+                profile.timing.resolved() &&
                 profile.sample_counter_policy == SvSampleCounterPolicy::explicit_modulus
                     ? QStringLiteral("A")
                     : QStringLiteral("B");
@@ -340,11 +360,42 @@ QVariantMap SclProfileModel::profileToVariantMap(const SvPublisherProfile& p) co
     map.insert(QStringLiteral("vlanId"), static_cast<int>(p.vlan_id));
     map.insert(QStringLiteral("vlanPriority"), static_cast<int>(p.vlan_priority));
     map.insert(QStringLiteral("confRev"), static_cast<qulonglong>(p.configuration_revision));
-    map.insert(QStringLiteral("sampleRate"), static_cast<qulonglong>(p.sample_rate_value));
-    map.insert(QStringLiteral("sampleMode"), sampleModeText(p.sample_mode));
+    map.insert(QStringLiteral("sampleRate"), static_cast<qulonglong>(p.timing.configured_sample_rate));
+    map.insert(QStringLiteral("sampleMode"), sampleModeText(p.timing.sampling_basis));
+    map.insert(QStringLiteral("timingResolved"), p.timing.resolved());
+    map.insert(QStringLiteral("nominalFrequencyMilliHz"),
+        p.timing.nominal_frequency_millihz.has_value()
+            ? QVariant::fromValue(static_cast<qulonglong>(*p.timing.nominal_frequency_millihz))
+            : QVariant{});
+    map.insert(QStringLiteral("sampleRatePerSecondNumerator"),
+        p.timing.samples_per_second.has_value()
+            ? QVariant::fromValue(static_cast<qulonglong>(p.timing.samples_per_second->numerator))
+            : QVariant{});
+    map.insert(QStringLiteral("sampleRatePerSecondDenominator"),
+        p.timing.samples_per_second.has_value()
+            ? QVariant::fromValue(static_cast<qulonglong>(p.timing.samples_per_second->denominator))
+            : QVariant{});
+    map.insert(QStringLiteral("frameRateNumerator"),
+        p.timing.frames_per_second.has_value()
+            ? QVariant::fromValue(static_cast<qulonglong>(p.timing.frames_per_second->numerator))
+            : QVariant{});
+    map.insert(QStringLiteral("frameRateDenominator"),
+        p.timing.frames_per_second.has_value()
+            ? QVariant::fromValue(static_cast<qulonglong>(p.timing.frames_per_second->denominator))
+            : QVariant{});
+    const auto sampleRateHz = p.timing.exact_sample_rate_hz();
+    const auto frameRate = p.timing.exact_frame_rate_hz();
+    map.insert(QStringLiteral("sampleRateHz"),
+        sampleRateHz.has_value()
+            ? QVariant::fromValue(static_cast<qulonglong>(*sampleRateHz))
+            : QVariant{});
+    map.insert(QStringLiteral("frameRateHz"),
+        frameRate.has_value()
+            ? QVariant::fromValue(static_cast<qulonglong>(*frameRate))
+            : QVariant{});
     map.insert(QStringLiteral("publisherRate"),
-        p.publisher_rate_hz.has_value()
-            ? QVariant::fromValue(static_cast<qulonglong>(*p.publisher_rate_hz))
+        frameRate.has_value()
+            ? QVariant::fromValue(static_cast<qulonglong>(*frameRate))
             : QVariant{});
     map.insert(QStringLiteral("counterPolicy"), counterPolicyText(p.sample_counter_policy));
     map.insert(QStringLiteral("counterModulus"),
@@ -352,7 +403,7 @@ QVariantMap SclProfileModel::profileToVariantMap(const SvPublisherProfile& p) co
             ? QVariant::fromValue(static_cast<int>(*p.sample_counter_modulus))
             : QVariant{});
     map.insert(QStringLiteral("payloadBytes"), static_cast<qulonglong>(p.payload_size_bytes));
-    map.insert(QStringLiteral("nofASDU"), static_cast<int>(p.no_asdu));
+    map.insert(QStringLiteral("nofASDU"), static_cast<int>(p.timing.asdus_per_frame));
     map.insert(QStringLiteral("channelLeafCount"), static_cast<qulonglong>(p.channels.size()));
     map.insert(QStringLiteral("includeDataSet"), p.asdu_options.data_set);
     map.insert(QStringLiteral("includeSampleRate"), p.asdu_options.sample_rate);

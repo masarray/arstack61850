@@ -20,6 +20,7 @@ using ar::iec61850::sampled_values::SvPublisherProfileCompileContext;
 using ar::iec61850::sampled_values::SvPublisherProfileCompiler;
 using ar::iec61850::sampled_values::SvSampleCounterPolicy;
 using ar::iec61850::sampled_values::SvSampleMode;
+using ar::iec61850::sampled_values::SvTimingResolution;
 using ar::iec61850::sampled_values::classify_esp32p4_sv_profile;
 using ar::iec61850::sampled_values::esp32p4_sv_profile_support_name;
 using ar::iec61850::scl::SclDocument;
@@ -77,8 +78,22 @@ std::string sample_mode_name(const SvSampleMode mode) {
     switch (mode) {
     case SvSampleMode::samples_per_second: return "SmpPerSec";
     case SvSampleMode::samples_per_period: return "SmpPerPeriod";
+    case SvSampleMode::seconds_per_sample: return "SecPerSample";
     default: return "unknown";
     }
+}
+
+std::string timing_resolution_name(const SvTimingResolution resolution) {
+    switch (resolution) {
+    case SvTimingResolution::resolved: return "resolved";
+    case SvTimingResolution::needs_nominal_frequency: return "needs-nominal-frequency";
+    case SvTimingResolution::invalid_sample_rate: return "invalid-sample-rate";
+    case SvTimingResolution::invalid_asdu_count: return "invalid-asdu-count";
+    case SvTimingResolution::unsupported_sample_mode: return "unsupported-sample-mode";
+    case SvTimingResolution::invalid_nominal_frequency: return "invalid-nominal-frequency";
+    case SvTimingResolution::arithmetic_overflow: return "arithmetic-overflow";
+    }
+    return "unsupported-sample-mode";
 }
 
 std::string counter_policy_name(const SvSampleCounterPolicy policy) {
@@ -111,12 +126,34 @@ void emit_profile(std::ostream& out, const SvPublisherProfile& p) {
     out << "\"vlanID\":" << p.vlan_id << ',';
     out << "\"vlanPriority\":" << static_cast<unsigned>(p.vlan_priority) << ',';
     out << "\"confRev\":" << p.configuration_revision << ',';
-    out << "\"sampleRate\":" << p.sample_rate_value << ',';
-    out << "\"sampleMode\":"; quoted(out, sample_mode_name(p.sample_mode)); out << ',';
-    out << "\"publisherRateHz\":";
-    if (p.publisher_rate_hz) out << *p.publisher_rate_hz; else out << "null";
+    out << "\"sampleRate\":" << p.timing.configured_sample_rate << ',';
+    out << "\"sampleMode\":"; quoted(out, sample_mode_name(p.timing.sampling_basis)); out << ',';
+    out << "\"timingResolution\":"; quoted(out, timing_resolution_name(p.timing.resolution)); out << ',';
+    out << "\"nominalFrequencyMilliHz\":";
+    if (p.timing.nominal_frequency_millihz) out << *p.timing.nominal_frequency_millihz; else out << "null";
     out << ',';
-    out << "\"nofASDU\":" << p.no_asdu << ',';
+    out << "\"sampleRatePerSecondNumerator\":";
+    if (p.timing.samples_per_second) out << p.timing.samples_per_second->numerator; else out << "null";
+    out << ',';
+    out << "\"sampleRatePerSecondDenominator\":";
+    if (p.timing.samples_per_second) out << p.timing.samples_per_second->denominator; else out << "null";
+    out << ',';
+    out << "\"frameRateNumerator\":";
+    if (p.timing.frames_per_second) out << p.timing.frames_per_second->numerator; else out << "null";
+    out << ',';
+    out << "\"frameRateDenominator\":";
+    if (p.timing.frames_per_second) out << p.timing.frames_per_second->denominator; else out << "null";
+    out << ',';
+    out << "\"sampleRateHz\":";
+    if (const auto rate = p.timing.exact_sample_rate_hz()) out << *rate; else out << "null";
+    out << ',';
+    out << "\"frameRateHz\":";
+    if (const auto rate = p.timing.exact_frame_rate_hz()) out << *rate; else out << "null";
+    out << ',';
+    out << "\"publisherRateHz\":";
+    if (const auto rate = p.timing.exact_frame_rate_hz()) out << *rate; else out << "null";
+    out << ',';
+    out << "\"nofASDU\":" << p.timing.asdus_per_frame << ',';
     out << "\"counterPolicy\":"; quoted(out, counter_policy_name(p.sample_counter_policy)); out << ',';
     out << "\"counterModulus\":";
     if (p.sample_counter_modulus) out << *p.sample_counter_modulus; else out << "null";
@@ -150,9 +187,10 @@ void emit_profile(std::ostream& out, const SvPublisherProfile& p) {
 void emit_document(
     std::ostream& out,
     const SclDocument& document,
-    const std::optional<std::uint16_t> counter_modulus) {
+    const std::optional<std::uint16_t> counter_modulus,
+    const std::optional<std::uint32_t> nominal_frequency_millihz) {
     out << '{';
-    out << "\"schemaVersion\":1,";
+    out << "\"schemaVersion\":2,";
     out << "\"source\":"; quoted(out, document.source_name); out << ',';
     out << "\"edition\":"; quoted(out, edition_name(document.edition)); out << ',';
     out << "\"headerID\":"; quoted(out, document.header_id); out << ',';
@@ -174,14 +212,17 @@ void emit_document(
         const auto& stream = document.sampled_values_streams[index];
         SvPublisherProfileCompileContext context;
         context.sample_counter_modulus = counter_modulus;
+        context.nominal_frequency_millihz = nominal_frequency_millihz;
         const auto compiled = SvPublisherProfileCompiler::compile(stream, context);
 
         std::string compatibility{"C"};
         std::string device_support{"blocked"};
         if (compiled.ok()) {
             const auto& profile = *compiled.profile;
-            compatibility = profile.sample_counter_policy == SvSampleCounterPolicy::explicit_modulus
-                ? "A" : "B";
+            compatibility =
+                profile.timing.resolved() &&
+                profile.sample_counter_policy == SvSampleCounterPolicy::explicit_modulus
+                    ? "A" : "B";
             device_support = std::string{
                 esp32p4_sv_profile_support_name(classify_esp32p4_sv_profile(profile))};
         }
@@ -202,6 +243,16 @@ void emit_document(
     out << "]}";
 }
 
+std::optional<std::uint32_t> parse_u32_nonzero(const std::string_view text) {
+    try {
+        const auto value = std::stoull(std::string{text});
+        if (value == 0U || value > std::numeric_limits<std::uint32_t>::max()) return std::nullopt;
+        return static_cast<std::uint32_t>(value);
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
 std::optional<std::uint16_t> parse_u16(const std::string_view text) {
     try {
         const auto value = std::stoul(std::string{text});
@@ -215,11 +266,12 @@ std::optional<std::uint16_t> parse_u16(const std::string_view text) {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cerr << "usage: ariec61850_smv_profile_inspect <SCL-file> [--counter-modulus N]\n";
+        std::cerr << "usage: ariec61850_smv_profile_inspect <SCL-file> [--counter-modulus N] [--nominal-frequency-hz N]\n";
         return 2;
     }
 
     std::optional<std::uint16_t> counter_modulus;
+    std::optional<std::uint32_t> nominal_frequency_millihz;
     for (int i = 2; i < argc; ++i) {
         if (std::string_view{argv[i]} == "--counter-modulus" && i + 1 < argc) {
             counter_modulus = parse_u16(argv[++i]);
@@ -227,6 +279,13 @@ int main(int argc, char** argv) {
                 std::cerr << "invalid counter modulus\n";
                 return 2;
             }
+        } else if (std::string_view{argv[i]} == "--nominal-frequency-hz" && i + 1 < argc) {
+            const auto frequency_hz = parse_u32_nonzero(argv[++i]);
+            if (!frequency_hz || *frequency_hz > std::numeric_limits<std::uint32_t>::max() / 1000U) {
+                std::cerr << "invalid nominal frequency\n";
+                return 2;
+            }
+            nominal_frequency_millihz = *frequency_hz * 1000U;
         } else {
             std::cerr << "unknown argument\n";
             return 2;
@@ -236,11 +295,11 @@ int main(int argc, char** argv) {
     try {
         const auto document = ar::iec61850::scl::SclParser{}.load(
             std::filesystem::path{argv[1]});
-        emit_document(std::cout, document, counter_modulus);
+        emit_document(std::cout, document, counter_modulus, nominal_frequency_millihz);
         std::cout << '\n';
         return 0;
     } catch (const std::exception& error) {
-        std::cout << "{\"schemaVersion\":1,\"fatalError\":";
+        std::cout << "{\"schemaVersion\":2,\"fatalError\":";
         quoted(std::cout, error.what());
         std::cout << "}\n";
         return 1;

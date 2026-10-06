@@ -84,9 +84,8 @@ SvPublisherProfile
   appId
   vlanPresent / vlanId / vlanPriority
   confRev
-  sampleRate / sampleMode
-  publisherRateHz
-  nofAsdu
+  configuredSampleRate / samplingBasis
+  nofAsdu / derived sample cadence / derived frame cadence
   sampleCounterPolicy / modulus
   ASDU field-presence policy
   ordered channels
@@ -95,8 +94,8 @@ SvPublisherProfile
 
 The first embedded bridge intentionally supports a bounded subset:
 
-- one ASDU;
-- absolute `SmpPerSec` publisher rate;
+- one ASDU per Ethernet frame;
+- resolved absolute sample cadence and frame cadence from `SmpPerSec`;
 - explicit validated sample-counter modulus;
 - eight logical channels `Ia, Ib, Ic, In, Ua, Ub, Uc, Un`;
 - 16 ordered leaves as eight `INT32 value + Quality` pairs;
