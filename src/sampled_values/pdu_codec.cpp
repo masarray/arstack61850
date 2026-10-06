@@ -207,12 +207,16 @@ void write_unsigned(
     const std::span<std::uint8_t> destination,
     std::size_t& offset,
     const std::uint8_t tag_number,
-    const std::uint64_t value) noexcept {
+    const std::uint64_t value,
+    SampledValuesEncodedFieldRegion* const region = nullptr) noexcept {
     const auto value_size = unsigned_integer_size(value);
     write_tlv_header(
         destination, offset,
         static_cast<std::uint8_t>(context_primitive_base | tag_number),
         value_size);
+    if (region != nullptr) {
+        *region = {offset, value_size, true};
+    }
 
     for (std::size_t index = value_size; index-- > 0U;) {
         const auto shift = static_cast<unsigned>(index * 8U);
@@ -223,7 +227,11 @@ void write_unsigned(
 [[nodiscard]] bool write_asdu(
     const SampledValueAsdu& asdu,
     const std::span<std::uint8_t> destination,
-    std::size_t& offset) noexcept {
+    std::size_t& offset,
+    SampledValueAsduEncodeLayout* const layout) noexcept {
+    if (layout != nullptr) {
+        *layout = {};
+    }
     const auto content_size = asdu_content_size(asdu);
     if (!content_size) {
         return false;
@@ -234,8 +242,12 @@ void write_unsigned(
     if (!asdu.data_set_reference.empty()) {
         write_string(destination, offset, 1U, asdu.data_set_reference);
     }
-    write_unsigned(destination, offset, 2U, asdu.sample_count);
-    write_unsigned(destination, offset, 3U, asdu.configuration_revision);
+    write_unsigned(
+        destination, offset, 2U, asdu.sample_count,
+        layout != nullptr ? &layout->sample_count : nullptr);
+    write_unsigned(
+        destination, offset, 3U, asdu.configuration_revision,
+        layout != nullptr ? &layout->configuration_revision : nullptr);
 
     if (asdu.reference_time.has_value()) {
         std::array<std::uint8_t, 8> timestamp{};
@@ -246,22 +258,34 @@ void write_unsigned(
             destination, offset,
             static_cast<std::uint8_t>(context_primitive_base | 4U),
             timestamp.size());
+        if (layout != nullptr) {
+            layout->reference_time = {offset, timestamp.size(), true};
+        }
         write_bytes(destination, offset, timestamp);
     }
 
-    write_unsigned(destination, offset, 5U, asdu.sample_synchronization);
+    write_unsigned(
+        destination, offset, 5U, asdu.sample_synchronization,
+        layout != nullptr ? &layout->sample_synchronization : nullptr);
     if (asdu.sample_rate.has_value()) {
-        write_unsigned(destination, offset, 6U, *asdu.sample_rate);
+        write_unsigned(
+            destination, offset, 6U, *asdu.sample_rate,
+            layout != nullptr ? &layout->sample_rate : nullptr);
     }
 
     write_tlv_header(
         destination, offset,
         static_cast<std::uint8_t>(context_primitive_base | 7U),
         asdu.sample_payload.size());
+    if (layout != nullptr) {
+        layout->sample_payload = {offset, asdu.sample_payload.size(), true};
+    }
     write_bytes(destination, offset, asdu.sample_payload);
 
     if (asdu.sample_mode.has_value()) {
-        write_unsigned(destination, offset, 8U, *asdu.sample_mode);
+        write_unsigned(
+            destination, offset, 8U, *asdu.sample_mode,
+            layout != nullptr ? &layout->sample_mode : nullptr);
     }
     return true;
 }
@@ -392,6 +416,19 @@ std::optional<std::size_t> SampledValuesPduCodec::encoded_size(
 wire::EncodeResult SampledValuesPduCodec::encode_into(
     const SampledValuesPdu& pdu,
     const std::span<std::uint8_t> destination) noexcept {
+    return encode_into_with_layout(pdu, destination, {});
+}
+
+wire::EncodeResult SampledValuesPduCodec::encode_into_with_layout(
+    const SampledValuesPdu& pdu,
+    const std::span<std::uint8_t> destination,
+    const std::span<SampledValueAsduEncodeLayout> layouts) noexcept {
+    if (!layouts.empty() && layouts.size() < pdu.asdus.size()) {
+        return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
+    }
+    for (auto& layout : layouts) {
+        layout = {};
+    }
     const auto required = encoded_size(pdu);
     if (!required) {
         return {wire::EncodeStatus::value_out_of_range, 0U, 0U};
@@ -419,8 +456,9 @@ wire::EncodeResult SampledValuesPduCodec::encode_into(
         static_cast<std::uint8_t>(context_constructed_base | 2U),
         *sequence_size);
 
-    for (const auto& asdu : pdu.asdus) {
-        if (!write_asdu(asdu, destination, offset)) {
+    for (std::size_t index = 0U; index < pdu.asdus.size(); ++index) {
+        auto* const layout = layouts.empty() ? nullptr : &layouts[index];
+        if (!write_asdu(pdu.asdus[index], destination, offset, layout)) {
             return {wire::EncodeStatus::value_out_of_range, 0U, *required};
         }
     }

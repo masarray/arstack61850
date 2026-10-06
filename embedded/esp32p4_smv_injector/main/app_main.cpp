@@ -10,6 +10,7 @@
 #include "ethernet_port.h"
 #include "live_control.hpp"
 #include "runtime_profile.hpp"
+#include "smp_synch_lab.hpp"
 #include "esp_err.h"
 #include "esp_eth.h"
 #include "esp_event.h"
@@ -42,10 +43,12 @@ using ar::esp32p4::smv::live_tx_running;
 using ar::esp32p4::smv::runtime_profile_initialize;
 using ar::esp32p4::smv::runtime_profile_snapshot;
 using ar::esp32p4::smv::runtime_profile_validate;
+using ar::esp32p4::smv::smp_synch_lab_decision;
 using ar::esp32p4::smv::take_start_request;
 using ar::iec61850::ethernet::MacAddress;
 using ar::iec61850::ethernet::VlanTag;
 using ar::iec61850::sampled_values::SampledValueAsdu;
+using ar::iec61850::sampled_values::SampledValueAsduEncodeLayout;
 using ar::iec61850::sampled_values::SampledValuesFrame;
 using ar::iec61850::sampled_values::SampledValuesFrameCodec;
 using ar::iec61850::sampled_values::SampledValuesPdu;
@@ -86,6 +89,7 @@ std::atomic<std::uint32_t> g_sample_tick_total{0U};
 struct PacketTemplate final {
     std::vector<std::uint8_t> bytes;
     std::size_t sample_count_offset{std::numeric_limits<std::size_t>::max()};
+    std::size_t sample_synchronization_offset{std::numeric_limits<std::size_t>::max()};
     std::size_t sample_payload_offset{std::numeric_limits<std::size_t>::max()};
 };
 
@@ -204,20 +208,6 @@ SampledValuesFrame make_runtime_frame(
     return frame;
 }
 
-bool find_fixed_field(
-    const std::vector<std::uint8_t>& bytes,
-    const std::uint8_t tag,
-    const std::uint8_t length,
-    std::size_t& value_offset) noexcept {
-    for (std::size_t index = 20U; index + 2U + length <= bytes.size(); ++index) {
-        if (bytes[index] == tag && bytes[index + 1U] == length) {
-            value_offset = index + 2U;
-            return true;
-        }
-    }
-    return false;
-}
-
 bool build_packet_template(
     const std::array<std::uint8_t, 6>& source_mac,
     const RuntimePublisherProfile& profile,
@@ -225,36 +215,59 @@ bool build_packet_template(
     const bool diagnostic_mirror,
     PacketTemplate& packet) {
     packet = {};
-    packet.bytes = SampledValuesFrameCodec::encode(
-        make_runtime_frame(source_mac, profile, diagnostic_mirror));
+    const auto frame = make_runtime_frame(source_mac, profile, diagnostic_mirror);
+    const auto required = SampledValuesFrameCodec::encoded_size(frame);
+    if (!required.has_value()) {
+        ESP_LOGE(kTag, "SV template size validation failed");
+        return false;
+    }
+
+    packet.bytes.resize(*required);
+    std::array<SampledValueAsduEncodeLayout, 1> layouts{};
+    const auto encoded = SampledValuesFrameCodec::encode_into_with_layout(
+        frame, packet.bytes, layouts);
+    if (!encoded.success() || encoded.bytes_written != packet.bytes.size()) {
+        ESP_LOGE(kTag, "SV template encode/layout generation failed");
+        return false;
+    }
+
+    const auto& layout = layouts.front();
+    const auto exact_region = [&packet](const auto& region, const std::size_t expected_size) {
+        return region.present && region.value_size == expected_size &&
+            region.value_offset <= packet.bytes.size() &&
+            region.value_size <= packet.bytes.size() - region.value_offset;
+    };
+    if (!exact_region(layout.sample_count, 2U) ||
+        !exact_region(layout.configuration_revision, 4U) ||
+        !exact_region(layout.sample_synchronization, 1U) ||
+        !exact_region(layout.sample_payload, 64U)) {
+        ESP_LOGE(kTag, "SV template patch layout does not match the bounded runtime contract");
+        return false;
+    }
+
+    packet.sample_count_offset = layout.sample_count.value_offset;
+    packet.sample_synchronization_offset = layout.sample_synchronization.value_offset;
+    packet.sample_payload_offset = layout.sample_payload.value_offset;
 
     if (broadcast_destination) {
         std::fill_n(packet.bytes.begin(), 6U, std::uint8_t{0xFFU});
     }
 
-    std::size_t conf_rev_offset = 0U;
-    if (!find_fixed_field(packet.bytes, 0x82U, 2U, packet.sample_count_offset) ||
-        !find_fixed_field(packet.bytes, 0x83U, 4U, conf_rev_offset) ||
-        !find_fixed_field(packet.bytes, 0x87U, 64U, packet.sample_payload_offset)) {
-        ESP_LOGE(kTag, "Failed to locate fixed SV patch fields in encoded template");
-        return false;
-    }
-    if (packet.sample_payload_offset + 64U > packet.bytes.size()) {
-        ESP_LOGE(kTag, "SV payload patch region exceeds encoded frame");
-        return false;
-    }
-
     write_u16_be(packet.bytes.data() + packet.sample_count_offset, 0U);
-    write_u32_be(packet.bytes.data() + conf_rev_offset, profile.configuration_revision);
+    write_u32_be(
+        packet.bytes.data() + layout.configuration_revision.value_offset,
+        profile.configuration_revision);
     return true;
 }
 
 void patch_packet(
     PacketTemplate& packet,
     const std::uint16_t sample_count,
+    const std::uint8_t sample_synchronization,
     const WaveformRow& values,
     const SvLiveSignalState& signal_state) noexcept {
     write_u16_be(packet.bytes.data() + packet.sample_count_offset, sample_count);
+    packet.bytes[packet.sample_synchronization_offset] = sample_synchronization;
     for (std::size_t channel = 0U; channel < values.size(); ++channel) {
         const auto base = packet.sample_payload_offset + channel * 8U;
         write_i32_be(packet.bytes.data() + base, values[channel]);
@@ -541,7 +554,11 @@ void publisher_task(void* argument) {
             ++local.mirror_fail;
 #endif
         } else {
-            patch_packet(canonical, canonical_sample_count, row, signal_state);
+            const auto sync_decision = smp_synch_lab_decision();
+            const auto sample_synchronization =
+                static_cast<std::uint8_t>(sync_decision.value);
+            patch_packet(
+                canonical, canonical_sample_count, sample_synchronization, row, signal_state);
             const esp_err_t canonical_result =
                 esp_eth_transmit(eth_handle, canonical.bytes.data(), canonical.bytes.size());
             if (canonical_result == ESP_OK) {
@@ -555,7 +572,8 @@ void publisher_task(void* argument) {
             }
 
 #if CONFIG_AR_SMV_BROADCAST_MIRROR
-            patch_packet(mirror, mirror_sample_count, row, signal_state);
+            patch_packet(
+                mirror, mirror_sample_count, sample_synchronization, row, signal_state);
             const esp_err_t mirror_result =
                 esp_eth_transmit(eth_handle, mirror.bytes.data(), mirror.bytes.size());
             if (mirror_result == ESP_OK) ++local.mirror_ok;
