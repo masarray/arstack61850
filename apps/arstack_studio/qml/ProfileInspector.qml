@@ -199,6 +199,41 @@ SurfacePanel {
                         font.pixelSize: panel.theme.captionSize
                         elide: Text.ElideRight
                     }
+                    Label {
+                        visible: panel.profile.profileFamily === "iec61869-9"
+                        text: "61869 variant"
+                        color: panel.theme.muted
+                        font.family: panel.uiFont
+                        font.pixelSize: panel.theme.captionSize
+                    }
+                    Label {
+                        visible: panel.profile.profileFamily === "iec61869-9"
+                        Layout.fillWidth: true
+                        text: panel.profile.iec61869Variant
+                              ? panel.profile.iec61869Variant + " · " + (panel.profile.iec61869VariantClass || "resolved")
+                              : "dataset resolved · timing incomplete"
+                        color: panel.profile.iec61869Variant ? panel.theme.textSoft : panel.theme.amber
+                        font.family: panel.monoFont
+                        font.pixelSize: panel.theme.captionSize
+                        elide: Text.ElideRight
+                    }
+                    Label {
+                        visible: panel.profile.profileFamily === "iec61869-9"
+                        text: "61869 scale"
+                        color: panel.theme.muted
+                        font.family: panel.uiFont
+                        font.pixelSize: panel.theme.captionSize
+                    }
+                    Label {
+                        visible: panel.profile.profileFamily === "iec61869-9"
+                        Layout.fillWidth: true
+                        text: "I " + (panel.profile.iec61869CurrentScale || "—") +
+                              " · U " + (panel.profile.iec61869VoltageScale || "—")
+                        color: panel.theme.textSoft
+                        font.family: panel.monoFont
+                        font.pixelSize: panel.theme.captionSize
+                        elide: Text.ElideRight
+                    }
                     Label { text: "Sampling"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize }
                     Label {
                         text: panel.profile.sampleRate

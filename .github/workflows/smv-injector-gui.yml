@@ -7,6 +7,7 @@ on:
       - 'tools/smv_profile_inspect.cpp'
       - 'include/ariec61850/sampled_values/publisher_profile.hpp'
       - 'include/ariec61850/sampled_values/profile_family.hpp'
+      - 'include/ariec61850/sampled_values/iec61869_9_profile.hpp'
       - 'include/ariec61850/scl/**'
       - 'src/scl/**'
       - 'tests/fixtures/scl/**'
@@ -17,6 +18,7 @@ on:
       - 'tools/smv_profile_inspect.cpp'
       - 'include/ariec61850/sampled_values/publisher_profile.hpp'
       - 'include/ariec61850/sampled_values/profile_family.hpp'
+      - 'include/ariec61850/sampled_values/iec61869_9_profile.hpp'
       - 'include/ariec61850/scl/**'
       - 'src/scl/**'
       - 'tests/fixtures/scl/**'
@@ -75,10 +77,22 @@ jobs:
           grep -q '"compatibilityClass":"A"' /tmp/profile-a.json
           grep -q '"profileFamily":"iec61850-9-2"' /tmp/profile-a.json
           grep -q '"deviceSupport":"ready"' /tmp/profile-a.json
-          build-smv-gui/ariec61850_smv_profile_inspect "$fixture" --profile-family iec61869-9 --counter-modulus 4800 > /tmp/profile-61869.json
-          grep -q '"compatibilityClass":"B"' /tmp/profile-61869.json
-          grep -q '"profileFamilyResolution":"incomplete"' /tmp/profile-61869.json
+          if build-smv-gui/ariec61850_smv_profile_inspect "$fixture" --profile-family iec61869-9 --counter-modulus 4800 > /tmp/profile-61869-invalid.json; then
+            echo "generic Amp/Vol fixture must not resolve as IEC 61869-9" >&2
+            exit 1
+          fi
+          grep -q 'TCTR.AmpSv.instMag.i or TVTR.VolSv.instMag.i' /tmp/profile-61869-invalid.json
+
+          fixture_61869=tests/fixtures/scl/sv-61869-f4800s2-i4u4.scd
+          build-smv-gui/ariec61850_smv_profile_inspect "$fixture_61869" --profile-family iec61869-9 --counter-modulus 4800 > /tmp/profile-61869.json
+          grep -q '"schemaVersion":4' /tmp/profile-61869.json
+          grep -q '"compatibilityClass":"A"' /tmp/profile-61869.json
+          grep -q '"profileFamilyResolution":"resolved"' /tmp/profile-61869.json
           grep -q '"deviceSupport":"unsupported-profile-family"' /tmp/profile-61869.json
+          grep -q '"code":"F4800S2I4U4"' /tmp/profile-61869.json
+          grep -q '"class":"preferred"' /tmp/profile-61869.json
+          grep -q '"scaleNumerator":1,"scaleDenominator":1000,"scaleUnit":"A"' /tmp/profile-61869.json
+          grep -q '"scaleNumerator":1,"scaleDenominator":100,"scaleUnit":"V"' /tmp/profile-61869.json
 
           multi=tests/fixtures/scl/compact-multi-stream.scd
           build-smv-gui/ariec61850_smv_profile_inspect "$multi" --stream-profile-family 0:iec61850-9-2 --counter-modulus 4000 > /tmp/profile-multi.json
