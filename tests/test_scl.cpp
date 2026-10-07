@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "ariec61850/sampled_values/compiled_device_profile.hpp"
 #include "ariec61850/sampled_values/esp32p4_profile_support.hpp"
 #include "ariec61850/sampled_values/publisher_profile.hpp"
 #include "ariec61850/sampled_values/rational_schedule.hpp"
@@ -809,6 +810,71 @@ void iec61869_9_profile_resolves_variant_dataset_and_exact_scaling() {
         }));
 }
 
+void class_a_sv_profile_compiles_to_bounded_device_envelope() {
+    using namespace ar::iec61850::sampled_values;
+    using namespace ar::iec61850::scl;
+
+    const auto document =
+        SclParser{}.load(fixture("sv-4800-structured-4i4v.scd"));
+    CHECK(document.sampled_values_streams.size() == 1U);
+
+    SvPublisherProfileCompileContext context;
+    context.profile_family = SvProfileFamily::iec61850_9_2;
+    context.sample_counter_modulus = static_cast<std::uint16_t>(4800U);
+    const auto host = SvPublisherProfileCompiler::compile(
+        document.sampled_values_streams.front(), context);
+    CHECK(host.ok());
+    CHECK(host.profile.has_value());
+    CHECK(classify_esp32p4_sv_profile(*host.profile) ==
+          Esp32P4SvProfileSupport::ready);
+
+    const auto device = compile_esp32p4_device_profile(*host.profile);
+    CHECK(device.ok());
+    CHECK(device.profile.has_value());
+    CHECK(device.profile->profile_family == SvProfileFamily::iec61850_9_2);
+    CHECK(device.profile->frame_rate_hz == 4800U);
+    CHECK(device.profile->sample_counter_modulus == 4800U);
+    CHECK(device.profile->no_asdu == 1U);
+    CHECK(device.profile->payload_size_bytes == 64U);
+    CHECK(device.profile->leaf_count == 16U);
+
+    const auto bytes =
+        SvDeviceProfileBinaryCodec::encoded_size(*device.profile);
+    CHECK(bytes.has_value());
+    std::vector<std::uint8_t> encoded(*bytes);
+    CHECK(SvDeviceProfileBinaryCodec::encode_into(
+              *device.profile, encoded).success());
+    CompiledSvDeviceProfile decoded;
+    CHECK(SvDeviceProfileBinaryCodec::decode(encoded, decoded).success());
+    CHECK(decoded == *device.profile);
+
+    const auto document_61869 =
+        SclParser{}.load(fixture("sv-61869-f4800s2-i4u4.scd"));
+    SvPublisherProfileCompileContext context_61869;
+    context_61869.profile_family = SvProfileFamily::iec61869_9;
+    context_61869.sample_counter_modulus =
+        static_cast<std::uint16_t>(4800U);
+    const auto host_61869 = SvPublisherProfileCompiler::compile(
+        document_61869.sampled_values_streams.front(), context_61869);
+    CHECK(host_61869.ok());
+    CHECK(host_61869.profile.has_value());
+    CHECK(host_61869.profile->profile_family_resolution ==
+          SvProfileFamilyResolution::resolved);
+    CHECK(classify_esp32p4_sv_profile(*host_61869.profile) ==
+          Esp32P4SvProfileSupport::unsupported_profile_family);
+
+    const auto blocked =
+        compile_esp32p4_device_profile(*host_61869.profile);
+    CHECK(!blocked.ok());
+    CHECK(!blocked.profile.has_value());
+    CHECK(std::any_of(
+        blocked.errors.begin(), blocked.errors.end(),
+        [](const std::string& error) {
+            return error.find("not deployable on the current ESP32-P4") !=
+                   std::string::npos;
+        }));
+}
+
 void parser_preserves_sampled_value_multicast_semantics() {
     using namespace ar::iec61850::sampled_values;
     using namespace ar::iec61850::scl;
@@ -1207,6 +1273,7 @@ int main() {
         {"SV sampling and frame cadence semantics", publisher_profile_separates_sampling_from_frame_cadence},
         {"SV profile family and transport semantics", sampled_values_profile_family_and_transport_are_explicit},
         {"IEC 61869-9 variant dataset and scaling semantics", iec61869_9_profile_resolves_variant_dataset_and_exact_scaling},
+        {"SV Class-A compiled device envelope", class_a_sv_profile_compiles_to_bounded_device_envelope},
         {"SCL SV multicast semantics", parser_preserves_sampled_value_multicast_semantics},
         {"SCL SV nofASDU provenance", parser_fails_closed_on_explicit_invalid_nof_asdu},
         {"SCL dataset references", dataset_reference_resolver_accepts_canonical_and_local_forms},

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ariec61850/ethernet/ethernet.hpp"
+#include "ariec61850/integrity/crc32.hpp"
 #include "ariec61850/mms/utc_time.hpp"
 #include "ariec61850/sampled_values/asdu.hpp"
+#include "ariec61850/sampled_values/compiled_device_profile.hpp"
 #include "ariec61850/sampled_values/frame.hpp"
 #include "ariec61850/sampled_values/frame_codec.hpp"
 #include "ariec61850/sampled_values/payload_inspector.hpp"
@@ -276,6 +278,137 @@ void sampled_values_codec_handles_multiple_asdus_and_rejects_malformed_input() {
     CHECK(!SampledValuesPduCodec::try_decode(bad_timestamp, decoded));
 }
 
+void compiled_device_profile_binary_is_canonical_and_integrity_checked() {
+    using namespace ar::iec61850::sampled_values;
+
+    constexpr std::array<std::uint8_t, 9> crc_reference{
+        '1','2','3','4','5','6','7','8','9'};
+    CHECK(ar::iec61850::integrity::crc32(crc_reference) == 0xCBF43926U);
+
+    CompiledSvDeviceProfile profile;
+    profile.profile_family = SvProfileFamily::iec61850_9_2;
+    profile.transport_mode = SvTransportMode::multicast;
+    profile.destination_mac = {0x01U, 0x0CU, 0xCDU, 0x04U, 0x00U, 0x01U};
+    profile.app_id = 0x4000U;
+    profile.vlan_present = true;
+    profile.vlan_id = 100U;
+    profile.vlan_priority = 4U;
+    profile.configuration_revision = 3U;
+    profile.sampling_basis = SvSampleMode::samples_per_second;
+    profile.configured_sample_rate = 4000U;
+    profile.frame_rate_hz = 4000U;
+    profile.sample_counter_modulus = 4000U;
+    profile.no_asdu = 1U;
+    profile.asdu_options.element_present = true;
+    profile.asdu_options.data_set = true;
+    profile.asdu_options.sample_synchronized = true;
+    profile.payload_size_bytes = 8U;
+
+    constexpr std::string_view sv_id{"SV1"};
+    std::copy(sv_id.begin(), sv_id.end(), profile.sv_id.begin());
+    profile.sv_id_length = static_cast<std::uint16_t>(sv_id.size());
+    constexpr std::string_view data_set{"DS"};
+    std::copy(data_set.begin(), data_set.end(), profile.data_set_reference.begin());
+    profile.data_set_reference_length =
+        static_cast<std::uint16_t>(data_set.size());
+
+    profile.leaf_count = 2U;
+    profile.leaves[0] = {SvDeviceWireType::int32, 4U, false, false};
+    profile.leaves[1] = {SvDeviceWireType::quality, 4U, true, false};
+
+    const auto size = SvDeviceProfileBinaryCodec::encoded_size(profile);
+    CHECK(size == std::optional<std::size_t>{75U});
+    ByteVector encoded(*size);
+    const auto encoded_result =
+        SvDeviceProfileBinaryCodec::encode_into(profile, encoded);
+    CHECK(encoded_result.success());
+    CHECK(encoded_result.bytes == encoded.size());
+    CHECK(to_hex(encoded) ==
+          "41525356000100140000004B00000037AAEB211E"
+          "0101008B010CCD040001400000640401000100000003"
+          "00000FA000000FA00FA000020000000800030002"
+          "060000040C0100045356314453");
+
+    CompiledSvDeviceProfile decoded;
+    const auto decoded_result = SvDeviceProfileBinaryCodec::decode(encoded, decoded);
+    CHECK(decoded_result.success());
+    CHECK(decoded_result.bytes == encoded.size());
+    CHECK(decoded == profile);
+
+    // No unknown enum may be silently encoded into a valid different mode.
+    auto unknown_family = profile;
+    unknown_family.profile_family = static_cast<SvProfileFamily>(0xFFU);
+    CHECK(!SvDeviceProfileBinaryCodec::encoded_size(unknown_family).has_value());
+    CHECK(SvDeviceProfileBinaryCodec::encode_into(unknown_family, encoded).status ==
+          SvDeviceProfileCodecStatus::invalid_value);
+    auto unknown_transport = profile;
+    unknown_transport.transport_mode = static_cast<SvTransportMode>(0xFFU);
+    CHECK(!SvDeviceProfileBinaryCodec::encoded_size(unknown_transport).has_value());
+    CHECK(SvDeviceProfileBinaryCodec::encode_into(unknown_transport, encoded).status ==
+          SvDeviceProfileCodecStatus::invalid_value);
+    auto unknown_basis = profile;
+    unknown_basis.sampling_basis = static_cast<SvSampleMode>(0xFFU);
+    CHECK(!SvDeviceProfileBinaryCodec::encoded_size(unknown_basis).has_value());
+    CHECK(SvDeviceProfileBinaryCodec::encode_into(unknown_basis, encoded).status ==
+          SvDeviceProfileCodecStatus::invalid_value);
+
+    // Valid-CRC, late-invalid descriptor must never expose a partial output.
+    auto late_invalid = encoded;
+    constexpr std::size_t first_leaf_flags =
+        SvDeviceProfileBinaryCodec::header_bytes +
+        SvDeviceProfileBinaryCodec::fixed_payload_bytes + 1U;
+    late_invalid[first_leaf_flags] = 0x80U;
+    std::fill(late_invalid.begin() + 16U, late_invalid.begin() + 20U,
+              std::uint8_t{0U});
+    const auto repaired_crc = ar::iec61850::integrity::crc32(late_invalid);
+    for (std::size_t i = 0; i < 4U; ++i) {
+        late_invalid[16U + i] =
+            static_cast<std::uint8_t>(repaired_crc >> ((3U - i) * 8U));
+    }
+    decoded = profile;
+    CHECK(SvDeviceProfileBinaryCodec::decode(late_invalid, decoded).status ==
+          SvDeviceProfileCodecStatus::invalid_value);
+    CHECK(decoded == CompiledSvDeviceProfile{});
+
+    ByteVector short_buffer(encoded.size() - 1U);
+    const auto short_result =
+        SvDeviceProfileBinaryCodec::encode_into(profile, short_buffer);
+    CHECK(short_result.status == SvDeviceProfileCodecStatus::buffer_too_small);
+    CHECK(short_result.bytes == encoded.size());
+
+    auto invalid_width = profile;
+    invalid_width.leaves[1].wire_width_bytes = 2U;
+    CHECK(!SvDeviceProfileBinaryCodec::encoded_size(invalid_width).has_value());
+
+    auto embedded_nul = profile;
+    embedded_nul.sv_id[1] = '\0';
+    CHECK(!SvDeviceProfileBinaryCodec::encoded_size(embedded_nul).has_value());
+
+    auto inconsistent_options = profile;
+    inconsistent_options.asdu_options.element_present = false;
+    CHECK(!SvDeviceProfileBinaryCodec::encoded_size(inconsistent_options).has_value());
+
+    auto corrupted = encoded;
+    corrupted.back() ^= 0x01U;
+    CHECK(SvDeviceProfileBinaryCodec::decode(corrupted, decoded).status ==
+          SvDeviceProfileCodecStatus::checksum_mismatch);
+
+    auto wrong_magic = encoded;
+    wrong_magic[0] = 'X';
+    CHECK(SvDeviceProfileBinaryCodec::decode(wrong_magic, decoded).status ==
+          SvDeviceProfileCodecStatus::invalid_magic);
+
+    auto wrong_version = encoded;
+    wrong_version[5] = 2U;
+    CHECK(SvDeviceProfileBinaryCodec::decode(wrong_version, decoded).status ==
+          SvDeviceProfileCodecStatus::unsupported_version);
+
+    auto wrong_length = encoded;
+    wrong_length[11] = static_cast<std::uint8_t>(wrong_length[11] - 1U);
+    CHECK(SvDeviceProfileBinaryCodec::decode(wrong_length, decoded).status ==
+          SvDeviceProfileCodecStatus::invalid_length);
+}
+
 void sample_counter_tracker_distinguishes_wrap_gap_duplicate_and_order() {
     using namespace ar::iec61850::sampled_values;
 
@@ -395,6 +528,7 @@ int main() {
         {"SV PDU golden vector", sampled_values_pdu_matches_csharp_golden_vector},
         {"SV Ethernet frame", sampled_values_frame_round_trips_vlan_process_bus_header},
         {"SV malformed input", sampled_values_codec_handles_multiple_asdus_and_rejects_malformed_input},
+        {"SV compiled device profile binary", compiled_device_profile_binary_is_canonical_and_integrity_checked},
         {"SV sample counter", sample_counter_tracker_distinguishes_wrap_gap_duplicate_and_order},
         {"SV stream supervisor", stream_supervisor_tracks_identity_configuration_and_statistics},
         {"SV quality and payload diagnostics", quality_and_generic_payload_diagnostics_preserve_wire_evidence}};

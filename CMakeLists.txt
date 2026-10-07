@@ -49,6 +49,7 @@ add_library(ariec61850_core
     src/control/mms_association_control_transport.cpp
     src/sampled_values/pdu_codec.cpp
     src/sampled_values/frame_codec.cpp
+    src/sampled_values/compiled_device_profile.cpp
     src/sampled_values/quality.cpp
     src/sampled_values/payload_inspector.cpp
     src/sampled_values/sample_counter.cpp
