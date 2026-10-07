@@ -870,6 +870,60 @@ void parser_preserves_sampled_value_multicast_semantics() {
     CHECK(invalid_export.error.find("multicast was explicitly malformed") != std::string::npos);
 }
 
+void parser_fails_closed_on_explicit_invalid_nof_asdu() {
+    using namespace ar::iec61850::sampled_values;
+    using namespace ar::iec61850::scl;
+
+    constexpr std::string_view xml = R"xml(
+<SCL xmlns="http://www.iec.ch/61850/2003/SCL" version="2007" revision="B">
+  <IED name="IED1"><AccessPoint><Server><LDevice inst="LD0"><LN0 lnClass="LLN0">
+    <SampledValueControl name="OMITTED" smpRate="4000" smpMod="SmpPerSec"/>
+    <SampledValueControl name="ONE" smpRate="4000" smpMod="SmpPerSec" nofASDU="1"/>
+    <SampledValueControl name="TWO" smpRate="4000" smpMod="SmpPerSec" nofASDU="2"/>
+    <SampledValueControl name="ZERO" smpRate="4000" smpMod="SmpPerSec" nofASDU="0"/>
+    <SampledValueControl name="TEXT" smpRate="4000" smpMod="SmpPerSec" nofASDU="not-a-number"/>
+    <SampledValueControl name="OVERFLOW" smpRate="4000" smpMod="SmpPerSec" nofASDU="65536"/>
+    <SampledValueControl name="EMPTY" smpRate="4000" smpMod="SmpPerSec" nofASDU=""/>
+  </LN0></LDevice></Server></AccessPoint></IED>
+</SCL>)xml";
+    const auto document = SclParser{}.parse(xml, "invalid-nofasdu.scd");
+    CHECK(document.sampled_values_streams.size() == 7U);
+    for (std::size_t index = 0U; index < 3U; ++index) {
+        CHECK(document.sampled_values_streams[index].no_asdu_valid);
+    }
+    CHECK(document.sampled_values_streams[0].no_asdu == 1U);
+    CHECK(document.sampled_values_streams[1].no_asdu == 1U);
+    CHECK(document.sampled_values_streams[2].no_asdu == 2U);
+    for (std::size_t index = 3U; index < 7U; ++index) {
+        const auto& stream = document.sampled_values_streams[index];
+        CHECK(!stream.no_asdu_valid);
+        CHECK(stream.no_asdu == 0U);
+        SvPublisherProfileCompileContext context;
+        context.profile_family = SvProfileFamily::iec61850_9_2;
+        const auto compiled = SvPublisherProfileCompiler::compile(stream, context);
+        CHECK(!compiled.ok());
+        CHECK(std::any_of(compiled.errors.begin(), compiled.errors.end(),
+                          [](const std::string& error) {
+                              return error.find("invalid explicit nofASDU") != std::string::npos;
+                          }));
+    }
+    CHECK(std::count_if(document.warnings.begin(), document.warnings.end(),
+                        [](const std::string& warning) {
+                            return warning.find("invalid explicit nofASDU=") != std::string::npos;
+                        }) == 4);
+
+    auto modeled = SclParser{}.load(fixture("sv-4800-structured-4i4v.scd"));
+    CHECK(modeled.sampled_values_streams.size() == 1U);
+    SclCanonicalExportOptions options;
+    options.edition = modeled.edition;
+    options.profile = SclExportProfile::scd;
+    CHECK(SclExporter::canonical(modeled, options).success);
+    modeled.sampled_values_streams.front().no_asdu_valid = false;
+    const auto blocked = SclExporter::canonical(modeled, options);
+    CHECK(!blocked.success);
+    CHECK(blocked.error.find("nofASDU was explicitly invalid") != std::string::npos);
+}
+
 void dataset_reference_resolver_accepts_canonical_and_local_forms() {
     using namespace ar::iec61850::scl;
 
@@ -1154,6 +1208,7 @@ int main() {
         {"SV profile family and transport semantics", sampled_values_profile_family_and_transport_are_explicit},
         {"IEC 61869-9 variant dataset and scaling semantics", iec61869_9_profile_resolves_variant_dataset_and_exact_scaling},
         {"SCL SV multicast semantics", parser_preserves_sampled_value_multicast_semantics},
+        {"SCL SV nofASDU provenance", parser_fails_closed_on_explicit_invalid_nof_asdu},
         {"SCL dataset references", dataset_reference_resolver_accepts_canonical_and_local_forms},
         {"SCL configured control model", parser_preserves_configured_control_model_value},
         {"Simulator semantic defaults and indexed RCBs", simulator_compiles_semantic_defaults_and_indexed_report_instances},
