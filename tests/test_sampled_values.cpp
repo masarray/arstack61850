@@ -335,6 +335,40 @@ void compiled_device_profile_binary_is_canonical_and_integrity_checked() {
     CHECK(decoded_result.bytes == encoded.size());
     CHECK(decoded == profile);
 
+    // No unknown enum may be silently encoded into a valid different mode.
+    auto unknown_family = profile;
+    unknown_family.profile_family = static_cast<SvProfileFamily>(0xFFU);
+    CHECK(!SvDeviceProfileBinaryCodec::encoded_size(unknown_family).has_value());
+    CHECK(SvDeviceProfileBinaryCodec::encode_into(unknown_family, encoded).status ==
+          SvDeviceProfileCodecStatus::invalid_value);
+    auto unknown_transport = profile;
+    unknown_transport.transport_mode = static_cast<SvTransportMode>(0xFFU);
+    CHECK(!SvDeviceProfileBinaryCodec::encoded_size(unknown_transport).has_value());
+    CHECK(SvDeviceProfileBinaryCodec::encode_into(unknown_transport, encoded).status ==
+          SvDeviceProfileCodecStatus::invalid_value);
+    auto unknown_basis = profile;
+    unknown_basis.sampling_basis = static_cast<SvSampleMode>(0xFFU);
+    CHECK(!SvDeviceProfileBinaryCodec::encoded_size(unknown_basis).has_value());
+    CHECK(SvDeviceProfileBinaryCodec::encode_into(unknown_basis, encoded).status ==
+          SvDeviceProfileCodecStatus::invalid_value);
+
+    // Valid-CRC, late-invalid descriptor must never expose a partial output.
+    auto late_invalid = encoded;
+    constexpr std::size_t first_leaf_flags =
+        SvDeviceProfileBinaryCodec::header_bytes +
+        SvDeviceProfileBinaryCodec::fixed_payload_bytes + 1U;
+    late_invalid[first_leaf_flags] = 0x80U;
+    std::fill(late_invalid.begin() + 16U, late_invalid.begin() + 20U, 0U);
+    const auto repaired_crc = ar::iec61850::integrity::crc32(late_invalid);
+    for (std::size_t i = 0; i < 4U; ++i) {
+        late_invalid[16U + i] =
+            static_cast<std::uint8_t>(repaired_crc >> ((3U - i) * 8U));
+    }
+    decoded = profile;
+    CHECK(SvDeviceProfileBinaryCodec::decode(late_invalid, decoded).status ==
+          SvDeviceProfileCodecStatus::invalid_value);
+    CHECK(decoded == CompiledSvDeviceProfile{});
+
     ByteVector short_buffer(encoded.size() - 1U);
     const auto short_result =
         SvDeviceProfileBinaryCodec::encode_into(profile, short_buffer);

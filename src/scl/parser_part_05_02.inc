@@ -26,9 +26,27 @@
 
                     stream.sample_rate = ushort_attribute(*control, "smpRate");
                     stream.sample_mode = attribute(control, "smpMod");
-                    stream.no_asdu = std::max<std::uint16_t>(
-                        1U,
-                        ushort_attribute(*control, "nofASDU"));
+                    // Apply the default only for omission; explicit malformed
+                    // nofASDU must never silently become a valid one-ASDU stream.
+                    const bool no_asdu_present = std::any_of(
+                        control->attributes.begin(), control->attributes.end(),
+                        [](const XmlAttribute& item) {
+                            return local_name(item.name) == "nofASDU";
+                        });
+                    if (no_asdu_present) {
+                        const auto count = optional_uint_attribute(*control, "nofASDU");
+                        if (!count.has_value() || *count == 0U ||
+                            *count > std::numeric_limits<std::uint16_t>::max()) {
+                            stream.no_asdu_valid = false;
+                            stream.no_asdu = 0U;
+                            document.warnings.push_back(
+                                "SV " + stream.control_block_reference +
+                                " has invalid explicit nofASDU='" + attribute(control, "nofASDU") +
+                                "'; deployment/export is blocked.");
+                        } else {
+                            stream.no_asdu = static_cast<std::uint16_t>(*count);
+                        }
+                    }
                     if (const auto* options = first_child(*control, "SmvOpts"); options != nullptr) {
                         stream.smv_options.element_present = true;
                         stream.smv_options.refresh_time = bool_attribute(*options, "refreshTime");

@@ -118,6 +118,17 @@ void write_u32(
 
 [[nodiscard]] bool valid_profile_shape(
     const CompiledSvDeviceProfile& profile) noexcept {
+    // Fail closed on unknown values; never recode an unknown mode as unicast.
+    if ((profile.profile_family != SvProfileFamily::iec61850_9_2 &&
+         profile.profile_family != SvProfileFamily::legacy_9_2le &&
+         profile.profile_family != SvProfileFamily::iec61869_9) ||
+        (profile.transport_mode != SvTransportMode::multicast &&
+         profile.transport_mode != SvTransportMode::unicast) ||
+        (profile.sampling_basis != SvSampleMode::samples_per_second &&
+         profile.sampling_basis != SvSampleMode::samples_per_period &&
+         profile.sampling_basis != SvSampleMode::seconds_per_sample)) {
+        return false;
+    }
     if (profile.schema_version != compiled_sv_device_profile_version ||
         profile.profile_family == SvProfileFamily::unspecified ||
         profile.app_id == 0U ||
@@ -457,6 +468,8 @@ SvDeviceProfileCodecResult SvDeviceProfileBinaryCodec::decode(
     const std::span<const std::uint8_t> source,
     CompiledSvDeviceProfile& profile) noexcept {
     profile = {};
+    // Only commit a decoded profile when all validation has succeeded.
+    CompiledSvDeviceProfile candidate{};
     if (source.size() < header_bytes) {
         return {SvDeviceProfileCodecStatus::invalid_length, 0U};
     }
@@ -481,13 +494,13 @@ SvDeviceProfileCodecResult SvDeviceProfileBinaryCodec::decode(
     }
 
     const std::size_t base = header_bytes;
-    if (!decode_profile_family(source[base], profile.profile_family)) {
+    if (!decode_profile_family(source[base], candidate.profile_family)) {
         return {SvDeviceProfileCodecStatus::invalid_value, 0U};
     }
     if (source[base + 1U] == 1U) {
-        profile.transport_mode = SvTransportMode::multicast;
+        candidate.transport_mode = SvTransportMode::multicast;
     } else if (source[base + 1U] == 2U) {
-        profile.transport_mode = SvTransportMode::unicast;
+        candidate.transport_mode = SvTransportMode::unicast;
     } else {
         return {SvDeviceProfileCodecStatus::invalid_value, 0U};
     }
@@ -495,58 +508,58 @@ SvDeviceProfileCodecResult SvDeviceProfileBinaryCodec::decode(
     if ((flags & static_cast<std::uint16_t>(~kKnownFlags)) != 0U) {
         return {SvDeviceProfileCodecStatus::invalid_value, 0U};
     }
-    profile.vlan_present = (flags & kFlagVlan) != 0U;
-    profile.asdu_options.data_set = (flags & kFlagDataSet) != 0U;
-    profile.asdu_options.sample_rate = (flags & kFlagSampleRate) != 0U;
-    profile.asdu_options.sample_synchronized =
+    candidate.vlan_present = (flags & kFlagVlan) != 0U;
+    candidate.asdu_options.data_set = (flags & kFlagDataSet) != 0U;
+    candidate.asdu_options.sample_rate = (flags & kFlagSampleRate) != 0U;
+    candidate.asdu_options.sample_synchronized =
         (flags & kFlagSampleSynchronized) != 0U;
-    profile.asdu_options.refresh_time = (flags & kFlagRefreshTime) != 0U;
-    profile.asdu_options.security = (flags & kFlagSecurity) != 0U;
-    profile.asdu_options.synch_source_id = (flags & kFlagSynchSourceId) != 0U;
-    profile.asdu_options.element_present = (flags & kFlagSmvOptsPresent) != 0U;
+    candidate.asdu_options.refresh_time = (flags & kFlagRefreshTime) != 0U;
+    candidate.asdu_options.security = (flags & kFlagSecurity) != 0U;
+    candidate.asdu_options.synch_source_id = (flags & kFlagSynchSourceId) != 0U;
+    candidate.asdu_options.element_present = (flags & kFlagSmvOptsPresent) != 0U;
 
     std::copy_n(source.begin() + static_cast<std::ptrdiff_t>(base + 4U),
-                profile.destination_mac.size(), profile.destination_mac.begin());
-    profile.app_id = read_u16(source, base + 10U);
-    profile.vlan_id = read_u16(source, base + 12U);
-    profile.vlan_priority = source[base + 14U];
-    if (!decode_sampling_basis(source[base + 15U], profile.sampling_basis)) {
+                candidate.destination_mac.size(), candidate.destination_mac.begin());
+    candidate.app_id = read_u16(source, base + 10U);
+    candidate.vlan_id = read_u16(source, base + 12U);
+    candidate.vlan_priority = source[base + 14U];
+    if (!decode_sampling_basis(source[base + 15U], candidate.sampling_basis)) {
         return {SvDeviceProfileCodecStatus::invalid_value, 0U};
     }
-    profile.no_asdu = read_u16(source, base + 16U);
-    profile.configuration_revision = read_u32(source, base + 18U);
-    profile.configured_sample_rate = read_u32(source, base + 22U);
-    profile.frame_rate_hz = read_u32(source, base + 26U);
-    profile.sample_counter_modulus = read_u16(source, base + 30U);
-    profile.leaf_count = read_u16(source, base + 32U);
-    profile.payload_size_bytes = read_u32(source, base + 34U);
-    profile.sv_id_length = read_u16(source, base + 38U);
-    profile.data_set_reference_length = read_u16(source, base + 40U);
+    candidate.no_asdu = read_u16(source, base + 16U);
+    candidate.configuration_revision = read_u32(source, base + 18U);
+    candidate.configured_sample_rate = read_u32(source, base + 22U);
+    candidate.frame_rate_hz = read_u32(source, base + 26U);
+    candidate.sample_counter_modulus = read_u16(source, base + 30U);
+    candidate.leaf_count = read_u16(source, base + 32U);
+    candidate.payload_size_bytes = read_u32(source, base + 34U);
+    candidate.sv_id_length = read_u16(source, base + 38U);
+    candidate.data_set_reference_length = read_u16(source, base + 40U);
 
-    if (profile.leaf_count > compiled_sv_device_profile_max_leaves ||
-        profile.sv_id_length > compiled_sv_device_profile_max_sv_id_bytes ||
-        profile.data_set_reference_length >
+    if (candidate.leaf_count > compiled_sv_device_profile_max_leaves ||
+        candidate.sv_id_length > compiled_sv_device_profile_max_sv_id_bytes ||
+        candidate.data_set_reference_length >
             compiled_sv_device_profile_max_dataset_bytes) {
         return {SvDeviceProfileCodecStatus::invalid_length, 0U};
     }
 
     const std::size_t descriptor_bytes =
-        static_cast<std::size_t>(profile.leaf_count) * leaf_descriptor_bytes;
+        static_cast<std::size_t>(candidate.leaf_count) * leaf_descriptor_bytes;
     const std::size_t expected_payload =
         fixed_payload_bytes + descriptor_bytes +
-        profile.sv_id_length + profile.data_set_reference_length;
+        candidate.sv_id_length + candidate.data_set_reference_length;
     if (expected_payload != payload_length) {
         return {SvDeviceProfileCodecStatus::invalid_length, 0U};
     }
 
     std::size_t offset = base + fixed_payload_bytes;
-    for (std::size_t index = 0U; index < profile.leaf_count; ++index) {
+    for (std::size_t index = 0U; index < candidate.leaf_count; ++index) {
         const auto type = static_cast<SvDeviceWireType>(source[offset]);
         const auto leaf_flags = source[offset + 1U];
         if (!valid_wire_type(type) || (leaf_flags & 0xFCU) != 0U) {
             return {SvDeviceProfileCodecStatus::invalid_value, 0U};
         }
-        profile.leaves[index] = {
+        candidate.leaves[index] = {
             type,
             read_u16(source, offset + 2U),
             (leaf_flags & 1U) != 0U,
@@ -557,18 +570,18 @@ SvDeviceProfileCodecResult SvDeviceProfileBinaryCodec::decode(
 
     std::copy_n(
         source.begin() + static_cast<std::ptrdiff_t>(offset),
-        profile.sv_id_length,
-        reinterpret_cast<std::uint8_t*>(profile.sv_id.data()));
-    offset += profile.sv_id_length;
+        candidate.sv_id_length,
+        reinterpret_cast<std::uint8_t*>(candidate.sv_id.data()));
+    offset += candidate.sv_id_length;
     std::copy_n(
         source.begin() + static_cast<std::ptrdiff_t>(offset),
-        profile.data_set_reference_length,
-        reinterpret_cast<std::uint8_t*>(profile.data_set_reference.data()));
+        candidate.data_set_reference_length,
+        reinterpret_cast<std::uint8_t*>(candidate.data_set_reference.data()));
 
-    if (!valid_profile_shape(profile)) {
-        profile = {};
+    if (!valid_profile_shape(candidate)) {
         return {SvDeviceProfileCodecStatus::invalid_value, 0U};
     }
+    profile = candidate;
     return {SvDeviceProfileCodecStatus::ok, source.size()};
 }
 

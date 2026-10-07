@@ -176,6 +176,7 @@ bool sampledValuesEquivalent(
             lhs.smv_id != rhs.smv_id || lhs.multicast != rhs.multicast ||
             lhs.multicast_valid != rhs.multicast_valid || lhs.sample_rate != rhs.sample_rate ||
             lhs.sample_mode != rhs.sample_mode || lhs.no_asdu != rhs.no_asdu ||
+            lhs.no_asdu_valid != rhs.no_asdu_valid ||
             !(lhs.smv_options == rhs.smv_options)) {
             return false;
         }

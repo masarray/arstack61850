@@ -238,6 +238,11 @@ public:
         }
         profile.data_set_reference = stream.data_set_reference;
         profile.configuration_revision = stream.configuration_revision;
+        if (!stream.no_asdu_valid) {
+            result.errors.push_back(
+                "SV SampledValueControl has invalid explicit nofASDU; "
+                "packetization cannot be inferred from malformed engineering input.");
+        }
         profile.timing = resolve_sv_publication_timing(
             parse_sample_mode(stream.sample_mode),
             stream.sample_rate,
