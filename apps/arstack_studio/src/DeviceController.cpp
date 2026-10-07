@@ -14,8 +14,10 @@
 #include <QSemaphore>
 #include <QSharedPointer>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
+#include <span>
 #include <utility>
 
 namespace {
@@ -748,8 +750,8 @@ void DeviceController::failBinaryProfileDeployment(const QString& message) {
     resetBinaryProfileTransfer();
     profileDeploying_ = false;
     profileArmed_ = false;
-    emit profileStateChanged();
     setError(message);
+    emit profileStateChanged();
 }
 
 bool DeviceController::beginBinaryProfileTransaction(const quint32 lastTransaction) {

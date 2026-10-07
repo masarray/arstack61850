@@ -165,6 +165,31 @@ jobs:
           fi
           echo 'S7 QML authority boundary: PASS · presentation submits intents through SmartSessionController and device mutators are not QML-invokable'
 
+      - name: Native binary profile authority regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          controller=apps/arstack_studio/src/DeviceController.cpp
+          profile_model=apps/arstack_studio/src/SclProfileModel.cpp
+          firmware=embedded/esp32p4_smv_injector/main/profile_control.cpp
+          grep -q 'deviceProfileBinary' "$profile_model"
+          grep -q 'compile_esp32p4_device_profile' "$profile_model"
+          grep -q 'PROFILE BINSTATUS' "$controller"
+          grep -q 'PROFILE BINBEGIN' "$controller"
+          grep -q 'PROFILE BINCHUNK' "$controller"
+          grep -q 'PROFILE BINCOMMIT' "$controller"
+          grep -q 'PROFILE SHOW' "$controller"
+          grep -q 'PROFILE BINSTATUS active=' "$firmware"
+          if grep -q 'QStringLiteral("PROFILE BEGIN")' "$controller"; then
+            echo 'Native Studio regressed to legacy textual profile deployment.'
+            exit 1
+          fi
+          if grep -q 'apps/smv_injector_gui' apps/arstack_studio/CMakeLists.txt; then
+            echo 'Native Studio must not depend on the deprecated browser control surface.'
+            exit 1
+          fi
+          echo 'Native binary profile authority: PASS · C++ compiler -> DeviceController -> firmware V1'
+
       - name: Configure
         shell: bash
         run: |
