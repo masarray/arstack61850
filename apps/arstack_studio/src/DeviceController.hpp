@@ -277,6 +277,7 @@ signals:
     void logTextChanged();
     void telemetryChanged();
     void profileStateChanged();
+    void profileDeploymentProgress();
     void ptpStateChanged();
     void deviceMessage(const QString& message);
     void portReleased(quint64 generation, const QString& portName);

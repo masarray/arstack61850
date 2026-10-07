@@ -31,8 +31,11 @@ const QRegularExpression kTimingExpression{
 const QRegularExpression kSignalGenerationExpression{
     QStringLiteral("Live signal generation\\s+(\\d+)\\s+committed"),
     QRegularExpression::CaseInsensitiveOption};
-const QRegularExpression kProfileCommittedExpression{
-    QStringLiteral("PROFILE committed generation=(\\d+)\\s+svID=(\\S+)\\s+APPID=0x([0-9A-Fa-f]+)\\s+rate=(\\d+)\\s+wrap=(\\d+)"),
+const QRegularExpression kBinaryCommitExpression{
+    QStringLiteral("PROFILE BINCOMMIT transaction=(\\d+)\\s+committed generation=(\\d+)\\s+svID=(\\S+)\\s+APPID=0x([0-9A-Fa-f]+)\\s+rate=(\\d+)\\s+wrap=(\\d+)"),
+    QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kBinaryAbortExpression{
+    QStringLiteral("PROFILE BINABORT transaction=(\\d+)\\s+accepted"),
     QRegularExpression::CaseInsensitiveOption};
 const QRegularExpression kProfileArmedExpression{
     QStringLiteral("PROFILE armed generation=(\\d+)\\s+svID=(\\S+)\\s+APPID=0x([0-9A-Fa-f]+)\\s+rate=(\\d+)\\s+wrap=(\\d+)"),
@@ -815,6 +818,7 @@ bool DeviceController::processBinaryProfileLine(const QString& line) {
             return true;
         }
         binaryProfile_.lastObservedTransaction = std::max(last, transaction);
+        emit profileDeploymentProgress();
         if (active) {
             binaryProfile_.transaction = transaction;
             binaryProfileStage_ = BinaryProfileStage::waiting_abort;
@@ -827,8 +831,15 @@ bool DeviceController::processBinaryProfileLine(const QString& line) {
         return true;
     }
 
-    if (binaryProfileStage_ == BinaryProfileStage::waiting_abort &&
-        line.contains(QStringLiteral("PROFILE BINABORT accepted"), Qt::CaseInsensitive)) {
+    match = kBinaryAbortExpression.match(line);
+    if (match.hasMatch() && binaryProfileStage_ == BinaryProfileStage::waiting_abort) {
+        bool txOk = false;
+        const quint32 transaction = match.captured(1).toUInt(&txOk);
+        if (!txOk || transaction != binaryProfile_.transaction) {
+            failBinaryProfileDeployment(QStringLiteral("Firmware BINABORT acknowledgement did not match the stale transaction."));
+            return true;
+        }
+        emit profileDeploymentProgress();
         static_cast<void>(beginBinaryProfileTransaction(binaryProfile_.lastObservedTransaction));
         return true;
     }
@@ -845,6 +856,7 @@ bool DeviceController::processBinaryProfileLine(const QString& line) {
             return true;
         }
         binaryProfile_.offset = 0;
+        emit profileDeploymentProgress();
         static_cast<void>(sendNextBinaryProfileChunk());
         return true;
     }
@@ -861,28 +873,33 @@ bool DeviceController::processBinaryProfileLine(const QString& line) {
             return true;
         }
         binaryProfile_.offset = binaryProfile_.expectedReceived;
+        emit profileDeploymentProgress();
         static_cast<void>(sendNextBinaryProfileChunk());
         return true;
     }
 
-    match = kProfileCommittedExpression.match(line);
+    match = kBinaryCommitExpression.match(line);
     if (match.hasMatch() && binaryProfileStage_ == BinaryProfileStage::waiting_commit) {
+        bool txOk = false;
         bool appOk = false;
         bool rateOk = false;
         bool modulusOk = false;
-        const quint32 appId = match.captured(3).toUInt(&appOk, 16);
-        const quint32 rate = match.captured(4).toUInt(&rateOk);
-        const quint32 modulus = match.captured(5).toUInt(&modulusOk);
-        if (!appOk || !rateOk || !modulusOk ||
-            match.captured(2) != binaryProfile_.svId ||
+        const quint32 transaction = match.captured(1).toUInt(&txOk);
+        const quint32 appId = match.captured(4).toUInt(&appOk, 16);
+        const quint32 rate = match.captured(5).toUInt(&rateOk);
+        const quint32 modulus = match.captured(6).toUInt(&modulusOk);
+        if (!txOk || !appOk || !rateOk || !modulusOk ||
+            transaction != binaryProfile_.transaction ||
+            match.captured(3) != binaryProfile_.svId ||
             appId != binaryProfile_.appId ||
             rate != binaryProfile_.rate ||
             modulus != binaryProfile_.modulus) {
-            failBinaryProfileDeployment(QStringLiteral("Firmware commit acknowledgement does not match the compiled profile."));
+            failBinaryProfileDeployment(QStringLiteral("Firmware BINCOMMIT acknowledgement does not match the compiled transaction."));
             return true;
         }
-        binaryProfile_.committedGeneration = match.captured(1);
+        binaryProfile_.committedGeneration = match.captured(2);
         binaryProfileStage_ = BinaryProfileStage::waiting_readback;
+        emit profileDeploymentProgress();
         if (!sendCommand(QStringLiteral("PROFILE SHOW"))) {
             failBinaryProfileDeployment(QStringLiteral("Could not verify the committed binary profile."));
         }

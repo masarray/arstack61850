@@ -258,7 +258,12 @@ while START owns packet-template preparation and the realtime timing lifecycle.
 
 Missing, duplicate or out-of-order chunks, replayed transaction numbers, wrong
 CRC/schema, unsupported wire semantics, and RUNNING state are rejected without
-changing the active stream. `PROFILE BINABORT <transaction>` cancels staging,
+changing the active stream.
+ Studio treats each transfer as an ACK-driven state machine:
+BINBEGIN/BINCHUNK/BINABORT/BINCOMMIT acknowledgements are bound to the exact
+transaction identity, and the host refreshes its bounded per-step timeout only
+after a validated progress acknowledgement. A delayed response from an older
+transaction therefore cannot complete a newer deployment. `PROFILE BINABORT <transaction>` cancels staging,
 and START discards all unfinished profile staging. The old textual PROFILE path
 remains available until Studio binary transport/ACK equivalence is independently
 verified. This is a software integration gate, not physical interoperability,

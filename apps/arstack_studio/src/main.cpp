@@ -264,7 +264,7 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
 
     const bool boundedProfileSyncPolicy =
         SmartSessionController::profileSyncMaxAttempts() == 2 &&
-        SmartSessionController::profileSyncTimeoutMs() == 6000 &&
+        SmartSessionController::profileSyncTimeoutMs() == 2500 &&
         SmartSessionController::profileSyncRetryAllowed(0) &&
         SmartSessionController::profileSyncRetryAllowed(1) &&
         !SmartSessionController::profileSyncRetryAllowed(2) &&

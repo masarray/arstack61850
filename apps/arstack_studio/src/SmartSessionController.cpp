@@ -681,6 +681,11 @@ void SmartSessionController::reconnectDeviceSignals() {
         handleProfileStateChanged();
         reconcile();
     });
+    connect(device_, &DeviceController::profileDeploymentProgress, this, [this] {
+        if (profileSyncStage_ == ProfileSyncStage::deploying) {
+            profileSyncTimer_.start();
+        }
+    });
 }
 
 void SmartSessionController::reconnectProfileSignals() {
