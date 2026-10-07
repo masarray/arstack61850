@@ -432,6 +432,7 @@ void handle_line(char* line) noexcept {
             ESP_LOGE(kTag, "START rejected: Studio control-session lease is unavailable");
             return;
         }
+        profile_control_abort_staging();
         g_start_request.store(true, std::memory_order_release);
         g_running.store(true, std::memory_order_release);
         wake_publisher();
