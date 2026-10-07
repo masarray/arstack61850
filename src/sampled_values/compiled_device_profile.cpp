@@ -92,6 +92,30 @@ void write_u32(
            raw <= static_cast<std::uint8_t>(SvDeviceWireType::timestamp);
 }
 
+[[nodiscard]] std::optional<std::uint16_t> canonical_wire_width(
+    const SvDeviceWireType type) noexcept {
+    switch (type) {
+    case SvDeviceWireType::boolean:
+    case SvDeviceWireType::int8:
+    case SvDeviceWireType::uint8:
+        return static_cast<std::uint16_t>(1U);
+    case SvDeviceWireType::int16:
+    case SvDeviceWireType::uint16:
+        return static_cast<std::uint16_t>(2U);
+    case SvDeviceWireType::int32:
+    case SvDeviceWireType::uint32:
+    case SvDeviceWireType::float32:
+    case SvDeviceWireType::quality:
+        return static_cast<std::uint16_t>(4U);
+    case SvDeviceWireType::int64:
+    case SvDeviceWireType::uint64:
+    case SvDeviceWireType::float64:
+    case SvDeviceWireType::timestamp:
+        return static_cast<std::uint16_t>(8U);
+    }
+    return std::nullopt;
+}
+
 [[nodiscard]] bool valid_profile_shape(
     const CompiledSvDeviceProfile& profile) noexcept {
     if (profile.schema_version != compiled_sv_device_profile_version ||
@@ -110,6 +134,26 @@ void write_u32(
     }
     if (profile.asdu_options.data_set &&
         profile.data_set_reference_length == 0U) {
+        return false;
+    }
+    if (!profile.asdu_options.element_present &&
+        (profile.asdu_options.refresh_time ||
+         profile.asdu_options.sample_synchronized ||
+         profile.asdu_options.sample_rate ||
+         profile.asdu_options.data_set ||
+         profile.asdu_options.security ||
+         profile.asdu_options.synch_source_id)) {
+        return false;
+    }
+    if (!profile.vlan_present &&
+        (profile.vlan_id != 0U || profile.vlan_priority != 0U)) {
+        return false;
+    }
+    const std::string_view sv_id{
+        profile.sv_id.data(), profile.sv_id_length};
+    const std::string_view data_set{
+        profile.data_set_reference.data(), profile.data_set_reference_length};
+    if (contains_nul(sv_id) || contains_nul(data_set)) {
         return false;
     }
     if (!is_valid_sv_app_id(profile.app_id)) return false;
@@ -131,7 +175,11 @@ void write_u32(
     std::uint64_t payload{};
     for (std::size_t index = 0U; index < profile.leaf_count; ++index) {
         const auto& leaf = profile.leaves[index];
-        if (!valid_wire_type(leaf.wire_type) || leaf.wire_width_bytes == 0U) {
+        const auto expected_width = canonical_wire_width(leaf.wire_type);
+        if (!expected_width.has_value() ||
+            leaf.wire_width_bytes != *expected_width ||
+            leaf.quality != (leaf.wire_type == SvDeviceWireType::quality) ||
+            leaf.timestamp != (leaf.wire_type == SvDeviceWireType::timestamp)) {
             return false;
         }
         payload += leaf.wire_width_bytes;

@@ -336,6 +336,18 @@ void compiled_device_profile_binary_is_canonical_and_integrity_checked() {
     CHECK(short_result.status == SvDeviceProfileCodecStatus::buffer_too_small);
     CHECK(short_result.bytes == encoded.size());
 
+    auto invalid_width = profile;
+    invalid_width.leaves[1].wire_width_bytes = 2U;
+    CHECK(!SvDeviceProfileBinaryCodec::encoded_size(invalid_width).has_value());
+
+    auto embedded_nul = profile;
+    embedded_nul.sv_id[1] = '\0';
+    CHECK(!SvDeviceProfileBinaryCodec::encoded_size(embedded_nul).has_value());
+
+    auto inconsistent_options = profile;
+    inconsistent_options.asdu_options.element_present = false;
+    CHECK(!SvDeviceProfileBinaryCodec::encoded_size(inconsistent_options).has_value());
+
     auto corrupted = encoded;
     corrupted.back() ^= 0x01U;
     CHECK(SvDeviceProfileBinaryCodec::decode(corrupted, decoded).status ==
