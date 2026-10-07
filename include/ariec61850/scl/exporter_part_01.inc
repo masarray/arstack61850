@@ -45,6 +45,11 @@ inline bool validate_model(
                 ": SampledValueControl@multicast was explicitly malformed in the source.";
             return false;
         }
+        if (!stream.no_asdu_valid || stream.no_asdu == 0U) {
+            error = "Canonical SCL export rejected " + stream.control_block_reference +
+                ": SampledValueControl@nofASDU was explicitly invalid in the source.";
+            return false;
+        }
     }
     for (const auto& entry : document.model_entries) {
         if (entry.ied_name.empty() || entry.ld_inst.empty() || entry.ln_class.empty() ||

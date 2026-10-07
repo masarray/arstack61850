@@ -180,6 +180,8 @@ struct SclSampledValuesStream final : SclProcessBusStream {
     std::uint16_t sample_rate{};
     std::string sample_mode;
     std::uint16_t no_asdu{1U};
+    // Only omitted nofASDU may use the SCL default of 1.
+    bool no_asdu_valid{true};
     SclSmvOptions smv_options;
 
     friend bool operator==(const SclSampledValuesStream&, const SclSampledValuesStream&) = default;
