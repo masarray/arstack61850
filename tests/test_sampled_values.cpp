@@ -358,7 +358,8 @@ void compiled_device_profile_binary_is_canonical_and_integrity_checked() {
         SvDeviceProfileBinaryCodec::header_bytes +
         SvDeviceProfileBinaryCodec::fixed_payload_bytes + 1U;
     late_invalid[first_leaf_flags] = 0x80U;
-    std::fill(late_invalid.begin() + 16U, late_invalid.begin() + 20U, 0U);
+    std::fill(late_invalid.begin() + 16U, late_invalid.begin() + 20U,
+              std::uint8_t{0U});
     const auto repaired_crc = ar::iec61850::integrity::crc32(late_invalid);
     for (std::size_t i = 0; i < 4U; ++i) {
         late_invalid[16U + i] =
