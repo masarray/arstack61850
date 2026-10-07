@@ -476,10 +476,21 @@ void compiled_binary_profile_activates_only_supported_4i4v_device_layout() {
     CHECK(!chunks.append(2U, 1U, std::span<const std::uint8_t>{encoded}.first(8U)));
     CHECK(!chunks.active()); // An out-of-order chunk destroys staging.
     CHECK(chunks.begin(3U, encoded.size()));
-    CHECK(!chunks.append(3U, 0U, std::span<const std::uint8_t>{encoded}.first(1U))
-          || chunks.received() == 1U);
+    CHECK(chunks.append(3U, 0U, std::span<const std::uint8_t>{encoded}.first(8U)));
+    CHECK(!chunks.append(3U, 0U, std::span<const std::uint8_t>{encoded}.first(8U)));
+    CHECK(!chunks.active()); // Duplicate offset fails closed.
+    CHECK(chunks.begin(4U, encoded.size()));
+    CHECK(!chunks.complete(4U)); // No partial commit.
+    CHECK(chunks.complete_record(4U).empty());
     chunks.abort();
-    CHECK(!chunks.complete(3U));
+    CHECK(chunks.begin(5U, encoded.size()));
+    CHECK(!chunks.append(
+        5U, 0U,
+        std::span<const std::uint8_t>{encoded}.first(
+            BinaryProfileStaging::max_chunk_bytes + 1U)));
+    CHECK(!chunks.active()); // Oversized chunks cannot bypass the console bound.
+    CHECK(!chunks.begin(5U, encoded.size())); // No replay after abort.
+    CHECK(!chunks.begin(6U, BinaryProfileStaging::max_record_bytes + 1U));
 
     auto corrupted = encoded;
     corrupted.back() ^= 0x01U;
