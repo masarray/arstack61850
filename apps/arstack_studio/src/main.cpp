@@ -81,7 +81,9 @@ int checkReferenceTemplate(int argc, char* argv[]) {
         profile.value(QStringLiteral("publisherRate")).toULongLong() == 4000ULL &&
         profile.value(QStringLiteral("counterModulus")).toUInt() == 4000U &&
         profile.value(QStringLiteral("payloadBytes")).toULongLong() == 64ULL &&
-        profile.value(QStringLiteral("channelLeafCount")).toULongLong() == 16ULL;
+        profile.value(QStringLiteral("channelLeafCount")).toULongLong() == 16ULL &&
+        profile.value(QStringLiteral("deviceProfileSchema")).toInt() == 1 &&
+        !profile.value(QStringLiteral("deviceProfileBinary")).toByteArray().isEmpty();
 
     if (!valid) {
         qCritical().noquote() << "4I+4V reference template regression:" << profile;
@@ -262,7 +264,7 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
 
     const bool boundedProfileSyncPolicy =
         SmartSessionController::profileSyncMaxAttempts() == 2 &&
-        SmartSessionController::profileSyncTimeoutMs() == 2500 &&
+        SmartSessionController::profileSyncTimeoutMs() == 6000 &&
         SmartSessionController::profileSyncRetryAllowed(0) &&
         SmartSessionController::profileSyncRetryAllowed(1) &&
         !SmartSessionController::profileSyncRetryAllowed(2) &&

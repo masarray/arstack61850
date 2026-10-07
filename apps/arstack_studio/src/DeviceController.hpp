@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <QByteArray>
 #include <QObject>
 #include <QStringList>
 #include <QThread>
@@ -222,12 +223,7 @@ public:
     bool setCtSaturation(bool enabled, double dcOffsetPercent, double harmonicPercent, int harmonicOrder, double clipPercent);
     virtual bool deployProfile(const QVariantMap& profile);
 
-    void abandonProfileDeployment() {
-        if (!profileDeploying_) return;
-        profileDeploying_ = false;
-        profileArmed_ = false;
-        emit profileStateChanged();
-    }
+    void abandonProfileDeployment();
 
     bool sendPtpShow();
     bool startPtp();
@@ -293,6 +289,30 @@ protected:
 private:
     friend class DeterministicSessionHarness;
 
+    enum class BinaryProfileStage {
+        idle,
+        waiting_status,
+        waiting_abort,
+        waiting_begin,
+        waiting_chunk,
+        waiting_commit,
+        waiting_readback,
+    };
+
+    struct BinaryProfileTransfer final {
+        QByteArray bytes;
+        QString svId;
+        QString committedGeneration;
+        quint32 appId{};
+        quint32 rate{};
+        quint32 modulus{};
+        quint32 confRev{};
+        quint32 transaction{};
+        quint32 lastObservedTransaction{};
+        qsizetype offset{};
+        qsizetype expectedReceived{};
+    };
+
     bool sendCommand(const QString& command);
     void connectWorkerSignals();
     void handlePortSnapshot(const QStringList& ports, const QString& recommendedPort, int highConfidenceCount);
@@ -307,6 +327,11 @@ private:
     void setError(const QString& message);
     void appendLog(const QString& direction, const QString& line);
     void processLine(const QString& rawLine);
+    bool processBinaryProfileLine(const QString& line);
+    bool beginBinaryProfileTransaction(quint32 lastTransaction);
+    bool sendNextBinaryProfileChunk();
+    void resetBinaryProfileTransfer();
+    void failBinaryProfileDeployment(const QString& message);
     void resetTelemetry();
     void resetPtpState();
     static QString cleanLine(const QString& rawLine);
@@ -340,6 +365,8 @@ private:
     bool deviceVerified_{false};
     bool profileArmed_{false};
     bool profileDeploying_{false};
+    BinaryProfileStage binaryProfileStage_{BinaryProfileStage::idle};
+    BinaryProfileTransfer binaryProfile_{};
     bool ptpAvailable_{false};
     bool ptpRunning_{false};
     bool ioWorkerReady_{false};

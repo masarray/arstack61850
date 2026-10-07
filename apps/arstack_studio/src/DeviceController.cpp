@@ -5,6 +5,7 @@
 #include "DeviceIoWorker.hpp"
 
 #include "ariec61850/ethernet/ethernet.hpp"
+#include "ariec61850/sampled_values/compiled_device_profile.hpp"
 
 #include <QDateTime>
 #include <QDebug>
@@ -33,6 +34,18 @@ const QRegularExpression kProfileCommittedExpression{
     QRegularExpression::CaseInsensitiveOption};
 const QRegularExpression kProfileArmedExpression{
     QStringLiteral("PROFILE armed generation=(\\d+)\\s+svID=(\\S+)\\s+APPID=0x([0-9A-Fa-f]+)\\s+rate=(\\d+)\\s+wrap=(\\d+)"),
+    QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kProfileReadbackExpression{
+    QStringLiteral("PROFILE generation=(\\d+)\\s+svID=(\\S+)\\s+APPID=0x([0-9A-Fa-f]+)\\s+rate=(\\d+)\\s+wrap=(\\d+)\\s+confRev=(\\d+)"),
+    QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kBinaryStatusExpression{
+    QStringLiteral("PROFILE BINSTATUS active=([01])\\s+transaction=(\\d+)\\s+last=(\\d+)\\s+received=(\\d+)\\s+expected=(\\d+)"),
+    QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kBinaryBeginExpression{
+    QStringLiteral("PROFILE BINBEGIN transaction=(\\d+)\\s+bytes=(\\d+)"),
+    QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kBinaryChunkExpression{
+    QStringLiteral("PROFILE BINCHUNK transaction=(\\d+)\\s+received=(\\d+)"),
     QRegularExpression::CaseInsensitiveOption};
 const QRegularExpression kIdentityExpression{
     QStringLiteral(
@@ -530,6 +543,7 @@ void DeviceController::handlePortOpened(const QString& portName, const bool auto
     running_ = false;
     profileArmed_ = false;
     profileDeploying_ = false;
+    resetBinaryProfileTransfer();
     resetPtpState();
     resetTelemetry();
 
@@ -555,6 +569,7 @@ void DeviceController::handlePortClosed(const QString& portName) {
     running_ = false;
     profileDeploying_ = false;
     profileArmed_ = false;
+    resetBinaryProfileTransfer();
     deviceVerified_ = false;
     clearIdentity();
     identifyAttempts_ = 0;
@@ -654,57 +669,261 @@ bool DeviceController::deployProfile(const QVariantMap& profile) {
         setError(QStringLiteral("Only Class A profiles supported by the current ESP32-P4 layout can be deployed."));
         return false;
     }
-
-    const QString svId = profile.value(QStringLiteral("svId")).toString();
-    const QString dataSet = profile.value(QStringLiteral("dataSetReference")).toString();
-    const QString mac = compactMac(profile.value(QStringLiteral("destinationMac")).toString());
-    const auto appId = profile.value(QStringLiteral("appId")).toUInt();
-    const bool vlanPresent = profile.value(QStringLiteral("vlanPresent")).toBool();
-    const auto vlanId = profile.value(QStringLiteral("vlanId")).toUInt();
-    const auto pcp = profile.value(QStringLiteral("vlanPriority")).toUInt();
-    const auto confRev = profile.value(QStringLiteral("confRev")).toULongLong();
-    const auto rate = profile.value(QStringLiteral("publisherRate")).toULongLong();
-    const auto modulus = profile.value(QStringLiteral("counterModulus")).toUInt();
-    const auto noAsdu = profile.value(QStringLiteral("nofASDU")).toUInt();
-    const bool includeDataSet = profile.value(QStringLiteral("includeDataSet")).toBool();
-    const bool includeSampleRate = profile.value(QStringLiteral("includeSampleRate")).toBool();
-
-    const QString idHex = utf8Hex(svId);
-    const QString dataSetHex = includeDataSet ? utf8Hex(dataSet) : QStringLiteral("-");
-    if (svId.isEmpty() || idHex.isEmpty() || idHex.size() > 180 || dataSetHex.size() > 170 ||
-        mac.size() != 12 || appId == 0U || appId > 65535U ||
-        vlanId > ar::iec61850::ethernet::maximum_vlan_id ||
-        pcp > ar::iec61850::ethernet::maximum_vlan_priority ||
-        rate == 0U || rate > 65535U || modulus == 0U || modulus > 65535U || noAsdu != 1U) {
-        setError(QStringLiteral("Compiled profile exceeds the current bounded device bridge."));
+    if (!identity_.capabilities.contains(QStringLiteral("PROFILE-BINARY-V1"), Qt::CaseInsensitive)) {
+        setError(QStringLiteral("Firmware update required: canonical binary profile deployment is unavailable."));
         return false;
     }
 
-    unsigned flags = 0U;
-    if (includeDataSet) flags |= 0x1U;
-    if (includeSampleRate) flags |= 0x2U;
+    const QByteArray bytes = profile.value(QStringLiteral("deviceProfileBinary")).toByteArray();
+    if (bytes.isEmpty()) {
+        setError(QStringLiteral("The selected SCL profile has no canonical device-profile binary."));
+        return false;
+    }
 
-    const QStringList commands{
-        QStringLiteral("PROFILE BEGIN"),
-        QStringLiteral("PROFILE ID %1").arg(idHex),
-        QStringLiteral("PROFILE DATASET %1").arg(dataSetHex),
-        QStringLiteral("PROFILE L2 %1 %2 %3 %4 %5")
-            .arg(appId).arg(mac).arg(vlanPresent ? 1 : 0).arg(vlanId).arg(pcp),
-        QStringLiteral("PROFILE SV %1 %2 %3 %4 %5")
-            .arg(confRev).arg(rate).arg(modulus).arg(noAsdu).arg(flags),
-        QStringLiteral("PROFILE COMMIT"),
-        QStringLiteral("PROFILE SHOW"),
-    };
+    using namespace ar::iec61850::sampled_values;
+    CompiledSvDeviceProfile decoded{};
+    const auto source = std::span<const std::uint8_t>{
+        reinterpret_cast<const std::uint8_t*>(bytes.constData()),
+        static_cast<std::size_t>(bytes.size())};
+    if (!SvDeviceProfileBinaryCodec::decode(source, decoded).success()) {
+        setError(QStringLiteral("The native SCL compiler produced an invalid device-profile envelope."));
+        return false;
+    }
 
+    const QString svId = QString::fromUtf8(
+        decoded.sv_id.data(), static_cast<qsizetype>(decoded.sv_id_length));
+    if (svId.isEmpty() ||
+        svId != profile.value(QStringLiteral("svId")).toString() ||
+        decoded.app_id != profile.value(QStringLiteral("appId")).toUInt() ||
+        decoded.frame_rate_hz != profile.value(QStringLiteral("publisherRate")).toULongLong() ||
+        decoded.sample_counter_modulus != profile.value(QStringLiteral("counterModulus")).toUInt() ||
+        decoded.configuration_revision != profile.value(QStringLiteral("confRev")).toULongLong()) {
+        setError(QStringLiteral("Canonical binary profile does not match the selected Studio engineering profile."));
+        return false;
+    }
+
+    resetBinaryProfileTransfer();
+    binaryProfile_.bytes = bytes;
+    binaryProfile_.svId = svId;
+    binaryProfile_.appId = decoded.app_id;
+    binaryProfile_.rate = decoded.frame_rate_hz;
+    binaryProfile_.modulus = decoded.sample_counter_modulus;
+    binaryProfile_.confRev = decoded.configuration_revision;
+    binaryProfileStage_ = BinaryProfileStage::waiting_status;
     profileDeploying_ = true;
     profileArmed_ = false;
     emit profileStateChanged();
-    if (!sendCommandBatch(commands)) {
-        profileDeploying_ = false;
-        emit profileStateChanged();
+
+    if (!sendCommand(QStringLiteral("PROFILE BINSTATUS"))) {
+        failBinaryProfileDeployment(QStringLiteral("Could not query firmware binary-profile staging state."));
         return false;
     }
     return true;
+}
+
+void DeviceController::abandonProfileDeployment() {
+    if (!profileDeploying_) return;
+    const auto stage = binaryProfileStage_;
+    const auto transaction = binaryProfile_.transaction;
+    resetBinaryProfileTransfer();
+    profileDeploying_ = false;
+    profileArmed_ = false;
+    emit profileStateChanged();
+
+    if (transaction != 0U &&
+        (stage == BinaryProfileStage::waiting_begin ||
+         stage == BinaryProfileStage::waiting_chunk ||
+         stage == BinaryProfileStage::waiting_commit)) {
+        static_cast<void>(sendQuietCommand(
+            QStringLiteral("PROFILE BINABORT %1").arg(transaction)));
+    }
+}
+
+void DeviceController::resetBinaryProfileTransfer() {
+    binaryProfileStage_ = BinaryProfileStage::idle;
+    binaryProfile_ = {};
+}
+
+void DeviceController::failBinaryProfileDeployment(const QString& message) {
+    resetBinaryProfileTransfer();
+    profileDeploying_ = false;
+    profileArmed_ = false;
+    emit profileStateChanged();
+    setError(message);
+}
+
+bool DeviceController::beginBinaryProfileTransaction(const quint32 lastTransaction) {
+    if (lastTransaction == std::numeric_limits<quint32>::max()) {
+        failBinaryProfileDeployment(
+            QStringLiteral("Firmware binary-profile transaction space is exhausted; reset the board."));
+        return false;
+    }
+    binaryProfile_.lastObservedTransaction = lastTransaction;
+    binaryProfile_.transaction = lastTransaction + 1U;
+    binaryProfile_.offset = 0;
+    binaryProfile_.expectedReceived = 0;
+    binaryProfileStage_ = BinaryProfileStage::waiting_begin;
+    if (!sendCommand(QStringLiteral("PROFILE BINBEGIN %1 %2")
+            .arg(binaryProfile_.transaction)
+            .arg(binaryProfile_.bytes.size()))) {
+        failBinaryProfileDeployment(QStringLiteral("Could not start binary profile staging."));
+        return false;
+    }
+    return true;
+}
+
+bool DeviceController::sendNextBinaryProfileChunk() {
+    constexpr qsizetype kChunkBytes = 48;
+    if (binaryProfile_.offset >= binaryProfile_.bytes.size()) {
+        binaryProfileStage_ = BinaryProfileStage::waiting_commit;
+        if (!sendCommand(QStringLiteral("PROFILE BINCOMMIT %1").arg(binaryProfile_.transaction))) {
+            failBinaryProfileDeployment(QStringLiteral("Could not commit the staged binary profile."));
+            return false;
+        }
+        return true;
+    }
+
+    const qsizetype remaining = binaryProfile_.bytes.size() - binaryProfile_.offset;
+    const qsizetype count = std::min(kChunkBytes, remaining);
+    const QByteArray chunk = binaryProfile_.bytes.mid(binaryProfile_.offset, count).toHex().toUpper();
+    binaryProfile_.expectedReceived = binaryProfile_.offset + count;
+    binaryProfileStage_ = BinaryProfileStage::waiting_chunk;
+    if (!sendCommand(QStringLiteral("PROFILE BINCHUNK %1 %2 %3")
+            .arg(binaryProfile_.transaction)
+            .arg(binaryProfile_.offset)
+            .arg(QString::fromLatin1(chunk)))) {
+        failBinaryProfileDeployment(QStringLiteral("Could not send a binary profile chunk."));
+        return false;
+    }
+    return true;
+}
+
+bool DeviceController::processBinaryProfileLine(const QString& line) {
+    if (!profileDeploying_ || binaryProfileStage_ == BinaryProfileStage::idle) return false;
+
+    auto match = kBinaryStatusExpression.match(line);
+    if (match.hasMatch() && binaryProfileStage_ == BinaryProfileStage::waiting_status) {
+        const bool active = match.captured(1) == QStringLiteral("1");
+        bool transactionOk = false;
+        bool lastOk = false;
+        const quint32 transaction = match.captured(2).toUInt(&transactionOk);
+        const quint32 last = match.captured(3).toUInt(&lastOk);
+        if (!transactionOk || !lastOk || (active && transaction == 0U)) {
+            failBinaryProfileDeployment(QStringLiteral("Firmware returned malformed binary staging status."));
+            return true;
+        }
+        binaryProfile_.lastObservedTransaction = std::max(last, transaction);
+        if (active) {
+            binaryProfile_.transaction = transaction;
+            binaryProfileStage_ = BinaryProfileStage::waiting_abort;
+            if (!sendCommand(QStringLiteral("PROFILE BINABORT %1").arg(transaction))) {
+                failBinaryProfileDeployment(QStringLiteral("Could not clear stale firmware profile staging."));
+            }
+        } else {
+            static_cast<void>(beginBinaryProfileTransaction(last));
+        }
+        return true;
+    }
+
+    if (binaryProfileStage_ == BinaryProfileStage::waiting_abort &&
+        line.contains(QStringLiteral("PROFILE BINABORT accepted"), Qt::CaseInsensitive)) {
+        static_cast<void>(beginBinaryProfileTransaction(binaryProfile_.lastObservedTransaction));
+        return true;
+    }
+
+    match = kBinaryBeginExpression.match(line);
+    if (match.hasMatch() && binaryProfileStage_ == BinaryProfileStage::waiting_begin) {
+        bool txOk = false;
+        bool sizeOk = false;
+        const quint32 transaction = match.captured(1).toUInt(&txOk);
+        const qulonglong bytes = match.captured(2).toULongLong(&sizeOk);
+        if (!txOk || !sizeOk || transaction != binaryProfile_.transaction ||
+            bytes != static_cast<qulonglong>(binaryProfile_.bytes.size())) {
+            failBinaryProfileDeployment(QStringLiteral("Firmware BINBEGIN acknowledgement did not match the requested transaction."));
+            return true;
+        }
+        binaryProfile_.offset = 0;
+        static_cast<void>(sendNextBinaryProfileChunk());
+        return true;
+    }
+
+    match = kBinaryChunkExpression.match(line);
+    if (match.hasMatch() && binaryProfileStage_ == BinaryProfileStage::waiting_chunk) {
+        bool txOk = false;
+        bool receivedOk = false;
+        const quint32 transaction = match.captured(1).toUInt(&txOk);
+        const qulonglong received = match.captured(2).toULongLong(&receivedOk);
+        if (!txOk || !receivedOk || transaction != binaryProfile_.transaction ||
+            received != static_cast<qulonglong>(binaryProfile_.expectedReceived)) {
+            failBinaryProfileDeployment(QStringLiteral("Firmware BINCHUNK acknowledgement did not match the requested byte range."));
+            return true;
+        }
+        binaryProfile_.offset = binaryProfile_.expectedReceived;
+        static_cast<void>(sendNextBinaryProfileChunk());
+        return true;
+    }
+
+    match = kProfileCommittedExpression.match(line);
+    if (match.hasMatch() && binaryProfileStage_ == BinaryProfileStage::waiting_commit) {
+        bool appOk = false;
+        bool rateOk = false;
+        bool modulusOk = false;
+        const quint32 appId = match.captured(3).toUInt(&appOk, 16);
+        const quint32 rate = match.captured(4).toUInt(&rateOk);
+        const quint32 modulus = match.captured(5).toUInt(&modulusOk);
+        if (!appOk || !rateOk || !modulusOk ||
+            match.captured(2) != binaryProfile_.svId ||
+            appId != binaryProfile_.appId ||
+            rate != binaryProfile_.rate ||
+            modulus != binaryProfile_.modulus) {
+            failBinaryProfileDeployment(QStringLiteral("Firmware commit acknowledgement does not match the compiled profile."));
+            return true;
+        }
+        binaryProfile_.committedGeneration = match.captured(1);
+        binaryProfileStage_ = BinaryProfileStage::waiting_readback;
+        if (!sendCommand(QStringLiteral("PROFILE SHOW"))) {
+            failBinaryProfileDeployment(QStringLiteral("Could not verify the committed binary profile."));
+        }
+        return true;
+    }
+
+    match = kProfileReadbackExpression.match(line);
+    if (match.hasMatch() && binaryProfileStage_ == BinaryProfileStage::waiting_readback) {
+        bool appOk = false;
+        bool rateOk = false;
+        bool modulusOk = false;
+        bool confOk = false;
+        const quint32 appId = match.captured(3).toUInt(&appOk, 16);
+        const quint32 rate = match.captured(4).toUInt(&rateOk);
+        const quint32 modulus = match.captured(5).toUInt(&modulusOk);
+        const quint32 confRev = match.captured(6).toUInt(&confOk);
+        if (!appOk || !rateOk || !modulusOk || !confOk ||
+            match.captured(1) != binaryProfile_.committedGeneration ||
+            match.captured(2) != binaryProfile_.svId ||
+            appId != binaryProfile_.appId ||
+            rate != binaryProfile_.rate ||
+            modulus != binaryProfile_.modulus ||
+            confRev != binaryProfile_.confRev) {
+            failBinaryProfileDeployment(QStringLiteral("Firmware PROFILE SHOW readback differs from the compiled binary profile."));
+            return true;
+        }
+
+        profileGeneration_ = match.captured(1);
+        resetBinaryProfileTransfer();
+        profileDeploying_ = false;
+        profileArmed_ = true;
+        emit profileStateChanged();
+        emit deviceMessage(QStringLiteral("Canonical binary V1 profile committed and verified."));
+        return true;
+    }
+
+    if (line.contains(QStringLiteral("PROFILE"), Qt::CaseInsensitive) &&
+        line.contains(QStringLiteral("rejected"), Qt::CaseInsensitive)) {
+        failBinaryProfileDeployment(QStringLiteral("Device rejected the canonical binary profile transaction."));
+        return true;
+    }
+
+    return false;
 }
 
 bool DeviceController::setCtSaturation(
@@ -903,13 +1122,12 @@ void DeviceController::processLine(const QString& rawLine) {
         emit telemetryChanged();
     }
 
-    match = kProfileCommittedExpression.match(line);
-    if (match.hasMatch()) {
+    if (processBinaryProfileLine(line)) return;
+
+    match = kProfileReadbackExpression.match(line);
+    if (match.hasMatch() && !profileDeploying_) {
         profileGeneration_ = match.captured(1);
-        profileDeploying_ = false;
-        profileArmed_ = true;
         emit profileStateChanged();
-        emit deviceMessage(QStringLiteral("SCL profile deployed and armed."));
     }
 
     match = kProfileArmedExpression.match(line);
@@ -1029,12 +1247,10 @@ void DeviceController::processLine(const QString& rawLine) {
             : QStringLiteral("PTP %1 could not start. Check the Ethernet link and retry.").arg(ptpRole_.toLower()));
     }
 
-    if (line.contains(QStringLiteral("PROFILE commit rejected"), Qt::CaseInsensitive) ||
-        line.contains(QStringLiteral("PROFILE rejected"), Qt::CaseInsensitive)) {
-        profileDeploying_ = false;
-        profileArmed_ = false;
-        emit profileStateChanged();
-        setError(QStringLiteral("Device rejected the profile."));
+    if (profileDeploying_ &&
+        line.contains(QStringLiteral("PROFILE"), Qt::CaseInsensitive) &&
+        line.contains(QStringLiteral("rejected"), Qt::CaseInsensitive)) {
+        failBinaryProfileDeployment(QStringLiteral("Device rejected the profile."));
     }
 }
 
