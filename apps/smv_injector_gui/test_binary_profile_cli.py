@@ -23,7 +23,7 @@ assert record[:4] == b"ARSV", record[:4]
 assert int.from_bytes(record[4:6], "big") == 1
 assert int.from_bytes(record[8:12], "big") == len(record)
 wire_crc = int.from_bytes(record[16:20], "big")
-without_crc = record[:16] + b"\\x00" * 4 + record[20:]
+without_crc = record[:16] + bytes(4) + record[20:]
 assert zlib.crc32(without_crc) == wire_crc
 assert len(record) <= 572
 print("C++ SCL -> canonical device profile binary V1: PASS", len(record), "bytes")

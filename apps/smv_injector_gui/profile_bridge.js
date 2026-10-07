@@ -9,6 +9,10 @@ const profileBridge = {
   deploying: false,
   currentCountsPerAmp: 1000,
   voltageCountsPerVolt: 100,
+  binaryCapable: false,
+  lastGeneration: null,
+  pendingAck: null,
+  nextTransaction: 0,
 };
 
 function utf8Hex(text) {
@@ -114,6 +118,13 @@ function installProfileUi() {
   const baseSetConnected = setConnected;
   setConnected = function(connected) {
     baseSetConnected(connected);
+    if (!connected) {
+      profileBridge.binaryCapable = false;
+      profileBridge.lastGeneration = null;
+      profileBridge.deployed = false;
+      profileBridge.deploying = false;
+      rejectPendingProfileAck(new Error("Serial device disconnected"));
+    }
     refreshDeployAvailability();
   };
   const baseSetRunning = setRunning;
@@ -125,25 +136,96 @@ function installProfileUi() {
   processDeviceLine = function(raw) {
     baseProcessDeviceLine(raw);
     const line = raw.replace(/\x1b\[[0-9;]*m/g, "").trim();
-    const committed = line.match(/PROFILE committed generation=(\d+)\s+svID=(\S+)\s+APPID=0x([0-9A-Fa-f]+)\s+rate=(\d+)\s+wrap=(\d+)/);
-    if (committed && profileBridge.deploying) {
-      profileBridge.deploying = false;
-      profileBridge.deployed = true;
-      applySelectedProfileToActiveCard();
-      $("deployState").textContent = `Profile armed · generation ${committed[1]}`;
-      showToast("SCL profile deployed and armed");
-      refreshDeployAvailability();
+    const identity = line.match(/ARSTACK identity .*capabilities=([A-Z0-9,_-]+)/);
+    if (identity) {
+      profileBridge.binaryCapable =
+        identity[1].split(",").includes("PROFILE-BINARY-V1");
     }
+    const shown = matchProfileReadback(line);
+    if (shown) profileBridge.lastGeneration = Number(shown[1]);
+    deliverProfileAck(line);
     const armed = line.match(/PROFILE armed generation=(\d+)\s+svID=(\S+)\s+APPID=0x([0-9A-Fa-f]+)\s+rate=(\d+)\s+wrap=(\d+)/);
     if (armed) {
       $("deployState").textContent = `Running profile · generation ${armed[1]}`;
     }
-    if (line.includes("PROFILE commit rejected") || line.includes("PROFILE rejected")) {
-      profileBridge.deploying = false;
-      showToast("Device rejected the profile", true);
-      refreshDeployAvailability();
-    }
+
   };
+}
+
+// C++ is the sole profile binary encoder and CRC/layout validator.
+// A single outstanding request owns the next matching serial acknowledgement.
+function matchProfileCommit(line) {
+  return line.match(/\bPROFILE committed generation=(\d+)\s+svID=(\S+)\s+APPID=0x([0-9A-Fa-f]+)\s+rate=(\d+)\s+wrap=(\d+)/);
+}
+
+function matchProfileReadback(line) {
+  return line.match(/\bPROFILE generation=(\d+)\s+svID=(\S+)\s+APPID=0x([0-9A-Fa-f]+)\s+rate=(\d+)\s+wrap=(\d+)\s+confRev=(\d+)/);
+}
+
+function rejectPendingProfileAck(error) {
+  const pending = profileBridge.pendingAck;
+  if (!pending) return;
+  profileBridge.pendingAck = null;
+  clearTimeout(pending.timer);
+  pending.reject(error);
+}
+
+function deliverProfileAck(line) {
+  const pending = profileBridge.pendingAck;
+  if (!pending) return;
+  if (/\bPROFILE(?: [A-Za-z0-9_-]+)? rejected\b|Invalid PROFILE|Unknown PROFILE/i.test(line)) {
+    rejectPendingProfileAck(new Error(line));
+    return;
+  }
+  const match = pending.matches(line);
+  if (!match) return;
+  profileBridge.pendingAck = null;
+  clearTimeout(pending.timer);
+  pending.resolve(match);
+}
+
+function exchangeProfileCommand(command, matches, label) {
+  if (profileBridge.pendingAck) {
+    return Promise.reject(new Error("Another profile command is awaiting acknowledgement"));
+  }
+  return new Promise((resolve, reject) => {
+    const pending = { matches, resolve, reject, timer: null };
+    profileBridge.pendingAck = pending;
+    pending.timer = setTimeout(() => {
+      if (profileBridge.pendingAck === pending) {
+        rejectPendingProfileAck(new Error(label + ": device acknowledgement timed out"));
+      }
+    }, 6000);
+    sendCommand(command).then((sent) => {
+      if (!sent && profileBridge.pendingAck === pending) {
+        rejectPendingProfileAck(new Error(label + ": serial command write failed"));
+      }
+    }).catch((error) => {
+      if (profileBridge.pendingAck === pending) rejectPendingProfileAck(error);
+    });
+  });
+}
+
+function verifyProfileReceipt(receipt, profile, expectedGeneration) {
+  const [ , generation, svID, appID, rate, wrap ] = receipt;
+  if (svID !== profile.svID ||
+      Number.parseInt(appID, 16) !== Number(profile.appID) ||
+      Number(rate) !== Number(profile.publisherRateHz) ||
+      Number(wrap) !== Number(profile.counterModulus) ||
+      !Number.isSafeInteger(Number(generation)) ||
+      (expectedGeneration !== null && Number(generation) !== expectedGeneration)) {
+    throw new Error("Device readback does not match the compiled SV profile");
+  }
+  return Number(generation);
+}
+
+function newProfileTransaction() {
+  const now = Math.floor(Date.now() / 1000);
+  profileBridge.nextTransaction = Math.max(now, profileBridge.nextTransaction + 1);
+  if (profileBridge.nextTransaction > 0xFFFFFFFF) {
+    throw new Error("Binary transaction ID exhausted");
+  }
+  return profileBridge.nextTransaction;
 }
 
 function compiledIec61869CountsPerUnit(profile, quantity) {
@@ -314,7 +396,8 @@ function refreshDeployAvailability() {
     stream?.profile &&
     stream.compatibilityClass === "A" &&
     stream.deviceSupport === "ready" &&
-    state.connected && !state.running && !profileBridge.deploying
+    state.connected && !state.running && !profileBridge.deploying &&
+    typeof stream.deviceProfileHex === "string" && stream.deviceProfileHex.length > 0
   );
   button.disabled = !ready;
   if (profileBridge.file && !profileBridge.deployed) {
@@ -327,51 +410,104 @@ function refreshDeployAvailability() {
 async function deploySelectedProfile() {
   const stream = selectedCompiledStream();
   const p = stream?.profile;
-  if (!p || stream.compatibilityClass !== "A" || stream.deviceSupport !== "ready") {
-    showToast("Profile is not deployable yet", true);
+  if (!p || stream.compatibilityClass !== "A" ||
+      stream.deviceSupport !== "ready" || !stream.deviceProfileHex) {
+    showToast("Host binary profile is not deployable yet", true);
     return;
   }
-  if (state.running) {
-    showToast("Stop the publisher before changing profile identity/layout", true);
+  if (!state.connected || state.running) {
+    showToast("Connect and STOP the publisher before deployment", true);
     return;
   }
-
-  const idHex = utf8Hex(p.svID);
-  const dataSetHex = p.asduOptions?.dataSet ? utf8Hex(p.dataSetReference) : "-";
-  if (!idHex || idHex.length > 180 || dataSetHex.length > 170) {
-    showToast("Profile identifier is too long for the current device bridge", true);
-    return;
-  }
-  const mac = macHex(p.destinationMac);
-  if (mac.length !== 12) {
-    showToast("Invalid destination MAC in compiled profile", true);
-    return;
-  }
-  let flags = 0;
-  if (p.asduOptions?.dataSet) flags |= 1;
-  if (p.asduOptions?.sampleRate) flags |= 2;
-
   profileBridge.deploying = true;
   profileBridge.deployed = false;
-  $("deployState").textContent = "Deploying validated profile…";
+  $("deployState").textContent = "Deploying canonical binary profile…";
   refreshDeployAvailability();
 
-  const commands = [
-    "PROFILE BEGIN",
-    `PROFILE ID ${idHex}`,
-    `PROFILE DATASET ${dataSetHex}`,
-    `PROFILE L2 ${p.appID} ${mac} ${p.vlanPresent ? 1 : 0} ${p.vlanID || 0} ${p.vlanPriority || 0}`,
-    `PROFILE SV ${p.confRev} ${p.publisherRateHz} ${p.counterModulus} ${p.nofASDU} ${flags}`,
-    "PROFILE COMMIT",
-    "PROFILE SHOW",
-  ];
-  for (const command of commands) {
-    const sent = await sendCommand(command);
-    if (!sent) {
-      profileBridge.deploying = false;
-      refreshDeployAvailability();
-      return;
+  const oldGeneration = profileBridge.lastGeneration;
+  let binaryTransaction = null;
+  let binaryCommitted = false;
+  try {
+    let commit;
+    if (profileBridge.binaryCapable) {
+      // Transport compiler output verbatim; do not implement another codec.
+      const plan = BinaryProfileTransport.plan(
+        stream.deviceProfileHex, newProfileTransaction());
+      binaryTransaction = plan.transaction;
+      await exchangeProfileCommand(
+        plan.begin,
+        line => line.includes("PROFILE BINBEGIN transaction=" + plan.transaction +
+                              " bytes=" + plan.totalBytes),
+        "BINBEGIN");
+      for (const chunk of plan.chunks) {
+        await exchangeProfileCommand(
+          chunk.command,
+          line => line.includes("PROFILE BINCHUNK transaction=" + plan.transaction +
+                                " received=" + chunk.received),
+          "BINCHUNK " + chunk.received);
+      }
+      commit = await exchangeProfileCommand(
+        plan.commit, matchProfileCommit, "BINCOMMIT");
+      binaryCommitted = true;
+    } else {
+      // Deliberate compatibility with old firmware. Binary failures never
+      // silently fall back to legacy text mode.
+      const idHex = utf8Hex(p.svID);
+      const dataSetHex = p.asduOptions?.dataSet ? utf8Hex(p.dataSetReference) : "-";
+      const mac = macHex(p.destinationMac);
+      if (!idHex || idHex.length > 180 || dataSetHex.length > 170 ||
+          mac.length !== 12) {
+        throw new Error("Profile exceeds the legacy text transport bounds");
+      }
+      let flags = 0;
+      if (p.asduOptions?.dataSet) flags |= 1;
+      if (p.asduOptions?.sampleRate) flags |= 2;
+      await exchangeProfileCommand(
+        "PROFILE BEGIN", line => line.includes("PROFILE staging started"),
+        "PROFILE BEGIN");
+      const commands = [
+        "PROFILE ID " + idHex,
+        "PROFILE DATASET " + dataSetHex,
+        "PROFILE L2 " + p.appID + " " + mac + " " +
+          (p.vlanPresent ? 1 : 0) + " " + (p.vlanID || 0) + " " +
+          (p.vlanPriority || 0),
+        "PROFILE SV " + p.confRev + " " + p.publisherRateHz + " " +
+          p.counterModulus + " " + p.nofASDU + " " + flags,
+      ];
+      for (const command of commands) {
+        if (!(await sendCommand(command))) {
+          throw new Error("Legacy PROFILE serial write failed");
+        }
+      }
+      commit = await exchangeProfileCommand(
+        "PROFILE COMMIT", matchProfileCommit, "PROFILE COMMIT");
     }
+    const committedGeneration = verifyProfileReceipt(commit, p, null);
+    if (oldGeneration !== null && committedGeneration <= oldGeneration) {
+      throw new Error("Device generation did not advance after profile commit");
+    }
+    // No success on a write/commit log alone. Verify immutable active identity.
+    const readback = await exchangeProfileCommand(
+      "PROFILE SHOW", matchProfileReadback, "PROFILE SHOW");
+    verifyProfileReceipt(readback, p, committedGeneration);
+    if (Number(readback[6]) !== Number(p.confRev)) {
+      throw new Error("Device confRev readback differs from the compiled profile");
+    }
+    profileBridge.lastGeneration = committedGeneration;
+    profileBridge.deployed = true;
+    applySelectedProfileToActiveCard();
+    $("deployState").textContent = "Verified profile · generation " + committedGeneration +
+      (profileBridge.binaryCapable ? " · binary V1" : " · legacy");
+    showToast("SCL profile committed and verified by device readback");
+  } catch (error) {
+    if (binaryTransaction !== null && !binaryCommitted && state.connected) {
+      await sendCommand("PROFILE BINABORT " + binaryTransaction);
+    }
+    $("deployState").textContent = "Deployment rejected · " + error.message;
+    showToast(error.message, true);
+  } finally {
+    profileBridge.deploying = false;
+    refreshDeployAvailability();
   }
 }
 

@@ -127,3 +127,28 @@ The rational GPTimer scheduler supports runtime publisher rates without permanen
 ## Next validation surface
 
 The preferred next hardware validation path is an independent raw Ethernet analyzer, potentially using a second ESP32-P4 board in promiscuous/all-multicast receive mode with application-layer VLAN parsing. That analyzer should compare configured SCL truth against observed canonical wire truth without relying on the current Windows USB-NIC capture path.
+
+## Windows binary-V1 bench artifact after #149
+
+The \`arstack-smv-injector-bench-windows-x64\` GitHub Actions artifact
+contains \`run-portable.cmd\`, the native C++ SCL/device-profile compiler,
+the localhost browser GUI and its static assets. Extract the artifact and
+run \`run-portable.cmd\`. Python 3 and Edge or Chrome (Web Serial) are
+required. Close \`idf.py monitor\` before connecting.
+
+Use ESP32-P4 firmware at least as new as merged PR #149. Firmware
+advertises \`PROFILE-BINARY-V1\` on \`IDENTIFY\`. For a capable board the
+GUI sends unmodified C++-compiled V1 bytes in max-48-byte chunks using
+\`BINBEGIN/BINCHUNK/BINCOMMIT\`, awaiting each chunk acknowledgement and
+verifying \`PROFILE SHOW\` generation, svID, APPID, publisher rate,
+counter modulus and confRev. Failed binary deployment never silently
+falls back to textual configuration. Legacy firmware can use the old
+text transport behind the same readback gate.
+
+Bench sequence: Connect 115200 -> import supported SCL/CID -> select
+the resolved family and explicitly confirm sample-counter modulus ->
+STOPPED -> Deploy -> verify generation/readback -> START -> observe
+4000/4800 fps, missed slots and TX failures -> STOP. Use isolated lab
+Ethernet and a VLAN/multicast-capable mirror/TAP to capture the canonical
+stream; \`AR_DIAG_SV1\` is only the separate untagged diagnostic mirror.
+Build/CI passes do not constitute physical timing or IEC conformance proof.

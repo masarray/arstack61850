@@ -320,7 +320,7 @@ void emit_document(
         out << "\"warnings\":"; string_array(out, compiled.warnings); out << ',';
         out << "\"profile\":";
         if (compiled.profile) emit_profile(out, *compiled.profile); else out << "null";
-        out << ",\\\"deviceProfileHex\\\":";
+        out << ",\"deviceProfileHex\":";
         // The existing C++ compiler is the only binary-profile authority.
         // Browser code only chunks these already-validated canonical bytes.
         bool emitted = false;

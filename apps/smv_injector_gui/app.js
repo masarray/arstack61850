@@ -202,6 +202,7 @@ async function sendCommand(command) {
     showToast("Connect the device first", true);
     return false;
   }
+  let writeSucceeded = true;
   state.sendChain = state.sendChain.then(async () => {
     const writer = state.port.writable.getWriter();
     try {
@@ -213,9 +214,10 @@ async function sendCommand(command) {
   }).catch((error) => {
     logLine(`Serial write failed: ${error.message}`, "ui");
     showToast(`Serial write failed: ${error.message}`, true);
+    writeSucceeded = false;
   });
   await state.sendChain;
-  return true;
+  return writeSucceeded;
 }
 
 async function applyChannel(id) {
@@ -242,6 +244,8 @@ async function connectSerial() {
     setConnected(true);
     logLine("Serial device connected at 115200 baud", "ui");
     startReadLoop();
+    await sendCommand("IDENTIFY");
+    await sendCommand("PROFILE SHOW");
     await sendCommand("SHOW");
   } catch (error) {
     if (error.name !== "NotFoundError") {
