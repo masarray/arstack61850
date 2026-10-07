@@ -264,6 +264,7 @@ bool FirmwareManager::loadManifest() {
     const bool productionCapabilities =
         hasCapability(QStringLiteral("SMV-4I4V")) &&
         hasCapability(QStringLiteral("PROFILE")) &&
+        hasCapability(QStringLiteral("PROFILE-BINARY-V1")) &&
         hasCapability(QStringLiteral("LIVE-SETPOINTS")) &&
         hasCapability(QStringLiteral("SESSION-LEASE")) &&
         hasCapability(QStringLiteral("PTP-P2")) &&

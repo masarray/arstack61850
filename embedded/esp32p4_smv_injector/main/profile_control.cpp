@@ -245,7 +245,8 @@ void handle_binary_profile_command(const char* command, char** save) noexcept {
             return;
         }
         g_binary_staging.abort();
-        ESP_LOGI(kTag, "PROFILE BINABORT accepted");
+        ESP_LOGI(kTag, "PROFILE BINABORT transaction=%lu accepted",
+                 static_cast<unsigned long>(transaction));
         return;
     }
 
@@ -293,7 +294,8 @@ void handle_binary_profile_command(const char* command, char** save) noexcept {
         g_binary_staging.abort();
         const auto active = runtime_profile_snapshot();
         ESP_LOGI(kTag,
-                 "PROFILE committed generation=%llu svID=%s APPID=0x%04X rate=%lu wrap=%u",
+                 "PROFILE BINCOMMIT transaction=%lu committed generation=%llu svID=%s APPID=0x%04X rate=%lu wrap=%u",
+                 static_cast<unsigned long>(transaction),
                  static_cast<unsigned long long>(active.generation),
                  active.sv_id.data(),
                  static_cast<unsigned>(active.app_id),
@@ -378,6 +380,22 @@ void handle_profile_command(char* arguments) noexcept {
         return;
     }
 #endif
+
+    // Read-only transfer recovery state is available in every publisher state.
+    if (std::strcmp(subcommand, "BINSTATUS") == 0) {
+        if (!no_extra(&save)) {
+            ESP_LOGE(kTag, "Usage: PROFILE BINSTATUS");
+            return;
+        }
+        ESP_LOGI(kTag,
+                 "PROFILE BINSTATUS active=%u transaction=%lu last=%lu received=%lu expected=%lu",
+                 g_binary_staging.active() ? 1U : 0U,
+                 static_cast<unsigned long>(g_binary_staging.transaction()),
+                 static_cast<unsigned long>(g_binary_staging.last_transaction()),
+                 static_cast<unsigned long>(g_binary_staging.received()),
+                 static_cast<unsigned long>(g_binary_staging.expected()));
+        return;
+    }
 
     // Abort remains available even while RUNNING; all mutations require STOPPED.
     if (std::strcmp(subcommand, "BINABORT") == 0) {

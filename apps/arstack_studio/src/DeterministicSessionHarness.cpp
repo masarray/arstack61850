@@ -41,6 +41,8 @@ public:
             {"firmware probe before serial release -> blocked", firmwareProbeRequiresReleasedPort()},
             {"profile timeout -> bounded terminal error", profileTimeoutIsTerminal()},
             {"profile rejection -> bounded terminal error", profileRejectionIsTerminal()},
+            {"binary stale ACK identity -> fail closed", binaryProfileStaleAckFailsClosed()},
+            {"binary progress -> per-step deadline rearmed", binaryProfileProgressRearmsDeadline()},
             {"READY unplug/replug COM renumber -> READY stopped", readyReplugRecoversWithoutStart()},
             {"RUNNING unplug/replug -> never auto-restarts", runningReplugNeverAutoStarts()},
             {"wrong device during recovery -> SETUP ERROR", wrongDeviceRecoveryFailsClosed()},
@@ -116,6 +118,7 @@ private:
         result.capabilities = {
             QStringLiteral("SMV-4I4V"),
             QStringLiteral("PROFILE"),
+            QStringLiteral("PROFILE-BINARY-V1"),
             QStringLiteral("LIVE-SETPOINTS"),
             QStringLiteral("SESSION-LEASE"),
             QStringLiteral("PTP-P2"),
@@ -545,6 +548,87 @@ private:
             session.state() == QStringLiteral("PROFILE SYNC ERROR") &&
             session.statusText().contains(QStringLiteral("rejected"), Qt::CaseInsensitive) &&
             !session.startReady();
+    }
+
+    static bool binaryProfileStaleAckFailsClosed() {
+        // Isolate DeviceController's parser boundary from the supervisor retry
+        // policy. Production may immediately schedule a bounded retry after a
+        // deployment failure; that must not be mistaken for stale-ACK acceptance.
+        Fixture abortFixture;
+        if (!abortFixture.profileReady) return false;
+        seedVerified(abortFixture, identity(), QStringLiteral("COM7"), false);
+        abortFixture.session.profileSyncStage_ =
+            SmartSessionController::ProfileSyncStage::failed;
+        auto& abortDevice = abortFixture.device;
+        const QString abortGeneration = abortDevice.profileGeneration_;
+
+        abortDevice.profileDeploying_ = true;
+        abortDevice.profileArmed_ = false;
+        abortDevice.binaryProfileStage_ =
+            DeviceController::BinaryProfileStage::waiting_abort;
+        abortDevice.binaryProfile_.transaction = 42U;
+        abortDevice.binaryProfile_.lastObservedTransaction = 42U;
+        abortDevice.lastError_.clear();
+
+        const bool abortConsumed = abortDevice.processBinaryProfileLine(
+            QStringLiteral("PROFILE BINABORT transaction=41 accepted"));
+        const bool abortClosed =
+            abortConsumed && !abortDevice.profileArmed_ &&
+            abortDevice.profileGeneration_ == abortGeneration &&
+            abortDevice.binaryProfileStage_ ==
+                DeviceController::BinaryProfileStage::idle &&
+            abortDevice.lastError_.contains(
+                QStringLiteral("BINABORT"), Qt::CaseInsensitive);
+
+        Fixture commitFixture;
+        if (!commitFixture.profileReady) return false;
+        seedVerified(commitFixture, identity(), QStringLiteral("COM7"), false);
+        commitFixture.session.profileSyncStage_ =
+            SmartSessionController::ProfileSyncStage::failed;
+        auto& commitDevice = commitFixture.device;
+        const QString commitGeneration = commitDevice.profileGeneration_;
+
+        commitDevice.profileDeploying_ = true;
+        commitDevice.profileArmed_ = false;
+        commitDevice.binaryProfileStage_ =
+            DeviceController::BinaryProfileStage::waiting_commit;
+        commitDevice.binaryProfile_.transaction = 77U;
+        commitDevice.binaryProfile_.svId = QStringLiteral("ARSTACK_SV01");
+        commitDevice.binaryProfile_.appId = 0x4000U;
+        commitDevice.binaryProfile_.rate = 4000U;
+        commitDevice.binaryProfile_.modulus = 4000U;
+        commitDevice.lastError_.clear();
+
+        const bool commitConsumed = commitDevice.processBinaryProfileLine(
+            QStringLiteral(
+                "PROFILE BINCOMMIT transaction=76 committed generation=8 "
+                "svID=ARSTACK_SV01 APPID=0x4000 rate=4000 wrap=4000"));
+        const bool commitClosed =
+            commitConsumed && !commitDevice.profileArmed_ &&
+            commitDevice.profileGeneration_ == commitGeneration &&
+            commitDevice.binaryProfileStage_ ==
+                DeviceController::BinaryProfileStage::idle &&
+            commitDevice.lastError_.contains(
+                QStringLiteral("BINCOMMIT"), Qt::CaseInsensitive);
+
+        return abortClosed && commitClosed;
+    }
+
+    static bool binaryProfileProgressRearmsDeadline() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
+        auto& session = fixture.session;
+        auto& device = fixture.device;
+
+        session.profileSyncStage_ = SmartSessionController::ProfileSyncStage::deploying;
+        session.profileSyncTimer_.stop();
+        emit device.profileDeploymentProgress();
+        const bool armed = session.profileSyncTimer_.isActive() &&
+            session.profileSyncTimer_.interval() == SmartSessionController::profileSyncTimeoutMs();
+        session.profileSyncTimer_.stop();
+        session.profileSyncStage_ = SmartSessionController::ProfileSyncStage::idle;
+        return armed;
     }
 
     static bool readyReplugRecoversWithoutStart() {

@@ -81,7 +81,9 @@ int checkReferenceTemplate(int argc, char* argv[]) {
         profile.value(QStringLiteral("publisherRate")).toULongLong() == 4000ULL &&
         profile.value(QStringLiteral("counterModulus")).toUInt() == 4000U &&
         profile.value(QStringLiteral("payloadBytes")).toULongLong() == 64ULL &&
-        profile.value(QStringLiteral("channelLeafCount")).toULongLong() == 16ULL;
+        profile.value(QStringLiteral("channelLeafCount")).toULongLong() == 16ULL &&
+        profile.value(QStringLiteral("deviceProfileSchema")).toInt() == 1 &&
+        !profile.value(QStringLiteral("deviceProfileBinary")).toByteArray().isEmpty();
 
     if (!valid) {
         qCritical().noquote() << "4I+4V reference template regression:" << profile;
@@ -195,7 +197,7 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
     const QString currentLine = QStringLiteral(
         "I (412) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
         "device_id=A1B2C3D4E5F6 firmware=%1 build=0123456789abcdef boot_id=0123456789ABCDEF "
-        "capabilities=SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO")
+        "capabilities=SMV-4I4V,PROFILE,PROFILE-BINARY-V1,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO")
         .arg(QStringLiteral(ARSTACK_STUDIO_VERSION));
     const bool currentParsed = DeviceController::parseIdentityLine(currentLine, currentIdentity);
     const bool currentAccepted = currentParsed &&
@@ -205,7 +207,7 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
     DeviceIdentity legacyIdentity;
     const QString legacyLine = QStringLiteral(
         "I (417) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
-        "device_id=A1B2C3D4E5F6 firmware=%1 boot_id=0123456789ABCDEF capabilities=SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO")
+        "device_id=A1B2C3D4E5F6 firmware=%1 boot_id=0123456789ABCDEF capabilities=SMV-4I4V,PROFILE,PROFILE-BINARY-V1,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO")
         .arg(QStringLiteral(ARSTACK_STUDIO_VERSION));
     const bool legacyParsed = DeviceController::parseIdentityLine(legacyLine, legacyIdentity);
     const bool legacyRejectedAsCurrent = legacyParsed &&
