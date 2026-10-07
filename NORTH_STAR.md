@@ -105,7 +105,7 @@ ARStack must track standards explicitly rather than use “IEC 61850” as a gen
 Profile labels are not interchangeable, are resolved per stream, and are never inferred from vendor, filename, `svID`, or DataSet shape:
 
 1. **Generic IEC 61850-9-2 / SCL-driven** — exact selected SCL stream and its multicast/unicast engineering intent drive the output.
-2. **IEC 61869-9** — representable as an explicit family, but deployable only when its scaling/variant constraints are explicitly implemented and evidenced.
+2. **IEC 61869-9** — host profile semantics resolve ordered AmpSv/VolSv measurement+Quality pairs, exact rational engineering scaling and `FfSsIiUu` sampling/packetization identity; current ESP32-P4 deployment remains a separate unsupported device capability until its runtime/evidence milestone is completed.
 3. **Legacy 9-2LE compatibility** — an explicit compatibility mode, never silently promoted to the generic standard.
 
 SV link identity is also gated independently: APPID belongs to the SV allocation and multicast publication must use the IEC Sampled Values multicast MAC block. Device capability remains a separate gate from standards/profile validity.
@@ -141,6 +141,11 @@ SvPublisherProfile
   ASDUsPerFrame / derivedFrameCadence
   sampleCounterPolicy
   synchronizationPolicy
+  iec61869Profile?
+    standardBasis
+    FfSsIiUu variant
+    exact rational current/voltage scale
+    measurement/Quality bindings
   channels[]
     semantic
     basicType
@@ -187,6 +192,8 @@ holdover                          -> explicit policy + evidence
 ```
 
 Compatibility overrides may exist for relay-readability tests, but they must be visibly labeled and must never be reported as synchronization evidence.
+
+IEC 61869-9:2016 remains the published profile basis for current claims. Draft/future amendment semantics such as `SynchSrcID` may be represented for inspection, but they must not promote a profile to published-standard conformance until that authority is final and explicitly implemented.
 
 ## 6. Product family north star
 

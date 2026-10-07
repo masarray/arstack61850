@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "ariec61850/sampled_values/esp32p4_profile_support.hpp"
 #include "ariec61850/sampled_values/publisher_profile.hpp"
 #include "ariec61850/sampled_values/rational_schedule.hpp"
 #include "ariec61850/scl/dataset_reference.hpp"
@@ -208,7 +209,7 @@ void parser_compiles_structured_4800_sv_profile_without_drift() {
     CHECK(profile.vlan_present);
     CHECK(profile.vlan_id == 0U);
     CHECK(profile.vlan_priority == 4U);
-    CHECK(profile.schema_version == 3U);
+    CHECK(profile.schema_version == 4U);
     CHECK(profile.profile_family == SvProfileFamily::iec61850_9_2);
     CHECK(profile.profile_family_resolution == SvProfileFamilyResolution::resolved);
     CHECK(profile.transport_mode == SvTransportMode::multicast);
@@ -465,14 +466,13 @@ void sampled_values_profile_family_and_transport_are_explicit() {
 
     context.profile_family = SvProfileFamily::iec61869_9;
     const auto iec61869 = SvPublisherProfileCompiler::compile(source, context);
-    CHECK(iec61869.ok());
-    CHECK(iec61869.profile.has_value());
-    CHECK(iec61869.profile->profile_family_resolution ==
-          SvProfileFamilyResolution::incomplete);
+    CHECK(!iec61869.ok());
+    CHECK(!iec61869.profile.has_value());
     CHECK(std::any_of(
-        iec61869.warnings.begin(), iec61869.warnings.end(),
-        [](const std::string& warning) {
-            return warning.find("deployment remains blocked") != std::string::npos;
+        iec61869.errors.begin(), iec61869.errors.end(),
+        [](const std::string& error) {
+            return error.find("TCTR.AmpSv.instMag.i or TVTR.VolSv.instMag.i") !=
+                   std::string::npos;
         }));
 
     context.profile_family = SvProfileFamily::unspecified;
@@ -481,6 +481,332 @@ void sampled_values_profile_family_and_transport_are_explicit() {
     CHECK(unspecified.profile.has_value());
     CHECK(unspecified.profile->profile_family_resolution ==
           SvProfileFamilyResolution::unresolved);
+}
+
+void iec61869_9_profile_resolves_variant_dataset_and_exact_scaling() {
+    using namespace ar::iec61850::sampled_values;
+    using namespace ar::iec61850::scl;
+
+    const auto document = SclParser{}.load(fixture("sv-4800-structured-4i4v.scd"));
+    CHECK(document.sampled_values_streams.size() == 1U);
+    auto preferred = document.sampled_values_streams.front();
+    CHECK(preferred.entries.size() == 16U);
+
+    for (std::size_t pair = 0U; pair < 8U; ++pair) {
+        const bool current = pair < 4U;
+        auto& measurement = preferred.entries[pair * 2U];
+        auto& quality = preferred.entries[pair * 2U + 1U];
+        measurement.do_name = current ? "AmpSv" : "VolSv";
+        quality.do_name = measurement.do_name;
+    }
+    preferred.no_asdu = 2U;
+    preferred.smv_options.element_present = true;
+    preferred.smv_options.sample_synchronized = true;
+    preferred.smv_options.refresh_time = false;
+    preferred.smv_options.sample_rate = false;
+    preferred.smv_options.data_set = false;
+    preferred.smv_options.security = false;
+
+    SvPublisherProfileCompileContext context;
+    context.profile_family = SvProfileFamily::iec61869_9;
+    context.sample_counter_modulus = static_cast<std::uint16_t>(4800U);
+
+    const auto compiled = SvPublisherProfileCompiler::compile(preferred, context);
+    CHECK(compiled.ok());
+    CHECK(compiled.profile.has_value());
+    const auto& profile = *compiled.profile;
+    CHECK(profile.schema_version == 4U);
+    CHECK(profile.profile_family == SvProfileFamily::iec61869_9);
+    CHECK(profile.profile_family_resolution == SvProfileFamilyResolution::resolved);
+    CHECK(profile.iec61869_9.has_value());
+    CHECK(profile.iec61869_9->standard_basis ==
+          Iec61869_9StandardBasis::published_2016);
+    CHECK(profile.iec61869_9->channels.size() == 8U);
+    CHECK(profile.iec61869_9->variant.has_value());
+    const auto& variant = *profile.iec61869_9->variant;
+    CHECK(variant.sample_rate_hz == 4800U);
+    CHECK(variant.asdus_per_frame == 2U);
+    CHECK(variant.current_quantity_count == 4U);
+    CHECK(variant.voltage_quantity_count == 4U);
+    CHECK(variant.preferred());
+    CHECK(iec61869_9_variant_code(variant) == "F4800S2I4U4");
+    CHECK(profile.iec61869_9->channels.front().quantity ==
+          Iec61869_9Quantity::current);
+    CHECK(profile.iec61869_9->channels.front().engineering_scale ==
+          iec61869_9_current_scale);
+    CHECK(profile.iec61869_9->channels.back().quantity ==
+          Iec61869_9Quantity::voltage);
+    CHECK(profile.iec61869_9->channels.back().engineering_scale ==
+          iec61869_9_voltage_scale);
+    CHECK(iec61869_9_current_scale.numerator == 1);
+    CHECK(iec61869_9_current_scale.denominator == 1000U);
+    CHECK(iec61869_9_current_scale.unit == SvEngineeringUnit::ampere);
+    CHECK(iec61869_9_voltage_scale.numerator == 1);
+    CHECK(iec61869_9_voltage_scale.denominator == 100U);
+    CHECK(iec61869_9_voltage_scale.unit == SvEngineeringUnit::volt);
+    CHECK(classify_esp32p4_sv_profile(profile) ==
+          Esp32P4SvProfileSupport::unsupported_profile_family);
+
+    auto three_phase = preferred;
+    three_phase.entries.erase(
+        three_phase.entries.begin() + 14, three_phase.entries.begin() + 16);
+    three_phase.entries.erase(
+        three_phase.entries.begin() + 6, three_phase.entries.begin() + 8);
+    const auto three_phase_result =
+        SvPublisherProfileCompiler::compile(three_phase, context);
+    CHECK(three_phase_result.ok());
+    CHECK(three_phase_result.profile->iec61869_9->variant.has_value());
+    CHECK(iec61869_9_variant_code(
+              *three_phase_result.profile->iec61869_9->variant) ==
+          "F4800S2I3U3");
+
+    auto current_only = preferred;
+    current_only.entries.erase(
+        current_only.entries.begin() + 2, current_only.entries.end());
+    const auto current_only_result =
+        SvPublisherProfileCompiler::compile(current_only, context);
+    CHECK(current_only_result.ok());
+    CHECK(current_only_result.profile->iec61869_9->variant.has_value());
+    CHECK(iec61869_9_variant_code(
+              *current_only_result.profile->iec61869_9->variant) ==
+          "F4800S2I1U0");
+
+    const auto fixture_61869 =
+        SclParser{}.load(fixture("sv-61869-f4800s2-i4u4.scd"));
+    CHECK(fixture_61869.sampled_values_streams.size() == 1U);
+    const auto fixture_result = SvPublisherProfileCompiler::compile(
+        fixture_61869.sampled_values_streams.front(), context);
+    CHECK(fixture_result.ok());
+    CHECK(fixture_result.profile->iec61869_9->variant.has_value());
+    CHECK(iec61869_9_variant_code(
+              *fixture_result.profile->iec61869_9->variant) ==
+          "F4800S2I4U4");
+
+    CHECK(iec61869_9_variant_class(4000U, 1U) ==
+          std::optional<Iec61869_9VariantClass>{
+              Iec61869_9VariantClass::backward_compatible});
+    CHECK(iec61869_9_variant_class(4800U, 1U) ==
+          std::optional<Iec61869_9VariantClass>{
+              Iec61869_9VariantClass::backward_compatible});
+    CHECK(iec61869_9_variant_class(5760U, 1U) ==
+          std::optional<Iec61869_9VariantClass>{
+              Iec61869_9VariantClass::backward_compatible});
+    CHECK(iec61869_9_variant_class(12800U, 8U) ==
+          std::optional<Iec61869_9VariantClass>{
+              Iec61869_9VariantClass::backward_compatible});
+    CHECK(iec61869_9_variant_class(15360U, 8U) ==
+          std::optional<Iec61869_9VariantClass>{
+              Iec61869_9VariantClass::backward_compatible});
+    CHECK(iec61869_9_variant_class(4800U, 2U) ==
+          std::optional<Iec61869_9VariantClass>{
+              Iec61869_9VariantClass::preferred});
+    CHECK(iec61869_9_variant_class(14400U, 6U) ==
+          std::optional<Iec61869_9VariantClass>{
+              Iec61869_9VariantClass::preferred});
+    CHECK(iec61869_9_variant_class(96000U, 1U) ==
+          std::optional<Iec61869_9VariantClass>{
+              Iec61869_9VariantClass::preferred});
+    CHECK(!iec61869_9_variant_class(5000U, 2U).has_value());
+
+    CHECK(iec61869_9_published_2016_sampling_basis(4800U, 2U) ==
+          std::optional<SvSampleMode>{SvSampleMode::samples_per_second});
+    CHECK(iec61869_9_published_2016_sampling_basis(14400U, 6U) ==
+          std::optional<SvSampleMode>{SvSampleMode::samples_per_second});
+    CHECK(iec61869_9_published_2016_sampling_basis(4000U, 1U) ==
+          std::optional<SvSampleMode>{SvSampleMode::samples_per_period});
+    CHECK(iec61869_9_published_2016_sampling_basis(96000U, 1U) ==
+          std::optional<SvSampleMode>{SvSampleMode::samples_per_period});
+
+    auto backward_50hz = preferred;
+    backward_50hz.sample_rate = 80U;
+    backward_50hz.sample_mode = "SmpPerPeriod";
+    backward_50hz.no_asdu = 1U;
+    context.nominal_frequency_millihz = 50'000U;
+    context.sample_counter_modulus = static_cast<std::uint16_t>(4000U);
+    const auto backward_50hz_result =
+        SvPublisherProfileCompiler::compile(backward_50hz, context);
+    CHECK(backward_50hz_result.ok());
+    CHECK(backward_50hz_result.profile->iec61869_9->variant.has_value());
+    CHECK(iec61869_9_variant_code(
+              *backward_50hz_result.profile->iec61869_9->variant) ==
+          "F4000S1I4U4");
+    CHECK(!backward_50hz_result.profile->iec61869_9->variant->preferred());
+
+    auto wrong_backward_basis = backward_50hz;
+    wrong_backward_basis.sample_rate = 4000U;
+    wrong_backward_basis.sample_mode = "SmpPerSec";
+    context.nominal_frequency_millihz.reset();
+    const auto wrong_backward_basis_result =
+        SvPublisherProfileCompiler::compile(wrong_backward_basis, context);
+    CHECK(!wrong_backward_basis_result.ok());
+    CHECK(std::any_of(
+        wrong_backward_basis_result.errors.begin(),
+        wrong_backward_basis_result.errors.end(),
+        [](const std::string& error) {
+            return error.find("SmpMod does not match") != std::string::npos;
+        }));
+
+    auto unicast = preferred;
+    unicast.multicast = false;
+    const auto unicast_result =
+        SvPublisherProfileCompiler::compile(unicast, context);
+    CHECK(!unicast_result.ok());
+    CHECK(std::any_of(
+        unicast_result.errors.begin(), unicast_result.errors.end(),
+        [](const std::string& error) {
+            return error.find("requires a multicast") != std::string::npos;
+        }));
+
+    auto missing_sync_option = preferred;
+    missing_sync_option.smv_options.sample_synchronized = false;
+    const auto missing_sync_option_result =
+        SvPublisherProfileCompiler::compile(missing_sync_option, context);
+    CHECK(!missing_sync_option_result.ok());
+    CHECK(std::any_of(
+        missing_sync_option_result.errors.begin(),
+        missing_sync_option_result.errors.end(),
+        [](const std::string& error) {
+            return error.find("sampleSynchronized=true") != std::string::npos;
+        }));
+
+    auto forbidden_sample_rate_option = preferred;
+    forbidden_sample_rate_option.smv_options.sample_rate = true;
+    const auto forbidden_sample_rate_option_result =
+        SvPublisherProfileCompiler::compile(forbidden_sample_rate_option, context);
+    CHECK(!forbidden_sample_rate_option_result.ok());
+    CHECK(std::any_of(
+        forbidden_sample_rate_option_result.errors.begin(),
+        forbidden_sample_rate_option_result.errors.end(),
+        [](const std::string& error) {
+            return error.find("sampleRate=false") != std::string::npos;
+        }));
+
+    context.nominal_frequency_millihz.reset();
+    auto high_rate = preferred;
+    high_rate.sample_rate = 14400U;
+    high_rate.no_asdu = 6U;
+    context.sample_counter_modulus = static_cast<std::uint16_t>(14400U);
+    const auto high_rate_result =
+        SvPublisherProfileCompiler::compile(high_rate, context);
+    CHECK(high_rate_result.ok());
+    CHECK(high_rate_result.profile->iec61869_9->variant.has_value());
+    CHECK(iec61869_9_variant_code(
+              *high_rate_result.profile->iec61869_9->variant) ==
+          "F14400S6I4U4");
+    CHECK(high_rate_result.profile->iec61869_9->variant->preferred());
+
+    auto high_bandwidth_dc = preferred;
+    high_bandwidth_dc.sample_rate = 9600U;
+    high_bandwidth_dc.sample_mode = "SmpPerPeriod";
+    high_bandwidth_dc.no_asdu = 1U;
+    context.nominal_frequency_millihz = 10'000U;
+    context.sample_counter_modulus.reset();
+    const auto high_bandwidth_dc_result =
+        SvPublisherProfileCompiler::compile(high_bandwidth_dc, context);
+    CHECK(high_bandwidth_dc_result.ok());
+    CHECK(high_bandwidth_dc_result.profile.has_value());
+    CHECK(high_bandwidth_dc_result.profile->iec61869_9.has_value());
+    CHECK(high_bandwidth_dc_result.profile->iec61869_9->variant.has_value());
+    CHECK(iec61869_9_variant_code(
+              *high_bandwidth_dc_result.profile->iec61869_9->variant) ==
+          "F96000S1I4U4");
+    CHECK(high_bandwidth_dc_result.profile->iec61869_9->variant->preferred());
+    CHECK(high_bandwidth_dc_result.profile->sample_counter_policy ==
+          SvSampleCounterPolicy::unresolved);
+    CHECK(!high_bandwidth_dc_result.profile->sample_counter_modulus.has_value());
+    CHECK(std::any_of(
+        high_bandwidth_dc_result.warnings.begin(),
+        high_bandwidth_dc_result.warnings.end(),
+        [](const std::string& warning) {
+            return warning.find("sample-counter wrap policy is unresolved") !=
+                   std::string::npos;
+        }));
+
+    context.nominal_frequency_millihz.reset();
+
+    auto nonstandard_rate = preferred;
+    nonstandard_rate.sample_rate = 5000U;
+    context.sample_counter_modulus = static_cast<std::uint16_t>(5000U);
+    const auto nonstandard =
+        SvPublisherProfileCompiler::compile(nonstandard_rate, context);
+    CHECK(!nonstandard.ok());
+    CHECK(std::any_of(
+        nonstandard.errors.begin(), nonstandard.errors.end(),
+        [](const std::string& error) {
+            return error.find("does not recognize the configured F5000S2") !=
+                   std::string::npos;
+        }));
+
+    auto generic_names = document.sampled_values_streams.front();
+    generic_names.no_asdu = 2U;
+    context.sample_counter_modulus = static_cast<std::uint16_t>(4800U);
+    const auto wrong_semantic =
+        SvPublisherProfileCompiler::compile(generic_names, context);
+    CHECK(!wrong_semantic.ok());
+
+    auto missing_quality = preferred;
+    missing_quality.entries.erase(missing_quality.entries.begin() + 1);
+    const auto missing_quality_result =
+        SvPublisherProfileCompiler::compile(missing_quality, context);
+    CHECK(!missing_quality_result.ok());
+    CHECK(std::any_of(
+        missing_quality_result.errors.begin(), missing_quality_result.errors.end(),
+        [](const std::string& error) {
+            return error.find("measurement/Quality pairs") != std::string::npos;
+        }));
+
+    auto wrong_order = preferred;
+    std::vector<SclDataSetEntry> reordered;
+    reordered.reserve(wrong_order.entries.size());
+    reordered.push_back(wrong_order.entries[8]);
+    reordered.push_back(wrong_order.entries[9]);
+    reordered.insert(
+        reordered.end(), wrong_order.entries.begin(), wrong_order.entries.begin() + 8);
+    reordered.insert(
+        reordered.end(), wrong_order.entries.begin() + 10, wrong_order.entries.end());
+    wrong_order.entries = std::move(reordered);
+    const auto wrong_order_result =
+        SvPublisherProfileCompiler::compile(wrong_order, context);
+    CHECK(!wrong_order_result.ok());
+    CHECK(std::any_of(
+        wrong_order_result.errors.begin(), wrong_order_result.errors.end(),
+        [](const std::string& error) {
+            return error.find("AmpSv current pairs to precede") != std::string::npos;
+        }));
+
+    auto secured_profile = preferred;
+    secured_profile.smv_options.security = true;
+    const auto secured_result =
+        SvPublisherProfileCompiler::compile(secured_profile, context);
+    CHECK(secured_result.ok());
+    CHECK(secured_result.profile.has_value());
+    CHECK(secured_result.profile->profile_family_resolution ==
+          SvProfileFamilyResolution::incomplete);
+    CHECK(secured_result.profile->iec61869_9.has_value());
+    CHECK(std::any_of(
+        secured_result.warnings.begin(), secured_result.warnings.end(),
+        [](const std::string& warning) {
+            return warning.find("IEC 62351-6") != std::string::npos &&
+                   warning.find("deployment") != std::string::npos;
+        }));
+    CHECK(classify_esp32p4_sv_profile(*secured_result.profile) ==
+          Esp32P4SvProfileSupport::unsupported_profile_family);
+
+    auto future_synch_source = preferred;
+    future_synch_source.smv_options.element_present = true;
+    future_synch_source.smv_options.synch_source_id = true;
+    const auto future_result =
+        SvPublisherProfileCompiler::compile(future_synch_source, context);
+    CHECK(future_result.ok());
+    CHECK(future_result.profile.has_value());
+    CHECK(future_result.profile->profile_family_resolution ==
+          SvProfileFamilyResolution::incomplete);
+    CHECK(std::any_of(
+        future_result.warnings.begin(), future_result.warnings.end(),
+        [](const std::string& warning) {
+            return warning.find("draft/future amendment semantics") !=
+                   std::string::npos;
+        }));
 }
 
 void parser_preserves_sampled_value_multicast_semantics() {
@@ -826,6 +1152,7 @@ int main() {
         {"SCL structured 4800 SV profile", parser_compiles_structured_4800_sv_profile_without_drift},
         {"SV sampling and frame cadence semantics", publisher_profile_separates_sampling_from_frame_cadence},
         {"SV profile family and transport semantics", sampled_values_profile_family_and_transport_are_explicit},
+        {"IEC 61869-9 variant dataset and scaling semantics", iec61869_9_profile_resolves_variant_dataset_and_exact_scaling},
         {"SCL SV multicast semantics", parser_preserves_sampled_value_multicast_semantics},
         {"SCL dataset references", dataset_reference_resolver_accepts_canonical_and_local_forms},
         {"SCL configured control model", parser_preserves_configured_control_model_value},

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "ariec61850/ethernet/ethernet.hpp"
+#include "ariec61850/sampled_values/iec61869_9_profile.hpp"
 #include "ariec61850/sampled_values/profile_family.hpp"
 #include "ariec61850/sampled_values/timing_semantics.hpp"
 #include "ariec61850/scl/model.hpp"
@@ -66,7 +67,7 @@ struct SvPublisherProfileCompileContext final {
 };
 
 struct SvPublisherProfile final {
-    std::uint32_t schema_version{3U};
+    std::uint32_t schema_version{4U};
     std::string control_block_reference;
     std::string sv_id;
     std::string data_set_reference;
@@ -86,6 +87,7 @@ struct SvPublisherProfile final {
     SvSampleCounterPolicy sample_counter_policy{SvSampleCounterPolicy::unresolved};
     std::optional<std::uint16_t> sample_counter_modulus;
     SvAsduOptions asdu_options;
+    std::optional<Iec61869_9Profile> iec61869_9;
 
     std::vector<SvPublisherChannel> channels;
     std::size_t payload_size_bytes{};
@@ -368,7 +370,7 @@ public:
             });
         }
         profile.payload_size_bytes = payload_size;
-        apply_profile_family_rules(profile, result);
+        apply_profile_family_rules(stream, profile, result);
 
         if (result.errors.empty()) {
             result.profile = std::move(profile);
@@ -426,6 +428,7 @@ private:
     }
 
     static void apply_profile_family_rules(
+        const scl::SclSampledValuesStream& stream,
         SvPublisherProfile& profile,
         SvPublisherProfileCompileResult& result) {
         switch (profile.profile_family) {
@@ -475,15 +478,105 @@ private:
             return;
         }
 
-        case SvProfileFamily::iec61869_9:
-            // P1.1 deliberately stops at transport/address family identity.
-            // Scaling, configurable variant constraints and full IEC 61869-9
-            // dataset rules are a later authority and must not be guessed here.
-            profile.profile_family_resolution = SvProfileFamilyResolution::incomplete;
-            result.warnings.push_back(
-                "IEC 61869-9 family selected: transport/address semantics are represented, "
-                "but scaling and variant rules are not yet complete; deployment remains blocked.");
+        case SvProfileFamily::iec61869_9: {
+            bool published_profile_valid = true;
+            if (profile.transport_mode != SvTransportMode::multicast) {
+                result.errors.push_back(
+                    "IEC 61869-9:2016 requires a multicast sampled value control block.");
+                published_profile_valid = false;
+            }
+            if (!profile.asdu_options.sample_synchronized) {
+                result.errors.push_back(
+                    "IEC 61869-9:2016 requires SmvOpts sampleSynchronized=true.");
+                published_profile_valid = false;
+            }
+            if (profile.asdu_options.refresh_time) {
+                result.errors.push_back(
+                    "IEC 61869-9:2016 requires SmvOpts refreshTime=false.");
+                published_profile_valid = false;
+            }
+            if (profile.asdu_options.sample_rate) {
+                result.errors.push_back(
+                    "IEC 61869-9:2016 requires SmvOpts sampleRate=false.");
+                published_profile_valid = false;
+            }
+            if (profile.asdu_options.data_set) {
+                result.errors.push_back(
+                    "IEC 61869-9:2016 requires SmvOpts dataSet=false.");
+                published_profile_valid = false;
+            }
+            const bool security_profile_requires_external_authority =
+                profile.asdu_options.security;
+            if (security_profile_requires_external_authority) {
+                result.warnings.push_back(
+                    "IEC 61869-9 stream requests IEC 62351-6 Sampled Values security. "
+                    "The base IEC 61869-9 semantics remain inspectable, but ARStack does not "
+                    "yet model the IEC 62351-6 wire/security authority, so deployment and "
+                    "a complete profile claim remain blocked.");
+            }
+
+            const auto resolved = resolve_iec61869_9_profile(stream.entries, profile.timing);
+            result.errors.insert(
+                result.errors.end(), resolved.errors.begin(), resolved.errors.end());
+            result.warnings.insert(
+                result.warnings.end(), resolved.warnings.begin(), resolved.warnings.end());
+
+            if (resolved.valid_dataset()) {
+                profile.iec61869_9 = resolved.profile;
+            }
+
+            if (!resolved.errors.empty()) {
+                profile.profile_family_resolution = SvProfileFamilyResolution::unresolved;
+                return;
+            }
+
+            if (resolved.profile.variant.has_value()) {
+                const auto& variant = *resolved.profile.variant;
+                const auto expected_basis = iec61869_9_published_2016_sampling_basis(
+                    variant.sample_rate_hz, variant.asdus_per_frame);
+                if (!expected_basis.has_value() ||
+                    profile.timing.sampling_basis != *expected_basis) {
+                    result.errors.push_back(
+                        "IEC 61869-9:2016 SmpMod does not match the selected F/S variant.");
+                    published_profile_valid = false;
+                } else if (!iec61869_9_published_2016_configured_rate_matches(
+                               variant, profile.timing)) {
+                    result.errors.push_back(
+                        "IEC 61869-9:2016 configured SmpRate does not match the "
+                        "published encoding rule for the selected F/S variant.");
+                    published_profile_valid = false;
+                }
+            }
+
+            if (!published_profile_valid) {
+                profile.profile_family_resolution = SvProfileFamilyResolution::unresolved;
+                return;
+            }
+
+            if (profile.asdu_options.synch_source_id) {
+                profile.profile_family_resolution = SvProfileFamilyResolution::incomplete;
+                result.warnings.push_back(
+                    "IEC 61869-9 published-2016 profile is otherwise resolved, but SynchSrcID "
+                    "belongs to draft/future amendment semantics and cannot promote a "
+                    "published-2016 conformance claim.");
+                return;
+            }
+            if (security_profile_requires_external_authority) {
+                profile.profile_family_resolution = SvProfileFamilyResolution::incomplete;
+                return;
+            }
+
+            profile.profile_family_resolution = resolved.complete()
+                ? SvProfileFamilyResolution::resolved
+                : SvProfileFamilyResolution::incomplete;
+            if (resolved.complete()) {
+                result.warnings.push_back(
+                    "IEC 61869-9:2016 dataset, optional-field policy, fixed engineering "
+                    "scaling and FfSsIiUu variant semantics are resolved on the host; "
+                    "current ESP32-P4 deployment support remains a separate device-capability gate.");
+            }
             return;
+        }
         }
     }
 

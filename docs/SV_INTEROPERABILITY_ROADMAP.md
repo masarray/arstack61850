@@ -94,17 +94,18 @@ The practical product rule is: **parse broadly, explain normalization, deploy na
 1. **SCL is configured intent.** Do not replace SCL values with convenient defaults when the configuration provides an explicit value.
 2. **Resolved type order is wire order.** FCDA order is preserved. When an FCDA points at a structured data object without `daName`, ARStack expands the matching functional-constraint leaves in `DataTypeTemplates` order.
 3. **Unsupported means rejected, not guessed.** Unknown basic types, ambiguous DataSet bindings, incomplete address bindings and unresolved structures must produce explicit diagnostics.
-4. **Optional fields are profile data.** `SmvOpts` is preserved so canonical ASDU field presence is not inferred from what a particular analyzer prefers.
+4. **Optional fields are profile data.** `SmvOpts` is preserved so canonical ASDU field presence is not inferred from what a particular analyzer prefers. A standards-valid IEC 62351-6 secured-SV request remains inspectable but non-deployable until the security wire authority is implemented; lack of local capability must not be mislabeled as invalid IEC.
 5. **Timing is rational, not truncated.** A requested rate such as 4800 samples/s must not become a fixed 208 us period. The scheduler distributes integer timer ticks so long-term rate has no truncation drift.
 6. **Sampling cadence is not frame cadence.** `SmpRate` and `SmpMod` define sampling semantics; `nofASDU` defines how many consecutive ASDUs are carried by one publication. The host derives both samples/s and Ethernet frames/s explicitly instead of storing one ambiguous publisher rate.
 7. **Transport intent is preserved.** `SampledValueControl@multicast` is engineering data. Missing means the IEC 61850-6 default `true`; an explicit `false` remains unicast through parse, compile and export rather than being rewritten as multicast.
 8. **Profile family is explicit per stream.** Generic IEC 61850-9-2, legacy 9-2LE compatibility and IEC 61869-9 are separate rule families. ARStack never selects one from vendor, filename, `svID` or DataSet shape, and one stream's selection cannot silently classify another stream.
-9. **SV addressing is standards-gated.** APPID must be in the SV allocation `0x4000..0x7FFF`; multicast SV uses the IEC SV multicast MAC block, while unicast requires a nonzero unicast destination.
-10. **Counter policy is independently validated.** `SmpPerSec` can establish sample cadence, but it must not be treated as universal proof of the `smpCnt` wrap rule. A rate-sized modulus may be shown as a candidate for inspection; device deployment requires an applicable profile rule or observed-evidence confirmation.
-11. **Synchronization is evidence-driven.** Configuration and packet shape cannot promote `smpSynch`; measured clock state controls synchronization claims.
-12. **Diagnostic traffic is separate.** Bench mirrors/probes must never change canonical stream identity or semantics.
-13. **Regression evidence is vendor-neutral.** Real lab configurations may inform anonymous fixtures, but proprietary configuration files, commercial names and product comparisons are not committed.
-14. **Tolerance is bounded.** Representation quirks can be normalized when equivalence is known; unresolved mandatory semantics remain non-deployable.
+9. **IEC 61869-9 semantics have one host authority.** The family resolver validates ordered `AmpSv.instMag.i -> AmpSv.q` and `VolSv.instMag.i -> VolSv.q` pairs, requires current pairs before voltage pairs, records exact rational scaling (1/1000 A/count and 1/100 V/count), and resolves an `FfSsIiUu` identity from canonical DataSet + timing evidence. Vendor channel-count limits never become standard rules.
+10. **SV addressing is standards-gated.** APPID must be in the SV allocation `0x4000..0x7FFF`; multicast SV uses the IEC SV multicast MAC block, while unicast requires a nonzero unicast destination.
+11. **Counter policy is independently validated.** `SmpPerSec` can establish sample cadence, but it must not be treated as universal proof of the `smpCnt` wrap rule. A rate-sized modulus may be shown as a candidate for inspection; device deployment requires an applicable profile rule or observed-evidence confirmation.
+12. **Synchronization is evidence-driven.** Configuration and packet shape cannot promote `smpSynch`; measured clock state controls synchronization claims.
+13. **Diagnostic traffic is separate.** Bench mirrors/probes must never change canonical stream identity or semantics.
+14. **Regression evidence is vendor-neutral.** Real lab configurations may inform anonymous fixtures, but proprietary configuration files, commercial names and product comparisons are not committed.
+15. **Tolerance is bounded.** Representation quirks can be normalized when equivalence is known; unresolved mandatory semantics remain non-deployable.
 
 ## Compatibility classes
 
@@ -135,7 +136,7 @@ The stream is structurally understood but deployment needs additional context. E
 - an unresolved sample-counter wrap policy;
 - a capture-derived runtime behavior that conflicts with an older engineering file;
 - a profile family that has not been selected explicitly;
-- IEC 61869-9 selected before its scaling/variant rules are completely implemented and evidenced.
+- IEC 61869-9 DataSet semantics are valid but the `FfSsIiUu` identity still needs unresolved timing context;
 
 Class B is not guessed. The host UI/CLI must request, resolve or validate the missing context explicitly before deployment.
 
@@ -199,6 +200,7 @@ Grow coverage by anonymous standards/profile families:
 | Address variants | APPID, multicast MAC, tagged/untagged VLAN handling |
 | Multiple streams | independent identity, counter and timing state |
 | nofASDU variants | deterministic frame construction and counter semantics |
+| IEC 61869-9 variants | exact `FfSsIiUu` identity, AmpSv/VolSv+Quality ordering, rational scale authority, and host-valid/device-unsupported distinction |
 | Additional fixed leaf types | standard-derived width + golden-wire tests |
 | Config vs capture conflict | explicit diagnostic, no silent override |
 | Vendor metadata / dialect variance | equivalent canonical profile + normalization provenance |

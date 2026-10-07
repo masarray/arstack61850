@@ -120,6 +120,25 @@ std::string mac_text(const std::array<std::uint8_t, 6>& mac) {
     return out.str();
 }
 
+std::string iec61869_variant_class_name(
+    const ar::iec61850::sampled_values::Iec61869_9VariantClass value) {
+    using ar::iec61850::sampled_values::Iec61869_9VariantClass;
+    return value == Iec61869_9VariantClass::preferred
+        ? "preferred" : "backward-compatible";
+}
+
+std::string iec61869_quantity_name(
+    const ar::iec61850::sampled_values::Iec61869_9Quantity value) {
+    using ar::iec61850::sampled_values::Iec61869_9Quantity;
+    return value == Iec61869_9Quantity::current ? "current" : "voltage";
+}
+
+std::string engineering_unit_name(
+    const ar::iec61850::sampled_values::SvEngineeringUnit value) {
+    using ar::iec61850::sampled_values::SvEngineeringUnit;
+    return value == SvEngineeringUnit::ampere ? "A" : "V";
+}
+
 void emit_profile(std::ostream& out, const SvPublisherProfile& p) {
     out << '{';
     out << "\"schemaVersion\":" << p.schema_version << ',';
@@ -177,6 +196,50 @@ void emit_profile(std::ostream& out, const SvPublisherProfile& p) {
     out << "\"dataSet\":" << (p.asdu_options.data_set ? "true" : "false") << ',';
     out << "\"security\":" << (p.asdu_options.security ? "true" : "false") << ',';
     out << "\"synchSourceId\":" << (p.asdu_options.synch_source_id ? "true" : "false") << "},";
+    out << "\"iec61869\":";
+    if (!p.iec61869_9.has_value()) {
+        out << "null";
+    } else {
+        const auto& semantic = *p.iec61869_9;
+        out << '{';
+        out << "\"standardBasis\":\"IEC 61869-9:2016\",";
+        out << "\"variant\":";
+        if (!semantic.variant.has_value()) {
+            out << "null";
+        } else {
+            const auto& variant = *semantic.variant;
+            out << '{';
+            out << "\"code\":";
+            quoted(out, ar::iec61850::sampled_values::iec61869_9_variant_code(variant));
+            out << ',';
+            out << "\"class\":";
+            quoted(out, iec61869_variant_class_name(variant.variant_class));
+            out << ',';
+            out << "\"sampleRateHz\":" << variant.sample_rate_hz << ',';
+            out << "\"asdusPerFrame\":" << variant.asdus_per_frame << ',';
+            out << "\"currentQuantities\":" << variant.current_quantity_count << ',';
+            out << "\"voltageQuantities\":" << variant.voltage_quantity_count;
+            out << '}';
+        }
+        out << ",\"channels\":[";
+        for (std::size_t index = 0U; index < semantic.channels.size(); ++index) {
+            if (index != 0U) out << ',';
+            const auto& binding = semantic.channels[index];
+            out << '{';
+            out << "\"measurementIndex\":" << binding.measurement_entry_index << ',';
+            out << "\"qualityIndex\":" << binding.quality_entry_index << ',';
+            out << "\"quantity\":";
+            quoted(out, iec61869_quantity_name(binding.quantity));
+            out << ',';
+            out << "\"scaleNumerator\":" << binding.engineering_scale.numerator << ',';
+            out << "\"scaleDenominator\":" << binding.engineering_scale.denominator << ',';
+            out << "\"scaleUnit\":";
+            quoted(out, engineering_unit_name(binding.engineering_scale.unit));
+            out << '}';
+        }
+        out << "]}";
+    }
+    out << ',';
     out << "\"channels\":[";
     for (std::size_t i = 0U; i < p.channels.size(); ++i) {
         if (i != 0U) out << ',';
@@ -202,7 +265,7 @@ void emit_document(
     const std::optional<std::uint16_t> counter_modulus,
     const std::optional<std::uint32_t> nominal_frequency_millihz) {
     out << '{';
-    out << "\"schemaVersion\":3,";
+    out << "\"schemaVersion\":4,";
     out << "\"source\":"; quoted(out, document.source_name); out << ',';
     out << "\"edition\":"; quoted(out, edition_name(document.edition)); out << ',';
     out << "\"headerID\":"; quoted(out, document.header_id); out << ',';
@@ -372,7 +435,7 @@ int main(int argc, char** argv) {
         std::cout << '\n';
         return 0;
     } catch (const std::exception& error) {
-        std::cout << "{\"schemaVersion\":3,\"fatalError\":";
+        std::cout << "{\"schemaVersion\":4,\"fatalError\":";
         quoted(std::cout, error.what());
         std::cout << "}\n";
         return 1;

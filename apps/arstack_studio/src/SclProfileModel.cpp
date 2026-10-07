@@ -16,6 +16,10 @@
 
 namespace {
 using ar::iec61850::sampled_values::Esp32P4SvProfileSupport;
+using ar::iec61850::sampled_values::Iec61869_9Quantity;
+using ar::iec61850::sampled_values::Iec61869_9VariantClass;
+using ar::iec61850::sampled_values::SvEngineeringUnit;
+using ar::iec61850::sampled_values::SvExactEngineeringScale;
 using ar::iec61850::sampled_values::SvPublisherProfile;
 using ar::iec61850::sampled_values::SvPublisherProfileCompileContext;
 using ar::iec61850::sampled_values::SvPublisherProfileCompiler;
@@ -86,6 +90,22 @@ QString supportText(const Esp32P4SvProfileSupport support) {
     return QString::fromLatin1(
         esp32p4_sv_profile_support_name(support).data(),
         static_cast<qsizetype>(esp32p4_sv_profile_support_name(support).size()));
+}
+
+QString iec61869VariantClassText(const Iec61869_9VariantClass value) {
+    return value == Iec61869_9VariantClass::preferred
+        ? QStringLiteral("preferred")
+        : QStringLiteral("backward-compatible");
+}
+
+QString exactScaleText(const SvExactEngineeringScale& scale) {
+    if (scale.denominator == 0U) return QStringLiteral("invalid");
+    const auto unit = scale.unit == SvEngineeringUnit::ampere
+        ? QStringLiteral("A") : QStringLiteral("V");
+    const auto value = static_cast<double>(scale.numerator) /
+        static_cast<double>(scale.denominator);
+    return QStringLiteral("%1 %2/count")
+        .arg(QString::number(value, 'g', 8), unit);
 }
 } // namespace
 
@@ -472,5 +492,42 @@ QVariantMap SclProfileModel::profileToVariantMap(const SvPublisherProfile& p) co
     map.insert(QStringLiteral("includeDataSet"), p.asdu_options.data_set);
     map.insert(QStringLiteral("includeSampleRate"), p.asdu_options.sample_rate);
     map.insert(QStringLiteral("sampleSynchronizedField"), p.asdu_options.sample_synchronized);
+
+    map.insert(QStringLiteral("iec61869Present"), p.iec61869_9.has_value());
+    if (p.iec61869_9.has_value()) {
+        const auto& semantic = *p.iec61869_9;
+        map.insert(QStringLiteral("iec61869StandardBasis"),
+            QStringLiteral("IEC 61869-9:2016"));
+        if (semantic.variant.has_value()) {
+            const auto& variant = *semantic.variant;
+            map.insert(QStringLiteral("iec61869Variant"),
+                QString::fromStdString(
+                    ar::iec61850::sampled_values::iec61869_9_variant_code(variant)));
+            map.insert(QStringLiteral("iec61869VariantClass"),
+                iec61869VariantClassText(variant.variant_class));
+            map.insert(QStringLiteral("iec61869CurrentCount"),
+                static_cast<int>(variant.current_quantity_count));
+            map.insert(QStringLiteral("iec61869VoltageCount"),
+                static_cast<int>(variant.voltage_quantity_count));
+        }
+        const auto current = std::find_if(
+            semantic.channels.begin(), semantic.channels.end(),
+            [](const auto& channel) {
+                return channel.quantity == Iec61869_9Quantity::current;
+            });
+        const auto voltage = std::find_if(
+            semantic.channels.begin(), semantic.channels.end(),
+            [](const auto& channel) {
+                return channel.quantity == Iec61869_9Quantity::voltage;
+            });
+        if (current != semantic.channels.end()) {
+            map.insert(QStringLiteral("iec61869CurrentScale"),
+                exactScaleText(current->engineering_scale));
+        }
+        if (voltage != semantic.channels.end()) {
+            map.insert(QStringLiteral("iec61869VoltageScale"),
+                exactScaleText(voltage->engineering_scale));
+        }
+    }
     return map;
 }

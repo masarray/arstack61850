@@ -7,6 +7,7 @@ on:
       - 'tools/smv_profile_inspect.cpp'
       - 'include/ariec61850/sampled_values/publisher_profile.hpp'
       - 'include/ariec61850/sampled_values/profile_family.hpp'
+      - 'include/ariec61850/sampled_values/iec61869_9_profile.hpp'
       - 'include/ariec61850/scl/**'
       - 'src/scl/**'
       - 'tests/fixtures/scl/**'
@@ -17,6 +18,7 @@ on:
       - 'tools/smv_profile_inspect.cpp'
       - 'include/ariec61850/sampled_values/publisher_profile.hpp'
       - 'include/ariec61850/sampled_values/profile_family.hpp'
+      - 'include/ariec61850/sampled_values/iec61869_9_profile.hpp'
       - 'include/ariec61850/scl/**'
       - 'src/scl/**'
       - 'tests/fixtures/scl/**'
@@ -57,6 +59,33 @@ jobs:
           grep -q 'navigator.serial' apps/smv_injector_gui/app.js
           grep -q '/api/scl/inspect' apps/smv_injector_gui/profile_bridge.js
 
+      - name: IEC 61869-9 authority boundary
+        shell: bash
+        run: |
+          core=include/ariec61850/sampled_values/iec61869_9_profile.hpp
+          publisher=include/ariec61850/sampled_values/publisher_profile.hpp
+          device=include/ariec61850/sampled_values/esp32p4_profile_support.hpp
+          bridge=apps/smv_injector_gui/profile_bridge.js
+          studio=apps/arstack_studio/qml/ProfileInspector.qml
+
+          grep -q 'iec61869_9_current_scale' "$core"
+          grep -q 'iec61869_9_voltage_scale' "$core"
+          grep -q 'resolve_iec61869_9_profile' "$publisher"
+          grep -q 'profile.profile_family == SvProfileFamily::iec61869_9' "$device"
+          grep -q 'compiledIec61869CountsPerUnit' "$bridge"
+          grep -q 'compiled standards profile and is read-only' "$bridge"
+          grep -q 'iec61869CurrentScale' "$studio"
+          grep -q 'iec61869VoltageScale' "$studio"
+
+          if grep -Eqi 'ABB|Siemens|Hitachi|OMICRON' "$core" "$publisher"; then
+            echo 'Vendor-specific IEC 61869-9 protocol branch is forbidden' >&2
+            exit 1
+          fi
+          if grep -Eq '0\.001|0\.01|1 mA/count|10 mV/count' "$studio"; then
+            echo 'Studio QML must consume compiled scale evidence, not own IEC 61869-9 constants' >&2
+            exit 1
+          fi
+
       - name: Build smart SCL profile engine
         shell: bash
         run: |
@@ -75,10 +104,21 @@ jobs:
           grep -q '"compatibilityClass":"A"' /tmp/profile-a.json
           grep -q '"profileFamily":"iec61850-9-2"' /tmp/profile-a.json
           grep -q '"deviceSupport":"ready"' /tmp/profile-a.json
-          build-smv-gui/ariec61850_smv_profile_inspect "$fixture" --profile-family iec61869-9 --counter-modulus 4800 > /tmp/profile-61869.json
-          grep -q '"compatibilityClass":"B"' /tmp/profile-61869.json
-          grep -q '"profileFamilyResolution":"incomplete"' /tmp/profile-61869.json
+          build-smv-gui/ariec61850_smv_profile_inspect "$fixture" --profile-family iec61869-9 --counter-modulus 4800 > /tmp/profile-61869-invalid.json
+          grep -q '"compatibilityClass":"C"' /tmp/profile-61869-invalid.json
+          grep -q '"profile":null' /tmp/profile-61869-invalid.json
+          grep -q 'TCTR.AmpSv.instMag.i or TVTR.VolSv.instMag.i' /tmp/profile-61869-invalid.json
+
+          fixture_61869=tests/fixtures/scl/sv-61869-f4800s2-i4u4.scd
+          build-smv-gui/ariec61850_smv_profile_inspect "$fixture_61869" --profile-family iec61869-9 --counter-modulus 4800 > /tmp/profile-61869.json
+          grep -q '"schemaVersion":4' /tmp/profile-61869.json
+          grep -q '"compatibilityClass":"A"' /tmp/profile-61869.json
+          grep -q '"profileFamilyResolution":"resolved"' /tmp/profile-61869.json
           grep -q '"deviceSupport":"unsupported-profile-family"' /tmp/profile-61869.json
+          grep -q '"code":"F4800S2I4U4"' /tmp/profile-61869.json
+          grep -q '"class":"preferred"' /tmp/profile-61869.json
+          grep -q '"scaleNumerator":1,"scaleDenominator":1000,"scaleUnit":"A"' /tmp/profile-61869.json
+          grep -q '"scaleNumerator":1,"scaleDenominator":100,"scaleUnit":"V"' /tmp/profile-61869.json
 
           multi=tests/fixtures/scl/compact-multi-stream.scd
           build-smv-gui/ariec61850_smv_profile_inspect "$multi" --stream-profile-family 0:iec61850-9-2 --counter-modulus 4000 > /tmp/profile-multi.json
