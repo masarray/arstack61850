@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ariec61850/ethernet/ethernet.hpp"
+#include "ariec61850/integrity/crc32.hpp"
 #include "ariec61850/mms/utc_time.hpp"
 #include "ariec61850/sampled_values/asdu.hpp"
 #include "ariec61850/sampled_values/compiled_device_profile.hpp"
@@ -279,6 +280,10 @@ void sampled_values_codec_handles_multiple_asdus_and_rejects_malformed_input() {
 
 void compiled_device_profile_binary_is_canonical_and_integrity_checked() {
     using namespace ar::iec61850::sampled_values;
+
+    constexpr std::array<std::uint8_t, 9> crc_reference{
+        '1','2','3','4','5','6','7','8','9'};
+    CHECK(ar::iec61850::integrity::crc32(crc_reference) == 0xCBF43926U);
 
     CompiledSvDeviceProfile profile;
     profile.profile_family = SvProfileFamily::iec61850_9_2;
