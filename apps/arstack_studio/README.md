@@ -4,7 +4,7 @@ ARStack Studio is the **canonical native desktop operator surface** for the firs
 
 > **v0.1.1 is the latest public ARStack Studio release.** Download: https://github.com/masarray/arstack61850/releases/tag/v0.1.1
 >
-> Production source target: `9c7fc7300220db4643e5643081240b955cfe12df` · accepted binary build head: `d9b5b6848415c7e6d1c52ec929e57c66b608058d`.
+> Public v0.1.1 tag source: `2bcf28dd948161bb70fdc6d5b338e9a600670bc1`. The earlier `9c7fc730...` / `d9b5b684...` pair remains the historical v0.1.0 P0 acceptance anchor, not the current development baseline.
 
 ## P0 public boundary
 
