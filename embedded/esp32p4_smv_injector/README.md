@@ -230,6 +230,10 @@ Use an isolated bench network. Do not connect this development image to an opera
 
 ## P3-A1 binary profile staging (engineering console, V1)
 
+The optional capability is explicitly advertised as `PROFILE-BINARY-V1` in
+IDENTIFY and the firmware manifest; older firmware without the token must
+continue using the legacy textual PROFILE route.
+
 The shared host binary envelope is accepted from SCL engineering intent only after
 the existing Class-A compiler has resolved a supported device profile. Firmware
 uses that same `SvDeviceProfileBinaryCodec` (magic/version/length/CRC/leaf
