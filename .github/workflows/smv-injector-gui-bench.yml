@@ -46,6 +46,7 @@ jobs:
           node --check apps/smv_injector_gui/profile_bridge.js
           node --check apps/smv_injector_gui/binary_profile_transport.js
           node apps/smv_injector_gui/test_binary_profile_transport.cjs
+          node apps/smv_injector_gui/test_binary_deploy_ack.cjs
           python -m py_compile apps/smv_injector_gui/host_server.py
       - name: Stage bench GUI and matched host profile tool
         shell: pwsh

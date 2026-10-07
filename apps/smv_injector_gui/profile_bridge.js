@@ -10,6 +10,7 @@ const profileBridge = {
   currentCountsPerAmp: 1000,
   voltageCountsPerVolt: 100,
   binaryCapable: false,
+  capabilityKnown: false,
   lastGeneration: null,
   pendingAck: null,
   nextTransaction: 0,
@@ -120,6 +121,7 @@ function installProfileUi() {
     baseSetConnected(connected);
     if (!connected) {
       profileBridge.binaryCapable = false;
+      profileBridge.capabilityKnown = false;
       profileBridge.lastGeneration = null;
       profileBridge.deployed = false;
       profileBridge.deploying = false;
@@ -140,6 +142,8 @@ function installProfileUi() {
     if (identity) {
       profileBridge.binaryCapable =
         identity[1].split(",").includes("PROFILE-BINARY-V1");
+      profileBridge.capabilityKnown = true;
+      refreshDeployAvailability();
     }
     const shown = matchProfileReadback(line);
     if (shown) profileBridge.lastGeneration = Number(shown[1]);
@@ -397,6 +401,7 @@ function refreshDeployAvailability() {
     stream.compatibilityClass === "A" &&
     stream.deviceSupport === "ready" &&
     state.connected && !state.running && !profileBridge.deploying &&
+    profileBridge.capabilityKnown && Number.isSafeInteger(profileBridge.lastGeneration) &&
     typeof stream.deviceProfileHex === "string" && stream.deviceProfileHex.length > 0
   );
   button.disabled = !ready;
@@ -429,6 +434,9 @@ async function deploySelectedProfile() {
   let binaryCommitted = false;
   try {
     let commit;
+    if (!profileBridge.capabilityKnown || !Number.isSafeInteger(oldGeneration)) {
+      throw new Error("Board identity and initial profile generation are not available");
+    }
     if (profileBridge.binaryCapable) {
       // Transport compiler output verbatim; do not implement another codec.
       const plan = BinaryProfileTransport.plan(
@@ -436,14 +444,20 @@ async function deploySelectedProfile() {
       binaryTransaction = plan.transaction;
       await exchangeProfileCommand(
         plan.begin,
-        line => line.includes("PROFILE BINBEGIN transaction=" + plan.transaction +
-                              " bytes=" + plan.totalBytes),
+        line => {
+          const ack = line.match(/PROFILE BINBEGIN transaction=(\d+) bytes=(\d+)(?!\d)/);
+          return ack && Number(ack[1]) === plan.transaction &&
+            Number(ack[2]) === plan.totalBytes;
+        },
         "BINBEGIN");
       for (const chunk of plan.chunks) {
         await exchangeProfileCommand(
           chunk.command,
-          line => line.includes("PROFILE BINCHUNK transaction=" + plan.transaction +
-                                " received=" + chunk.received),
+          line => {
+            const ack = line.match(/PROFILE BINCHUNK transaction=(\d+) received=(\d+)(?!\d)/);
+            return ack && Number(ack[1]) === plan.transaction &&
+              Number(ack[2]) === chunk.received;
+          },
           "BINCHUNK " + chunk.received);
       }
       commit = await exchangeProfileCommand(
