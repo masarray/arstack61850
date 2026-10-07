@@ -22,6 +22,7 @@ REQUIRED_RUNTIME_ASSETS = (
     "app.js",
     "scl_bridge_bootstrap.js",
     "profile_bridge.js",
+    "binary_profile_transport.js",
     "profile_bridge.css",
 )
 

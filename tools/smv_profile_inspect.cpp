@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "ariec61850/sampled_values/compiled_device_profile.hpp"
 #include "ariec61850/sampled_values/esp32p4_profile_support.hpp"
 #include "ariec61850/sampled_values/publisher_profile.hpp"
 #include "ariec61850/scl/parser.hpp"
@@ -14,6 +15,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 using ar::iec61850::sampled_values::SvPublisherProfile;
@@ -318,6 +320,33 @@ void emit_document(
         out << "\"warnings\":"; string_array(out, compiled.warnings); out << ',';
         out << "\"profile\":";
         if (compiled.profile) emit_profile(out, *compiled.profile); else out << "null";
+        out << ",\\\"deviceProfileHex\\\":";
+        // The existing C++ compiler is the only binary-profile authority.
+        // Browser code only chunks these already-validated canonical bytes.
+        bool emitted = false;
+        if (compiled.ok() && compatibility == "A" && device_support == "ready") {
+            const auto device = ar::iec61850::sampled_values::
+                compile_esp32p4_device_profile(*compiled.profile);
+            if (device.ok()) {
+                const auto size = ar::iec61850::sampled_values::
+                    SvDeviceProfileBinaryCodec::encoded_size(*device.profile);
+                if (size.has_value()) {
+                    std::vector<std::uint8_t> bytes(*size);
+                    const auto encoded = ar::iec61850::sampled_values::
+                        SvDeviceProfileBinaryCodec::encode_into(*device.profile, bytes);
+                    if (encoded.success() && encoded.bytes == bytes.size()) {
+                        std::ostringstream hex;
+                        hex << std::uppercase << std::hex << std::setfill('0');
+                        for (const auto byte : bytes) {
+                            hex << std::setw(2) << static_cast<unsigned>(byte);
+                        }
+                        quoted(out, hex.str());
+                        emitted = true;
+                    }
+                }
+            }
+        }
+        if (!emitted) out << "null";
         out << '}';
     }
     out << "]}";

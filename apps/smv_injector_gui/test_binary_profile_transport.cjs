@@ -1,0 +1,20 @@
+"use strict";
+const assert = require("node:assert/strict");
+const { plan } = require("./binary_profile_transport.js");
+
+const hex = "AA".repeat(66 + 64);
+const p = plan(hex, 1791342000);
+assert.equal(p.totalBytes, 130);
+assert.equal(p.chunks.length, 3);
+assert.deepEqual(p.chunks.map(c => c.received), [48, 96, 130]);
+assert.ok(p.chunks.every(c => c.command.length < 192));
+assert.equal(p.begin, "PROFILE BINBEGIN 1791342000 130");
+assert.equal(p.commit, "PROFILE BINCOMMIT 1791342000");
+assert.equal(p.abort, "PROFILE BINABORT 1791342000");
+assert.throws(() => plan("AAA", 1), /malformed/);
+assert.throws(() => plan("ZZ".repeat(70), 1), /malformed/);
+assert.throws(() => plan("AA".repeat(65), 1), /bounds/);
+assert.throws(() => plan("AA".repeat(573), 1), /bounds/);
+assert.throws(() => plan(hex, 0), /transaction/);
+assert.throws(() => plan(hex, 2 ** 32), /transaction/);
+console.log("SMV binary console framing: PASS");

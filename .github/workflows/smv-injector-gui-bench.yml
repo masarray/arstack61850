@@ -1,0 +1,67 @@
+name: SMV Injector GUI Bench
+
+on:
+  pull_request:
+    paths:
+      - 'apps/smv_injector_gui/**'
+      - 'tools/smv_profile_inspect.cpp'
+      - '.github/workflows/smv-injector-gui-bench.yml'
+      - 'include/ariec61850/sampled_values/**'
+      - 'src/sampled_values/**'
+      - 'src/scl/**'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/smv_injector_gui/**'
+      - 'tools/smv_profile_inspect.cpp'
+      - '.github/workflows/smv-injector-gui-bench.yml'
+      - 'include/ariec61850/sampled_values/**'
+      - 'src/sampled_values/**'
+      - 'src/scl/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smv-gui-bench-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-bench:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile canonical host SCL/profile tool
+        shell: pwsh
+        run: |
+          cmake -S apps/smv_injector_gui/host -B build-smv-bench -G "Visual Studio 17 2022" -A x64 -DARIEC61850_WARNINGS_AS_ERRORS=ON
+          cmake --build build-smv-bench --config Release --target ariec61850_smv_profile_inspect --parallel
+      - name: Host binary golden/CRC and console regression
+        shell: pwsh
+        run: |
+          $tool = "build-smv-bench/Release/ariec61850_smv_profile_inspect.exe"
+          python apps/smv_injector_gui/test_binary_profile_cli.py $tool
+          node --check apps/smv_injector_gui/profile_bridge.js
+          node --check apps/smv_injector_gui/binary_profile_transport.js
+          node apps/smv_injector_gui/test_binary_profile_transport.cjs
+          python -m py_compile apps/smv_injector_gui/host_server.py
+      - name: Stage bench GUI and matched host profile tool
+        shell: pwsh
+        run: |
+          $dest = "dist/SMV-Injector-Bench"
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          Copy-Item apps/smv_injector_gui/*.html, apps/smv_injector_gui/*.css, apps/smv_injector_gui/*.js, apps/smv_injector_gui/host_server.py, apps/smv_injector_gui/run-portable.cmd -Destination $dest
+          Copy-Item apps/smv_injector_gui/assets -Destination $dest -Recurse
+          Copy-Item build-smv-bench/Release/ariec61850_smv_profile_inspect.exe -Destination $dest
+          Copy-Item LICENSE, NOTICE -Destination $dest
+          Copy-Item apps/smv_injector_gui/README.md -Destination $dest
+          if (!(Test-Path "$dest/run-portable.cmd")) { throw "Portable GUI launcher missing" }
+          if (!(Test-Path "$dest/binary_profile_transport.js")) { throw "Binary profile transport missing" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arstack-smv-injector-bench-windows-x64
+          path: dist/SMV-Injector-Bench/
+          if-no-files-found: error
+          retention-days: 14
