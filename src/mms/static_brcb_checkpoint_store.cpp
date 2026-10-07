@@ -2,6 +2,7 @@
 
 #include "ariec61850/mms/static_brcb_checkpoint_store.hpp"
 
+#include "ariec61850/integrity/crc32.hpp"
 #include "ariec61850/mms/static_brcb_runtime.hpp"
 
 #include <algorithm>
@@ -84,25 +85,6 @@ void write_u64(
     return value;
 }
 
-[[nodiscard]] std::uint32_t crc32_update(
-    std::uint32_t state,
-    const std::span<const std::uint8_t> bytes) noexcept {
-    for (const auto byte : bytes) {
-        state ^= byte;
-        for (std::uint8_t bit = 0U; bit < 8U; ++bit) {
-            const auto mask = static_cast<std::uint32_t>(
-                0U - static_cast<std::uint32_t>(state & 1U));
-            state = (state >> 1U) ^ (0xEDB88320U & mask);
-        }
-    }
-    return state;
-}
-
-[[nodiscard]] std::uint32_t crc32(
-    const std::span<const std::uint8_t> bytes) noexcept {
-    return ~crc32_update(0xFFFF'FFFFU, bytes);
-}
-
 [[nodiscard]] bool generation_newer(
     const std::uint64_t left,
     const std::uint64_t right) noexcept {
@@ -131,7 +113,7 @@ void write_u64(
     std::uint32_t& result) noexcept {
     std::array<std::uint8_t, kCrcChunkBytes> chunk{};
     std::size_t consumed = 0U;
-    std::uint32_t state = 0xFFFF'FFFFU;
+    std::uint32_t state = integrity::crc32_initial_state;
     while (consumed < payload_bytes) {
         const auto remaining = payload_bytes - consumed;
         const auto bytes = std::min(remaining, chunk.size());
@@ -141,12 +123,12 @@ void write_u64(
                 std::span<std::uint8_t>{chunk}.first(bytes))) {
             return false;
         }
-        state = crc32_update(
+        state = integrity::crc32_update(
             state,
             std::span<const std::uint8_t>{chunk}.first(bytes));
         consumed += bytes;
     }
-    result = ~state;
+    result = integrity::crc32_finalize(state);
     return true;
 }
 
@@ -168,9 +150,9 @@ void write_u64(
     if (!std::equal(kHeaderMagic.begin(), kHeaderMagic.end(), header.begin()) ||
         read_u16(header, 8U) != MmsStaticBrcbCheckpointStore::format_version ||
         read_u16(header, 10U) != MmsStaticBrcbCheckpointStore::record_header_bytes ||
-        crc32(std::span<const std::uint8_t>{header}.first(36U)) != read_u32(header, 36U) ||
+        integrity::crc32(std::span<const std::uint8_t>{header}.first(36U)) != read_u32(header, 36U) ||
         !std::equal(kFooterMagic.begin(), kFooterMagic.end(), footer.begin()) ||
-        crc32(std::span<const std::uint8_t>{footer}.first(28U)) != read_u32(footer, 28U)) {
+        integrity::crc32(std::span<const std::uint8_t>{footer}.first(28U)) != read_u32(footer, 28U)) {
         return info;
     }
     for (std::size_t index = 28U; index < 36U; ++index) {
@@ -232,7 +214,7 @@ void build_header(
     write_u64(header, 12U, generation);
     write_u32(header, 20U, payload_bytes);
     write_u32(header, 24U, payload_crc);
-    write_u32(header, 36U, crc32(std::span<const std::uint8_t>{header}.first(36U)));
+    write_u32(header, 36U, integrity::crc32(std::span<const std::uint8_t>{header}.first(36U)));
 }
 
 void build_footer(
@@ -245,7 +227,7 @@ void build_footer(
     write_u64(footer, 8U, generation);
     write_u32(footer, 16U, payload_bytes);
     write_u32(footer, 20U, payload_crc);
-    write_u32(footer, 28U, crc32(std::span<const std::uint8_t>{footer}.first(28U)));
+    write_u32(footer, 28U, integrity::crc32(std::span<const std::uint8_t>{footer}.first(28U)));
 }
 
 } // namespace
@@ -303,7 +285,7 @@ MmsStaticBrcbCheckpointResult MmsStaticBrcbCheckpointStore::checkpoint(
     }
     const auto generation = next_generation(current_generation);
     const auto payload_bytes = static_cast<std::uint32_t>(state.bytes_written);
-    const auto payload_crc = crc32(state_buffer.first(state.bytes_written));
+    const auto payload_crc = integrity::crc32(state_buffer.first(state.bytes_written));
 
     std::array<std::uint8_t, record_header_bytes> header{};
     std::array<std::uint8_t, record_footer_bytes> footer{};
@@ -395,7 +377,7 @@ MmsStaticBrcbCheckpointResult MmsStaticBrcbCheckpointStore::restore(
                 backend_.context,
                 base + record_header_bytes,
                 payload) ||
-            crc32(payload) != info.payload_crc) {
+            integrity::crc32(payload) != info.payload_crc) {
             return MmsStaticBrcbCheckpointStatus::storage_failure;
         }
         return MmsStaticBrcbCheckpointStatus::ok;
