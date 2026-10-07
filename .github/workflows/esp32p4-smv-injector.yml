@@ -142,7 +142,7 @@ jobs:
               "chipRevisionPolicy": "pre-v3",
               "version": os.environ["ARSTACK_FIRMWARE_VERSION"],
               "protocol": int(os.environ["ARSTACK_PROTOCOL_VERSION"]),
-              "capabilities": ["SMV-4I4V", "PROFILE", "LIVE-SETPOINTS", "SESSION-LEASE", "PTP-P2", "SMPSYNCH-AUTO"],
+              "capabilities": ["SMV-4I4V", "PROFILE", "PROFILE-BINARY-V1", "LIVE-SETPOINTS", "SESSION-LEASE", "PTP-P2", "SMPSYNCH-AUTO"],
               "flashOffset": 0,
               "image": image,
               "sha256": sha256,
@@ -166,6 +166,7 @@ jobs:
           assert manifest['protocol'] == 1
           assert 'PTP-P2' in manifest['capabilities']
           assert 'SMPSYNCH-AUTO' in manifest['capabilities']
+          assert 'PROFILE-BINARY-V1' in manifest['capabilities']
           assert actual == manifest['sha256']
           print(f"Firmware package: PASS · {manifest['image']} · PTP-P2 · pre-v3 · SHA-256 {actual}")
           PY

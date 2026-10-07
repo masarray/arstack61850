@@ -8,5 +8,7 @@ namespace ar::esp32p4::smv {
 // The operator-facing surface remains the GUI; this text transport is a
 // bounded development control protocol, not a user workflow.
 void handle_profile_command(char* arguments) noexcept;
+// Discard incomplete text/binary staging at each publisher START.
+void profile_control_abort_staging() noexcept;
 
 } // namespace ar::esp32p4::smv

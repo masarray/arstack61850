@@ -227,3 +227,39 @@ Ethernet RX
 In a switched lab, the analyzer still requires the relevant frames to reach its physical port. Use a TAP or managed-switch mirror/SPAN configuration that preserves the traffic and VLAN tags.
 
 Use an isolated bench network. Do not connect this development image to an operational process bus.
+
+## P3-A1 binary profile staging (engineering console, V1)
+
+The optional capability is explicitly advertised as `PROFILE-BINARY-V1` in
+IDENTIFY and the firmware manifest; older firmware without the token must
+continue using the legacy textual PROFILE route.
+
+The shared host binary envelope is accepted from SCL engineering intent only after
+the existing Class-A compiler has resolved a supported device profile. Firmware
+uses that same `SvDeviceProfileBinaryCodec` (magic/version/length/CRC/leaf
+descriptors); it does not parse SCL or maintain a second active profile model.
+
+For a locally compiled binary V1 envelope, send the following STOPPED-only
+commands to the firmware console (decimal transaction and byte offsets; chunk
+hex without separators; max 48 raw bytes per command):
+
+```text
+PROFILE BINBEGIN 1 <total-binary-bytes>
+PROFILE BINCHUNK 1 0 <up-to-48-bytes-as-hex>
+PROFILE BINCHUNK 1 48 <next-bytes-as-hex>
+PROFILE BINCOMMIT 1
+```
+
+A complete transaction is decoded and mapped into the existing
+`RuntimePublisherProfile` only if the current device supports it (one ASDU,
+SmpPerSec, ordered 4I+4V INT32+Quality leaves, 64-byte payload, supported
+SmvOpts). The existing atomic `runtime_profile_commit()` owns generation,
+while START owns packet-template preparation and the realtime timing lifecycle.
+
+Missing, duplicate or out-of-order chunks, replayed transaction numbers, wrong
+CRC/schema, unsupported wire semantics, and RUNNING state are rejected without
+changing the active stream. `PROFILE BINABORT <transaction>` cancels staging,
+and START discards all unfinished profile staging. The old textual PROFILE path
+remains available until Studio binary transport/ACK equivalence is independently
+verified. This is a software integration gate, not physical interoperability,
+PTP-lock or wire-jitter proof.

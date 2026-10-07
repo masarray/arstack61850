@@ -5,6 +5,8 @@
 #include "ariec61850/mms/utc_time.hpp"
 #include "ariec61850/sampled_values/asdu.hpp"
 #include "ariec61850/sampled_values/compiled_device_profile.hpp"
+#include "../embedded/esp32p4_smv_injector/main/binary_profile_staging.hpp"
+#include "../embedded/esp32p4_smv_injector/main/compiled_profile_adapter.hpp"
 #include "ariec61850/sampled_values/frame.hpp"
 #include "ariec61850/sampled_values/frame_codec.hpp"
 #include "ariec61850/sampled_values/payload_inspector.hpp"
@@ -409,6 +411,121 @@ void compiled_device_profile_binary_is_canonical_and_integrity_checked() {
           SvDeviceProfileCodecStatus::invalid_length);
 }
 
+
+void compiled_binary_profile_activates_only_supported_4i4v_device_layout() {
+    using namespace ar::iec61850::sampled_values;
+    using namespace ar::esp32p4::smv;
+
+    CompiledSvDeviceProfile device{};
+    device.profile_family = SvProfileFamily::iec61850_9_2;
+    device.transport_mode = SvTransportMode::multicast;
+    device.destination_mac = {0x01U, 0x0CU, 0xCDU, 0x04U, 0x00U, 0x01U};
+    device.app_id = 0x4001U;
+    device.vlan_present = true;
+    device.vlan_id = 100U;
+    device.vlan_priority = 4U;
+    device.configuration_revision = 9U;
+    device.sampling_basis = SvSampleMode::samples_per_second;
+    device.configured_sample_rate = 4800U;
+    device.frame_rate_hz = 4800U;
+    device.sample_counter_modulus = 4800U;
+    device.no_asdu = 1U;
+    device.asdu_options.element_present = true;
+    device.asdu_options.sample_synchronized = true;
+    device.asdu_options.data_set = true;
+    device.asdu_options.sample_rate = true;
+    device.payload_size_bytes = 64U;
+    device.leaf_count = 16U;
+    device.sv_id_length = 3U;
+    device.sv_id[0] = 'S'; device.sv_id[1] = 'V'; device.sv_id[2] = '2';
+    device.data_set_reference_length = 2U;
+    device.data_set_reference[0] = 'D';
+    device.data_set_reference[1] = 'S';
+    for (std::size_t i = 0U; i < 8U; ++i) {
+        device.leaves[2U * i] = {SvDeviceWireType::int32, 4U, false, false};
+        device.leaves[2U * i + 1U] = {SvDeviceWireType::quality, 4U, true, false};
+    }
+    const auto size = SvDeviceProfileBinaryCodec::encoded_size(device);
+    CHECK(size.has_value());
+    std::vector<std::uint8_t> encoded(*size);
+    CHECK(SvDeviceProfileBinaryCodec::encode_into(device, encoded).success());
+
+    BinaryProfileStaging chunks;
+    CHECK(chunks.begin(1U, encoded.size()));
+    for (std::size_t offset = 0U; offset < encoded.size();) {
+        const auto count = std::min(BinaryProfileStaging::max_chunk_bytes,
+                                    encoded.size() - offset);
+        CHECK(chunks.append(1U, offset, std::span<const std::uint8_t>{encoded}.subspan(offset, count)));
+        offset += count;
+    }
+    CHECK(chunks.complete(1U));
+    RuntimePublisherProfile runtime{};
+    CHECK(decode_binary_runtime_profile(chunks.complete_record(1U), runtime) ==
+          BinaryRuntimeProfileStatus::ok);
+    CHECK(runtime.publisher_rate_hz == 4800U);
+    CHECK(runtime.sample_counter_modulus == 4800U);
+    CHECK(runtime.configuration_revision == 9U);
+    CHECK(runtime.app_id == 0x4001U);
+    CHECK(runtime.sv_id[0] == 'S' && runtime.sv_id[2] == '2');
+    CHECK(runtime.include_data_set && runtime.include_sample_rate);
+    CHECK(runtime.data_set_reference[0] == 'D');
+    const auto previous_generation = runtime.generation;
+    chunks.abort();
+    CHECK(!chunks.begin(1U, encoded.size())); // Replayed transaction ID.
+    CHECK(chunks.begin(2U, encoded.size()));
+    CHECK(!chunks.append(2U, 1U, std::span<const std::uint8_t>{encoded}.first(8U)));
+    CHECK(!chunks.active()); // An out-of-order chunk destroys staging.
+    CHECK(chunks.begin(3U, encoded.size()));
+    CHECK(chunks.append(3U, 0U, std::span<const std::uint8_t>{encoded}.first(8U)));
+    CHECK(!chunks.append(3U, 0U, std::span<const std::uint8_t>{encoded}.first(8U)));
+    CHECK(!chunks.active()); // Duplicate offset fails closed.
+    CHECK(chunks.begin(4U, encoded.size()));
+    CHECK(!chunks.complete(4U)); // No partial commit.
+    CHECK(chunks.complete_record(4U).empty());
+    chunks.abort();
+    CHECK(chunks.begin(5U, encoded.size()));
+    CHECK(!chunks.append(
+        5U, 0U,
+        std::span<const std::uint8_t>{encoded}.first(
+            BinaryProfileStaging::max_chunk_bytes + 1U)));
+    CHECK(!chunks.active()); // Oversized chunks cannot bypass the console bound.
+    CHECK(!chunks.begin(5U, encoded.size())); // No replay after abort.
+    CHECK(!chunks.begin(6U, BinaryProfileStaging::max_record_bytes + 1U));
+
+    auto corrupted = encoded;
+    corrupted.back() ^= 0x01U;
+    CHECK(decode_binary_runtime_profile(corrupted, runtime) ==
+          BinaryRuntimeProfileStatus::invalid_envelope);
+    CHECK(runtime.generation == previous_generation);
+    CHECK(runtime.sv_id[2] == '2');
+
+    auto unsupported = device;
+    unsupported.profile_family = SvProfileFamily::iec61869_9;
+    CHECK(SvDeviceProfileBinaryCodec::encode_into(unsupported, encoded).success());
+    CHECK(decode_binary_runtime_profile(encoded, runtime) ==
+          BinaryRuntimeProfileStatus::unsupported_device_capability);
+    CHECK(runtime.app_id == 0x4001U);
+
+    unsupported = device;
+    unsupported.asdu_options.sample_synchronized = false;
+    CHECK(SvDeviceProfileBinaryCodec::encode_into(unsupported, encoded).success());
+    CHECK(decode_binary_runtime_profile(encoded, runtime) ==
+          BinaryRuntimeProfileStatus::unsupported_device_capability);
+
+    unsupported = device;
+    unsupported.leaves[0] = {SvDeviceWireType::uint32, 4U, false, false};
+    CHECK(SvDeviceProfileBinaryCodec::encode_into(unsupported, encoded).success());
+    CHECK(decode_binary_runtime_profile(encoded, runtime) ==
+          BinaryRuntimeProfileStatus::unsupported_device_capability);
+
+    unsupported = device;
+    unsupported.frame_rate_hz = 4000U; // Cannot silently change 4800 sample cadence.
+    CHECK(SvDeviceProfileBinaryCodec::encode_into(unsupported, encoded).success());
+    CHECK(decode_binary_runtime_profile(encoded, runtime) ==
+          BinaryRuntimeProfileStatus::unsupported_device_capability);
+    CHECK(runtime.publisher_rate_hz == 4800U);
+}
+
 void sample_counter_tracker_distinguishes_wrap_gap_duplicate_and_order() {
     using namespace ar::iec61850::sampled_values;
 
@@ -529,6 +646,7 @@ int main() {
         {"SV Ethernet frame", sampled_values_frame_round_trips_vlan_process_bus_header},
         {"SV malformed input", sampled_values_codec_handles_multiple_asdus_and_rejects_malformed_input},
         {"SV compiled device profile binary", compiled_device_profile_binary_is_canonical_and_integrity_checked},
+        {"SV binary ESP32-P4 activation gate", compiled_binary_profile_activates_only_supported_4i4v_device_layout},
         {"SV sample counter", sample_counter_tracker_distinguishes_wrap_gap_duplicate_and_order},
         {"SV stream supervisor", stream_supervisor_tracks_identity_configuration_and_statistics},
         {"SV quality and payload diagnostics", quality_and_generic_payload_diagnostics_preserve_wire_evidence}};

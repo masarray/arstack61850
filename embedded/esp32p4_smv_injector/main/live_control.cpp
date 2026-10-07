@@ -238,12 +238,12 @@ void print_identity() noexcept {
     const char* version = app != nullptr ? app->version : "unknown";
 #if CONFIG_AR_PTP_LAB_TX
     const char* capabilities = g_control_lease_timer != nullptr
-        ? "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO"
-        : "SMV-4I4V,PROFILE,LIVE-SETPOINTS,PTP-P2,SMPSYNCH-AUTO";
+        ? "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO,PROFILE-BINARY-V1"
+        : "SMV-4I4V,PROFILE,LIVE-SETPOINTS,PTP-P2,SMPSYNCH-AUTO,PROFILE-BINARY-V1";
 #else
     const char* capabilities = g_control_lease_timer != nullptr
-        ? "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE"
-        : "SMV-4I4V,PROFILE,LIVE-SETPOINTS";
+        ? "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE,PROFILE-BINARY-V1"
+        : "SMV-4I4V,PROFILE,LIVE-SETPOINTS,PROFILE-BINARY-V1";
 #endif
     ESP_LOGI(kTag,
              "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 device_id=%02X%02X%02X%02X%02X%02X firmware=%s build=%s boot_id=%016llX capabilities=%s",
@@ -432,6 +432,7 @@ void handle_line(char* line) noexcept {
             ESP_LOGE(kTag, "START rejected: Studio control-session lease is unavailable");
             return;
         }
+        profile_control_abort_staging();
         g_start_request.store(true, std::memory_order_release);
         g_running.store(true, std::memory_order_release);
         wake_publisher();

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "profile_control.hpp"
+#include "binary_profile_staging.hpp"
+#include "compiled_profile_adapter.hpp"
 
 #include "live_control.hpp"
 #include "runtime_profile.hpp"
@@ -19,6 +21,8 @@
 #include <cerrno>
 #include <cctype>
 #include <cstdint>
+#include <cstddef>
+#include <span>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
@@ -30,6 +34,7 @@ constexpr char kTag[] = "ar_smv_profile";
 constexpr char kDelimiters[] = " \t\r\n";
 RuntimePublisherProfile g_staging{};
 bool g_staging_active = false;
+BinaryProfileStaging g_binary_staging{};
 
 void uppercase_ascii(char* text) noexcept {
     if (text == nullptr) return;
@@ -81,6 +86,26 @@ bool decode_mac(const char* text, std::array<std::uint8_t, 6>& mac) noexcept {
         const int low = hex_nibble(text[i * 2U + 1U]);
         if (high < 0 || low < 0) return false;
         mac[i] = static_cast<std::uint8_t>((high << 4) | low);
+    }
+    return true;
+}
+
+
+bool decode_binary_chunk(const char* hex,
+                         std::array<std::uint8_t, BinaryProfileStaging::max_chunk_bytes>& output,
+                         std::size_t& bytes) noexcept {
+    bytes = 0U;
+    if (hex == nullptr) return false;
+    const std::size_t length = std::strlen(hex);
+    if (length == 0U || (length % 2U) != 0U ||
+        length / 2U > output.size()) {
+        return false;
+    }
+    for (std::size_t i = 0U; i < length; i += 2U) {
+        const int high = hex_nibble(hex[i]);
+        const int low = hex_nibble(hex[i + 1U]);
+        if (high < 0 || low < 0) return false;
+        output[bytes++] = static_cast<std::uint8_t>((high << 4) | low);
     }
     return true;
 }
@@ -191,7 +216,101 @@ void print_profile(const RuntimePublisherProfile& profile) noexcept {
              profile.include_sample_rate ? 1U : 0U);
 }
 
+
+void handle_binary_profile_command(const char* command, char** save) noexcept {
+    const char* transaction_text = strtok_r(nullptr, kDelimiters, save);
+    std::uint32_t transaction{};
+    if (!parse_u32(transaction_text, transaction) || transaction == 0U) {
+        ESP_LOGE(kTag, "PROFILE binary rejected: invalid transaction");
+        return;
+    }
+
+    if (std::strcmp(command, "BINBEGIN") == 0) {
+        const char* total_text = strtok_r(nullptr, kDelimiters, save);
+        std::uint32_t total{};
+        if (!parse_u32(total_text, total) || !no_extra(save) ||
+            g_staging_active || !g_binary_staging.begin(transaction, total)) {
+            ESP_LOGE(kTag, "PROFILE BINBEGIN rejected: staging busy, replay or invalid length");
+            return;
+        }
+        ESP_LOGI(kTag, "PROFILE BINBEGIN transaction=%lu bytes=%lu",
+                 static_cast<unsigned long>(transaction),
+                 static_cast<unsigned long>(total));
+        return;
+    }
+
+    if (std::strcmp(command, "BINABORT") == 0) {
+        if (!no_extra(save) || !g_binary_staging.owns(transaction)) {
+            ESP_LOGE(kTag, "PROFILE BINABORT rejected: unknown transaction");
+            return;
+        }
+        g_binary_staging.abort();
+        ESP_LOGI(kTag, "PROFILE BINABORT accepted");
+        return;
+    }
+
+    if (std::strcmp(command, "BINCHUNK") == 0) {
+        const char* offset_text = strtok_r(nullptr, kDelimiters, save);
+        const char* hex_text = strtok_r(nullptr, kDelimiters, save);
+        std::uint32_t offset{};
+        if (!parse_u32(offset_text, offset) || !no_extra(save) ||
+            !g_binary_staging.owns(transaction)) {
+            ESP_LOGE(kTag, "PROFILE BINCHUNK rejected: unknown transaction or offset");
+            return;
+        }
+        std::array<std::uint8_t, BinaryProfileStaging::max_chunk_bytes> chunk{};
+        std::size_t count{};
+        if (!decode_binary_chunk(hex_text, chunk, count) ||
+            !g_binary_staging.append(
+                transaction, offset,
+                std::span<const std::uint8_t>{chunk}.first(count))) {
+            g_binary_staging.abort();
+            ESP_LOGE(kTag, "PROFILE BINCHUNK rejected: invalid, duplicate or out-of-order bytes");
+            return;
+        }
+        ESP_LOGI(kTag, "PROFILE BINCHUNK transaction=%lu received=%lu",
+                 static_cast<unsigned long>(transaction),
+                 static_cast<unsigned long>(g_binary_staging.received()));
+        return;
+    }
+
+    if (std::strcmp(command, "BINCOMMIT") == 0) {
+        if (!no_extra(save) || !g_binary_staging.owns(transaction)) {
+            ESP_LOGE(kTag, "PROFILE BINCOMMIT rejected: unknown transaction");
+            return;
+        }
+        const auto record = g_binary_staging.complete_record(transaction);
+        RuntimePublisherProfile candidate{};
+        const auto decoded = decode_binary_runtime_profile(record, candidate);
+        if (!g_binary_staging.complete(transaction) ||
+            decoded != BinaryRuntimeProfileStatus::ok ||
+            !runtime_profile_validate(candidate) ||
+            live_tx_running() || !runtime_profile_commit(candidate)) {
+            g_binary_staging.abort();
+            ESP_LOGE(kTag, "PROFILE BINCOMMIT rejected: incomplete, invalid or unsupported device profile");
+            return;
+        }
+        g_binary_staging.abort();
+        const auto active = runtime_profile_snapshot();
+        ESP_LOGI(kTag,
+                 "PROFILE committed generation=%llu svID=%s APPID=0x%04X rate=%lu wrap=%u",
+                 static_cast<unsigned long long>(active.generation),
+                 active.sv_id.data(),
+                 static_cast<unsigned>(active.app_id),
+                 static_cast<unsigned long>(active.publisher_rate_hz),
+                 static_cast<unsigned>(active.sample_counter_modulus));
+        return;
+    }
+
+    ESP_LOGE(kTag, "Unknown PROFILE binary subcommand");
+}
+
 } // namespace
+
+void profile_control_abort_staging() noexcept {
+    g_binary_staging.abort();
+    g_staging_active = false;
+}
 
 void handle_profile_command(char* arguments) noexcept {
     char* save{};
@@ -260,12 +379,26 @@ void handle_profile_command(char* arguments) noexcept {
     }
 #endif
 
+    // Abort remains available even while RUNNING; all mutations require STOPPED.
+    if (std::strcmp(subcommand, "BINABORT") == 0) {
+        handle_binary_profile_command(subcommand, &save);
+        return;
+    }
     if (live_tx_running()) {
+        g_binary_staging.abort();
         ESP_LOGE(kTag, "PROFILE rejected: stop the publisher before changing stream identity/layout");
+        return;
+    }
+    if (std::strncmp(subcommand, "BIN", 3U) == 0) {
+        handle_binary_profile_command(subcommand, &save);
         return;
     }
 
     if (std::strcmp(subcommand, "BEGIN") == 0) {
+        if (g_binary_staging.active()) {
+            ESP_LOGE(kTag, "PROFILE BEGIN rejected: finish or abort binary transfer first");
+            return;
+        }
         if (!no_extra(&save)) {
             ESP_LOGE(kTag, "Usage: PROFILE BEGIN");
             return;
