@@ -116,6 +116,7 @@ private:
         result.capabilities = {
             QStringLiteral("SMV-4I4V"),
             QStringLiteral("PROFILE"),
+            QStringLiteral("PROFILE-BINARY-V1"),
             QStringLiteral("LIVE-SETPOINTS"),
             QStringLiteral("SESSION-LEASE"),
             QStringLiteral("PTP-P2"),

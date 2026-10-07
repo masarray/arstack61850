@@ -2,9 +2,11 @@
 
 #include "SclProfileModel.hpp"
 
+#include "ariec61850/sampled_values/compiled_device_profile.hpp"
 #include "ariec61850/sampled_values/esp32p4_profile_support.hpp"
 #include "ariec61850/scl/parser.hpp"
 
+#include <QByteArray>
 #include <QFile>
 #include <QStringList>
 
@@ -527,6 +529,21 @@ QVariantMap SclProfileModel::profileToVariantMap(const SvPublisherProfile& p) co
         if (voltage != semantic.channels.end()) {
             map.insert(QStringLiteral("iec61869VoltageScale"),
                 exactScaleText(voltage->engineering_scale));
+        }
+    }
+    const auto device = ar::iec61850::sampled_values::compile_esp32p4_device_profile(p);
+    if (device.ok()) {
+        const auto size = ar::iec61850::sampled_values::SvDeviceProfileBinaryCodec::encoded_size(*device.profile);
+        if (size.has_value()) {
+            std::vector<std::uint8_t> bytes(*size);
+            const auto encoded = ar::iec61850::sampled_values::SvDeviceProfileBinaryCodec::encode_into(*device.profile, bytes);
+            if (encoded.success() && encoded.bytes == bytes.size()) {
+                map.insert(QStringLiteral("deviceProfileBinary"), QByteArray{
+                    reinterpret_cast<const char*>(bytes.data()),
+                    static_cast<qsizetype>(bytes.size())});
+                map.insert(QStringLiteral("deviceProfileSchema"),
+                    static_cast<int>(ar::iec61850::sampled_values::compiled_sv_device_profile_version));
+            }
         }
     }
     return map;

@@ -78,6 +78,8 @@ public:
 
     [[nodiscard]] std::size_t received() const noexcept { return received_; }
     [[nodiscard]] std::size_t expected() const noexcept { return expected_; }
+    [[nodiscard]] std::uint32_t transaction() const noexcept { return transaction_; }
+    [[nodiscard]] std::uint32_t last_transaction() const noexcept { return last_transaction_; }
     [[nodiscard]] bool active() const noexcept { return active_; }
 
     void abort() noexcept {

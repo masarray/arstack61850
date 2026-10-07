@@ -379,6 +379,22 @@ void handle_profile_command(char* arguments) noexcept {
     }
 #endif
 
+    // Read-only transfer recovery state is available in every publisher state.
+    if (std::strcmp(subcommand, "BINSTATUS") == 0) {
+        if (!no_extra(&save)) {
+            ESP_LOGE(kTag, "Usage: PROFILE BINSTATUS");
+            return;
+        }
+        ESP_LOGI(kTag,
+                 "PROFILE BINSTATUS active=%u transaction=%lu last=%lu received=%lu expected=%lu",
+                 g_binary_staging.active() ? 1U : 0U,
+                 static_cast<unsigned long>(g_binary_staging.transaction()),
+                 static_cast<unsigned long>(g_binary_staging.last_transaction()),
+                 static_cast<unsigned long>(g_binary_staging.received()),
+                 static_cast<unsigned long>(g_binary_staging.expected()));
+        return;
+    }
+
     // Abort remains available even while RUNNING; all mutations require STOPPED.
     if (std::strcmp(subcommand, "BINABORT") == 0) {
         handle_binary_profile_command(subcommand, &save);
