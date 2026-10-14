@@ -44,10 +44,12 @@ status_required = [
 ]
 data_model_required = [
     'objectName: "browserDataModelChildren"',
-    'model: root.treeModel.selectedChildren',
+    'model: root.detail',
+    'root.detail.select(childRow.index)',
+    'root.detail.toggle(childRow.index)',
     'onDoubleClicked: root.drillInto(childRow.index)',
-    'root.treeModel.selectParent()',
-    'root.treeModel.selectedChildrenTruncated',
+    'root.detail.selectParent()',
+    'root.detail.truncated',
 ]
 
 for label, source, required in [
