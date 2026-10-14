@@ -229,7 +229,7 @@ config AR_PTP_LOCK_REQUIRED_SAMPLES
 config AR_PTP_SYNC_TIMEOUT_MS
     int "TIME_RECEIVER Sync timeout before HOLDOVER/UNLOCKED (ms)"
     range 100 10000
-    default 1000
+    default 3000
     depends on AR_PTP_LAB_TX
 
 config AR_PTP_HOLDOVER_TIMEOUT_MS
