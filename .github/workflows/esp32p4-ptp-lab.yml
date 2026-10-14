@@ -115,6 +115,11 @@ jobs:
 
           set_config CONFIG_AR_PTP_LAB_TX y
           set_config CONFIG_AR_PTP_OPERATING_ROLE ${{ matrix.role_value }}
+          if [ "${{ matrix.role_name }}" = "source" ]; then
+            # Compile the guarded M2A control-plane/ISR adapter in a dedicated
+            # SOURCE build, without enabling it in the public default image.
+            set_config CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL y
+          fi
           set_config CONFIG_AR_PTP_DOMAIN 0
           set_config CONFIG_AR_PTP_TRANSPORT_SPECIFIC 1
           set_config CONFIG_AR_PTP_PORT_NUMBER 2
@@ -153,7 +158,18 @@ jobs:
           grep -q '^CONFIG_AR_PTP_PORT_NUMBER=2$' sdkconfig
           grep -q '^CONFIG_AR_PTP_VLAN_ID=100$' sdkconfig
           grep -q '^CONFIG_AR_PTP_LOCK_OFFSET_NS=2000$' sdkconfig
-          grep -q '^CONFIG_AR_PTP_LOCK_REQUIRED_SAMPLES=8$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_LOCK_REQUIRED_SAMPLES=8
+
+      - name: Build PTP-P2 firmware
+        run: source /opt/esp/idf/export.sh && idf.py build
+ sdkconfig
+          if [ "${{ matrix.role_name }}" = "source" ]; then
+            grep -q '^CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y
+
+      - name: Build PTP-P2 firmware
+        run: source /opt/esp/idf/export.sh && idf.py build
+ sdkconfig
+          fi
 
       - name: Build PTP-P2 firmware
         run: source /opt/esp/idf/export.sh && idf.py build
