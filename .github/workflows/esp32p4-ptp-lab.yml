@@ -41,6 +41,7 @@ jobs:
       - name: Portable strict phase regression
         shell: bash
         run: |
+          source /opt/esp/idf/export.sh
           cmake -S tests/ptp_profile -B build-phase-guard -DCMAKE_BUILD_TYPE=Release
           cmake --build build-phase-guard --target sv_ptp_phase_authority_tests --parallel 2
           ctest --test-dir build-phase-guard --output-on-failure -R sv_ptp_phase_authority_tests
