@@ -214,6 +214,25 @@ int main(int argc, char** argv) {
         return 8;
     }
 
+    // Global Data must read true MMS targets even when a DataSet supplies the
+    // IEC FCDA spelling rather than the MMS $FC$ spelling. Unknown FCs fail
+    // closed. Duplicate aliases must not cause extra requests.
+    const QStringList iecWatched{
+        QStringLiteral("LD4/LLN19.DO99.DA4  [MX]"),
+        QStringLiteral("LD4/LLN19$MX$DO99$DA4  [MX]"),
+        QStringLiteral("LD4/LLN19.DO99.DA3  [MX]")};
+    const auto readIec = model.readTargetsForReferences(iecWatched, 64);
+    const auto readDo = model.readTargetsForReferences(
+        {QStringLiteral("LD4/LLN19.DO99  [MX]")}, 64);
+    const auto readInvalidFc = model.readTargetsForReferences(
+        {QStringLiteral("LD4/LLN19.DO99.DA4  [ST]")}, 64);
+    if (readIec.size() != 2 || readDo.size() != 4 || !readInvalidFc.isEmpty() ||
+        readIec.constFirst().item != QStringLiteral("LLN19$MX$DO99$DA4") ||
+        model.readTargetsForReferences(iecWatched, 1).size() != 1) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL canonical_global_watch_read\n";
+        return 20;
+    }
+
     const bool passes = applyMs <= 5000 && filterMs <= 1500 && selectMs <= 500;
     std::cout << "IED_BROWSER_LARGE_MODEL_" << (passes ? "PASS" : "FAIL")
               << " nodes=" << model.totalNodeCount()

@@ -20,6 +20,17 @@ Rectangle {
     color: theme.background
 
     ListModel { id: watchModel }
+    // Coalesce hot MMS value changes to a bounded UI refresh cadence.
+    // This is change-driven (not cyclic MMS polling) and never delays reads.
+    Timer {
+        id: watchUiCoalescer
+        interval: 50
+        repeat: false
+        onTriggered: root.syncRows()
+    }
+    function requestWatchUiRefresh() {
+        if (!watchUiCoalescer.running) watchUiCoalescer.start()
+    }
 
     function snapshotRows() {
         var entries = []
@@ -218,8 +229,11 @@ Rectangle {
 
     Connections {
         target: context.treeModel
-        function onDataChanged() { root.syncRows() }
+        function onDataChanged() { root.requestWatchUiRefresh() }
         function onSelectionChanged() { root.syncRows() }
+        // Read completions may update off-screen canonical nodes; coalesce
+        // storms without losing the final measured value.
+        function onValuesChanged() { root.requestWatchUiRefresh() }
     }
 
     Connections {

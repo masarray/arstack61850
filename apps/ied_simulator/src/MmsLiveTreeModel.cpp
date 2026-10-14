@@ -591,35 +591,46 @@ QVector<MmsLiveTreeModel::ReadTarget> MmsLiveTreeModel::readTargetsForVisibleRan
 QVector<MmsLiveTreeModel::ReadTarget> MmsLiveTreeModel::readTargetsForReferences(
     const QStringList& references, const int maximumTargets) const {
     QVector<ReadTarget> result;
-    if (references.isEmpty() || maximumTargets <= 0) return result;
+    if (maximumTargets <= 0 || references.isEmpty()) return result;
+    result.reserve(std::min(maximumTargets, 64));
+    QSet<QString> uniqueTargets;
 
-    QStringList wanted;
-    QSet<QString> seenReferences;
-    for (const auto& raw : references) {
-        const auto reference = raw.trimmed();
-        if (reference.isEmpty() || seenReferences.contains(reference)) continue;
-        seenReferences.insert(reference);
-        wanted.push_back(reference);
-    }
-
-    QSet<QString> seenTargets;
-    const auto matchesRequestedReference = [&wanted](const QString& nodeReference) {
-        for (const auto& reference : wanted) {
-            if (nodeReference == reference) return true;
-            if (nodeReference.startsWith(reference + QLatin1Char('.'))) return true;
-            if (nodeReference.startsWith(reference + QLatin1Char('$'))) return true;
-        }
-        return false;
+    const auto append = [this, &result, &uniqueTargets, maximumTargets](
+                            const int nodeIndex, const QString& fc) {
+        if (result.size() >= maximumTargets || nodeIndex < 0 ||
+            nodeIndex >= nodes_.size()) return;
+        const auto& node = nodes_.at(nodeIndex);
+        if (node.kind != NodeKind::dataAttribute ||
+            node.domain.isEmpty() || node.item.isEmpty()) return;
+        if (!fc.isEmpty() && node.functionalConstraint.compare(fc, Qt::CaseInsensitive) != 0)
+            return;
+        const QString key = nodeKey(node.domain, node.item);
+        if (uniqueTargets.contains(key)) return;
+        uniqueTargets.insert(key);
+        result.push_back({key, node.domain, node.item});
     };
 
-    for (const auto& node : nodes_) {
+    // Each user-selected IEC FCDA or MMS member resolves through the canonical
+    // hash index. A matching DO is expanded only to its actual FC-matching DA
+    // children; no broad prefix sweep, guessed target or unintended network read.
+    for (const auto& raw : references) {
         if (result.size() >= maximumTargets) break;
-        if (node.kind != NodeKind::dataAttribute || node.domain.isEmpty() || node.item.isEmpty()) continue;
-        if (!matchesRequestedReference(node.reference)) continue;
-        const auto key = nodeKey(node.domain, node.item);
-        if (seenTargets.contains(key)) continue;
-        seenTargets.insert(key);
-        result.push_back({key, node.domain, node.item});
+        const auto [reference, fc] = splitDataSetMemberReference(raw);
+        if (reference.isEmpty()) continue;
+        const auto found = referenceIndex_.constFind(reference);
+        if (found == referenceIndex_.cend()) continue;
+        for (const int nodeIndex : found.value()) {
+            if (result.size() >= maximumTargets) break;
+            const auto& node = nodes_.at(nodeIndex);
+            if (node.kind == NodeKind::dataAttribute) {
+                append(nodeIndex, fc);
+            } else if (node.kind == NodeKind::dataObject) {
+                for (const int child : node.children) {
+                    append(child, fc);
+                    if (result.size() >= maximumTargets) break;
+                }
+            }
+        }
     }
     return result;
 }
