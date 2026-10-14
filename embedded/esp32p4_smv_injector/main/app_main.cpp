@@ -169,6 +169,7 @@ struct SampleClockContext final {
     std::atomic<bool> phase_authority_valid{false};
     SvBoundedSlewCursor phase_slew{};
     std::uint32_t phase_index{};
+    bool previous_phase_healthy{};
     bool phase_enabled{}; // set before timer START; only ISR reads it
 #endif
 };
@@ -427,15 +428,28 @@ bool sample_alarm_callback(
         // change smpCnt or issue multiple timer alarms to catch up.
         const bool phase_valid = context->phase_authority_valid.load(
             std::memory_order_relaxed);
-        const std::int32_t requested = context->requested_slew_ticks.exchange(
-            0, std::memory_order_relaxed);
         if (!phase_valid) {
-            // Cancel an in-flight slew immediately on PTP/source/phase fault.
-            context->phase_slew.arm(context->schedule.rate_hz, 0);
-        } else if (requested != 0 &&
-                   index + 16U < context->schedule.rate_hz) {
-            context->phase_slew.arm(
-                context->schedule.rate_hz - index, requested);
+            // Cancel once on a healthy->fault transition; do not reset
+            // distributor memory at the full 4k/4.8k ISR cadence.
+            if (context->previous_phase_healthy) {
+                context->phase_slew.arm(context->schedule.rate_hz, 0);
+                context->previous_phase_healthy = false;
+            }
+        } else {
+            context->previous_phase_healthy = true;
+            // Most frames have no new command. Avoid a locked RMW atomic
+            // exchange on all 4k/4.8k interrupts; take it only when nonzero.
+            if (context->requested_slew_ticks.load(
+                    std::memory_order_relaxed) != 0) {
+                const std::int32_t requested =
+                    context->requested_slew_ticks.exchange(
+                        0, std::memory_order_relaxed);
+                if (requested != 0 &&
+                    index + 16U < context->schedule.rate_hz) {
+                    context->phase_slew.arm(
+                        context->schedule.rate_hz - index, requested);
+                }
+            }
         }
         adjustment = context->phase_slew.next_adjustment();
         if (adjustment != 0) {
@@ -516,6 +530,7 @@ gptimer_handle_t start_sample_clock(
     g_sample_clock_context.cumulative_slew_ticks.store(0, std::memory_order_relaxed);
     g_sample_clock_context.phase_authority_valid.store(false, std::memory_order_relaxed);
     g_sample_clock_context.phase_index = 0U;
+    g_sample_clock_context.previous_phase_healthy = false;
     g_sample_clock_context.phase_enabled = false;
     g_sample_clock_context.phase_slew.arm(publisher_rate_hz, 0);
 #else
