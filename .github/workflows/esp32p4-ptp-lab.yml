@@ -143,7 +143,7 @@ jobs:
           set_config CONFIG_AR_PTP_UNLOCK_OFFSET_NS 20000
           set_config CONFIG_AR_PTP_PHASE_STEP_THRESHOLD_NS 1000000
           set_config CONFIG_AR_PTP_LOCK_REQUIRED_SAMPLES 8
-          set_config CONFIG_AR_PTP_SYNC_TIMEOUT_MS 1000
+          set_config CONFIG_AR_PTP_SYNC_TIMEOUT_MS 3000
           set_config CONFIG_AR_PTP_HOLDOVER_TIMEOUT_MS 5000
           set_config CONFIG_AR_PTP_MAX_FREQ_ADJ_PPB 100000
 
