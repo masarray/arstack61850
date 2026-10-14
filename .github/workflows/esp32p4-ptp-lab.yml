@@ -25,8 +25,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: esp32p4-ptp-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   phase-guard-checkpoint:

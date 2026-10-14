@@ -4,13 +4,57 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'embedded/**'
+      - 'include/ariec61850/mms/**'
+      - 'src/mms/**'
+      - 'include/ariec61850/control/**'
+      - 'src/control/**'
+      - 'include/ariec61850/asn1/**'
+      - 'src/asn1/**'
+      - 'include/ariec61850/acse/**'
+      - 'src/acse/**'
+      - 'include/ariec61850/osi/**'
+      - 'src/osi/**'
+      - 'include/ariec61850/goose/**'
+      - 'src/goose/**'
+      - 'include/ariec61850/sampled_values/**'
+      - 'src/sampled_values/**'
+      - 'include/ariec61850/ethernet/**'
+      - 'src/ethernet/**'
+      - 'include/ariec61850/time_sync/**'
+      - 'src/time_sync/**'
+      - '.github/workflows/embedded-ci.yml'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-
-  workflow_dispatch:
+    paths:
+      - 'embedded/**'
+      - 'include/ariec61850/mms/**'
+      - 'src/mms/**'
+      - 'include/ariec61850/control/**'
+      - 'src/control/**'
+      - 'include/ariec61850/asn1/**'
+      - 'src/asn1/**'
+      - 'include/ariec61850/acse/**'
+      - 'src/acse/**'
+      - 'include/ariec61850/osi/**'
+      - 'src/osi/**'
+      - 'include/ariec61850/goose/**'
+      - 'src/goose/**'
+      - 'include/ariec61850/sampled_values/**'
+      - 'src/sampled_values/**'
+      - 'include/ariec61850/ethernet/**'
+      - 'src/ethernet/**'
+      - 'include/ariec61850/time_sync/**'
+      - 'src/time_sync/**'
+      - '.github/workflows/embedded-ci.yml'
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   embedded-host-sim:

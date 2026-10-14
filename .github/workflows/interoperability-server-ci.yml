@@ -13,13 +13,22 @@ on:
       - 'src/osi/**'
       - 'src/acse/**'
       - 'src/mms/**'
-      - 'include/ariec61850/**'
+      - 'include/ariec61850/asn1/**'
+      - 'include/ariec61850/acse/**'
+      - 'include/ariec61850/osi/**'
+      - 'include/ariec61850/mms/**'
+      - 'include/ariec61850/scl/**'
+      - 'include/ariec61850/control/**'
+      - 'include/ariec61850/ethernet/**'
+      - 'include/ariec61850/goose/**'
+      - 'include/ariec61850/sampled_values/**'
+      - 'include/ariec61850/capture/**'
       - '.github/workflows/interoperability-server-ci.yml'
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   linux:

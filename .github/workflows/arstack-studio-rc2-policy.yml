@@ -2,6 +2,7 @@ name: ARStack Studio RC2 Acceptance Policy
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'apps/arstack_studio/src/Rc2Acceptance.cpp'
       - 'apps/arstack_studio/rc2/**'
@@ -20,11 +21,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: arstack-studio-rc2-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   windows-policy:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: RC2 Windows evidence gate
     runs-on: windows-2022
     steps:
@@ -79,6 +81,7 @@ jobs:
           retention-days: 14
 
   linux-policy:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: RC2 Linux policy regression
     runs-on: ubuntu-latest
     container: ubuntu:26.04

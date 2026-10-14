@@ -7,6 +7,7 @@ on:
       - 'assets/**'
       - '.github/workflows/ied-simulator-release-hardening.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'apps/ied_simulator/**'
       - '.github/workflows/ied-simulator-release-hardening.yml'
@@ -14,8 +15,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   linux-release-soak:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -64,6 +70,7 @@ jobs:
           --cycles 12
 
   windows-release-package:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
