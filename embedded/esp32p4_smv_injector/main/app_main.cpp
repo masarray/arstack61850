@@ -11,6 +11,7 @@
 #include "ethernet_port.h"
 #include "live_control.hpp"
 #include "runtime_profile.hpp"
+#include "sdkconfig.h"
 #if CONFIG_AR_PTP_LAB_TX
 #include "ptp_lab_task.hpp"
 #include "esp_idf_version.h"
@@ -28,7 +29,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
-#include "sdkconfig.h"
 
 #include <algorithm>
 #include <array>
