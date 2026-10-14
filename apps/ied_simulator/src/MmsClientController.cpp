@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "MmsClientController.hpp"
 #include "MmsSclClientProjection.hpp"
+#include "MmsSemanticValue.hpp"
 
 #include "ariec61850/mms/data_codec.hpp"
 #include "ariec61850/mms/live_discovery.hpp"
@@ -34,6 +35,7 @@ std::span<const std::uint8_t> responsePayload(const mms::MmsConfirmedExchangeRes
 struct ReadValue final {
     QString key;
     QString display;
+    QVariantMap typedEvidence;
 };
 
 QVector<ReadValue> readTargets(
@@ -67,7 +69,8 @@ QVector<ReadValue> readTargets(
         if (!result.success()) continue;
         values.push_back({
             targets.at(index).key,
-            QString::fromStdString(mms::MmsDataCodec::to_display_string(*result.value))});
+            QString::fromStdString(mms::MmsDataCodec::to_display_string(*result.value)),
+            arstack::iedsim::decodeMmsSemanticAttribute(*result.value, targets.at(index).item)});
     }
     if (values.isEmpty()) throw std::runtime_error("MMS Read returned no successful AccessResult.");
     return values;
@@ -517,10 +520,10 @@ void MmsClientController::startRead(
                 QMetaObject::invokeMethod(self, [self, generation, values, operationName] {
                     if (!self || self->generation_ != generation) return;
                     for (const auto& value : values) {
-                        self->treeModel_.applyReadValue(value.key, value.display);
+                        self->treeModel_.applyReadValue(value.key, value.display, value.typedEvidence);
                         if (self->engineeringContext_) {
                             self->engineeringContext_->treeModel()->applyReadValue(
-                                value.key, value.display);
+                                value.key, value.display, value.typedEvidence);
                         }
                     }
                     self->setOperationBusy(false);
@@ -670,10 +673,10 @@ bool MmsClientController::writeSelected(const QString& textValue) {
                 QMetaObject::invokeMethod(self, [self, generation, reference, values] {
                     if (!self || self->generation_ != generation) return;
                     for (const auto& read : values) {
-                        self->treeModel_.applyReadValue(read.key, read.display);
+                        self->treeModel_.applyReadValue(read.key, read.display, read.typedEvidence);
                         if (self->engineeringContext_) {
                             self->engineeringContext_->treeModel()->applyReadValue(
-                                read.key, read.display);
+                                read.key, read.display, read.typedEvidence);
                         }
                     }
                     self->setOperationBusy(false);

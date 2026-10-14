@@ -81,6 +81,17 @@ if missing_dataset:
 if 'root.memberNode(modelData)' in data_set:
     raise SystemExit("BROWSER_DATASET_HIERARCHY_FAIL unnormalized per-row linear lookup")
 
+model_quality_required = [
+    'Quality Details',
+    'Time Quality',
+    'root.currentNode.qualityDetails',
+    'root.currentNode.timestampDetails',
+    'modelData.data.fields',
+]
+model_missing = [term for term in model_quality_required if term not in data_model]
+if model_missing:
+    raise SystemExit("BROWSER_TYPED_QT_INSPECTOR_FAIL missing=" + ",".join(model_missing))
+
 report_required = [
     'objectName: "browserReportUnifiedInspector"',
     'Control Block Attributes',

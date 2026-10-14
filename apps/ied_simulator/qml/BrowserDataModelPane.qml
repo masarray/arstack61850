@@ -267,6 +267,73 @@ Rectangle {
                     }
                 }
 
+                // Semantic fields are present only for verified typed MMS
+                // quality/UTC values. No false flags for unread/offline data.
+                Repeater {
+                    model: [
+                        {heading: "Quality Details", data: root.currentNode.qualityDetails},
+                        {heading: "Time Quality", data: root.currentNode.timestampDetails}
+                    ]
+                    delegate: ColumnLayout {
+                        id: semanticSection
+                        required property int index
+                        required property var modelData
+                        visible: modelData.data !== undefined &&
+                                 modelData.data.fields !== undefined
+                        Layout.fillWidth: true
+                        spacing: 0
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: visible ? 24 : 0
+                            color: theme.surfaceRaised
+                            Label {
+                                anchors.fill: parent
+                                leftPadding: 8
+                                verticalAlignment: Text.AlignVCenter
+                                text: modelData.heading + " · MMS Read"
+                                font.pixelSize: 10
+                                font.weight: Font.DemiBold
+                                color: theme.text
+                            }
+                        }
+                        Repeater {
+                            model: semanticSection.modelData.data &&
+                                   semanticSection.modelData.data.fields
+                                   ? semanticSection.modelData.data.fields : []
+                            delegate: Rectangle {
+                                required property int index
+                                required property var modelData
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 25
+                                color: index % 2 ? theme.surfaceSoft : theme.surface
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 15
+                                    anchors.rightMargin: 8
+                                    Label {
+                                        text: modelData.label
+                                        Layout.preferredWidth: Math.max(150, root.width * 0.34)
+                                        color: theme.textSoft
+                                        font.pixelSize: 10
+                                    }
+                                    Label {
+                                        text: root.text(modelData.value)
+                                        Layout.fillWidth: true
+                                        color: theme.text
+                                        font.pixelSize: 10
+                                    }
+                                }
+                                Rectangle {
+                                    anchors.bottom: parent.bottom
+                                    width: parent.width
+                                    height: 1
+                                    color: theme.lineSoft
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Label {
                     visible: !root.currentNode.kind
                     Layout.fillWidth: true
