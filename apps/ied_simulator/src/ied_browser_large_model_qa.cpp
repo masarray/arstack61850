@@ -168,6 +168,26 @@ int main(int argc, char** argv) {
         return 7;
     }
 
+    // FC-qualified members use canonical reference indices rather than O(N)
+    // linear scans per visible DataSet row. Expanding a DO is read-only.
+    const auto doNode = model.nodeForReference(QStringLiteral("LD4/LLN19.DO99  [MX]"));
+    const auto boundedChildren = model.dataSetChildrenForReference(
+        QStringLiteral("LD4/LLN19.DO99"), QStringLiteral("MX"), 2);
+    const auto missingFc = model.dataSetChildrenForReference(
+        QStringLiteral("LD4/LLN19.DO99"), QStringLiteral("CF"), 64);
+    const auto exactDa = model.nodeForReference(
+        QStringLiteral("LD4/LLN19$MX$DO99$DA4  [MX]"));
+    if (doNode.value(QStringLiteral("kind")).toString() != QStringLiteral("DO") ||
+        boundedChildren.size() != 2 ||
+        boundedChildren.constFirst().toMap()
+            .value(QStringLiteral("functionalConstraint")).toString() != QStringLiteral("MX") ||
+        !missingFc.isEmpty() ||
+        exactDa.value(QStringLiteral("reference")).toString() !=
+            QStringLiteral("LD4/LLN19$MX$DO99$DA4")) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL dataset_reference_projection\n";
+        return 18;
+    }
+
     QStringList monitoredReferences;
     for (int doIndex = 0; doIndex < 100; ++doIndex) {
         monitoredReferences.push_back(
@@ -188,6 +208,6 @@ int main(int argc, char** argv) {
               << " apply_ms=" << applyMs
               << " filter_ms=" << filterMs
               << " select_ms=" << selectMs
-              << " eager_expansion=false drilldown=canonical inline_projection=bounded\n";
+              << " eager_expansion=false drilldown=canonical inline_projection=bounded dataset_lookup=indexed\n";
     return passes ? 0 : 11;
 }
