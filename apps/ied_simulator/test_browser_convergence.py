@@ -85,6 +85,17 @@ if missing_dataset:
 if 'root.memberNode(modelData)' in data_set:
     raise SystemExit("BROWSER_DATASET_HIERARCHY_FAIL unnormalized per-row linear lookup")
 
+report_controller = (workspace_path.parent.parent / "src" / "MmsReportController.cpp").read_text(encoding="utf-8")
+for token in [
+    'kMaximumTypedReportEvidence = 96',
+    'kMaximumVisibleReportMembers = 256',
+    'decodeEngineeringEvidence(',
+    'QStringLiteral("valueEvidence")',
+    'QStringLiteral("valueEvidenceTruncated")',
+]:
+    if token not in report_controller:
+        raise SystemExit("BROWSER_REPORT_TYPED_EVIDENCE_FAIL missing=" + token)
+
 report_required = [
     'objectName: "browserReportUnifiedInspector"',
     'Control Block Attributes',
@@ -100,6 +111,9 @@ report_required = [
     'delegate: PropertyRow { lastReportSection: true }',
     'delegate: DataRow { received: false }',
     'reports.selectedRcbDataSetMembers',
+    'selectedReportMemberEvidence()',
+    'root.selectedReportMemberIndex = dataRow.index',
+    'BrowserEngineeringEvidence {',
     'String(frame.reportId) === wanted',
     'Offline values are not fabricated.',
 ]
