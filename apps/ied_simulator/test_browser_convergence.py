@@ -85,6 +85,7 @@ data_set_required = [
     'root.selectedAttributeNode.engineeringEvidence || ({})',
     'selected.reference === root.selectedAttributeReference',
     'root.selectedAttributeReference = selected',
+    'memberRow.resolved.reference : ""',
     'root.showSelectedEvidence = selected',
 ]
 missing_dataset = [term for term in data_set_required if term not in data_set]

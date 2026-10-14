@@ -236,9 +236,15 @@ Rectangle {
                                     root.selectedAttributeReference = ""
                                     if (memberRow.canExpand)
                                         root.toggleMember(memberRow.index, memberRow.modelData)
-                                    else if (memberRow.resolved.readable === true)
-                                        root.modelProvider.treeModel.selectMmsItem(
+                                    else if (memberRow.resolved.readable === true) {
+                                        // Direct FCDA/DA members must expose typed q/t too,
+                                        // without expansion or an implicit MMS Read.
+                                        const selected = root.modelProvider.treeModel.selectMmsItem(
                                             memberRow.resolved.mmsDomain, memberRow.resolved.mmsItem)
+                                        root.selectedAttributeReference = selected
+                                                ? memberRow.resolved.reference : ""
+                                        root.showSelectedEvidence = selected
+                                    }
                                 }
                             }
                         }
