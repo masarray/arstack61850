@@ -43,8 +43,8 @@ jobs:
         run: |
           source /opt/esp/idf/export.sh
           cmake -S tests/ptp_profile -B build-phase-guard -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-phase-guard --target ptp_receiver_clock_authority_tests sv_ptp_phase_authority_tests sv_tx_egress_evidence_tests ptp_power_profile_tests ptp_runtime_tests --parallel 2
-          ctest --test-dir build-phase-guard --output-on-failure -R 'ptp_receiver_clock_authority_tests|sv_ptp_phase_authority_tests|sv_tx_egress_evidence_tests|ptp_power_profile_tests|ptp_runtime_tests'
+          cmake --build build-phase-guard --target ptp_canonical_authority_tests ptp_receiver_clock_authority_tests sv_ptp_phase_authority_tests sv_tx_egress_evidence_tests ptp_power_profile_tests ptp_runtime_tests --parallel 2
+          ctest --test-dir build-phase-guard --output-on-failure -R 'ptp_canonical_authority_tests|ptp_receiver_clock_authority_tests|sv_ptp_phase_authority_tests|sv_tx_egress_evidence_tests|ptp_power_profile_tests|ptp_runtime_tests'
       - name: Compile guarded ESP32-P4 SOURCE firmware
         shell: bash
         working-directory: embedded/esp32p4_smv_injector

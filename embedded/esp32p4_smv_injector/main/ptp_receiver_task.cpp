@@ -122,6 +122,7 @@ ar_ptp_lab_status_t g_receiver_status{};
 
 [[nodiscard]] bool receiver_runtime_ready() noexcept {
     return g_receiver_running.load(std::memory_order_acquire) &&
+           !g_receiver_stop_requested.load(std::memory_order_acquire) &&
            g_receiver_startup_state.load(std::memory_order_acquire) ==
                ReceiverStartupState::ready;
 }
@@ -991,11 +992,22 @@ bool ptp_receiver_is_running() noexcept {
     return receiver_runtime_ready();
 }
 
+bool ptp_receiver_runtime_active() noexcept {
+    return g_receiver_running.load(std::memory_order_acquire);
+}
+
 bool ptp_receiver_get_status(ar_ptp_lab_status_t& status) noexcept {
     portENTER_CRITICAL(&g_receiver_status_mux);
     status = g_receiver_status;
     portEXIT_CRITICAL(&g_receiver_status_mux);
-    status.is_running = receiver_runtime_ready();
+    // Never reuse worker's last LOCKED snapshot across STOP/cleanup.
+    status.is_running = status.is_running && receiver_runtime_ready();
+    if (!status.is_running) {
+        status.timing_authority_clock_usable = false;
+        status.measured_smp_synch_valid = false;
+        status.globally_traceable = false;
+        status.offset_valid = false;
+    }
     return true;
 }
 

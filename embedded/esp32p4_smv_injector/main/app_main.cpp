@@ -501,6 +501,18 @@ bool sample_alarm_callback(
     return high_priority_task_woken == pdTRUE;
 }
 
+#if CONFIG_AR_PTP_LAB_TX && defined(SOC_EMAC_IEEE1588V2_SUPPORTED) && \
+    SOC_EMAC_IEEE1588V2_SUPPORTED && ESP_IDF_VERSION_MAJOR < 6
+// One canonical, quiet SOURCE lease for control-plane phase decisions.
+// Keeps SOURCE/RECEIVER role fencing and generation in the same snapshot.
+[[nodiscard]] std::uint32_t source_ptp_clock_authority_generation() noexcept {
+    ar_ptp_timing_authority_t clock{};
+    return ar_ptp_lab_get_timing_authority(&clock) &&
+           clock.role == AR_PTP_ROLE_LAB_SOURCE && clock.clock_usable
+        ? clock.generation : 0U;
+}
+#endif
+
 // This is deliberately a bounded START-time observation, not a per-sample
 // PTP IOCTL and not evidence that the free-running GPTimer stays disciplined.
 // It places smpCnt=0 near a PTP epoch only for the selected LAB_SOURCE role.
@@ -510,11 +522,7 @@ bool sample_alarm_callback(
 plan_source_ptp_epoch_arm(const esp_eth_handle_t eth_handle) noexcept {
 #if CONFIG_AR_PTP_LAB_TX && defined(SOC_EMAC_IEEE1588V2_SUPPORTED) && \
     SOC_EMAC_IEEE1588V2_SUPPORTED && ESP_IDF_VERSION_MAJOR < 6
-    ar_ptp_lab_config_t config{};
-    ar_ptp_lab_status_t status{};
-    if (!ar_ptp_lab_get_status(&status) || !status.is_running ||
-        !ar_ptp_lab_get_config(&config) ||
-        config.role != AR_PTP_ROLE_LAB_SOURCE) return std::nullopt;
+    if (source_ptp_clock_authority_generation() == 0U) return std::nullopt;
 
     eth_mac_time_t ptp_time{};
     const std::int64_t before_us = esp_timer_get_time();
@@ -1016,7 +1024,7 @@ void sv_ptp_phase_observer_task(void* argument) {
             g_sample_clock_context.publisher_fault_generation.load(
                 std::memory_order_acquire);
         const std::uint32_t source_generation =
-            ar_ptp_lab_source_generation();
+            source_ptp_clock_authority_generation();
         // Source START/recovery is a new time authority even if the hardware
         // seconds are continuous. Never carry PI integrator over source reset.
         if (source_generation == 0U ||
@@ -1027,11 +1035,9 @@ void sv_ptp_phase_observer_task(void* argument) {
             continue;
         }
 
-        ar_ptp_lab_config_t config{};
         if (events != 1U || !live_tx_running() ||
             (xEventGroupGetBits(g_link_events) & kLinkUpBit) == 0U ||
-            !ar_ptp_lab_is_running() || !ar_ptp_lab_get_config(&config) ||
-            config.role != AR_PTP_ROLE_LAB_SOURCE) {
+            source_ptp_clock_authority_generation() != source_generation) {
             static_cast<void>(controller.invalidate());
             revoke_sv_phase_session(notified_session);
             continue;
@@ -1077,7 +1083,7 @@ void sv_ptp_phase_observer_task(void* argument) {
         xSemaphoreGive(g_phase_timer_mutex);
 
         if (!evidence_valid || !ar_ptp_lab_is_running() ||
-            ar_ptp_lab_source_generation() != source_generation) {
+            source_ptp_clock_authority_generation() != source_generation) {
             static_cast<void>(controller.invalidate());
             revoke_sv_phase_session(notified_session);
             continue;
@@ -1101,7 +1107,7 @@ void sv_ptp_phase_observer_task(void* argument) {
             g_sample_clock_context.epoch_generation.load(
                 std::memory_order_acquire) == observation.last_sv_epoch_generation &&
             decision.accepted && live_tx_running() &&
-            ar_ptp_lab_source_generation() == source_generation &&
+            source_ptp_clock_authority_generation() == source_generation &&
             no_new_publisher_fault) {
             // A single near-boundary observation is only a baseline. Do
             // not arm ISR steering until adjacent smpCnt=0 deadlines map
