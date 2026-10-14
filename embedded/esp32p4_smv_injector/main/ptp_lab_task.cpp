@@ -202,6 +202,18 @@ void fill_kconfig_defaults(ar_ptp_lab_config_t& config) noexcept {
 [[nodiscard]] bool validate_runtime_config(
     const ar_ptp_lab_config_t& config,
     std::string& error) {
+    // LAB_SOURCE has no external clock input or traceability evidence.
+    // Reject source-quality advertising that would mislead an IED BMCA.
+    if (config.role == AR_PTP_ROLE_LAB_SOURCE &&
+        (config.clock_class != 248U ||
+         config.clock_accuracy !=
+             static_cast<std::uint8_t>(PtpClockAccuracy::unknown) ||
+         config.time_source !=
+             static_cast<std::uint8_t>(PtpTimeSource::internal_oscillator))) {
+        error = "LAB_SOURCE requires clockClass=248, clockAccuracy=UNKNOWN "
+                "and timeSource=INTERNAL_OSCILLATOR (no external reference)";
+        return false;
+    }
     if (config.clock_identity_override && all_zero_identity(config.clock_identity)) {
         error = "clockIdentity override must be non-zero";
         return false;
