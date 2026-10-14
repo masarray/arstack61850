@@ -58,7 +58,7 @@ struct RoleControlClaim final {
     RoleControlClaim(const RoleControlClaim&) = delete;
     RoleControlClaim& operator=(const RoleControlClaim&) = delete;
     RoleControlClaim() = default;
-}
+};
 
 
 void fill_p2_defaults(ar_ptp_lab_config_t& config) noexcept {
