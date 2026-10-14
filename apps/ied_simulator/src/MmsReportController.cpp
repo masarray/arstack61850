@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "MmsReportController.hpp"
-#include "MmsEngineeringEvidence.hpp"
+#include "BrowserReportMemberProjection.hpp"
 
 #include "ariec61850/mms/data_codec.hpp"
 #include "ariec61850/mms/dynamic_data_set.hpp"
@@ -28,7 +28,6 @@ namespace mms = ar::iec61850::mms;
 namespace {
 constexpr int kMaximumVisibleReports = 128;
 constexpr int kMaximumTypedReportEvidence = 96;
-constexpr int kMaximumVisibleReportMembers = 256;
 
 QString boolText(const std::optional<bool> value) {
     if (!value.has_value()) return QStringLiteral("—");
@@ -436,21 +435,6 @@ struct ReportUi final {
     bool cleanupRequired{};
 };
 
-QString reportValueText(const mms::MmsReportValue& item) {
-    QString value = QStringLiteral("<failed>");
-    if (item.value) value = QString::fromStdString(mms::MmsDataCodec::to_display_string(*item.value));
-    QString reference = QString::fromStdString(item.data_reference);
-    if (reference.isEmpty() && item.member) reference = QString::fromStdString(item.member->user_reference);
-    if (reference.isEmpty()) reference = QStringLiteral("member[%1]").arg(static_cast<qulonglong>(item.data_set_index));
-    QString reasons;
-    for (const auto& reason : item.reason_for_inclusion.names) {
-        if (!reasons.isEmpty()) reasons += QStringLiteral(", ");
-        reasons += QString::fromStdString(reason);
-    }
-    return QStringLiteral("%1 = %2%3")
-        .arg(reference, value, reasons.isEmpty() ? QString{} : QStringLiteral("  · ") + reasons);
-}
-
 ReportUi buildSubscriptionUi(
     const mms::MmsReportSubscriptionSnapshot& subscription,
     const bool active) {
@@ -480,48 +464,18 @@ ReportUi buildSubscriptionUi(
             map.insert(QStringLiteral("overflow"), frame.header.buffer_overflow.value_or(false));
             map.insert(QStringLiteral("decoderMode"), QString::fromStdString(frame.decoder_mode));
             map.insert(QStringLiteral("valueCount"), static_cast<int>(frame.values.size()));
-            QStringList values;
-            QVariantList typedEvidence;
-            bool typedEvidenceTruncated = false;
-            int memberIndex = 0;
-            for (const auto& item : frame.values) {
-                values.push_back(reportValueText(item));
-                if (item.value && memberIndex < kMaximumVisibleReportMembers) {
-                    QString memberRef = QString::fromStdString(item.data_reference);
-                    if (memberRef.isEmpty() && item.member)
-                        memberRef = QString::fromStdString(item.member->user_reference);
-                    if (memberRef.isEmpty() && item.member)
-                        memberRef = QString::fromStdString(item.member->mms_reference);
-                    if (typedEvidenceBudget > 0) {
-                        const auto evidence = arstack::iedsim::decodeEngineeringEvidence(
-                            memberRef, *item.value);
-                        if (!evidence.isEmpty()) {
-                            typedEvidence.push_back(QVariantMap{
-                                {QStringLiteral("index"), memberIndex},
-                                {QStringLiteral("evidence"), evidence}});
-                            --typedEvidenceBudget;
-                        }
-                    } else {
-                        // Mark truncation only for real q/t typed members, not
-                        // unrelated BIT STRING or UTC-valued attributes.
-                        const auto kind = item.value->kind();
-                        const auto separator = std::max(
-                            memberRef.lastIndexOf(QLatin1Char('$')),
-                            memberRef.lastIndexOf(QLatin1Char('.')));
-                        const QString leaf = memberRef.mid(separator + 1);
-                        if ((leaf == QStringLiteral("q") &&
-                             kind == mms::MmsDataKind::bit_string) ||
-                            (leaf == QStringLiteral("t") &&
-                             kind == mms::MmsDataKind::utc_time))
-                            typedEvidenceTruncated = true;
-                    }
-                }
-                ++memberIndex;
-            }
-            map.insert(QStringLiteral("values"), values);
-            map.insert(QStringLiteral("valueEvidence"), typedEvidence);
-            map.insert(QStringLiteral("valueEvidenceTruncated"), typedEvidenceTruncated);
-            map.insert(QStringLiteral("valuesSummary"), values.mid(0, 3).join(QStringLiteral(" | ")));
+            // A frame can include far more DataSet members than the 256 GUI
+            // rows. Project only retained rows, preserving actual total count
+            // and a shared typed-evidence budget across recent frames.
+            const auto projected = arstack::iedsim::projectBrowserReportMembers(
+                frame.values, typedEvidenceBudget);
+            map.insert(QStringLiteral("values"), projected.values);
+            map.insert(QStringLiteral("valueEvidence"), projected.evidence);
+            map.insert(QStringLiteral("valueEvidenceTruncated"), projected.evidenceTruncated);
+            map.insert(QStringLiteral("valuesTruncated"), projected.rowsTruncated);
+            map.insert(QStringLiteral("valueTextTruncated"), projected.textTruncated);
+            map.insert(QStringLiteral("valuesSummary"),
+                       projected.values.mid(0, 3).join(QStringLiteral(" | ")));
             map.insert(QStringLiteral("duplicateCount"), static_cast<qulonglong>(streamIt->state.duplicate_count));
             map.insert(QStringLiteral("gapCount"), static_cast<qulonglong>(streamIt->state.gap_count));
             map.insert(QStringLiteral("resetCount"), static_cast<qulonglong>(streamIt->state.reset_count));
