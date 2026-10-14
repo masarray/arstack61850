@@ -92,14 +92,41 @@ def main():
         assert "ready_for_review" in trigger, f"{name}: no ready transition"
         assert "paths:" in trigger, f"{name}: unscoped PR"
         jobs = source.split("\njobs:\n", 1)[1]
-        names = re.findall(r"(?m)^  [a-z0-9_-]+:\s*$", jobs)
-        guarded = re.findall(
-            r"(?m)^  [a-z0-9_-]+:\s*\n" + re.escape(gate) + r"\s*$",
-            jobs,
+        # Validate each top-level job, not just the number of guarded jobs.
+        # The sole Draft exception is the explicit M3 opt-in SOURCE checkpoint.
+        boundaries = list(re.finditer(r"(?m)^  ([a-z0-9_-]+):[ ]*$", jobs))
+        assert boundaries, f"{name}: no jobs"
+        phase_gate = (
+            "    if: ${{ github.event_name == 'pull_request' && "
+            "github.event.pull_request.draft && "
+            "contains(github.event.pull_request.body, '[run-phase-guard]') }}"
         )
-        assert names and len(guarded) == len(names), (
-            name, len(guarded), len(names)
-        )
+        for index, boundary in enumerate(boundaries):
+            job_name = boundary.group(1)
+            block_end = (
+                boundaries[index + 1].start()
+                if index + 1 < len(boundaries) else len(jobs)
+            )
+            block = jobs[boundary.end():block_end]
+            if_lines = re.findall(r"(?m)^    if: .+$", block)
+            if if_lines == [gate]:
+                continue
+            if name == "esp32p4-ptp-lab.yml" and job_name == "phase-guard-checkpoint":
+                assert if_lines == [phase_gate], (name, job_name, "unsafe opt-in")
+                assert not re.search(r"(?m)^    (?:strategy|uses):", block), (
+                    name, job_name, "checkpoint may not be a matrix/reusable job"
+                )
+                assert "matrix:" not in block, (name, job_name, "matrix flood")
+                assert "Portable strict phase regression" in block, (
+                    name, job_name, "portable tests missing"
+                )
+                assert "Compile guarded ESP32-P4 SOURCE firmware" in block, (
+                    name, job_name, "SOURCE build missing"
+                )
+                continue
+            raise AssertionError(
+                f"{name}: job {job_name} lacks Draft gate (got {if_lines})"
+            )
 
     for name in ("esp32p4-smv-injector.yml", "esp32p4-ptp-lab.yml"):
         source = (ROOT / name).read_text(encoding="utf-8")
