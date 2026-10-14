@@ -43,8 +43,8 @@ jobs:
         run: |
           source /opt/esp/idf/export.sh
           cmake -S tests/ptp_profile -B build-phase-guard -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-phase-guard --target sv_ptp_phase_authority_tests --parallel 2
-          ctest --test-dir build-phase-guard --output-on-failure -R sv_ptp_phase_authority_tests
+          cmake --build build-phase-guard --target sv_ptp_phase_authority_tests sv_tx_egress_evidence_tests --parallel 2
+          ctest --test-dir build-phase-guard --output-on-failure -R 'sv_ptp_phase_authority_tests|sv_tx_egress_evidence_tests'
       - name: Compile guarded ESP32-P4 SOURCE firmware
         shell: bash
         working-directory: embedded/esp32p4_smv_injector
@@ -55,18 +55,21 @@ jobs:
           from pathlib import Path
           p = Path("sdkconfig")
           s = p.read_text(encoding="utf-8")
-          off = "# CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL is not set"
-          on = "CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y"
-          if off in s:
-              s = s.replace(off, on)
-          elif on not in s:
-              s += "\n" + on + "\n"
+          def put_bool(source, key, enabled):
+              source = "\n".join(line for line in source.splitlines()
+                  if line != f"# {key} is not set" and not line.startswith(key + "="))
+              return source + "\n" + (f"{key}=y" if enabled else f"# {key} is not set") + "\n"
+          s = put_bool(s, "CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL", True)
+          s = put_bool(s, "CONFIG_AR_SMV_BROADCAST_MIRROR", False)
+          s = put_bool(s, "CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL", True)
           p.write_text(s, encoding="utf-8")
           PY
           idf.py reconfigure
           grep -qx 'CONFIG_AR_PTP_LAB_TX=y' sdkconfig
           grep -qx 'CONFIG_AR_SMV_LIVE_TX=y' sdkconfig
           grep -qx 'CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y' sdkconfig
+          grep -qx '# CONFIG_AR_SMV_BROADCAST_MIRROR is not set' sdkconfig
+          grep -qx 'CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL=y' sdkconfig
           idf.py build
 
   build-esp32p4-ptp:

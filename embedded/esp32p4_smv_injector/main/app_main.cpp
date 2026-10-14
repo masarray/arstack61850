@@ -30,6 +30,13 @@
 #else
 #define AR_SV_PTP_PHASE_SUPPORTED 0
 #endif
+#if AR_SV_PTP_PHASE_SUPPORTED && defined(CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL) && \
+    CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL
+#define AR_SV_TX_EGRESS_SUPPORTED 1
+#include "ariec61850/time_sync/sv_tx_egress_evidence.hpp"
+#else
+#define AR_SV_TX_EGRESS_SUPPORTED 0
+#endif
 #include "esp_err.h"
 #include "esp_eth.h"
 #include "esp_event.h"
@@ -82,6 +89,11 @@ using ar::iec61850::time_sync::SvPtpPhaseAuthority;
 using ar::iec61850::time_sync::SvPtpPhaseObservation;
 using ar::iec61850::time_sync::SvPtpPublisherContinuityGate;
 #endif
+#if AR_SV_TX_EGRESS_SUPPORTED
+using ar::iec61850::time_sync::SvTxEgressEvidence;
+using ar::iec61850::time_sync::SvTxEgressObservation;
+using ar::iec61850::time_sync::SvTxEgressSummary;
+#endif
 
 constexpr char kTag[] = "ar_smv_p3";
 constexpr EventBits_t kLinkUpBit = BIT0;
@@ -117,6 +129,11 @@ static_assert(std::atomic<std::int32_t>::is_always_lock_free);
 static_assert(std::atomic<bool>::is_always_lock_free);
 #endif
 std::atomic<std::uint32_t> g_sample_tick_total{0U};
+#if AR_SV_TX_EGRESS_SUPPORTED
+constexpr std::uint32_t kEgressEvidenceEveryZeroEpochs = 16U;
+portMUX_TYPE g_tx_egress_mux = portMUX_INITIALIZER_UNLOCKED;
+SvTxEgressEvidence g_tx_egress_evidence{};
+#endif
 #if AR_SV_PTP_PHASE_SUPPORTED
 SemaphoreHandle_t g_phase_timer_mutex = nullptr;
 gptimer_handle_t g_monitored_sample_clock = nullptr; // under mutex, never in ISR
@@ -648,6 +665,9 @@ void publisher_task(void* argument) {
     bool schedule_anchored = false;
     bool epoch_armed = false;
     std::int64_t expected_wake_us = 0;
+#if AR_SV_TX_EGRESS_SUPPORTED
+    std::uint32_t zero_epoch_frames_seen = 0U;
+#endif
 #if AR_SV_PTP_PHASE_SUPPORTED
     std::int32_t previous_slew_total = 0;
 #endif
@@ -693,6 +713,12 @@ void publisher_task(void* argument) {
             consecutive_canonical_tx_failures = 0U;
             last_canonical_tx_error = ESP_OK;
             expected_schedule.reset(active_profile.publisher_rate_hz);
+#if AR_SV_TX_EGRESS_SUPPORTED
+            zero_epoch_frames_seen = 0U;
+            portENTER_CRITICAL(&g_tx_egress_mux);
+            g_tx_egress_evidence.reset();
+            portEXIT_CRITICAL(&g_tx_egress_mux);
+#endif
 #if AR_SV_PTP_PHASE_SUPPORTED
             previous_slew_total = 0;
 #endif
@@ -810,8 +836,78 @@ void publisher_task(void* argument) {
                 static_cast<std::uint8_t>(sync_decision.value);
             patch_packet(
                 canonical, canonical_sample_count, sample_synchronization, row, signal_state);
+#if AR_SV_TX_EGRESS_SUPPORTED
+            // ONCE / 16 seconds, replace normal SV TX for the real canonical
+            // frame with descriptor-stamped TX. ESP-IDF 5.5.4 polls the DMA
+            // descriptor for its timestamp: never run this on every frame.
+            // This is diagnostic evidence, not validated IED synchronization.
+            bool take_egress_timestamp = false;
+            SvTxEgressObservation egress{};
+            std::uint32_t evidence_session = 0U;
+            std::uint32_t fault_generation_before = 0U;
+            if (epoch_armed && g_sample_clock_context.phase_enabled &&
+                canonical_sample_count == 0U && missed_slots == 0U &&
+                active_profile.sample_counter_modulus ==
+                    active_profile.publisher_rate_hz) {
+                ++zero_epoch_frames_seen;
+                if ((zero_epoch_frames_seen % kEgressEvidenceEveryZeroEpochs) == 0U &&
+                    ar_ptp_lab_is_running()) {
+                    take_egress_timestamp = true;
+                    evidence_session = g_sample_clock_context.session_generation.load(
+                        std::memory_order_acquire);
+                    egress.sample_epoch_generation =
+                        g_sample_clock_context.epoch_generation.load(
+                            std::memory_order_acquire);
+                    egress.scheduled_alarm_ticks_low32 =
+                        g_sample_clock_context.last_epoch_alarm.load(
+                            std::memory_order_acquire);
+                    fault_generation_before =
+                        g_sample_clock_context.publisher_fault_generation.load(
+                            std::memory_order_acquire);
+                    egress.smp_cnt = canonical_sample_count;
+                    egress.no_missed_slots = pending_ticks == 1U;
+                }
+            }
+            eth_mac_time_t egress_hw_time{};
+            const std::int64_t submit_before_us =
+                take_egress_timestamp ? esp_timer_get_time() : 0;
+            const esp_err_t canonical_result = take_egress_timestamp
+                ? esp_eth_transmit_ctrl_vargs(
+                    eth_handle, &egress_hw_time, 2U, canonical.bytes.data(),
+                    static_cast<std::uint32_t>(canonical.bytes.size()))
+                : esp_eth_transmit(
+                    eth_handle, canonical.bytes.data(), canonical.bytes.size());
+            if (take_egress_timestamp) {
+                const std::int64_t submit_after_us = esp_timer_get_time();
+                const std::int64_t duration =
+                    submit_after_us >= submit_before_us
+                    ? submit_after_us - submit_before_us : 0LL;
+                egress.submit_duration_us = static_cast<std::uint32_t>(
+                    std::min<std::int64_t>(duration, 0xFFFFFFFFLL));
+                // A descriptor polling delay that exceeds one scheduled
+                // sample interval is diagnostic interference: retain the TX
+                // timestamp but mark the sample's timing evidence unqualified.
+                egress.no_missed_slots = egress.no_missed_slots &&
+                    egress.submit_duration_us <=
+                        kTimerResolutionHz / active_profile.publisher_rate_hz;
+                egress.canonical_tx_success = canonical_result == ESP_OK;
+                egress.hw_ptp_seconds = egress_hw_time.seconds;
+                egress.hw_ptp_nanoseconds = egress_hw_time.nanoseconds;
+                egress.same_sample_epoch = evidence_session != 0U &&
+                    g_sample_clock_context.session_generation.load(
+                        std::memory_order_acquire) == evidence_session &&
+                    g_sample_clock_context.epoch_generation.load(
+                        std::memory_order_acquire) == egress.sample_epoch_generation &&
+                    g_sample_clock_context.publisher_fault_generation.load(
+                        std::memory_order_acquire) == fault_generation_before;
+                portENTER_CRITICAL(&g_tx_egress_mux);
+                static_cast<void>(g_tx_egress_evidence.record(egress));
+                portEXIT_CRITICAL(&g_tx_egress_mux);
+            }
+#else
             const esp_err_t canonical_result =
                 esp_eth_transmit(eth_handle, canonical.bytes.data(), canonical.bytes.size());
+#endif
             if (canonical_result == ESP_OK) {
                 ++local.canonical_ok;
                 consecutive_canonical_tx_failures = 0U;
@@ -1030,6 +1126,9 @@ void telemetry_task(void*) {
     std::int64_t previous_tick_time_us = 0;
     bool rate_baseline_valid = false;
     TimingStats baseline_stats{};
+#if AR_SV_TX_EGRESS_SUPPORTED
+    std::uint32_t previously_reported_egress = 0U;
+#endif
 
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -1038,6 +1137,36 @@ void telemetry_task(void*) {
         snapshot = g_interval_stats;
         g_interval_stats = TimingStats{};
         portEXIT_CRITICAL(&g_stats_mux);
+#if AR_SV_TX_EGRESS_SUPPORTED
+        SvTxEgressSummary egress_snapshot{};
+        portENTER_CRITICAL(&g_tx_egress_mux);
+        egress_snapshot = g_tx_egress_evidence.summary();
+        portEXIT_CRITICAL(&g_tx_egress_mux);
+        if (egress_snapshot.attempted != previously_reported_egress) {
+            previously_reported_egress = egress_snapshot.attempted;
+            ESP_LOGI(kTag,
+                "SV MAC TX descriptor evidence (LAB, 1/16 smpCnt=0): "
+                "attempted=%lu measured=%lu invalid=%lu txfail=%lu no_hw_ts=%lu "
+                "PTP-egress-phase_ns[min/mean/max]=%ld/%lld/%ld "
+                "submit_max_us=%lu last_epoch=%lu last_alarm_ticks=%lu; "
+                "PTP/SV absolute accuracy and smpSynch NOT QUALIFIED",
+                static_cast<unsigned long>(egress_snapshot.attempted),
+                static_cast<unsigned long>(egress_snapshot.measured),
+                static_cast<unsigned long>(egress_snapshot.rejected_epoch),
+                static_cast<unsigned long>(egress_snapshot.failed_transmit),
+                static_cast<unsigned long>(egress_snapshot.missing_hw_timestamp),
+                static_cast<long>(egress_snapshot.measured > 0U
+                    ? egress_snapshot.min_phase_ns : 0),
+                static_cast<long long>(egress_snapshot.measured > 0U
+                    ? egress_snapshot.phase_sum_ns /
+                        static_cast<std::int64_t>(egress_snapshot.measured) : 0LL),
+                static_cast<long>(egress_snapshot.measured > 0U
+                    ? egress_snapshot.max_phase_ns : 0),
+                static_cast<unsigned long>(egress_snapshot.max_submit_duration_us),
+                static_cast<unsigned long>(egress_snapshot.last_epoch_generation),
+                static_cast<unsigned long>(egress_snapshot.last_alarm_ticks_low32));
+        }
+#endif
 
         const std::int64_t now_us = esp_timer_get_time();
         const std::uint32_t tick_total = g_sample_tick_total.load(std::memory_order_relaxed);

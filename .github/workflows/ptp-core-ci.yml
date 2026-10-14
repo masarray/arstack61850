@@ -20,6 +20,7 @@ on:
       - 'tests/test_ptp_p2_hardening.cpp'
       - 'tests/test_sv_ptp_epoch.cpp'
       - 'tests/test_sv_ptp_phase_authority.cpp'
+      - 'tests/test_sv_tx_egress_evidence.cpp'
       - 'tests/ptp_profile/**'
       - '.github/workflows/ptp-core-ci.yml'
   pull_request:
@@ -125,6 +126,7 @@ jobs:
           Build-Target 'ptp_discipline_tests'
           Build-Target 'sv_ptp_epoch_tests'
           Build-Target 'sv_ptp_phase_authority_tests'
+          Build-Target 'sv_tx_egress_evidence_tests'
           Build-Target 'ptp_p2_hardening_tests'
           Build-Target 'ptp_profile_analyze'
 

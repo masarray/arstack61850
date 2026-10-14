@@ -68,6 +68,21 @@ config AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL
         AUTO smpSynch remains unsynchronized until independent wire/hardware
         timestamp evidence is available. DO NOT use on a live substation.
 
+config AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL
+    bool "LAB ONLY: sparse canonical SV EMAC hardware TX timestamp evidence"
+    default n
+    depends on AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL && !AR_SMV_BROADCAST_MIRROR && !AR_SMV_DIAGNOSTIC_PROBES
+    help
+        Diagnostic only: once per 16 canonical smpCnt-zero epochs, use the
+        ESP32-P4 MAC extended TX API to request a descriptor timestamp on
+        the actual SV frame, while all other frames use the regular TX path.
+        The ESP-IDF 5.x driver busy-waits for the selected descriptor, which
+        can perturb realtime scheduling; never enable on a live process bus.
+        Disable the broadcast mirror and diagnostic probes to avoid extra
+        competing TX traffic. Missing/non-SV timestamps are recorded as
+        unavailable, never substituted with esp_timer time or claimed as
+        proof that a relay has synchronized. Defaults OFF.
+
 config AR_PTP_OPERATING_ROLE
     int "PTP operating role (0=lab source, 1=time receiver, 2=monitor)"
     range 0 2
