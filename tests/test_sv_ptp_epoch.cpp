@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ariec61850/time_sync/sv_ptp_epoch.hpp"
+#include "ariec61850/sampled_values/rational_schedule.hpp"
 
 #include <cstdint>
+#include <array>
 #include <iostream>
 #include <optional>
 
@@ -34,6 +36,27 @@ int main() {
                  "qualified local clock value lost")) return 1;
     if (!require(!qualified_sv_sync_value(std::nullopt, true),
                  "missing clock evidence accepted")) return 1;
+    // Pure scheduling proof: the existing portable rational scheduler has
+    // precisely one million timer ticks per whole 4000/4800-sample epoch.
+    // This validates arithmetic/rollover, NOT physical EMAC egress phase.
+    for (const auto rate : std::array<std::uint32_t, 2>{4000U, 4800U}) {
+        ar::iec61850::sampled_values::RationalTickSchedule schedule{1000000ULL, rate};
+        std::uint64_t elapsed_ticks = 0U;
+        std::uint32_t counter = 0U;
+        for (std::uint32_t sample = 0U; sample < rate * 120U; ++sample) {
+            const auto duration = schedule.next_interval_ticks();
+            if (!require(duration == 1000000U / rate ||
+                         duration == (1000000U / rate) + 1U,
+                         "rational cadence interval invalid")) return 1;
+            elapsed_ticks += duration;
+            counter = (counter + 1U) % rate;
+            if ((sample + 1U) % rate == 0U) {
+                if (!require(elapsed_ticks == (sample + 1ULL) / rate * 1000000ULL,
+                             "rational schedule drifted from 1-second epoch")) return 1;
+                if (!require(counter == 0U, "sample counter rollover not at epoch")) return 1;
+            }
+        }
+    }
     std::cout << "SV/PTP epoch and synchronization gates passed\n";
     return 0;
 }
