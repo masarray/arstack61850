@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "MmsLiveTreeModel.hpp"
 #include "MmsEngineeringEvidence.hpp"
+#include "BrowserReportMemberProjection.hpp"
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
@@ -309,6 +310,48 @@ int main(int argc, char** argv) {
              .value(QStringLiteral("engineeringEvidence")).toMap().isEmpty()) {
         std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL stale_evidence\n";
         return 25;
+    }
+
+    // Project 300 decoded report members but allocate only 256 GUI rows.
+    // A shared one-item evidence budget prevents a q/t storm from allocating
+    // a detailed map per member or per retained report frame.
+    std::vector<ar::iec61850::mms::MmsReportValue> largeFrame(300);
+    for (std::size_t index = 0; index < largeFrame.size(); ++index) {
+        largeFrame[index].data_set_index = index;
+        largeFrame[index].data_reference = "LD4/LLN19.DO99.stVal";
+        largeFrame[index].value = ar::iec61850::mms::MmsDataValue::boolean(true);
+    }
+    largeFrame[0].data_reference = "LD4/LLN19.DO99.q";
+    largeFrame[0].value = ar::iec61850::mms::MmsDataValue::bit_string(3U, bits);
+    largeFrame[1].data_reference = "LD4/LLN19.DO99.t";
+    largeFrame[1].value = ar::iec61850::mms::MmsDataValue::utc_time(utc);
+    largeFrame[2].value.reset();   // An unsuccessful member has no typed evidence
+    largeFrame[3].data_reference = "LD4/LLN19.DO99.q";
+    largeFrame[3].value = ar::iec61850::mms::MmsDataValue::boolean(false); // Wrong kind
+    largeFrame[4].data_reference = std::string(2048, 'X'); // Bounded preview
+    int typedBudget = 1;
+    const auto projected = arstack::iedsim::projectBrowserReportMembers(
+        largeFrame, typedBudget);
+    if (projected.values.size() != 256 ||
+        projected.evidence.size() != 1 ||
+        projected.evidence.constFirst().toMap().value(QStringLiteral("index")).toInt() != 0 ||
+        typedBudget != 0 ||
+        !projected.rowsTruncated || !projected.textTruncated ||
+        !projected.evidenceTruncated ||
+        !projected.values.at(2).contains(QStringLiteral("<failed>")) ||
+        projected.values.at(4).size() > 1100) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL bounded_report_projection\n";
+        return 27;
+    }
+    int smallBudget = 2;
+    const auto smallProjection = arstack::iedsim::projectBrowserReportMembers(
+        largeFrame, smallBudget, 3);
+    if (smallProjection.values.size() != 3 ||
+        smallProjection.evidence.size() != 2 ||
+        smallBudget != 0 || !smallProjection.rowsTruncated ||
+        smallProjection.evidenceTruncated) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL bounded_report_small_window\n";
+        return 28;
     }
 
     const bool passes = applyMs <= 5000 && filterMs <= 1500 && selectMs <= 500;

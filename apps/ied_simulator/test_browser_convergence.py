@@ -88,8 +88,7 @@ if 'root.memberNode(modelData)' in data_set:
 report_controller = (workspace_path.parent.parent / "src" / "MmsReportController.cpp").read_text(encoding="utf-8")
 for token in [
     'kMaximumTypedReportEvidence = 96',
-    'kMaximumVisibleReportMembers = 256',
-    'decodeEngineeringEvidence(',
+    'projectBrowserReportMembers(',
     'QStringLiteral("valueEvidence")',
     'QStringLiteral("valueEvidenceTruncated")',
 ]:
@@ -102,6 +101,22 @@ typed_decoder = (workspace_path.parent.parent / "src" / "MmsEngineeringEvidence.
 if typed_decoder.count("decodeEngineeringEvidence(") != 1 or (
         "const QString leaf = mmsItem.mid(leafSeparator + 1);" not in typed_decoder):
     raise SystemExit("BROWSER_REPORT_TYPED_EVIDENCE_FAIL invalid shared decoder source")
+
+projection_header = (workspace_path.parent.parent / "src" / "BrowserReportMemberProjection.hpp").read_text(encoding="utf-8")
+for token in [
+    'kBrowserReportVisibleMemberLimit = 256',
+    'kBrowserReportTextLimit = 1024',
+    'std::min(members.size(),',
+    'projection.rowsTruncated = members.size() > visibleCount',
+    'if (!member.value || reference.isEmpty()) continue',
+    'decodeEngineeringEvidence(',
+]:
+    if token not in projection_header:
+        raise SystemExit("BROWSER_REPORT_BOUNDED_PROJECTION_FAIL missing=" + token)
+if 'for (const auto& item : frame.values)' in report_controller:
+    raise SystemExit("BROWSER_REPORT_BOUNDED_PROJECTION_FAIL full-frame QML string conversion")
+if 'decodeEngineeringEvidence(' in report_controller:
+    raise SystemExit("BROWSER_REPORT_BOUNDED_PROJECTION_FAIL duplicate inline decoding")
 
 report_required = [
     'objectName: "browserReportUnifiedInspector"',
@@ -122,6 +137,8 @@ report_required = [
     'root.selectedReportMemberIndex = dataRow.index',
     'onLatestReportIdentityChanged: selectedReportMemberIndex = -1',
     'BrowserEngineeringEvidence {',
+    'root.latestReport.valuesTruncated === true',
+    'root.latestReport.valueTextTruncated === true',
     'String(frame.reportId) === wanted',
     'Offline values are not fabricated.',
 ]

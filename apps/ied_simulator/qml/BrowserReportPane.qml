@@ -419,7 +419,7 @@ Rectangle {
                     }
                     Repeater {
                         model: root.hasLastReport && root.latestReport.values
-                               ? root.latestReport.values.slice(0, 256) : []
+                               ? root.latestReport.values : []
                         delegate: DataRow { received: true }
                     }
                     Repeater {
@@ -440,6 +440,15 @@ Rectangle {
                         font.pixelSize: 9
                     }
                     Label {
+                        visible: root.hasLastReport &&
+                                 root.latestReport.valueTextTruncated === true
+                        Layout.fillWidth: true
+                        leftPadding: 9
+                        text: "Some values are preview-truncated; the report payload is preserved by MMS runtime."
+                        color: theme.muted
+                        font.pixelSize: 9
+                    }
+                    Label {
                         visible: root.hasLastReport ? !root.latestReport.values || root.latestReport.values.length === 0
                                                     : root.configuredMembers.length === 0
                         Layout.fillWidth: true
@@ -455,7 +464,7 @@ Rectangle {
                         font.pixelSize: 10
                     }
                     Label {
-                        visible: root.hasLastReport ? root.latestReport.values.length > 256
+                        visible: root.hasLastReport ? root.latestReport.valuesTruncated === true
                                                     : root.configuredMembers.length > 256
                         Layout.fillWidth: true
                         leftPadding: 10
