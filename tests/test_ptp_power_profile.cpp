@@ -143,6 +143,10 @@ void check_tai_seed_and_truthful_time_properties() {
     PtpFrame frame;
     REQUIRE(PtpCodec::try_parse_ethernet_frame(announce->ethernet_frame, frame));
     REQUIRE(frame.header.flags == 0x0008U);
+    // Independent raw-octet check, so encoder/parser cannot agree on
+    // an identical but incorrectly located flagField.
+    REQUIRE(announce->ethernet_frame[20U] == 0x00U);
+    REQUIRE(announce->ethernet_frame[21U] == 0x08U);
     REQUIRE(frame.announce.has_value());
     REQUIRE(frame.announce->current_utc_offset == 37);
     REQUIRE(frame.announce->clock_class == 248U);
@@ -151,6 +155,8 @@ void check_tai_seed_and_truthful_time_properties() {
     REQUIRE(sync.has_value());
     REQUIRE(PtpCodec::try_parse_ethernet_frame(sync->ethernet_frame, frame));
     REQUIRE(frame.header.flags == 0x0208U); // two-step + PTP timescale
+    REQUIRE(sync->ethernet_frame[20U] == 0x02U);
+    REQUIRE(sync->ethernet_frame[21U] == 0x08U);
     const auto follow_up = local_clock.prepare_follow_up(
         sync->sequence_id, PtpTimestamp{1700000038U, 123456U});
     REQUIRE(follow_up.has_value());
@@ -169,6 +175,8 @@ void check_tai_seed_and_truthful_time_properties() {
     REQUIRE(PtpCodec::try_parse_ethernet_frame(
         verified_announce->ethernet_frame, frame));
     REQUIRE(frame.header.flags == 0x000CU);
+    REQUIRE(verified_announce->ethernet_frame[20U] == 0x00U);
+    REQUIRE(verified_announce->ethernet_frame[21U] == 0x0CU);
     REQUIRE((frame.header.flags & 0x0030U) == 0U);
     manually_verified.stop();
 
@@ -182,6 +190,12 @@ void check_tai_seed_and_truthful_time_properties() {
         unseeded_announce->ethernet_frame, frame));
     REQUIRE(frame.header.flags == 0U);
     unseeded.stop();
+
+    auto inconsistent = make_source();
+    inconsistent.time_properties.current_utc_offset_valid = true;
+    std::string error;
+    REQUIRE(!PtpPublisherRuntime::validate_options(inconsistent, error));
+    REQUIRE(!error.empty());
 }
 
 void check_vlan_encoding_remains_configurable() {
