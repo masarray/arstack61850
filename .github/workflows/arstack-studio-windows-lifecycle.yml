@@ -2,6 +2,7 @@ name: ARStack Studio Windows Lifecycle
 
 on:
   push:
+    branches: [main]
     paths:
       - 'apps/arstack_studio/**'
       - '.github/workflows/arstack-studio-windows-lifecycle.yml'

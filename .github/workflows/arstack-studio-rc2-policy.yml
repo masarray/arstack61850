@@ -10,6 +10,7 @@ on:
       - 'docs/SMV_STUDIO_RC2_ACCEPTANCE.md'
       - '.github/workflows/arstack-studio-rc2-policy.yml'
   push:
+    branches: [main]
     paths:
       - 'apps/arstack_studio/src/Rc2Acceptance.cpp'
       - 'apps/arstack_studio/rc2/**'

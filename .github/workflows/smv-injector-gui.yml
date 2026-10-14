@@ -2,6 +2,7 @@ name: SMV Injector GUI
 
 on:
   push:
+    branches: [main]
     paths:
       - 'apps/smv_injector_gui/**'
       - 'tools/smv_profile_inspect.cpp'

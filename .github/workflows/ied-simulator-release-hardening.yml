@@ -2,6 +2,7 @@ name: IED Simulator Release Hardening
 
 on:
   push:
+    branches: [main]
     paths:
       - 'apps/ied_simulator/**'
       - 'assets/**'
