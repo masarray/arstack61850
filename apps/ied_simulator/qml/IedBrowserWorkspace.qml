@@ -771,11 +771,9 @@ Item {
                         modelProvider: root.context
                     }
 
-                    ReportsWorkspace {
+                    BrowserReportPane {
                         theme: root.theme
                         reports: root.reports
-                        showConnectionHeader: false
-                        showInventoryPanel: false
                     }
 
                     SettingsWorkspace {

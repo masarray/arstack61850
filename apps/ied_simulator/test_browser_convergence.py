@@ -5,7 +5,9 @@ import sys
 if len(sys.argv) != 5:
     raise SystemExit("usage: test_browser_convergence.py IedBrowserWorkspace.qml IedBrowserNavigation.qml BrowserStatusConsole.qml BrowserDataModelPane.qml")
 
-workspace = Path(sys.argv[1]).read_text(encoding="utf-8")
+workspace_path = Path(sys.argv[1])
+workspace = workspace_path.read_text(encoding="utf-8")
+report_inspector = (workspace_path.parent / "BrowserReportPane.qml").read_text(encoding="utf-8")
 navigation = Path(sys.argv[2]).read_text(encoding="utf-8")
 status = Path(sys.argv[3]).read_text(encoding="utf-8")
 data_model = Path(sys.argv[4]).read_text(encoding="utf-8")
@@ -20,6 +22,7 @@ workspace_required = [
     'client.readEngineeringSelected()',
     'BrowserStatusConsole {',
     'modelProvider: root.context',
+    'BrowserReportPane {',
 ]
 navigation_required = [
     'color: theme.navigation',
@@ -61,6 +64,23 @@ for label, source, required in [
     missing = [token for token in required if token not in source]
     if missing:
         raise SystemExit("BROWSER_CONVERGENCE_FAIL " + label + " missing=" + ",".join(missing))
+
+report_required = [
+    'objectName: "browserReportUnifiedInspector"',
+    'Control Block Attributes',
+    'Information Received in Last Report',
+    'heading: "Data"',
+    'newestMatchingReport()',
+    'String(frame.reportId) === wanted',
+    'No matched DataSet members. Offline values are not fabricated.',
+]
+missing_report = [term for term in report_required if term not in report_inspector]
+if missing_report:
+    raise SystemExit("BROWSER_REPORT_INSPECTOR_FAIL missing=" + ",".join(missing_report))
+if "ReportsWorkspace {" in workspace:
+    raise SystemExit("BROWSER_REPORT_INSPECTOR_FAIL legacy three-panel report view")
+if 'implicitHeight: 25' not in navigation or "readonly property bool newGroup:" not in navigation:
+    raise SystemExit("BROWSER_REPORT_INSPECTOR_FAIL navigation is not grouped and compact")
 
 if "client.treeModel" in navigation:
     raise SystemExit("BROWSER_CONVERGENCE_FAIL navigation regressed to session-owned model")
