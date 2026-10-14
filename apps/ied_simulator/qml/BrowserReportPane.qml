@@ -106,9 +106,15 @@ Rectangle {
 
     component PropertyRow: Rectangle {
         id: propertyRow
-        required property string title
-        property var rawValue
-        property int stripe: 0
+        // Repeater supplies these model roles explicitly; lexical 'index'
+        // in an inline component otherwise resolves to row zero.
+        required property int index
+        property bool lastReportSection: false
+        readonly property string title: lastReportSection
+                                       ? root.informationLabels[index] : root.attributeLabels[index]
+        readonly property var rawValue: lastReportSection
+                                        ? root.informationValue(index) : root.attributeValue(index)
+        readonly property int stripe: index
         implicitHeight: 25
         Layout.fillWidth: true
         color: stripe % 2 ? root.theme.surfaceSoft : root.theme.surface
@@ -196,9 +202,15 @@ Rectangle {
     }
 
     component DataRow: Rectangle {
-        required property string reference
-        property string displayValue: "—"
-        property int stripe: 0
+        id: dataRow
+        required property int index
+        required property var modelData
+        property bool received: false
+        readonly property string reference: received
+                                            ? root.memberName(modelData) : String(modelData)
+        readonly property string displayValue: received
+                                               ? root.memberValue(modelData) : "—"
+        readonly property int stripe: index
         Layout.fillWidth: true
         implicitHeight: 25
         color: stripe % 2 ? root.theme.surfaceSoft : root.theme.surface
@@ -215,7 +227,7 @@ Rectangle {
                 font.weight: Font.DemiBold
             }
             Label {
-                text: reference
+                text: dataRow.reference
                 Layout.preferredWidth: Math.max(100, parent.width * 0.55 - 28)
                 color: root.theme.text
                 font.pixelSize: 10
@@ -228,7 +240,7 @@ Rectangle {
             Label {
                 Layout.fillWidth: true
                 leftPadding: 8
-                text: displayValue
+                text: dataRow.displayValue
                 color: root.theme.text
                 font.pixelSize: 10
                 elide: Text.ElideMiddle
@@ -334,11 +346,7 @@ Rectangle {
                     spacing: 0
                     Repeater {
                         model: root.attributeLabels.length
-                        delegate: PropertyRow {
-                            title: root.attributeLabels[index]
-                            rawValue: root.attributeValue(index)
-                            stripe: index
-                        }
+                        delegate: PropertyRow { lastReportSection: false }
                     }
                 }
 
@@ -354,11 +362,7 @@ Rectangle {
                     spacing: 0
                     Repeater {
                         model: root.informationLabels.length
-                        delegate: PropertyRow {
-                            title: root.informationLabels[index]
-                            rawValue: root.informationValue(index)
-                            stripe: index
-                        }
+                        delegate: PropertyRow { lastReportSection: true }
                     }
                 }
 
@@ -389,19 +393,11 @@ Rectangle {
                     Repeater {
                         model: root.hasLastReport && root.latestReport.values
                                ? root.latestReport.values.slice(0, 256) : []
-                        delegate: DataRow {
-                            reference: root.memberName(modelData)
-                            displayValue: root.memberValue(modelData)
-                            stripe: index
-                        }
+                        delegate: DataRow { received: true }
                     }
                     Repeater {
                         model: !root.hasLastReport ? root.configuredMembers.slice(0, 256) : []
-                        delegate: DataRow {
-                            reference: String(modelData)
-                            displayValue: "—"
-                            stripe: index
-                        }
+                        delegate: DataRow { received: false }
                     }
                     Label {
                         visible: root.hasLastReport ? !root.latestReport.values || root.latestReport.values.length === 0
