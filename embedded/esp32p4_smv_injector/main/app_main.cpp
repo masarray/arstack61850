@@ -402,7 +402,44 @@ bool sample_alarm_callback(
     const gptimer_alarm_event_data_t* event,
     void* user_context) {
     auto* context = static_cast<SampleClockContext*>(user_context);
-    const auto interval = context->schedule.next_ticks();
+    std::int32_t adjustment = 0;
+#if AR_SV_PTP_PHASE_SUPPORTED
+    const std::uint32_t index = context->phase_index;
+    bool epoch_boundary = false;
+    if (context->phase_enabled) {
+        if (index == 0U) {
+            epoch_boundary = true;
+            context->last_epoch_alarm.store(
+                static_cast<std::uint32_t>(event->alarm_value),
+                std::memory_order_relaxed);
+            context->epoch_generation.fetch_add(1U, std::memory_order_release);
+            context->phase_slew.arm(context->schedule.rate_hz, 0);
+        }
+        context->phase_index = index + 1U >= context->schedule.rate_hz
+            ? 0U : index + 1U;
+        // Commands arrive after a cross-clock read from the background task.
+        // Apply within THIS epoch, across all remaining intervals. Never
+        // change smpCnt or issue multiple timer alarms to catch up.
+        const std::int32_t requested = context->requested_slew_ticks.exchange(
+            0, std::memory_order_relaxed);
+        if (requested != 0 &&
+            index + 16U < context->schedule.rate_hz) {
+            context->phase_slew.arm(
+                context->schedule.rate_hz - index, requested);
+        }
+        adjustment = context->phase_slew.next_adjustment();
+        if (adjustment != 0) {
+            context->cumulative_slew_ticks.fetch_add(
+                adjustment, std::memory_order_relaxed);
+        }
+    }
+#endif
+    const std::uint32_t nominal_interval = context->schedule.next_ticks();
+    const std::int64_t corrected_interval =
+        static_cast<std::int64_t>(nominal_interval) + adjustment;
+    // The configured 4000/4800fps profiles have >=208us nominal intervals.
+    const std::uint32_t interval = static_cast<std::uint32_t>(
+        corrected_interval > 0 ? corrected_interval : 1LL);
     context->next_alarm = {};
     context->next_alarm.alarm_count = event->alarm_value + interval;
     context->next_alarm.flags.auto_reload_on_alarm = false;
@@ -410,6 +447,11 @@ bool sample_alarm_callback(
 
     BaseType_t high_priority_task_woken = pdFALSE;
     vTaskNotifyGiveFromISR(context->publisher_task, &high_priority_task_woken);
+#if AR_SV_PTP_PHASE_SUPPORTED
+    if (epoch_boundary && g_phase_observer_task != nullptr) {
+        vTaskNotifyGiveFromISR(g_phase_observer_task, &high_priority_task_woken);
+    }
+#endif
     return high_priority_task_woken == pdTRUE;
 }
 
@@ -451,9 +493,23 @@ gptimer_handle_t start_sample_clock(
     TaskHandle_t publisher_task_handle,
     const std::uint32_t publisher_rate_hz,
     const esp_eth_handle_t eth_handle,
-    bool& epoch_armed) {
+    bool& epoch_armed,
+    const bool profile_has_second_aligned_counter) {
     epoch_armed = false;
+#if AR_SV_PTP_PHASE_SUPPORTED
+    g_sample_clock_context.publisher_task = publisher_task_handle;
+    g_sample_clock_context.next_alarm = {};
+    g_sample_clock_context.epoch_generation.store(0U, std::memory_order_relaxed);
+    g_sample_clock_context.last_epoch_alarm.store(0U, std::memory_order_relaxed);
+    g_sample_clock_context.requested_slew_ticks.store(0, std::memory_order_relaxed);
+    g_sample_clock_context.cumulative_slew_ticks.store(0, std::memory_order_relaxed);
+    g_sample_clock_context.phase_index = 0U;
+    g_sample_clock_context.phase_enabled = false;
+    g_sample_clock_context.phase_slew.arm(publisher_rate_hz, 0);
+#else
     g_sample_clock_context = {};
+    (void)profile_has_second_aligned_counter;
+#endif
     g_sample_clock_context.publisher_task = publisher_task_handle;
     g_sample_clock_context.schedule.reset(publisher_rate_hz);
 
@@ -474,6 +530,11 @@ gptimer_handle_t start_sample_clock(
     // cross-clock arm latency without touching the high-frequency callback.
     const auto epoch_arm = plan_source_ptp_epoch_arm(eth_handle);
     epoch_armed = epoch_arm.has_value();
+#if AR_SV_PTP_PHASE_SUPPORTED
+    g_sample_clock_context.phase_enabled =
+        epoch_armed && profile_has_second_aligned_counter &&
+        g_phase_observer_task != nullptr && g_phase_timer_mutex != nullptr;
+#endif
     g_sample_clock_context.next_alarm = {};
     g_sample_clock_context.next_alarm.alarm_count = epoch_arm.has_value()
         ? epoch_arm->first_alarm_us
@@ -482,15 +543,33 @@ gptimer_handle_t start_sample_clock(
     ESP_ERROR_CHECK(gptimer_set_alarm_action(timer, &g_sample_clock_context.next_alarm));
     ESP_ERROR_CHECK(gptimer_enable(timer));
     ESP_ERROR_CHECK(gptimer_start(timer));
+#if AR_SV_PTP_PHASE_SUPPORTED
+    if (g_sample_clock_context.phase_enabled) {
+        xSemaphoreTake(g_phase_timer_mutex, portMAX_DELAY);
+        g_monitored_sample_clock = timer;
+        xSemaphoreGive(g_phase_timer_mutex);
+    }
+#endif
     return timer;
 }
 
 void stop_sample_clock(gptimer_handle_t& timer) noexcept {
     if (timer == nullptr) return;
+#if AR_SV_PTP_PHASE_SUPPORTED
+    // Serialize teardown with the non-ISR phase observer, so a GPTimer
+    // handle can never be deleted during its bracketed EMAC PTP read.
+    xSemaphoreTake(g_phase_timer_mutex, portMAX_DELAY);
+    if (g_monitored_sample_clock == timer) g_monitored_sample_clock = nullptr;
+    g_sample_clock_context.requested_slew_ticks.store(
+        0, std::memory_order_relaxed);
+#endif
     static_cast<void>(gptimer_stop(timer));
     static_cast<void>(gptimer_disable(timer));
     static_cast<void>(gptimer_del_timer(timer));
     timer = nullptr;
+#if AR_SV_PTP_PHASE_SUPPORTED
+    xSemaphoreGive(g_phase_timer_mutex);
+#endif
 }
 
 void publisher_task(void* argument) {
@@ -590,7 +669,13 @@ void publisher_task(void* argument) {
             // dozens of ISR notifications before the publisher could consume
             // its first tick, so every START falsely began with missed slots.
             sample_clock = start_sample_clock(
-                task_handle, active_profile.publisher_rate_hz, eth_handle, epoch_armed);
+                task_handle, active_profile.publisher_rate_hz, eth_handle,
+                epoch_armed,
+                // The 1-ASDU-per-frame 80-SPC profile has exactly one
+                // sample-counter epoch per publisher second. Other SCL
+                // profiles need an explicit standard-derived epoch policy.
+                active_profile.sample_counter_modulus ==
+                    active_profile.publisher_rate_hz);
             if (!epoch_armed) {
                 // Legacy first alarm already consumes the first rational tick;
                 // a PTP-armed first alarm is an independent epoch delay.
