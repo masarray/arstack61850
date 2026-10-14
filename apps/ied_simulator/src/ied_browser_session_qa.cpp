@@ -134,6 +134,29 @@ int main(int argc, char** argv) {
         return 10;
     }
 
+    // Opening an SCL must preserve configured RCB -> DataSet membership
+    // without pretending that any RCB has been enabled or read over MMS.
+    const auto offlineRcb = reports.selectedRcb();
+    if (offlineRcb.value(QStringLiteral("reportId")).toString() !=
+            QStringLiteral("BROWSERIED/Status") ||
+        offlineRcb.value(QStringLiteral("dataSet")).toString() !=
+            QStringLiteral("BROWSERIEDLD0/LLN0.Status") ||
+        reports.selectedRcbDataSetMembers().size() != 1 ||
+        offlineRcb.contains(QStringLiteral("enabled")) ||
+        offlineRcb.contains(QStringLiteral("reserved")) ||
+        offlineRcb.value(QStringLiteral("probeOk")).toBool() ||
+        !reports.receivedReports().isEmpty()) {
+        std::cerr << "BROWSER_REPORT_OFFLINE_BINDING_FAIL configured_values_not_retained_or_fabricated\n";
+        return 21;
+    }
+    if (!reports.selectRcb(1) || reports.selectedRcbDataSetMembers().size() != 1 ||
+        reports.selectedRcb().value(QStringLiteral("dataSet")).toString() !=
+            QStringLiteral("BROWSERIEDLD0/LLN0.Status")) {
+        std::cerr << "BROWSER_REPORT_OFFLINE_BINDING_FAIL indexed_rcb_mismatch\n";
+        return 22;
+    }
+    reports.selectRcb(0);
+
     const auto gooseProjection = engineeringContext.gooseStreams();
     if (gooseProjection.constFirst().toMap()
             .value(QStringLiteral("destinationMac")).toString() !=

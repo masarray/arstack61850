@@ -71,12 +71,17 @@ report_required = [
     'Information Received in Last Report',
     'heading: "Data"',
     'newestMatchingReport()',
+    'root.attributeLabels[index]',
+    'root.informationLabels[index]',
+    'reports.selectedRcbDataSetMembers',
     'String(frame.reportId) === wanted',
-    'No matched DataSet members. Offline values are not fabricated.',
+    'Offline values are not fabricated.',
 ]
 missing_report = [term for term in report_required if term not in report_inspector]
 if missing_report:
     raise SystemExit("BROWSER_REPORT_INSPECTOR_FAIL missing=" + ",".join(missing_report))
+if 'title: modelData[0]' in report_inspector or 'rawValue: modelData[1]' in report_inspector:
+    raise SystemExit("BROWSER_REPORT_INSPECTOR_FAIL nested-array attribute labels")
 if "ReportsWorkspace {" in workspace:
     raise SystemExit("BROWSER_REPORT_INSPECTOR_FAIL legacy three-panel report view")
 if 'implicitHeight: 25' not in navigation or "readonly property bool newGroup:" not in navigation:

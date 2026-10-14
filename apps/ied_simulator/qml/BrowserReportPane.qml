@@ -44,15 +44,10 @@ Rectangle {
     }
 
     function membersForSelectedRcb() {
-        const reference = hasSelection && rcb.dataSet ? String(rcb.dataSet) : ""
-        if (!reference || !reports.dataSets)
-            return []
-        for (let index = 0; index < reports.dataSets.length; ++index) {
-            const entry = reports.dataSets[index]
-            if (String(entry.reference || "") === reference)
-                return entry.members || []
-        }
-        return []
+        // Resolve through the canonical C++ DataSet matcher, never by a
+        // potentially unrelated user-selected DataSet index.
+        return root.hasSelection && root.rcb.dataSet
+               ? reports.selectedRcbDataSetMembers : []
     }
 
     function memberName(raw) {
@@ -67,7 +62,50 @@ Rectangle {
         return at >= 0 ? text.slice(at + 3) : "—"
     }
 
+    readonly property var attributeLabels: [
+        "Enabled", "Reserved", "Control Block Reference", "Report ID",
+        "DataSet Reference", "Trigger Options", "Buffer Time (ms)",
+        "Configuration Revision", "Integrity Period (ms)", "Sequence Number",
+        "Reservation Time (s)", "Owner"
+    ]
+    readonly property var informationLabels: [
+        "Report ID", "Sequence Number", "Subsequence Number",
+        "Configuration Revision", "Entry ID", "Decoder"
+    ]
+
+    function attributeValue(index) {
+        switch (index) {
+        case 0: return rcb.enabled
+        case 1: return rcb.reserved
+        case 2: return rcb.reference
+        case 3: return rcb.reportId
+        case 4: return rcb.dataSet
+        case 5: return rcb.triggerOptions
+        case 6: return rcb.bufTm
+        case 7: return rcb.confRev
+        case 8: return rcb.intgPd
+        case 9: return rcb.sqNum
+        case 10: return rcb.resvTms
+        case 11: return rcb.owner
+        default: return undefined
+        }
+    }
+
+    function informationValue(index) {
+        if (!hasLastReport) return undefined
+        switch (index) {
+        case 0: return latestReport.reportId
+        case 1: return latestReport.sequence
+        case 2: return latestReport.subSequence
+        case 3: return latestReport.confRev
+        case 4: return latestReport.entryId
+        case 5: return latestReport.decoderMode
+        default: return undefined
+        }
+    }
+
     component PropertyRow: Rectangle {
+        id: propertyRow
         required property string title
         property var rawValue
         property int stripe: 0
@@ -93,7 +131,7 @@ Rectangle {
             height: parent.height
             x: 7
             verticalAlignment: Text.AlignVCenter
-            text: title
+            text: propertyRow.title
             color: root.theme.textSoft
             font.pixelSize: 10
             elide: Text.ElideRight
@@ -295,23 +333,10 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: 0
                     Repeater {
-                        model: [
-                            ["Enabled", root.rcb.enabled],
-                            ["Reserved", root.rcb.reserved],
-                            ["Control Block Reference", root.rcb.reference],
-                            ["Report ID", root.rcb.reportId],
-                            ["DataSet Reference", root.rcb.dataSet],
-                            ["Trigger Options", root.rcb.triggerOptions],
-                            ["Buffer Time (ms)", root.rcb.bufTm],
-                            ["Configuration Revision", root.rcb.confRev],
-                            ["Integrity Period (ms)", root.rcb.intgPd],
-                            ["Sequence Number", root.rcb.sqNum],
-                            ["Reservation Time (s)", root.rcb.resvTms],
-                            ["Owner", root.rcb.owner]
-                        ]
+                        model: root.attributeLabels.length
                         delegate: PropertyRow {
-                            title: modelData[0]
-                            rawValue: modelData[1]
+                            title: root.attributeLabels[index]
+                            rawValue: root.attributeValue(index)
                             stripe: index
                         }
                     }
@@ -328,15 +353,12 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: 0
                     Repeater {
-                        model: [
-                            ["Report ID", root.hasLastReport ? root.latestReport.reportId : undefined],
-                            ["Sequence Number", root.hasLastReport ? root.latestReport.sequence : undefined],
-                            ["Subsequence Number", root.hasLastReport ? root.latestReport.subSequence : undefined],
-                            ["Configuration Revision", root.hasLastReport ? root.latestReport.confRev : undefined],
-                            ["Entry ID", root.hasLastReport ? root.latestReport.entryId : undefined],
-                            ["Decoder", root.hasLastReport ? root.latestReport.decoderMode : undefined]
-                        ]
-                        delegate: PropertyRow { title: modelData[0]; rawValue: modelData[1]; stripe: index }
+                        model: root.informationLabels.length
+                        delegate: PropertyRow {
+                            title: root.informationLabels[index]
+                            rawValue: root.informationValue(index)
+                            stripe: index
+                        }
                     }
                 }
 
@@ -390,7 +412,9 @@ Rectangle {
                         verticalAlignment: Text.AlignVCenter
                         text: root.hasLastReport
                               ? "The report contains no exposed member values."
-                              : "No matched DataSet members. Offline values are not fabricated."
+                              : !root.rcb.dataSet
+                                ? "No bound DataSet reference is available for this RCB."
+                                : "The configured DataSet has no exposed members. Offline values are not fabricated."
                         color: theme.muted
                         font.pixelSize: 10
                     }
