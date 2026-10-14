@@ -201,7 +201,15 @@ Rectangle {
                         else
                             root.detail.select(childRow.index)
                     }
-                    onDoubleClicked: root.drillInto(childRow.index)
+                    onDoubleClicked: function(event) {
+                        // First arrow click has already changed expansion; a
+                        // double-click on that arrow must not undo it.
+                        if (childRow.model.hasChildren &&
+                            event.x < 24 + Math.min(childRow.model.depth, 6) * 14)
+                            root.detail.select(childRow.index)
+                        else
+                            root.drillInto(childRow.index)
+                    }
                 }
             }
         }

@@ -50,6 +50,7 @@ data_model_required = [
     'onDoubleClicked: root.drillInto(childRow.index)',
     'root.detail.selectParent()',
     'root.detail.truncated',
+    'onDoubleClicked: function(event)',
 ]
 
 for label, source, required in [
