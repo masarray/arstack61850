@@ -260,6 +260,12 @@ Rectangle {
                     }
                 }
 
+                BrowserEngineeringEvidence {
+                    objectName: "browserDataModelTypedEvidence"
+                    theme: root.theme
+                    engineeringEvidence: root.currentNode.engineeringEvidence || ({})
+                }
+
                 Repeater {
                     model: [
                         {label: "Reference", value: root.currentNode.reference},
@@ -300,12 +306,6 @@ Rectangle {
                             }
                         }
                     }
-                }
-
-                BrowserEngineeringEvidence {
-                    objectName: "browserDataModelTypedEvidence"
-                    theme: root.theme
-                    engineeringEvidence: root.currentNode.engineeringEvidence || ({})
                 }
 
                 Label {

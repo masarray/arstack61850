@@ -108,6 +108,10 @@ if data_set.count('BrowserEngineeringEvidence {') != 1:
     raise SystemExit("BROWSER_DATASET_EVIDENCE_FAIL duplicate/hidden evidence inspector")
 if 'readEngineeringSelected()' in data_set or 'readEngineeringSelected()' in data_model:
     raise SystemExit("BROWSER_TYPED_EVIDENCE_FAIL passive inspector initiated MMS Read")
+# A clipped 235px selected-DA inspector must put typed q/t before the
+# generic reference/type rows; otherwise all typed pixels are below the fold.
+if data_model.find('BrowserEngineeringEvidence {') > data_model.find('                Repeater {'):
+    raise SystemExit("BROWSER_TYPED_EVIDENCE_FAIL typed details below clipped metadata rows")
 
 qa_source = (workspace_path.parent.parent / "src" / "BrowserEvidenceVisualQa.hpp").read_text(encoding="utf-8")
 for token in [
@@ -116,6 +120,8 @@ for token in [
     'MmsLiveDetailModel::ReferenceRole',
     'selectEvidenceAttribute',
     'malformedEvidence.isEmpty()',
+    'mapRectToItem(',
+    'clipped.height() >= 50',
     'data-model-quality.png',
     'data-model-timestamp.png',
     'datasets-quality.png',

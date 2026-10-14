@@ -14,6 +14,7 @@
 #include <QImage>
 #include <QMetaObject>
 #include <QQuickItem>
+#include <QRectF>
 #include <QQuickWindow>
 #include <QTimer>
 
@@ -157,10 +158,25 @@ private:
     }
 
     [[nodiscard]] bool visibleEvidence(QQuickItem* component, const QString& kind) const {
-        return component && component->isVisible() &&
-            component->property("hasEvidence").toBool() &&
+        if (!component || !component->isVisible() ||
+            !component->property("hasEvidence").toBool() ||
             component->property("engineeringEvidence").toMap()
-                .value(QStringLiteral("kind")).toString() == kind;
+                .value(QStringLiteral("kind")).toString() != kind) return false;
+
+        // Qt Quick visible=true does not prove pixels survive ScrollView
+        // clipping. Require at least the typed heading + one evidence row to
+        // intersect the actual selected inspector viewport.
+        QQuickItem* viewport = component == modelEvidence_
+            ? modelPane_->findChild<QQuickItem*>(
+                QStringLiteral("browserDataModelSelectedAttributeInspector"))
+            : dataSetPane_->findChild<QQuickItem*>(
+                QStringLiteral("browserDataSetEvidenceInspector"));
+        if (!viewport || !viewport->isVisible()) return false;
+        const QRectF bounds = component->mapRectToItem(
+            viewport, QRectF(0, 0, component->width(), component->height()));
+        const QRectF clipped = bounds.intersected(
+            QRectF(0, 0, viewport->width(), viewport->height()));
+        return clipped.width() > 80 && clipped.height() >= 50;
     }
 
     void capture(const char* path, QQuickItem* component, const QString& kind) {
