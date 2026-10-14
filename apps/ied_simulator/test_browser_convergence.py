@@ -110,6 +110,8 @@ for token in [
     'projection.rowsTruncated = members.size() > visibleCount',
     'if (!member.value || reference.isEmpty()) continue',
     'decodeEngineeringEvidence(',
+    '#include "BrowserBoundedMmsPreview.hpp"',
+    'previewMmsValue(*member.value',
 ]:
     if token not in projection_header:
         raise SystemExit("BROWSER_REPORT_BOUNDED_PROJECTION_FAIL missing=" + token)
@@ -117,6 +119,20 @@ if 'for (const auto& item : frame.values)' in report_controller:
     raise SystemExit("BROWSER_REPORT_BOUNDED_PROJECTION_FAIL full-frame QML string conversion")
 if 'decodeEngineeringEvidence(' in report_controller:
     raise SystemExit("BROWSER_REPORT_BOUNDED_PROJECTION_FAIL duplicate inline decoding")
+if 'MmsDataCodec::to_display_string(*member.value)' in projection_header:
+    raise SystemExit("BROWSER_VALUE_BOUNDED_FAIL unbounded intermediary in report GUI")
+
+value_preview = (workspace_path.parent.parent / "src" / "BrowserBoundedMmsPreview.hpp").read_text(encoding="utf-8")
+for token in [
+    'BoundedMmsPreview',
+    'previewMmsValue(',
+    'writer.appendHex(value.raw_value())',
+    'writer.appendUtf8(std::get<std::string>(value.value()))',
+    'writer.result.truncated = true',
+    'value.children()',
+]:
+    if token not in value_preview:
+        raise SystemExit("BROWSER_VALUE_BOUNDED_FAIL missing=" + token)
 
 report_required = [
     'objectName: "browserReportUnifiedInspector"',
