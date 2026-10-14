@@ -79,7 +79,7 @@ data_set_required = [
     'root.expandedMemberIndex',
     'maximumExpandedChildren: 64',
     'required property var modelData',
-    'root.showSelectedEvidence = true',
+    'root.showSelectedEvidence = selected',
     'BrowserEngineeringEvidence {',
     'objectName: "browserDataSetEvidenceInspector"',
     'root.selectedAttributeNode.engineeringEvidence || ({})',
