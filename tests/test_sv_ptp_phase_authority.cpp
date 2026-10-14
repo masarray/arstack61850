@@ -47,6 +47,14 @@ void check_phase_sign_and_bounded_corrections() {
     CHECK(second.slew_ticks_next_epoch < 0);
     CHECK(second.slew_ticks_next_epoch >= -400);
     CHECK(!second.software_tracking);
+    // A coarse software START may initially be several milliseconds
+    // from the PTP epoch. Acquire monotonically, never jump the counter.
+    SvPtpPhaseAuthority coarse;
+    CHECK(coarse.observe(snapshot(1U, 9000)).accepted);
+    const auto coarse_recovery = coarse.observe(snapshot(2U, 9080));
+    CHECK(coarse_recovery.accepted);
+    CHECK(coarse_recovery.slew_ticks_next_epoch == -400);
+    CHECK(!coarse_recovery.software_tracking);
     const auto step = controller.observe(snapshot(3U, 65000));
     CHECK(!step.accepted);
     CHECK(step.clock_discontinuity);
