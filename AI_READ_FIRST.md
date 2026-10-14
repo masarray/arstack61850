@@ -4,6 +4,7 @@ This repository contains protocol behavior that has been reconstructed from stan
 
 Read the topic contract before changing the corresponding code:
 
+- **Current native Qt Workbench / IED Browser progress, exact baseline, red PR and optimized coding handoff:** [`docs/WORKBENCH_CURRENT_HANDOFF.md`](docs/WORKBENCH_CURRENT_HANDOFF.md). Read this before working on `apps/ied_simulator` Browser/Reports/DataSets/Global Data/q/t.
 - **Live IP discovery vs trusted-SCL online connect:** [`docs/ONLINE_MODEL_CONNECT_DECISION.md`](docs/ONLINE_MODEL_CONNECT_DECISION.md), then [`LIVE_DISCOVERY_PROFILE.md`](LIVE_DISCOVERY_PROFILE.md).
 - **RCB reporting, URCB/BRCB activation, report bit semantics, replay/recovery:** [`RCB_REPORTING.md`](RCB_REPORTING.md).
 - **Open SCL, live MMS reconstruction, canonical model normalization, IED-name resolution, and Edition 2 / Edition 1 export:** [`SCL_EXPORT.md`](SCL_EXPORT.md), then [`docs/SCL_IMPORT_NORMALIZATION_PROFILE.md`](docs/SCL_IMPORT_NORMALIZATION_PROFILE.md) and [`docs/SCL_EXPORT_RECONSTRUCTION_PROFILE.md`](docs/SCL_EXPORT_RECONSTRUCTION_PROFILE.md).
