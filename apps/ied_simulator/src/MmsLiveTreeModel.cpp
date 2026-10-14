@@ -140,6 +140,7 @@ void MmsLiveTreeModel::applyDocument(const ar::iec61850::mms::MmsLiveModelDocume
     visible_.clear();
     mmsIndex_.clear();
     referenceIndex_.clear();
+    typedEvidence_.clear();
     selectedNode_ = -1;
 
     Node root;
@@ -228,6 +229,7 @@ void MmsLiveTreeModel::clear() {
     visible_.clear();
     mmsIndex_.clear();
     referenceIndex_.clear();
+    typedEvidence_.clear();
     selectedNode_ = -1;
     endResetModel();
     emit countsChanged();
@@ -348,6 +350,26 @@ QVariantMap MmsLiveTreeModel::nodeMap(const int nodeIndex) const {
     result.insert(QStringLiteral("childCount"), node.children.size());
     result.insert(QStringLiteral("quality"), siblingValue(nodeIndex, QStringLiteral("q")));
     result.insert(QStringLiteral("timestamp"), siblingValue(nodeIndex, QStringLiteral("t")));
+    // Typed evidence is held only for MMS Read-verified q/t leaves. The
+    // inspector borrows it from a sibling under the same canonical DO.
+    if (node.kind == NodeKind::dataAttribute && node.parent >= 0) {
+        const auto borrow = [this, nodeIndex](const QString& wanted) -> QVariantMap {
+            const auto& selected = nodes_.at(nodeIndex);
+            const auto matching = [this, &wanted](int index) {
+                const auto& candidate = nodes_.at(index);
+                return candidate.label.compare(wanted, Qt::CaseInsensitive) == 0
+                    || leafName(candidate.attributePath).compare(wanted, Qt::CaseInsensitive) == 0;
+            };
+            if (matching(nodeIndex)) return typedEvidence_.value(nodeIndex);
+            for (const int sibling : nodes_.at(selected.parent).children)
+                if (matching(sibling)) return typedEvidence_.value(sibling);
+            return {};
+        };
+        const auto q = borrow(QStringLiteral("q"));
+        const auto t = borrow(QStringLiteral("t"));
+        if (!q.isEmpty()) result.insert(QStringLiteral("qualityDetails"), q);
+        if (!t.isEmpty()) result.insert(QStringLiteral("timestampDetails"), t);
+    }
     result.insert(QStringLiteral("writable"), node.writable);
     result.insert(QStringLiteral("readable"), node.kind == NodeKind::dataAttribute && !node.item.isEmpty());
     QString objectReference;
@@ -659,13 +681,17 @@ QVector<MmsLiveTreeModel::ReadTarget> MmsLiveTreeModel::readTargetsForReferences
     return result;
 }
 
-void MmsLiveTreeModel::applyReadValue(const QString& key, const QString& displayValue) {
+void MmsLiveTreeModel::applyReadValue(
+    const QString& key, const QString& displayValue, const QVariantMap& typedEvidence) {
     const auto found = mmsIndex_.constFind(key);
     if (found == mmsIndex_.cend()) return;
     const auto nodeIndex = found.value();
     auto& node = nodes_[nodeIndex];
-    if (node.value == displayValue) return;
+    const bool evidenceChanged = typedEvidence_.value(nodeIndex) != typedEvidence;
+    if (node.value == displayValue && !evidenceChanged) return;
     node.value = displayValue;
+    if (!typedEvidence.isEmpty()) typedEvidence_.insert(nodeIndex, typedEvidence);
+    else typedEvidence_.remove(nodeIndex);
     detailModel_->nodeValueChanged(nodeIndex);
     emit valuesChanged();
     const auto row = visibleRowForNode(nodeIndex);

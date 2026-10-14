@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "MmsLiveTreeModel.hpp"
+#include "MmsSemanticValue.hpp"
+#include <array>
+#include <chrono>
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
@@ -71,6 +74,46 @@ int main(int argc, char** argv) {
     model.applyDocument(document);
     const auto applyMs = applyTimer.elapsed();
 
+    // Typed IEC 61850 Quality: exactly 13 bits. 01=invalid;
+    // substituted/test/operatorBlocked are independently asserted.
+    const std::array<std::uint8_t, 2> qualityBytes{0x40U, 0x38U};
+    const auto quality = arstack::iedsim::decodeMmsSemanticAttribute(
+        ar::iec61850::mms::MmsDataValue::bit_string(3U, qualityBytes),
+        QStringLiteral("LLN0$ST$Pos$q"));
+    const auto malformed = arstack::iedsim::decodeMmsSemanticAttribute(
+        ar::iec61850::mms::MmsDataValue::bit_string(0U, qualityBytes),
+        QStringLiteral("LLN0$ST$Pos$q"));
+    const auto wrongLeaf = arstack::iedsim::decodeMmsSemanticAttribute(
+        ar::iec61850::mms::MmsDataValue::bit_string(3U, qualityBytes),
+        QStringLiteral("LLN0$ST$Pos$stVal"));
+    const QVariantList qualityFields = quality.value(QStringLiteral("fields")).toList();
+    if (quality.value(QStringLiteral("summary")).toString() != QStringLiteral("invalid") ||
+        qualityFields.size() != 12 ||
+        qualityFields.at(9).toMap().value(QStringLiteral("value")).toString() !=
+            QStringLiteral("substituted") ||
+        !qualityFields.at(10).toMap().value(QStringLiteral("value")).toBool() ||
+        !qualityFields.at(11).toMap().value(QStringLiteral("value")).toBool() ||
+        !malformed.isEmpty() || !wrongLeaf.isEmpty()) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL typed_quality_semantics\n";
+        return 24;
+    }
+    const ar::iec61850::mms::Iec61850UtcTime utc{
+        std::chrono::system_clock::time_point{std::chrono::seconds{1'730'000'000}},
+        0xA5U};
+    const auto time = arstack::iedsim::decodeMmsSemanticAttribute(
+        ar::iec61850::mms::MmsDataValue::utc_time(utc),
+        QStringLiteral("LLN0$ST$Pos$t"));
+    const auto timeFields = time.value(QStringLiteral("fields")).toList();
+    if (timeFields.size() != 5 ||
+        !timeFields.at(1).toMap().value(QStringLiteral("value")).toBool() ||
+        timeFields.at(2).toMap().value(QStringLiteral("value")).toBool() ||
+        !timeFields.at(3).toMap().value(QStringLiteral("value")).toBool() ||
+        timeFields.at(4).toMap().value(QStringLiteral("value")).toString() != QStringLiteral("5") ||
+        !time.value(QStringLiteral("summary")).toString().contains(QStringLiteral("UTC"))) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL typed_time_quality\n";
+        return 25;
+    }
+
     constexpr int expectedAttributes = 5 * 20 * 100 * 5;
     const int expectedMinimumNodes = expectedAttributes + 5 * 20 * 100 + 5 * 20 + 5 + 1;
     if (model.totalNodeCount() < expectedMinimumNodes) {
@@ -78,6 +121,13 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    // Metadata is initially unknown and must not be fabricated.
+    const auto beforeQuality = model.nodeForReference(QStringLiteral("LD4/LLN19.DO99.DA4 [MX]"));
+    if (beforeQuality.contains(QStringLiteral("qualityDetails")) ||
+        beforeQuality.contains(QStringLiteral("timestampDetails"))) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL invented_quality\n";
+        return 26;
+    }
     // Root and LDs are open, but LNs remain collapsed. Large online models must
     // not eagerly instantiate every DO/DA row into the visible projection.
     if (model.visibleNodeCount() > 256) {
@@ -237,6 +287,50 @@ int main(int argc, char** argv) {
         model.readTargetsForReferences(iecWatched, 1).size() != 1) {
         std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL canonical_global_watch_read\n";
         return 20;
+    }
+
+    // Sparse canonical metadata must be shared by all siblings and cleared
+    // when a new IED document replaces the previous one.
+    ar::iec61850::mms::MmsLiveModelDocument small;
+    ar::iec61850::mms::MmsLiveLogicalDevice sd;
+    sd.mms_domain = "LD0"; sd.instance = "LD0";
+    ar::iec61850::mms::MmsLiveLogicalNode sn;
+    sn.name = "LLN0";
+    ar::iec61850::mms::MmsLiveDataObject so;
+    so.name = "Pos"; so.reference = "LD0/LLN0.Pos";
+    for (const auto& leaf : {"stVal", "q", "t"}) {
+        ar::iec61850::mms::MmsLiveDataAttribute da;
+        da.attribute_path = std::string("Pos.") + leaf;
+        da.object_reference = so.reference;
+        da.functional_constraint = "ST";
+        da.mms_item_name = std::string("LLN0$ST$Pos$") + leaf;
+        da.mms_reference = std::string("LD0/") + da.mms_item_name;
+        da.mms_type = std::string(leaf) == "t" ? "utc-time"
+                     : std::string(leaf) == "q" ? "bit-string" : "integer";
+        da.type_discovery_status = "Exact";
+        so.attributes.push_back(std::move(da));
+    }
+    sn.data_objects.push_back(std::move(so));
+    sd.logical_nodes.push_back(std::move(sn));
+    small.logical_devices.push_back(std::move(sd));
+    MmsLiveTreeModel typedTree;
+    typedTree.applyDocument(small);
+    const QString keyBase = QStringLiteral("LD0") + QChar(0x1f) + QStringLiteral("LLN0$ST$Pos$");
+    typedTree.applyReadValue(keyBase + QStringLiteral("q"), QStringLiteral("034038"), quality);
+    typedTree.applyReadValue(keyBase + QStringLiteral("t"), QStringLiteral("UTC time"), time);
+    const auto sibling = typedTree.nodeForReference(QStringLiteral("LD0/LLN0.Pos.stVal [ST]"));
+    const auto typedQ = sibling.value(QStringLiteral("qualityDetails")).toMap();
+    const auto typedT = sibling.value(QStringLiteral("timestampDetails")).toMap();
+    if (typedQ.value(QStringLiteral("summary")).toString() != QStringLiteral("invalid") ||
+        typedT.value(QStringLiteral("kind")).toString() != QStringLiteral("timestamp")) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL typed_canonical_siblings\n";
+        return 27;
+    }
+    typedTree.applyDocument(small);
+    if (typedTree.nodeForReference(QStringLiteral("LD0/LLN0.Pos.q [ST]"))
+            .contains(QStringLiteral("qualityDetails"))) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL typed_stale_document\n";
+        return 28;
     }
 
     const bool passes = applyMs <= 5000 && filterMs <= 1500 && selectMs <= 500;

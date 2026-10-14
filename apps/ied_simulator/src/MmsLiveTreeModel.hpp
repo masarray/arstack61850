@@ -157,7 +157,7 @@ public:
     [[nodiscard]] QVector<ReadTarget> readTargetsForReferences(
         const QStringList& references,
         int maximumTargets = 64) const;
-    void applyReadValue(const QString& key, const QString& displayValue);
+    void applyReadValue(const QString& key, const QString& displayValue, const QVariantMap& typedEvidence = {});
 
 signals:
     void filterTextChanged();
@@ -211,6 +211,9 @@ private:
     QVector<int> visible_;
     QHash<QString, int> mmsIndex_;
     QHash<QString, QVector<int>> referenceIndex_;
+    // Sparse: only successfully decoded live q/t leaves own a map.
+    // Do not allocate expensive QVariantMaps for every discovered node.
+    QHash<int, QVariantMap> typedEvidence_;
     QString filterText_;
     int selectedNode_{-1};
     static constexpr int maximumProjectedChildren_{4096};

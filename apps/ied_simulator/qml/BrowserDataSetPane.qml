@@ -247,7 +247,13 @@ Rectangle {
                                     }
                                     Label {
                                         Layout.preferredWidth: Math.max(180, root.width * 0.42)
-                                        text: root.displayValue(attributeRow.modelData.value)
+                                        text: attributeRow.modelData.qualityDetails &&
+                                              attributeRow.modelData.qualityDetails.summary
+                                              ? attributeRow.modelData.qualityDetails.summary
+                                              : attributeRow.modelData.timestampDetails &&
+                                                attributeRow.modelData.timestampDetails.summary
+                                                ? attributeRow.modelData.timestampDetails.summary
+                                                : root.displayValue(attributeRow.modelData.value)
                                         color: theme.textSoft
                                         font.pixelSize: 10
                                         elide: Text.ElideRight
