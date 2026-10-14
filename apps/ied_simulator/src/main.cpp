@@ -2,6 +2,7 @@
 
 #include "IedFleetController.hpp"
 #include "IedBrowserFleetController.hpp"
+#include "BrowserEvidenceVisualQa.hpp"
 #include "SclWorkspaceController.hpp"
 
 #include <QCommandLineOption>
@@ -113,6 +114,10 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption smokeOption{
         QStringLiteral("smoke-test"),
         QStringLiteral("Load the QML scene, wait briefly, and exit.")};
+    const QCommandLineOption qaBrowserEvidenceOption{
+        QStringLiteral("qa-browser-evidence-output"),
+        QStringLiteral("QA: render selected q/t evidence from canonical SCL with synthetic typed values."),
+        QStringLiteral("directory")};
     const QCommandLineOption qaBrowserRoutingOption{
         QStringLiteral("qa-browser-routing"),
         QStringLiteral("QA: verify the rendered active IED Browser and its offline signal tree match the selected fleet slot.")};
@@ -145,6 +150,7 @@ int main(int argc, char* argv[]) {
         screenshotOption,
         smokeOption,
         qaBrowserRoutingOption,
+        qaBrowserEvidenceOption,
         portOption,
         setFirstValueOption,
         qaLiveBurstOption,
@@ -644,6 +650,17 @@ int main(int argc, char* argv[]) {
                     << "switching=pass reindex=pass cross_ied_panel=false";
                 app.exit(0);
             });
+        }
+        if (parser.isSet(qaBrowserEvidenceOption)) {
+            if (!parser.isSet(browserModelOption) || parser.isSet(screenshotOption) ||
+                browserFleet == nullptr) {
+                qCritical().noquote()
+                    << "BROWSER_EVIDENCE_VISUAL_FAIL requires --browser-model without --screenshot";
+                QTimer::singleShot(0, &app, [] { QCoreApplication::exit(71); });
+            } else {
+                arstack::iedsim::runBrowserEvidenceVisualQa(
+                    app, rootObject, browserFleet, parser.value(qaBrowserEvidenceOption));
+            }
         }
         if (parser.isSet(screenshotOption)) {
             const auto outputPath = parser.value(screenshotOption);

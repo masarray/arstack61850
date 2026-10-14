@@ -385,6 +385,25 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Render and validate selected Quality and TimeQuality in native Browser
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          ./build-ied-simulator-qt/arstack_ied_simulator \
+            --browser-model ./tests/fixtures/scl/minimal-station-brcb.scd \
+            --qa-browser-evidence-output ./ied-browser-typed-evidence
+          for name in data-model-quality data-model-timestamp datasets-quality datasets-timestamp; do
+            test -s "ied-browser-typed-evidence/${name}.png"
+          done
+
+      - name: Upload selected typed-evidence visual regression
+        uses: actions/upload-artifact@v4
+        with:
+          name: ied-browser-typed-evidence-m2i
+          path: ied-browser-typed-evidence/*.png
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Prove GUI value is visible through MMS
         run: >-
           python3 apps/ied_simulator/test_gui_live_value.py

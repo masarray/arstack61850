@@ -57,6 +57,7 @@ data_model_required = [
     'BrowserEngineeringEvidence {',
     'root.currentNode.engineeringEvidence',
     'objectName: "browserDataModelSelectedAttributeInspector"',
+    'objectName: "browserDataModelTypedEvidence"',
     'root.detail.rootChildCount === 0 || root.currentNode.kind === "DA"',
     'function onValuesChanged() { root.valueRevision += 1 }',
 ]
@@ -79,14 +80,17 @@ data_set_required = [
     'root.expandedMemberIndex',
     'maximumExpandedChildren: 64',
     'required property var modelData',
-    'root.showSelectedEvidence = selected',
+    'root.showSelectedEvidence = exact',
     'BrowserEngineeringEvidence {',
     'objectName: "browserDataSetEvidenceInspector"',
     'root.selectedAttributeNode.engineeringEvidence || ({})',
     'selected.reference === root.selectedAttributeReference',
-    'root.selectedAttributeReference = selected',
-    'memberRow.resolved.reference : ""',
-    'root.showSelectedEvidence = selected',
+    'root.selectedAttributeReference = exact',
+    'function selectEvidenceAttribute(domain, item, expectedReference)',
+    'memberRow.resolved.reference)',
+    'attributeRow.modelData.reference)',
+    'objectName: "browserDataSetTypedEvidence"',
+    'root.showSelectedEvidence = exact',
 ]
 missing_dataset = [term for term in data_set_required if term not in data_set]
 if missing_dataset:
@@ -104,6 +108,23 @@ if data_set.count('BrowserEngineeringEvidence {') != 1:
     raise SystemExit("BROWSER_DATASET_EVIDENCE_FAIL duplicate/hidden evidence inspector")
 if 'readEngineeringSelected()' in data_set or 'readEngineeringSelected()' in data_model:
     raise SystemExit("BROWSER_TYPED_EVIDENCE_FAIL passive inspector initiated MMS Read")
+
+qa_source = (workspace_path.parent.parent / "src" / "BrowserEvidenceVisualQa.hpp").read_text(encoding="utf-8")
+for token in [
+    'BROWSER_EVIDENCE_VISUAL_PASS',
+    'decodeEngineeringEvidence(',
+    'MmsLiveDetailModel::ReferenceRole',
+    'selectEvidenceAttribute',
+    'malformedEvidence.isEmpty()',
+    'data-model-quality.png',
+    'data-model-timestamp.png',
+    'datasets-quality.png',
+    'datasets-timestamp.png',
+]:
+    if token not in qa_source:
+        raise SystemExit("BROWSER_TYPED_EVIDENCE_QA_FAIL missing=" + token)
+if 'readEngineeringSelected()' in qa_source or 'std::thread' in qa_source:
+    raise SystemExit("BROWSER_TYPED_EVIDENCE_QA_FAIL hidden MMS read or worker")
 
 report_controller = (workspace_path.parent.parent / "src" / "MmsReportController.cpp").read_text(encoding="utf-8")
 for token in [

@@ -760,12 +760,14 @@ Item {
                     currentIndex: root.activeSection
 
                     BrowserDataModelPane {
+                        objectName: "browserDataModelPane"
                         theme: root.theme
                         client: root.client
                         modelProvider: root.context
                     }
 
                     BrowserDataSetPane {
+                        objectName: "browserDataSetPane"
                         theme: root.theme
                         reports: root.reports
                         modelProvider: root.context
