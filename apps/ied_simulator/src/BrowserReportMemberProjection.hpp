@@ -13,6 +13,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <string_view>
 #include <vector>
 #include <utility>
 
@@ -32,6 +34,29 @@ struct BrowserReportMemberProjection final {
 inline constexpr int kBrowserReportVisibleMemberLimit = 256;
 inline constexpr int kBrowserReportTextLimit = 1024;
 
+// Bound untrusted IEC member reference and reason strings BEFORE conversion to
+// QString. No full-sized temporary allocation for oversized MMS metadata.
+[[nodiscard]] inline QString boundedReportMetadata(
+    const std::string_view source, const std::size_t maximumBytes, bool& truncated) {
+    std::size_t count = std::min(maximumBytes, source.size());
+    if (count < source.size()) {
+        // Never split a UTF-8 continuation byte at the preview boundary.
+        while (count > 0 && (static_cast<unsigned char>(source[count]) & 0xC0U) == 0x80U)
+            --count;
+        truncated = true;
+    }
+    return QString::fromUtf8(source.data(), static_cast<qsizetype>(count));
+}
+
+[[nodiscard]] inline bool hasReportTypedLeaf(
+    const std::string_view reference, const mms::MmsDataKind kind) noexcept {
+    if (reference.size() < 2U) return false;
+    const char separator = reference[reference.size() - 2U];
+    if (separator != '$' && separator != '.') return false;
+    return (reference.back() == 'q' && kind == mms::MmsDataKind::bit_string) ||
+           (reference.back() == 't' && kind == mms::MmsDataKind::utc_time);
+}
+
 [[nodiscard]] inline BrowserReportMemberProjection projectBrowserReportMembers(
     const std::vector<mms::MmsReportValue>& members,
     int& remainingTypedEvidence,
@@ -44,42 +69,67 @@ inline constexpr int kBrowserReportTextLimit = 1024;
 
     for (std::size_t ordinal = 0; ordinal < visibleCount; ++ordinal) {
         const auto& member = members[ordinal];
-        QString reference = QString::fromStdString(member.data_reference);
-        if (reference.isEmpty() && member.member)
-            reference = QString::fromStdString(member.member->user_reference);
-        if (reference.isEmpty() && member.member)
-            reference = QString::fromStdString(member.member->mms_reference);
+        const std::string* rawReference = &member.data_reference;
+        if (rawReference->empty() && member.member)
+            rawReference = &member.member->user_reference;
+        if (rawReference->empty() && member.member)
+            rawReference = &member.member->mms_reference;
+        const std::string_view fullReference(*rawReference);
+        bool referenceTruncated = false;
+        const QString reference = boundedReportMetadata(
+            fullReference, kBrowserReportTextLimit, referenceTruncated);
 
         QString displayReference = reference;
         if (displayReference.isEmpty())
             displayReference = QStringLiteral("member[%1]").arg(
                 static_cast<qulonglong>(member.data_set_index));
         QString displayValue = QStringLiteral("<failed>");
+        bool valueTruncated = false;
         if (member.value) {
             // Never allocate a full string/hex/array representation and then
             // truncate it. Serialize directly into a 1024-character budget.
             const auto preview = previewMmsValue(*member.value,
                                                   kBrowserReportTextLimit);
             displayValue = QString::fromStdString(preview.text);
-            projection.textTruncated |= preview.truncated;
+            valueTruncated = preview.truncated;
         }
         QString reasons;
+        bool reasonsTruncated = false;
         for (const auto& reason : member.reason_for_inclusion.names) {
+            if (reasons.size() >= kBrowserReportTextLimit) {
+                reasonsTruncated = true;
+                break;
+            }
             if (!reasons.isEmpty()) reasons += QStringLiteral(", ");
-            reasons += QString::fromStdString(reason);
+            reasons += boundedReportMetadata(
+                reason, static_cast<std::size_t>(
+                    std::max(0, kBrowserReportTextLimit - int(reasons.size()))),
+                reasonsTruncated);
+            if (reasonsTruncated) break;
         }
         QString text = QStringLiteral("%1 = %2%3").arg(
             displayReference, displayValue,
             reasons.isEmpty() ? QString{} : QStringLiteral("  · ") + reasons);
-        if (text.size() > kBrowserReportTextLimit) {
+        const bool rowTruncated = referenceTruncated || reasonsTruncated ||
+                                  (member.value && valueTruncated) ||
+                                  text.size() > kBrowserReportTextLimit;
+        if (rowTruncated) {
             projection.textTruncated = true;
-            text = text.left(kBrowserReportTextLimit) + QStringLiteral(" … [preview truncated]");
+            const QString marker = QStringLiteral(" … [preview truncated]");
+            text = text.left(kBrowserReportTextLimit - marker.size()) + marker;
         }
         projection.values.push_back(std::move(text));
 
         // Only read successful typed q/t values, and only when the retained
         // presentation row matches the member ordinal (never DataSet position).
-        if (!member.value || reference.isEmpty()) continue;
+        if (!member.value || fullReference.empty()) continue;
+        if (referenceTruncated) {
+            // A shortened IEC reference must never be treated as the identity
+            // of a report q/t DA. The runtime retains the complete reference.
+            if (hasReportTypedLeaf(fullReference, member.value->kind()))
+                projection.evidenceTruncated = true;
+            continue;
+        }
         if (remainingTypedEvidence > 0) {
             const auto decoded = decodeEngineeringEvidence(reference, *member.value);
             if (!decoded.isEmpty()) {
@@ -90,13 +140,7 @@ inline constexpr int kBrowserReportTextLimit = 1024;
             }
         } else {
             // Do not decode (allocate rows) once the shared budget is empty.
-            const auto separator = std::max(
-                reference.lastIndexOf(QLatin1Char('$')),
-                reference.lastIndexOf(QLatin1Char('.')));
-            const QString leaf = reference.mid(separator + 1);
-            const auto kind = member.value->kind();
-            if ((leaf == QStringLiteral("q") && kind == mms::MmsDataKind::bit_string) ||
-                (leaf == QStringLiteral("t") && kind == mms::MmsDataKind::utc_time))
+            if (hasReportTypedLeaf(fullReference, member.value->kind()))
                 projection.evidenceTruncated = true;
         }
     }
