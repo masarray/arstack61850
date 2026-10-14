@@ -324,6 +324,22 @@ void disable_hardware_ptp(const esp_eth_handle_t eth_handle) noexcept {
             "clock quality remains UNKNOWN (not IED traceable)");
         return false;
     }
+    // A successful write ioctl alone does not prove that the MAC is operating
+    // on the intended timebase. Verify once at control-plane START, never
+    // during each SV sample or PTP packet.
+    eth_mac_time_t readback{};
+    const auto read_result = esp_eth_ioctl(
+        eth_handle, static_cast<esp_eth_io_cmd_t>(ETH_MAC_ESP_CMD_G_PTP_TIME),
+        &readback);
+    if (read_result != ESP_OK || readback.nanoseconds >= 1'000'000'000U ||
+        static_cast<std::uint64_t>(readback.seconds) <
+            static_cast<std::uint64_t>(*tai_seconds) ||
+        static_cast<std::uint64_t>(readback.seconds) >
+            static_cast<std::uint64_t>(*tai_seconds) + 1ULL) {
+        ESP_LOGE(kTag,
+            "Hardware PTP TAI seed read-back invalid; withholding PTP-timescale claim");
+        return false;
+    }
     ESP_LOGI(kTag,
         "PTP/TAI seed applied from local RTC and configured UTC offset; "
         "absolute time accuracy/traceability NOT established");
