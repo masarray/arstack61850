@@ -2,6 +2,7 @@
 #include "MmsLiveTreeModel.hpp"
 #include "MmsEngineeringEvidence.hpp"
 #include "BrowserReportMemberProjection.hpp"
+#include "BrowserBoundedMmsPreview.hpp"
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
@@ -352,6 +353,73 @@ int main(int argc, char** argv) {
         smallProjection.evidenceTruncated) {
         std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL bounded_report_small_window\n";
         return 28;
+    }
+
+    using ar::iec61850::mms::MmsDataCodec;
+    using ar::iec61850::mms::MmsDataValue;
+    // M2F: the GUI must not allocate multi-megabyte intermediary strings
+    // for a tiny report preview. Primitive display remains codec-identical.
+    const std::string hugeText(2'000'000, 'V');
+    const auto hugeVisible = MmsDataValue::visible_string(hugeText);
+    const auto hugePreview = arstack::iedsim::previewMmsValue(hugeVisible, 1024);
+    const std::vector<std::uint8_t> hugeRawBytes(1'000'000, 0xABU);
+    const auto hugeBytes = MmsDataValue::octet_string(hugeRawBytes);
+    const auto hexPreview = arstack::iedsim::previewMmsValue(hugeBytes, 1024);
+    std::vector<MmsDataValue> children;
+    children.reserve(4000);
+    for (int index = 0; index < 4000; ++index)
+        children.push_back(MmsDataValue::visible_string(std::string(300, 'C')));
+    const auto nested = MmsDataValue::array(std::move(children));
+    const auto nestedPreview = arstack::iedsim::previewMmsValue(nested, 1024);
+    if (hugePreview.text.size() != 1024 || !hugePreview.truncated ||
+        hugePreview.text.front() != 'V' || hugePreview.text.back() != 'V' ||
+        hexPreview.text.size() != 1024 || !hexPreview.truncated ||
+        hexPreview.text.substr(0, 4) != "ABAB" ||
+        nestedPreview.text.size() != 1024 || !nestedPreview.truncated ||
+        nestedPreview.text.front() != '[') {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL bounded_value_serialization\n";
+        return 29;
+    }
+    // Exact semantics for complete output, including nested structures,
+    // raw-byte uppercase hex, bool and UTC types.
+    const std::vector<MmsDataValue> samples{
+        MmsDataValue::boolean(true),
+        MmsDataValue::integer(-42),
+        MmsDataValue::floating_point(3.125),
+        MmsDataValue::bit_string(3U, bits),
+        MmsDataValue::utc_time(utc),
+        MmsDataValue::structure({MmsDataValue::boolean(false),
+                                 MmsDataValue::visible_string("ABC")})};
+    for (const auto& sample : samples) {
+        const auto preview = arstack::iedsim::previewMmsValue(sample, 1024);
+        if (preview.truncated ||
+            preview.text != MmsDataCodec::to_display_string(sample)) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL bounded_value_parity\n";
+            return 30;
+        }
+    }
+    const auto zeroBudget = arstack::iedsim::previewMmsValue(hugeVisible, 0);
+    if (!zeroBudget.text.empty() || !zeroBudget.truncated) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL bounded_value_zero_budget\n";
+        return 31;
+    }
+    // A bounded MMSString must not end on an incomplete UTF-8 character.
+    const std::string utf8Boundary = std::string(1023, 'A') + "\xE2\x82\xAC";
+    const auto utf8Preview = arstack::iedsim::previewMmsValue(
+        MmsDataValue::mms_string(utf8Boundary), 1024);
+    if (!utf8Preview.truncated || utf8Preview.text.size() != 1023 ||
+        utf8Preview.text.back() != 'A') {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL bounded_value_utf8_boundary\n";
+        return 33;
+    }
+    largeFrame[5].value = hugeVisible;
+    int hugeBudget = 4;
+    const auto boundedFrame = arstack::iedsim::projectBrowserReportMembers(
+        largeFrame, hugeBudget, 6);
+    if (boundedFrame.values.size() != 6 || !boundedFrame.textTruncated ||
+        boundedFrame.values.at(5).size() > 1100) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL bounded_value_report_integration\n";
+        return 32;
     }
 
     const bool passes = applyMs <= 5000 && filterMs <= 1500 && selectMs <= 500;

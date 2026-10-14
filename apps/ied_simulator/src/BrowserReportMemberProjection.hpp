@@ -2,7 +2,7 @@
 #pragma once
 
 #include "MmsEngineeringEvidence.hpp"
-#include "ariec61850/mms/data_codec.hpp"
+#include "BrowserBoundedMmsPreview.hpp"
 #include "ariec61850/mms/reporting.hpp"
 
 #include <QString>
@@ -55,8 +55,14 @@ inline constexpr int kBrowserReportTextLimit = 1024;
             displayReference = QStringLiteral("member[%1]").arg(
                 static_cast<qulonglong>(member.data_set_index));
         QString displayValue = QStringLiteral("<failed>");
-        if (member.value)
-            displayValue = QString::fromStdString(mms::MmsDataCodec::to_display_string(*member.value));
+        if (member.value) {
+            // Never allocate a full string/hex/array representation and then
+            // truncate it. Serialize directly into a 1024-character budget.
+            const auto preview = previewMmsValue(*member.value,
+                                                  kBrowserReportTextLimit);
+            displayValue = QString::fromStdString(preview.text);
+            projection.textTruncated |= preview.truncated;
+        }
         QString reasons;
         for (const auto& reason : member.reason_for_inclusion.names) {
             if (!reasons.isEmpty()) reasons += QStringLiteral(", ");
