@@ -54,6 +54,8 @@ data_model_required = [
     'root.detail.selectParent()',
     'root.detail.truncated',
     'onDoubleClicked: function(event)',
+    'BrowserEngineeringEvidence {',
+    'root.currentNode.engineeringEvidence',
 ]
 
 for label, source, required in [
@@ -74,6 +76,8 @@ data_set_required = [
     'root.expandedMemberIndex',
     'maximumExpandedChildren: 64',
     'required property var modelData',
+    'root.showSelectedEvidence = true',
+    'BrowserEngineeringEvidence {',
 ]
 missing_dataset = [term for term in data_set_required if term not in data_set]
 if missing_dataset:

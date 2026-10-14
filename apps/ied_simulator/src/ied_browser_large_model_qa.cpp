@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "MmsLiveTreeModel.hpp"
+#include "MmsEngineeringEvidence.hpp"
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
+
+#include <array>
+#include <chrono>
 
 #include <iostream>
 #include <string>
@@ -237,6 +241,65 @@ int main(int argc, char** argv) {
         model.readTargetsForReferences(iecWatched, 1).size() != 1) {
         std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL canonical_global_watch_read\n";
         return 20;
+    }
+
+    // Decoding is based on actual typed MMS payload, never on displayed hex.
+    // Quality: validity=invalid, Overflow=true, Source=substituted,
+    // Test=true, OperatorBlocked=true. The unused bits must be exactly three.
+    const std::array<std::uint8_t, 2> bits{0x60U, 0x38U};
+    const auto qualityEvidence = arstack::iedsim::decodeEngineeringEvidence(
+        QStringLiteral("LLN19$MX$DO99$q"),
+        ar::iec61850::mms::MmsDataValue::bit_string(3U, bits));
+    const auto qualityRows = qualityEvidence.value(QStringLiteral("rows")).toList();
+    const auto malformedQuality = arstack::iedsim::decodeEngineeringEvidence(
+        QStringLiteral("LLN19$MX$DO99$q"),
+        ar::iec61850::mms::MmsDataValue::bit_string(2U, bits));
+    const auto wrongKind = arstack::iedsim::decodeEngineeringEvidence(
+        QStringLiteral("LLN19$MX$DO99$q"),
+        ar::iec61850::mms::MmsDataValue::boolean(true));
+    if (qualityEvidence.value(QStringLiteral("kind")).toString() != QStringLiteral("quality") ||
+        qualityRows.size() != 12 ||
+        qualityRows.at(0).toMap().value(QStringLiteral("value")).toString() != QStringLiteral("invalid") ||
+        !qualityRows.at(1).toMap().value(QStringLiteral("value")).toBool() ||
+        qualityRows.at(9).toMap().value(QStringLiteral("value")).toString() != QStringLiteral("substituted") ||
+        !qualityRows.at(10).toMap().value(QStringLiteral("value")).toBool() ||
+        !qualityRows.at(11).toMap().value(QStringLiteral("value")).toBool() ||
+        !malformedQuality.isEmpty() || !wrongKind.isEmpty()) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL typed_quality_evidence\n";
+        return 22;
+    }
+
+    const ar::iec61850::mms::Iec61850UtcTime utc{
+        std::chrono::system_clock::time_point{std::chrono::seconds{1720000000}},
+        0xBFU};  // leap known, clock not synchronized, accuracy unspecified
+    const auto timeEvidence = arstack::iedsim::decodeEngineeringEvidence(
+        QStringLiteral("LLN19$MX$DO99$t"),
+        ar::iec61850::mms::MmsDataValue::utc_time(utc));
+    const auto timeRows = timeEvidence.value(QStringLiteral("rows")).toList();
+    if (timeEvidence.value(QStringLiteral("kind")).toString() != QStringLiteral("timestamp") ||
+        timeRows.size() != 5 ||
+        !timeRows.at(1).toMap().value(QStringLiteral("value")).toBool() ||
+        timeRows.at(2).toMap().value(QStringLiteral("value")).toBool() ||
+        !timeRows.at(3).toMap().value(QStringLiteral("value")).toBool() ||
+        timeRows.at(4).toMap().value(QStringLiteral("value")).toString() != QStringLiteral("unspecified") ||
+        !timeEvidence.value(QStringLiteral("summary")).toString().endsWith(QStringLiteral("UTC"))) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL typed_timestamp_evidence\n";
+        return 23;
+    }
+
+    // Model evidence is replaced by each new sample and never retained
+    // after an untyped refresh. Reuse an existing canonical MMS leaf.
+    model.applyReadValue(liveKey, QStringLiteral("typed"), qualityEvidence);
+    if (model.nodeForReference(QStringLiteral("LD4/LLN19.DO99.DA4"))
+            .value(QStringLiteral("engineeringEvidence")).toMap() != qualityEvidence) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL canonical_evidence_path\n";
+        return 24;
+    }
+    model.applyReadValue(liveKey, QStringLiteral("typed"));
+    if (!model.nodeForReference(QStringLiteral("LD4/LLN19.DO99.DA4"))
+             .value(QStringLiteral("engineeringEvidence")).toMap().isEmpty()) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL stale_evidence\n";
+        return 25;
     }
 
     const bool passes = applyMs <= 5000 && filterMs <= 1500 && selectMs <= 500;
