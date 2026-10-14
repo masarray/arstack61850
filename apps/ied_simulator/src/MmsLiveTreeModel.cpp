@@ -35,7 +35,9 @@ QString logicalNodeDescription(const QString& logicalNodeClass) {
 }
 } // namespace
 
-MmsLiveTreeModel::MmsLiveTreeModel(QObject* parent) : QAbstractListModel(parent) {}
+MmsLiveTreeModel::MmsLiveTreeModel(QObject* parent) : QAbstractListModel(parent) {
+    detailModel_ = new MmsLiveDetailModel(this);
+}
 
 int MmsLiveTreeModel::rowCount(const QModelIndex& parent) const {
     return parent.isValid() ? 0 : visible_.size();
@@ -114,6 +116,7 @@ int MmsLiveTreeModel::appendNode(Node node) {
 }
 
 void MmsLiveTreeModel::applyDocument(const ar::iec61850::mms::MmsLiveModelDocument& document) {
+    detailModel_->resetForDocument();
     beginResetModel();
     nodes_.clear();
     visible_.clear();
@@ -193,12 +196,14 @@ void MmsLiveTreeModel::applyDocument(const ar::iec61850::mms::MmsLiveModelDocume
     }
 
     endResetModel();
+    detailModel_->setRoot(0);
     rebuildVisible();
     emit countsChanged();
     emit selectionChanged();
 }
 
 void MmsLiveTreeModel::clear() {
+    detailModel_->resetForDocument();
     beginResetModel();
     nodes_.clear();
     visible_.clear();
@@ -375,6 +380,7 @@ bool MmsLiveTreeModel::selectNode(const int nodeIndex) {
     if (nodeIndex < 0 || nodeIndex >= nodes_.size() || nodeIndex == selectedNode_) return false;
     const auto previousRow = selectedRow();
     selectedNode_ = nodeIndex;
+    detailModel_->setRoot(nodeIndex);
     for (int cursor = nodes_.at(selectedNode_).parent; cursor >= 0; cursor = nodes_.at(cursor).parent) {
         nodes_[cursor].expanded = true;
     }
@@ -421,6 +427,7 @@ void MmsLiveTreeModel::selectRow(const int row) {
     if (next == selectedNode_) return;
     const auto previousRow = selectedRow();
     selectedNode_ = next;
+    detailModel_->setRoot(next);
     const auto currentRow = selectedRow();
     if (previousRow >= 0) emit dataChanged(index(previousRow), index(previousRow), {SelectedRole});
     if (currentRow >= 0) emit dataChanged(index(currentRow), index(currentRow), {SelectedRole});
@@ -440,6 +447,7 @@ bool MmsLiveTreeModel::selectMmsItem(const QString& domain, const QString& item)
     const auto found = mmsIndex_.constFind(nodeKey(domain, item));
     if (found == mmsIndex_.cend()) return false;
     selectedNode_ = found.value();
+    detailModel_->setRoot(selectedNode_);
     for (int cursor = nodes_.at(selectedNode_).parent; cursor >= 0; cursor = nodes_.at(cursor).parent) {
         nodes_[cursor].expanded = true;
     }
@@ -558,10 +566,159 @@ void MmsLiveTreeModel::applyReadValue(const QString& key, const QString& display
     auto& node = nodes_[nodeIndex];
     if (node.value == displayValue) return;
     node.value = displayValue;
+    detailModel_->nodeValueChanged(nodeIndex);
     const auto row = visibleRowForNode(nodeIndex);
     if (row >= 0) emit dataChanged(index(row), index(row), {ValueRole});
     if (!filterText_.trimmed().isEmpty()) rebuildVisible();
     if (nodeIndex == selectedNode_ || (selectedNode_ >= 0 && node.parent == nodes_.at(selectedNode_).parent)) {
         emit selectionChanged();
     }
+}
+
+
+// Detail projection contains only visible row indices into the canonical model.
+// Expanding a branch is a local UI operation, never an MMS read.
+MmsLiveDetailModel::MmsLiveDetailModel(MmsLiveTreeModel* owner)
+    : QAbstractListModel(owner), owner_(owner) {}
+
+int MmsLiveDetailModel::rowCount(const QModelIndex& parent) const {
+    return parent.isValid() ? 0 : rows_.size();
+}
+
+QHash<int, QByteArray> MmsLiveDetailModel::roleNames() const {
+    return {{LabelRole, "label"}, {KindRole, "kind"}, {ReferenceRole, "reference"},
+            {DepthRole, "depth"}, {HasChildrenRole, "hasChildren"},
+            {ExpandedRole, "expanded"}, {SelectedRole, "selected"},
+            {FunctionalConstraintRole, "functionalConstraint"},
+            {DescriptionRole, "description"}, {ValueRole, "value"}};
+}
+
+QVariant MmsLiveDetailModel::data(const QModelIndex& index, const int role) const {
+    if (!index.isValid() || index.row() < 0 || index.row() >= rows_.size()) return {};
+    const auto row = rows_.at(index.row());
+    const auto& n = owner_->nodes_.at(row.node);
+    switch (role) {
+    case LabelRole: return n.label;
+    case KindRole: return MmsLiveTreeModel::kindName(n.kind);
+    case ReferenceRole: return n.reference;
+    case DepthRole: return row.depth;
+    case HasChildrenRole: return !n.children.isEmpty();
+    case ExpandedRole: return expanded_.contains(row.node);
+    case SelectedRole: return selected_ == row.node;
+    case FunctionalConstraintRole: return n.functionalConstraint;
+    case DescriptionRole: return n.description;
+    case ValueRole: {
+        if (!n.value.isEmpty()) return n.value;
+        if (n.kind != MmsLiveTreeModel::NodeKind::dataObject) return QString{};
+        static const QStringList preferred{QStringLiteral("stVal"), QStringLiteral("mag"),
+                                           QStringLiteral("setVal"), QStringLiteral("instMag"),
+                                           QStringLiteral("general")};
+        for (const auto& label : preferred)
+            for (const auto child : n.children) {
+                const auto& leaf = owner_->nodes_.at(child);
+                if (leaf.label.compare(label, Qt::CaseInsensitive) == 0 &&
+                    !leaf.value.isEmpty()) return leaf.value;
+            }
+        return QString{};
+    }
+    default: return {};
+    }
+}
+
+QString MmsLiveDetailModel::rootLabel() const {
+    return root_ >= 0 && root_ < owner_->nodes_.size() ? owner_->nodes_.at(root_).label : QString{};
+}
+QString MmsLiveDetailModel::rootKind() const {
+    return root_ >= 0 && root_ < owner_->nodes_.size()
+        ? MmsLiveTreeModel::kindName(owner_->nodes_.at(root_).kind) : QString{};
+}
+int MmsLiveDetailModel::rootChildCount() const {
+    return root_ >= 0 && root_ < owner_->nodes_.size()
+        ? owner_->nodes_.at(root_).children.size() : 0;
+}
+void MmsLiveDetailModel::append(int node, int depth) {
+    if (rows_.size() >= maximumRows_) { truncated_ = true; return; }
+    rows_.push_back({node, depth});
+    if (!expanded_.contains(node)) return;
+    for (const auto child : owner_->nodes_.at(node).children) {
+        append(child, depth + 1);
+        if (truncated_) return;
+    }
+}
+void MmsLiveDetailModel::rebuild() {
+    beginResetModel();
+    rows_.clear();
+    truncated_ = false;
+    if (root_ >= 0 && root_ < owner_->nodes_.size())
+        for (const auto child : owner_->nodes_.at(root_).children) {
+            append(child, 0);
+            if (truncated_) break;
+        }
+    endResetModel();
+    emit projectionChanged();
+}
+void MmsLiveDetailModel::setRoot(int node) {
+    const int valid = node >= 0 && node < owner_->nodes_.size() ? node : -1;
+    if (root_ == valid) return;
+    root_ = valid;
+    selected_ = -1;
+    rebuild();
+    emit rootChanged();
+}
+void MmsLiveDetailModel::resetForDocument() {
+    expanded_.clear();
+    root_ = -1;
+    selected_ = -1;
+    rebuild();
+    emit rootChanged();
+}
+int MmsLiveDetailModel::rowOf(int node) const {
+    for (int row = 0; row < rows_.size(); ++row)
+        if (rows_.at(row).node == node) return row;
+    return -1;
+}
+void MmsLiveDetailModel::toggle(int row) {
+    if (row < 0 || row >= rows_.size()) return;
+    const int node = rows_.at(row).node;
+    if (owner_->nodes_.at(node).children.isEmpty()) return;
+    if (expanded_.contains(node)) expanded_.remove(node);
+    else expanded_.insert(node);
+    rebuild();
+}
+void MmsLiveDetailModel::select(int row) {
+    if (row < 0 || row >= rows_.size()) return;
+    const int node = rows_.at(row).node;
+    if (selected_ == node && owner_->selectedNode_ == node) return;
+    const int oldDetail = rowOf(selected_);
+    const int oldTree = owner_->selectedRow();
+    selected_ = node;
+    owner_->selectedNode_ = node; // keep panel root stable; read/control target canonical node
+    const int newTree = owner_->selectedRow();
+    if (oldDetail >= 0) emit dataChanged(index(oldDetail), index(oldDetail), {SelectedRole});
+    emit dataChanged(index(row), index(row), {SelectedRole});
+    if (oldTree >= 0)
+        emit owner_->dataChanged(owner_->index(oldTree), owner_->index(oldTree),
+                                 {MmsLiveTreeModel::SelectedRole});
+    if (newTree >= 0)
+        emit owner_->dataChanged(owner_->index(newTree), owner_->index(newTree),
+                                 {MmsLiveTreeModel::SelectedRole});
+    emit owner_->selectionChanged();
+}
+void MmsLiveDetailModel::drillInto(int row) {
+    if (row < 0 || row >= rows_.size()) return;
+    select(row);
+    const int node = rows_.at(row).node;
+    if (!owner_->nodes_.at(node).children.isEmpty()) toggle(row);
+}
+void MmsLiveDetailModel::selectParent() {
+    if (root_ < 0 || root_ >= owner_->nodes_.size()) return;
+    const int parent = owner_->nodes_.at(root_).parent;
+    if (parent >= 0) owner_->selectNode(parent);
+}
+void MmsLiveDetailModel::nodeValueChanged(int node) {
+    const int row = rowOf(node);
+    if (row >= 0) emit dataChanged(index(row), index(row), {ValueRole});
+    const int parent = owner_->nodes_.at(node).parent;
+    const int parentRow = rowOf(parent);
+    if (parentRow >= 0) emit dataChanged(index(parentRow), index(parentRow), {ValueRole});
 }
