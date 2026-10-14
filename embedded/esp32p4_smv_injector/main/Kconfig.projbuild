@@ -234,9 +234,13 @@ config AR_PTP_MANUAL_UTC_OFFSET_VALID
     default n
     depends on AR_PTP_LAB_TX
     help
-        Enable only after the operator checks the configured TAI-UTC offset
-        against a current authoritative leap-second record. This flag does
-        NOT imply UTC traceability, frequency lock, or high clock accuracy.
+        Enable only after the operator verifies the configured TAI-UTC offset
+        against an authoritative leap-second record AND verifies that the
+        RTC-derived UTC epoch is meaningfully correct. Without this, SOURCE
+        advertises neither the PTP-timescale nor offset-valid flag even if
+        the hardware clock could be seeded. This remains an INTERNAL
+        OSCILLATOR and does NOT imply UTC traceability, frequency lock,
+        microsecond-grade accuracy, or a certified Grandmaster.
         The runtime also requires a plausible system UTC epoch before it
         advertises currentUtcOffsetValid.
 

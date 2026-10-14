@@ -47,6 +47,39 @@ private:
     bool fresh_sync_pair_{};
 };
 
+// A live Ethernet SOURCE is not healthy merely because Announce and Sync were
+// successfully transmitted once. Require BOTH recent on-wire observations;
+// every input is in the same monotonic microsecond timebase. This portable
+// check is also used by the exposed SOURCE status, so stalled FreeRTOS
+// scheduling cannot leave a stale READY boolean visible to SV phase control.
+struct PtpSourceEvidenceFreshness final {
+    [[nodiscard]] static constexpr bool fresh(
+        const std::int64_t now_us, const std::int64_t announce_us,
+        const std::int64_t sync_follow_up_us,
+        const std::int64_t timeout_us) noexcept {
+        if (now_us <= 0 || timeout_us <= 0 ||
+            announce_us <= 0 || sync_follow_up_us <= 0 ||
+            now_us < announce_us || now_us < sync_follow_up_us) {
+            return false;
+        }
+        return now_us - announce_us < timeout_us &&
+               now_us - sync_follow_up_us < timeout_us;
+    }
+};
+
+// A plausible RTC and a configurable UTC offset do not by themselves prove
+// the TAI/PTP timescale. Only set the timescale AND offset-valid flags when
+// the EMAC was actually seeded and the offset was explicitly verified.
+// No option here asserts time/frequency traceability or GM accuracy.
+[[nodiscard]] constexpr PtpTimeProperties conservative_lab_time_properties(
+    const bool hardware_tai_seeded,
+    const bool verified_tai_utc_offset) noexcept {
+    PtpTimeProperties result{};
+    result.ptp_timescale = hardware_tai_seeded && verified_tai_utc_offset;
+    result.current_utc_offset_valid = result.ptp_timescale;
+    return result;
+}
+
 // Static configuration compatibility, NOT a declaration of IEEE/IEC
 // conformance, grandmaster accuracy, or IED time lock. Runtime hardware
 // timestamps, clock quality and Pdelay exchanges need independent evidence.
