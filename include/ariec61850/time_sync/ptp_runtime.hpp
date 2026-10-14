@@ -207,6 +207,11 @@ public:
             error = "Sync interval must be greater than zero";
             return false;
         }
+        if (options.time_properties.current_utc_offset_valid &&
+            !options.time_properties.ptp_timescale) {
+            error = "A valid TAI-UTC offset requires the PTP timescale";
+            return false;
+        }
         if (options.follow_up_delay < std::chrono::milliseconds::zero()) {
             error = "Follow-up delay cannot be negative";
             return false;
