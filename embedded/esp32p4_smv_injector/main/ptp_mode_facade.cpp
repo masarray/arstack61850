@@ -5,6 +5,7 @@
 
 #include "ariec61850/time_sync/ptp_discipline.hpp"
 #include "ariec61850/time_sync/ptp_canonical_authority.hpp"
+#include "ariec61850/time_sync/ptp_emac_role_ownership.hpp"
 
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -23,6 +24,7 @@ bool ar_ptp_source_configure(const ar_ptp_lab_config_t* config);
 void ar_ptp_source_start(esp_eth_handle_t eth_handle);
 void ar_ptp_source_stop(void);
 bool ar_ptp_source_is_running(void);
+bool ar_ptp_source_runtime_active(void);
 uint32_t ar_ptp_source_generation(void);
 bool ar_ptp_source_get_status(ar_ptp_lab_status_t* status);
 }
@@ -39,6 +41,23 @@ ar_ptp_lab_config_t g_facade_override{};
 bool g_facade_override_valid = false;
 std::atomic<int> g_active_role{static_cast<int>(AR_PTP_ROLE_LAB_SOURCE)};
 std::atomic_bool g_receiver_stop_pending{false};
+// Serialize competing START/configure callers without holding a spinlock
+// while a worker asynchronously acquires/releases EMAC timestamp hardware.
+std::atomic_bool g_role_control_transition{false};
+
+struct RoleControlClaim final {
+    bool held{!g_role_control_transition.exchange(
+        true, std::memory_order_acq_rel)};
+    ~RoleControlClaim() noexcept {
+        if (held) g_role_control_transition.store(
+            false, std::memory_order_release);
+    }
+    RoleControlClaim(const RoleControlClaim&) = delete;
+    RoleControlClaim& operator=(const RoleControlClaim&) = delete;
+    RoleControlClaim() = default;
+};
+
+
 
 void fill_p2_defaults(ar_ptp_lab_config_t& config) noexcept {
     config.role = static_cast<ar_ptp_role_t>(CONFIG_AR_PTP_OPERATING_ROLE);
@@ -101,6 +120,15 @@ void fill_p2_defaults(ar_ptp_lab_config_t& config) noexcept {
     if (ptp_receiver_runtime_active()) return true;
     g_receiver_stop_pending.store(false, std::memory_order_release);
     return false;
+}
+
+[[nodiscard]] bool emac_role_free() noexcept {
+    const bool pending = receiver_stop_cleanup_pending();
+    return ar::iec61850::time_sync::can_change_ptp_emac_role({
+        ar_ptp_source_runtime_active(),
+        ptp_receiver_runtime_active(),
+        pending,
+    });
 }
 
 [[nodiscard]] const char* role_name(const ar_ptp_role_t role) noexcept {
@@ -198,10 +226,13 @@ extern "C" void ar_ptp_lab_get_default_config(ar_ptp_lab_config_t* config) {
 }
 
 extern "C" bool ar_ptp_lab_configure(const ar_ptp_lab_config_t* config) {
-    if (config == nullptr || ar_ptp_source_is_running() || ar::esp32p4::smv::ptp_receiver_runtime_active() || ar::esp32p4::smv::receiver_stop_cleanup_pending() || !ar::esp32p4::smv::valid_public_config(*config)) return false;
+    if (config == nullptr) return false;
+    ar::esp32p4::smv::RoleControlClaim transaction{};
+    if (!transaction.held || !ar::esp32p4::smv::emac_role_free() ||
+        !ar::esp32p4::smv::valid_public_config(*config)) return false;
     if (!ar_ptp_source_configure(config)) return false;
     portENTER_CRITICAL(&ar::esp32p4::smv::g_ptp_facade_mux);
-    if (ar_ptp_source_is_running() || ar::esp32p4::smv::ptp_receiver_runtime_active() || ar::esp32p4::smv::g_receiver_stop_pending.load(std::memory_order_acquire)) {
+    if (!ar::esp32p4::smv::emac_role_free()) {
         portEXIT_CRITICAL(&ar::esp32p4::smv::g_ptp_facade_mux);
         return false;
     }
@@ -218,20 +249,14 @@ extern "C" bool ar_ptp_lab_get_config(ar_ptp_lab_config_t* config) {
 }
 
 extern "C" bool ar_ptp_lab_try_start(const esp_eth_handle_t eth_handle) {
-    if (eth_handle == nullptr || ar_ptp_source_is_running()) return false;
-
-    // A STOP request for receiver/monitor is asynchronous. Never interpret the
-    // still-ready old runtime as acceptance of a new START. Reject until the
-    // worker has completed cleanup, then clear the facade stop gate.
-    if (ar::esp32p4::smv::receiver_stop_cleanup_pending() ||
-        ar::esp32p4::smv::ptp_receiver_runtime_active()) {
-        return false;
-    }
+    if (eth_handle == nullptr) return false;
+    ar::esp32p4::smv::RoleControlClaim transaction{};
+    if (!transaction.held || !ar::esp32p4::smv::emac_role_free()) return false;
 
     const auto config = ar::esp32p4::smv::selected_config();
     if (!ar::esp32p4::smv::valid_public_config(config)) {
         ESP_LOGE(ar::esp32p4::smv::kTag,
-                 "PTP start rejected: invalid role/cadence/discipline threshold combination");
+                 "PTP start rejected: invalid role/cadence/discipline thresholds");
         return false;
     }
 
@@ -278,7 +303,7 @@ namespace {
 [[nodiscard]] bool collect_ptp_status(ar_ptp_lab_status_t& status) noexcept {
     status = {};
     bool ok = true;
-    if (ar_ptp_source_is_running()) {
+    if (ar_ptp_source_runtime_active()) {
         const auto before = ar_ptp_source_generation();
         ok = ar_ptp_source_get_status(&status);
         const auto after = ar_ptp_source_generation();

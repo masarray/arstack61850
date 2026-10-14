@@ -917,6 +917,12 @@ extern "C" bool ar_ptp_lab_is_running(void) {
     return ar::esp32p4::smv::ptp_lab_is_running();
 }
 
+// Lifetime/ownership is deliberately independent of measured PTP READY.
+// Used only by the facade to prevent simultaneous EMAC timebase owners.
+extern "C" bool ar_ptp_source_runtime_active(void) {
+    return ar::esp32p4::smv::g_ptp_started.load(std::memory_order_acquire);
+}
+
 extern "C" std::uint32_t ar_ptp_source_generation(void) {
     if (!ar::esp32p4::smv::ptp_lab_is_running()) return 0U;
     return ar::esp32p4::smv::g_ptp_source_generation.load(
