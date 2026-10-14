@@ -45,11 +45,32 @@ struct SmpSynchDecision final {
 };
 
 /**
+ * Qualification of the *actual sample timeline*; deliberately distinct from
+ * PTP clock discipline. Defaults to denied. A clock can be LOCKED while the
+ * Sampled Values GPTimer and smpCnt epoch are still free-running.
+ *
+ * The hardware publisher must establish every field from independent timing
+ * evidence before AUTO is eligible to announce local/global synchronization.
+ */
+struct SvSampleTimelineEvidence final {
+    bool clock_and_timeline_share_epoch{};
+    bool counter_epoch_verified{};
+    bool sample_phase_within_profile_limit{};
+
+    [[nodiscard]] constexpr bool qualified() const noexcept {
+        return clock_and_timeline_share_epoch &&
+               counter_epoch_verified &&
+               sample_phase_within_profile_limit;
+    }
+};
+
+/**
  * Resolve what the SV publisher is allowed to advertise in smpSynch.
  *
- * AUTO is deliberately conservative: until a future clock-discipline/lock
- * engine supplies measured_synchronization, AUTO advertises 0. Merely seeing
- * valid PTP packets is never sufficient evidence for automatic promotion.
+ * AUTO requires BOTH a measured PTP clock state and independently qualified
+ * SV sample/counter epoch evidence. A PTP LOCKED flag alone is insufficient.
+ * Existing publishers using the independent GPTimer intentionally default to
+ * unqualified timeline evidence and transmit smpSynch=0.
  *
  * The three non-AUTO modes are explicit lab overrides and may advertise
  * smpSynch 0, 1, or 2 regardless of measured timing. They are therefore
@@ -58,10 +79,11 @@ struct SmpSynchDecision final {
  */
 [[nodiscard]] constexpr SmpSynchDecision resolve_sv_sync_policy(
     const SvSyncPolicyMode mode,
-    const std::optional<SmpSynchValue> measured_synchronization = std::nullopt) noexcept {
+    const std::optional<SmpSynchValue> measured_synchronization = std::nullopt,
+    const SvSampleTimelineEvidence timeline_evidence = {}) noexcept {
     switch (mode) {
     case SvSyncPolicyMode::external_ptp_auto:
-        if (measured_synchronization.has_value()) {
+        if (measured_synchronization.has_value() && timeline_evidence.qualified()) {
             return {*measured_synchronization, mode, SmpSynchDecisionSource::measured_timing};
         }
         return {SmpSynchValue::not_synchronized, mode, SmpSynchDecisionSource::safe_default};
