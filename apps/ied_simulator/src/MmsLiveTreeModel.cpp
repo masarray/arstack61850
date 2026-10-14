@@ -680,10 +680,67 @@ int MmsLiveDetailModel::rowOf(int node) const {
 void MmsLiveDetailModel::toggle(int row) {
     if (row < 0 || row >= rows_.size()) return;
     const int node = rows_.at(row).node;
-    if (owner_->nodes_.at(node).children.isEmpty()) return;
-    if (expanded_.contains(node)) expanded_.remove(node);
-    else expanded_.insert(node);
-    rebuild();
+    const int depth = rows_.at(row).depth;
+    const auto& children = owner_->nodes_.at(node).children;
+    if (children.isEmpty()) return;
+
+    // An earlier bounded projection might have withheld later siblings.
+    // Rebuild in that rare case to restore complete ordering after collapse.
+    if (truncated_) {
+        if (expanded_.contains(node)) expanded_.remove(node);
+        else expanded_.insert(node);
+        rebuild();
+        return;
+    }
+
+    if (expanded_.contains(node)) {
+        int last = row + 1;
+        while (last < rows_.size() && rows_.at(last).depth > depth) ++last;
+        // A selected descendant must not silently disappear from view.
+        const int selectedRow = rowOf(selected_);
+        if (selectedRow > row && selectedRow < last) select(row);
+        expanded_.remove(node);
+        if (last > row + 1) {
+            beginRemoveRows({}, row + 1, last - 1);
+            rows_.remove(row + 1, last - row - 1);
+            endRemoveRows();
+        }
+    } else {
+        expanded_.insert(node);
+        QVector<Row> added;
+        added.reserve(std::min(maximumRows_ - rows_.size(), int(children.size())));
+        bool clipped = false;
+        const int capacity = maximumRows_ - rows_.size();
+        const auto expand = [&](const auto& self, int child, int level) -> void {
+            if (added.size() >= capacity) { clipped = true; return; }
+            added.push_back({child, level});
+            if (expanded_.contains(child))
+                for (const auto descendant : owner_->nodes_.at(child).children) {
+                    self(self, descendant, level + 1);
+                    if (clipped) return;
+                }
+        };
+        for (const auto child : children) {
+            expand(expand, child, depth + 1);
+            if (clipped) break;
+        }
+        if (!added.isEmpty()) {
+            const int offset = row + 1;
+            const int oldSize = rows_.size();
+            beginInsertRows({}, offset, offset + added.size() - 1);
+            rows_.resize(oldSize + added.size());
+            for (int pos = oldSize - 1; pos >= offset; --pos)
+                rows_[pos + added.size()] = rows_.at(pos);
+            for (int pos = 0; pos < added.size(); ++pos)
+                rows_[offset + pos] = added.at(pos);
+            endInsertRows();
+        }
+        if (clipped) {
+            truncated_ = true;
+            emit projectionChanged();
+        }
+    }
+    emit dataChanged(index(row), index(row), {ExpandedRole});
 }
 void MmsLiveDetailModel::select(int row) {
     if (row < 0 || row >= rows_.size()) return;
