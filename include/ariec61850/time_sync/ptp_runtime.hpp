@@ -99,7 +99,7 @@ struct PtpPublisherOptions final {
     PtpClockIdentity clock_identity{0x02U, 0x00U, 0x00U, 0xFFU, 0xFEU, 0x00U, 0x00U, 0x01U};
     std::uint16_t port_number{1U};
     std::chrono::milliseconds announce_interval{1000};
-    std::chrono::milliseconds sync_interval{250};
+    std::chrono::milliseconds sync_interval{1000};
     std::chrono::milliseconds follow_up_delay{};
     bool two_step_clock{true};
     bool respond_to_peer_delay{true};
