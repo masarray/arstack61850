@@ -182,8 +182,8 @@ Rectangle {
                         Layout.preferredWidth: Math.max(180, root.width * 0.42)
                         text: childRow.model.value
                               || childRow.model.description
-                              || (childRow.model.childCount > 0
-                                  ? childRow.model.childCount + " item(s)" : "—")
+                              || (childRow.model.hasChildren
+                                  ? "Expand for attributes" : "—")
                         color: childRow.model.selected ? "#ffffff" : theme.textSoft
                         font.pixelSize: 9
                         elide: Text.ElideRight

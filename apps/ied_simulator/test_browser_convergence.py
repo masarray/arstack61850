@@ -8,6 +8,7 @@ if len(sys.argv) != 5:
 workspace_path = Path(sys.argv[1])
 workspace = workspace_path.read_text(encoding="utf-8")
 report_inspector = (workspace_path.parent / "BrowserReportPane.qml").read_text(encoding="utf-8")
+data_set = (workspace_path.parent / "BrowserDataSetPane.qml").read_text(encoding="utf-8")
 navigation = Path(sys.argv[2]).read_text(encoding="utf-8")
 status = Path(sys.argv[3]).read_text(encoding="utf-8")
 data_model = Path(sys.argv[4]).read_text(encoding="utf-8")
@@ -64,6 +65,21 @@ for label, source, required in [
     missing = [token for token in required if token not in source]
     if missing:
         raise SystemExit("BROWSER_CONVERGENCE_FAIL " + label + " missing=" + ",".join(missing))
+
+data_set_required = [
+    'objectName: "browserDataSetMembers"',
+    'function memberParts(',
+    'function toggleMember(',
+    'dataSetChildrenForReference(',
+    'root.expandedMemberIndex',
+    'maximumExpandedChildren: 64',
+    'required property var modelData',
+]
+missing_dataset = [term for term in data_set_required if term not in data_set]
+if missing_dataset:
+    raise SystemExit("BROWSER_DATASET_HIERARCHY_FAIL missing=" + ",".join(missing_dataset))
+if 'root.memberNode(modelData)' in data_set:
+    raise SystemExit("BROWSER_DATASET_HIERARCHY_FAIL unnormalized per-row linear lookup")
 
 report_required = [
     'objectName: "browserReportUnifiedInspector"',

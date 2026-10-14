@@ -141,6 +141,10 @@ public:
     Q_INVOKABLE void toggle(int row);
     Q_INVOKABLE bool selectMmsItem(const QString& domain, const QString& item);
     Q_INVOKABLE QVariantMap nodeForReference(const QString& reference) const;
+    // FCDA expansion is bounded and derives exclusively from canonical nodes.
+    Q_INVOKABLE QVariantList dataSetChildrenForReference(
+        const QString& reference, const QString& functionalConstraint,
+        int maximumChildren = 64) const;
     Q_INVOKABLE void clear();
 
     void applyDocument(const ar::iec61850::mms::MmsLiveModelDocument& document);
@@ -159,6 +163,7 @@ signals:
     void filterTextChanged();
     void selectionChanged();
     void countsChanged();
+    void valuesChanged();
 
 private:
     friend class MmsLiveDetailModel;
@@ -205,6 +210,7 @@ private:
     QVector<Node> nodes_;
     QVector<int> visible_;
     QHash<QString, int> mmsIndex_;
+    QHash<QString, QVector<int>> referenceIndex_;
     QString filterText_;
     int selectedNode_{-1};
     static constexpr int maximumProjectedChildren_{4096};

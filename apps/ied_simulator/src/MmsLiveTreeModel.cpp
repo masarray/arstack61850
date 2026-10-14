@@ -111,6 +111,24 @@ int MmsLiveTreeModel::appendNode(Node node) {
     const auto index = nodes_.size();
     if (node.parent >= 0 && node.parent < nodes_.size()) nodes_[node.parent].children.push_back(index);
     if (!node.domain.isEmpty() && !node.item.isEmpty()) mmsIndex_.insert(nodeKey(node.domain, node.item), index);
+    if (!node.reference.isEmpty() &&
+        (node.kind == NodeKind::dataObject || node.kind == NodeKind::dataAttribute))
+        referenceIndex_[node.reference].push_back(index);
+    // The same canonical DA can be addressed as an MMS item or an IEC
+    // FCD/FCDA reference. Index both; no duplicate node or second authority.
+    if (node.kind == NodeKind::dataAttribute &&
+        node.parent >= 0 && node.parent < nodes_.size()) {
+        const auto& object = nodes_.at(node.parent);
+        QString suffix = node.attributePath.trimmed();
+        const QString objectPrefix = object.label + QLatin1Char('.');
+        const int prefixStart = suffix.indexOf(objectPrefix);
+        if (prefixStart >= 0) suffix = suffix.mid(prefixStart + objectPrefix.size());
+        if (suffix.isEmpty()) suffix = node.label;
+        if (!object.reference.isEmpty() && !suffix.isEmpty()) {
+            const QString iecReference = object.reference + QLatin1Char('.') + suffix;
+            if (iecReference != node.reference) referenceIndex_[iecReference].push_back(index);
+        }
+    }
     nodes_.push_back(std::move(node));
     return index;
 }
@@ -121,6 +139,7 @@ void MmsLiveTreeModel::applyDocument(const ar::iec61850::mms::MmsLiveModelDocume
     nodes_.clear();
     visible_.clear();
     mmsIndex_.clear();
+    referenceIndex_.clear();
     selectedNode_ = -1;
 
     Node root;
@@ -208,6 +227,7 @@ void MmsLiveTreeModel::clear() {
     nodes_.clear();
     visible_.clear();
     mmsIndex_.clear();
+    referenceIndex_.clear();
     selectedNode_ = -1;
     endResetModel();
     emit countsChanged();
@@ -410,15 +430,60 @@ bool MmsLiveTreeModel::selectRoot() {
     return nodes_.isEmpty() ? false : selectNode(0);
 }
 
+namespace {
+// Dataset descriptors carry an optional human-readable FC suffix. Strip only
+// that suffix, never modify IEC object identifiers or infer an unknown FC.
+QPair<QString, QString> splitDataSetMemberReference(const QString& raw) {
+    const QString reference = raw.trimmed();
+    const int split = reference.lastIndexOf(QStringLiteral(" ["));
+    if (split < 0 || !reference.endsWith(QLatin1Char(']'))) return {reference, {}};
+    const QString fc = reference.mid(split + 2, reference.size() - split - 3);
+    if (fc.isEmpty() || fc.size() > 4) return {reference, {}};
+    for (const auto character : fc)
+        if (!character.isLetterOrNumber()) return {reference, {}};
+    return {reference.left(split).trimmed(), fc.toUpper()};
+}
+} // namespace
+
 QVariantMap MmsLiveTreeModel::nodeForReference(const QString& reference) const {
-    const auto wanted = reference.trimmed();
-    if (wanted.isEmpty()) return {};
-    for (int index = 0; index < nodes_.size(); ++index) {
-        const auto& node = nodes_.at(index);
-        if (node.kind != NodeKind::dataAttribute) continue;
-        if (node.reference == wanted) return nodeMap(index);
+    const auto [wanted, fc] = splitDataSetMemberReference(reference);
+    const auto found = referenceIndex_.constFind(wanted);
+    if (wanted.isEmpty() || found == referenceIndex_.cend()) return {};
+    for (const auto nodeIndex : found.value()) {
+        const auto& node = nodes_.at(nodeIndex);
+        if (fc.isEmpty() || node.kind == NodeKind::dataObject ||
+            node.functionalConstraint.compare(fc, Qt::CaseInsensitive) == 0)
+            return nodeMap(nodeIndex);
     }
     return {};
+}
+
+QVariantList MmsLiveTreeModel::dataSetChildrenForReference(
+    const QString& reference, const QString& functionalConstraint,
+    const int maximumChildren) const {
+    QVariantList result;
+    if (maximumChildren <= 0) return result;
+    const auto [wanted, suffixFc] = splitDataSetMemberReference(reference);
+    const QString fc = functionalConstraint.trimmed().isEmpty()
+        ? suffixFc : functionalConstraint.trimmed().toUpper();
+    const auto found = referenceIndex_.constFind(wanted);
+    if (wanted.isEmpty() || found == referenceIndex_.cend()) return result;
+    const int limit = std::min(64, maximumChildren);
+    for (const int nodeIndex : found.value()) {
+        const auto& object = nodes_.at(nodeIndex);
+        if (object.kind != NodeKind::dataObject) continue;
+        result.reserve(std::min(limit, int(object.children.size())));
+        for (const int child : object.children) {
+            const auto& attribute = nodes_.at(child);
+            if (!fc.isEmpty() &&
+                attribute.functionalConstraint.compare(fc, Qt::CaseInsensitive) != 0)
+                continue;
+            result.push_back(nodeMap(child));
+            if (result.size() >= limit) return result;
+        }
+        break;
+    }
+    return result;
 }
 
 void MmsLiveTreeModel::selectRow(const int row) {
@@ -567,6 +632,7 @@ void MmsLiveTreeModel::applyReadValue(const QString& key, const QString& display
     if (node.value == displayValue) return;
     node.value = displayValue;
     detailModel_->nodeValueChanged(nodeIndex);
+    emit valuesChanged();
     const auto row = visibleRowForNode(nodeIndex);
     if (row >= 0) emit dataChanged(index(row), index(row), {ValueRole});
     if (!filterText_.trimmed().isEmpty()) rebuildVisible();
