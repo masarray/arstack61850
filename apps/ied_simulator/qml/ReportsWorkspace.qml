@@ -321,43 +321,92 @@ Item {
                             }
                         }
 
-                        GridLayout {
+                        Rectangle {
                             Layout.fillWidth: true
-                            columns: 2
-                            columnSpacing: 10
-                            rowSpacing: 5
-                            Repeater {
-                                model: [
-                                    ["DataSet", reports.selectedRcb.dataSet],
-                                    ["RptID", reports.selectedRcb.reportId],
-                                    ["ConfRev", reports.selectedRcb.confRev],
-                                    ["BufTm", reports.selectedRcb.bufTm],
-                                    ["IntgPd", reports.selectedRcb.intgPd],
-                                    ["SqNum", reports.selectedRcb.sqNum],
-                                    ["RptEna", reports.selectedRcb.enabled],
-                                    ["Reserved", reports.selectedRcb.reserved],
-                                    ["ResvTms", reports.selectedRcb.resvTms],
-                                    ["Owner", reports.selectedRcb.owner]
-                                ]
-                                delegate: Rectangle {
-                                    required property var modelData
+                            implicitHeight: controlAttributes.implicitHeight
+                            color: theme.surface
+                            border.width: 1
+                            border.color: theme.line
+
+                            ColumnLayout {
+                                id: controlAttributes
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                spacing: 0
+
+                                Rectangle {
                                     Layout.fillWidth: true
-                                    implicitHeight: 46
-                                    radius: 5
-                                    color: theme.surface
-                                    border.width: 1
-                                    border.color: theme.lineSoft
-                                    ColumnLayout {
+                                    Layout.preferredHeight: 26
+                                    color: theme.surfaceRaised
+                                    RowLayout {
                                         anchors.fill: parent
-                                        anchors.margins: 7
-                                        spacing: 1
-                                        Label { text: modelData[0]; color: theme.muted; font.pixelSize: 7 }
+                                        anchors.leftMargin: 8
+                                        anchors.rightMargin: 8
                                         Label {
-                                            Layout.fillWidth: true
-                                            text: root.text(modelData[1])
+                                            text: "▾  Control block attributes"
                                             color: theme.text
                                             font.pixelSize: 8
-                                            elide: Text.ElideMiddle
+                                            font.weight: Font.DemiBold
+                                        }
+                                        Item { Layout.fillWidth: true }
+                                        Label {
+                                            text: reports.selectedRcb.probeOk === true ? "VERIFIED" : "ENGINEERING"
+                                            color: reports.selectedRcb.probeOk === true ? theme.green : theme.muted
+                                            font.pixelSize: 7
+                                            font.weight: Font.DemiBold
+                                        }
+                                    }
+                                }
+
+                                Repeater {
+                                    model: [
+                                        ["Enabled", reports.selectedRcb.enabled],
+                                        ["Reserved", reports.selectedRcb.reserved],
+                                        ["Control block reference", reports.selectedRcb.reference],
+                                        ["Report ID", reports.selectedRcb.reportId],
+                                        ["DataSet reference", reports.selectedRcb.dataSet],
+                                        ["Trigger options", reports.selectedRcb.triggerOptions],
+                                        ["Buffer time (ms)", reports.selectedRcb.bufTm],
+                                        ["Configuration revision", reports.selectedRcb.confRev],
+                                        ["Integrity period (ms)", reports.selectedRcb.intgPd],
+                                        ["Sequence number", reports.selectedRcb.sqNum],
+                                        ["Reservation time (s)", reports.selectedRcb.resvTms],
+                                        ["Owner", reports.selectedRcb.owner]
+                                    ]
+                                    delegate: Rectangle {
+                                        required property int index
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        implicitHeight: 24
+                                        color: index % 2 ? theme.surfaceSoft : theme.surface
+                                        RowLayout {
+                                            anchors.fill: parent
+                                            spacing: 0
+                                            Label {
+                                                Layout.preferredWidth: 155
+                                                Layout.fillHeight: true
+                                                leftPadding: 7
+                                                verticalAlignment: Text.AlignVCenter
+                                                text: modelData[0]
+                                                color: theme.textSoft
+                                                font.pixelSize: 8
+                                            }
+                                            Rectangle {
+                                                Layout.preferredWidth: 1
+                                                Layout.fillHeight: true
+                                                color: theme.lineSoft
+                                            }
+                                            Label {
+                                                Layout.fillWidth: true
+                                                Layout.fillHeight: true
+                                                leftPadding: 7
+                                                rightPadding: 7
+                                                verticalAlignment: Text.AlignVCenter
+                                                text: root.text(modelData[1])
+                                                color: theme.text
+                                                font.pixelSize: 8
+                                                elide: Text.ElideMiddle
+                                            }
                                         }
                                     }
                                 }
@@ -541,9 +590,11 @@ Item {
                         model: reports.receivedReports
                         ScrollBar.vertical: ScrollBar { }
                         delegate: Rectangle {
+                            id: reportRow
                             required property var modelData
+                            property bool expanded: false
                             width: ListView.view.width
-                            height: 78
+                            height: 78 + (expanded ? Math.min(modelData.values ? modelData.values.length : 0, 64) * 23 + 5 : 0)
                             color: modelData.overflow ? theme.redSoft : "transparent"
                             border.width: 0
                             ColumnLayout {
@@ -555,6 +606,11 @@ Item {
                                 spacing: 2
                                 RowLayout {
                                     Layout.fillWidth: true
+                                    Label {
+                                        text: reportRow.expanded ? "▾" : "▸"
+                                        color: theme.muted
+                                        font.pixelSize: 8
+                                    }
                                     Label {
                                         Layout.fillWidth: true
                                         text: root.text(modelData.reportId)
@@ -589,6 +645,36 @@ Item {
                                     color: theme.muted
                                     font.pixelSize: 7
                                 }
+                                Repeater {
+                                    model: reportRow.expanded && modelData.values
+                                           ? modelData.values.slice(0, 64) : []
+                                    delegate: Rectangle {
+                                        required property int index
+                                        required property string modelData
+                                        Layout.fillWidth: true
+                                        implicitHeight: 22
+                                        color: index % 2 ? theme.surfaceSoft : theme.surface
+                                        border.width: 1
+                                        border.color: theme.lineSoft
+                                        Label {
+                                            anchors.fill: parent
+                                            leftPadding: 7
+                                            rightPadding: 7
+                                            verticalAlignment: Text.AlignVCenter
+                                            text: modelData
+                                            color: theme.textSoft
+                                            font.pixelSize: 7
+                                            elide: Text.ElideMiddle
+                                        }
+                                    }
+                                }
+                            }
+                            MouseArea {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                height: 78
+                                onClicked: reportRow.expanded = !reportRow.expanded
                             }
                         }
                     }

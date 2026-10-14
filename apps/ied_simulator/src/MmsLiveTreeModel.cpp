@@ -14,6 +14,25 @@ QString leafName(const QString& path) {
     const auto split = std::max(dot, dollar);
     return split >= 0 ? path.mid(split + 1) : path;
 }
+
+QString logicalNodeDescription(const QString& logicalNodeClass) {
+    static const QHash<QString, QString> descriptions{
+        {QStringLiteral("LLN0"), QStringLiteral("Logical node zero")},
+        {QStringLiteral("LPHD"), QStringLiteral("Physical device information")},
+        {QStringLiteral("MMXU"), QStringLiteral("Measurement")},
+        {QStringLiteral("MSQI"), QStringLiteral("Sequence and imbalance")},
+        {QStringLiteral("MMTR"), QStringLiteral("Metering")},
+        {QStringLiteral("PIOC"), QStringLiteral("Instantaneous overcurrent")},
+        {QStringLiteral("PTOC"), QStringLiteral("Time overcurrent")},
+        {QStringLiteral("XCBR"), QStringLiteral("Circuit breaker")},
+        {QStringLiteral("CSWI"), QStringLiteral("Switch controller")},
+    };
+    const auto normalized = logicalNodeClass.trimmed().toUpper();
+    if (const auto found = descriptions.constFind(normalized); found != descriptions.cend()) {
+        return found.value();
+    }
+    return normalized.isEmpty() ? QString{} : QStringLiteral("Logical node %1").arg(normalized);
+}
 } // namespace
 
 MmsLiveTreeModel::MmsLiveTreeModel(QObject* parent) : QAbstractListModel(parent) {}
@@ -118,6 +137,7 @@ void MmsLiveTreeModel::applyDocument(const ar::iec61850::mms::MmsLiveModelDocume
         ld.label = q(logicalDevice.instance.empty() ? logicalDevice.mms_domain : logicalDevice.instance);
         ld.reference = q(logicalDevice.mms_domain);
         ld.domain = q(logicalDevice.mms_domain);
+        ld.description = QStringLiteral("Logical device");
         const auto ldIndex = appendNode(std::move(ld));
 
         for (const auto& logicalNode : logicalDevice.logical_nodes) {
@@ -129,6 +149,7 @@ void MmsLiveTreeModel::applyDocument(const ar::iec61850::mms::MmsLiveModelDocume
             ln.label = q(logicalNode.name);
             ln.reference = q(logicalDevice.mms_domain + "/" + logicalNode.name);
             ln.domain = q(logicalDevice.mms_domain);
+            ln.description = logicalNodeDescription(q(logicalNode.logical_node_class));
             const auto lnIndex = appendNode(std::move(ln));
 
             for (const auto& dataObject : logicalNode.data_objects) {
@@ -140,6 +161,7 @@ void MmsLiveTreeModel::applyDocument(const ar::iec61850::mms::MmsLiveModelDocume
                 object.label = q(dataObject.name);
                 object.reference = q(dataObject.reference);
                 object.domain = q(logicalDevice.mms_domain);
+                object.description = q(dataObject.inferred_cdc);
                 const auto objectIndex = appendNode(std::move(object));
 
                 for (const auto& attribute : dataObject.attributes) {
@@ -161,6 +183,7 @@ void MmsLiveTreeModel::applyDocument(const ar::iec61850::mms::MmsLiveModelDocume
                     da.mmsType = q(attribute.mms_type);
                     da.sclType = q(attribute.scl_basic_type);
                     da.typeStatus = q(attribute.type_discovery_status);
+                    da.description = q(attribute.scl_basic_type);
                     da.writable = isWritableAttribute(
                         da.functionalConstraint, da.typeStatus, da.mmsType);
                     (void)appendNode(std::move(da));
@@ -277,7 +300,27 @@ QVariantMap MmsLiveTreeModel::nodeMap(const int nodeIndex) const {
     result.insert(QStringLiteral("mmsType"), node.mmsType);
     result.insert(QStringLiteral("sclType"), node.sclType);
     result.insert(QStringLiteral("typeStatus"), node.typeStatus);
-    result.insert(QStringLiteral("value"), node.value);
+    result.insert(QStringLiteral("description"), node.description);
+    QString displayValue = node.value;
+    if (displayValue.isEmpty() && node.kind == NodeKind::dataObject) {
+        static const QStringList preferredLeaves{
+            QStringLiteral("stVal"), QStringLiteral("mag"), QStringLiteral("setVal"),
+            QStringLiteral("instMag"), QStringLiteral("general")};
+        for (const auto& preferred : preferredLeaves) {
+            for (const auto childIndex : node.children) {
+                const auto& child = nodes_.at(childIndex);
+                if (child.label.compare(preferred, Qt::CaseInsensitive) == 0 &&
+                    !child.value.isEmpty()) {
+                    displayValue = child.value;
+                    break;
+                }
+            }
+            if (!displayValue.isEmpty()) break;
+        }
+    }
+    result.insert(QStringLiteral("value"), displayValue);
+    result.insert(QStringLiteral("hasChildren"), !node.children.isEmpty());
+    result.insert(QStringLiteral("childCount"), node.children.size());
     result.insert(QStringLiteral("quality"), siblingValue(nodeIndex, QStringLiteral("q")));
     result.insert(QStringLiteral("timestamp"), siblingValue(nodeIndex, QStringLiteral("t")));
     result.insert(QStringLiteral("writable"), node.writable);
@@ -297,6 +340,68 @@ QVariantMap MmsLiveTreeModel::nodeMap(const int nodeIndex) const {
 
 QVariantMap MmsLiveTreeModel::selectedNode() const {
     return nodeMap(selectedNode_);
+}
+
+int MmsLiveTreeModel::presentationNodeIndex() const noexcept {
+    if (selectedNode_ >= 0 && selectedNode_ < nodes_.size()) return selectedNode_;
+    return nodes_.isEmpty() ? -1 : 0;
+}
+
+QVariantMap MmsLiveTreeModel::presentationNode() const {
+    return nodeMap(presentationNodeIndex());
+}
+
+int MmsLiveTreeModel::selectedChildCount() const noexcept {
+    const auto nodeIndex = presentationNodeIndex();
+    return nodeIndex >= 0 ? nodes_.at(nodeIndex).children.size() : 0;
+}
+
+bool MmsLiveTreeModel::selectedChildrenTruncated() const noexcept {
+    return selectedChildCount() > maximumProjectedChildren_;
+}
+
+QVariantList MmsLiveTreeModel::selectedChildren() const {
+    QVariantList result;
+    const auto nodeIndex = presentationNodeIndex();
+    if (nodeIndex < 0) return result;
+    const auto& children = nodes_.at(nodeIndex).children;
+    const auto count = std::min(children.size(), qsizetype{maximumProjectedChildren_});
+    result.reserve(count);
+    for (int index = 0; index < count; ++index) result.push_back(nodeMap(children.at(index)));
+    return result;
+}
+
+bool MmsLiveTreeModel::selectNode(const int nodeIndex) {
+    if (nodeIndex < 0 || nodeIndex >= nodes_.size() || nodeIndex == selectedNode_) return false;
+    const auto previousRow = selectedRow();
+    selectedNode_ = nodeIndex;
+    for (int cursor = nodes_.at(selectedNode_).parent; cursor >= 0; cursor = nodes_.at(cursor).parent) {
+        nodes_[cursor].expanded = true;
+    }
+    rebuildVisible();
+    const auto currentRow = selectedRow();
+    if (previousRow >= 0 && previousRow < rowCount())
+        emit dataChanged(index(previousRow), index(previousRow), {SelectedRole});
+    if (currentRow >= 0)
+        emit dataChanged(index(currentRow), index(currentRow), {SelectedRole});
+    emit selectionChanged();
+    return true;
+}
+
+bool MmsLiveTreeModel::selectChild(const int row) {
+    const auto nodeIndex = presentationNodeIndex();
+    if (nodeIndex < 0 || row < 0 || row >= nodes_.at(nodeIndex).children.size()) return false;
+    return selectNode(nodes_.at(nodeIndex).children.at(row));
+}
+
+bool MmsLiveTreeModel::selectParent() {
+    const auto nodeIndex = presentationNodeIndex();
+    if (nodeIndex < 0 || nodes_.at(nodeIndex).parent < 0) return false;
+    return selectNode(nodes_.at(nodeIndex).parent);
+}
+
+bool MmsLiveTreeModel::selectRoot() {
+    return nodes_.isEmpty() ? false : selectNode(0);
 }
 
 QVariantMap MmsLiveTreeModel::nodeForReference(const QString& reference) const {

@@ -85,6 +85,18 @@ int main(int argc, char** argv) {
         return 3;
     }
 
+    if (!model.selectRoot() || model.selectedChildCount() != 5 ||
+        model.selectedChildren().size() != 5 || !model.selectChild(4) ||
+        model.presentationNode().value(QStringLiteral("kind")).toString() != QStringLiteral("LD") ||
+        model.selectedChildCount() != 20 || !model.selectChild(19) ||
+        model.presentationNode().value(QStringLiteral("kind")).toString() != QStringLiteral("LN") ||
+        model.selectedChildCount() != 100 || !model.selectChild(99) ||
+        model.presentationNode().value(QStringLiteral("kind")).toString() != QStringLiteral("DO") ||
+        model.selectedChildCount() != 5) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL bounded_drilldown_projection\n";
+        return 12;
+    }
+
     QElapsedTimer filterTimer;
     filterTimer.start();
     model.setFilterText(QStringLiteral("LD4/LLN19.DO99"));
@@ -153,6 +165,6 @@ int main(int argc, char** argv) {
               << " apply_ms=" << applyMs
               << " filter_ms=" << filterMs
               << " select_ms=" << selectMs
-              << " eager_expansion=false\n";
+              << " eager_expansion=false drilldown=canonical\n";
     return passes ? 0 : 11;
 }

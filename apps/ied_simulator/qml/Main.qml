@@ -467,7 +467,10 @@ ApplicationWindow {
                                 IedBrowserWorkspace {
                                     required property int index
                                     objectName: "iedBrowserView_" + index
-                                    anchors.fill: parent
+                                    x: 0
+                                    y: 0
+                                    width: perIedBrowserHost.width
+                                    height: perIedBrowserHost.height
                                     visible: index === root.browserFleet.activeIndex
                                     theme: appTheme
                                     productState: hardening
