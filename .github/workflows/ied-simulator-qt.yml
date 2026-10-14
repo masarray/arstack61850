@@ -362,6 +362,29 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Capture native Browser Data Model and DataSets visual baselines
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          ./build-ied-simulator-qt/arstack_ied_simulator \
+            --browser-model ./tests/fixtures/scl/minimal-station-brcb.scd \
+            --browser-section 0 --screenshot ./ied-browser-data-model.png
+          ./build-ied-simulator-qt/arstack_ied_simulator \
+            --browser-model ./tests/fixtures/scl/minimal-station-brcb.scd \
+            --browser-section 1 --screenshot ./ied-browser-datasets.png
+          test -s ./ied-browser-data-model.png
+          test -s ./ied-browser-datasets.png
+
+      - name: Upload Browser Data Model and DataSets visual baselines
+        uses: actions/upload-artifact@v4
+        with:
+          name: ied-browser-model-datasets-m2h
+          path: |
+            ied-browser-data-model.png
+            ied-browser-datasets.png
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Prove GUI value is visible through MMS
         run: >-
           python3 apps/ied_simulator/test_gui_live_value.py

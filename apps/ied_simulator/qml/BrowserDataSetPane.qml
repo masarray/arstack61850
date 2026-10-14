@@ -16,6 +16,18 @@ Rectangle {
     property var expandedMemberChildren: []
     property int valueRevision: 0
     property bool showSelectedEvidence: false
+    property string selectedAttributeReference: ""
+    readonly property var selectedAttributeNode: {
+        // Re-evaluate the canonical node when an MMS value changes; do not
+        // cache report/typed evidence in QML or retain stale DA selections.
+        const revision = root.valueRevision
+        const selected = root.modelProvider.treeModel.selectedNode
+        return root.showSelectedEvidence
+               && selected.reference === root.selectedAttributeReference
+               ? selected : ({})
+    }
+    readonly property var selectedAttributeEvidence:
+        root.selectedAttributeNode.engineeringEvidence || ({})
     readonly property int maximumExpandedChildren: 64
 
     function memberParts(raw) {
@@ -39,6 +51,8 @@ Rectangle {
     }
 
     function toggleMember(row, raw) {
+        showSelectedEvidence = false
+        selectedAttributeReference = ""
         if (expandedMemberIndex === row) {
             expandedMemberIndex = -1
             expandedMemberChildren = []
@@ -57,6 +71,7 @@ Rectangle {
             root.expandedMemberIndex = -1
             root.expandedMemberChildren = []
             root.showSelectedEvidence = false
+            root.selectedAttributeReference = ""
         }
     }
     Connections {
@@ -129,10 +144,16 @@ Rectangle {
                     MouseArea { id: dsMouse; anchors.fill: parent; hoverEnabled: true; onClicked: reports.selectDataSet(dataSetRow.index) }
                 }
             }
-            ListView {
-                id: memberList
-                objectName: "browserDataSetMembers"
-                clip: true
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 0
+                ListView {
+                    id: memberList
+                    objectName: "browserDataSetMembers"
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
                 reuseItems: true
                 cacheBuffer: 0
                 model: reports.selectedDataSetMembers
@@ -211,11 +232,19 @@ Rectangle {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 onClicked: {
+                                    root.showSelectedEvidence = false
+                                    root.selectedAttributeReference = ""
                                     if (memberRow.canExpand)
                                         root.toggleMember(memberRow.index, memberRow.modelData)
-                                    else if (memberRow.resolved.readable === true)
-                                        root.modelProvider.treeModel.selectMmsItem(
+                                    else if (memberRow.resolved.readable === true) {
+                                        // Direct FCDA/DA members must expose typed q/t too,
+                                        // without expansion or an implicit MMS Read.
+                                        const selected = root.modelProvider.treeModel.selectMmsItem(
                                             memberRow.resolved.mmsDomain, memberRow.resolved.mmsItem)
+                                        root.selectedAttributeReference = selected
+                                                ? memberRow.resolved.reference : ""
+                                        root.showSelectedEvidence = selected
+                                    }
                                 }
                             }
                         }
@@ -259,9 +288,11 @@ Rectangle {
                                 MouseArea {
                                     anchors.fill: parent
                                     onClicked: {
-                                        root.modelProvider.treeModel.selectMmsItem(
+                                        const selected = root.modelProvider.treeModel.selectMmsItem(
                                             attributeRow.modelData.mmsDomain, attributeRow.modelData.mmsItem)
-                                        root.showSelectedEvidence = true
+                                        root.selectedAttributeReference = selected
+                                                ? attributeRow.modelData.reference : ""
+                                        root.showSelectedEvidence = selected
                                     }
                                 }
                             }
@@ -283,11 +314,43 @@ Rectangle {
                     }
                 }
             }
-            BrowserEngineeringEvidence {
-                theme: root.theme
-                engineeringEvidence: root.showSelectedEvidence
-                    ? (root.modelProvider.treeModel.selectedNode.engineeringEvidence || ({}))
-                    : ({})
+                // Exactly the second StackLayout page. The previous inspector
+                // was a third page that currentIndex 0/1 could never reveal.
+                ScrollView {
+                    id: dataSetEvidenceView
+                    objectName: "browserDataSetEvidenceInspector"
+                    visible: root.selectedAttributeEvidence.kind === "quality"
+                             || root.selectedAttributeEvidence.kind === "timestamp"
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: visible
+                                            ? Math.min(235, Math.max(130, root.height * 0.36)) : 0
+                    contentWidth: availableWidth
+                    clip: true
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    ColumnLayout {
+                        width: Math.max(0, dataSetEvidenceView.availableWidth)
+                        spacing: 0
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: 25
+                            color: theme.surfaceRaised
+                            Label {
+                                anchors.fill: parent
+                                leftPadding: 8
+                                verticalAlignment: Text.AlignVCenter
+                                text: root.selectedAttributeNode.reference
+                                      + "  ·  " + root.displayValue(root.selectedAttributeNode.value)
+                                color: theme.text
+                                font.pixelSize: 9
+                                elide: Text.ElideMiddle
+                            }
+                        }
+                        BrowserEngineeringEvidence {
+                            theme: root.theme
+                            engineeringEvidence: root.selectedAttributeEvidence
+                        }
+                    }
+                }
             }
         }
     }
