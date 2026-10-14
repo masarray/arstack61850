@@ -1,7 +1,9 @@
 name: IED Simulator Release Hardening
 
 on:
+  workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - 'apps/ied_simulator/**'
       - 'assets/**'
@@ -9,7 +11,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - 'apps/ied_simulator/**'
+      - 'apps/ied_simulator/packaging/**'
+      - 'apps/ied_simulator/CMakeLists.txt'
+      - 'apps/ied_simulator/src/main.cpp'
+      - 'assets/**'
       - '.github/workflows/ied-simulator-release-hardening.yml'
 
 permissions:

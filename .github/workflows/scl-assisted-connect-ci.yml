@@ -2,6 +2,7 @@ name: SCL-Assisted Connect CI
 
 on:
   push:
+    branches: [main]
     paths:
       - 'include/ariec61850/mms/scl_assisted_connect.hpp'
       - 'include/ariec61850/mms/scl_association.hpp'

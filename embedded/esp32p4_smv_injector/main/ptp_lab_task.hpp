@@ -94,6 +94,9 @@ typedef struct ar_ptp_lab_status_t {
     bool globally_traceable;
     bool measured_smp_synch_valid;
     uint8_t measured_smp_synch;
+    // Clock authority lease only; neither field proves SMV/PPS phase.
+    uint32_t timing_authority_generation;
+    bool timing_authority_clock_usable;
 } ar_ptp_lab_status_t;
 
 /** Fill a configuration snapshot from the firmware's Kconfig defaults. */

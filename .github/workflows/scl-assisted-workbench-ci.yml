@@ -2,6 +2,7 @@ name: SCL-Assisted Workbench CI
 
 on:
   push:
+    branches: [main]
     paths:
       - 'apps/ied_simulator/src/MmsClientController.*'
       - 'apps/ied_simulator/src/MmsLiveTreeModel.*'

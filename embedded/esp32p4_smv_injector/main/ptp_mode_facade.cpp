@@ -258,6 +258,9 @@ extern "C" bool ar_ptp_lab_get_status(ar_ptp_lab_status_t* status) {
         if (result) {
             status->role = AR_PTP_ROLE_LAB_SOURCE;
             status->discipline_state = AR_PTP_DISCIPLINE_UNLOCKED;
+            status->timing_authority_generation = ar_ptp_source_generation();
+            status->timing_authority_clock_usable =
+                status->is_running && status->timing_authority_generation != 0U;
         }
     } else if (ar::esp32p4::smv::ptp_receiver_is_running()) {
         result = ar::esp32p4::smv::ptp_receiver_get_status(*status);
