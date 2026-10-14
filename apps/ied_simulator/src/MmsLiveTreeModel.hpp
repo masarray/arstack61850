@@ -163,6 +163,7 @@ signals:
     void filterTextChanged();
     void selectionChanged();
     void countsChanged();
+    void valuesChanged();
 
 private:
     friend class MmsLiveDetailModel;

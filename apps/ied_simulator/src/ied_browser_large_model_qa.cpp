@@ -177,15 +177,28 @@ int main(int argc, char** argv) {
         QStringLiteral("LD4/LLN19.DO99"), QStringLiteral("CF"), 64);
     const auto exactDa = model.nodeForReference(
         QStringLiteral("LD4/LLN19$MX$DO99$DA4  [MX]"));
+    const auto iecDa = model.nodeForReference(
+        QStringLiteral("LD4/LLN19.DO99.DA4  [MX]"));
     if (doNode.value(QStringLiteral("kind")).toString() != QStringLiteral("DO") ||
         boundedChildren.size() != 2 ||
         boundedChildren.constFirst().toMap()
             .value(QStringLiteral("functionalConstraint")).toString() != QStringLiteral("MX") ||
         !missingFc.isEmpty() ||
         exactDa.value(QStringLiteral("reference")).toString() !=
+            QStringLiteral("LD4/LLN19$MX$DO99$DA4") ||
+        iecDa.value(QStringLiteral("reference")).toString() !=
             QStringLiteral("LD4/LLN19$MX$DO99$DA4")) {
         std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL dataset_reference_projection\n";
         return 18;
+    }
+
+    const QString liveKey = QStringLiteral("LD4") + QChar(0x1f) +
+                            QStringLiteral("LLN19$MX$DO99$DA4");
+    model.applyReadValue(liveKey, QStringLiteral("23"));
+    if (model.nodeForReference(QStringLiteral("LD4/LLN19.DO99.DA4  [MX]"))
+             .value(QStringLiteral("value")).toString() != QStringLiteral("23")) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL dataset_alias_value\n";
+        return 19;
     }
 
     QStringList monitoredReferences;

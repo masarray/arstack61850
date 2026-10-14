@@ -14,6 +14,7 @@ Rectangle {
 
     property int expandedMemberIndex: -1
     property var expandedMemberChildren: []
+    property int valueRevision: 0
     readonly property int maximumExpandedChildren: 64
 
     function memberParts(raw) {
@@ -31,7 +32,10 @@ Rectangle {
         return value === undefined || value === null || String(value).length === 0
                ? "—" : String(value)
     }
-    function memberNode(reference) { return modelProvider.treeModel.nodeForReference(reference) }
+    function memberNode(reference) {
+        const revision = root.valueRevision
+        return modelProvider.treeModel.nodeForReference(reference)
+    }
 
     function toggleMember(row, raw) {
         if (expandedMemberIndex === row) {
@@ -51,6 +55,19 @@ Rectangle {
         function onSelectionChanged() {
             root.expandedMemberIndex = -1
             root.expandedMemberChildren = []
+        }
+    }
+    Connections {
+        target: root.modelProvider.treeModel
+        function onValuesChanged() {
+            root.valueRevision += 1
+            if (root.expandedMemberIndex >= 0 &&
+                root.expandedMemberIndex < root.reports.selectedDataSetMembers.length) {
+                const parts = root.memberParts(
+                    root.reports.selectedDataSetMembers[root.expandedMemberIndex])
+                root.expandedMemberChildren = root.modelProvider.treeModel.dataSetChildrenForReference(
+                    parts.reference, parts.fc, root.maximumExpandedChildren)
+            }
         }
     }
 

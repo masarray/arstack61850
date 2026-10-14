@@ -114,6 +114,21 @@ int MmsLiveTreeModel::appendNode(Node node) {
     if (!node.reference.isEmpty() &&
         (node.kind == NodeKind::dataObject || node.kind == NodeKind::dataAttribute))
         referenceIndex_[node.reference].push_back(index);
+    // The same canonical DA can be addressed as an MMS item or an IEC
+    // FCD/FCDA reference. Index both; no duplicate node or second authority.
+    if (node.kind == NodeKind::dataAttribute &&
+        node.parent >= 0 && node.parent < nodes_.size()) {
+        const auto& object = nodes_.at(node.parent);
+        QString suffix = node.attributePath.trimmed();
+        const QString objectPrefix = object.label + QLatin1Char('.');
+        const int prefixStart = suffix.indexOf(objectPrefix);
+        if (prefixStart >= 0) suffix = suffix.mid(prefixStart + objectPrefix.size());
+        if (suffix.isEmpty()) suffix = node.label;
+        if (!object.reference.isEmpty() && !suffix.isEmpty()) {
+            const QString iecReference = object.reference + QLatin1Char('.') + suffix;
+            if (iecReference != node.reference) referenceIndex_[iecReference].push_back(index);
+        }
+    }
     nodes_.push_back(std::move(node));
     return index;
 }
@@ -617,6 +632,7 @@ void MmsLiveTreeModel::applyReadValue(const QString& key, const QString& display
     if (node.value == displayValue) return;
     node.value = displayValue;
     detailModel_->nodeValueChanged(nodeIndex);
+    emit valuesChanged();
     const auto row = visibleRowForNode(nodeIndex);
     if (row >= 0) emit dataChanged(index(row), index(row), {ValueRole});
     if (!filterText_.trimmed().isEmpty()) rebuildVisible();
