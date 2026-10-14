@@ -2,6 +2,7 @@ name: SCL-Assisted Workbench CI
 
 on:
   push:
+    branches: [main]
     paths:
       - 'apps/ied_simulator/src/MmsClientController.*'
       - 'apps/ied_simulator/src/MmsLiveTreeModel.*'
@@ -39,7 +40,7 @@ permissions:
 
 concurrency:
   group: scl-assisted-workbench-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   product-path:
