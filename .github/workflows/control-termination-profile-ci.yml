@@ -4,7 +4,17 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'include/ariec61850/control/**'
+      - 'src/control/**'
+      - 'tests/test_command_termination.cpp'
+      - 'tests/control_termination_profile/**'
+      - 'include/ariec61850/mms/data_value.hpp'
+      - 'include/ariec61850/mms/reporting.hpp'
+      - 'src/mms/data_value.cpp'
+      - '.github/workflows/control-termination-profile-ci.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'include/ariec61850/control/**'
       - 'src/control/**'
@@ -18,8 +28,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   control-termination-profile:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: Control Termination / ${{ matrix.compiler }}
     runs-on: ubuntu-latest
     strategy:

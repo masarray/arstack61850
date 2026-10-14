@@ -4,7 +4,16 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'include/ariec61850/control/**'
+      - 'src/control/**'
+      - 'include/ariec61850/mms/association_runtime.hpp'
+      - 'src/mms/association_runtime_control_wait.cpp'
+      - 'tests/test_control_session.cpp'
+      - 'tests/control_session_profile/**'
+      - '.github/workflows/control-session-profile-ci.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'include/ariec61850/control/**'
       - 'src/control/**'
@@ -17,8 +26,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   control-session-profile:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: Control Session / ${{ matrix.compiler }}
     runs-on: ubuntu-latest
     strategy:

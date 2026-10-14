@@ -4,7 +4,19 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'include/ariec61850/control/**'
+      - 'src/control/**'
+      - 'tests/test_control_mms_structure.cpp'
+      - 'tests/control_mms_profile/**'
+      - 'include/ariec61850/mms/data_value.hpp'
+      - 'include/ariec61850/mms/services.hpp'
+      - 'src/mms/data_value.cpp'
+      - 'src/mms/data_codec.cpp'
+      - 'src/mms/utc_time.cpp'
+      - '.github/workflows/control-mms-profile-ci.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'include/ariec61850/control/**'
       - 'src/control/**'
@@ -20,8 +32,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   control-mms-profile:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: Control MMS / ${{ matrix.compiler }}
     runs-on: ubuntu-latest
     strategy:

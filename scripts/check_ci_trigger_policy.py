@@ -67,15 +67,105 @@ def main():
     assert matching(paths(sources["scl-assisted-workbench-ci.yml"]), MODEL_CPP)
     assert not matching(paths(sources["ied-simulator-release-hardening.yml"]), NORMAL_GUI)
     assert matching(paths(sources["ied-simulator-release-hardening.yml"]), PACKAGING)
-    # Firmware branch builds are intentionally preserved for board testing, but
-    # one branch owns a shared push/PR concurrency key so only its latest
-    # firmware artifact run continues.
+    # Real routing guarantees: no feature-push firmware fanout, no
+    # PR-triggered installer, no Draft PR runner minutes for heavy matrices.
+    heavy_pr = (
+        "esp32p4-ptp-lab.yml", "esp32p4-smv-injector.yml",
+        "cpp-ci.yml", "embedded-ci.yml", "security-evidence.yml",
+        "ptp-core-ci.yml", "arstack-studio-qt.yml",
+        "arstack-studio-windows-lifecycle.yml", "ied-simulator-qt.yml",
+        "ied-simulator-release-hardening.yml", "brcb-hard-profile-ci.yml",
+        "control-hard-profile-ci.yml", "control-mms-profile-ci.yml",
+        "control-session-profile-ci.yml", "control-termination-profile-ci.yml",
+        "interoperability-server-ci.yml", "scl-assisted-connect-ci.yml",
+        "scl-assisted-workbench-ci.yml", "smv-injector-gui.yml",
+        "arstack-studio-rc2-policy.yml", "mms-r12-server-ci.yml",
+        "control-interop-harness-ci.yml", "dynamic-rcb-trial-ci.yml",
+    )
+    gate = (
+        "    if: ${{ github.event_name != 'pull_request' || "
+        "!github.event.pull_request.draft }}"
+    )
+    for name in heavy_pr:
+        source = (ROOT / name).read_text(encoding="utf-8")
+        trigger = event_body(source, "pull_request")
+        assert "ready_for_review" in trigger, f"{name}: no ready transition"
+        assert "paths:" in trigger, f"{name}: unscoped PR"
+        jobs = source.split("\njobs:\n", 1)[1]
+        # Validate each top-level job, not just the number of guarded jobs.
+        # The sole Draft exception is the explicit M3 opt-in SOURCE checkpoint.
+        boundaries = list(re.finditer(r"(?m)^  ([a-z0-9_-]+):[ ]*$", jobs))
+        assert boundaries, f"{name}: no jobs"
+        phase_gate = (
+            "    if: ${{ github.event_name == 'pull_request' && "
+            "github.event.pull_request.draft && "
+            "contains(github.event.pull_request.body, '[run-phase-guard]') }}"
+        )
+        for index, boundary in enumerate(boundaries):
+            job_name = boundary.group(1)
+            block_end = (
+                boundaries[index + 1].start()
+                if index + 1 < len(boundaries) else len(jobs)
+            )
+            block = jobs[boundary.end():block_end]
+            if_lines = re.findall(r"(?m)^    if: .+$", block)
+            if if_lines == [gate]:
+                continue
+            if name == "esp32p4-ptp-lab.yml" and job_name == "phase-guard-checkpoint":
+                assert if_lines == [phase_gate], (name, job_name, "unsafe opt-in")
+                assert not re.search(r"(?m)^    (?:strategy|uses):", block), (
+                    name, job_name, "checkpoint may not be a matrix/reusable job"
+                )
+                assert "matrix:" not in block, (name, job_name, "matrix flood")
+                assert "Portable strict phase regression" in block, (
+                    name, job_name, "portable tests missing"
+                )
+                assert "Compile guarded ESP32-P4 SOURCE firmware" in block, (
+                    name, job_name, "SOURCE build missing"
+                )
+                continue
+            raise AssertionError(
+                f"{name}: job {job_name} lacks Draft gate (got {if_lines})"
+            )
+
     for name in ("esp32p4-smv-injector.yml", "esp32p4-ptp-lab.yml"):
-        fw = (ROOT / name).read_text(encoding="utf-8")
-        assert "github.event.pull_request.head.ref || github.ref_name" in fw, name
-        assert "github.event.pull_request.head.repo.full_name || github.repository" in fw, name
-        assert "github.ref != 'refs/heads/main'" in fw, name
-    print("CI_ROUTING_POLICY_PASS non_gui_excluded=6 duplicate_feature_push=0 pr_concurrency=15 firmware_branch_artifacts=preserved")
+        source = (ROOT / name).read_text(encoding="utf-8")
+        push = event_body(source, "push")
+        assert "branches: [main]" in push, f"{name}: feature push flood"
+        assert "paths:" in push, f"{name}: unscoped main build"
+        assert re.search(r"(?m)^  workflow_dispatch:\s*$", source), (
+            name, "missing on-demand board artifact"
+        )
+
+    main_path_scoped = (
+        "cpp-ci.yml", "security-evidence.yml", "embedded-ci.yml",
+        "brcb-hard-profile-ci.yml", "control-hard-profile-ci.yml",
+        "control-mms-profile-ci.yml", "control-session-profile-ci.yml",
+        "control-termination-profile-ci.yml",
+    )
+    for name in main_path_scoped:
+        source = (ROOT / name).read_text(encoding="utf-8")
+        push = event_body(source, "push")
+        assert "paths:" in push, f"{name}: full suite on every main push"
+
+    release = (ROOT / "arstack-studio-release.yml").read_text(encoding="utf-8")
+    assert not re.search(r"(?m)^  pull_request:", release), (
+        "Studio installer packaging must be manually dispatched or tagged"
+    )
+    assert "workflow_dispatch:" in release and "tags:" in release
+    interop = (ROOT / "interoperability-server-ci.yml").read_text(
+        encoding="utf-8"
+    )
+    assert not matching(
+        paths(interop), "include/ariec61850/time_sync/ptp_runtime.hpp"
+    ), "PTP-only headers must not trigger MMS server CI"
+
+    print(
+        "CI_ROUTING_POLICY_PASS: "
+        "draft_gate_workflows=23; feature_firmware_push=off; "
+        "main_path_scoped=8; installer_pr=off; "
+        "targeted_manual_firmware=on"
+    )
 
 
 if __name__ == "__main__":

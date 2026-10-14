@@ -3,7 +3,19 @@ name: C++ CI
 on:
   push:
     branches: [main]
+    paths:
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'include/**'
+      - 'src/**'
+      - 'tests/**'
+      - 'tools/**'
+      - 'scripts/**'
+      - 'fuzz/**'
+      - 'embedded/**'
+      - '.github/workflows/cpp-ci.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'CMakeLists.txt'
       - 'cmake/**'
@@ -26,6 +38,7 @@ concurrency:
 
 jobs:
   linux:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: Linux / ${{ matrix.compiler }}
     runs-on: ubuntu-latest
     strategy:
@@ -68,6 +81,7 @@ jobs:
           python3 scripts/run-phase4c-timeout-recovery.py --help > /dev/null
 
   windows:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: Windows / MSVC
     runs-on: windows-latest
     steps:
