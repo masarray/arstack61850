@@ -2,6 +2,7 @@ name: IED Simulator Qt
 
 on:
   push:
+    branches: [main]
     paths:
       - 'apps/ied_simulator/**'
       - 'include/ariec61850/scl/**'
@@ -20,6 +21,7 @@ on:
       - 'CMakeLists.txt'
       - '.github/workflows/ied-simulator-qt.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'apps/ied_simulator/**'
       - 'include/ariec61850/scl/**'
@@ -41,8 +43,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build-and-smoke:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
