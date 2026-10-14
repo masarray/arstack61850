@@ -9,6 +9,7 @@
 namespace {
 
 using ar::iec61850::time_sync::SmpSynchDecisionSource;
+using ar::iec61850::time_sync::SvSampleTimelineEvidence;
 using ar::iec61850::time_sync::SmpSynchValue;
 using ar::iec61850::time_sync::SvSyncPolicyMode;
 using ar::iec61850::time_sync::resolve_sv_sync_policy;
@@ -32,16 +33,45 @@ void test_auto_is_safe_without_measured_lock() {
     require(!decision.measured(), "AUTO safe default is not measured");
 }
 
-void test_auto_accepts_future_measured_state() {
+void test_ptp_lock_without_sample_epoch_is_not_synchronization() {
+    const auto measured = SmpSynchValue::global_synchronized;
+    const auto clock_only = resolve_sv_sync_policy(SvSyncPolicyMode::external_ptp_auto, measured);
+    require(clock_only.value == SmpSynchValue::not_synchronized && !clock_only.measured(),
+            "PTP LOCKED must not assert synchronized SMV with free-running GPTimer");
+
+    const SvSampleTimelineEvidence partials[] = {
+        {true, false, false}, {false, true, true},
+        {true, false, true}, {true, true, false},
+    };
+    for (const auto& partial : partials) {
+        const auto result = resolve_sv_sync_policy(
+            SvSyncPolicyMode::external_ptp_auto, measured, partial);
+        require(result.value == SmpSynchValue::not_synchronized,
+                "incomplete timeline qualification must fail closed");
+    }
+}
+
+void test_auto_requires_both_measured_ptp_and_qualified_sample_epoch() {
+    const SvSampleTimelineEvidence verified{true, true, true};
+    const auto no_ptp = resolve_sv_sync_policy(
+        SvSyncPolicyMode::external_ptp_auto, std::nullopt, verified);
+    require(no_ptp.value == SmpSynchValue::not_synchronized,
+            "timeline qualification without measured PTP must fail closed");
+
     const auto local = resolve_sv_sync_policy(
         SvSyncPolicyMode::external_ptp_auto,
-        SmpSynchValue::local_synchronized);
+        SmpSynchValue::local_synchronized, verified);
     require(local.value == SmpSynchValue::local_synchronized,
-            "AUTO must pass through measured local synchronization");
+            "qualified local clock and sample timeline must allow local synchronization");
     require(local.source == SmpSynchDecisionSource::measured_timing,
-            "AUTO with measured evidence must identify MEASURED source");
-    require(local.measured(), "measured decision flag must be true");
-    require(!local.simulated(), "measured decision must not be marked simulated");
+            "qualified synchronization must identify MEASURED source");
+    require(local.measured() && !local.simulated(),
+            "qualified synchronization is measured, not simulation");
+    const auto global = resolve_sv_sync_policy(
+        SvSyncPolicyMode::external_ptp_auto,
+        SmpSynchValue::global_synchronized, verified);
+    require(global.value == SmpSynchValue::global_synchronized,
+            "global clock promotion requires independently verified sample timeline");
 }
 
 void test_all_lab_compatibility_modes() {
@@ -85,7 +115,8 @@ void test_labels_are_stable_for_ui_and_evidence() {
 
 int main() {
     test_auto_is_safe_without_measured_lock();
-    test_auto_accepts_future_measured_state();
+    test_ptp_lock_without_sample_epoch_is_not_synchronization();
+    test_auto_requires_both_measured_ptp_and_qualified_sample_epoch();
     test_all_lab_compatibility_modes();
     test_labels_are_stable_for_ui_and_evidence();
     std::cout << "smpSynch lab policy tests passed\n";
