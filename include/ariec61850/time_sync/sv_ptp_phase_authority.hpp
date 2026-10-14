@@ -43,7 +43,7 @@ struct SvPtpPhasePolicy final {
     std::uint32_t maximum_clock_read_span_us{500U};
     std::uint32_t maximum_clock_rate_error_us{400U};
     std::uint32_t maximum_observation_spacing_us{1500000U};
-    std::int32_t maximum_phase_error_us{2000};
+    std::int32_t maximum_phase_error_us{20000};
     std::int32_t maximum_slew_per_second_us{400};
     std::int32_t integral_limit_us{250};
     std::int32_t phase_deadband_us{2};
