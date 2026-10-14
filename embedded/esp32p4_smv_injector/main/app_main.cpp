@@ -120,6 +120,7 @@ std::atomic<std::uint32_t> g_sample_tick_total{0U};
 SemaphoreHandle_t g_phase_timer_mutex = nullptr;
 gptimer_handle_t g_monitored_sample_clock = nullptr; // under mutex, never in ISR
 TaskHandle_t g_phase_observer_task = nullptr;
+std::atomic<std::uint32_t> g_phase_session_serial{0U};
 #endif
 
 struct PacketTemplate final {
@@ -163,6 +164,7 @@ struct SampleClockContext final {
     // ISR-owned epoch count/deadline are published with release/acquire.
     // Only the low 32 bits are used (71-minute wrap at 1 MHz).
     std::atomic<std::uint32_t> epoch_generation{0U};
+    std::atomic<std::uint32_t> session_generation{0U};
     std::atomic<std::uint32_t> last_epoch_alarm{0U};
     std::atomic<std::int32_t> requested_slew_ticks{0};
     std::atomic<std::int32_t> cumulative_slew_ticks{0};
@@ -525,6 +527,9 @@ gptimer_handle_t start_sample_clock(
     g_sample_clock_context.publisher_task = publisher_task_handle;
     g_sample_clock_context.next_alarm = {};
     g_sample_clock_context.epoch_generation.store(0U, std::memory_order_relaxed);
+    g_sample_clock_context.session_generation.store(
+        g_phase_session_serial.fetch_add(1U, std::memory_order_relaxed) + 1U,
+        std::memory_order_release);
     g_sample_clock_context.last_epoch_alarm.store(0U, std::memory_order_relaxed);
     g_sample_clock_context.requested_slew_ticks.store(0, std::memory_order_relaxed);
     g_sample_clock_context.cumulative_slew_ticks.store(0, std::memory_order_relaxed);
@@ -587,6 +592,8 @@ void stop_sample_clock(gptimer_handle_t& timer) noexcept {
     // handle can never be deleted during its bracketed EMAC PTP read.
     xSemaphoreTake(g_phase_timer_mutex, portMAX_DELAY);
     if (g_monitored_sample_clock == timer) g_monitored_sample_clock = nullptr;
+    g_sample_clock_context.session_generation.store(
+        0U, std::memory_order_release);
     g_sample_clock_context.requested_slew_ticks.store(
         0, std::memory_order_relaxed);
     g_sample_clock_context.phase_authority_valid.store(
