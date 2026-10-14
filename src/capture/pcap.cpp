@@ -6,6 +6,7 @@
 #include <fstream>
 #include <limits>
 #include <string>
+#include <utility>
 
 namespace ar::iec61850::capture {
 namespace {
@@ -108,6 +109,27 @@ std::vector<PcapPacket> PcapReader::read_all(const std::filesystem::path& file_p
 }
 
 std::vector<PcapPacket> PcapReader::read_all(std::istream& stream) {
+    std::vector<PcapPacket> packets;
+    for_each_packet(stream, [&packets](PcapPacket&& packet) {
+        packets.push_back(std::move(packet));
+    });
+    return packets;
+}
+
+void PcapReader::for_each_packet(
+    const std::filesystem::path& file_path, const PacketVisitor& visitor) {
+    std::ifstream stream(file_path, std::ios::binary);
+    if (!stream) {
+        throw PcapFormatError("Unable to open PCAP file: " + file_path.string());
+    }
+    for_each_packet(stream, visitor);
+}
+
+void PcapReader::for_each_packet(
+    std::istream& stream, const PacketVisitor& visitor) {
+    if (!visitor) {
+        throw std::invalid_argument("PCAP packet visitor must not be empty.");
+    }
     std::array<std::uint8_t, global_header_length> global_header{};
     if (!read_exactly(stream, global_header)) {
         throw PcapFormatError("PCAP file is shorter than the global header.");
@@ -135,7 +157,6 @@ std::vector<PcapPacket> PcapReader::read_all(std::istream& stream) {
                               std::to_string(snap_length) + ".");
     }
 
-    std::vector<PcapPacket> packets;
     while (true) {
         std::array<std::uint8_t, packet_header_length> packet_header{};
         stream.read(reinterpret_cast<char*>(packet_header.data()),
@@ -168,10 +189,9 @@ std::vector<PcapPacket> PcapReader::read_all(std::istream& stream) {
         if (!read_exactly(stream, frame)) {
             throw PcapFormatError("Truncated PCAP packet payload.");
         }
-        packets.push_back({to_timestamp(seconds, fractional, resolution), std::move(frame)});
+        visitor(PcapPacket{to_timestamp(seconds, fractional, resolution), std::move(frame)});
     }
 
-    return packets;
 }
 
 PcapWriter::PcapWriter(std::ostream& stream, const std::uint32_t snap_length)

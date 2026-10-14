@@ -317,6 +317,20 @@ void self_test() {
     bytes.seekg(0);
     const auto packets = capture::PcapReader::read_all(bytes);
     if (packets.size() < 2U) throw std::runtime_error("PCAP fixture too small");
+    // Both APIs MUST return identical observations. Reader remains reusable
+    // after a seek, with no retained packet list in the streaming caller.
+    bytes.clear();
+    bytes.seekg(0);
+    CaptureAudit streaming(opts);
+    capture::PcapReader::for_each_packet(
+        bytes, [&streaming](capture::PcapPacket&& packet) {
+            streaming.observe(packet);
+        });
+    if (streaming.stream().gaps != 1U ||
+        streaming.stream().normal_wraps != 1U ||
+        streaming.evidence().selected_asdus != 5U) {
+        throw std::runtime_error("Streaming PCAP regression diverged from read_all");
+    }
     CaptureAudit clean(opts);
     for (std::size_t i = 0U; i + 1U < packets.size(); ++i) {
         clean.observe(packets[i]);
@@ -382,9 +396,10 @@ int main(const int argc, char** argv) {
             return 64;
         }
         CaptureAudit audit(options);
-        for (const auto& packet : capture::PcapReader::read_all(path)) {
-            audit.observe(packet);
-        }
+        capture::PcapReader::for_each_packet(
+            path, [&audit](capture::PcapPacket&& packet) {
+                audit.observe(packet);
+            });
         display(audit, json);
         // A nonzero exit means a missing/anomalous software *wire* fixture;
         // exit=0 NEVER means an IED's PTP clock has physically synchronized.

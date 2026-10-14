@@ -1,6 +1,6 @@
 # PTP + SMV PCAP Wire Audit — M2B software evidence
 
-Implemented in `ariec61850_ptp_sv_wire_audit`, using the **existing** ARIEC61850 Ethernet/PTP/SV codecs, PCAP reader and SampledValuesStreamSupervisor. No second protocol parser and no embedded realtime changes.
+Implemented in `ariec61850_ptp_sv_wire_audit`, using the **existing** ARIEC61850 Ethernet/PTP/SV codecs, PCAP reader and SampledValuesStreamSupervisor. The new `PcapReader::for_each_packet` API reads **one packet at a time** with bounded memory; legacy `read_all()` is preserved using the same parser. No second protocol parser and no embedded realtime changes.
 
 ## Purpose
 
@@ -9,7 +9,7 @@ A combined packet-level audit to discover software-wire defects before an IED is
 Use a classic Ethernet **.pcap** file. If Wireshark captures .pcapng, export/save as .pcap first (the existing ARIEC61850 PcapReader is a classic-PCAP reader). Example after host C++ build:
 
 ```sh
-./build/ariec61850_ptp_sv_wire_audit capture.pcap --sv-id "MU01/LLN0$SV1" --app-id 0x4000 --counter-modulus 4000 --ptp-domain 0 --json
+./build/ariec61850_ptp_sv_wire_audit capture.pcap --sv-id 'MU01/LLN0$SV1' --app-id 0x4000 --counter-modulus 4000 --ptp-domain 0 --json
 ```
 
 `--counter-modulus` is required, not inferred from frame rate: one SV frame may contain multiple ASDUs and particular IEC 61869-9 profiles have distinct counter policies. Different APPID, svID or source MAC streams are never combined into one counter history.
@@ -32,3 +32,7 @@ Use a classic Ethernet **.pcap** file. If Wireshark captures .pcapng, export/sav
 4. Save PCAP + firmware commit + IED configuration for multi-vendor relay interoperability when equipment is available.
 
 This tool is offline host-only. It does not affect 4000-fps embedded ISR behavior, native Qt Studio or public installer builds.
+
+## Large-capture optimization
+
+Unlike `read_all()`, the audit command consumes packets through `PcapReader::for_each_packet` and does **not** retain all decoded frames. The parser still bounds individual frames by the validated PCAP snap length (maximum supported 16 MiB). This permits hour-long 4,000/4,800-fps captures without O(packet count) memory growth; disk I/O and decode CPU time still scale with the capture. The in-memory self-test compares streaming and bulk-reader behavior on the same positive/negative fixture.
