@@ -617,16 +617,40 @@ QVector<MmsLiveTreeModel::ReadTarget> MmsLiveTreeModel::readTargetsForReferences
         if (result.size() >= maximumTargets) break;
         const auto [reference, fc] = splitDataSetMemberReference(raw);
         if (reference.isEmpty()) continue;
-        const auto found = referenceIndex_.constFind(reference);
-        if (found == referenceIndex_.cend()) continue;
+        QString effectiveFc = fc;
+        auto found = referenceIndex_.constFind(reference);
+        if (found == referenceIndex_.cend()) {
+            // Also preserve the standard MMS FCD prefix LN$FC$DO: its
+            // canonical structural owner is the same indexed LD/LN.DO.
+            // Accept only a complete prefix, never a broad string match.
+            const int slash = reference.indexOf(QLatin1Char('/'));
+            const int first = slash >= 0
+                ? reference.indexOf(QLatin1Char('$'), slash + 1) : -1;
+            const int second = first >= 0
+                ? reference.indexOf(QLatin1Char('$'), first + 1) : -1;
+            if (second <= first) continue;
+            const QString prefixFc = reference.mid(first + 1, second - first - 1).toUpper();
+            const QString objectName = reference.mid(second + 1);
+            if (prefixFc.size() < 2 || prefixFc.size() > 4 ||
+                objectName.isEmpty() || objectName.contains(QLatin1Char('$')))
+                continue;
+            bool validFc = true;
+            for (const auto ch : prefixFc)
+                if (!ch.isLetterOrNumber()) { validFc = false; break; }
+            if (!validFc || (!fc.isEmpty() && fc != prefixFc)) continue;
+            effectiveFc = prefixFc;
+            const QString iecDo = reference.left(first) + QLatin1Char('.') + objectName;
+            found = referenceIndex_.constFind(iecDo);
+            if (found == referenceIndex_.cend()) continue;
+        }
         for (const int nodeIndex : found.value()) {
             if (result.size() >= maximumTargets) break;
             const auto& node = nodes_.at(nodeIndex);
             if (node.kind == NodeKind::dataAttribute) {
-                append(nodeIndex, fc);
+                append(nodeIndex, effectiveFc);
             } else if (node.kind == NodeKind::dataObject) {
                 for (const int child : node.children) {
-                    append(child, fc);
+                    append(child, effectiveFc);
                     if (result.size() >= maximumTargets) break;
                 }
             }

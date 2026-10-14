@@ -226,7 +226,13 @@ int main(int argc, char** argv) {
         {QStringLiteral("LD4/LLN19.DO99  [MX]")}, 64);
     const auto readInvalidFc = model.readTargetsForReferences(
         {QStringLiteral("LD4/LLN19.DO99.DA4  [ST]")}, 64);
-    if (readIec.size() != 2 || readDo.size() != 4 || !readInvalidFc.isEmpty() ||
+    const auto readMmsFcd = model.readTargetsForReferences(
+        {QStringLiteral("LD4/LLN19$MX$DO99")}, 64);
+    const auto rejectMismatchedFcd = model.readTargetsForReferences(
+        {QStringLiteral("LD4/LLN19$MX$DO99  [ST]")}, 64);
+    if (readIec.size() != 2 || readDo.size() != 4 ||
+        readMmsFcd.size() != 4 || !rejectMismatchedFcd.isEmpty() ||
+        !readInvalidFc.isEmpty() ||
         readIec.constFirst().item != QStringLiteral("LLN19$MX$DO99$DA4") ||
         model.readTargetsForReferences(iecWatched, 1).size() != 1) {
         std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL canonical_global_watch_read\n";
