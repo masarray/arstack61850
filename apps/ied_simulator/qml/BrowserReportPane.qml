@@ -19,7 +19,13 @@ Rectangle {
     property bool informationExpanded: true
     property bool dataExpanded: true
     property int selectedReportMemberIndex: -1
-    onLatestReportChanged: selectedReportMemberIndex = -1
+    // Preserve selection through repeat snapshots of the same report frame;
+    // reset only when the actual ReportID/sequence/entry identity changes.
+    readonly property string latestReportIdentity: !hasLastReport ? "" : [
+        latestReport.reportId || "", latestReport.sequence || "",
+        latestReport.subSequence || "", latestReport.entryId || ""
+    ].join("|")
+    onLatestReportIdentityChanged: selectedReportMemberIndex = -1
     function selectedReportMemberEvidence() {
         if (!hasLastReport || selectedReportMemberIndex < 0 ||
             !latestReport.valueEvidence) return ({})

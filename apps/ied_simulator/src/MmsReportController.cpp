@@ -490,6 +490,8 @@ ReportUi buildSubscriptionUi(
                     QString memberRef = QString::fromStdString(item.data_reference);
                     if (memberRef.isEmpty() && item.member)
                         memberRef = QString::fromStdString(item.member->user_reference);
+                    if (memberRef.isEmpty() && item.member)
+                        memberRef = QString::fromStdString(item.member->mms_reference);
                     if (typedEvidenceBudget > 0) {
                         const auto evidence = arstack::iedsim::decodeEngineeringEvidence(
                             memberRef, *item.value);
@@ -500,11 +502,17 @@ ReportUi buildSubscriptionUi(
                             --typedEvidenceBudget;
                         }
                     } else {
-                        // Indicate omitted typed details without manufacturing
-                        // a decoded value or carrying unbounded metadata.
+                        // Mark truncation only for real q/t typed members, not
+                        // unrelated BIT STRING or UTC-valued attributes.
                         const auto kind = item.value->kind();
-                        if (kind == mms::MmsDataKind::bit_string ||
-                            kind == mms::MmsDataKind::utc_time)
+                        const auto separator = std::max(
+                            memberRef.lastIndexOf(QLatin1Char('$')),
+                            memberRef.lastIndexOf(QLatin1Char('.')));
+                        const QString leaf = memberRef.mid(separator + 1);
+                        if ((leaf == QStringLiteral("q") &&
+                             kind == mms::MmsDataKind::bit_string) ||
+                            (leaf == QStringLiteral("t") &&
+                             kind == mms::MmsDataKind::utc_time))
                             typedEvidenceTruncated = true;
                     }
                 }
