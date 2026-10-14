@@ -27,7 +27,7 @@ Status: **in progress, not a conformance certificate.** This matrix is designed 
 | PTP transportSpecific/VLAN | Must agree with IED and network/engineering plan | Configuration preserved in codecs; no universal nibble or VLAN assumption |
 | Clock identity | Stable and nonzero source identity; Follow_Up sequence matches Sync | SOFTWARE TEST |
 | Clock class / traceability | No unproven grandmaster quality: lab oscillator is class 248, clockAccuracy unknown | STATIC, checked against encoded Announce |
-| PTP timescale and UTC properties | Valid PTP/TAI epoch, UTC offset flags and source provenance must agree | **GAP**: current LAB_SOURCE seeds EMAC from system UTC seconds, does not establish a proven TAI/UTC epoch or truthfully encoded timescale. Never claim 9-3 conformance yet |
+| PTP timescale and UTC properties | Timestamp in PTP/TAI seconds when epoch is available; truthful flagField and offset provenance | **PARTIAL SOFTWARE TEST**: bounded UTC-to-TAI conversion; EMAC seed from plausible local RTC; PTP-timescale flag; opt-in UTC-offset-valid flag. Traceability remains false. Unset RTC leads to no PTP-timescale claim. UTC accuracy, leap-offset currency and hardware evidence are **GAP**; no 9-3 conformance claim |
 | Full PTP ordinary-clock/BMCA behavior | Select/announce/step/holdover/recover according to applicable clock type | **GAP** for a standards-complete Grandmaster; current LAB_SOURCE is a limited laboratory source |
 | SV canonical Ethernet stream | 0x88BA, engineered destination, APPID, svID, confRev, VLAN, dataset ordering | Portable codec/profile tests exist; independent canonical-wire acceptance pending |
 | 4000/4800 sampling | Correct rational cadence and modulus for the **explicitly chosen** 80-samples/cycle family | SOFTWARE TEST: 120 s mathematical schedule, zero accumulated tick drift |
@@ -47,7 +47,7 @@ Status: **in progress, not a conformance certificate.** This matrix is designed 
 
 ## Next coding tranche, ordered by standards risk
 
-1. **PTP time-properties correctness:** explicitly model PTP/TAI epoch, trusted UTC-offset provenance, Announce timescale/timeTraceable/currentUtcOffsetValid flags, source clock quality; never silently convert an uninitialized system clock to a traceable Grandmaster.
+1. **PTP time-properties further hardening:** verify UTC-offset provenance against authoritative leap records, RTC synchronization, leap-second transitions and time steps; surface compact diagnostics in Studio. Pure software cannot attest absolute clock accuracy.
 2. **Reusable PTP/SV timeline authority:** continuously compare and correct GPTimer phase against EMAC hardware time at a bounded rate; handle drift, clock steps, PTP restart, source switches, and holdover without pretending alignment.
 3. **Profile-targeted SV compiler:** exact profile-specific sample counter reset, ASDU grouping, nofASDU, dataset layout and scaling from SCL + documented source profile. Do not hard-code 4000/4800 for arbitrary SCL.
 4. **Passive interoperability fixtures:** anonymous golden frames/PCAP and independent decoder checks for 9-2LE-compatible streams and a separately supported IEC 61869-9 variant. Report mismatches rather than automatic coercion.
