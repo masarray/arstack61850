@@ -344,6 +344,7 @@ QVariantMap MmsLiveTreeModel::nodeMap(const int nodeIndex) const {
         }
     }
     result.insert(QStringLiteral("value"), displayValue);
+    result.insert(QStringLiteral("engineeringEvidence"), node.engineeringEvidence);
     result.insert(QStringLiteral("hasChildren"), !node.children.isEmpty());
     result.insert(QStringLiteral("childCount"), node.children.size());
     result.insert(QStringLiteral("quality"), siblingValue(nodeIndex, QStringLiteral("q")));
@@ -659,13 +660,18 @@ QVector<MmsLiveTreeModel::ReadTarget> MmsLiveTreeModel::readTargetsForReferences
     return result;
 }
 
-void MmsLiveTreeModel::applyReadValue(const QString& key, const QString& displayValue) {
+void MmsLiveTreeModel::applyReadValue(
+    const QString& key, const QString& displayValue,
+    const QVariantMap& engineeringEvidence) {
     const auto found = mmsIndex_.constFind(key);
     if (found == mmsIndex_.cend()) return;
     const auto nodeIndex = found.value();
     auto& node = nodes_[nodeIndex];
-    if (node.value == displayValue) return;
+    if (node.value == displayValue && node.engineeringEvidence == engineeringEvidence) return;
     node.value = displayValue;
+    // Evidence is immutable per received sample; a later untyped update must
+    // clear previous bit/clock details rather than reuse stale measurements.
+    node.engineeringEvidence = engineeringEvidence;
     detailModel_->nodeValueChanged(nodeIndex);
     emit valuesChanged();
     const auto row = visibleRowForNode(nodeIndex);

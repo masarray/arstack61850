@@ -15,6 +15,7 @@ Rectangle {
     property int expandedMemberIndex: -1
     property var expandedMemberChildren: []
     property int valueRevision: 0
+    property bool showSelectedEvidence: false
     readonly property int maximumExpandedChildren: 64
 
     function memberParts(raw) {
@@ -55,6 +56,7 @@ Rectangle {
         function onSelectionChanged() {
             root.expandedMemberIndex = -1
             root.expandedMemberChildren = []
+            root.showSelectedEvidence = false
         }
     }
     Connections {
@@ -256,8 +258,11 @@ Rectangle {
                                 Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: theme.lineSoft }
                                 MouseArea {
                                     anchors.fill: parent
-                                    onClicked: root.modelProvider.treeModel.selectMmsItem(
-                                        attributeRow.modelData.mmsDomain, attributeRow.modelData.mmsItem)
+                                    onClicked: {
+                                        root.modelProvider.treeModel.selectMmsItem(
+                                            attributeRow.modelData.mmsDomain, attributeRow.modelData.mmsItem)
+                                        root.showSelectedEvidence = true
+                                    }
                                 }
                             }
                         }
@@ -277,6 +282,12 @@ Rectangle {
                         }
                     }
                 }
+            }
+            BrowserEngineeringEvidence {
+                theme: root.theme
+                engineeringEvidence: root.showSelectedEvidence
+                    ? (root.modelProvider.treeModel.selectedNode.engineeringEvidence || ({}))
+                    : ({})
             }
         }
     }

@@ -267,6 +267,11 @@ Rectangle {
                     }
                 }
 
+                BrowserEngineeringEvidence {
+                    theme: root.theme
+                    engineeringEvidence: root.currentNode.engineeringEvidence || ({})
+                }
+
                 Label {
                     visible: !root.currentNode.kind
                     Layout.fillWidth: true

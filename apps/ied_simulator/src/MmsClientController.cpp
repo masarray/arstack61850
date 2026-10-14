@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "MmsClientController.hpp"
+#include "MmsEngineeringEvidence.hpp"
 #include "MmsSclClientProjection.hpp"
 
 #include "ariec61850/mms/data_codec.hpp"
@@ -34,6 +35,7 @@ std::span<const std::uint8_t> responsePayload(const mms::MmsConfirmedExchangeRes
 struct ReadValue final {
     QString key;
     QString display;
+    QVariantMap engineeringEvidence;
 };
 
 QVector<ReadValue> readTargets(
@@ -67,7 +69,9 @@ QVector<ReadValue> readTargets(
         if (!result.success()) continue;
         values.push_back({
             targets.at(index).key,
-            QString::fromStdString(mms::MmsDataCodec::to_display_string(*result.value))});
+            QString::fromStdString(mms::MmsDataCodec::to_display_string(*result.value)),
+            arstack::iedsim::decodeEngineeringEvidence(
+                targets.at(index).item, *result.value)});
     }
     if (values.isEmpty()) throw std::runtime_error("MMS Read returned no successful AccessResult.");
     return values;
@@ -517,10 +521,11 @@ void MmsClientController::startRead(
                 QMetaObject::invokeMethod(self, [self, generation, values, operationName] {
                     if (!self || self->generation_ != generation) return;
                     for (const auto& value : values) {
-                        self->treeModel_.applyReadValue(value.key, value.display);
+                        self->treeModel_.applyReadValue(
+                            value.key, value.display, value.engineeringEvidence);
                         if (self->engineeringContext_) {
                             self->engineeringContext_->treeModel()->applyReadValue(
-                                value.key, value.display);
+                                value.key, value.display, value.engineeringEvidence);
                         }
                     }
                     self->setOperationBusy(false);
@@ -670,10 +675,11 @@ bool MmsClientController::writeSelected(const QString& textValue) {
                 QMetaObject::invokeMethod(self, [self, generation, reference, values] {
                     if (!self || self->generation_ != generation) return;
                     for (const auto& read : values) {
-                        self->treeModel_.applyReadValue(read.key, read.display);
+                        self->treeModel_.applyReadValue(
+                            read.key, read.display, read.engineeringEvidence);
                         if (self->engineeringContext_) {
                             self->engineeringContext_->treeModel()->applyReadValue(
-                                read.key, read.display);
+                                read.key, read.display, read.engineeringEvidence);
                         }
                     }
                     self->setOperationBusy(false);

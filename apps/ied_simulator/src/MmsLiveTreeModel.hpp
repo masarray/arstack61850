@@ -157,7 +157,8 @@ public:
     [[nodiscard]] QVector<ReadTarget> readTargetsForReferences(
         const QStringList& references,
         int maximumTargets = 64) const;
-    void applyReadValue(const QString& key, const QString& displayValue);
+    void applyReadValue(const QString& key, const QString& displayValue,
+                        const QVariantMap& engineeringEvidence = {});
 
 signals:
     void filterTextChanged();
@@ -186,6 +187,7 @@ private:
         QString typeStatus;
         QString description;
         QString value;
+        QVariantMap engineeringEvidence;
         bool writable{};
     };
 
