@@ -120,7 +120,7 @@ config AR_PTP_ANNOUNCE_INTERVAL_MS
 config AR_PTP_SYNC_INTERVAL_MS
     int "PTP Sync interval (ms)"
     range 20 5000
-    default 250
+    default 1000
     depends on AR_PTP_LAB_TX
     help
         LAB_SOURCE uses two-step Sync/Follow_Up so Follow_Up can carry the exact
