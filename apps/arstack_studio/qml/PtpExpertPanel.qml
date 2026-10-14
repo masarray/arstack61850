@@ -197,7 +197,7 @@ SurfacePanel {
                             text: modeCombo.currentIndex === 0
                                 ? "PTP TX does not by itself change SV smpSynch."
                                 : modeCombo.currentIndex === 1
-                                    ? "AUTO smpSynch follows measured receiver evidence only."
+                                    ? "AUTO requires qualified PTP clock and independently verified SV sample phase."
                                     : "Useful for observing timing traffic without changing the network."
                             wrapMode: Text.WordWrap
                             color: panel.theme.muted
@@ -334,7 +334,7 @@ SurfacePanel {
                     Label { text: "Announce interval (ms)"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: announceField; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 100; top: 10000 } }
                     Label { text: "Sync interval (ms)"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
-                    NumericField { id: syncField; theme: panel.theme; monoFont: panel.uiFont; text: "250"; validator: IntValidator { bottom: 20; top: 5000 } }
+                    NumericField { id: syncField; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 20; top: 5000 } }
                     CheckBox { id: vlanCheck; text: "VLAN"; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: vlanField; enabled: vlanCheck.checked; theme: panel.theme; monoFont: panel.uiFont; text: "100"; validator: IntValidator { bottom: 1; top: 4094 } }
                     Label { text: "VLAN PCP"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
@@ -355,7 +355,7 @@ SurfacePanel {
                     Layout.fillWidth: true
                     ComboBox {
                         Layout.fillWidth: true
-                        model: ["AUTO — measured PTP only", "0 — Not synchronized", "1 — Local synchronized (simulation)", "2 — Global synchronized (simulation)"]
+                        model: ["AUTO — qualified PTP + SV timing", "0 — Not synchronized", "1 — Local synchronized (simulation)", "2 — Global synchronized (simulation)"]
                         currentIndex: panel.syncIndex(panel.device.smpSynchMode)
                         enabled: panel.session && panel.device.deviceVerified && !panel.session.updatingFirmware
                         font.family: panel.uiFont
@@ -372,7 +372,7 @@ SurfacePanel {
                 }
                 Label {
                     Layout.fillWidth: true
-                    text: "PTP Source transmission is not proof that the SV clock is externally synchronized. AUTO stays fail-closed unless receiver discipline is measured."
+                    text: "PTP traffic or clock lock alone does not prove SV sample synchronization. AUTO remains fail-closed until the SV timeline is independently qualified."
                     wrapMode: Text.WordWrap
                     color: panel.theme.textSoft
                     font.family: panel.uiFont
