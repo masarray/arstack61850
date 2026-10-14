@@ -85,6 +85,24 @@ if missing_dataset:
 if 'root.memberNode(modelData)' in data_set:
     raise SystemExit("BROWSER_DATASET_HIERARCHY_FAIL unnormalized per-row linear lookup")
 
+report_controller = (workspace_path.parent.parent / "src" / "MmsReportController.cpp").read_text(encoding="utf-8")
+for token in [
+    'kMaximumTypedReportEvidence = 96',
+    'kMaximumVisibleReportMembers = 256',
+    'decodeEngineeringEvidence(',
+    'QStringLiteral("valueEvidence")',
+    'QStringLiteral("valueEvidenceTruncated")',
+]:
+    if token not in report_controller:
+        raise SystemExit("BROWSER_REPORT_TYPED_EVIDENCE_FAIL missing=" + token)
+
+# Protect the shared typed decoder from truncated/doubled source,
+# not just presence of UI tokens.
+typed_decoder = (workspace_path.parent.parent / "src" / "MmsEngineeringEvidence.hpp").read_text(encoding="utf-8")
+if typed_decoder.count("decodeEngineeringEvidence(") != 1 or (
+        "const QString leaf = mmsItem.mid(leafSeparator + 1);" not in typed_decoder):
+    raise SystemExit("BROWSER_REPORT_TYPED_EVIDENCE_FAIL invalid shared decoder source")
+
 report_required = [
     'objectName: "browserReportUnifiedInspector"',
     'Control Block Attributes',
@@ -100,6 +118,10 @@ report_required = [
     'delegate: PropertyRow { lastReportSection: true }',
     'delegate: DataRow { received: false }',
     'reports.selectedRcbDataSetMembers',
+    'selectedReportMemberEvidence()',
+    'root.selectedReportMemberIndex = dataRow.index',
+    'onLatestReportIdentityChanged: selectedReportMemberIndex = -1',
+    'BrowserEngineeringEvidence {',
     'String(frame.reportId) === wanted',
     'Offline values are not fabricated.',
 ]

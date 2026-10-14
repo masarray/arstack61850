@@ -18,6 +18,25 @@ Rectangle {
     property bool attributesExpanded: true
     property bool informationExpanded: true
     property bool dataExpanded: true
+    property int selectedReportMemberIndex: -1
+    // Preserve selection through repeat snapshots of the same report frame;
+    // reset only when the actual ReportID/sequence/entry identity changes.
+    readonly property string latestReportIdentity: !hasLastReport ? "" : [
+        latestReport.reportId || "", latestReport.sequence || "",
+        latestReport.subSequence || "", latestReport.entryId || ""
+    ].join("|")
+    onLatestReportIdentityChanged: selectedReportMemberIndex = -1
+    function selectedReportMemberEvidence() {
+        if (!hasLastReport || selectedReportMemberIndex < 0 ||
+            !latestReport.valueEvidence) return ({})
+        const entries = latestReport.valueEvidence
+        for (let index = 0; index < entries.length; ++index) {
+            const entry = entries[index]
+            if (entry.index === selectedReportMemberIndex)
+                return entry.evidence || ({})
+        }
+        return ({})
+    }
     color: theme.background
 
     function asText(value) {
@@ -213,7 +232,9 @@ Rectangle {
         readonly property int stripe: index
         Layout.fillWidth: true
         implicitHeight: 25
-        color: stripe % 2 ? root.theme.surfaceSoft : root.theme.surface
+        color: received && root.selectedReportMemberIndex === index
+               ? root.theme.accentSoft
+               : stripe % 2 ? root.theme.surfaceSoft : root.theme.surface
         RowLayout {
             anchors.fill: parent
             anchors.leftMargin: 9
@@ -248,6 +269,12 @@ Rectangle {
                 ToolTip.text: text
                 MouseArea { id: dataValueMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
             }
+        }
+        MouseArea {
+            anchors.fill: parent
+            enabled: dataRow.received
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.selectedReportMemberIndex = dataRow.index
         }
         Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: root.theme.lineSoft }
     }
@@ -398,6 +425,19 @@ Rectangle {
                     Repeater {
                         model: !root.hasLastReport ? root.configuredMembers.slice(0, 256) : []
                         delegate: DataRow { received: false }
+                    }
+                    BrowserEngineeringEvidence {
+                        theme: root.theme
+                        engineeringEvidence: root.selectedReportMemberEvidence()
+                    }
+                    Label {
+                        visible: root.hasLastReport &&
+                                 root.latestReport.valueEvidenceTruncated === true
+                        Layout.fillWidth: true
+                        leftPadding: 9
+                        text: "Some report q/t details were omitted by the bounded projection."
+                        color: theme.muted
+                        font.pixelSize: 9
                     }
                     Label {
                         visible: root.hasLastReport ? !root.latestReport.values || root.latestReport.values.length === 0

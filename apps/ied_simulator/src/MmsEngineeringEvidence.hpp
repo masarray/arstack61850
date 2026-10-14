@@ -10,6 +10,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <variant>
@@ -27,7 +28,10 @@ inline void addEvidenceRow(QVariantList& rows, const QString& label, const QVari
 [[nodiscard]] inline QVariantMap decodeEngineeringEvidence(
     const QString& mmsItem, const ar::iec61850::mms::MmsDataValue& value) {
     using namespace ar::iec61850::mms;
-    const QString leaf = mmsItem.mid(mmsItem.lastIndexOf(QLatin1Char('$')) + 1);
+    // Accept both typed MMS $FC$DO$q and IEC LN.DO.q report-member paths.
+    const int leafSeparator = std::max(mmsItem.lastIndexOf(QLatin1Char('$')),
+                                       mmsItem.lastIndexOf(QLatin1Char('.')));
+    const QString leaf = mmsItem.mid(leafSeparator + 1);
     QVariantList rows;
 
     if (leaf == QStringLiteral("q") && value.kind() == MmsDataKind::bit_string) {

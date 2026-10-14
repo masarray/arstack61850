@@ -251,6 +251,15 @@ int main(int argc, char** argv) {
         QStringLiteral("LLN19$MX$DO99$q"),
         ar::iec61850::mms::MmsDataValue::bit_string(3U, bits));
     const auto qualityRows = qualityEvidence.value(QStringLiteral("rows")).toList();
+    // RCB member references can use IEC LN.DO.q rather than MMS $FC$DO$q.
+    // Both must use exactly the same typed decoder and return equal results.
+    const auto iecQualityEvidence = arstack::iedsim::decodeEngineeringEvidence(
+        QStringLiteral("LD4/LLN19.DO99.q"),
+        ar::iec61850::mms::MmsDataValue::bit_string(3U, bits));
+    if (iecQualityEvidence != qualityEvidence) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL report_iec_quality_alias\n";
+        return 26;
+    }
     const auto malformedQuality = arstack::iedsim::decodeEngineeringEvidence(
         QStringLiteral("LLN19$MX$DO99$q"),
         ar::iec61850::mms::MmsDataValue::bit_string(2U, bits));
