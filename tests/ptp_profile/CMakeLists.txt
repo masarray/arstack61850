@@ -19,6 +19,11 @@ add_executable(ptp_profile_tests
 target_link_libraries(ptp_profile_tests PRIVATE ptp_profile_core)
 target_compile_features(ptp_profile_tests PRIVATE cxx_std_20)
 
+add_executable(ptp_power_profile_tests
+    "${ARSTACK_ROOT}/tests/test_ptp_power_profile.cpp")
+target_link_libraries(ptp_power_profile_tests PRIVATE ptp_profile_core)
+target_compile_features(ptp_power_profile_tests PRIVATE cxx_std_20)
+
 add_executable(ptp_runtime_tests
     "${ARSTACK_ROOT}/tests/test_ptp_runtime.cpp")
 target_link_libraries(ptp_runtime_tests PRIVATE ptp_profile_core)
@@ -54,7 +59,7 @@ add_executable(ptp_profile_analyze
 target_link_libraries(ptp_profile_analyze PRIVATE ptp_profile_core)
 target_compile_features(ptp_profile_analyze PRIVATE cxx_std_20)
 
-foreach(target IN ITEMS ptp_profile_core ptp_profile_tests ptp_runtime_tests smp_synch_policy_tests smp_synch_wire_offset_tests ptp_discipline_tests sv_ptp_epoch_tests ptp_p2_hardening_tests ptp_profile_analyze)
+foreach(target IN ITEMS ptp_profile_core ptp_profile_tests ptp_power_profile_tests ptp_runtime_tests smp_synch_policy_tests smp_synch_wire_offset_tests ptp_discipline_tests sv_ptp_epoch_tests ptp_p2_hardening_tests ptp_profile_analyze)
     if(MSVC)
         target_compile_options(${target} PRIVATE /W4 /WX /permissive-)
     else()
@@ -65,6 +70,7 @@ endforeach()
 
 enable_testing()
 add_test(NAME ptp_profile_tests COMMAND ptp_profile_tests)
+add_test(NAME ptp_power_profile_tests COMMAND ptp_power_profile_tests)
 add_test(NAME ptp_runtime_tests COMMAND ptp_runtime_tests)
 add_test(NAME smp_synch_policy_tests COMMAND smp_synch_policy_tests)
 add_test(NAME smp_synch_wire_offset_tests COMMAND smp_synch_wire_offset_tests)
