@@ -18,6 +18,7 @@ on:
       - 'tests/fixtures/scl/client-workbench-incompatible.scd'
       - '.github/workflows/scl-assisted-workbench-ci.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'apps/ied_simulator/src/MmsClientController.*'
       - 'apps/ied_simulator/src/MmsLiveTreeModel.*'
@@ -38,11 +39,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: scl-assisted-workbench-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   product-path:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
