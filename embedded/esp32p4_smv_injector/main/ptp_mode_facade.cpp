@@ -6,6 +6,7 @@
 #include "ariec61850/time_sync/ptp_discipline.hpp"
 #include "ariec61850/time_sync/ptp_canonical_authority.hpp"
 #include "ariec61850/time_sync/ptp_emac_role_ownership.hpp"
+#include "ariec61850/time_sync/ptp_control_cancellation.hpp"
 
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -39,24 +40,25 @@ constexpr char kTag[] = "ar_ptp_mode";
 portMUX_TYPE g_ptp_facade_mux = portMUX_INITIALIZER_UNLOCKED;
 ar_ptp_lab_config_t g_facade_override{};
 bool g_facade_override_valid = false;
-std::atomic<int> g_active_role{static_cast<int>(AR_PTP_ROLE_LAB_SOURCE)};
 std::atomic_bool g_receiver_stop_pending{false};
-// Serialize competing START/configure callers without holding a spinlock
-// while a worker asynchronously acquires/releases EMAC timestamp hardware.
-std::atomic_bool g_role_control_transition{false};
+ar::iec61850::time_sync::PtpControlCancellationGate g_role_control;
+
+void stop_active_ptp_roles() noexcept;
 
 struct RoleControlClaim final {
-    bool held{!g_role_control_transition.exchange(
-        true, std::memory_order_acq_rel)};
+    bool held{g_role_control.try_acquire()};
+    [[nodiscard]] bool finish() noexcept {
+        if (!held) return false;
+        held = false;
+        return g_role_control.finish(stop_active_ptp_roles);
+    }
     ~RoleControlClaim() noexcept {
-        if (held) g_role_control_transition.store(
-            false, std::memory_order_release);
+        if (held) static_cast<void>(g_role_control.finish(stop_active_ptp_roles));
     }
     RoleControlClaim(const RoleControlClaim&) = delete;
     RoleControlClaim& operator=(const RoleControlClaim&) = delete;
     RoleControlClaim() = default;
-};
-
+}
 
 
 void fill_p2_defaults(ar_ptp_lab_config_t& config) noexcept {
@@ -111,15 +113,22 @@ void fill_p2_defaults(ar_ptp_lab_config_t& config) noexcept {
     return has_override ? config : default_config();
 }
 
-[[nodiscard]] ar_ptp_role_t active_role() noexcept {
-    return static_cast<ar_ptp_role_t>(g_active_role.load(std::memory_order_acquire));
-}
-
 [[nodiscard]] bool receiver_stop_cleanup_pending() noexcept {
     if (!g_receiver_stop_pending.load(std::memory_order_acquire)) return false;
     if (ptp_receiver_runtime_active()) return true;
     g_receiver_stop_pending.store(false, std::memory_order_release);
     return false;
+}
+
+// Ownership is derived from live workers, never from a stale selected role.
+void stop_active_ptp_roles() noexcept {
+    if (ar_ptp_source_runtime_active()) {
+        ar_ptp_source_stop();
+    }
+    if (ptp_receiver_runtime_active()) {
+        g_receiver_stop_pending.store(true, std::memory_order_release);
+        ptp_receiver_stop();
+    }
 }
 
 [[nodiscard]] bool emac_role_free() noexcept {
@@ -239,7 +248,7 @@ extern "C" bool ar_ptp_lab_configure(const ar_ptp_lab_config_t* config) {
     ar::esp32p4::smv::g_facade_override = *config;
     ar::esp32p4::smv::g_facade_override_valid = true;
     portEXIT_CRITICAL(&ar::esp32p4::smv::g_ptp_facade_mux);
-    return true;
+    return transaction.finish();
 }
 
 extern "C" bool ar_ptp_lab_get_config(ar_ptp_lab_config_t* config) {
@@ -260,15 +269,18 @@ extern "C" bool ar_ptp_lab_try_start(const esp_eth_handle_t eth_handle) {
         return false;
     }
 
-    ar::esp32p4::smv::g_active_role.store(
-        static_cast<int>(config.role), std::memory_order_release);
+    bool started = false;
     if (config.role == AR_PTP_ROLE_LAB_SOURCE) {
         if (!ar_ptp_source_configure(&config)) return false;
         ar_ptp_source_start(eth_handle);
-        return ar_ptp_source_is_running();
+        started = ar_ptp_source_is_running();
+    } else {
+        started = ar::esp32p4::smv::ptp_receiver_start(eth_handle, config);
     }
-
-    return ar::esp32p4::smv::ptp_receiver_start(eth_handle, config);
+    // STOP can race with the bounded blocking START: it must win the
+    // cancellation handshake before START may report READY to its caller.
+    const bool uncancelled = transaction.finish();
+    return started && uncancelled;
 }
 
 extern "C" void ar_ptp_lab_start(const esp_eth_handle_t eth_handle) {
@@ -276,22 +288,22 @@ extern "C" void ar_ptp_lab_start(const esp_eth_handle_t eth_handle) {
 }
 
 extern "C" void ar_ptp_lab_stop(void) {
-    if (ar::esp32p4::smv::active_role() == AR_PTP_ROLE_LAB_SOURCE) {
-        ar_ptp_source_stop();
-        return;
+    // Publish the cancellation immediately. If START/config owns the
+    // slot, that owner drains STOP at the atomic release boundary.
+    if (ar::esp32p4::smv::g_role_control.request_stop_and_try_acquire()) {
+        static_cast<void>(ar::esp32p4::smv::g_role_control.finish(
+            ar::esp32p4::smv::stop_active_ptp_roles));
     }
-    if (ar::esp32p4::smv::ptp_receiver_runtime_active()) {
-        ar::esp32p4::smv::g_receiver_stop_pending.store(true, std::memory_order_release);
-    }
-    ar::esp32p4::smv::ptp_receiver_stop();
 }
 
 extern "C" bool ar_ptp_lab_is_running(void) {
-    return ar_ptp_source_is_running() || ar::esp32p4::smv::ptp_receiver_is_running();
+    return !ar::esp32p4::smv::g_role_control.stop_requested() &&
+        (ar_ptp_source_is_running() || ar::esp32p4::smv::ptp_receiver_is_running());
 }
 
 extern "C" uint32_t ar_ptp_lab_source_generation(void) {
-    return ar_ptp_source_is_running() ? ar_ptp_source_generation() : 0U;
+    return !ar::esp32p4::smv::g_role_control.stop_requested() &&
+        ar_ptp_source_is_running() ? ar_ptp_source_generation() : 0U;
 }
 
 namespace ar::esp32p4::smv {
@@ -320,6 +332,14 @@ namespace {
         status.discipline_state = AR_PTP_DISCIPLINE_UNLOCKED;
     }
     if (!ok) return false;
+    if (g_role_control.stop_requested()) {
+        status.is_running = false;
+        status.timing_authority_clock_usable = false;
+        status.globally_traceable = false;
+        status.measured_smp_synch_valid = false;
+        status.offset_valid = false;
+        status.timing_authority_generation = 0U;
+    }
     const auto lease = canonical_ptp_authority_status(status);
     status.timing_authority_clock_usable = lease.clock_usable;
     status.globally_traceable = lease.globally_traceable;
