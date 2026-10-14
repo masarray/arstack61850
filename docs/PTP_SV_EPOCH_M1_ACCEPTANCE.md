@@ -38,3 +38,14 @@ Authoritative references:
 4. Inspect independent canonical capture and IED diagnostics. If the IED still alarms, report the alarm rather than changing `smpSynch` or PTP clock quality to hide it.
 
 M1 improves interoperability defaults and synchronization safety; it does **not** certify IEC/IEEE 61850-9-3 performance or guarantee a locked IED. M2 + physical bench evidence are mandatory.
+
+
+## M1+ timeProperties / TAI hardening (software-only)
+
+- Portable PtpTimeProperties now encodes IEEE 1588v2 flagField bits explicitly in Announce, Sync, Follow_Up and Pdelay; packet visibility alone does not assert traceability.
+- ESP32-P4 LAB_SOURCE treats time(nullptr) as an untrusted candidate UTC clock, validates a plausible date and a bounded configured TAI-UTC offset, converts to TAI seconds, and checks the hardware seconds-register range. The EMAC PTP timescale flag is set only if the TAI epoch is actually seeded.
+- currentUtcOffsetValid is FALSE by default; CONFIG_AR_PTP_MANUAL_UTC_OFFSET_VALID=y requires explicit operator validation and a successful TAI seed. timeTraceable/frequencyTraceable remain FALSE. Local source remains clockClass=248, accuracy UNKNOWN, timeSource=INTERNAL_OSCILLATOR.
+- LAB_SOURCE rejects configuration that claims unverified higher grandmaster quality. Test vectors inspect wire octets independently of the existing PTP packet decoder.
+- Uninitialized RTC: run as a plainly non-timescale-validated laboratory source; **do not** market as a fully conformant IEC/IEEE 61850-9-3 grandmaster.
+
+Still missing: independent reference proving actual UTC time and leap-second offset, continuous phase/frequency coupling between EMAC PTP and SV GPTimer, mandatory clock-state/BMCA behaviors, and physical accuracy/IED acceptance.
