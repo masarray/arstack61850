@@ -1,18 +1,27 @@
 name: IED Simulator Release Hardening
 
 on:
+  workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - 'apps/ied_simulator/**'
       - 'assets/**'
       - '.github/workflows/ied-simulator-release-hardening.yml'
   pull_request:
     paths:
-      - 'apps/ied_simulator/**'
+      - 'apps/ied_simulator/packaging/**'
+      - 'apps/ied_simulator/CMakeLists.txt'
+      - 'apps/ied_simulator/src/main.cpp'
+      - 'assets/**'
       - '.github/workflows/ied-simulator-release-hardening.yml'
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   linux-release-soak:

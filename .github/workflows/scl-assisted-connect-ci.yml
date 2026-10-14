@@ -2,6 +2,7 @@ name: SCL-Assisted Connect CI
 
 on:
   push:
+    branches: [main]
     paths:
       - 'include/ariec61850/mms/scl_assisted_connect.hpp'
       - 'include/ariec61850/mms/scl_association.hpp'
@@ -37,8 +38,8 @@ on:
       - '.github/workflows/scl-assisted-connect-ci.yml'
 
 concurrency:
-  group: scl-assisted-connect-${{ github.ref }}
-  cancel-in-progress: true
+  group: scl-assisted-connect-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   linux-profile:

@@ -1,0 +1,26 @@
+name: CI Routing Policy
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - 'scripts/check_ci_trigger_policy.py'
+      - 'docs/CI_WORKFLOW_ROUTING.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - 'scripts/check_ci_trigger_policy.py'
+      - 'docs/CI_WORKFLOW_ROUTING.md'
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  routing-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify scoped PR workflow routing
+        run: python3 scripts/check_ci_trigger_policy.py

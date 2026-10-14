@@ -2,6 +2,7 @@ name: PTP Core CI
 
 on:
   push:
+    branches: [main]
     paths:
       - 'include/ariec61850/time_sync/**'
       - 'src/time_sync/**'
@@ -38,6 +39,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   portable-ptp:

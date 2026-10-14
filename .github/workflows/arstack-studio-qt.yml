@@ -2,6 +2,7 @@ name: ARStack Studio Qt
 
 on:
   push:
+    branches: [main]
     paths:
       - 'apps/arstack_studio/**'
       - 'include/ariec61850/sampled_values/**'
@@ -21,7 +22,7 @@ permissions:
 
 concurrency:
   group: arstack-studio-qt-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   windows-launcher-parse:

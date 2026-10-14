@@ -5,10 +5,27 @@ on:
     branches:
       - "agent/phase-4d-c5-control-interoperability"
   pull_request:
+    paths:
+      - 'tools/control_interop_probe/**'
+      - 'include/ariec61850/control/**'
+      - 'src/control/**'
+      - 'include/ariec61850/mms/**'
+      - 'src/mms/**'
+      - 'include/ariec61850/asn1/**'
+      - 'src/asn1/**'
+      - 'include/ariec61850/osi/**'
+      - 'src/osi/**'
+      - 'include/ariec61850/acse/**'
+      - 'src/acse/**'
+      - '.github/workflows/control-interop-harness-ci.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   control-interop:

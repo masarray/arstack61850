@@ -2,6 +2,7 @@ name: IED Simulator Qt
 
 on:
   push:
+    branches: [main]
     paths:
       - 'apps/ied_simulator/**'
       - 'include/ariec61850/scl/**'
@@ -40,6 +41,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-and-smoke:
