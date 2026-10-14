@@ -979,11 +979,13 @@ void sv_ptp_phase_observer_task(void* argument) {
         // neither a stale sample nor a recycled timer can receive a command.
         const bool source_still_running =
             ar_ptp_lab_is_running() && live_tx_running();
+        bool committed = false;
+        xSemaphoreTake(g_phase_timer_mutex, portMAX_DELAY);
+        // Check fault generation at the serialized command handoff, not
+        // earlier while this task may be waiting for timer teardown.
         const bool no_new_publisher_fault =
             g_sample_clock_context.publisher_fault_generation.load(
                 std::memory_order_acquire) == current_faults;
-        bool committed = false;
-        xSemaphoreTake(g_phase_timer_mutex, portMAX_DELAY);
         const bool session_matches = notified_session != 0U &&
             g_monitored_sample_clock != nullptr &&
             g_sample_clock_context.session_generation.load(
