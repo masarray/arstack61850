@@ -2,6 +2,7 @@ name: IEC 61850 Interoperability Server CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'tools/static_ied_server_iedsim/**'
       - 'tools/static_ied_server.cpp'
@@ -22,6 +23,7 @@ concurrency:
 
 jobs:
   linux:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     strategy:
       matrix:
         compiler: [gcc, clang]
@@ -45,6 +47,7 @@ jobs:
         run: ctest --test-dir build-interop-parity --output-on-failure
 
   windows:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

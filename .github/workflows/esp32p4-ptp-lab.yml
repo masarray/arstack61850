@@ -1,7 +1,9 @@
 name: ESP32-P4 PTP Lab Profile
 
 on:
+  workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - 'embedded/esp32p4_smv_injector/**'
       - 'include/ariec61850/time_sync/**'
@@ -10,6 +12,7 @@ on:
       - 'src/ethernet/**'
       - '.github/workflows/esp32p4-ptp-lab.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'embedded/esp32p4_smv_injector/**'
       - 'include/ariec61850/time_sync/**'
@@ -27,6 +30,7 @@ concurrency:
 
 jobs:
   build-esp32p4-ptp:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     strategy:
       fail-fast: false
       matrix:
