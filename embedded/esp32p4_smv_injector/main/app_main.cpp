@@ -393,7 +393,9 @@ plan_source_ptp_epoch_arm(const esp_eth_handle_t eth_handle) noexcept {
 #if CONFIG_AR_PTP_LAB_TX && defined(SOC_EMAC_IEEE1588V2_SUPPORTED) && \
     SOC_EMAC_IEEE1588V2_SUPPORTED && ESP_IDF_VERSION_MAJOR < 6
     ar_ptp_lab_config_t config{};
-    if (!ar_ptp_lab_is_running() || !ar_ptp_lab_get_config(&config) ||
+    ar_ptp_lab_status_t status{};
+    if (!ar_ptp_lab_get_status(&status) || !status.is_running ||
+        !ar_ptp_lab_get_config(&config) ||
         config.role != AR_PTP_ROLE_LAB_SOURCE) return std::nullopt;
 
     eth_mac_time_t ptp_time{};
@@ -563,6 +565,8 @@ void publisher_task(void* argument) {
                 // Legacy first alarm already consumes the first rational tick;
                 // a PTP-armed first alarm is an independent epoch delay.
                 static_cast<void>(expected_schedule.next_ticks());
+            } else {
+                ESP_LOGI(kTag, "PTP epoch START armed; SV sync remains unqualified (smpSynch AUTO=0)");
             }
             continue;
         }
