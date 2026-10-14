@@ -563,6 +563,16 @@ void ptp_lab_task(void* argument) {
         }
     }
 
+    // A Power Profile slave needs peer-delay replies to qualify network
+    // propagation time. Do not advertise a usable timing source when the
+    // requested hardware RX/Pdelay path could not be established.
+    if (options.respond_to_peer_delay && !pdelay_enabled) {
+        ESP_LOGE(kTag, "PTP SOURCE rejected: required hardware Pdelay response path unavailable");
+        finish_runtime(context);
+        vTaskDelete(nullptr);
+        return;
+    }
+
     const auto clock_identity = format_ptp_clock_identity(options.clock_identity);
     ESP_LOGW(kTag,
              "PTP LAB TX enabled: troubleshooting/interoperability helper only; not a GPS-backed or certified grandmaster");
@@ -606,6 +616,7 @@ void ptp_lab_task(void* argument) {
                 const bool emitted_core_timing = g_announce_sent.load(std::memory_order_relaxed) > 0U && g_sync_sent.load(std::memory_order_relaxed) > 0U && g_follow_up_sent.load(std::memory_order_relaxed) > 0U;
                 if (emitted_core_timing) g_ptp_ready.store(true, std::memory_order_release);
             } else {
+                g_ptp_ready.store(false, std::memory_order_release);
                 context.runtime->record_error("Ethernet transmit or hardware timestamp failure");
                 g_tx_failure_count.fetch_add(1U, std::memory_order_relaxed);
                 ++consecutive_failures;
