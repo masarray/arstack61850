@@ -5,11 +5,20 @@
 #include "ariec61850/sampled_values/frame.hpp"
 #include "ariec61850/sampled_values/frame_codec.hpp"
 #include "ariec61850/sampled_values/live_signal_state.hpp"
+#include "ariec61850/time_sync/sv_ptp_epoch.hpp"
 
 #include "driver/gptimer.h"
 #include "ethernet_port.h"
 #include "live_control.hpp"
 #include "runtime_profile.hpp"
+#if CONFIG_AR_PTP_LAB_TX
+#include "ptp_lab_task.hpp"
+#include "esp_idf_version.h"
+#include "soc/soc_caps.h"
+#if ESP_IDF_VERSION_MAJOR < 6
+#include "esp_eth_mac_esp.h"
+#endif
+#endif
 #include "smp_synch_lab.hpp"
 #include "esp_err.h"
 #include "esp_eth.h"
@@ -27,6 +36,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -54,6 +64,9 @@ using ar::iec61850::sampled_values::SampledValuesFrameCodec;
 using ar::iec61850::sampled_values::SampledValuesPdu;
 using ar::iec61850::sampled_values::SvFixedPointSineEngine;
 using ar::iec61850::sampled_values::SvLiveSignalState;
+using ar::iec61850::time_sync::SvSecondBoundaryArm;
+using ar::iec61850::time_sync::SvPtpClockObservation;
+using ar::iec61850::time_sync::plan_sv_ptp_second_arm;
 
 constexpr char kTag[] = "ar_smv_p3";
 constexpr EventBits_t kLinkUpBit = BIT0;
@@ -370,9 +383,44 @@ bool sample_alarm_callback(
     return high_priority_task_woken == pdTRUE;
 }
 
+// This is deliberately a bounded START-time observation, not a per-sample
+// PTP IOCTL and not evidence that the free-running GPTimer stays disciplined.
+// It places smpCnt=0 near a PTP epoch only for the selected LAB_SOURCE role.
+// Independent EMAC TX timestamp / phase evidence is still required before
+// advertising smpSynch=1/2.
+[[nodiscard]] std::optional<SvSecondBoundaryArm>
+plan_source_ptp_epoch_arm(const esp_eth_handle_t eth_handle) noexcept {
+#if CONFIG_AR_PTP_LAB_TX && defined(SOC_EMAC_IEEE1588V2_SUPPORTED) && \
+    SOC_EMAC_IEEE1588V2_SUPPORTED && ESP_IDF_VERSION_MAJOR < 6
+    ar_ptp_lab_config_t config{};
+    if (!ar_ptp_lab_is_running() || !ar_ptp_lab_get_config(&config) ||
+        config.role != AR_PTP_ROLE_LAB_SOURCE) return std::nullopt;
+
+    eth_mac_time_t ptp_time{};
+    const std::int64_t before_us = esp_timer_get_time();
+    const auto result = esp_eth_ioctl(
+        eth_handle, static_cast<esp_eth_io_cmd_t>(ETH_MAC_ESP_CMD_G_PTP_TIME),
+        &ptp_time);
+    const std::int64_t after_us = esp_timer_get_time();
+    if (result != ESP_OK || before_us < 0 || after_us < before_us ||
+        (ptp_time.seconds == 0U && ptp_time.nanoseconds == 0U)) {
+        return std::nullopt;
+    }
+    return plan_sv_ptp_second_arm(SvPtpClockObservation{
+        ptp_time.nanoseconds, static_cast<std::uint64_t>(before_us),
+        static_cast<std::uint64_t>(after_us)});
+#else
+    (void)eth_handle;
+    return std::nullopt;
+#endif
+}
+
 gptimer_handle_t start_sample_clock(
     TaskHandle_t publisher_task_handle,
-    const std::uint32_t publisher_rate_hz) {
+    const std::uint32_t publisher_rate_hz,
+    const esp_eth_handle_t eth_handle,
+    bool& epoch_armed) {
+    epoch_armed = false;
     g_sample_clock_context = {};
     g_sample_clock_context.publisher_task = publisher_task_handle;
     g_sample_clock_context.schedule.reset(publisher_rate_hz);
@@ -390,9 +438,14 @@ gptimer_handle_t start_sample_clock(
     ESP_ERROR_CHECK(gptimer_register_event_callbacks(
         timer, &callbacks, &g_sample_clock_context));
 
+    // The timer is configured before reading EMAC PTP time, minimizing
+    // cross-clock arm latency without touching the high-frequency callback.
+    const auto epoch_arm = plan_source_ptp_epoch_arm(eth_handle);
+    epoch_armed = epoch_arm.has_value();
     g_sample_clock_context.next_alarm = {};
-    g_sample_clock_context.next_alarm.alarm_count =
-        g_sample_clock_context.schedule.next_ticks();
+    g_sample_clock_context.next_alarm.alarm_count = epoch_arm.has_value()
+        ? epoch_arm->first_alarm_us
+        : g_sample_clock_context.schedule.next_ticks();
     g_sample_clock_context.next_alarm.flags.auto_reload_on_alarm = false;
     ESP_ERROR_CHECK(gptimer_set_alarm_action(timer, &g_sample_clock_context.next_alarm));
     ESP_ERROR_CHECK(gptimer_enable(timer));
@@ -443,6 +496,7 @@ void publisher_task(void* argument) {
     std::uint16_t mirror_sample_count = 0U;
     TimingStats local{};
     bool schedule_anchored = false;
+    bool epoch_armed = false;
     std::int64_t expected_wake_us = 0;
     std::uint32_t consecutive_canonical_tx_failures = 0U;
     esp_err_t last_canonical_tx_error = ESP_OK;
@@ -486,7 +540,6 @@ void publisher_task(void* argument) {
             consecutive_canonical_tx_failures = 0U;
             last_canonical_tx_error = ESP_OK;
             expected_schedule.reset(active_profile.publisher_rate_hz);
-            static_cast<void>(expected_schedule.next_ticks()); // first alarm interval
             ESP_LOGI(kTag,
                      "PROFILE armed generation=%llu svID=%s APPID=0x%04X rate=%lu wrap=%u confRev=%lu VLAN=%u/%u/%u frameLen=%u",
                      static_cast<unsigned long long>(active_profile.generation),
@@ -504,7 +557,13 @@ void publisher_task(void* argument) {
             // Formatting the profile log after timer enable previously queued
             // dozens of ISR notifications before the publisher could consume
             // its first tick, so every START falsely began with missed slots.
-            sample_clock = start_sample_clock(task_handle, active_profile.publisher_rate_hz);
+            sample_clock = start_sample_clock(
+                task_handle, active_profile.publisher_rate_hz, eth_handle, epoch_armed);
+            if (!epoch_armed) {
+                // Legacy first alarm already consumes the first rational tick;
+                // a PTP-armed first alarm is an independent epoch delay.
+                static_cast<void>(expected_schedule.next_ticks());
+            }
             continue;
         }
 
