@@ -55,6 +55,19 @@ config AR_PTP_LAB_TX
         role 2 is passive monitor-only. This feature is not a GPS-backed or
         certified grandmaster claim.
 
+config AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL
+    bool "LAB ONLY: continuous bounded PTP-to-SV phase steering (experimental)"
+    default n
+    depends on AR_PTP_LAB_TX && AR_SMV_P2_REALTIME_50HZ
+    help
+        Opt-in experimental EMAC-PTP / GPTimer phase bridge. Reads hardware
+        clocks in a low-priority task once per SV second, then distributes
+        at most 400 +/-1us corrections across remaining SV deadlines.
+        Requires SOURCE active BEFORE SV START and exactly one transmitted
+        ASDU per sample with publisher fps matching smpCnt modulus.
+        AUTO smpSynch remains unsynchronized until independent wire/hardware
+        timestamp evidence is available. DO NOT use on a live substation.
+
 config AR_PTP_OPERATING_ROLE
     int "PTP operating role (0=lab source, 1=time receiver, 2=monitor)"
     range 0 2
