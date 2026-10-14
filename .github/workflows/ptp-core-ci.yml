@@ -16,6 +16,7 @@ on:
       - 'tests/test_smp_synch_wire_offset.cpp'
       - 'tests/test_ptp_discipline.cpp'
       - 'tests/test_ptp_p2_hardening.cpp'
+      - 'tests/test_sv_ptp_epoch.cpp'
       - 'tests/ptp_profile/**'
       - '.github/workflows/ptp-core-ci.yml'
   pull_request:
@@ -33,6 +34,7 @@ on:
       - 'tests/test_smp_synch_wire_offset.cpp'
       - 'tests/test_ptp_discipline.cpp'
       - 'tests/test_ptp_p2_hardening.cpp'
+      - 'tests/test_sv_ptp_epoch.cpp'
       - 'tests/ptp_profile/**'
       - '.github/workflows/ptp-core-ci.yml'
 
@@ -110,6 +112,7 @@ jobs:
           Build-Target 'smp_synch_policy_tests'
           Build-Target 'smp_synch_wire_offset_tests'
           Build-Target 'ptp_discipline_tests'
+          Build-Target 'sv_ptp_epoch_tests'
           Build-Target 'ptp_p2_hardening_tests'
           Build-Target 'ptp_profile_analyze'
 
