@@ -67,15 +67,35 @@ def main():
     assert matching(paths(sources["scl-assisted-workbench-ci.yml"]), MODEL_CPP)
     assert not matching(paths(sources["ied-simulator-release-hardening.yml"]), NORMAL_GUI)
     assert matching(paths(sources["ied-simulator-release-hardening.yml"]), PACKAGING)
-    # Firmware branch builds are intentionally preserved for board testing, but
-    # one branch owns a shared push/PR concurrency key so only its latest
-    # firmware artifact run continues.
+    # PTP / SMV firmware uses one source-branch key for PR runs; repetitive
+    # feature pushes never schedule additional ESP-IDF builds.
     for name in ("esp32p4-smv-injector.yml", "esp32p4-ptp-lab.yml"):
         fw = (ROOT / name).read_text(encoding="utf-8")
         assert "github.event.pull_request.head.ref || github.ref_name" in fw, name
         assert "github.event.pull_request.head.repo.full_name || github.repository" in fw, name
         assert "github.ref != 'refs/heads/main'" in fw, name
-    print("CI_ROUTING_POLICY_PASS non_gui_excluded=6 duplicate_feature_push=0 pr_concurrency=15 firmware_branch_artifacts=preserved")
+    # WIP iteration must not spend Windows/ESP-IDF/3-compiler runners.
+    # Ready-for-review, main integration and explicit workflow_dispatch remain.
+    expensive = ("esp32p4-ptp-lab.yml", "esp32p4-smv-injector.yml", "ptp-core-ci.yml", "cpp-ci.yml", "embedded-ci.yml", "security-evidence.yml", "arstack-studio-qt.yml", "interoperability-server-ci.yml", "ied-simulator-release-hardening.yml", "arstack-studio-windows-lifecycle.yml", "brcb-hard-profile-ci.yml",)
+    for name in expensive:
+        source = (ROOT / name).read_text(encoding="utf-8")
+        assert "ready_for_review" in event_body(source, "pull_request"), name
+        job_part = source.split("\njobs:\n", 1)[1]
+        job_names = re.findall(r"(?m)^  [a-zA-Z0-9_-]+:", job_part)
+        draft_gates = re.findall(
+            r"(?m)^    if: .*github.event.pull_request.draft.*$",
+            job_part,
+        )
+        assert len(draft_gates) == len(job_names), (name, len(draft_gates), len(job_names))
+    for name in ("esp32p4-smv-injector.yml", "esp32p4-ptp-lab.yml"):
+        firmware = (ROOT / name).read_text(encoding="utf-8")
+        push = event_body(firmware, "push")
+        assert "branches: [main]" in push, f"{name}: feature push flood"
+        assert "workflow_dispatch:" in firmware, f"{name}: missing manual candidate"
+    release = (ROOT / "arstack-studio-release.yml").read_text(encoding="utf-8")
+    assert not re.search(r"(?m)^  pull_request:", release), "installer on every PR"
+    assert "workflow_dispatch:" in release and "tags:" in release
+    print("CI_ROUTING_POLICY_PASS draft_runner_gates=11 firmware_feature_push=off release_pr_packaging=off manual_candidates=on")
 
 
 if __name__ == "__main__":

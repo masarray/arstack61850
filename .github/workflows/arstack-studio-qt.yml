@@ -10,6 +10,7 @@ on:
       - 'include/ariec61850/scl/**'
       - '.github/workflows/arstack-studio-qt.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'apps/arstack_studio/**'
       - 'include/ariec61850/sampled_values/**'
@@ -22,10 +23,11 @@ permissions:
 
 concurrency:
   group: arstack-studio-qt-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
 jobs:
   windows-launcher-parse:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -54,6 +56,7 @@ jobs:
           Write-Host 'Windows PowerShell parse: PASS · launcher + S8B packaged ownership probe'
 
   windows-ownership-integration:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: S8B Windows ownership integration
     runs-on: windows-2022
     steps:
@@ -124,6 +127,7 @@ jobs:
           retention-days: 7
 
   qt-build-smoke:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     container: ubuntu:26.04
     steps:

@@ -3,7 +3,17 @@ name: Security and Evidence
 on:
   push:
     branches: [main]
+    paths:
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'include/**'
+      - 'src/**'
+      - 'tests/**'
+      - 'tools/**'
+      - 'fuzz/**'
+      - '.github/workflows/security-evidence.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'CMakeLists.txt'
       - 'cmake/**'
@@ -20,10 +30,11 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
 jobs:
   sanitizers:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: Clang / ASan + UBSan
     runs-on: ubuntu-latest
     env:
@@ -45,6 +56,7 @@ jobs:
         run: ctest --test-dir build-sanitizers --output-on-failure
 
   fuzz-smoke:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: Clang / libFuzzer corpus smoke
     runs-on: ubuntu-latest
     timeout-minutes: 15

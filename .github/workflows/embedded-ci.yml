@@ -5,6 +5,7 @@ on:
     branches:
       - main
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'embedded/**'
       - 'include/ariec61850/mms/**'
@@ -27,15 +28,18 @@ on:
       - 'src/time_sync/**'
       - '.github/workflows/embedded-ci.yml'
 
+  workflow_dispatch:
+
 permissions:
   contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
 jobs:
   embedded-host-sim:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: Embedded host-sim / ${{ matrix.compiler }}
     runs-on: ubuntu-latest
     strategy:

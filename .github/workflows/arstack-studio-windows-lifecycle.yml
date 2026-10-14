@@ -7,6 +7,7 @@ on:
       - 'apps/arstack_studio/**'
       - '.github/workflows/arstack-studio-windows-lifecycle.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'apps/arstack_studio/**'
       - '.github/workflows/arstack-studio-windows-lifecycle.yml'
@@ -16,10 +17,11 @@ permissions:
 
 concurrency:
   group: arstack-studio-windows-lifecycle-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
 jobs:
   close-exit-reopen:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: Close -> process exit -> immediate reopen
     runs-on: windows-2022
     timeout-minutes: 12
