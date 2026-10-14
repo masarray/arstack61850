@@ -56,6 +56,9 @@ data_model_required = [
     'onDoubleClicked: function(event)',
     'BrowserEngineeringEvidence {',
     'root.currentNode.engineeringEvidence',
+    'objectName: "browserDataModelSelectedAttributeInspector"',
+    'root.detail.rootChildCount === 0 || root.currentNode.kind === "DA"',
+    'function onValuesChanged() { root.valueRevision += 1 }',
 ]
 
 for label, source, required in [
@@ -78,12 +81,28 @@ data_set_required = [
     'required property var modelData',
     'root.showSelectedEvidence = true',
     'BrowserEngineeringEvidence {',
+    'objectName: "browserDataSetEvidenceInspector"',
+    'root.selectedAttributeNode.engineeringEvidence || ({})',
+    'selected.reference === root.selectedAttributeReference',
+    'root.selectedAttributeReference = selected',
+    'root.showSelectedEvidence = selected',
 ]
 missing_dataset = [term for term in data_set_required if term not in data_set]
 if missing_dataset:
     raise SystemExit("BROWSER_DATASET_HIERARCHY_FAIL missing=" + ",".join(missing_dataset))
 if 'root.memberNode(modelData)' in data_set:
     raise SystemExit("BROWSER_DATASET_HIERARCHY_FAIL unnormalized per-row linear lookup")
+# The DataSets evidence inspector must be inside the selectable members page,
+# never an unreachable third child in the overview/members StackLayout.
+stack = data_set.split('StackLayout {', 1)[1]
+members = stack.find('objectName: "browserDataSetMembers"')
+evidence = stack.find('objectName: "browserDataSetEvidenceInspector"')
+if members < 0 or evidence <= members or 'ColumnLayout {' not in stack[:members]:
+    raise SystemExit("BROWSER_DATASET_EVIDENCE_FAIL inspector is not in member pane")
+if data_set.count('BrowserEngineeringEvidence {') != 1:
+    raise SystemExit("BROWSER_DATASET_EVIDENCE_FAIL duplicate/hidden evidence inspector")
+if 'readEngineeringSelected()' in data_set or 'readEngineeringSelected()' in data_model:
+    raise SystemExit("BROWSER_TYPED_EVIDENCE_FAIL passive inspector initiated MMS Read")
 
 report_controller = (workspace_path.parent.parent / "src" / "MmsReportController.cpp").read_text(encoding="utf-8")
 for token in [

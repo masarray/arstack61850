@@ -11,8 +11,19 @@ Rectangle {
     required property var modelProvider
 
     readonly property var treeModel: modelProvider.treeModel
-    readonly property var currentNode: treeModel.presentationNode
+    // Model snapshots are immutable QVariants. A live value update emits
+    // valuesChanged, not selectionChanged; take a new canonical snapshot.
+    property int valueRevision: 0
+    readonly property var currentNode: {
+        const revision = root.valueRevision
+        return root.treeModel.presentationNode
+    }
     readonly property var detail: treeModel.detailModel
+
+    Connections {
+        target: root.treeModel
+        function onValuesChanged() { root.valueRevision += 1 }
+    }
 
     color: theme.background
 
@@ -215,15 +226,39 @@ Rectangle {
         }
 
         ScrollView {
-            visible: root.detail.rootChildCount === 0
+            id: nodeInspector
+            objectName: "browserDataModelSelectedAttributeInspector"
+            // Keep the canonical DO/DA tree in view while inspecting a DA.
+            visible: root.detail.rootChildCount === 0 || root.currentNode.kind === "DA"
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.fillHeight: root.detail.rootChildCount === 0
+            Layout.preferredHeight: root.detail.rootChildCount === 0
+                                    ? -1 : Math.min(235, Math.max(130, root.height * 0.36))
+            clip: true
             contentWidth: availableWidth
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
             ColumnLayout {
                 width: Math.max(0, parent.width - 24)
                 x: 12
                 spacing: 0
+
+                Rectangle {
+                    visible: root.detail.rootChildCount > 0
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: visible ? 25 : 0
+                    color: theme.surfaceRaised
+                    Label {
+                        anchors.fill: parent
+                        leftPadding: 8
+                        verticalAlignment: Text.AlignVCenter
+                        text: "SELECTED ATTRIBUTE · " + (root.currentNode.label || "")
+                        color: theme.text
+                        font.pixelSize: 9
+                        font.weight: Font.DemiBold
+                        elide: Text.ElideMiddle
+                    }
+                }
 
                 Repeater {
                     model: [
