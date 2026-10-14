@@ -111,6 +111,10 @@ struct TimingStats final {
 
 TimingStats g_interval_stats{};
 static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
+#if AR_SV_PTP_PHASE_SUPPORTED
+static_assert(std::atomic<std::int32_t>::is_always_lock_free);
+static_assert(std::atomic<bool>::is_always_lock_free);
+#endif
 std::atomic<std::uint32_t> g_sample_tick_total{0U};
 #if AR_SV_PTP_PHASE_SUPPORTED
 SemaphoreHandle_t g_phase_timer_mutex = nullptr;
@@ -440,12 +444,13 @@ bool sample_alarm_callback(
         }
     }
 #endif
-    const std::uint32_t nominal_interval = context->schedule.next_ticks();
-    const std::int64_t corrected_interval =
-        static_cast<std::int64_t>(nominal_interval) + adjustment;
-    // The configured 4000/4800fps profiles have >=208us nominal intervals.
-    const std::uint32_t interval = static_cast<std::uint32_t>(
-        corrected_interval > 0 ? corrected_interval : 1LL);
+    std::uint32_t interval = context->schedule.next_ticks();
+#if AR_SV_PTP_PHASE_SUPPORTED
+    // Exactly the original ISR path in normal production builds. The
+    // experimental opt-in only adjusts a positive deadline by one tick.
+    if (adjustment > 0) ++interval;
+    else if (adjustment < 0 && interval > 1U) --interval;
+#endif
     context->next_alarm = {};
     context->next_alarm.alarm_count = event->alarm_value + interval;
     context->next_alarm.flags.auto_reload_on_alarm = false;
