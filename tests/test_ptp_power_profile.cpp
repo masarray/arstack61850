@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ariec61850/time_sync/ptp_power_profile.hpp"
 #include "ariec61850/time_sync/ptp.hpp"
+#include "ariec61850/time_sync/ptp_tai_source.hpp"
 
 #include <algorithm>
 #include <array>
@@ -119,6 +120,70 @@ void check_ptp_wire_sequence_and_identity() {
     source.stop();
 }
 
+void check_tai_seed_and_truthful_time_properties() {
+    // The physical clock uses unsigned 32-bit seconds; reject unavailable
+    // system time, stale RTC and arithmetic overflow rather than wrapping.
+    REQUIRE(!try_seed_ptp_tai_seconds(0, 37).has_value());
+    REQUIRE(!try_seed_ptp_tai_seconds(1577836799LL, 37).has_value());
+    REQUIRE(!try_seed_ptp_tai_seconds(1700000000LL, -1).has_value());
+    REQUIRE(!try_seed_ptp_tai_seconds(1700000000LL, 201).has_value());
+    REQUIRE(!try_seed_ptp_tai_seconds(4294967290LL, 37).has_value());
+    REQUIRE(try_seed_ptp_tai_seconds(1700000000LL, 37) ==
+            std::optional<std::uint32_t>{1700000037U});
+    REQUIRE(try_seed_ptp_tai_seconds(4294967258LL, 37) ==
+            std::optional<std::uint32_t>{4294967295U});
+
+    auto options = make_source();
+    options.time_properties.ptp_timescale = true;
+    // Local RTC-derived TAI is not UTC/GNSS traceable, even with a TAI epoch.
+    PtpPublisherRuntime local_clock{options};
+    REQUIRE(local_clock.start());
+    const auto announce = local_clock.prepare_announce(PtpTimestamp{1700000037U, 0U});
+    REQUIRE(announce.has_value());
+    PtpFrame frame;
+    REQUIRE(PtpCodec::try_parse_ethernet_frame(announce->ethernet_frame, frame));
+    REQUIRE(frame.header.flags == 0x0008U);
+    REQUIRE(frame.announce.has_value());
+    REQUIRE(frame.announce->current_utc_offset == 37);
+    REQUIRE(frame.announce->clock_class == 248U);
+
+    const auto sync = local_clock.prepare_sync(PtpTimestamp{});
+    REQUIRE(sync.has_value());
+    REQUIRE(PtpCodec::try_parse_ethernet_frame(sync->ethernet_frame, frame));
+    REQUIRE(frame.header.flags == 0x0208U); // two-step + PTP timescale
+    const auto follow_up = local_clock.prepare_follow_up(
+        sync->sequence_id, PtpTimestamp{1700000038U, 123456U});
+    REQUIRE(follow_up.has_value());
+    REQUIRE(PtpCodec::try_parse_ethernet_frame(follow_up->ethernet_frame, frame));
+    REQUIRE(frame.header.flags == 0x0008U);
+    local_clock.stop();
+
+    // An explicitly verified TAI-UTC offset is a separate assertion;
+    // it does not implicitly enable timeTraceable/frequencyTraceable.
+    options.time_properties.current_utc_offset_valid = true;
+    PtpPublisherRuntime manually_verified{options};
+    REQUIRE(manually_verified.start());
+    const auto verified_announce = manually_verified.prepare_announce(
+        PtpTimestamp{1700000037U, 0U});
+    REQUIRE(verified_announce.has_value());
+    REQUIRE(PtpCodec::try_parse_ethernet_frame(
+        verified_announce->ethernet_frame, frame));
+    REQUIRE(frame.header.flags == 0x000CU);
+    REQUIRE((frame.header.flags & 0x0030U) == 0U);
+    manually_verified.stop();
+
+    // Time-properties must never be inferred from PTP packet visibility.
+    PtpPublisherRuntime unseeded{make_source()};
+    REQUIRE(unseeded.start());
+    const auto unseeded_announce = unseeded.prepare_announce(
+        PtpTimestamp{1U, 0U});
+    REQUIRE(unseeded_announce.has_value());
+    REQUIRE(PtpCodec::try_parse_ethernet_frame(
+        unseeded_announce->ethernet_frame, frame));
+    REQUIRE(frame.header.flags == 0U);
+    unseeded.stop();
+}
+
 void check_vlan_encoding_remains_configurable() {
     auto options = make_source();
     options.vlan_id = 100U;
@@ -142,6 +207,7 @@ int main() {
         check_defaults_and_reject_nonstandard_cadence();
         check_ptp_wire_sequence_and_identity();
         check_vlan_encoding_remains_configurable();
+        check_tai_seed_and_truthful_time_properties();
         std::cout << "PTP Power Profile wire and configuration checks passed\n";
         return 0;
     } catch (const std::exception& e) {
