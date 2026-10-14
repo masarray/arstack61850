@@ -851,6 +851,21 @@ void publisher_task(void* argument) {
 }
 
 #if AR_SV_PTP_PHASE_SUPPORTED
+// Revoke only the matching GPTimer generation; a stale monitor must never
+// overwrite the new session's phase gate following STOP/START.
+void revoke_sv_phase_session(const std::uint32_t expected_session) noexcept {
+    xSemaphoreTake(g_phase_timer_mutex, portMAX_DELAY);
+    if (expected_session != 0U &&
+        g_sample_clock_context.session_generation.load(
+            std::memory_order_acquire) == expected_session) {
+        g_sample_clock_context.phase_authority_valid.store(
+            false, std::memory_order_release);
+        g_sample_clock_context.requested_slew_ticks.store(
+            0, std::memory_order_relaxed);
+    }
+    xSemaphoreGive(g_phase_timer_mutex);
+}
+
 // Shadow-verified software phase servo. This task never controls smpSynch,
 // executes no ISR code and acquires a GPTimer handle under a teardown mutex.
 // It samples clocks once per sample-counter epoch, 250ms after smpCnt=0.
@@ -858,8 +873,16 @@ void sv_ptp_phase_observer_task(void* argument) {
     const auto eth_handle = static_cast<esp_eth_handle_t>(argument);
     SvPtpPhaseAuthority controller;
     std::uint32_t accepted_epochs = 0U;
+    std::uint32_t controller_session = 0U;
     while (true) {
         const std::uint32_t events = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        const std::uint32_t notified_session =
+            g_sample_clock_context.session_generation.load(
+                std::memory_order_acquire);
+        if (controller_session != notified_session) {
+            controller.reset();
+            controller_session = notified_session;
+        }
         vTaskDelay(pdMS_TO_TICKS(250));
 
         ar_ptp_lab_config_t config{};
@@ -868,10 +891,7 @@ void sv_ptp_phase_observer_task(void* argument) {
             !ar_ptp_lab_is_running() || !ar_ptp_lab_get_config(&config) ||
             config.role != AR_PTP_ROLE_LAB_SOURCE) {
             static_cast<void>(controller.invalidate());
-            g_sample_clock_context.phase_authority_valid.store(
-                false, std::memory_order_release);
-            g_sample_clock_context.requested_slew_ticks.store(
-                0, std::memory_order_relaxed);
+            revoke_sv_phase_session(notified_session);
             continue;
         }
 
@@ -882,7 +902,9 @@ void sv_ptp_phase_observer_task(void* argument) {
         SvPtpPhaseObservation observation{};
         xSemaphoreTake(g_phase_timer_mutex, portMAX_DELAY);
         const gptimer_handle_t timer = g_monitored_sample_clock;
-        if (timer != nullptr) {
+        if (timer != nullptr && notified_session != 0U &&
+            g_sample_clock_context.session_generation.load(
+                std::memory_order_acquire) == notified_session) {
             const std::uint32_t generation_before =
                 g_sample_clock_context.epoch_generation.load(
                     std::memory_order_acquire);
@@ -897,7 +919,8 @@ void sv_ptp_phase_observer_task(void* argument) {
             if (before_rc == ESP_OK && ptp_rc == ESP_OK &&
                 after_rc == ESP_OK && generation_before != 0U &&
                 generation_before == generation_after &&
-                ptp.nanoseconds < 1000000000U) {
+                ptp.nanoseconds >= 100000000U &&
+                ptp.nanoseconds <= 800000000U) {
                 observation = SvPtpPhaseObservation{
                     static_cast<std::uint32_t>(before),
                     static_cast<std::uint32_t>(after),
@@ -913,33 +936,41 @@ void sv_ptp_phase_observer_task(void* argument) {
 
         if (!evidence_valid || !ar_ptp_lab_is_running()) {
             static_cast<void>(controller.invalidate());
-            g_sample_clock_context.phase_authority_valid.store(
-                false, std::memory_order_release);
-            g_sample_clock_context.requested_slew_ticks.store(
-                0, std::memory_order_relaxed);
+            revoke_sv_phase_session(notified_session);
             continue;
         }
 
         const auto decision = controller.observe(observation);
-        // A late observation must NEVER steer a future epoch after a STOP,
-        // re-ARM, source transition or scheduler-counter rollover.
-        const bool same_session =
+        // Handoff and GPTimer deletion share a control-plane mutex:
+        // neither a stale sample nor a recycled timer can receive a command.
+        const bool source_still_running =
+            ar_ptp_lab_is_running() && live_tx_running();
+        bool committed = false;
+        xSemaphoreTake(g_phase_timer_mutex, portMAX_DELAY);
+        const bool session_matches = notified_session != 0U &&
+            g_monitored_sample_clock != nullptr &&
+            g_sample_clock_context.session_generation.load(
+                std::memory_order_acquire) == notified_session;
+        if (session_matches &&
             g_sample_clock_context.epoch_generation.load(
-                std::memory_order_acquire) == observation.last_sv_epoch_generation;
-        if (!decision.accepted || !same_session ||
-            !ar_ptp_lab_is_running() || !live_tx_running()) {
-            static_cast<void>(controller.invalidate());
+                std::memory_order_acquire) == observation.last_sv_epoch_generation &&
+            decision.accepted && source_still_running) {
+            g_sample_clock_context.phase_authority_valid.store(
+                true, std::memory_order_release);
+            g_sample_clock_context.requested_slew_ticks.store(
+                decision.slew_ticks_next_epoch, std::memory_order_release);
+            committed = true;
+        } else if (session_matches) {
             g_sample_clock_context.phase_authority_valid.store(
                 false, std::memory_order_release);
             g_sample_clock_context.requested_slew_ticks.store(
                 0, std::memory_order_relaxed);
+        }
+        xSemaphoreGive(g_phase_timer_mutex);
+        if (!committed) {
+            static_cast<void>(controller.invalidate());
             continue;
         }
-
-        g_sample_clock_context.phase_authority_valid.store(
-            true, std::memory_order_release);
-        g_sample_clock_context.requested_slew_ticks.store(
-            decision.slew_ticks_next_epoch, std::memory_order_release);
         ++accepted_epochs;
         if ((accepted_epochs % 60U) == 0U) {
             ESP_LOGI(kTag,
