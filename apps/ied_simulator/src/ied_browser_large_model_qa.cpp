@@ -422,6 +422,51 @@ int main(int argc, char** argv) {
         return 32;
     }
 
+    using ar::iec61850::mms::MmsReportValue;
+    // M2G: bounded value formatting alone is insufficient if an IED returns
+    // oversized IEC member references or Reason-for-Inclusion names.
+    std::vector<MmsReportValue> giantMetadata(4);
+    giantMetadata[0].data_reference = std::string(1'500'000, 'R');
+    giantMetadata[0].value = MmsDataValue::boolean(true);
+    giantMetadata[1].data_reference = "LD4/LLN19.DO99.stVal";
+    giantMetadata[1].value = MmsDataValue::boolean(false);
+    giantMetadata[1].reason_for_inclusion.names.push_back(std::string(1'500'000, 'N'));
+    giantMetadata[2].data_reference = std::string(1'500'000, 'R') + ".q";
+    giantMetadata[2].value = MmsDataValue::bit_string(3U, bits);
+    giantMetadata[3].data_reference = "LD4/LLN19.DO99.stVal";
+    giantMetadata[3].value = MmsDataValue::boolean(true);
+    giantMetadata[3].reason_for_inclusion.names.assign(1500, "data-change");
+    int metadataBudget = 8;
+    const auto safeMetadata = arstack::iedsim::projectBrowserReportMembers(
+        giantMetadata, metadataBudget);
+    if (safeMetadata.values.size() != 4 || !safeMetadata.textTruncated ||
+        !safeMetadata.evidenceTruncated || !safeMetadata.evidence.isEmpty() ||
+        metadataBudget != 8 ||
+        safeMetadata.values.at(0).size() > 1024 ||
+        safeMetadata.values.at(1).size() > 1024 ||
+        safeMetadata.values.at(2).size() > 1024 ||
+        safeMetadata.values.at(3).size() > 1024 ||
+        !safeMetadata.values.at(0).contains(QStringLiteral("preview truncated")) ||
+        !safeMetadata.values.at(1).contains(QStringLiteral("preview truncated")) ||
+        !safeMetadata.values.at(3).contains(QStringLiteral("preview truncated"))) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL bounded_report_metadata\n";
+        return 34;
+    }
+    // Normal IEC references remain exact so q/t evidence can still be
+    // associated with the original received member ordinal.
+    std::vector<MmsReportValue> normalMetadata(1);
+    normalMetadata[0].data_reference = "LD4/LLN19.DO99.q";
+    normalMetadata[0].value = MmsDataValue::bit_string(3U, bits);
+    const auto normalProjected = arstack::iedsim::projectBrowserReportMembers(
+        normalMetadata, metadataBudget);
+    if (normalProjected.evidence.size() != 1 ||
+        normalProjected.evidence.constFirst().toMap()
+            .value(QStringLiteral("index")).toInt() != 0 ||
+        normalProjected.textTruncated) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL report_metadata_provenance\n";
+        return 35;
+    }
+
     const bool passes = applyMs <= 5000 && filterMs <= 1500 && selectMs <= 500;
     std::cout << "IED_BROWSER_LARGE_MODEL_" << (passes ? "PASS" : "FAIL")
               << " nodes=" << model.totalNodeCount()

@@ -108,9 +108,14 @@ for token in [
     'kBrowserReportTextLimit = 1024',
     'std::min(members.size(),',
     'projection.rowsTruncated = members.size() > visibleCount',
-    'if (!member.value || reference.isEmpty()) continue',
+    'if (!member.value || fullReference.empty()) continue',
     'decodeEngineeringEvidence(',
-    '#include "BrowserBoundedMmsPreview.hpp"',
+    'boundedReportMetadata(',
+    'const std::string_view fullReference(*rawReference)',
+    'if (referenceTruncated) {',
+    'hasReportTypedLeaf(',
+    'text.left(kBrowserReportTextLimit - marker.size()) + marker',
+    '#include "BrowserBoundedMmsPreview.hpp"'
     'previewMmsValue(*member.value',
 ]:
     if token not in projection_header:
@@ -121,6 +126,9 @@ if 'decodeEngineeringEvidence(' in report_controller:
     raise SystemExit("BROWSER_REPORT_BOUNDED_PROJECTION_FAIL duplicate inline decoding")
 if 'MmsDataCodec::to_display_string(*member.value)' in projection_header:
     raise SystemExit("BROWSER_VALUE_BOUNDED_FAIL unbounded intermediary in report GUI")
+if ('QString::fromStdString(member.data_reference)' in projection_header or
+        'QString::fromStdString(reason)' in projection_header):
+    raise SystemExit("BROWSER_REPORT_METADATA_BOUNDED_FAIL eager untrusted metadata conversion")
 
 value_preview = (workspace_path.parent.parent / "src" / "BrowserBoundedMmsPreview.hpp").read_text(encoding="utf-8")
 for token in [
