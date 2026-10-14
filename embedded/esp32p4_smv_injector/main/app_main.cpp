@@ -6,6 +6,7 @@
 #include "ariec61850/sampled_values/frame_codec.hpp"
 #include "ariec61850/sampled_values/live_signal_state.hpp"
 #include "ariec61850/time_sync/sv_ptp_epoch.hpp"
+#include "ariec61850/time_sync/sv_ptp_clock_lease.hpp"
 
 #include "driver/gptimer.h"
 #include "ethernet_port.h"
@@ -83,6 +84,10 @@ using ar::iec61850::sampled_values::SvLiveSignalState;
 using ar::iec61850::time_sync::SvSecondBoundaryArm;
 using ar::iec61850::time_sync::SvPtpClockObservation;
 using ar::iec61850::time_sync::plan_sv_ptp_second_arm;
+using ar::iec61850::time_sync::SvPtpClockLease;
+using ar::iec61850::time_sync::PtpAuthorityRole;
+using ar::iec61850::time_sync::same_sv_ptp_clock_lease;
+using ar::iec61850::time_sync::valid_sv_ptp_clock_lease;
 #if AR_SV_PTP_PHASE_SUPPORTED
 using ar::iec61850::time_sync::SvBoundedSlewCursor;
 using ar::iec61850::time_sync::SvPtpPhaseAuthority;
@@ -188,6 +193,8 @@ struct SampleClockContext final {
     std::atomic<std::int32_t> cumulative_slew_ticks{0};
     std::atomic<std::uint32_t> publisher_fault_generation{0U};
     std::atomic<bool> phase_authority_valid{false};
+    // Immutable for one monitored timer session; read under phase mutex.
+    SvPtpClockLease armed_ptp_clock{};
     SvBoundedSlewCursor phase_slew{};
     std::uint32_t phase_index{};
     bool previous_phase_healthy{};
@@ -501,29 +508,40 @@ bool sample_alarm_callback(
     return high_priority_task_woken == pdTRUE;
 }
 
-#if CONFIG_AR_PTP_LAB_TX && defined(SOC_EMAC_IEEE1588V2_SUPPORTED) && \
-    SOC_EMAC_IEEE1588V2_SUPPORTED && ESP_IDF_VERSION_MAJOR < 6
-// One canonical, quiet SOURCE lease for control-plane phase decisions.
-// Keeps SOURCE/RECEIVER role fencing and generation in the same snapshot.
-[[nodiscard]] std::uint32_t source_ptp_clock_authority_generation() noexcept {
-    ar_ptp_timing_authority_t clock{};
-    return ar_ptp_lab_get_timing_authority(&clock) &&
-           clock.role == AR_PTP_ROLE_LAB_SOURCE && clock.clock_usable
-        ? clock.generation : 0U;
-}
+// One status-derived authority snapshot per read: never assemble role,
+// generation and GM identity from separate getters.
+[[nodiscard]] SvPtpClockLease read_ptp_epoch_clock_lease() noexcept {
+    SvPtpClockLease lease{};
+#if CONFIG_AR_PTP_LAB_TX
+    ar_ptp_timing_authority_t status{};
+    if (ar_ptp_lab_get_timing_authority(&status)) {
+        lease.role = static_cast<PtpAuthorityRole>(status.role);
+        lease.generation = status.generation;
+        lease.clock_usable = status.clock_usable;
+        lease.source_selected = status.source_selected;
+        std::copy_n(status.selected_source_clock_identity, 8U,
+                    lease.source_clock_identity.begin());
+        lease.source_port = status.selected_source_port_number;
+    }
 #endif
+    return lease;
+}
 
-// This is deliberately a bounded START-time observation, not a per-sample
-// PTP IOCTL and not evidence that the free-running GPTimer stays disciplined.
-// It places smpCnt=0 near a PTP epoch only for the selected LAB_SOURCE role.
-// Independent EMAC TX timestamp / phase evidence is still required before
-// advertising smpSynch=1/2.
-[[nodiscard]] std::optional<SvSecondBoundaryArm>
-plan_source_ptp_epoch_arm(const esp_eth_handle_t eth_handle) noexcept {
+struct SvPtpEpochArm final {
+    SvSecondBoundaryArm timer{};
+    SvPtpClockLease lease{};
+};
+
+// Align the initial sample with EMAC PTP and retain EXACT authority identity.
+// The receiver path is experimental-only; normal builds stay free-running.
+[[nodiscard]] std::optional<SvPtpEpochArm>
+plan_ptp_epoch_arm(const esp_eth_handle_t eth_handle) noexcept {
 #if CONFIG_AR_PTP_LAB_TX && defined(SOC_EMAC_IEEE1588V2_SUPPORTED) && \
     SOC_EMAC_IEEE1588V2_SUPPORTED && ESP_IDF_VERSION_MAJOR < 6
-    if (source_ptp_clock_authority_generation() == 0U) return std::nullopt;
-
+    const auto lease = read_ptp_epoch_clock_lease();
+    if (!valid_sv_ptp_clock_lease(lease)) return std::nullopt;
+    if (lease.role == PtpAuthorityRole::receiver &&
+        !AR_SV_PTP_PHASE_SUPPORTED) return std::nullopt;
     eth_mac_time_t ptp_time{};
     const std::int64_t before_us = esp_timer_get_time();
     const auto result = esp_eth_ioctl(
@@ -531,12 +549,15 @@ plan_source_ptp_epoch_arm(const esp_eth_handle_t eth_handle) noexcept {
         &ptp_time);
     const std::int64_t after_us = esp_timer_get_time();
     if (result != ESP_OK || before_us < 0 || after_us < before_us ||
-        (ptp_time.seconds == 0U && ptp_time.nanoseconds == 0U)) {
+        (ptp_time.seconds == 0U && ptp_time.nanoseconds == 0U) ||
+        !same_sv_ptp_clock_lease(lease, read_ptp_epoch_clock_lease())) {
         return std::nullopt;
     }
-    return plan_sv_ptp_second_arm(SvPtpClockObservation{
+    const auto arm = plan_sv_ptp_second_arm(SvPtpClockObservation{
         ptp_time.nanoseconds, static_cast<std::uint64_t>(before_us),
         static_cast<std::uint64_t>(after_us)});
+    if (!arm.has_value()) return std::nullopt;
+    return SvPtpEpochArm{*arm, lease};
 #else
     (void)eth_handle;
     return std::nullopt;
@@ -562,6 +583,7 @@ gptimer_handle_t start_sample_clock(
     g_sample_clock_context.cumulative_slew_ticks.store(0, std::memory_order_relaxed);
     g_sample_clock_context.publisher_fault_generation.store(0U, std::memory_order_relaxed);
     g_sample_clock_context.phase_authority_valid.store(false, std::memory_order_relaxed);
+    g_sample_clock_context.armed_ptp_clock = {};
     g_sample_clock_context.phase_index = 0U;
     g_sample_clock_context.previous_phase_healthy = false;
     g_sample_clock_context.phase_enabled = false;
@@ -588,16 +610,19 @@ gptimer_handle_t start_sample_clock(
 
     // The timer is configured before reading EMAC PTP time, minimizing
     // cross-clock arm latency without touching the high-frequency callback.
-    const auto epoch_arm = plan_source_ptp_epoch_arm(eth_handle);
+    const auto epoch_arm = plan_ptp_epoch_arm(eth_handle);
     epoch_armed = epoch_arm.has_value();
 #if AR_SV_PTP_PHASE_SUPPORTED
+    if (epoch_arm.has_value()) {
+        g_sample_clock_context.armed_ptp_clock = epoch_arm->lease;
+    }
     g_sample_clock_context.phase_enabled =
         epoch_armed && profile_has_second_aligned_counter &&
         g_phase_observer_task != nullptr && g_phase_timer_mutex != nullptr;
 #endif
     g_sample_clock_context.next_alarm = {};
     g_sample_clock_context.next_alarm.alarm_count = epoch_arm.has_value()
-        ? epoch_arm->first_alarm_us
+        ? epoch_arm->timer.first_alarm_us
         : g_sample_clock_context.schedule.next_ticks();
     g_sample_clock_context.next_alarm.flags.auto_reload_on_alarm = false;
     ESP_ERROR_CHECK(gptimer_set_alarm_action(timer, &g_sample_clock_context.next_alarm));
@@ -626,6 +651,7 @@ void stop_sample_clock(gptimer_handle_t& timer) noexcept {
         0, std::memory_order_relaxed);
     g_sample_clock_context.phase_authority_valid.store(
         false, std::memory_order_release);
+    g_sample_clock_context.armed_ptp_clock = {};
 #endif
     static_cast<void>(gptimer_stop(timer));
     static_cast<void>(gptimer_disable(timer));
@@ -1023,13 +1049,11 @@ void sv_ptp_phase_observer_task(void* argument) {
         const std::uint32_t current_faults =
             g_sample_clock_context.publisher_fault_generation.load(
                 std::memory_order_acquire);
-        const std::uint32_t source_generation =
-            source_ptp_clock_authority_generation();
-        // Source START/recovery is a new time authority even if the hardware
-        // seconds are continuous. Never carry PI integrator over source reset.
-        if (source_generation == 0U ||
+        const auto lease = read_ptp_epoch_clock_lease();
+        // A role/GM/relock change revokes the previous PI integrator.
+        if (!valid_sv_ptp_clock_lease(lease) ||
             !continuity.unchanged(notified_session, current_faults,
-                                  source_generation)) {
+                                  lease.generation)) {
             static_cast<void>(controller.invalidate());
             revoke_sv_phase_session(notified_session);
             continue;
@@ -1037,7 +1061,7 @@ void sv_ptp_phase_observer_task(void* argument) {
 
         if (events != 1U || !live_tx_running() ||
             (xEventGroupGetBits(g_link_events) & kLinkUpBit) == 0U ||
-            source_ptp_clock_authority_generation() != source_generation) {
+            !same_sv_ptp_clock_lease(lease, read_ptp_epoch_clock_lease())) {
             static_cast<void>(controller.invalidate());
             revoke_sv_phase_session(notified_session);
             continue;
@@ -1048,11 +1072,13 @@ void sv_ptp_phase_observer_task(void* argument) {
         eth_mac_time_t ptp{};
         bool evidence_valid = false;
         SvPtpPhaseObservation observation{};
+        SvPtpClockLease armed_lease{};
         xSemaphoreTake(g_phase_timer_mutex, portMAX_DELAY);
         const gptimer_handle_t timer = g_monitored_sample_clock;
         if (timer != nullptr && notified_session != 0U &&
             g_sample_clock_context.session_generation.load(
                 std::memory_order_acquire) == notified_session) {
+            armed_lease = g_sample_clock_context.armed_ptp_clock;
             const std::uint32_t generation_before =
                 g_sample_clock_context.epoch_generation.load(
                     std::memory_order_acquire);
@@ -1082,8 +1108,9 @@ void sv_ptp_phase_observer_task(void* argument) {
         }
         xSemaphoreGive(g_phase_timer_mutex);
 
-        if (!evidence_valid || !ar_ptp_lab_is_running() ||
-            source_ptp_clock_authority_generation() != source_generation) {
+        if (!evidence_valid ||
+            !same_sv_ptp_clock_lease(armed_lease, lease) ||
+            !same_sv_ptp_clock_lease(lease, read_ptp_epoch_clock_lease())) {
             static_cast<void>(controller.invalidate());
             revoke_sv_phase_session(notified_session);
             continue;
@@ -1107,7 +1134,9 @@ void sv_ptp_phase_observer_task(void* argument) {
             g_sample_clock_context.epoch_generation.load(
                 std::memory_order_acquire) == observation.last_sv_epoch_generation &&
             decision.accepted && live_tx_running() &&
-            source_ptp_clock_authority_generation() == source_generation &&
+            same_sv_ptp_clock_lease(
+                armed_lease, g_sample_clock_context.armed_ptp_clock) &&
+            same_sv_ptp_clock_lease(lease, read_ptp_epoch_clock_lease()) &&
             no_new_publisher_fault) {
             // A single near-boundary observation is only a baseline. Do
             // not arm ISR steering until adjacent smpCnt=0 deadlines map
