@@ -115,7 +115,7 @@ for token in [
     'if (referenceTruncated) {',
     'hasReportTypedLeaf(',
     'text.left(kBrowserReportTextLimit - marker.size()) + marker',
-    '#include "BrowserBoundedMmsPreview.hpp"'
+    '#include "BrowserBoundedMmsPreview.hpp"',
     'previewMmsValue(*member.value',
 ]:
     if token not in projection_header:
