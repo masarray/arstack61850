@@ -122,7 +122,7 @@ jobs:
           set_config CONFIG_AR_PTP_VLAN_ID 100
           set_config CONFIG_AR_PTP_VLAN_PRIORITY 4
           set_config CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS 1000
-          set_config CONFIG_AR_PTP_SYNC_INTERVAL_MS 250
+          set_config CONFIG_AR_PTP_SYNC_INTERVAL_MS 1000
           set_config CONFIG_AR_PTP_RESPOND_PDELAY y
           set_config CONFIG_AR_PTP_PDELAY_REQUEST_INTERVAL_MS 1000
           set_config CONFIG_AR_PTP_PRIORITY1 120
