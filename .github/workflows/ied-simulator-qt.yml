@@ -21,6 +21,7 @@ on:
       - 'CMakeLists.txt'
       - '.github/workflows/ied-simulator-qt.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'apps/ied_simulator/**'
       - 'include/ariec61850/scl/**'
@@ -48,6 +49,7 @@ concurrency:
 
 jobs:
   build-and-smoke:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

@@ -76,7 +76,7 @@ def main():
         assert "github.ref != 'refs/heads/main'" in fw, name
     # WIP iteration must not spend Windows/ESP-IDF/3-compiler runners.
     # Ready-for-review, main integration and explicit workflow_dispatch remain.
-    expensive = ("esp32p4-ptp-lab.yml", "esp32p4-smv-injector.yml", "ptp-core-ci.yml", "cpp-ci.yml", "embedded-ci.yml", "security-evidence.yml", "arstack-studio-qt.yml", "interoperability-server-ci.yml", "ied-simulator-release-hardening.yml", "arstack-studio-windows-lifecycle.yml", "brcb-hard-profile-ci.yml",)
+    expensive = ("esp32p4-ptp-lab.yml", "esp32p4-smv-injector.yml", "ptp-core-ci.yml", "cpp-ci.yml", "embedded-ci.yml", "security-evidence.yml", "arstack-studio-qt.yml", "interoperability-server-ci.yml", "ied-simulator-release-hardening.yml", "ied-simulator-qt.yml", "arstack-studio-windows-lifecycle.yml", "brcb-hard-profile-ci.yml",)
     for name in expensive:
         source = (ROOT / name).read_text(encoding="utf-8")
         assert "ready_for_review" in event_body(source, "pull_request"), name
@@ -95,7 +95,7 @@ def main():
     release = (ROOT / "arstack-studio-release.yml").read_text(encoding="utf-8")
     assert not re.search(r"(?m)^  pull_request:", release), "installer on every PR"
     assert "workflow_dispatch:" in release and "tags:" in release
-    print("CI_ROUTING_POLICY_PASS draft_runner_gates=11 firmware_feature_push=off release_pr_packaging=off manual_candidates=on")
+    print("CI_ROUTING_POLICY_PASS draft_runner_gates=12 firmware_feature_push=off release_pr_packaging=off manual_candidates=on")
 
 
 if __name__ == "__main__":
