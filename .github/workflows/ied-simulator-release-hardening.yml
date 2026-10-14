@@ -22,7 +22,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   linux-release-soak:
@@ -87,9 +87,32 @@ jobs:
           arch: 'win64_msvc2022_64'
           cache: true
 
-      - name: Install NSIS
+      - name: Install and verify NSIS
         shell: pwsh
-        run: choco install nsis --yes --no-progress
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $candidates = @(
+            (Join-Path ${env:ProgramFiles(x86)} 'NSIS\\makensis.exe'),
+            (Join-Path ${env:ProgramFiles} 'NSIS\\makensis.exe'),
+            'C:\\ProgramData\\chocolatey\\bin\\makensis.exe'
+          )
+          $compiler = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+          if (-not $compiler) {
+            for ($attempt = 1; $attempt -le 2; $attempt++) {
+              choco install nsis --yes --no-progress
+              $status = $LASTEXITCODE
+              $compiler = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+              if ($compiler) { break }
+              Write-Warning "NSIS installation failed (attempt $attempt/2, Chocolatey exit $status)"
+              if ($attempt -lt 2) { Start-Sleep -Seconds 12 }
+            }
+          }
+          if (-not $compiler) {
+            throw 'NSIS installation unavailable (Chocolatey feed). Abort before expensive Windows build.'
+          }
+          "MAKENSIS_PATH=$compiler" >> $env:GITHUB_ENV
+          & $compiler /VERSION
+          if ($LASTEXITCODE -ne 0) { throw 'makensis version check failed' }
 
       - name: Configure MSVC release build
         shell: pwsh
@@ -126,8 +149,10 @@ jobs:
           Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -Force
           $installer = Join-Path $release 'ARStack-IEC61850-Workbench-Setup-win64.exe'
           $icon = (Resolve-Path 'assets\favicon.ico').Path
-          $makensis = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
-          if (-not (Test-Path -LiteralPath $makensis -PathType Leaf)) { throw "makensis not found: $makensis" }
+          $makensis = $env:MAKENSIS_PATH
+          if (-not $makensis -or -not (Test-Path -LiteralPath $makensis -PathType Leaf)) {
+            throw 'NSIS preflight did not provide a usable makensis.exe'
+          }
           & $makensis "/DSTAGE_DIR=$stage" "/DOUT_FILE=$installer" "/DAPP_ICON=$icon" 'apps\ied_simulator\packaging\windows\ARStackIEC61850Workbench.nsi'
           if ($LASTEXITCODE -ne 0) { throw "makensis failed with exit code $LASTEXITCODE" }
 

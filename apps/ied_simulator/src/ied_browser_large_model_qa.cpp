@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "MmsLiveTreeModel.hpp"
+#include "MmsEngineeringEvidence.hpp"
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
+
+#include <array>
+#include <chrono>
 
 #include <iostream>
 #include <string>
@@ -85,6 +89,41 @@ int main(int argc, char** argv) {
         return 3;
     }
 
+    if (!model.selectRoot() || model.selectedChildCount() != 5 ||
+        model.selectedChildren().size() != 5 || !model.selectChild(4) ||
+        model.presentationNode().value(QStringLiteral("kind")).toString() != QStringLiteral("LD") ||
+        model.selectedChildCount() != 20 || !model.selectChild(19) ||
+        model.presentationNode().value(QStringLiteral("kind")).toString() != QStringLiteral("LN") ||
+        model.selectedChildCount() != 100 || !model.selectChild(99) ||
+        model.presentationNode().value(QStringLiteral("kind")).toString() != QStringLiteral("DO") ||
+        model.selectedChildCount() != 5) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL bounded_drilldown_projection\n";
+        return 12;
+    }
+
+    // Inline projection remains bounded and does not change canonical selection root.
+    auto* detail = qobject_cast<MmsLiveDetailModel*>(model.detailModel());
+    if (!detail || detail->rootKind() != QStringLiteral("DO") || detail->rowCount() != 5) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL inline_root\n";
+        return 13;
+    }
+    model.selectRoot();
+    if (detail->rowCount() != 5) return 14;
+    detail->toggle(4);
+    if (detail->rowCount() != 25 ||
+        detail->data(detail->index(5), MmsLiveDetailModel::DepthRole).toInt() != 1) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL inline_expansion\n";
+        return 15;
+    }
+    detail->toggle(4);
+    if (detail->rowCount() != 5) return 16;
+    detail->select(0);
+    if (detail->rootKind() != QStringLiteral("IED") ||
+        model.selectedNode().value(QStringLiteral("kind")).toString() != QStringLiteral("LD")) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL selection_context\n";
+        return 17;
+    }
+
     QElapsedTimer filterTimer;
     filterTimer.start();
     model.setFilterText(QStringLiteral("LD4/LLN19.DO99"));
@@ -133,6 +172,39 @@ int main(int argc, char** argv) {
         return 7;
     }
 
+    // FC-qualified members use canonical reference indices rather than O(N)
+    // linear scans per visible DataSet row. Expanding a DO is read-only.
+    const auto doNode = model.nodeForReference(QStringLiteral("LD4/LLN19.DO99  [MX]"));
+    const auto boundedChildren = model.dataSetChildrenForReference(
+        QStringLiteral("LD4/LLN19.DO99"), QStringLiteral("MX"), 2);
+    const auto missingFc = model.dataSetChildrenForReference(
+        QStringLiteral("LD4/LLN19.DO99"), QStringLiteral("CF"), 64);
+    const auto exactDa = model.nodeForReference(
+        QStringLiteral("LD4/LLN19$MX$DO99$DA4  [MX]"));
+    const auto iecDa = model.nodeForReference(
+        QStringLiteral("LD4/LLN19.DO99.DA4  [MX]"));
+    if (doNode.value(QStringLiteral("kind")).toString() != QStringLiteral("DO") ||
+        boundedChildren.size() != 2 ||
+        boundedChildren.constFirst().toMap()
+            .value(QStringLiteral("functionalConstraint")).toString() != QStringLiteral("MX") ||
+        !missingFc.isEmpty() ||
+        exactDa.value(QStringLiteral("reference")).toString() !=
+            QStringLiteral("LD4/LLN19$MX$DO99$DA4") ||
+        iecDa.value(QStringLiteral("reference")).toString() !=
+            QStringLiteral("LD4/LLN19$MX$DO99$DA4")) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL dataset_reference_projection\n";
+        return 18;
+    }
+
+    const QString liveKey = QStringLiteral("LD4") + QChar(0x1f) +
+                            QStringLiteral("LLN19$MX$DO99$DA4");
+    model.applyReadValue(liveKey, QStringLiteral("23"));
+    if (model.nodeForReference(QStringLiteral("LD4/LLN19.DO99.DA4  [MX]"))
+             .value(QStringLiteral("value")).toString() != QStringLiteral("23")) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL dataset_alias_value\n";
+        return 19;
+    }
+
     QStringList monitoredReferences;
     for (int doIndex = 0; doIndex < 100; ++doIndex) {
         monitoredReferences.push_back(
@@ -146,6 +218,99 @@ int main(int argc, char** argv) {
         return 8;
     }
 
+    // Global Data must read true MMS targets even when a DataSet supplies the
+    // IEC FCDA spelling rather than the MMS $FC$ spelling. Unknown FCs fail
+    // closed. Duplicate aliases must not cause extra requests.
+    const QStringList iecWatched{
+        QStringLiteral("LD4/LLN19.DO99.DA4  [MX]"),
+        QStringLiteral("LD4/LLN19$MX$DO99$DA4  [MX]"),
+        QStringLiteral("LD4/LLN19.DO99.DA3  [MX]")};
+    const auto readIec = model.readTargetsForReferences(iecWatched, 64);
+    const auto readDo = model.readTargetsForReferences(
+        {QStringLiteral("LD4/LLN19.DO99  [MX]")}, 64);
+    const auto readInvalidFc = model.readTargetsForReferences(
+        {QStringLiteral("LD4/LLN19.DO99.DA4  [ST]")}, 64);
+    const auto readMmsFcd = model.readTargetsForReferences(
+        {QStringLiteral("LD4/LLN19$MX$DO99")}, 64);
+    const auto rejectMismatchedFcd = model.readTargetsForReferences(
+        {QStringLiteral("LD4/LLN19$MX$DO99  [ST]")}, 64);
+    if (readIec.size() != 2 || readDo.size() != 4 ||
+        readMmsFcd.size() != 4 || !rejectMismatchedFcd.isEmpty() ||
+        !readInvalidFc.isEmpty() ||
+        readIec.constFirst().item != QStringLiteral("LLN19$MX$DO99$DA4") ||
+        model.readTargetsForReferences(iecWatched, 1).size() != 1) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL canonical_global_watch_read\n";
+        return 20;
+    }
+
+    // Decoding is based on actual typed MMS payload, never on displayed hex.
+    // Quality: validity=invalid, Overflow=true, Source=substituted,
+    // Test=true, OperatorBlocked=true. The unused bits must be exactly three.
+    const std::array<std::uint8_t, 2> bits{0x60U, 0x38U};
+    const auto qualityEvidence = arstack::iedsim::decodeEngineeringEvidence(
+        QStringLiteral("LLN19$MX$DO99$q"),
+        ar::iec61850::mms::MmsDataValue::bit_string(3U, bits));
+    const auto qualityRows = qualityEvidence.value(QStringLiteral("rows")).toList();
+    // RCB member references can use IEC LN.DO.q rather than MMS $FC$DO$q.
+    // Both must use exactly the same typed decoder and return equal results.
+    const auto iecQualityEvidence = arstack::iedsim::decodeEngineeringEvidence(
+        QStringLiteral("LD4/LLN19.DO99.q"),
+        ar::iec61850::mms::MmsDataValue::bit_string(3U, bits));
+    if (iecQualityEvidence != qualityEvidence) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL report_iec_quality_alias\n";
+        return 26;
+    }
+    const auto malformedQuality = arstack::iedsim::decodeEngineeringEvidence(
+        QStringLiteral("LLN19$MX$DO99$q"),
+        ar::iec61850::mms::MmsDataValue::bit_string(2U, bits));
+    const auto wrongKind = arstack::iedsim::decodeEngineeringEvidence(
+        QStringLiteral("LLN19$MX$DO99$q"),
+        ar::iec61850::mms::MmsDataValue::boolean(true));
+    if (qualityEvidence.value(QStringLiteral("kind")).toString() != QStringLiteral("quality") ||
+        qualityRows.size() != 12 ||
+        qualityRows.at(0).toMap().value(QStringLiteral("value")).toString() != QStringLiteral("invalid") ||
+        !qualityRows.at(1).toMap().value(QStringLiteral("value")).toBool() ||
+        qualityRows.at(9).toMap().value(QStringLiteral("value")).toString() != QStringLiteral("substituted") ||
+        !qualityRows.at(10).toMap().value(QStringLiteral("value")).toBool() ||
+        !qualityRows.at(11).toMap().value(QStringLiteral("value")).toBool() ||
+        !malformedQuality.isEmpty() || !wrongKind.isEmpty()) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL typed_quality_evidence\n";
+        return 22;
+    }
+
+    const ar::iec61850::mms::Iec61850UtcTime utc{
+        std::chrono::system_clock::time_point{std::chrono::seconds{1720000000}},
+        0xBFU};  // leap known, clock not synchronized, accuracy unspecified
+    const auto timeEvidence = arstack::iedsim::decodeEngineeringEvidence(
+        QStringLiteral("LLN19$MX$DO99$t"),
+        ar::iec61850::mms::MmsDataValue::utc_time(utc));
+    const auto timeRows = timeEvidence.value(QStringLiteral("rows")).toList();
+    if (timeEvidence.value(QStringLiteral("kind")).toString() != QStringLiteral("timestamp") ||
+        timeRows.size() != 5 ||
+        !timeRows.at(1).toMap().value(QStringLiteral("value")).toBool() ||
+        timeRows.at(2).toMap().value(QStringLiteral("value")).toBool() ||
+        !timeRows.at(3).toMap().value(QStringLiteral("value")).toBool() ||
+        timeRows.at(4).toMap().value(QStringLiteral("value")).toString() != QStringLiteral("unspecified") ||
+        !timeEvidence.value(QStringLiteral("summary")).toString().endsWith(QStringLiteral("UTC"))) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL typed_timestamp_evidence\n";
+        return 23;
+    }
+
+    // Model evidence is replaced by each new sample and never retained
+    // after an untyped refresh. Reuse an existing canonical MMS leaf.
+    model.applyReadValue(liveKey, QStringLiteral("typed"), qualityEvidence);
+    if (model.nodeForReference(QStringLiteral("LD4/LLN19.DO99.DA4"))
+            .value(QStringLiteral("engineeringEvidence")).toMap() != qualityEvidence) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL canonical_evidence_path\n";
+        return 24;
+    }
+    model.applyReadValue(liveKey, QStringLiteral("typed"));
+    if (!model.nodeForReference(QStringLiteral("LD4/LLN19.DO99.DA4"))
+             .value(QStringLiteral("engineeringEvidence")).toMap().isEmpty()) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL stale_evidence\n";
+        return 25;
+    }
+
     const bool passes = applyMs <= 5000 && filterMs <= 1500 && selectMs <= 500;
     std::cout << "IED_BROWSER_LARGE_MODEL_" << (passes ? "PASS" : "FAIL")
               << " nodes=" << model.totalNodeCount()
@@ -153,6 +318,6 @@ int main(int argc, char** argv) {
               << " apply_ms=" << applyMs
               << " filter_ms=" << filterMs
               << " select_ms=" << selectMs
-              << " eager_expansion=false\n";
+              << " eager_expansion=false drilldown=canonical inline_projection=bounded dataset_lookup=indexed\n";
     return passes ? 0 : 11;
 }

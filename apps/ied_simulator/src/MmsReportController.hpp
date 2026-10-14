@@ -36,6 +36,7 @@ class MmsReportController : public QObject {
     Q_PROPERTY(int selectedDataSetIndex READ selectedDataSetIndex NOTIFY selectionChanged)
     Q_PROPERTY(QVariantMap selectedRcb READ selectedRcb NOTIFY selectionChanged)
     Q_PROPERTY(QStringList selectedDataSetMembers READ selectedDataSetMembers NOTIFY selectionChanged)
+    Q_PROPERTY(QStringList selectedRcbDataSetMembers READ selectedRcbDataSetMembers NOTIFY selectionChanged)
     Q_PROPERTY(QVariantList receivedReports READ receivedReports NOTIFY reportsChanged)
     Q_PROPERTY(QStringList events READ events NOTIFY reportsChanged)
     Q_PROPERTY(qulonglong receivedReportCount READ receivedReportCount NOTIFY reportsChanged)
@@ -68,6 +69,7 @@ public:
     [[nodiscard]] int selectedDataSetIndex() const noexcept { return selectedDataSetIndex_; }
     [[nodiscard]] QVariantMap selectedRcb() const { return selectedRcb_; }
     [[nodiscard]] QStringList selectedDataSetMembers() const { return selectedDataSetMembers_; }
+    [[nodiscard]] QStringList selectedRcbDataSetMembers() const { return selectedRcbDataSetMembers_; }
     [[nodiscard]] QVariantList receivedReports() const { return receivedReports_; }
     [[nodiscard]] QStringList events() const { return events_; }
     [[nodiscard]] qulonglong receivedReportCount() const noexcept { return receivedReportCount_; }
@@ -142,6 +144,7 @@ private:
     int selectedDataSetIndex_{-1};
     QVariantMap selectedRcb_;
     QStringList selectedDataSetMembers_;
+    QStringList selectedRcbDataSetMembers_;
     QVariantList receivedReports_;
     QStringList events_;
     QStringList diagnostics_;

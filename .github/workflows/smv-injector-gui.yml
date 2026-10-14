@@ -14,6 +14,7 @@ on:
       - 'tests/fixtures/scl/**'
       - '.github/workflows/smv-injector-gui.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'apps/smv_injector_gui/**'
       - 'tools/smv_profile_inspect.cpp'
@@ -34,6 +35,7 @@ concurrency:
 
 jobs:
   profile-bridge-smoke:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -155,6 +157,7 @@ jobs:
           grep -q '"deviceSupport":"ready"' /tmp/api.json
 
   windows-launcher-smoke:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: windows-latest
     steps:
       - name: Checkout

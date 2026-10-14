@@ -67,35 +67,78 @@ def main():
     assert matching(paths(sources["scl-assisted-workbench-ci.yml"]), MODEL_CPP)
     assert not matching(paths(sources["ied-simulator-release-hardening.yml"]), NORMAL_GUI)
     assert matching(paths(sources["ied-simulator-release-hardening.yml"]), PACKAGING)
-    # PTP / SMV firmware uses one source-branch key for PR runs; repetitive
-    # feature pushes never schedule additional ESP-IDF builds.
-    for name in ("esp32p4-smv-injector.yml", "esp32p4-ptp-lab.yml"):
-        fw = (ROOT / name).read_text(encoding="utf-8")
-        assert "github.event.pull_request.head.ref || github.ref_name" in fw, name
-        assert "github.event.pull_request.head.repo.full_name || github.repository" in fw, name
-        assert "github.ref != 'refs/heads/main'" in fw, name
-    # WIP iteration must not spend Windows/ESP-IDF/3-compiler runners.
-    # Ready-for-review, main integration and explicit workflow_dispatch remain.
-    expensive = ("esp32p4-ptp-lab.yml", "esp32p4-smv-injector.yml", "ptp-core-ci.yml", "cpp-ci.yml", "embedded-ci.yml", "security-evidence.yml", "arstack-studio-qt.yml", "interoperability-server-ci.yml", "ied-simulator-release-hardening.yml", "ied-simulator-qt.yml", "arstack-studio-windows-lifecycle.yml", "brcb-hard-profile-ci.yml",)
-    for name in expensive:
+    # Real routing guarantees: no feature-push firmware fanout, no
+    # PR-triggered installer, no Draft PR runner minutes for heavy matrices.
+    heavy_pr = (
+        "esp32p4-ptp-lab.yml", "esp32p4-smv-injector.yml",
+        "cpp-ci.yml", "embedded-ci.yml", "security-evidence.yml",
+        "ptp-core-ci.yml", "arstack-studio-qt.yml",
+        "arstack-studio-windows-lifecycle.yml", "ied-simulator-qt.yml",
+        "ied-simulator-release-hardening.yml", "brcb-hard-profile-ci.yml",
+        "control-hard-profile-ci.yml", "control-mms-profile-ci.yml",
+        "control-session-profile-ci.yml", "control-termination-profile-ci.yml",
+        "interoperability-server-ci.yml", "scl-assisted-connect-ci.yml",
+        "scl-assisted-workbench-ci.yml", "smv-injector-gui.yml",
+        "arstack-studio-rc2-policy.yml", "mms-r12-server-ci.yml",
+        "control-interop-harness-ci.yml", "dynamic-rcb-trial-ci.yml",
+    )
+    gate = (
+        "    if: ${{ github.event_name != 'pull_request' || "
+        "!github.event.pull_request.draft }}"
+    )
+    for name in heavy_pr:
         source = (ROOT / name).read_text(encoding="utf-8")
-        assert "ready_for_review" in event_body(source, "pull_request"), name
-        job_part = source.split("\njobs:\n", 1)[1]
-        job_names = re.findall(r"(?m)^  [a-zA-Z0-9_-]+:", job_part)
-        draft_gates = re.findall(
-            r"(?m)^    if: .*github.event.pull_request.draft.*$",
-            job_part,
+        trigger = event_body(source, "pull_request")
+        assert "ready_for_review" in trigger, f"{name}: no ready transition"
+        assert "paths:" in trigger, f"{name}: unscoped PR"
+        jobs = source.split("\njobs:\n", 1)[1]
+        names = re.findall(r"(?m)^  [a-z0-9_-]+:\s*$", jobs)
+        guarded = re.findall(
+            r"(?m)^  [a-z0-9_-]+:\s*\n" + re.escape(gate) + r"\s*$",
+            jobs,
         )
-        assert len(draft_gates) == len(job_names), (name, len(draft_gates), len(job_names))
+        assert names and len(guarded) == len(names), (
+            name, len(guarded), len(names)
+        )
+
     for name in ("esp32p4-smv-injector.yml", "esp32p4-ptp-lab.yml"):
-        firmware = (ROOT / name).read_text(encoding="utf-8")
-        push = event_body(firmware, "push")
+        source = (ROOT / name).read_text(encoding="utf-8")
+        push = event_body(source, "push")
         assert "branches: [main]" in push, f"{name}: feature push flood"
-        assert "workflow_dispatch:" in firmware, f"{name}: missing manual candidate"
+        assert "paths:" in push, f"{name}: unscoped main build"
+        assert re.search(r"(?m)^  workflow_dispatch:\s*$", source), (
+            name, "missing on-demand board artifact"
+        )
+
+    main_path_scoped = (
+        "cpp-ci.yml", "security-evidence.yml", "embedded-ci.yml",
+        "brcb-hard-profile-ci.yml", "control-hard-profile-ci.yml",
+        "control-mms-profile-ci.yml", "control-session-profile-ci.yml",
+        "control-termination-profile-ci.yml",
+    )
+    for name in main_path_scoped:
+        source = (ROOT / name).read_text(encoding="utf-8")
+        push = event_body(source, "push")
+        assert "paths:" in push, f"{name}: full suite on every main push"
+
     release = (ROOT / "arstack-studio-release.yml").read_text(encoding="utf-8")
-    assert not re.search(r"(?m)^  pull_request:", release), "installer on every PR"
+    assert not re.search(r"(?m)^  pull_request:", release), (
+        "Studio installer packaging must be manually dispatched or tagged"
+    )
     assert "workflow_dispatch:" in release and "tags:" in release
-    print("CI_ROUTING_POLICY_PASS draft_runner_gates=12 firmware_feature_push=off release_pr_packaging=off manual_candidates=on")
+    interop = (ROOT / "interoperability-server-ci.yml").read_text(
+        encoding="utf-8"
+    )
+    assert not matching(
+        paths(interop), "include/ariec61850/time_sync/ptp_runtime.hpp"
+    ), "PTP-only headers must not trigger MMS server CI"
+
+    print(
+        "CI_ROUTING_POLICY_PASS: "
+        "draft_gate_workflows=23; feature_firmware_push=off; "
+        "main_path_scoped=8; installer_pr=off; "
+        "targeted_manual_firmware=on"
+    )
 
 
 if __name__ == "__main__":

@@ -1,35 +1,67 @@
-# CI routing contract — ARStack61850
+# ARStack61850 — CI routing and runner-budget contract
 
-The CI contract is **draft PRs do not consume heavy runner minutes, targeted ready-for-review gates, risk-scoped `main` integration, and manual/tag-only release packaging**. A new feature commit must never trigger unrelated domain matrices.
+**Purpose:** fast iterations without sacrificing reliable release validation.
+A normal WIP/experimental feature push must NOT start a firmware matrix,
+Windows package, sanitizer run, or broad unrelated subsystem regression.
 
-## Pull request matrix
+## Routing by lifecycle
 
-| Changed area | Normal PR gate | Additional relevant gates |
+| Event | What runs | What must **not** run |
 | --- | --- | --- |
-| `apps/ied_simulator/qml/**` / Workbench UI | IED Simulator Qt | SCL-assisted Workbench only for its specifically listed C++ model files |
-| `apps/ied_simulator/packaging/**`, app CMake or entrypoint | IED Simulator Qt | IED Simulator Release Hardening |
-| `include/**`, `src/**`, root `tests/**`, `tools/**` | C++ CI, Security and Evidence | Specialized profile gates matching the changed protocol |
-| BRCB/RCB sources | C++ CI, Security and Evidence | BRCB Hard / Dynamic RCB where relevant |
-| control interoperability sources | C++ CI, Security and Evidence | Control Interop Harness |
-| embedded sources or embedded-facing protocol core | Embedded Profile CI | Other firmware / protocol-specific workflows through their own paths |
+| Draft PR, opened/synchronized | Lightweight routing policy and deliberately opted-in checkpoint jobs | Heavy ESP-IDF, Windows Qt/installer, GCC+Clang+MSVC, sanitizers, control/MMS matrices |
+| Explicit single checkpoint | Engineer selects the exact workflow/ref via `workflow_dispatch`, or a temporary opt-in one-job gate | Unrelated workflows and full platform/release packaging |
+| PR `ready_for_review`, later synchronize | All *relevant* path-filtered CI, including specialized required regression | Unrelated subsystem matrices |
+| `main` integration push | Relevant path-scoped integration tests (including security, control, firmware) | All-workflows-on-every-commit |
+| Tagged `v*` release or manual release dispatch | ARStack Studio Windows installer + release firmware as requested | Installer on ordinary PR commits |
 
-- **Draft PR**: expensive C++ / sanitizers / MSVC / Qt / ESP-IDF / PTP / interop jobs are **skipped**. A Draft can be updated without restarting expensive runs. **Ready PR**: path-scoped jobs run on ready_for_review and synchronize. Superseded PR heads are cancelled.
-- **Feature branch push**: no repeated ESP-IDF/Windows builds. Only selected explicit historic special branches retain their own scoped push gates. Favor a Draft PR until an acceptance checkpoint, then mark Ready or manually dispatch the relevant test.
-- **`main`**: production integration is path-scoped (including C++ and security) and superseded heavy runs may be cancelled as the branch advances. Keep the newest HEAD green before tagging.
-- **Studio / PTP / legacy SMV GUI**: feature branch push does not duplicate the PR validation; push is scoped to `main`.
-- **ESP32-P4 firmware / PTP lab**: feature pushes do **not** run ESP-IDF builds. Run on scoped ready PRs, `main` changes, or intentionally from `workflow_dispatch` on the exact branch/commit for hardware testing.
-- **ARStack Studio release package**: only `workflow_dispatch` for explicit test installers or `v*` tags for official release. PR changes do **not** trigger full installer packaging. ARStack Studio Qt smoke runs on relevant ready PRs.
-- **Before merging a release candidate**: explicitly run the Windows packaging/release acceptance workflow on the exact release candidate head, in addition to scoped PR CI. No hardware proof is implied by CI.
-- **Workflow files themselves**: are included in their own path filters so trigger changes receive acceptance runs. The lightweight CI Routing Policy gate checks trigger invariants.
+Every workflow keeps its own **`paths`** filters for ready PR checks.
+When a Draft PR is updated, GitHub may show a workflow **skipped** record;
+that record is not a passed test and must not allocate the heavy job runner.
+We cannot prevent the GitHub PR event itself without also losing up-to-date
+Ready-PR checks on `synchronize`.
 
-Do not broaden unrelated PR `paths` to `apps/ied_simulator/**` or remove concurrency without updating `scripts/check_ci_trigger_policy.py`. Batch related changes into one commit before asking CI to validate; prefer failed-job reruns rather than repushing formatting edits.
+## Firmware and PTP–SMV strategy
 
-## Engineering checkpoint protocol
+- **ESP32-P4 PTP Lab Profile** and **ESP32-P4 SMV Injector**:
+  feature-branch `push` events are disabled; automatic `push` is scoped to
+  `main` plus relevant paths. `workflow_dispatch` is supported on exact
+  feature refs to create a test firmware artifact intentionally.
+- `workflow_call` in the existing SV firmware workflow remains available
+  to the manually/tag-triggered Studio release process.
+- Draft PTP/SV development can use a **single explicit target** in the
+  existing workflow (e.g. M2/M3 phase regressions plus guarded SOURCE build),
+  then remove the opt-in after receiving exact-SHA evidence.
+- The default firmware must never be made falsely green by treating a
+  **skipped** experimental test as proof of PTP synchronization or IED lock.
 
-1. Work in Draft PR without repetitive workflow runs for each edited file. Validate formatting and small tests locally or at a deliberate checkpoint.
-2. Run a **single targeted workflow_dispatch on the exact feature ref** for an early firmware artifact; explicitly name the commit SHA in test evidence.
-3. Mark PR Ready only when code is coherent. Relevant path-scoped GCC/Clang/MSVC, firmware, security and Qt checks then run; avoid pointless pushes to wake runners.
-4. Build the full Windows installer **only on demand or tag**, never for every protocol diff.
-5. Merge only after relevant required checks at the current head and investigate missing/stale checks. Do not confuse a skipped Draft check with passed test evidence.
+## Studio, IED Simulator and protocol tests
 
-A GitHub workflow record for a Draft may still show as *skipped*; it must consume **zero expensive job runners**, not requeue 15-minute builds. Manual dispatch remains available and is not skipped.
+- Studio installer (`arstack-studio-release.yml`) triggers only from a
+  version tag or explicit `workflow_dispatch`, not normal PRs.
+- Studio Qt, Simulator Qt and Windows lifecycle jobs remain path-scoped for
+  Ready PRs but skip expensive jobs on Draft.
+- Interoperability server no longer matches *all* IEC61850 headers:
+  a standalone PTP time-sync change does not invoke MMS-server CI.
+- Core C++, embedded and security jobs use existing PR affected-file paths
+  on `main` too. Control/BRCB specialized CI uses its own affected paths
+  on `main`, instead of rebuilding every Control variant for unrelated UI.
+- Superseded PR heads are cancelled via workflow-specific `concurrency`
+  groups. Avoid workflows that cause additional commits or dispatch siblings
+  merely to perform ordinary validation.
+
+## Working discipline
+
+1. Implement a coherent milestone in one local/remote batch. Avoid push after
+   every line edit, generated formatting change, or README adjustment.
+2. Check what can be tested without hardware first (portable CTest/lint).
+3. Choose **one** targeted CI checkpoint on the selected feature SHA.
+4. Resolve failures, then mark Ready when normal path-scoped checks should run.
+5. Before integration/release, insist on relevant **non-skipped** exact-head
+   results; select the release workflow explicitly if an installer is needed.
+6. A CI routing policy modification is always checked by the cheap
+   `ci-routing-policy.yml` job, which runs
+   `scripts/check_ci_trigger_policy.py`.
+
+**Cost/accountability:** A skipped Draft run is acceptable metadata.
+A repeated 25-minute ESP-IDF image pull, full Windows package, irrelevant
+protocol matrix or repeated action per WIP commit is not.

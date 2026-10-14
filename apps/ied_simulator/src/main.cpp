@@ -2,6 +2,7 @@
 
 #include "IedFleetController.hpp"
 #include "IedBrowserFleetController.hpp"
+#include "SclWorkspaceController.hpp"
 
 #include <QCommandLineOption>
 #include <QCommandLineParser>
@@ -72,6 +73,14 @@ int main(int argc, char* argv[]) {
         QStringLiteral("scl"),
         QStringLiteral("Import an engineering file before showing the window."),
         QStringLiteral("path")};
+    const QCommandLineOption browserModelOption{
+        QStringLiteral("browser-model"),
+        QStringLiteral("Open an engineering file in the IED Browser before showing the window."),
+        QStringLiteral("path")};
+    const QCommandLineOption browserSectionOption{
+        QStringLiteral("browser-section"),
+        QStringLiteral("Select the initial Browser section (0-6)."),
+        QStringLiteral("index")};
     const QCommandLineOption qaAsyncImportOption{
         QStringLiteral("qa-async-import"),
         QStringLiteral("QA: import one engineering file through the interactive bounded worker and exit."),
@@ -125,6 +134,8 @@ int main(int argc, char* argv[]) {
         QStringLiteral("milliseconds")};
     parser.addOptions({
         sclOption,
+        browserModelOption,
+        browserSectionOption,
         qaAsyncImportOption,
         qaAsyncImportRepeatOption,
         qaRuntimeCyclesOption,
@@ -152,6 +163,53 @@ int main(int argc, char* argv[]) {
     if (!engine.rootObjects().isEmpty()) {
         auto* const rootObject = engine.rootObjects().constFirst();
         auto* const backend = rootObject->findChild<QObject*>(QStringLiteral("simulatorBackend"));
+        auto* const browserFleet = rootObject->findChild<IedBrowserFleetController*>(
+            QStringLiteral("iedBrowserFleetBackend"));
+        if (browserFleet != nullptr && parser.isSet(browserModelOption)) {
+            rootObject->setProperty("workspaceIndex", 1);
+            if (!browserFleet->activeEngineering()->openFile(
+                    QUrl::fromLocalFile(parser.value(browserModelOption)))) {
+                qWarning().noquote() << "Browser model open request was rejected.";
+            }
+        }
+        if (parser.isSet(browserSectionOption)) {
+            bool sectionOk{};
+            const auto section = parser.value(browserSectionOption).toInt(&sectionOk);
+            if (!sectionOk || section < 0 || section > 6) {
+                qWarning().noquote() << "Browser section must be between 0 and 6.";
+            } else {
+                static const QStringList sectionTitles{
+                    QStringLiteral("Data Model"),
+                    QStringLiteral("DataSets"),
+                    QStringLiteral("Reports"),
+                    QStringLiteral("Setting Groups"),
+                    QStringLiteral("Files"),
+                    QStringLiteral("GOOSE"),
+                    QStringLiteral("Global Data")};
+                QTimer::singleShot(1'250, rootObject, [rootObject, section] {
+                    auto* const host = rootObject->findChild<QQuickItem*>(
+                        QStringLiteral("perIedBrowserHost"));
+                    QObject* browser{};
+                    if (host != nullptr) {
+                        for (auto* item : host->childItems()) {
+                            if (item != nullptr && item->objectName() == QStringLiteral("iedBrowserView_0")) {
+                                browser = item;
+                                break;
+                            }
+                        }
+                    }
+                    if (browser == nullptr) return;
+                    browser->setProperty("activeSection", section);
+                    browser->setProperty("activeSectionTitle", sectionTitles.at(section));
+                    if (section == 5) {
+                        auto* const context = browser->property("context").value<QObject*>();
+                        if (context != nullptr && context->property("gooseCount").toInt() > 0) {
+                            browser->setProperty("selectedGooseIndex", 0);
+                        }
+                    }
+                });
+            }
+        }
         int defaultPort = 102;
         if (backend != nullptr && parser.isSet(portOption)) {
             bool valid{};

@@ -13,24 +13,10 @@ Rectangle {
     property var selectedStream: selectedIndex >= 0 && selectedIndex < visibleStreams.length
                                  ? visibleStreams[selectedIndex] : ({})
 
-    onVisibleStreamsChanged: {
-        if (!visibleStreams.length)
-            selectedIndex = -1
-        else if (selectedIndex < 0 || selectedIndex >= visibleStreams.length)
-            selectedIndex = 0
-    }
-
     color: theme.background
 
     function text(value) {
         return value === undefined || value === null || String(value).length === 0 ? "—" : String(value)
-    }
-
-    Connections {
-        target: context
-        function onContextChanged() {
-            root.selectedIndex = root.visibleStreams.length > 0 ? 0 : -1
-        }
     }
 
     RowLayout {
@@ -38,7 +24,9 @@ Rectangle {
         spacing: 0
 
         Rectangle {
-            Layout.preferredWidth: Math.max(300, root.width * 0.32)
+            visible: root.selectedIndex < 0
+            Layout.preferredWidth: visible ? root.width : 0
+            Layout.fillWidth: visible
             Layout.fillHeight: true
             color: theme.chrome
             border.width: 1
@@ -132,6 +120,7 @@ Rectangle {
         }
 
         ScrollView {
+            visible: root.selectedIndex >= 0
             Layout.fillWidth: true
             Layout.fillHeight: true
             contentWidth: availableWidth
@@ -159,37 +148,83 @@ Rectangle {
 
                 Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: theme.lineSoft }
 
-                GridLayout {
+                Rectangle {
                     Layout.fillWidth: true
-                    columns: 2
-                    columnSpacing: 18
-                    rowSpacing: 8
+                    implicitHeight: gooseAttributes.implicitHeight
+                    color: theme.surface
+                    border.width: 1
+                    border.color: theme.line
 
-                    Label { text: "IED"; color: theme.muted; font.pixelSize: 9 }
-                    Label { text: root.text(root.selectedStream.iedName); color: theme.textSoft; font.pixelSize: 9 }
-                    Label { text: "DataSet"; color: theme.muted; font.pixelSize: 9 }
-                    Label { Layout.fillWidth: true; text: root.text(root.selectedStream.dataSet); color: theme.textSoft; font.pixelSize: 9; elide: Text.ElideMiddle }
-                    Label { text: "ConfRev"; color: theme.muted; font.pixelSize: 9 }
-                    Label { text: root.text(root.selectedStream.confRev); color: theme.textSoft; font.pixelSize: 9 }
-                    Label { text: "APPID"; color: theme.muted; font.pixelSize: 9 }
-                    Label { text: root.text(root.selectedStream.appId); color: theme.textSoft; font.pixelSize: 9 }
-                    Label { text: "Destination MAC"; color: theme.muted; font.pixelSize: 9 }
-                    Label { text: root.text(root.selectedStream.destinationMac); color: theme.textSoft; font.pixelSize: 9 }
-                    Label { text: "VLAN"; color: theme.muted; font.pixelSize: 9 }
-                    Label {
-                        text: root.selectedStream.vlanId === undefined || root.selectedStream.vlanId === null
-                              ? "—"
-                              : String(root.selectedStream.vlanId) + " · priority " + root.text(root.selectedStream.vlanPriority)
-                        color: theme.textSoft
-                        font.pixelSize: 9
-                    }
-                    Label { text: "Retransmission"; color: theme.muted; font.pixelSize: 9 }
-                    Label {
-                        text: root.selectedIndex >= 0
-                              ? root.text(root.selectedStream.minTimeMs) + " / " + root.text(root.selectedStream.maxTimeMs) + " ms"
-                              : "—"
-                        color: theme.textSoft
-                        font.pixelSize: 9
+                    ColumnLayout {
+                        id: gooseAttributes
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        spacing: 0
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 26
+                            color: theme.surfaceRaised
+                            Label {
+                                anchors.fill: parent
+                                leftPadding: 8
+                                verticalAlignment: Text.AlignVCenter
+                                text: "▾  Control block attributes"
+                                color: theme.text
+                                font.pixelSize: 8
+                                font.weight: Font.DemiBold
+                            }
+                        }
+                        Repeater {
+                            model: [
+                                ["IED", root.selectedStream.iedName],
+                                ["Control block reference", root.selectedStream.reference],
+                                ["Destination MAC address", root.selectedStream.destinationMac],
+                                ["Application ID", root.selectedStream.appId],
+                                ["GOOSE ID", root.selectedStream.goId],
+                                ["DataSet reference", root.selectedStream.dataSet],
+                                ["VLAN ID", root.selectedStream.vlanId],
+                                ["VLAN priority", root.selectedStream.vlanPriority],
+                                ["Configuration revision", root.selectedStream.confRev],
+                                ["Minimum retransmission (ms)", root.selectedStream.minTimeMs],
+                                ["Maximum retransmission (ms)", root.selectedStream.maxTimeMs]
+                            ]
+                            delegate: Rectangle {
+                                required property int index
+                                required property var modelData
+                                Layout.fillWidth: true
+                                implicitHeight: 25
+                                color: index % 2 ? theme.surfaceSoft : theme.surface
+                                RowLayout {
+                                    anchors.fill: parent
+                                    spacing: 0
+                                    Label {
+                                        Layout.preferredWidth: 190
+                                        Layout.fillHeight: true
+                                        leftPadding: 7
+                                        verticalAlignment: Text.AlignVCenter
+                                        text: modelData[0]
+                                        color: theme.textSoft
+                                        font.pixelSize: 8
+                                    }
+                                    Rectangle {
+                                        Layout.preferredWidth: 1
+                                        Layout.fillHeight: true
+                                        color: theme.lineSoft
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        leftPadding: 7
+                                        rightPadding: 7
+                                        verticalAlignment: Text.AlignVCenter
+                                        text: root.text(modelData[1])
+                                        color: theme.text
+                                        font.pixelSize: 8
+                                        elide: Text.ElideMiddle
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 

@@ -46,7 +46,8 @@ required_navigation = [
 ]
 required_goose = [
     "property var visibleStreams: context.gooseStreams",
-    "target: context",
+    "property int selectedIndex: -1",
+    "property var selectedStream:",
 ]
 
 for label, source, required in [

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "MmsReportController.hpp"
+#include "MmsEngineeringEvidence.hpp"
 
 #include "ariec61850/mms/data_codec.hpp"
 #include "ariec61850/mms/dynamic_data_set.hpp"
@@ -9,6 +10,7 @@
 #include "ariec61850/mms/static_report_session.hpp"
 
 #include <QByteArray>
+#include <QHash>
 #include <QMetaObject>
 #include <QPointer>
 
@@ -25,6 +27,8 @@ namespace mms = ar::iec61850::mms;
 
 namespace {
 constexpr int kMaximumVisibleReports = 128;
+constexpr int kMaximumTypedReportEvidence = 96;
+constexpr int kMaximumVisibleReportMembers = 256;
 
 QString boolText(const std::optional<bool> value) {
     if (!value.has_value()) return QStringLiteral("—");
@@ -459,6 +463,7 @@ ReportUi buildSubscriptionUi(
     }
     while (ui.events.size() > 256) ui.events.removeFirst();
 
+    int typedEvidenceBudget = kMaximumTypedReportEvidence;
     for (auto streamIt = subscription.streams.rbegin();
          streamIt != subscription.streams.rend(); ++streamIt) {
         for (auto frameIt = streamIt->recent_frames.rbegin();
@@ -476,8 +481,46 @@ ReportUi buildSubscriptionUi(
             map.insert(QStringLiteral("decoderMode"), QString::fromStdString(frame.decoder_mode));
             map.insert(QStringLiteral("valueCount"), static_cast<int>(frame.values.size()));
             QStringList values;
-            for (const auto& value : frame.values) values.push_back(reportValueText(value));
+            QVariantList typedEvidence;
+            bool typedEvidenceTruncated = false;
+            int memberIndex = 0;
+            for (const auto& item : frame.values) {
+                values.push_back(reportValueText(item));
+                if (item.value && memberIndex < kMaximumVisibleReportMembers) {
+                    QString memberRef = QString::fromStdString(item.data_reference);
+                    if (memberRef.isEmpty() && item.member)
+                        memberRef = QString::fromStdString(item.member->user_reference);
+                    if (memberRef.isEmpty() && item.member)
+                        memberRef = QString::fromStdString(item.member->mms_reference);
+                    if (typedEvidenceBudget > 0) {
+                        const auto evidence = arstack::iedsim::decodeEngineeringEvidence(
+                            memberRef, *item.value);
+                        if (!evidence.isEmpty()) {
+                            typedEvidence.push_back(QVariantMap{
+                                {QStringLiteral("index"), memberIndex},
+                                {QStringLiteral("evidence"), evidence}});
+                            --typedEvidenceBudget;
+                        }
+                    } else {
+                        // Mark truncation only for real q/t typed members, not
+                        // unrelated BIT STRING or UTC-valued attributes.
+                        const auto kind = item.value->kind();
+                        const auto separator = std::max(
+                            memberRef.lastIndexOf(QLatin1Char('$')),
+                            memberRef.lastIndexOf(QLatin1Char('.')));
+                        const QString leaf = memberRef.mid(separator + 1);
+                        if ((leaf == QStringLiteral("q") &&
+                             kind == mms::MmsDataKind::bit_string) ||
+                            (leaf == QStringLiteral("t") &&
+                             kind == mms::MmsDataKind::utc_time))
+                            typedEvidenceTruncated = true;
+                    }
+                }
+                ++memberIndex;
+            }
             map.insert(QStringLiteral("values"), values);
+            map.insert(QStringLiteral("valueEvidence"), typedEvidence);
+            map.insert(QStringLiteral("valueEvidenceTruncated"), typedEvidenceTruncated);
             map.insert(QStringLiteral("valuesSummary"), values.mid(0, 3).join(QStringLiteral(" | ")));
             map.insert(QStringLiteral("duplicateCount"), static_cast<qulonglong>(streamIt->state.duplicate_count));
             map.insert(QStringLiteral("gapCount"), static_cast<qulonglong>(streamIt->state.gap_count));
@@ -616,6 +659,7 @@ void MmsReportController::clearInventory() {
     selectedDataSetIndex_ = -1;
     selectedRcb_.clear();
     selectedDataSetMembers_.clear();
+    selectedRcbDataSetMembers_.clear();
     receivedReports_.clear();
     events_.clear();
     receivedReportCount_ = 0;
@@ -632,10 +676,32 @@ void MmsReportController::adoptEngineeringInventory() {
         return;
     }
 
-    const auto seed = buildContextDiscoverySeed(*engineeringContext_->modelSnapshot());
+    const auto* const canonical = engineeringContext_->modelSnapshot();
+    const auto seed = buildContextDiscoverySeed(*canonical);
     const auto ui = buildDiscoveryUi(seed, QString{});
     dataSets_ = ui.dataSets;
     reportControls_ = ui.reportControls;
+
+    // SCL contains configured RCB bindings even without live attribute reads.
+    // Carry only engineering metadata; never synthesize active state or values.
+    QHash<QString, const mms::MmsLiveReportControl*> byReference;
+    byReference.reserve(static_cast<qsizetype>(canonical->report_controls.size()));
+    for (const auto& control : canonical->report_controls)
+        byReference.insert(QString::fromStdString(control.reference), &control);
+    for (auto& row : reportControls_) {
+        auto map = row.toMap();
+        const auto* control = byReference.value(
+            map.value(QStringLiteral("reference")).toString(), nullptr);
+        if (!control) continue;
+        map.insert(QStringLiteral("dataSet"), QString::fromStdString(control->data_set_reference));
+        map.insert(QStringLiteral("canonicalDataSet"), QString::fromStdString(control->data_set_reference));
+        map.insert(QStringLiteral("dataSetBindingStatus"), QString::fromStdString(control->data_set_binding_status));
+        map.insert(QStringLiteral("reportId"), QString::fromStdString(control->report_id));
+        map.insert(QStringLiteral("confRev"), QString::fromStdString(control->configuration_revision));
+        map.insert(QStringLiteral("bufTm"), QString::fromStdString(control->buffer_time_ms));
+        map.insert(QStringLiteral("intgPd"), QString::fromStdString(control->integrity_period_ms));
+        row = map;
+    }
     staticCandidates_.clear();
     dynamicCandidates_.clear();
     associationProfile_.clear();
@@ -841,6 +907,7 @@ bool MmsReportController::reconnect() {
 void MmsReportController::refreshSelection() {
     selectedRcb_.clear();
     selectedDataSetMembers_.clear();
+    selectedRcbDataSetMembers_.clear();
     if (selectedRcbIndex_ >= 0 && selectedRcbIndex_ < reportControls_.size()) {
         selectedRcb_ = reportControls_.at(selectedRcbIndex_).toMap();
         const auto bound = selectedRcb_.value(QStringLiteral("dataSet")).toString();
@@ -850,6 +917,7 @@ void MmsReportController::refreshSelection() {
                 if (!sameDataSetReference(bound, map.value(QStringLiteral("reference")).toString())) continue;
                 selectedDataSetIndex_ = row;
                 selectedDataSetMembers_ = map.value(QStringLiteral("members")).toStringList();
+                selectedRcbDataSetMembers_ = selectedDataSetMembers_;
                 break;
             }
         }
@@ -868,6 +936,13 @@ bool MmsReportController::selectRcb(const int row) {
 }
 
 bool MmsReportController::selectDataSet(const int row) {
+    if (row == -1) {
+        if (selectedDataSetIndex_ == -1 && selectedDataSetMembers_.isEmpty()) return true;
+        selectedDataSetIndex_ = -1;
+        selectedDataSetMembers_.clear();
+        emit selectionChanged();
+        return true;
+    }
     if (row < 0 || row >= dataSets_.size()) return false;
     selectedDataSetIndex_ = row;
     selectedDataSetMembers_ = dataSets_.at(row).toMap().value(QStringLiteral("members")).toStringList();

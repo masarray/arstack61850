@@ -21,8 +21,67 @@ Item {
     property int activeSection: 0
     property string activeSectionTitle: "Data Model"
     property var selectedModelNode: context.treeModel.selectedNode
+    property int selectedGooseIndex: -1
 
     signal watchedDataChanged()
+
+    component RibbonAction: Button {
+        id: action
+        required property string badge
+        property bool emphasized: false
+
+        implicitWidth: 66
+        implicitHeight: 64
+        hoverEnabled: true
+        leftPadding: 4
+        rightPadding: 4
+
+        contentItem: Column {
+            spacing: 3
+            anchors.centerIn: parent
+            Rectangle {
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 27
+                height: 25
+                radius: 4
+                color: action.enabled
+                       ? (action.emphasized ? root.theme.accent : root.theme.surfaceSoft)
+                       : root.theme.surfaceRaised
+                border.width: 1
+                border.color: action.enabled
+                              ? (action.emphasized ? root.theme.accent : root.theme.line)
+                              : root.theme.lineSoft
+                Label {
+                    anchors.centerIn: parent
+                    text: action.badge
+                    color: action.enabled
+                           ? (action.emphasized ? "#ffffff" : root.theme.textSoft)
+                           : root.theme.muted
+                    font.pixelSize: action.badge.length > 2 ? 7 : 9
+                    font.weight: Font.DemiBold
+                }
+            }
+            Label {
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 62
+                text: action.text
+                color: action.enabled ? root.theme.text : root.theme.muted
+                font.pixelSize: 8
+                font.weight: Font.Medium
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+            }
+        }
+
+        background: Rectangle {
+            radius: 4
+            color: !action.enabled ? "transparent"
+                   : action.pressed ? root.theme.surfaceSoft
+                   : action.hovered ? root.theme.accentSoft : "transparent"
+            border.width: action.hovered && action.enabled ? 1 : 0
+            border.color: root.theme.accent
+        }
+    }
 
     function watchedRows() { return globalDataPane.snapshotRows() }
     function refreshWatchedGlobalData() { return globalDataPane.refreshWatched() }
@@ -43,23 +102,23 @@ Item {
     function breadcrumb() {
         if (activeSection === 0) {
             var ref = selectedModelNode.reference || selectedModelNode.label || ""
-            return ref.length ? root.activeIedLabel() + " / Data Model / " + ref : root.activeIedLabel() + " / Data Model"
+            return ref.length ? root.activeIedLabel() + " › Data Model › " + ref : root.activeIedLabel() + " › Data Model"
         }
         if (activeSection === 1) {
             if (reports.selectedDataSetIndex >= 0 && reports.selectedDataSetIndex < reports.dataSets.length)
-                return root.activeIedLabel() + " / DataSets / " + (reports.dataSets[reports.selectedDataSetIndex].reference || "")
-            return root.activeIedLabel() + " / DataSets"
+                return root.activeIedLabel() + " › DataSets › " + (reports.dataSets[reports.selectedDataSetIndex].reference || "")
+            return root.activeIedLabel() + " › DataSets"
         }
         if (activeSection === 2)
-            return reports.selectedRcb.reference ? root.activeIedLabel() + " / Reports / " + reports.selectedRcb.reference : root.activeIedLabel() + " / Reports"
+            return reports.selectedRcb.reference ? root.activeIedLabel() + " › Reports › " + reports.selectedRcb.reference : root.activeIedLabel() + " › Reports"
         if (activeSection === 3)
             return utilities.selectedSettingGroup.reference
-                    ? root.activeIedLabel() + " / Setting Groups / " + utilities.selectedSettingGroup.reference
-                    : root.activeIedLabel() + " / Setting Groups"
+                    ? root.activeIedLabel() + " › Setting Groups › " + utilities.selectedSettingGroup.reference
+                    : root.activeIedLabel() + " › Setting Groups"
         if (activeSection === 4)
-            return root.activeIedLabel() + " / Files" + (utilities.currentDirectory.length ? " / " + utilities.currentDirectory : "")
-        if (activeSection === 5) return root.activeIedLabel() + " / GOOSE"
-        return root.activeIedLabel() + " / Global Data"
+            return root.activeIedLabel() + " › Files" + (utilities.currentDirectory.length ? " › " + utilities.currentDirectory : "")
+        if (activeSection === 5) return root.activeIedLabel() + " › GOOSE"
+        return root.activeIedLabel() + " › Global Data"
     }
 
     function selectSection(section, title) {
@@ -87,6 +146,13 @@ Item {
         function onStateChanged() {
             if (session.connected)
                 root.ensureActiveService()
+        }
+    }
+
+    Connections {
+        target: context
+        function onContextChanged() {
+            root.selectedGooseIndex = -1
         }
     }
 
@@ -123,154 +189,282 @@ Item {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 62
+            Layout.preferredHeight: 94
             color: root.theme.chrome
             border.width: 1
             border.color: root.theme.lineSoft
 
-            RowLayout {
+            Flickable {
                 anchors.fill: parent
-                anchors.leftMargin: 14
-                anchors.rightMargin: 14
-                spacing: 8
+                contentWidth: ribbonRow.width + 16
+                contentHeight: height
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                flickableDirection: Flickable.HorizontalFlick
 
-                ColumnLayout {
-                    Layout.preferredWidth: 155
-                    spacing: 1
-                    Label {
-                        text: "MODEL"
-                        color: root.theme.text
-                        font.pixelSize: 11
-                        font.weight: Font.DemiBold
+                Row {
+                    id: ribbonRow
+                    x: 8
+                    height: parent.height
+                    spacing: 7
+
+                    Column {
+                        width: 136
+                        height: parent.height
+                        Row {
+                            RibbonAction {
+                                badge: "SCL"
+                                text: "Open SCL"
+                                enabled: !session.configurationLocked && !engineering.busy
+                                onClicked: browserSclDialog.open()
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Open SCL/CID/SCD/IID/ICD into the canonical Browser model."
+                            }
+                            RibbonAction {
+                                badge: "↓"
+                                text: engineering.busy ? "Saving…" : "Save SCL"
+                                enabled: engineering.engineeringContextExportSupported && !engineering.busy
+                                onClicked: saveSclDialog.open()
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Export the cached canonical model locally without hidden rediscovery."
+                            }
+                        }
+                        Label {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: "APPLICATION"
+                            color: root.theme.muted
+                            font.pixelSize: 7
+                            font.weight: Font.DemiBold
+                        }
                     }
-                    Label {
-                        text: context.loaded
-                              ? root.activeIedLabel() + " · " + context.authority
-                              : "Open SCL or discover one IED endpoint"
-                        color: root.theme.muted
-                        font.pixelSize: 8
+
+                    Rectangle { width: 1; height: 78; y: 5; color: root.theme.lineSoft }
+
+                    Column {
+                        width: 262
+                        height: parent.height
+                        spacing: 4
+                        Row {
+                            spacing: 5
+                            TextField {
+                                id: hostField
+                                width: 172
+                                height: 29
+                                text: session.host
+                                placeholderText: "IED IP / hostname"
+                                selectByMouse: true
+                                enabled: !session.configurationLocked
+                                font.pixelSize: 9
+                                onEditingFinished: session.host = text
+                            }
+                            SpinBox {
+                                id: portField
+                                width: 80
+                                height: 29
+                                from: 1
+                                to: 65535
+                                value: session.port
+                                editable: true
+                                enabled: !session.configurationLocked
+                                onValueModified: session.port = value
+                            }
+                        }
+                        Row {
+                            spacing: 6
+                            Rectangle {
+                                width: 8; height: 8; radius: 4
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: session.lastError.length ? root.theme.red
+                                                               : session.connected ? root.theme.green
+                                                                                   : session.busy ? root.theme.amber
+                                                                                                  : root.theme.muted
+                            }
+                            Label {
+                                width: 244
+                                text: session.stateText + " · " + session.endpoint
+                                color: session.lastError.length ? root.theme.red : root.theme.textSoft
+                                font.pixelSize: 8
+                                font.weight: Font.Medium
+                                elide: Text.ElideRight
+                            }
+                        }
+                        Label {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: "ENDPOINT"
+                            color: root.theme.muted
+                            font.pixelSize: 7
+                            font.weight: Font.DemiBold
+                        }
                     }
-                }
 
-                Button {
-                    text: "Open SCL"
-                    enabled: !session.configurationLocked && !engineering.busy
-                    onClicked: browserSclDialog.open()
-                    ToolTip.visible: hovered
-                    ToolTip.text: "Open SCL/CID/SCD/IID/ICD into the persistent Browser model."
-                }
+                    Rectangle { width: 1; height: 78; y: 5; color: root.theme.lineSoft }
 
-                Button {
-                    text: engineering.busy ? "Saving…" : "Save SCL"
-                    visible: context.loaded && context.authorityKey === "live-discovery"
-                    enabled: engineering.engineeringContextExportSupported
-                             && !engineering.busy
-                    onClicked: saveSclDialog.open()
-                    ToolTip.visible: hovered
-                    ToolTip.text: context.online
-                                  ? "Save the cached canonical IED model locally; no rediscovery is performed."
-                                  : "Save the persistent canonical IED model while offline."
-                }
-
-                TextField {
-                    id: hostField
-                    Layout.preferredWidth: 205
-                    text: session.host
-                    placeholderText: "IED IP / hostname"
-                    selectByMouse: true
-                    enabled: !session.configurationLocked
-                    onEditingFinished: session.host = text
-                }
-
-                SpinBox {
-                    id: portField
-                    Layout.preferredWidth: 102
-                    from: 1
-                    to: 65535
-                    value: session.port
-                    editable: true
-                    enabled: !session.configurationLocked
-                    onValueModified: session.port = value
-                }
-
-                Button {
-                    text: "Online"
-                    visible: context.loaded
-                    enabled: !session.connected && !session.busy && !context.selectionRequired
-                    onClicked: {
-                        session.host = hostField.text
-                        session.port = portField.value
-                        session.connectUsingEngineeringContext()
+                    Column {
+                        width: 200
+                        height: parent.height
+                        Row {
+                            RibbonAction {
+                                badge: "ON"
+                                text: "Online"
+                                emphasized: session.connected
+                                enabled: context.loaded && !session.connected && !session.busy && !context.selectionRequired
+                                onClicked: {
+                                    session.host = hostField.text
+                                    session.port = portField.value
+                                    session.connectUsingEngineeringContext()
+                                }
+                            }
+                            RibbonAction {
+                                badge: "IED"
+                                text: session.busy && !session.connected ? "Working…" : "Discover IED"
+                                enabled: !session.connected && !session.busy
+                                onClicked: {
+                                    session.host = hostField.text
+                                    session.port = portField.value
+                                    session.discoverAndConnect()
+                                }
+                            }
+                            RibbonAction {
+                                badge: "×"
+                                text: "Close"
+                                enabled: session.connected || session.busy
+                                onClicked: session.disconnectFromIed()
+                            }
+                        }
+                        Label {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: "IED SESSION"
+                            color: root.theme.muted
+                            font.pixelSize: 7
+                            font.weight: Font.DemiBold
+                        }
                     }
-                    ToolTip.visible: hovered
-                    ToolTip.text: context.authorityKey === "scl"
-                                  ? "Connect using the active trusted SCL model."
-                                  : "Reconnect/discover the active IED endpoint."
-                }
 
-                Button {
-                    text: session.busy && !session.connected ? "Discovering…" : "Discover IED"
-                    enabled: !session.connected && !session.busy
-                    onClicked: {
-                        session.host = hostField.text
-                        session.port = portField.value
-                        session.discoverAndConnect()
+                    Rectangle { width: 1; height: 78; y: 5; color: root.theme.lineSoft }
+
+                    Column {
+                        width: 200
+                        height: parent.height
+                        Row {
+                            RibbonAction {
+                                badge: "R"
+                                text: "Read"
+                                enabled: client.connected && !client.operationBusy
+                                         && root.selectedModelNode.readable === true
+                                onClicked: client.readEngineeringSelected()
+                            }
+                            RibbonAction {
+                                badge: "CO"
+                                text: "Control"
+                                enabled: session.connected
+                                         && root.selectedModelNode.controlCandidate === true
+                                         && !controls.busy
+                                onClicked: controlDialog.openFor(root.selectedModelNode)
+                            }
+                            RibbonAction {
+                                badge: "CLR"
+                                text: "Clear"
+                                enabled: globalDataPane.watchCount > 0
+                                onClicked: root.selectSection(6, "Global Data")
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Open Global Data to review or clear monitored entries."
+                            }
+                        }
+                        Label {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: "DATA"
+                            color: root.theme.muted
+                            font.pixelSize: 7
+                            font.weight: Font.DemiBold
+                        }
                     }
-                    ToolTip.visible: hovered
-                    ToolTip.text: "Ignore trusted SCL for this connect, discover the live MMS model, and publish it into this Browser context."
-                }
 
-                Button {
-                    text: "Disconnect"
-                    enabled: session.connected || session.busy
-                    onClicked: session.disconnectFromIed()
-                }
+                    Rectangle { width: 1; height: 78; y: 5; color: root.theme.lineSoft }
 
-                Rectangle {
-                    width: 8
-                    height: 8
-                    radius: 4
-                    color: session.lastError.length ? root.theme.red
-                                                   : session.connected ? root.theme.green
-                                                                       : session.busy ? root.theme.amber
-                                                                                      : root.theme.muted
-                }
-
-                ColumnLayout {
-                    spacing: 0
-                    Label {
-                        text: session.stateText
-                        color: session.lastError.length ? root.theme.red : root.theme.textSoft
-                        font.pixelSize: 9
-                        font.weight: Font.DemiBold
+                    Column {
+                        width: 266
+                        height: parent.height
+                        Row {
+                            RibbonAction {
+                                badge: "GI"
+                                text: "Enable + GI"
+                                emphasized: reports.active
+                                enabled: root.activeSection === 2 && reports.connected
+                                         && !reports.busy && !reports.active
+                                         && !reports.cleanupRequired && reports.selectedRcbIndex >= 0
+                                onClicked: reports.enableSelected(true)
+                            }
+                            RibbonAction {
+                                badge: "OFF"
+                                text: "Disable"
+                                enabled: reports.connected && reports.active && !reports.busy
+                                onClicked: reports.disableSelected()
+                            }
+                            RibbonAction {
+                                badge: "DS"
+                                text: "Add DataSet"
+                                enabled: reports.connected && !reports.busy && !reports.active
+                                onClicked: dataSetAuthorDialog.newDraft()
+                            }
+                            RibbonAction {
+                                badge: "G"
+                                text: "GOOSE"
+                                enabled: context.loaded && context.gooseCount > 0
+                                onClicked: {
+                                    root.selectedGooseIndex = -1
+                                    root.selectSection(5, "GOOSE")
+                                }
+                            }
+                        }
+                        Label {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: "SERVICES"
+                            color: root.theme.muted
+                            font.pixelSize: 7
+                            font.weight: Font.DemiBold
+                        }
                     }
-                    Label {
-                        text: session.endpoint
-                        color: root.theme.muted
-                        font.pixelSize: 8
-                    }
-                }
 
-                Item { Layout.fillWidth: true }
+                    Rectangle { width: 1; height: 78; y: 5; color: root.theme.lineSoft }
 
-                ColumnLayout {
-                    visible: context.loaded
-                    spacing: 0
-                    Label {
-                        Layout.alignment: Qt.AlignRight
-                        text: context.iedName.length ? context.iedName
-                              : context.selectionRequired ? "Select active IED" : "IED model"
-                        color: root.theme.text
-                        font.pixelSize: 10
-                        font.weight: Font.DemiBold
-                    }
-                    Label {
-                        Layout.alignment: Qt.AlignRight
-                        text: context.logicalDeviceCount + " LD · " + context.logicalNodeCount + " LN · "
-                              + context.dataAttributeCount + " DA · "
-                              + (context.online ? "ONLINE" : "OFFLINE")
-                        color: root.theme.muted
-                        font.pixelSize: 8
+                    Column {
+                        width: 176
+                        height: parent.height
+                        y: 6
+                        spacing: 2
+                        Label {
+                            width: parent.width
+                            text: "MODEL"
+                            color: root.theme.muted
+                            font.pixelSize: 7
+                            font.weight: Font.DemiBold
+                        }
+                        Label {
+                            width: parent.width
+                            text: context.iedName.length ? context.iedName
+                                  : context.selectionRequired ? "Select active IED" : "IED model"
+                            color: root.theme.text
+                            font.pixelSize: 10
+                            font.weight: Font.DemiBold
+                            elide: Text.ElideRight
+                        }
+                        Label {
+                            width: parent.width
+                            text: context.loaded
+                                  ? context.logicalDeviceCount + " LD · " + context.logicalNodeCount + " LN · "
+                                    + context.dataAttributeCount + " DA"
+                                  : "Open SCL or discover one endpoint"
+                            color: root.theme.muted
+                            font.pixelSize: 8
+                            elide: Text.ElideRight
+                        }
+                        Label {
+                            width: parent.width
+                            text: context.online ? "ONLINE" : "OFFLINE"
+                            color: context.online ? root.theme.green : root.theme.muted
+                            font.pixelSize: 8
+                            font.weight: Font.DemiBold
+                        }
                     }
                 }
             }
@@ -347,9 +541,14 @@ Item {
                 reports: root.reports
                 utilities: root.utilities
                 globalDataCount: globalDataPane.watchCount
+                selectedGooseIndex: root.selectedGooseIndex
                 section: root.activeSection
                 onSectionRequested: function(section, title) {
                     root.selectSection(section, title)
+                }
+                onGooseRequested: function(index) {
+                    root.selectedGooseIndex = index
+                    root.selectSection(5, "GOOSE")
                 }
                 onWidthChanged: splitterPersist.restart()
             }
@@ -560,24 +759,21 @@ Item {
                     Layout.fillHeight: true
                     currentIndex: root.activeSection
 
-                    MmsClientWorkspace {
+                    BrowserDataModelPane {
                         theme: root.theme
                         client: root.client
                         modelProvider: root.context
-                        showConnectionHeader: false
-                        showNavigationPanel: false
                     }
 
                     BrowserDataSetPane {
                         theme: root.theme
                         reports: root.reports
+                        modelProvider: root.context
                     }
 
-                    ReportsWorkspace {
+                    BrowserReportPane {
                         theme: root.theme
                         reports: root.reports
-                        showConnectionHeader: false
-                        showInventoryPanel: false
                     }
 
                     SettingsWorkspace {
@@ -597,6 +793,7 @@ Item {
                         id: goosePane
                         theme: root.theme
                         context: root.context
+                        selectedIndex: root.selectedGooseIndex
                     }
 
                     BrowserGlobalDataPane {

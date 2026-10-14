@@ -5,6 +5,7 @@ on:
     branches:
       - "agent/phase-4d-c5-control-interoperability"
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'tools/control_interop_probe/**'
       - 'include/ariec61850/control/**'
@@ -29,6 +30,7 @@ concurrency:
 
 jobs:
   control-interop:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: Control Interop Harness / ${{ matrix.compiler }}
     runs-on: ${{ matrix.os }}
     strategy:
