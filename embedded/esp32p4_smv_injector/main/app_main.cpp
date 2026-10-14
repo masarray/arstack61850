@@ -726,8 +726,10 @@ void publisher_task(void* argument) {
             const std::int32_t latest_slew_total =
                 g_sample_clock_context.cumulative_slew_ticks.load(
                     std::memory_order_relaxed);
-            expected_wake_us += static_cast<std::int64_t>(
-                latest_slew_total - previous_slew_total);
+            expected_wake_us +=
+                ar::iec61850::time_sync::sv_phase_detail::signed_delta_u32(
+                    static_cast<std::uint32_t>(latest_slew_total),
+                    static_cast<std::uint32_t>(previous_slew_total));
             previous_slew_total = latest_slew_total;
 #endif
         }
