@@ -162,6 +162,7 @@ struct SampleClockContext final {
     std::atomic<std::uint32_t> last_epoch_alarm{0U};
     std::atomic<std::int32_t> requested_slew_ticks{0};
     std::atomic<std::int32_t> cumulative_slew_ticks{0};
+    std::atomic<bool> phase_authority_valid{false};
     SvBoundedSlewCursor phase_slew{};
     std::uint32_t phase_index{};
     bool phase_enabled{}; // set before timer START; only ISR reads it
@@ -420,10 +421,15 @@ bool sample_alarm_callback(
         // Commands arrive after a cross-clock read from the background task.
         // Apply within THIS epoch, across all remaining intervals. Never
         // change smpCnt or issue multiple timer alarms to catch up.
+        const bool phase_valid = context->phase_authority_valid.load(
+            std::memory_order_relaxed);
         const std::int32_t requested = context->requested_slew_ticks.exchange(
             0, std::memory_order_relaxed);
-        if (requested != 0 &&
-            index + 16U < context->schedule.rate_hz) {
+        if (!phase_valid) {
+            // Cancel an in-flight slew immediately on PTP/source/phase fault.
+            context->phase_slew.arm(context->schedule.rate_hz, 0);
+        } else if (requested != 0 &&
+                   index + 16U < context->schedule.rate_hz) {
             context->phase_slew.arm(
                 context->schedule.rate_hz - index, requested);
         }
@@ -503,6 +509,7 @@ gptimer_handle_t start_sample_clock(
     g_sample_clock_context.last_epoch_alarm.store(0U, std::memory_order_relaxed);
     g_sample_clock_context.requested_slew_ticks.store(0, std::memory_order_relaxed);
     g_sample_clock_context.cumulative_slew_ticks.store(0, std::memory_order_relaxed);
+    g_sample_clock_context.phase_authority_valid.store(false, std::memory_order_relaxed);
     g_sample_clock_context.phase_index = 0U;
     g_sample_clock_context.phase_enabled = false;
     g_sample_clock_context.phase_slew.arm(publisher_rate_hz, 0);
@@ -562,6 +569,8 @@ void stop_sample_clock(gptimer_handle_t& timer) noexcept {
     if (g_monitored_sample_clock == timer) g_monitored_sample_clock = nullptr;
     g_sample_clock_context.requested_slew_ticks.store(
         0, std::memory_order_relaxed);
+    g_sample_clock_context.phase_authority_valid.store(
+        false, std::memory_order_release);
 #endif
     static_cast<void>(gptimer_stop(timer));
     static_cast<void>(gptimer_disable(timer));
@@ -609,6 +618,9 @@ void publisher_task(void* argument) {
     bool schedule_anchored = false;
     bool epoch_armed = false;
     std::int64_t expected_wake_us = 0;
+#if AR_SV_PTP_PHASE_SUPPORTED
+    std::int32_t previous_slew_total = 0;
+#endif
     std::uint32_t consecutive_canonical_tx_failures = 0U;
     esp_err_t last_canonical_tx_error = ESP_OK;
 
@@ -651,6 +663,9 @@ void publisher_task(void* argument) {
             consecutive_canonical_tx_failures = 0U;
             last_canonical_tx_error = ESP_OK;
             expected_schedule.reset(active_profile.publisher_rate_hz);
+#if AR_SV_PTP_PHASE_SUPPORTED
+            previous_slew_total = 0;
+#endif
             ESP_LOGI(kTag,
                      "PROFILE armed generation=%llu svID=%s APPID=0x%04X rate=%lu wrap=%u confRev=%lu VLAN=%u/%u/%u frameLen=%u",
                      static_cast<unsigned long long>(active_profile.generation),
@@ -704,6 +719,17 @@ void publisher_task(void* argument) {
                 elapsed_ticks += expected_schedule.next_ticks();
             }
             expected_wake_us += static_cast<std::int64_t>(elapsed_ticks);
+#if AR_SV_PTP_PHASE_SUPPORTED
+            // Preserve the existing lateness metric when the ISR slews its
+            // timer deadlines. Otherwise planned corrective ticks would be
+            // misreported as publisher latency/drift.
+            const std::int32_t latest_slew_total =
+                g_sample_clock_context.cumulative_slew_ticks.load(
+                    std::memory_order_relaxed);
+            expected_wake_us += static_cast<std::int64_t>(
+                latest_slew_total - previous_slew_total);
+            previous_slew_total = latest_slew_total;
+#endif
         }
 
         const auto signal_state = live_signal_snapshot();
