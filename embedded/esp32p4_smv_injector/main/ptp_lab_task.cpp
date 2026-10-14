@@ -79,6 +79,7 @@ struct PtpLabContext final {
 PtpLabContext g_ptp_context{};
 std::atomic_bool g_ptp_started{false};
 std::atomic_bool g_ptp_ready{false};
+std::atomic<std::uint32_t> g_ptp_source_generation{0U};
 std::atomic_bool g_stop_requested{false};
 std::atomic_bool g_ptp_accept_rx{false};
 std::atomic<std::uint64_t> g_announce_sent{0U};
@@ -667,7 +668,15 @@ void ptp_lab_task(void* argument) {
                 consecutive_failures = 0U;
                 context.runtime->clear_error();
                 const bool emitted_core_timing = g_announce_sent.load(std::memory_order_relaxed) > 0U && g_sync_sent.load(std::memory_order_relaxed) > 0U && g_follow_up_sent.load(std::memory_order_relaxed) > 0U;
-                if (emitted_core_timing) g_ptp_ready.store(true, std::memory_order_release);
+                if (emitted_core_timing) {
+                    // Any successful re-entry into READY defines a new time
+                    // authority generation, even if 1Hz PTP seconds happen
+                    // to look continuous across a failed Sync exchange.
+                    if (!g_ptp_ready.load(std::memory_order_relaxed)) {
+                        g_ptp_source_generation.fetch_add(1U, std::memory_order_release);
+                    }
+                    g_ptp_ready.store(true, std::memory_order_release);
+                }
             } else {
                 g_ptp_ready.store(false, std::memory_order_release);
                 context.runtime->record_error("Ethernet transmit or hardware timestamp failure");
@@ -827,6 +836,12 @@ extern "C" void ar_ptp_lab_stop(void) {
 
 extern "C" bool ar_ptp_lab_is_running(void) {
     return ar::esp32p4::smv::ptp_lab_is_running();
+}
+
+extern "C" std::uint32_t ar_ptp_source_generation(void) {
+    if (!ar::esp32p4::smv::ptp_lab_is_running()) return 0U;
+    return ar::esp32p4::smv::g_ptp_source_generation.load(
+        std::memory_order_acquire);
 }
 
 extern "C" bool ar_ptp_lab_get_status(ar_ptp_lab_status_t* status) {

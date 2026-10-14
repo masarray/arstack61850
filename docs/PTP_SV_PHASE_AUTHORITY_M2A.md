@@ -49,3 +49,7 @@ If any validation fails, no autonomous `smpSynch=1/2` claim is made. Do not enab
 - IEC/IEEE 61850-9-3: https://webstore.iec.ch/en/publication/24998
 - IEC 61850-9-2+AMD1: https://webstore.iec.ch/en/publication/66549
 - ESP-IDF GPTimer API: https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32p4/api-reference/peripherals/gptimer.html
+
+### M2D restart-safe PTP source continuity
+
+The low-priority phase authority now takes a monotonic PTP SOURCE generation with each cross-clock sample. `SvPtpPublisherContinuityGate` explicitly treats a source recovery/restart as loss of phase evidence, clears the old PI integrator, and requires fresh clean epochs. Read and handoff checks compare the same SOURCE generation, including the STOP/START mutex window. A successful 1 Hz PTP Sync/Follow_Up cycle after previous source failure does NOT inherit historical SV phase qualification. This is default-off lab-only software evidence; it never asserts `smpSynch=1/2` or IED lock.

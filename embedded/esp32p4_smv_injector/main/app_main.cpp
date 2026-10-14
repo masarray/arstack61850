@@ -858,12 +858,15 @@ void publisher_task(void* argument) {
                     egress.sample_epoch_generation =
                         g_sample_clock_context.epoch_generation.load(
                             std::memory_order_acquire);
+                    egress.publisher_session_generation = evidence_session;
+                    egress.ptp_source_generation = ar_ptp_lab_source_generation();
                     egress.scheduled_alarm_ticks_low32 =
                         g_sample_clock_context.last_epoch_alarm.load(
                             std::memory_order_acquire);
                     fault_generation_before =
                         g_sample_clock_context.publisher_fault_generation.load(
                             std::memory_order_acquire);
+                    egress.publisher_fault_generation = fault_generation_before;
                     egress.smp_cnt = canonical_sample_count;
                     egress.no_missed_slots = pending_ticks == 1U;
                 }
@@ -893,7 +896,10 @@ void publisher_task(void* argument) {
                 egress.canonical_tx_success = canonical_result == ESP_OK;
                 egress.hw_ptp_seconds = egress_hw_time.seconds;
                 egress.hw_ptp_nanoseconds = egress_hw_time.nanoseconds;
-                egress.same_sample_epoch = evidence_session != 0U &&
+                egress.same_sample_epoch = egress.ptp_source_generation != 0U &&
+                    ar_ptp_lab_source_generation() ==
+                        egress.ptp_source_generation &&
+                    evidence_session != 0U &&
                     g_sample_clock_context.session_generation.load(
                         std::memory_order_acquire) == evidence_session &&
                     g_sample_clock_context.epoch_generation.load(
@@ -1009,7 +1015,13 @@ void sv_ptp_phase_observer_task(void* argument) {
         const std::uint32_t current_faults =
             g_sample_clock_context.publisher_fault_generation.load(
                 std::memory_order_acquire);
-        if (!continuity.unchanged(notified_session, current_faults)) {
+        const std::uint32_t source_generation =
+            ar_ptp_lab_source_generation();
+        // Source START/recovery is a new time authority even if the hardware
+        // seconds are continuous. Never carry PI integrator over source reset.
+        if (source_generation == 0U ||
+            !continuity.unchanged(notified_session, current_faults,
+                                  source_generation)) {
             static_cast<void>(controller.invalidate());
             revoke_sv_phase_session(notified_session);
             continue;
@@ -1064,7 +1076,8 @@ void sv_ptp_phase_observer_task(void* argument) {
         }
         xSemaphoreGive(g_phase_timer_mutex);
 
-        if (!evidence_valid || !ar_ptp_lab_is_running()) {
+        if (!evidence_valid || !ar_ptp_lab_is_running() ||
+            ar_ptp_lab_source_generation() != source_generation) {
             static_cast<void>(controller.invalidate());
             revoke_sv_phase_session(notified_session);
             continue;
@@ -1073,8 +1086,6 @@ void sv_ptp_phase_observer_task(void* argument) {
         const auto decision = controller.observe(observation);
         // Handoff and GPTimer deletion share a control-plane mutex:
         // neither a stale sample nor a recycled timer can receive a command.
-        const bool source_still_running =
-            ar_ptp_lab_is_running() && live_tx_running();
         bool committed = false;
         xSemaphoreTake(g_phase_timer_mutex, portMAX_DELAY);
         // Check fault generation at the serialized command handoff, not
@@ -1089,7 +1100,8 @@ void sv_ptp_phase_observer_task(void* argument) {
         if (session_matches &&
             g_sample_clock_context.epoch_generation.load(
                 std::memory_order_acquire) == observation.last_sv_epoch_generation &&
-            decision.accepted && source_still_running &&
+            decision.accepted && live_tx_running() &&
+            ar_ptp_lab_source_generation() == source_generation &&
             no_new_publisher_fault) {
             g_sample_clock_context.phase_authority_valid.store(
                 true, std::memory_order_release);
@@ -1146,15 +1158,20 @@ void telemetry_task(void*) {
             previously_reported_egress = egress_snapshot.attempted;
             ESP_LOGI(kTag,
                 "SV MAC TX descriptor evidence (LAB, 1/16 smpCnt=0): "
-                "attempted=%lu measured=%lu invalid=%lu txfail=%lu no_hw_ts=%lu "
+                "attempted=%lu baseline=%lu measured=%lu invalid=%lu txfail=%lu no_hw_ts=%lu "
+                "SV_discontinuity=%lu PTP_clock_step=%lu PTP_source_changed=%lu "
                 "PTP-egress-phase_ns[min/mean/max]=%ld/%lld/%ld "
                 "submit_max_us=%lu last_epoch=%lu last_alarm_ticks=%lu; "
                 "PTP/SV absolute accuracy and smpSynch NOT QUALIFIED",
                 static_cast<unsigned long>(egress_snapshot.attempted),
+                static_cast<unsigned long>(egress_snapshot.baseline_established),
                 static_cast<unsigned long>(egress_snapshot.measured),
                 static_cast<unsigned long>(egress_snapshot.rejected_epoch),
                 static_cast<unsigned long>(egress_snapshot.failed_transmit),
                 static_cast<unsigned long>(egress_snapshot.missing_hw_timestamp),
+                static_cast<unsigned long>(egress_snapshot.publisher_discontinuities),
+                static_cast<unsigned long>(egress_snapshot.ptp_clock_discontinuities),
+                static_cast<unsigned long>(egress_snapshot.ptp_source_changes),
                 static_cast<long>(egress_snapshot.measured > 0U
                     ? egress_snapshot.min_phase_ns : 0),
                 static_cast<long long>(egress_snapshot.measured > 0U

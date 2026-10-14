@@ -210,17 +210,21 @@ public:
     constexpr void reset() noexcept {
         session_ = 0U;
         fault_generation_ = 0U;
+        source_generation_ = 0U;
     }
 
     [[nodiscard]] constexpr bool unchanged(
-        const std::uint32_t session, const std::uint32_t fault_generation) noexcept {
+        const std::uint32_t session, const std::uint32_t fault_generation,
+        const std::uint32_t source_generation = 0U) noexcept {
         if (session == 0U) {
             reset();
             return false;
         }
-        if (session_ != session || fault_generation_ != fault_generation) {
+        if (session_ != session || fault_generation_ != fault_generation ||
+            source_generation_ != source_generation) {
             session_ = session;
             fault_generation_ = fault_generation;
+            source_generation_ = source_generation;
             return false;
         }
         return true;
@@ -229,6 +233,7 @@ public:
 private:
     std::uint32_t session_{};
     std::uint32_t fault_generation_{};
+    std::uint32_t source_generation_{};
 };
 
 // ISR-safe, O(1), no allocation/locks/IOCTL. Each interval differs from the

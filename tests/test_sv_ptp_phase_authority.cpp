@@ -164,6 +164,13 @@ void check_publisher_continuity_gate_reacquisition() {
     CHECK(phase.invalidate().state == SvPtpPhaseState::invalid);
     CHECK(gate.unchanged(2U, 0U));
     CHECK(phase.observe(snapshot(1U, 10)).slew_ticks_next_epoch == 0);
+    // A PTP SOURCE restart, even with valid-looking seconds, must force
+    // phase controller reacquisition rather than retaining the old PI state.
+    CHECK(!gate.unchanged(2U, 0U, 3U));
+    CHECK(gate.unchanged(2U, 0U, 3U));
+    CHECK(!gate.unchanged(2U, 0U, 4U));
+    CHECK(gate.unchanged(2U, 0U, 4U));
+    CHECK(phase.invalidate().slew_ticks_next_epoch == 0);
     CHECK(!gate.unchanged(0U, 0U));  // STOP
     CHECK(!gate.unchanged(2U, 0U));  // START must re-acquire
 }

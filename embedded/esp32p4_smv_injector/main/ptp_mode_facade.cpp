@@ -21,6 +21,7 @@ bool ar_ptp_source_configure(const ar_ptp_lab_config_t* config);
 void ar_ptp_source_start(esp_eth_handle_t eth_handle);
 void ar_ptp_source_stop(void);
 bool ar_ptp_source_is_running(void);
+uint32_t ar_ptp_source_generation(void);
 bool ar_ptp_source_get_status(ar_ptp_lab_status_t* status);
 }
 
@@ -242,6 +243,10 @@ extern "C" void ar_ptp_lab_stop(void) {
 
 extern "C" bool ar_ptp_lab_is_running(void) {
     return ar_ptp_source_is_running() || ar::esp32p4::smv::ptp_receiver_is_running();
+}
+
+extern "C" uint32_t ar_ptp_lab_source_generation(void) {
+    return ar_ptp_source_is_running() ? ar_ptp_source_generation() : 0U;
 }
 
 extern "C" bool ar_ptp_lab_get_status(ar_ptp_lab_status_t* status) {
