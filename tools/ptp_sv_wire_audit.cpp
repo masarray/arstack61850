@@ -48,6 +48,9 @@ struct Evidence final {
     std::uint64_t ptp_sync{};
     std::uint64_t ptp_two_step_sync{};
     std::uint64_t ptp_follow_up{};
+    std::uint64_t ptp_follow_up_matched{};
+    std::uint64_t ptp_follow_up_orphan{};
+    std::uint64_t ptp_follow_up_missing{};
     std::uint64_t ptp_pdelay_response{};
     std::array<std::uint64_t, 4> smp_synch_counts{};
     std::uint64_t counter_zero_observations{};
@@ -79,26 +82,46 @@ public:
                 ++results_.ptp_domain_mismatches;
                 return;
             }
-            switch (frame.header.message_type) {
-            case ptp::PtpMessageType::announce: ++results_.ptp_announce; break;
-            case ptp::PtpMessageType::sync:
-                ++results_.ptp_sync;
-                if (frame.header.is_two_step()) ++results_.ptp_two_step_sync;
-                break;
-            case ptp::PtpMessageType::follow_up: ++results_.ptp_follow_up; break;
-            case ptp::PtpMessageType::pdelay_resp:
-                ++results_.ptp_pdelay_response;
-                break;
-            default: break;
-            }
-            if (frame.header.message_type == ptp::PtpMessageType::announce ||
-                frame.header.message_type == ptp::PtpMessageType::sync ||
-                frame.header.message_type == ptp::PtpMessageType::follow_up) {
+            // Announce/Sync/FollowUp must belong to ONE selected clock
+            // identity. A rogue GM never completes the current Sync pair.
+            const auto message_type = frame.header.message_type;
+            if (message_type == ptp::PtpMessageType::announce ||
+                message_type == ptp::PtpMessageType::sync ||
+                message_type == ptp::PtpMessageType::follow_up) {
                 if (!ptp_source_.has_value()) {
                     ptp_source_ = frame.header.source_port_identity;
                 } else if (*ptp_source_ != frame.header.source_port_identity) {
                     ++results_.ptp_source_conflicts;
+                    return;
                 }
+            }
+            switch (message_type) {
+            case ptp::PtpMessageType::announce:
+                ++results_.ptp_announce;
+                break;
+            case ptp::PtpMessageType::sync:
+                ++results_.ptp_sync;
+                if (frame.header.is_two_step()) {
+                    ++results_.ptp_two_step_sync;
+                    if (pending_sync_sequence_.has_value()) {
+                        ++results_.ptp_follow_up_missing;
+                    }
+                    pending_sync_sequence_ = frame.header.sequence_id;
+                }
+                break;
+            case ptp::PtpMessageType::follow_up:
+                ++results_.ptp_follow_up;
+                if (pending_sync_sequence_ == frame.header.sequence_id) {
+                    ++results_.ptp_follow_up_matched;
+                    pending_sync_sequence_.reset();
+                } else {
+                    ++results_.ptp_follow_up_orphan;
+                }
+                break;
+            case ptp::PtpMessageType::pdelay_resp:
+                ++results_.ptp_pdelay_response;
+                break;
+            default: break;
             }
             return;
         }
@@ -157,8 +180,12 @@ public:
     }
     [[nodiscard]] bool ptp_visibility_complete() const noexcept {
         return results_.ptp_announce > 0U && results_.ptp_sync > 0U &&
-            (results_.ptp_two_step_sync == 0U || results_.ptp_follow_up > 0U) &&
-            results_.ptp_source_conflicts == 0U;
+            results_.ptp_source_conflicts == 0U &&
+            results_.ptp_follow_up_orphan == 0U &&
+            results_.ptp_follow_up_missing == 0U &&
+            !pending_sync_sequence_.has_value() &&
+            (results_.ptp_two_step_sync == 0U ||
+             results_.ptp_follow_up_matched == results_.ptp_two_step_sync);
     }
     [[nodiscard]] bool wire_consistent() const noexcept {
         const auto& s = stream();
@@ -174,6 +201,7 @@ private:
     Evidence results_{};
     std::optional<ethernet::MacAddress> sv_source_;
     std::optional<ptp::PtpPortIdentity> ptp_source_;
+    std::optional<std::uint16_t> pending_sync_sequence_;
 };
 
 [[nodiscard]] unsigned parse_unsigned(
@@ -209,6 +237,9 @@ void display(const CaptureAudit& audit, const bool json) {
           << "\"ptpAnnounce\":" << a.ptp_announce << ","
           << "\"ptpSync\":" << a.ptp_sync << ","
           << "\"ptpFollowUp\":" << a.ptp_follow_up << ","
+          << "\"ptpFollowUpMatched\":" << a.ptp_follow_up_matched << ","
+          << "\"ptpFollowUpOrphan\":" << a.ptp_follow_up_orphan << ","
+          << "\"ptpFollowUpMissing\":" << a.ptp_follow_up_missing << ","
           << "\"ptpPdelayResp\":" << a.ptp_pdelay_response << ","
           << "\"ptpDomainMismatches\":" << a.ptp_domain_mismatches << ","
           << "\"ptpSourceConflicts\":" << a.ptp_source_conflicts << ","
@@ -243,7 +274,10 @@ void display(const CaptureAudit& audit, const bool json) {
     } else {
         std::cout << "PTP Announce/Sync/FollowUp: "
                   << a.ptp_announce << "/" << a.ptp_sync << "/"
-                  << a.ptp_follow_up << " | PdelayResp=" << a.ptp_pdelay_response
+                  << a.ptp_follow_up << " (matched="
+                  << a.ptp_follow_up_matched << ", orphan="
+                  << a.ptp_follow_up_orphan << ", missing="
+                  << a.ptp_follow_up_missing << ") | PdelayResp=" << a.ptp_pdelay_response
                   << " | domain mismatch=" << a.ptp_domain_mismatches
                   << " | source conflicts=" << a.ptp_source_conflicts << "\n"
                   << "SV selected frames/asdus: " << a.selected_sv_frames
@@ -340,12 +374,35 @@ void self_test() {
         clean.evidence().ignored_sv_frames != 1U) {
         throw std::runtime_error("Clean interleaved PTP/SV PCAP rejected");
     }
+    // A Follow_Up with a different sequenceId must NEVER qualify a Sync.
+    auto wrong_follow_up = packets;
+    auto mismatched_config = config;
+    mismatched_config.sequence_id = 0x4321U;
+    wrong_follow_up[2U].frame = ptp::PtpCodec::build_ethernet_frame(
+        ptp::ptp_general_multicast_mac, ptp_mac,
+        ptp::PtpCodec::build_follow_up(mismatched_config));
+    CaptureAudit mismatched(opts);
+    for (const auto& packet : wrong_follow_up) mismatched.observe(packet);
+    if (mismatched.ptp_visibility_complete() ||
+        mismatched.evidence().ptp_follow_up_orphan != 1U ||
+        mismatched.evidence().ptp_follow_up_matched != 0U) {
+        throw std::runtime_error("Mismatched PTP Follow_Up accepted");
+    }
+    // Missing Follow_Up is not repaired by arbitrary packet visibility.
+    CaptureAudit missing_followup(opts);
+    for (std::size_t i = 0U; i < packets.size(); ++i) {
+        if (i != 2U) missing_followup.observe(packets[i]);
+    }
+    if (missing_followup.ptp_visibility_complete()) {
+        throw std::runtime_error("Missing PTP Follow_Up accepted");
+    }
     CaptureAudit audit(opts);
     for (const auto& p : packets) audit.observe(p);
     const auto& e = audit.evidence();
     const auto& s = audit.stream();
     if (e.ptp_announce != 1U || e.ptp_sync != 1U ||
-        e.ptp_follow_up != 1U || e.selected_asdus != 5U ||
+        e.ptp_follow_up != 1U || e.ptp_follow_up_matched != 1U ||
+        e.ptp_follow_up_orphan != 0U || e.selected_asdus != 5U ||
         e.ignored_sv_frames != 1U || s.normal_wraps != 1U ||
         s.gaps != 1U || s.missing_samples != 1U ||
         !audit.ptp_visibility_complete() || audit.wire_consistent()) {
