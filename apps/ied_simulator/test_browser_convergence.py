@@ -47,7 +47,6 @@ data_model_required = [
     'model: root.detail',
     'root.detail.select(childRow.index)',
     'root.detail.toggle(childRow.index)',
-    'onDoubleClicked: root.drillInto(childRow.index)',
     'root.detail.selectParent()',
     'root.detail.truncated',
     'onDoubleClicked: function(event)',
