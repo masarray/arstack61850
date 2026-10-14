@@ -821,6 +821,110 @@ void publisher_task(void* argument) {
 #endif
 }
 
+#if AR_SV_PTP_PHASE_SUPPORTED
+// Shadow-verified software phase servo. This task never controls smpSynch,
+// executes no ISR code and acquires a GPTimer handle under a teardown mutex.
+// It samples clocks once per sample-counter epoch, 250ms after smpCnt=0.
+void sv_ptp_phase_observer_task(void* argument) {
+    const auto eth_handle = static_cast<esp_eth_handle_t>(argument);
+    SvPtpPhaseAuthority controller;
+    std::uint32_t accepted_epochs = 0U;
+    while (true) {
+        const std::uint32_t events = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        vTaskDelay(pdMS_TO_TICKS(250));
+
+        ar_ptp_lab_config_t config{};
+        if (events != 1U || !live_tx_running() ||
+            (xEventGroupGetBits(g_link_events) & kLinkUpBit) == 0U ||
+            !ar_ptp_lab_is_running() || !ar_ptp_lab_get_config(&config) ||
+            config.role != AR_PTP_ROLE_LAB_SOURCE) {
+            static_cast<void>(controller.invalidate());
+            g_sample_clock_context.phase_authority_valid.store(
+                false, std::memory_order_release);
+            g_sample_clock_context.requested_slew_ticks.store(
+                0, std::memory_order_relaxed);
+            continue;
+        }
+
+        std::uint64_t before = 0U;
+        std::uint64_t after = 0U;
+        eth_mac_time_t ptp{};
+        bool evidence_valid = false;
+        SvPtpPhaseObservation observation{};
+        xSemaphoreTake(g_phase_timer_mutex, portMAX_DELAY);
+        const gptimer_handle_t timer = g_monitored_sample_clock;
+        if (timer != nullptr) {
+            const std::uint32_t generation_before =
+                g_sample_clock_context.epoch_generation.load(
+                    std::memory_order_acquire);
+            const esp_err_t before_rc = gptimer_get_raw_count(timer, &before);
+            const esp_err_t ptp_rc = esp_eth_ioctl(
+                eth_handle, static_cast<esp_eth_io_cmd_t>(
+                    ETH_MAC_ESP_CMD_G_PTP_TIME), &ptp);
+            const esp_err_t after_rc = gptimer_get_raw_count(timer, &after);
+            const std::uint32_t generation_after =
+                g_sample_clock_context.epoch_generation.load(
+                    std::memory_order_acquire);
+            if (before_rc == ESP_OK && ptp_rc == ESP_OK &&
+                after_rc == ESP_OK && generation_before != 0U &&
+                generation_before == generation_after &&
+                ptp.nanoseconds < 1000000000U) {
+                observation = SvPtpPhaseObservation{
+                    static_cast<std::uint32_t>(before),
+                    static_cast<std::uint32_t>(after),
+                    g_sample_clock_context.last_epoch_alarm.load(
+                        std::memory_order_acquire),
+                    generation_after,
+                    static_cast<std::uint64_t>(ptp.seconds),
+                    ptp.nanoseconds};
+                evidence_valid = true;
+            }
+        }
+        xSemaphoreGive(g_phase_timer_mutex);
+
+        if (!evidence_valid || !ar_ptp_lab_is_running()) {
+            static_cast<void>(controller.invalidate());
+            g_sample_clock_context.phase_authority_valid.store(
+                false, std::memory_order_release);
+            g_sample_clock_context.requested_slew_ticks.store(
+                0, std::memory_order_relaxed);
+            continue;
+        }
+
+        const auto decision = controller.observe(observation);
+        // A late observation must NEVER steer a future epoch after a STOP,
+        // re-ARM, source transition or scheduler-counter rollover.
+        const bool same_session =
+            g_sample_clock_context.epoch_generation.load(
+                std::memory_order_acquire) == observation.last_sv_epoch_generation;
+        if (!decision.accepted || !same_session ||
+            !ar_ptp_lab_is_running() || !live_tx_running()) {
+            static_cast<void>(controller.invalidate());
+            g_sample_clock_context.phase_authority_valid.store(
+                false, std::memory_order_release);
+            g_sample_clock_context.requested_slew_ticks.store(
+                0, std::memory_order_relaxed);
+            continue;
+        }
+
+        g_sample_clock_context.phase_authority_valid.store(
+            true, std::memory_order_release);
+        g_sample_clock_context.requested_slew_ticks.store(
+            decision.slew_ticks_next_epoch, std::memory_order_release);
+        ++accepted_epochs;
+        if ((accepted_epochs % 60U) == 0U) {
+            ESP_LOGI(kTag,
+                "SV/PTP phase SW evidence: phase=%ld us uncertainty=%lu us "
+                "slew=%ld ticks/epoch tracking=%u; smpSynch AUTO remains 0",
+                static_cast<long>(decision.phase_error_us),
+                static_cast<unsigned long>(decision.observation_uncertainty_us),
+                static_cast<long>(decision.slew_ticks_next_epoch),
+                decision.software_tracking ? 1U : 0U);
+        }
+    }
+}
+#endif
+
 void telemetry_task(void*) {
     std::uint32_t previous_tick_total = 0U;
     std::int64_t previous_tick_time_us = 0;
