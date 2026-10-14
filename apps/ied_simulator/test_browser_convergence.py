@@ -2,14 +2,17 @@
 from pathlib import Path
 import sys
 
-if len(sys.argv) != 4:
-    raise SystemExit("usage: test_browser_convergence.py IedBrowserWorkspace.qml IedBrowserNavigation.qml BrowserStatusConsole.qml")
+if len(sys.argv) != 5:
+    raise SystemExit("usage: test_browser_convergence.py IedBrowserWorkspace.qml IedBrowserNavigation.qml BrowserStatusConsole.qml BrowserDataModelPane.qml")
 
 workspace = Path(sys.argv[1]).read_text(encoding="utf-8")
 navigation = Path(sys.argv[2]).read_text(encoding="utf-8")
 status = Path(sys.argv[3]).read_text(encoding="utf-8")
+data_model = Path(sys.argv[4]).read_text(encoding="utf-8")
 
 workspace_required = [
+    'component RibbonAction: Button',
+    'Layout.preferredHeight: 94',
     'text: "MODEL"',
     'text: "COMMANDS"',
     'text: "Online"',
@@ -19,6 +22,7 @@ workspace_required = [
     'modelProvider: root.context',
 ]
 navigation_required = [
+    'color: theme.navigation',
     'text: "ENGINEERING EXPLORER"',
     'id: iedRoot',
     'title: "GOOSE"',
@@ -27,6 +31,8 @@ navigation_required = [
     'title: "Files"',
     'title: "DataSets"',
     'title: "Data Model"',
+    'signal gooseRequested(int index)',
+    'context.gooseStreams',
     'context.treeModel',
 ]
 status_required = [
@@ -36,11 +42,19 @@ status_required = [
     'function captureContext()',
     'Bounded Browser history · no background polling',
 ]
+data_model_required = [
+    'objectName: "browserDataModelChildren"',
+    'model: root.treeModel.selectedChildren',
+    'onDoubleClicked: root.drillInto(childRow.index)',
+    'root.treeModel.selectParent()',
+    'root.treeModel.selectedChildrenTruncated',
+]
 
 for label, source, required in [
     ("workspace", workspace, workspace_required),
     ("navigation", navigation, navigation_required),
     ("status", status, status_required),
+    ("data-model", data_model, data_model_required),
 ]:
     missing = [token for token in required if token not in source]
     if missing:
@@ -53,4 +67,4 @@ if "Timer {" in status:
 if "maximumEntries: 80" not in status:
     raise SystemExit("BROWSER_CONVERGENCE_FAIL status history is not bounded")
 
-print("BROWSER_CONVERGENCE_PASS ied_root=pass contextual_commands=pass canonical_tree=pass bounded_history=80 polling=false")
+print("BROWSER_CONVERGENCE_PASS ribbon=pass dense_explorer=pass goose_drilldown=pass data_model_drilldown=pass ied_root=pass contextual_commands=pass canonical_tree=pass bounded_history=80 polling=false")

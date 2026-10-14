@@ -7,6 +7,7 @@
 #include <QHash>
 #include <QString>
 #include <QStringList>
+#include <QVariantList>
 #include <QVariantMap>
 #include <QVector>
 #include <QtQmlIntegration/qqmlintegration.h>
@@ -20,6 +21,10 @@ class MmsLiveTreeModel : public QAbstractListModel {
     Q_PROPERTY(QString filterText READ filterText WRITE setFilterText NOTIFY filterTextChanged)
     Q_PROPERTY(int selectedRow READ selectedRow WRITE selectRow NOTIFY selectionChanged)
     Q_PROPERTY(QVariantMap selectedNode READ selectedNode NOTIFY selectionChanged)
+    Q_PROPERTY(QVariantMap presentationNode READ presentationNode NOTIFY selectionChanged)
+    Q_PROPERTY(QVariantList selectedChildren READ selectedChildren NOTIFY selectionChanged)
+    Q_PROPERTY(int selectedChildCount READ selectedChildCount NOTIFY selectionChanged)
+    Q_PROPERTY(bool selectedChildrenTruncated READ selectedChildrenTruncated NOTIFY selectionChanged)
     Q_PROPERTY(int totalNodeCount READ totalNodeCount NOTIFY countsChanged)
     Q_PROPERTY(int visibleNodeCount READ visibleNodeCount NOTIFY countsChanged)
 
@@ -71,10 +76,17 @@ public:
 
     [[nodiscard]] int selectedRow() const noexcept;
     [[nodiscard]] QVariantMap selectedNode() const;
+    [[nodiscard]] QVariantMap presentationNode() const;
+    [[nodiscard]] QVariantList selectedChildren() const;
+    [[nodiscard]] int selectedChildCount() const noexcept;
+    [[nodiscard]] bool selectedChildrenTruncated() const noexcept;
     [[nodiscard]] int totalNodeCount() const noexcept { return nodes_.size(); }
     [[nodiscard]] int visibleNodeCount() const noexcept { return visible_.size(); }
 
     Q_INVOKABLE void selectRow(int row);
+    Q_INVOKABLE bool selectChild(int row);
+    Q_INVOKABLE bool selectParent();
+    Q_INVOKABLE bool selectRoot();
     Q_INVOKABLE void toggle(int row);
     Q_INVOKABLE bool selectMmsItem(const QString& domain, const QString& item);
     Q_INVOKABLE QVariantMap nodeForReference(const QString& reference) const;
@@ -115,6 +127,7 @@ private:
         QString mmsType;
         QString sclType;
         QString typeStatus;
+        QString description;
         QString value;
         bool writable{};
     };
@@ -131,6 +144,8 @@ private:
     [[nodiscard]] int visibleRowForNode(int nodeIndex) const noexcept;
     [[nodiscard]] QString siblingValue(int nodeIndex, const QString& leafName) const;
     [[nodiscard]] QVariantMap nodeMap(int nodeIndex) const;
+    [[nodiscard]] int presentationNodeIndex() const noexcept;
+    bool selectNode(int nodeIndex);
     [[nodiscard]] QVector<ReadTarget> readTargetsForNode(int nodeIndex) const;
     [[nodiscard]] int appendNode(Node node);
 
@@ -139,4 +154,5 @@ private:
     QHash<QString, int> mmsIndex_;
     QString filterText_;
     int selectedNode_{-1};
+    static constexpr int maximumProjectedChildren_{4096};
 };

@@ -868,6 +868,13 @@ bool MmsReportController::selectRcb(const int row) {
 }
 
 bool MmsReportController::selectDataSet(const int row) {
+    if (row == -1) {
+        if (selectedDataSetIndex_ == -1 && selectedDataSetMembers_.isEmpty()) return true;
+        selectedDataSetIndex_ = -1;
+        selectedDataSetMembers_.clear();
+        emit selectionChanged();
+        return true;
+    }
     if (row < 0 || row >= dataSets_.size()) return false;
     selectedDataSetIndex_ = row;
     selectedDataSetMembers_ = dataSets_.at(row).toMap().value(QStringLiteral("members")).toStringList();

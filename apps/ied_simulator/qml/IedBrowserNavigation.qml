@@ -15,12 +15,14 @@ Rectangle {
 
     property int section: 0
     property int globalDataCount: 0
+    property int selectedGooseIndex: -1
     property string sectionTitle: "Data Model"
     signal sectionRequested(int section, string title)
+    signal gooseRequested(int index)
 
-    color: theme.chrome
+    color: theme.navigation
     border.width: 1
-    border.color: theme.lineSoft
+    border.color: theme.navigationDark
 
     function choose(sectionValue, titleValue) {
         root.sectionTitle = titleValue
@@ -45,8 +47,8 @@ Rectangle {
         property string countText: ""
         Layout.fillWidth: true
         implicitHeight: 27
-        color: root.section === targetSection ? root.theme.accentSoft
-                                              : navMouse.containsMouse ? root.theme.surfaceRaised : "transparent"
+        color: root.section === targetSection ? root.theme.accent
+                                              : navMouse.containsMouse ? "#263833" : "transparent"
         border.width: root.section === targetSection ? 1 : 0
         border.color: root.theme.accent
 
@@ -57,21 +59,21 @@ Rectangle {
             spacing: 7
             Label {
                 text: root.section === nav.targetSection ? "▾" : "›"
-                color: root.section === nav.targetSection ? root.theme.accent : root.theme.muted
+            color: root.section === nav.targetSection ? "#ffffff" : root.theme.navigationMuted
                 font.pixelSize: 11
                 Layout.preferredWidth: 12
             }
             Label {
                 Layout.fillWidth: true
                 text: nav.title
-                color: root.section === nav.targetSection ? root.theme.text : root.theme.textSoft
+                color: root.section === nav.targetSection ? "#ffffff" : root.theme.navigationText
                 font.pixelSize: 9
                 font.weight: root.section === nav.targetSection ? Font.DemiBold : Font.Normal
             }
             Label {
                 visible: nav.countText.length > 0
                 text: nav.countText
-                color: root.theme.muted
+                color: root.section === nav.targetSection ? "#dff7f3" : root.theme.navigationMuted
                 font.pixelSize: 8
             }
         }
@@ -80,7 +82,13 @@ Rectangle {
             id: navMouse
             anchors.fill: parent
             hoverEnabled: true
-            onClicked: root.choose(nav.targetSection, nav.title)
+            onClicked: {
+                if (nav.targetSection === 5)
+                    root.gooseRequested(-1)
+                if (nav.targetSection === 1)
+                    reports.selectDataSet(-1)
+                root.choose(nav.targetSection, nav.title)
+            }
         }
     }
 
@@ -131,7 +139,7 @@ Rectangle {
                     id: iedRoot
                     Layout.fillWidth: true
                     implicitHeight: 39
-                    color: root.theme.surfaceSoft
+                    color: root.theme.navigationDark
                     border.width: 1
                     border.color: root.theme.lineSoft
 
@@ -153,7 +161,7 @@ Rectangle {
                             Label {
                                 Layout.fillWidth: true
                                 text: context.iedName.length ? context.iedName : "IED"
-                                color: root.theme.text
+                                color: root.theme.navigationText
                                 font.pixelSize: 9
                                 font.weight: Font.DemiBold
                                 elide: Text.ElideRight
@@ -163,14 +171,14 @@ Rectangle {
                                 text: context.loaded
                                       ? context.authority + " · " + (context.endpoint.length ? context.endpoint : session.endpoint)
                                       : "No engineering model loaded"
-                                color: root.theme.muted
+                                color: root.theme.navigationMuted
                                 font.pixelSize: 7
                                 elide: Text.ElideMiddle
                             }
                         }
                         Label {
                             text: context.online ? "ONLINE" : "OFFLINE"
-                            color: context.online ? root.theme.green : root.theme.muted
+                            color: context.online ? "#82e0ad" : root.theme.navigationMuted
                             font.pixelSize: 7
                             font.weight: Font.DemiBold
                         }
@@ -181,6 +189,65 @@ Rectangle {
                     targetSection: 5
                     title: "GOOSE"
                     countText: context.loaded ? String(context.gooseCount) : ""
+                }
+
+                Loader {
+                    Layout.fillWidth: true
+                    active: root.section === 5 && context.gooseStreams.length > 0
+                    visible: active
+                    sourceComponent: Component {
+                        ColumnLayout {
+                            spacing: 0
+                            Repeater {
+                                model: context.gooseStreams
+                                delegate: Rectangle {
+                                    required property int index
+                                    required property var modelData
+                                    Layout.fillWidth: true
+                                    implicitHeight: 32
+                                    color: root.selectedGooseIndex === index
+                                           ? "#324842" : gooseMouse.containsMouse ? "#263833" : "transparent"
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 28
+                                        anchors.rightMargin: 8
+                                        spacing: 6
+                                        Label {
+                                            text: "G"
+                                            color: "#69d5cb"
+                                            font.pixelSize: 7
+                                            font.weight: Font.Bold
+                                        }
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 0
+                                            Label {
+                                                Layout.fillWidth: true
+                                                text: modelData.name || modelData.reference || "GOOSE"
+                                                color: root.theme.navigationText
+                                                font.pixelSize: 8
+                                                elide: Text.ElideMiddle
+                                            }
+                                            Label {
+                                                Layout.fillWidth: true
+                                                text: (modelData.ldInst || "")
+                                                      + (modelData.dataSet ? " · " + modelData.dataSet : "")
+                                                color: root.theme.navigationMuted
+                                                font.pixelSize: 7
+                                                elide: Text.ElideMiddle
+                                            }
+                                        }
+                                    }
+                                    MouseArea {
+                                        id: gooseMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: root.gooseRequested(index)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 NavButton {
@@ -202,9 +269,9 @@ Rectangle {
                                     required property int index
                                     required property var modelData
                                     Layout.fillWidth: true
-                                    implicitHeight: 27
+                                    implicitHeight: 34
                                     color: reports.selectedRcbIndex === index
-                                           ? root.theme.surfaceRaised : reportMouse.containsMouse ? root.theme.surface : "transparent"
+                                           ? "#324842" : reportMouse.containsMouse ? "#263833" : "transparent"
                                     RowLayout {
                                         anchors.fill: parent
                                         anchors.leftMargin: 28
@@ -212,16 +279,28 @@ Rectangle {
                                         spacing: 5
                                         Label {
                                             text: modelData.buffered ? "B" : "U"
-                                            color: modelData.buffered ? root.theme.amber : root.theme.accent
+                                            color: modelData.buffered ? "#f4c96b" : "#69d5cb"
                                             font.pixelSize: 7
                                             font.weight: Font.Bold
                                         }
-                                        Label {
+                                        ColumnLayout {
                                             Layout.fillWidth: true
-                                            text: modelData.reference || "Report"
-                                            color: root.theme.textSoft
-                                            font.pixelSize: 8
-                                            elide: Text.ElideMiddle
+                                            spacing: 0
+                                            Label {
+                                                Layout.fillWidth: true
+                                                text: modelData.name || modelData.reference || "Report"
+                                                color: root.theme.navigationText
+                                                font.pixelSize: 8
+                                                elide: Text.ElideMiddle
+                                            }
+                                            Label {
+                                                Layout.fillWidth: true
+                                                text: (modelData.domain || "")
+                                                      + (modelData.logicalNode ? " · " + modelData.logicalNode : "")
+                                                color: root.theme.navigationMuted
+                                                font.pixelSize: 7
+                                                elide: Text.ElideMiddle
+                                            }
                                         }
                                     }
                                     MouseArea {
@@ -258,16 +337,16 @@ Rectangle {
                                     required property int index
                                     required property var modelData
                                     Layout.fillWidth: true
-                                    implicitHeight: 27
+                                    implicitHeight: 34
                                     color: utilities.selectedSettingGroupIndex === index
-                                           ? root.theme.surfaceRaised : sgMouse.containsMouse ? root.theme.surface : "transparent"
+                                           ? "#324842" : sgMouse.containsMouse ? "#263833" : "transparent"
                                     Label {
                                         anchors.fill: parent
                                         anchors.leftMargin: 28
                                         anchors.rightMargin: 8
                                         verticalAlignment: Text.AlignVCenter
                                         text: modelData.reference || "SGCB"
-                                        color: root.theme.textSoft
+                                        color: root.theme.navigationText
                                         font.pixelSize: 8
                                         elide: Text.ElideMiddle
                                     }
@@ -312,24 +391,36 @@ Rectangle {
                                     required property int index
                                     required property var modelData
                                     Layout.fillWidth: true
-                                    implicitHeight: 27
+                                    implicitHeight: 34
                                     color: reports.selectedDataSetIndex === index
-                                           ? root.theme.surfaceRaised : dsMouse.containsMouse ? root.theme.surface : "transparent"
+                                           ? "#324842" : dsMouse.containsMouse ? "#263833" : "transparent"
                                     RowLayout {
                                         anchors.fill: parent
                                         anchors.leftMargin: 28
                                         anchors.rightMargin: 8
                                         spacing: 5
-                                        Label {
+                                        ColumnLayout {
                                             Layout.fillWidth: true
-                                            text: modelData.reference || "DataSet"
-                                            color: root.theme.textSoft
-                                            font.pixelSize: 8
-                                            elide: Text.ElideMiddle
+                                            spacing: 0
+                                            Label {
+                                                Layout.fillWidth: true
+                                                text: modelData.name || modelData.reference || "DataSet"
+                                                color: root.theme.navigationText
+                                                font.pixelSize: 8
+                                                elide: Text.ElideMiddle
+                                            }
+                                            Label {
+                                                Layout.fillWidth: true
+                                                text: (modelData.domain || "")
+                                                      + (modelData.logicalNode ? " · " + modelData.logicalNode : "")
+                                                color: root.theme.navigationMuted
+                                                font.pixelSize: 7
+                                                elide: Text.ElideMiddle
+                                            }
                                         }
                                         Label {
                                             text: modelData.members ? String(modelData.members.length) : ""
-                                            color: root.theme.muted
+                                            color: root.theme.navigationMuted
                                             font.pixelSize: 7
                                         }
                                     }
@@ -403,8 +494,8 @@ Rectangle {
                             required property var model
                             width: modelTree.width
                             height: 25
-                            color: model.selected ? root.theme.accentSoft
-                                                  : modelMouse.containsMouse ? root.theme.surfaceRaised : "transparent"
+                            color: model.selected ? root.theme.accent
+                                                  : modelMouse.containsMouse ? "#263833" : "transparent"
                             border.width: model.selected ? 1 : 0
                             border.color: root.theme.accent
 
@@ -416,27 +507,28 @@ Rectangle {
                                 Label {
                                     Layout.preferredWidth: 11
                                     text: model.hasChildren ? (model.expanded ? "▾" : "▸") : ""
-                                    color: root.theme.muted
+                                    color: model.selected ? "#ffffff" : root.theme.navigationMuted
                                     font.pixelSize: 9
                                 }
                                 Label {
                                     Layout.preferredWidth: 22
                                     text: model.kind
-                                    color: model.kind === "DA" ? root.theme.accent : root.theme.muted
+                                    color: model.selected ? "#ffffff"
+                                          : model.kind === "DA" ? "#69d5cb" : root.theme.navigationMuted
                                     font.pixelSize: 7
                                     font.weight: Font.DemiBold
                                 }
                                 Label {
                                     Layout.fillWidth: true
                                     text: model.label
-                                    color: root.theme.textSoft
+                                    color: model.selected ? "#ffffff" : root.theme.navigationText
                                     font.pixelSize: 8
                                     elide: Text.ElideMiddle
                                 }
                                 Label {
                                     Layout.preferredWidth: 34
                                     text: model.functionalConstraint || ""
-                                    color: root.theme.muted
+                                    color: model.selected ? "#dff7f3" : root.theme.navigationMuted
                                     font.pixelSize: 7
                                     horizontalAlignment: Text.AlignRight
                                 }
