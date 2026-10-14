@@ -97,6 +97,29 @@ int main(int argc, char** argv) {
         return 12;
     }
 
+    // Inline projection remains bounded and does not change canonical selection root.
+    auto* detail = qobject_cast<MmsLiveDetailModel*>(model.detailModel());
+    if (!detail || detail->rootKind() != QStringLiteral("DO") || detail->rowCount() != 5) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL inline_root\n";
+        return 13;
+    }
+    model.selectRoot();
+    if (detail->rowCount() != 5) return 14;
+    detail->toggle(4);
+    if (detail->rowCount() != 25 ||
+        detail->data(detail->index(5), MmsLiveDetailModel::DepthRole).toInt() != 1) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL inline_expansion\n";
+        return 15;
+    }
+    detail->toggle(4);
+    if (detail->rowCount() != 5) return 16;
+    detail->select(0);
+    if (detail->rootKind() != QStringLiteral("IED") ||
+        model.selectedNode().value(QStringLiteral("kind")).toString() != QStringLiteral("LD")) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL selection_context\n";
+        return 17;
+    }
+
     QElapsedTimer filterTimer;
     filterTimer.start();
     model.setFilterText(QStringLiteral("LD4/LLN19.DO99"));
@@ -165,6 +188,6 @@ int main(int argc, char** argv) {
               << " apply_ms=" << applyMs
               << " filter_ms=" << filterMs
               << " select_ms=" << selectMs
-              << " eager_expansion=false drilldown=canonical\n";
+              << " eager_expansion=false drilldown=canonical inline_projection=bounded\n";
     return passes ? 0 : 11;
 }

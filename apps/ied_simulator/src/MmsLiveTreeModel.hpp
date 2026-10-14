@@ -5,6 +5,7 @@
 
 #include <QAbstractListModel>
 #include <QHash>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
@@ -14,6 +15,54 @@
 
 #include <optional>
 
+
+class MmsLiveTreeModel;
+
+// Virtualized, bounded view of canonical MMS nodes; never a second semantic tree.
+class MmsLiveDetailModel final : public QAbstractListModel {
+    Q_OBJECT
+    Q_PROPERTY(QString rootLabel READ rootLabel NOTIFY rootChanged)
+    Q_PROPERTY(QString rootKind READ rootKind NOTIFY rootChanged)
+    Q_PROPERTY(int rootChildCount READ rootChildCount NOTIFY rootChanged)
+    Q_PROPERTY(bool truncated READ truncated NOTIFY projectionChanged)
+public:
+    enum DetailRole {
+        LabelRole = Qt::UserRole + 1, KindRole, ReferenceRole, DepthRole,
+        HasChildrenRole, ExpandedRole, SelectedRole, FunctionalConstraintRole,
+        DescriptionRole, ValueRole
+    };
+    explicit MmsLiveDetailModel(MmsLiveTreeModel* owner);
+    int rowCount(const QModelIndex& parent = {}) const override;
+    QVariant data(const QModelIndex& index, int role) const override;
+    QHash<int, QByteArray> roleNames() const override;
+    QString rootLabel() const;
+    QString rootKind() const;
+    int rootChildCount() const;
+    bool truncated() const noexcept { return truncated_; }
+    Q_INVOKABLE void toggle(int row);
+    Q_INVOKABLE void select(int row);
+    Q_INVOKABLE void drillInto(int row);
+    Q_INVOKABLE void selectParent();
+    void setRoot(int nodeIndex);
+    void resetForDocument();
+    void nodeValueChanged(int nodeIndex);
+signals:
+    void rootChanged();
+    void projectionChanged();
+private:
+    struct Row { int node; int depth; };
+    void rebuild();
+    void append(int node, int depth);
+    int rowOf(int node) const;
+    MmsLiveTreeModel* owner_;
+    QVector<Row> rows_;
+    QSet<int> expanded_;
+    int root_{-1};
+    int selected_{-1};
+    bool truncated_{};
+    static constexpr int maximumRows_{4096};
+};
+
 class MmsLiveTreeModel : public QAbstractListModel {
     Q_OBJECT
     QML_ELEMENT
@@ -21,6 +70,7 @@ class MmsLiveTreeModel : public QAbstractListModel {
     Q_PROPERTY(QString filterText READ filterText WRITE setFilterText NOTIFY filterTextChanged)
     Q_PROPERTY(int selectedRow READ selectedRow WRITE selectRow NOTIFY selectionChanged)
     Q_PROPERTY(QVariantMap selectedNode READ selectedNode NOTIFY selectionChanged)
+    Q_PROPERTY(QAbstractItemModel* detailModel READ detailModel CONSTANT)
     Q_PROPERTY(QVariantMap presentationNode READ presentationNode NOTIFY selectionChanged)
     Q_PROPERTY(QVariantList selectedChildren READ selectedChildren NOTIFY selectionChanged)
     Q_PROPERTY(int selectedChildCount READ selectedChildCount NOTIFY selectionChanged)
@@ -76,6 +126,7 @@ public:
 
     [[nodiscard]] int selectedRow() const noexcept;
     [[nodiscard]] QVariantMap selectedNode() const;
+    [[nodiscard]] QAbstractItemModel* detailModel() const noexcept { return detailModel_; }
     [[nodiscard]] QVariantMap presentationNode() const;
     [[nodiscard]] QVariantList selectedChildren() const;
     [[nodiscard]] int selectedChildCount() const noexcept;
@@ -110,6 +161,7 @@ signals:
     void countsChanged();
 
 private:
+    friend class MmsLiveDetailModel;
     enum class NodeKind : quint8 { ied, logicalDevice, logicalNode, dataObject, dataAttribute };
 
     struct Node final {
@@ -149,6 +201,7 @@ private:
     [[nodiscard]] QVector<ReadTarget> readTargetsForNode(int nodeIndex) const;
     [[nodiscard]] int appendNode(Node node);
 
+    MmsLiveDetailModel* detailModel_{};
     QVector<Node> nodes_;
     QVector<int> visible_;
     QHash<QString, int> mmsIndex_;

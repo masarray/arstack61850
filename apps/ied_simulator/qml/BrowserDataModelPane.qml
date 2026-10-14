@@ -12,7 +12,7 @@ Rectangle {
 
     readonly property var treeModel: modelProvider.treeModel
     readonly property var currentNode: treeModel.presentationNode
-    property int highlightedRow: -1
+    readonly property var detail: treeModel.detailModel
 
     color: theme.background
 
@@ -21,20 +21,8 @@ Rectangle {
                 ? "—" : String(value)
     }
 
-    function drillInto(row) {
-        if (!treeModel.selectChild(row))
-            return
-        highlightedRow = -1
-        if (treeModel.presentationNode.hasChildren !== true
-                && client.connected && !client.operationBusy
-                && treeModel.presentationNode.readable === true)
-            client.readEngineeringSelected()
-    }
-
-    Connections {
-        target: root.treeModel
-        function onSelectionChanged() { root.highlightedRow = -1 }
-    }
+    // Inline inspection is local; network reads remain explicit ribbon commands.
+    function drillInto(row) { detail.drillInto(row) }
 
     ColumnLayout {
         anchors.fill: parent
@@ -55,11 +43,11 @@ Rectangle {
 
                 Button {
                     objectName: "browserDataModelBack"
-                    visible: Boolean(root.currentNode.kind) && root.currentNode.kind !== "IED"
+                    visible: root.detail.rootKind !== "" && root.detail.rootKind !== "IED"
                     implicitWidth: 24
                     implicitHeight: 22
                     text: "‹"
-                    onClicked: root.treeModel.selectParent()
+                    onClicked: root.detail.selectParent()
                     ToolTip.visible: hovered
                     ToolTip.text: "Up one model level"
                 }
@@ -72,7 +60,7 @@ Rectangle {
                     Label {
                         id: nodeKind
                         anchors.centerIn: parent
-                        text: root.currentNode.kind || "MODEL"
+                        text: root.detail.rootKind || "MODEL"
                         color: "#ffffff"
                         font.pixelSize: 7
                         font.weight: Font.Bold
@@ -81,7 +69,7 @@ Rectangle {
 
                 Label {
                     Layout.fillWidth: true
-                    text: root.currentNode.label || "Data Model"
+                    text: root.detail.rootLabel || "Data Model"
                     color: theme.text
                     font.pixelSize: 10
                     font.weight: Font.DemiBold
@@ -89,8 +77,8 @@ Rectangle {
                 }
 
                 Label {
-                    visible: root.treeModel.selectedChildCount > 0
-                    text: root.treeModel.selectedChildCount + " item(s)"
+                    visible: root.detail.rootChildCount > 0
+                    text: root.detail.rootChildCount + " item(s)"
                     color: theme.muted
                     font.pixelSize: 8
                 }
@@ -98,7 +86,7 @@ Rectangle {
         }
 
         Rectangle {
-            visible: root.treeModel.selectedChildCount > 0
+            visible: root.detail.rootChildCount > 0
             Layout.fillWidth: true
             Layout.preferredHeight: 25
             color: theme.chrome
@@ -130,22 +118,22 @@ Rectangle {
         ListView {
             id: childList
             objectName: "browserDataModelChildren"
-            visible: root.treeModel.selectedChildCount > 0
+            visible: root.detail.rootChildCount > 0
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
             reuseItems: true
             cacheBuffer: 0
-            model: root.treeModel.selectedChildren
+            model: root.detail
             ScrollBar.vertical: ScrollBar {}
 
             delegate: Rectangle {
                 id: childRow
                 required property int index
-                required property var modelData
+                required property var model
                 width: childList.width
                 height: 25
-                color: root.highlightedRow === index ? theme.accent
+                color: childRow.model.selected ? theme.accent
                        : childMouse.containsMouse ? theme.accentSoft
                        : index % 2 ? theme.surfaceSoft : theme.surface
                 border.width: 1
@@ -153,50 +141,50 @@ Rectangle {
 
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: 7
+                    anchors.leftMargin: 7 + Math.min(childRow.model.depth, 6) * 14
                     anchors.rightMargin: 7
                     spacing: 6
 
                     Label {
                         Layout.preferredWidth: 10
-                        text: childRow.modelData.hasChildren === true ? "›" : ""
-                        color: root.highlightedRow === childRow.index ? "#ffffff" : theme.muted
+                        text: childRow.model.hasChildren ? (childRow.model.expanded ? "▾" : "▸") : ""
+                        color: childRow.model.selected ? "#ffffff" : theme.muted
                         font.pixelSize: 9
                     }
                     Rectangle {
                         Layout.preferredWidth: 20
                         Layout.preferredHeight: 17
                         radius: 2
-                        color: root.highlightedRow === childRow.index ? "#ffffff" : theme.accent
+                        color: childRow.model.selected ? "#ffffff" : theme.accent
                         Label {
                             anchors.centerIn: parent
-                            text: childRow.modelData.kind || ""
-                            color: root.highlightedRow === childRow.index ? theme.accent : "#ffffff"
+                            text: childRow.model.kind || ""
+                            color: childRow.model.selected ? theme.accent : "#ffffff"
                             font.pixelSize: 7
                             font.weight: Font.Bold
                         }
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: childRow.modelData.label || childRow.modelData.reference || "—"
-                        color: root.highlightedRow === childRow.index ? "#ffffff" : theme.text
+                        text: childRow.model.label || childRow.model.reference || "—"
+                        color: childRow.model.selected ? "#ffffff" : theme.text
                         font.pixelSize: 9
                         elide: Text.ElideMiddle
                     }
                     Label {
-                        visible: childRow.modelData.functionalConstraint
-                                 && String(childRow.modelData.functionalConstraint).length > 0
-                        text: "[" + childRow.modelData.functionalConstraint + "]"
-                        color: root.highlightedRow === childRow.index ? "#dff7f3" : theme.muted
+                        visible: childRow.model.functionalConstraint
+                                 && String(childRow.model.functionalConstraint).length > 0
+                        text: "[" + childRow.model.functionalConstraint + "]"
+                        color: childRow.model.selected ? "#dff7f3" : theme.muted
                         font.pixelSize: 8
                     }
                     Label {
                         Layout.preferredWidth: Math.max(180, root.width * 0.42)
-                        text: childRow.modelData.value
-                              || childRow.modelData.description
-                              || (childRow.modelData.childCount > 0
-                                  ? childRow.modelData.childCount + " item(s)" : "—")
-                        color: root.highlightedRow === childRow.index ? "#ffffff" : theme.textSoft
+                        text: childRow.model.value
+                              || childRow.model.description
+                              || (childRow.model.childCount > 0
+                                  ? childRow.model.childCount + " item(s)" : "—")
+                        color: childRow.model.selected ? "#ffffff" : theme.textSoft
                         font.pixelSize: 9
                         elide: Text.ElideRight
                     }
@@ -206,14 +194,28 @@ Rectangle {
                     id: childMouse
                     anchors.fill: parent
                     hoverEnabled: true
-                    onClicked: root.highlightedRow = childRow.index
-                    onDoubleClicked: root.drillInto(childRow.index)
+                    onClicked: function(event) {
+                        if (childRow.model.hasChildren &&
+                            event.x < 24 + Math.min(childRow.model.depth, 6) * 14)
+                            root.detail.toggle(childRow.index)
+                        else
+                            root.detail.select(childRow.index)
+                    }
+                    onDoubleClicked: function(event) {
+                        // First arrow click has already changed expansion; a
+                        // double-click on that arrow must not undo it.
+                        if (childRow.model.hasChildren &&
+                            event.x < 24 + Math.min(childRow.model.depth, 6) * 14)
+                            root.detail.select(childRow.index)
+                        else
+                            root.drillInto(childRow.index)
+                    }
                 }
             }
         }
 
         ScrollView {
-            visible: root.treeModel.selectedChildCount === 0
+            visible: root.detail.rootChildCount === 0
             Layout.fillWidth: true
             Layout.fillHeight: true
             contentWidth: availableWidth
@@ -279,10 +281,10 @@ Rectangle {
         }
 
         Label {
-            visible: root.treeModel.selectedChildrenTruncated
+            visible: root.detail.truncated
             Layout.fillWidth: true
             Layout.preferredHeight: 24
-            text: "Showing the first 4096 direct children. Refine the canonical tree selection to continue."
+            text: "Showing the first 4096 visible rows. Collapse branches or narrow the selection to continue."
             color: theme.amber
             font.pixelSize: 8
             horizontalAlignment: Text.AlignHCenter
