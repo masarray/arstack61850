@@ -49,7 +49,10 @@ jobs:
           cmake --build build-wire-audit --target ariec61850_ptp_sv_wire_audit --parallel 2
       - name: Run synthetic positive/negative and streaming parity regressions
         run: |
-          ctest --test-dir build-wire-audit --output-on-failure -R '^ariec61850_ptp_sv_wire_audit_selftest    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+          ctest --test-dir build-wire-audit --output-on-failure -R ariec61850_ptp_sv_wire_audit_selftest
+
+  linux:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: Linux / ${{ matrix.compiler }}
     runs-on: ubuntu-latest
     strategy:
