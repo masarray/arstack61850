@@ -89,7 +89,6 @@ report_controller = (workspace_path.parent.parent / "src" / "MmsReportController
 for token in [
     'kMaximumTypedReportEvidence = 96',
     'projectBrowserReportMembers(',
-    'decodeEngineeringEvidence(',
     'QStringLiteral("valueEvidence")',
     'QStringLiteral("valueEvidenceTruncated")',
 ]:
@@ -110,11 +109,14 @@ for token in [
     'std::min(members.size(),',
     'projection.rowsTruncated = members.size() > visibleCount',
     'if (!member.value || reference.isEmpty()) continue',
+    'decodeEngineeringEvidence(',
 ]:
     if token not in projection_header:
         raise SystemExit("BROWSER_REPORT_BOUNDED_PROJECTION_FAIL missing=" + token)
 if 'for (const auto& item : frame.values)' in report_controller:
     raise SystemExit("BROWSER_REPORT_BOUNDED_PROJECTION_FAIL full-frame QML string conversion")
+if 'decodeEngineeringEvidence(' in report_controller:
+    raise SystemExit("BROWSER_REPORT_BOUNDED_PROJECTION_FAIL duplicate inline decoding")
 
 report_required = [
     'objectName: "browserReportUnifiedInspector"',
