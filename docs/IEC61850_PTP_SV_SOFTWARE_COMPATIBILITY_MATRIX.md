@@ -6,7 +6,7 @@ Status: **in progress, not a conformance certificate.** This matrix is designed 
 
 - [IEC/IEEE 61850-9-3:2016](https://webstore.iec.ch/en/publication/24998): IEEE 1588-2008 L2 PTP / peer-to-peer delay profile.
 - [IEC 61850-9-2:2011 + AMD1:2020](https://webstore.iec.ch/en/publication/66549): Sampled Values Ethernet mapping.
-- [IEC 61869-9:2016](https://webstore.iec.ch/en/publication/24602): digital interfaces for instrument transformers and application-specific synchronization/sample behavior.
+- [IEC 61869-9:2016](https://webstore.iec.ch/en/publication/24663): digital interfaces for instrument transformers and application-specific synchronization/sample behavior.
 - Later drafts or secondary summaries cannot silently override the approved 2016/2020 baselines. Verify profile-specific interpretations against controlled standards copies before making claims.
 
 ## Evidence taxonomy
