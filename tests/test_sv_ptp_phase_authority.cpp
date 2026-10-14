@@ -168,6 +168,51 @@ void check_publisher_continuity_gate_reacquisition() {
     CHECK(!gate.unchanged(2U, 0U));  // START must re-acquire
 }
 
+void check_continuity_recovery_under_repeated_loss() {
+    // Emulate a publisher fault during multiple observation windows. No
+    // stale correction may survive a drop or a rapid STOP/START transition.
+    for (const auto rate : std::array<std::uint32_t, 2>{4000U, 4800U}) {
+        SvPtpPublisherContinuityGate gate;
+        SvPtpPhaseAuthority phase;
+        std::uint32_t faults = 0U;
+        std::uint32_t session = 1U;
+        std::int32_t oscillator_phase_us = 100;
+        std::int32_t previous_command = 0;
+        bool recovered = false;
+        for (std::uint32_t epoch = 1U; epoch <= 360U; ++epoch) {
+            oscillator_phase_us += 80 + previous_command;
+            if (epoch == 55U || epoch == 56U || epoch == 132U ||
+                epoch == 205U || epoch == 206U) {
+                ++faults;
+            }
+            if (epoch == 260U) {
+                ++session;
+                faults = 0U;
+            }
+            previous_command = 0;
+            if (!gate.unchanged(session, faults)) {
+                CHECK(phase.invalidate().slew_ticks_next_epoch == 0);
+                continue;
+            }
+            const auto decision = phase.observe(snapshot(epoch, oscillator_phase_us));
+            CHECK(decision.accepted);
+            CHECK(decision.slew_ticks_next_epoch >= -400);
+            CHECK(decision.slew_ticks_next_epoch <= 400);
+            // The command can only ever be distributed by an ISR-safe
+            // cursor, with each interval changing by at most one tick.
+            SvBoundedSlewCursor slew;
+            slew.arm(rate, decision.slew_ticks_next_epoch);
+            for (std::uint32_t i = 0U; i < rate; ++i) {
+                const auto delta = slew.next_adjustment();
+                CHECK(delta >= -1 && delta <= 1);
+            }
+            previous_command = slew.applied_ticks();
+            if (epoch > 330U && decision.software_tracking) recovered = true;
+        }
+        CHECK(recovered);
+    }
+}
+
 void check_clock_step_stale_brackets_and_timer_wrap() {
     SvPtpPhaseAuthority tracker;
     CHECK(!tracker.observe(snapshot(1U, 0, 1200U)).accepted);
@@ -204,6 +249,7 @@ int main() {
         check_software_servo_tracks_80ppm_drift_without_counter_reset();
         check_clock_step_stale_brackets_and_timer_wrap();
         check_publisher_continuity_gate_reacquisition();
+        check_continuity_recovery_under_repeated_loss();
         std::cout << "SV PTP phase authority 4000/4800 fps regression passed\n";
         return 0;
     } catch (const std::exception& e) {
