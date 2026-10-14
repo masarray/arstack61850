@@ -265,51 +265,74 @@ Rectangle {
                             spacing: 0
                             Repeater {
                                 model: reports.reportControls
-                                delegate: Rectangle {
+                                delegate: ColumnLayout {
+                                    id: reportEntry
                                     required property int index
                                     required property var modelData
+                                    readonly property var preceding: index > 0 ? reports.reportControls[index - 1] : ({})
+                                    readonly property bool newGroup: index === 0
+                                        || modelData.domain !== preceding.domain
+                                        || modelData.logicalNode !== preceding.logicalNode
                                     Layout.fillWidth: true
-                                    implicitHeight: 34
-                                    color: reports.selectedRcbIndex === index
-                                           ? "#324842" : reportMouse.containsMouse ? "#263833" : "transparent"
-                                    RowLayout {
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 28
-                                        anchors.rightMargin: 8
-                                        spacing: 5
+                                    spacing: 0
+                                    Rectangle {
+                                        visible: reportEntry.newGroup
+                                        Layout.fillWidth: true
+                                        implicitHeight: visible ? 22 : 0
+                                        color: root.theme.navigation
                                         Label {
-                                            text: modelData.buffered ? "B" : "U"
-                                            color: modelData.buffered ? "#f4c96b" : "#69d5cb"
-                                            font.pixelSize: 7
-                                            font.weight: Font.Bold
-                                        }
-                                        ColumnLayout {
-                                            Layout.fillWidth: true
-                                            spacing: 0
-                                            Label {
-                                                Layout.fillWidth: true
-                                                text: modelData.name || modelData.reference || "Report"
-                                                color: root.theme.navigationText
-                                                font.pixelSize: 8
-                                                elide: Text.ElideMiddle
-                                            }
-                                            Label {
-                                                Layout.fillWidth: true
-                                                text: (modelData.domain || "")
-                                                      + (modelData.logicalNode ? " · " + modelData.logicalNode : "")
-                                                color: root.theme.navigationMuted
-                                                font.pixelSize: 7
-                                                elide: Text.ElideMiddle
-                                            }
+                                            anchors.fill: parent
+                                            leftPadding: 28
+                                            verticalAlignment: Text.AlignVCenter
+                                            text: "LD  " + (reportEntry.modelData.domain || "IED")
+                                                  + "  ›  LN  " + (reportEntry.modelData.logicalNode || "LLN0")
+                                            font.pixelSize: 9
+                                            font.weight: Font.DemiBold
+                                            color: root.theme.navigationMuted
+                                            elide: Text.ElideMiddle
                                         }
                                     }
-                                    MouseArea {
-                                        id: reportMouse
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        onClicked: {
-                                            reports.selectRcb(index)
-                                            root.choose(2, "Reports")
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        implicitHeight: 25
+                                        color: reports.selectedRcbIndex === reportEntry.index
+                                               ? "#324842" : reportMouse.containsMouse ? "#263833" : "transparent"
+                                        Rectangle {
+                                            visible: reports.selectedRcbIndex === reportEntry.index
+                                            width: 2
+                                            height: parent.height
+                                            color: root.theme.accent
+                                        }
+                                        RowLayout {
+                                            anchors.fill: parent
+                                            anchors.leftMargin: 42
+                                            anchors.rightMargin: 8
+                                            spacing: 7
+                                            Label {
+                                                text: reportEntry.modelData.buffered ? "BR" : "UR"
+                                                color: reportEntry.modelData.buffered ? "#f4c96b" : "#69d5cb"
+                                                font.pixelSize: 9
+                                                font.weight: Font.DemiBold
+                                                Layout.preferredWidth: 18
+                                            }
+                                            Label {
+                                                Layout.fillWidth: true
+                                                text: reportEntry.modelData.name || reportEntry.modelData.reference || "Report"
+                                                color: root.theme.navigationText
+                                                font.pixelSize: 10
+                                                elide: Text.ElideMiddle
+                                            }
+                                        }
+                                        MouseArea {
+                                            id: reportMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            onClicked: {
+                                                reports.selectRcb(reportEntry.index)
+                                                root.choose(2, "Reports")
+                                            }
+                                            ToolTip.visible: containsMouse
+                                            ToolTip.text: String(reportEntry.modelData.reference || "")
                                         }
                                     }
                                 }

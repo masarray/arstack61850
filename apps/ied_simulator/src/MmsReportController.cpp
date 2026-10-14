@@ -9,6 +9,7 @@
 #include "ariec61850/mms/static_report_session.hpp"
 
 #include <QByteArray>
+#include <QHash>
 #include <QMetaObject>
 #include <QPointer>
 
@@ -616,6 +617,7 @@ void MmsReportController::clearInventory() {
     selectedDataSetIndex_ = -1;
     selectedRcb_.clear();
     selectedDataSetMembers_.clear();
+    selectedRcbDataSetMembers_.clear();
     receivedReports_.clear();
     events_.clear();
     receivedReportCount_ = 0;
@@ -632,10 +634,32 @@ void MmsReportController::adoptEngineeringInventory() {
         return;
     }
 
-    const auto seed = buildContextDiscoverySeed(*engineeringContext_->modelSnapshot());
+    const auto* const canonical = engineeringContext_->modelSnapshot();
+    const auto seed = buildContextDiscoverySeed(*canonical);
     const auto ui = buildDiscoveryUi(seed, QString{});
     dataSets_ = ui.dataSets;
     reportControls_ = ui.reportControls;
+
+    // SCL contains configured RCB bindings even without live attribute reads.
+    // Carry only engineering metadata; never synthesize active state or values.
+    QHash<QString, const mms::MmsLiveReportControl*> byReference;
+    byReference.reserve(static_cast<qsizetype>(canonical->report_controls.size()));
+    for (const auto& control : canonical->report_controls)
+        byReference.insert(QString::fromStdString(control.reference), &control);
+    for (auto& row : reportControls_) {
+        auto map = row.toMap();
+        const auto* control = byReference.value(
+            map.value(QStringLiteral("reference")).toString(), nullptr);
+        if (!control) continue;
+        map.insert(QStringLiteral("dataSet"), QString::fromStdString(control->data_set_reference));
+        map.insert(QStringLiteral("canonicalDataSet"), QString::fromStdString(control->data_set_reference));
+        map.insert(QStringLiteral("dataSetBindingStatus"), QString::fromStdString(control->data_set_binding_status));
+        map.insert(QStringLiteral("reportId"), QString::fromStdString(control->report_id));
+        map.insert(QStringLiteral("confRev"), QString::fromStdString(control->configuration_revision));
+        map.insert(QStringLiteral("bufTm"), QString::fromStdString(control->buffer_time_ms));
+        map.insert(QStringLiteral("intgPd"), QString::fromStdString(control->integrity_period_ms));
+        row = map;
+    }
     staticCandidates_.clear();
     dynamicCandidates_.clear();
     associationProfile_.clear();
@@ -841,6 +865,7 @@ bool MmsReportController::reconnect() {
 void MmsReportController::refreshSelection() {
     selectedRcb_.clear();
     selectedDataSetMembers_.clear();
+    selectedRcbDataSetMembers_.clear();
     if (selectedRcbIndex_ >= 0 && selectedRcbIndex_ < reportControls_.size()) {
         selectedRcb_ = reportControls_.at(selectedRcbIndex_).toMap();
         const auto bound = selectedRcb_.value(QStringLiteral("dataSet")).toString();
@@ -850,6 +875,7 @@ void MmsReportController::refreshSelection() {
                 if (!sameDataSetReference(bound, map.value(QStringLiteral("reference")).toString())) continue;
                 selectedDataSetIndex_ = row;
                 selectedDataSetMembers_ = map.value(QStringLiteral("members")).toStringList();
+                selectedRcbDataSetMembers_ = selectedDataSetMembers_;
                 break;
             }
         }
