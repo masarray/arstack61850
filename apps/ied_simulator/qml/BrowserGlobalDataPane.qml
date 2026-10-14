@@ -20,6 +20,11 @@ Rectangle {
     color: theme.background
 
     ListModel { id: watchModel }
+    // Qt.callLater coalesces multiple events for the same method into one
+    // event-loop refresh. No timers, background polling, or automatic MMS reads.
+    function requestWatchUiRefresh() {
+        Qt.callLater(root.syncRows)
+    }
 
     function snapshotRows() {
         var entries = []
@@ -218,8 +223,11 @@ Rectangle {
 
     Connections {
         target: context.treeModel
-        function onDataChanged() { root.syncRows() }
+        function onDataChanged() { root.requestWatchUiRefresh() }
         function onSelectionChanged() { root.syncRows() }
+        // Read completions may update off-screen canonical nodes; coalesce
+        // storms without losing the final measured value.
+        function onValuesChanged() { root.requestWatchUiRefresh() }
     }
 
     Connections {

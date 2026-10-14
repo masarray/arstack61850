@@ -591,35 +591,70 @@ QVector<MmsLiveTreeModel::ReadTarget> MmsLiveTreeModel::readTargetsForVisibleRan
 QVector<MmsLiveTreeModel::ReadTarget> MmsLiveTreeModel::readTargetsForReferences(
     const QStringList& references, const int maximumTargets) const {
     QVector<ReadTarget> result;
-    if (references.isEmpty() || maximumTargets <= 0) return result;
+    if (maximumTargets <= 0 || references.isEmpty()) return result;
+    result.reserve(std::min(maximumTargets, 64));
+    QSet<QString> uniqueTargets;
 
-    QStringList wanted;
-    QSet<QString> seenReferences;
-    for (const auto& raw : references) {
-        const auto reference = raw.trimmed();
-        if (reference.isEmpty() || seenReferences.contains(reference)) continue;
-        seenReferences.insert(reference);
-        wanted.push_back(reference);
-    }
-
-    QSet<QString> seenTargets;
-    const auto matchesRequestedReference = [&wanted](const QString& nodeReference) {
-        for (const auto& reference : wanted) {
-            if (nodeReference == reference) return true;
-            if (nodeReference.startsWith(reference + QLatin1Char('.'))) return true;
-            if (nodeReference.startsWith(reference + QLatin1Char('$'))) return true;
-        }
-        return false;
+    const auto append = [this, &result, &uniqueTargets, maximumTargets](
+                            const int nodeIndex, const QString& fc) {
+        if (result.size() >= maximumTargets || nodeIndex < 0 ||
+            nodeIndex >= nodes_.size()) return;
+        const auto& node = nodes_.at(nodeIndex);
+        if (node.kind != NodeKind::dataAttribute ||
+            node.domain.isEmpty() || node.item.isEmpty()) return;
+        if (!fc.isEmpty() && node.functionalConstraint.compare(fc, Qt::CaseInsensitive) != 0)
+            return;
+        const QString key = nodeKey(node.domain, node.item);
+        if (uniqueTargets.contains(key)) return;
+        uniqueTargets.insert(key);
+        result.push_back({key, node.domain, node.item});
     };
 
-    for (const auto& node : nodes_) {
+    // Each user-selected IEC FCDA or MMS member resolves through the canonical
+    // hash index. A matching DO is expanded only to its actual FC-matching DA
+    // children; no broad prefix sweep, guessed target or unintended network read.
+    for (const auto& raw : references) {
         if (result.size() >= maximumTargets) break;
-        if (node.kind != NodeKind::dataAttribute || node.domain.isEmpty() || node.item.isEmpty()) continue;
-        if (!matchesRequestedReference(node.reference)) continue;
-        const auto key = nodeKey(node.domain, node.item);
-        if (seenTargets.contains(key)) continue;
-        seenTargets.insert(key);
-        result.push_back({key, node.domain, node.item});
+        const auto [reference, fc] = splitDataSetMemberReference(raw);
+        if (reference.isEmpty()) continue;
+        QString effectiveFc = fc;
+        auto found = referenceIndex_.constFind(reference);
+        if (found == referenceIndex_.cend()) {
+            // Also preserve the standard MMS FCD prefix LN$FC$DO: its
+            // canonical structural owner is the same indexed LD/LN.DO.
+            // Accept only a complete prefix, never a broad string match.
+            const int slash = reference.indexOf(QLatin1Char('/'));
+            const int first = slash >= 0
+                ? reference.indexOf(QLatin1Char('$'), slash + 1) : -1;
+            const int second = first >= 0
+                ? reference.indexOf(QLatin1Char('$'), first + 1) : -1;
+            if (second <= first) continue;
+            const QString prefixFc = reference.mid(first + 1, second - first - 1).toUpper();
+            const QString objectName = reference.mid(second + 1);
+            if (prefixFc.size() < 2 || prefixFc.size() > 4 ||
+                objectName.isEmpty() || objectName.contains(QLatin1Char('$')))
+                continue;
+            bool validFc = true;
+            for (const auto ch : prefixFc)
+                if (!ch.isLetterOrNumber()) { validFc = false; break; }
+            if (!validFc || (!fc.isEmpty() && fc != prefixFc)) continue;
+            effectiveFc = prefixFc;
+            const QString iecDo = reference.left(first) + QLatin1Char('.') + objectName;
+            found = referenceIndex_.constFind(iecDo);
+            if (found == referenceIndex_.cend()) continue;
+        }
+        for (const int nodeIndex : found.value()) {
+            if (result.size() >= maximumTargets) break;
+            const auto& node = nodes_.at(nodeIndex);
+            if (node.kind == NodeKind::dataAttribute) {
+                append(nodeIndex, effectiveFc);
+            } else if (node.kind == NodeKind::dataObject) {
+                for (const int child : node.children) {
+                    append(child, effectiveFc);
+                    if (result.size() >= maximumTargets) break;
+                }
+            }
+        }
     }
     return result;
 }
