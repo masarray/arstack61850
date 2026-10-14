@@ -5,12 +5,26 @@ on:
     branches:
       - main
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'embedded/brcb_hard_profile/**'
+      - 'embedded/brcb_*.cpp'
+      - 'embedded/mms_brcb_*.cpp'
+      - 'include/ariec61850/mms/**'
+      - 'src/mms/**'
+      - 'include/ariec61850/control/**'
+      - 'src/control/**'
+      - 'include/ariec61850/asn1/**'
+      - 'src/asn1/**'
+      - 'tests/fixtures/scl/**'
+      - '.github/workflows/brcb-hard-profile-ci.yml'
 
 permissions:
   contents: read
 
 jobs:
   brcb-hard-profile:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: BRCB Hard / ${{ matrix.compiler }}
     runs-on: ubuntu-latest
     strategy:

@@ -4,6 +4,20 @@ on:
   push:
     branches: ["agent/phase-4d-d2-dynamic-rcb-live-trial"]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'tools/dynamic_rcb_trial/**'
+      - 'include/ariec61850/mms/**'
+      - 'src/mms/**'
+      - 'include/ariec61850/control/**'
+      - 'src/control/**'
+      - 'include/ariec61850/asn1/**'
+      - 'src/asn1/**'
+      - 'include/ariec61850/osi/**'
+      - 'src/osi/**'
+      - 'include/ariec61850/acse/**'
+      - 'src/acse/**'
+      - '.github/workflows/dynamic-rcb-trial-ci.yml'
   workflow_dispatch:
 
 permissions:
@@ -11,6 +25,7 @@ permissions:
 
 jobs:
   build:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     strategy:
       matrix:
         include:

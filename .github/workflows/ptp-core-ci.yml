@@ -2,6 +2,7 @@ name: PTP Core CI
 
 on:
   push:
+    branches: [main]
     paths:
       - 'include/ariec61850/time_sync/**'
       - 'src/time_sync/**'
