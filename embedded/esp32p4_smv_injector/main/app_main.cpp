@@ -21,6 +21,15 @@
 #endif
 #endif
 #include "smp_synch_lab.hpp"
+#if defined(CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL) && CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL && \
+    CONFIG_AR_PTP_LAB_TX && defined(SOC_EMAC_IEEE1588V2_SUPPORTED) && \
+    SOC_EMAC_IEEE1588V2_SUPPORTED && ESP_IDF_VERSION_MAJOR < 6
+#define AR_SV_PTP_PHASE_SUPPORTED 1
+#include "ariec61850/time_sync/sv_ptp_phase_authority.hpp"
+#include "freertos/semphr.h"
+#else
+#define AR_SV_PTP_PHASE_SUPPORTED 0
+#endif
 #include "esp_err.h"
 #include "esp_eth.h"
 #include "esp_event.h"
@@ -67,6 +76,11 @@ using ar::iec61850::sampled_values::SvLiveSignalState;
 using ar::iec61850::time_sync::SvSecondBoundaryArm;
 using ar::iec61850::time_sync::SvPtpClockObservation;
 using ar::iec61850::time_sync::plan_sv_ptp_second_arm;
+#if AR_SV_PTP_PHASE_SUPPORTED
+using ar::iec61850::time_sync::SvBoundedSlewCursor;
+using ar::iec61850::time_sync::SvPtpPhaseAuthority;
+using ar::iec61850::time_sync::SvPtpPhaseObservation;
+#endif
 
 constexpr char kTag[] = "ar_smv_p3";
 constexpr EventBits_t kLinkUpBit = BIT0;
@@ -98,6 +112,11 @@ struct TimingStats final {
 TimingStats g_interval_stats{};
 static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
 std::atomic<std::uint32_t> g_sample_tick_total{0U};
+#if AR_SV_PTP_PHASE_SUPPORTED
+SemaphoreHandle_t g_phase_timer_mutex = nullptr;
+gptimer_handle_t g_monitored_sample_clock = nullptr; // under mutex, never in ISR
+TaskHandle_t g_phase_observer_task = nullptr;
+#endif
 
 struct PacketTemplate final {
     std::vector<std::uint8_t> bytes;
@@ -136,6 +155,17 @@ struct SampleClockContext final {
     TaskHandle_t publisher_task{};
     RationalScheduleCursor schedule{};
     gptimer_alarm_config_t next_alarm{};
+#if AR_SV_PTP_PHASE_SUPPORTED
+    // ISR-owned epoch count/deadline are published with release/acquire.
+    // Only the low 32 bits are used (71-minute wrap at 1 MHz).
+    std::atomic<std::uint32_t> epoch_generation{0U};
+    std::atomic<std::uint32_t> last_epoch_alarm{0U};
+    std::atomic<std::int32_t> requested_slew_ticks{0};
+    std::atomic<std::int32_t> cumulative_slew_ticks{0};
+    SvBoundedSlewCursor phase_slew{};
+    std::uint32_t phase_index{};
+    bool phase_enabled{}; // set before timer START; only ISR reads it
+#endif
 };
 
 SampleClockContext g_sample_clock_context{};
