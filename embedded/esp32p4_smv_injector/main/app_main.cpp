@@ -1014,6 +1014,22 @@ extern "C" void app_main(void) {
 
 #if CONFIG_AR_SMV_LIVE_TX && CONFIG_AR_SMV_P2_REALTIME_50HZ
     runtime_profile_initialize();
+#if AR_SV_PTP_PHASE_SUPPORTED
+    g_phase_timer_mutex = xSemaphoreCreateMutex();
+    if (g_phase_timer_mutex == nullptr) {
+        ESP_LOGE(kTag, "PTP/SV phase observer mutex allocation failed");
+        return;
+    }
+    if (xTaskCreatePinnedToCore(
+            &sv_ptp_phase_observer_task, "ar_smv_ptp_phase", 6144, eth_handle,
+            2, &g_phase_observer_task, 0) != pdPASS) {
+        ESP_LOGE(kTag, "Failed to create PTP/SV phase observer on CPU0");
+        return;
+    }
+    ESP_LOGW(kTag,
+        "Experimental PTP/SV phase servo enabled: software-only evidence; "
+        "physical time accuracy and smpSynch qualification NOT established");
+#endif
     live_control_initialize(
         static_cast<std::int32_t>(CONFIG_AR_SMV_CURRENT_RMS_MA),
         static_cast<std::int32_t>(CONFIG_AR_SMV_VOLTAGE_RMS_MV / 10));
