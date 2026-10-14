@@ -708,9 +708,9 @@ void MmsLiveDetailModel::toggle(int row) {
     } else {
         expanded_.insert(node);
         QVector<Row> added;
-        added.reserve(std::min(maximumRows_ - rows_.size(), int(children.size())));
+        const int capacity = maximumRows_ - int(rows_.size());
+        added.reserve(std::min(capacity, int(children.size())));
         bool clipped = false;
-        const int capacity = maximumRows_ - rows_.size();
         const auto expand = [&](const auto& self, int child, int level) -> void {
             if (added.size() >= capacity) { clipped = true; return; }
             added.push_back({child, level});
