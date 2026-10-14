@@ -55,6 +55,10 @@ for token in (
 
 if 'Timer {' in pane:
     raise SystemExit("Global Data pane: background Timer/polling is forbidden")
+if "function onValuesChanged() { root.requestWatchUiRefresh() }" not in pane:
+    raise SystemExit("Global Data pane: off-screen canonical read updates must be observed")
+if "Qt.callLater(root.syncRows)" not in pane:
+    raise SystemExit("Global Data pane: update bursts must coalesce without a timer")
 if 'client.treeModel' in pane:
     raise SystemExit("Global Data pane: must consume canonical context.treeModel, not client.treeModel")
 

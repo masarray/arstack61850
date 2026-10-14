@@ -20,16 +20,10 @@ Rectangle {
     color: theme.background
 
     ListModel { id: watchModel }
-    // Coalesce hot MMS value changes to a bounded UI refresh cadence.
-    // This is change-driven (not cyclic MMS polling) and never delays reads.
-    Timer {
-        id: watchUiCoalescer
-        interval: 50
-        repeat: false
-        onTriggered: root.syncRows()
-    }
+    // Qt.callLater coalesces multiple events for the same method into one
+    // event-loop refresh. No timers, background polling, or automatic MMS reads.
     function requestWatchUiRefresh() {
-        if (!watchUiCoalescer.running) watchUiCoalescer.start()
+        Qt.callLater(root.syncRows)
     }
 
     function snapshotRows() {
