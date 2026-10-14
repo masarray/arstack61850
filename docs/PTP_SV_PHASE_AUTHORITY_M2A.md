@@ -7,6 +7,7 @@
 - Hardware clock: ESP32-P4 Ethernet MAC IEEE1588 PTP time. LAB_SOURCE must already be active when the SV publisher starts. TIME_RECEIVER and MONITOR are NOT silently treated as a source clock for this M2A adapter.
 - SV sample schedule: existing GPTimer 1 MHz rational-tick schedule and one canonical SV frame per period, retaining the verified firmware publisher/ISR; no second PTP stack and no duplicate scheduler.
 - Off-realtime phase observer: one low-priority CPU0 task, notified at each publisher **sample-zero ISR**. It waits 250 ms then brackets one hardware PTP clock read with two GPTimer raw-timer readings. The timer lifetime is protected by a teardown mutex in the control plane, never an ISR mutex.
+- Portable `SvPtpPublisherContinuityGate`: a new START session, missed canonical slot, or failed canonical Ethernet transmit revokes phase evidence immediately and forces a clean acquisition after faults cease; observer compares an atomic fault generation again before any command handoff. Healthy 4k/4.8k paths incur no extra fault-only atomic increments.
 - Portable `SvPtpPhaseAuthority`: normalizes the phase of the GPTimer sample-zero *deadline* against the nearest PTP second; checks clock-read uncertainty, PTP monotonic continuity, epoch-generation continuity, gross steps and measured clock drift. On invalid evidence, reset/invalidate; no stale command persists.
 - Bounded software PI: delivers at most ±400 ticks of 1 µs adjustment per one-second epoch. The ISR takes a lock-free correction command and distributes +/-1 tick over the **remaining intervals of the same epoch**, never resets `smpCnt`, catches up missed samples, or performs EMAC IOCTL/heap allocation/formatting/logging. A source/clock fault cancels a partially applied correction as soon as the background monitor detects it.
 - Software telemetry continues to report measured scheduling lateness correctly by incorporating the accumulated ISR phase slews.
@@ -30,6 +31,7 @@ If any validation fails, no autonomous `smpSynch=1/2` claim is made. Do not enab
 - 480 consecutive epochs with simulated +80 ppm independent GPTimer/EMAC clocks at both 4000 and 4800 fps; no phase jumps, bounded steering and tracking convergence.
 - Exact distribution of corrections ±400, ±81, ±1, 0, 1, 73, 400 over one second; zero drift of the original rational base schedule.
 - Reject source jumps, missed epochs, stale/long bracket reads, invalid inputs and rearm without previous integral commands.
+- Reject stale continuity evidence after STOP/START, publisher missed-slot batches and failed canonical frame transmissions; test that previous slew state is cleared before reacquisition.
 - Relative GPTimer low-32-bit rollover after approximately 4295 seconds (71 minutes).
 - Compile strict -Wall/-Wextra/-Wconversion/-Wsign-conversion/-Werror, GCC and Clang, plus MSVC /W4 /WX. ESP32-P4 SOURCE compile path exercised in dedicated CI matrix.
 

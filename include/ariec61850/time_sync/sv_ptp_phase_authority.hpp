@@ -201,6 +201,36 @@ private:
     SvPtpPhaseState state_{SvPtpPhaseState::acquiring};
 };
 
+// A control-plane gate for evidence that a canonical SV publisher has not
+// skipped sample slots or failed Ethernet TX since the previous observation.
+// A fresh session and any fault require re-acquisition; neither can inherit
+// a previously qualified phase controller. This does NOT authorize smpSynch.
+class SvPtpPublisherContinuityGate final {
+public:
+    constexpr void reset() noexcept {
+        session_ = 0U;
+        fault_generation_ = 0U;
+    }
+
+    [[nodiscard]] constexpr bool unchanged(
+        const std::uint32_t session, const std::uint32_t fault_generation) noexcept {
+        if (session == 0U) {
+            reset();
+            return false;
+        }
+        if (session_ != session || fault_generation_ != fault_generation) {
+            session_ = session;
+            fault_generation_ = fault_generation;
+            return false;
+        }
+        return true;
+    }
+
+private:
+    std::uint32_t session_{};
+    std::uint32_t fault_generation_{};
+};
+
 // ISR-safe, O(1), no allocation/locks/IOCTL. Each interval differs from the
 // existing rational scheduler by at most ONE 1-MHz timer tick. The complete
 // correction is distributed across one explicitly armed second (4000/4800

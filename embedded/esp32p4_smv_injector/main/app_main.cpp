@@ -80,6 +80,7 @@ using ar::iec61850::time_sync::plan_sv_ptp_second_arm;
 using ar::iec61850::time_sync::SvBoundedSlewCursor;
 using ar::iec61850::time_sync::SvPtpPhaseAuthority;
 using ar::iec61850::time_sync::SvPtpPhaseObservation;
+using ar::iec61850::time_sync::SvPtpPublisherContinuityGate;
 #endif
 
 constexpr char kTag[] = "ar_smv_p3";
@@ -168,6 +169,7 @@ struct SampleClockContext final {
     std::atomic<std::uint32_t> last_epoch_alarm{0U};
     std::atomic<std::int32_t> requested_slew_ticks{0};
     std::atomic<std::int32_t> cumulative_slew_ticks{0};
+    std::atomic<std::uint32_t> publisher_fault_generation{0U};
     std::atomic<bool> phase_authority_valid{false};
     SvBoundedSlewCursor phase_slew{};
     std::uint32_t phase_index{};
@@ -533,6 +535,7 @@ gptimer_handle_t start_sample_clock(
     g_sample_clock_context.last_epoch_alarm.store(0U, std::memory_order_relaxed);
     g_sample_clock_context.requested_slew_ticks.store(0, std::memory_order_relaxed);
     g_sample_clock_context.cumulative_slew_ticks.store(0, std::memory_order_relaxed);
+    g_sample_clock_context.publisher_fault_generation.store(0U, std::memory_order_relaxed);
     g_sample_clock_context.phase_authority_valid.store(false, std::memory_order_relaxed);
     g_sample_clock_context.phase_index = 0U;
     g_sample_clock_context.previous_phase_healthy = false;
@@ -763,6 +766,15 @@ void publisher_task(void* argument) {
 
         const auto signal_state = live_signal_snapshot();
         if (pending_ticks > 1U) {
+#if AR_SV_PTP_PHASE_SUPPORTED
+            // A skipped frame breaks canonical timeline evidence, even if
+            // GPTimer deadlines were mathematically aligned. Fault-only
+            // atomic operations; the normal 4k/4.8kHz path is untouched.
+            g_sample_clock_context.publisher_fault_generation.fetch_add(
+                1U, std::memory_order_release);
+            g_sample_clock_context.phase_authority_valid.store(
+                false, std::memory_order_release);
+#endif
             missed_slots = static_cast<std::uint64_t>(pending_ticks - 1U);
             canonical_sample_count = static_cast<std::uint16_t>(
                 (static_cast<std::uint32_t>(canonical_sample_count) + missed_slots) %
@@ -783,6 +795,12 @@ void publisher_task(void* argument) {
             ++local.canonical_fail;
             last_canonical_tx_error = ESP_ERR_INVALID_STATE;
             ++consecutive_canonical_tx_failures;
+#if AR_SV_PTP_PHASE_SUPPORTED
+            g_sample_clock_context.publisher_fault_generation.fetch_add(
+                1U, std::memory_order_release);
+            g_sample_clock_context.phase_authority_valid.store(
+                false, std::memory_order_release);
+#endif
 #if CONFIG_AR_SMV_BROADCAST_MIRROR
             ++local.mirror_fail;
 #endif
@@ -802,6 +820,12 @@ void publisher_task(void* argument) {
                 ++local.canonical_fail;
                 last_canonical_tx_error = canonical_result;
                 ++consecutive_canonical_tx_failures;
+#if AR_SV_PTP_PHASE_SUPPORTED
+                g_sample_clock_context.publisher_fault_generation.fetch_add(
+                    1U, std::memory_order_release);
+                g_sample_clock_context.phase_authority_valid.store(
+                    false, std::memory_order_release);
+#endif
             }
 
 #if CONFIG_AR_SMV_BROADCAST_MIRROR
@@ -872,6 +896,7 @@ void revoke_sv_phase_session(const std::uint32_t expected_session) noexcept {
 void sv_ptp_phase_observer_task(void* argument) {
     const auto eth_handle = static_cast<esp_eth_handle_t>(argument);
     SvPtpPhaseAuthority controller;
+    SvPtpPublisherContinuityGate continuity;
     std::uint32_t accepted_epochs = 0U;
     std::uint32_t controller_session = 0U;
     while (true) {
@@ -881,9 +906,18 @@ void sv_ptp_phase_observer_task(void* argument) {
                 std::memory_order_acquire);
         if (controller_session != notified_session) {
             controller.reset();
+            continuity.reset();
             controller_session = notified_session;
         }
         vTaskDelay(pdMS_TO_TICKS(250));
+        const std::uint32_t current_faults =
+            g_sample_clock_context.publisher_fault_generation.load(
+                std::memory_order_acquire);
+        if (!continuity.unchanged(notified_session, current_faults)) {
+            static_cast<void>(controller.invalidate());
+            revoke_sv_phase_session(notified_session);
+            continue;
+        }
 
         ar_ptp_lab_config_t config{};
         if (events != 1U || !live_tx_running() ||
@@ -945,6 +979,9 @@ void sv_ptp_phase_observer_task(void* argument) {
         // neither a stale sample nor a recycled timer can receive a command.
         const bool source_still_running =
             ar_ptp_lab_is_running() && live_tx_running();
+        const bool no_new_publisher_fault =
+            g_sample_clock_context.publisher_fault_generation.load(
+                std::memory_order_acquire) == current_faults;
         bool committed = false;
         xSemaphoreTake(g_phase_timer_mutex, portMAX_DELAY);
         const bool session_matches = notified_session != 0U &&
@@ -954,7 +991,8 @@ void sv_ptp_phase_observer_task(void* argument) {
         if (session_matches &&
             g_sample_clock_context.epoch_generation.load(
                 std::memory_order_acquire) == observation.last_sv_epoch_generation &&
-            decision.accepted && source_still_running) {
+            decision.accepted && source_still_running &&
+            no_new_publisher_fault) {
             g_sample_clock_context.phase_authority_valid.store(
                 true, std::memory_order_release);
             g_sample_clock_context.requested_slew_ticks.store(

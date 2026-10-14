@@ -141,6 +141,33 @@ void check_software_servo_tracks_80ppm_drift_without_counter_reset() {
     }
 }
 
+void check_publisher_continuity_gate_reacquisition() {
+    SvPtpPublisherContinuityGate gate;
+    SvPtpPhaseAuthority phase;
+    CHECK(!gate.unchanged(0U, 0U));
+    // A new publisher generation cannot reuse the previous phase estimate.
+    CHECK(!gate.unchanged(1U, 0U));
+    CHECK(gate.unchanged(1U, 0U));
+    CHECK(phase.observe(snapshot(1U, 10)).accepted);
+    CHECK(phase.observe(snapshot(2U, 90)).accepted);
+
+    // One missed canonical slot or a failed canonical EMAC send invalidates
+    // the existing PI integral; observer may only acquire on clean epochs.
+    CHECK(!gate.unchanged(1U, 1U));
+    CHECK(phase.invalidate().slew_ticks_next_epoch == 0);
+    CHECK(gate.unchanged(1U, 1U));
+    const auto cold = phase.observe(snapshot(3U, 100));
+    CHECK(cold.accepted);
+    CHECK(cold.slew_ticks_next_epoch == 0);
+
+    CHECK(!gate.unchanged(2U, 0U));
+    CHECK(phase.invalidate().state == SvPtpPhaseState::invalid);
+    CHECK(gate.unchanged(2U, 0U));
+    CHECK(phase.observe(snapshot(1U, 10)).slew_ticks_next_epoch == 0);
+    CHECK(!gate.unchanged(0U, 0U));  // STOP
+    CHECK(!gate.unchanged(2U, 0U));  // START must re-acquire
+}
+
 void check_clock_step_stale_brackets_and_timer_wrap() {
     SvPtpPhaseAuthority tracker;
     CHECK(!tracker.observe(snapshot(1U, 0, 1200U)).accepted);
@@ -176,6 +203,7 @@ int main() {
         check_per_second_slew_distribution();
         check_software_servo_tracks_80ppm_drift_without_counter_reset();
         check_clock_step_stale_brackets_and_timer_wrap();
+        check_publisher_continuity_gate_reacquisition();
         std::cout << "SV PTP phase authority 4000/4800 fps regression passed\n";
         return 0;
     } catch (const std::exception& e) {

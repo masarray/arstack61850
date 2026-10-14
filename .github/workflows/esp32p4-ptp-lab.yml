@@ -29,6 +29,180 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  phase-guard-checkpoint:
+    # Explicit one-job Draft checkpoint only; do not schedule the 2-role
+    # ESP32 matrix, Windows/MSVC or Studio installer for each WIP commit.
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft && contains(github.event.pull_request.body, '[run-phase-guard]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: espressif/idf:v5.5.4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Portable PTP phase regression (strict -Werror)
+        shell: bash
+        run: |
+          cmake -S tests/ptp_profile -B build-phase-guard -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-phase-guard --target sv_ptp_phase_authority_tests --parallel 2
+          ctest --test-dir build-phase-guard --output-on-failure -R sv_ptp_phase_authority_tests
+      - name: Compile ESP32-P4 guarded SOURCE firmware
+        shell: bash
+        working-directory: embedded/esp32p4_smv_injector
+        run: |
+          source /opt/esp/idf/export.sh
+          idf.py set-target esp32p4
+          if grep -q '^# CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL is not set    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - role_name: source
+            role_value: 0
+          - role_name: receiver
+            role_value: 1
+    name: build-esp32p4-ptp-${{ matrix.role_name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    container:
+      image: espressif/idf:v5.5.4
+    defaults:
+      run:
+        shell: bash
+        working-directory: embedded/esp32p4_smv_injector
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select ESP32-P4 target
+        run: source /opt/esp/idf/export.sh && idf.py set-target esp32p4
+
+      - name: Verify PTP source readiness and ESP-IDF 5.5 TX contract
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          eth = Path('main/ethernet_port.c').read_text(encoding='utf-8')
+          app = Path('main/app_main.cpp').read_text(encoding='utf-8')
+          ptp = Path('main/ptp_lab_task.cpp').read_text(encoding='utf-8')
+          receiver = Path('main/ptp_receiver_task.cpp').read_text(encoding='utf-8')
+
+          # Never allow the old premature boot path back into Ethernet init.
+          if 'ar_ptp_lab_try_start(handle)' in eth:
+              raise SystemExit('PTP must not auto-start inside Ethernet initialization before app_main starts Ethernet')
+          if 'ESP_ERROR_CHECK(esp_eth_start(eth_handle));' not in app:
+              raise SystemExit('app_main must explicitly start Ethernet before operator-controlled PTP can run')
+
+          # ESP-IDF 5.5 esp_eth_transmit_ctrl_vargs forwards argc as the number
+          # of variadic arguments. ESP32-P4 EMAC computes buf_num = argc / 2,
+          # so one frame is two varargs: buffer pointer + buffer length.
+          tx_signature = '2U,\n        frame.data(),\n        frame.size()'
+          if tx_signature not in ptp:
+              raise SystemExit('PTP SOURCE timestamp TX must pass argc=2 for one buffer/length frame on ESP-IDF 5.5')
+          if tx_signature not in receiver:
+              raise SystemExit('PTP RECEIVER timestamp TX must pass argc=2 for one buffer/length frame on ESP-IDF 5.5')
+          if 'argc counts buffer/length pairs' in ptp or 'argc counts buffer/length pairs' in receiver:
+              raise SystemExit('stale/incorrect esp_eth_transmit_ctrl_vargs argc documentation remains')
+          if 'PTP hardware-timestamp TX failed:' not in ptp or 'without a valid hardware timestamp' not in ptp:
+              raise SystemExit('PTP SOURCE must distinguish driver TX errors from invalid timestamp evidence')
+
+          # Admission truth is the stronger bounded runtime contract: explicit
+          # operator start is accepted only after real Announce + Sync + Follow_Up TX.
+          required = [
+              'const bool started = ar_ptp_lab_try_start(s_eth_handle);',
+              'ar_esp32p4_restore_normal_emac();',
+              'g_ptp_ready',
+              'PTP source readiness timeout',
+              'g_announce_sent.load',
+              'g_sync_sent.load',
+              'g_follow_up_sent.load',
+              'return g_ptp_ready.load',
+          ]
+          combined = eth + '\n' + ptp
+          missing = [token for token in required if token not in combined]
+          if missing:
+              raise SystemExit('PTP verified-start contract missing: ' + ', '.join(missing))
+          print('PTP contract: post-Ethernet start + ESP-IDF 5.5 argc=2 timestamp TX + verified core timing + rollback')
+          PY
+
+      - name: Enable guarded PTP-P2 profile
+        shell: bash
+        run: |
+          set_config() {
+            local key="$1"
+            local value="$2"
+            if grep -q "^${key}=" sdkconfig; then
+              sed -i "s|^${key}=.*|${key}=${value}|" sdkconfig
+            elif grep -q "^# ${key} is not set$" sdkconfig && [ "$value" = "y" ]; then
+              sed -i "s|^# ${key} is not set$|${key}=y|" sdkconfig
+            else
+              echo "${key}=${value}" >> sdkconfig
+            fi
+          }
+
+          set_config CONFIG_AR_PTP_LAB_TX y
+          set_config CONFIG_AR_PTP_OPERATING_ROLE ${{ matrix.role_value }}
+          if [ "${{ matrix.role_name }}" = "source" ]; then
+            # Compile the guarded M2A control-plane/ISR adapter in a dedicated
+            # SOURCE build, without enabling it in the public default image.
+            set_config CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL y
+          fi
+          set_config CONFIG_AR_PTP_DOMAIN 0
+          set_config CONFIG_AR_PTP_TRANSPORT_SPECIFIC 1
+          set_config CONFIG_AR_PTP_PORT_NUMBER 2
+          set_config CONFIG_AR_PTP_VLAN y
+          set_config CONFIG_AR_PTP_VLAN_ID 100
+          set_config CONFIG_AR_PTP_VLAN_PRIORITY 4
+          set_config CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS 1000
+          set_config CONFIG_AR_PTP_SYNC_INTERVAL_MS 1000
+          set_config CONFIG_AR_PTP_RESPOND_PDELAY y
+          set_config CONFIG_AR_PTP_PDELAY_REQUEST_INTERVAL_MS 1000
+          set_config CONFIG_AR_PTP_PRIORITY1 120
+          set_config CONFIG_AR_PTP_PRIORITY2 121
+          set_config CONFIG_AR_PTP_CLOCK_CLASS 248
+          set_config CONFIG_AR_PTP_CLOCK_ACCURACY 254
+          set_config CONFIG_AR_PTP_OFFSET_SCALED_LOG_VARIANCE 65535
+          set_config CONFIG_AR_PTP_TIME_SOURCE 160
+          set_config CONFIG_AR_PTP_CURRENT_UTC_OFFSET 37
+          set_config CONFIG_AR_PTP_MAX_PATH_DELAY_NS 5000000
+          set_config CONFIG_AR_PTP_MAX_PATH_JITTER_NS 100000
+          set_config CONFIG_AR_PTP_LOCK_OFFSET_NS 2000
+          set_config CONFIG_AR_PTP_UNLOCK_OFFSET_NS 20000
+          set_config CONFIG_AR_PTP_PHASE_STEP_THRESHOLD_NS 1000000
+          set_config CONFIG_AR_PTP_LOCK_REQUIRED_SAMPLES 8
+          set_config CONFIG_AR_PTP_SYNC_TIMEOUT_MS 3000
+          set_config CONFIG_AR_PTP_HOLDOVER_TIMEOUT_MS 5000
+          set_config CONFIG_AR_PTP_MAX_FREQ_ADJ_PPB 100000
+
+          source /opt/esp/idf/export.sh
+          idf.py reconfigure
+
+          grep -E '^CONFIG_AR_PTP_(LAB_TX|OPERATING_ROLE|DOMAIN|TRANSPORT_SPECIFIC|PORT_NUMBER|VLAN|VLAN_ID|VLAN_PRIORITY|PDELAY_REQUEST_INTERVAL_MS|LOCK_OFFSET_NS|UNLOCK_OFFSET_NS|LOCK_REQUIRED_SAMPLES|MAX_FREQ_ADJ_PPB)=' sdkconfig
+
+          grep -q '^CONFIG_AR_PTP_LAB_TX=y$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_OPERATING_ROLE=${{ matrix.role_value }}$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_TRANSPORT_SPECIFIC=1$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_PORT_NUMBER=2$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_VLAN_ID=100$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_LOCK_OFFSET_NS=2000$' sdkconfig
+          grep -q '^CONFIG_AR_PTP_LOCK_REQUIRED_SAMPLES=8$' sdkconfig
+          if [ "${{ matrix.role_name }}" = "source" ]; then
+            grep -q '^CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y$' sdkconfig
+          fi
+
+      - name: Build PTP-P2 firmware
+        run: source /opt/esp/idf/export.sh && idf.py build
+ sdkconfig; then
+            sed -i 's/^# CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL is not set$/CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y/' sdkconfig
+          elif grep -q '^CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=' sdkconfig; then
+            sed -i 's/^CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=.*/CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y/' sdkconfig
+          else
+            echo 'CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y' >> sdkconfig
+          fi
+          idf.py reconfigure
+          grep -qx 'CONFIG_AR_PTP_LAB_TX=y' sdkconfig
+          grep -qx 'CONFIG_AR_SMV_LIVE_TX=y' sdkconfig
+          grep -qx 'CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y' sdkconfig
+          idf.py build
+
   build-esp32p4-ptp:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     strategy:
