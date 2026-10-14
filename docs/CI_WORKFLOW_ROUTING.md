@@ -16,6 +16,8 @@ The CI contract is **risk-scoped PR checks, full integrated `main` checks, and m
 - **PR**: path-scoped. Superseded PR heads are cancelled using workflow-specific concurrency groups.
 - **Feature branch push**: no duplicate workflow run when an equivalent PR run already exists. The patched workflows run on push to `main` only (historic explicit special branches remain where applicable).
 - **`main`**: preserve full integration CI where configured. It is not path-trimmed to optimize feature iteration.
+- **Studio / PTP / legacy SMV GUI**: feature branch push does not duplicate the PR validation; push is scoped to `main`.
+- **ESP32-P4 firmware / PTP lab**: feature-branch push still builds artifacts before a PR exists. Push and PR for the *same repository+branch* use a shared concurrency key, cancelling superseded feature runs without cancelling integrated `main` evidence.
 - **Windows Workbench release package**: run automatically on release-impacting PRs and integrated `main` changes, or manually with `workflow_dispatch` for an explicit bench/release candidate. Normal QML-only PR iteration should not package an installer on every commit.
 - **Before merging a release candidate**: explicitly run the Windows packaging/release acceptance workflow on the exact release candidate head, in addition to scoped PR CI. No hardware proof is implied by CI.
 - **Workflow files themselves**: are included in their own path filters so trigger changes receive acceptance runs. The lightweight CI Routing Policy gate checks trigger invariants.

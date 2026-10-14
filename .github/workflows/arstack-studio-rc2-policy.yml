@@ -9,6 +9,7 @@ on:
       - 'docs/SMV_STUDIO_RC2_ACCEPTANCE.md'
       - '.github/workflows/arstack-studio-rc2-policy.yml'
   push:
+    branches: [main]
     paths:
       - 'apps/arstack_studio/src/Rc2Acceptance.cpp'
       - 'apps/arstack_studio/rc2/**'
@@ -21,7 +22,7 @@ permissions:
 
 concurrency:
   group: arstack-studio-rc2-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   windows-policy:
