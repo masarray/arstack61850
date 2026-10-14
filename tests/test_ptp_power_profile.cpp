@@ -44,6 +44,43 @@ void check_defaults_and_reject_nonstandard_cadence() {
     REQUIRE(!inspect_ptp_power_profile_cadence(profile).compatible());
 }
 
+void check_source_readiness_requires_fresh_wire_proof() {
+    PtpSourceReadinessGate gate;
+    REQUIRE(!gate.ready());
+    gate.observe_peer_delay(true);
+    REQUIRE(!gate.ready()); // Pdelay response is never Sync evidence.
+    gate.observe_announce(true);
+    REQUIRE(!gate.ready());
+    gate.observe_sync_pair(true);
+    REQUIRE(gate.ready());
+
+    gate.observe_sync_pair(false); // e.g., Follow_Up failed after Sync TX
+    REQUIRE(!gate.ready());
+    gate.observe_peer_delay(true);
+    REQUIRE(!gate.ready()); // previously sent Announce/Sync must not count
+    gate.observe_sync_pair(true);
+    REQUIRE(!gate.ready()); // need a *fresh* Announce too
+    gate.observe_announce(true);
+    REQUIRE(gate.ready());
+
+    gate.observe_peer_delay(false);
+    REQUIRE(!gate.ready());
+    gate.observe_announce(true);
+    REQUIRE(!gate.ready());
+    gate.observe_sync_pair(true);
+    REQUIRE(gate.ready());
+
+    // A failed Announce revokes readiness even if the Sync pair was fine.
+    gate.observe_announce(false);
+    REQUIRE(!gate.ready());
+    gate.observe_announce(true);
+    REQUIRE(!gate.ready());
+    gate.observe_sync_pair(true);
+    REQUIRE(gate.ready());
+    gate.invalidate(); // SOURCE STOP / teardown
+    REQUIRE(!gate.ready());
+}
+
 void check_ptp_wire_sequence_and_identity() {
     auto options = make_source();
     constexpr std::uint8_t domain = 93U; // supported alternate network domain
@@ -219,6 +256,7 @@ void check_vlan_encoding_remains_configurable() {
 int main() {
     try {
         check_defaults_and_reject_nonstandard_cadence();
+        check_source_readiness_requires_fresh_wire_proof();
         check_ptp_wire_sequence_and_identity();
         check_vlan_encoding_remains_configurable();
         check_tai_seed_and_truthful_time_properties();

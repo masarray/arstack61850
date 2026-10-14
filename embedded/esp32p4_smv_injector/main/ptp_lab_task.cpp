@@ -3,6 +3,7 @@
 #include "ptp_lab_task.hpp"
 
 #include "ariec61850/time_sync/ptp.hpp"
+#include "ariec61850/time_sync/ptp_power_profile.hpp"
 #include "ariec61850/time_sync/ptp_runtime.hpp"
 #include "ariec61850/time_sync/ptp_tai_source.hpp"
 
@@ -46,6 +47,8 @@ using ar::iec61850::time_sync::PtpMessageType;
 using ar::iec61850::time_sync::PtpPortIdentity;
 using ar::iec61850::time_sync::PtpPublisherOptions;
 using ar::iec61850::time_sync::PtpPublisherRuntime;
+using ar::iec61850::time_sync::PtpSourceReadinessGate;
+using ar::iec61850::time_sync::inspect_ptp_power_profile_cadence;
 using ar::iec61850::time_sync::PtpTimeSource;
 using ar::iec61850::time_sync::PtpTimestamp;
 using ar::iec61850::time_sync::format_ptp_clock_identity;
@@ -219,7 +222,17 @@ void fill_kconfig_defaults(ar_ptp_lab_config_t& config) noexcept {
         error = "clockIdentity override must be non-zero";
         return false;
     }
-    return options_from_config(config, kValidationMac, &error).has_value();
+    auto options = options_from_config(config, kValidationMac, &error);
+    if (!options.has_value()) return false;
+#if !defined(CONFIG_AR_PTP_ALLOW_NONSTANDARD_LAB_CADENCE) || !CONFIG_AR_PTP_ALLOW_NONSTANDARD_LAB_CADENCE
+    if (config.role == AR_PTP_ROLE_LAB_SOURCE &&
+        !inspect_ptp_power_profile_cadence(*options).compatible()) {
+        error = "IEC/IEEE 61850-9-3 lab SOURCE requires 1s Announce, 1s Sync "
+                "and hardware Pdelay responder; nonstandard bench mode is opt-in";
+        return false;
+    }
+#endif
+    return true;
 }
 
 [[nodiscard]] std::optional<PtpPublisherOptions> make_runtime_options(
@@ -642,6 +655,7 @@ void ptp_lab_task(void* argument) {
              pdelay_enabled ? "enabled" : "disabled");
 
     std::uint32_t consecutive_failures = 0U;
+    PtpSourceReadinessGate source_readiness;
     while (!g_stop_requested.load(std::memory_order_acquire)) {
         bool attempted = false;
         bool success = true;
@@ -650,35 +664,43 @@ void ptp_lab_task(void* argument) {
         while (context.pdelay_queue != nullptr &&
                xQueueReceive(context.pdelay_queue, &pdelay_request, 0U) == pdTRUE) {
             attempted = true;
-            success = send_pdelay_response(context, pdelay_request) && success;
+            const bool response_delivered = send_pdelay_response(context, pdelay_request);
+            source_readiness.observe_peer_delay(response_delivered);
+            success = response_delivered && success;
         }
 
         const auto due = context.runtime->poll_due();
         if (due.announce) {
             attempted = true;
-            success = send_announce(context) && success;
+            const bool announce_delivered = send_announce(context);
+            source_readiness.observe_announce(announce_delivered);
+            success = announce_delivered && success;
         }
         if (due.sync) {
             attempted = true;
-            success = send_sync_follow_up(context) && success;
+            // True only if the actual Sync TX timestamp AND matching Follow_Up
+            // TX succeeded; Sync alone never qualifies the source.
+            const bool pair_delivered = send_sync_follow_up(context);
+            source_readiness.observe_sync_pair(pair_delivered);
+            success = pair_delivered && success;
+        }
+        // A failed peer-delay response in the same batch must also revoke
+        // any freshly sent core messages; no readiness resurrection by Pdelay.
+        if (!success) source_readiness.invalidate();
+        const bool qualified_ready = source_readiness.ready();
+        const bool was_ready = g_ptp_ready.load(std::memory_order_acquire);
+        if (!qualified_ready) {
+            g_ptp_ready.store(false, std::memory_order_release);
+        } else if (!was_ready) {
+            g_ptp_source_generation.fetch_add(1U, std::memory_order_release);
+            g_ptp_ready.store(true, std::memory_order_release);
         }
 
         if (attempted) {
             if (success) {
                 consecutive_failures = 0U;
-                context.runtime->clear_error();
-                const bool emitted_core_timing = g_announce_sent.load(std::memory_order_relaxed) > 0U && g_sync_sent.load(std::memory_order_relaxed) > 0U && g_follow_up_sent.load(std::memory_order_relaxed) > 0U;
-                if (emitted_core_timing) {
-                    // Any successful re-entry into READY defines a new time
-                    // authority generation, even if 1Hz PTP seconds happen
-                    // to look continuous across a failed Sync exchange.
-                    if (!g_ptp_ready.load(std::memory_order_relaxed)) {
-                        g_ptp_source_generation.fetch_add(1U, std::memory_order_release);
-                    }
-                    g_ptp_ready.store(true, std::memory_order_release);
-                }
+                if (qualified_ready) context.runtime->clear_error();
             } else {
-                g_ptp_ready.store(false, std::memory_order_release);
                 context.runtime->record_error("Ethernet transmit or hardware timestamp failure");
                 g_tx_failure_count.fetch_add(1U, std::memory_order_relaxed);
                 ++consecutive_failures;

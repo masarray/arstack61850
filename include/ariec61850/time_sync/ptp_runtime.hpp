@@ -277,11 +277,13 @@ public:
 
         if (monotonic_time >= next_announce_) {
             due.announce = true;
-            next_announce_ = monotonic_time + options_.announce_interval;
+            next_announce_ = advance_deadline(
+                next_announce_, monotonic_time, options_.announce_interval);
         }
         if (monotonic_time >= next_sync_) {
             due.sync = true;
-            next_sync_ = monotonic_time + options_.sync_interval;
+            next_sync_ = advance_deadline(
+                next_sync_, monotonic_time, options_.sync_interval);
         }
         return due;
     }
@@ -413,6 +415,17 @@ public:
     }
 
 private:
+    // Preserve the originally anchored 1Hz power-profile cadence across
+    // delayed poll()/peer-delay processing. O(1), never emit catch-up bursts.
+    // Sleep/task latency can still affect packet egress and must be measured.
+    [[nodiscard]] static std::chrono::steady_clock::time_point advance_deadline(
+        const std::chrono::steady_clock::time_point previous,
+        const std::chrono::steady_clock::time_point observed,
+        const std::chrono::milliseconds interval) noexcept {
+        const auto missed_intervals = (observed - previous) / interval;
+        return previous + interval * (missed_intervals + 1);
+    }
+
     [[nodiscard]] static std::int8_t interval_to_log2(
         const std::chrono::milliseconds interval) noexcept {
         auto milliseconds = interval.count();

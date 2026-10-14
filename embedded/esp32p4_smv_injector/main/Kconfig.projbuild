@@ -93,6 +93,17 @@ config AR_PTP_OPERATING_ROLE
         listens to an external PTP source, performs hardware-timestamped peer
         delay, and disciplines the ESP32-P4 IEEE1588 clock. MONITOR is passive.
 
+config AR_PTP_ALLOW_NONSTANDARD_LAB_CADENCE
+    bool "LAB ONLY: allow non-IEC 61850-9-3 SOURCE cadence"
+    default n
+    depends on AR_PTP_LAB_TX
+    help
+        Default SOURCE admission enforces nominal 1-second Announce and Sync
+        and an enabled hardware peer-delay responder, as expected by the
+        IEC/IEEE 61850-9-3 power utility profile. Turn this on ONLY for
+        intentional isolated nonstandard packet tests; it does not make
+        the LAB_SOURCE a traceable certified PTP Grandmaster.
+
 config AR_PTP_DOMAIN
     int "PTP domain number"
     range 0 255

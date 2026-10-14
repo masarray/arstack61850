@@ -196,6 +196,49 @@ void peer_delay_runtime_preserves_request_identity_and_hw_timestamps() {
     CHECK(runtime.status().peer_delay_responses_sent == std::uint64_t{2U});
 }
 
+void fixed_deadline_cadence_survives_scheduler_latency() {
+    using namespace ar::iec61850::time_sync;
+    auto opts = make_options();
+    opts.announce_interval = std::chrono::milliseconds{1000};
+    opts.sync_interval = std::chrono::milliseconds{1000};
+    PtpPublisherRuntime source{opts};
+    const auto start = std::chrono::steady_clock::time_point{};
+    CHECK(source.start(std::chrono::system_clock::time_point{}, start));
+    auto due = source.poll_due(start);
+    CHECK(due.announce && due.sync);
+    // A late poll must not permanently shift the next 1s deadline by 7ms.
+    due = source.poll_due(start + std::chrono::milliseconds{1007});
+    CHECK(due.announce && due.sync);
+    due = source.poll_due(start + std::chrono::milliseconds{1999});
+    CHECK(!due.announce && !due.sync);
+    due = source.poll_due(start + std::chrono::milliseconds{2001});
+    CHECK(due.announce && due.sync);
+
+    // After a long pause, send at most ONE pair: never generate bursts.
+    due = source.poll_due(start + std::chrono::milliseconds{10250});
+    CHECK(due.announce && due.sync);
+    due = source.poll_due(start + std::chrono::milliseconds{10251});
+    CHECK(!due.announce && !due.sync);
+    due = source.poll_due(start + std::chrono::milliseconds{10999});
+    CHECK(!due.announce && !due.sync);
+    due = source.poll_due(start + std::chrono::milliseconds{11001});
+    CHECK(due.announce && due.sync);
+    source.stop();
+
+    // Even with different intervals the periods must remain independent.
+    opts.sync_interval = std::chrono::milliseconds{250};
+    PtpPublisherRuntime subsecond{opts};
+    CHECK(subsecond.start(std::chrono::system_clock::time_point{}, start));
+    due = subsecond.poll_due(start);
+    CHECK(due.announce && due.sync);
+    due = subsecond.poll_due(start + std::chrono::milliseconds{261});
+    CHECK(!due.announce && due.sync);
+    due = subsecond.poll_due(start + std::chrono::milliseconds{499});
+    CHECK(!due.announce && !due.sync);
+    due = subsecond.poll_due(start + std::chrono::milliseconds{501});
+    CHECK(!due.announce && due.sync);
+}
+
 void one_step_policy_suppresses_follow_up() {
     using namespace ar::iec61850::time_sync;
     auto options = make_options();
@@ -220,6 +263,7 @@ int main() {
         {"PTP ClockIdentity helpers", clock_identity_helpers_match_ariec61850_behavior},
         {"PTP runtime option validation", options_are_fail_safe_and_reconfiguration_requires_stop},
         {"PTP runtime scheduler/status", scheduler_sequence_and_status_match_runtime_contract},
+        {"PTP deterministic cadence under delayed polling", fixed_deadline_cadence_survives_scheduler_latency},
         {"PTP runtime hardware Pdelay preparation", peer_delay_runtime_preserves_request_identity_and_hw_timestamps},
         {"PTP runtime one-step policy", one_step_policy_suppresses_follow_up},
     };

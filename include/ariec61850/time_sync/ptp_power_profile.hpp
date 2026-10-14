@@ -7,6 +7,46 @@
 
 namespace ar::iec61850::time_sync {
 
+// SOURCE health is NOT a lifetime frame counter: following ANY TX failure,
+// Announce and a *complete* Sync/Follow_Up pair must both be freshly sent.
+// Successful Pdelay alone cannot requalify PTP SOURCE for the SV phase servo.
+// This fixed-size policy has no platform/timebase assumptions.
+class PtpSourceReadinessGate final {
+public:
+    constexpr void invalidate() noexcept {
+        fresh_announce_ = false;
+        fresh_sync_pair_ = false;
+    }
+
+    [[nodiscard]] constexpr bool ready() const noexcept {
+        return fresh_announce_ && fresh_sync_pair_;
+    }
+
+    constexpr void observe_announce(const bool delivered) noexcept {
+        if (!delivered) {
+            invalidate();
+        } else {
+            fresh_announce_ = true;
+        }
+    }
+
+    constexpr void observe_sync_pair(const bool delivered) noexcept {
+        if (!delivered) {
+            invalidate();
+        } else {
+            fresh_sync_pair_ = true;
+        }
+    }
+
+    constexpr void observe_peer_delay(const bool delivered) noexcept {
+        if (!delivered) invalidate();
+    }
+
+private:
+    bool fresh_announce_{};
+    bool fresh_sync_pair_{};
+};
+
 // Static configuration compatibility, NOT a declaration of IEEE/IEC
 // conformance, grandmaster accuracy, or IED time lock. Runtime hardware
 // timestamps, clock quality and Pdelay exchanges need independent evidence.
