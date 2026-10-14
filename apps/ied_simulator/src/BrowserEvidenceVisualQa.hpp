@@ -208,8 +208,46 @@ private:
                 schedule(100);  // QA-only bounded readiness; never a runtime poll.
                 return;
             }
-            if (!prepare() || !selectModel(quality_)) {
-                fail("quality_model_setup"); return;
+            // SCL loading and QML visual instantiation have separate
+            // lifecycles. Source ready does not imply the active Browser pane
+            // and its StackLayout children have been rendered yet.
+            if (!prepared_) {
+                if (!prepare()) {
+                    if (++readinessChecks_ > 40) {
+                        qCritical().noquote()
+                            << "BROWSER_EVIDENCE_VISUAL_DIAG"
+                            << "loaded=" << (context_ && context_->loaded())
+                            << "datasets=" << (reports_ ? reports_->dataSets().size() : -1)
+                            << "nodes=" << (model_ ? model_->totalNodeCount() : -1)
+                            << "selected_dataset=" << dataSetIndex_
+                            << "q_valid=" << quality_.valid()
+                            << "t_valid=" << timestamp_.valid()
+                            << "browser=" << static_cast<void*>(browser_)
+                            << "browser_visible=" << (browser_ && browser_->isVisible())
+                            << "model_pane=" << static_cast<void*>(modelPane_)
+                            << "dataset_pane=" << static_cast<void*>(dataSetPane_)
+                            << "model_typed=" << static_cast<void*>(modelEvidence_)
+                            << "dataset_typed=" << static_cast<void*>(dataSetEvidence_);
+                        fail("rendered_qa_preparation_timeout");
+                        return;
+                    }
+                    schedule(100);
+                    return;
+                }
+                prepared_ = true;
+            }
+            if (!selectModel(quality_)) {
+                auto* detail = qobject_cast<MmsLiveDetailModel*>(model_->detailModel());
+                qCritical().noquote()
+                    << "BROWSER_EVIDENCE_VISUAL_DIAG"
+                    << "q_domain=" << quality_.domain
+                    << "q_item=" << quality_.item
+                    << "q_reference=" << quality_.reference
+                    << "selected=" << model_->selectedNode().value(QStringLiteral("reference"))
+                    << "detail_root=" << (detail ? detail->rootKind() : QString{})
+                    << "detail_rows=" << (detail ? detail->rowCount() : -1);
+                fail("quality_model_selection");
+                return;
             }
             phase_ = 1;
             schedule(150);
@@ -275,6 +313,7 @@ private:
     QImage previous_;
     int dataSetIndex_{-1};
     int readinessChecks_{};
+    bool prepared_{};
     int phase_{};
 };
 
