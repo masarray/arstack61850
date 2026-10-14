@@ -158,17 +158,9 @@ jobs:
           grep -q '^CONFIG_AR_PTP_PORT_NUMBER=2$' sdkconfig
           grep -q '^CONFIG_AR_PTP_VLAN_ID=100$' sdkconfig
           grep -q '^CONFIG_AR_PTP_LOCK_OFFSET_NS=2000$' sdkconfig
-          grep -q '^CONFIG_AR_PTP_LOCK_REQUIRED_SAMPLES=8
-
-      - name: Build PTP-P2 firmware
-        run: source /opt/esp/idf/export.sh && idf.py build
- sdkconfig
+          grep -q '^CONFIG_AR_PTP_LOCK_REQUIRED_SAMPLES=8$' sdkconfig
           if [ "${{ matrix.role_name }}" = "source" ]; then
-            grep -q '^CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y
-
-      - name: Build PTP-P2 firmware
-        run: source /opt/esp/idf/export.sh && idf.py build
- sdkconfig
+            grep -q '^CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y$' sdkconfig
           fi
 
       - name: Build PTP-P2 firmware
