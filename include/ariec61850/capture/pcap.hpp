@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <istream>
 #include <ostream>
 #include <span>
@@ -25,6 +26,16 @@ struct PcapPacket final {
 
 class PcapReader final {
 public:
+    // One bounded PCAP packet at a time. Packet ownership is transferred to
+    // the callback and is discarded unless the callback explicitly retains it.
+    // Uses the exact same parser as read_all; no duplicate PCAP implementation.
+    using PacketVisitor = std::function<void(PcapPacket&&)>;
+
+    static void for_each_packet(const std::filesystem::path& file_path,
+                                const PacketVisitor& visitor);
+    static void for_each_packet(std::istream& stream,
+                                const PacketVisitor& visitor);
+
     [[nodiscard]] static std::vector<PcapPacket> read_all(const std::filesystem::path& file_path);
     [[nodiscard]] static std::vector<PcapPacket> read_all(std::istream& stream);
 };

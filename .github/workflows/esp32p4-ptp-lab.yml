@@ -1,7 +1,9 @@
 name: ESP32-P4 PTP Lab Profile
 
 on:
+  workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - 'embedded/esp32p4_smv_injector/**'
       - 'include/ariec61850/time_sync/**'
@@ -10,6 +12,7 @@ on:
       - 'src/ethernet/**'
       - '.github/workflows/esp32p4-ptp-lab.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'embedded/esp32p4_smv_injector/**'
       - 'include/ariec61850/time_sync/**'
@@ -22,11 +25,56 @@ permissions:
   contents: read
 
 concurrency:
-  group: esp32p4-ptp-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  phase-guard-checkpoint:
+    # Explicit one-job Draft checkpoint: no two-role firmware matrix.
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft && contains(github.event.pull_request.body, '[run-phase-guard]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: espressif/idf:v5.5.4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Portable strict phase regression
+        shell: bash
+        run: |
+          source /opt/esp/idf/export.sh
+          cmake -S tests/ptp_profile -B build-phase-guard -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-phase-guard --target sv_ptp_phase_authority_tests sv_tx_egress_evidence_tests ptp_power_profile_tests ptp_runtime_tests --parallel 2
+          ctest --test-dir build-phase-guard --output-on-failure -R 'sv_ptp_phase_authority_tests|sv_tx_egress_evidence_tests|ptp_power_profile_tests|ptp_runtime_tests'
+      - name: Compile guarded ESP32-P4 SOURCE firmware
+        shell: bash
+        working-directory: embedded/esp32p4_smv_injector
+        run: |
+          source /opt/esp/idf/export.sh
+          idf.py set-target esp32p4
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("sdkconfig")
+          s = p.read_text(encoding="utf-8")
+          def put_bool(source, key, enabled):
+              source = "\n".join(line for line in source.splitlines()
+                  if line != f"# {key} is not set" and not line.startswith(key + "="))
+              return source + "\n" + (f"{key}=y" if enabled else f"# {key} is not set") + "\n"
+          s = put_bool(s, "CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL", True)
+          s = put_bool(s, "CONFIG_AR_SMV_BROADCAST_MIRROR", False)
+          s = put_bool(s, "CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL", True)
+          p.write_text(s, encoding="utf-8")
+          PY
+          idf.py reconfigure
+          grep -qx 'CONFIG_AR_PTP_LAB_TX=y' sdkconfig
+          grep -qx 'CONFIG_AR_SMV_LIVE_TX=y' sdkconfig
+          grep -qx 'CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y' sdkconfig
+          grep -qx '# CONFIG_AR_SMV_BROADCAST_MIRROR is not set' sdkconfig
+          grep -qx 'CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL=y' sdkconfig
+          grep -qx '# CONFIG_AR_PTP_ALLOW_NONSTANDARD_LAB_CADENCE is not set' sdkconfig
+          idf.py build
+
   build-esp32p4-ptp:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     strategy:
       fail-fast: false
       matrix:
@@ -115,6 +163,11 @@ jobs:
 
           set_config CONFIG_AR_PTP_LAB_TX y
           set_config CONFIG_AR_PTP_OPERATING_ROLE ${{ matrix.role_value }}
+          if [ "${{ matrix.role_name }}" = "source" ]; then
+            # Compile the guarded M2A control-plane/ISR adapter in a dedicated
+            # SOURCE build, without enabling it in the public default image.
+            set_config CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL y
+          fi
           set_config CONFIG_AR_PTP_DOMAIN 0
           set_config CONFIG_AR_PTP_TRANSPORT_SPECIFIC 1
           set_config CONFIG_AR_PTP_PORT_NUMBER 2
@@ -138,7 +191,7 @@ jobs:
           set_config CONFIG_AR_PTP_UNLOCK_OFFSET_NS 20000
           set_config CONFIG_AR_PTP_PHASE_STEP_THRESHOLD_NS 1000000
           set_config CONFIG_AR_PTP_LOCK_REQUIRED_SAMPLES 8
-          set_config CONFIG_AR_PTP_SYNC_TIMEOUT_MS 1000
+          set_config CONFIG_AR_PTP_SYNC_TIMEOUT_MS 3000
           set_config CONFIG_AR_PTP_HOLDOVER_TIMEOUT_MS 5000
           set_config CONFIG_AR_PTP_MAX_FREQ_ADJ_PPB 100000
 
@@ -154,6 +207,9 @@ jobs:
           grep -q '^CONFIG_AR_PTP_VLAN_ID=100$' sdkconfig
           grep -q '^CONFIG_AR_PTP_LOCK_OFFSET_NS=2000$' sdkconfig
           grep -q '^CONFIG_AR_PTP_LOCK_REQUIRED_SAMPLES=8$' sdkconfig
+          if [ "${{ matrix.role_name }}" = "source" ]; then
+            grep -q '^CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y$' sdkconfig
+          fi
 
       - name: Build PTP-P2 firmware
         run: source /opt/esp/idf/export.sh && idf.py build

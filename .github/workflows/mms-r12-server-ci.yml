@@ -2,6 +2,7 @@ name: MMS R1-R2 Server CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'include/ariec61850/acse/**'
       - 'include/ariec61850/mms/**'
@@ -19,8 +20,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   linux:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: Linux ${{ matrix.compiler }}
     runs-on: ubuntu-latest
     strategy:
@@ -52,6 +58,7 @@ jobs:
           ./build-mms-r12/ariec61850_mms_urcb_server --help
 
   windows:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: Windows MSVC
     runs-on: windows-latest
     steps:

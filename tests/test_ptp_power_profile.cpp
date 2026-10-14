@@ -44,6 +44,87 @@ void check_defaults_and_reject_nonstandard_cadence() {
     REQUIRE(!inspect_ptp_power_profile_cadence(profile).compatible());
 }
 
+void check_source_readiness_requires_fresh_wire_proof() {
+    PtpSourceReadinessGate gate;
+    REQUIRE(!gate.ready());
+    gate.observe_peer_delay(true);
+    REQUIRE(!gate.ready()); // Pdelay response is never Sync evidence.
+    gate.observe_announce(true);
+    REQUIRE(!gate.ready());
+    gate.observe_sync_pair(true);
+    REQUIRE(gate.ready());
+
+    gate.observe_sync_pair(false); // e.g., Follow_Up failed after Sync TX
+    REQUIRE(!gate.ready());
+    gate.observe_peer_delay(true);
+    REQUIRE(!gate.ready()); // previously sent Announce/Sync must not count
+    gate.observe_sync_pair(true);
+    REQUIRE(!gate.ready()); // need a *fresh* Announce too
+    gate.observe_announce(true);
+    REQUIRE(gate.ready());
+
+    gate.observe_peer_delay(false);
+    REQUIRE(!gate.ready());
+    gate.observe_announce(true);
+    REQUIRE(!gate.ready());
+    gate.observe_sync_pair(true);
+    REQUIRE(gate.ready());
+
+    // A failed Announce revokes readiness even if the Sync pair was fine.
+    gate.observe_announce(false);
+    REQUIRE(!gate.ready());
+    gate.observe_announce(true);
+    REQUIRE(!gate.ready());
+    gate.observe_sync_pair(true);
+    REQUIRE(gate.ready());
+    gate.invalidate(); // SOURCE STOP / teardown
+    REQUIRE(!gate.ready());
+}
+
+void check_source_heartbeat_freshness_and_time_provenance() {
+    // A late task or absent Announce must revoke READY without waiting for
+    // another SOURCE loop. A clock going backward is never healthy.
+    using Fresh = PtpSourceEvidenceFreshness;
+    REQUIRE(!Fresh::fresh(5000000, 0, 4700000, 3000000));
+    REQUIRE(!Fresh::fresh(5000000, 4700000, 0, 3000000));
+    REQUIRE(Fresh::fresh(5000000, 3000001, 4200000, 3000000));
+    REQUIRE(!Fresh::fresh(5000000, 2000000, 4200000, 3000000));
+    REQUIRE(!Fresh::fresh(5000000, 4200000, 1999999, 3000000));
+    REQUIRE(!Fresh::fresh(5000000, 5100000, 4200000, 3000000));
+    REQUIRE(!Fresh::fresh(5000000, 4200000, 5100000, 3000000));
+    REQUIRE(!Fresh::fresh(5000000, 4200000, 4200000, 0));
+    REQUIRE(Fresh::fresh(8000000, 6000000, 7000000, 3000000));
+    REQUIRE(!Fresh::fresh(10000001, 6000000, 7000000, 3000000));
+
+    const auto unverified = conservative_lab_time_properties(true, false);
+    REQUIRE(unverified.flags() == 0U);
+    REQUIRE(!unverified.ptp_timescale);
+    const auto unseeded = conservative_lab_time_properties(false, true);
+    REQUIRE(unseeded.flags() == 0U);
+    const auto verified = conservative_lab_time_properties(true, true);
+    REQUIRE(verified.flags() == 0x000CU);
+    REQUIRE(!verified.time_traceable && !verified.frequency_traceable);
+    // Test actual wire bytes separately from the code's own PTP decoder.
+    auto options = make_source();
+    options.time_properties = unverified;
+    PtpPublisherRuntime source{options};
+    REQUIRE(source.start());
+    const auto first = source.prepare_announce(PtpTimestamp{1700000037U, 0U});
+    REQUIRE(first.has_value());
+    REQUIRE(first->ethernet_frame[20] == 0x00U);
+    REQUIRE(first->ethernet_frame[21] == 0x00U);
+    source.stop();
+
+    options.time_properties = verified;
+    PtpPublisherRuntime explicit_offset{options};
+    REQUIRE(explicit_offset.start());
+    const auto second = explicit_offset.prepare_announce(PtpTimestamp{1700000037U, 0U});
+    REQUIRE(second.has_value());
+    REQUIRE(second->ethernet_frame[20] == 0x00U);
+    REQUIRE(second->ethernet_frame[21] == 0x0CU);
+    explicit_offset.stop();
+}
+
 void check_ptp_wire_sequence_and_identity() {
     auto options = make_source();
     constexpr std::uint8_t domain = 93U; // supported alternate network domain
@@ -219,6 +300,8 @@ void check_vlan_encoding_remains_configurable() {
 int main() {
     try {
         check_defaults_and_reject_nonstandard_cadence();
+        check_source_readiness_requires_fresh_wire_proof();
+        check_source_heartbeat_freshness_and_time_provenance();
         check_ptp_wire_sequence_and_identity();
         check_vlan_encoding_remains_configurable();
         check_tai_seed_and_truthful_time_properties();

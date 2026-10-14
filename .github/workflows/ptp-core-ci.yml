@@ -2,6 +2,7 @@ name: PTP Core CI
 
 on:
   push:
+    branches: [main]
     paths:
       - 'include/ariec61850/time_sync/**'
       - 'src/time_sync/**'
@@ -18,9 +19,12 @@ on:
       - 'tests/test_ptp_discipline.cpp'
       - 'tests/test_ptp_p2_hardening.cpp'
       - 'tests/test_sv_ptp_epoch.cpp'
+      - 'tests/test_sv_ptp_phase_authority.cpp'
+      - 'tests/test_sv_tx_egress_evidence.cpp'
       - 'tests/ptp_profile/**'
       - '.github/workflows/ptp-core-ci.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'include/ariec61850/time_sync/**'
       - 'src/time_sync/**'
@@ -37,14 +41,22 @@ on:
       - 'tests/test_ptp_discipline.cpp'
       - 'tests/test_ptp_p2_hardening.cpp'
       - 'tests/test_sv_ptp_epoch.cpp'
+      - 'tests/test_sv_ptp_phase_authority.cpp'
       - 'tests/ptp_profile/**'
       - '.github/workflows/ptp-core-ci.yml'
+
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   portable-ptp:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     strategy:
       fail-fast: false
       matrix:
@@ -75,6 +87,7 @@ jobs:
         run: ctest --test-dir build-ptp-${{ matrix.compiler }} --output-on-failure
 
   portable-ptp-msvc:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -116,6 +129,8 @@ jobs:
           Build-Target 'smp_synch_wire_offset_tests'
           Build-Target 'ptp_discipline_tests'
           Build-Target 'sv_ptp_epoch_tests'
+          Build-Target 'sv_ptp_phase_authority_tests'
+          Build-Target 'sv_tx_egress_evidence_tests'
           Build-Target 'ptp_p2_hardening_tests'
           Build-Target 'ptp_profile_analyze'
 

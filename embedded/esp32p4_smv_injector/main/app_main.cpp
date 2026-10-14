@@ -21,6 +21,22 @@
 #endif
 #endif
 #include "smp_synch_lab.hpp"
+#if defined(CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL) && CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL && \
+    CONFIG_AR_PTP_LAB_TX && defined(SOC_EMAC_IEEE1588V2_SUPPORTED) && \
+    SOC_EMAC_IEEE1588V2_SUPPORTED && ESP_IDF_VERSION_MAJOR < 6
+#define AR_SV_PTP_PHASE_SUPPORTED 1
+#include "ariec61850/time_sync/sv_ptp_phase_authority.hpp"
+#include "freertos/semphr.h"
+#else
+#define AR_SV_PTP_PHASE_SUPPORTED 0
+#endif
+#if AR_SV_PTP_PHASE_SUPPORTED && defined(CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL) && \
+    CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL
+#define AR_SV_TX_EGRESS_SUPPORTED 1
+#include "ariec61850/time_sync/sv_tx_egress_evidence.hpp"
+#else
+#define AR_SV_TX_EGRESS_SUPPORTED 0
+#endif
 #include "esp_err.h"
 #include "esp_eth.h"
 #include "esp_event.h"
@@ -67,6 +83,17 @@ using ar::iec61850::sampled_values::SvLiveSignalState;
 using ar::iec61850::time_sync::SvSecondBoundaryArm;
 using ar::iec61850::time_sync::SvPtpClockObservation;
 using ar::iec61850::time_sync::plan_sv_ptp_second_arm;
+#if AR_SV_PTP_PHASE_SUPPORTED
+using ar::iec61850::time_sync::SvBoundedSlewCursor;
+using ar::iec61850::time_sync::SvPtpPhaseAuthority;
+using ar::iec61850::time_sync::SvPtpPhaseObservation;
+using ar::iec61850::time_sync::SvPtpPublisherContinuityGate;
+#endif
+#if AR_SV_TX_EGRESS_SUPPORTED
+using ar::iec61850::time_sync::SvTxEgressEvidence;
+using ar::iec61850::time_sync::SvTxEgressObservation;
+using ar::iec61850::time_sync::SvTxEgressSummary;
+#endif
 
 constexpr char kTag[] = "ar_smv_p3";
 constexpr EventBits_t kLinkUpBit = BIT0;
@@ -97,7 +124,22 @@ struct TimingStats final {
 
 TimingStats g_interval_stats{};
 static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
+#if AR_SV_PTP_PHASE_SUPPORTED
+static_assert(std::atomic<std::int32_t>::is_always_lock_free);
+static_assert(std::atomic<bool>::is_always_lock_free);
+#endif
 std::atomic<std::uint32_t> g_sample_tick_total{0U};
+#if AR_SV_TX_EGRESS_SUPPORTED
+constexpr std::uint32_t kEgressEvidenceEveryZeroEpochs = 16U;
+portMUX_TYPE g_tx_egress_mux = portMUX_INITIALIZER_UNLOCKED;
+SvTxEgressEvidence g_tx_egress_evidence{};
+#endif
+#if AR_SV_PTP_PHASE_SUPPORTED
+SemaphoreHandle_t g_phase_timer_mutex = nullptr;
+gptimer_handle_t g_monitored_sample_clock = nullptr; // under mutex, never in ISR
+TaskHandle_t g_phase_observer_task = nullptr;
+std::atomic<std::uint32_t> g_phase_session_serial{0U};
+#endif
 
 struct PacketTemplate final {
     std::vector<std::uint8_t> bytes;
@@ -136,6 +178,21 @@ struct SampleClockContext final {
     TaskHandle_t publisher_task{};
     RationalScheduleCursor schedule{};
     gptimer_alarm_config_t next_alarm{};
+#if AR_SV_PTP_PHASE_SUPPORTED
+    // ISR-owned epoch count/deadline are published with release/acquire.
+    // Only the low 32 bits are used (71-minute wrap at 1 MHz).
+    std::atomic<std::uint32_t> epoch_generation{0U};
+    std::atomic<std::uint32_t> session_generation{0U};
+    std::atomic<std::uint32_t> last_epoch_alarm{0U};
+    std::atomic<std::int32_t> requested_slew_ticks{0};
+    std::atomic<std::int32_t> cumulative_slew_ticks{0};
+    std::atomic<std::uint32_t> publisher_fault_generation{0U};
+    std::atomic<bool> phase_authority_valid{false};
+    SvBoundedSlewCursor phase_slew{};
+    std::uint32_t phase_index{};
+    bool previous_phase_healthy{};
+    bool phase_enabled{}; // set before timer START; only ISR reads it
+#endif
 };
 
 SampleClockContext g_sample_clock_context{};
@@ -372,7 +429,63 @@ bool sample_alarm_callback(
     const gptimer_alarm_event_data_t* event,
     void* user_context) {
     auto* context = static_cast<SampleClockContext*>(user_context);
-    const auto interval = context->schedule.next_ticks();
+    std::int32_t adjustment = 0;
+#if AR_SV_PTP_PHASE_SUPPORTED
+    const std::uint32_t index = context->phase_index;
+    bool epoch_boundary = false;
+    if (context->phase_enabled) {
+        if (index == 0U) {
+            epoch_boundary = true;
+            context->last_epoch_alarm.store(
+                static_cast<std::uint32_t>(event->alarm_value),
+                std::memory_order_relaxed);
+            context->epoch_generation.fetch_add(1U, std::memory_order_release);
+            context->phase_slew.arm(context->schedule.rate_hz, 0);
+        }
+        context->phase_index = index + 1U >= context->schedule.rate_hz
+            ? 0U : index + 1U;
+        // Commands arrive after a cross-clock read from the background task.
+        // Apply within THIS epoch, across all remaining intervals. Never
+        // change smpCnt or issue multiple timer alarms to catch up.
+        const bool phase_valid = context->phase_authority_valid.load(
+            std::memory_order_relaxed);
+        if (!phase_valid) {
+            // Cancel once on a healthy->fault transition; do not reset
+            // distributor memory at the full 4k/4.8k ISR cadence.
+            if (context->previous_phase_healthy) {
+                context->phase_slew.arm(context->schedule.rate_hz, 0);
+                context->previous_phase_healthy = false;
+            }
+        } else {
+            context->previous_phase_healthy = true;
+            // Most frames have no new command. Avoid a locked RMW atomic
+            // exchange on all 4k/4.8k interrupts; take it only when nonzero.
+            if (context->requested_slew_ticks.load(
+                    std::memory_order_relaxed) != 0) {
+                const std::int32_t requested =
+                    context->requested_slew_ticks.exchange(
+                        0, std::memory_order_relaxed);
+                if (requested != 0 &&
+                    index + 16U < context->schedule.rate_hz) {
+                    context->phase_slew.arm(
+                        context->schedule.rate_hz - index, requested);
+                }
+            }
+        }
+        adjustment = context->phase_slew.next_adjustment();
+        if (adjustment != 0) {
+            context->cumulative_slew_ticks.fetch_add(
+                adjustment, std::memory_order_relaxed);
+        }
+    }
+#endif
+    std::uint32_t interval = context->schedule.next_ticks();
+#if AR_SV_PTP_PHASE_SUPPORTED
+    // Exactly the original ISR path in normal production builds. The
+    // experimental opt-in only adjusts a positive deadline by one tick.
+    if (adjustment > 0) ++interval;
+    else if (adjustment < 0 && interval > 1U) --interval;
+#endif
     context->next_alarm = {};
     context->next_alarm.alarm_count = event->alarm_value + interval;
     context->next_alarm.flags.auto_reload_on_alarm = false;
@@ -380,6 +493,11 @@ bool sample_alarm_callback(
 
     BaseType_t high_priority_task_woken = pdFALSE;
     vTaskNotifyGiveFromISR(context->publisher_task, &high_priority_task_woken);
+#if AR_SV_PTP_PHASE_SUPPORTED
+    if (epoch_boundary && g_phase_observer_task != nullptr) {
+        vTaskNotifyGiveFromISR(g_phase_observer_task, &high_priority_task_woken);
+    }
+#endif
     return high_priority_task_woken == pdTRUE;
 }
 
@@ -421,9 +539,29 @@ gptimer_handle_t start_sample_clock(
     TaskHandle_t publisher_task_handle,
     const std::uint32_t publisher_rate_hz,
     const esp_eth_handle_t eth_handle,
-    bool& epoch_armed) {
+    bool& epoch_armed,
+    const bool profile_has_second_aligned_counter) {
     epoch_armed = false;
+#if AR_SV_PTP_PHASE_SUPPORTED
+    g_sample_clock_context.publisher_task = publisher_task_handle;
+    g_sample_clock_context.next_alarm = {};
+    g_sample_clock_context.epoch_generation.store(0U, std::memory_order_relaxed);
+    g_sample_clock_context.session_generation.store(
+        g_phase_session_serial.fetch_add(1U, std::memory_order_relaxed) + 1U,
+        std::memory_order_release);
+    g_sample_clock_context.last_epoch_alarm.store(0U, std::memory_order_relaxed);
+    g_sample_clock_context.requested_slew_ticks.store(0, std::memory_order_relaxed);
+    g_sample_clock_context.cumulative_slew_ticks.store(0, std::memory_order_relaxed);
+    g_sample_clock_context.publisher_fault_generation.store(0U, std::memory_order_relaxed);
+    g_sample_clock_context.phase_authority_valid.store(false, std::memory_order_relaxed);
+    g_sample_clock_context.phase_index = 0U;
+    g_sample_clock_context.previous_phase_healthy = false;
+    g_sample_clock_context.phase_enabled = false;
+    g_sample_clock_context.phase_slew.arm(publisher_rate_hz, 0);
+#else
     g_sample_clock_context = {};
+    (void)profile_has_second_aligned_counter;
+#endif
     g_sample_clock_context.publisher_task = publisher_task_handle;
     g_sample_clock_context.schedule.reset(publisher_rate_hz);
 
@@ -444,6 +582,11 @@ gptimer_handle_t start_sample_clock(
     // cross-clock arm latency without touching the high-frequency callback.
     const auto epoch_arm = plan_source_ptp_epoch_arm(eth_handle);
     epoch_armed = epoch_arm.has_value();
+#if AR_SV_PTP_PHASE_SUPPORTED
+    g_sample_clock_context.phase_enabled =
+        epoch_armed && profile_has_second_aligned_counter &&
+        g_phase_observer_task != nullptr && g_phase_timer_mutex != nullptr;
+#endif
     g_sample_clock_context.next_alarm = {};
     g_sample_clock_context.next_alarm.alarm_count = epoch_arm.has_value()
         ? epoch_arm->first_alarm_us
@@ -452,15 +595,37 @@ gptimer_handle_t start_sample_clock(
     ESP_ERROR_CHECK(gptimer_set_alarm_action(timer, &g_sample_clock_context.next_alarm));
     ESP_ERROR_CHECK(gptimer_enable(timer));
     ESP_ERROR_CHECK(gptimer_start(timer));
+#if AR_SV_PTP_PHASE_SUPPORTED
+    if (g_sample_clock_context.phase_enabled) {
+        xSemaphoreTake(g_phase_timer_mutex, portMAX_DELAY);
+        g_monitored_sample_clock = timer;
+        xSemaphoreGive(g_phase_timer_mutex);
+    }
+#endif
     return timer;
 }
 
 void stop_sample_clock(gptimer_handle_t& timer) noexcept {
     if (timer == nullptr) return;
+#if AR_SV_PTP_PHASE_SUPPORTED
+    // Serialize teardown with the non-ISR phase observer, so a GPTimer
+    // handle can never be deleted during its bracketed EMAC PTP read.
+    xSemaphoreTake(g_phase_timer_mutex, portMAX_DELAY);
+    if (g_monitored_sample_clock == timer) g_monitored_sample_clock = nullptr;
+    g_sample_clock_context.session_generation.store(
+        0U, std::memory_order_release);
+    g_sample_clock_context.requested_slew_ticks.store(
+        0, std::memory_order_relaxed);
+    g_sample_clock_context.phase_authority_valid.store(
+        false, std::memory_order_release);
+#endif
     static_cast<void>(gptimer_stop(timer));
     static_cast<void>(gptimer_disable(timer));
     static_cast<void>(gptimer_del_timer(timer));
     timer = nullptr;
+#if AR_SV_PTP_PHASE_SUPPORTED
+    xSemaphoreGive(g_phase_timer_mutex);
+#endif
 }
 
 void publisher_task(void* argument) {
@@ -500,6 +665,12 @@ void publisher_task(void* argument) {
     bool schedule_anchored = false;
     bool epoch_armed = false;
     std::int64_t expected_wake_us = 0;
+#if AR_SV_TX_EGRESS_SUPPORTED
+    std::uint32_t zero_epoch_frames_seen = 0U;
+#endif
+#if AR_SV_PTP_PHASE_SUPPORTED
+    std::int32_t previous_slew_total = 0;
+#endif
     std::uint32_t consecutive_canonical_tx_failures = 0U;
     esp_err_t last_canonical_tx_error = ESP_OK;
 
@@ -542,6 +713,15 @@ void publisher_task(void* argument) {
             consecutive_canonical_tx_failures = 0U;
             last_canonical_tx_error = ESP_OK;
             expected_schedule.reset(active_profile.publisher_rate_hz);
+#if AR_SV_TX_EGRESS_SUPPORTED
+            zero_epoch_frames_seen = 0U;
+            portENTER_CRITICAL(&g_tx_egress_mux);
+            g_tx_egress_evidence.reset();
+            portEXIT_CRITICAL(&g_tx_egress_mux);
+#endif
+#if AR_SV_PTP_PHASE_SUPPORTED
+            previous_slew_total = 0;
+#endif
             ESP_LOGI(kTag,
                      "PROFILE armed generation=%llu svID=%s APPID=0x%04X rate=%lu wrap=%u confRev=%lu VLAN=%u/%u/%u frameLen=%u",
                      static_cast<unsigned long long>(active_profile.generation),
@@ -560,7 +740,13 @@ void publisher_task(void* argument) {
             // dozens of ISR notifications before the publisher could consume
             // its first tick, so every START falsely began with missed slots.
             sample_clock = start_sample_clock(
-                task_handle, active_profile.publisher_rate_hz, eth_handle, epoch_armed);
+                task_handle, active_profile.publisher_rate_hz, eth_handle,
+                epoch_armed,
+                // The 1-ASDU-per-frame 80-SPC profile has exactly one
+                // sample-counter epoch per publisher second. Other SCL
+                // profiles need an explicit standard-derived epoch policy.
+                active_profile.sample_counter_modulus ==
+                    active_profile.publisher_rate_hz);
             if (!epoch_armed) {
                 // Legacy first alarm already consumes the first rational tick;
                 // a PTP-armed first alarm is an independent epoch delay.
@@ -589,10 +775,32 @@ void publisher_task(void* argument) {
                 elapsed_ticks += expected_schedule.next_ticks();
             }
             expected_wake_us += static_cast<std::int64_t>(elapsed_ticks);
+#if AR_SV_PTP_PHASE_SUPPORTED
+            // Preserve the existing lateness metric when the ISR slews its
+            // timer deadlines. Otherwise planned corrective ticks would be
+            // misreported as publisher latency/drift.
+            const std::int32_t latest_slew_total =
+                g_sample_clock_context.cumulative_slew_ticks.load(
+                    std::memory_order_relaxed);
+            expected_wake_us +=
+                ar::iec61850::time_sync::sv_phase_detail::signed_delta_u32(
+                    static_cast<std::uint32_t>(latest_slew_total),
+                    static_cast<std::uint32_t>(previous_slew_total));
+            previous_slew_total = latest_slew_total;
+#endif
         }
 
         const auto signal_state = live_signal_snapshot();
         if (pending_ticks > 1U) {
+#if AR_SV_PTP_PHASE_SUPPORTED
+            // A skipped frame breaks canonical timeline evidence, even if
+            // GPTimer deadlines were mathematically aligned. Fault-only
+            // atomic operations; the normal 4k/4.8kHz path is untouched.
+            g_sample_clock_context.publisher_fault_generation.fetch_add(
+                1U, std::memory_order_release);
+            g_sample_clock_context.phase_authority_valid.store(
+                false, std::memory_order_release);
+#endif
             missed_slots = static_cast<std::uint64_t>(pending_ticks - 1U);
             canonical_sample_count = static_cast<std::uint16_t>(
                 (static_cast<std::uint32_t>(canonical_sample_count) + missed_slots) %
@@ -613,6 +821,12 @@ void publisher_task(void* argument) {
             ++local.canonical_fail;
             last_canonical_tx_error = ESP_ERR_INVALID_STATE;
             ++consecutive_canonical_tx_failures;
+#if AR_SV_PTP_PHASE_SUPPORTED
+            g_sample_clock_context.publisher_fault_generation.fetch_add(
+                1U, std::memory_order_release);
+            g_sample_clock_context.phase_authority_valid.store(
+                false, std::memory_order_release);
+#endif
 #if CONFIG_AR_SMV_BROADCAST_MIRROR
             ++local.mirror_fail;
 #endif
@@ -622,8 +836,84 @@ void publisher_task(void* argument) {
                 static_cast<std::uint8_t>(sync_decision.value);
             patch_packet(
                 canonical, canonical_sample_count, sample_synchronization, row, signal_state);
+#if AR_SV_TX_EGRESS_SUPPORTED
+            // ONCE / 16 seconds, replace normal SV TX for the real canonical
+            // frame with descriptor-stamped TX. ESP-IDF 5.5.4 polls the DMA
+            // descriptor for its timestamp: never run this on every frame.
+            // This is diagnostic evidence, not validated IED synchronization.
+            bool take_egress_timestamp = false;
+            SvTxEgressObservation egress{};
+            std::uint32_t evidence_session = 0U;
+            std::uint32_t fault_generation_before = 0U;
+            if (epoch_armed && g_sample_clock_context.phase_enabled &&
+                canonical_sample_count == 0U && missed_slots == 0U &&
+                active_profile.sample_counter_modulus ==
+                    active_profile.publisher_rate_hz) {
+                ++zero_epoch_frames_seen;
+                if ((zero_epoch_frames_seen % kEgressEvidenceEveryZeroEpochs) == 0U &&
+                    ar_ptp_lab_is_running()) {
+                    take_egress_timestamp = true;
+                    evidence_session = g_sample_clock_context.session_generation.load(
+                        std::memory_order_acquire);
+                    egress.sample_epoch_generation =
+                        g_sample_clock_context.epoch_generation.load(
+                            std::memory_order_acquire);
+                    egress.publisher_session_generation = evidence_session;
+                    egress.ptp_source_generation = ar_ptp_lab_source_generation();
+                    egress.scheduled_alarm_ticks_low32 =
+                        g_sample_clock_context.last_epoch_alarm.load(
+                            std::memory_order_acquire);
+                    fault_generation_before =
+                        g_sample_clock_context.publisher_fault_generation.load(
+                            std::memory_order_acquire);
+                    egress.publisher_fault_generation = fault_generation_before;
+                    egress.smp_cnt = canonical_sample_count;
+                    egress.no_missed_slots = pending_ticks == 1U;
+                }
+            }
+            eth_mac_time_t egress_hw_time{};
+            const std::int64_t submit_before_us =
+                take_egress_timestamp ? esp_timer_get_time() : 0;
+            const esp_err_t canonical_result = take_egress_timestamp
+                ? esp_eth_transmit_ctrl_vargs(
+                    eth_handle, &egress_hw_time, 2U, canonical.bytes.data(),
+                    static_cast<std::uint32_t>(canonical.bytes.size()))
+                : esp_eth_transmit(
+                    eth_handle, canonical.bytes.data(), canonical.bytes.size());
+            if (take_egress_timestamp) {
+                const std::int64_t submit_after_us = esp_timer_get_time();
+                const std::int64_t duration =
+                    submit_after_us >= submit_before_us
+                    ? submit_after_us - submit_before_us : 0LL;
+                egress.submit_duration_us = static_cast<std::uint32_t>(
+                    std::min<std::int64_t>(duration, 0xFFFFFFFFLL));
+                // A descriptor polling delay that exceeds one scheduled
+                // sample interval is diagnostic interference: retain the TX
+                // timestamp but mark the sample's timing evidence unqualified.
+                egress.no_missed_slots = egress.no_missed_slots &&
+                    egress.submit_duration_us <=
+                        kTimerResolutionHz / active_profile.publisher_rate_hz;
+                egress.canonical_tx_success = canonical_result == ESP_OK;
+                egress.hw_ptp_seconds = egress_hw_time.seconds;
+                egress.hw_ptp_nanoseconds = egress_hw_time.nanoseconds;
+                egress.same_sample_epoch = egress.ptp_source_generation != 0U &&
+                    ar_ptp_lab_source_generation() ==
+                        egress.ptp_source_generation &&
+                    evidence_session != 0U &&
+                    g_sample_clock_context.session_generation.load(
+                        std::memory_order_acquire) == evidence_session &&
+                    g_sample_clock_context.epoch_generation.load(
+                        std::memory_order_acquire) == egress.sample_epoch_generation &&
+                    g_sample_clock_context.publisher_fault_generation.load(
+                        std::memory_order_acquire) == fault_generation_before;
+                portENTER_CRITICAL(&g_tx_egress_mux);
+                static_cast<void>(g_tx_egress_evidence.record(egress));
+                portEXIT_CRITICAL(&g_tx_egress_mux);
+            }
+#else
             const esp_err_t canonical_result =
                 esp_eth_transmit(eth_handle, canonical.bytes.data(), canonical.bytes.size());
+#endif
             if (canonical_result == ESP_OK) {
                 ++local.canonical_ok;
                 consecutive_canonical_tx_failures = 0U;
@@ -632,6 +922,12 @@ void publisher_task(void* argument) {
                 ++local.canonical_fail;
                 last_canonical_tx_error = canonical_result;
                 ++consecutive_canonical_tx_failures;
+#if AR_SV_PTP_PHASE_SUPPORTED
+                g_sample_clock_context.publisher_fault_generation.fetch_add(
+                    1U, std::memory_order_release);
+                g_sample_clock_context.phase_authority_valid.store(
+                    false, std::memory_order_release);
+#endif
             }
 
 #if CONFIG_AR_SMV_BROADCAST_MIRROR
@@ -680,11 +976,171 @@ void publisher_task(void* argument) {
 #endif
 }
 
+#if AR_SV_PTP_PHASE_SUPPORTED
+// Revoke only the matching GPTimer generation; a stale monitor must never
+// overwrite the new session's phase gate following STOP/START.
+void revoke_sv_phase_session(const std::uint32_t expected_session) noexcept {
+    xSemaphoreTake(g_phase_timer_mutex, portMAX_DELAY);
+    if (expected_session != 0U &&
+        g_sample_clock_context.session_generation.load(
+            std::memory_order_acquire) == expected_session) {
+        g_sample_clock_context.phase_authority_valid.store(
+            false, std::memory_order_release);
+        g_sample_clock_context.requested_slew_ticks.store(
+            0, std::memory_order_relaxed);
+    }
+    xSemaphoreGive(g_phase_timer_mutex);
+}
+
+// Shadow-verified software phase servo. This task never controls smpSynch,
+// executes no ISR code and acquires a GPTimer handle under a teardown mutex.
+// It samples clocks once per sample-counter epoch, 250ms after smpCnt=0.
+void sv_ptp_phase_observer_task(void* argument) {
+    const auto eth_handle = static_cast<esp_eth_handle_t>(argument);
+    SvPtpPhaseAuthority controller;
+    SvPtpPublisherContinuityGate continuity;
+    std::uint32_t accepted_epochs = 0U;
+    std::uint32_t controller_session = 0U;
+    while (true) {
+        const std::uint32_t events = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        const std::uint32_t notified_session =
+            g_sample_clock_context.session_generation.load(
+                std::memory_order_acquire);
+        if (controller_session != notified_session) {
+            controller.reset();
+            continuity.reset();
+            controller_session = notified_session;
+        }
+        vTaskDelay(pdMS_TO_TICKS(250));
+        const std::uint32_t current_faults =
+            g_sample_clock_context.publisher_fault_generation.load(
+                std::memory_order_acquire);
+        const std::uint32_t source_generation =
+            ar_ptp_lab_source_generation();
+        // Source START/recovery is a new time authority even if the hardware
+        // seconds are continuous. Never carry PI integrator over source reset.
+        if (source_generation == 0U ||
+            !continuity.unchanged(notified_session, current_faults,
+                                  source_generation)) {
+            static_cast<void>(controller.invalidate());
+            revoke_sv_phase_session(notified_session);
+            continue;
+        }
+
+        ar_ptp_lab_config_t config{};
+        if (events != 1U || !live_tx_running() ||
+            (xEventGroupGetBits(g_link_events) & kLinkUpBit) == 0U ||
+            !ar_ptp_lab_is_running() || !ar_ptp_lab_get_config(&config) ||
+            config.role != AR_PTP_ROLE_LAB_SOURCE) {
+            static_cast<void>(controller.invalidate());
+            revoke_sv_phase_session(notified_session);
+            continue;
+        }
+
+        std::uint64_t before = 0U;
+        std::uint64_t after = 0U;
+        eth_mac_time_t ptp{};
+        bool evidence_valid = false;
+        SvPtpPhaseObservation observation{};
+        xSemaphoreTake(g_phase_timer_mutex, portMAX_DELAY);
+        const gptimer_handle_t timer = g_monitored_sample_clock;
+        if (timer != nullptr && notified_session != 0U &&
+            g_sample_clock_context.session_generation.load(
+                std::memory_order_acquire) == notified_session) {
+            const std::uint32_t generation_before =
+                g_sample_clock_context.epoch_generation.load(
+                    std::memory_order_acquire);
+            const esp_err_t before_rc = gptimer_get_raw_count(timer, &before);
+            const esp_err_t ptp_rc = esp_eth_ioctl(
+                eth_handle, static_cast<esp_eth_io_cmd_t>(
+                    ETH_MAC_ESP_CMD_G_PTP_TIME), &ptp);
+            const esp_err_t after_rc = gptimer_get_raw_count(timer, &after);
+            const std::uint32_t generation_after =
+                g_sample_clock_context.epoch_generation.load(
+                    std::memory_order_acquire);
+            if (before_rc == ESP_OK && ptp_rc == ESP_OK &&
+                after_rc == ESP_OK && generation_before != 0U &&
+                generation_before == generation_after &&
+                ptp.nanoseconds >= 100000000U &&
+                ptp.nanoseconds <= 800000000U) {
+                observation = SvPtpPhaseObservation{
+                    static_cast<std::uint32_t>(before),
+                    static_cast<std::uint32_t>(after),
+                    g_sample_clock_context.last_epoch_alarm.load(
+                        std::memory_order_acquire),
+                    generation_after,
+                    static_cast<std::uint64_t>(ptp.seconds),
+                    ptp.nanoseconds};
+                evidence_valid = true;
+            }
+        }
+        xSemaphoreGive(g_phase_timer_mutex);
+
+        if (!evidence_valid || !ar_ptp_lab_is_running() ||
+            ar_ptp_lab_source_generation() != source_generation) {
+            static_cast<void>(controller.invalidate());
+            revoke_sv_phase_session(notified_session);
+            continue;
+        }
+
+        const auto decision = controller.observe(observation);
+        // Handoff and GPTimer deletion share a control-plane mutex:
+        // neither a stale sample nor a recycled timer can receive a command.
+        bool committed = false;
+        xSemaphoreTake(g_phase_timer_mutex, portMAX_DELAY);
+        // Check fault generation at the serialized command handoff, not
+        // earlier while this task may be waiting for timer teardown.
+        const bool no_new_publisher_fault =
+            g_sample_clock_context.publisher_fault_generation.load(
+                std::memory_order_acquire) == current_faults;
+        const bool session_matches = notified_session != 0U &&
+            g_monitored_sample_clock != nullptr &&
+            g_sample_clock_context.session_generation.load(
+                std::memory_order_acquire) == notified_session;
+        if (session_matches &&
+            g_sample_clock_context.epoch_generation.load(
+                std::memory_order_acquire) == observation.last_sv_epoch_generation &&
+            decision.accepted && live_tx_running() &&
+            ar_ptp_lab_source_generation() == source_generation &&
+            no_new_publisher_fault) {
+            g_sample_clock_context.phase_authority_valid.store(
+                true, std::memory_order_release);
+            g_sample_clock_context.requested_slew_ticks.store(
+                decision.slew_ticks_next_epoch, std::memory_order_release);
+            committed = true;
+        } else if (session_matches) {
+            g_sample_clock_context.phase_authority_valid.store(
+                false, std::memory_order_release);
+            g_sample_clock_context.requested_slew_ticks.store(
+                0, std::memory_order_relaxed);
+        }
+        xSemaphoreGive(g_phase_timer_mutex);
+        if (!committed) {
+            static_cast<void>(controller.invalidate());
+            continue;
+        }
+        ++accepted_epochs;
+        if ((accepted_epochs % 60U) == 0U) {
+            ESP_LOGI(kTag,
+                "SV/PTP phase SW evidence: phase=%ld us uncertainty=%lu us "
+                "slew=%ld ticks/epoch tracking=%u; smpSynch AUTO remains 0",
+                static_cast<long>(decision.phase_error_us),
+                static_cast<unsigned long>(decision.observation_uncertainty_us),
+                static_cast<long>(decision.slew_ticks_next_epoch),
+                decision.software_tracking ? 1U : 0U);
+        }
+    }
+}
+#endif
+
 void telemetry_task(void*) {
     std::uint32_t previous_tick_total = 0U;
     std::int64_t previous_tick_time_us = 0;
     bool rate_baseline_valid = false;
     TimingStats baseline_stats{};
+#if AR_SV_TX_EGRESS_SUPPORTED
+    std::uint32_t previously_reported_egress = 0U;
+#endif
 
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -693,6 +1149,41 @@ void telemetry_task(void*) {
         snapshot = g_interval_stats;
         g_interval_stats = TimingStats{};
         portEXIT_CRITICAL(&g_stats_mux);
+#if AR_SV_TX_EGRESS_SUPPORTED
+        SvTxEgressSummary egress_snapshot{};
+        portENTER_CRITICAL(&g_tx_egress_mux);
+        egress_snapshot = g_tx_egress_evidence.summary();
+        portEXIT_CRITICAL(&g_tx_egress_mux);
+        if (egress_snapshot.attempted != previously_reported_egress) {
+            previously_reported_egress = egress_snapshot.attempted;
+            ESP_LOGI(kTag,
+                "SV MAC TX descriptor evidence (LAB, 1/16 smpCnt=0): "
+                "attempted=%lu baseline=%lu measured=%lu invalid=%lu txfail=%lu no_hw_ts=%lu "
+                "SV_discontinuity=%lu PTP_clock_step=%lu PTP_source_changed=%lu "
+                "PTP-egress-phase_ns[min/mean/max]=%ld/%lld/%ld "
+                "submit_max_us=%lu last_epoch=%lu last_alarm_ticks=%lu; "
+                "PTP/SV absolute accuracy and smpSynch NOT QUALIFIED",
+                static_cast<unsigned long>(egress_snapshot.attempted),
+                static_cast<unsigned long>(egress_snapshot.baseline_established),
+                static_cast<unsigned long>(egress_snapshot.measured),
+                static_cast<unsigned long>(egress_snapshot.rejected_epoch),
+                static_cast<unsigned long>(egress_snapshot.failed_transmit),
+                static_cast<unsigned long>(egress_snapshot.missing_hw_timestamp),
+                static_cast<unsigned long>(egress_snapshot.publisher_discontinuities),
+                static_cast<unsigned long>(egress_snapshot.ptp_clock_discontinuities),
+                static_cast<unsigned long>(egress_snapshot.ptp_source_changes),
+                static_cast<long>(egress_snapshot.measured > 0U
+                    ? egress_snapshot.min_phase_ns : 0),
+                static_cast<long long>(egress_snapshot.measured > 0U
+                    ? egress_snapshot.phase_sum_ns /
+                        static_cast<std::int64_t>(egress_snapshot.measured) : 0LL),
+                static_cast<long>(egress_snapshot.measured > 0U
+                    ? egress_snapshot.max_phase_ns : 0),
+                static_cast<unsigned long>(egress_snapshot.max_submit_duration_us),
+                static_cast<unsigned long>(egress_snapshot.last_epoch_generation),
+                static_cast<unsigned long>(egress_snapshot.last_alarm_ticks_low32));
+        }
+#endif
 
         const std::int64_t now_us = esp_timer_get_time();
         const std::uint32_t tick_total = g_sample_tick_total.load(std::memory_order_relaxed);
@@ -769,6 +1260,22 @@ extern "C" void app_main(void) {
 
 #if CONFIG_AR_SMV_LIVE_TX && CONFIG_AR_SMV_P2_REALTIME_50HZ
     runtime_profile_initialize();
+#if AR_SV_PTP_PHASE_SUPPORTED
+    g_phase_timer_mutex = xSemaphoreCreateMutex();
+    if (g_phase_timer_mutex == nullptr) {
+        ESP_LOGE(kTag, "PTP/SV phase observer mutex allocation failed");
+        return;
+    }
+    if (xTaskCreatePinnedToCore(
+            &sv_ptp_phase_observer_task, "ar_smv_ptp_phase", 6144, eth_handle,
+            2, &g_phase_observer_task, 0) != pdPASS) {
+        ESP_LOGE(kTag, "Failed to create PTP/SV phase observer on CPU0");
+        return;
+    }
+    ESP_LOGW(kTag,
+        "Experimental PTP/SV phase servo enabled: software-only evidence; "
+        "physical time accuracy and smpSynch qualification NOT established");
+#endif
     live_control_initialize(
         static_cast<std::int32_t>(CONFIG_AR_SMV_CURRENT_RMS_MA),
         static_cast<std::int32_t>(CONFIG_AR_SMV_VOLTAGE_RMS_MV / 10));

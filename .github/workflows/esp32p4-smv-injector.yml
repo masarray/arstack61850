@@ -2,7 +2,9 @@ name: ESP32-P4 SMV Injector
 
 on:
   workflow_call:
+  workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - 'embedded/esp32p4_smv_injector/**'
       - 'include/ariec61850/asn1/**'
@@ -17,6 +19,7 @@ on:
       - 'src/sampled_values/**'
       - '.github/workflows/esp32p4-smv-injector.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'embedded/esp32p4_smv_injector/**'
       - 'include/ariec61850/asn1/**'
@@ -35,8 +38,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: esp32p4-smv-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   ARSTACK_FIRMWARE_VERSION: '0.1.1'
@@ -44,6 +47,7 @@ env:
 
 jobs:
   build-esp32p4:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     container:

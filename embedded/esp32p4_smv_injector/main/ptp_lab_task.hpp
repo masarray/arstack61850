@@ -129,6 +129,10 @@ void ar_ptp_lab_stop(void);
 /** Return whether the selected PTP runtime is currently ready/running. */
 bool ar_ptp_lab_is_running(void);
 
+/** Nonzero only for a currently ready SOURCE. Increments when PTP SOURCE
+ * becomes ready after START or after a clock/TX failure; not traceability. */
+uint32_t ar_ptp_lab_source_generation(void);
+
 /** Obtain a coherent live status snapshot for serial/GUI observability. */
 bool ar_ptp_lab_get_status(ar_ptp_lab_status_t* status);
 

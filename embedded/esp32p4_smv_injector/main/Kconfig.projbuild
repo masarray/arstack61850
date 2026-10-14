@@ -55,6 +55,34 @@ config AR_PTP_LAB_TX
         role 2 is passive monitor-only. This feature is not a GPS-backed or
         certified grandmaster claim.
 
+config AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL
+    bool "LAB ONLY: continuous bounded PTP-to-SV phase steering (experimental)"
+    default n
+    depends on AR_PTP_LAB_TX && AR_SMV_P2_REALTIME_50HZ
+    help
+        Opt-in experimental EMAC-PTP / GPTimer phase bridge. Reads hardware
+        clocks in a low-priority task once per SV second, then distributes
+        at most 400 +/-1us corrections across remaining SV deadlines.
+        Requires SOURCE active BEFORE SV START and exactly one transmitted
+        ASDU per sample with publisher fps matching smpCnt modulus.
+        AUTO smpSynch remains unsynchronized until independent wire/hardware
+        timestamp evidence is available. DO NOT use on a live substation.
+
+config AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL
+    bool "LAB ONLY: sparse canonical SV EMAC hardware TX timestamp evidence"
+    default n
+    depends on AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL && !AR_SMV_BROADCAST_MIRROR && !AR_SMV_DIAGNOSTIC_PROBES
+    help
+        Diagnostic only: once per 16 canonical smpCnt-zero epochs, use the
+        ESP32-P4 MAC extended TX API to request a descriptor timestamp on
+        the actual SV frame, while all other frames use the regular TX path.
+        The ESP-IDF 5.x driver busy-waits for the selected descriptor, which
+        can perturb realtime scheduling; never enable on a live process bus.
+        Disable the broadcast mirror and diagnostic probes to avoid extra
+        competing TX traffic. Missing/non-SV timestamps are recorded as
+        unavailable, never substituted with esp_timer time or claimed as
+        proof that a relay has synchronized. Defaults OFF.
+
 config AR_PTP_OPERATING_ROLE
     int "PTP operating role (0=lab source, 1=time receiver, 2=monitor)"
     range 0 2
@@ -64,6 +92,17 @@ config AR_PTP_OPERATING_ROLE
         LAB_SOURCE sends Announce/Sync and can answer Pdelay. TIME_RECEIVER
         listens to an external PTP source, performs hardware-timestamped peer
         delay, and disciplines the ESP32-P4 IEEE1588 clock. MONITOR is passive.
+
+config AR_PTP_ALLOW_NONSTANDARD_LAB_CADENCE
+    bool "LAB ONLY: allow non-IEC 61850-9-3 SOURCE cadence"
+    default n
+    depends on AR_PTP_LAB_TX
+    help
+        Default SOURCE admission enforces nominal 1-second Announce and Sync
+        and an enabled hardware peer-delay responder, as expected by the
+        IEC/IEEE 61850-9-3 power utility profile. Turn this on ONLY for
+        intentional isolated nonstandard packet tests; it does not make
+        the LAB_SOURCE a traceable certified PTP Grandmaster.
 
 config AR_PTP_DOMAIN
     int "PTP domain number"
@@ -195,9 +234,13 @@ config AR_PTP_MANUAL_UTC_OFFSET_VALID
     default n
     depends on AR_PTP_LAB_TX
     help
-        Enable only after the operator checks the configured TAI-UTC offset
-        against a current authoritative leap-second record. This flag does
-        NOT imply UTC traceability, frequency lock, or high clock accuracy.
+        Enable only after the operator verifies the configured TAI-UTC offset
+        against an authoritative leap-second record AND verifies that the
+        RTC-derived UTC epoch is meaningfully correct. Without this, SOURCE
+        advertises neither the PTP-timescale nor offset-valid flag even if
+        the hardware clock could be seeded. This remains an INTERNAL
+        OSCILLATOR and does NOT imply UTC traceability, frequency lock,
+        microsecond-grade accuracy, or a certified Grandmaster.
         The runtime also requires a plausible system UTC epoch before it
         advertises currentUtcOffsetValid.
 

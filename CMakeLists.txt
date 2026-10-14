@@ -166,6 +166,11 @@ if(ARIEC61850_BUILD_TOOLS)
     target_compile_features(ariec61850_ptp_analyze PRIVATE cxx_std_20)
     ariec61850_apply_warnings(ariec61850_ptp_analyze)
     ariec61850_apply_sanitizers(ariec61850_ptp_analyze)
+    add_executable(ariec61850_ptp_sv_wire_audit tools/ptp_sv_wire_audit.cpp)
+    target_link_libraries(ariec61850_ptp_sv_wire_audit PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_ptp_sv_wire_audit PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_ptp_sv_wire_audit)
+    ariec61850_apply_sanitizers(ariec61850_ptp_sv_wire_audit)
 
     add_executable(ariec61850_comtrade_inspect tools/comtrade_inspect.cpp)
     target_link_libraries(ariec61850_comtrade_inspect PRIVATE ARIEC61850::core)
@@ -498,6 +503,8 @@ if(ARIEC61850_BUILD_TESTS)
     endforeach()
 
     if(ARIEC61850_BUILD_TOOLS)
+        add_test(NAME ariec61850_ptp_sv_wire_audit_selftest
+                 COMMAND ariec61850_ptp_sv_wire_audit --self-test)
         add_test(
             NAME ariec61850_pcap_interop_smoke
             COMMAND ariec61850_pcap_interop_check

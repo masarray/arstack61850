@@ -44,6 +44,16 @@ add_executable(ptp_discipline_tests
 target_link_libraries(ptp_discipline_tests PRIVATE ptp_profile_core)
 target_compile_features(ptp_discipline_tests PRIVATE cxx_std_20)
 
+add_executable(sv_ptp_phase_authority_tests
+    "${ARSTACK_ROOT}/tests/test_sv_ptp_phase_authority.cpp")
+target_link_libraries(sv_ptp_phase_authority_tests PRIVATE ptp_profile_core)
+target_compile_features(sv_ptp_phase_authority_tests PRIVATE cxx_std_20)
+
+add_executable(sv_tx_egress_evidence_tests
+    "${ARSTACK_ROOT}/tests/test_sv_tx_egress_evidence.cpp")
+target_link_libraries(sv_tx_egress_evidence_tests PRIVATE ptp_profile_core)
+target_compile_features(sv_tx_egress_evidence_tests PRIVATE cxx_std_20)
+
 add_executable(sv_ptp_epoch_tests
     "${ARSTACK_ROOT}/tests/test_sv_ptp_epoch.cpp")
 target_link_libraries(sv_ptp_epoch_tests PRIVATE ptp_profile_core)
@@ -59,7 +69,7 @@ add_executable(ptp_profile_analyze
 target_link_libraries(ptp_profile_analyze PRIVATE ptp_profile_core)
 target_compile_features(ptp_profile_analyze PRIVATE cxx_std_20)
 
-foreach(target IN ITEMS ptp_profile_core ptp_profile_tests ptp_power_profile_tests ptp_runtime_tests smp_synch_policy_tests smp_synch_wire_offset_tests ptp_discipline_tests sv_ptp_epoch_tests ptp_p2_hardening_tests ptp_profile_analyze)
+foreach(target IN ITEMS ptp_profile_core ptp_profile_tests ptp_power_profile_tests ptp_runtime_tests smp_synch_policy_tests smp_synch_wire_offset_tests ptp_discipline_tests sv_ptp_epoch_tests sv_ptp_phase_authority_tests sv_tx_egress_evidence_tests ptp_p2_hardening_tests ptp_profile_analyze)
     if(MSVC)
         target_compile_options(${target} PRIVATE /W4 /WX /permissive-)
     else()
@@ -76,5 +86,7 @@ add_test(NAME smp_synch_policy_tests COMMAND smp_synch_policy_tests)
 add_test(NAME smp_synch_wire_offset_tests COMMAND smp_synch_wire_offset_tests)
 add_test(NAME ptp_discipline_tests COMMAND ptp_discipline_tests)
 add_test(NAME sv_ptp_epoch_tests COMMAND sv_ptp_epoch_tests)
+add_test(NAME sv_ptp_phase_authority_tests COMMAND sv_ptp_phase_authority_tests)
+add_test(NAME sv_tx_egress_evidence_tests COMMAND sv_tx_egress_evidence_tests)
 add_test(NAME ptp_p2_hardening_tests COMMAND ptp_p2_hardening_tests)
 add_test(NAME ptp_profile_analyze_help COMMAND ptp_profile_analyze --help)
