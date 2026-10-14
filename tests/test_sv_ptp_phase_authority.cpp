@@ -247,6 +247,73 @@ void check_clock_step_stale_brackets_and_timer_wrap() {
     CHECK(tracker.invalidate().slew_ticks_next_epoch == 0);
 }
 
+void check_continuous_ptp_second_binding() {
+    SvPtpPhaseAuthority authority;
+    const auto initial = authority.observe(snapshot(10U, 80));
+    CHECK(initial.accepted);
+    CHECK(!initial.epoch_second_continuous);
+    CHECK(initial.sv_epoch_ptp_second == kEpochZero + 10U);
+    CHECK(initial.slew_ticks_next_epoch == 0);
+
+    const auto stable = authority.observe(snapshot(11U, 160));
+    CHECK(stable.accepted);
+    CHECK(stable.epoch_second_continuous);
+    CHECK(stable.sv_epoch_ptp_second == kEpochZero + 11U);
+
+    // One missing epoch invalidates both the phase integrator and the
+    // PTP-second association. Reacquisition starts from a cold baseline.
+    const auto skipped = authority.observe(snapshot(13U, 240));
+    CHECK(!skipped.accepted);
+    CHECK(!skipped.epoch_second_continuous);
+    CHECK(skipped.slew_ticks_next_epoch == 0);
+    const auto reacquire = authority.observe(snapshot(14U, 320));
+    CHECK(reacquire.accepted);
+    CHECK(!reacquire.epoch_second_continuous);
+    CHECK(reacquire.slew_ticks_next_epoch == 0);
+    CHECK(authority.observe(snapshot(15U, 400)).epoch_second_continuous);
+
+    // Valid phase modulo 1 s is not enough: a PTP second step must NOT be
+    // interpreted as an adjacent SV epoch (neither +1 s nor -1 s).
+    auto forward = snapshot(16U, 480);
+    forward.ptp_seconds += 1U;
+    CHECK(!authority.observe(forward).accepted);
+    CHECK(!authority.observe(snapshot(17U, 560)).epoch_second_continuous);
+    CHECK(authority.observe(snapshot(18U, 640)).epoch_second_continuous);
+    auto backward = snapshot(19U, 720);
+    backward.ptp_seconds -= 1U;
+    CHECK(!authority.observe(backward).accepted);
+
+    // Near a PTP second rollover the last SV epoch is correctly labelled
+    // with the NEXT whole second, not the read's current second. Neither
+    // rounding nor 32-bit GPTimer wrap may silently alias it.
+    SvPtpPhaseAuthority boundary;
+    auto before_second = snapshot(100U, 0);
+    before_second.ptp_seconds = kEpochZero + 99U;
+    before_second.ptp_nanoseconds = 999950000U;
+    before_second.timer_before_ticks =
+        before_second.last_sv_epoch_ticks + 46U;
+    before_second.timer_after_ticks =
+        before_second.last_sv_epoch_ticks + 54U;
+    const auto baseline = boundary.observe(before_second);
+    CHECK(baseline.accepted);
+    CHECK(baseline.phase_error_us == -100);
+    CHECK(!baseline.epoch_second_continuous);
+    CHECK(baseline.sv_epoch_ptp_second == kEpochZero + 100U);
+    const auto next = boundary.observe(snapshot(101U, 80));
+    CHECK(next.accepted);
+    CHECK(next.epoch_second_continuous);
+    CHECK(next.sv_epoch_ptp_second == kEpochZero + 101U);
+
+    // Keep absolute second labels across 71-minute GPTimer low32 rollover.
+    SvPtpPhaseAuthority wrap;
+    for (std::uint32_t epoch = 4293U; epoch < 4333U; ++epoch) {
+        const auto decision = wrap.observe(snapshot(epoch, 60));
+        CHECK(decision.accepted);
+        CHECK(decision.sv_epoch_ptp_second == kEpochZero + epoch);
+        CHECK(decision.epoch_second_continuous == (epoch != 4293U));
+    }
+}
+
 } // namespace
 
 int main() {
@@ -257,6 +324,7 @@ int main() {
         check_clock_step_stale_brackets_and_timer_wrap();
         check_publisher_continuity_gate_reacquisition();
         check_continuity_recovery_under_repeated_loss();
+        check_continuous_ptp_second_binding();
         std::cout << "SV PTP phase authority 4000/4800 fps regression passed\n";
         return 0;
     } catch (const std::exception& e) {

@@ -37,6 +37,10 @@ struct SvPtpPhaseDecision final {
     std::int32_t slew_ticks_next_epoch{};
     // This is a software timing assessment, NOT a valid wire smpSynch claim.
     bool software_tracking{};
+    // Stable integer PTP second paired with the last smpCnt=0 deadline.
+    // A first observation is a baseline; only two consecutive epochs bind.
+    bool epoch_second_continuous{};
+    std::uint64_t sv_epoch_ptp_second{};
 };
 
 struct SvPtpPhasePolicy final {
@@ -82,6 +86,7 @@ public:
 
     constexpr void reset() noexcept {
         have_previous_ = false;
+        previous_sv_epoch_ptp_second_ = 0U;
         integral_us_ = 0;
         tracking_samples_ = 0U;
         state_ = SvPtpPhaseState::acquiring;
@@ -92,7 +97,7 @@ public:
     [[nodiscard]] constexpr SvPtpPhaseDecision invalidate() noexcept {
         reset();
         state_ = SvPtpPhaseState::invalid;
-        return {state_, false, true, 0, 0U, 0, false};
+        return {state_, false, true, 0, 0U, 0, false, false, 0U};
     }
 
     // One well-bracketed observation per approximately 1-second SV epoch.
@@ -116,8 +121,24 @@ public:
         const std::int64_t raw_phase =
             sv_phase_detail::signed_delta_u32(o.last_sv_epoch_ticks, midpoint) +
             static_cast<std::int64_t>(o.ptp_nanoseconds / 1000U);
-        const std::int32_t phase =
-            sv_phase_detail::normalize_to_nearest_ptp_second(raw_phase);
+        // Do not discard the integer-second label by modulo reduction.
+        // The bounded signed shift also handles readings just before a PTP
+        // second boundary; GPTimer low32 can wrap independently.
+        constexpr std::int64_t second_us = 1000000LL;
+        const std::int64_t shift = raw_phase >= 0
+            ? (raw_phase + second_us / 2) / second_us
+            : (raw_phase - second_us / 2) / second_us;
+        if (shift < -1 || shift > 1 ||
+            (shift < 0 && o.ptp_seconds == 0U) ||
+            (shift > 0 && o.ptp_seconds ==
+                std::numeric_limits<std::uint64_t>::max())) {
+            return invalidate();
+        }
+        const std::uint64_t sv_epoch_second = shift < 0
+            ? o.ptp_seconds - 1U
+            : o.ptp_seconds + static_cast<std::uint64_t>(shift);
+        const std::int32_t phase = static_cast<std::int32_t>(
+            raw_phase - shift * second_us);
         const std::uint32_t uncertainty = ((span + 1U) / 2U) + 1U;
         if (sv_phase_detail::magnitude(phase) >
             policy_.maximum_phase_error_us) {
@@ -127,7 +148,10 @@ public:
         if (have_previous_) {
             const std::uint32_t epoch_advance =
                 o.last_sv_epoch_generation - previous_epoch_generation_;
-            if (epoch_advance != 1U || o.ptp_seconds < previous_ptp_seconds_ ||
+            if (epoch_advance != 1U ||
+                sv_epoch_second <= previous_sv_epoch_ptp_second_ ||
+                sv_epoch_second - previous_sv_epoch_ptp_second_ != 1U ||
+                o.ptp_seconds < previous_ptp_seconds_ ||
                 o.ptp_seconds - previous_ptp_seconds_ > 2U) {
                 return invalidate();
             }
@@ -154,6 +178,7 @@ public:
         previous_ptp_seconds_ = o.ptp_seconds;
         previous_ptp_nanoseconds_ = o.ptp_nanoseconds;
         previous_epoch_generation_ = o.last_sv_epoch_generation;
+        previous_sv_epoch_ptp_second_ = sv_epoch_second;
         const bool first_observation = !have_previous_;
         have_previous_ = true;
 
@@ -169,7 +194,8 @@ public:
             ? SvPtpPhaseState::tracking : SvPtpPhaseState::acquiring;
 
         if (first_observation) {
-            return {state_, true, false, phase, uncertainty, 0, false};
+            return {state_, true, false, phase, uncertainty, 0, false,
+                    false, sv_epoch_second};
         }
 
         // Bounded PI servo. The integrator estimates fixed frequency bias,
@@ -186,7 +212,7 @@ public:
             -policy_.maximum_slew_per_second_us,
             policy_.maximum_slew_per_second_us);
         return {state_, true, false, phase, uncertainty, requested,
-                state_ == SvPtpPhaseState::tracking};
+                state_ == SvPtpPhaseState::tracking, true, sv_epoch_second};
     }
 
 private:
@@ -196,6 +222,7 @@ private:
     std::uint32_t previous_ptp_nanoseconds_{};
     std::uint32_t previous_epoch_generation_{};
     std::uint64_t previous_ptp_seconds_{};
+    std::uint64_t previous_sv_epoch_ptp_second_{};
     std::int32_t integral_us_{};
     std::uint32_t tracking_samples_{};
     SvPtpPhaseState state_{SvPtpPhaseState::acquiring};

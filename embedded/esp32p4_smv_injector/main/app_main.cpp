@@ -1103,10 +1103,15 @@ void sv_ptp_phase_observer_task(void* argument) {
             decision.accepted && live_tx_running() &&
             ar_ptp_lab_source_generation() == source_generation &&
             no_new_publisher_fault) {
+            // A single near-boundary observation is only a baseline. Do
+            // not arm ISR steering until adjacent smpCnt=0 deadlines map
+            // to adjacent *integer PTP seconds* in the same generation.
             g_sample_clock_context.phase_authority_valid.store(
-                true, std::memory_order_release);
+                decision.epoch_second_continuous, std::memory_order_release);
             g_sample_clock_context.requested_slew_ticks.store(
-                decision.slew_ticks_next_epoch, std::memory_order_release);
+                decision.epoch_second_continuous
+                    ? decision.slew_ticks_next_epoch : 0,
+                std::memory_order_release);
             committed = true;
         } else if (session_matches) {
             g_sample_clock_context.phase_authority_valid.store(
@@ -1123,11 +1128,13 @@ void sv_ptp_phase_observer_task(void* argument) {
         if ((accepted_epochs % 60U) == 0U) {
             ESP_LOGI(kTag,
                 "SV/PTP phase SW evidence: phase=%ld us uncertainty=%lu us "
-                "slew=%ld ticks/epoch tracking=%u; smpSynch AUTO remains 0",
+                "slew=%ld ticks/epoch tracking=%u PTPepoch=%llu bound=%u; smpSynch AUTO remains 0",
                 static_cast<long>(decision.phase_error_us),
                 static_cast<unsigned long>(decision.observation_uncertainty_us),
                 static_cast<long>(decision.slew_ticks_next_epoch),
-                decision.software_tracking ? 1U : 0U);
+                decision.software_tracking ? 1U : 0U,
+                static_cast<unsigned long long>(decision.sv_epoch_ptp_second),
+                decision.epoch_second_continuous ? 1U : 0U);
         }
     }
 }
