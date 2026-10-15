@@ -1,62 +1,57 @@
-# ARStack Studio native Windows preview — side-by-side operator candidate
+# ARStack Studio Inno Setup — GUI-first Windows installer
 
-**Scope:** Build the existing native Qt/C++/QML `ARStackStudio.exe` from the exact
-GitHub pull-request head. Package a Windows installer/portable ZIP that a user
-can open directly. There is **no web UI, external Python tool, or manual flash
-file selection** in the operator workflow.
+The native Qt/C++ Studio .exe is the only operator interface. The new installer
+uses Inno Setup 6.7.1 (pinned in CI), keeping the existing NSIS script only
+for historical v0.1.1 reproducibility.
 
-## Firmware selection and provenance
+## User-focused behavior
 
-- The candidate is deliberately **GUI-only**. It uses the public v0.1.1
-  firmware, manifest and standalone flasher from the [published v0.1.1
-  portable release](https://github.com/masarray/arstack61850/releases/tag/v0.1.1).
-- CI verifies the exact 46 MB source ZIP's SHA-256:
-  `27dfa5374afe9ac9f9235d86dfa26131a3d2f3d26a73205f1fa188a6a3d9ee4c`.
-  It copies **only** firmware, tools and their licenses from this authenticated
-  baseline into the newly compiled GUI package. It does not silently bundle
-  firmware from the experimental M3 branch.
-- A `PREVIEW-PROVENANCE.json` file ties the compiled GUI commit to that
-  immutable public firmware archive; this is a traceability record, not a
-  firmware cryptographic signing scheme.
-- Firmware compatibility and packaged operation are checked using **Studio's
-  existing native firmware manifest validator**, not a parallel Python parser.
+- **Install/update:** same Inno AppId detects an earlier installation in its
+  channel and uses the previous install directory; no second "copy" is made.
+  The next preview installer upgrades the previous preview through the same
+  normal double-click GUI, not a Python script.
+- **Running Studio:** Windows Restart Manager requests graceful application
+  closure before overwriting running EXE/DLLs. Do not force-kill or silently
+  resume SV output. For unattended CI, Inno uses /CLOSEAPPLICATIONS.
+- **Safety:** preview and stable use **different** AppIds, uninstall registry
+  entries, install folders and Start Menu shortcuts. Both still share
+  Studio's cross-process serial-device single-instance lock.
+- **No admin required:** per-user installation with PrivilegesRequired=lowest.
+- **Remove:** Inno unregisters its own install, executable, tools, firmware,
+  and shortcuts. Never delete unknown files or application/user data by
+  wildcard. Keep operator-authored files untouched.
+- **Traceability:** GUI commit, pinned public v0.1.1 firmware archive digest,
+  and unqualified embedded PTP status are included with the preview.
 
-## Isolation policy
+## Acceptance
 
-- The NSIS packaging script supports an opt-in `ARSTACK_PREVIEW` channel. It
-  has a distinct installation directory, uninstall registry key, program-menu
-  folder, display name, and uninstaller; **normal stable packaging defaults are
-  unchanged**.
-- The preview GUI advertises `0.1.1-preview` in its window title. This is the
-  *GUI channel label*, not a new embedded firmware version.
-- Studio keeps its existing cross-process single-instance serial-port lock;
-  stable Studio and preview **must not control the same device concurrently**.
-- Only a PR-triggered workflow builds preview candidates. It never creates a
-  GitHub Release, tag, merges to main, or overwrites v0.1.1.
-- Artifact lifetime is seven days. Installer and portable ZIP SHA-256 files are
-  shipped together.
+The PR-triggered Windows workflow builds the exact PR-head Qt executable,
+runs the native session harness, verifies the public v0.1.1 firmware ZIP's
+SHA-256, stages firmware/tools into the preview GUI, executes packaged
+application smoke, and produces a **single Windows Inno Setup .exe** plus a
+portable ZIP. Then on a clean Windows runner it performs:
 
-## Gates
+1. Silent first-time install to an isolated preview path.
+2. Inno AppId registration and Studio firmware/policy/lifecycle checks.
+3. Launch the GUI, request an in-place update via the same installer and
+   confirm the first process was gracefully retired.
+4. Confirm user-owned data survives upgrading.
+5. Run the updated installed native firmware contract.
+6. Uninstall, check owned EXE and AppId registration are gone while personal
+   data is preserved, and ensure public NSIS stable registration was untouched.
+7. Upload files only after all tests pass.
 
-1. Build the exact PR-head Qt/C++ Studio Windows executable with warnings-as-errors.
-2. Run the production deterministic device/session harness.
-3. Verify the pinned v0.1.1 release source archive checksum before extracting
-   firmware/flasher from it.
-4. Run Studio's own profile/firmware/P0 policy and application-lifecycle checks
-   **against the staged Windows executable and firmware**; invoke bundled
-   espflash standalone to verify its executable availability.
-5. Produce an independent *preview-only* NSIS installer and portable ZIP.
-6. Silent-install the preview into a clean Windows test location; rerun native
-   firmware/P0/lifecycle checks, verify preview-specific registry identity and
-   absence of stable registration, and silently uninstall.
-7. Upload the Windows artifacts only if every gate succeeds.
+## Release safeguards and remaining boundaries
 
-Hardware PTP phase accuracy, external GM/PPS and IED acceptance are not proven
-by a Windows installer. The SOURCE/RECEIVER M3 embedded firmware is not included;
-corresponding features will appear unavailable on devices without the required
-firmware capability. `smpSynch AUTO` remains fail-closed.
+**The v0.1.1 NSIS installer cannot be silently taken over by a new Inno AppId
+without a separate safe migration contract.** Preview deliberately never
+uninstalls or modifies the public stable channel. A subsequent stable-channel
+migration must validate ownership/path, safely stop Studio, run the genuine
+legacy uninstaller with bounded completion, validate rollback / known data
+preservation, and test install/upgrade/uninstall from a real v0.1.1 image
+before replacing the stable installer. Until then do not promote this to
+public stable.
 
-**Operator:** Download the Windows preview setup from the successful GitHub
-Actions run's Artifacts area and launch `ARStack-Studio-Preview-win-x64-setup.exe`.
-The preview installs separately from the public Studio and operates through
-the GUI. It is an engineering evaluation candidate, **not a stable release**.
+The operator needs only ARStack Studio and the bundled firmware manager;
+Windows signing/trust and physical PTP/GM/PPS/IED interoperability remain
+independent release gates.

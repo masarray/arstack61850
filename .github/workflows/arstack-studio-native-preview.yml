@@ -114,19 +114,21 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Pinned flasher execution failed' }
           Write-Host 'Native GUI, firmware manifest, shutdown and flasher: PASS'
 
-      - name: Build portable and side-by-side Windows preview setup
+      - name: Build portable and Inno Setup Windows preview installer
         shell: pwsh
         run: |
           $stage = Join-Path $PWD 'dist\ARStack-Studio-Preview'
           $zip = Join-Path $PWD 'dist\ARStack-Studio-Preview-win-x64-portable.zip'
           Compress-Archive -Path "$stage\*" -DestinationPath $zip -CompressionLevel Optimal -Force
-          choco install nsis -y --no-progress
-          if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed' }
-          $script = (Resolve-Path 'apps\arstack_studio\packaging\ARStackStudio.nsi').Path
+          choco install innosetup --version 6.7.1 -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Inno Setup installation failed' }
+          $compiler = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $compiler)) { throw "Pinned Inno Setup compiler missing: $compiler" }
+          $script = (Resolve-Path 'apps\arstack_studio\packaging\ARStackStudio.iss').Path
           $installer = Join-Path $PWD 'dist\ARStack-Studio-Preview-win-x64-setup.exe'
-          & makensis '/DARSTACK_PREVIEW' "/DSOURCE_DIR=$stage" "/DOUTPUT_FILE=$installer" '/DAPP_VERSION=0.1.1' $script
+          & $compiler '/DPREVIEW=1' '/DSTUDIO_VERSION=0.1.1' "/DSTAGE_DIR=$stage" "/O$PWD\dist" $script
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path $installer)) {
-            throw 'Side-by-side preview installer build failed'
+            throw 'Inno Setup native GUI preview installer build failed'
           }
           $files = @($zip, $installer)
           $checks = foreach ($file in $files) {
@@ -135,15 +137,16 @@ jobs:
           }
           $checks | Set-Content (Join-Path $PWD 'dist\SHA256SUMS.txt') -Encoding ascii
 
-      - name: Fresh install smoke in isolated preview directory
+      - name: Inno clean install, running-app upgrade and clean uninstall
         shell: pwsh
         run: |
           $installer = Join-Path $PWD 'dist\ARStack-Studio-Preview-win-x64-setup.exe'
           $installDir = Join-Path $env:RUNNER_TEMP 'ARStackStudioPreviewCleanInstall'
-          & $installer '/S' "/D=$installDir"
-          if ($LASTEXITCODE -ne 0) { throw 'Preview installer failed' }
+          $silent = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS', "/DIR=$installDir")
+          & $installer @silent
+          if ($LASTEXITCODE -ne 0) { throw 'Inno preview installation failed' }
           $exe = Join-Path $installDir 'ARStackStudio.exe'
-          if (-not (Test-Path $exe)) { throw 'Preview installer did not deploy GUI .exe' }
+          if (-not (Test-Path $exe)) { throw 'Preview installation is missing GUI EXE' }
           $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $installDir 'firmware'
           $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $installDir 'tools\espflash.exe'
           $env:ESPFLASH_SKIP_UPDATE_CHECK = 'true'
@@ -151,15 +154,46 @@ jobs:
             & $exe $check
             if ($LASTEXITCODE -ne 0) { throw "Installed preview failed $check" }
           }
-          $previewKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ARStackStudioPreview'
-          if (-not (Test-Path $previewKey)) { throw 'Preview-specific registry identity missing' }
+          $previewKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ARStack61850.Studio.Preview_is1'
+          if (-not (Test-Path $previewKey)) { throw 'Inno Preview AppId registration missing' }
           $stableKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ARStackStudio'
-          if (Test-Path $stableKey) { throw 'Preview unexpectedly modified stable installer registration' }
-          $uninstall = Join-Path $installDir 'Uninstall.exe'
-          if (-not (Test-Path $uninstall)) { throw 'Preview uninstaller missing' }
-          & $uninstall '/S'
-          if ($LASTEXITCODE -ne 0) { throw 'Preview uninstaller failed' }
-          Write-Host 'Preview install/run/uninstall and stable-key isolation: PASS'
+          if (Test-Path $stableKey) { throw 'Preview unexpectedly changed stable NSIS registration' }
+          $userNote = Join-Path $installDir 'operator-owned-note.txt'
+          'preserve my own data' | Set-Content -LiteralPath $userNote
+          $runningApp = Start-Process -FilePath $exe -PassThru
+          try {
+            if (-not $runningApp.WaitForInputIdle(15000)) {
+              throw 'GUI did not become interactive during hot-update test'
+            }
+            if ($runningApp.HasExited) { throw 'GUI exited before hot-update test' }
+            & $installer @silent
+            if ($LASTEXITCODE -ne 0) { throw 'Inno upgrade with running GUI failed' }
+            $runningApp.Refresh()
+            if (-not $runningApp.HasExited) {
+              throw 'Inno did not gracefully close the GUI for upgrade'
+            }
+          } finally {
+            if (-not $runningApp.HasExited) {
+              $runningApp.CloseMainWindow() | Out-Null
+              if (-not $runningApp.WaitForExit(10000)) { $runningApp.Kill() }
+            }
+            $runningApp.Dispose()
+          }
+          if (-not (Test-Path -LiteralPath $userNote)) {
+            throw 'Preview upgrade removed an operator-owned file'
+          }
+          & $exe '--check-firmware-contract'
+          if ($LASTEXITCODE -ne 0) { throw 'Upgraded GUI firmware contract failed' }
+          $uninstall = Join-Path $installDir 'unins000.exe'
+          if (-not (Test-Path $uninstall)) { throw 'Inno-generated uninstaller missing' }
+          & $uninstall '/VERYSILENT' '/SUPPRESSMSGBOXES' '/NORESTART'
+          if ($LASTEXITCODE -ne 0) { throw 'Inno preview uninstall failed' }
+          if (Test-Path $exe) { throw 'Uninstall left an application-owned GUI EXE' }
+          if (Test-Path $previewKey) { throw 'Uninstall left Inno AppId entry' }
+          if (-not (Test-Path $userNote)) { throw 'Uninstall deleted operator-owned data' }
+          if (Test-Path $stableKey) { throw 'Preview uninstall changed stable registration' }
+          Remove-Item -LiteralPath $userNote -Force
+          Write-Host 'Inno preview install, hot upgrade, data preservation and clean uninstall: PASS'
 
       - name: Upload GUI-only Windows preview packages
         uses: actions/upload-artifact@v4
