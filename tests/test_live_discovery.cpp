@@ -485,6 +485,8 @@ void live_discovery_builds_csharp_compatible_read_only_model() {
     CHECK(result.wire_budget.get_named_variable_list_attributes == 1U);
     CHECK(result.wire_budget.read_report_controls == 1U);
     CHECK(result.wire_budget.total() == read_only_requests);
+    const auto budgetSummary = result.summary();
+    CHECK(budgetSummary.find("wireRequests=6 [NameList=3, GVA=1, DataSetDirectory=1, RCBRead=1]") != std::string::npos);
 }
 
 
@@ -638,6 +640,7 @@ void verified_data_set_hints_restore_late_ln_type_schema() {
     CHECK(result.wire_budget.get_variable_access_attributes == 2U);
     CHECK(result.wire_budget.read_report_controls == 0U);
     CHECK(result.wire_budget.total() == 6U);
+    CHECK(result.summary().find("wireRequests=6 [NameList=3, GVA=2, DataSetDirectory=1, RCBRead=0]") != std::string::npos);
 }
 
 void disconnected_optional_probes_do_not_inflate_wire_budget() {

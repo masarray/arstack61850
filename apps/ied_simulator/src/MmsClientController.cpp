@@ -454,7 +454,8 @@ bool MmsClientController::connectToIed() {
             worker->session = std::move(session);
 
             if (self) {
-                QMetaObject::invokeMethod(self, [self, generation, model, associationProfile] {
+                const auto wireSummary = QString::fromStdString(discovery->summary());
+                QMetaObject::invokeMethod(self, [self, generation, model, associationProfile, wireSummary] {
                     if (!self || self->generation_ != generation) return;
                     self->treeModel_.applyDocument(*model);
                     self->iedName_ = QString::fromStdString(model->identity.ied_name);
@@ -475,6 +476,9 @@ bool MmsClientController::connectToIed() {
                             .arg(self->logicalDeviceCount_)
                             .arg(self->logicalNodeCount_)
                             .arg(self->dataAttributeCount_));
+                    // Capture the immutable worker result once; never query
+                    // session counters from the GUI or issue a diagnostic Read.
+                    self->appendDiagnostic(wireSummary);
                     emit self->modelChanged();
                     emit self->stateChanged();
                 }, Qt::QueuedConnection);
