@@ -28,6 +28,12 @@ struct MmsLiveDiscoveryOptions final {
     bool probe_variable_types{true};
     std::size_t maximum_variable_type_probes{4'096U};
 
+    // Opt-in, fail-closed DataSet-backed LN type closure for truncated NameList.
+    // Runs only after successful live directory reads, not from an SCL guess.
+    // Extra exact ST/MX LN roots share the total GVAA probe limit.
+    bool use_verified_data_set_type_hints{false};
+    std::size_t maximum_data_set_type_hint_roots{48U};
+
     bool read_data_set_directories{true};
     std::size_t maximum_data_set_directories{4'096U};
 

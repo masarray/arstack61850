@@ -481,6 +481,148 @@ void live_discovery_builds_csharp_compatible_read_only_model() {
     CHECK(read_only_requests == 6U);
 }
 
+
+void case_distinct_references_are_not_deduplicated() {
+    // Two valid MMS leaf names differ only in case: both must survive the
+    // canonical DA index instead of overwriting one another.
+    mms::MmsLiveDiscoveryResult snapshot;
+    snapshot.endpoint = {"192.0.2.10", 102U};
+    snapshot.names.domain_variables["OLS501LD0"] = {
+        "GGIO1$ST$Ind1$stVal", "GGIO1$ST$Ind1$StVal"};
+    const auto model = mms::MmsLiveModelBuilder::build(snapshot);
+    CHECK(model.coverage.data_attribute_count == 2U);
+    CHECK(model.logical_devices.size() == 1U);
+    CHECK(model.logical_devices.front().logical_nodes.size() == 1U);
+    CHECK(model.logical_devices.front().logical_nodes.front().data_objects.size() == 1U);
+    const auto& attributes =
+        model.logical_devices.front().logical_nodes.front().data_objects.front().attributes;
+    CHECK(attributes.size() == 2U);
+    CHECK(attributes.front().attribute_path != attributes.back().attribute_path);
+}
+
+void case_distinct_ln_type_probes_are_preserved() {
+    ScriptedTransport transport;
+    queue_handshake(transport);
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_get_name_list_response_p_data(
+            {1U, {"OLS501LD0"}, false})));
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_get_name_list_response_p_data(
+            {2U, {"GGIO1$ST$Ind1$stVal", "ggio1$ST$Ind1$stVal"}, false})));
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_get_name_list_response_p_data(
+            {3U, {}, false})));
+    for (std::uint32_t id = 4U; id <= 5U; ++id) {
+        mms::MmsVariableAccessAttributesResponse type;
+        type.invoke_id = id;
+        type.type.kind = mms::MmsTypeKind::boolean;
+        transport.push_receive(wrap_application(
+            mms::MmsServiceCodec::encode_variable_access_attributes_response_p_data(type)));
+    }
+    mms::MmsAssociationRuntime association{transport};
+    association.connect({"127.0.0.1", 102U});
+    mms::MmsLiveDiscoveryOptions options;
+    options.maximum_variable_type_probes = 2U;
+    options.read_data_set_directories = false;
+    options.probe_report_controls = false;
+    const auto result = mms::MmsLiveDiscoveryClient{association}.discover(options);
+    CHECK(result.variable_types.size() == 2U);
+    CHECK(result.variable_types[0].success());
+    CHECK(result.variable_types[1].success());
+    CHECK(result.variable_types[0].variable.item == "GGIO1");
+    CHECK(result.variable_types[1].variable.item == "ggio1");
+    CHECK(result.variable_types[0].variable.reference() !=
+          result.variable_types[1].variable.reference());
+}
+
+void verified_data_set_hints_restore_late_ln_type_schema() {
+    ScriptedTransport transport;
+    queue_handshake(transport);
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_get_name_list_response_p_data(
+            {1U, {"OLS501LD0"}, false})));
+    // NameList omits CSWI1, but an actual MMS DataSet directory includes
+    // CSWI1$ST$Pos (FCD). No SCL/model guess is allowed in this probe.
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_get_name_list_response_p_data(
+            {2U, {"LLN0$ST$Mod$stVal"}, false})));
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_get_name_list_response_p_data(
+            {3U, {"LLN0$DataSetA"}, false})));
+    mms::MmsDataSetDirectoryResponse directory;
+    directory.invoke_id = 4U;
+    directory.members.push_back({
+        mms::MmsObjectName::domain_specific("OLS501LD0", "CSWI1$ST$Pos"),
+        "OLS501LD0/CSWI1$ST$Pos", "OLS501LD0/CSWI1.Pos", "ST",
+        "CSWI1", "Pos", 100U});
+    // Invalid/wrong-domain and wrong-FC members must never schedule GVA.
+    directory.members.push_back({
+        mms::MmsObjectName::domain_specific("OTHERLD0", "CSWI9$ST$Pos"),
+        "OTHERLD0/CSWI9$ST$Pos", "OTHERLD0/CSWI9.Pos", "ST",
+        "CSWI9", "Pos", 100U});
+    directory.members.push_back({
+        mms::MmsObjectName::domain_specific("OLS501LD0", "CSWI8$CF$ctlModel"),
+        "OLS501LD0/CSWI8$CF$ctlModel", "OLS501LD0/CSWI8.ctlModel", "CF",
+        "CSWI8", "ctlModel", 100U});
+    transport.push_receive(wrap_application(
+        mms::MmsDataSetDirectoryCodec::encode_response_p_data(directory)));
+    mms::MmsVariableAccessAttributesResponse first;
+    first.invoke_id = 5U;
+    first.type.kind = mms::MmsTypeKind::boolean;
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_variable_access_attributes_response_p_data(first)));
+
+    mms::MmsVariableAccessAttributesResponse late;
+    late.invoke_id = 6U;
+    late.type.kind = mms::MmsTypeKind::structure;
+    mms::MmsTypeSpecification fc;
+    fc.kind = mms::MmsTypeKind::structure;
+    fc.name = "ST";
+    mms::MmsTypeSpecification doSpec;
+    doSpec.kind = mms::MmsTypeKind::structure;
+    doSpec.name = "Pos";
+    mms::MmsTypeSpecification valueSpec;
+    valueSpec.kind = mms::MmsTypeKind::boolean;
+    valueSpec.name = "stVal";
+    mms::MmsTypeSpecification qualitySpec;
+    qualitySpec.kind = mms::MmsTypeKind::bit_string;
+    qualitySpec.name = "q";
+    doSpec.children.push_back(std::move(valueSpec));
+    doSpec.children.push_back(std::move(qualitySpec));
+    fc.children.push_back(std::move(doSpec));
+    late.type.children.push_back(std::move(fc));
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_variable_access_attributes_response_p_data(late)));
+
+    mms::MmsAssociationRuntime association{transport};
+    association.connect({"127.0.0.1", 102U});
+    mms::MmsLiveDiscoveryOptions options;
+    options.maximum_variable_type_probes = 8U;
+    options.maximum_data_set_type_hint_roots = 2U;
+    options.use_verified_data_set_type_hints = true;
+    options.probe_report_controls = false;
+    const auto result = mms::MmsLiveDiscoveryClient{association}.discover(options);
+    CHECK(result.variable_types.size() == 2U);
+    CHECK(result.variable_types[0].variable.item == "LLN0");
+    CHECK(result.variable_types[1].variable.item == "CSWI1");
+    CHECK(result.variable_types[1].success());
+    CHECK(!result.partial());
+    const auto model = mms::MmsLiveModelBuilder::build(result);
+    bool found_cswi = false;
+    for (const auto& ld : model.logical_devices) {
+        for (const auto& ln : ld.logical_nodes) {
+            if (ln.name != "CSWI1") continue;
+            found_cswi = true;
+            for (const auto& object : ln.data_objects) {
+                if (object.name != "Pos") continue;
+                CHECK(object.attributes.size() >= 2U);
+            }
+        }
+    }
+    CHECK(found_cswi);
+    CHECK(transport.sent().size() == 8U); // association (2) + 6 reads
+}
+
 void pagination_without_forward_progress_is_rejected() {
     ScriptedTransport transport;
     queue_handshake(transport);
@@ -509,6 +651,9 @@ int main() {
         csharp_control_block_inventory_cases_are_preserved();
         dynamic_rcb_binding_states_are_preserved();
         live_discovery_builds_csharp_compatible_read_only_model();
+        case_distinct_references_are_not_deduplicated();
+        case_distinct_ln_type_probes_are_preserved();
+        verified_data_set_hints_restore_late_ln_type_schema();
         pagination_without_forward_progress_is_rejected();
         std::cout << "Live MMS discovery and model parity tests passed.\n";
         return 0;

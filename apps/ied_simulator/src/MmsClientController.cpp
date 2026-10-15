@@ -438,6 +438,10 @@ bool MmsClientController::connectToIed() {
 
             mms::MmsLiveDiscoveryOptions options;
             options.maximum_variable_type_probes = 8'192U;
+            // One bounded extra-LN pass, driven only by verified static
+            // MMS DataSet members; do not retry/sweep an entire IED.
+            options.use_verified_data_set_type_hints = true;
+            options.maximum_data_set_type_hint_roots = 48U;
             options.maximum_data_set_directories = 4'096U;
             options.maximum_report_control_probes = 1'024U;
             auto discovery = std::make_shared<mms::MmsLiveDiscoveryResult>(
