@@ -90,7 +90,7 @@ data_set_required = [
     'visible: root.selectedAttributeNode.kind === "DA"',
     'root.selectedAttributeNode.hasReceivedValue === true',
     'root.selectedAttributeNode.valueSourceReference',
-    'text: "IED Timestamp"',
+    '{label: "IED Timestamp"',
     'memberRow.resolved.hasReceivedValue !== true',
     'attributeRow.modelData.hasReceivedValue === true',
     'root.selectedAttributeNode.engineeringEvidence || ({})',
