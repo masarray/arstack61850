@@ -68,7 +68,9 @@ inline std::string MmsLiveModelDocument::structural_manifest() const {
     append_control_blocks(log_controls);
 
     std::sort(lines.begin() + 2, lines.end(), [](const auto& left, const auto& right) {
-        return lower(left) < lower(right);
+        const auto folded_left = lower(left);
+        const auto folded_right = lower(right);
+        return folded_left == folded_right ? left < right : folded_left < folded_right;
     });
 
     std::ostringstream out;
@@ -136,7 +138,9 @@ inline std::string MmsLiveModelDocument::runtime_snapshot_manifest() const {
     append_runtime_controls(log_controls);
 
     std::sort(lines.begin() + 2, lines.end(), [](const auto& left, const auto& right) {
-        return lower(left) < lower(right);
+        const auto folded_left = lower(left);
+        const auto folded_right = lower(right);
+        return folded_left == folded_right ? left < right : folded_left < folded_right;
     });
 
     std::ostringstream out;

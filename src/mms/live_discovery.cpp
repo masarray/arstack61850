@@ -37,6 +37,13 @@ void validate_options(const MmsLiveDiscoveryOptions& options) {
         throw std::invalid_argument(
             "Live MMS discovery report-control probe limit must be positive.");
     }
+    if (options.use_verified_data_set_type_hints &&
+        (!options.probe_variable_types || !options.read_data_set_directories ||
+         options.maximum_data_set_type_hint_roots == 0U)) {
+        throw std::invalid_argument(
+            "Verified DataSet type closure requires type and directory reads "
+            "and a positive extra-LN budget.");
+    }
 }
 
 [[nodiscard]] std::string object_class_name(
@@ -108,14 +115,6 @@ void validate_options(const MmsLiveDiscoveryOptions& options) {
            ": " + exception.what();
 }
 
-[[nodiscard]] std::string lower_ascii(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](const char character) {
-        return static_cast<char>(
-            std::tolower(static_cast<unsigned char>(character)));
-    });
-    return value;
-}
-
 // Mirrors ARIEC61850 LiveIedVariableTypeProbePlanner: probe one MMS type tree at
 // each Logical Node root instead of probing every LN$FC$DO$DA leaf. Standards-
 // shaped servers usually advertise the Logical Node root directly (for example
@@ -138,7 +137,8 @@ void validate_options(const MmsLiveDiscoveryOptions& options) {
                 ? item
                 : item.substr(0U, separator);
             if (logical_node.empty()) continue;
-            const auto identity = lower_ascii(domain) + "\n" + lower_ascii(logical_node);
+            // IEC 61850/MMS references are case-sensitive identifiers.
+            const auto identity = domain + "\n" + logical_node;
             if (!seen.insert(identity).second) {
                 continue;
             }
@@ -150,6 +150,67 @@ void validate_options(const MmsLiveDiscoveryOptions& options) {
         }
     }
     return candidates;
+}
+
+
+struct VerifiedTypeHintPlan final {
+    std::vector<MmsObjectName> roots;
+    bool budget_exceeded{};
+};
+
+// Trust only observed, non-deletable MMS DataSet directories, never an SCL
+// declaration or a guessed LN name. An exact FC root proves a candidate for
+// a targeted type probe; its type remains unknown until GVA actually succeeds.
+// Reject the whole optional extension on budget overflow, preserving the
+// original NameList-only discovery unchanged.
+[[nodiscard]] VerifiedTypeHintPlan plan_verified_data_set_type_roots(
+    const MmsDiscoverySnapshot& snapshot,
+    const std::vector<MmsDataSetDirectoryEvidence>& directories,
+    const std::vector<MmsObjectName>& existing_roots,
+    const std::size_t maximum_total,
+    const std::size_t maximum_extra) {
+    VerifiedTypeHintPlan plan;
+    std::set<std::string, std::less<>> seen;
+    for (const auto& root : existing_roots) seen.insert(root.reference());
+
+    for (const auto& evidence : directories) {
+        if (!evidence.success() || evidence.directory->deletable ||
+            snapshot.domain_variables.find(evidence.candidate.domain) ==
+                snapshot.domain_variables.end()) {
+            continue;
+        }
+        for (const auto& member : evidence.directory->members) {
+            const auto& name = member.object_name;
+            if (name.kind != MmsObjectNameKind::domain_specific ||
+                name.domain != evidence.candidate.domain) continue;
+            const auto first = name.item.find('$');
+            if (first == std::string::npos || first == 0U) continue;
+            const auto second = name.item.find('$', first + 1U);
+            if (second == std::string::npos || second == first + 1U ||
+                second + 1U >= name.item.size()) continue;
+            const auto fc = std::string_view{name.item}.substr(
+                first + 1U, second - first - 1U);
+            if (fc != "ST" && fc != "MX") continue;
+            if (member.functional_constraint != fc ||
+                (!member.logical_node.empty() &&
+                 member.logical_node != name.item.substr(0U, first)) ||
+                (!member.mms_reference.empty() &&
+                 member.mms_reference != name.reference())) {
+                continue;
+            }
+            const auto root = MmsObjectName::domain_specific(
+                name.domain, name.item.substr(0U, first));
+            if (!seen.insert(root.reference()).second) continue;
+            if (plan.roots.size() >= maximum_extra ||
+                existing_roots.size() + plan.roots.size() >= maximum_total) {
+                plan.roots.clear();
+                plan.budget_exceeded = true;
+                return plan;
+            }
+            plan.roots.push_back(root);
+        }
+    }
+    return plan;
 }
 
 } // namespace
@@ -326,9 +387,58 @@ MmsLiveDiscoveryResult MmsLiveDiscoveryClient::discover(
 
     result.report_inventory = MmsReportInventoryBuilder::build(result.names);
 
-    if (options.probe_variable_types) {
-        const auto candidates = build_logical_node_type_probe_candidates(
+    const auto readDataSetDirectories = [&] {
+        if (!options.read_data_set_directories) return;
+        const std::size_t count = std::min(
+            options.maximum_data_set_directories,
+            result.report_inventory.data_sets.size());
+        result.data_set_directories.reserve(count);
+        for (std::size_t index = 0U; index < count; ++index) {
+            MmsDataSetDirectoryEvidence evidence;
+            evidence.candidate = result.report_inventory.data_sets[index];
+            try {
+                MmsDataSetDirectoryRequest request;
+                request.invoke_id = association_.next_invoke_id();
+                request.data_set_name = MmsDataSetDirectoryCodec::parse_data_set_reference(
+                    evidence.candidate.reference);
+                const auto encoded = MmsDataSetDirectoryCodec::encode_request_p_data(
+                    request, association_.negotiated().presentation_context_id);
+                const auto exchange = association_.exchange_confirmed(
+                    encoded, request.invoke_id, stop_token);
+                const auto payload = response_payload(
+                    exchange, "GetNamedVariableListAttributes");
+                evidence.directory = MmsDataSetDirectoryCodec::decode_response(
+                    payload, request.invoke_id);
+            } catch (const std::exception& exception) {
+                evidence.error = exception.what();
+                result.diagnostics.push_back(optional_probe_error(
+                    "DataSet directory", evidence.candidate.reference, exception));
+                if (!options.continue_on_optional_probe_error) {
+                    throw;
+                }
+            }
+            result.data_set_directories.push_back(std::move(evidence));
+        }
+    };
+
+    const auto probeVariableTypes = [&] {
+        if (!options.probe_variable_types) return;
+        auto candidates = build_logical_node_type_probe_candidates(
             result.names, options.maximum_variable_type_probes);
+        if (options.use_verified_data_set_type_hints) {
+            const auto extra = plan_verified_data_set_type_roots(
+                result.names, result.data_set_directories, candidates,
+                options.maximum_variable_type_probes,
+                options.maximum_data_set_type_hint_roots);
+            if (extra.budget_exceeded) {
+                result.diagnostics.push_back(
+                    "Verified DataSet LN type-root budget exceeded; "
+                    "optional extra probes skipped without partial selection.");
+            } else {
+                candidates.insert(
+                    candidates.end(), extra.roots.begin(), extra.roots.end());
+            }
+        }
         result.variable_types.reserve(candidates.size());
 
         for (const auto& candidate : candidates) {
@@ -361,39 +471,16 @@ MmsLiveDiscoveryResult MmsLiveDiscoveryClient::discover(
             }
             result.variable_types.push_back(std::move(evidence));
         }
-    }
+    };
 
-    if (options.read_data_set_directories) {
-        const std::size_t count = std::min(
-            options.maximum_data_set_directories,
-            result.report_inventory.data_sets.size());
-        result.data_set_directories.reserve(count);
-        for (std::size_t index = 0U; index < count; ++index) {
-            MmsDataSetDirectoryEvidence evidence;
-            evidence.candidate = result.report_inventory.data_sets[index];
-            try {
-                MmsDataSetDirectoryRequest request;
-                request.invoke_id = association_.next_invoke_id();
-                request.data_set_name = MmsDataSetDirectoryCodec::parse_data_set_reference(
-                    evidence.candidate.reference);
-                const auto encoded = MmsDataSetDirectoryCodec::encode_request_p_data(
-                    request, association_.negotiated().presentation_context_id);
-                const auto exchange = association_.exchange_confirmed(
-                    encoded, request.invoke_id, stop_token);
-                const auto payload = response_payload(
-                    exchange, "GetNamedVariableListAttributes");
-                evidence.directory = MmsDataSetDirectoryCodec::decode_response(
-                    payload, request.invoke_id);
-            } catch (const std::exception& exception) {
-                evidence.error = exception.what();
-                result.diagnostics.push_back(optional_probe_error(
-                    "DataSet directory", evidence.candidate.reference, exception));
-                if (!options.continue_on_optional_probe_error) {
-                    throw;
-                }
-            }
-            result.data_set_directories.push_back(std::move(evidence));
-        }
+    // Only the opt-in closure path changes phase order. Existing callers
+    // retain their wire sequence and unchanged default request count.
+    if (options.use_verified_data_set_type_hints) {
+        readDataSetDirectories();
+        probeVariableTypes();
+    } else {
+        probeVariableTypes();
+        readDataSetDirectories();
     }
 
     if (options.probe_report_controls) {

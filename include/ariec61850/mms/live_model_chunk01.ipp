@@ -50,7 +50,7 @@ namespace live_model_detail {
 }
 [[nodiscard]] inline std::string key(std::string value) {
     std::replace(value.begin(), value.end(), '$', '.');
-    return lower(std::move(value));
+    return value;
 }
 [[nodiscard]] inline std::string bit_names(const MmsReportBitField& field) {
     std::ostringstream out;
@@ -74,16 +74,16 @@ namespace live_model_detail {
     const MmsTypeSpecification* best{};
     std::size_t best_depth{};
     for (const auto& item : evidence) {
-        if (!item.success() || !same(item.variable.domain, point.domain)) continue;
+        if (!item.success() || item.variable.domain != point.domain) continue;
         const auto root = split(item.variable.item, '$');
         if (root.empty() || root.size() > target.size()) continue;
         bool prefix = true;
-        for (std::size_t i = 0; i < root.size(); ++i) prefix &= same(root[i], target[i]);
+        for (std::size_t i = 0; i < root.size(); ++i) prefix &= (root[i] == target[i]);
         if (!prefix) continue;
         const MmsTypeSpecification* current = &item.attributes->type;
         for (std::size_t i = root.size(); current && i < target.size(); ++i) {
             const auto found = std::find_if(current->children.begin(), current->children.end(),
-                [&](const auto& child) { return same(child.name, target[i]); });
+                [&](const auto& child) { return child.name == target[i]; });
             current = found == current->children.end() ? nullptr : &*found;
         }
         if (current && root.size() >= best_depth) {
