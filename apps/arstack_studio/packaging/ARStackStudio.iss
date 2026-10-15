@@ -5,14 +5,11 @@
 #ifndef STAGE_DIR
   #error STAGE_DIR is mandatory
 #endif
-#ifndef PREVIEW
-  #define PREVIEW 0
-#endif
 #ifndef STUDIO_VERSION
   #define STUDIO_VERSION "0.1.1"
 #endif
 
-#if PREVIEW
+#ifdef ARSTACK_PREVIEW
   #define ProductName "ARStack Studio Preview"
   #define ProductId "ARStack61850.Studio.Preview"
   #define ProductFolder "ARStack Studio Preview"
@@ -84,7 +81,7 @@ Filename: "{app}\ARStackStudio.exe"; Description: "Launch {#ProductName}"; Flags
 ; recursively deletes {app}; do not execute it as part of a new installation.
 ; Instead, after verified Inno replacement succeeds, retire only its
 ; proven-owned old uninstall executable and ARP registration.
-#if PREVIEW
+#ifdef ARSTACK_PREVIEW
 ; Preview upgrades use Inno's native same-AppId uninstall-log tracking.
 #else
 [Code]

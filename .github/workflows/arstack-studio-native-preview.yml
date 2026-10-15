@@ -237,7 +237,7 @@ jobs:
           if (-not (Test-Path $compiler)) { throw "Pinned Inno Setup compiler missing: $compiler" }
           $script = (Resolve-Path 'apps\arstack_studio\packaging\ARStackStudio.iss').Path
           $installer = Join-Path $PWD 'dist\ARStack-Studio-Preview-win-x64-setup.exe'
-          & $compiler '/DPREVIEW=1' '/DSTUDIO_VERSION=0.1.1' "/DSTAGE_DIR=$stage" "/O$PWD\dist" $script
+          & $compiler '/DARSTACK_PREVIEW' '/DSTUDIO_VERSION=0.1.1' "/DSTAGE_DIR=$stage" "/O$PWD\dist" $script
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path $installer)) {
             throw 'Inno Setup native GUI preview installer build failed'
           }
@@ -333,10 +333,12 @@ jobs:
           $stage = Join-Path $PWD 'dist\ARStack-Studio-Preview'
           $compiler = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Inno Setup 6\ISCC.exe'
           $script = (Resolve-Path 'apps\arstack_studio\packaging\ARStackStudio.iss').Path
-          & $compiler '/DPREVIEW=0' '/DSTUDIO_VERSION=0.1.1' "/DSTAGE_DIR=$stage" "/O$env:RUNNER_TEMP" $script
+          & $compiler '/DSTUDIO_VERSION=0.1.1' "/DSTAGE_DIR=$stage" "/O$env:RUNNER_TEMP" $script
           if ($LASTEXITCODE -ne 0) { throw 'Stable-channel migration fixture compilation failed' }
           $migrationSetup = Join-Path $env:RUNNER_TEMP 'ARStack-Studio-win-x64-setup.exe'
-          if (-not (Test-Path $migrationSetup)) { throw 'Inno migration fixture missing' }
+          if (-not (Test-Path $migrationSetup)) { throw 'Stable-channel Inno fixture must have a stable installer identity' }
+          $accidentalPreview = Join-Path $env:RUNNER_TEMP 'ARStack-Studio-Preview-win-x64-setup.exe'
+          if (Test-Path $accidentalPreview) { throw 'Stable migration compiled a Preview AppId accidentally' }
           $migrated = Start-Process -FilePath $migrationSetup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS') -Wait -PassThru
           if ($migrated.ExitCode -ne 0) { throw "Verified NSIS to Inno migration exit $($migrated.ExitCode)" }
           if (Test-Path $legacyKey) { throw 'Legacy NSIS uninstall registration was not cleaned' }

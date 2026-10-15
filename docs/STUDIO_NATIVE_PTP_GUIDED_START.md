@@ -29,3 +29,16 @@ No changes to the stable firmware, embedded PTP Draft stack, public installer
 or `smpSynch AUTO` promotion. An independently tested Windows installer with
 matching firmware remains a release gate; this source change is not itself a
 published release.
+
+## GUI shutdown and Inno Restart Manager
+
+The Studio shutdown owner sends bounded STOP commands on the existing serial
+worker for independently running SMV and PTP, in that order. PTP also receives
+STOP during a pending START transaction. The worker drains each command within
+a 120 ms monotonic wall-clock bound and reports incomplete flushes, then closes
+the COM port. No extra serial owner, unbounded sleep or detached worker exists.
+
+Inno Setup requests ordinary application closure through Windows Restart
+Manager before upgrading files. This provides best-effort protocol-safe
+shutdown without claiming that a disconnected or failed COM link can certify
+a physical STOP; hardware testing remains a separate gate.
