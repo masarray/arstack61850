@@ -71,7 +71,7 @@ require(main, (
     "onOpenSourceRequested: function(fileUrl)",
     "fleet.prepareForNewSource()",
     "FleetGlobalDataPane {",
-    "onWatchedDataChanged: fleetGlobalData.refreshRows()",
+    "onWatchedDataChanged: fleetGlobalData.requestRefresh()",
 ), "shell routing")
 require(browser, (
     "required property var fleet",
@@ -91,7 +91,14 @@ require(all_data, (
     "view.watchedRows()",
     "view.refreshWatchedGlobalData()",
     "maximumRows: 2048",
+    "function requestRefresh()",
+    "Qt.callLater(root.refreshRows)",
+    "rows.setProperty(i, role, next[i][role])",
+    'text: "QUALITY"',
+    'text: "IED TIMESTAMP"',
 ), "all-IED Global Data")
+if 'onWatchedDataChanged: fleetGlobalData.refreshRows()' in shell:
+    raise SystemExit("P6E_FAIL uncoalesced cross-IED watch refresh")
 require(global_data, (
     "signal watchSnapshotChanged()",
     "function snapshotRows()",
