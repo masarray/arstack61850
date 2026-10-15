@@ -158,6 +158,12 @@ target_compile_features(arstack_session_harness PRIVATE cxx_std_20)
 target_compile_definitions(arstack_studio PRIVATE
     ARSTACK_STUDIO_VERSION="${PROJECT_VERSION}"
 )
+
+# Opt-in Windows engineering preview identity; OFF for all stable builds.
+option(ARSTACK_STUDIO_ENGINEERING_PREVIEW "Mark this Studio build as an isolated preview" OFF)
+if(ARSTACK_STUDIO_ENGINEERING_PREVIEW)
+    target_compile_definitions(arstack_studio PRIVATE ARSTACK_STUDIO_ENGINEERING_PREVIEW=1)
+endif()
 target_compile_definitions(arstack_session_harness PRIVATE
     ARSTACK_STUDIO_VERSION="${PROJECT_VERSION}"
 )

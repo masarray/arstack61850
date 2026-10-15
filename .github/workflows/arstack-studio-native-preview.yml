@@ -1,0 +1,173 @@
+name: ARStack Studio Native Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'apps/arstack_studio/**'
+      - '.github/workflows/arstack-studio-native-preview.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  windows-preview:
+    if: ${{ !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: windows-2022
+    timeout-minutes: 40
+    env:
+      PREVIEW_SHA: ${{ github.event.pull_request.head.sha }}
+      BASE_PORTABLE_SHA256: 27dfa5374afe9ac9f9235d86dfa26131a3d2f3d26a73205f1fa188a6a3d9ee4c
+      BASE_PORTABLE_URL: https://github.com/masarray/arstack61850/releases/download/v0.1.1/ARStack-Studio-0.1.1-win-x64-portable.zip
+
+    steps:
+      - name: Checkout exact GUI PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.10.3'
+          arch: win64_msvc2022_64
+          modules: 'qtserialport'
+          cache: true
+
+      - name: Build real native preview executable and session harness
+        shell: pwsh
+        run: |
+          cmake -S apps/arstack_studio -B build-studio-preview -G "Visual Studio 17 2022" -A x64 -DARIEC61850_WARNINGS_AS_ERRORS=ON -DARSTACK_STUDIO_ENGINEERING_PREVIEW=ON
+          if ($LASTEXITCODE -ne 0) { throw 'Preview configuration failed' }
+          cmake --build build-studio-preview --config Release --target arstack_studio arstack_session_harness --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'Native Studio preview build failed' }
+          & "$PWD\build-studio-preview\Release\arstack_session_harness.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Native session regression failed' }
+
+      - name: Verify immutable public v0.1.1 firmware and flasher source
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'arstack-v0.1.1-portable.zip'
+          Invoke-WebRequest -Uri $env:BASE_PORTABLE_URL -OutFile $archive
+          $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $env:BASE_PORTABLE_SHA256) {
+            throw "Public v0.1.1 base archive SHA-256 mismatch: $actual"
+          }
+          $baseline = Join-Path $env:RUNNER_TEMP 'arstack-v0.1.1-verified'
+          Expand-Archive -LiteralPath $archive -DestinationPath $baseline -Force
+          foreach ($name in @('firmware\firmware-manifest.json', 'tools\espflash.exe', 'ARStackStudio.exe')) {
+            if (-not (Test-Path (Join-Path $baseline $name))) {
+              throw "Pinned public base package is incomplete: $name"
+            }
+          }
+          Write-Host 'Pinned v0.1.1 public firmware / flasher archive: VERIFIED'
+
+      - name: Stage isolated GUI preview with pinned release firmware
+        shell: pwsh
+        run: |
+          $stage = Join-Path $PWD 'dist\ARStack-Studio-Preview'
+          $baseline = Join-Path $env:RUNNER_TEMP 'arstack-v0.1.1-verified'
+          New-Item -Path $stage -ItemType Directory -Force | Out-Null
+          $gui = Join-Path $PWD 'build-studio-preview\Release\arstack_studio.exe'
+          if (-not (Test-Path $gui)) { throw 'Fresh preview GUI executable missing' }
+          $exe = Join-Path $stage 'ARStackStudio.exe'
+          Copy-Item $gui $exe
+          windeployqt --release --qmldir "$PWD\apps\arstack_studio\qml" --compiler-runtime $exe
+          if ($LASTEXITCODE -ne 0) { throw 'Qt runtime deployment failed' }
+          Copy-Item (Join-Path $baseline 'firmware') (Join-Path $stage 'firmware') -Recurse
+          Copy-Item (Join-Path $baseline 'tools') (Join-Path $stage 'tools') -Recurse
+          if (Test-Path (Join-Path $baseline 'licenses')) {
+            Copy-Item (Join-Path $baseline 'licenses') (Join-Path $stage 'licenses') -Recurse
+          }
+          Copy-Item LICENSE,NOTICE,THIRD_PARTY_NOTICES.md,COPYRIGHT.md -Destination $stage
+          $meta = [ordered]@{
+            schema = 'arstack.studio.preview-provenance.v1'
+            display = 'ARStack Studio Engineering Preview - not a public stable release'
+            guiCommit = $env:PREVIEW_SHA
+            guiVersion = '0.1.1-preview'
+            firmwareRelease = 'v0.1.1'
+            pinnedFirmwarePackageSha256 = $env:BASE_PORTABLE_SHA256
+            embeddedExperimentalM3 = $false
+            ptpHardwareQualified = $false
+            publicRelease = $false
+          }
+          $meta | ConvertTo-Json | Set-Content (Join-Path $stage 'PREVIEW-PROVENANCE.json') -Encoding utf8
+
+      - name: Smoke native packaged GUI, unchanged firmware contract and flasher
+        shell: pwsh
+        run: |
+          $stage = Join-Path $PWD 'dist\ARStack-Studio-Preview'
+          $exe = Join-Path $stage 'ARStackStudio.exe'
+          $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $stage 'firmware'
+          $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $stage 'tools\espflash.exe'
+          $env:ESPFLASH_SKIP_UPDATE_CHECK = 'true'
+          foreach ($check in @('--check-reference-template', '--check-firmware-contract', '--check-p0-policy', '--check-app-lifecycle')) {
+            & $exe $check
+            if ($LASTEXITCODE -ne 0) { throw "Preview GUI failed packaged smoke $check" }
+          }
+          & $env:ARSTACK_STUDIO_ESPFLASH --version
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned flasher execution failed' }
+          Write-Host 'Native GUI, firmware manifest, shutdown and flasher: PASS'
+
+      - name: Build portable and side-by-side Windows preview setup
+        shell: pwsh
+        run: |
+          $stage = Join-Path $PWD 'dist\ARStack-Studio-Preview'
+          $zip = Join-Path $PWD 'dist\ARStack-Studio-Preview-win-x64-portable.zip'
+          Compress-Archive -Path "$stage\*" -DestinationPath $zip -CompressionLevel Optimal -Force
+          choco install nsis -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed' }
+          $script = (Resolve-Path 'apps\arstack_studio\packaging\ARStackStudio.nsi').Path
+          $installer = Join-Path $PWD 'dist\ARStack-Studio-Preview-win-x64-setup.exe'
+          & makensis '/DARSTACK_PREVIEW' "/DSOURCE_DIR=$stage" "/DOUTPUT_FILE=$installer" '/DAPP_VERSION=0.1.1' $script
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $installer)) {
+            throw 'Side-by-side preview installer build failed'
+          }
+          $files = @($zip, $installer)
+          $checks = foreach ($file in $files) {
+            $sha = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$sha  $([IO.Path]::GetFileName($file))"
+          }
+          $checks | Set-Content (Join-Path $PWD 'dist\SHA256SUMS.txt') -Encoding ascii
+
+      - name: Fresh install smoke in isolated preview directory
+        shell: pwsh
+        run: |
+          $installer = Join-Path $PWD 'dist\ARStack-Studio-Preview-win-x64-setup.exe'
+          $installDir = Join-Path $env:RUNNER_TEMP 'ARStackStudioPreviewCleanInstall'
+          & $installer '/S' "/D=$installDir"
+          if ($LASTEXITCODE -ne 0) { throw 'Preview installer failed' }
+          $exe = Join-Path $installDir 'ARStackStudio.exe'
+          if (-not (Test-Path $exe)) { throw 'Preview installer did not deploy GUI .exe' }
+          $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $installDir 'firmware'
+          $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $installDir 'tools\espflash.exe'
+          $env:ESPFLASH_SKIP_UPDATE_CHECK = 'true'
+          foreach ($check in @('--check-firmware-contract', '--check-p0-policy', '--check-app-lifecycle')) {
+            & $exe $check
+            if ($LASTEXITCODE -ne 0) { throw "Installed preview failed $check" }
+          }
+          $previewKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ARStackStudioPreview'
+          if (-not (Test-Path $previewKey)) { throw 'Preview-specific registry identity missing' }
+          $stableKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ARStackStudio'
+          if (Test-Path $stableKey) { throw 'Preview unexpectedly modified stable installer registration' }
+          $uninstall = Join-Path $installDir 'Uninstall.exe'
+          if (-not (Test-Path $uninstall)) { throw 'Preview uninstaller missing' }
+          & $uninstall '/S'
+          if ($LASTEXITCODE -ne 0) { throw 'Preview uninstaller failed' }
+          Write-Host 'Preview install/run/uninstall and stable-key isolation: PASS'
+
+      - name: Upload GUI-only Windows preview packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: arstack-studio-native-preview-win-x64-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: |
+            dist/ARStack-Studio-Preview-win-x64-setup.exe
+            dist/ARStack-Studio-Preview-win-x64-portable.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
