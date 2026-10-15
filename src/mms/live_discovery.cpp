@@ -388,6 +388,7 @@ MmsLiveDiscoveryResult MmsLiveDiscoveryClient::discover(
     result.report_inventory = MmsReportInventoryBuilder::build(result.names);
 
     const auto readDataSetDirectories = [&] {
+        if (!options.read_data_set_directories) return;
         const std::size_t count = std::min(
             options.maximum_data_set_directories,
             result.report_inventory.data_sets.size());
@@ -421,6 +422,7 @@ MmsLiveDiscoveryResult MmsLiveDiscoveryClient::discover(
     };
 
     const auto probeVariableTypes = [&] {
+        if (!options.probe_variable_types) return;
         auto candidates = build_logical_node_type_probe_candidates(
             result.names, options.maximum_variable_type_probes);
         if (options.use_verified_data_set_type_hints) {
