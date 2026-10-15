@@ -439,7 +439,7 @@ int main(int argc, char* argv[]) {
     }
 
     qulonglong brcbGiReports = 0;
-    if (ReferenceIec61850Fixture) {
+    if (indexedFixture) {
         if (selectEligibleRcb(reports, true, exactBrcb) < 0 ||
             reports.selectedDataSetMembers().isEmpty()) {
             qCritical() << "REPORTS_WORKBENCH_FAIL eligible_brcb";
@@ -485,9 +485,9 @@ int main(int argc, char* argv[]) {
         << "urcb_gi_reports=" + QString::number(reportCountAfterGi)
         << "brcb_gi_reports=" + QString::number(brcbGiReports)
         << "rcb_manifest_instances=pass"
-        << QStringLiteral("reference_iec61850_indexed_inventory=%1").arg(ReferenceIec61850Fixture ? QStringLiteral("pass") : QStringLiteral("n/a"))
+        << QStringLiteral("reference_iec61850_indexed_inventory=%1").arg(indexedFixture ? QStringLiteral("pass") : QStringLiteral("n/a"))
         << "urcb=pass"
-        << QStringLiteral("brcb_gi=%1").arg(ReferenceIec61850Fixture ? QStringLiteral("pass") : QStringLiteral("n/a"))
+        << QStringLiteral("brcb_gi=%1").arg(indexedFixture ? QStringLiteral("pass") : QStringLiteral("n/a"))
         << "brcb_inventory=pass"
         << "entryid_indicator=pass"
         << "cleanup=pass"
