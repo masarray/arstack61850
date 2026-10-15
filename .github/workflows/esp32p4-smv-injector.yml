@@ -38,7 +38,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: esp32p4-smv-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: esp32p4-smv-${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
@@ -58,6 +58,10 @@ jobs:
         working-directory: embedded/esp32p4_smv_injector
     steps:
       - uses: actions/checkout@v4
+        with:
+          # PR packaging must use exactly the reviewed source SHA, not a
+          # synthetic merge SHA that may change between queue and build.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Select ESP32-P4 target
         run: source /opt/esp/idf/export.sh && idf.py set-target esp32p4
@@ -130,15 +134,22 @@ jobs:
           test -s "build/${image}"
 
       - name: Create release manifest and SHA-256 contract
+        env:
+          # Container git may lack safe.directory or even be unavailable.
+          # The checkout explicitly selected this verified PR-head SHA.
+          ARSTACK_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           image="arstack-esp32p4-smv-${ARSTACK_FIRMWARE_VERSION}.bin"
           sha="$(sha256sum "build/${image}" | awk '{print $1}')"
-          python3 - "$image" "$sha" "$GITHUB_SHA" <<'PY'
+          python3 - "$image" "$sha" "$ARSTACK_SOURCE_COMMIT" <<'PY'
           import json
           import os
+          import re
           import sys
           image, sha256, source_commit = sys.argv[1:]
+          if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
+              raise SystemExit("Firmware source SHA unavailable/invalid; refusing a zero-provenance package")
           manifest = {
               "schema": "arstack.studio.firmware.v1",
               "product": "ARStack ESP32-P4 SMV Injector",
@@ -171,6 +182,7 @@ jobs:
           assert 'PTP-P2' in manifest['capabilities']
           assert 'SMPSYNCH-AUTO' in manifest['capabilities']
           assert 'PROFILE-BINARY-V1' in manifest['capabilities']
+          assert __import__('re').fullmatch(r'[0-9a-f]{40}', manifest['sourceCommit'])
           assert actual == manifest['sha256']
           print(f"Firmware package: PASS · {manifest['image']} · PTP-P2 · pre-v3 · SHA-256 {actual}")
           PY

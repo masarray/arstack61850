@@ -438,8 +438,13 @@ int main(int argc, char* argv[]) {
     QGuiApplication app(argc, argv);
     app.setQuitOnLastWindowClosed(true);
     QCoreApplication::setOrganizationName(QStringLiteral("ARStack61850"));
+#ifdef ARSTACK_STUDIO_ENGINEERING_PREVIEW
+    QCoreApplication::setApplicationName(QStringLiteral("ARStack Studio Preview"));
+    QCoreApplication::setApplicationVersion(QStringLiteral(ARSTACK_STUDIO_VERSION "-preview"));
+#else
     QCoreApplication::setApplicationName(QStringLiteral("ARStack Studio"));
     QCoreApplication::setApplicationVersion(QStringLiteral(ARSTACK_STUDIO_VERSION));
+#endif
 
     // S6 ownership starts before any firmware process, QML object, or serial
     // worker exists. A second Studio process therefore cannot race for the

@@ -12,7 +12,7 @@ SurfacePanel {
     property string monoFont: "Inter"
     property var roleValues: ["SOURCE", "RECEIVER", "MONITOR"]
     property bool advancedVisible: false
-    property bool startPending: false
+    readonly property bool startPending: panel.device && panel.device.ptpStarting
 
     function roleIndex(role) {
         if (role === "RECEIVER") return 1
@@ -27,9 +27,8 @@ SurfacePanel {
         return 0
     }
 
-    function applyProfile() {
-        if (!panel.session) return false
-        return panel.session.requestConfigurePtp({
+    function ptpProfile() {
+        return {
             domain: Number(domainField.text),
             transportSpecific: Number(transportField.text),
             vlanEnabled: vlanCheck.checked,
@@ -38,24 +37,18 @@ SurfacePanel {
             announceIntervalMs: Number(announceField.text),
             syncIntervalMs: Number(syncField.text),
             respondToPeerDelay: pdelayCheck.checked
-        })
+        }
+    }
+
+    function applyProfile() {
+        return panel.session && panel.session.requestConfigurePtp(panel.ptpProfile())
     }
 
     function startSelectedMode() {
         if (!panel.session || !panel.device.ptpAvailable) return
         var role = panel.roleValues[modeCombo.currentIndex]
-        if (!panel.session.requestPtpRole(role)) {
-            if (panel.controller) panel.controller.showMessage("PTP mode could not be selected.", true)
-            return
-        }
-        if (!panel.applyProfile()) {
-            if (panel.controller) panel.controller.showMessage("PTP settings were rejected before start.", true)
-            return
-        }
-        panel.startPending = true
-        if (!panel.session.requestStartPtp()) {
-            panel.startPending = false
-            if (panel.controller) panel.controller.showMessage("PTP start command could not be sent.", true)
+        if (!panel.session.requestStartPtpConfigured(role, panel.ptpProfile())) {
+            if (panel.controller) panel.controller.showMessage("PTP start blocked. See the Timing status for details.", true)
         }
     }
 
@@ -66,42 +59,24 @@ SurfacePanel {
         && Number(panel.device.ptpSyncSent) > 0
         && Number(panel.device.ptpFollowUpSent) > 0
         && Number(panel.device.ptpTxFailures) === 0
-    readonly property string headlineState: panel.startPending ? "STARTING"
+    readonly property bool stopPending: panel.startPending &&
+        (panel.device.ptpStatus.indexOf("Stopping PTP") === 0 ||
+         panel.device.ptpStatus.indexOf("Checking that board") === 0 ||
+         panel.device.ptpStatus.indexOf("PTP STOP unverified") === 0)
+    readonly property string headlineState: panel.stopPending
+        ? (panel.device.ptpStatus.indexOf("unverified") !== -1 ? "STOP UNVERIFIED" : "STOPPING")
+        : panel.startPending ? "STARTING"
         : panel.device.ptpRunning
-            ? (panel.receiverRole ? panel.device.ptpDiscipline : panel.activeRole + " ACTIVE")
+            ? (panel.receiverRole ? (panel.device.ptpDiscipline === "LOCKED" ? "BOARD LOCKED" : panel.device.ptpDiscipline)
+                : panel.activeRole + " ACTIVE")
             : panel.device.ptpStatus === "PTP start failed" ? "START FAILED" : "OFF"
 
     Timer {
-        interval: 700
+        // Status refresh only. Native C++ verifies ACKs and owns timeouts.
+        interval: 1000
         repeat: true
         running: panel.startPending || panel.device.ptpRunning
-        onTriggered: {
-            if (panel.session) panel.session.requestPtpRefresh()
-            if (panel.device.ptpRunning) panel.startPending = false
-        }
-    }
-
-    Timer {
-        interval: 3500
-        repeat: false
-        running: panel.startPending
-        onTriggered: {
-            panel.startPending = false
-            if (panel.session) panel.session.requestPtpRefresh()
-            if (!panel.device.ptpRunning && panel.controller)
-                panel.controller.showMessage("PTP did not reach verified transmit state. Check Ethernet link and retry.", true)
-        }
-    }
-
-    Connections {
-        target: panel.device
-        function onPtpStateChanged() {
-            if (panel.device.ptpRunning) {
-                panel.startPending = false
-                if (panel.controller && panel.sourceRole && panel.sourceEvidence)
-                    panel.controller.showMessage("PTP Source active · Announce + Sync + Follow_Up verified.", false)
-            }
-        }
+        onTriggered: if (panel.session) panel.session.requestPtpRefresh()
     }
 
     ScrollView {
@@ -138,8 +113,8 @@ SurfacePanel {
                     theme: panel.theme
                     monoFont: panel.uiFont
                     state: panel.headlineState
-                    stateColor: panel.device.ptpDiscipline === "LOCKED" ? panel.theme.green
-                        : panel.headlineState === "START FAILED" ? panel.theme.red
+                    stateColor: panel.headlineState === "START FAILED" ? panel.theme.red
+                        : panel.receiverRole && panel.device.ptpRunning ? panel.theme.amber
                         : panel.device.ptpRunning ? panel.theme.green
                         : panel.startPending ? panel.theme.amber : panel.theme.muted
                 }
@@ -215,7 +190,8 @@ SurfacePanel {
                     theme: panel.theme
                     uiFont: panel.uiFont
                     tone: "accent"
-                    text: panel.startPending ? "Starting…"
+                    text: panel.stopPending ? "Stop pending…"
+                        : panel.startPending ? "Starting…"
                         : modeCombo.currentIndex === 0 ? "Start PTP Source"
                         : modeCombo.currentIndex === 1 ? "Start PTP Receiver" : "Start Monitor"
                     enabled: panel.session && panel.device.ptpAvailable && !panel.device.ptpRunning && !panel.startPending && !panel.session.updatingFirmware
@@ -225,10 +201,9 @@ SurfacePanel {
                     theme: panel.theme
                     uiFont: panel.uiFont
                     tone: "danger"
-                    text: "Stop PTP"
+                    text: panel.device.ptpStatus.indexOf("PTP STOP unverified") === 0 ? "Retry Stop PTP" : "Stop PTP"
                     enabled: panel.session && (panel.device.ptpRunning || panel.startPending) && !panel.session.updatingFirmware
                     onClicked: {
-                        panel.startPending = false
                         panel.session.requestStopPtp()
                     }
                 }
@@ -279,7 +254,7 @@ SurfacePanel {
                     Label {
                         Layout.columnSpan: 5
                         text: panel.sourceRole && panel.device.ptpRunning && panel.sourceEvidence
-                            ? "Verified transmit path: Announce + Sync + Follow_Up counters are advancing with zero TX failures."
+                            ? "Board reports Announce + Sync + Follow_Up TX with zero failures. Independent timing is not qualified."
                             : panel.sourceRole && panel.startPending
                                 ? "Waiting for the first verified Announce + Sync + Follow_Up transmission…"
                                 : panel.device.ptpStatus
@@ -304,7 +279,7 @@ SurfacePanel {
                     anchors.margins: 10
                     columns: 4
                     Label { text: "Discipline"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-                    Label { text: panel.device.ptpDiscipline; color: panel.device.ptpDiscipline === "LOCKED" ? panel.theme.green : panel.theme.amber; font.family: panel.monoFont; font.pixelSize: 10; font.weight: Font.DemiBold }
+                    Label { text: panel.device.ptpDiscipline === "LOCKED" ? "LOCKED (board)" : panel.device.ptpDiscipline; color: panel.theme.amber; font.family: panel.monoFont; font.pixelSize: 10; font.weight: Font.DemiBold }
                     Label { text: "Selected source"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
                     Label { text: panel.device.ptpSource === "NONE" ? "—" : panel.device.ptpSource; color: panel.theme.text; font.family: panel.monoFont; font.pixelSize: 9 }
                     Label { text: "Offset"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
@@ -334,7 +309,7 @@ SurfacePanel {
                     Label { text: "Announce interval (ms)"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: announceField; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 100; top: 10000 } }
                     Label { text: "Sync interval (ms)"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
-                    NumericField { id: syncField; theme: panel.theme; monoFont: panel.uiFont; text: "250"; validator: IntValidator { bottom: 20; top: 5000 } }
+                    NumericField { id: syncField; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 20; top: 5000 } }
                     CheckBox { id: vlanCheck; text: "VLAN"; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: vlanField; enabled: vlanCheck.checked; theme: panel.theme; monoFont: panel.uiFont; text: "100"; validator: IntValidator { bottom: 1; top: 4094 } }
                     Label { text: "VLAN PCP"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
@@ -344,8 +319,11 @@ SurfacePanel {
                         theme: panel.theme
                         uiFont: panel.uiFont
                         text: "Apply advanced settings"
-                        enabled: panel.session && panel.device.ptpAvailable && !panel.device.ptpRunning
-                        onClicked: panel.applyProfile()
+                        enabled: panel.session && panel.device.ptpAvailable && !panel.device.ptpRunning && !panel.startPending
+                        onClicked: {
+                            if (!panel.applyProfile() && panel.controller)
+                                panel.controller.showMessage("PTP settings rejected.", true)
+                        }
                     }
                 }
 

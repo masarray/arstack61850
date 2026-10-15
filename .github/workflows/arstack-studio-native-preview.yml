@@ -1,0 +1,373 @@
+name: ARStack Studio Native Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'apps/arstack_studio/**'
+      - '.github/workflows/arstack-studio-native-preview.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # Build one compatible SOURCE firmware bundle from the exact reviewed PR
+  # rather than taking an older public firmware that lacks PROFILE-BINARY-V1.
+  firmware:
+    uses: ./.github/workflows/esp32p4-smv-injector.yml
+
+  windows-preview:
+    needs: firmware
+    if: ${{ !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: windows-2022
+    timeout-minutes: 40
+    env:
+      PREVIEW_SHA: ${{ github.event.pull_request.head.sha }}
+      BASE_PORTABLE_SHA256: 27dfa5374afe9ac9f9235d86dfa26131a3d2f3d26a73205f1fa188a6a3d9ee4c
+      BASE_PORTABLE_URL: https://github.com/masarray/arstack61850/releases/download/v0.1.1/ARStack-Studio-0.1.1-win-x64-portable.zip
+
+    steps:
+      - name: Checkout exact GUI PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.10.3'
+          arch: win64_msvc2022_64
+          modules: 'qtserialport'
+          cache: true
+
+      - name: Build real native preview executable and session harness
+        shell: pwsh
+        run: |
+          cmake -S apps/arstack_studio -B build-studio-preview -G "Visual Studio 17 2022" -A x64 -DARIEC61850_WARNINGS_AS_ERRORS=ON -DARSTACK_STUDIO_ENGINEERING_PREVIEW=ON
+          if ($LASTEXITCODE -ne 0) { throw 'Preview configuration failed' }
+          cmake --build build-studio-preview --config Release --target arstack_studio arstack_session_harness --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'Native Studio preview build failed' }
+          & "$PWD\build-studio-preview\Release\arstack_session_harness.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Native session regression failed' }
+          # Differentiate product code regressions from missing deployed DLLs.
+          $nativeGui = Join-Path $PWD 'build-studio-preview\Release\arstack_studio.exe'
+          $probe = Start-Process -FilePath $nativeGui -ArgumentList '--check-reference-template' -Wait -PassThru
+          Write-Host "NATIVE_BUILD_REFERENCE_TEMPLATE_EXIT=$($probe.ExitCode)"
+          if ($probe.ExitCode -ne 0) { throw 'Native Windows reference template regression before packaging' }
+
+      - name: Download matched ESP32-P4 firmware built by the same workflow
+        uses: actions/download-artifact@v4
+        with:
+          name: arstack-esp32p4-smv-firmware
+          path: firmware-package
+
+      - name: Verify immutable public v0.1.1 flasher source and matched firmware
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'arstack-v0.1.1-portable.zip'
+          Invoke-WebRequest -Uri $env:BASE_PORTABLE_URL -OutFile $archive
+          $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $env:BASE_PORTABLE_SHA256) {
+            throw "Public v0.1.1 base archive SHA-256 mismatch: $actual"
+          }
+          $baseline = Join-Path $env:RUNNER_TEMP 'arstack-v0.1.1-verified'
+          Expand-Archive -LiteralPath $archive -DestinationPath $baseline -Force
+          foreach ($name in @('firmware\firmware-manifest.json', 'tools\espflash.exe', 'ARStackStudio.exe')) {
+            if (-not (Test-Path (Join-Path $baseline $name))) {
+              throw "Pinned public base package is incomplete: $name"
+            }
+          }
+          $legacyGui = Join-Path $baseline 'ARStackStudio.exe'
+          $probe = Start-Process -FilePath $legacyGui -ArgumentList '--check-reference-template' -Wait -PassThru
+          Write-Host "PUBLIC_BASELINE_REFERENCE_TEMPLATE_EXIT=$($probe.ExitCode)"
+          if ($probe.ExitCode -ne 0) { throw 'Verified public base GUI reference template regression' }
+          # Older v0.1.1 public firmware remains an immutable historical
+          # source for the verified flasher ONLY. Its capability contract is
+          # missing PROFILE-BINARY-V1 and cannot be shipped with this GUI.
+          $newFirmware = Join-Path $PWD 'firmware-package'
+          $manifestPath = Join-Path $newFirmware 'firmware-manifest.json'
+          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+            throw 'Matching firmware job did not provide its manifest'
+          }
+          $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+          $expectedCapabilities = @('SMV-4I4V', 'PROFILE', 'PROFILE-BINARY-V1', 'LIVE-SETPOINTS', 'SESSION-LEASE', 'PTP-P2', 'SMPSYNCH-AUTO')
+          foreach ($capability in $expectedCapabilities) {
+            if ($manifest.capabilities -notcontains $capability) { throw "PR firmware lacks capability: $capability" }
+          }
+          if ($manifest.sourceCommit -ne $env:PREVIEW_SHA) {
+            throw "Firmware source SHA $($manifest.sourceCommit) differs from exact Studio PR head $env:PREVIEW_SHA"
+          }
+          if ($manifest.version -ne '0.1.1' -or $manifest.chip -ne 'esp32p4') {
+            throw 'PR firmware version or target does not match native Studio'
+          }
+          $image = Join-Path $newFirmware $manifest.image
+          if (-not (Test-Path -LiteralPath $image -PathType Leaf)) {
+            throw 'Matching firmware image is missing'
+          }
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath $image).Hash.ToLowerInvariant() -ne $manifest.sha256.ToLowerInvariant()) {
+            throw 'Matching PR firmware image SHA-256 mismatch'
+          }
+          $env:ARSTACK_STUDIO_FIRMWARE_DIR = $newFirmware
+          $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $baseline 'tools\espflash.exe'
+          $native = Join-Path $PWD 'build-studio-preview\Release\arstack_studio.exe'
+          $logDir = Join-Path $env:RUNNER_TEMP 'studio-firmware-diagnostics'
+          New-Item -Path $logDir -ItemType Directory -Force | Out-Null
+          $baselineStdErr = Join-Path $logDir 'baseline.stderr.log'
+          $baselineStdOut = Join-Path $logDir 'baseline.stdout.log'
+          $baselineContract = Start-Process -FilePath $legacyGui -ArgumentList '--check-firmware-contract' -Wait -PassThru -RedirectStandardError $baselineStdErr -RedirectStandardOutput $baselineStdOut
+          Write-Host "PUBLIC_BASELINE_FIRMWARE_CONTRACT_EXIT=$($baselineContract.ExitCode)"
+          Get-Content $baselineStdErr -ErrorAction SilentlyContinue
+          if ($baselineContract.ExitCode -ne 0) { throw 'Pinned public v0.1.1 GUI cannot validate its own firmware' }
+          $nativeStdErr = Join-Path $logDir 'native.stderr.log'
+          $nativeStdOut = Join-Path $logDir 'native.stdout.log'
+          $firmwareContract = Start-Process -FilePath $native -ArgumentList '--check-firmware-contract' -Wait -PassThru -RedirectStandardError $nativeStdErr -RedirectStandardOutput $nativeStdOut
+          Write-Host "NATIVE_WITH_PUBLIC_BASELINE_FIRMWARE_CONTRACT_EXIT=$($firmwareContract.ExitCode)"
+          Get-Content $nativeStdErr -ErrorAction SilentlyContinue
+          if ($firmwareContract.ExitCode -ne 0) {
+            $manifest = Get-Content -Raw (Join-Path $baseline 'firmware\firmware-manifest.json') | ConvertFrom-Json
+            Write-Host "PUBLIC_FIRMWARE_MANIFEST_VERSION=$($manifest.version) PROTOCOL=$($manifest.protocol) IMAGE=$($manifest.image)"
+            $file = Join-Path (Join-Path $baseline 'firmware') $manifest.image
+            Write-Host "PUBLIC_FIRMWARE_IMAGE_EXISTS=$(Test-Path $file) SHA_MATCH=$((Test-Path $file) -and ((Get-FileHash -Algorithm SHA256 $file).Hash.ToLowerInvariant() -eq $manifest.sha256.ToLowerInvariant())) FLASHER_EXISTS=$(Test-Path $env:ARSTACK_STUDIO_ESPFLASH)"
+            throw 'New native GUI disagrees with public firmware bundle; see stdout/stderr above'
+          }
+          Write-Host 'Pinned public v0.1.1 flasher source + matched PR-head firmware: VERIFIED'
+
+      - name: Stage isolated GUI preview with pinned release firmware
+        shell: pwsh
+        run: |
+          $stage = Join-Path $PWD 'dist\ARStack-Studio-Preview'
+          $baseline = Join-Path $env:RUNNER_TEMP 'arstack-v0.1.1-verified'
+          New-Item -Path $stage -ItemType Directory -Force | Out-Null
+          $gui = Join-Path $PWD 'build-studio-preview\Release\arstack_studio.exe'
+          if (-not (Test-Path $gui)) { throw 'Fresh preview GUI executable missing' }
+          $exe = Join-Path $stage 'ARStackStudio.exe'
+          Copy-Item $gui $exe
+          windeployqt --release --qmldir "$PWD\apps\arstack_studio\qml" --compiler-runtime $exe
+          if ($LASTEXITCODE -ne 0) { throw 'Qt runtime deployment failed' }
+          # Copy directory CONTENTS to a pre-created destination, not directory
+          # objects to ambiguous destination names (PowerShell nesting hazard).
+          # Firmware is from the exact PR HEAD; only pinned flasher/tools
+          # originate from the public v0.1.1 archive.
+          foreach ($dir in @('firmware', 'tools')) {
+            $sourceDir = if ($dir -eq 'firmware') {
+              Join-Path $PWD 'firmware-package'
+            } else {
+              Join-Path $baseline 'tools'
+            }
+            $targetDir = Join-Path $stage $dir
+            if (-not (Test-Path $sourceDir)) { throw "Source bundle folder missing: $dir" }
+            New-Item -Path $targetDir -ItemType Directory -Force | Out-Null
+            Copy-Item -Path (Join-Path $sourceDir '*') -Destination $targetDir -Recurse -Force
+          }
+          if (Test-Path (Join-Path $baseline 'licenses')) {
+            $licenseDir = Join-Path $stage 'licenses'
+            New-Item -Path $licenseDir -ItemType Directory -Force | Out-Null
+            Copy-Item -Path (Join-Path $baseline 'licenses\*') -Destination $licenseDir -Recurse -Force
+          }
+          foreach ($mandatory in @('firmware\firmware-manifest.json', 'tools\espflash.exe')) {
+            $full = Join-Path $stage $mandatory
+            if (-not (Test-Path $full -PathType Leaf)) {
+              throw "Preview staging lost required top-level bundle path: $mandatory"
+            }
+          }
+          $manifest = Get-Content -Raw (Join-Path $stage 'firmware\firmware-manifest.json') | ConvertFrom-Json
+          $firmwareFile = Join-Path (Join-Path $stage 'firmware') $manifest.image
+          if (-not (Test-Path $firmwareFile -PathType Leaf)) {
+            throw "Preview manifest firmware image missing: $($manifest.image)"
+          }
+          $imageSha = (Get-FileHash -Algorithm SHA256 -LiteralPath $firmwareFile).Hash.ToLowerInvariant()
+          if ($imageSha -ne $manifest.sha256.ToLowerInvariant()) {
+            throw "Preview staged firmware image hash mismatch: $imageSha"
+          }
+          if ($manifest.sourceCommit -ne $env:PREVIEW_SHA -or
+              $manifest.capabilities -notcontains 'PROFILE-BINARY-V1') {
+            throw 'Staged firmware changed identity or required capability'
+          }
+          Write-Host "Staged Studio GUI with PR-head firmware and pinned flasher at canonical paths: PASS"
+          Copy-Item LICENSE,NOTICE,THIRD_PARTY_NOTICES.md,COPYRIGHT.md -Destination $stage
+          $meta = [ordered]@{
+            schema = 'arstack.studio.preview-provenance.v1'
+            display = 'ARStack Studio Engineering Preview - not a public stable release'
+            guiCommit = $env:PREVIEW_SHA
+            guiVersion = '0.1.1-preview'
+            firmwareVersion = '0.1.1'
+            firmwareSourceCommit = $env:PREVIEW_SHA
+            firmwareCompile = 'ESP-IDF v5.5.4 / exact PR HEAD'
+            pinnedFlasherBasePackageSha256 = $env:BASE_PORTABLE_SHA256
+            embeddedExperimentalM3 = $false
+            ptpHardwareQualified = $false
+            publicRelease = $false
+          }
+          $meta | ConvertTo-Json | Set-Content (Join-Path $stage 'PREVIEW-PROVENANCE.json') -Encoding utf8
+
+      - name: Smoke native packaged GUI, unchanged firmware contract and flasher
+        shell: pwsh
+        run: |
+          $stage = Join-Path $PWD 'dist\ARStack-Studio-Preview'
+          $exe = Join-Path $stage 'ARStackStudio.exe'
+          $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $stage 'firmware'
+          $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $stage 'tools\espflash.exe'
+          $env:ESPFLASH_SKIP_UPDATE_CHECK = 'true'
+          foreach ($check in @('--check-reference-template', '--check-firmware-contract', '--check-p0-policy', '--check-app-lifecycle')) {
+            $probe = Start-Process -FilePath $exe -ArgumentList $check -Wait -PassThru
+            Write-Host "PACKAGED_PREVIEW_CHECK=$check EXIT=$($probe.ExitCode)"
+            if ($probe.ExitCode -ne 0) {
+              Get-ChildItem $stage -Filter '*.dll' | Select-Object -ExpandProperty Name
+              throw "Preview GUI failed packaged smoke $check with code $($probe.ExitCode)"
+            }
+          }
+          & $env:ARSTACK_STUDIO_ESPFLASH --version
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned flasher execution failed' }
+          Write-Host 'Native GUI, firmware manifest, shutdown and flasher: PASS'
+
+      - name: Build portable and Inno Setup Windows preview installer
+        shell: pwsh
+        run: |
+          $stage = Join-Path $PWD 'dist\ARStack-Studio-Preview'
+          $zip = Join-Path $PWD 'dist\ARStack-Studio-Preview-win-x64-portable.zip'
+          Compress-Archive -Path "$stage\*" -DestinationPath $zip -CompressionLevel Optimal -Force
+          choco install innosetup --version 6.7.1 -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Inno Setup installation failed' }
+          $compiler = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $compiler)) { throw "Pinned Inno Setup compiler missing: $compiler" }
+          $script = (Resolve-Path 'apps\arstack_studio\packaging\ARStackStudio.iss').Path
+          $installer = Join-Path $PWD 'dist\ARStack-Studio-Preview-win-x64-setup.exe'
+          & $compiler '/DARSTACK_PREVIEW' '/DSTUDIO_VERSION=0.1.1' "/DSTAGE_DIR=$stage" "/O$PWD\dist" $script
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $installer)) {
+            throw 'Inno Setup native GUI preview installer build failed'
+          }
+          $files = @($zip, $installer)
+          $checks = foreach ($file in $files) {
+            $sha = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$sha  $([IO.Path]::GetFileName($file))"
+          }
+          $checks | Set-Content (Join-Path $PWD 'dist\SHA256SUMS.txt') -Encoding ascii
+
+      - name: Inno clean install, running-app upgrade and clean uninstall
+        shell: pwsh
+        run: |
+          $installer = Join-Path $PWD 'dist\ARStack-Studio-Preview-win-x64-setup.exe'
+          $installDir = Join-Path $env:RUNNER_TEMP 'ARStackStudioPreviewCleanInstall'
+          $silent = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS', "/DIR=`"$installDir`"")
+          $install = Start-Process -FilePath $installer -ArgumentList $silent -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Inno preview install exit $($install.ExitCode)" }
+          $exe = Join-Path $installDir 'ARStackStudio.exe'
+          if (-not (Test-Path $exe)) { throw 'Preview installation is missing GUI EXE' }
+          $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $installDir 'firmware'
+          $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $installDir 'tools\espflash.exe'
+          $env:ESPFLASH_SKIP_UPDATE_CHECK = 'true'
+          foreach ($check in @('--check-firmware-contract', '--check-p0-policy', '--check-app-lifecycle')) {
+            $probe = Start-Process -FilePath $exe -ArgumentList $check -Wait -PassThru
+            if ($probe.ExitCode -ne 0) { throw "Installed preview failed $check code $($probe.ExitCode)" }
+          }
+          $previewKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ARStack61850.Studio.Preview_is1'
+          if (-not (Test-Path $previewKey)) { throw 'Inno Preview AppId registration missing' }
+          $stableKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ARStackStudio'
+          if (Test-Path $stableKey) { throw 'Preview unexpectedly changed stable NSIS registration' }
+          $userNote = Join-Path $installDir 'operator-owned-note.txt'
+          'preserve my own data' | Set-Content -LiteralPath $userNote
+          $runningApp = Start-Process -FilePath $exe -PassThru
+          try {
+            if (-not $runningApp.WaitForInputIdle(15000)) {
+              throw 'GUI did not become interactive during hot-update test'
+            }
+            if ($runningApp.HasExited) { throw 'GUI exited before hot-update test' }
+            $upgrade = Start-Process -FilePath $installer -ArgumentList $silent -Wait -PassThru
+            if ($upgrade.ExitCode -ne 0) { throw "Inno GUI hot-update exit $($upgrade.ExitCode)" }
+            $runningApp.Refresh()
+            if (-not $runningApp.HasExited) {
+              throw 'Inno did not gracefully close the GUI for upgrade'
+            }
+          } finally {
+            if (-not $runningApp.HasExited) {
+              $runningApp.CloseMainWindow() | Out-Null
+              if (-not $runningApp.WaitForExit(10000)) { $runningApp.Kill() }
+            }
+            $runningApp.Dispose()
+          }
+          if (-not (Test-Path -LiteralPath $userNote)) {
+            throw 'Preview upgrade removed an operator-owned file'
+          }
+          $probe = Start-Process -FilePath $exe -ArgumentList '--check-firmware-contract' -Wait -PassThru
+          if ($probe.ExitCode -ne 0) { throw 'Upgraded GUI firmware contract failed' }
+          $uninstall = Join-Path $installDir 'unins000.exe'
+          if (-not (Test-Path $uninstall)) { throw 'Inno-generated uninstaller missing' }
+          $removal = Start-Process -FilePath $uninstall -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru
+          if ($removal.ExitCode -ne 0) { throw "Inno preview uninstall exit $($removal.ExitCode)" }
+          if (Test-Path $exe) { throw 'Uninstall left an application-owned GUI EXE' }
+          if (Test-Path $previewKey) { throw 'Uninstall left Inno AppId entry' }
+          if (-not (Test-Path $userNote)) { throw 'Uninstall deleted operator-owned data' }
+          if (Test-Path $stableKey) { throw 'Preview uninstall changed stable registration' }
+          Remove-Item -LiteralPath $userNote -Force
+          Write-Host 'Inno preview install, hot upgrade, data preservation and clean uninstall: PASS'
+
+      - name: Real public NSIS v0.1.1 to Inno migration acceptance
+        shell: pwsh
+        run: |
+          # The stable-channel Inno package below is only a CI migration
+          # fixture and is NEVER uploaded or released.
+          $oldUrl = 'https://github.com/masarray/arstack61850/releases/download/v0.1.1/ARStack-Studio-0.1.1-win-x64-setup.exe'
+          $oldSha = 'aa2bf3a1d8609c4c4d25c82ec7050a56004323b9086ed8f056db918292785a19'
+          $oldSetup = Join-Path $env:RUNNER_TEMP 'verified-v0.1.1-nsis-setup.exe'
+          Invoke-WebRequest -Uri $oldUrl -OutFile $oldSetup
+          $actual = (Get-FileHash $oldSetup -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $oldSha) { throw 'Legacy NSIS installer SHA-256 mismatch' }
+          $stableDir = Join-Path $env:LOCALAPPDATA 'Programs\ARStack Studio'
+          $legacyKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ARStackStudio'
+          $innoKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ARStack61850.Studio.Stable_is1'
+          if (Test-Path $legacyKey) { throw 'Unexpected preexisting stable NSIS registration on runner' }
+          $legacyInstall = Start-Process -FilePath $oldSetup -ArgumentList @('/S', "/D=$stableDir") -Wait -PassThru
+          if ($legacyInstall.ExitCode -ne 0) { throw "Historical NSIS install exit $($legacyInstall.ExitCode)" }
+          if (-not (Test-Path $legacyKey) -or
+              -not (Test-Path (Join-Path $stableDir 'Uninstall.exe'))) {
+            throw 'Legacy NSIS installation evidence missing'
+          }
+          $note = Join-Path $stableDir 'field-operator-owned-note.txt'
+          'preserved on installer migration' | Set-Content -LiteralPath $note
+
+          $stage = Join-Path $PWD 'dist\ARStack-Studio-Preview'
+          $compiler = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Inno Setup 6\ISCC.exe'
+          $script = (Resolve-Path 'apps\arstack_studio\packaging\ARStackStudio.iss').Path
+          & $compiler '/DSTUDIO_VERSION=0.1.1' "/DSTAGE_DIR=$stage" "/O$env:RUNNER_TEMP" $script
+          if ($LASTEXITCODE -ne 0) { throw 'Stable-channel migration fixture compilation failed' }
+          $migrationSetup = Join-Path $env:RUNNER_TEMP 'ARStack-Studio-win-x64-setup.exe'
+          if (-not (Test-Path $migrationSetup)) { throw 'Stable-channel Inno fixture must have a stable installer identity' }
+          $accidentalPreview = Join-Path $env:RUNNER_TEMP 'ARStack-Studio-Preview-win-x64-setup.exe'
+          if (Test-Path $accidentalPreview) { throw 'Stable migration compiled a Preview AppId accidentally' }
+          $migrated = Start-Process -FilePath $migrationSetup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS') -Wait -PassThru
+          if ($migrated.ExitCode -ne 0) { throw "Verified NSIS to Inno migration exit $($migrated.ExitCode)" }
+          if (Test-Path $legacyKey) { throw 'Legacy NSIS uninstall registration was not cleaned' }
+          if (Test-Path (Join-Path $stableDir 'Uninstall.exe')) {
+            throw 'Legacy NSIS uninstaller still present after migration'
+          }
+          if (-not (Test-Path $innoKey)) { throw 'New Inno Stable AppId missing' }
+          if (-not (Test-Path $note)) { throw 'Migration lost operator data' }
+          $newGui = Join-Path $stableDir 'ARStackStudio.exe'
+          $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $stableDir 'firmware'
+          $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $stableDir 'tools\espflash.exe'
+          $probe = Start-Process -FilePath $newGui -ArgumentList '--check-firmware-contract' -Wait -PassThru
+          if ($probe.ExitCode -ne 0) { throw 'Migrated firmware package contract failed' }
+          $uninstall = Join-Path $stableDir 'unins000.exe'
+          $removed = Start-Process -FilePath $uninstall -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru
+          if ($removed.ExitCode -ne 0) { throw "Migrated Inno uninstall exit $($removed.ExitCode)" }
+          if ((Test-Path $newGui) -or (Test-Path $innoKey) -or (-not (Test-Path $note))) {
+            throw 'Migrated Inno uninstall did not remove owned files safely'
+          }
+          Remove-Item $note -Force
+          Write-Host 'Actual v0.1.1 NSIS to Inno + owned cleanup + data preservation: PASS'
+
+      - name: Upload GUI-only Windows preview packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: arstack-studio-native-preview-win-x64-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: |
+            dist/ARStack-Studio-Preview-win-x64-setup.exe
+            dist/ARStack-Studio-Preview-win-x64-portable.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7

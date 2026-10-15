@@ -100,7 +100,7 @@ public:
 
 public slots:
     void initialize();
-    void shutdown(bool requestStop);
+    void shutdown(bool requestSvStop, bool requestPtpStop);
     void refreshPorts(quint64 generation);
     void autoDetectAndConnect(quint64 generation);
     void connectPort(const QString& portName, quint64 generation);
@@ -130,6 +130,8 @@ signals:
     void transportError(quint64 generation, const QString& message, bool fatal);
 
 private:
+    friend class DeterministicSessionHarness;
+
     struct PendingCommand final {
         QString text;
         QByteArray bytes;
@@ -149,6 +151,7 @@ private:
         bool quiet,
         bool exclusive,
         bool reportRejection);
+    void queuePriorityPtpStop();
     void pumpWriteQueue();
     void completeActiveWrite();
     void processReadyRead();
@@ -177,5 +180,6 @@ private:
     bool genericProbeActive_{false};
     bool identityConfirmed_{false};
     bool writeActive_{false};
+    bool ptpStopPending_{false}; // reserved bounded emergency STOP slot
     bool heartbeatEnabled_{false};
 };
