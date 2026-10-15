@@ -4,16 +4,32 @@
 > **Primary strategy and ownership contract:** [WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md](WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md).
 > **Scope:** installed native ARStack Workbench in apps/ied_simulator. Not a web app, WPF clone, or the separate ESP32-P4/SMV Studio track.
 
-## Verified integration checkpoint — 2026-10-15 (subsequent to the historical snapshot below)
+## Verified current integration checkpoint — 2026-10-15 (WIB)
 
-- **M2K MERGED** via [PR #176](https://github.com/masarray/arstack61850/pull/176), squash commit `0cc882022d20f416a33433d5f29a1f8950984d85` (verified as the new `main` at merge). Exact PR head `5c5e425c20acb1b849399f39bf62da0f68c0942b`; native Qt [38678320479](https://github.com/masarray/arstack61850/actions/runs/38678320479) and SCL-Assisted Workbench [38678320482](https://github.com/masarray/arstack61850/actions/runs/38678320482) were **SUCCESS** before merge. All review threads resolved; merge performed with expected head lease. PR #175 native Studio/PTP had already merged to main at `a47d65e` and its independent paths remained preserved.
-- **Post-M2K main CI**: [Qt 38698517002](https://github.com/masarray/arstack61850/actions/runs/38698517002), [SCL 38698516965](https://github.com/masarray/arstack61850/actions/runs/38698516965), [Release Hardening 38698517080](https://github.com/masarray/arstack61850/actions/runs/38698517080). SCL was verified **SUCCESS**; Qt and Release Hardening were **IN PROGRESS** when handoff updated, require fresh results.
-- **M2L ACTIVE / NOT MERGED**: [PR #178](https://github.com/masarray/arstack61850/pull/178), initial head `0dc048bb9ea33676a64e8284ca3626d70f2bf684` based on `0cc8820`. First slice edits canonical `MmsLiveTreeModel`, existing 60k+ QA and native selected-DA inspector. Exact CDC + MX + received finite numeric MMS gates magnitude/vector; vector angle appears only with actual `CMV cVal.ang.f`; scalar Hz/TotW and Boolean cannot invent angle. q/t companion visibility is restricted to the selected DA's FC and actual reception. No units or degree signs are inferred. Source replacement clears read evidence.
-- **M2L QA state**: branch initially opened as draft so draft-head CI was **SKIPPED**, **not PASS**. Ready-for-review plus exact new HEAD Qt/large-model/Browser regression and review signoff are required before merge. Physical IED, Windows installed artifact and native rendered-screen acceptance remain separate; source-only regression is not those gates.
-- **Ownership**: Track A owns canonical model and test in PR #178, Track B owns selected inspector QML changes *inside the same PR* to keep the slice vertical, Track C reporting/RCB remains untouched, Track D checks exact-head CI and post-merge runs. Other threads must avoid editing these four PR paths concurrently.
-- **Next**: Refresh PR #178 and CI, address any actual compiler/test/review defects, merge only after exact-head checks, verify `main`, then continue M2M native DataSets and selected-state screenshot QA. Never merge legacy #172/#164 by assumption.
+**Source baseline at acceptance: main `9cc9bda9c30804be343d49367e4dde6948789d95`.** Refresh live GitHub before further edits. Subsequent documentation-only commits may advance main without changing Workbench source.
 
-## Current checkpoint
+| Milestone | Integrated status | Exact-head evidence |
+| --- | --- | --- |
+| **M2K — ARSAS native All-IED live grid** | **MERGED** [PR #176](https://github.com/masarray/arstack61850/pull/176), squash `0cc882022d20f416a33433d5f29a1f8950984d85`; no conflict with independently merged native Studio/PTP #175 | PR head `5c5e425c20acb1b849399f39bf62da0f68c0942b`: [Qt 38678320479](https://github.com/masarray/arstack61850/actions/runs/38678320479) and [SCL 38678320482](https://github.com/masarray/arstack61850/actions/runs/38678320482) SUCCESS. Post-M2K main [Qt 38698517002](https://github.com/masarray/arstack61850/actions/runs/38698517002), [SCL 38698516965](https://github.com/masarray/arstack61850/actions/runs/38698516965), [Release Hardening 38698517080](https://github.com/masarray/arstack61850/actions/runs/38698517080) **all SUCCESS** |
+| **M2L — canonical measurement semantics & provenance** | **MERGED** [PR #178](https://github.com/masarray/arstack61850/pull/178), squash `9cc9bda9c30804be343d49367e4dde6948789d95`. Five changed paths, one canonical SSOT, native inspector and actual C++ regression | PR head `278271d7ca316d154113c1c8968339eea3a83e94`: [Qt 38700261642](https://github.com/masarray/arstack61850/actions/runs/38700261642) **SUCCESS (55 successful steps)**; [SCL 38700261577](https://github.com/masarray/arstack61850/actions/runs/38700261577) **SUCCESS**; no unresolved review. Post-M2L main [Qt 38701682484](https://github.com/masarray/arstack61850/actions/runs/38701682484), [SCL 38701682271](https://github.com/masarray/arstack61850/actions/runs/38701682271), [Release Hardening 38701682258](https://github.com/masarray/arstack61850/actions/runs/38701682258) **IN PROGRESS at this checkpoint**, not claimed PASS |
+
+### Canonical M2L invariants accepted
+
+- `MmsLiveTreeModel` is the only value/measurement owner; no additional MMS parser, q/t decoder, cache, or timer.
+- Only exact-authority CDC `CMV` + received finite numeric MX `cVal.mag.f/i` and `cVal.ang.f/i` exposes vector and angle. Scalar `MV/SAV` `mag.f/i` or `instMag.f/i` has no fabricated angle; `Hz` and `TotW` stay scalar even with stray `ang.f`. Boolean remains non-measurement. No guessed unit, multiplier, or degree symbol.
+- Uses existing `referenceIndex_` exact IEC aliases for constant-number measurement lookups rather than rescanning all DO siblings for each projected DA. No O(whole-tree) hot-path lookup.
+- q/t companions require actual received state and matching FC. DO preview now carries real received-value and exact value-source reference, including empty-string successful MMS reads.
+- Source replacement clears evidence. Malformed numeric angle, untrusted CDC, wrong-FC companion, and integer AnalogueValue alternatives have deterministic regression in the existing 60k QA.
+- Historical #172/#164 and legacy Browser recovery PRs remain **unmerged candidates**. Never automatically merge them; #175 native Studio/PTP remains a distinct track and was preserved.
+
+### Next engineering milestones (owners)
+
+1. **M2M — Native Data Model/DataSets GUI/UX** on merged M2L canonical fields: selected attribute, FC/IEC aliasing, lazy DO→DA and DataSet member ordering; actual native-rendered selected-state QA; strict no implicit MMS Read on expanding tree.
+2. **M2N — Reporting/RCB UX** stays with the existing `MmsReportController` and ordered-report-member projection; no cyclic polling in static report mode.
+3. **M2O/M2P — SG, Files, GOOSE, acceptance** need independent service-owner testing, Windows installed Workbench lineage and physical IED interop. Synthetic Qt CI is **not** proof of physical interoperability or installer parity.
+4. **Track D** must refresh and validate post-M2L main CI above before claiming fully qualified integrated CI. Subsequent work should not rewrite M2K/M2L canonical ownership without a regression-backed need.
+
+## Historical checkpoint — before M2K/M2L (archived, superseded by verified section above)
 
 | Item | Verified at this snapshot |
 | --- | --- |
@@ -37,7 +53,7 @@
 6. Scalar Hz and total power (TotW) do not acquire an “angle” through a generic presentation shortcut; only display units/phasor components proven by typed metadata.
 7. Never claim pixel-level IEDScout/ARSAS parity, latest installer parity, or real physical IED interop on synthetic fixtures alone.
 
-## Immediate action and owners
+## Historical action and owners (superseded; do not execute stale PR merge instructions)
 
 **Integration owner (first):** re-query main, PR #176 head, exact-head Qt result, review threads. Fix failures in **that PR**, not in a new duplicate. If green, squash-merge with expected-head lease, verify main integration and update this table.
 
