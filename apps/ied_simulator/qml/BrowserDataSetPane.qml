@@ -8,6 +8,9 @@ Rectangle {
     required property var theme
     required property var reports
     required property var modelProvider
+    // The selected DA remains owned by the existing canonical MMS model.
+    signal dataModelRequested()
+    signal watchAttributeRequested(var node)
     readonly property bool overview: reports.selectedDataSetIndex < 0
     readonly property var selectedDataSet: !overview && reports.selectedDataSetIndex < reports.dataSets.length ? reports.dataSets[reports.selectedDataSetIndex] : ({})
     color: theme.background
@@ -72,6 +75,19 @@ Rectangle {
             root.expandedMemberChildren = []
             root.showSelectedEvidence = false
             root.selectedAttributeReference = ""
+        }
+    }
+    Connections {
+        target: root.modelProvider
+        function onContextChanged() {
+            // Context replacement may retain a textual IEC reference. Clear
+            // selection and lazy children so an old IED cannot drive actions
+            // in a new association with the same LD/LN/DO/DA names.
+            root.expandedMemberIndex = -1
+            root.expandedMemberChildren = []
+            root.showSelectedEvidence = false
+            root.selectedAttributeReference = ""
+            root.valueRevision += 1
         }
     }
     Connections {
@@ -335,17 +351,44 @@ Rectangle {
                         spacing: 0
                         Rectangle {
                             Layout.fillWidth: true
-                            implicitHeight: 25
+                            implicitHeight: 30
                             color: theme.surfaceRaised
-                            Label {
+                            RowLayout {
                                 anchors.fill: parent
-                                leftPadding: 8
-                                verticalAlignment: Text.AlignVCenter
-                                text: root.selectedAttributeNode.reference
-                                      + "  ·  " + root.displayValue(root.selectedAttributeNode.value)
-                                color: theme.text
-                                font.pixelSize: 9
-                                elide: Text.ElideMiddle
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 6
+                                spacing: 6
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: root.selectedAttributeNode.reference
+                                          + "  ·  " + (root.selectedAttributeNode.hasReceivedValue === true
+                                              ? root.displayValue(root.selectedAttributeNode.value) : "NOT READ")
+                                    color: theme.text
+                                    font.pixelSize: 9
+                                    elide: Text.ElideMiddle
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: root.selectedAttributeNode.reference
+                                }
+                                Button {
+                                    objectName: "browserDataSetOpenInDataModel"
+                                    implicitHeight: 25
+                                    text: "Data Model ›"
+                                    enabled: root.selectedAttributeNode.kind === "DA"
+                                             && root.selectedAttributeNode.readable === true
+                                    onClicked: root.dataModelRequested()
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Inspect this canonical DA in Data Model; use its explicit Read command there."
+                                }
+                                Button {
+                                    objectName: "browserDataSetWatchSelectedDa"
+                                    implicitHeight: 25
+                                    text: "Watch DA"
+                                    enabled: root.selectedAttributeNode.kind === "DA"
+                                             && root.selectedAttributeNode.readable === true
+                                    onClicked: root.watchAttributeRequested(root.selectedAttributeNode)
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Add only this canonical DA to the selected IED's bounded Global Data watchlist."
+                                }
                             }
                         }
                         Repeater {

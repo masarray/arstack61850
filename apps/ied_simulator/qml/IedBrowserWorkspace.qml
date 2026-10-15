@@ -769,6 +769,10 @@ Item {
                         theme: root.theme
                         reports: root.reports
                         modelProvider: root.context
+                        onDataModelRequested: root.selectSection(0, "Data Model")
+                        onWatchAttributeRequested: function(node) {
+                            globalDataPane.addSelectedData(node)
+                        }
                     }
 
                     BrowserReportPane {
