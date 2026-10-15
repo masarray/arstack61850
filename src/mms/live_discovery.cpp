@@ -375,24 +375,33 @@ MmsLiveDiscoveryResult MmsLiveDiscoveryClient::discover(
             "Domain discovery exceeded the configured domain bound.");
     }
 
+    // VMD Domain names are already observed wire evidence, even if a later
+    // per-domain GetNameList faults. Keep every proven domain in the canonical
+    // identity inventory without inventing LN variables or DataSet contents.
     for (const auto& domain : domains) {
+        result.names.domain_variables.try_emplace(domain);
+    }
+    for (const auto& domain : domains) {
+        // A failed confirmed exchange closes the association. Keep earlier
+        // successful domain evidence; never manufacture additional failed
+        // optional probe entries for an already-disconnected peer.
+        if (!association_.associated()) break;
         try {
-            result.names.domain_variables.emplace(
+            result.names.domain_variables.at(domain) = get_name_list(
+                MmsGetNameListObjectClass::named_variable,
                 domain,
-                get_name_list(
-                    MmsGetNameListObjectClass::named_variable,
-                    domain,
-                    options,
-                    result.wire_budget,
-                    stop_token));
+                options,
+                result.wire_budget,
+                stop_token);
         } catch (const std::exception& exception) {
             if (!options.continue_on_optional_probe_error) {
                 throw;
             }
-            result.names.domain_variables.emplace(domain, std::vector<std::string>{});
+            // Seeded VMD domain remains with no claimed variable evidence.
             result.diagnostics.push_back(optional_probe_error(
                 "NamedVariable", domain, exception));
         }
+        if (!association_.associated()) break;
 
         try {
             result.names.domain_variable_lists.emplace(
@@ -417,12 +426,13 @@ MmsLiveDiscoveryResult MmsLiveDiscoveryClient::discover(
     result.report_inventory = MmsReportInventoryBuilder::build(result.names);
 
     const auto readDataSetDirectories = [&] {
-        if (!options.read_data_set_directories) return;
+        if (!options.read_data_set_directories || !association_.associated()) return;
         const std::size_t count = std::min(
             options.maximum_data_set_directories,
             result.report_inventory.data_sets.size());
         result.data_set_directories.reserve(count);
         for (std::size_t index = 0U; index < count; ++index) {
+            if (!association_.associated()) break;
             MmsDataSetDirectoryEvidence evidence;
             evidence.candidate = result.report_inventory.data_sets[index];
             try {
@@ -452,7 +462,7 @@ MmsLiveDiscoveryResult MmsLiveDiscoveryClient::discover(
     };
 
     const auto probeVariableTypes = [&] {
-        if (!options.probe_variable_types) return;
+        if (!options.probe_variable_types || !association_.associated()) return;
         auto candidates = build_logical_node_type_probe_candidates(
             result.names, options.maximum_variable_type_probes);
         if (options.use_verified_data_set_type_hints) {
@@ -472,6 +482,7 @@ MmsLiveDiscoveryResult MmsLiveDiscoveryClient::discover(
         result.variable_types.reserve(candidates.size());
 
         for (const auto& candidate : candidates) {
+            if (!association_.associated()) break;
             MmsVariableTypeEvidence evidence;
             evidence.variable = candidate;
             try {
@@ -514,12 +525,13 @@ MmsLiveDiscoveryResult MmsLiveDiscoveryClient::discover(
         readDataSetDirectories();
     }
 
-    if (options.probe_report_controls) {
+    if (options.probe_report_controls && association_.associated()) {
         const std::size_t count = std::min(
             options.maximum_report_control_probes,
             result.report_inventory.report_controls.size());
         result.report_controls.reserve(count);
         for (std::size_t index = 0U; index < count; ++index) {
+            if (!association_.associated()) break;
             MmsReportControlEvidence evidence;
             evidence.candidate = result.report_inventory.report_controls[index];
             evidence.requested_attributes = select_report_attributes(

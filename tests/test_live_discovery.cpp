@@ -678,10 +678,52 @@ void disconnected_optional_probes_do_not_inflate_wire_budget() {
     CHECK(transport.sent().size() == 6U); // 2 handshake + 4 actual requests
     CHECK(result.variable_types.size() == 1U);
     CHECK(!result.variable_types.front().success());
-    CHECK(result.data_set_directories.size() == 1U);
-    CHECK(!result.data_set_directories.front().success());
-    CHECK(result.report_controls.size() == 1U);
-    CHECK(!result.report_controls.front().success());
+    // Inventory still exposes the configured DataSet/RCB identity, while
+    // unattempted enrichment remains absent, never synthetic failures.
+    CHECK(result.report_inventory.data_sets.size() == 1U);
+    CHECK(result.report_inventory.report_controls.size() == 1U);
+    CHECK(result.data_set_directories.empty());
+    CHECK(result.report_controls.empty());
+}
+
+void association_loss_preserves_completed_domain_evidence_without_dead_probes() {
+    ScriptedTransport transport;
+    queue_handshake(transport);
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_get_name_list_response_p_data(
+            {1U, {"OLS501LD0", "OLS501LD1"}, false})));
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_get_name_list_response_p_data(
+            {2U, {"LLN0$ST$Mod$stVal"}, false})));
+    // Third GetNameList (DataSet names for LD0) is sent but times out.
+    // Do not enumerate LD1 after the association is no longer usable.
+    mms::MmsAssociationRuntime association{transport};
+    association.connect({"127.0.0.1", 102U});
+
+    mms::MmsLiveDiscoveryOptions options;
+    options.probe_variable_types = false;
+    options.read_data_set_directories = false;
+    options.probe_report_controls = false;
+    const auto result = mms::MmsLiveDiscoveryClient{association}.discover(options);
+
+    CHECK(!association.associated());
+    CHECK(result.partial());
+    CHECK(result.names.domain_variables.size() == 2U);
+    CHECK(result.names.domain_variables.at("OLS501LD0").size() == 1U);
+    CHECK(result.names.domain_variable_lists.size() == 1U);
+    CHECK(result.names.domain_variable_lists.at("OLS501LD0").empty());
+    CHECK(result.names.domain_variables.at("OLS501LD1").empty());
+    // The second domain is observed from VMD but its variables are unknown.
+    // Canonical identity reconciliation must not mistake partial enumeration
+    // for a genuine single-domain IED.
+    const auto model = mms::MmsLiveModelBuilder::build(result);
+    CHECK(model.identity.logical_device_aliases.count("OLS501LD0") == 1U);
+    CHECK(model.identity.logical_device_aliases.count("OLS501LD1") == 1U);
+    CHECK(result.wire_budget.get_name_list == 3U);
+    CHECK(result.wire_budget.get_variable_access_attributes == 0U);
+    CHECK(result.wire_budget.get_named_variable_list_attributes == 0U);
+    CHECK(result.wire_budget.read_report_controls == 0U);
+    CHECK(transport.sent().size() == 5U); // 2 handshake + exactly 3 sends
 }
 
 void pagination_without_forward_progress_is_rejected() {
@@ -716,6 +758,7 @@ int main() {
         case_distinct_ln_type_probes_are_preserved();
         verified_data_set_hints_restore_late_ln_type_schema();
         disconnected_optional_probes_do_not_inflate_wire_budget();
+        association_loss_preserves_completed_domain_evidence_without_dead_probes();
         pagination_without_forward_progress_is_rejected();
         std::cout << "Live MMS discovery and model parity tests passed.\n";
         return 0;
