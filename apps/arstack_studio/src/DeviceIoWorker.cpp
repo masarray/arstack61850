@@ -5,6 +5,7 @@
 #include "DeviceController.hpp"
 
 #include <QDebug>
+#include <QElapsedTimer>
 #include <QSerialPort>
 #include <QSerialPortInfo>
 #include <QThread>
@@ -126,9 +127,19 @@ void DeviceIoWorker::shutdown(const bool requestSvStop, const bool requestPtpSto
     if ((requestSvStop || requestPtpStop) && serial_ != nullptr && serial_->isOpen()) {
         const auto sendBoundedStop = [this](const QByteArray& command) {
             const qint64 queued = serial_->write(command);
-            if (queued != command.size() || !serial_->waitForBytesWritten(120)) {
+            if (queued != command.size()) {
+                qWarning().noquote() << "Device shutdown: bounded STOP write was rejected.";
+                return;
+            }
+            QElapsedTimer deadline;
+            deadline.start();
+            while (serial_->bytesToWrite() > 0 && deadline.elapsed() < 120) {
+                const int remaining = 120 - static_cast<int>(deadline.elapsed());
+                if (!serial_->waitForBytesWritten(remaining)) break;
+            }
+            if (serial_->bytesToWrite() > 0) {
                 qWarning().noquote()
-                    << "Device shutdown: STOP transmission could not be confirmed on the serial link.";
+                    << "Device shutdown: STOP bytes remained queued after the bounded drain.";
             }
         };
         if (requestSvStop) sendBoundedStop(QByteArrayLiteral("STOP\n"));
