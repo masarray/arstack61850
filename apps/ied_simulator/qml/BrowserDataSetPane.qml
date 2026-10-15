@@ -50,6 +50,18 @@ Rectangle {
         return modelProvider.treeModel.nodeForReference(reference)
     }
 
+    // Shared canonical DA selection for user input and deterministic GUI QA.
+    // Never perform an MMS Read, duplicate q/t decoding, or cache semantic data.
+    function selectEvidenceAttribute(domain, item, expectedReference) {
+        const selected = root.modelProvider.treeModel.selectMmsItem(domain, item)
+        const canonical = selected ? root.modelProvider.treeModel.selectedNode : ({})
+        const exact = selected && canonical.kind === "DA"
+                      && canonical.reference === expectedReference
+        root.selectedAttributeReference = exact ? canonical.reference : ""
+        root.showSelectedEvidence = exact
+        return exact
+    }
+
     function toggleMember(row, raw) {
         showSelectedEvidence = false
         selectedAttributeReference = ""
@@ -239,11 +251,10 @@ Rectangle {
                                     else if (memberRow.resolved.readable === true) {
                                         // Direct FCDA/DA members must expose typed q/t too,
                                         // without expansion or an implicit MMS Read.
-                                        const selected = root.modelProvider.treeModel.selectMmsItem(
-                                            memberRow.resolved.mmsDomain, memberRow.resolved.mmsItem)
-                                        root.selectedAttributeReference = selected
-                                                ? memberRow.resolved.reference : ""
-                                        root.showSelectedEvidence = selected
+                                        root.selectEvidenceAttribute(
+                                            memberRow.resolved.mmsDomain,
+                                            memberRow.resolved.mmsItem,
+                                            memberRow.resolved.reference)
                                     }
                                 }
                             }
@@ -288,11 +299,10 @@ Rectangle {
                                 MouseArea {
                                     anchors.fill: parent
                                     onClicked: {
-                                        const selected = root.modelProvider.treeModel.selectMmsItem(
-                                            attributeRow.modelData.mmsDomain, attributeRow.modelData.mmsItem)
-                                        root.selectedAttributeReference = selected
-                                                ? attributeRow.modelData.reference : ""
-                                        root.showSelectedEvidence = selected
+                                        root.selectEvidenceAttribute(
+                                            attributeRow.modelData.mmsDomain,
+                                            attributeRow.modelData.mmsItem,
+                                            attributeRow.modelData.reference)
                                     }
                                 }
                             }
@@ -346,6 +356,7 @@ Rectangle {
                             }
                         }
                         BrowserEngineeringEvidence {
+                            objectName: "browserDataSetTypedEvidence"
                             theme: root.theme
                             engineeringEvidence: root.selectedAttributeEvidence
                         }

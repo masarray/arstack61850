@@ -38,6 +38,20 @@ std::string mmsItem(const scl::SclDataSetEntry& entry) {
     return item;
 }
 
+// SCL signal_reference is a source/display identifier (IED/LD/... [FC]),
+// not a canonical domain-specific MMS/IEC reference. Convert typed FCDA fields
+// exactly once at the SCL ingress; FC stays separate and SCL XML remains
+// source provenance. Unresolved fields remain explicitly unresolved.
+std::string canonicalFcdaReference(const scl::SclDataSetEntry& entry) {
+    const auto ln = logicalNodeName(entry);
+    if (entry.ied_name.empty() || entry.ld_inst.empty() ||
+        ln.empty() || entry.do_name.empty()) return {};
+    std::string reference = entry.ied_name + entry.ld_inst + "/" +
+                            ln + "." + entry.do_name;
+    if (!entry.da_name.empty()) reference += "." + entry.da_name;
+    return reference;
+}
+
 std::string mmsTypeForSclBasicType(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](const unsigned char ch) {
         return static_cast<char>(std::toupper(ch));
@@ -198,7 +212,11 @@ mms::MmsLiveModelDocument buildSclEngineeringModel(
             const auto& entry = dataSet.entries[index];
             mms::MmsLiveDataSetMember member;
             member.index = index;
-            member.reference = entry.signal_reference;
+            // Use one indexed, FC-neutral IEC identity for both opened SCL
+            // and live discovery. Never carry source IED/LD/... [FC] spelling
+            // into the canonical DataSet presentation and append FC twice.
+            member.reference = canonicalFcdaReference(entry);
+            if (member.reference.empty()) member.reference = entry.signal_reference;
             member.functional_constraint = entry.functional_constraint;
             member.mms_reference = (entry.ied_name + entry.ld_inst) + "/" + mmsItem(entry);
             projected.members.push_back(std::move(member));
