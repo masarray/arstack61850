@@ -105,6 +105,18 @@ if data_set.count('BrowserEngineeringEvidence {') != 1:
 if 'readEngineeringSelected()' in data_set or 'readEngineeringSelected()' in data_model:
     raise SystemExit("BROWSER_TYPED_EVIDENCE_FAIL passive inspector initiated MMS Read")
 
+# Typed MMS evidence from the initial trusted-SCL snapshot must survive into
+# both canonical trees. The large-model QA exercises valid/invalid wire cases.
+snapshot_projection = (workspace_path.parent.parent / "src" / "MmsSclClientProjection.hpp").read_text(encoding="utf-8")
+mms_client = (workspace_path.parent.parent / "src" / "MmsClientController.cpp").read_text(encoding="utf-8")
+large_model_qa = (workspace_path.parent.parent / "src" / "ied_browser_large_model_qa.cpp").read_text(encoding="utf-8")
+if ("sclSnapshotTypedEvidence(item, *leaf.value)" not in snapshot_projection or
+        "item[item.size() - 2] != '$'" not in snapshot_projection or
+        "trusted_scl_initial_typed_evidence" not in large_model_qa or
+        "failed_root_evidence" not in large_model_qa or
+        mms_client.count("value.engineeringEvidence);") < 2):
+    raise SystemExit("BROWSER_INITIAL_SNAPSHOT_TYPED_EVIDENCE_FAIL missing typed provenance")
+
 report_controller = (workspace_path.parent.parent / "src" / "MmsReportController.cpp").read_text(encoding="utf-8")
 for token in [
     'kMaximumTypedReportEvidence = 96',

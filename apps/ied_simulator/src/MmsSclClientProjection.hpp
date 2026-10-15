@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "MmsEngineeringEvidence.hpp"
+
 #include "ariec61850/mms/data_codec.hpp"
 #include "ariec61850/mms/live_model.hpp"
 #include "ariec61850/mms/scl_assisted_connect.hpp"
@@ -21,7 +23,18 @@ struct SclSnapshotValue final {
     std::string domain;
     std::string item;
     std::string display;
+    // Typed provenance from the same successful initial MMS wire sample.
+    QVariantMap engineeringEvidence;
 };
+
+// Avoid Qt conversion/evidence allocations for non-q/t leaves of huge SCL
+// snapshots; use the one existing typed, fail-closed decoder.
+[[nodiscard]] inline QVariantMap sclSnapshotTypedEvidence(
+    const std::string& item, const ar::iec61850::mms::MmsDataValue& value) {
+    if (item.size() < 2 || item[item.size() - 2] != '$' ||
+        (item.back() != 'q' && item.back() != 't')) return {};
+    return decodeEngineeringEvidence(QString::fromStdString(item), value);
+}
 
 namespace detail {
 
@@ -304,10 +317,12 @@ namespace detail {
                 if (!leaf.value || leaf.model_entry_index >= document.model_entries.size()) continue;
                 const auto& entry = document.model_entries[leaf.model_entry_index];
                 if (entry.ied_name != snapshot.ied_name) continue;
+                const auto item = detail::mms_item(entry);
                 values.push_back({
                     entry.ied_name + entry.ld_inst,
-                    detail::mms_item(entry),
+                    item,
                     ar::iec61850::mms::MmsDataCodec::to_display_string(*leaf.value),
+                    sclSnapshotTypedEvidence(item, *leaf.value),
                 });
             }
         }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "MmsLiveTreeModel.hpp"
 #include "MmsEngineeringEvidence.hpp"
+#include "MmsSclClientProjection.hpp"
 #include "BrowserReportMemberProjection.hpp"
 #include "BrowserBoundedMmsPreview.hpp"
 
@@ -311,6 +312,69 @@ int main(int argc, char** argv) {
              .value(QStringLiteral("engineeringEvidence")).toMap().isEmpty()) {
         std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL stale_evidence\n";
         return 25;
+    }
+
+    // A successful SCL-assisted initial MMS Read already contains typed q/t;
+    // never infer from display strings or fabricated post-connect values.
+    {
+        namespace mms = ar::iec61850::mms;
+        namespace scl = ar::iec61850::scl;
+        scl::SclDocument engineering;
+        engineering.model_entries.reserve(5);
+        const auto entry = [](const std::string& object, const std::string& attribute) {
+            scl::SclDataSetEntry value;
+            value.ied_name = "IED_TYPED";
+            value.ld_inst = "LD0";
+            value.ln_class = "XCBR";
+            value.ln_inst = "1";
+            value.do_name = object;
+            value.da_name = attribute;
+            value.functional_constraint = "ST";
+            return value;
+        };
+        engineering.model_entries.push_back(entry("Pos", "q"));
+        engineering.model_entries.push_back(entry("Pos", "t"));
+        engineering.model_entries.push_back(entry("BadPos", "q"));
+        engineering.model_entries.push_back(entry("WrongPos", "q"));
+        engineering.model_entries.push_back(entry("Pos", "stVal"));
+
+        mms::MmsSclAssistedConnectResult snapshot;
+        snapshot.ied_name = "IED_TYPED";
+        mms::MmsInitialFcBatchResult batch;
+        mms::MmsInitialFcRootResult root;
+        root.root_value = mms::MmsDataValue::boolean(true);
+        const auto push = [&root](const std::size_t index, mms::MmsDataValue value) {
+            mms::MmsSclMappedLeaf mapped;
+            mapped.model_entry_index = index;
+            mapped.value = std::move(value);
+            root.mapped_leaves.push_back(std::move(mapped));
+        };
+        push(0U, mms::MmsDataValue::bit_string(3U, bits));
+        push(1U, mms::MmsDataValue::utc_time(utc));
+        push(2U, mms::MmsDataValue::bit_string(2U, bits));
+        push(3U, mms::MmsDataValue::boolean(true));
+        push(4U, mms::MmsDataValue::boolean(false));
+        batch.roots.push_back(std::move(root));
+        snapshot.batches.push_back(std::move(batch));
+        snapshot.mapped_leaf_count = 5U;
+        const auto mapped = arstack::iedsim::collect_scl_snapshot_values(engineering, snapshot);
+        if (mapped.size() != 5U ||
+            mapped.at(0).engineeringEvidence != qualityEvidence ||
+            mapped.at(1).engineeringEvidence != timeEvidence ||
+            !mapped.at(2).engineeringEvidence.isEmpty() ||
+            !mapped.at(3).engineeringEvidence.isEmpty() ||
+            !mapped.at(4).engineeringEvidence.isEmpty() ||
+            mapped.at(0).item != "XCBR1$ST$Pos$q" ||
+            mapped.at(1).item != "XCBR1$ST$Pos$t") {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL trusted_scl_initial_typed_evidence\n";
+            return 27;
+        }
+        // A failed FC-root Read must never populate GUI evidence.
+        snapshot.batches.front().roots.front().access_failure_code = 1U;
+        if (!arstack::iedsim::collect_scl_snapshot_values(engineering, snapshot).empty()) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL failed_root_evidence\n";
+            return 28;
+        }
     }
 
     // Project 300 decoded report members but allocate only 256 GUI rows.

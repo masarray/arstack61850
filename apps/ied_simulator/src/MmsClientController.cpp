@@ -371,7 +371,8 @@ bool MmsClientController::connectToIed() {
                             self->treeModel_.applyDocument(*model);
                             for (const auto& value : *initialValues) {
                                 self->treeModel_.applyReadValue(
-                                    snapshotKey(value), QString::fromStdString(value.display));
+                                    snapshotKey(value), QString::fromStdString(value.display),
+                                    value.engineeringEvidence);
                             }
                             self->iedName_ = QString::fromStdString(model->identity.ied_name);
                             self->modelSummary_ = QString::fromStdString(model->summary);
@@ -392,7 +393,8 @@ bool MmsClientController::connectToIed() {
                                     *model, requestedTrustedSclPath);
                                 for (const auto& value : *initialValues) {
                                     self->engineeringContext_->treeModel()->applyReadValue(
-                                        snapshotKey(value), QString::fromStdString(value.display));
+                                        snapshotKey(value), QString::fromStdString(value.display),
+                                    value.engineeringEvidence);
                                 }
                             }
                             self->appendDiagnostic(healthSummary);
