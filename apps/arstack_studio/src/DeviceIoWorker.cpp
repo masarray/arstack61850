@@ -4,6 +4,8 @@
 
 #include "DeviceController.hpp"
 
+#include <QDebug>
+#include <QElapsedTimer>
 #include <QSerialPort>
 #include <QSerialPortInfo>
 #include <QThread>
@@ -107,7 +109,7 @@ bool DeviceIoWorker::adoptGeneration(const quint64 generation, const bool closeO
     return true;
 }
 
-void DeviceIoWorker::shutdown(const bool requestStop) {
+void DeviceIoWorker::shutdown(const bool requestSvStop, const bool requestPtpStop) {
     if (!initialized_ || shuttingDown_) return;
     shuttingDown_ = true;
 
@@ -118,14 +120,32 @@ void DeviceIoWorker::shutdown(const bool requestStop) {
     probeQueue_.clear();
     genericProbeActive_ = false;
 
-    if (requestStop && serial_ != nullptr && serial_->isOpen()) {
-        const QByteArray stopBytes{"STOP\n"};
-        if (serial_->write(stopBytes) == stopBytes.size()) {
-            static_cast<void>(serial_->waitForBytesWritten(120));
-        }
+    // Stop both independent publishers before handing the COM port to an
+    // installer. Keep SV stop ahead of PTP stop so no new SV frame is sent
+    // during grandmaster shutdown. This runs once during teardown only.
+    commandQueue_.clear();
+    if ((requestSvStop || requestPtpStop) && serial_ != nullptr && serial_->isOpen()) {
+        const auto sendBoundedStop = [this](const QByteArray& command) {
+            const qint64 queued = serial_->write(command);
+            if (queued != command.size()) {
+                qWarning().noquote() << "Device shutdown: bounded STOP write was rejected.";
+                return;
+            }
+            QElapsedTimer deadline;
+            deadline.start();
+            while (serial_->bytesToWrite() > 0 && deadline.elapsed() < 120) {
+                const int remaining = 120 - static_cast<int>(deadline.elapsed());
+                if (!serial_->waitForBytesWritten(remaining)) break;
+            }
+            if (serial_->bytesToWrite() > 0) {
+                qWarning().noquote()
+                    << "Device shutdown: STOP bytes remained queued after the bounded drain.";
+            }
+        };
+        if (requestSvStop) sendBoundedStop(QByteArrayLiteral("STOP\n"));
+        if (requestPtpStop) sendBoundedStop(QByteArrayLiteral("PTP STOP\n"));
     }
 
-    commandQueue_.clear();
     exclusiveCommandsRemaining_ = 0;
     writeActive_ = false;
     activeCommand_ = {};

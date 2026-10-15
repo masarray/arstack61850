@@ -100,7 +100,7 @@ public:
 
 public slots:
     void initialize();
-    void shutdown(bool requestStop);
+    void shutdown(bool requestSvStop, bool requestPtpStop);
     void refreshPorts(quint64 generation);
     void autoDetectAndConnect(quint64 generation);
     void connectPort(const QString& portName, quint64 generation);

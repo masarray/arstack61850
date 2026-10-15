@@ -86,6 +86,13 @@ const QRegularExpression kSmpSynchExpression{
 } // namespace
 
 DeviceController::DeviceController(QObject* parent) : QObject(parent) {
+    ptpStartTimer_.setSingleShot(true);
+    connect(&ptpStartTimer_, &QTimer::timeout, this, [this] {
+        if (!ptpStarting()) return;
+        const bool rollback = ptpStartStage_ == PtpStartStage::awaiting_start ||
+                              ptpStartStage_ == PtpStartStage::awaiting_runtime;
+        failPtpStartup(QStringLiteral("PTP acknowledgement timed out. Start cancelled."), rollback);
+    });
     ioWorker_ = new DeviceIoWorker;
     ioWorker_->moveToThread(&ioThread_);
     ioThread_.setObjectName(QStringLiteral("ARStackDeviceIo"));
@@ -106,6 +113,8 @@ bool DeviceController::shutdown() {
     shuttingDown_ = true;
     pendingAutoDetect_ = false;
     pendingConnectPort_.clear();
+    const bool requestPtpStop = needsPtpStopBeforeShutdown();
+    resetPtpStartup();
 
     if (ioWorker_ == nullptr || !ioThread_.isRunning()) {
         ioWorker_ = nullptr;
@@ -116,9 +125,9 @@ bool DeviceController::shutdown() {
         return true;
     }
 
-    const bool requestStop = running_;
+    const bool requestSvStop = running_;
     if (QThread::currentThread() == &ioThread_) {
-        ioWorker_->shutdown(requestStop);
+        ioWorker_->shutdown(requestSvStop, requestPtpStop);
         ioThread_.quit();
         shuttingDown_ = false;
         return false;
@@ -128,8 +137,8 @@ bool DeviceController::shutdown() {
     DeviceIoWorker* const worker = ioWorker_;
     const bool queued = QMetaObject::invokeMethod(
         worker,
-        [worker, requestStop, acknowledged] {
-            worker->shutdown(requestStop);
+        [worker, requestSvStop, requestPtpStop, acknowledged] {
+            worker->shutdown(requestSvStop, requestPtpStop);
             acknowledged->release();
         },
         Qt::QueuedConnection);
@@ -320,7 +329,8 @@ void DeviceController::connectWorkerSignals() {
             profileArmed_ = false;
             emit profileStateChanged();
         }
-        setError(message);
+        if (ptpStarting()) failPtpStartup(QStringLiteral("PTP serial command rejected: ") + message, false);
+        else setError(message);
     });
 
     connect(ioWorker_, &DeviceIoWorker::transportError, this,
@@ -372,6 +382,7 @@ QString DeviceController::ptpTxFailures() const { return ptpTxFailures_; }
 
 void DeviceController::setSessionGeneration(const quint64 generation) {
     if (generation == 0 || generation == sessionGeneration_) return;
+    resetPtpStartup();
     sessionGeneration_ = generation;
     pendingAutoDetect_ = false;
     pendingConnectPort_.clear();
@@ -972,32 +983,184 @@ bool DeviceController::setCtSaturation(
 
 bool DeviceController::sendPtpShow() { return sendCommand(QStringLiteral("PTP SHOW")); }
 bool DeviceController::startPtp() { return sendCommand(QStringLiteral("PTP START")); }
-bool DeviceController::stopPtp() { return sendCommand(QStringLiteral("PTP STOP")); }
+bool DeviceController::stopPtp() {
+    resetPtpStartup();
+    ptpStatus_ = QStringLiteral("PTP stop requested");
+    emit ptpStateChanged();
+    return sendCommand(QStringLiteral("PTP STOP"));
+}
+
+QString DeviceController::ptpConfigCommand(const QVariantMap& profile) {
+    const auto parse = [&profile](const char* key, const unsigned maximum, unsigned& out) {
+        const QVariant value = profile.value(QString::fromLatin1(key));
+        bool valid = false;
+        const uint number = value.toUInt(&valid);
+        if (!valid || number > maximum) return false;
+        out = number;
+        return true;
+    };
+    unsigned domain{}, transport{}, vlan{}, pcp{}, announce{}, sync{};
+    if (!parse("domain", 255U, domain) ||
+        !parse("transportSpecific", 15U, transport) ||
+        !parse("vlanId", 4094U, vlan) ||
+        !parse("vlanPriority", 7U, pcp) ||
+        !parse("announceIntervalMs", 10000U, announce) ||
+        !parse("syncIntervalMs", 5000U, sync) ||
+        announce < 100U || sync < 20U ||
+        (profile.value(QStringLiteral("vlanEnabled")).toBool() && vlan == 0U)) {
+        return {};
+    }
+    return QStringLiteral("PTP CONFIG %1 %2 %3 %4 %5 %6 %7 %8")
+        .arg(domain).arg(transport)
+        .arg(profile.value(QStringLiteral("vlanEnabled")).toBool() ? 1 : 0)
+        .arg(vlan).arg(pcp).arg(announce).arg(sync)
+        .arg(profile.value(QStringLiteral("respondToPeerDelay")).toBool() ? 1 : 0);
+}
+
+void DeviceController::resetPtpStartup() noexcept {
+    ptpStartTimer_.stop();
+    ptpStartStage_ = PtpStartStage::idle;
+    pendingPtpRole_.clear();
+    pendingPtpConfig_.clear();
+    ptpRuntimeRoleSeen_ = false;
+}
+
+void DeviceController::failPtpStartup(const QString& reason, const bool rollback) {
+    resetPtpStartup();
+    ptpRunning_ = false;
+    ptpStatus_ = QStringLiteral("PTP start failed");
+    emit ptpStateChanged();
+    setError(reason);
+    if (rollback && connected_ && sessionGeneration_ != 0) {
+        // Ordered on the same serial worker after any delayed START.
+        static_cast<void>(sendCommand(QStringLiteral("PTP STOP")));
+    }
+}
+
+bool DeviceController::startPtpConfigured(const QString& requestedRole,
+                                           const QVariantMap& profile) {
+    const QString role = requestedRole.trimmed().toUpper();
+    if (!deviceVerified_ || !connected_ || !ioWorkerReady_ || !ptpAvailable_ ||
+        ptpRunning_ || ptpStarting() ||
+        (role != QStringLiteral("SOURCE") &&
+         role != QStringLiteral("RECEIVER") &&
+         role != QStringLiteral("MONITOR"))) {
+        setError(QStringLiteral("Connect a PTP-capable ESP32-P4 and stop timing before starting."));
+        return false;
+    }
+    const QString command = ptpConfigCommand(profile);
+    if (command.isEmpty()) {
+        setError(QStringLiteral("Invalid PTP settings. Check domain, VLAN and timing intervals."));
+        return false;
+    }
+    pendingPtpRole_ = role;
+    pendingPtpConfig_ = command;
+    ptpStartStage_ = PtpStartStage::awaiting_role_ack;
+    ptpStatus_ = QStringLiteral("Waiting for board to accept PTP mode...");
+    emit ptpStateChanged();
+    if (!sendCommand(QStringLiteral("PROFILE PTPROLE %1").arg(role))) {
+        failPtpStartup(QStringLiteral("Could not queue PTP role selection."), false);
+        return false;
+    }
+    ptpStartTimer_.start(5000);
+    return true;
+}
+
+void DeviceController::advancePtpStartup(const QString& line) {
+    if (!ptpStarting()) return;
+    const bool rejected =
+        line.contains(QStringLiteral("PTPROLE rejected"), Qt::CaseInsensitive) ||
+        line.contains(QStringLiteral("PTPROLE configuration unavailable"), Qt::CaseInsensitive) ||
+        line.contains(QStringLiteral("PTP configuration rejected"), Qt::CaseInsensitive) ||
+        line.contains(QStringLiteral("PTP start rejected"), Qt::CaseInsensitive) ||
+        line.contains(QStringLiteral("PTP unavailable"), Qt::CaseInsensitive);
+    if (rejected) {
+        const bool rollback = ptpStartStage_ == PtpStartStage::awaiting_start ||
+                              ptpStartStage_ == PtpStartStage::awaiting_runtime;
+        failPtpStartup(QStringLiteral("Board rejected PTP mode, settings or start."), rollback);
+        return;
+    }
+    if (ptpStartStage_ == PtpStartStage::awaiting_role_ack) {
+        // A SHOW response cannot replace the explicit PTPROLE acceptance.
+        if (line.contains(QStringLiteral("PTPROLE accepted"), Qt::CaseInsensitive)) {
+            ptpStartStage_ = PtpStartStage::awaiting_role_readback;
+            ptpStatus_ = QStringLiteral("Confirming PTP mode on board...");
+            emit ptpStateChanged();
+            ptpStartTimer_.start(5000);
+        }
+        return;
+    }
+    if (ptpStartStage_ == PtpStartStage::awaiting_role_readback) {
+        const auto reply = kPtpRoleExpression.match(line);
+        if (!reply.hasMatch()) return;
+        if (reply.captured(1).toUpper() != pendingPtpRole_ ||
+            reply.captured(3) != QStringLiteral("0")) {
+            failPtpStartup(QStringLiteral("PTP mode readback does not match the selection."), false);
+            return;
+        }
+        const QString command = pendingPtpConfig_;
+        ptpStartStage_ = PtpStartStage::awaiting_config;
+        ptpStatus_ = QStringLiteral("Applying PTP settings...");
+        emit ptpStateChanged();
+        if (!sendCommand(command)) {
+            failPtpStartup(QStringLiteral("Could not queue PTP configuration."), false);
+            return;
+        }
+        ptpStartTimer_.start(5000);
+    } else if (ptpStartStage_ == PtpStartStage::awaiting_config &&
+               line.contains(QStringLiteral("PTP configuration accepted"), Qt::CaseInsensitive)) {
+        ptpStartStage_ = PtpStartStage::awaiting_start;
+        ptpStatus_ = QStringLiteral("Starting PTP runtime...");
+        emit ptpStateChanged();
+        if (!sendCommand(QStringLiteral("PTP START"))) {
+            failPtpStartup(QStringLiteral("Could not queue PTP START."), true);
+            return;
+        }
+        ptpStartTimer_.start(10000);
+    } else if (ptpStartStage_ == PtpStartStage::awaiting_start &&
+               line.contains(QStringLiteral("PTP start accepted"), Qt::CaseInsensitive)) {
+        ptpStartStage_ = PtpStartStage::awaiting_runtime;
+        ptpRuntimeRoleSeen_ = false;
+        ptpStatus_ = QStringLiteral("Verifying live PTP role and runtime...");
+        emit ptpStateChanged();
+        if (!sendPtpShow()) {
+            failPtpStartup(QStringLiteral("Could not read back PTP runtime."), true);
+            return;
+        }
+        ptpStartTimer_.start(5000);
+    } else if (ptpStartStage_ == PtpStartStage::awaiting_runtime) {
+        const auto roleEvidence = kPtpMeasuredStateExpression.match(line);
+        if (roleEvidence.hasMatch()) {
+            if (roleEvidence.captured(1).toUpper() != pendingPtpRole_) {
+                failPtpStartup(QStringLiteral("PTP runtime role differs from the selected mode."), true);
+                return;
+            }
+            ptpRuntimeRoleSeen_ = true;
+            return;
+        }
+        const auto readback = kPtpStatusExpression.match(line);
+        if (!readback.hasMatch()) return;
+        if (!ptpRuntimeRoleSeen_ || !ptpRunning_ || ptpRole_ != pendingPtpRole_) {
+            failPtpStartup(QStringLiteral("PTP requires matching PTP2 role and RUNNING readback."), true);
+            return;
+        }
+        resetPtpStartup();
+        ptpStatus_ = QStringLiteral("PTP runtime active; external timing still unqualified");
+        emit ptpStateChanged();
+    }
+}
 
 bool DeviceController::configurePtp(const QVariantMap& profile) {
-    if (!deviceVerified_ || ptpRunning_) {
-        setError(ptpRunning_
-            ? QStringLiteral("Stop PTP Lab TX before applying expert timing settings.")
-            : QStringLiteral("Verify the ESP32-P4 before configuring PTP."));
+    if (!deviceVerified_ || ptpRunning_ || ptpStarting()) {
+        setError(QStringLiteral("Stop PTP and finish pending operations before changing settings."));
         return false;
     }
-    const auto domain = profile.value(QStringLiteral("domain")).toUInt();
-    const auto transport = profile.value(QStringLiteral("transportSpecific")).toUInt();
-    const bool vlanEnabled = profile.value(QStringLiteral("vlanEnabled")).toBool();
-    const auto vlanId = profile.value(QStringLiteral("vlanId")).toUInt();
-    const auto pcp = profile.value(QStringLiteral("vlanPriority")).toUInt();
-    const auto announceMs = profile.value(QStringLiteral("announceIntervalMs")).toUInt();
-    const auto syncMs = profile.value(QStringLiteral("syncIntervalMs")).toUInt();
-    const bool pdelay = profile.value(QStringLiteral("respondToPeerDelay")).toBool();
-    if (domain > 255U || transport > 15U || (vlanEnabled && (vlanId == 0U || vlanId > 4094U)) ||
-        pcp > 7U || announceMs < 100U || announceMs > 10000U ||
-        syncMs < 20U || syncMs > 5000U) {
-        setError(QStringLiteral("PTP expert profile is outside the firmware safety bounds."));
+    const QString command = ptpConfigCommand(profile);
+    if (command.isEmpty()) {
+        setError(QStringLiteral("PTP expert profile is outside firmware safety bounds."));
         return false;
     }
-    return sendCommand(QStringLiteral("PTP CONFIG %1 %2 %3 %4 %5 %6 %7 %8")
-        .arg(domain).arg(transport).arg(vlanEnabled ? 1 : 0).arg(vlanId).arg(pcp)
-        .arg(announceMs).arg(syncMs).arg(pdelay ? 1 : 0));
+    return sendCommand(command);
 }
 
 void DeviceController::clearLog() {
@@ -1116,8 +1279,12 @@ void DeviceController::processLine(const QString& rawLine) {
     if (line.isEmpty()) return;
     appendLog(QStringLiteral("←"), line);
 
-    if (line.contains(QStringLiteral("START accepted"), Qt::CaseInsensitive)) setRunning(true);
-    if (line.contains(QStringLiteral("STOP accepted"), Qt::CaseInsensitive)) setRunning(false);
+    // SV lifecycle acknowledgements are not PTP lifecycle acknowledgements.
+    // Never report 4I+4V output RUNNING merely because PTP START succeeded.
+    if (line.contains(QStringLiteral("START accepted: profile armed"), Qt::CaseInsensitive))
+        setRunning(true);
+    if (line.contains(QStringLiteral("STOP accepted: SV transmission suppressed"), Qt::CaseInsensitive))
+        setRunning(false);
 
     auto match = kStateExpression.match(line);
     if (match.hasMatch()) {
@@ -1246,15 +1413,12 @@ void DeviceController::processLine(const QString& rawLine) {
         ptpStatus_ = QStringLiteral("Not enabled in firmware");
         emit ptpStateChanged();
     }
-    if (line.contains(QStringLiteral("PTP configuration accepted"), Qt::CaseInsensitive)) {
+    if (line.contains(QStringLiteral("PTP configuration accepted"), Qt::CaseInsensitive) && !ptpStarting()) {
         emit deviceMessage(QStringLiteral("PTP expert profile accepted."));
         static_cast<void>(sendPtpShow());
     }
-    if (line.contains(QStringLiteral("PTP start accepted"), Qt::CaseInsensitive)) {
-        ptpStatus_ = ptpRole_ == QStringLiteral("SOURCE") ? QStringLiteral("Source TX verified") : QStringLiteral("Timing runtime started");
-        emit deviceMessage(ptpRole_ == QStringLiteral("SOURCE")
-            ? QStringLiteral("PTP source start verified; reading live TX counters.")
-            : QStringLiteral("PTP %1 runtime started.").arg(ptpRole_.toLower()));
+    if (line.contains(QStringLiteral("PTP start accepted"), Qt::CaseInsensitive) && !ptpStarting()) {
+        ptpStatus_ = QStringLiteral("PTP start acknowledged; requesting live status");
         static_cast<void>(sendPtpShow());
     }
     if (line.contains(QStringLiteral("PTP start rejected"), Qt::CaseInsensitive) || line.contains(QStringLiteral("PTP source readiness timeout"), Qt::CaseInsensitive)) {
@@ -1265,6 +1429,8 @@ void DeviceController::processLine(const QString& rawLine) {
             ? QStringLiteral("PTP source did not emit Announce/Sync/Follow_Up. Check the Ethernet link and retry Start PTP Source.")
             : QStringLiteral("PTP %1 could not start. Check the Ethernet link and retry.").arg(ptpRole_.toLower()));
     }
+
+    advancePtpStartup(line);
 
     if (profileDeploying_ &&
         line.contains(QStringLiteral("PROFILE"), Qt::CaseInsensitive) &&
@@ -1282,6 +1448,7 @@ void DeviceController::resetTelemetry() {
 }
 
 void DeviceController::resetPtpState() {
+    resetPtpStartup();
     ptpAvailable_ = false;
     ptpRunning_ = false;
     ptpStatus_ = QStringLiteral("Waiting for device");

@@ -194,6 +194,7 @@ public:
     Q_INVOKABLE bool requestSmpSynch(const QString& mode);
     Q_INVOKABLE bool requestConfigurePtp(const QVariantMap& profile);
     Q_INVOKABLE bool requestStartPtp();
+    Q_INVOKABLE bool requestStartPtpConfigured(const QString& role, const QVariantMap& profile);
     Q_INVOKABLE bool requestStopPtp();
 
     Q_INVOKABLE bool beginFirmwareUpdate();
