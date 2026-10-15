@@ -51,7 +51,7 @@
 4. Report member reference and evidence must map to exact received frame ordinal and actual Report ID. Static reporting remains report-only without implicit periodic MMS Read.
 5. Preserve verified bounds: 60k+ node large-model regression, 4,096 detail rows, 64 lazy FCDA DAs, 64 explicit Read targets, 256 per-IED watched objects, 2,048 All-IED rendered objects, 256-char All-IED preview, 256 visible report members, 1,024-char report preview, 96 initial typed q/t details. These are presentation bounds; do not drop authoritative frames.
 6. Scalar Hz and total power (TotW) do not acquire an “angle” through a generic presentation shortcut; only display units/phasor components proven by typed metadata.
-7. Never claim pixel-level IEDScout/ARSAS parity, latest installer parity, or real physical IED interop on synthetic fixtures alone.
+7. Never claim pixel-level reference IEC 61850 client/ARSAS parity, latest installer parity, or real physical IED interop on synthetic fixtures alone.
 
 ## Historical action and owners (superseded; do not execute stale PR merge instructions)
 
@@ -59,7 +59,7 @@
 
 **Canonical/SSOT owner (second):** M2L Measurement semantics and value/q/t/unit/angle provenance on the existing MMS model. Tests for MX vector, scalar Hz, TotW, malformed q/t, unset value, SCL-vs-live authority and source-generation mismatch first.
 
-**QML/UX owner (parallel on disjoint files):** compare ARSAS Explorer live grid, selected-state IEDScout screenshots and ARStack Qt Data Model/DataSets/Reports/SG. Build a screen-state matrix and deterministic native captures; do not change the canonical model or edit #176's All-IED files concurrently.
+**QML/UX owner (parallel on disjoint files):** compare ARSAS Explorer live grid, selected-state reference IEC 61850 client screenshots and ARStack Qt Data Model/DataSets/Reports/SG. Build a screen-state matrix and deterministic native captures; do not change the canonical model or edit #176's All-IED files concurrently.
 
 **Protocol/RCB owner:** preserve exact Reporting contract ([RCB_REPORTING_REFERENCE.md](RCB_REPORTING_REFERENCE.md)); no new polling, invented report values or uncontrolled writes.
 
