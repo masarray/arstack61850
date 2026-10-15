@@ -74,6 +74,14 @@ jobs:
           $probe = Start-Process -FilePath $legacyGui -ArgumentList '--check-reference-template' -Wait -PassThru
           Write-Host "PUBLIC_BASELINE_REFERENCE_TEMPLATE_EXIT=$($probe.ExitCode)"
           if ($probe.ExitCode -ne 0) { throw 'Verified public base GUI reference template regression' }
+          $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $baseline 'firmware'
+          $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $baseline 'tools\espflash.exe'
+          $native = Join-Path $PWD 'build-studio-preview\Release\arstack_studio.exe'
+          $firmwareContract = Start-Process -FilePath $native -ArgumentList '--check-firmware-contract' -Wait -PassThru
+          Write-Host "NATIVE_WITH_PUBLIC_BASELINE_FIRMWARE_CONTRACT_EXIT=$($firmwareContract.ExitCode)"
+          if ($firmwareContract.ExitCode -ne 0) {
+            throw 'Native Studio cannot accept the pinned public firmware bundle before packaging'
+          }
           Write-Host 'Pinned v0.1.1 public firmware / flasher archive: VERIFIED'
 
       - name: Stage isolated GUI preview with pinned release firmware
@@ -88,11 +96,36 @@ jobs:
           Copy-Item $gui $exe
           windeployqt --release --qmldir "$PWD\apps\arstack_studio\qml" --compiler-runtime $exe
           if ($LASTEXITCODE -ne 0) { throw 'Qt runtime deployment failed' }
-          Copy-Item (Join-Path $baseline 'firmware') (Join-Path $stage 'firmware') -Recurse
-          Copy-Item (Join-Path $baseline 'tools') (Join-Path $stage 'tools') -Recurse
-          if (Test-Path (Join-Path $baseline 'licenses')) {
-            Copy-Item (Join-Path $baseline 'licenses') (Join-Path $stage 'licenses') -Recurse
+          # Copy directory CONTENTS to a pre-created destination, not directory
+          # objects to ambiguous destination names (PowerShell nesting hazard).
+          foreach ($dir in @('firmware', 'tools')) {
+            $sourceDir = Join-Path $baseline $dir
+            $targetDir = Join-Path $stage $dir
+            if (-not (Test-Path $sourceDir)) { throw "Pinned bundle folder missing: $dir" }
+            New-Item -Path $targetDir -ItemType Directory -Force | Out-Null
+            Copy-Item -Path (Join-Path $sourceDir '*') -Destination $targetDir -Recurse -Force
           }
+          if (Test-Path (Join-Path $baseline 'licenses')) {
+            $licenseDir = Join-Path $stage 'licenses'
+            New-Item -Path $licenseDir -ItemType Directory -Force | Out-Null
+            Copy-Item -Path (Join-Path $baseline 'licenses\*') -Destination $licenseDir -Recurse -Force
+          }
+          foreach ($mandatory in @('firmware\firmware-manifest.json', 'tools\espflash.exe')) {
+            $full = Join-Path $stage $mandatory
+            if (-not (Test-Path $full -PathType Leaf)) {
+              throw "Preview staging lost required top-level bundle path: $mandatory"
+            }
+          }
+          $manifest = Get-Content -Raw (Join-Path $stage 'firmware\firmware-manifest.json') | ConvertFrom-Json
+          $firmwareFile = Join-Path (Join-Path $stage 'firmware') $manifest.image
+          if (-not (Test-Path $firmwareFile -PathType Leaf)) {
+            throw "Preview manifest firmware image missing: $($manifest.image)"
+          }
+          $imageSha = (Get-FileHash -Algorithm SHA256 -LiteralPath $firmwareFile).Hash.ToLowerInvariant()
+          if ($imageSha -ne $manifest.sha256.ToLowerInvariant()) {
+            throw "Preview staged firmware image hash mismatch: $imageSha"
+          }
+          Write-Host "Staged real GUI with pinned firmware image and flasher at canonical paths: PASS"
           Copy-Item LICENSE,NOTICE,THIRD_PARTY_NOTICES.md,COPYRIGHT.md -Destination $stage
           $meta = [ordered]@{
             schema = 'arstack.studio.preview-provenance.v1'
