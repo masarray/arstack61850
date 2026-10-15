@@ -530,8 +530,15 @@ private:
         if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_runtime) return false;
         d.processLine(QStringLiteral(
             "PTP status=RUNNING Announce=1 Sync=1 FollowUp=1 PdelayFrames=0 TXfail=0"));
-        if (d.ptpStarting() || d.ptpRunning_ || d.ptpStatus_ != QStringLiteral("PTP start failed"))
-            return false;
+        // Missing PTP2 evidence after START must trigger a verified rollback,
+        // not silently clear state while the board might still transmit.
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_ack ||
+            !d.ptpStarting() ||
+            f.session.requestStartPtpConfigured(QStringLiteral("SOURCE"), ptpValidProfile()) ||
+            d.startPtp() || d.setPtpRole(QStringLiteral("MONITOR"))) return false;
+        d.processLine(QStringLiteral("PTP stop requested"));
+        d.processLine(ptpStoppedStatus());
+        if (d.ptpStarting() || d.ptpRunning_) return false;
         if (!f.session.requestStartPtpConfigured(QStringLiteral("SOURCE"), ptpValidProfile()))
             return false;
         d.processLine(QStringLiteral("PTPROLE accepted"));
@@ -539,8 +546,12 @@ private:
         d.processLine(QStringLiteral("PTP configuration accepted"));
         d.processLine(QStringLiteral("PTP start accepted"));
         d.processLine(ptpRoleEvidence(QStringLiteral("RECEIVER")));
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_ack ||
+            !d.ptpStarting()) return false;
+        d.processLine(QStringLiteral("PTP stop requested"));
+        d.processLine(ptpStoppedStatus());
         return !d.ptpStarting() && !d.ptpRunning_ &&
-            d.ptpStatus_ == QStringLiteral("PTP start failed");
+            d.ptpStatus_.contains(QStringLiteral("confirmed by board"));
     }
 
     static bool ptpGuidedStartNeedsAcks() {

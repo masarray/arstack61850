@@ -244,8 +244,8 @@ public:
             setError(QStringLiteral("PTP role must be SOURCE, RECEIVER, or MONITOR."));
             return false;
         }
-        if (ptpRunning_) {
-            setError(QStringLiteral("Stop PTP before changing its operating role."));
+        if (ptpRunning_ || ptpStarting()) {
+            setError(QStringLiteral("Confirm PTP is stopped before changing its operating role."));
             return false;
         }
         return sendCommand(QStringLiteral("PROFILE PTPROLE %1").arg(role));

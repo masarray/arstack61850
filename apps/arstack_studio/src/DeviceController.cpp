@@ -1002,7 +1002,15 @@ bool DeviceController::setCtSaturation(
 }
 
 bool DeviceController::sendPtpShow() { return sendCommand(QStringLiteral("PTP SHOW")); }
-bool DeviceController::startPtp() { return sendCommand(QStringLiteral("PTP START")); }
+bool DeviceController::startPtp() {
+    // Legacy direct START must not bypass a guided START, in-flight STOP,
+    // or an unverified cancellation. Both paths share this device authority.
+    if (!deviceVerified_ || !ptpAvailable_ || ptpRunning_ || ptpStarting()) {
+        setError(QStringLiteral("PTP must be verified and stopped before START."));
+        return false;
+    }
+    return sendCommand(QStringLiteral("PTP START"));
+}
 bool DeviceController::stopPtp() {
     if (!connected_ || !ioWorkerReady_ || !deviceVerified_) {
         setError(QStringLiteral("Connect the verified ESP32-P4 before stopping PTP."));
