@@ -39,6 +39,10 @@ public:
             {"manual recovery intent survives IDENTIFY -> firmware required", manualRecoveryIntentArmsFirmwareOffer()},
             {"stale generation release -> ignored", staleReleaseGenerationIsIgnored()},
             {"firmware probe before serial release -> blocked", firmwareProbeRequiresReleasedPort()},
+            {"PTP staged START requires role/config/runtime ACKs", ptpGuidedStartNeedsAcks()},
+            {"PTP rejected config never starts", ptpGuidedRejectedConfigStops()},
+            {"PTP STOP cancels pending start", ptpGuidedStopCancelsStart()},
+            {"PTP role mismatch and new session revoke pending start", ptpGuidedRoleAndGenerationGuards()},
             {"profile timeout -> bounded terminal error", profileTimeoutIsTerminal()},
             {"profile rejection -> bounded terminal error", profileRejectionIsTerminal()},
             {"binary stale ACK identity -> fail closed", binaryProfileStaleAckFailsClosed()},
@@ -451,6 +455,84 @@ private:
             fixture.session.firmwareInstallVisible() &&
             fixture.session.blankBoardPort_ == QStringLiteral("COM7") &&
             !fixture.session.startReady();
+    }
+
+    static QVariantMap ptpValidProfile() {
+        return {{QStringLiteral("domain"), 0},
+                {QStringLiteral("transportSpecific"), 0},
+                {QStringLiteral("vlanEnabled"), false},
+                {QStringLiteral("vlanId"), 100},
+                {QStringLiteral("vlanPriority"), 4},
+                {QStringLiteral("announceIntervalMs"), 1000},
+                {QStringLiteral("syncIntervalMs"), 1000},
+                {QStringLiteral("respondToPeerDelay"), true}};
+    }
+
+    static bool setupGuidedPtp(Fixture& f, const QString& role) {
+        if (!f.profileReady) return false;
+        seedVerified(f, identity(), QStringLiteral("COM7"), false);
+        f.device.ptpAvailable_ = true;
+        f.device.ioWorkerReady_ = true; // No actual COM opened by this harness.
+        return f.session.requestStartPtpConfigured(role, ptpValidProfile());
+    }
+
+    static bool ptpGuidedStartNeedsAcks() {
+        Fixture f;
+        if (!setupGuidedPtp(f, QStringLiteral("RECEIVER"))) return false;
+        auto& d = f.device;
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_role ||
+            d.ptpRunning_ || !d.ptpStarting()) return false;
+        d.processLine(QStringLiteral("PTPROLE role=RECEIVER value=1 running=0"));
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_config ||
+            !d.ptpStarting()) return false;
+        d.processLine(QStringLiteral("PTP configuration accepted"));
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_start ||
+            d.ptpRunning_) return false;
+        d.processLine(QStringLiteral("PTP start accepted"));
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_runtime) return false;
+        d.processLine(QStringLiteral(
+            "PTP status=RUNNING Announce=1 Sync=1 FollowUp=1 PdelayFrames=0 TXfail=0"));
+        return !d.ptpStarting() && d.ptpRunning_ &&
+            d.ptpRole_ == QStringLiteral("RECEIVER") &&
+            d.ptpStatus_.contains(QStringLiteral("external timing still unqualified"));
+    }
+
+    static bool ptpGuidedRejectedConfigStops() {
+        Fixture f;
+        if (!setupGuidedPtp(f, QStringLiteral("SOURCE"))) return false;
+        auto& d = f.device;
+        d.processLine(QStringLiteral("PTPROLE role=SOURCE value=0 running=0"));
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_config) return false;
+        d.processLine(QStringLiteral("PTP configuration rejected: invalid profile"));
+        return !d.ptpStarting() && !d.ptpRunning_ &&
+            d.ptpStatus_ == QStringLiteral("PTP start failed");
+    }
+
+    static bool ptpGuidedStopCancelsStart() {
+        Fixture f;
+        if (!setupGuidedPtp(f, QStringLiteral("SOURCE"))) return false;
+        auto& d = f.device;
+        if (!f.session.requestStopPtp() || d.ptpStarting()) return false;
+        // ACK from now-abandoned transaction cannot trigger CONFIG or START.
+        d.processLine(QStringLiteral("PTPROLE role=SOURCE value=0 running=0"));
+        return !d.ptpStarting() && d.ptpStartStage_ ==
+            DeviceController::PtpStartStage::idle;
+    }
+
+    static bool ptpGuidedRoleAndGenerationGuards() {
+        Fixture f;
+        if (!setupGuidedPtp(f, QStringLiteral("RECEIVER"))) return false;
+        auto& d = f.device;
+        d.processLine(QStringLiteral("PTPROLE role=MONITOR value=2 running=0"));
+        if (d.ptpStarting() || d.ptpStatus_ != QStringLiteral("PTP start failed"))
+            return false;
+        if (!f.session.requestStartPtpConfigured(QStringLiteral("RECEIVER"), ptpValidProfile()))
+            return false;
+        const quint64 previous = d.sessionGeneration_;
+        d.setSessionGeneration(previous + 1);
+        d.processLine(QStringLiteral("PTPROLE role=RECEIVER value=1 running=0"));
+        return !d.ptpStarting() && d.ptpStartStage_ ==
+            DeviceController::PtpStartStage::idle;
     }
 
     static bool staleReleaseGenerationIsIgnored() {

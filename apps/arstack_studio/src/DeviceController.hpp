@@ -5,6 +5,7 @@
 #include <QObject>
 #include <QStringList>
 #include <QThread>
+#include <QTimer>
 #include <QVariantMap>
 
 class DeterministicSessionHarness;
@@ -60,6 +61,7 @@ class DeviceController : public QObject {
     Q_PROPERTY(bool profileDeploying READ profileDeploying NOTIFY profileStateChanged)
     Q_PROPERTY(bool ptpAvailable READ ptpAvailable NOTIFY ptpStateChanged)
     Q_PROPERTY(bool ptpRunning READ ptpRunning NOTIFY ptpStateChanged)
+    Q_PROPERTY(bool ptpStarting READ ptpStarting NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpStatus READ ptpStatus NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpDomain READ ptpDomain NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpTransportSpecific READ ptpTransportSpecific NOTIFY ptpStateChanged)
@@ -142,6 +144,7 @@ public:
     [[nodiscard]] bool profileDeploying() const noexcept;
     [[nodiscard]] bool ptpAvailable() const noexcept;
     [[nodiscard]] bool ptpRunning() const noexcept;
+    [[nodiscard]] bool ptpStarting() const noexcept { return ptpStartStage_ != PtpStartStage::idle; }
     [[nodiscard]] QString ptpStatus() const;
     [[nodiscard]] QString ptpDomain() const;
     [[nodiscard]] QString ptpTransportSpecific() const;
@@ -227,6 +230,7 @@ public:
 
     bool sendPtpShow();
     bool startPtp();
+    bool startPtpConfigured(const QString& role, const QVariantMap& profile);
     bool stopPtp();
     bool configurePtp(const QVariantMap& profile);
 
@@ -290,6 +294,8 @@ protected:
 private:
     friend class DeterministicSessionHarness;
 
+    enum class PtpStartStage { idle, awaiting_role, awaiting_config, awaiting_start, awaiting_runtime };
+
     enum class BinaryProfileStage {
         idle,
         waiting_status,
@@ -335,6 +341,10 @@ private:
     void failBinaryProfileDeployment(const QString& message);
     void resetTelemetry();
     void resetPtpState();
+    void advancePtpStartup(const QString& line);
+    void failPtpStartup(const QString& reason, bool rollback);
+    void resetPtpStartup() noexcept;
+    [[nodiscard]] static QString ptpConfigCommand(const QVariantMap& profile);
     static QString cleanLine(const QString& rawLine);
     static QString utf8Hex(const QString& text);
     static QString compactMac(const QString& text);
@@ -370,6 +380,10 @@ private:
     BinaryProfileTransfer binaryProfile_{};
     bool ptpAvailable_{false};
     bool ptpRunning_{false};
+    PtpStartStage ptpStartStage_{PtpStartStage::idle};
+    QTimer ptpStartTimer_;
+    QString pendingPtpRole_;
+    QString pendingPtpConfig_;
     bool ioWorkerReady_{false};
     bool ioWorkerAffinityValid_{false};
     bool shuttingDown_{false};

@@ -430,6 +430,12 @@ bool SmartSessionController::requestStartPtp() {
     return deviceControlAvailable() && device_ != nullptr && device_->startPtp();
 }
 
+bool SmartSessionController::requestStartPtpConfigured(const QString& role,
+                                                        const QVariantMap& profile) {
+    return deviceControlAvailable() && device_ != nullptr &&
+           device_->startPtpConfigured(role, profile);
+}
+
 bool SmartSessionController::requestStopPtp() {
     return deviceControlAvailable() && device_ != nullptr && device_->stopPtp();
 }
