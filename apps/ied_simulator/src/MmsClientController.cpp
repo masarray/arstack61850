@@ -355,8 +355,25 @@ bool MmsClientController::connectToIed() {
 
                 auto model = std::make_shared<mms::MmsLiveModelDocument>(
                     arstack::iedsim::build_scl_live_model(*trustedScl, *snapshot));
-                auto initialValues = std::make_shared<std::vector<arstack::iedsim::SclSnapshotValue>>(
-                    arstack::iedsim::collect_scl_snapshot_values(*trustedScl, *snapshot));
+                const auto snapshotValues =
+                    arstack::iedsim::collect_scl_snapshot_values(*trustedScl, *snapshot);
+                // The portable adapter has no Qt dependency. Convert typed q/t
+                // once on the MMS worker before publishing to the GUI thread.
+                auto initialValues = std::make_shared<QVector<ReadValue>>();
+                initialValues->reserve(static_cast<qsizetype>(snapshotValues.size()));
+                std::size_t totalTyped{};
+                std::size_t projectedTyped{};
+                for (const auto& value : snapshotValues) {
+                    if (arstack::iedsim::isSclTypedEvidenceLeaf(value.item)) ++totalTyped;
+                    if (value.typedSample) ++projectedTyped;
+                    const auto evidence = value.typedSample
+                        ? arstack::iedsim::decodeEngineeringEvidence(
+                            QString::fromStdString(value.item), *value.typedSample)
+                        : QVariantMap{};
+                    initialValues->push_back({
+                        snapshotKey(value), QString::fromStdString(value.display),
+                        evidence});
+                }
 
                 worker->discovery.reset();
                 worker->trustedScl = trustedScl;
@@ -366,12 +383,12 @@ bool MmsClientController::connectToIed() {
                 if (self) {
                     QMetaObject::invokeMethod(
                         self,
-                        [self, generation, model, snapshot, initialValues, associationProfile, healthSummary, requestedTrustedSclPath] {
+                        [self, generation, model, snapshot, initialValues, totalTyped, projectedTyped, associationProfile, healthSummary, requestedTrustedSclPath] {
                             if (!self || self->generation_ != generation) return;
                             self->treeModel_.applyDocument(*model);
                             for (const auto& value : *initialValues) {
                                 self->treeModel_.applyReadValue(
-                                    snapshotKey(value), QString::fromStdString(value.display));
+                                    value.key, value.display, value.engineeringEvidence);
                             }
                             self->iedName_ = QString::fromStdString(model->identity.ied_name);
                             self->modelSummary_ = QString::fromStdString(model->summary);
@@ -392,8 +409,14 @@ bool MmsClientController::connectToIed() {
                                     *model, requestedTrustedSclPath);
                                 for (const auto& value : *initialValues) {
                                     self->engineeringContext_->treeModel()->applyReadValue(
-                                        snapshotKey(value), QString::fromStdString(value.display));
+                                        value.key, value.display, value.engineeringEvidence);
                                 }
+                            }
+                            if (totalTyped > projectedTyped) {
+                                self->appendDiagnostic(
+                                    QStringLiteral("Initial q/t detail bounded: %1 of %2 typed leaves; "
+                                                   "select a leaf and Read explicitly for its evidence.")
+                                        .arg(projectedTyped).arg(totalTyped));
                             }
                             self->appendDiagnostic(healthSummary);
                             self->appendDiagnostic(

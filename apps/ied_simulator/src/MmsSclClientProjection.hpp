@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cctype>
 #include <map>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -21,7 +22,17 @@ struct SclSnapshotValue final {
     std::string domain;
     std::string item;
     std::string display;
+    // Hold only typed q/t samples, never the entire snapshot value payload.
+    // Pure C++ adapter: portable non-Qt SCL profile must still compile.
+    std::unique_ptr<ar::iec61850::mms::MmsDataValue> typedSample;
 };
+
+inline constexpr std::size_t kMaximumSclInitialTypedEvidence = 96U;
+
+[[nodiscard]] inline bool isSclTypedEvidenceLeaf(const std::string& item) noexcept {
+    return item.size() >= 2 && item[item.size() - 2] == '$' &&
+           (item.back() == 'q' || item.back() == 't');
+}
 
 namespace detail {
 
@@ -297,6 +308,7 @@ namespace detail {
     const ar::iec61850::mms::MmsSclAssistedConnectResult& snapshot) {
     std::vector<SclSnapshotValue> values;
     values.reserve(snapshot.mapped_leaf_count);
+    std::size_t typedCount{};
     for (const auto& batch : snapshot.batches) {
         for (const auto& root : batch.roots) {
             if (!root.mapping_success()) continue;
@@ -304,10 +316,17 @@ namespace detail {
                 if (!leaf.value || leaf.model_entry_index >= document.model_entries.size()) continue;
                 const auto& entry = document.model_entries[leaf.model_entry_index];
                 if (entry.ied_name != snapshot.ied_name) continue;
+                const auto item = detail::mms_item(entry);
+                const bool retainTyped = isSclTypedEvidenceLeaf(item) &&
+                    typedCount < kMaximumSclInitialTypedEvidence;
+                if (retainTyped) ++typedCount;
                 values.push_back({
                     entry.ied_name + entry.ld_inst,
-                    detail::mms_item(entry),
+                    item,
                     ar::iec61850::mms::MmsDataCodec::to_display_string(*leaf.value),
+                    retainTyped
+                        ? std::make_unique<ar::iec61850::mms::MmsDataValue>(*leaf.value)
+                        : nullptr,
                 });
             }
         }
