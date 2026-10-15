@@ -4,6 +4,16 @@
 > **Primary strategy and ownership contract:** [WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md](WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md).
 > **Scope:** installed native ARStack Workbench in apps/ied_simulator. Not a web app, WPF clone, or the separate ESP32-P4/SMV Studio track.
 
+## Active native parity + repository naming work — 2026-10-15
+
+- Work branch: feat/native-workbench-reference-hygiene-arsas-parity-20261015; base main c8aabf292c370993950b8682718cd56b77f2cabf. IN PROGRESS until exact-head CI and merge.
+- Removed prohibited third-party names from source comments, tests and current docs; indexed RCB fixture tests now derive IED/domain identity from validated references instead of a hard-coded vendor label.
+- A lightweight Product Naming Guard workflow checks all tracked source/path names on PR and push.
+- Engine reference map: [ARIEC61850_ARSAS_NATIVE_PORT_MAP.md](ARIEC61850_ARSAS_NATIVE_PORT_MAP.md). ARIEC C# behavior is a reference for missing protocol capabilities; canonical C++/Qt is the runtime SSOT.
+- M2M native UX: DataSets selected attribute inspector now shows ordinary ST/MX/CO DA value, read-state, FC, Quality, IED Timestamp, MMS type and provenance. No implicit MMS read.
+- Post-M2L main [Qt 38701682484](https://github.com/masarray/arstack61850/actions/runs/38701682484), [SCL 38701682271](https://github.com/masarray/arstack61850/actions/runs/38701682271) and [Release Hardening 38701682258](https://github.com/masarray/arstack61850/actions/runs/38701682258): all SUCCESS.
+- Remaining gate: PR exact-head Qt + source review and selected-state screenshot QA. Do not claim physical IED or Windows installer acceptance from synthetic CI.
+
 ## Verified current integration checkpoint — 2026-10-15 (WIB)
 
 **Source baseline at acceptance: main `9cc9bda9c30804be343d49367e4dde6948789d95`.** Refresh live GitHub before further edits. Subsequent documentation-only commits may advance main without changing Workbench source.
