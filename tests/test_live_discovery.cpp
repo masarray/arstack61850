@@ -708,11 +708,17 @@ void association_loss_preserves_completed_domain_evidence_without_dead_probes() 
 
     CHECK(!association.associated());
     CHECK(result.partial());
-    CHECK(result.names.domain_variables.size() == 1U);
+    CHECK(result.names.domain_variables.size() == 2U);
     CHECK(result.names.domain_variables.at("OLS501LD0").size() == 1U);
     CHECK(result.names.domain_variable_lists.size() == 1U);
     CHECK(result.names.domain_variable_lists.at("OLS501LD0").empty());
-    CHECK(result.names.domain_variables.count("OLS501LD1") == 0U);
+    CHECK(result.names.domain_variables.at("OLS501LD1").empty());
+    // The second domain is observed from VMD but its variables are unknown.
+    // Canonical identity reconciliation must not mistake partial enumeration
+    // for a genuine single-domain IED.
+    const auto model = mms::MmsLiveModelBuilder::build(result);
+    CHECK(model.identity.logical_device_aliases.count("OLS501LD0") == 1U);
+    CHECK(model.identity.logical_device_aliases.count("OLS501LD1") == 1U);
     CHECK(result.wire_budget.get_name_list == 3U);
     CHECK(result.wire_budget.get_variable_access_attributes == 0U);
     CHECK(result.wire_budget.get_named_variable_list_attributes == 0U);

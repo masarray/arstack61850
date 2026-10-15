@@ -375,25 +375,29 @@ MmsLiveDiscoveryResult MmsLiveDiscoveryClient::discover(
             "Domain discovery exceeded the configured domain bound.");
     }
 
+    // VMD Domain names are already observed wire evidence, even if a later
+    // per-domain GetNameList faults. Keep every proven domain in the canonical
+    // identity inventory without inventing LN variables or DataSet contents.
+    for (const auto& domain : domains) {
+        result.names.domain_variables.try_emplace(domain);
+    }
     for (const auto& domain : domains) {
         // A failed confirmed exchange closes the association. Keep earlier
         // successful domain evidence; never manufacture additional failed
         // optional probe entries for an already-disconnected peer.
         if (!association_.associated()) break;
         try {
-            result.names.domain_variables.emplace(
+            result.names.domain_variables.at(domain) = get_name_list(
+                MmsGetNameListObjectClass::named_variable,
                 domain,
-                get_name_list(
-                    MmsGetNameListObjectClass::named_variable,
-                    domain,
-                    options,
-                    result.wire_budget,
-                    stop_token));
+                options,
+                result.wire_budget,
+                stop_token);
         } catch (const std::exception& exception) {
             if (!options.continue_on_optional_probe_error) {
                 throw;
             }
-            result.names.domain_variables.emplace(domain, std::vector<std::string>{});
+            // Seeded VMD domain remains with no claimed variable evidence.
             result.diagnostics.push_back(optional_probe_error(
                 "NamedVariable", domain, exception));
         }
