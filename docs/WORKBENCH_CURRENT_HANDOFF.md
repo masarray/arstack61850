@@ -1,8 +1,18 @@
 # Native Qt IEC 61850 Workbench — current cross-thread handoff
 
-> **Updated:** 2026-10-15 (WIB), snapshot only; always refresh GitHub refs and PR state before editing.
+> **Updated:** 2026-10-16 (WIB), snapshot only; always refresh GitHub refs and PR state before editing.
 > **Primary strategy and ownership contract:** [WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md](WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md).
 > **Scope:** installed native ARStack Workbench in apps/ied_simulator. Not a web app, WPF clone, or the separate ESP32-P4/SMV Studio track.
+
+## P0 MMS Discovery interoperability and failure containment — 2026-10-16
+
+- **Integrated baseline**: main `6cc64b384b643fe85b71b9e2082daa1e805766c8`. Source remains the portable IEC 61850 C++ engine under `src/mms/` and `include/ariec61850/mms/`, consumed by the native Qt Workbench; the ESP32-P4 SV Studio is a separate product.
+- **[PR #182](https://github.com/masarray/arstack61850/pull/182) MERGED**: preserve case-sensitive MMS references and add bounded, opt-in live DataSet-backed ST/MX LN type-root closure. Do not duplicate this feature or claim it is universally enabled for the GUI.
+- **[PR #183](https://github.com/masarray/arstack61850/pull/183) MERGED** at `0081a52d73036fb4ebeec7be63a2d6b2d88cb060`: per-service confirmed-request wire budget from a *per-exchange runtime send receipt*. The receipt flips only after full request transmission; unsuccessful responses still count as sent, while pre-send fault/disconnect attempts do not. Exact PR head `4c2dee88d718c25d9ca245f32a935b46842f2676`, **13/13 CI SUCCESS** including Qt, GCC, Clang, MSVC, naming guard and negative failure tests.
+- **[PR #184](https://github.com/masarray/arstack61850/pull/184) MERGED** at `6cc64b384b643fe85b71b9e2082daa1e805766c8`: stop all non-productive optional discovery probes once the accepted MMS association becomes unusable; retain **all domains observed from VMD GetNameList** before stopping, plus successfully received LN evidence, but no fabricated values/children from unattempted probes. Exact PR head `2539da2f96966b048990b63b42c2c2633f46fede`, **12/12 CI SUCCESS** including [native Qt 38812887713](https://github.com/masarray/arstack61850/actions/runs/38812887713) 55 steps and [C++ CI 38812887750](https://github.com/masarray/arstack61850/actions/runs/38812887750) on GCC/Clang/MSVC; all review threads resolved.
+- **Post-merge evidence**: Product Naming Guard on #184 main SUCCESS; other main workflows were still IN PROGRESS at this checkpoint. PR CI green does not prove actual field IED interoperability, Windows installed package equivalence, or parallel MMS transport performance.
+- **Next performance/interop task**: record request budgets and semantic model fingerprints on the *same device/SCL* under repeatable conditions before comparing serial and optimized discovery. The existing `exchange_confirmed` performs synchronous send/receive; **do not** launch concurrent callers naïvely. A negotiated-outstanding pipeline requires one association-owned receive dispatcher, exact invoke-ID correlation, bounded in-flight window (never exceeding peer `maxOutstandingCalling`), sequential pages within each continuation chain, cancellation, failure containment, deterministic canonical publication, and a prove-no-regression baseline. Keep conservative mode when evidence is incomplete.
+- **Next native user acceptance**: correctly expose/enable optional DataSet-backed closure where proven and explicitly requested, plus physical relay trials for truncated NameList, identity conflict, RCB/SG/Files, source generation, and rendering. Do not treat this source integration as an installed Workbench or physical IED certification.
 
 ## Latest verified native Workbench integration — 2026-10-15
 
