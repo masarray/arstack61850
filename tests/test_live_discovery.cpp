@@ -7,6 +7,7 @@
 #include "ariec61850/osi/cotp.hpp"
 #include "ariec61850/osi/tpkt.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <deque>
 #include <iostream>
