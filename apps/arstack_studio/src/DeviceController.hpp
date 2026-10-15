@@ -294,7 +294,7 @@ protected:
 private:
     friend class DeterministicSessionHarness;
 
-    enum class PtpStartStage { idle, awaiting_role, awaiting_config, awaiting_start, awaiting_runtime };
+    enum class PtpStartStage { idle, awaiting_role_ack, awaiting_role_readback, awaiting_config, awaiting_start, awaiting_runtime };
 
     enum class BinaryProfileStage {
         idle,
@@ -385,6 +385,7 @@ private:
     QTimer ptpStartTimer_;
     QString pendingPtpRole_;
     QString pendingPtpConfig_;
+    bool ptpRuntimeRoleSeen_{false};
     bool ioWorkerReady_{false};
     bool ioWorkerAffinityValid_{false};
     bool shuttingDown_{false};

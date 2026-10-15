@@ -61,7 +61,8 @@ SurfacePanel {
         && Number(panel.device.ptpTxFailures) === 0
     readonly property string headlineState: panel.startPending ? "STARTING"
         : panel.device.ptpRunning
-            ? (panel.receiverRole ? panel.device.ptpDiscipline : panel.activeRole + " ACTIVE")
+            ? (panel.receiverRole ? (panel.device.ptpDiscipline === "LOCKED" ? "BOARD LOCKED" : panel.device.ptpDiscipline)
+                : panel.activeRole + " ACTIVE")
             : panel.device.ptpStatus === "PTP start failed" ? "START FAILED" : "OFF"
 
     Timer {
@@ -106,8 +107,8 @@ SurfacePanel {
                     theme: panel.theme
                     monoFont: panel.uiFont
                     state: panel.headlineState
-                    stateColor: panel.device.ptpDiscipline === "LOCKED" ? panel.theme.green
-                        : panel.headlineState === "START FAILED" ? panel.theme.red
+                    stateColor: panel.headlineState === "START FAILED" ? panel.theme.red
+                        : panel.receiverRole && panel.device.ptpRunning ? panel.theme.amber
                         : panel.device.ptpRunning ? panel.theme.green
                         : panel.startPending ? panel.theme.amber : panel.theme.muted
                 }
@@ -271,7 +272,7 @@ SurfacePanel {
                     anchors.margins: 10
                     columns: 4
                     Label { text: "Discipline"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-                    Label { text: panel.device.ptpDiscipline; color: panel.device.ptpDiscipline === "LOCKED" ? panel.theme.green : panel.theme.amber; font.family: panel.monoFont; font.pixelSize: 10; font.weight: Font.DemiBold }
+                    Label { text: panel.device.ptpDiscipline === "LOCKED" ? "LOCKED (board)" : panel.device.ptpDiscipline; color: panel.theme.amber; font.family: panel.monoFont; font.pixelSize: 10; font.weight: Font.DemiBold }
                     Label { text: "Selected source"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
                     Label { text: panel.device.ptpSource === "NONE" ? "—" : panel.device.ptpSource; color: panel.theme.text; font.family: panel.monoFont; font.pixelSize: 9 }
                     Label { text: "Offset"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }

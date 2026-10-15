@@ -1022,6 +1022,7 @@ void DeviceController::resetPtpStartup() noexcept {
     ptpStartStage_ = PtpStartStage::idle;
     pendingPtpRole_.clear();
     pendingPtpConfig_.clear();
+    ptpRuntimeRoleSeen_ = false;
 }
 
 void DeviceController::failPtpStartup(const QString& reason, const bool rollback) {
@@ -1054,8 +1055,8 @@ bool DeviceController::startPtpConfigured(const QString& requestedRole,
     }
     pendingPtpRole_ = role;
     pendingPtpConfig_ = command;
-    ptpStartStage_ = PtpStartStage::awaiting_role;
-    ptpStatus_ = QStringLiteral("Selecting PTP timing mode...");
+    ptpStartStage_ = PtpStartStage::awaiting_role_ack;
+    ptpStatus_ = QStringLiteral("Waiting for board to accept PTP mode...");
     emit ptpStateChanged();
     if (!sendCommand(QStringLiteral("PROFILE PTPROLE %1").arg(role))) {
         failPtpStartup(QStringLiteral("Could not queue PTP role selection."), false);
@@ -1079,7 +1080,17 @@ void DeviceController::advancePtpStartup(const QString& line) {
         failPtpStartup(QStringLiteral("Board rejected PTP mode, settings or start."), rollback);
         return;
     }
-    if (ptpStartStage_ == PtpStartStage::awaiting_role) {
+    if (ptpStartStage_ == PtpStartStage::awaiting_role_ack) {
+        // A SHOW response cannot replace the explicit PTPROLE acceptance.
+        if (line.contains(QStringLiteral("PTPROLE accepted"), Qt::CaseInsensitive)) {
+            ptpStartStage_ = PtpStartStage::awaiting_role_readback;
+            ptpStatus_ = QStringLiteral("Confirming PTP mode on board...");
+            emit ptpStateChanged();
+            ptpStartTimer_.start(5000);
+        }
+        return;
+    }
+    if (ptpStartStage_ == PtpStartStage::awaiting_role_readback) {
         const auto reply = kPtpRoleExpression.match(line);
         if (!reply.hasMatch()) return;
         if (reply.captured(1).toUpper() != pendingPtpRole_ ||
@@ -1109,7 +1120,8 @@ void DeviceController::advancePtpStartup(const QString& line) {
     } else if (ptpStartStage_ == PtpStartStage::awaiting_start &&
                line.contains(QStringLiteral("PTP start accepted"), Qt::CaseInsensitive)) {
         ptpStartStage_ = PtpStartStage::awaiting_runtime;
-        ptpStatus_ = QStringLiteral("Verifying live PTP runtime...");
+        ptpRuntimeRoleSeen_ = false;
+        ptpStatus_ = QStringLiteral("Verifying live PTP role and runtime...");
         emit ptpStateChanged();
         if (!sendPtpShow()) {
             failPtpStartup(QStringLiteral("Could not read back PTP runtime."), true);
@@ -1117,10 +1129,19 @@ void DeviceController::advancePtpStartup(const QString& line) {
         }
         ptpStartTimer_.start(5000);
     } else if (ptpStartStage_ == PtpStartStage::awaiting_runtime) {
+        const auto roleEvidence = kPtpMeasuredStateExpression.match(line);
+        if (roleEvidence.hasMatch()) {
+            if (roleEvidence.captured(1).toUpper() != pendingPtpRole_) {
+                failPtpStartup(QStringLiteral("PTP runtime role differs from the selected mode."), true);
+                return;
+            }
+            ptpRuntimeRoleSeen_ = true;
+            return;
+        }
         const auto readback = kPtpStatusExpression.match(line);
         if (!readback.hasMatch()) return;
-        if (!ptpRunning_ || ptpRole_ != pendingPtpRole_) {
-            failPtpStartup(QStringLiteral("PTP runtime does not confirm the selected mode."), true);
+        if (!ptpRuntimeRoleSeen_ || !ptpRunning_ || ptpRole_ != pendingPtpRole_) {
+            failPtpStartup(QStringLiteral("PTP requires matching PTP2 role and RUNNING readback."), true);
             return;
         }
         resetPtpStartup();
@@ -1392,7 +1413,7 @@ void DeviceController::processLine(const QString& rawLine) {
         ptpStatus_ = QStringLiteral("Not enabled in firmware");
         emit ptpStateChanged();
     }
-    if (line.contains(QStringLiteral("PTP configuration accepted"), Qt::CaseInsensitive)) {
+    if (line.contains(QStringLiteral("PTP configuration accepted"), Qt::CaseInsensitive) && !ptpStarting()) {
         emit deviceMessage(QStringLiteral("PTP expert profile accepted."));
         static_cast<void>(sendPtpShow());
     }
