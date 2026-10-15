@@ -203,4 +203,15 @@ if "Timer {" in status:
 if "maximumEntries: 80" not in status:
     raise SystemExit("BROWSER_CONVERGENCE_FAIL status history is not bounded")
 
+main_cpp = (workspace_path.parent.parent / "src" / "main.cpp").read_text(encoding="utf-8")
+for required in [
+    'qa-browser-select-mms',
+    'selectMmsItem(domain, item)',
+    'BROWSER_EVIDENCE_QA_FAIL',
+]:
+    if required not in main_cpp:
+        raise SystemExit("BROWSER_EVIDENCE_QA_FAIL missing=" + required)
+if 'applyReadValue(' in main_cpp:
+    raise SystemExit("BROWSER_EVIDENCE_QA_FAIL synthetic value injection in app CLI")
+
 print("BROWSER_CONVERGENCE_PASS ribbon=pass dense_explorer=pass goose_drilldown=pass data_model_drilldown=pass ied_root=pass contextual_commands=pass canonical_tree=pass bounded_history=80 polling=false")
