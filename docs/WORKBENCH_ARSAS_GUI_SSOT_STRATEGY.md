@@ -2,7 +2,7 @@
 
 **Status:** cross-thread execution contract; first written 2026-10-15 (WIB), against ARStack main a328da13133a and ARSAS main 45348eccf24e941dd185e5fb729217923846c610. **Re-query GitHub before acting.** This is a living strategy, not a claim of completed functionality.
 
-**Product:** the installed **native Qt/QML ARStack Workbench** (apps/ied_simulator), **not** a web GUI, a new desktop app, a WPF port, or the separate ESP32-P4 timing/SV firmware track. The objective is an professional IEC 61850 engineering-grade engineering workflow while borrowing effective visual/interaction patterns from the ARSAS/ARIEC61850 Windows Explorer. ARStack's own IEC 61850 models and wire evidence remain authoritative.
+**Product:** the installed **native Qt/QML ARStack Workbench** (apps/ied_simulator), **not** a web GUI, a new desktop app, a WPF port, or the separate ESP32-P4 timing/SV firmware track. The objective is a professional IEC 61850 engineering workflow while borrowing effective visual/interaction patterns from the ARSAS/ARIEC61850 Windows Explorer. ARStack's own IEC 61850 models and wire evidence remain authoritative.
 
 ## 0. Read order for every thread
 
@@ -20,11 +20,11 @@
 - [ARSAS shared static DataSet authority](https://github.com/masarray/arsas/blob/45348eccf24e941dd185e5fb729217923846c610/MainWindow.SharedStaticDataSetAuthority.cs): preserve static report-first behavior, without automatic cyclic MMS.
 - [ARSAS IoList FAT workspace](https://github.com/masarray/arsas/blob/45348eccf24e941dd185e5fb729217923846c610/IoListTestingWindow.xaml): multi-IED selection and engineering context.
 
-**Copy the *interaction principles*, not WPF/C# runtime, invented values, unsupported IEC semantics, or duplicated services.** ARSAS' IEC 61850 Explorer is a useful reference, but not proof that every ARSAS screen literally matches an professional engineering tab.
+**Copy the *interaction principles*, not WPF/C# runtime, invented values, unsupported IEC semantics, or duplicated services.** ARSAS' IEC 61850 Explorer is a useful reference, but not proof that every ARSAS screen literally matches any single engineering tab.
 
-## 1. Exact baseline, active work and merge dependencies
+## 1. Integration baseline and merge dependencies
 
-At creation:
+Historical baseline and accepted merges (always refresh current GitHub status):
 - ARStack main: [a328da13 (M2J merged)](https://github.com/masarray/arstack61850/commit/a328da13133a6473dc6a28a69f5d2aebab7a7198). M2H [#171](https://github.com/masarray/arstack61850/pull/171), M2I [#173](https://github.com/masarray/arstack61850/pull/173) and M2J [#174](https://github.com/masarray/arstack61850/pull/174) are merged.
 - M2J post-merge Qt, release hardening, SCL-assisted connect and SCL-assisted Workbench workflows completed successfully at this main SHA.
 - **Integrated M2K:** PR #176 merged into main at `0cc882022d20f416a33433d5f29a1f8950984d85` with exact-head native Qt and SCL verification.
@@ -168,12 +168,22 @@ Milestone order may be rearranged **only for explicit blockers/dependencies**, a
 
 **Merge gate:** review live diff/ownership, verify no unresolved review thread, require **completed/success, non-skipped, exact PR-head** relevant gates, squash merge with expected_head_sha, re-read main HEAD, then verify post-merge CI separately. A docs-only PR should use relevant cheap document/link checks, not dispatch unrelated firmware/Windows build storms.
 
-## 8. Immediate handoff to the next two threads
+## 8. Current integration order and cross-thread handoff
 
-**Integrator now:** check [PR #176](https://github.com/masarray/arstack61850/pull/176) against current main and exact-head Qt run [38678320479](https://github.com/masarray/arstack61850/actions/runs/38678320479). Its source and routing regression changes must stay coordinated. If green and reviews resolved, squash-merge with SHA lease, then verify main integration. If red, use the failed job log and fix the **actual** root cause in #176; do not open a duplicate M2K branch.
+**Verified integration baseline (2026-10-15):**
+- M2K [PR #176](https://github.com/masarray/arstack61850/pull/176) merged at `0cc882022d20f416a33433d5f29a1f8950984d85`.
+- M2L [PR #178](https://github.com/masarray/arstack61850/pull/178) merged at `9cc9bda9c30804be343d49367e4dde6948789d95`.
+- Native DataSets inspector + repository naming safeguard M2M [PR #179](https://github.com/masarray/arstack61850/pull/179) merged at `ce643e81cd7640ed2b694c0914282177f871a9fa`, its exact-head 14-workflow matrix **SUCCESS**.
+- Native DataSets → Data Model / Global Data actions and source-generation selection reset [PR #180](https://github.com/masarray/arstack61850/pull/180) is the **active M2M candidate**, head `cb7b7fb92447f6365c3c751abd3d0d7db922ffdc` as of this snapshot. It is NOT merged at document writing; verify actual CI/reviews live before merge.
 
-**Track A (after M2K merged):** start M2L by tracing actual Measurement DO/DA typed metadata and quality/time provenance, with baseline screenshots/fixtures including **Hz/TotW must not have phasor angle**. Produce a signed-off data-contract test **before** changing presentation.
+**Current Integrator:** complete and review #180's native Qt/Browser/large-model gate, then merge only with exact SHA and all required checks green. Keep [current handoff](WORKBENCH_CURRENT_HANDOFF.md) synchronized after integration. Do not resume obsolete directions that ask to integrate #176 or implement M2L again.
 
-**Track B:** study and build the ARSAS-vs-ARStack **screen-state comparison matrix** while Track A owns the canonical model. Avoid overlapping #176's All-IED QML before merge. Implement only after A's model contracts are confirmed, using the existing QML panels; propose small selected-state screenshot QA in a separate non-conflicting path.
+**Track A — C++ engine:** compare [ARIEC61850 port map](ARIEC61850_ARSAS_NATIVE_PORT_MAP.md) against existing canonical C++ owners. Port only a **measured, genuinely missing semantic capability** with protocol/negative tests; no second C# runtime, MMS client, SCL parser, or model.
 
-**Definition of progress:** merged code, verified CI, inspectable native screenshots, honest unverified items and an updated on-repo handoff. More lines of code, a second GUI stack, or an unchecked screenshot do not count.
+**Track B — native GUI/UX:** continue the existing Qt `IedBrowserWorkspace`, Data Model/DataSets/Reports/Global Data views, borrowing dense Explorer navigation and feedback patterns from ARSAS. Demonstrate selected-state rendered screenshots, real actions, no automatic Read or per-row timers; do not convert WPF verbatim.
+
+**Track C — reports/RCB and SG/Files:** verify effective state and actual received ordered report members, controls and life-cycle cleanup under existing service owners. Keep report-first static behavior and bound IED session generation.
+
+**Track D — acceptance and Windows package:** capture genuine selected DA/FCDA/RCB states, 60k model and multi-IED regression, then verify installed **Workbench** executable artifacts separately from **Studio**. A synthetic screenshot is not proof of physical IED interoperability.
+
+**Definition of progress:** merged source on the real native product path, exact-head and post-merge CI evidence, selected-state screenshots, truthful source/provenance, no product-naming regression, and updated handoff. A redundant PR, a second GUI stack or an unchecked screenshot is not progress.
