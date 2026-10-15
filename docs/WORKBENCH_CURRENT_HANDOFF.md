@@ -4,6 +4,15 @@
 > **Primary strategy and ownership contract:** [WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md](WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md).
 > **Scope:** installed native ARStack Workbench in apps/ied_simulator. Not a web app, WPF clone, or the separate ESP32-P4/SMV Studio track.
 
+## Verified integration checkpoint — 2026-10-15 (subsequent to the historical snapshot below)
+
+- **M2K MERGED** via [PR #176](https://github.com/masarray/arstack61850/pull/176), squash commit `0cc882022d20f416a33433d5f29a1f8950984d85` (verified as the new `main` at merge). Exact PR head `5c5e425c20acb1b849399f39bf62da0f68c0942b`; native Qt [38678320479](https://github.com/masarray/arstack61850/actions/runs/38678320479) and SCL-Assisted Workbench [38678320482](https://github.com/masarray/arstack61850/actions/runs/38678320482) were **SUCCESS** before merge. All review threads resolved; merge performed with expected head lease. PR #175 native Studio/PTP had already merged to main at `a47d65e` and its independent paths remained preserved.
+- **Post-M2K main CI**: [Qt 38698517002](https://github.com/masarray/arstack61850/actions/runs/38698517002), [SCL 38698516965](https://github.com/masarray/arstack61850/actions/runs/38698516965), [Release Hardening 38698517080](https://github.com/masarray/arstack61850/actions/runs/38698517080). SCL was verified **SUCCESS**; Qt and Release Hardening were **IN PROGRESS** when handoff updated, require fresh results.
+- **M2L ACTIVE / NOT MERGED**: [PR #178](https://github.com/masarray/arstack61850/pull/178), initial head `0dc048bb9ea33676a64e8284ca3626d70f2bf684` based on `0cc8820`. First slice edits canonical `MmsLiveTreeModel`, existing 60k+ QA and native selected-DA inspector. Exact CDC + MX + received finite numeric MMS gates magnitude/vector; vector angle appears only with actual `CMV cVal.ang.f`; scalar Hz/TotW and Boolean cannot invent angle. q/t companion visibility is restricted to the selected DA's FC and actual reception. No units or degree signs are inferred. Source replacement clears read evidence.
+- **M2L QA state**: branch initially opened as draft so draft-head CI was **SKIPPED**, **not PASS**. Ready-for-review plus exact new HEAD Qt/large-model/Browser regression and review signoff are required before merge. Physical IED, Windows installed artifact and native rendered-screen acceptance remain separate; source-only regression is not those gates.
+- **Ownership**: Track A owns canonical model and test in PR #178, Track B owns selected inspector QML changes *inside the same PR* to keep the slice vertical, Track C reporting/RCB remains untouched, Track D checks exact-head CI and post-merge runs. Other threads must avoid editing these four PR paths concurrently.
+- **Next**: Refresh PR #178 and CI, address any actual compiler/test/review defects, merge only after exact-head checks, verify `main`, then continue M2M native DataSets and selected-state screenshot QA. Never merge legacy #172/#164 by assumption.
+
 ## Current checkpoint
 
 | Item | Verified at this snapshot |
