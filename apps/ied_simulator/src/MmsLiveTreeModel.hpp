@@ -187,6 +187,7 @@ private:
         QString typeStatus;
         QString description;
         QString value;
+        bool cdcAuthoritative{}; // true only for an exact CDC source
         bool hasReceivedValue{};  // updated only at actual MMS sample ingress
         QVariantMap engineeringEvidence;
         bool writable{};
@@ -203,6 +204,7 @@ private:
     void appendVisibleSubtree(int nodeIndex, const QVector<bool>* included);
     [[nodiscard]] int visibleRowForNode(int nodeIndex) const noexcept;
     [[nodiscard]] QString siblingValue(int nodeIndex, const QString& leafName) const;
+    [[nodiscard]] QVariantMap measurementForNode(int nodeIndex) const;
     [[nodiscard]] QVariantMap nodeMap(int nodeIndex) const;
     [[nodiscard]] int presentationNodeIndex() const noexcept;
     bool selectNode(int nodeIndex);

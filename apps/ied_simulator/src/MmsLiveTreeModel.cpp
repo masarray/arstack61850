@@ -4,6 +4,7 @@
 #include <QSet>
 
 #include <algorithm>
+#include <cmath>
 
 namespace {
 QString q(const std::string& value) { return QString::fromStdString(value); }
@@ -184,6 +185,9 @@ void MmsLiveTreeModel::applyDocument(const ar::iec61850::mms::MmsLiveModelDocume
                 object.reference = q(dataObject.reference);
                 object.domain = q(logicalDevice.mms_domain);
                 object.description = q(dataObject.inferred_cdc);
+                object.cdcAuthoritative =
+                    dataObject.confidence == ar::iec61850::mms::MmsLiveModelConfidence::exact &&
+                    !dataObject.inferred_cdc.empty();
                 const auto objectIndex = appendNode(std::move(object));
 
                 for (const auto& attribute : dataObject.attributes) {
@@ -297,19 +301,93 @@ QString MmsLiveTreeModel::siblingValue(const int nodeIndex, const QString& wante
     if (nodeIndex < 0 || nodeIndex >= nodes_.size()) return {};
     const auto& selected = nodes_.at(nodeIndex);
     if (selected.kind != NodeKind::dataAttribute) return {};
-    if (leafName(selected.attributePath).compare(wantedLeaf, Qt::CaseInsensitive) == 0 ||
-        selected.label.compare(wantedLeaf, Qt::CaseInsensitive) == 0) {
-        return selected.value;
-    }
+
+    // q/t is FC-scoped, not any same-DO sibling with a matching leaf name.
+    // A readable but unread companion must never masquerade as evidence.
+    const auto matches = [&](const Node& candidate) {
+        return candidate.kind == NodeKind::dataAttribute &&
+            candidate.hasReceivedValue &&
+            candidate.functionalConstraint.compare(
+                selected.functionalConstraint, Qt::CaseInsensitive) == 0 &&
+            (leafName(candidate.attributePath).compare(wantedLeaf, Qt::CaseInsensitive) == 0 ||
+             candidate.label.compare(wantedLeaf, Qt::CaseInsensitive) == 0);
+    };
+    if (matches(selected)) return selected.value;
     if (selected.parent < 0) return {};
-    for (const auto siblingIndex : nodes_.at(selected.parent).children) {
+    for (const int siblingIndex : nodes_.at(selected.parent).children) {
         const auto& sibling = nodes_.at(siblingIndex);
-        if (leafName(sibling.attributePath).compare(wantedLeaf, Qt::CaseInsensitive) == 0 ||
-            sibling.label.compare(wantedLeaf, Qt::CaseInsensitive) == 0) {
-            return sibling.value;
-        }
+        if (matches(sibling)) return sibling.value;
     }
     return {};
+}
+
+QVariantMap MmsLiveTreeModel::measurementForNode(const int nodeIndex) const {
+    if (nodeIndex < 0 || nodeIndex >= nodes_.size()) return {};
+    const auto& selected = nodes_.at(nodeIndex);
+    const int objectIndex = selected.kind == NodeKind::dataObject
+        ? nodeIndex : (selected.kind == NodeKind::dataAttribute &&
+                       selected.functionalConstraint.compare(
+                           QStringLiteral("MX"), Qt::CaseInsensitive) == 0
+                           ? selected.parent : -1);
+    if (objectIndex < 0 || objectIndex >= nodes_.size()) return {};
+    const auto& object = nodes_.at(objectIndex);
+    if (object.kind != NodeKind::dataObject || !object.cdcAuthoritative) return {};
+
+    // Existing canonical CDC and FC metadata are required. Names such as Hz,
+    // TotW, "mag" or an incidental "ang" are never sufficient for a phasor.
+    const QString cdc = object.description.trimmed().toUpper();
+    const bool vector = cdc == QStringLiteral("CMV");
+    if (!vector && cdc != QStringLiteral("MV") && cdc != QStringLiteral("SAV"))
+        return {};
+
+    // IEC aliases are already indexed at appendNode; use exact reference
+    // lookups rather than scanning every sibling once per projected DA row.
+    const auto receivedNumeric = [this, &object, objectIndex](const QString& suffix) -> const Node* {
+        const auto found = referenceIndex_.constFind(
+            object.reference + QLatin1Char('.') + suffix);
+        if (found == referenceIndex_.cend()) return nullptr;
+        for (const int candidateIndex : found.value()) {
+            const auto& child = nodes_.at(candidateIndex);
+            if (child.kind != NodeKind::dataAttribute || !child.hasReceivedValue ||
+                child.parent != objectIndex ||
+                child.functionalConstraint.compare(QStringLiteral("MX"), Qt::CaseInsensitive) != 0)
+                continue;
+            const QString type = child.mmsType.trimmed().toLower();
+            if (type != QStringLiteral("floating-point") &&
+                type != QStringLiteral("integer") && type != QStringLiteral("unsigned"))
+                continue;
+            bool parsed = false;
+            const double numeric = child.value.toDouble(&parsed);
+            if (parsed && std::isfinite(numeric)) return &child;
+        }
+        return nullptr;
+    };
+    const Node* magnitude = nullptr;
+    const Node* angle = nullptr;
+    if (vector) {
+        magnitude = receivedNumeric(QStringLiteral("cVal.mag.f"));
+        if (!magnitude) magnitude = receivedNumeric(QStringLiteral("cVal.mag.i"));
+        angle = receivedNumeric(QStringLiteral("cVal.ang.f"));
+        if (!angle) angle = receivedNumeric(QStringLiteral("cVal.ang.i"));
+    } else {
+        magnitude = receivedNumeric(QStringLiteral("mag.f"));
+        if (!magnitude) magnitude = receivedNumeric(QStringLiteral("mag.i"));
+        if (!magnitude) magnitude = receivedNumeric(QStringLiteral("instMag.f"));
+        if (!magnitude) magnitude = receivedNumeric(QStringLiteral("instMag.i"));
+    }
+    if (!magnitude) return {};
+    QVariantMap result;
+    result.insert(QStringLiteral("kind"), vector ? QStringLiteral("vector")
+                                                 : QStringLiteral("scalar"));
+    result.insert(QStringLiteral("magnitude"), magnitude->value);
+    result.insert(QStringLiteral("magnitudeSourceReference"), magnitude->reference);
+    // No engineering unit is present in MmsLiveDataAttribute; never guess Hz,
+    // W, a multiplier, or a degree sign from a DO name or its numeric type.
+    if (vector && angle) {
+        result.insert(QStringLiteral("angle"), angle->value);
+        result.insert(QStringLiteral("angleSourceReference"), angle->reference);
+    }
+    return result;
 }
 
 QVariantMap MmsLiveTreeModel::nodeMap(const int nodeIndex) const {
@@ -327,24 +405,30 @@ QVariantMap MmsLiveTreeModel::nodeMap(const int nodeIndex) const {
     result.insert(QStringLiteral("typeStatus"), node.typeStatus);
     result.insert(QStringLiteral("description"), node.description);
     QString displayValue = node.value;
-    if (displayValue.isEmpty() && node.kind == NodeKind::dataObject) {
+    bool displayReceived = node.hasReceivedValue;
+    QString displaySource = displayReceived ? node.reference : QString{};
+    if (!displayReceived && node.kind == NodeKind::dataObject) {
         static const QStringList preferredLeaves{
             QStringLiteral("stVal"), QStringLiteral("mag"), QStringLiteral("setVal"),
             QStringLiteral("instMag"), QStringLiteral("general")};
         for (const auto& preferred : preferredLeaves) {
             for (const auto childIndex : node.children) {
                 const auto& child = nodes_.at(childIndex);
-                if (child.label.compare(preferred, Qt::CaseInsensitive) == 0 &&
-                    !child.value.isEmpty()) {
+                if (child.hasReceivedValue &&
+                    child.label.compare(preferred, Qt::CaseInsensitive) == 0) {
                     displayValue = child.value;
+                    displayReceived = true;
+                    displaySource = child.reference;
                     break;
                 }
             }
-            if (!displayValue.isEmpty()) break;
+            if (displayReceived) break;
         }
     }
     result.insert(QStringLiteral("value"), displayValue);
-    result.insert(QStringLiteral("hasReceivedValue"), node.hasReceivedValue);
+    result.insert(QStringLiteral("hasReceivedValue"), displayReceived);
+    result.insert(QStringLiteral("valueSourceReference"), displaySource);
+    result.insert(QStringLiteral("measurement"), measurementForNode(nodeIndex));
     result.insert(QStringLiteral("engineeringEvidence"), node.engineeringEvidence);
     result.insert(QStringLiteral("hasChildren"), !node.children.isEmpty());
     result.insert(QStringLiteral("childCount"), node.children.size());
@@ -726,8 +810,8 @@ QVariant MmsLiveDetailModel::data(const QModelIndex& index, const int role) cons
         for (const auto& label : preferred)
             for (const auto child : n.children) {
                 const auto& leaf = owner_->nodes_.at(child);
-                if (leaf.label.compare(label, Qt::CaseInsensitive) == 0 &&
-                    !leaf.value.isEmpty()) return leaf.value;
+                if (leaf.hasReceivedValue &&
+                    leaf.label.compare(label, Qt::CaseInsensitive) == 0) return leaf.value;
             }
         return QString{};
     }
