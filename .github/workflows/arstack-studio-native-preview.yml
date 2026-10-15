@@ -195,6 +195,59 @@ jobs:
           Remove-Item -LiteralPath $userNote -Force
           Write-Host 'Inno preview install, hot upgrade, data preservation and clean uninstall: PASS'
 
+      - name: Real public NSIS v0.1.1 to Inno migration acceptance
+        shell: pwsh
+        run: |
+          # The stable-channel Inno package below is only a CI migration
+          # fixture and is NEVER uploaded or released.
+          $oldUrl = 'https://github.com/masarray/arstack61850/releases/download/v0.1.1/ARStack-Studio-0.1.1-win-x64-setup.exe'
+          $oldSha = 'aa2bf3a1d8609c4c4d25c82ec7050a56004323b9086ed8f056db918292785a19'
+          $oldSetup = Join-Path $env:RUNNER_TEMP 'verified-v0.1.1-nsis-setup.exe'
+          Invoke-WebRequest -Uri $oldUrl -OutFile $oldSetup
+          $actual = (Get-FileHash $oldSetup -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $oldSha) { throw 'Legacy NSIS installer SHA-256 mismatch' }
+          $stableDir = Join-Path $env:LOCALAPPDATA 'Programs\ARStack Studio'
+          $legacyKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ARStackStudio'
+          $innoKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ARStack61850.Studio.Stable_is1'
+          if (Test-Path $legacyKey) { throw 'Unexpected preexisting stable NSIS registration on runner' }
+          & $oldSetup '/S' "/D=$stableDir"
+          if ($LASTEXITCODE -ne 0) { throw 'Actual v0.1.1 NSIS install failed' }
+          if (-not (Test-Path $legacyKey) -or
+              -not (Test-Path (Join-Path $stableDir 'Uninstall.exe'))) {
+            throw 'Legacy NSIS installation evidence missing'
+          }
+          $note = Join-Path $stableDir 'field-operator-owned-note.txt'
+          'preserved on installer migration' | Set-Content -LiteralPath $note
+
+          $stage = Join-Path $PWD 'dist\ARStack-Studio-Preview'
+          $compiler = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Inno Setup 6\ISCC.exe'
+          $script = (Resolve-Path 'apps\arstack_studio\packaging\ARStackStudio.iss').Path
+          & $compiler '/DPREVIEW=0' '/DSTUDIO_VERSION=0.1.1' "/DSTAGE_DIR=$stage" "/O$env:RUNNER_TEMP" $script
+          if ($LASTEXITCODE -ne 0) { throw 'Stable-channel migration fixture compilation failed' }
+          $migrationSetup = Join-Path $env:RUNNER_TEMP 'ARStack-Studio-win-x64-setup.exe'
+          if (-not (Test-Path $migrationSetup)) { throw 'Inno migration fixture missing' }
+          & $migrationSetup '/VERYSILENT' '/SUPPRESSMSGBOXES' '/NORESTART' '/CLOSEAPPLICATIONS'
+          if ($LASTEXITCODE -ne 0) { throw 'Verified NSIS to Inno migration failed' }
+          if (Test-Path $legacyKey) { throw 'Legacy NSIS uninstall registration was not cleaned' }
+          if (Test-Path (Join-Path $stableDir 'Uninstall.exe')) {
+            throw 'Legacy NSIS uninstaller still present after migration'
+          }
+          if (-not (Test-Path $innoKey)) { throw 'New Inno Stable AppId missing' }
+          if (-not (Test-Path $note)) { throw 'Migration lost operator data' }
+          $newGui = Join-Path $stableDir 'ARStackStudio.exe'
+          $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $stableDir 'firmware'
+          $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $stableDir 'tools\espflash.exe'
+          & $newGui '--check-firmware-contract'
+          if ($LASTEXITCODE -ne 0) { throw 'Migrated firmware package contract failed' }
+          $uninstall = Join-Path $stableDir 'unins000.exe'
+          & $uninstall '/VERYSILENT' '/SUPPRESSMSGBOXES' '/NORESTART'
+          if ($LASTEXITCODE -ne 0) { throw 'Migrated Inno uninstall failed' }
+          if (Test-Path $newGui -or (Test-Path $innoKey) -or -not (Test-Path $note)) {
+            throw 'Migrated Inno uninstall did not remove owned files safely'
+          }
+          Remove-Item $note -Force
+          Write-Host 'Actual v0.1.1 NSIS to Inno + owned cleanup + data preservation: PASS'
+
       - name: Upload GUI-only Windows preview packages
         uses: actions/upload-artifact@v4
         with:
