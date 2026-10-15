@@ -59,7 +59,13 @@ SurfacePanel {
         && Number(panel.device.ptpSyncSent) > 0
         && Number(panel.device.ptpFollowUpSent) > 0
         && Number(panel.device.ptpTxFailures) === 0
-    readonly property string headlineState: panel.startPending ? "STARTING"
+    readonly property bool stopPending: panel.startPending &&
+        (panel.device.ptpStatus.indexOf("Stopping PTP") === 0 ||
+         panel.device.ptpStatus.indexOf("Checking that board") === 0 ||
+         panel.device.ptpStatus.indexOf("PTP STOP unverified") === 0)
+    readonly property string headlineState: panel.stopPending
+        ? (panel.device.ptpStatus.indexOf("unverified") !== -1 ? "STOP UNVERIFIED" : "STOPPING")
+        : panel.startPending ? "STARTING"
         : panel.device.ptpRunning
             ? (panel.receiverRole ? (panel.device.ptpDiscipline === "LOCKED" ? "BOARD LOCKED" : panel.device.ptpDiscipline)
                 : panel.activeRole + " ACTIVE")
@@ -184,7 +190,8 @@ SurfacePanel {
                     theme: panel.theme
                     uiFont: panel.uiFont
                     tone: "accent"
-                    text: panel.startPending ? "Starting…"
+                    text: panel.stopPending ? "Stop pending…"
+                        : panel.startPending ? "Starting…"
                         : modeCombo.currentIndex === 0 ? "Start PTP Source"
                         : modeCombo.currentIndex === 1 ? "Start PTP Receiver" : "Start Monitor"
                     enabled: panel.session && panel.device.ptpAvailable && !panel.device.ptpRunning && !panel.startPending && !panel.session.updatingFirmware
@@ -194,7 +201,7 @@ SurfacePanel {
                     theme: panel.theme
                     uiFont: panel.uiFont
                     tone: "danger"
-                    text: "Stop PTP"
+                    text: panel.device.ptpStatus.indexOf("PTP STOP unverified") === 0 ? "Retry Stop PTP" : "Stop PTP"
                     enabled: panel.session && (panel.device.ptpRunning || panel.startPending) && !panel.session.updatingFirmware
                     onClicked: {
                         panel.session.requestStopPtp()

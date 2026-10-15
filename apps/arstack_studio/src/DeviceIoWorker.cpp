@@ -124,6 +124,7 @@ void DeviceIoWorker::shutdown(const bool requestSvStop, const bool requestPtpSto
     // installer. Keep SV stop ahead of PTP stop so no new SV frame is sent
     // during grandmaster shutdown. This runs once during teardown only.
     commandQueue_.clear();
+    ptpStopPending_ = false;
     if ((requestSvStop || requestPtpStop) && serial_ != nullptr && serial_->isOpen()) {
         const auto sendBoundedStop = [this](const QByteArray& command) {
             const qint64 queued = serial_->write(command);
@@ -243,6 +244,7 @@ bool DeviceIoWorker::openPortInternal(const QString& portName, const bool automa
     identifyAttempts_ = 0;
     pendingRx_.clear();
     commandQueue_.clear();
+    ptpStopPending_ = false;
     exclusiveCommandsRemaining_ = 0;
     writeActive_ = false;
     activeCommand_ = {};
@@ -290,6 +292,7 @@ void DeviceIoWorker::closePortInternal(const bool emitRelease) {
     identifyAttempts_ = 0;
     pendingRx_.clear();
     commandQueue_.clear();
+    ptpStopPending_ = false;
     exclusiveCommandsRemaining_ = 0;
     writeActive_ = false;
     activeCommand_ = {};
@@ -368,6 +371,13 @@ bool DeviceIoWorker::enqueueCommandsInternal(
     }
     if (commands.isEmpty()) return true;
 
+    if (!exclusive && commands.size() == 1 &&
+        commands.constFirst().trimmed() == QStringLiteral("PTP STOP")) {
+        // One reserved safety slot cannot be rejected by normal queue saturation.
+        queuePriorityPtpStop();
+        return true;
+    }
+
     if (exclusiveCommandsRemaining_ > 0) {
         if (reportRejection) {
             emit commandRejected(activeGeneration_, exclusive
@@ -408,10 +418,38 @@ bool DeviceIoWorker::enqueueCommandsInternal(
     return true;
 }
 
-void DeviceIoWorker::pumpWriteQueue() {
-    if (serial_ == nullptr || !serial_->isOpen() || writeActive_ || commandQueue_.isEmpty()) return;
+void DeviceIoWorker::queuePriorityPtpStop() {
+    // Bounded (64 entries) and infrequent: revoke every unsent PTP START.
+    // Preserve all other queued commands; STOP runs after the active write.
+    QQueue<PendingCommand> retained;
+    while (!commandQueue_.isEmpty()) {
+        PendingCommand command = commandQueue_.dequeue();
+        if (command.text == QStringLiteral("PTP START")) {
+            if (command.exclusive && exclusiveCommandsRemaining_ > 0) {
+                --exclusiveCommandsRemaining_;
+            }
+            continue;
+        }
+        retained.enqueue(std::move(command));
+    }
+    commandQueue_ = std::move(retained);
+    if (!(writeActive_ && activeCommand_.text == QStringLiteral("PTP STOP"))) {
+        ptpStopPending_ = true; // coalesce repeated urgent STOP intents
+    }
+    pumpWriteQueue();
+}
 
-    activeCommand_ = commandQueue_.dequeue();
+void DeviceIoWorker::pumpWriteQueue() {
+    if (serial_ == nullptr || !serial_->isOpen() || writeActive_ ||
+        (!ptpStopPending_ && commandQueue_.isEmpty())) return;
+
+    if (ptpStopPending_) {
+        ptpStopPending_ = false;
+        activeCommand_ = PendingCommand{
+            QStringLiteral("PTP STOP"), QByteArrayLiteral("PTP STOP\n"), false, false};
+    } else {
+        activeCommand_ = commandQueue_.dequeue();
+    }
     const qint64 accepted = serial_->write(activeCommand_.bytes);
     if (accepted != activeCommand_.bytes.size()) {
         const QString detail = accepted < 0

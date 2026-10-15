@@ -89,9 +89,23 @@ DeviceController::DeviceController(QObject* parent) : QObject(parent) {
     ptpStartTimer_.setSingleShot(true);
     connect(&ptpStartTimer_, &QTimer::timeout, this, [this] {
         if (!ptpStarting()) return;
+        if (ptpStartStage_ == PtpStartStage::awaiting_stop_ack ||
+            ptpStartStage_ == PtpStartStage::awaiting_stop_readback) {
+            markPtpStopUnconfirmed(QStringLiteral(
+                "PTP STOP was not confirmed by the board. Retry Stop PTP; output may still be active."));
+            return;
+        }
+        if (ptpStartStage_ == PtpStartStage::stop_unconfirmed) return;
         const bool rollback = ptpStartStage_ == PtpStartStage::awaiting_start ||
                               ptpStartStage_ == PtpStartStage::awaiting_runtime;
         failPtpStartup(QStringLiteral("PTP acknowledgement timed out. Start cancelled."), rollback);
+    });
+    ptpStopPollTimer_.setSingleShot(true);
+    connect(&ptpStopPollTimer_, &QTimer::timeout, this, [this] {
+        if (ptpStartStage_ == PtpStartStage::awaiting_stop_readback &&
+            !sendPtpShow()) {
+            markPtpStopUnconfirmed(QStringLiteral("Could not verify board PTP STOP status."));
+        }
     });
     ioWorker_ = new DeviceIoWorker;
     ioWorker_->moveToThread(&ioThread_);
@@ -329,8 +343,14 @@ void DeviceController::connectWorkerSignals() {
             profileArmed_ = false;
             emit profileStateChanged();
         }
-        if (ptpStarting()) failPtpStartup(QStringLiteral("PTP serial command rejected: ") + message, false);
-        else setError(message);
+        if (ptpStartStage_ == PtpStartStage::awaiting_stop_ack ||
+            ptpStartStage_ == PtpStartStage::awaiting_stop_readback) {
+            markPtpStopUnconfirmed(QStringLiteral("PTP STOP verification command rejected: ") + message);
+        } else if (ptpStarting() && ptpStartStage_ != PtpStartStage::stop_unconfirmed) {
+            const bool rollback = ptpStartStage_ == PtpStartStage::awaiting_start ||
+                                  ptpStartStage_ == PtpStartStage::awaiting_runtime;
+            failPtpStartup(QStringLiteral("PTP serial command rejected: ") + message, rollback);
+        } else setError(message);
     });
 
     connect(ioWorker_, &DeviceIoWorker::transportError, this,
@@ -984,10 +1004,11 @@ bool DeviceController::setCtSaturation(
 bool DeviceController::sendPtpShow() { return sendCommand(QStringLiteral("PTP SHOW")); }
 bool DeviceController::startPtp() { return sendCommand(QStringLiteral("PTP START")); }
 bool DeviceController::stopPtp() {
-    resetPtpStartup();
-    ptpStatus_ = QStringLiteral("PTP stop requested");
-    emit ptpStateChanged();
-    return sendCommand(QStringLiteral("PTP STOP"));
+    if (!connected_ || !ioWorkerReady_ || !deviceVerified_) {
+        setError(QStringLiteral("Connect the verified ESP32-P4 before stopping PTP."));
+        return false;
+    }
+    return beginPtpStopVerification();
 }
 
 QString DeviceController::ptpConfigCommand(const QVariantMap& profile) {
@@ -1019,22 +1040,53 @@ QString DeviceController::ptpConfigCommand(const QVariantMap& profile) {
 
 void DeviceController::resetPtpStartup() noexcept {
     ptpStartTimer_.stop();
+    ptpStopPollTimer_.stop();
     ptpStartStage_ = PtpStartStage::idle;
     pendingPtpRole_.clear();
     pendingPtpConfig_.clear();
     ptpRuntimeRoleSeen_ = false;
 }
 
+bool DeviceController::beginPtpStopVerification() {
+    ptpStartTimer_.stop();
+    ptpStopPollTimer_.stop();
+    ptpStartStage_ = PtpStartStage::awaiting_stop_ack;
+    pendingPtpRole_.clear();
+    pendingPtpConfig_.clear();
+    ptpRuntimeRoleSeen_ = false;
+    ptpStatus_ = QStringLiteral("Stopping PTP; waiting for board confirmation...");
+    emit ptpStateChanged();
+    // Emergency STOP has one reserved slot in the existing serial owner and
+    // eliminates unsent START commands, even when the normal queue is full.
+    if (!sendCommand(QStringLiteral("PTP STOP"))) {
+        markPtpStopUnconfirmed(QStringLiteral("Could not queue safety PTP STOP."));
+        return false;
+    }
+    ptpStartTimer_.start(5000);
+    return true;
+}
+
+void DeviceController::markPtpStopUnconfirmed(const QString& reason) {
+    ptpStartTimer_.stop();
+    ptpStopPollTimer_.stop();
+    // Failed verification is not proof that the transmitter stopped. Block
+    // new START intents until an explicit STOP retry or a new session.
+    ptpStartStage_ = PtpStartStage::stop_unconfirmed;
+    ptpStatus_ = QStringLiteral("PTP STOP unverified — output may still be active");
+    emit ptpStateChanged();
+    setError(reason);
+}
+
 void DeviceController::failPtpStartup(const QString& reason, const bool rollback) {
+    setError(reason);
+    if (rollback && connected_ && sessionGeneration_ != 0) {
+        static_cast<void>(beginPtpStopVerification());
+        return;
+    }
     resetPtpStartup();
     ptpRunning_ = false;
     ptpStatus_ = QStringLiteral("PTP start failed");
     emit ptpStateChanged();
-    setError(reason);
-    if (rollback && connected_ && sessionGeneration_ != 0) {
-        // Ordered on the same serial worker after any delayed START.
-        static_cast<void>(sendCommand(QStringLiteral("PTP STOP")));
-    }
 }
 
 bool DeviceController::startPtpConfigured(const QString& requestedRole,
@@ -1067,7 +1119,37 @@ bool DeviceController::startPtpConfigured(const QString& requestedRole,
 }
 
 void DeviceController::advancePtpStartup(const QString& line) {
-    if (!ptpStarting()) return;
+    if (!ptpStarting() || ptpStartStage_ == PtpStartStage::stop_unconfirmed) return;
+    if (ptpStartStage_ == PtpStartStage::awaiting_stop_ack) {
+        // Firmware emits "PTP stop requested", not "PTP stop accepted".
+        // A stale STOPPED status from an older SHOW cannot confirm this STOP.
+        if (line.contains(QStringLiteral("PTP stop requested"), Qt::CaseInsensitive)) {
+            ptpStartStage_ = PtpStartStage::awaiting_stop_readback;
+            ptpStatus_ = QStringLiteral("Checking that board PTP is stopped...");
+            emit ptpStateChanged();
+            if (!sendPtpShow()) {
+                markPtpStopUnconfirmed(QStringLiteral("Could not request PTP STOP readback."));
+                return;
+            }
+            ptpStartTimer_.start(5000);
+        }
+        return;
+    }
+    if (ptpStartStage_ == PtpStartStage::awaiting_stop_readback) {
+        const auto readback = kPtpStatusExpression.match(line);
+        if (!readback.hasMatch()) return;
+        if (readback.captured(1).compare(QStringLiteral("STOPPED"), Qt::CaseInsensitive) == 0) {
+            resetPtpStartup();
+            ptpRunning_ = false;
+            ptpStatus_ = QStringLiteral("PTP stopped — confirmed by board");
+            emit ptpStateChanged();
+        } else if (!ptpStopPollTimer_.isActive()) {
+            // Firmware stop is asynchronous. Poll on Qt timers without
+            // extending the absolute five-second verification deadline.
+            ptpStopPollTimer_.start(250);
+        }
+        return;
+    }
     const bool rejected =
         line.contains(QStringLiteral("PTPROLE rejected"), Qt::CaseInsensitive) ||
         line.contains(QStringLiteral("PTPROLE configuration unavailable"), Qt::CaseInsensitive) ||
@@ -1093,9 +1175,11 @@ void DeviceController::advancePtpStartup(const QString& line) {
     if (ptpStartStage_ == PtpStartStage::awaiting_role_readback) {
         const auto reply = kPtpRoleExpression.match(line);
         if (!reply.hasMatch()) return;
-        if (reply.captured(1).toUpper() != pendingPtpRole_ ||
-            reply.captured(3) != QStringLiteral("0")) {
-            failPtpStartup(QStringLiteral("PTP mode readback does not match the selection."), false);
+        // A prior PROFILE SHOW can emit old role telemetry after the ACK.
+        // Wait for the selected role; fail only if it is itself still running.
+        if (reply.captured(1).toUpper() != pendingPtpRole_) return;
+        if (reply.captured(3) != QStringLiteral("0")) {
+            failPtpStartup(QStringLiteral("Selected PTP role is still running."), false);
             return;
         }
         const QString command = pendingPtpConfig_;

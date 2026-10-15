@@ -294,7 +294,11 @@ protected:
 private:
     friend class DeterministicSessionHarness;
 
-    enum class PtpStartStage { idle, awaiting_role_ack, awaiting_role_readback, awaiting_config, awaiting_start, awaiting_runtime };
+    enum class PtpStartStage {
+        idle, awaiting_role_ack, awaiting_role_readback, awaiting_config,
+        awaiting_start, awaiting_runtime, awaiting_stop_ack, awaiting_stop_readback,
+        stop_unconfirmed
+    };
 
     enum class BinaryProfileStage {
         idle,
@@ -344,6 +348,8 @@ private:
     [[nodiscard]] bool needsPtpStopBeforeShutdown() const noexcept { return ptpRunning_ || ptpStarting(); }
     void advancePtpStartup(const QString& line);
     void failPtpStartup(const QString& reason, bool rollback);
+    bool beginPtpStopVerification();
+    void markPtpStopUnconfirmed(const QString& reason);
     void resetPtpStartup() noexcept;
     [[nodiscard]] static QString ptpConfigCommand(const QVariantMap& profile);
     static QString cleanLine(const QString& rawLine);
@@ -383,6 +389,7 @@ private:
     bool ptpRunning_{false};
     PtpStartStage ptpStartStage_{PtpStartStage::idle};
     QTimer ptpStartTimer_;
+    QTimer ptpStopPollTimer_;
     QString pendingPtpRole_;
     QString pendingPtpConfig_;
     bool ptpRuntimeRoleSeen_{false};

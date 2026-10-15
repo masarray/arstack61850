@@ -130,6 +130,8 @@ signals:
     void transportError(quint64 generation, const QString& message, bool fatal);
 
 private:
+    friend class DeterministicSessionHarness;
+
     struct PendingCommand final {
         QString text;
         QByteArray bytes;
@@ -149,6 +151,7 @@ private:
         bool quiet,
         bool exclusive,
         bool reportRejection);
+    void queuePriorityPtpStop();
     void pumpWriteQueue();
     void completeActiveWrite();
     void processReadyRead();
@@ -177,5 +180,6 @@ private:
     bool genericProbeActive_{false};
     bool identityConfirmed_{false};
     bool writeActive_{false};
+    bool ptpStopPending_{false}; // reserved bounded emergency STOP slot
     bool heartbeatEnabled_{false};
 };

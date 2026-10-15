@@ -2,6 +2,7 @@
 
 #include "DeterministicSessionHarness.hpp"
 
+#include "DeviceIoWorker.hpp"
 #include "FirmwareManager.hpp"
 #include "SclProfileModel.hpp"
 #include "SmartSessionController.hpp"
@@ -43,7 +44,10 @@ public:
             {"PTP stale role readback cannot bypass ACK", ptpStaleRoleReadbackBlocked()},
             {"PTP runtime requires matching PTP2 role", ptpRuntimeRoleEvidenceRequired()},
             {"PTP rejected config never starts", ptpGuidedRejectedConfigStops()},
-            {"PTP STOP cancels pending start", ptpGuidedStopCancelsStart()},
+            {"PTP STOP cancels pending start after verified readback", ptpGuidedStopCancelsStart()},
+            {"PTP STOP full queue uses bounded priority slot", ptpSafetyStopBypassesFullQueue()},
+            {"PTP STOP requires firmware ACK and stopped readback", ptpStopConfirmationCannotBeGuessed()},
+            {"PTP STOP timeout blocks restart pending manual recovery", ptpUnverifiedStopBlocksRestart()},
             {"App teardown must stop PTP without SV output", ptpOnlyShutdownIntent()},
             {"PTP role mismatch and new session revoke pending start", ptpGuidedRoleAndGenerationGuards()},
             {"profile timeout -> bounded terminal error", profileTimeoutIsTerminal()},
@@ -575,15 +579,77 @@ private:
             d.ptpStatus_ == QStringLiteral("PTP start failed");
     }
 
+    static QString ptpStoppedStatus() {
+        return QStringLiteral(
+            "PTP status=STOPPED Announce=0 Sync=0 FollowUp=0 PdelayFrames=0 TXfail=0");
+    }
+
     static bool ptpGuidedStopCancelsStart() {
         Fixture f;
         if (!setupGuidedPtp(f, QStringLiteral("SOURCE"))) return false;
         auto& d = f.device;
-        if (!f.session.requestStopPtp() || d.ptpStarting()) return false;
+        if (!f.session.requestStopPtp() ||
+            d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_ack) return false;
         // ACK from now-abandoned transaction cannot trigger CONFIG or START.
         d.processLine(QStringLiteral("PTPROLE role=SOURCE value=0 running=0"));
-        return !d.ptpStarting() && d.ptpStartStage_ ==
-            DeviceController::PtpStartStage::idle;
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_ack) return false;
+        d.processLine(QStringLiteral("PTP stop requested"));
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_readback) return false;
+        d.processLine(ptpStoppedStatus());
+        return !d.ptpStarting() &&
+            d.ptpStartStage_ == DeviceController::PtpStartStage::idle &&
+            d.ptpStatus_.contains(QStringLiteral("confirmed by board"));
+    }
+
+    static bool ptpSafetyStopBypassesFullQueue() {
+        DeviceIoWorker worker;
+        for (int i = 0; i < DeviceIoWorker::commandQueueCapacity(); ++i) {
+            worker.commandQueue_.enqueue(DeviceIoWorker::PendingCommand{
+                i == 7 ? QStringLiteral("PTP START") : QStringLiteral("PROFILE SHOW"),
+                QByteArrayLiteral("PROFILE SHOW\n"), false, false});
+        }
+        worker.queuePriorityPtpStop(); // no COM: test pure queue mutation only
+        const bool reserved = worker.ptpStopPending_ &&
+            worker.commandQueue_.size() == DeviceIoWorker::commandQueueCapacity() - 1;
+        bool noPendingStart = true;
+        for (const auto& cmd : worker.commandQueue_) {
+            if (cmd.text == QStringLiteral("PTP START")) noPendingStart = false;
+        }
+        worker.queuePriorityPtpStop(); // coalesced, never double-allocates
+        return reserved && noPendingStart && worker.ptpStopPending_ &&
+            worker.commandQueue_.size() == DeviceIoWorker::commandQueueCapacity() - 1;
+    }
+
+    static bool ptpStopConfirmationCannotBeGuessed() {
+        Fixture f;
+        if (!setupGuidedPtp(f, QStringLiteral("RECEIVER"))) return false;
+        auto& d = f.device;
+        if (!d.stopPtp()) return false;
+        d.processLine(ptpStoppedStatus()); // stale SHOW reply, before STOP ACK
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_ack) return false;
+        d.processLine(QStringLiteral("PTP stop requested"));
+        d.processLine(QStringLiteral(
+            "PTP status=RUNNING Announce=1 Sync=1 FollowUp=0 PdelayFrames=0 TXfail=0"));
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_readback ||
+            !d.ptpStopPollTimer_.isActive()) return false;
+        d.processLine(ptpStoppedStatus());
+        return d.ptpStartStage_ == DeviceController::PtpStartStage::idle &&
+            !d.ptpStarting() && !d.ptpStopPollTimer_.isActive();
+    }
+
+    static bool ptpUnverifiedStopBlocksRestart() {
+        Fixture f;
+        if (!setupGuidedPtp(f, QStringLiteral("SOURCE"))) return false;
+        auto& d = f.device;
+        if (!d.stopPtp()) return false;
+        d.markPtpStopUnconfirmed(QStringLiteral("Injected STOP verification timeout"));
+        const bool blocksRestart = d.ptpStarting() &&
+            d.ptpStartStage_ == DeviceController::PtpStartStage::stop_unconfirmed &&
+            !f.session.requestStartPtpConfigured(QStringLiteral("SOURCE"), ptpValidProfile());
+        if (!blocksRestart || !d.stopPtp()) return false;
+        d.processLine(QStringLiteral("PTP stop requested"));
+        d.processLine(ptpStoppedStatus());
+        return !d.ptpStarting() && d.ptpStartStage_ == DeviceController::PtpStartStage::idle;
     }
 
     static bool ptpGuidedRoleAndGenerationGuards() {
@@ -591,11 +657,12 @@ private:
         if (!setupGuidedPtp(f, QStringLiteral("RECEIVER"))) return false;
         auto& d = f.device;
         d.processLine(QStringLiteral("PTPROLE accepted"));
+        // Earlier SHOW telemetry must not abort or advance RECEIVER selection.
         d.processLine(QStringLiteral("PTPROLE role=MONITOR value=2 running=0"));
-        if (d.ptpStarting() || d.ptpStatus_ != QStringLiteral("PTP start failed"))
-            return false;
-        if (!f.session.requestStartPtpConfigured(QStringLiteral("RECEIVER"), ptpValidProfile()))
-            return false;
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_role_readback ||
+            !d.ptpStarting()) return false;
+        d.processLine(QStringLiteral("PTPROLE role=RECEIVER value=1 running=0"));
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_config) return false;
         const quint64 previous = d.sessionGeneration_;
         d.setSessionGeneration(previous + 1);
         d.processLine(QStringLiteral("PTPROLE role=RECEIVER value=1 running=0"));
