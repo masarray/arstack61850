@@ -264,6 +264,17 @@ Rectangle {
                     model: [
                         {label: "Reference", value: root.currentNode.reference},
                         {label: "Value", value: root.currentNode.value},
+                        {label: "Value source", value: root.currentNode.valueSourceReference},
+                        {label: "Measurement", value: root.currentNode.measurement
+                             ? root.currentNode.measurement.kind : ""},
+                        {label: "Magnitude · MMS received", value: root.currentNode.measurement
+                             ? root.currentNode.measurement.magnitude : ""},
+                        {label: "Magnitude source", value: root.currentNode.measurement
+                             ? root.currentNode.measurement.magnitudeSourceReference : ""},
+                        {label: "Angle · raw, unit unverified", value: root.currentNode.measurement
+                             ? root.currentNode.measurement.angle : ""},
+                        {label: "Angle source", value: root.currentNode.measurement
+                             ? root.currentNode.measurement.angleSourceReference : ""},
                         {label: "Read state", value: root.currentNode.kind === "DA"
                              ? (root.currentNode.hasReceivedValue === true ? "Received" : "Not read")
                              : ""},

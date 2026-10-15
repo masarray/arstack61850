@@ -8,6 +8,7 @@
 #include <QCoreApplication>
 #include <QElapsedTimer>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 
@@ -591,6 +592,156 @@ int main(int argc, char** argv) {
         normalProjected.textTruncated) {
         std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL report_metadata_provenance\n";
         return 35;
+    }
+
+
+    // M2L: prove scalar-vs-vector output comes from exact CDC + MX + received
+    // typed numeric DAs, never guessing an angle or engineering unit.
+    {
+        using namespace ar::iec61850::mms;
+        MmsLiveModelDocument engineeringModel;
+        engineeringModel.identity.ied_name = "M2L_TYPED";
+        MmsLiveLogicalDevice device;
+        device.mms_domain = "LD_M2L";
+        device.instance = "LD_M2L";
+        MmsLiveLogicalNode ln;
+        ln.name = "MMXU1";
+        ln.logical_node_class = "MMXU";
+        const auto addObject = [&](const std::string& name, const std::string& cdc,
+                                   MmsLiveModelConfidence confidence)
+            -> MmsLiveDataObject& {
+            ln.data_objects.emplace_back();
+            auto& object = ln.data_objects.back();
+            object.name = name;
+            object.reference = "LD_M2L/MMXU1." + name;
+            object.inferred_cdc = cdc;
+            object.confidence = confidence;
+            return object;
+        };
+        const auto addAttribute = [](MmsLiveDataObject& object,
+                                     const std::string& path,
+                                     const std::string& fc,
+                                     const std::string& type) {
+            MmsLiveDataAttribute attribute;
+            attribute.attribute_path = object.name + "." + path;
+            attribute.object_reference = object.reference;
+            attribute.functional_constraint = fc;
+            std::string itemPath = path;
+            std::replace(itemPath.begin(), itemPath.end(), '.', '$');
+            attribute.mms_item_name = "MMXU1$" + fc + "$" + object.name + "$" + itemPath;
+            attribute.mms_reference = "LD_M2L/" + attribute.mms_item_name;
+            attribute.mms_type = type;
+            attribute.type_discovery_status = "Exact";
+            object.attributes.push_back(std::move(attribute));
+        };
+        auto& phasor = addObject("PhV", "CMV", MmsLiveModelConfidence::exact);
+        addAttribute(phasor, "cVal.mag.f", "MX", "floating-point");
+        addAttribute(phasor, "cVal.ang.f", "MX", "floating-point");
+        addAttribute(phasor, "q", "ST", "bit-string"); // wrong FC must never leak
+        addAttribute(phasor, "q", "MX", "bit-string");
+        addAttribute(phasor, "t", "MX", "utc-time");
+        for (const std::string name : {"Hz", "TotW"}) {
+            auto& scalar = addObject(name, "MV", MmsLiveModelConfidence::exact);
+            addAttribute(scalar, "mag.f", "MX", "floating-point");
+            addAttribute(scalar, "ang.f", "MX", "floating-point"); // spurious, not CMV
+        }
+        auto& status = addObject("Health", "SPS", MmsLiveModelConfidence::exact);
+        addAttribute(status, "stVal", "ST", "boolean");
+        auto& uncertain = addObject("EstimatedPhV", "CMV", MmsLiveModelConfidence::low);
+        addAttribute(uncertain, "cVal.mag.f", "MX", "floating-point");
+        addAttribute(uncertain, "cVal.ang.f", "MX", "floating-point");
+        device.logical_nodes.push_back(std::move(ln));
+        engineeringModel.logical_devices.push_back(std::move(device));
+        MmsLiveTreeModel measurementModel;
+        measurementModel.applyDocument(engineeringModel);
+        const auto ref = [](const QString& name) {
+            return QStringLiteral("LD_M2L/MMXU1.") + name;
+        };
+        const auto received = [&measurementModel](const QString& item,
+                                                   const QString& display) {
+            measurementModel.applyReadValue(
+                QStringLiteral("LD_M2L") + QChar(0x1f) + item, display);
+        };
+        if (!measurementModel.nodeForReference(ref(QStringLiteral("PhV")))
+                 .value(QStringLiteral("measurement")).toMap().isEmpty()) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL m2l_unread_vector\n";
+            return 36;
+        }
+        received(QStringLiteral("MMXU1$MX$PhV$cVal$mag$f"), QStringLiteral("115.0"));
+        const auto partial = measurementModel.nodeForReference(ref(QStringLiteral("PhV")))
+            .value(QStringLiteral("measurement")).toMap();
+        if (partial.value(QStringLiteral("kind")).toString() != QStringLiteral("vector") ||
+            partial.value(QStringLiteral("magnitude")).toString() != QStringLiteral("115.0") ||
+            partial.contains(QStringLiteral("angle")) ||
+            partial.contains(QStringLiteral("unit"))) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL m2l_partial_phasor\n";
+            return 37;
+        }
+        received(QStringLiteral("MMXU1$MX$PhV$cVal$ang$f"), QStringLiteral("not-number"));
+        if (measurementModel.nodeForReference(ref(QStringLiteral("PhV")))
+                .value(QStringLiteral("measurement")).toMap().contains(QStringLiteral("angle"))) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL m2l_malformed_angle\n";
+            return 38;
+        }
+        received(QStringLiteral("MMXU1$MX$PhV$cVal$ang$f"), QStringLiteral("30.0"));
+        const auto vector = measurementModel.nodeForReference(ref(QStringLiteral("PhV")))
+            .value(QStringLiteral("measurement")).toMap();
+        if (vector.value(QStringLiteral("angle")).toString() != QStringLiteral("30.0") ||
+            !vector.value(QStringLiteral("angleSourceReference")).toString()
+                     .contains(QStringLiteral("cVal$ang$f"))) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL m2l_valid_phasor\n";
+            return 39;
+        }
+        const auto selectedRef = ref(QStringLiteral("PhV.cVal.mag.f"));
+        received(QStringLiteral("MMXU1$ST$PhV$q"), QStringLiteral("ST_Q"));
+        if (!measurementModel.nodeForReference(selectedRef)
+                 .value(QStringLiteral("quality")).toString().isEmpty()) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL m2l_cross_fc_quality\n";
+            return 40;
+        }
+        received(QStringLiteral("MMXU1$MX$PhV$q"), QStringLiteral("MX_Q"));
+        received(QStringLiteral("MMXU1$MX$PhV$t"), QStringLiteral("IED_UTC"));
+        const auto observed = measurementModel.nodeForReference(selectedRef);
+        if (observed.value(QStringLiteral("quality")).toString() != QStringLiteral("MX_Q") ||
+            observed.value(QStringLiteral("timestamp")).toString() != QStringLiteral("IED_UTC") ||
+            observed.value(QStringLiteral("measurement")).toMap() != vector) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL m2l_companion_provenance\n";
+            return 41;
+        }
+        for (const QString name : {QStringLiteral("Hz"), QStringLiteral("TotW")}) {
+            const auto item = QStringLiteral("MMXU1$MX$") + name;
+            received(item + QStringLiteral("$mag$f"), QStringLiteral("50.25"));
+            received(item + QStringLiteral("$ang$f"), QStringLiteral("90"));
+            const auto scalar = measurementModel.nodeForReference(ref(name))
+                .value(QStringLiteral("measurement")).toMap();
+            if (scalar.value(QStringLiteral("kind")).toString() != QStringLiteral("scalar") ||
+                scalar.value(QStringLiteral("magnitude")).toString() != QStringLiteral("50.25") ||
+                scalar.contains(QStringLiteral("angle")) || scalar.contains(QStringLiteral("unit"))) {
+                std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL m2l_scalar_false_angle\n";
+                return 42;
+            }
+        }
+        received(QStringLiteral("MMXU1$ST$Health$stVal"), QStringLiteral("true"));
+        if (!measurementModel.nodeForReference(ref(QStringLiteral("Health")))
+                .value(QStringLiteral("measurement")).toMap().isEmpty()) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL m2l_boolean_false_magnitude\n";
+            return 43;
+        }
+        received(QStringLiteral("MMXU1$MX$EstimatedPhV$cVal$mag$f"), QStringLiteral("100"));
+        received(QStringLiteral("MMXU1$MX$EstimatedPhV$cVal$ang$f"), QStringLiteral("20"));
+        if (!measurementModel.nodeForReference(ref(QStringLiteral("EstimatedPhV")))
+                .value(QStringLiteral("measurement")).toMap().isEmpty()) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL m2l_uncertain_cdc\n";
+            return 44;
+        }
+        measurementModel.applyDocument(engineeringModel);
+        if (!measurementModel.nodeForReference(ref(QStringLiteral("PhV")))
+                .value(QStringLiteral("measurement")).toMap().isEmpty() ||
+            measurementModel.nodeForReference(selectedRef)
+                .value(QStringLiteral("hasReceivedValue")).toBool()) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL m2l_source_replacement_stale\n";
+            return 45;
+        }
     }
 
     const bool passes = applyMs <= 5000 && filterMs <= 1500 && selectMs <= 500;
