@@ -50,9 +50,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Native session regression failed' }
           # Differentiate product code regressions from missing deployed DLLs.
           $nativeGui = Join-Path $PWD 'build-studio-preview\Release\arstack_studio.exe'
-          & $nativeGui '--check-reference-template'
-          Write-Host "NATIVE_BUILD_REFERENCE_TEMPLATE_EXIT=$LASTEXITCODE"
-          if ($LASTEXITCODE -ne 0) { throw 'Native Windows reference template regression before packaging' }
+          $probe = Start-Process -FilePath $nativeGui -ArgumentList '--check-reference-template' -Wait -PassThru
+          Write-Host "NATIVE_BUILD_REFERENCE_TEMPLATE_EXIT=$($probe.ExitCode)"
+          if ($probe.ExitCode -ne 0) { throw 'Native Windows reference template regression before packaging' }
 
       - name: Verify immutable public v0.1.1 firmware and flasher source
         shell: pwsh
@@ -71,9 +71,9 @@ jobs:
             }
           }
           $legacyGui = Join-Path $baseline 'ARStackStudio.exe'
-          & $legacyGui '--check-reference-template'
-          Write-Host "PUBLIC_BASELINE_REFERENCE_TEMPLATE_EXIT=$LASTEXITCODE"
-          if ($LASTEXITCODE -ne 0) { throw 'Verified public base GUI reference template regression' }
+          $probe = Start-Process -FilePath $legacyGui -ArgumentList '--check-reference-template' -Wait -PassThru
+          Write-Host "PUBLIC_BASELINE_REFERENCE_TEMPLATE_EXIT=$($probe.ExitCode)"
+          if ($probe.ExitCode -ne 0) { throw 'Verified public base GUI reference template regression' }
           Write-Host 'Pinned v0.1.1 public firmware / flasher archive: VERIFIED'
 
       - name: Stage isolated GUI preview with pinned release firmware
@@ -116,11 +116,11 @@ jobs:
           $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $stage 'tools\espflash.exe'
           $env:ESPFLASH_SKIP_UPDATE_CHECK = 'true'
           foreach ($check in @('--check-reference-template', '--check-firmware-contract', '--check-p0-policy', '--check-app-lifecycle')) {
-            & $exe $check
-            Write-Host "PACKAGED_PREVIEW_CHECK=$check EXIT=$LASTEXITCODE"
-            if ($LASTEXITCODE -ne 0) {
+            $probe = Start-Process -FilePath $exe -ArgumentList $check -Wait -PassThru
+            Write-Host "PACKAGED_PREVIEW_CHECK=$check EXIT=$($probe.ExitCode)"
+            if ($probe.ExitCode -ne 0) {
               Get-ChildItem $stage -Filter '*.dll' | Select-Object -ExpandProperty Name
-              throw "Preview GUI failed packaged smoke $check with code $LASTEXITCODE"
+              throw "Preview GUI failed packaged smoke $check with code $($probe.ExitCode)"
             }
           }
           & $env:ARSTACK_STUDIO_ESPFLASH --version
@@ -155,17 +155,17 @@ jobs:
         run: |
           $installer = Join-Path $PWD 'dist\ARStack-Studio-Preview-win-x64-setup.exe'
           $installDir = Join-Path $env:RUNNER_TEMP 'ARStackStudioPreviewCleanInstall'
-          $silent = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS', "/DIR=$installDir")
-          & $installer @silent
-          if ($LASTEXITCODE -ne 0) { throw 'Inno preview installation failed' }
+          $silent = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS', "/DIR=`"$installDir`"")
+          $install = Start-Process -FilePath $installer -ArgumentList $silent -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Inno preview install exit $($install.ExitCode)" }
           $exe = Join-Path $installDir 'ARStackStudio.exe'
           if (-not (Test-Path $exe)) { throw 'Preview installation is missing GUI EXE' }
           $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $installDir 'firmware'
           $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $installDir 'tools\espflash.exe'
           $env:ESPFLASH_SKIP_UPDATE_CHECK = 'true'
           foreach ($check in @('--check-firmware-contract', '--check-p0-policy', '--check-app-lifecycle')) {
-            & $exe $check
-            if ($LASTEXITCODE -ne 0) { throw "Installed preview failed $check" }
+            $probe = Start-Process -FilePath $exe -ArgumentList $check -Wait -PassThru
+            if ($probe.ExitCode -ne 0) { throw "Installed preview failed $check code $($probe.ExitCode)" }
           }
           $previewKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ARStack61850.Studio.Preview_is1'
           if (-not (Test-Path $previewKey)) { throw 'Inno Preview AppId registration missing' }
@@ -179,8 +179,8 @@ jobs:
               throw 'GUI did not become interactive during hot-update test'
             }
             if ($runningApp.HasExited) { throw 'GUI exited before hot-update test' }
-            & $installer @silent
-            if ($LASTEXITCODE -ne 0) { throw 'Inno upgrade with running GUI failed' }
+            $upgrade = Start-Process -FilePath $installer -ArgumentList $silent -Wait -PassThru
+            if ($upgrade.ExitCode -ne 0) { throw "Inno GUI hot-update exit $($upgrade.ExitCode)" }
             $runningApp.Refresh()
             if (-not $runningApp.HasExited) {
               throw 'Inno did not gracefully close the GUI for upgrade'
@@ -195,12 +195,12 @@ jobs:
           if (-not (Test-Path -LiteralPath $userNote)) {
             throw 'Preview upgrade removed an operator-owned file'
           }
-          & $exe '--check-firmware-contract'
-          if ($LASTEXITCODE -ne 0) { throw 'Upgraded GUI firmware contract failed' }
+          $probe = Start-Process -FilePath $exe -ArgumentList '--check-firmware-contract' -Wait -PassThru
+          if ($probe.ExitCode -ne 0) { throw 'Upgraded GUI firmware contract failed' }
           $uninstall = Join-Path $installDir 'unins000.exe'
           if (-not (Test-Path $uninstall)) { throw 'Inno-generated uninstaller missing' }
-          & $uninstall '/VERYSILENT' '/SUPPRESSMSGBOXES' '/NORESTART'
-          if ($LASTEXITCODE -ne 0) { throw 'Inno preview uninstall failed' }
+          $removal = Start-Process -FilePath $uninstall -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru
+          if ($removal.ExitCode -ne 0) { throw "Inno preview uninstall exit $($removal.ExitCode)" }
           if (Test-Path $exe) { throw 'Uninstall left an application-owned GUI EXE' }
           if (Test-Path $previewKey) { throw 'Uninstall left Inno AppId entry' }
           if (-not (Test-Path $userNote)) { throw 'Uninstall deleted operator-owned data' }
@@ -223,8 +223,8 @@ jobs:
           $legacyKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ARStackStudio'
           $innoKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ARStack61850.Studio.Stable_is1'
           if (Test-Path $legacyKey) { throw 'Unexpected preexisting stable NSIS registration on runner' }
-          & $oldSetup '/S' "/D=$stableDir"
-          if ($LASTEXITCODE -ne 0) { throw 'Actual v0.1.1 NSIS install failed' }
+          $legacyInstall = Start-Process -FilePath $oldSetup -ArgumentList @('/S', "/D=$stableDir") -Wait -PassThru
+          if ($legacyInstall.ExitCode -ne 0) { throw "Historical NSIS install exit $($legacyInstall.ExitCode)" }
           if (-not (Test-Path $legacyKey) -or
               -not (Test-Path (Join-Path $stableDir 'Uninstall.exe'))) {
             throw 'Legacy NSIS installation evidence missing'
@@ -239,8 +239,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Stable-channel migration fixture compilation failed' }
           $migrationSetup = Join-Path $env:RUNNER_TEMP 'ARStack-Studio-win-x64-setup.exe'
           if (-not (Test-Path $migrationSetup)) { throw 'Inno migration fixture missing' }
-          & $migrationSetup '/VERYSILENT' '/SUPPRESSMSGBOXES' '/NORESTART' '/CLOSEAPPLICATIONS'
-          if ($LASTEXITCODE -ne 0) { throw 'Verified NSIS to Inno migration failed' }
+          $migrated = Start-Process -FilePath $migrationSetup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS') -Wait -PassThru
+          if ($migrated.ExitCode -ne 0) { throw "Verified NSIS to Inno migration exit $($migrated.ExitCode)" }
           if (Test-Path $legacyKey) { throw 'Legacy NSIS uninstall registration was not cleaned' }
           if (Test-Path (Join-Path $stableDir 'Uninstall.exe')) {
             throw 'Legacy NSIS uninstaller still present after migration'
@@ -250,11 +250,11 @@ jobs:
           $newGui = Join-Path $stableDir 'ARStackStudio.exe'
           $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $stableDir 'firmware'
           $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $stableDir 'tools\espflash.exe'
-          & $newGui '--check-firmware-contract'
-          if ($LASTEXITCODE -ne 0) { throw 'Migrated firmware package contract failed' }
+          $probe = Start-Process -FilePath $newGui -ArgumentList '--check-firmware-contract' -Wait -PassThru
+          if ($probe.ExitCode -ne 0) { throw 'Migrated firmware package contract failed' }
           $uninstall = Join-Path $stableDir 'unins000.exe'
-          & $uninstall '/VERYSILENT' '/SUPPRESSMSGBOXES' '/NORESTART'
-          if ($LASTEXITCODE -ne 0) { throw 'Migrated Inno uninstall failed' }
+          $removed = Start-Process -FilePath $uninstall -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru
+          if ($removed.ExitCode -ne 0) { throw "Migrated Inno uninstall exit $($removed.ExitCode)" }
           if (Test-Path $newGui -or (Test-Path $innoKey) -or -not (Test-Path $note)) {
             throw 'Migrated Inno uninstall did not remove owned files safely'
           }
