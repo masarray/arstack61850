@@ -340,37 +340,37 @@ QVariantMap MmsLiveTreeModel::measurementForNode(const int nodeIndex) const {
     if (!vector && cdc != QStringLiteral("MV") && cdc != QStringLiteral("SAV"))
         return {};
 
+    // IEC aliases are already indexed at appendNode; use exact reference
+    // lookups rather than scanning every sibling once per projected DA row.
+    const auto receivedNumeric = [this, &object](const QString& suffix) -> const Node* {
+        const auto found = referenceIndex_.constFind(
+            object.reference + QLatin1Char('.') + suffix);
+        if (found == referenceIndex_.cend()) return nullptr;
+        for (const int candidateIndex : found.value()) {
+            const auto& child = nodes_.at(candidateIndex);
+            if (child.kind != NodeKind::dataAttribute || !child.hasReceivedValue ||
+                child.parent != (&object - nodes_.constData()) ||
+                child.functionalConstraint.compare(QStringLiteral("MX"), Qt::CaseInsensitive) != 0)
+                continue;
+            const QString type = child.mmsType.trimmed().toLower();
+            if (type != QStringLiteral("floating-point") &&
+                type != QStringLiteral("integer") && type != QStringLiteral("unsigned"))
+                continue;
+            bool parsed = false;
+            const double numeric = child.value.toDouble(&parsed);
+            if (parsed && std::isfinite(numeric)) return &child;
+        }
+        return nullptr;
+    };
     const Node* magnitude = nullptr;
     const Node* angle = nullptr;
-    for (const int childIndex : object.children) {
-        const auto& child = nodes_.at(childIndex);
-        if (child.kind != NodeKind::dataAttribute || !child.hasReceivedValue ||
-            child.functionalConstraint.compare(QStringLiteral("MX"), Qt::CaseInsensitive) != 0)
-            continue;
-        const QString type = child.mmsType.trimmed().toLower();
-        if (type != QStringLiteral("floating-point") &&
-            type != QStringLiteral("integer") &&
-            type != QStringLiteral("unsigned"))
-            continue;
-        bool parsed = false;
-        const double numeric = child.value.toDouble(&parsed);
-        if (!parsed || !std::isfinite(numeric)) continue;
-        const QString path = child.attributePath;
-        if (vector) {
-            if (path.compare(QStringLiteral("cVal.mag.f"), Qt::CaseInsensitive) == 0 ||
-                path.endsWith(QStringLiteral(".cVal.mag.f"), Qt::CaseInsensitive))
-                magnitude = &child;
-            else if (path.compare(QStringLiteral("cVal.ang.f"), Qt::CaseInsensitive) == 0 ||
-                     path.endsWith(QStringLiteral(".cVal.ang.f"), Qt::CaseInsensitive))
-                angle = &child;
-        } else if (path.compare(QStringLiteral("mag.f"), Qt::CaseInsensitive) == 0 ||
-                   path.compare(QStringLiteral("mag.i"), Qt::CaseInsensitive) == 0 ||
-                   path.endsWith(QStringLiteral(".mag.f"), Qt::CaseInsensitive) ||
-                   path.endsWith(QStringLiteral(".mag.i"), Qt::CaseInsensitive) ||
-                   path.compare(QStringLiteral("instMag.f"), Qt::CaseInsensitive) == 0 ||
-                   path.endsWith(QStringLiteral(".instMag.f"), Qt::CaseInsensitive)) {
-            magnitude = &child;
-        }
+    if (vector) {
+        magnitude = receivedNumeric(QStringLiteral("cVal.mag.f"));
+        angle = receivedNumeric(QStringLiteral("cVal.ang.f"));
+    } else {
+        magnitude = receivedNumeric(QStringLiteral("mag.f"));
+        if (!magnitude) magnitude = receivedNumeric(QStringLiteral("mag.i"));
+        if (!magnitude) magnitude = receivedNumeric(QStringLiteral("instMag.f"));
     }
     if (!magnitude) return {};
     QVariantMap result;

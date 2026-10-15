@@ -722,6 +722,26 @@ int main(int argc, char** argv) {
             }
         }
         received(QStringLiteral("MMXU1$ST$Health$stVal"), QStringLiteral("true"));
+        const auto sourcedStatus = measurementModel.nodeForReference(
+            ref(QStringLiteral("Health")));
+        if (sourcedStatus.value(QStringLiteral("value")).toString() != QStringLiteral("true") ||
+            !sourcedStatus.value(QStringLiteral("hasReceivedValue")).toBool() ||
+            !sourcedStatus.value(QStringLiteral("valueSourceReference")).toString()
+                 .contains(QStringLiteral("Health$stVal"))) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL m2l_do_value_source\n";
+            return 46;
+        }
+        // A successful empty-string sample stays received and source-backed,
+        // not a fabricated NOT READ or a stale previous nonempty value.
+        received(QStringLiteral("MMXU1$ST$Health$stVal"), QString{});
+        const auto receivedEmptyStatus = measurementModel.nodeForReference(
+            ref(QStringLiteral("Health")));
+        if (!receivedEmptyStatus.value(QStringLiteral("hasReceivedValue")).toBool() ||
+            !receivedEmptyStatus.value(QStringLiteral("value")).toString().isEmpty() ||
+            receivedEmptyStatus.value(QStringLiteral("valueSourceReference")).toString().isEmpty()) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL m2l_do_received_empty\n";
+            return 47;
+        }
         if (!measurementModel.nodeForReference(ref(QStringLiteral("Health")))
                 .value(QStringLiteral("measurement")).toMap().isEmpty()) {
             std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL m2l_boolean_false_magnitude\n";
