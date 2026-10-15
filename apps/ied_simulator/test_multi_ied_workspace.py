@@ -97,7 +97,7 @@ require(all_data, (
     'text: "QUALITY"',
     'text: "IED TIMESTAMP"',
 ), "all-IED Global Data")
-if 'onWatchedDataChanged: fleetGlobalData.refreshRows()' in shell:
+if 'onWatchedDataChanged: fleetGlobalData.refreshRows()' in main:
     raise SystemExit("P6E_FAIL uncoalesced cross-IED watch refresh")
 require(global_data, (
     "signal watchSnapshotChanged()",
