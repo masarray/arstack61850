@@ -152,8 +152,8 @@ int main() {
         return 2;
     }
 
-    // Real IEDScout static-URCB acceptance capture:
-    // IEDScout did not rewrite OptFlds. The configured/effective report profile
+    // Real reference IEC 61850 client static-URCB acceptance capture:
+    // reference IEC 61850 client did not rewrite OptFlds. The configured/effective report profile
     // emits OptFlds 78 80, SqNum=1, DataSet Analog, ConfRev=100001,
     // 22/22 included members and GI ReasonForInclusion.
     const std::array<mms::MmsStaticUrcbDefinition, 1U> urcb_definitions{{
@@ -222,7 +222,7 @@ int main() {
         return 8;
     }
 
-    // Real IEDScout BRCB acceptance capture:
+    // Real reference IEC 61850 client BRCB acceptance capture:
     // RptID ...$BR$Buffer, OptFlds 79 80, SqNum=1,
     // DataSet Digital, EntryID=1, ConfRev=100001, 36/36 included, GI reason.
     const mms::MmsStaticBrcbDefinition brcb_definition{
@@ -382,7 +382,7 @@ int main() {
     }
 
     std::cout
-        << "IEDSCOUT_REPORTING_GOLDEN_PASS "
+        << "REFERENCE_IEC61850_REPORTING_GOLDEN_PASS "
         << "urcbMembers=22 urcbOptFlds=7880 urcbSqNum=1 "
         << "brcbMembers=36 brcbOptFlds=7980 "
         << "brcbGiSqNum=1 brcbGiEntryID=1 "
