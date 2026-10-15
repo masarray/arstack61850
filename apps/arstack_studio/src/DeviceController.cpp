@@ -113,6 +113,7 @@ bool DeviceController::shutdown() {
     shuttingDown_ = true;
     pendingAutoDetect_ = false;
     pendingConnectPort_.clear();
+    const bool requestPtpStop = needsPtpStopBeforeShutdown();
     resetPtpStartup();
 
     if (ioWorker_ == nullptr || !ioThread_.isRunning()) {
@@ -124,9 +125,9 @@ bool DeviceController::shutdown() {
         return true;
     }
 
-    const bool requestStop = running_;
+    const bool requestSvStop = running_;
     if (QThread::currentThread() == &ioThread_) {
-        ioWorker_->shutdown(requestStop);
+        ioWorker_->shutdown(requestSvStop, requestPtpStop);
         ioThread_.quit();
         shuttingDown_ = false;
         return false;
@@ -136,8 +137,8 @@ bool DeviceController::shutdown() {
     DeviceIoWorker* const worker = ioWorker_;
     const bool queued = QMetaObject::invokeMethod(
         worker,
-        [worker, requestStop, acknowledged] {
-            worker->shutdown(requestStop);
+        [worker, requestSvStop, requestPtpStop, acknowledged] {
+            worker->shutdown(requestSvStop, requestPtpStop);
             acknowledged->release();
         },
         Qt::QueuedConnection);

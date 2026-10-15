@@ -42,6 +42,7 @@ public:
             {"PTP staged START requires role/config/runtime ACKs", ptpGuidedStartNeedsAcks()},
             {"PTP rejected config never starts", ptpGuidedRejectedConfigStops()},
             {"PTP STOP cancels pending start", ptpGuidedStopCancelsStart()},
+            {"App teardown must stop PTP without SV output", ptpOnlyShutdownIntent()},
             {"PTP role mismatch and new session revoke pending start", ptpGuidedRoleAndGenerationGuards()},
             {"profile timeout -> bounded terminal error", profileTimeoutIsTerminal()},
             {"profile rejection -> bounded terminal error", profileRejectionIsTerminal()},
@@ -455,6 +456,22 @@ private:
             fixture.session.firmwareInstallVisible() &&
             fixture.session.blankBoardPort_ == QStringLiteral("COM7") &&
             !fixture.session.startReady();
+    }
+
+    static bool ptpOnlyShutdownIntent() {
+        Fixture fixture;
+        auto& device = fixture.device;
+        device.running_ = false;
+        device.ptpRunning_ = false;
+        device.ptpStartStage_ = DeviceController::PtpStartStage::idle;
+        if (device.needsPtpStopBeforeShutdown()) return false;
+        device.ptpRunning_ = true;
+        if (!device.needsPtpStopBeforeShutdown()) return false;
+        device.ptpRunning_ = false;
+        device.ptpStartStage_ = DeviceController::PtpStartStage::awaiting_start;
+        if (!device.needsPtpStopBeforeShutdown()) return false;
+        device.ptpStartStage_ = DeviceController::PtpStartStage::awaiting_role;
+        return device.needsPtpStopBeforeShutdown();
     }
 
     static QVariantMap ptpValidProfile() {

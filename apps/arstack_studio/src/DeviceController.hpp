@@ -341,6 +341,7 @@ private:
     void failBinaryProfileDeployment(const QString& message);
     void resetTelemetry();
     void resetPtpState();
+    [[nodiscard]] bool needsPtpStopBeforeShutdown() const noexcept { return ptpRunning_ || ptpStarting(); }
     void advancePtpStartup(const QString& line);
     void failPtpStartup(const QString& reason, bool rollback);
     void resetPtpStartup() noexcept;
