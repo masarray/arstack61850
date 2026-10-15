@@ -130,6 +130,10 @@ if ("node.hasReceivedValue === true ? \"LIVE\" : \"NOT READ\"" not in per_ied_gl
         "unread_sample_false_live" not in large_model_qa or
         "empty_sample_received" not in large_model_qa):
     raise SystemExit("BROWSER_ARSAS_SSOT_FAIL unread values fabricated as LIVE")
+main_qml = (workspace_path.parent / "Main.qml").read_text(encoding="utf-8")
+if 'onWatchedDataChanged: fleetGlobalData.requestRefresh()' not in main_qml:
+    raise SystemExit("BROWSER_ARSAS_LIVE_GRID_FAIL uncoalesced cross-IED burst")
+
 if "Timer {" in fleet_global or "readEngineeringSelected()" in fleet_global:
     raise SystemExit("BROWSER_ARSAS_SSOT_FAIL implicit MMS polling or read")
 
