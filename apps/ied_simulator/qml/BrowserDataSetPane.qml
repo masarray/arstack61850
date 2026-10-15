@@ -221,7 +221,9 @@ Rectangle {
                                 }
                                 Label {
                                     Layout.preferredWidth: Math.max(180, root.width * 0.42)
-                                    text: root.displayValue(memberRow.resolved.value)
+                                    text: memberRow.resolved.kind === "DA" &&
+                                          memberRow.resolved.hasReceivedValue !== true
+                                          ? "NOT READ" : root.displayValue(memberRow.resolved.value)
                                     color: theme.textSoft
                                     font.pixelSize: 10
                                     elide: Text.ElideRight
@@ -278,7 +280,9 @@ Rectangle {
                                     }
                                     Label {
                                         Layout.preferredWidth: Math.max(180, root.width * 0.42)
-                                        text: root.displayValue(attributeRow.modelData.value)
+                                        text: attributeRow.modelData.hasReceivedValue === true
+                                              ? root.displayValue(attributeRow.modelData.value)
+                                              : "NOT READ"
                                         color: theme.textSoft
                                         font.pixelSize: 10
                                         elide: Text.ElideRight
@@ -319,8 +323,7 @@ Rectangle {
                 ScrollView {
                     id: dataSetEvidenceView
                     objectName: "browserDataSetEvidenceInspector"
-                    visible: root.selectedAttributeEvidence.kind === "quality"
-                             || root.selectedAttributeEvidence.kind === "timestamp"
+                    visible: root.selectedAttributeNode.kind === "DA"
                     Layout.fillWidth: true
                     Layout.preferredHeight: visible
                                             ? Math.min(235, Math.max(130, root.height * 0.36)) : 0
@@ -343,6 +346,49 @@ Rectangle {
                                 color: theme.text
                                 font.pixelSize: 9
                                 elide: Text.ElideMiddle
+                            }
+                        }
+                        Repeater {
+                            // One selected canonical node; no parallel DataSet value store.
+                            // A normal MX/ST/CO leaf is inspectable, not only q/t leaves.
+                            model: [
+                                {label: "Functional constraint", value: root.selectedAttributeNode.functionalConstraint},
+                                {label: "Read state", value: root.selectedAttributeNode.hasReceivedValue === true
+                                    ? "RECEIVED" : "NOT READ"},
+                                {label: "Value", value: root.selectedAttributeNode.hasReceivedValue === true
+                                    ? root.displayValue(root.selectedAttributeNode.value) : "—"},
+                                {label: "Quality", value: root.displayValue(root.selectedAttributeNode.quality)},
+                                {label: "IED Timestamp", value: root.displayValue(root.selectedAttributeNode.timestamp)},
+                                {label: "MMS type", value: root.displayValue(root.selectedAttributeNode.mmsType)},
+                                {label: "Value source", value: root.selectedAttributeNode.valueSourceReference || "—"}
+                            ]
+                            delegate: Rectangle {
+                                required property int index
+                                required property var modelData
+                                Layout.fillWidth: true
+                                implicitHeight: 22
+                                color: index % 2 ? theme.surfaceSoft : theme.surface
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 8
+                                    spacing: 6
+                                    Label {
+                                        Layout.preferredWidth: Math.max(120, root.width * 0.34)
+                                        text: modelData.label
+                                        color: theme.muted
+                                        font.pixelSize: 9
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: modelData.value || "—"
+                                        color: theme.text
+                                        font.pixelSize: 9
+                                        elide: Text.ElideMiddle
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: text
+                                    }
+                                }
                             }
                         }
                         BrowserEngineeringEvidence {

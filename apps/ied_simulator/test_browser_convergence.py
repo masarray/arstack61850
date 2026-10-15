@@ -87,6 +87,12 @@ data_set_required = [
     'root.showSelectedEvidence = selected',
     'BrowserEngineeringEvidence {',
     'objectName: "browserDataSetEvidenceInspector"',
+    'visible: root.selectedAttributeNode.kind === "DA"',
+    'root.selectedAttributeNode.hasReceivedValue === true',
+    'root.selectedAttributeNode.valueSourceReference',
+    'text: "IED Timestamp"',
+    'memberRow.resolved.hasReceivedValue !== true',
+    'attributeRow.modelData.hasReceivedValue === true',
     'root.selectedAttributeNode.engineeringEvidence || ({})',
     'selected.reference === root.selectedAttributeReference',
     'root.selectedAttributeReference = selected',
@@ -107,6 +113,8 @@ if members < 0 or evidence <= members or 'ColumnLayout {' not in stack[:members]
     raise SystemExit("BROWSER_DATASET_EVIDENCE_FAIL inspector is not in member pane")
 if data_set.count('BrowserEngineeringEvidence {') != 1:
     raise SystemExit("BROWSER_DATASET_EVIDENCE_FAIL duplicate/hidden evidence inspector")
+if 'Timer {' in data_set:
+    raise SystemExit("BROWSER_DATASET_PROVENANCE_FAIL implicit per-DA timer")
 if 'readEngineeringSelected()' in data_set or 'readEngineeringSelected()' in data_model:
     raise SystemExit("BROWSER_TYPED_EVIDENCE_FAIL passive inspector initiated MMS Read")
 
