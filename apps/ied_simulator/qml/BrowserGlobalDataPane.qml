@@ -189,7 +189,12 @@ Rectangle {
                 watchModel.setProperty(i, "value", node.value || "")
                 watchModel.setProperty(i, "quality", node.quality || "")
                 watchModel.setProperty(i, "timestamp", node.timestamp || "")
-                watchModel.setProperty(i, "status", context.online ? (node.readable ? "LIVE" : "UNRESOLVED") : "OFFLINE")
+                // Structural reachability is not a successful MMS sample.
+                // Legitimate empty-string values still count as received via the
+                // canonical model's explicit sample-ingress bit.
+                watchModel.setProperty(i, "status", !context.online ? "OFFLINE"
+                    : !node.readable ? "UNRESOLVED"
+                    : node.hasReceivedValue === true ? "LIVE" : "NOT READ")
             } else if (row.kind === "DATASET") {
                 var members = row.membersText.length > 0 ? row.membersText.split("\n").length : 0
                 watchModel.setProperty(i, "status", context.online ? "READY" : "OFFLINE")

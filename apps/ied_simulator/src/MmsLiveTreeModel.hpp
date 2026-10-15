@@ -187,6 +187,7 @@ private:
         QString typeStatus;
         QString description;
         QString value;
+        bool hasReceivedValue{};  // updated only at actual MMS sample ingress
         QVariantMap engineeringEvidence;
         bool writable{};
     };

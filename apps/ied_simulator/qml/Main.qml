@@ -482,7 +482,7 @@ ApplicationWindow {
                                     utilities: root.browserFleet.utilitiesAt(index)
                                     controls: root.browserFleet.controlsAt(index)
                                     engineering: root.browserFleet.engineeringAt(index)
-                                    onWatchedDataChanged: fleetGlobalData.refreshRows()
+                                    onWatchedDataChanged: fleetGlobalData.requestRefresh()
                                 }
                             }
                         }

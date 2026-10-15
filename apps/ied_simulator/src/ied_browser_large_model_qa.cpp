@@ -201,6 +201,19 @@ int main(int argc, char** argv) {
 
     const QString liveKey = QStringLiteral("LD4") + QChar(0x1f) +
                             QStringLiteral("LLN19$MX$DO99$DA4");
+    // ARSAS parity: discovered/readable is not the same as measured. An
+    // empty-string MMS sample is still a real received value, not "Not read".
+    if (model.nodeForReference(QStringLiteral("LD4/LLN19.DO99.DA4"))
+            .value(QStringLiteral("hasReceivedValue")).toBool()) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL unread_sample_false_live\n";
+        return 30;
+    }
+    model.applyReadValue(liveKey, QString{});
+    if (!model.nodeForReference(QStringLiteral("LD4/LLN19.DO99.DA4"))
+             .value(QStringLiteral("hasReceivedValue")).toBool()) {
+        std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL empty_sample_received\n";
+        return 31;
+    }
     model.applyReadValue(liveKey, QStringLiteral("23"));
     if (model.nodeForReference(QStringLiteral("LD4/LLN19.DO99.DA4  [MX]"))
              .value(QStringLiteral("value")).toString() != QStringLiteral("23")) {
