@@ -410,6 +410,7 @@ ApplicationWindow {
                     font.pixelSize: 9
                 }
                 Item { Layout.fillWidth: true }
+                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "Copy diagnostics"; onClicked: workflowBar.session.copyDiagnostics() }
                 CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "Clear"; onClicked: device.clearLog() }
             }
             ScrollView {

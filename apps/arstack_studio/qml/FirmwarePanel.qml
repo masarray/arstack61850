@@ -344,9 +344,16 @@ SurfacePanel {
                 text: panel.technicalDetailsVisible ? "Hide technical details" : "Technical details"
                 onClicked: panel.technicalDetailsVisible = !panel.technicalDetailsVisible
             }
+            CalmButton {
+                theme: panel.theme
+                uiFont: panel.uiFont
+                text: "Copy diagnostics"
+                enabled: panel.session !== null
+                onClicked: panel.session.copyDiagnostics()
+            }
             Label {
                 Layout.fillWidth: true
-                text: "Protocol, target revision, SHA-256 and firmware-service log"
+                text: "Review/redact device identifiers and logs before sharing"
                 color: panel.theme.muted
                 font.family: panel.uiFont
                 font.pixelSize: 9
