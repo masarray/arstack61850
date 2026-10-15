@@ -172,7 +172,11 @@ public:
     [[nodiscard]] MmsConfirmedExchangeResult exchange_confirmed(
         std::span<const std::uint8_t> presentation_payload,
         std::uint32_t expected_invoke_id,
-        std::stop_token stop_token = {});
+        std::stop_token stop_token = {},
+        // Optional per-call receipt, independent of the bounded event log.
+        // True only when the complete confirmed request was sent to transport.
+        // A response timeout after a successful send still leaves this true.
+        bool* request_sent = nullptr);
 
     [[nodiscard]] MmsPduEnvelope poll_once(
         std::stop_token stop_token = {});

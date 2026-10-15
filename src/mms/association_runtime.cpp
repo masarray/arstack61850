@@ -668,7 +668,9 @@ void MmsAssociationRuntime::disconnect(const std::stop_token stop_token) noexcep
 MmsConfirmedExchangeResult MmsAssociationRuntime::exchange_confirmed(
     const std::span<const std::uint8_t> presentation_payload,
     const std::uint32_t expected_invoke_id,
-    const std::stop_token stop_token) {
+    const std::stop_token stop_token,
+    bool* const request_sent) {
+    if (request_sent != nullptr) *request_sent = false;
     require_associated();
     if (expected_invoke_id == 0U ||
         expected_invoke_id > MmsPduCodec::maximum_invoke_id) {
@@ -689,6 +691,7 @@ MmsConfirmedExchangeResult MmsAssociationRuntime::exchange_confirmed(
     const auto deadline = deadline_after(options_.request_timeout);
     try {
         send_application_payload(presentation_payload, deadline, stop_token);
+        if (request_sent != nullptr) *request_sent = true;
         add_event(MmsAssociationEventKind::confirmed_request_sent,
                   "Confirmed MMS request sent.", expected_invoke_id);
 
