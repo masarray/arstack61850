@@ -15,7 +15,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Build one compatible SOURCE firmware bundle from the exact reviewed PR
+  # rather than taking an older public firmware that lacks PROFILE-BINARY-V1.
+  firmware:
+    uses: ./.github/workflows/esp32p4-smv-injector.yml
+
   windows-preview:
+    needs: firmware
     if: ${{ !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: windows-2022
     timeout-minutes: 40
@@ -54,7 +60,13 @@ jobs:
           Write-Host "NATIVE_BUILD_REFERENCE_TEMPLATE_EXIT=$($probe.ExitCode)"
           if ($probe.ExitCode -ne 0) { throw 'Native Windows reference template regression before packaging' }
 
-      - name: Verify immutable public v0.1.1 firmware and flasher source
+      - name: Download matched ESP32-P4 firmware built by the same workflow
+        uses: actions/download-artifact@v4
+        with:
+          name: arstack-esp32p4-smv-firmware
+          path: firmware-package
+
+      - name: Verify immutable public v0.1.1 flasher source and matched firmware
         shell: pwsh
         run: |
           $archive = Join-Path $env:RUNNER_TEMP 'arstack-v0.1.1-portable.zip'
@@ -74,7 +86,33 @@ jobs:
           $probe = Start-Process -FilePath $legacyGui -ArgumentList '--check-reference-template' -Wait -PassThru
           Write-Host "PUBLIC_BASELINE_REFERENCE_TEMPLATE_EXIT=$($probe.ExitCode)"
           if ($probe.ExitCode -ne 0) { throw 'Verified public base GUI reference template regression' }
-          $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $baseline 'firmware'
+          # Older v0.1.1 public firmware remains an immutable historical
+          # source for the verified flasher ONLY. Its capability contract is
+          # missing PROFILE-BINARY-V1 and cannot be shipped with this GUI.
+          $newFirmware = Join-Path $PWD 'firmware-package'
+          $manifestPath = Join-Path $newFirmware 'firmware-manifest.json'
+          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+            throw 'Matching firmware job did not provide its manifest'
+          }
+          $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+          $expectedCapabilities = @('SMV-4I4V', 'PROFILE', 'PROFILE-BINARY-V1', 'LIVE-SETPOINTS', 'SESSION-LEASE', 'PTP-P2', 'SMPSYNCH-AUTO')
+          foreach ($capability in $expectedCapabilities) {
+            if ($manifest.capabilities -notcontains $capability) { throw "PR firmware lacks capability: $capability" }
+          }
+          if ($manifest.sourceCommit -ne $env:PREVIEW_SHA) {
+            throw "Firmware source SHA $($manifest.sourceCommit) differs from exact Studio PR head $env:PREVIEW_SHA"
+          }
+          if ($manifest.version -ne '0.1.1' -or $manifest.chip -ne 'esp32p4') {
+            throw 'PR firmware version or target does not match native Studio'
+          }
+          $image = Join-Path $newFirmware $manifest.image
+          if (-not (Test-Path -LiteralPath $image -PathType Leaf)) {
+            throw 'Matching firmware image is missing'
+          }
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath $image).Hash.ToLowerInvariant() -ne $manifest.sha256.ToLowerInvariant()) {
+            throw 'Matching PR firmware image SHA-256 mismatch'
+          }
+          $env:ARSTACK_STUDIO_FIRMWARE_DIR = $newFirmware
           $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $baseline 'tools\espflash.exe'
           $native = Join-Path $PWD 'build-studio-preview\Release\arstack_studio.exe'
           $logDir = Join-Path $env:RUNNER_TEMP 'studio-firmware-diagnostics'
@@ -97,7 +135,7 @@ jobs:
             Write-Host "PUBLIC_FIRMWARE_IMAGE_EXISTS=$(Test-Path $file) SHA_MATCH=$((Test-Path $file) -and ((Get-FileHash -Algorithm SHA256 $file).Hash.ToLowerInvariant() -eq $manifest.sha256.ToLowerInvariant())) FLASHER_EXISTS=$(Test-Path $env:ARSTACK_STUDIO_ESPFLASH)"
             throw 'New native GUI disagrees with public firmware bundle; see stdout/stderr above'
           }
-          Write-Host 'Pinned v0.1.1 public firmware / flasher archive: VERIFIED'
+          Write-Host 'Pinned public v0.1.1 flasher source + matched PR-head firmware: VERIFIED'
 
       - name: Stage isolated GUI preview with pinned release firmware
         shell: pwsh
@@ -113,10 +151,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Qt runtime deployment failed' }
           # Copy directory CONTENTS to a pre-created destination, not directory
           # objects to ambiguous destination names (PowerShell nesting hazard).
+          # Firmware is from the exact PR HEAD; only pinned flasher/tools
+          # originate from the public v0.1.1 archive.
           foreach ($dir in @('firmware', 'tools')) {
-            $sourceDir = Join-Path $baseline $dir
+            $sourceDir = if ($dir -eq 'firmware') {
+              Join-Path $PWD 'firmware-package'
+            } else {
+              Join-Path $baseline 'tools'
+            }
             $targetDir = Join-Path $stage $dir
-            if (-not (Test-Path $sourceDir)) { throw "Pinned bundle folder missing: $dir" }
+            if (-not (Test-Path $sourceDir)) { throw "Source bundle folder missing: $dir" }
             New-Item -Path $targetDir -ItemType Directory -Force | Out-Null
             Copy-Item -Path (Join-Path $sourceDir '*') -Destination $targetDir -Recurse -Force
           }
@@ -140,15 +184,21 @@ jobs:
           if ($imageSha -ne $manifest.sha256.ToLowerInvariant()) {
             throw "Preview staged firmware image hash mismatch: $imageSha"
           }
-          Write-Host "Staged real GUI with pinned firmware image and flasher at canonical paths: PASS"
+          if ($manifest.sourceCommit -ne $env:PREVIEW_SHA -or
+              $manifest.capabilities -notcontains 'PROFILE-BINARY-V1') {
+            throw 'Staged firmware changed identity or required capability'
+          }
+          Write-Host "Staged Studio GUI with PR-head firmware and pinned flasher at canonical paths: PASS"
           Copy-Item LICENSE,NOTICE,THIRD_PARTY_NOTICES.md,COPYRIGHT.md -Destination $stage
           $meta = [ordered]@{
             schema = 'arstack.studio.preview-provenance.v1'
             display = 'ARStack Studio Engineering Preview - not a public stable release'
             guiCommit = $env:PREVIEW_SHA
             guiVersion = '0.1.1-preview'
-            firmwareRelease = 'v0.1.1'
-            pinnedFirmwarePackageSha256 = $env:BASE_PORTABLE_SHA256
+            firmwareVersion = '0.1.1'
+            firmwareSourceCommit = $env:PREVIEW_SHA
+            firmwareCompile = 'ESP-IDF v5.5.4 / exact PR HEAD'
+            pinnedFlasherBasePackageSha256 = $env:BASE_PORTABLE_SHA256
             embeddedExperimentalM3 = $false
             ptpHardwareQualified = $false
             publicRelease = $false

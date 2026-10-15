@@ -58,6 +58,10 @@ jobs:
         working-directory: embedded/esp32p4_smv_injector
     steps:
       - uses: actions/checkout@v4
+        with:
+          # PR packaging must use exactly the reviewed source SHA, not a
+          # synthetic merge SHA that may change between queue and build.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Select ESP32-P4 target
         run: source /opt/esp/idf/export.sh && idf.py set-target esp32p4
@@ -134,7 +138,7 @@ jobs:
           set -euo pipefail
           image="arstack-esp32p4-smv-${ARSTACK_FIRMWARE_VERSION}.bin"
           sha="$(sha256sum "build/${image}" | awk '{print $1}')"
-          python3 - "$image" "$sha" "$GITHUB_SHA" <<'PY'
+          python3 - "$image" "$sha" "$(git rev-parse HEAD)" <<'PY'
           import json
           import os
           import sys

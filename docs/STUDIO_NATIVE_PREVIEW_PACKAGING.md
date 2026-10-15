@@ -20,14 +20,25 @@ for historical v0.1.1 reproducibility.
 - **Remove:** Inno unregisters its own install, executable, tools, firmware,
   and shortcuts. Never delete unknown files or application/user data by
   wildcard. Keep operator-authored files untouched.
-- **Traceability:** GUI commit, pinned public v0.1.1 firmware archive digest,
-  and unqualified embedded PTP status are included with the preview.
+- **Traceability:** GUI commit, matching PR-HEAD ESP-IDF firmware source/manifest/hash,
+  pinned public v0.1.1 **flasher tool** archive digest, and unqualified
+  embedded PTP status are included with the preview.
 
 ## Acceptance
 
+The historical published v0.1.1 firmware manifest does not declare
+PROFILE-BINARY-V1, which the modern native Studio requires. The new bundle
+must be built from the same source commit rather than accepting an obsolete
+image or disabling the capability check.
+
 The PR-triggered Windows workflow builds the exact PR-head Qt executable,
-runs the native session harness, verifies the public v0.1.1 firmware ZIP's
-SHA-256, stages firmware/tools into the preview GUI, executes packaged
+runs the native session harness, builds a fresh matching ESP32-P4 firmware
+bundle through the shared ESP-IDF workflow from the exact PR HEAD,
+verifies its manifest and image hash and PROFILE-BINARY-V1 capability, and
+independently verifies the pinned public v0.1.1 archive's SHA-256 **only to
+reuse the existing bundled flasher and licenses**. The historical firmware
+is not compatible with the new Studio and is never staged. It stages the
+matched firmware/tools into the preview GUI, executes packaged
 application smoke, and produces a **single Windows Inno Setup .exe** plus a
 portable ZIP. Then on a clean Windows runner it performs:
 
@@ -46,10 +57,12 @@ portable ZIP. Then on a clean Windows runner it performs:
 **The v0.1.1 NSIS installer cannot be silently taken over by a new Inno AppId
 without a separate safe migration contract.** Preview deliberately never
 uninstalls or modifies the public stable channel. A subsequent stable-channel
-migration must validate ownership/path, safely stop Studio, run the genuine
-legacy uninstaller with bounded completion, validate rollback / known data
-preservation, and test install/upgrade/uninstall from a real v0.1.1 image
-before replacing the stable installer. Until then do not promote this to
+migration must validate ownership/path, safely stop Studio, **avoid running
+the legacy NSIS uninstaller that recursively deletes user files**, and retire
+only verified NSIS ownership records after the new Inno installation is in
+place. A Windows CI fixture installs the actual hash-pinned v0.1.1 NSIS package,
+tests migration, firmware validity, and data preservation, then uninstalls
+Inno. This is an acceptance fixture only, never a published stable installer. Until then do not promote this to
 public stable.
 
 The operator needs only ARStack Studio and the bundled firmware manager;
