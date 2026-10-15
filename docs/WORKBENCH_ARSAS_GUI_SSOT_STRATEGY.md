@@ -174,9 +174,9 @@ Milestone order may be rearranged **only for explicit blockers/dependencies**, a
 - M2K [PR #176](https://github.com/masarray/arstack61850/pull/176) merged at `0cc882022d20f416a33433d5f29a1f8950984d85`.
 - M2L [PR #178](https://github.com/masarray/arstack61850/pull/178) merged at `9cc9bda9c30804be343d49367e4dde6948789d95`.
 - Native DataSets inspector + repository naming safeguard M2M [PR #179](https://github.com/masarray/arstack61850/pull/179) merged at `ce643e81cd7640ed2b694c0914282177f871a9fa`, its exact-head 14-workflow matrix **SUCCESS**.
-- Native DataSets → Data Model / Global Data actions and source-generation selection reset [PR #180](https://github.com/masarray/arstack61850/pull/180) is the **active M2M candidate**, head `cb7b7fb92447f6365c3c751abd3d0d7db922ffdc` as of this snapshot. It is NOT merged at document writing; verify actual CI/reviews live before merge.
+- Native DataSets → Data Model / Global Data actions and source-generation selection reset [PR #180](https://github.com/masarray/arstack61850/pull/180) **MERGED** at `1e6ff57be39badd8d1d297b4301060ed3835984e`, exact PR head `cb7b7fb92447f6365c3c751abd3d0d7db922ffdc`; native Qt 55 steps and naming guard SUCCESS.
 
-**Current Integrator:** complete and review #180's native Qt/Browser/large-model gate, then merge only with exact SHA and all required checks green. Keep [current handoff](WORKBENCH_CURRENT_HANDOFF.md) synchronized after integration. Do not resume obsolete directions that ask to integrate #176 or implement M2L again.
+**Current Integrator:** #179 and #180 are merged. Verify post-merge Qt / Windows Workbench release evidence and run actual DataSets-to-Data Model selected-DA click-through; then pursue M2N Reporting/RCB UX and only demonstrated missing ARIEC61850 engine semantics. Keep [current handoff](WORKBENCH_CURRENT_HANDOFF.md) current. Do not resume obsolete #176/M2L instructions.
 
 **Track A — C++ engine:** compare [ARIEC61850 port map](ARIEC61850_ARSAS_NATIVE_PORT_MAP.md) against existing canonical C++ owners. Port only a **measured, genuinely missing semantic capability** with protocol/negative tests; no second C# runtime, MMS client, SCL parser, or model.
 

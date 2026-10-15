@@ -4,6 +4,16 @@
 > **Primary strategy and ownership contract:** [WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md](WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md).
 > **Scope:** installed native ARStack Workbench in apps/ied_simulator. Not a web app, WPF clone, or the separate ESP32-P4/SMV Studio track.
 
+## Latest verified native Workbench integration — 2026-10-15
+
+- Main source: `1e6ff57be39badd8d1d297b4301060ed3835984e`, M2M [PR #180](https://github.com/masarray/arstack61850/pull/180) MERGED; exact-head Qt [38714259031](https://github.com/masarray/arstack61850/actions/runs/38714259031) SUCCESS (55 steps), Product Naming Guard [38714259041](https://github.com/masarray/arstack61850/actions/runs/38714259041) SUCCESS, zero unresolved reviews.
+- M2M [PR #179](https://github.com/masarray/arstack61850/pull/179) MERGED at `ce643e81cd7640ed2b694c0914282177f871a9fa` with 14/14 exact-head workflows SUCCESS; selected canonical DataSet DA inspector and tracked-source naming guard.
+- Documentation strategy [PR #181](https://github.com/masarray/arstack61850/pull/181) MERGED at `01188097c9551102a264b5d140597d1aea48d7b4`; older instructions to merge M2K/M2L are superseded.
+- Canonical C++ owners remain the runtime SSOT. ARIEC61850 provides demonstrated engine semantics to port only when missing; ARSAS provides native Explorer interaction patterns, never a second WPF/.NET/web stack.
+- NEXT: genuine selected-FCDA DataSets -> Data Model -> explicit Read / Watch DA click-through rendered Windows acceptance, reconnect and cross-IED isolation; then M2N Reporting/RCB effective-state and real frame mapping. Physical IED and Windows installed-package parity remain UNVERIFIED.
+- Post-merge Qt and Windows Release Hardening on this main SHA were IN PROGRESS at this checkpoint; do not mark PASS without exact run evidence.
+
+## Historical milestone notes (accepted or superseded; do not execute old PR integration instructions)
 ## M2M native DataSets -> Data Model handoff slice — 2026-10-15
 
 - Branch `feat/workbench-m2m-dataset-da-actions-context-20261015` based on merged #179 main `ce643e81cd7640ed2b694c0914282177f871a9fa`. Keep this section IN PROGRESS until exact-head CI/merge checks.
