@@ -640,6 +640,50 @@ void verified_data_set_hints_restore_late_ln_type_schema() {
     CHECK(result.wire_budget.total() == 6U);
 }
 
+void disconnected_optional_probes_do_not_inflate_wire_budget() {
+    ScriptedTransport transport;
+    queue_handshake(transport);
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_get_name_list_response_p_data(
+            {1U, {"OLS501LD0"}, false})));
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_get_name_list_response_p_data(
+            {2U, {"LLN0$ST$Mod$stVal", "LLN0$RP$urcbA01$RptEna"}, false})));
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_get_name_list_response_p_data(
+            {3U, {"LLN0$DataSetA"}, false})));
+    // Do not enqueue an answer to the GVA request: the exchange sends one
+    // confirmed request, then times out and closes this association.
+    // DataSet and RCB optional phases continue but can no longer send.
+    mms::MmsAssociationOptions transportOptions;
+    transportOptions.maximum_events = 1U; // Bounded events must not affect accounting.
+    mms::MmsAssociationRuntime association{transport, transportOptions};
+    association.connect({"127.0.0.1", 102U});
+
+    mms::MmsLiveDiscoveryOptions options;
+    options.maximum_variable_type_probes = 1U;
+    options.maximum_data_set_directories = 1U;
+    options.maximum_report_control_probes = 1U;
+    options.continue_on_optional_probe_error = true;
+    const auto result = mms::MmsLiveDiscoveryClient{association}.discover(options);
+
+    CHECK(!association.associated());
+    CHECK(result.partial());
+    CHECK(result.domain_count() == 1U);
+    CHECK(result.wire_budget.get_name_list == 3U);
+    CHECK(result.wire_budget.get_variable_access_attributes == 1U);
+    CHECK(result.wire_budget.get_named_variable_list_attributes == 0U);
+    CHECK(result.wire_budget.read_report_controls == 0U);
+    CHECK(result.wire_budget.total() == 4U);
+    CHECK(transport.sent().size() == 6U); // 2 handshake + 4 actual requests
+    CHECK(result.variable_types.size() == 1U);
+    CHECK(!result.variable_types.front().success());
+    CHECK(result.data_set_directories.size() == 1U);
+    CHECK(!result.data_set_directories.front().success());
+    CHECK(result.report_controls.size() == 1U);
+    CHECK(!result.report_controls.front().success());
+}
+
 void pagination_without_forward_progress_is_rejected() {
     ScriptedTransport transport;
     queue_handshake(transport);
@@ -671,6 +715,7 @@ int main() {
         case_distinct_references_are_not_deduplicated();
         case_distinct_ln_type_probes_are_preserved();
         verified_data_set_hints_restore_late_ln_type_schema();
+        disconnected_optional_probes_do_not_inflate_wire_budget();
         pagination_without_forward_progress_is_rejected();
         std::cout << "Live MMS discovery and model parity tests passed.\n";
         return 0;

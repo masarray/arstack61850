@@ -266,6 +266,31 @@ std::string MmsLiveDiscoveryResult::summary() const {
     return stream.str();
 }
 
+namespace {
+
+// Capture the per-exchange send receipt even when the response times out.
+// This scoped counter is independent of shared event history and keeps the
+// correct service category if a later optional probe fails before sending.
+struct ConfirmedSendCount final {
+    std::size_t& service_count;
+    bool sent{};
+    ~ConfirmedSendCount() {
+        if (sent) ++service_count;
+    }
+};
+
+[[nodiscard]] MmsConfirmedExchangeResult exchange_counted(
+    MmsAssociationRuntime& association,
+    const std::span<const std::uint8_t> request,
+    const std::uint32_t invoke_id,
+    const std::stop_token stop_token,
+    std::size_t& service_count) {
+    ConfirmedSendCount receipt{service_count};
+    return association.exchange_confirmed(request, invoke_id, stop_token, &receipt.sent);
+}
+
+} // namespace
+
 MmsLiveDiscoveryClient::MmsLiveDiscoveryClient(MmsAssociationRuntime& association)
     : association_{association} {}
 
@@ -291,9 +316,9 @@ std::vector<std::string> MmsLiveDiscoveryClient::get_name_list(
 
         const auto encoded = MmsServiceCodec::encode_get_name_list_request_p_data(
             request, association_.negotiated().presentation_context_id);
-        ++wire_budget.get_name_list;
-        const auto exchange = association_.exchange_confirmed(
-            encoded, request.invoke_id, stop_token);
+        const auto exchange = exchange_counted(
+            association_, encoded, request.invoke_id, stop_token,
+            wire_budget.get_name_list);
         const auto payload = response_payload(exchange, "GetNameList");
         const auto response = MmsServiceCodec::decode_get_name_list_response(
             payload, request.invoke_id);
@@ -407,9 +432,9 @@ MmsLiveDiscoveryResult MmsLiveDiscoveryClient::discover(
                     evidence.candidate.reference);
                 const auto encoded = MmsDataSetDirectoryCodec::encode_request_p_data(
                     request, association_.negotiated().presentation_context_id);
-                ++result.wire_budget.get_named_variable_list_attributes;
-                const auto exchange = association_.exchange_confirmed(
-                    encoded, request.invoke_id, stop_token);
+                const auto exchange = exchange_counted(
+                    association_, encoded, request.invoke_id, stop_token,
+                    result.wire_budget.get_named_variable_list_attributes);
                 const auto payload = response_payload(
                     exchange, "GetNamedVariableListAttributes");
                 evidence.directory = MmsDataSetDirectoryCodec::decode_response(
@@ -457,9 +482,9 @@ MmsLiveDiscoveryResult MmsLiveDiscoveryClient::discover(
                     encode_variable_access_attributes_request_p_data(
                         request,
                         association_.negotiated().presentation_context_id);
-                ++result.wire_budget.get_variable_access_attributes;
-                const auto exchange = association_.exchange_confirmed(
-                    encoded, request.invoke_id, stop_token);
+                const auto exchange = exchange_counted(
+                    association_, encoded, request.invoke_id, stop_token,
+                    result.wire_budget.get_variable_access_attributes);
                 const auto payload = response_payload(
                     exchange, "GetVariableAccessAttributes");
                 evidence.attributes = MmsServiceCodec::
@@ -515,9 +540,9 @@ MmsLiveDiscoveryResult MmsLiveDiscoveryClient::discover(
                     evidence.requested_attributes);
                 const auto encoded = MmsServiceCodec::encode_read_request_p_data(
                     request, association_.negotiated().presentation_context_id);
-                ++result.wire_budget.read_report_controls;
-                const auto exchange = association_.exchange_confirmed(
-                    encoded, invoke_id, stop_token);
+                const auto exchange = exchange_counted(
+                    association_, encoded, invoke_id, stop_token,
+                    result.wire_budget.read_report_controls);
                 const auto payload = response_payload(
                     exchange, "Read RCB attributes");
                 const auto response = MmsServiceCodec::decode_read_response(

@@ -72,8 +72,9 @@ struct MmsReportControlEvidence final {
     [[nodiscard]] bool success() const noexcept { return state.has_value(); }
 };
 
-// Actual outbound confirmed-service attempts, including failed responses.
-// Pure accounting: no extra MMS service and no influence on scheduling.
+// Completed outbound confirmed MMS request sends (including responses that
+// later fail or time out). Pre-send failures and post-disconnect probes do not
+// count. Pure accounting: no extra MMS service or scheduling side effects.
 struct MmsLiveDiscoveryWireBudget final {
     std::size_t get_name_list{};
     std::size_t get_variable_access_attributes{};
