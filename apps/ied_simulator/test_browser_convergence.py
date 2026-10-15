@@ -112,6 +112,9 @@ mms_client = (workspace_path.parent.parent / "src" / "MmsClientController.cpp").
 large_model_qa = (workspace_path.parent.parent / "src" / "ied_browser_large_model_qa.cpp").read_text(encoding="utf-8")
 if ("isSclTypedEvidenceLeaf(item)" not in snapshot_projection or
         "item[item.size() - 2] == '$'" not in snapshot_projection or
+        "kMaximumSclInitialTypedEvidence = 96U" not in snapshot_projection or
+        "typedCount < kMaximumSclInitialTypedEvidence" not in snapshot_projection or
+        "initial_qt_evidence_budget" not in large_model_qa or
         '"MmsEngineeringEvidence.hpp"' in snapshot_projection or
         "trusted_scl_initial_typed_evidence" not in large_model_qa or
         "failed_root_evidence" not in large_model_qa or

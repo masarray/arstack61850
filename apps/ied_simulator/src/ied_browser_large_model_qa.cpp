@@ -376,6 +376,38 @@ int main(int argc, char** argv) {
             std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL trusted_scl_initial_typed_evidence\n";
             return 27;
         }
+        // Bound typed initial-snapshot copies and decoded GUI maps at 96,
+        // independently of the number of successfully mapped values.
+        mms::MmsSclAssistedConnectResult largeSnapshot;
+        largeSnapshot.ied_name = "IED_TYPED";
+        mms::MmsInitialFcBatchResult largeBatch;
+        mms::MmsInitialFcRootResult largeRoot;
+        largeRoot.root_value = mms::MmsDataValue::boolean(true);
+        const auto qEntry = engineering.model_entries.at(0);
+        engineering.model_entries.resize(150, qEntry);
+        for (std::size_t i = 0; i < 150U; ++i) {
+            mms::MmsSclMappedLeaf leaf;
+            leaf.model_entry_index = i;
+            leaf.value = mms::MmsDataValue::bit_string(3U, bits);
+            largeRoot.mapped_leaves.push_back(std::move(leaf));
+        }
+        largeBatch.roots.push_back(std::move(largeRoot));
+        largeSnapshot.batches.push_back(std::move(largeBatch));
+        largeSnapshot.mapped_leaf_count = 150U;
+        const auto bounded = arstack::iedsim::collect_scl_snapshot_values(
+            engineering, largeSnapshot);
+        std::size_t typedVisible{};
+        for (const auto& item : bounded)
+            if (item.typedSample) ++typedVisible;
+        if (bounded.size() != 150U ||
+            typedVisible != arstack::iedsim::kMaximumSclInitialTypedEvidence ||
+            bounded.at(95).typedSample == nullptr ||
+            bounded.at(96).typedSample != nullptr ||
+            bounded.back().display.empty()) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL initial_qt_evidence_budget\n";
+            return 29;
+        }
+
         // A failed FC-root Read must never populate GUI evidence.
         snapshot.batches.front().roots.front().access_failure_code = 1U;
         if (!arstack::iedsim::collect_scl_snapshot_values(engineering, snapshot).empty()) {

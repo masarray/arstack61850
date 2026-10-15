@@ -361,7 +361,11 @@ bool MmsClientController::connectToIed() {
                 // once on the MMS worker before publishing to the GUI thread.
                 auto initialValues = std::make_shared<QVector<ReadValue>>();
                 initialValues->reserve(static_cast<qsizetype>(snapshotValues.size()));
+                std::size_t totalTyped{};
+                std::size_t projectedTyped{};
                 for (const auto& value : snapshotValues) {
+                    if (arstack::iedsim::isSclTypedEvidenceLeaf(value.item)) ++totalTyped;
+                    if (value.typedSample) ++projectedTyped;
                     const auto evidence = value.typedSample
                         ? arstack::iedsim::decodeEngineeringEvidence(
                             QString::fromStdString(value.item), *value.typedSample)
@@ -379,7 +383,7 @@ bool MmsClientController::connectToIed() {
                 if (self) {
                     QMetaObject::invokeMethod(
                         self,
-                        [self, generation, model, snapshot, initialValues, associationProfile, healthSummary, requestedTrustedSclPath] {
+                        [self, generation, model, snapshot, initialValues, totalTyped, projectedTyped, associationProfile, healthSummary, requestedTrustedSclPath] {
                             if (!self || self->generation_ != generation) return;
                             self->treeModel_.applyDocument(*model);
                             for (const auto& value : *initialValues) {
@@ -407,6 +411,12 @@ bool MmsClientController::connectToIed() {
                                     self->engineeringContext_->treeModel()->applyReadValue(
                                         value.key, value.display, value.engineeringEvidence);
                                 }
+                            }
+                            if (totalTyped > projectedTyped) {
+                                self->appendDiagnostic(
+                                    QStringLiteral("Initial q/t detail bounded: %1 of %2 typed leaves; "
+                                                   "select a leaf and Read explicitly for its evidence.")
+                                        .arg(projectedTyped).arg(totalTyped));
                             }
                             self->appendDiagnostic(healthSummary);
                             self->appendDiagnostic(
