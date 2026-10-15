@@ -1,0 +1,33 @@
+name: ESP32-P4 PTP M3E Bench Preflight
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'scripts/ptp_m3e_bench_gate.py'
+      - 'tests/test_ptp_m3e_bench_gate.py'
+      - 'docs/PTP_M3E_BENCH_EVIDENCE_GATE.md'
+      - '.github/workflows/ptp-m3e-bench-preflight.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/ptp_m3e_bench_gate.py'
+      - 'tests/test_ptp_m3e_bench_gate.py'
+      - 'docs/PTP_M3E_BENCH_EVIDENCE_GATE.md'
+      - '.github/workflows/ptp-m3e-bench-preflight.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  offline-bench-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run M3E positive / negative artifact, serial and wire evidence tests
+        run: python3 -m unittest discover -s tests -p 'test_ptp_m3e_bench_gate.py' -v
