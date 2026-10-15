@@ -48,6 +48,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Native Studio preview build failed' }
           & "$PWD\build-studio-preview\Release\arstack_session_harness.exe"
           if ($LASTEXITCODE -ne 0) { throw 'Native session regression failed' }
+          # Differentiate product code regressions from missing deployed DLLs.
+          $nativeGui = Join-Path $PWD 'build-studio-preview\Release\arstack_studio.exe'
+          & $nativeGui '--check-reference-template'
+          Write-Host "NATIVE_BUILD_REFERENCE_TEMPLATE_EXIT=$LASTEXITCODE"
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows reference template regression before packaging' }
 
       - name: Verify immutable public v0.1.1 firmware and flasher source
         shell: pwsh
@@ -65,6 +70,10 @@ jobs:
               throw "Pinned public base package is incomplete: $name"
             }
           }
+          $legacyGui = Join-Path $baseline 'ARStackStudio.exe'
+          & $legacyGui '--check-reference-template'
+          Write-Host "PUBLIC_BASELINE_REFERENCE_TEMPLATE_EXIT=$LASTEXITCODE"
+          if ($LASTEXITCODE -ne 0) { throw 'Verified public base GUI reference template regression' }
           Write-Host 'Pinned v0.1.1 public firmware / flasher archive: VERIFIED'
 
       - name: Stage isolated GUI preview with pinned release firmware
@@ -108,7 +117,11 @@ jobs:
           $env:ESPFLASH_SKIP_UPDATE_CHECK = 'true'
           foreach ($check in @('--check-reference-template', '--check-firmware-contract', '--check-p0-policy', '--check-app-lifecycle')) {
             & $exe $check
-            if ($LASTEXITCODE -ne 0) { throw "Preview GUI failed packaged smoke $check" }
+            Write-Host "PACKAGED_PREVIEW_CHECK=$check EXIT=$LASTEXITCODE"
+            if ($LASTEXITCODE -ne 0) {
+              Get-ChildItem $stage -Filter '*.dll' | Select-Object -ExpandProperty Name
+              throw "Preview GUI failed packaged smoke $check with code $LASTEXITCODE"
+            }
           }
           & $env:ARSTACK_STUDIO_ESPFLASH --version
           if ($LASTEXITCODE -ne 0) { throw 'Pinned flasher execution failed' }
