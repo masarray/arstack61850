@@ -149,6 +149,7 @@ target_link_libraries(arstack_studio PRIVATE
 
 target_link_libraries(arstack_session_harness PRIVATE
     Qt6::Core
+    Qt6::Gui
     Qt6::SerialPort
     ARIEC61850::core
 )
