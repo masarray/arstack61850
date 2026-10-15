@@ -18,6 +18,7 @@
 #include <QQuickWindow>
 #include <QTimer>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -228,6 +229,44 @@ private:
                             << "dataset_pane=" << static_cast<void*>(dataSetPane_)
                             << "model_typed=" << static_cast<void*>(modelEvidence_)
                             << "dataset_typed=" << static_cast<void*>(dataSetEvidence_);
+                        // Diagnose the canonical IEC-versus-MMS member
+                        // mapping before considering any resolver change.
+                        // This bounded QA log is never part of a live callback.
+                        if (reports_ && model_) {
+                            const int bound = std::min(4, int(reports_->dataSets().size()));
+                            for (int i = 0; i < bound; ++i) {
+                                if (!reports_->selectDataSet(i)) continue;
+                                const auto members = reports_->selectedDataSetMembers();
+                                qCritical().noquote() << "BROWSER_EVIDENCE_DATASET_DIAG"
+                                    << "index=" << i << "members=" << members.size();
+                                for (int n = 0; n < std::min(8, int(members.size())); ++n) {
+                                    const auto& ref = members.at(n);
+                                    const auto node = model_->nodeForReference(ref);
+                                    qCritical().noquote()
+                                        << "BROWSER_EVIDENCE_MEMBER_DIAG"
+                                        << "member=" << ref.left(180)
+                                        << "node_kind=" << node.value(QStringLiteral("kind"))
+                                        << "node_ref=" << node.value(QStringLiteral("reference"))
+                                        << "node_item=" << node.value(QStringLiteral("mmsItem"))
+                                        << "node_fc=" << node.value(QStringLiteral("functionalConstraint"));
+                                }
+                            }
+                            if (const auto* source = context_->modelSnapshot()) {
+                                for (const auto& ds : source->data_sets) {
+                                    qCritical().noquote()
+                                        << "BROWSER_EVIDENCE_CANONICAL_DS_DIAG"
+                                        << "reference=" << QString::fromStdString(ds.reference).left(180)
+                                        << "members=" << ds.members.size();
+                                    for (std::size_t n = 0; n < std::min<std::size_t>(8U, ds.members.size()); ++n) {
+                                        const auto& member = ds.members[n];
+                                        qCritical().noquote() << "BROWSER_EVIDENCE_CANONICAL_MEMBER_DIAG"
+                                            << QString::fromStdString(member.reference).left(180)
+                                            << QString::fromStdString(member.mms_reference).left(180)
+                                            << QString::fromStdString(member.functional_constraint);
+                                    }
+                                }
+                            }
+                        }
                         fail("rendered_qa_preparation_timeout");
                         return;
                     }
