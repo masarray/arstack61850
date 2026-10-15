@@ -2,7 +2,7 @@
 
 This file is the **current-state handoff** for a new engineer or AI thread. Read [`NORTH_STAR.md`](NORTH_STAR.md) first for the long-term direction, then use this file to continue active development without reconstructing the bench history from chat.
 
-> **Current native IEC 61850 Workbench / Browser engineering track (M2A–M2G):** read [docs/WORKBENCH_CURRENT_HANDOFF.md](docs/WORKBENCH_CURRENT_HANDOFF.md) before resuming Qt Browser, DataSets, Global Data, Reports, typed q/t, CI or Windows Workbench work. This is a dated, SHA-backed checkpoint and lists the active red PR. The SMV/ESP32-P4 release history below belongs to a separate product track.
+> **Current native IEC 61850 Workbench / Browser engineering track (M2A–M2J merged; M2K PR #176 active as of 2026-10-15):** read [docs/WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md](docs/WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md) for the shared ARSAS-inspired GUI/SSOT execution plan, cross-thread ownership and CI/merge gates; then read [docs/WORKBENCH_CURRENT_HANDOFF.md](docs/WORKBENCH_CURRENT_HANDOFF.md) for the latest checkpoint and active blockers. **Always refresh GitHub refs**. The SMV/ESP32-P4 release history below is a separate product track.
 
 Last major product milestone update: **2026-09-15 — stable public SMV Injector v0.1.0 released**.
 
