@@ -228,19 +228,44 @@ int main(int argc, char* argv[]) {
             } else {
                 const QString domain = reference.left(slash);
                 const QString item = reference.mid(slash + 1);
-                QTimer::singleShot(1'350, rootObject,
-                    [rootObject, domain, item] {
-                        auto* const fleet = rootObject->findChild<IedBrowserFleetController*>(
-                            QStringLiteral("iedBrowserFleetBackend"));
-                        auto* context = fleet != nullptr ? fleet->contextAt(0) : nullptr;
-                        auto* tree = context != nullptr ? context->treeModel() : nullptr;
-                        if (!tree || !tree->selectMmsItem(domain, item)) {
-                            qCritical().noquote()
-                                << "BROWSER_EVIDENCE_QA_FAIL missing canonical MMS DA"
-                                << domain << item;
-                            QCoreApplication::exit(66);
-                        }
+                auto* context = browserFleet != nullptr ? browserFleet->contextAt(0) : nullptr;
+                if (!context) {
+                    qCritical().noquote() << "BROWSER_EVIDENCE_QA_FAIL missing Browser context";
+                    QTimer::singleShot(0, &app, [] { QCoreApplication::exit(66); });
+                } else {
+                    const QString screenshotPath = parser.value(screenshotOption);
+                    auto completed = std::make_shared<bool>(false);
+                    const auto selectAfterPublish =
+                        [rootObject, context, domain, item, screenshotPath, completed] {
+                            if (*completed || !context->loaded()) return;
+                            *completed = true;
+                            if (!context->treeModel()->selectMmsItem(domain, item)) {
+                                qCritical().noquote()
+                                    << "BROWSER_EVIDENCE_QA_FAIL missing canonical MMS DA"
+                                    << domain << item;
+                                QCoreApplication::exit(66);
+                                return;
+                            }
+                            // Capture only after the bound QML selection has rendered.
+                            QTimer::singleShot(150, rootObject, [rootObject, screenshotPath] {
+                                auto* window = qobject_cast<QQuickWindow*>(rootObject);
+                                if (!window || !window->grabWindow().save(screenshotPath)) {
+                                    qCritical().noquote() << "BROWSER_EVIDENCE_QA_FAIL screenshot";
+                                    QCoreApplication::exit(67);
+                                    return;
+                                }
+                                QCoreApplication::exit(0);
+                            });
+                        };
+                    QObject::connect(context, &IedEngineeringContextController::contextChanged,
+                                     rootObject, selectAfterPublish);
+                    selectAfterPublish(); // Also handles already-published documents.
+                    QTimer::singleShot(10'000, rootObject, [completed] {
+                        if (*completed) return;
+                        qCritical().noquote() << "BROWSER_EVIDENCE_QA_FAIL model publication timeout";
+                        QCoreApplication::exit(68);
                     });
+                }
             }
         }
         int defaultPort = 102;
@@ -678,7 +703,7 @@ int main(int argc, char* argv[]) {
                 app.exit(0);
             });
         }
-        if (parser.isSet(screenshotOption)) {
+        if (parser.isSet(screenshotOption) && !parser.isSet(qaBrowserSelectOption)) {
             const auto outputPath = parser.value(screenshotOption);
             QTimer::singleShot(1600, &app, [&app, rootObject, outputPath] {
                 if (auto* const window = qobject_cast<QQuickWindow*>(rootObject)) {
