@@ -233,9 +233,7 @@ int main(int argc, char* argv[]) {
                         auto* const fleet = rootObject->findChild<IedBrowserFleetController*>(
                             QStringLiteral("iedBrowserFleetBackend"));
                         auto* context = fleet != nullptr ? fleet->contextAt(0) : nullptr;
-                        auto* tree = context != nullptr
-                            ? qobject_cast<MmsLiveTreeModel*>(
-                                context->property("treeModel").value<QObject*>()) : nullptr;
+                        auto* tree = context != nullptr ? context->treeModel() : nullptr;
                         if (!tree || !tree->selectMmsItem(domain, item)) {
                             qCritical().noquote()
                                 << "BROWSER_EVIDENCE_QA_FAIL missing canonical MMS DA"
