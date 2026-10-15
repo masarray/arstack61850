@@ -358,12 +358,19 @@ int main(int argc, char** argv) {
         snapshot.batches.push_back(std::move(batch));
         snapshot.mapped_leaf_count = 5U;
         const auto mapped = arstack::iedsim::collect_scl_snapshot_values(engineering, snapshot);
+        const auto mappedEvidence = [](const arstack::iedsim::SclSnapshotValue& value) {
+            return value.typedSample
+                ? arstack::iedsim::decodeEngineeringEvidence(
+                    QString::fromStdString(value.item), *value.typedSample)
+                : QVariantMap{};
+        };
         if (mapped.size() != 5U ||
-            mapped.at(0).engineeringEvidence != qualityEvidence ||
-            mapped.at(1).engineeringEvidence != timeEvidence ||
-            !mapped.at(2).engineeringEvidence.isEmpty() ||
-            !mapped.at(3).engineeringEvidence.isEmpty() ||
-            !mapped.at(4).engineeringEvidence.isEmpty() ||
+            !mapped.at(0).typedSample || !mapped.at(1).typedSample ||
+            mappedEvidence(mapped.at(0)) != qualityEvidence ||
+            mappedEvidence(mapped.at(1)) != timeEvidence ||
+            !mappedEvidence(mapped.at(2)).isEmpty() ||
+            !mappedEvidence(mapped.at(3)).isEmpty() ||
+            mapped.at(4).typedSample ||
             mapped.at(0).item != "XCBR1$ST$Pos$q" ||
             mapped.at(1).item != "XCBR1$ST$Pos$t") {
             std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL trusted_scl_initial_typed_evidence\n";

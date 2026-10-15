@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include "MmsEngineeringEvidence.hpp"
-
 #include "ariec61850/mms/data_codec.hpp"
 #include "ariec61850/mms/live_model.hpp"
 #include "ariec61850/mms/scl_assisted_connect.hpp"
@@ -12,6 +10,7 @@
 #include <algorithm>
 #include <cctype>
 #include <map>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -23,17 +22,14 @@ struct SclSnapshotValue final {
     std::string domain;
     std::string item;
     std::string display;
-    // Typed provenance from the same successful initial MMS wire sample.
-    QVariantMap engineeringEvidence;
+    // Hold only typed q/t samples, never the entire snapshot value payload.
+    // Pure C++ adapter: portable non-Qt SCL profile must still compile.
+    std::unique_ptr<ar::iec61850::mms::MmsDataValue> typedSample;
 };
 
-// Avoid Qt conversion/evidence allocations for non-q/t leaves of huge SCL
-// snapshots; use the one existing typed, fail-closed decoder.
-[[nodiscard]] inline QVariantMap sclSnapshotTypedEvidence(
-    const std::string& item, const ar::iec61850::mms::MmsDataValue& value) {
-    if (item.size() < 2 || item[item.size() - 2] != '$' ||
-        (item.back() != 'q' && item.back() != 't')) return {};
-    return decodeEngineeringEvidence(QString::fromStdString(item), value);
+[[nodiscard]] inline bool isSclTypedEvidenceLeaf(const std::string& item) noexcept {
+    return item.size() >= 2 && item[item.size() - 2] == '$' &&
+           (item.back() == 'q' || item.back() == 't');
 }
 
 namespace detail {
@@ -322,7 +318,9 @@ namespace detail {
                     entry.ied_name + entry.ld_inst,
                     item,
                     ar::iec61850::mms::MmsDataCodec::to_display_string(*leaf.value),
-                    sclSnapshotTypedEvidence(item, *leaf.value),
+                    isSclTypedEvidenceLeaf(item)
+                        ? std::make_unique<ar::iec61850::mms::MmsDataValue>(*leaf.value)
+                        : nullptr,
                 });
             }
         }

@@ -355,8 +355,21 @@ bool MmsClientController::connectToIed() {
 
                 auto model = std::make_shared<mms::MmsLiveModelDocument>(
                     arstack::iedsim::build_scl_live_model(*trustedScl, *snapshot));
-                auto initialValues = std::make_shared<std::vector<arstack::iedsim::SclSnapshotValue>>(
-                    arstack::iedsim::collect_scl_snapshot_values(*trustedScl, *snapshot));
+                const auto snapshotValues =
+                    arstack::iedsim::collect_scl_snapshot_values(*trustedScl, *snapshot);
+                // The portable adapter has no Qt dependency. Convert typed q/t
+                // once on the MMS worker before publishing to the GUI thread.
+                auto initialValues = std::make_shared<QVector<ReadValue>>();
+                initialValues->reserve(static_cast<qsizetype>(snapshotValues.size()));
+                for (const auto& value : snapshotValues) {
+                    const auto evidence = value.typedSample
+                        ? arstack::iedsim::decodeEngineeringEvidence(
+                            QString::fromStdString(value.item), *value.typedSample)
+                        : QVariantMap{};
+                    initialValues->push_back({
+                        snapshotKey(value), QString::fromStdString(value.display),
+                        evidence});
+                }
 
                 worker->discovery.reset();
                 worker->trustedScl = trustedScl;
@@ -371,8 +384,7 @@ bool MmsClientController::connectToIed() {
                             self->treeModel_.applyDocument(*model);
                             for (const auto& value : *initialValues) {
                                 self->treeModel_.applyReadValue(
-                                    snapshotKey(value), QString::fromStdString(value.display),
-                                    value.engineeringEvidence);
+                                    value.key, value.display, value.engineeringEvidence);
                             }
                             self->iedName_ = QString::fromStdString(model->identity.ied_name);
                             self->modelSummary_ = QString::fromStdString(model->summary);
@@ -393,8 +405,7 @@ bool MmsClientController::connectToIed() {
                                     *model, requestedTrustedSclPath);
                                 for (const auto& value : *initialValues) {
                                     self->engineeringContext_->treeModel()->applyReadValue(
-                                        snapshotKey(value), QString::fromStdString(value.display),
-                                    value.engineeringEvidence);
+                                        value.key, value.display, value.engineeringEvidence);
                                 }
                             }
                             self->appendDiagnostic(healthSummary);
