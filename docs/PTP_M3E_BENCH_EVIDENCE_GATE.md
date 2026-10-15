@@ -55,3 +55,60 @@ The gate exits `0` for clean artifact-only preflight or complete consistent seri
 ## Physical acceptance still required
 
 M3E is a **repeatable collection boundary**, not a completed board test. Before considering qualified PTP/SV synchronization, independently measure MAC SV egress timestamps vs external GM/PPS, sustained drift/jitter, epoch second continuity across loss/recovery, and relay/IED acceptance per P2 criteria. Record observed physical deviations and do not upgrade `smpSynch AUTO` or merge to a public stable release based on host capture or the software result.
+
+## M3E.2 — Ordered PTP lifecycle evidence (fail-closed host gate)
+
+An M3E.1 weakness has been closed: a clean PCAP plus a RECEIVER serial log
+showing only `UNLOCKED`/`ACQUIRING` must **not** return
+`softwareEvidenceConsistent=true`. M3E.2 adds an **ordered** operational gate
+that is required alongside serial identity and wire consistency. It consumes
+existing `IDENTIFY`, `PTP2` and `PTP status` lines; it adds no firmware task,
+no ISR instrumentation, no wire decoder and no claim of physical PTP lock.
+
+The `--scenario` option defaults to `auto` (`receiver-acquisition` for
+RECEIVER or `source-ready` for SOURCE). For deliberate negative testing choose:
+
+| Scenario | Required **firmware-reported** sequence |
+| --- | --- |
+| `receiver-acquisition` | `UNLOCKED` or `ACQUIRING` → measured `LOCKED` |
+| `receiver-recovery` | measured `LOCKED` → `HOLDOVER`/`UNLOCKED`/`ACQUIRING`/`FAULT` → measured `LOCKED` |
+| `receiver-gm-handoff` | measured `LOCKED` with GM A → non-LOCKED → measured `LOCKED` with a **different** GM identity/port |
+| `source-ready` | SOURCE reports `PTP status=RUNNING` with nonzero sent Announce, Sync, Follow_Up |
+
+For RECEIVER a usable `LOCKED` line must include selected, nonzero GM
+identity/port and valid numeric offset/path/jitter plus positive Sync,
+Follow_Up, Pdelay and accepted discipline counters. Truncated LOCKED lines,
+zero-evidence counters, direct LOCKED-to-LOCKED GM changes without observed
+demotion, mixed boot IDs or missing 16-hex-digit boot identity are incomplete.
+A new source does **not** inherit the previous locked lease. The gate performs
+one linear pass over log observations, with a 16 MiB serial-input ceiling.
+
+Example: run an acquisition, then separately test loss/recovery on the same
+bench (preserve unedited serial and capture artifacts):
+
+```sh
+python scripts/ptp_m3e_bench_gate.py \
+  --bundle arstack61850-esp32p4-m3d2-bench-7d2d514.zip \
+  --role receiver --scenario receiver-recovery \
+  --serial-log receiver-loss-recovery.log \
+  --pcap receiver-recovery-segment.pcap \
+  --wire-audit ./build-m3e/ariec61850_ptp_sv_wire_audit \
+  --sv-id 'ACTUAL_SVID' --app-id 0x4000 \
+  --counter-modulus 4000 --ptp-domain 0 \
+  --output m3e2-recovery-report.json
+```
+
+Use a **single uninterrupted stable-GM PCAP segment** as the wire input for
+each audit. Retain a separate PCAP for the handoff itself; the existing PTP
+wire auditor intentionally detects mixed GM identity and must not be bypassed
+by relabeling sources or concatenating captures. A positive lifecycle result
+is `operationalLifecycle.status=OBSERVED`, which means only that the board
+reported the required ordered evidence. It cannot prove every transition
+occurred or was measured between serial polls. `softwareEvidenceConsistent`
+now requires **all three** gates: serial identity, ordered operational status,
+and canonical PCAP continuity. All hardware qualification fields remain
+`null`, and AUTO `smpSynch` promotion/public release remain `false`.
+
+All M3E.2 changes are Python host-tool regression/doc additions. The proven
+M3D.2 SOURCE/RECEIVER firmware binaries and native ARStack Studio are not
+rebuilt or modified by this checkpoint.

@@ -23,6 +23,14 @@ IDENTITY = re.compile(r"\bARSTACK identity\b[^\r\n]*?\bbuild=([0-9a-fA-F]{16})\b
 PTP2 = re.compile(r"\bPTP2 role=(SOURCE|RECEIVER|MONITOR) discipline=(UNLOCKED|ACQUIRING|LOCKED|HOLDOVER|FAULT) source=(NONE|[0-9A-Fa-f]{16}/[0-9]+)\b")
 ROLES = {"source": 0, "receiver": 1}
 MAX_ZIP_BYTES = 32 * 1024 * 1024
+MAX_SERIAL_LOG_BYTES = 16 * 1024 * 1024
+SCENARIOS = ("auto", "receiver-acquisition", "receiver-recovery",
+             "receiver-gm-handoff", "source-ready")
+BOOT_ID = re.compile(r"\bboot_id=([a-fA-F0-9]{16})\b")
+SOURCE_READY = re.compile(
+    r"\bPTP status=RUNNING Announce=([0-9]+) Sync=([0-9]+) "
+    r"FollowUp=([0-9]+)\b")
+STATUS_FIELD = re.compile(r"\b([A-Za-z][A-Za-z0-9]*)=([^\s]+)")
 
 class EvidenceError(ValueError):
     pass
@@ -181,6 +189,128 @@ def serial_evidence(data: bytes, role: str, build_id: str) -> dict:
             "note": "Board serial status is not independent GM phase accuracy evidence"}
 
 
+def operational_evidence(data: bytes, role: str, scenario: str) -> dict:
+    """Assess observable *firmware-reported* lifecycle, never PTP accuracy.
+
+    Ordered events are essential: a lock report alone cannot demonstrate
+    acquisition; two locks without an intervening demotion cannot prove
+    restart/recovery; a new grandmaster must never be treated as continuous
+    authority. No second wire protocol decoder or speculative timestamps.
+    """
+    require(role in ROLES and scenario in SCENARIOS, "unknown bench scenario")
+    if scenario == "auto":
+        scenario = "receiver-acquisition" if role == "receiver" else "source-ready"
+    require((role == "source") == (scenario == "source-ready"),
+            "scenario incompatible with firmware role")
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    boot_ids = [m.group(1).lower() for line in lines
+                if IDENTITY.search(line) and (m := BOOT_ID.search(line))]
+    if len(set(boot_ids)) != 1 or not boot_ids:
+        return {"status": "INCOMPLETE", "scenario": scenario,
+                "reason": "one unambiguous 16-digit boot_id required",
+                "reportedLockSamples": 0, "reportedRecovery": False,
+                "reportedGmHandoff": False}
+
+    if role == "source":
+        ready = [tuple(int(x) for x in m.groups())
+                 for line in lines if (m := SOURCE_READY.search(line))]
+        usable = any(all(x > 0 for x in values) for values in ready)
+        return {"status": "OBSERVED" if usable else "INCOMPLETE",
+                "scenario": scenario,
+                "reason": "source Announce+Sync+FollowUp TX readiness reported"
+                          if usable else "verified source TX readiness evidence missing",
+                "reportedSourceReadySamples": sum(all(x > 0 for x in v)
+                                                   for v in ready),
+                "reportedLockSamples": 0,
+                "reportedRecovery": False, "reportedGmHandoff": False}
+
+    snapshots = []
+    invalid_locks = 0
+    for line in lines:
+        m = PTP2.search(line)
+        if not m:
+            continue
+        role_text, state, gm = m.groups()
+        require(role_text == "RECEIVER", "receiver lifecycle contains a different role")
+        fields = dict(STATUS_FIELD.findall(line[m.start():]))
+        valid_lock = False
+        if state == "LOCKED":
+            # Actual firmware emits all of these on each PTP2 SHOW. A
+            # truncated/handwritten line must never satisfy the scenario.
+            numeric = ("offset", "path", "jitter", "rxSync", "rxFollowUp",
+                       "rxPdelay", "accepted")
+            try:
+                measurements = {k: int(fields[k], 10) for k in numeric}
+                gm_clock, gm_port = gm.split("/")
+                valid_lock = (gm_clock != "0" * 16 and int(gm_port) > 0 and
+                              measurements["rxSync"] > 0 and
+                              measurements["rxFollowUp"] > 0 and
+                              measurements["rxPdelay"] > 0 and
+                              measurements["accepted"] > 0 and
+                              measurements["path"] >= 0 and
+                              measurements["jitter"] >= 0)
+            except (KeyError, ValueError):
+                valid_lock = False
+        if state == "LOCKED" and not valid_lock:
+            invalid_locks += 1
+        snapshots.append((state, gm.upper(), valid_lock))
+
+    if not snapshots:
+        return {"status": "INCOMPLETE", "scenario": scenario,
+                "reason": "receiver PTP2 lifecycle missing", "reportedLockSamples": 0,
+                "reportedRecovery": False, "reportedGmHandoff": False}
+    # Require evidence of a prior non-LOCKED state for cold acquisition.
+    # For recovery/switch, a complete measured LOCKED snapshot must occur on
+    # BOTH sides of a demotion. A direct locked->locked GM swap is invalid.
+    acquired = False
+    saw_acquisition = False
+    recovery = False
+    handoff = False
+    unsafe_direct_handoff = False
+    previous_gm = None
+    demoted = False
+    # One O(n) pass over bounded serial events, never O(n^2) prefixes.
+    for state, gm, valid in snapshots:
+        if state != "LOCKED":
+            if state in ("UNLOCKED", "ACQUIRING"):
+                saw_acquisition = True
+            if previous_gm is not None:
+                demoted = True
+        elif valid:
+            if saw_acquisition:
+                acquired = True
+            if previous_gm is not None:
+                if demoted:
+                    recovery = True
+                    if gm != previous_gm:
+                        handoff = True
+                elif gm != previous_gm:
+                    unsafe_direct_handoff = True
+            previous_gm = gm
+            demoted = False
+    satisfied = ({"receiver-acquisition": acquired,
+                  "receiver-recovery": recovery,
+                  "receiver-gm-handoff": handoff}[scenario] and
+                 invalid_locks == 0 and not unsafe_direct_handoff)
+    reasons = {
+        "receiver-acquisition": "UNLOCKED/ACQUIRING then measured LOCKED",
+        "receiver-recovery": "LOCKED, observed demotion, measured LOCKED reacquisition",
+        "receiver-gm-handoff": "LOCKED old GM, demotion, LOCKED different GM",
+    }
+    return {"status": "OBSERVED" if satisfied else "INCOMPLETE",
+            "scenario": scenario,
+            "reason": reasons[scenario] if satisfied else
+                      "required ordered lifecycle evidence not observed",
+            "reportedLockSamples": sum(s == "LOCKED" and v
+                                       for s, _, v in snapshots),
+            "reportedRecovery": recovery, "reportedGmHandoff": handoff,
+            "invalidLockReports": invalid_locks,
+            "directGmHandoffWithoutDemotion": unsafe_direct_handoff,
+            "observedStateSequence": [s for i, (s, _, _) in enumerate(snapshots)
+                                      if i == 0 or s != snapshots[i - 1][0]][:64],
+            "note": "Firmware PTP state is not externally measured GM/phase qualification"}
+
+
 def wire_evidence(audit: dict) -> dict:
     require(audit.get("evidence") == "wire_only_unqualified", "not an ARIEC61850 wire audit")
     require(all(audit.get(x) is None for x in (
@@ -241,6 +371,8 @@ def main() -> int:
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--role", choices=tuple(ROLES), required=True)
     parser.add_argument("--serial-log", type=Path)
+    parser.add_argument("--scenario", choices=SCENARIOS, default="auto",
+                        help="required ordered firmware-reported lifecycle for full evidence")
     parser.add_argument("--pcap", type=Path)
     parser.add_argument("--wire-audit", type=Path,
                         help="built ariec61850_ptp_sv_wire_audit host binary")
@@ -254,8 +386,17 @@ def main() -> int:
         require((args.pcap is None) == (args.wire_audit is None),
                 "PCAP requires --wire-audit, and vice versa")
         firmware = verified_bundle(args.bundle, args.role)
-        serial = (serial_evidence(args.serial_log.read_bytes(), args.role, firmware["buildId"])
-                  if args.serial_log else {"status": "MISSING"})
+        require(args.scenario == "auto" or
+                ((args.role == "source") == (args.scenario == "source-ready")),
+                "scenario incompatible with firmware role")
+        serial = {"status": "MISSING"}
+        lifecycle = {"status": "MISSING", "scenario": args.scenario}
+        if args.serial_log:
+            require(args.serial_log.stat().st_size <= MAX_SERIAL_LOG_BYTES,
+                    "serial evidence too large")
+            serial_bytes = args.serial_log.read_bytes()
+            serial = serial_evidence(serial_bytes, args.role, firmware["buildId"])
+            lifecycle = operational_evidence(serial_bytes, args.role, args.scenario)
         wire = {"status": "MISSING"}
         if args.pcap:
             require(args.sv_id is not None and args.app_id is not None and
@@ -269,9 +410,11 @@ def main() -> int:
             "schema": "arstack-ptp-m3e-bench-gate-v1",
             "firmware": firmware,
             "serial": serial,
+            "operationalLifecycle": lifecycle,
             "wire": wire,
             "softwareEvidenceConsistent": wire["status"] == "CONSISTENT" and
-                                          serial["status"] == "OBSERVED",
+                                          serial["status"] == "OBSERVED" and
+                                          lifecycle["status"] == "OBSERVED",
             "independentHardwarePhaseQualified": None,
             "independentPTPGrandmasterAccuracyQualified": None,
             "relayAcceptanceQualified": None,
