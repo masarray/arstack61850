@@ -16,6 +16,7 @@ fleet_global = (workspace_path.parent / "FleetGlobalDataPane.qml").read_text(enc
 per_ied_global = (workspace_path.parent / "BrowserGlobalDataPane.qml").read_text(encoding="utf-8")
 canonical_header = (workspace_path.parent.parent / "src" / "MmsLiveTreeModel.hpp").read_text(encoding="utf-8")
 canonical_tree = (workspace_path.parent.parent / "src" / "MmsLiveTreeModel.cpp").read_text(encoding="utf-8")
+large_model_qa = (workspace_path.parent.parent / "src" / "ied_browser_large_model_qa.cpp").read_text(encoding="utf-8")
 
 workspace_required = [
     'component RibbonAction: Button',
@@ -141,7 +142,6 @@ if "Timer {" in fleet_global or "readEngineeringSelected()" in fleet_global:
 # both canonical trees. The large-model QA exercises valid/invalid wire cases.
 snapshot_projection = (workspace_path.parent.parent / "src" / "MmsSclClientProjection.hpp").read_text(encoding="utf-8")
 mms_client = (workspace_path.parent.parent / "src" / "MmsClientController.cpp").read_text(encoding="utf-8")
-large_model_qa = (workspace_path.parent.parent / "src" / "ied_browser_large_model_qa.cpp").read_text(encoding="utf-8")
 if ("isSclTypedEvidenceLeaf(item)" not in snapshot_projection or
         "item[item.size() - 2] == '$'" not in snapshot_projection or
         "kMaximumSclInitialTypedEvidence = 96U" not in snapshot_projection or
