@@ -385,6 +385,43 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Capture selected native DA q/t evidence baselines
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          ./build-ied-simulator-qt/arstack_ied_simulator \
+            --browser-model ./tests/fixtures/scl/minimal-station-brcb.scd \
+            --browser-section 0 \
+            --qa-browser-select-mms 'MU01LD0/XCBR1$ST$Pos$q' \
+            --screenshot ./ied-browser-selected-quality.png
+          ./build-ied-simulator-qt/arstack_ied_simulator \
+            --browser-model ./tests/fixtures/scl/minimal-station-brcb.scd \
+            --browser-section 0 \
+            --qa-browser-select-mms 'MU01LD0/XCBR1$ST$Pos$t' \
+            --screenshot ./ied-browser-selected-timestamp.png
+          test -s ./ied-browser-selected-quality.png
+          test -s ./ied-browser-selected-timestamp.png
+          # Do not silently produce a screenshot when the source DA is missing.
+          if ./build-ied-simulator-qt/arstack_ied_simulator \
+              --browser-model ./tests/fixtures/scl/minimal-station-brcb.scd \
+              --browser-section 0 \
+              --qa-browser-select-mms 'MU01LD0/XCBR1$ST$Missing$q' \
+              --screenshot ./ied-browser-nonexistent.png; then
+            echo "Missing MMS item unexpectedly accepted" >&2
+            exit 1
+          fi
+          test ! -e ./ied-browser-nonexistent.png
+
+      - name: Upload selected native DA evidence baselines
+        uses: actions/upload-artifact@v4
+        with:
+          name: ied-browser-selected-da-m2i
+          path: |
+            ied-browser-selected-quality.png
+            ied-browser-selected-timestamp.png
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Prove GUI value is visible through MMS
         run: >-
           python3 apps/ied_simulator/test_gui_live_value.py

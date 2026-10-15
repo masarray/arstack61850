@@ -2,6 +2,7 @@
 
 #include "IedFleetController.hpp"
 #include "IedBrowserFleetController.hpp"
+#include "MmsLiveTreeModel.hpp"
 #include "SclWorkspaceController.hpp"
 
 #include <QCommandLineOption>
@@ -81,6 +82,10 @@ int main(int argc, char* argv[]) {
         QStringLiteral("browser-section"),
         QStringLiteral("Select the initial Browser section (0-6)."),
         QStringLiteral("index")};
+    const QCommandLineOption qaBrowserSelectOption{
+        QStringLiteral("qa-browser-select-mms"),
+        QStringLiteral("QA screenshot only: select an existing canonical MMS DA as DOMAIN/ITEM (requires --browser-model and --screenshot)."),
+        QStringLiteral("domain/item")};
     const QCommandLineOption qaAsyncImportOption{
         QStringLiteral("qa-async-import"),
         QStringLiteral("QA: import one engineering file through the interactive bounded worker and exit."),
@@ -136,6 +141,7 @@ int main(int argc, char* argv[]) {
         sclOption,
         browserModelOption,
         browserSectionOption,
+        qaBrowserSelectOption,
         qaAsyncImportOption,
         qaAsyncImportRepeatOption,
         qaRuntimeCyclesOption,
@@ -208,6 +214,35 @@ int main(int argc, char* argv[]) {
                         }
                     }
                 });
+            }
+        }
+        if (parser.isSet(qaBrowserSelectOption)) {
+            // Explicit offline QA selection. Never synthesize values or cause a
+            // network Read merely to make an engineering screenshot convincing.
+            const QString reference = parser.value(qaBrowserSelectOption);
+            const int slash = reference.indexOf(QLatin1Char('/'));
+            if (!parser.isSet(browserModelOption) || !parser.isSet(screenshotOption) ||
+                slash <= 0 || slash == reference.size() - 1) {
+                qCritical().noquote() << "BROWSER_EVIDENCE_QA_FAIL invalid screenshot selection";
+                QTimer::singleShot(0, &app, [] { QCoreApplication::exit(65); });
+            } else {
+                const QString domain = reference.left(slash);
+                const QString item = reference.mid(slash + 1);
+                QTimer::singleShot(1'350, rootObject,
+                    [rootObject, domain, item] {
+                        auto* const fleet = rootObject->findChild<IedBrowserFleetController*>(
+                            QStringLiteral("iedBrowserFleetBackend"));
+                        auto* context = fleet != nullptr ? fleet->contextAt(0) : nullptr;
+                        auto* tree = context != nullptr
+                            ? qobject_cast<MmsLiveTreeModel*>(
+                                context->property("treeModel").value<QObject*>()) : nullptr;
+                        if (!tree || !tree->selectMmsItem(domain, item)) {
+                            qCritical().noquote()
+                                << "BROWSER_EVIDENCE_QA_FAIL missing canonical MMS DA"
+                                << domain << item;
+                            QCoreApplication::exit(66);
+                        }
+                    });
             }
         }
         int defaultPort = 102;
