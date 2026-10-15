@@ -397,13 +397,23 @@ int main(int argc, char** argv) {
         const auto bounded = arstack::iedsim::collect_scl_snapshot_values(
             engineering, largeSnapshot);
         std::size_t typedVisible{};
-        for (const auto& item : bounded)
+        std::size_t eligibleOrdinal{};
+        bool ordinalMismatch{};
+        for (const auto& item : bounded) {
+            const bool eligible = arstack::iedsim::isSclTypedEvidenceLeaf(item.item);
+            const bool expectedTyped = eligible &&
+                eligibleOrdinal < arstack::iedsim::kMaximumSclInitialTypedEvidence;
+            if (static_cast<bool>(item.typedSample) != expectedTyped)
+                ordinalMismatch = true;
             if (item.typedSample) ++typedVisible;
+            if (eligible) ++eligibleOrdinal;
+        }
+        // Scalar leaves do not consume the q/t budget; assert on candidate
+        // ordinal, not an assumed fixed position in a mixed FC-root batch.
         if (bounded.size() != 150U ||
+            eligibleOrdinal != 149U ||
             typedVisible != arstack::iedsim::kMaximumSclInitialTypedEvidence ||
-            bounded.at(95).typedSample == nullptr ||
-            bounded.at(96).typedSample != nullptr ||
-            bounded.back().display.empty()) {
+            ordinalMismatch || bounded.back().display.empty()) {
             std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL initial_qt_evidence_budget\n";
             return 29;
         }
