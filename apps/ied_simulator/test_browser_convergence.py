@@ -113,6 +113,15 @@ if 'readEngineeringSelected()' in data_set or 'readEngineeringSelected()' in dat
 if data_model.find('BrowserEngineeringEvidence {') > data_model.find('                Repeater {'):
     raise SystemExit("BROWSER_TYPED_EVIDENCE_FAIL typed details below clipped metadata rows")
 
+scl_ingress = (workspace_path.parent.parent / "src" / "IedEngineeringContextController.cpp").read_text(encoding="utf-8")
+for token in [
+    'canonicalFcdaReference(const scl::SclDataSetEntry& entry)',
+    'member.reference = canonicalFcdaReference(entry);',
+    'member.functional_constraint = entry.functional_constraint;',
+]:
+    if token not in scl_ingress:
+        raise SystemExit("BROWSER_DATASET_CANONICAL_FCDA_FAIL missing=" + token)
+
 qa_source = (workspace_path.parent.parent / "src" / "BrowserEvidenceVisualQa.hpp").read_text(encoding="utf-8")
 for token in [
     'BROWSER_EVIDENCE_VISUAL_PASS',

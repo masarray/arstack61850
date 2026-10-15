@@ -3,6 +3,7 @@
 
 #include <QCoreApplication>
 
+#include <array>
 #include <iostream>
 
 namespace scl = ar::iec61850::scl;
@@ -179,6 +180,46 @@ int main(int argc, char** argv) {
         return 8;
     }
 
+    // Real SCL parser reference spelling includes source IED/LD separators
+    // and an FC suffix. The canonical Browser must have one FC-neutral
+    // identity shared by Data Model and DataSets for direct q/t selection.
+    auto sourceStyled = makeIed("IED_A", "192.0.2.10");
+    sourceStyled.model_entries.front().signal_reference =
+        "IED_A/LD0/LLN0.Mod.stVal [ST]";
+    sourceStyled.data_sets.front().entries.front().signal_reference =
+        "IED_A/LD0/LLN0.Mod.stVal [ST]";
+    auto qEntry = sourceStyled.model_entries.front();
+    qEntry.da_name = "q";
+    qEntry.basic_type = "Quality";
+    qEntry.signal_reference = "IED_A/LD0/LLN0.Mod.q [ST]";
+    auto tEntry = sourceStyled.model_entries.front();
+    tEntry.da_name = "t";
+    tEntry.basic_type = "Timestamp";
+    tEntry.signal_reference = "IED_A/LD0/LLN0.Mod.t [ST]";
+    sourceStyled.model_entries.push_back(qEntry);
+    sourceStyled.model_entries.push_back(tEntry);
+    sourceStyled.data_sets.front().entries.push_back(qEntry);
+    sourceStyled.data_sets.front().entries.push_back(tEntry);
+    if (!context.publishSclDocument(sourceStyled, QStringLiteral("/tmp/source-fcda.cid")))
+        return 9;
+    const auto* normalized = context.modelSnapshot();
+    if (!normalized || normalized->data_sets.size() != 1U ||
+        normalized->data_sets.front().members.size() != 3U) return 10;
+    const auto& canonicalMembers = normalized->data_sets.front().members;
+    const std::string canonicalRoot = "IED_ALD0/LLN0.Mod.";
+    const std::array<std::string, 3> leaves{"stVal", "q", "t"};
+    for (std::size_t i = 0U; i < leaves.size(); ++i) {
+        const auto expected = canonicalRoot + leaves[i];
+        if (canonicalMembers[i].reference != expected ||
+            canonicalMembers[i].functional_constraint != "ST" ||
+            context.treeModel()->nodeForReference(
+                QString::fromStdString(expected + "  [ST]"))
+                .value(QStringLiteral("readable")).toBool() != true) {
+            std::cerr << "IED_ENGINEERING_CONTEXT_FAIL canonical_scl_fcda_member\n";
+            return 11;
+        }
+    }
+
     std::cout
         << "IED_ENGINEERING_CONTEXT_PASS"
         << " scl_ingress=pass"
@@ -186,6 +227,7 @@ int main(int argc, char** argv) {
         << " multi_ied_selection=pass"
         << " disconnect_persistence=pass"
         << " structural_authority=pass"
+        << " canonical_scl_fcda_qt=pass"
         << " fingerprint=" << context.structuralFingerprint().toStdString()
         << "\n";
     return 0;
