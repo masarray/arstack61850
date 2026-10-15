@@ -4,6 +4,16 @@
 > **Primary strategy and ownership contract:** [WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md](WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md).
 > **Scope:** installed native ARStack Workbench in apps/ied_simulator. Not a web app, WPF clone, or the separate ESP32-P4/SMV Studio track.
 
+## Active native parity + repository naming work — 2026-10-15
+
+- Work branch: feat/native-workbench-reference-hygiene-arsas-parity-20261015; base main c8aabf292c370993950b8682718cd56b77f2cabf. IN PROGRESS until exact-head CI and merge.
+- Removed prohibited third-party names from source comments, tests and current docs; indexed RCB fixture tests now derive IED/domain identity from validated references instead of a hard-coded vendor label.
+- A lightweight Product Naming Guard workflow checks all tracked source/path names on PR and push.
+- Engine reference map: [ARIEC61850_ARSAS_NATIVE_PORT_MAP.md](ARIEC61850_ARSAS_NATIVE_PORT_MAP.md). ARIEC C# behavior is a reference for missing protocol capabilities; canonical C++/Qt is the runtime SSOT.
+- M2M native UX: DataSets selected attribute inspector now shows ordinary ST/MX/CO DA value, read-state, FC, Quality, IED Timestamp, MMS type and provenance. No implicit MMS read.
+- Post-M2L main [Qt 38701682484](https://github.com/masarray/arstack61850/actions/runs/38701682484), [SCL 38701682271](https://github.com/masarray/arstack61850/actions/runs/38701682271) and [Release Hardening 38701682258](https://github.com/masarray/arstack61850/actions/runs/38701682258): all SUCCESS.
+- Remaining gate: PR exact-head Qt + source review and selected-state screenshot QA. Do not claim physical IED or Windows installer acceptance from synthetic CI.
+
 ## Verified current integration checkpoint — 2026-10-15 (WIB)
 
 **Source baseline at acceptance: main `9cc9bda9c30804be343d49367e4dde6948789d95`.** Refresh live GitHub before further edits. Subsequent documentation-only commits may advance main without changing Workbench source.
@@ -51,7 +61,7 @@
 4. Report member reference and evidence must map to exact received frame ordinal and actual Report ID. Static reporting remains report-only without implicit periodic MMS Read.
 5. Preserve verified bounds: 60k+ node large-model regression, 4,096 detail rows, 64 lazy FCDA DAs, 64 explicit Read targets, 256 per-IED watched objects, 2,048 All-IED rendered objects, 256-char All-IED preview, 256 visible report members, 1,024-char report preview, 96 initial typed q/t details. These are presentation bounds; do not drop authoritative frames.
 6. Scalar Hz and total power (TotW) do not acquire an “angle” through a generic presentation shortcut; only display units/phasor components proven by typed metadata.
-7. Never claim pixel-level IEDScout/ARSAS parity, latest installer parity, or real physical IED interop on synthetic fixtures alone.
+7. Never claim pixel-level reference IEC 61850 client/ARSAS parity, latest installer parity, or real physical IED interop on synthetic fixtures alone.
 
 ## Historical action and owners (superseded; do not execute stale PR merge instructions)
 
@@ -59,7 +69,7 @@
 
 **Canonical/SSOT owner (second):** M2L Measurement semantics and value/q/t/unit/angle provenance on the existing MMS model. Tests for MX vector, scalar Hz, TotW, malformed q/t, unset value, SCL-vs-live authority and source-generation mismatch first.
 
-**QML/UX owner (parallel on disjoint files):** compare ARSAS Explorer live grid, selected-state IEDScout screenshots and ARStack Qt Data Model/DataSets/Reports/SG. Build a screen-state matrix and deterministic native captures; do not change the canonical model or edit #176's All-IED files concurrently.
+**QML/UX owner (parallel on disjoint files):** compare ARSAS Explorer live grid, selected-state reference IEC 61850 client screenshots and ARStack Qt Data Model/DataSets/Reports/SG. Build a screen-state matrix and deterministic native captures; do not change the canonical model or edit #176's All-IED files concurrently.
 
 **Protocol/RCB owner:** preserve exact Reporting contract ([RCB_REPORTING_REFERENCE.md](RCB_REPORTING_REFERENCE.md)); no new polling, invented report values or uncontrolled writes.
 

@@ -2,7 +2,7 @@
 
 **Status:** cross-thread execution contract; first written 2026-10-15 (WIB), against ARStack main a328da13133a and ARSAS main 45348eccf24e941dd185e5fb729217923846c610. **Re-query GitHub before acting.** This is a living strategy, not a claim of completed functionality.
 
-**Product:** the installed **native Qt/QML ARStack Workbench** (apps/ied_simulator), **not** a web GUI, a new desktop app, a WPF port, or the separate ESP32-P4 timing/SV firmware track. The objective is an IEDScout-class engineering workflow while borrowing effective visual/interaction patterns from the ARSAS/ARIEC61850 Windows Explorer. ARStack's own IEC 61850 models and wire evidence remain authoritative.
+**Product:** the installed **native Qt/QML ARStack Workbench** (apps/ied_simulator), **not** a web GUI, a new desktop app, a WPF port, or the separate ESP32-P4 timing/SV firmware track. The objective is an professional IEC 61850 engineering-grade engineering workflow while borrowing effective visual/interaction patterns from the ARSAS/ARIEC61850 Windows Explorer. ARStack's own IEC 61850 models and wire evidence remain authoritative.
 
 ## 0. Read order for every thread
 
@@ -20,16 +20,16 @@
 - [ARSAS shared static DataSet authority](https://github.com/masarray/arsas/blob/45348eccf24e941dd185e5fb729217923846c610/MainWindow.SharedStaticDataSetAuthority.cs): preserve static report-first behavior, without automatic cyclic MMS.
 - [ARSAS IoList FAT workspace](https://github.com/masarray/arsas/blob/45348eccf24e941dd185e5fb729217923846c610/IoListTestingWindow.xaml): multi-IED selection and engineering context.
 
-**Copy the *interaction principles*, not WPF/C# runtime, invented values, unsupported IEC semantics, or duplicated services.** ARSAS' IEC 61850 Explorer is a useful reference, but not proof that every ARSAS screen literally matches an IEDScout tab.
+**Copy the *interaction principles*, not WPF/C# runtime, invented values, unsupported IEC semantics, or duplicated services.** ARSAS' IEC 61850 Explorer is a useful reference, but not proof that every ARSAS screen literally matches an professional engineering tab.
 
 ## 1. Exact baseline, active work and merge dependencies
 
 At creation:
 - ARStack main: [a328da13 (M2J merged)](https://github.com/masarray/arstack61850/commit/a328da13133a6473dc6a28a69f5d2aebab7a7198). M2H [#171](https://github.com/masarray/arstack61850/pull/171), M2I [#173](https://github.com/masarray/arstack61850/pull/173) and M2J [#174](https://github.com/masarray/arstack61850/pull/174) are merged.
 - M2J post-merge Qt, release hardening, SCL-assisted connect and SCL-assisted Workbench workflows completed successfully at this main SHA.
-- **Active integration candidate M2K: [PR #176](https://github.com/masarray/arstack61850/pull/176)**, head **5c5e425c20acb1b849399f39bf62da0f68c0942b** at writing. The SCL-Assisted Workbench CI passed; its exact-head native Qt run [38678320479](https://github.com/masarray/arstack61850/actions/runs/38678320479) was still **in progress** when last inspected. **Do not mark M2K merged/green or start conflicting edits from an assumption.**
+- **Integrated M2K:** PR #176 merged into main at `0cc882022d20f416a33433d5f29a1f8950984d85` with exact-head native Qt and SCL verification.
 - Unmerged PR [#172](https://github.com/masarray/arstack61850/pull/172) (another q/t visual QA branch), [#164](https://github.com/masarray/arstack61850/pull/164) (older q/t branch), and legacy Browser recovery PRs exist. They are **not automatically safe to merge**; review differences against main and accepted M2I/M2J first. Some PTP/SV and native Studio branches are distinct tracks (for example #175).
-- M2K's approved scope is the ARSAS-inspired native All-IED live grid, explicit Quality / IED Timestamp columns, bounded search and truthful sample-received state in the canonical MMS tree, with regression gates. The existing M2K branch owns those files until merged/closed. **One integration owner**, no duplicate competing PR for M2K.
+- **M2K accepted scope:** native All-IED grid, visible Quality / IED Timestamp, bounded search, canonical sample-received state; retain its single SSOT and no polling.
 - Every future milestone lists both base SHA and exact PR head, a bounded change set, CI links, review resolution and merge SHA. Update the companion [current handoff](WORKBENCH_CURRENT_HANDOFF.md) at accepted checkpoints, not after every experimental commit.
 
 ## 2. Authoritative architecture — a single model, multiple views
@@ -83,7 +83,7 @@ Current code authority / edit boundaries:
 - **Static DataSet/RCB must remain report-first/report-only** where configured; no silent periodic Read to fill missing rows. Initial bounded snapshot and user-triggered explicit Read are distinct authorities. URCB reservation and BRCB behavior cannot be collapsed.
 - Controls/write/SG switching/file operations require effective server-state readback/guarded user intent and clear error presentation. A successful request submission alone is not proof of effect.
 
-## 3. UX target and user workflow (ARSAS guidance, IEDScout-class outcome)
+## 3. UX target and user workflow (ARSAS guidance, professional IEC 61850 engineering-grade outcome)
 
 **Primary journey:** Open SCL or Add IED by endpoint -> resolve exact IED/AP/domain -> inspect offline hierarchy -> Connect/Discover/Validate -> browse Data Model/Measurement -> select DA / Read explicitly -> inspect typed Value/Quality/TimeQuality/unit/provenance -> choose bounded DataSet -> inspect ordered FCDA -> inspect report controls -> confirm/enable static RCB under correct guard -> receive evidence mapped to report member -> monitor All-IED grid -> disconnect/reopen without cross-context residue.
 
@@ -121,8 +121,8 @@ Every milestone is a **small vertical slice** (one actual user action through th
 
 | Gate | Scope and dependencies | Merge acceptance |
 | --- | --- | --- |
-| **M2K — ongoing, PR #176** | ARSAS-style All-IED grid + canonical hasReceivedValue; finish exact-head CI and review, **then** merge | visible q/t, correct NOT READ vs empty received, stable coalesced updates, multi-IED P6E and 60k regression, PR SHA matches CI |
-| **M2L — next** | **Canonical measurement semantics / provenance first**, building on merged M2K: correct scalar vs vector, engineering unit, quality, clock, read state, acquisition; one typed projection contract | fixture matrix: MX magnitude, structured vector+angle when valid, frequency (Hz), TotW/power, Boolean, invalid unit/type/q/t, stale generation; no angle on Hz/TotW; no 'LIVE' without sample |
+| **M2K — merged, PR #176** | Native All-IED grid + canonical hasReceivedValue | Preserve existing verified grid/provenance/large-model behavior |
+| **M2L — merged, PR #178** | Canonical exact CDC + MX measurement semantics, authoritative q/t and read source | Preserve integer/float vector and scalar regression, no fictional angle/units, source replacement tests |
 | **M2M** | Data Model and DataSets **rendered native workflow**: selection, FCDA aliases, tree expansion, inspector/read button, per-IED Global Data handoff | deterministic native screenshots with actual selected DA/FCDA (not overview only), no implicit Read, 64 child bound, multi-IED isolation |
 | **M2N** | Reports/RCB and Global Data provenance: requested vs effective RCB; actual report q/t and ordered frame members; consolidated live grid acquisition | static report-only; GI/URCB/BRCB and cleanup, malformed/omitted/segmented report tests, actual selected native screenshot and no cross-IED leakage |
 | **M2O** | Setting Groups / Files / GOOSE productivity and safety; one controller and explicit user workflow per feature | selected SG values and readback, negative/safe control cases, guarded transfer/cancel, configured-vs-live GOOSE state |

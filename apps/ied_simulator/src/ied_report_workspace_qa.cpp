@@ -20,8 +20,8 @@
 #include <functional>
 
 namespace {
-bool isIedScoutIndexedFixture(const QString& sclPath) {
-    return QFileInfo(sclPath).fileName() == QStringLiteral("iedscout-indexed-reports.scd");
+bool isIndexedReportFixture(const QString& sclPath) {
+    return QFileInfo(sclPath).fileName().endsWith(QStringLiteral("indexed-reports.scd"), Qt::CaseInsensitive);
 }
 
 bool verifyIndexedRcbManifestExpansion() {
@@ -82,34 +82,43 @@ bool verifyIndexedRcbManifestExpansion() {
     return brcbExpanded && urcbExpanded && nonIndexedStable;
 }
 
-bool verifyIedScoutIndexedInventory(
+bool verifyIndexedReportInventory(
     const QString& sclPath,
     const QVariantList& reportControls) {
-    if (!isIedScoutIndexedFixture(sclPath)) return true;
+    if (!isIndexedReportFixture(sclPath)) return true;
 
     QSet<QString> references;
+    QString scope;
     bool allConcreteInstancesReadable = true;
     for (const auto& value : reportControls) {
         const auto item = value.toMap();
         const auto reference = item.value(QStringLiteral("reference")).toString();
-        if (reference.isEmpty()) continue;
+        const int separator = reference.lastIndexOf(QLatin1Char('.'));
+        if (separator <= 0) return false;
+        const QString prefix = reference.left(separator);
+        const QString instance = reference.mid(separator + 1);
+        if (scope.isEmpty()) scope = prefix;
+        if (scope != prefix) return false; // No cross-IED/LD/LLN aliasing.
         references.insert(reference);
 
         const bool buffered = item.value(QStringLiteral("buffered")).toBool();
-        const auto expectedReportId = buffered
-            ? QStringLiteral("IEDSCOUT01LD0/LLN0$BR$Buffer")
-            : QStringLiteral("IEDSCOUT01LD0/LLN0$RP$Unbuffer");
+        const QString expectedReportId = scope + (buffered
+            ? QStringLiteral("$BR$Buffer") : QStringLiteral("$RP$Unbuffer"));
+        const bool validInstance = buffered
+            ? (instance == QStringLiteral("Buffer01") || instance == QStringLiteral("Buffer02"))
+            : (instance == QStringLiteral("Unbuffer01") || instance == QStringLiteral("Unbuffer02"));
         allConcreteInstancesReadable = allConcreteInstancesReadable &&
+            validInstance &&
             item.value(QStringLiteral("probeOk")).toBool() &&
             !item.value(QStringLiteral("dataSet")).toString().isEmpty() &&
             item.value(QStringLiteral("reportId")).toString() == expectedReportId;
     }
-
-    static const QSet<QString> expected{
-        QStringLiteral("IEDSCOUT01LD0/LLN0.Buffer01"),
-        QStringLiteral("IEDSCOUT01LD0/LLN0.Buffer02"),
-        QStringLiteral("IEDSCOUT01LD0/LLN0.Unbuffer01"),
-        QStringLiteral("IEDSCOUT01LD0/LLN0.Unbuffer02")};
+    if (scope.isEmpty()) return false;
+    const QSet<QString> expected{
+        scope + QStringLiteral(".Buffer01"),
+        scope + QStringLiteral(".Buffer02"),
+        scope + QStringLiteral(".Unbuffer01"),
+        scope + QStringLiteral(".Unbuffer02")};
     return references == expected && allConcreteInstancesReadable;
 }
 
@@ -198,13 +207,7 @@ int main(int argc, char* argv[]) {
 
     IedFleetController simulator;
     const QString sclPath = QString::fromLocal8Bit(argv[1]);
-    const bool iedScoutFixture = isIedScoutIndexedFixture(sclPath);
-    const QString exactUrcb = iedScoutFixture
-        ? QStringLiteral("IEDSCOUT01LD0/LLN0.Unbuffer01")
-        : QString{};
-    const QString exactBrcb = iedScoutFixture
-        ? QStringLiteral("IEDSCOUT01LD0/LLN0.Buffer01")
-        : QString{};
+    const bool indexedFixture = isIndexedReportFixture(sclPath);
     if (!loadAsync(simulator, sclPath)) {
         qCritical().noquote() << "REPORTS_WORKBENCH_FAIL import" << simulator.fatalError();
         return 4;
@@ -255,7 +258,25 @@ int main(int argc, char* argv[]) {
         qCritical() << "REPORTS_WORKBENCH_FAIL unexpected_dynamic_ownership";
         return 28;
     }
-    if (!verifyIedScoutIndexedInventory(sclPath, reportControls)) {
+    // The fixture's actual IED/domain identity is authoritative. Resolve
+    // concrete RCB instances from the just-received inventory, never from
+    // a vendor-shaped string that could silently miss the selected IED.
+    QString exactUrcb;
+    QString exactBrcb;
+    if (indexedFixture) {
+        for (const auto& value : reportControls) {
+            const QString reference = value.toMap().value(QStringLiteral("reference")).toString();
+            if (reference.endsWith(QStringLiteral(".Unbuffer01")))
+                exactUrcb = reference;
+            else if (reference.endsWith(QStringLiteral(".Buffer01")))
+                exactBrcb = reference;
+        }
+        if (exactUrcb.isEmpty() || exactBrcb.isEmpty()) {
+            qCritical() << "REPORTS_WORKBENCH_FAIL indexed_rcb_identity";
+            return 21;
+        }
+    }
+    if (!verifyIndexedReportInventory(sclPath, reportControls)) {
         QStringList actual;
         for (const auto& value : reportControls) {
             const auto item = value.toMap();
@@ -265,7 +286,7 @@ int main(int argc, char* argv[]) {
                 (item.value(QStringLiteral("probeOk")).toBool() ? QStringLiteral("ok") : QStringLiteral("fail")) +
                 QStringLiteral("|rptID=") + item.value(QStringLiteral("reportId")).toString());
         }
-        qCritical().noquote() << "REPORTS_WORKBENCH_FAIL iedscout_indexed_inventory"
+        qCritical().noquote() << "REPORTS_WORKBENCH_FAIL reference_iec61850_indexed_inventory"
                               << actual.join(QLatin1Char(','));
         return 21;
     }
@@ -418,7 +439,7 @@ int main(int argc, char* argv[]) {
     }
 
     qulonglong brcbGiReports = 0;
-    if (iedScoutFixture) {
+    if (indexedFixture) {
         if (selectEligibleRcb(reports, true, exactBrcb) < 0 ||
             reports.selectedDataSetMembers().isEmpty()) {
             qCritical() << "REPORTS_WORKBENCH_FAIL eligible_brcb";
@@ -464,9 +485,9 @@ int main(int argc, char* argv[]) {
         << "urcb_gi_reports=" + QString::number(reportCountAfterGi)
         << "brcb_gi_reports=" + QString::number(brcbGiReports)
         << "rcb_manifest_instances=pass"
-        << QStringLiteral("iedscout_indexed_inventory=%1").arg(iedScoutFixture ? QStringLiteral("pass") : QStringLiteral("n/a"))
+        << QStringLiteral("reference_iec61850_indexed_inventory=%1").arg(indexedFixture ? QStringLiteral("pass") : QStringLiteral("n/a"))
         << "urcb=pass"
-        << QStringLiteral("brcb_gi=%1").arg(iedScoutFixture ? QStringLiteral("pass") : QStringLiteral("n/a"))
+        << QStringLiteral("brcb_gi=%1").arg(indexedFixture ? QStringLiteral("pass") : QStringLiteral("n/a"))
         << "brcb_inventory=pass"
         << "entryid_indicator=pass"
         << "cleanup=pass"
