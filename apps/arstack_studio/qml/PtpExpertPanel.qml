@@ -301,7 +301,7 @@ SurfacePanel {
                     Label { text: "Announce interval (ms)"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: announceField; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 100; top: 10000 } }
                     Label { text: "Sync interval (ms)"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
-                    NumericField { id: syncField; theme: panel.theme; monoFont: panel.uiFont; text: "250"; validator: IntValidator { bottom: 20; top: 5000 } }
+                    NumericField { id: syncField; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 20; top: 5000 } }
                     CheckBox { id: vlanCheck; text: "VLAN"; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: vlanField; enabled: vlanCheck.checked; theme: panel.theme; monoFont: panel.uiFont; text: "100"; validator: IntValidator { bottom: 1; top: 4094 } }
                     Label { text: "VLAN PCP"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
