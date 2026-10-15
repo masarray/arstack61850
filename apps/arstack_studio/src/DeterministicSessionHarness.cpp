@@ -489,10 +489,11 @@ private:
         if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_start ||
             d.ptpRunning_) return false;
         d.processLine(QStringLiteral("PTP start accepted"));
-        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_runtime) return false;
+        // A PTP-only START must NEVER switch the SV 4I+4V publisher on.
+        if (d.running_ || d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_runtime) return false;
         d.processLine(QStringLiteral(
             "PTP status=RUNNING Announce=1 Sync=1 FollowUp=1 PdelayFrames=0 TXfail=0"));
-        return !d.ptpStarting() && d.ptpRunning_ &&
+        return !d.running_ && !d.ptpStarting() && d.ptpRunning_ &&
             d.ptpRole_ == QStringLiteral("RECEIVER") &&
             d.ptpStatus_.contains(QStringLiteral("external timing still unqualified"));
     }

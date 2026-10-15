@@ -1257,8 +1257,12 @@ void DeviceController::processLine(const QString& rawLine) {
     if (line.isEmpty()) return;
     appendLog(QStringLiteral("←"), line);
 
-    if (line.contains(QStringLiteral("START accepted"), Qt::CaseInsensitive)) setRunning(true);
-    if (line.contains(QStringLiteral("STOP accepted"), Qt::CaseInsensitive)) setRunning(false);
+    // SV lifecycle acknowledgements are not PTP lifecycle acknowledgements.
+    // Never report 4I+4V output RUNNING merely because PTP START succeeded.
+    if (line.contains(QStringLiteral("START accepted: profile armed"), Qt::CaseInsensitive))
+        setRunning(true);
+    if (line.contains(QStringLiteral("STOP accepted: SV transmission suppressed"), Qt::CaseInsensitive))
+        setRunning(false);
 
     auto match = kStateExpression.match(line);
     if (match.hasMatch()) {
