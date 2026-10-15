@@ -640,6 +640,11 @@ int main(int argc, char** argv) {
         addAttribute(phasor, "q", "ST", "bit-string"); // wrong FC must never leak
         addAttribute(phasor, "q", "MX", "bit-string");
         addAttribute(phasor, "t", "MX", "utc-time");
+        auto& integerVector = addObject("PhVInteger", "CMV", MmsLiveModelConfidence::exact);
+        addAttribute(integerVector, "cVal.mag.i", "MX", "integer");
+        addAttribute(integerVector, "cVal.ang.i", "MX", "integer");
+        auto& integerSav = addObject("SavInteger", "SAV", MmsLiveModelConfidence::exact);
+        addAttribute(integerSav, "instMag.i", "MX", "integer");
         for (const std::string name : {"Hz", "TotW"}) {
             auto& scalar = addObject(name, "MV", MmsLiveModelConfidence::exact);
             addAttribute(scalar, "mag.f", "MX", "floating-point");
@@ -720,6 +725,28 @@ int main(int argc, char** argv) {
                 std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL m2l_scalar_false_angle\n";
                 return 42;
             }
+        }
+        received(QStringLiteral("MMXU1$MX$PhVInteger$cVal$mag$i"), QStringLiteral("127"));
+        received(QStringLiteral("MMXU1$MX$PhVInteger$cVal$ang$i"), QStringLiteral("-15"));
+        const auto integerPhasor = measurementModel.nodeForReference(
+            ref(QStringLiteral("PhVInteger")))
+                .value(QStringLiteral("measurement")).toMap();
+        if (integerPhasor.value(QStringLiteral("kind")).toString() != QStringLiteral("vector") ||
+            integerPhasor.value(QStringLiteral("magnitude")).toString() != QStringLiteral("127") ||
+            integerPhasor.value(QStringLiteral("angle")).toString() != QStringLiteral("-15")) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL m2l_integer_analogue_vector\n";
+            return 48;
+        }
+        received(QStringLiteral("MMXU1$MX$SavInteger$instMag$i"), QStringLiteral("42"));
+        const auto integerScalar = measurementModel.nodeForReference(
+            ref(QStringLiteral("SavInteger")))
+                .value(QStringLiteral("measurement")).toMap();
+        if (integerScalar.value(QStringLiteral("kind")).toString() != QStringLiteral("scalar") ||
+            integerScalar.value(QStringLiteral("magnitude")).toString() != QStringLiteral("42") ||
+            integerScalar.contains(QStringLiteral("angle")) ||
+            integerScalar.contains(QStringLiteral("unit"))) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL m2l_integer_analogue_scalar\n";
+            return 49;
         }
         received(QStringLiteral("MMXU1$ST$Health$stVal"), QStringLiteral("true"));
         const auto sourcedStatus = measurementModel.nodeForReference(

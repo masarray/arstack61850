@@ -342,14 +342,14 @@ QVariantMap MmsLiveTreeModel::measurementForNode(const int nodeIndex) const {
 
     // IEC aliases are already indexed at appendNode; use exact reference
     // lookups rather than scanning every sibling once per projected DA row.
-    const auto receivedNumeric = [this, &object](const QString& suffix) -> const Node* {
+    const auto receivedNumeric = [this, &object, objectIndex](const QString& suffix) -> const Node* {
         const auto found = referenceIndex_.constFind(
             object.reference + QLatin1Char('.') + suffix);
         if (found == referenceIndex_.cend()) return nullptr;
         for (const int candidateIndex : found.value()) {
             const auto& child = nodes_.at(candidateIndex);
             if (child.kind != NodeKind::dataAttribute || !child.hasReceivedValue ||
-                child.parent != (&object - nodes_.constData()) ||
+                child.parent != objectIndex ||
                 child.functionalConstraint.compare(QStringLiteral("MX"), Qt::CaseInsensitive) != 0)
                 continue;
             const QString type = child.mmsType.trimmed().toLower();
@@ -366,11 +366,14 @@ QVariantMap MmsLiveTreeModel::measurementForNode(const int nodeIndex) const {
     const Node* angle = nullptr;
     if (vector) {
         magnitude = receivedNumeric(QStringLiteral("cVal.mag.f"));
+        if (!magnitude) magnitude = receivedNumeric(QStringLiteral("cVal.mag.i"));
         angle = receivedNumeric(QStringLiteral("cVal.ang.f"));
+        if (!angle) angle = receivedNumeric(QStringLiteral("cVal.ang.i"));
     } else {
         magnitude = receivedNumeric(QStringLiteral("mag.f"));
         if (!magnitude) magnitude = receivedNumeric(QStringLiteral("mag.i"));
         if (!magnitude) magnitude = receivedNumeric(QStringLiteral("instMag.f"));
+        if (!magnitude) magnitude = receivedNumeric(QStringLiteral("instMag.i"));
     }
     if (!magnitude) return {};
     QVariantMap result;
