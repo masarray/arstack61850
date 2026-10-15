@@ -264,6 +264,9 @@ Rectangle {
                     model: [
                         {label: "Reference", value: root.currentNode.reference},
                         {label: "Value", value: root.currentNode.value},
+                        {label: "Read state", value: root.currentNode.kind === "DA"
+                             ? (root.currentNode.hasReceivedValue === true ? "Received" : "Not read")
+                             : ""},
                         {label: "Quality", value: root.currentNode.quality},
                         {label: "Timestamp", value: root.currentNode.timestamp},
                         {label: "Functional constraint", value: root.currentNode.functionalConstraint},

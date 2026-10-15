@@ -12,6 +12,10 @@ data_set = (workspace_path.parent / "BrowserDataSetPane.qml").read_text(encoding
 navigation = Path(sys.argv[2]).read_text(encoding="utf-8")
 status = Path(sys.argv[3]).read_text(encoding="utf-8")
 data_model = Path(sys.argv[4]).read_text(encoding="utf-8")
+fleet_global = (workspace_path.parent / "FleetGlobalDataPane.qml").read_text(encoding="utf-8")
+per_ied_global = (workspace_path.parent / "BrowserGlobalDataPane.qml").read_text(encoding="utf-8")
+canonical_header = (workspace_path.parent.parent / "src" / "MmsLiveTreeModel.hpp").read_text(encoding="utf-8")
+canonical_tree = (workspace_path.parent.parent / "src" / "MmsLiveTreeModel.cpp").read_text(encoding="utf-8")
 
 workspace_required = [
     'component RibbonAction: Button',
@@ -104,6 +108,30 @@ if data_set.count('BrowserEngineeringEvidence {') != 1:
     raise SystemExit("BROWSER_DATASET_EVIDENCE_FAIL duplicate/hidden evidence inspector")
 if 'readEngineeringSelected()' in data_set or 'readEngineeringSelected()' in data_model:
     raise SystemExit("BROWSER_TYPED_EVIDENCE_FAIL passive inspector initiated MMS Read")
+
+# M2K — migrate ARSAS live-grid presentation while retaining one authoritative
+# per-IED canonical MMS tree and rejecting "readable means LIVE" shortcuts.
+for token in [
+    'objectName: "fleetGlobalDataSearch"',
+    'text: "QUALITY"',
+    'text: "IED TIMESTAMP"',
+    'function requestRefresh()',
+    'Qt.callLater(root.refreshRows)',
+    'rows.setProperty(i, role, next[i][role])',
+    'readonly property int maximumPreviewLength: 256',
+    'onDoubleClicked: root.iedRequested(slotIndex)',
+]:
+    if token not in fleet_global:
+        raise SystemExit("BROWSER_ARSAS_LIVE_GRID_FAIL missing=" + token)
+if ("node.hasReceivedValue === true ? \"LIVE\" : \"NOT READ\"" not in per_ied_global or
+        "bool hasReceivedValue{};" not in canonical_header or
+        'QStringLiteral("hasReceivedValue")' not in canonical_tree or
+        "node.hasReceivedValue = true;" not in canonical_tree or
+        "unread_sample_false_live" not in large_model_qa or
+        "empty_sample_received" not in large_model_qa):
+    raise SystemExit("BROWSER_ARSAS_SSOT_FAIL unread values fabricated as LIVE")
+if "Timer {" in fleet_global or "readEngineeringSelected()" in fleet_global:
+    raise SystemExit("BROWSER_ARSAS_SSOT_FAIL implicit MMS polling or read")
 
 # Typed MMS evidence from the initial trusted-SCL snapshot must survive into
 # both canonical trees. The large-model QA exercises valid/invalid wire cases.
