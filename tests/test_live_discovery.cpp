@@ -498,6 +498,12 @@ void case_distinct_references_are_not_deduplicated() {
         model.logical_devices.front().logical_nodes.front().data_objects.front().attributes;
     CHECK(attributes.size() == 2U);
     CHECK(attributes.front().attribute_path != attributes.back().attribute_path);
+    auto reversed = model;
+    auto& reversed_attributes =
+        reversed.logical_devices.front().logical_nodes.front().data_objects.front().attributes;
+    std::reverse(reversed_attributes.begin(), reversed_attributes.end());
+    CHECK(model.structural_manifest() == reversed.structural_manifest());
+    CHECK(model.structural_fingerprint() == reversed.structural_fingerprint());
 }
 
 void case_distinct_ln_type_probes_are_preserved() {
