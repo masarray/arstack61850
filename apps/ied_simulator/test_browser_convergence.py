@@ -87,6 +87,15 @@ data_set_required = [
     'root.showSelectedEvidence = selected',
     'BrowserEngineeringEvidence {',
     'objectName: "browserDataSetEvidenceInspector"',
+    'objectName: "browserDataSetOpenInDataModel"',
+    'objectName: "browserDataSetWatchSelectedDa"',
+    'signal dataModelRequested()',
+    'signal watchAttributeRequested(var node)',
+    'onClicked: root.dataModelRequested()',
+    'onClicked: root.watchAttributeRequested(root.selectedAttributeNode)',
+    'function onContextChanged() {',
+    'root.selectedAttributeReference = ""',
+    'root.expandedMemberChildren = []',
     'visible: root.selectedAttributeNode.kind === "DA"',
     'root.selectedAttributeNode.hasReceivedValue === true',
     'root.selectedAttributeNode.valueSourceReference',
@@ -115,6 +124,9 @@ if data_set.count('BrowserEngineeringEvidence {') != 1:
     raise SystemExit("BROWSER_DATASET_EVIDENCE_FAIL duplicate/hidden evidence inspector")
 if 'Timer {' in data_set:
     raise SystemExit("BROWSER_DATASET_PROVENANCE_FAIL implicit per-DA timer")
+if ('onDataModelRequested: root.selectSection(0, "Data Model")' not in workspace or
+        'globalDataPane.addSelectedData(node)' not in workspace):
+    raise SystemExit("BROWSER_DATASET_HANDOFF_FAIL use canonical Data Model and per-IED watchlist")
 if 'readEngineeringSelected()' in data_set or 'readEngineeringSelected()' in data_model:
     raise SystemExit("BROWSER_TYPED_EVIDENCE_FAIL passive inspector initiated MMS Read")
 

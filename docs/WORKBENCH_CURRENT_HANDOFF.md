@@ -4,6 +4,14 @@
 > **Primary strategy and ownership contract:** [WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md](WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md).
 > **Scope:** installed native ARStack Workbench in apps/ied_simulator. Not a web app, WPF clone, or the separate ESP32-P4/SMV Studio track.
 
+## M2M native DataSets -> Data Model handoff slice — 2026-10-15
+
+- Branch `feat/workbench-m2m-dataset-da-actions-context-20261015` based on merged #179 main `ce643e81cd7640ed2b694c0914282177f871a9fa`. Keep this section IN PROGRESS until exact-head CI/merge checks.
+- The selected DataSet attribute inspector gains **Data Model ›** (reuse existing canonical selection and explicit Read action) and **Watch DA** (reuse per-IED bounded Global Data addSelectedData), following ARSAS Explorer's short-path navigation without copying .NET/WPF or adding a protocol engine.
+- Context replacement invalidates DataSets' expanded FCDA children and selected DA evidence even when the next IED reuses the same IEC reference. Any action is disabled without a readable selected DA.
+- No extra MMS request or timer; no duplicate SCL/MMS tree. Existing stable indexed 64-child FC-matched DA projection and report-first behavior stay untouched.
+- Native Qt QML smoke / 60k large model / Browser convergence and exact-head SCL-assisted gates required; selected FCDA physical evidence and standalone installed Windows UI parity remain open.
+
 ## Active native parity + repository naming work — 2026-10-15
 
 - Work branch: feat/native-workbench-reference-hygiene-arsas-parity-20261015; base main c8aabf292c370993950b8682718cd56b77f2cabf. IN PROGRESS until exact-head CI and merge.
