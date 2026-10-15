@@ -355,7 +355,7 @@ jobs:
           $uninstall = Join-Path $stableDir 'unins000.exe'
           $removed = Start-Process -FilePath $uninstall -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru
           if ($removed.ExitCode -ne 0) { throw "Migrated Inno uninstall exit $($removed.ExitCode)" }
-          if (Test-Path $newGui -or (Test-Path $innoKey) -or -not (Test-Path $note)) {
+          if ((Test-Path $newGui) -or (Test-Path $innoKey) -or (-not (Test-Path $note))) {
             throw 'Migrated Inno uninstall did not remove owned files safely'
           }
           Remove-Item $note -Force
