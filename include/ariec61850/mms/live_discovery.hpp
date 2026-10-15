@@ -72,10 +72,25 @@ struct MmsReportControlEvidence final {
     [[nodiscard]] bool success() const noexcept { return state.has_value(); }
 };
 
+// Actual outbound confirmed-service attempts, including failed responses.
+// Pure accounting: no extra MMS service and no influence on scheduling.
+struct MmsLiveDiscoveryWireBudget final {
+    std::size_t get_name_list{};
+    std::size_t get_variable_access_attributes{};
+    std::size_t get_named_variable_list_attributes{};
+    std::size_t read_report_controls{};
+
+    [[nodiscard]] std::size_t total() const noexcept {
+        return get_name_list + get_variable_access_attributes +
+            get_named_variable_list_attributes + read_report_controls;
+    }
+};
+
 struct MmsLiveDiscoveryResult final {
     MmsEndpoint endpoint;
     std::string association_profile;
     std::vector<MmsAssociationAttemptEvidence> association_attempts;
+    MmsLiveDiscoveryWireBudget wire_budget;
     MmsDiscoverySnapshot names;
     MmsReportInventory report_inventory;
     std::vector<MmsVariableTypeEvidence> variable_types;
@@ -116,6 +131,7 @@ private:
         MmsGetNameListObjectClass object_class,
         const std::string& domain,
         const MmsLiveDiscoveryOptions& options,
+        MmsLiveDiscoveryWireBudget& wire_budget,
         std::stop_token stop_token);
 
     MmsAssociationRuntime& association_;

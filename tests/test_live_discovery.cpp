@@ -480,6 +480,11 @@ void live_discovery_builds_csharp_compatible_read_only_model() {
         ++read_only_requests;
     }
     CHECK(read_only_requests == 6U);
+    CHECK(result.wire_budget.get_name_list == 3U);
+    CHECK(result.wire_budget.get_variable_access_attributes == 1U);
+    CHECK(result.wire_budget.get_named_variable_list_attributes == 1U);
+    CHECK(result.wire_budget.read_report_controls == 1U);
+    CHECK(result.wire_budget.total() == read_only_requests);
 }
 
 
@@ -628,6 +633,11 @@ void verified_data_set_hints_restore_late_ln_type_schema() {
     }
     CHECK(found_cswi);
     CHECK(transport.sent().size() == 8U); // association (2) + 6 reads
+    CHECK(result.wire_budget.get_name_list == 3U);
+    CHECK(result.wire_budget.get_named_variable_list_attributes == 1U);
+    CHECK(result.wire_budget.get_variable_access_attributes == 2U);
+    CHECK(result.wire_budget.read_report_controls == 0U);
+    CHECK(result.wire_budget.total() == 6U);
 }
 
 void pagination_without_forward_progress_is_rejected() {
