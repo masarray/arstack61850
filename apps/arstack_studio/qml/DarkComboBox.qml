@@ -37,12 +37,12 @@ ComboBox {
     delegate: ItemDelegate {
         id: item
         required property int index
-        required property var modelData
+        // textAt resolves QStringList and QAbstractItemModel textRole.
         width: control.width
         height: 35
         highlighted: control.highlightedIndex === index
         contentItem: Text {
-            text: String(item.modelData)
+            text: control.textAt(item.index)
             font: control.font
             color: control.theme.text
             leftPadding: 9

@@ -35,7 +35,7 @@ SurfacePanel {
             RowLayout {
                 anchors.fill: parent
                 anchors.margins: 12
-                CheckBox { id: enabledCheck; checked: panel.controller.ctSaturationEnabled; text: "Enable CT saturation stress"; font.family: panel.uiFont; font.pixelSize: 10 }
+                DarkCheckBox { id: enabledCheck; theme: panel.theme; checked: panel.controller.ctSaturationEnabled; text: "Enable CT saturation stress"; font.family: panel.uiFont; font.pixelSize: 10 }
                 Item { Layout.fillWidth: true }
                 Label { text: panel.controller.ctSaturationEnabled ? "ACTIVE" : "CLEAN SINE"; color: panel.controller.ctSaturationEnabled ? panel.theme.amber : panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8; font.weight: Font.Bold }
             }
