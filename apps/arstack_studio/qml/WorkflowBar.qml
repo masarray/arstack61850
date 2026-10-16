@@ -703,7 +703,16 @@ SurfacePanel {
             }
             RowLayout {
                 Layout.fillWidth: true
+                spacing: 8
                 Item { Layout.fillWidth: true }
+                CalmButton {
+                    theme: ribbon.theme
+                    uiFont: ribbon.uiFont
+                    text: "Copy diagnostics"
+                    visible: !ribbon.firmwareResultSuccess
+                    implicitWidth: 145
+                    onClicked: StudioClipboard.copyText(smartSession.diagnosticsText())
+                }
                 CalmButton { theme: ribbon.theme; uiFont: ribbon.uiFont; text: "OK"; tone: ribbon.firmwareResultSuccess ? "success" : "normal"; implicitWidth: 100; onClicked: resultDialog.close() }
                 Item { Layout.fillWidth: true }
             }
