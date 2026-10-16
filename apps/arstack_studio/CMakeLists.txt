@@ -97,6 +97,7 @@ qt_add_qml_module(arstack_studio
         qml/ProfileInspector.qml
         qml/ConfigurationHub.qml
         qml/PtpExpertPanel.qml
+        qml/StudioDarkComboBox.qml
         qml/DeviceExpertPanel.qml
         qml/FirmwarePanel.qml
         qml/WaveformExpertPanel.qml

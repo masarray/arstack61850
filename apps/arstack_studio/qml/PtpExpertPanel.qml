@@ -143,59 +143,18 @@ SurfacePanel {
                             font.pixelSize: 9
                             font.weight: Font.DemiBold
                         }
-                        ComboBox {
+                        StudioDarkComboBox {
                             id: modeCombo
                             Layout.fillWidth: true
-                            model: ["Source - provide lab PTP", "Follower - external GM discovery", "Monitor - observe only"]
+                            theme: panel.theme
+                            uiFont: panel.uiFont
+                            model: ["Source — provide lab PTP", "Follower — auto-discover external GM", "Monitor — observe only"]
                             currentIndex: panel.roleIndex(panel.activeRole)
-                            enabled: panel.session && panel.device.ptpAvailable && !panel.device.ptpRunning && !panel.startPending && !panel.session.updatingFirmware
-                            font.family: panel.uiFont
-                            font.pixelSize: 11
-                            palette.text: panel.theme.text
-                            palette.buttonText: panel.theme.text
-                            palette.windowText: panel.theme.text
-                            palette.base: panel.theme.surface2
-                            palette.button: panel.theme.raised
-                            background: Rectangle {
-                                radius: 6
-                                color: panel.theme.surface2
-                                border.color: panel.theme.line
-                            }
-                            contentItem: Text {
-                                text: modeCombo.displayText
-                                color: panel.theme.text
-                                font: modeCombo.font
-                                verticalAlignment: Text.AlignVCenter
-                                leftPadding: 10
-                                rightPadding: 18
-                                elide: Text.ElideRight
-                            }
-                            delegate: ItemDelegate {
-                                width: modeCombo.width
-                                text: modelData
-                                highlighted: modeCombo.highlightedIndex === index
-                                palette.text: panel.theme.text
-                                background: Rectangle {
-                                    color: parent.highlighted ? panel.theme.accentSoft : panel.theme.raised
-                                }
-                            }
-                            popup: Popup {
-                                y: modeCombo.height
-                                width: modeCombo.width
-                                padding: 3
-                                implicitHeight: contentItem.implicitHeight + 6
-                                contentItem: ListView {
-                                    clip: true
-                                    implicitHeight: contentHeight
-                                    model: modeCombo.popup.visible ? modeCombo.delegateModel : null
-                                    currentIndex: modeCombo.highlightedIndex
-                                }
-                                background: Rectangle {
-                                    radius: 7
-                                    color: panel.theme.raised
-                                    border.color: panel.theme.line
-                                }
-                            }
+                            enabled: panel.session && panel.device.ptpAvailable
+                                && !panel.device.ptpRunning && !panel.startPending
+                                && !panel.session.updatingFirmware
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Choose one exclusive PTP role. Source transmits, Follower receives, Monitor listens."
                         }
                     }
 
@@ -235,20 +194,31 @@ SurfacePanel {
                 Label { text: "SV Sample Synchronization · lab simulation"; color: panel.theme.text; font.family: panel.uiFont; font.pixelSize: 12; font.weight: Font.DemiBold }
                 RowLayout {
                     Layout.fillWidth: true
-                    ComboBox {
+                    StudioDarkComboBox {
                         id: svSyncCombo
                         Layout.fillWidth: true
-                        palette.text: panel.theme.text
-                        palette.buttonText: panel.theme.text
-                        palette.base: panel.theme.surface2
-                        palette.windowText: panel.theme.text
-                        background: Rectangle { radius: 6; color: panel.theme.surface2; border.color: panel.theme.line }
-                        model: ["AUTO — measured PTP only", "0 — Not synchronized", "1 — Local synchronized (simulation)", "2 — Global synchronized (simulation)"]
+                        theme: panel.theme
+                        uiFont: panel.uiFont
+                        model: ["AUTO — measured PTP only", "0 — Not synchronized",
+                                "1 — Local sync (simulation)", "2 — Global sync (simulation)"]
                         currentIndex: panel.syncIndex(panel.device.smpSynchMode)
-                        enabled: panel.session && panel.device.deviceVerified && !panel.session.updatingFirmware
-                        font.family: panel.uiFont
-                        font.pixelSize: 9
-                        onActivated: panel.session.requestSmpSynch(["AUTO", "0", "1", "2"][currentIndex])
+                        enabled: panel.session && panel.device.deviceVerified
+                            && !panel.session.updatingFirmware
+                        ToolTip.visible: hovered
+                        ToolTip.text: "This affects the emitted SV smpSynch flag; it does not discipline the sample timer."
+                        onActivated: {
+                            const requested = ["AUTO", "0", "1", "2"][currentIndex]
+                            const accepted = panel.session && panel.session.requestSmpSynch(requested)
+                            // Show the device-confirmed state until the board actually
+                            // accepts/readbacks the new flag, then update reactively.
+                            // Qt.binding preserves the declaration over reconnects,
+                            // rejected commands and external serial changes.
+                            currentIndex = Qt.binding(function() {
+                                return panel.syncIndex(panel.device.smpSynchMode)
+                            })
+                            if (!accepted && panel.controller)
+                                panel.controller.showMessage("SV sync choice was not accepted. Copy diagnostics for details.", true)
+                        }
                     }
                     StateBadge {
                         theme: panel.theme
@@ -260,11 +230,11 @@ SurfacePanel {
                 }
                 Label {
                     Layout.fillWidth: true
-                    text: "AUTO uses measured timing evidence. Select 0 / 1 / 2 to simulate subscriber behavior (the emitted SV flag will be marked SIMULATED)."
+                    text: "AUTO = measured evidence; 0 / 1 / 2 = on-wire simulation flag only. PTP packets and sampling clock are separate."
                     wrapMode: Text.WordWrap
                     color: panel.theme.textSoft
                     font.family: panel.uiFont
-                    font.pixelSize: 8
+                    font.pixelSize: 11
                 }
 
             RowLayout {
