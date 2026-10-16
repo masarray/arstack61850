@@ -204,6 +204,20 @@ Rectangle {
                         suffixText: matrix.groupIndex === 0 ? "A" : "V"
                         text: signalRow.mag.toFixed(3)
                         invalidInput: false
+                        TapHandler {
+                            acceptedButtons: Qt.RightButton
+                            onTapped: {
+                                if (signalRow.rowIndex < 3) magnitudeMenu.popup()
+                            }
+                        }
+                        SignalQuickMenu {
+                            id: magnitudeMenu
+                            theme: matrix.theme
+                            controller: matrix.controller
+                            groupIndex: matrix.groupIndex
+                            rowIndex: signalRow.rowIndex
+                            phaseMode: false
+                        }
                         onActiveFocusChanged: {
                             if (activeFocus) {
                                 matrix.controller.selectSignal(matrix.groupIndex, signalRow.rowIndex)
@@ -254,6 +268,20 @@ Rectangle {
                         suffixText: "°"
                         text: signalRow.angle.toFixed(2)
                         invalidInput: false
+                        TapHandler {
+                            acceptedButtons: Qt.RightButton
+                            onTapped: {
+                                if (signalRow.rowIndex < 3) phaseMenu.popup()
+                            }
+                        }
+                        SignalQuickMenu {
+                            id: phaseMenu
+                            theme: matrix.theme
+                            controller: matrix.controller
+                            groupIndex: matrix.groupIndex
+                            rowIndex: signalRow.rowIndex
+                            phaseMode: true
+                        }
                         onActiveFocusChanged: {
                             if (activeFocus) {
                                 matrix.controller.selectSignal(matrix.groupIndex, signalRow.rowIndex)

@@ -93,6 +93,9 @@ qt_add_qml_module(arstack_studio
         qml/RibbonAction.qml
         qml/CalmButton.qml
         qml/NumericField.qml
+        qml/DarkComboBox.qml
+        qml/DarkCheckBox.qml
+        qml/SignalQuickMenu.qml
         qml/StateBadge.qml
         qml/ProfileInspector.qml
         qml/ConfigurationHub.qml

@@ -298,6 +298,36 @@ ApplicationWindow {
         return true
     }
 
+    // Three-phase lab shortcuts; neutral is deliberately untouched.
+    // Existing live setpoint session owns the serial writer and ordering.
+    function quickSetGroup(group, row, action) {
+        if (row < 0 || row > 2) return false
+        var model = groupModel(group)
+        var anchor = model.get(row)
+        var i
+        if (action === "equal_value") {
+            if (!validMagnitude(group, anchor.magnitude)) return false
+            for (i = 0; i < 3; ++i) model.setProperty(i, "magnitude", anchor.magnitude)
+        } else if (action === "equal_angle") {
+            if (signalFrequency <= 0 || !validPhase(anchor.phase)) return false
+            for (i = 0; i < 3; ++i) model.setProperty(i, "phase", anchor.phase)
+        } else if (action === "balance_angle") {
+            if (signalFrequency <= 0 || !validPhase(anchor.phase)) return false
+            var a = anchor.phase + (row === 1 ? 120 : row === 2 ? -120 : 0)
+            var angles = [normalizedAngle(a), normalizedAngle(a - 120), normalizedAngle(a + 120)]
+            for (i = 0; i < 3; ++i) model.setProperty(i, "phase", angles[i])
+        } else return false
+        selectSignal(group, row)
+        if (workflowBar.session && workflowBar.session.liveControlReady && !sendLinkedGroup(group)) {
+            showMessage("ABC changed locally; one or more live setpoints were rejected. Copy diagnostics.", true)
+            return false
+        }
+        showMessage((group === 0 ? "Current" : "Voltage") + " ABC: " +
+                    (action === "equal_value" ? "Equal Value" : action === "equal_angle" ? "Equal Angle" : "Balance 120°") +
+                    " · neutral unchanged", false)
+        return true
+    }
+
     function applyAllSignals() {
         if (!workflowBar.session || !workflowBar.session.liveControlReady) return
         workflowBar.session.requestSetFrequency(signalFrequency)
@@ -472,10 +502,10 @@ ApplicationWindow {
 
     Window {
         id: configurationWindow
-        width: 760
-        height: 780
-        minimumWidth: 640
-        minimumHeight: 660
+        width: 860
+        height: 750
+        minimumWidth: 700
+        minimumHeight: 620
         visible: false
         title: "ARStack Studio · Advanced"
         color: studioTheme.bg
@@ -485,27 +515,17 @@ ApplicationWindow {
             configurationWindow.hide()
         }
 
-        DockFrame {
+        ConfigurationHub {
+            id: profilePanel
             anchors.fill: parent
-            anchors.margins: 10
+            anchors.margins: 18
             theme: studioTheme
-            titleText: "Advanced"
-            statusText: device.deviceVerified ? "DEVICE CONNECTED" : "OFFLINE"
+            controller: root
+            device: device
+            profiles: sclProfiles
+            session: workflowBar.session
             uiFont: root.uiFont
             monoFont: root.monoFont
-            closable: false
-
-            ConfigurationHub {
-                id: profilePanel
-                anchors.fill: parent
-                theme: studioTheme
-                controller: root
-                device: device
-                profiles: sclProfiles
-                session: workflowBar.session
-                uiFont: root.uiFont
-                monoFont: root.monoFont
-            }
         }
     }
 
@@ -726,7 +746,8 @@ ApplicationWindow {
                                 CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "50"; implicitWidth: 44; onClicked: root.setFrequencyValue(50) }
                                 CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "60"; implicitWidth: 44; onClicked: root.setFrequencyValue(60) }
                                 Rectangle { width: 1; height: 24; color: studioTheme.lineSoft }
-                                CheckBox {
+                                DarkCheckBox {
+                                    theme: studioTheme
                                     enabled: root.signalFrequency > 0
                                     checked: root.phaseLink
                                     text: "3-phase link"
