@@ -2,6 +2,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import ARStack.Studio 1.0
 
 SurfacePanel {
     id: panel
@@ -256,6 +257,13 @@ SurfacePanel {
                     text: "Refresh"
                     enabled: panel.session && panel.device.deviceVerified && !panel.session.updatingFirmware
                     onClicked: panel.session.requestPtpRefresh()
+                }
+                CalmButton {
+                    theme: panel.theme
+                    uiFont: panel.uiFont
+                    text: "Copy diagnostics"
+                    enabled: panel.session
+                    onClicked: StudioClipboard.copyText(panel.session.diagnosticsText())
                 }
                 Item { Layout.fillWidth: true }
                 DarkCheckBox {
