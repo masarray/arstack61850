@@ -318,12 +318,28 @@ ApplicationWindow {
             for (i = 0; i < 3; ++i) model.setProperty(i, "phase", angles[i])
         } else return false
         selectSignal(group, row)
-        if (workflowBar.session && workflowBar.session.liveControlReady && !sendLinkedGroup(group)) {
-            showMessage("ABC changed locally; one or more live setpoints were rejected. Copy diagnostics.", true)
-            return false
+        var submitted = false
+        if (workflowBar.session && workflowBar.session.liveControlReady) {
+            var batch = []
+            for (i = 0; i < 3; ++i) {
+                var channel = model.get(i)
+                batch.push({
+                    signalId: channel.signalId,
+                    magnitude: channel.magnitude,
+                    phase: channel.phase,
+                    quality: Number(channel.quality) >>> 0
+                })
+            }
+            submitted = workflowBar.session.requestSetSignalsBatch(
+                batch, currentScale, voltageScale)
+            if (!submitted) {
+                showMessage("ABC changed locally; complete live batch rejected. Copy diagnostics.", true)
+                return false
+            }
         }
         showMessage((group === 0 ? "Current" : "Voltage") + " ABC: " +
                     (action === "equal_value" ? "Equal Value" : action === "equal_angle" ? "Equal Angle" : "Balance 120°") +
+                    (submitted ? " · 3 commands submitted together" : " · offline preview") +
                     " · neutral unchanged", false)
         return true
     }

@@ -179,6 +179,11 @@ public:
         quint32 quality,
         double currentCountsPerAmp,
         double voltageCountsPerVolt);
+    // One all-or-none worker FIFO admission for fast ABC operator actions.
+    Q_INVOKABLE bool requestSetSignalsBatch(
+        const QVariantList& signals,
+        double currentCountsPerAmp,
+        double voltageCountsPerVolt);
     Q_INVOKABLE bool requestSetEnabled(const QString& signalId, const bool enabled) {
         return liveControlReady() && device_ != nullptr && device_->setEnabled(signalId, enabled);
     }
