@@ -119,7 +119,13 @@ SurfacePanel {
                     checked: panel.device.ptpRunning
                     enabled: panel.controlReady && !panel.startPending
                     onClicked: {
-                        if (checked) panel.startSelectedMode()
+                        // AbstractButton toggles its local checked property before
+                        // the async firmware ACK. Restore the only authoritative
+                        // device-state binding immediately: rejected START must
+                        // never leave this switch falsely showing ON.
+                        var requestedOn = checked
+                        checked = Qt.binding(function() { return panel.device.ptpRunning })
+                        if (requestedOn) panel.startSelectedMode()
                         else panel.session.requestStopPtp()
                     }
                     font.family: panel.uiFont
