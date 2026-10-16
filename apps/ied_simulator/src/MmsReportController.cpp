@@ -405,7 +405,14 @@ void probeContextReportControls(
         }
         mms::MmsReportControlEvidence evidence;
         evidence.candidate = candidate;
-        evidence.requested_attributes = candidate.attributes;
+        // The canonical inventory lists readable fields AND supported
+        // trigger/write surfaces. GI is a command, not a mandatory Read.
+        // Do not fail live attach on IEDs that expose GI as write-only.
+        evidence.requested_attributes.reserve(candidate.attributes.size());
+        for (const auto& attribute : candidate.attributes) {
+            if (attribute != "GI")
+                evidence.requested_attributes.push_back(attribute);
+        }
         try {
             const auto invokeId = association.next_invoke_id();
             const auto request = mms::MmsReportControlStateMapper::build_read_request(
