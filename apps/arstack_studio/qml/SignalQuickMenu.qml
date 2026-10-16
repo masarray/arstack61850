@@ -12,7 +12,9 @@ Menu {
     width: 238
     padding: 5
     background: Rectangle { radius: 8; color: quick.theme.raised; border.width: 1; border.color: quick.theme.line }
-    delegate: MenuItem {
+    // Inline menu items share the same explicit dark presentation, including
+    // declarative MenuItem children (Menu.delegate only styles Actions).
+    component QuickAction: MenuItem {
         id: action
         implicitWidth: quick.width - 10
         implicitHeight: 34
@@ -25,12 +27,12 @@ Menu {
         }
         background: Rectangle { radius: 6; color: action.highlighted ? quick.theme.accentSoft : "transparent" }
     }
-    MenuItem {
+    QuickAction {
         text: quick.phaseMode ? "Equal Angle · A B C" : "Equal Value · A B C"
         onTriggered: quick.controller.quickSetGroup(quick.groupIndex, quick.rowIndex,
                                                      quick.phaseMode ? "equal_angle" : "equal_value")
     }
-    MenuItem {
+    QuickAction {
         visible: quick.phaseMode
         height: visible ? implicitHeight : 0
         text: "Balance ABC · 120°"
