@@ -13,6 +13,17 @@ ApplicationWindow {
     visible: true
     title: "ARStack Studio · SMV + PTP · v" + Qt.application.version
     color: studioTheme.bg
+    // Dark control palette inherited by native Controls (ComboBox/CheckBox).
+    // Without this the platform Windows style can render black text on
+    // Studio's intentionally dark backgrounds.
+    palette.window: studioTheme.bg
+    palette.windowText: studioTheme.text
+    palette.base: studioTheme.surface2
+    palette.text: studioTheme.text
+    palette.button: studioTheme.raised
+    palette.buttonText: studioTheme.text
+    palette.highlight: studioTheme.accentSoft
+    palette.highlightedText: studioTheme.text
 
     StudioTheme { id: studioTheme }
 
@@ -515,6 +526,12 @@ ApplicationWindow {
         visible: false
         title: "ARStack Studio · Advanced"
         color: studioTheme.bg
+        palette.window: studioTheme.bg
+        palette.windowText: studioTheme.text
+        palette.base: studioTheme.surface2
+        palette.text: studioTheme.text
+        palette.button: studioTheme.raised
+        palette.buttonText: studioTheme.text
 
         onClosing: function(close) {
             close.accepted = false

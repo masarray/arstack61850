@@ -262,6 +262,16 @@ SurfacePanel {
                     enabled: panel.session && panel.device.deviceVerified && !panel.session.updatingFirmware
                     onClicked: panel.session.requestPtpRefresh()
                 }
+                CalmButton {
+                    theme: panel.theme
+                    uiFont: panel.uiFont
+                    text: "Copy diagnostics"
+                    enabled: panel.session && panel.device.deviceVerified
+                    onClicked: {
+                        StudioClipboard.copyText(panel.session.diagnosticsText())
+                        if (panel.controller) panel.controller.showMessage("PTP and firmware diagnostics copied.", false)
+                    }
+                }
                 Item { Layout.fillWidth: true }
                 CheckBox {
                     text: "Advanced settings"
