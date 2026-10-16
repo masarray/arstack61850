@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <limits>
 #include <stdexcept>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
