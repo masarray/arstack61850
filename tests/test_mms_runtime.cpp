@@ -374,6 +374,82 @@ void confirmed_exchange_timeout_closes_transport_and_can_reconnect() {
     CHECK(transport.connect_count() == 2U);
 }
 
+
+void confirmed_exchange_rejects_unexpected_invoke_instead_of_caching_it() {
+    ScriptedTransport transport;
+    queue_handshake(transport);
+    mms::MmsAssociationRuntime runtime{transport};
+    runtime.connect({"127.0.0.1", 102U});
+
+    const auto expected_id = runtime.next_invoke_id();
+    const auto unexpected_id = runtime.next_invoke_id();
+    mms::MmsReadRequest request;
+    request.invoke_id = expected_id;
+    request.variables.push_back(
+        mms::MmsObjectName::domain_specific("LD0", "LLN0$ST$Mod$stVal"));
+    const auto request_bytes = mms::MmsServiceCodec::encode_read_request_p_data(request);
+
+    mms::MmsReadResponse unexpected;
+    unexpected.invoke_id = unexpected_id;
+    unexpected.results.push_back({mms::MmsDataValue::boolean(false), std::nullopt});
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_read_response_p_data(unexpected)));
+
+    // This matching response would previously let the first exchange succeed
+    // and leave the unrelated response cached for a later unsent request.
+    mms::MmsReadResponse matching;
+    matching.invoke_id = expected_id;
+    matching.results.push_back({mms::MmsDataValue::boolean(true), std::nullopt});
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_read_response_p_data(matching)));
+
+    bool request_sent = false;
+    check_throws<mms::MmsAssociationRuntimeError>([&] {
+        static_cast<void>(runtime.exchange_confirmed(
+            request_bytes, expected_id, {}, &request_sent));
+    });
+    CHECK(request_sent);
+    CHECK(transport.sent().size() == 3U); // COTP, AARQ, exactly one MMS request
+    CHECK(runtime.state() == mms::MmsAssociationRuntimeState::faulted);
+    CHECK(!transport.connected());
+    CHECK(!runtime.last_fault().empty());
+}
+
+void confirmed_exchange_rejects_idle_orphan_without_sending() {
+    ScriptedTransport transport;
+    queue_handshake(transport);
+    mms::MmsAssociationRuntime runtime{transport};
+    runtime.connect({"127.0.0.1", 102U});
+
+    const auto invoke_id = runtime.next_invoke_id();
+    mms::MmsReadResponse orphan;
+    orphan.invoke_id = invoke_id;
+    orphan.results.push_back({mms::MmsDataValue::boolean(false), std::nullopt});
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_read_response_p_data(orphan)));
+
+    mms::MmsPduEnvelope idle_received;
+    CHECK(runtime.try_poll_once_for(std::chrono::milliseconds{1}, idle_received));
+    CHECK(idle_received.confirmed_result());
+
+    mms::MmsReadRequest request;
+    request.invoke_id = invoke_id;
+    request.variables.push_back(
+        mms::MmsObjectName::domain_specific("LD0", "LLN0$ST$Mod$stVal"));
+    const auto request_bytes = mms::MmsServiceCodec::encode_read_request_p_data(request);
+    const auto sent_before = transport.sent().size();
+
+    bool request_sent = true;
+    check_throws<mms::MmsAssociationRuntimeError>([&] {
+        static_cast<void>(runtime.exchange_confirmed(
+            request_bytes, invoke_id, {}, &request_sent));
+    });
+    CHECK(!request_sent);
+    CHECK(transport.sent().size() == sent_before);
+    CHECK(runtime.state() == mms::MmsAssociationRuntimeState::faulted);
+    CHECK(!transport.connected());
+}
+
 [[nodiscard]] mms::MmsReportControlCandidate make_urcb_candidate() {
     mms::MmsReportControlCandidate candidate;
     candidate.domain = "LD0";
@@ -688,6 +764,8 @@ int main() {
         {"association profile fallback", association_retries_legacy_profile_after_balanced_rejection},
         {"association cancellation and reconnect", association_rejects_cancelled_connect_and_can_reconnect},
         {"confirmed exchange timeout closes transport and reconnects", confirmed_exchange_timeout_closes_transport_and_can_reconnect},
+        {"unexpected confirmed invoke fails closed", confirmed_exchange_rejects_unexpected_invoke_instead_of_caching_it},
+        {"orphan confirmed result cannot acknowledge unsent request", confirmed_exchange_rejects_idle_orphan_without_sending},
         {"report subscription lifecycle", subscription_runtime_reserves_enables_receives_and_cleans_up},
         {"report cleanup after association loss", subscription_marks_cleanup_required_when_association_is_lost},
         {"report takeover protection", subscription_does_not_take_over_an_enabled_rcb},

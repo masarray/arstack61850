@@ -683,13 +683,15 @@ MmsConfirmedExchangeResult MmsAssociationRuntime::exchange_confirmed(
             "Confirmed exchange payload does not contain the expected invoke ID.");
     }
 
-    MmsPduEnvelope queued;
-    if (invoke_router_.try_dequeue(expected_invoke_id, queued)) {
-        return {std::move(queued), {}};
-    }
-
     const auto deadline = deadline_after(options_.request_timeout);
     try {
+        // This runtime owns one synchronous confirmed exchange at a time.
+        // A result routed by idle polling or a previous operation cannot
+        // acknowledge a request that has not been transmitted yet.
+        if (invoke_router_.queued_confirmed_count() != 0U) {
+            throw MmsAssociationRuntimeError(
+                "Unsolicited queued MMS confirmed result before a new request.");
+        }
         send_application_payload(presentation_payload, deadline, stop_token);
         if (request_sent != nullptr) *request_sent = true;
         add_event(MmsAssociationEventKind::confirmed_request_sent,
@@ -700,6 +702,14 @@ MmsConfirmedExchangeResult MmsAssociationRuntime::exchange_confirmed(
              ++index) {
             auto received = receive_application_payload(deadline, stop_token);
             auto envelope = route_received_payload(received);
+            if (envelope.confirmed_result() &&
+                !envelope.matches_invoke(expected_invoke_id)) {
+                // A second invoke ID has no legitimate in-flight owner in
+                // this serial runtime. Fail this association rather than
+                // caching a response to satisfy a future, unsent request.
+                throw MmsAssociationRuntimeError(
+                    "Unexpected MMS confirmed result invoke ID in serial exchange.");
+            }
             if (envelope.confirmed_result() &&
                 envelope.matches_invoke(expected_invoke_id)) {
                 MmsPduEnvelope matched;
