@@ -740,6 +740,23 @@ ApplicationWindow {
                             color: "#0b1219"
                             border.width: 0
 
+                            StudioActionMenu {
+                                id: frequencyMenu
+                                theme: studioTheme
+                                uiFont: root.uiFont
+                                x: 80
+                                y: 45
+                                Action { text: "FREQUENCY  ·  SHARED"; enabled: false }
+                                Action { text: "DC mode  ·  0 Hz"; onTriggered: root.setWaveformMode("DC") }
+                                Action { text: "50 Hz  ·  nominal lab preset"; onTriggered: root.setFrequencyValue(50) }
+                                Action { text: "60 Hz  ·  lab preset"; onTriggered: root.setFrequencyValue(60) }
+                                MenuSeparator {}
+                                Action {
+                                    text: "Return to last AC frequency"
+                                    enabled: root.previousAcFrequency > 0
+                                    onTriggered: root.setWaveformMode("AC")
+                                }
+                            }
                             RowLayout {
                                 anchors.fill: parent
                                 anchors.leftMargin: 11
@@ -756,6 +773,14 @@ ApplicationWindow {
                                 }
                                 NumericField {
                                     id: frequencyField
+                                    ToolTip.visible: hovered && !activeFocus
+                                    ToolTip.delay: 650
+                                    ToolTip.text: "Right-click for DC / 50 Hz / 60 Hz and AC restoration"
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        acceptedButtons: Qt.RightButton
+                                        onClicked: frequencyMenu.popup()
+                                    }
                                     theme: studioTheme
                                     monoFont: root.monoFont
                                     compact: root.compactLayout

@@ -38,6 +38,8 @@ Menu {
             border.color: menu.theme.accent
         }
     }
+    // Render the same separators on Windows rather than native light lines.
+    // All commands are Qt Actions so disabled/keyboard behavior remains native.
     background: Rectangle {
         color: menu.theme.menuSurface
         radius: menu.theme.menuRadius
