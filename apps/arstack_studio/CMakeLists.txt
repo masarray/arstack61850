@@ -36,6 +36,8 @@ set(ARSTACK_STUDIO_CORE_SOURCES
 
 qt_add_executable(arstack_studio
     src/main.cpp
+    src/StudioClipboard.cpp
+    src/StudioClipboard.hpp
     ${ARSTACK_STUDIO_CORE_SOURCES}
 )
 

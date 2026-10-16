@@ -42,6 +42,7 @@ class SmartSessionController : public QObject {
     Q_PROPERTY(QString expectedFirmwareBuildId READ expectedFirmwareBuildId NOTIFY stateChanged)
     Q_PROPERTY(QString deviceFirmwareVersion READ deviceFirmwareVersion NOTIFY stateChanged)
     Q_PROPERTY(QString deviceFirmwareBuildId READ deviceFirmwareBuildId NOTIFY stateChanged)
+    Q_PROPERTY(QString firmwareUpdateResult READ firmwareUpdateResult NOTIFY stateChanged)
     Q_PROPERTY(qulonglong sessionGeneration READ sessionGeneration NOTIFY stateChanged)
     Q_PROPERTY(PortOwner portOwner READ portOwner NOTIFY stateChanged)
 
@@ -205,6 +206,8 @@ public:
     Q_INVOKABLE bool retryFirmwareSetup();
     Q_INVOKABLE bool retryIdentification();
     Q_INVOKABLE bool retryProfileSync();
+    Q_INVOKABLE QString diagnosticsText() const;
+    [[nodiscard]] QString firmwareUpdateResult() const { return lastFirmwareUpdateResult_; }
 
 signals:
     void dependenciesChanged();
@@ -380,6 +383,7 @@ private:
     QString updatePort_;
     QString blankBoardPort_;
     QString setupErrorStatus_;
+    QString lastFirmwareUpdateResult_;
     QString profileSyncBaselineGeneration_;
     QString profileSyncBootId_;
     QString profileSyncError_;

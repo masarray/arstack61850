@@ -7,6 +7,7 @@
 #include "SclProfileModel.hpp"
 
 #include <QVariantMap>
+#include <QStringList>
 
 #include <algorithm>
 #include <limits>
@@ -478,6 +479,7 @@ bool SmartSessionController::beginFirmwareOperation(const QString& portName) {
     resetProfileSync(true);
     setupError_ = false;
     setupErrorStatus_.clear();
+    lastFirmwareUpdateResult_.clear();
 
     if (device_->running()) {
         updateStage_ = UpdateStage::stopping;
@@ -503,6 +505,7 @@ bool SmartSessionController::retryFirmwareUpdate() {
     if (device_ == nullptr || firmware_ == nullptr || updatePort_.isEmpty() || firmware_->busy()) return false;
     setupError_ = false;
     setupErrorStatus_.clear();
+    lastFirmwareUpdateResult_.clear();
     blankBoardDetected_ = false;
     updateRequested_ = true;
     updateReconnectAttempts_ = 0;
@@ -861,6 +864,76 @@ void SmartSessionController::clearBlankBoardContext() {
     setupErrorStatus_.clear();
 }
 
+QString SmartSessionController::diagnosticsText() const {
+    // Operator-triggered read-only snapshot; does not touch serial ownership.
+    QStringList rows;
+    auto add = [&rows](const QString& key, const QString& value) {
+        rows << key + QStringLiteral(": ") + (value.isEmpty() ? QStringLiteral("-") : value);
+    };
+    rows << QStringLiteral("ARStack Studio field diagnostics")
+         << QStringLiteral("Device telemetry is reported, not independently verified on wire.");
+    add(QStringLiteral("Studio version"), expectedFirmwareVersion());
+    add(QStringLiteral("Session state"), state_);
+    add(QStringLiteral("Session status"), statusText_);
+    add(QStringLiteral("Session generation"), QString::number(sessionGeneration_));
+    add(QStringLiteral("Serial owner"), portOwner_ == PortOwner::deviceSession
+        ? QStringLiteral("device session") : portOwner_ == PortOwner::firmwareTool
+        ? QStringLiteral("firmware tool") : QStringLiteral("none"));
+    add(QStringLiteral("Firmware update stage"), firmwareUpdateStage());
+    add(QStringLiteral("Last firmware update result"), lastFirmwareUpdateResult_);
+    add(QStringLiteral("Setup error"), setupErrorStatus_);
+    if (firmware_ != nullptr) {
+        add(QStringLiteral("Bundled firmware version"), firmware_->firmwareVersion());
+        add(QStringLiteral("Bundled build ID"), firmware_->firmwareBuildId());
+        add(QStringLiteral("Bundled firmware SHA256"), firmware_->firmwareSha256());
+        add(QStringLiteral("Firmware service status"), firmware_->status());
+        add(QStringLiteral("Firmware target"), firmware_->targetChip());
+        add(QStringLiteral("Firmware operation busy"), firmware_->busy() ? QStringLiteral("yes") : QStringLiteral("no"));
+    }
+    if (profiles_ != nullptr && profiles_->hasProfiles()) {
+        const QVariantMap profile = profiles_->selectedProfile();
+        add(QStringLiteral("Configured SV ID"), profile.value(QStringLiteral("svId")).toString());
+        add(QStringLiteral("Configured APPID"), profile.value(QStringLiteral("appId")).toString());
+        add(QStringLiteral("Configured publisher fps"), profile.value(QStringLiteral("publisherRate")).toString());
+        add(QStringLiteral("Configured counter wrap"), profile.value(QStringLiteral("counterModulus")).toString());
+        add(QStringLiteral("Configured payload bytes"), profile.value(QStringLiteral("payloadBytes")).toString());
+    }
+    if (device_ != nullptr) {
+        add(QStringLiteral("Device verified"), device_->deviceVerified() ? QStringLiteral("yes") : QStringLiteral("no"));
+        add(QStringLiteral("COM port"), device_->portName());
+        add(QStringLiteral("Device product"), device_->deviceProduct());
+        add(QStringLiteral("Device target"), device_->deviceTarget());
+        add(QStringLiteral("Device ID"), device_->deviceId());
+        add(QStringLiteral("Device firmware version"), device_->firmwareVersion());
+        add(QStringLiteral("Device firmware build ID"), device_->firmwareBuildId());
+        add(QStringLiteral("Device protocol"), device_->protocolVersion());
+        add(QStringLiteral("Device capabilities"), device_->capabilities().join(QStringLiteral(", ")));
+        add(QStringLiteral("Exact bundled build match"), firmwareIsCurrent() ? QStringLiteral("yes") : QStringLiteral("NOT VERIFIED"));
+        add(QStringLiteral("Firmware protocol compatible"), !device_->deviceVerified()
+            ? QStringLiteral("UNKNOWN (identity not verified)")
+            : firmwareIsCompatible() ? QStringLiteral("yes") : QStringLiteral("no"));
+        add(QStringLiteral("Profile generation"), device_->profileGeneration());
+        add(QStringLiteral("Profile armed"), device_->profileArmed() ? QStringLiteral("yes") : QStringLiteral("no"));
+        add(QStringLiteral("SMV running"), device_->running() ? QStringLiteral("yes") : QStringLiteral("no"));
+        add(QStringLiteral("SMV FPS reported"), device_->fps());
+        add(QStringLiteral("SMV missed reported"), device_->missed());
+        add(QStringLiteral("SMV TX failures reported"), device_->txFailures());
+        add(QStringLiteral("PTP status reported"), device_->ptpStatus());
+        add(QStringLiteral("PTP role reported"), device_->ptpRole());
+        add(QStringLiteral("PTP discipline reported"), device_->ptpDiscipline());
+        add(QStringLiteral("SMPSYNCH value reported"), device_->smpSynchValue());
+        add(QStringLiteral("Device last error"), device_->lastError());
+        rows << QStringLiteral("--- Device serial log, last 12000 chars ---")
+             << device_->logText().right(12000);
+    }
+    if (firmware_ != nullptr) {
+        rows << QStringLiteral("--- Firmware service log, last 12000 chars ---")
+             << firmware_->logText().right(12000);
+    }
+    rows << QStringLiteral("Review and redact site identifiers or addresses before sharing.");
+    return rows.join(QLatin1Char('\n'));
+}
+
 void SmartSessionController::latchFirmwareFailure(QString message) {
     reconnectTimer_.stop();
     const bool optionalOperation = updateWasOptional_;
@@ -872,6 +945,9 @@ void SmartSessionController::latchFirmwareFailure(QString message) {
     blankBoardDetected_ = false;
     if (portOwner_ == PortOwner::firmwareTool) setPortOwner(PortOwner::none);
     message = message.trimmed();
+    lastFirmwareUpdateResult_ = message.isEmpty()
+        ? QStringLiteral("Firmware verification failed; inspect the firmware-service log.")
+        : message;
     setupError_ = !optionalOperation;
     setupErrorStatus_ = optionalOperation ? QString{} : (message.isEmpty()
         ? QStringLiteral("Firmware setup did not complete. Retry explicitly when the board is ready.")
@@ -1143,6 +1219,7 @@ void SmartSessionController::reconcile() {
         updateRequested_ = false;
         updateWasOptional_ = false;
         updateStage_ = UpdateStage::idle;
+        lastFirmwareUpdateResult_ = QStringLiteral("Exact bundled firmware build verified after reconnect.");
         clearBlankBoardContext();
         emit firmwareUpdateFinished(true);
     }

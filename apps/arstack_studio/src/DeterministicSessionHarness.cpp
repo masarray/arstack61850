@@ -33,6 +33,7 @@ public:
             {"same version stale build -> READY with update suggestion", sameVersionStaleBuildOffersUpdate()},
             {"optional bootloader wait -> cancel restores supervisor", optionalBootloaderWaitCanCancel()},
             {"firmware stage projection -> supervisor-owned", firmwareStageProjectionIsExplicit()},
+            {"firmware verification failure remains copyable after READY", firmwareFailureRemainsDiagnosable()},
             {"fragmented espflash progress -> monotonic", fragmentedEspflashProgressIsMonotonic()},
             {"trusted ESP32-P4 identity timeout -> firmware required", automaticIdentityTimeoutOffersFirmwareRecovery()},
             {"single visible COM without metadata -> firmware required", singleVisibleTimeoutWithoutRecommendationOffersFirmwareRecovery()},
@@ -939,6 +940,26 @@ private:
             device.missedHealthReplies_ == StudioDeviceController::controlHealthMaxMisses() &&
             !device.controlResponsive_ &&
             !device.healthProbeOutstanding_;
+    }
+
+    static bool firmwareFailureRemainsDiagnosable() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        auto& session = fixture.session;
+        session.updateWasOptional_ = true;
+        session.updateRequested_ = true;
+        session.updateStage_ = SmartSessionController::UpdateStage::reconnecting;
+        session.latchFirmwareFailure(QStringLiteral(
+            "Firmware was written, but reconnect reported a different build."));
+        const QString report = session.diagnosticsText();
+        return !session.updateRequested_ && !session.setupError_ &&
+            session.firmwareUpdateResult().contains(QStringLiteral("different build")) &&
+            report.contains(QStringLiteral("Last firmware update result: Firmware was written")) &&
+            report.contains(QStringLiteral("Bundled build ID: 0123456789abcdef")) &&
+            report.contains(QStringLiteral("Configured SV ID: ARSTACK_SV01")) &&
+            report.contains(QStringLiteral("Configured publisher fps: 4000")) &&
+            report.contains(QStringLiteral("Exact bundled build match: NOT VERIFIED")) &&
+            report.contains(QStringLiteral("Firmware protocol compatible: UNKNOWN"));
     }
 
     static bool workerTeardownCompletes() {

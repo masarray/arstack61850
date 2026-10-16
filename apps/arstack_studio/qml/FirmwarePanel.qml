@@ -2,6 +2,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import ARStack.Studio 1.0
 
 SurfacePanel {
     id: panel
@@ -11,6 +12,13 @@ SurfacePanel {
     property string uiFont: "Inter"
     property string monoFont: "Inter"
     property bool technicalDetailsVisible: false
+    readonly property string firmwareDisplayStatus:
+        panel.session && panel.session.firmwareUpdateResult.length > 0 &&
+        !panel.session.updatingFirmware
+        ? panel.session.firmwareUpdateResult : panel.firmware.status
+    readonly property bool verificationFailed:
+        panel.session && panel.session.firmwareUpdateResult.length > 0 &&
+        !panel.session.firmwareUpdateResult.startsWith("Exact bundled firmware build verified")
 
     readonly property bool hasPort: firmwarePort.currentText.length > 0
 
@@ -317,17 +325,17 @@ SurfacePanel {
 
         Rectangle {
             Layout.fillWidth: true
-            implicitHeight: panel.firmware.status.length > 0 ? 52 : 0
-            visible: panel.firmware.status.length > 0
+            implicitHeight: panel.firmwareDisplayStatus.length > 0 ? 52 : 0
+            visible: panel.firmwareDisplayStatus.length > 0
             radius: 7
-            color: panel.firmware.targetVerified ? "#10251d" : (panel.firmware.bootloaderHelpNeeded ? "#261f13" : "#171d25")
+            color: panel.verificationFailed ? "#2a171c" : (panel.firmware.targetVerified ? "#10251d" : (panel.firmware.bootloaderHelpNeeded ? "#261f13" : "#171d25"))
             border.width: 1
-            border.color: panel.firmware.targetVerified ? "#2c674e" : (panel.firmware.bootloaderHelpNeeded ? "#705827" : panel.theme.lineSoft)
+            border.color: panel.verificationFailed ? panel.theme.red : (panel.firmware.targetVerified ? "#2c674e" : (panel.firmware.bootloaderHelpNeeded ? "#705827" : panel.theme.lineSoft))
             Label {
                 anchors.fill: parent
                 anchors.margins: 11
-                text: panel.firmware.status
-                color: panel.firmware.targetVerified ? panel.theme.green : (panel.firmware.bootloaderHelpNeeded ? panel.theme.amber : panel.theme.textSoft)
+                text: panel.firmwareDisplayStatus
+                color: panel.verificationFailed ? panel.theme.red : (panel.firmware.targetVerified ? panel.theme.green : (panel.firmware.bootloaderHelpNeeded ? panel.theme.amber : panel.theme.textSoft))
                 font.family: panel.uiFont
                 font.pixelSize: 10
                 wrapMode: Text.WordWrap
@@ -344,9 +352,16 @@ SurfacePanel {
                 text: panel.technicalDetailsVisible ? "Hide technical details" : "Technical details"
                 onClicked: panel.technicalDetailsVisible = !panel.technicalDetailsVisible
             }
+            CalmButton {
+                theme: panel.theme
+                uiFont: panel.uiFont
+                text: "Copy diagnostics"
+                enabled: panel.session !== null
+                onClicked: StudioClipboard.copyText(panel.session.diagnosticsText())
+            }
             Label {
                 Layout.fillWidth: true
-                text: "Protocol, target revision, SHA-256 and firmware-service log"
+                text: "Review/redact device identifiers and logs before sharing"
                 color: panel.theme.muted
                 font.family: panel.uiFont
                 font.pixelSize: 9

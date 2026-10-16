@@ -146,9 +146,9 @@ SurfacePanel {
                 controller.showMessage("Firmware installed and verified successfully.", false)
             } else {
                 ribbon.firmwareResultTitle = "Firmware installation not completed"
-                ribbon.firmwareResultMessage = FirmwareService.status.length > 0
-                    ? FirmwareService.status
-                    : "Studio could not verify the firmware installation. Keep the board connected and try again."
+                ribbon.firmwareResultMessage = smartSession.firmwareUpdateResult.length > 0
+                    ? smartSession.firmwareUpdateResult
+                    : "Studio could not verify the firmware installation. Open Advanced > Firmware > Copy diagnostics."
                 controller.showMessage("Firmware installation was not verified.", true)
             }
             Qt.callLater(resultDialog.open)
