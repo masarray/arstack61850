@@ -39,7 +39,7 @@ Rectangle {
         if (configured === undefined || configured === null || String(configured).length === 0)
             return false
         const expected = Number(configured)
-        return Number.isSafeInteger(expected) && expected >= 0
+        return isFinite(expected) && Math.floor(expected) === expected && expected >= 0
                 && expected === Number(root.observation.confRev)
     }
 
