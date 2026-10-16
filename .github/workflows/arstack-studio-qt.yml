@@ -170,6 +170,10 @@ jobs:
           fi
           echo 'S7 QML authority boundary: PASS · presentation submits intents through SmartSessionController and device mutators are not QML-invokable'
 
+      - name: Studio operator workspace layout and PTP authority contract
+        shell: bash
+        run: python3 apps/arstack_studio/tests/check_operator_workspace.py
+
       - name: Native binary profile authority regression
         shell: bash
         run: |
