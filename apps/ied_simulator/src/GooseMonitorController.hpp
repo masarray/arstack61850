@@ -123,6 +123,12 @@ public:
         const QString& appId,
         const QString& destinationMac) const;
 
+    // Full configured SCL/live identity, including optional goID and VLAN
+    // constraints. A partial or inconsistent SCL record never causes an
+    // APPID-only guess or an accidental cross-VLAN publisher binding.
+    Q_INVOKABLE QVariantMap observedForConfiguredStream(
+        const QVariantMap& configured) const;
+
     // Deterministic QA/offline evidence path. This uses the same decoder,
     // supervisor, bounded model and retention path as live raw-Ethernet capture.
     [[nodiscard]] bool ingestFrameBytes(

@@ -113,6 +113,43 @@ int main(int argc, char** argv) {
                      .value(QStringLiteral("matched")).toBool(),
                 "destination MAC mismatch leaked a stream");
 
+
+        // Full SCL constraints: goID, VLAN ID/priority must not silently
+        // bind a different multicast virtual LAN or publishing control block.
+        QVariantMap configured;
+        configured.insert(QStringLiteral("reference"), goRef);
+        configured.insert(QStringLiteral("dataSet"), dataSet);
+        configured.insert(QStringLiteral("appId"), QStringLiteral("1001"));
+        configured.insert(QStringLiteral("destinationMac"), dst);
+        configured.insert(QStringLiteral("goId"), field(publisherEvidence, "goId"));
+        if (publisherEvidence.value(QStringLiteral("vlanId")).isValid()) {
+            configured.insert(QStringLiteral("vlanId"),
+                              publisherEvidence.value(QStringLiteral("vlanId")));
+        }
+        if (publisherEvidence.value(QStringLiteral("vlanPriority")).isValid()) {
+            configured.insert(QStringLiteral("vlanPriority"),
+                              publisherEvidence.value(QStringLiteral("vlanPriority")));
+        }
+        REQUIRE(monitor.observedForConfiguredStream(configured)
+                    .value(QStringLiteral("matched")).toBool(),
+                "canonical SCL identity did not bind to observed GOOSE");
+        auto conflicting = configured;
+        conflicting.insert(QStringLiteral("goId"), QStringLiteral("wrong-publisher"));
+        REQUIRE(!monitor.observedForConfiguredStream(conflicting)
+                     .value(QStringLiteral("matched")).toBool(),
+                "wrong goID leaked stream from a different publisher");
+        conflicting = configured;
+        conflicting.insert(QStringLiteral("vlanId"), 4094);
+        if (configured.value(QStringLiteral("vlanId")).toInt() == 4094)
+            conflicting.insert(QStringLiteral("vlanId"), 4093);
+        REQUIRE(!monitor.observedForConfiguredStream(conflicting)
+                     .value(QStringLiteral("matched")).toBool(),
+                "wrong VLAN identity adopted an observed GOOSE frame");
+        conflicting = configured;
+        conflicting.insert(QStringLiteral("vlanPriority"), 99);
+        REQUIRE(!monitor.observedForConfiguredStream(conflicting)
+                     .value(QStringLiteral("matched")).toBool(),
+                "invalid configured VLAN priority was accepted");
         GooseMonitorController ambiguousMonitor;
         REQUIRE(ambiguousMonitor.ingestFrameBytes(
                     packets.back().frame, base + std::chrono::seconds{1}),

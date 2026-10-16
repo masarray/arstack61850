@@ -21,11 +21,7 @@ Rectangle {
         const generation = root.evidenceGeneration
         if (root.selectedIndex < 0 || !root.selectedStream.reference)
             return ({matched: false, reason: "Select a configured GOOSE stream"})
-        return root.monitor.observedForStream(
-            root.selectedStream.reference || "",
-            root.selectedStream.dataSet || "",
-            root.selectedStream.appId || "",
-            root.selectedStream.destinationMac || "")
+        return root.monitor.observedForConfiguredStream(root.selectedStream)
     }
 
     // A matching frame is not evidence that the configured FCDA order is

@@ -246,6 +246,44 @@ QVariantMap GooseMonitorController::observedForStream(
     return result;
 }
 
+QVariantMap GooseMonitorController::observedForConfiguredStream(
+    const QVariantMap& configured) const {
+    const auto str = [&](const char* key) {
+        return configured.value(QString::fromLatin1(key)).toString();
+    };
+    auto evidence = observedForStream(
+        str("reference"), str("dataSet"), str("appId"), str("destinationMac"));
+    if (!evidence.value(QStringLiteral("matched")).toBool()) return evidence;
+
+    const auto fail = [&](const QString& reason) {
+        QVariantMap rejected;
+        rejected.insert(QStringLiteral("matched"), false);
+        rejected.insert(QStringLiteral("reason"), reason);
+        return rejected;
+    };
+    const auto goId = str("goId");
+    if (!goId.isEmpty() && goId != evidence.value(QStringLiteral("goId")).toString()) {
+        return fail(QStringLiteral("Configured goID differs from observed GOOSE stream"));
+    }
+    for (const auto& binding : {
+             std::pair{"vlanId", "vlanId"},
+             std::pair{"vlanPriority", "vlanPriority"}}) {
+        const auto expected = configured.value(QString::fromLatin1(binding.first));
+        if (!expected.isValid() || expected.isNull()) continue;
+        bool ok = false;
+        const auto numeric = expected.toInt(&ok);
+        if (!ok || numeric < 0 ||
+            numeric > (std::string_view{binding.first} == "vlanId" ? 4094 : 7)) {
+            return fail(QStringLiteral("Invalid configured GOOSE VLAN field"));
+        }
+        const auto observed = evidence.value(QString::fromLatin1(binding.second));
+        if (!observed.isValid() || observed.isNull() || observed.toInt() != numeric) {
+            return fail(QStringLiteral("Configured GOOSE VLAN field differs from observed frame"));
+        }
+    }
+    return evidence;
+}
+
 bool GooseMonitorController::startCapture() {
     if (capturing_) return true;
     if (interfaceName_.isEmpty()) {
