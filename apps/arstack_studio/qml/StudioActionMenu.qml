@@ -7,6 +7,9 @@ Menu {
     id: menu
     property var theme
     property string uiFont: "Inter"
+    // Qt 6.8+ can prefer native Windows menus, which ignore custom QML
+    // delegates and render in OS colors. Force our portable styled overlay.
+    popupType: Popup.Item
     implicitWidth: 250
     topPadding: 7
     bottomPadding: 7

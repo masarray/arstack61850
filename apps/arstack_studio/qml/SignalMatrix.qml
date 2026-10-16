@@ -262,7 +262,7 @@ Rectangle {
                                 var at = signalRow.mapFromItem(magnitudeField, 0, magnitudeField.height)
                                 magnitudeMenu.x = Math.max(6, Math.min(at.x, signalRow.width - magnitudeMenu.width))
                                 magnitudeMenu.y = at.y
-                                magnitudeMenu.popup()
+                                magnitudeMenu.popup(magnitudeMenu.x, magnitudeMenu.y)
                             }
                         }
                         Layout.fillWidth: true
@@ -325,7 +325,7 @@ Rectangle {
                                 var at = signalRow.mapFromItem(phaseField, 0, phaseField.height)
                                 phaseMenu.x = Math.max(6, Math.min(at.x, signalRow.width - phaseMenu.width))
                                 phaseMenu.y = at.y
-                                phaseMenu.popup()
+                                phaseMenu.popup(phaseMenu.x, phaseMenu.y)
                             }
                         }
                         enabled: matrix.controller.signalFrequency > 0
