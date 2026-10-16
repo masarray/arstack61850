@@ -117,7 +117,9 @@ SurfacePanel {
                 font.letterSpacing: 1.0
             }
 
-            ComboBox {
+            StudioDarkComboBox {
+                theme: panel.theme
+                uiFont: panel.uiFont
                 Layout.fillWidth: true
                 model: panel.profiles
                 textRole: "control"
@@ -308,7 +310,9 @@ SurfacePanel {
                     wrapMode: Text.WordWrap
                 }
 
-                ComboBox {
+                StudioDarkComboBox {
+                    theme: panel.theme
+                    uiFont: panel.uiFont
                     id: profileFamilySelector
                     Layout.fillWidth: true
                     enabled: panel.session && panel.session.engineeringEditable
