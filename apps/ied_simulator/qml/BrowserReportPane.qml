@@ -117,6 +117,17 @@ Rectangle {
         { label: "Segmentation", name: "segmentation" }
     ]
 
+    function observedRcbInUse() {
+        // Availability classification may be "dataset-unreadable" when a
+        // bounded RCB Read succeeds without a DataSet-directory probe.
+        // Positive verified RptEna, Resv or Owner evidence still forbids a
+        // misleading "available" banner. Never infer other-client identity.
+        return rcb.probeOk === true
+               && (rcb.enabled === "true"
+                   || rcb.reserved === "true"
+                   || (rcb.owner && String(rcb.owner).length > 0))
+    }
+
     function readStatusLabel(raw) {
         switch (String(raw || "not-read")) {
         case "verified": return "IED Read verified"
@@ -509,15 +520,14 @@ Rectangle {
                         anchors.margins: 7
                         wrapMode: Text.WordWrap
                         font.pixelSize: 10
-                        color: root.rcb.availability === "in-use"
-                               ? theme.red : theme.muted
+                        color: root.observedRcbInUse() ? theme.red : theme.muted
                         text: root.rcb.probeOk !== true
                               ? "RCB live state not verified · never infer an unused reservation."
-                              : root.rcb.availability === "in-use"
+                              : root.observedRcbInUse()
                                 ? "RCB in use: enabled, reservation or Owner evidence is present. Do not take over another client."
                                 : root.rcb.availability === "available"
-                                  ? "RCB currently available according to readback. Revalidate ownership before enabling."
-                                  : "RCB availability: " + root.asText(root.rcb.availabilityReason)
+                                  ? "No in-use evidence in RCB readback. Revalidate ownership before enabling."
+                                  : "RCB availability not verified: " + root.asText(root.rcb.availabilityReason)
                     }
                 }
 
