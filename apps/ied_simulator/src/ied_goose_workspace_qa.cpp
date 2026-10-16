@@ -186,6 +186,12 @@ int main(int argc, char** argv) {
                 "could not decode alternate publisher identity");
         alternate.source = ethernet::MacAddress::parse("02-11-22-33-44-55");
         alternate.destination = ethernet::MacAddress::parse("01-0C-CD-01-00-FE");
+        alternate.pdu.go_id = "alternate-publisher";
+        if (alternate.vlan) {
+            alternate.vlan->vlan_id =
+                static_cast<std::uint16_t>(
+                    (alternate.vlan->vlan_id + 1U) % 4095U);
+        }
         REQUIRE(ambiguousMonitor.ingestFrameBytes(
                     goose::GooseFrameCodec::encode(alternate),
                     base + std::chrono::seconds{2}),
@@ -200,6 +206,31 @@ int main(int argc, char** argv) {
                     goRef, dataSet, "1001", "01-0C-CD-01-00-FE")
                      .value(QStringLiteral("matched")).toBool(),
                 "alternate exact publisher could not be bound");
+
+        auto byGoId = configured;
+        byGoId.remove(QStringLiteral("destinationMac"));
+        byGoId.remove(QStringLiteral("vlanId"));
+        byGoId.remove(QStringLiteral("vlanPriority"));
+        REQUIRE(ambiguousMonitor.observedForConfiguredStream(byGoId)
+                    .value(QStringLiteral("matched")).toBool(),
+                "goID must disambiguate publishers before ambiguity rejection");
+        byGoId.insert(QStringLiteral("goId"), QStringLiteral("alternate-publisher"));
+        REQUIRE(ambiguousMonitor.observedForConfiguredStream(byGoId)
+                    .value(QStringLiteral("matched")).toBool(),
+                "alternate goID did not disambiguate two otherwise identical publishers");
+        byGoId.remove(QStringLiteral("goId"));
+        REQUIRE(!ambiguousMonitor.observedForConfiguredStream(byGoId)
+                     .value(QStringLiteral("matched")).toBool(),
+                "underspecified multiple publishers must remain fail-closed");
+
+        if (publisherEvidence.value(QStringLiteral("vlanId")).isValid()) {
+            auto byVlan = byGoId;
+            byVlan.insert(QStringLiteral("vlanId"),
+                          publisherEvidence.value(QStringLiteral("vlanId")));
+            REQUIRE(ambiguousMonitor.observedForConfiguredStream(byVlan)
+                        .value(QStringLiteral("matched")).toBool(),
+                    "VLAN ID must disambiguate publisher before ambiguity rejection");
+        }
         goose::GooseFrame baseFrame;
         REQUIRE(goose::GooseFrameCodec::try_decode(packets.back().frame, baseFrame),
                 "could not decode Stage M evidence for sequence QA");

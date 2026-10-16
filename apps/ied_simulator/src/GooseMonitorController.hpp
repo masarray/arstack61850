@@ -16,6 +16,7 @@
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -165,6 +166,17 @@ private:
     static constexpr int kPollIntervalMilliseconds = 10;
     static constexpr int kExpiryScanIntervalMilliseconds = 100;
 
+    // Full configured-source constraints must participate BEFORE the unique
+    // match decision. Do not let early partial-identity ambiguity obscure
+    // an otherwise unambiguous goID/VLAN publisher.
+    [[nodiscard]] QVariantMap observedForStreamFiltered(
+        const QString& goCbRef,
+        const QString& dataSet,
+        const QString& appId,
+        const QString& destinationMac,
+        const QString& goId,
+        std::optional<int> vlanId,
+        std::optional<int> vlanPriority) const;
     [[nodiscard]] QVariantMap streamMap(const StreamSlot& slot) const;
     [[nodiscard]] static QString sequenceStatusText(ar::iec61850::goose::GooseSequenceStatus status);
     [[nodiscard]] static QString formatValue(const ar::iec61850::mms::MmsDataValue& value, int depth = 0);

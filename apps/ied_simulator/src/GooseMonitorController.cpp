@@ -202,6 +202,19 @@ QVariantMap GooseMonitorController::observedForStream(
     const QString& dataSet,
     const QString& appId,
     const QString& destinationMac) const {
+    return observedForStreamFiltered(
+        goCbRef, dataSet, appId, destinationMac,
+        {}, std::nullopt, std::nullopt);
+}
+
+QVariantMap GooseMonitorController::observedForStreamFiltered(
+    const QString& goCbRef,
+    const QString& dataSet,
+    const QString& appId,
+    const QString& destinationMac,
+    const QString& goId,
+    const std::optional<int> vlanId,
+    const std::optional<int> vlanPriority) const {
     QVariantMap result;
     result.insert(QStringLiteral("matched"), false);
     result.insert(QStringLiteral("reason"), QStringLiteral("Awaiting an exact GOOSE frame"));
@@ -259,7 +272,11 @@ QVariantMap GooseMonitorController::observedForStream(
              QString::fromStdString(frame.pdu.data_set_reference) != requestedDataSet) ||
             (!appIdText.isEmpty() && frame.app_id != requestedAppId) ||
             (!requestedMac.isEmpty() &&
-             normalizeMac(QString::fromStdString(frame.destination.to_string())) != requestedMac)) {
+             normalizeMac(QString::fromStdString(frame.destination.to_string())) != requestedMac) ||
+            (!goId.isEmpty() && QString::fromStdString(frame.pdu.go_id) != goId) ||
+            (vlanId && (!frame.vlan || frame.vlan->vlan_id != *vlanId)) ||
+            (vlanPriority &&
+             (!frame.vlan || frame.vlan->priority_code_point != *vlanPriority))) {
             continue;
         }
         if (found != nullptr) {
@@ -289,37 +306,29 @@ QVariantMap GooseMonitorController::observedForConfiguredStream(
     const auto str = [&](const char* key) {
         return configured.value(QString::fromLatin1(key)).toString();
     };
-    auto evidence = observedForStream(
-        str("reference"), str("dataSet"), str("appId"), str("destinationMac"));
-    if (!evidence.value(QStringLiteral("matched")).toBool()) return evidence;
-
-    const auto fail = [&](const QString& reason) {
-        QVariantMap rejected;
-        rejected.insert(QStringLiteral("matched"), false);
-        rejected.insert(QStringLiteral("reason"), reason);
-        return rejected;
-    };
-    const auto goId = str("goId");
-    if (!goId.isEmpty() && goId != evidence.value(QStringLiteral("goId")).toString()) {
-        return fail(QStringLiteral("Configured goID differs from observed GOOSE stream"));
-    }
+    // Validate optional SCL VLAN selectors once, then use them together
+    // with goID, APPID, goCBRef, DataSet and destination MAC in ONE bounded
+    // lookup. Previous two-stage matching could falsely reject a unique
+    // configured publisher as ambiguous before its VLAN/goID was checked.
+    std::optional<int> vlanId;
+    std::optional<int> vlanPriority;
     for (const auto& binding : {
-             std::pair{"vlanId", "vlanId"},
-             std::pair{"vlanPriority", "vlanPriority"}}) {
+             std::pair{"vlanId", &vlanId},
+             std::pair{"vlanPriority", &vlanPriority}}) {
         const auto expected = configured.value(QString::fromLatin1(binding.first));
         if (!expected.isValid() || expected.isNull()) continue;
         bool ok = false;
-        const auto numeric = expected.toInt(&ok);
+        const int numeric = expected.toInt(&ok);
         if (!ok || numeric < 0 ||
             numeric > (std::string_view{binding.first} == "vlanId" ? 4094 : 7)) {
-            return fail(QStringLiteral("Invalid configured GOOSE VLAN field"));
+            return {{QStringLiteral("matched"), false},
+                    {QStringLiteral("reason"), QStringLiteral("Invalid configured GOOSE VLAN field")}};
         }
-        const auto observed = evidence.value(QString::fromLatin1(binding.second));
-        if (!observed.isValid() || observed.isNull() || observed.toInt() != numeric) {
-            return fail(QStringLiteral("Configured GOOSE VLAN field differs from observed frame"));
-        }
+        *binding.second = numeric;
     }
-    return evidence;
+    return observedForStreamFiltered(
+        str("reference"), str("dataSet"), str("appId"),
+        str("destinationMac"), str("goId"), vlanId, vlanPriority);
 }
 
 bool GooseMonitorController::startCapture() {
