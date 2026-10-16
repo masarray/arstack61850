@@ -26,7 +26,7 @@ class GooseMonitorController : public QAbstractListModel {
     Q_OBJECT
     QML_ELEMENT
 
-    Q_PROPERTY(QStringList interfaces READ interfaces NOTIFY monitorChanged)
+    Q_PROPERTY(QStringList interfaces READ interfaces NOTIFY interfacesChanged)
     Q_PROPERTY(QString interfaceName READ interfaceName WRITE setInterfaceName NOTIFY monitorChanged)
     Q_PROPERTY(bool capturing READ capturing NOTIFY monitorChanged)
     Q_PROPERTY(QString statusText READ statusText NOTIFY monitorChanged)
@@ -82,7 +82,8 @@ public:
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
 
-    [[nodiscard]] QStringList interfaces() const;
+    [[nodiscard]] QStringList interfaces() const { return interfaces_; }
+    Q_INVOKABLE void refreshInterfaces();
     [[nodiscard]] QString interfaceName() const { return interfaceName_; }
     void setInterfaceName(const QString& value);
     [[nodiscard]] bool capturing() const noexcept { return capturing_; }
@@ -113,6 +114,22 @@ public:
     Q_INVOKABLE void select(int row);
     Q_INVOKABLE bool exportPcap(const QUrl& fileUrl);
 
+    // Passive engineering binding, not a new subscriber or MMS operation.
+    // A frame is exposed only if its case-sensitive goCBRef and every
+    // configured address/identity constraint match exactly and uniquely.
+    // Never substitutes APPID-only guesses for a verified IED source.
+    Q_INVOKABLE QVariantMap observedForStream(
+        const QString& goCbRef,
+        const QString& dataSet,
+        const QString& appId,
+        const QString& destinationMac) const;
+
+    // Full configured SCL/live identity, including optional goID and VLAN
+    // constraints. A partial or inconsistent SCL record never causes an
+    // APPID-only guess or an accidental cross-VLAN publisher binding.
+    Q_INVOKABLE QVariantMap observedForConfiguredStream(
+        const QVariantMap& configured) const;
+
     // Deterministic QA/offline evidence path. This uses the same decoder,
     // supervisor, bounded model and retention path as live raw-Ethernet capture.
     [[nodiscard]] bool ingestFrameBytes(
@@ -121,6 +138,7 @@ public:
     void checkTimeoutsAt(clock::time_point now);
 
 signals:
+    void interfacesChanged();
     void monitorChanged();
     void selectionChanged();
 
@@ -166,6 +184,7 @@ private:
     std::vector<StreamSlot> streams_;
     std::deque<ar::iec61850::capture::PcapPacket> retainedPackets_;
     QStringList recentEvents_;
+    QStringList interfaces_;
     QString interfaceName_;
     QString statusText_{QStringLiteral("Stopped")};
     ar::iec61850::goose::RawEthernetSubscriber transport_;

@@ -86,12 +86,16 @@ Item {
                     Layout.preferredWidth: 240
                     model: root.monitor.interfaces
                     enabled: !root.monitor.capturing
-                    currentIndex: Math.max(0, root.monitor.interfaces.indexOf(root.monitor.interfaceName))
+                    currentIndex: root.monitor.interfaces.indexOf(root.monitor.interfaceName)
+                    displayText: currentIndex < 0 ? "Select capture interface" : currentText
                     onActivated: root.monitor.interfaceName = currentText
-                    Component.onCompleted: {
-                        if (root.monitor.interfaceName.length === 0 && count > 0)
-                            root.monitor.interfaceName = currentText
-                    }
+                }
+
+                ActionButton {
+                    theme: root.theme
+                    text: "Refresh NICs"
+                    enabled: !root.monitor.capturing
+                    onClicked: root.monitor.refreshInterfaces()
                 }
 
                 ActionButton {

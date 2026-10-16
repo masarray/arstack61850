@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <limits>
 #include <stdexcept>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -51,11 +52,44 @@ bool sequenceIssue(const GooseSequenceStatus status) noexcept {
         status == GooseSequenceStatus::state_jump ||
         status == GooseSequenceStatus::state_regression;
 }
+
+[[nodiscard]] QString wireGoCbRef(const QString& reference) {
+    // Live MMS control inventory uses LD/LN.GO.control; on-wire GOOSE
+    // uses LD/LN$GO$control. Rewriting arbitrary '.' globally would corrupt
+    // user-defined names or DataSet member paths. Only convert typed GO.
+    if (reference.contains(QLatin1Char('$'))) return reference;
+    QString converted = reference;
+    const auto slash = converted.indexOf(QLatin1Char('/'));
+    if (slash < 0) return converted;
+    const auto first = converted.indexOf(QLatin1Char('.'), slash + 1);
+    if (first <= slash + 1) return converted;
+    const auto second = converted.indexOf(QLatin1Char('.'), first + 1);
+    if (second < 0 || converted.mid(first + 1, second - first - 1) != QStringLiteral("GO") ||
+        second + 1 >= converted.size()) return converted;
+    converted[first] = QLatin1Char('$');
+    converted[second] = QLatin1Char('$');
+    return converted;
+}
+
+[[nodiscard]] QString wireDataSetRef(const QString& reference) {
+    // Live MMS canonical DataSet LD/LN.dataSet -> wire LD/LN$dataSet.
+    // The suffix must be one typed leaf; do not normalize arbitrary DO/DA.
+    if (reference.contains(QLatin1Char('$'))) return reference;
+    QString converted = reference;
+    const auto slash = converted.indexOf(QLatin1Char('/'));
+    if (slash < 0) return converted;
+    const auto dot = converted.indexOf(QLatin1Char('.'), slash + 1);
+    if (dot <= slash + 1 || dot + 1 >= converted.size() ||
+        converted.indexOf(QLatin1Char('.'), dot + 1) >= 0) return converted;
+    converted[dot] = QLatin1Char('$');
+    return converted;
+}
 } // namespace
 
 GooseMonitorController::GooseMonitorController(QObject* parent)
     : QAbstractListModel(parent) {
     monitorClock_.start();
+    refreshInterfaces();
     captureTimer_ = new QTimer(this);
     captureTimer_->setInterval(kPollIntervalMilliseconds);
     captureTimer_->setTimerType(Qt::PreciseTimer);
@@ -128,7 +162,9 @@ QHash<int, QByteArray> GooseMonitorController::roleNames() const {
     };
 }
 
-QStringList GooseMonitorController::interfaces() const {
+void GooseMonitorController::refreshInterfaces() {
+    if (capturing_) return;
+
     QStringList result;
     for (const auto& networkInterface : QNetworkInterface::allInterfaces()) {
         const auto flags = networkInterface.flags();
@@ -141,7 +177,9 @@ QStringList GooseMonitorController::interfaces() const {
         if (!name.isEmpty() && !result.contains(name)) result.push_back(name);
     }
     std::sort(result.begin(), result.end());
-    return result;
+    if (interfaces_ == result) return;
+    interfaces_ = std::move(result);
+    emit interfacesChanged();
 }
 
 void GooseMonitorController::setInterfaceName(const QString& value) {
@@ -157,6 +195,131 @@ void GooseMonitorController::setInterfaceName(const QString& value) {
         ? QStringLiteral("Select an Ethernet interface")
         : QStringLiteral("Ready on %1").arg(normalized);
     emit monitorChanged();
+}
+
+QVariantMap GooseMonitorController::observedForStream(
+    const QString& goCbRef,
+    const QString& dataSet,
+    const QString& appId,
+    const QString& destinationMac) const {
+    QVariantMap result;
+    result.insert(QStringLiteral("matched"), false);
+    result.insert(QStringLiteral("reason"), QStringLiteral("Awaiting an exact GOOSE frame"));
+    const auto reference = wireGoCbRef(goCbRef.trimmed());
+    if (reference.isEmpty()) {
+        result.insert(QStringLiteral("reason"),
+                      QStringLiteral("Configured goCBRef unavailable; no identity binding"));
+        return result;
+    }
+
+    // IEC 61850 SCL APPID is a hexadecimal octet-string representation,
+    // even when it contains digits only (e.g. '1001' = 0x1001).
+    const auto appIdText = appId.trimmed();
+    bool appIdValid = true;
+    unsigned int requestedAppId = 0U;
+    if (!appIdText.isEmpty()) {
+        requestedAppId = appIdText.toUInt(&appIdValid, 16);
+        if (!appIdValid || requestedAppId > 0xFFFFU) {
+            result.insert(QStringLiteral("reason"),
+                          QStringLiteral("Invalid configured hexadecimal GOOSE APPID"));
+            return result;
+        }
+    }
+
+    const auto normalizeMac = [](QString mac) {
+        mac.remove(QLatin1Char(':'));
+        mac.remove(QLatin1Char('-'));
+        mac.remove(QLatin1Char('.'));
+        return mac.trimmed().toUpper();
+    };
+    const auto requestedMac = normalizeMac(destinationMac);
+    if (!requestedMac.isEmpty()) {
+        if (requestedMac.size() != 12) {
+            result.insert(QStringLiteral("reason"),
+                          QStringLiteral("Invalid configured destination MAC"));
+            return result;
+        }
+        for (const QChar ch : requestedMac) {
+            if (!ch.isDigit() && (ch < QLatin1Char('A') || ch > QLatin1Char('F'))) {
+                result.insert(QStringLiteral("reason"),
+                              QStringLiteral("Invalid configured destination MAC"));
+                return result;
+            }
+        }
+    }
+
+    const auto requestedDataSet = wireDataSetRef(dataSet.trimmed());
+    const StreamSlot* found = nullptr;
+    for (const auto& slot : streams_) {
+        const auto& frame = slot.frame;
+        // Never infer the publisher from APPID alone. Use exact goCBRef
+        // plus all available binding constraints; retain original case.
+        if (QString::fromStdString(frame.pdu.go_cb_ref) != reference ||
+            (!requestedDataSet.isEmpty() &&
+             QString::fromStdString(frame.pdu.data_set_reference) != requestedDataSet) ||
+            (!appIdText.isEmpty() && frame.app_id != requestedAppId) ||
+            (!requestedMac.isEmpty() &&
+             normalizeMac(QString::fromStdString(frame.destination.to_string())) != requestedMac)) {
+            continue;
+        }
+        if (found != nullptr) {
+            result.insert(QStringLiteral("reason"),
+                          QStringLiteral("Ambiguous GOOSE publisher identity; multiple sources match"));
+            return result;
+        }
+        found = &slot;
+    }
+    if (found == nullptr) return result;
+
+    result = streamMap(*found);
+    result.insert(QStringLiteral("matched"), true);
+    result.insert(QStringLiteral("values"), found->values);
+    result.insert(QStringLiteral("captureActive"), capturing_);
+    result.insert(QStringLiteral("reason"),
+                  found->timedOut
+                      ? QStringLiteral("Observed frame expired (TimeAllowedToLive)")
+                      : (!capturing_
+                          ? QStringLiteral("Last observed frame retained; capture not active")
+                          : QStringLiteral("Exact wire-identity match (read-only)")));
+    return result;
+}
+
+QVariantMap GooseMonitorController::observedForConfiguredStream(
+    const QVariantMap& configured) const {
+    const auto str = [&](const char* key) {
+        return configured.value(QString::fromLatin1(key)).toString();
+    };
+    auto evidence = observedForStream(
+        str("reference"), str("dataSet"), str("appId"), str("destinationMac"));
+    if (!evidence.value(QStringLiteral("matched")).toBool()) return evidence;
+
+    const auto fail = [&](const QString& reason) {
+        QVariantMap rejected;
+        rejected.insert(QStringLiteral("matched"), false);
+        rejected.insert(QStringLiteral("reason"), reason);
+        return rejected;
+    };
+    const auto goId = str("goId");
+    if (!goId.isEmpty() && goId != evidence.value(QStringLiteral("goId")).toString()) {
+        return fail(QStringLiteral("Configured goID differs from observed GOOSE stream"));
+    }
+    for (const auto& binding : {
+             std::pair{"vlanId", "vlanId"},
+             std::pair{"vlanPriority", "vlanPriority"}}) {
+        const auto expected = configured.value(QString::fromLatin1(binding.first));
+        if (!expected.isValid() || expected.isNull()) continue;
+        bool ok = false;
+        const auto numeric = expected.toInt(&ok);
+        if (!ok || numeric < 0 ||
+            numeric > (std::string_view{binding.first} == "vlanId" ? 4094 : 7)) {
+            return fail(QStringLiteral("Invalid configured GOOSE VLAN field"));
+        }
+        const auto observed = evidence.value(QString::fromLatin1(binding.second));
+        if (!observed.isValid() || observed.isNull() || observed.toInt() != numeric) {
+            return fail(QStringLiteral("Configured GOOSE VLAN field differs from observed frame"));
+        }
+    }
+    return evidence;
 }
 
 bool GooseMonitorController::startCapture() {

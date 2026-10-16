@@ -76,6 +76,130 @@ int main(int argc, char** argv) {
         REQUIRE(publisherEvidence.value(QStringLiteral("valueCount")).toInt() > 0,
                 "decoded allData values were not exposed");
 
+
+        // Browser GOOSE reuses the Sniffer decoder and must not guess
+        // identities from APPID alone or swap publishers across IEDs.
+        const auto goRef = field(publisherEvidence, "goCbRef");
+        const auto dataSet = field(publisherEvidence, "dataSetReference");
+        const auto dst = field(publisherEvidence, "destinationMac");
+        const auto bound = monitor.observedForStream(
+            goRef, dataSet, QStringLiteral("1001"), dst);
+        REQUIRE(bound.value(QStringLiteral("matched")).toBool(),
+                "configured GOOSE stream did not bind to decoded PCAP evidence");
+        REQUIRE(bound.value(QStringLiteral("values")).toStringList().size() ==
+                    publisherEvidence.value(QStringLiteral("valueCount")).toInt(),
+                "bound allData order or member count not preserved");
+        REQUIRE(bound.value(QStringLiteral("stNum")).toULongLong() == 2U,
+                "bound stream did not expose last observed state");
+        REQUIRE(!monitor.observedForStream(QString{}, dataSet, "1001", dst)
+                     .value(QStringLiteral("matched")).toBool(),
+                "missing goCBRef must not match");
+        REQUIRE(!monitor.observedForStream(goRef.toLower(), dataSet, "1001", dst)
+                     .value(QStringLiteral("matched")).toBool(),
+                "GOOSE goCBRef lost case-sensitive identity");
+        REQUIRE(!monitor.observedForStream(goRef, dataSet + "WRONG", "1001", dst)
+                     .value(QStringLiteral("matched")).toBool(),
+                "wrong DataSet incorrectly adopted an observed value");
+        REQUIRE(!monitor.observedForStream(goRef, dataSet, "1002", dst)
+                     .value(QStringLiteral("matched")).toBool(),
+                "APPID mismatch leaked another stream's values");
+        REQUIRE(!monitor.observedForStream(goRef, dataSet, "not-hex", dst)
+                     .value(QStringLiteral("matched")).toBool(),
+                "malformed configured APPID was accepted");
+        REQUIRE(!monitor.observedForStream(goRef, dataSet, "1001", "XX-00")
+                     .value(QStringLiteral("matched")).toBool(),
+                "invalid configured multicast MAC was accepted");
+        REQUIRE(!monitor.observedForStream(goRef, dataSet, "1001", "01-0C-CD-01-00-FF")
+                     .value(QStringLiteral("matched")).toBool(),
+                "destination MAC mismatch leaked a stream");
+
+
+        // Full SCL constraints: goID, VLAN ID/priority must not silently
+        // bind a different multicast virtual LAN or publishing control block.
+        QVariantMap configured;
+        configured.insert(QStringLiteral("reference"), goRef);
+        configured.insert(QStringLiteral("dataSet"), dataSet);
+        configured.insert(QStringLiteral("appId"), QStringLiteral("1001"));
+        configured.insert(QStringLiteral("destinationMac"), dst);
+        configured.insert(QStringLiteral("goId"), field(publisherEvidence, "goId"));
+        if (publisherEvidence.value(QStringLiteral("vlanId")).isValid()) {
+            configured.insert(QStringLiteral("vlanId"),
+                              publisherEvidence.value(QStringLiteral("vlanId")));
+        }
+        if (publisherEvidence.value(QStringLiteral("vlanPriority")).isValid()) {
+            configured.insert(QStringLiteral("vlanPriority"),
+                              publisherEvidence.value(QStringLiteral("vlanPriority")));
+        }
+        REQUIRE(monitor.observedForConfiguredStream(configured)
+                    .value(QStringLiteral("matched")).toBool(),
+                "canonical SCL identity did not bind to observed GOOSE");
+
+        const auto wireToCanonicalGo = [](QString ref) {
+            const auto first = ref.indexOf(QLatin1Char('$'));
+            const auto second = ref.indexOf(QLatin1Char('$'), first + 1);
+            REQUIRE(first >= 0 && second >= 0, "fixture requires typed wire GO reference");
+            ref[first] = QLatin1Char('.');
+            ref[second] = QLatin1Char('.');
+            return ref;
+        };
+        const auto wireToCanonicalSet = [](QString ref) {
+            const auto slash = ref.indexOf(QLatin1Char('/'));
+            const auto dollar = ref.indexOf(QLatin1Char('$'), slash + 1);
+            REQUIRE(dollar >= 0, "fixture requires canonical DataSet translation");
+            ref[dollar] = QLatin1Char('.');
+            return ref;
+        };
+        auto discovered = configured;
+        discovered.insert(QStringLiteral("reference"), wireToCanonicalGo(goRef));
+        discovered.insert(QStringLiteral("dataSet"), wireToCanonicalSet(dataSet));
+        REQUIRE(monitor.observedForConfiguredStream(discovered)
+                     .value(QStringLiteral("matched")).toBool(),
+                "typed live-model GO/DataSet identifiers failed wire normalization");
+        discovered.insert(QStringLiteral("reference"),
+                          QStringLiteral("OtherIED/LLN0.GO.gcb01"));
+        REQUIRE(!monitor.observedForConfiguredStream(discovered)
+                     .value(QStringLiteral("matched")).toBool(),
+                "normalization crossed IED model identity");
+        auto conflicting = configured;
+        conflicting.insert(QStringLiteral("goId"), QStringLiteral("wrong-publisher"));
+        REQUIRE(!monitor.observedForConfiguredStream(conflicting)
+                     .value(QStringLiteral("matched")).toBool(),
+                "wrong goID leaked stream from a different publisher");
+        conflicting = configured;
+        conflicting.insert(QStringLiteral("vlanId"), 4094);
+        if (configured.value(QStringLiteral("vlanId")).toInt() == 4094)
+            conflicting.insert(QStringLiteral("vlanId"), 4093);
+        REQUIRE(!monitor.observedForConfiguredStream(conflicting)
+                     .value(QStringLiteral("matched")).toBool(),
+                "wrong VLAN identity adopted an observed GOOSE frame");
+        conflicting = configured;
+        conflicting.insert(QStringLiteral("vlanPriority"), 99);
+        REQUIRE(!monitor.observedForConfiguredStream(conflicting)
+                     .value(QStringLiteral("matched")).toBool(),
+                "invalid configured VLAN priority was accepted");
+        GooseMonitorController ambiguousMonitor;
+        REQUIRE(ambiguousMonitor.ingestFrameBytes(
+                    packets.back().frame, base + std::chrono::seconds{1}),
+                "secondary identity test failed first import");
+        goose::GooseFrame alternate;
+        REQUIRE(goose::GooseFrameCodec::try_decode(packets.back().frame, alternate),
+                "could not decode alternate publisher identity");
+        alternate.source = ethernet::MacAddress::parse("02-11-22-33-44-55");
+        alternate.destination = ethernet::MacAddress::parse("01-0C-CD-01-00-FE");
+        REQUIRE(ambiguousMonitor.ingestFrameBytes(
+                    goose::GooseFrameCodec::encode(alternate),
+                    base + std::chrono::seconds{2}),
+                "secondary identity test rejected valid other publisher");
+        REQUIRE(!ambiguousMonitor.observedForStream(goRef, dataSet, "1001", "")
+                     .value(QStringLiteral("matched")).toBool(),
+                "ambiguous publisher identity must fail closed");
+        REQUIRE(ambiguousMonitor.observedForStream(goRef, dataSet, "1001", dst)
+                     .value(QStringLiteral("matched")).toBool(),
+                "exact multicast MAC failed to disambiguate publishers");
+        REQUIRE(ambiguousMonitor.observedForStream(
+                    goRef, dataSet, "1001", "01-0C-CD-01-00-FE")
+                     .value(QStringLiteral("matched")).toBool(),
+                "alternate exact publisher could not be bound");
         goose::GooseFrame baseFrame;
         REQUIRE(goose::GooseFrameCodec::try_decode(packets.back().frame, baseFrame),
                 "could not decode Stage M evidence for sequence QA");
@@ -169,7 +293,8 @@ int main(int argc, char** argv) {
         std::cout
             << "GOOSE_WORKSPACE_PASS pcap_packets=3 streams=" << monitor.rowCount()
             << " appid=0x1001 values=decoded duplicate=pass gap=pass regression=pass"
-               " state_jump=pass state_regression=pass timeout=pass pcap_export=pass\n";
+               " state_jump=pass state_regression=pass timeout=pass pcap_export=pass"
+               " browser_subscribe_binding=pass publisher_isolation=pass\n";
         std::cout
             << "GOOSE_MONITOR_NEGATIVE_PASS malformed=rejected oversize=rejected capacity=rejected"
                " missing_interface=rejected explicit_binding=required bounded_streams="
