@@ -344,7 +344,7 @@ SurfacePanel {
                     anchors.fill: parent
                     anchors.margins: 12
                     spacing: 6
-Rectangle { Layout.fillWidth: true; height: 1; color: panel.theme.lineSoft }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: panel.theme.lineSoft }
                 Label { text: "SV output flag · lab simulation"; color: panel.theme.text; font.family: panel.uiFont; font.pixelSize: 12; font.weight: Font.DemiBold }
                 RowLayout {
                     Layout.fillWidth: true
@@ -400,12 +400,12 @@ Rectangle { Layout.fillWidth: true; height: 1; color: panel.theme.lineSoft }
                     Label { text: "Sync interval (ms)"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: syncField; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 20; top: 5000 } }
                     DarkCheckBox {
-                        theme: panel.theme id: vlanCheck; text: "VLAN"; font.family: panel.uiFont; font.pixelSize: 9 }
+                        theme: panel.theme; id: vlanCheck; text: "VLAN"; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: vlanField; enabled: vlanCheck.checked; theme: panel.theme; monoFont: panel.uiFont; text: "100"; validator: IntValidator { bottom: 1; top: 4094 } }
                     Label { text: "VLAN PCP"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: pcpField; enabled: vlanCheck.checked; theme: panel.theme; monoFont: panel.uiFont; text: "4"; validator: IntValidator { bottom: 0; top: 7 } }
                     DarkCheckBox {
-                        theme: panel.theme id: pdelayCheck; text: "Peer-delay response"; checked: true; font.family: panel.uiFont; font.pixelSize: 9 }
+                        theme: panel.theme; id: pdelayCheck; text: "Peer-delay response"; checked: true; font.family: panel.uiFont; font.pixelSize: 9 }
                     CalmButton {
                         theme: panel.theme
                         uiFont: panel.uiFont
