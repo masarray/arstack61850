@@ -146,7 +146,7 @@ Rectangle {
                         onTriggered: matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex,
                             "magnitude", matrix.groupIndex === 0 ? 1.0 : 57.74)
                     }
-                    MenuSeparator {}
+                    StudioMenuDivider { theme: matrix.theme }
                     Action {
                         text: "Equal ABC magnitudes"
                         enabled: signalRow.rowIndex < 3
@@ -163,7 +163,7 @@ Rectangle {
                         enabled: matrix.controller.signalFrequency > 0
                         onTriggered: matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "phase", 0)
                     }
-                    MenuSeparator {}
+                    StudioMenuDivider { theme: matrix.theme }
                     Action {
                         text: "Equal ABC angles"
                         enabled: signalRow.rowIndex < 3

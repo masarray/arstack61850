@@ -27,6 +27,12 @@ Rectangle {
     readonly property color stateColor: busy ? theme.amber
         : device && device.ptpRunning ? theme.green : theme.muted
 
+    function roleIndex(role) {
+        if (role === "RECEIVER") return 1
+        if (role === "MONITOR") return 2
+        return 0
+    }
+
     function syncIndex(mode) {
         if (mode === "FORCE_0") return 1
         if (mode === "FORCE_1_LOCAL") return 2
@@ -95,7 +101,8 @@ Rectangle {
                 Layout.fillWidth: true
                 Layout.minimumWidth: 118
                 model: ["Source", "Follower", "Monitor"]
-                currentIndex: tray.selectedRoleIndex
+                currentIndex: tray.device && tray.device.ptpRunning
+                    ? tray.roleIndex(tray.device.ptpRole) : tray.selectedRoleIndex
                 enabled: tray.ptpReady && !tray.busy && !tray.device.ptpRunning
                 onActivated: tray.selectedRoleIndex = currentIndex
                 ToolTip.visible: hovered

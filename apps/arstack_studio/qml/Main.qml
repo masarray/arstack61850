@@ -750,7 +750,7 @@ ApplicationWindow {
                                 Action { text: "DC mode  ·  0 Hz"; onTriggered: root.setWaveformMode("DC") }
                                 Action { text: "50 Hz  ·  nominal lab preset"; onTriggered: root.setFrequencyValue(50) }
                                 Action { text: "60 Hz  ·  lab preset"; onTriggered: root.setFrequencyValue(60) }
-                                MenuSeparator {}
+                                StudioMenuDivider { theme: studioTheme }
                                 Action {
                                     text: "Return to last AC frequency"
                                     enabled: root.previousAcFrequency > 0
