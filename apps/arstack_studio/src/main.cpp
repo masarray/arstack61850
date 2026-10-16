@@ -610,17 +610,28 @@ int main(int argc, char* argv[]) {
             return 20;
         }
         auto step = std::make_shared<int>(0);
+        auto resizeRetries = std::make_shared<int>(0);
         auto* uiTimer = new QTimer(&app);
         uiTimer->setInterval(400);
         mainWindow->resize(sizes.front());
         QObject::connect(uiTimer, &QTimer::timeout, &app,
-                         [&, step, uiTimer] {
+                         [&, step, resizeRetries, uiTimer] {
             const QSize target = sizes.at(static_cast<std::size_t>(*step));
             if (mainWindow->size() != target) {
-                // Window managers may apply a deferred resize.
+                // CI's virtual Windows desktop can clamp large native
+                // windows. Diagnose that instead of spinning 15 seconds.
+                if (++*resizeRetries > 5) {
+                    qCritical().noquote() << "Studio UI cannot reach target viewport:"
+                        << "requested=" << target << "actual=" << mainWindow->size()
+                        << "platform=" << QGuiApplication::platformName();
+                    uiTimer->stop();
+                    QCoreApplication::exit(24);
+                    return;
+                }
                 mainWindow->resize(target);
                 return;
             }
+            *resizeRetries = 0;
             if (!checkOperatorViewport(mainWindow, target)) {
                 uiTimer->stop();
                 QCoreApplication::exit(21);

@@ -90,25 +90,39 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          # Exercise real Windows Qt platform rendering, not offscreen lifecycle.
-          Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
-          Remove-Item Env:QT_QUICK_BACKEND -ErrorAction SilentlyContinue
+          # The GitHub runner's virtual desktop clamps physical window sizes.
+          # Exercise *exact* logical viewports using Windows-built Qt Quick
+          # offscreen software rendering. These PNGs are layout evidence,
+          # NOT an assertion of real on-monitor Windows color/hover fidelity.
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          $env:QT_QUICK_BACKEND = 'software'
           $candidate = Get-ChildItem -Path (Join-Path $PWD 'build-arstack-studio') -Recurse -File |
             Where-Object { $_.Name -ieq 'arstack_studio.exe' -or $_.Name -ieq 'ARStackStudio.exe' } |
             Select-Object -First 1
           if ($null -eq $candidate) { throw 'Studio GUI executable not found' }
-          $env:ARSTACK_STUDIO_QA_DIR = Join-Path $PWD 'studio-ui-evidence'
-          New-Item -ItemType Directory -Path $env:ARSTACK_STUDIO_QA_DIR -Force | Out-Null
           $exe = $candidate.FullName
-          $probe = Start-Process -FilePath $exe -ArgumentList '--check-operator-ui' -Wait -PassThru
-          if ($probe.ExitCode -ne 0) { throw "Studio UI geometry and screenshot check failed: $($probe.ExitCode)" }
-          foreach ($dimensions in @('1240x760', '960x620', '1440x900')) {
-            $png = Join-Path $env:ARSTACK_STUDIO_QA_DIR "studio-$dimensions.png"
-            if (-not (Test-Path $png) -or (Get-Item $png).Length -lt 10000) {
-              throw "Missing/empty Windows screenshot at $dimensions"
+          foreach ($scale in @('1', '1.5')) {
+            $env:QT_SCALE_FACTOR = $scale
+            $suffix = if ($scale -eq '1') { 'dpi-100' } else { 'dpi-150' }
+            $env:ARSTACK_STUDIO_QA_DIR = Join-Path (Join-Path $PWD 'studio-ui-evidence') $suffix
+            New-Item -ItemType Directory -Path $env:ARSTACK_STUDIO_QA_DIR -Force | Out-Null
+            $stdout = Join-Path $env:ARSTACK_STUDIO_QA_DIR 'ui-test-stdout.txt'
+            $stderr = Join-Path $env:ARSTACK_STUDIO_QA_DIR 'ui-test-stderr.txt'
+            $probe = Start-Process -FilePath $exe -ArgumentList '--check-operator-ui' -Wait -PassThru `
+              -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+            Get-Content $stdout -ErrorAction SilentlyContinue
+            Get-Content $stderr -ErrorAction SilentlyContinue
+            if ($probe.ExitCode -ne 0) {
+              throw "Qt Quick viewport geometry or screenshot failed at DPI=$scale, exit=$($probe.ExitCode); see logs in evidence."
+            }
+            foreach ($dimensions in @('1240x760', '960x620', '1440x900')) {
+              $png = Join-Path $env:ARSTACK_STUDIO_QA_DIR "studio-$dimensions.png"
+              if (-not (Test-Path $png) -or (Get-Item $png).Length -lt 10000) {
+                throw "Missing/empty Windows-built Qt screenshot DPI=$scale at $dimensions"
+              }
             }
           }
-          Write-Host 'Native Windows GUI screenshot evidence: PASS'
+          Write-Host 'Windows-built Qt Quick deterministic viewport and High-DPI evidence: PASS'
       - name: Upload desktop layout evidence
         if: always()
         uses: actions/upload-artifact@v4
