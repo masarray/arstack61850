@@ -5,6 +5,7 @@
 #include "SclProfileModel.hpp"
 #include "SingleInstanceGuard.hpp"
 #include "SmartSessionController.hpp"
+#include "StudioClipboard.hpp"
 #include "StudioDeviceController.hpp"
 
 #include <QCloseEvent>
@@ -462,6 +463,8 @@ int main(int argc, char* argv[]) {
     qmlRegisterType<StudioDeviceController>("ARStack.Studio", 1, 0, "DeviceController");
     qmlRegisterType<SmartSessionController>("ARStack.Studio", 1, 0, "SmartSessionController");
     qmlRegisterSingletonInstance("ARStack.Studio", 1, 0, "FirmwareService", &firmwareService);
+    StudioClipboard clipboard;
+    qmlRegisterSingletonInstance("ARStack.Studio", 1, 0, "StudioClipboard", &clipboard);
 
     QQmlApplicationEngine engine;
     QObject::connect(

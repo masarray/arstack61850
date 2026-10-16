@@ -2,6 +2,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import ARStack.Studio 1.0
 
 SurfacePanel {
     id: panel
@@ -349,7 +350,7 @@ SurfacePanel {
                 uiFont: panel.uiFont
                 text: "Copy diagnostics"
                 enabled: panel.session !== null
-                onClicked: panel.session.copyDiagnostics()
+                onClicked: StudioClipboard.copyText(panel.session.diagnosticsText())
             }
             Label {
                 Layout.fillWidth: true

@@ -7,8 +7,6 @@
 #include "SclProfileModel.hpp"
 
 #include <QVariantMap>
-#include <QClipboard>
-#include <QGuiApplication>
 #include <QStringList>
 
 #include <algorithm>
@@ -903,7 +901,9 @@ QString SmartSessionController::diagnosticsText() const {
         add(QStringLiteral("Device protocol"), device_->protocolVersion());
         add(QStringLiteral("Device capabilities"), device_->capabilities().join(QStringLiteral(", ")));
         add(QStringLiteral("Exact bundled build match"), firmwareIsCurrent() ? QStringLiteral("yes") : QStringLiteral("NOT VERIFIED"));
-        add(QStringLiteral("Firmware protocol compatible"), firmwareIsCompatible() ? QStringLiteral("yes") : QStringLiteral("no"));
+        add(QStringLiteral("Firmware protocol compatible"), !device_->deviceVerified()
+            ? QStringLiteral("UNKNOWN (identity not verified)")
+            : firmwareIsCompatible() ? QStringLiteral("yes") : QStringLiteral("no"));
         add(QStringLiteral("Profile generation"), device_->profileGeneration());
         add(QStringLiteral("Profile armed"), device_->profileArmed() ? QStringLiteral("yes") : QStringLiteral("no"));
         add(QStringLiteral("SMV running"), device_->running() ? QStringLiteral("yes") : QStringLiteral("no"));
@@ -924,11 +924,6 @@ QString SmartSessionController::diagnosticsText() const {
     }
     rows << QStringLiteral("Review and redact site identifiers or addresses before sharing.");
     return rows.join(QLatin1Char('\n'));
-}
-
-void SmartSessionController::copyDiagnostics() const {
-    if (auto* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
-        clipboard->setText(diagnosticsText());
 }
 
 void SmartSessionController::latchFirmwareFailure(QString message) {

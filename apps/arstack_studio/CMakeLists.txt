@@ -36,6 +36,8 @@ set(ARSTACK_STUDIO_CORE_SOURCES
 
 qt_add_executable(arstack_studio
     src/main.cpp
+    src/StudioClipboard.cpp
+    src/StudioClipboard.hpp
     ${ARSTACK_STUDIO_CORE_SOURCES}
 )
 
@@ -149,7 +151,6 @@ target_link_libraries(arstack_studio PRIVATE
 
 target_link_libraries(arstack_session_harness PRIVATE
     Qt6::Core
-    Qt6::Gui
     Qt6::SerialPort
     ARIEC61850::core
 )

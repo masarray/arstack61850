@@ -207,7 +207,6 @@ public:
     Q_INVOKABLE bool retryIdentification();
     Q_INVOKABLE bool retryProfileSync();
     Q_INVOKABLE QString diagnosticsText() const;
-    Q_INVOKABLE void copyDiagnostics() const;
     [[nodiscard]] QString firmwareUpdateResult() const { return lastFirmwareUpdateResult_; }
 
 signals:

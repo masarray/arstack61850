@@ -956,7 +956,8 @@ private:
             session.firmwareUpdateResult().contains(QStringLiteral("different build")) &&
             report.contains(QStringLiteral("Last firmware update result: Firmware was written")) &&
             report.contains(QStringLiteral("Bundled build ID: 0123456789abcdef")) &&
-            report.contains(QStringLiteral("Exact bundled build match: NOT VERIFIED"));
+            report.contains(QStringLiteral("Exact bundled build match: NOT VERIFIED")) &&
+            report.contains(QStringLiteral("Firmware protocol compatible: UNKNOWN"));
     }
 
     static bool workerTeardownCompletes() {
