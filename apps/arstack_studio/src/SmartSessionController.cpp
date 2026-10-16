@@ -1209,9 +1209,15 @@ void SmartSessionController::reconcile() {
             const QString observed = deviceFirmwareVersion_.isEmpty()
                 ? QStringLiteral("legacy/unknown firmware")
                 : QStringLiteral("firmware v%1").arg(deviceFirmwareVersion_);
+            const QString installedBuild = deviceFirmwareBuildId_.isEmpty()
+                ? QStringLiteral("missing/unknown") : deviceFirmwareBuildId_;
+            const QString expectedBuild = expectedFirmwareBuildId().isEmpty()
+                ? QStringLiteral("missing/unknown") : expectedFirmwareBuildId();
             latchFirmwareFailure(QStringLiteral(
-                "Firmware was written, but reconnect verification reported %1 instead of the exact bundled build for v%2.")
-                .arg(observed, expectedFirmwareVersion()));
+                "Firmware write/reset completed and ESP32-P4 reconnected, but exact build verification failed: "
+                "%1, installed build %2; package expects v%3, build %4. "
+                "A compatible existing firmware may still run. Copy diagnostics before retrying.")
+                .arg(observed, installedBuild, expectedFirmwareVersion(), expectedBuild));
             emit firmwareUpdateFinished(false);
             reconcile();
             return;

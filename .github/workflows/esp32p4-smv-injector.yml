@@ -44,6 +44,9 @@ concurrency:
 env:
   ARSTACK_FIRMWARE_VERSION: '0.1.1'
   ARSTACK_PROTOCOL_VERSION: '1'
+  # Reusable PR workflows expose github.sha as a synthetic merge SHA.
+  # Compile identity and manifest must use the exact checked-out PR HEAD.
+  ARSTACK_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
   build-esp32p4:
@@ -62,6 +65,21 @@ jobs:
           # PR packaging must use exactly the reviewed source SHA, not a
           # synthetic merge SHA that may change between queue and build.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Pin semantic firmware build ID to the exact checkout
+        run: |
+          set -euo pipefail
+          if [[ ! "$ARSTACK_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'Missing exact firmware source commit' >&2
+            exit 1
+          fi
+          checkout_commit="$(git -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD)"
+          if [[ "$checkout_commit" != "$ARSTACK_SOURCE_COMMIT" ]]; then
+            echo "Firmware checkout drift: $checkout_commit != $ARSTACK_SOURCE_COMMIT" >&2
+            exit 1
+          fi
+          echo "ARSTACK_FIRMWARE_BUILD_ID=${ARSTACK_SOURCE_COMMIT:0:16}" >> "$GITHUB_ENV"
+          echo "Exact firmware build identity pinned to ${ARSTACK_SOURCE_COMMIT:0:16}"
 
       - name: Select ESP32-P4 target
         run: source /opt/esp/idf/export.sh && idf.py set-target esp32p4
@@ -137,7 +155,6 @@ jobs:
         env:
           # Container git may lack safe.directory or even be unavailable.
           # The checkout explicitly selected this verified PR-head SHA.
-          ARSTACK_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           image="arstack-esp32p4-smv-${ARSTACK_FIRMWARE_VERSION}.bin"
@@ -163,6 +180,7 @@ jobs:
               "sha256": sha256,
               "espIdf": "5.5.4",
               "sourceCommit": source_commit,
+              "buildId": source_commit[:16],
           }
           with open("build/firmware-manifest.json", "w", encoding="utf-8", newline="\n") as handle:
               json.dump(manifest, handle, indent=2, sort_keys=True)
@@ -183,6 +201,11 @@ jobs:
           assert 'SMPSYNCH-AUTO' in manifest['capabilities']
           assert 'PROFILE-BINARY-V1' in manifest['capabilities']
           assert __import__('re').fullmatch(r'[0-9a-f]{40}', manifest['sourceCommit'])
+          expected_build_id = manifest['sourceCommit'][:16]
+          assert manifest['buildId'] == expected_build_id
+          # The app itself must advertise the identity in IDENTIFY. A valid SHA
+          # and sourceCommit in manifest alone cannot prove which ELF was built.
+          assert expected_build_id.encode('ascii') in payload, 'Firmware image does not contain the promised semantic build identity'
           assert actual == manifest['sha256']
           print(f"Firmware package: PASS · {manifest['image']} · PTP-P2 · pre-v3 · SHA-256 {actual}")
           PY
