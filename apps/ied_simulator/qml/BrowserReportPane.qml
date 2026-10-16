@@ -16,6 +16,8 @@ Rectangle {
     readonly property bool hasLastReport: latestReport.reportId !== undefined
     readonly property var configuredMembers: membersForSelectedRcb()
     property bool attributesExpanded: true
+    property bool triggerExpanded: true
+    property bool optionalExpanded: true
     property bool informationExpanded: true
     property bool dataExpanded: true
     property bool eventsExpanded: true
@@ -93,6 +95,37 @@ Rectangle {
         "Configuration Revision", "Integrity Period (ms)", "Sequence Number",
         "Reservation Time (s)", "Owner"
     ]
+    // Exact IEC 61850 TrgOps / OptFlds bit names from the native field codec.
+    // These are read-only observations. Authoring stays behind the explicit
+    // guarded confirmation dialog in the Browser ribbon.
+    readonly property var triggerFields: [
+        { label: "Data change", name: "data-change" },
+        { label: "Quality change", name: "quality-change" },
+        { label: "Data update", name: "data-update" },
+        { label: "Integrity", name: "integrity" },
+        { label: "General interrogation", name: "general-interrogation" }
+    ]
+    readonly property var optionalFields: [
+        { label: "Sequence number", name: "sequence-number" },
+        { label: "Report timestamp", name: "report-time-stamp" },
+        { label: "Reason for inclusion", name: "reason-for-inclusion" },
+        { label: "DataSet name", name: "data-set-name" },
+        { label: "Data reference", name: "data-reference" },
+        { label: "Buffer overflow", name: "buffer-overflow" },
+        { label: "Entry ID", name: "entry-id" },
+        { label: "Configuration revision", name: "configuration-revision" },
+        { label: "Segmentation", name: "segmentation" }
+    ]
+
+    function readStatusLabel(raw) {
+        switch (String(raw || "not-read")) {
+        case "verified": return "IED Read verified"
+        case "not-exposed": return "Not exposed by IED"
+        case "read-failed": return "IED Read failed"
+        default: return "Not read"
+        }
+    }
+
     readonly property var informationLabels: [
         "Report ID", "Sequence Number", "Subsequence Number",
         "Configuration Revision", "Entry ID", "Decoder"
@@ -380,6 +413,111 @@ Rectangle {
                     Repeater {
                         model: root.attributeLabels.length
                         delegate: PropertyRow { lastReportSection: false }
+                    }
+                }
+
+                SectionHeading {
+                    heading: "Trigger Options (TrgOps)"
+                    evidence: root.readStatusLabel(root.rcb.triggerOptionsReadStatus)
+                    opened: root.triggerExpanded
+                    onToggleRequested: root.triggerExpanded = !root.triggerExpanded
+                }
+                ColumnLayout {
+                    visible: root.triggerExpanded
+                    Layout.fillWidth: true
+                    spacing: 0
+                    Label {
+                        visible: root.rcb.triggerOptionsReadStatus !== "verified"
+                        Layout.fillWidth: true
+                        leftPadding: 10
+                        topPadding: 6
+                        bottomPadding: 6
+                        color: theme.muted
+                        font.pixelSize: 10
+                        text: "TrgOps " + root.readStatusLabel(root.rcb.triggerOptionsReadStatus)
+                              + " · no on/off bit state is inferred."
+                    }
+                    GridLayout {
+                        visible: root.rcb.triggerOptionsReadStatus === "verified"
+                        Layout.fillWidth: true
+                        columns: width >= 550 ? 3 : width >= 330 ? 2 : 1
+                        rowSpacing: 0
+                        columnSpacing: 8
+                        Repeater {
+                            model: root.triggerFields
+                            delegate: CheckBox {
+                                required property var modelData
+                                text: modelData.label
+                                checked: root.rcb.triggerOptionNames
+                                         && root.rcb.triggerOptionNames.indexOf(modelData.name) >= 0
+                                enabled: false // inspected bit, never an MMS Write
+                                font.pixelSize: 10
+                                Layout.fillWidth: true
+                            }
+                        }
+                    }
+                }
+
+                SectionHeading {
+                    heading: "Optional Fields (OptFlds)"
+                    evidence: root.readStatusLabel(root.rcb.optionalFieldsReadStatus)
+                    opened: root.optionalExpanded
+                    onToggleRequested: root.optionalExpanded = !root.optionalExpanded
+                }
+                ColumnLayout {
+                    visible: root.optionalExpanded
+                    Layout.fillWidth: true
+                    spacing: 0
+                    Label {
+                        visible: root.rcb.optionalFieldsReadStatus !== "verified"
+                        Layout.fillWidth: true
+                        leftPadding: 10
+                        topPadding: 6
+                        bottomPadding: 6
+                        color: theme.muted
+                        font.pixelSize: 10
+                        text: "OptFlds " + root.readStatusLabel(root.rcb.optionalFieldsReadStatus)
+                              + " · no on/off bit state is inferred."
+                    }
+                    GridLayout {
+                        visible: root.rcb.optionalFieldsReadStatus === "verified"
+                        Layout.fillWidth: true
+                        columns: width >= 550 ? 3 : width >= 330 ? 2 : 1
+                        rowSpacing: 0
+                        columnSpacing: 8
+                        Repeater {
+                            model: root.optionalFields
+                            delegate: CheckBox {
+                                required property var modelData
+                                text: modelData.label
+                                checked: root.rcb.optionalFieldNames
+                                         && root.rcb.optionalFieldNames.indexOf(modelData.name) >= 0
+                                enabled: false // inspected bit, never an MMS Write
+                                font.pixelSize: 10
+                                Layout.fillWidth: true
+                            }
+                        }
+                    }
+                }
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: rcbAvailabilityLabel.implicitHeight + 14
+                    color: theme.surface
+                    Label {
+                        id: rcbAvailabilityLabel
+                        anchors.fill: parent
+                        anchors.margins: 7
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: 10
+                        color: root.rcb.availability === "in-use"
+                               ? theme.red : theme.muted
+                        text: root.rcb.probeOk !== true
+                              ? "RCB live state not verified · never infer an unused reservation."
+                              : root.rcb.availability === "in-use"
+                                ? "RCB in use: enabled, reservation or Owner evidence is present. Do not take over another client."
+                                : root.rcb.availability === "available"
+                                  ? "RCB currently available according to readback. Revalidate ownership before enabling."
+                                  : "RCB availability: " + root.asText(root.rcb.availabilityReason)
                     }
                 }
 

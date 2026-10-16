@@ -46,6 +46,32 @@ QString hexBytes(const std::span<const std::uint8_t> bytes) {
     return QString::fromLatin1(raw.toHex(' ')).toUpper();
 }
 
+QString bitReadState(
+    const mms::MmsReportControlCandidate& candidate,
+    const mms::MmsReportControlEvidence& evidence,
+    const mms::MmsReportBitField* observed,
+    const std::string_view attribute) {
+    // Do not infer false from missing fields or partial read failures:
+    // a successfully read, zero-bit BIT STRING still carries a nonempty raw.
+    if (std::find(candidate.attributes.begin(), candidate.attributes.end(),
+                  attribute) == candidate.attributes.end())
+        return QStringLiteral("not-exposed");
+    if (std::find(evidence.requested_attributes.begin(),
+                  evidence.requested_attributes.end(), attribute) ==
+        evidence.requested_attributes.end())
+        return QStringLiteral("not-read");
+    return observed && !observed->raw.empty()
+        ? QStringLiteral("verified") : QStringLiteral("read-failed");
+}
+
+QStringList bitNames(const mms::MmsReportBitField& bits) {
+    QStringList names;
+    names.reserve(static_cast<qsizetype>(bits.names.size()));
+    for (const auto& name : bits.names)
+        names.push_back(QString::fromStdString(name));
+    return names;
+}
+
 QString availabilityText(const mms::MmsRcbAvailability value) {
     switch (value) {
     case mms::MmsRcbAvailability::unknown: return QStringLiteral("unknown");
@@ -251,11 +277,27 @@ DiscoveryUi buildDiscoveryUi(
         map.insert(QStringLiteral("attributes"), attributes);
         map.insert(QStringLiteral("supportsEntryId"), attributes.contains(QStringLiteral("EntryID")));
         map.insert(QStringLiteral("supportsPurgeBuf"), attributes.contains(QStringLiteral("PurgeBuf")));
+        map.insert(QStringLiteral("triggerOptionNames"), QStringList{});
+        map.insert(QStringLiteral("optionalFieldNames"), QStringList{});
+        map.insert(QStringLiteral("triggerOptionsReadStatus"),
+                   attributes.contains(QStringLiteral("TrgOps"))
+                       ? QStringLiteral("not-read") : QStringLiteral("not-exposed"));
+        map.insert(QStringLiteral("optionalFieldsReadStatus"),
+                   attributes.contains(QStringLiteral("OptFlds"))
+                       ? QStringLiteral("not-read") : QStringLiteral("not-exposed"));
 
         for (const auto& evidence : discovery.report_controls) {
             if (evidence.candidate.reference != candidate.reference) continue;
             map.insert(QStringLiteral("probeOk"), evidence.success());
             map.insert(QStringLiteral("probeError"), QString::fromStdString(evidence.error));
+            map.insert(QStringLiteral("triggerOptionsReadStatus"),
+                       bitReadState(candidate, evidence,
+                                    evidence.state ? &evidence.state->trigger_options : nullptr,
+                                    "TrgOps"));
+            map.insert(QStringLiteral("optionalFieldsReadStatus"),
+                       bitReadState(candidate, evidence,
+                                    evidence.state ? &evidence.state->optional_fields : nullptr,
+                                    "OptFlds"));
             if (evidence.state) {
                 const auto& state = *evidence.state;
                 map.insert(QStringLiteral("dataSet"), QString::fromStdString(state.data_set_reference));
@@ -279,6 +321,8 @@ DiscoveryUi buildDiscoveryUi(
                         }
                         return result;
                     }()));
+                map.insert(QStringLiteral("triggerOptionNames"), bitNames(state.trigger_options));
+                map.insert(QStringLiteral("optionalFieldNames"), bitNames(state.optional_fields));
                 map.insert(QStringLiteral("optionalFields"), QString::fromStdString(
                     [&state] {
                         std::string result;
