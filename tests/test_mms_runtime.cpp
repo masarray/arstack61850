@@ -590,7 +590,6 @@ void queue_probe_response(
         {mms::MmsDataValue::unsigned_integer(1U), std::nullopt},
         {mms::MmsDataValue::bit_string(0U, ByteVector{0x5AU, 0x00U}), std::nullopt},
         {mms::MmsDataValue::bit_string(0U, ByteVector{0x40U}), std::nullopt},
-        {mms::MmsDataValue::boolean(false), std::nullopt},
         {mms::MmsDataValue::boolean(reserved), std::nullopt},
     };
     transport.push_receive(wrap_application(
@@ -672,15 +671,15 @@ void queue_static_preclaim_response(
 void queue_static_subscription_probe_response(
     ScriptedTransport& transport,
     const std::uint32_t invoke_id,
-    const bool enabled = false) {
+    const bool enabled = false,
+    const std::string& data_set = "LD0/LLN0.DataSet") {
     mms::MmsReadResponse response;
     response.invoke_id = invoke_id;
     response.results = {
         {mms::MmsDataValue::visible_string("RPT-FALLBACK"), std::nullopt},
         {mms::MmsDataValue::boolean(enabled), std::nullopt},
-        {mms::MmsDataValue::visible_string("LD0/LLN0.DataSet"), std::nullopt},
+        {mms::MmsDataValue::visible_string(data_set), std::nullopt},
         {mms::MmsDataValue::unsigned_integer(1U), std::nullopt},
-        {mms::MmsDataValue::boolean(false), std::nullopt},
         {mms::MmsDataValue::unsigned_integer(0U), std::nullopt},
     };
     transport.push_receive(wrap_application(
@@ -731,8 +730,10 @@ void static_session_skips_contended_preferred_and_subscribes_fallback() {
     CHECK(active.subscription->enabled_by_runtime);
     CHECK(!active.subscription->reservation_touched);
 
+    auto matched = make_report();
+    matched.items[0].value = mms::MmsDataValue::visible_string("RPT-FALLBACK");
     transport.push_receive(wrap_application(
-        mms::MmsInformationReportCodec::encode_p_data(make_report())));
+        mms::MmsInformationReportCodec::encode_p_data(matched)));
     CHECK(session.poll_once());
     CHECK(session.snapshot().subscription->received_reports == 1U);
 
@@ -761,6 +762,34 @@ void static_session_rejects_data_set_rebinding() {
     });
 }
 
+
+void static_session_fails_closed_on_live_dataset_rebind() {
+    ScriptedTransport transport;
+    queue_handshake(transport);
+    mms::MmsAssociationRuntime association{transport};
+    association.connect({"127.0.0.1", 102U});
+    const auto preferred = make_static_brcb_candidate("brcbPreferred01");
+    const auto fallback = make_static_brcb_candidate("brcbFallback01");
+    const auto discovery = make_static_discovery(preferred, fallback);
+    queue_static_preclaim_response(transport, 1U, true);
+    queue_static_preclaim_response(transport, 2U, false);
+    // Another client rebound the RCB between directory discovery and enable.
+    queue_static_subscription_probe_response(
+        transport, 3U, false, "LD0/LLN0.UnrelatedDataSet");
+    mms::MmsStaticReportSessionOptions options;
+    options.selection.preferred_rcb_reference = preferred.reference;
+    options.selection.allow_urcb_fallback = false;
+    options.contention.probe_count = 1U;
+    options.contention.probe_delay = std::chrono::milliseconds{0};
+    options.maximum_candidate_attempts = 2U;
+    mms::MmsStaticReportSessionRuntime session{association, discovery, options};
+    session.prepare();
+    CHECK(session.snapshot().selected_rcb_reference == fallback.reference);
+    check_throws<mms::MmsReportSubscriptionError>([&] { session.start(); });
+    CHECK(!session.active());
+    CHECK(transport.sent().size() == 5U); // CR, AARQ, 3 Read; no unsafe Write
+}
+
 void subscription_runtime_reserves_enables_receives_and_cleans_up() {
     ScriptedTransport transport;
     queue_handshake(transport);
@@ -782,10 +811,19 @@ void subscription_runtime_reserves_enables_receives_and_cleans_up() {
     CHECK(active.enabled_by_runtime);
     CHECK(active.reservation_touched);
 
+    auto foreign = make_report();
+    foreign.items[0].value = mms::MmsDataValue::visible_string("ANOTHER-RCB");
+    transport.push_receive(wrap_application(
+        mms::MmsInformationReportCodec::encode_p_data(foreign)));
+    CHECK(subscription.poll_once());
+    CHECK(subscription.snapshot().rejected_reports == 1U);
+    CHECK(subscription.snapshot().received_reports == 0U);
+
     transport.push_receive(wrap_application(
         mms::MmsInformationReportCodec::encode_p_data(make_report())));
     CHECK(subscription.poll_once());
     const auto observed = subscription.snapshot();
+    CHECK(observed.rejected_reports == 1U);
     CHECK(observed.received_reports == 1U);
     CHECK(observed.decode_failures == 0U);
     CHECK(observed.streams.size() == 1U);
@@ -841,7 +879,6 @@ void subscription_does_not_take_over_an_enabled_rcb() {
         {mms::MmsDataValue::bit_string(0U, ByteVector{0x5AU, 0x00U}), std::nullopt},
         {mms::MmsDataValue::bit_string(0U, ByteVector{0x40U}), std::nullopt},
         {mms::MmsDataValue::boolean(false), std::nullopt},
-        {mms::MmsDataValue::boolean(false), std::nullopt},
     };
     transport.push_receive(wrap_application(
         mms::MmsServiceCodec::encode_read_response_p_data(response)));
@@ -867,6 +904,7 @@ int main() {
         {"batch out-of-order response and interleaved report", confirmed_batch_dispatches_out_of_order_with_report},
         {"batch unexpected invoke and timeout fault containment", confirmed_batch_unregistered_response_faults_and_receipts_survive},
         {"report subscription lifecycle", subscription_runtime_reserves_enables_receives_and_cleans_up},
+        {"static RCB live DataSet rebind refusal", static_session_fails_closed_on_live_dataset_rebind},
         {"report cleanup after association loss", subscription_marks_cleanup_required_when_association_is_lost},
         {"report takeover protection", subscription_does_not_take_over_an_enabled_rcb},
         {"static report session failover lifecycle", static_session_skips_contended_preferred_and_subscribes_fallback},
