@@ -729,6 +729,112 @@ void association_loss_preserves_completed_domain_evidence_without_dead_probes() 
     CHECK(transport.sent().size() == 5U); // 2 handshake + exactly 3 sends
 }
 
+
+void negotiated_name_list_pipeline_preserves_model_and_wire_budget() {
+    const auto run = [](const bool pipeline, const bool broken_continuation) {
+        ScriptedTransport transport;
+        queue_handshake(transport);
+        const auto response = [&](const std::uint32_t id,
+                                  const std::vector<std::string>& names,
+                                  const bool more) {
+            transport.push_receive(wrap_application(
+                mms::MmsServiceCodec::encode_get_name_list_response_p_data(
+                    {id, names, more})));
+        };
+        response(1U, {"ALPHALD0", "ALPHAPROT"}, false);
+        if (pipeline) {
+            // The first four independent chains are in-flight together.
+            // Respond deliberately out of invoke order, including an empty
+            // valid DataSet list; continuation remains sequential per chain.
+            response(4U, {"MMXU1$MX$PhV$phsA$cVal$mag$f"}, false);
+            response(3U, {"LLN0$DataSetA"}, false);
+            response(2U, {"LLN0$ST$Mod$stVal"}, true);
+            response(5U, {}, false);
+            response(6U, broken_continuation
+                ? std::vector<std::string>{}
+                : std::vector<std::string>{"PTOC1$ST$Str$stVal"}, 
+                broken_continuation);
+        } else {
+            response(2U, {"LLN0$ST$Mod$stVal"}, true);
+            response(3U, {"PTOC1$ST$Str$stVal"}, false);
+            response(4U, {"LLN0$DataSetA"}, false);
+            response(5U, {"MMXU1$MX$PhV$phsA$cVal$mag$f"}, false);
+            response(6U, {}, false);
+        }
+        mms::MmsAssociationRuntime association{transport};
+        association.connect({"127.0.0.1", 102U});
+        mms::MmsLiveDiscoveryClient discovery{association};
+        mms::MmsLiveDiscoveryOptions options;
+        options.max_concurrent_name_list_chains = pipeline ? 4U : 1U;
+        options.probe_variable_types = false;
+        options.read_data_set_directories = false;
+        options.probe_report_controls = false;
+        auto result = discovery.discover(options);
+
+        CHECK(result.wire_budget.get_name_list == 6U);
+        CHECK(result.wire_budget.total() == 6U);
+        CHECK(result.wire_budget.name_list_peak_outstanding == (pipeline ? 4U : 1U));
+        CHECK(transport.sent().size() == 8U);
+        if (pipeline) {
+            // The first continuation may only be transmitted after the first
+            // batch has completed. It must use the exact previous page cursor.
+            const auto tpkt = osi::TpktFrameCodec::decode(transport.sent()[7]);
+            const auto cotp = osi::CotpFrameCodec::decode(tpkt.payload);
+            const auto request =
+                mms::MmsServiceCodec::decode_get_name_list_request(cotp.user_data);
+            CHECK(request.invoke_id == 6U);
+            CHECK(request.domain_id == "ALPHALD0");
+            CHECK(request.object_class == mms::MmsGetNameListObjectClass::named_variable);
+            CHECK(request.continue_after == "LLN0$ST$Mod$stVal");
+        }
+        if (broken_continuation) {
+            CHECK(result.partial());
+            CHECK(result.names.domain_variables.at("ALPHALD0").empty());
+            CHECK(result.names.domain_variables.at("ALPHAPROT").size() == 1U);
+        }
+        return result;
+    };
+
+    const auto legacy = run(false, false);
+    const auto pipelined = run(true, false);
+    CHECK(!pipelined.partial());
+    CHECK(legacy.names.domain_variables == pipelined.names.domain_variables);
+    CHECK(legacy.names.domain_variable_lists == pipelined.names.domain_variable_lists);
+    CHECK(legacy.report_inventory.data_sets.size() ==
+          pipelined.report_inventory.data_sets.size());
+    CHECK(legacy.report_inventory.report_controls.size() ==
+          pipelined.report_inventory.report_controls.size());
+    CHECK(pipelined.summary().find("nameListPeakOutstanding=4") != std::string::npos);
+    static_cast<void>(run(true, true));
+}
+
+void name_list_batch_fault_retains_only_verified_domain_evidence() {
+    ScriptedTransport transport;
+    queue_handshake(transport);
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_get_name_list_response_p_data(
+            {1U, {"ALPHALD0", "ALPHAPROT"}, false})));
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_get_name_list_response_p_data(
+            {99U, {"UNEXPECTED"}, false})));
+    mms::MmsAssociationRuntime association{transport};
+    association.connect({"127.0.0.1", 102U});
+    mms::MmsLiveDiscoveryClient discovery{association};
+    mms::MmsLiveDiscoveryOptions options;
+    options.max_concurrent_name_list_chains = 4U;
+    options.probe_variable_types = false;
+    options.read_data_set_directories = false;
+    options.probe_report_controls = false;
+    const auto result = discovery.discover(options);
+    CHECK(result.partial());
+    CHECK(!association.associated());
+    CHECK(result.domain_count() == 2U);
+    CHECK(result.variable_count() == 0U);
+    CHECK(result.variable_list_count() == 0U);
+    CHECK(result.wire_budget.get_name_list == 5U);
+    CHECK(result.wire_budget.name_list_peak_outstanding == 4U);
+}
+
 void pagination_without_forward_progress_is_rejected() {
     ScriptedTransport transport;
     queue_handshake(transport);
@@ -762,6 +868,8 @@ int main() {
         verified_data_set_hints_restore_late_ln_type_schema();
         disconnected_optional_probes_do_not_inflate_wire_budget();
         association_loss_preserves_completed_domain_evidence_without_dead_probes();
+        negotiated_name_list_pipeline_preserves_model_and_wire_budget();
+        name_list_batch_fault_retains_only_verified_domain_evidence();
         pagination_without_forward_progress_is_rejected();
         std::cout << "Live MMS discovery and model parity tests passed.\n";
         return 0;

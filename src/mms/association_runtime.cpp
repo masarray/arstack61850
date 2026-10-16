@@ -11,6 +11,7 @@
 #include <array>
 #include <exception>
 #include <limits>
+#include <unordered_map>
 #include <utility>
 
 namespace ar::iec61850::mms {
@@ -391,6 +392,7 @@ void MmsAssociationRuntime::connect(
     information_reports_.clear();
     tpkt_decoder_.reset();
     next_invoke_id_ = 0U;
+    negotiated_outstanding_verified_ = false;
     remote_cotp_reference_ = 0U;
     negotiated_ = {};
     negotiated_.tpdu_size_code = options_.tpdu_size_code;
@@ -413,6 +415,7 @@ void MmsAssociationRuntime::connect(
             information_reports_.clear();
             tpkt_decoder_.reset();
             remote_cotp_reference_ = 0U;
+            negotiated_outstanding_verified_ = false;
             negotiated_ = {};
             negotiated_.tpdu_size_code = options_.tpdu_size_code;
             negotiated_.presentation_context_id = options_.presentation_context_id;
@@ -531,6 +534,8 @@ void MmsAssociationRuntime::connect(
                             initiate.negotiated_maximum_outstanding_called;
                         negotiated_.data_structure_nesting_level =
                             initiate.negotiated_data_structure_nesting_level;
+                        negotiated_outstanding_verified_ =
+                            initiate.negotiated_maximum_outstanding_calling > 0U;
                     } catch (const std::exception& exception) {
                         strict_failure =
                             std::string{"Strict MMS Initiate-Response decode failed: "} +
@@ -555,6 +560,7 @@ void MmsAssociationRuntime::connect(
                     throw MmsAssociationRuntimeError(strict_failure);
                 }
                 used_csharp_compatibility = true;
+                negotiated_outstanding_verified_ = false;
                 acceptance_message =
                     profile.name + ": " + compatibility_message +
                     (strict_failure.empty()
@@ -754,6 +760,122 @@ MmsConfirmedExchangeResult MmsAssociationRuntime::exchange_confirmed(
                       exception.what(), expected_invoke_id);
         } else {
             fail(exception.what());
+        }
+        transport_.close();
+        invoke_router_.clear();
+        information_reports_.clear();
+        tpkt_decoder_.reset();
+        remote_cotp_reference_ = 0U;
+        throw;
+    }
+}
+
+std::vector<MmsConfirmedExchangeResult>
+MmsAssociationRuntime::exchange_confirmed_batch(
+    const std::span<const MmsConfirmedBatchRequest> requests,
+    const std::stop_token stop_token,
+    std::size_t* const sent_count) {
+    if (sent_count) *sent_count = 0U;
+    require_associated();
+    // Bound the collection independently of server claims. Caller must opt in.
+    constexpr std::size_t hard_window = 8U;
+    const auto window = std::min<std::size_t>(
+        hard_window, verified_outstanding_calling());
+    if (requests.empty() || requests.size() > window) {
+        throw std::invalid_argument(
+            "Confirmed MMS batch exceeds verified negotiated calling window.");
+    }
+    std::unordered_map<std::uint32_t, std::size_t> slots;
+    slots.reserve(requests.size());
+    for (std::size_t i = 0U; i < requests.size(); ++i) {
+        const auto& req = requests[i];
+        if (req.invoke_id == 0U ||
+            req.invoke_id > MmsPduCodec::maximum_invoke_id ||
+            !slots.emplace(req.invoke_id, i).second) {
+            throw std::invalid_argument(
+                "Confirmed MMS batch contains invalid or duplicate invoke ID.");
+        }
+        const auto pdu = MmsPduCodec::decode_envelope(req.presentation_payload);
+        if (pdu.kind != MmsPduKind::confirmed_request ||
+            !pdu.matches_invoke(req.invoke_id)) {
+            throw std::invalid_argument(
+                "Confirmed MMS batch PDU does not match its invoke ID.");
+        }
+    }
+
+    const auto deadline = deadline_after(options_.request_timeout);
+    try {
+        if (invoke_router_.queued_confirmed_count() != 0U) {
+            throw MmsAssociationRuntimeError(
+                "Orphan confirmed response before MMS batch send.");
+        }
+        for (const auto& req : requests) {
+            require_not_cancelled(stop_token);
+            send_application_payload(req.presentation_payload, deadline, stop_token);
+            if (sent_count) ++*sent_count;
+            add_event(MmsAssociationEventKind::confirmed_request_sent,
+                      "Batched confirmed MMS request sent.", req.invoke_id);
+        }
+
+        std::vector<std::optional<MmsConfirmedExchangeResult>> completed(requests.size());
+        std::size_t remaining = requests.size();
+        for (std::size_t received_count = 0U;
+             received_count < options_.maximum_receive_chunks_per_operation;
+             ++received_count) {
+            auto bytes = receive_application_payload(deadline, stop_token);
+            auto envelope = route_received_payload(bytes);
+            if (!envelope.confirmed_result()) continue; // InformationReport
+            const auto found = envelope.invoke_id
+                ? slots.find(*envelope.invoke_id) : slots.end();
+            if (found == slots.end() || completed[found->second].has_value()) {
+                throw MmsAssociationRuntimeError(
+                    "Unregistered or duplicate confirmed MMS batch invoke ID.");
+            }
+            MmsPduEnvelope matched;
+            if (!invoke_router_.try_dequeue(*envelope.invoke_id, matched)) {
+                throw MmsAssociationRuntimeError(
+                    "Batch response absent from authoritative invoke router.");
+            }
+            completed[found->second] = MmsConfirmedExchangeResult{
+                std::move(matched), std::move(bytes)};
+            add_event(MmsAssociationEventKind::confirmed_result_received,
+                      "Batched confirmed MMS result received.", *envelope.invoke_id);
+            if (--remaining == 0U) {
+                std::vector<MmsConfirmedExchangeResult> results;
+                results.reserve(completed.size());
+                for (auto& item : completed) results.push_back(std::move(*item));
+                return results;
+            }
+        }
+        throw MmsAssociationRuntimeError(
+            "MMS batch exhausted bounded receive iteration budget.");
+    } catch (const MmsTransportCancelledError& error) {
+        state_ = MmsAssociationRuntimeState::faulted;
+        last_fault_ = error.what();
+        add_event(MmsAssociationEventKind::cancelled, error.what());
+        transport_.close();
+        invoke_router_.clear();
+        information_reports_.clear();
+        tpkt_decoder_.reset();
+        remote_cotp_reference_ = 0U;
+        throw;
+    } catch (const MmsTransportTimeoutError& error) {
+        state_ = MmsAssociationRuntimeState::faulted;
+        last_fault_ = error.what();
+        add_event(MmsAssociationEventKind::timed_out, error.what());
+        transport_.close();
+        invoke_router_.clear();
+        information_reports_.clear();
+        tpkt_decoder_.reset();
+        remote_cotp_reference_ = 0U;
+        throw;
+    } catch (const std::exception& error) {
+        if (stop_token.stop_requested()) {
+            state_ = MmsAssociationRuntimeState::faulted;
+            last_fault_ = error.what();
+            add_event(MmsAssociationEventKind::cancelled, error.what());
+        } else {
+            fail(error.what());
         }
         transport_.close();
         invoke_router_.clear();

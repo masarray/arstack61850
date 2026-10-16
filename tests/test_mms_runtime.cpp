@@ -450,6 +450,104 @@ void confirmed_exchange_rejects_idle_orphan_without_sending() {
     CHECK(!transport.connected());
 }
 
+
+void confirmed_batch_dispatches_out_of_order_with_report() {
+    ScriptedTransport transport;
+    queue_handshake(transport);
+    mms::MmsAssociationRuntime runtime{transport};
+    runtime.connect({"127.0.0.1", 102U});
+    CHECK(runtime.verified_outstanding_calling() >= 2U);
+
+    std::vector<mms::MmsConfirmedBatchRequest> requests;
+    for (std::size_t i = 0U; i < 2U; ++i) {
+        mms::MmsReadRequest request;
+        request.invoke_id = runtime.next_invoke_id();
+        request.variables.push_back(
+            mms::MmsObjectName::domain_specific("LD0", "LLN0$ST$Mod$stVal"));
+        requests.push_back({
+            mms::MmsServiceCodec::encode_read_request_p_data(request),
+            request.invoke_id});
+    }
+
+    transport.push_receive(wrap_application(
+        mms::MmsInformationReportCodec::encode_p_data(make_report())));
+    for (const auto index : {1U, 0U}) {
+        mms::MmsReadResponse response;
+        response.invoke_id = requests[index].invoke_id;
+        response.results.push_back({
+            mms::MmsDataValue::boolean(index == 0U), std::nullopt});
+        transport.push_receive(wrap_application(
+            mms::MmsServiceCodec::encode_read_response_p_data(response)));
+    }
+    std::size_t sent = 0U;
+    const auto result = runtime.exchange_confirmed_batch(requests, {}, &sent);
+    CHECK(sent == 2U);
+    CHECK(transport.sent().size() == 4U); // handshake + two complete requests
+    CHECK(result.size() == 2U);
+    CHECK(result[0].envelope.matches_invoke(requests[0].invoke_id));
+    CHECK(result[1].envelope.matches_invoke(requests[1].invoke_id));
+    CHECK(runtime.queued_information_report_count() == 1U);
+    CHECK(runtime.associated());
+
+    // Invalid batches fail before any wire work; no speculative retries.
+    const auto count_before = transport.sent().size();
+    const std::vector<mms::MmsConfirmedBatchRequest> duplicate{
+        requests[0], requests[0]};
+    check_throws<std::invalid_argument>([&] {
+        static_cast<void>(runtime.exchange_confirmed_batch(duplicate));
+    });
+    CHECK(transport.sent().size() == count_before);
+    CHECK(runtime.associated());
+    const std::vector<mms::MmsConfirmedBatchRequest> over_cap(
+        9U, requests[0]);
+    check_throws<std::invalid_argument>([&] {
+        static_cast<void>(runtime.exchange_confirmed_batch(over_cap));
+    });
+    CHECK(runtime.associated());
+}
+
+void confirmed_batch_unregistered_response_faults_and_receipts_survive() {
+    ScriptedTransport transport;
+    queue_handshake(transport);
+    mms::MmsAssociationRuntime runtime{transport};
+    runtime.connect({"127.0.0.1", 102U});
+    std::vector<mms::MmsConfirmedBatchRequest> requests;
+    for (std::size_t i = 0U; i < 2U; ++i) {
+        mms::MmsReadRequest request;
+        request.invoke_id = runtime.next_invoke_id();
+        request.variables.push_back(
+            mms::MmsObjectName::domain_specific("LD0", "LLN0$ST$Mod$stVal"));
+        requests.push_back({
+            mms::MmsServiceCodec::encode_read_request_p_data(request),
+            request.invoke_id});
+    }
+    mms::MmsReadResponse rogue;
+    rogue.invoke_id = 77U;
+    rogue.results.push_back({mms::MmsDataValue::boolean(false), std::nullopt});
+    transport.push_receive(wrap_application(
+        mms::MmsServiceCodec::encode_read_response_p_data(rogue)));
+    std::size_t sent = 0U;
+    check_throws<mms::MmsAssociationRuntimeError>([&] {
+        static_cast<void>(runtime.exchange_confirmed_batch(requests, {}, &sent));
+    });
+    CHECK(sent == 2U);
+    CHECK(!runtime.associated());
+    CHECK(!transport.connected());
+    CHECK(transport.sent().size() == 4U);
+    queue_handshake(transport);
+    runtime.connect({"127.0.0.1", 102U});
+    CHECK(runtime.associated());
+
+    std::size_t timeout_sent = 0U;
+    check_throws<mms::MmsTransportTimeoutError>([&] {
+        static_cast<void>(runtime.exchange_confirmed_batch(
+            requests, {}, &timeout_sent));
+    });
+    CHECK(timeout_sent == 2U);
+    CHECK(!runtime.associated());
+    CHECK(!transport.connected());
+}
+
 [[nodiscard]] mms::MmsReportControlCandidate make_urcb_candidate() {
     mms::MmsReportControlCandidate candidate;
     candidate.domain = "LD0";
@@ -766,6 +864,8 @@ int main() {
         {"confirmed exchange timeout closes transport and reconnects", confirmed_exchange_timeout_closes_transport_and_can_reconnect},
         {"unexpected confirmed invoke fails closed", confirmed_exchange_rejects_unexpected_invoke_instead_of_caching_it},
         {"orphan confirmed result cannot acknowledge unsent request", confirmed_exchange_rejects_idle_orphan_without_sending},
+        {"batch out-of-order response and interleaved report", confirmed_batch_dispatches_out_of_order_with_report},
+        {"batch unexpected invoke and timeout fault containment", confirmed_batch_unregistered_response_faults_and_receipts_survive},
         {"report subscription lifecycle", subscription_runtime_reserves_enables_receives_and_cleans_up},
         {"report cleanup after association loss", subscription_marks_cleanup_required_when_association_is_lost},
         {"report takeover protection", subscription_does_not_take_over_an_enabled_rcb},

@@ -144,6 +144,8 @@ void print_usage() {
         << "  --no-types             Skip GetVariableAccessAttributes probes.\n"
         << "  --no-datasets          Skip DataSet directory reads.\n"
         << "  --no-rcb               Skip read-only RCB attribute probes.\n"
+        << "  --name-list-window N   Opt-in bounded GetNameList wire pipeline (1..8; default 1).\n"
+        << "                         Requires verified peer calling window; otherwise serial.\n"
         << "  --max-types N          Bound all type probes.\n"
         << "  --max-datasets N       Bound DataSet directory reads.\n"
         << "  --max-rcb N            Bound RCB read probes.\n"
@@ -571,6 +573,7 @@ int main(int argc, char** argv) {
             } else if (option == "--no-polling-fallback") {
                 rcb_plan_options.allow_polling_fallback = false;
             } else if (option == "--ied-name" || option == "--max-types" ||
+                       option == "--name-list-window" ||
                        option == "--max-datasets" || option == "--max-rcb" ||
                        option == "--timeout-ms" || option == "--rcb-plan" ||
                        option == "--rcb-ld" || option == "--rcb-dataset" ||
@@ -609,7 +612,13 @@ int main(int argc, char** argv) {
                 }
 
                 const auto parsed = parse_limit(option, value);
-                if (option == "--max-types") {
+                if (option == "--name-list-window") {
+                    if (parsed > 8U) {
+                        throw std::invalid_argument(
+                            "--name-list-window requires 1..8.");
+                    }
+                    discovery_options.max_concurrent_name_list_chains = parsed;
+                } else if (option == "--max-types") {
                     discovery_options.maximum_variable_type_probes = parsed;
                 } else if (option == "--max-datasets") {
                     discovery_options.maximum_data_set_directories = parsed;

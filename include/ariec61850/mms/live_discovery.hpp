@@ -25,6 +25,11 @@ struct MmsLiveDiscoveryOptions final {
     std::size_t maximum_domains{4'096U};
     std::size_t maximum_names_per_domain{65'536U};
 
+    // Opt-in association-owned GetNameList wire pipelining (not threads).
+    // Default 1 preserves legacy serial order and behavior. Effective window
+    // is min(requested, verified peer calling limit, hard cap of 8).
+    std::size_t max_concurrent_name_list_chains{1U};
+
     bool probe_variable_types{true};
     std::size_t maximum_variable_type_probes{4'096U};
 
@@ -77,6 +82,8 @@ struct MmsReportControlEvidence final {
 // count. Pure accounting: no extra MMS service or scheduling side effects.
 struct MmsLiveDiscoveryWireBudget final {
     std::size_t get_name_list{};
+    // Observed send window, not a requested/conjectured concurrency value.
+    std::size_t name_list_peak_outstanding{};
     std::size_t get_variable_access_attributes{};
     std::size_t get_named_variable_list_attributes{};
     std::size_t read_report_controls{};
@@ -134,6 +141,13 @@ private:
         const MmsLiveDiscoveryOptions& options,
         MmsLiveDiscoveryWireBudget& wire_budget,
         std::stop_token stop_token);
+
+    void get_name_lists_pipelined(
+        const std::vector<std::string>& domains,
+        const MmsLiveDiscoveryOptions& options,
+        MmsLiveDiscoveryResult& result,
+        std::stop_token stop_token,
+        std::size_t window);
 
     MmsAssociationRuntime& association_;
 };

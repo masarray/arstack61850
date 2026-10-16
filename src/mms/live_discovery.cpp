@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <deque>
 #include <map>
 #include <set>
 #include <sstream>
@@ -19,7 +20,9 @@ namespace {
 void validate_options(const MmsLiveDiscoveryOptions& options) {
     if (options.maximum_pages_per_query == 0U ||
         options.maximum_domains == 0U ||
-        options.maximum_names_per_domain == 0U) {
+        options.maximum_names_per_domain == 0U ||
+        options.max_concurrent_name_list_chains == 0U ||
+        options.max_concurrent_name_list_chains > 8U) {
         throw std::invalid_argument("Live MMS discovery name-list limits are invalid.");
     }
     if (options.probe_variable_types &&
@@ -267,6 +270,8 @@ std::string MmsLiveDiscoveryResult::summary() const {
            << ", GVA=" << wire_budget.get_variable_access_attributes
            << ", DataSetDirectory=" << wire_budget.get_named_variable_list_attributes
            << ", RCBRead=" << wire_budget.read_report_controls << ']'
+           << ", nameListPeakOutstanding="
+           << wire_budget.name_list_peak_outstanding
            << ", diagnostics=" << diagnostics.size() << '.';
     return stream.str();
 }
@@ -359,6 +364,156 @@ std::vector<std::string> MmsLiveDiscoveryClient::get_name_list(
         " exceeded the configured page bound.");
 }
 
+void MmsLiveDiscoveryClient::get_name_lists_pipelined(
+    const std::vector<std::string>& domains,
+    const MmsLiveDiscoveryOptions& options,
+    MmsLiveDiscoveryResult& result,
+    const std::stop_token stop_token,
+    const std::size_t window) {
+    struct Chain final {
+        std::size_t domain_index{};
+        MmsGetNameListObjectClass object_class{};
+        std::vector<std::string> names;
+        std::set<std::string, std::less<>> seen;
+        std::string continue_after;
+        std::size_t pages{};
+    };
+    // Each domain/class is its own sequential continuation chain; only
+    // independent chains may be outstanding together. All socket ownership
+    // stays on this one call stack and one MMS association.
+    std::vector<Chain> chains;
+    chains.reserve(domains.size() * 2U);
+    std::deque<std::size_t> ready;
+    for (std::size_t i = 0U; i < domains.size(); ++i) {
+        for (const auto cls : {MmsGetNameListObjectClass::named_variable,
+                               MmsGetNameListObjectClass::named_variable_list}) {
+            ready.push_back(chains.size());
+            Chain chain;
+            chain.domain_index = i;
+            chain.object_class = cls;
+            chains.push_back(std::move(chain));
+        }
+    }
+
+    auto publish = [&](Chain& chain) {
+        const auto& domain = domains[chain.domain_index];
+        if (chain.object_class == MmsGetNameListObjectClass::named_variable) {
+            result.names.domain_variables.at(domain) = std::move(chain.names);
+        } else {
+            result.names.domain_variable_lists.emplace(domain, std::move(chain.names));
+        }
+    };
+    auto failed = [&](const Chain& chain, const std::exception& error) {
+        if (!options.continue_on_optional_probe_error) throw;
+        const auto& domain = domains[chain.domain_index];
+        result.diagnostics.push_back(
+            optional_probe_error(object_class_name(chain.object_class), domain, error));
+        if (chain.object_class == MmsGetNameListObjectClass::named_variable_list) {
+            result.names.domain_variable_lists.try_emplace(domain);
+        }
+    };
+
+    while (!ready.empty() && association_.associated()) {
+        std::vector<std::size_t> chosen;
+        std::vector<MmsConfirmedBatchRequest> requests;
+        chosen.reserve(window);
+        requests.reserve(window);
+        while (!ready.empty() && chosen.size() < window) {
+            const auto index = ready.front();
+            ready.pop_front();
+            auto& chain = chains[index];
+            MmsGetNameListRequest request;
+            request.invoke_id = association_.next_invoke_id();
+            request.object_class = chain.object_class;
+            request.scope = MmsObjectScopeKind::domain_specific;
+            request.domain_id = domains[chain.domain_index];
+            request.continue_after = chain.continue_after;
+            ++chain.pages;
+            chosen.push_back(index);
+            requests.push_back(MmsConfirmedBatchRequest{
+                MmsServiceCodec::encode_get_name_list_request_p_data(
+                    request, association_.negotiated().presentation_context_id),
+                request.invoke_id});
+        }
+
+        // Preserve actual wire send receipts even if the batch times out or a
+        // later segmented write fails. No extra network request for metrics.
+        struct Receipt final {
+            MmsLiveDiscoveryWireBudget& budget;
+            std::size_t sent{};
+            ~Receipt() {
+                budget.get_name_list += sent;
+                budget.name_list_peak_outstanding =
+                    std::max(budget.name_list_peak_outstanding, sent);
+            }
+        } receipt{result.wire_budget};
+        std::vector<MmsConfirmedExchangeResult> exchanges;
+        try {
+            if (requests.size() == 1U) {
+                bool sent = false;
+                try {
+                    exchanges.push_back(association_.exchange_confirmed(
+                        requests.front().presentation_payload,
+                        requests.front().invoke_id, stop_token, &sent));
+                } catch (...) {
+                    receipt.sent = sent ? 1U : 0U;
+                    throw;
+                }
+                receipt.sent = sent ? 1U : 0U;
+            } else {
+                exchanges = association_.exchange_confirmed_batch(
+                    requests, stop_token, &receipt.sent);
+            }
+        } catch (const std::exception& error) {
+            if (!options.continue_on_optional_probe_error) throw;
+            // No unconfirmed page is published. Preserve completed prior
+            // chains/domains and one concrete diagnostic for this batch.
+            result.diagnostics.push_back(
+                std::string{"NameList pipeline fault: "} + error.what());
+            if (!association_.associated()) break;
+            // A non-fatal local failure is terminal for this selected group;
+            // other unsent groups are not guessed or fabricated.
+            break;
+        }
+
+        for (std::size_t pos = 0U; pos < chosen.size(); ++pos) {
+            auto& chain = chains[chosen[pos]];
+            try {
+                const auto payload = response_payload(exchanges[pos], "GetNameList");
+                const auto response = MmsServiceCodec::decode_get_name_list_response(
+                    payload, requests[pos].invoke_id);
+                const auto count_before = chain.names.size();
+                for (const auto& name : response.names) {
+                    if (chain.seen.insert(name).second) {
+                        if (chain.names.size() >= options.maximum_names_per_domain) {
+                            throw MmsLiveDiscoveryError(
+                                "GetNameList name bound exceeded for " +
+                                domains[chain.domain_index]);
+                        }
+                        chain.names.push_back(name);
+                    }
+                }
+                if (!response.more_follows) {
+                    publish(chain);
+                } else {
+                    if (response.names.empty() || chain.names.size() == count_before) {
+                        throw MmsLiveDiscoveryError(
+                            "GetNameList moreFollows without forward progress.");
+                    }
+                    if (chain.pages >= options.maximum_pages_per_query) {
+                        throw MmsLiveDiscoveryError(
+                            "GetNameList continuation page bound exceeded.");
+                    }
+                    chain.continue_after = response.names.back();
+                    ready.push_back(chosen[pos]);
+                }
+            } catch (const std::exception& error) {
+                failed(chain, error);
+            }
+        }
+    }
+}
+
 MmsLiveDiscoveryResult MmsLiveDiscoveryClient::discover(
     const MmsLiveDiscoveryOptions& options,
     const std::stop_token stop_token) {
@@ -386,6 +541,16 @@ MmsLiveDiscoveryResult MmsLiveDiscoveryClient::discover(
     for (const auto& domain : domains) {
         result.names.domain_variables.try_emplace(domain);
     }
+    // VMD enumeration is always serial. A strict association must prove its
+    // calling window; tolerant/unknown peers remain on the original path.
+    result.wire_budget.name_list_peak_outstanding =
+        result.wire_budget.get_name_list == 0U ? 0U : 1U;
+    const auto name_window = std::min<std::size_t>(
+        options.max_concurrent_name_list_chains,
+        std::min<std::size_t>(8U, association_.verified_outstanding_calling()));
+    if (name_window > 1U) {
+        get_name_lists_pipelined(domains, options, result, stop_token, name_window);
+    } else {
     for (const auto& domain : domains) {
         // A failed confirmed exchange closes the association. Keep earlier
         // successful domain evidence; never manufacture additional failed
@@ -428,6 +593,7 @@ MmsLiveDiscoveryResult MmsLiveDiscoveryClient::discover(
         }
     }
 
+    }
     result.report_inventory = MmsReportInventoryBuilder::build(result.names);
 
     const auto readDataSetDirectories = [&] {

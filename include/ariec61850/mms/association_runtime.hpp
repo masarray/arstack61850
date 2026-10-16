@@ -154,6 +154,13 @@ struct MmsConfirmedExchangeResult final {
     std::vector<std::uint8_t> presentation_payload;
 };
 
+// Caller supplies complete encoded P-DATA. Invoke IDs are validated against
+// the encoded requests before any bytes are sent to the association.
+struct MmsConfirmedBatchRequest final {
+    std::vector<std::uint8_t> presentation_payload;
+    std::uint32_t invoke_id{};
+};
+
 class MmsAssociationRuntime final {
 public:
     explicit MmsAssociationRuntime(
@@ -181,6 +188,22 @@ public:
         // True only when the complete confirmed request was sent to transport.
         // A response timeout after a successful send still leaves this true.
         bool* request_sent = nullptr);
+
+    // Association-owned, synchronous *wire pipeline*, not a thread pool.
+    // Sends complete requests serially, then receives and dispatches responses
+    // by exact invoke-ID. Must never overlap poll/receive/exchange calls.
+    // Only available after a strict, positive negotiated calling window.
+    // sent_count records completed transmissions even when a later send/recv
+    // fails. The association is faulted/closed on any in-flight failure.
+    [[nodiscard]] std::vector<MmsConfirmedExchangeResult> exchange_confirmed_batch(
+        std::span<const MmsConfirmedBatchRequest> requests,
+        std::stop_token stop_token = {},
+        std::size_t* sent_count = nullptr);
+
+    [[nodiscard]] std::size_t verified_outstanding_calling() const noexcept {
+        return negotiated_outstanding_verified_
+            ? negotiated_.maximum_outstanding_calling : 1U;
+    }
 
     [[nodiscard]] MmsPduEnvelope poll_once(
         std::stop_token stop_token = {});
@@ -256,6 +279,8 @@ private:
     MmsAssociationRuntimeState state_{MmsAssociationRuntimeState::disconnected};
     MmsEndpoint endpoint_;
     MmsNegotiatedAssociation negotiated_;
+    // Unknown or tolerant Initiate-Response is strictly serial.
+    bool negotiated_outstanding_verified_{};
     MmsInvokeRouter invoke_router_;
     osi::TpktStreamDecoder tpkt_decoder_;
     std::deque<std::vector<std::uint8_t>> information_reports_;
