@@ -173,6 +173,13 @@ target_compile_definitions(arstack_session_harness PRIVATE
     ARSTACK_STUDIO_VERSION="${PROJECT_VERSION}"
 )
 
+# Dedicated ARStack Studio icon shared by Qt window, Windows PE, and Inno.
+qt_add_resources(arstack_studio "studio_branding"
+    PREFIX "/studio"
+    BASE "${CMAKE_CURRENT_LIST_DIR}/../../assets/studio_icon"
+    FILES "${CMAKE_CURRENT_LIST_DIR}/../../assets/studio_icon/favicon.ico"
+)
 if(WIN32)
+    target_sources(arstack_studio PRIVATE src/StudioIcon.rc)
     set_target_properties(arstack_studio PROPERTIES WIN32_EXECUTABLE TRUE)
 endif()

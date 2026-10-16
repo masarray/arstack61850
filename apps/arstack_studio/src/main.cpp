@@ -20,6 +20,7 @@
 #include <QPointer>
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
+#include <QIcon>
 #include <QThread>
 #include <QTimer>
 #include <QtQml/qqml.h>
@@ -438,6 +439,7 @@ int main(int argc, char* argv[]) {
 
     QGuiApplication app(argc, argv);
     app.setQuitOnLastWindowClosed(true);
+    app.setWindowIcon(QIcon(QStringLiteral(":/studio/favicon.ico")));
     QCoreApplication::setOrganizationName(QStringLiteral("ARStack61850"));
 #ifdef ARSTACK_STUDIO_ENGINEERING_PREVIEW
     QCoreApplication::setApplicationName(QStringLiteral("ARStack Studio Preview"));
