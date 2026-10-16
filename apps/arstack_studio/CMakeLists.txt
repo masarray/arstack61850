@@ -190,7 +190,7 @@ if(WIN32)
     configure_file("${ARSTACK_STUDIO_BRAND_DIR}/ARStackStudio.ico"
                    "${ARSTACK_STUDIO_ICON}" COPYONLY)
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ARStackStudio.rc"
-         "IDI_ARSTACK ICON \\"${ARSTACK_STUDIO_ICON}\\"\\n")
+         "IDI_ARSTACK ICON \"${ARSTACK_STUDIO_ICON}\"\n")
     target_sources(arstack_studio PRIVATE
         "${CMAKE_CURRENT_BINARY_DIR}/ARStackStudio.rc")
     set_target_properties(arstack_studio PROPERTIES WIN32_EXECUTABLE TRUE)
