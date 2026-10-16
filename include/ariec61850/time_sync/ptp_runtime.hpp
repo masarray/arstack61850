@@ -99,9 +99,10 @@ struct PtpPublisherOptions final {
     PtpClockIdentity clock_identity{0x02U, 0x00U, 0x00U, 0xFFU, 0xFEU, 0x00U, 0x00U, 0x01U};
     std::uint16_t port_number{1U};
     std::chrono::milliseconds announce_interval{1000};
-    std::chrono::milliseconds sync_interval{250};
+    std::chrono::milliseconds sync_interval{1000};
     std::chrono::milliseconds follow_up_delay{};
     bool two_step_clock{true};
+    PtpTimeProperties time_properties{};
     bool respond_to_peer_delay{true};
     std::uint8_t priority1{128U};
     std::uint8_t priority2{128U};
@@ -204,6 +205,11 @@ public:
         }
         if (options.sync_interval <= std::chrono::milliseconds::zero()) {
             error = "Sync interval must be greater than zero";
+            return false;
+        }
+        if (options.time_properties.current_utc_offset_valid &&
+            !options.time_properties.ptp_timescale) {
+            error = "A valid TAI-UTC offset requires the PTP timescale";
             return false;
         }
         if (options.follow_up_delay < std::chrono::milliseconds::zero()) {
@@ -435,6 +441,7 @@ private:
         result.sequence_id = sequence_id;
         result.log_message_interval = log_message_interval;
         result.two_step = two_step;
+        result.time_properties = options_.time_properties;
         result.priority1 = options_.priority1;
         result.priority2 = options_.priority2;
         result.clock_class = options_.clock_class;

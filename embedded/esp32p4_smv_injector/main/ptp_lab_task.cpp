@@ -4,6 +4,7 @@
 
 #include "ariec61850/time_sync/ptp.hpp"
 #include "ariec61850/time_sync/ptp_runtime.hpp"
+#include "ariec61850/time_sync/ptp_tai_source.hpp"
 
 #include "esp_err.h"
 #include "esp_eth.h"
@@ -201,6 +202,18 @@ void fill_kconfig_defaults(ar_ptp_lab_config_t& config) noexcept {
 [[nodiscard]] bool validate_runtime_config(
     const ar_ptp_lab_config_t& config,
     std::string& error) {
+    // LAB_SOURCE has no external clock input or traceability evidence.
+    // Reject source-quality advertising that would mislead an IED BMCA.
+    if (config.role == AR_PTP_ROLE_LAB_SOURCE &&
+        (config.clock_class != 248U ||
+         config.clock_accuracy !=
+             static_cast<std::uint8_t>(PtpClockAccuracy::unknown) ||
+         config.time_source !=
+             static_cast<std::uint8_t>(PtpTimeSource::internal_oscillator))) {
+        error = "LAB_SOURCE requires clockClass=248, clockAccuracy=UNKNOWN "
+                "and timeSource=INTERNAL_OSCILLATOR (no external reference)";
+        return false;
+    }
     if (config.clock_identity_override && all_zero_identity(config.clock_identity)) {
         error = "clockIdentity override must be non-zero";
         return false;
@@ -288,20 +301,49 @@ void disable_hardware_ptp(const esp_eth_handle_t eth_handle) noexcept {
     }
 }
 
-void seed_hardware_clock(const esp_eth_handle_t eth_handle) noexcept {
+// Returns true only when the EMAC was seeded with an epoch expressed in
+// PTP/TAI seconds. A plausible RTC is not an accuracy/traceability guarantee.
+[[nodiscard]] bool seed_hardware_clock(
+    const esp_eth_handle_t eth_handle,
+    const std::int16_t configured_tai_utc_offset) noexcept {
     eth_mac_time_t initial_time{};
     const std::time_t system_time = std::time(nullptr);
-    if (system_time > 0 &&
-        static_cast<std::uint64_t>(system_time) <= std::numeric_limits<std::uint32_t>::max()) {
-        initial_time.seconds = static_cast<std::uint32_t>(system_time);
-    }
+    const auto tai_seconds = ar::iec61850::time_sync::try_seed_ptp_tai_seconds(
+        static_cast<std::int64_t>(system_time), configured_tai_utc_offset);
+    if (tai_seconds.has_value()) initial_time.seconds = *tai_seconds;
     const auto result = esp_eth_ioctl(
-        eth_handle,
-        static_cast<esp_eth_io_cmd_t>(ETH_MAC_ESP_CMD_S_PTP_TIME),
+        eth_handle, static_cast<esp_eth_io_cmd_t>(ETH_MAC_ESP_CMD_S_PTP_TIME),
         &initial_time);
     if (result != ESP_OK) {
-        ESP_LOGW(kTag, "Unable to seed hardware PTP time: %s", esp_err_to_name(result));
+        ESP_LOGE(kTag, "Hardware PTP clock seed failed: %s", esp_err_to_name(result));
+        return false;
     }
+    if (!tai_seconds.has_value()) {
+        ESP_LOGW(kTag,
+            "No plausible UTC epoch: EMAC PTP free-runs without PTP-timescale validity; "
+            "clock quality remains UNKNOWN (not IED traceable)");
+        return false;
+    }
+    // A successful write ioctl alone does not prove that the MAC is operating
+    // on the intended timebase. Verify once at control-plane START, never
+    // during each SV sample or PTP packet.
+    eth_mac_time_t readback{};
+    const auto read_result = esp_eth_ioctl(
+        eth_handle, static_cast<esp_eth_io_cmd_t>(ETH_MAC_ESP_CMD_G_PTP_TIME),
+        &readback);
+    if (read_result != ESP_OK || readback.nanoseconds >= 1'000'000'000U ||
+        static_cast<std::uint64_t>(readback.seconds) <
+            static_cast<std::uint64_t>(*tai_seconds) ||
+        static_cast<std::uint64_t>(readback.seconds) >
+            static_cast<std::uint64_t>(*tai_seconds) + 1ULL) {
+        ESP_LOGE(kTag,
+            "Hardware PTP TAI seed read-back invalid; withholding PTP-timescale claim");
+        return false;
+    }
+    ESP_LOGI(kTag,
+        "PTP/TAI seed applied from local RTC and configured UTC offset; "
+        "absolute time accuracy/traceability NOT established");
+    return true;
 }
 
 [[nodiscard]] PtpTimestamp hardware_time(const esp_eth_handle_t eth_handle) noexcept {
@@ -511,7 +553,9 @@ void ptp_lab_task(void* argument) {
         vTaskDelete(nullptr);
         return;
     }
-    seed_hardware_clock(context.eth_handle);
+    const auto selected_ptp_config = selected_config();
+    const bool ptp_tai_epoch_seeded = seed_hardware_clock(
+        context.eth_handle, selected_ptp_config.current_utc_offset);
 
     const auto mac_result = esp_eth_ioctl(
         context.eth_handle,
@@ -532,6 +576,15 @@ void ptp_lab_task(void* argument) {
         return;
     }
 
+    // IEEE 1588-2008 timeProperties must match the actual EMAC timescale.
+    // Flagging PTP/TAI does not imply traceability to UTC/GNSS.
+    profile->time_properties.ptp_timescale = ptp_tai_epoch_seeded;
+#if defined(CONFIG_AR_PTP_MANUAL_UTC_OFFSET_VALID) && CONFIG_AR_PTP_MANUAL_UTC_OFFSET_VALID
+    profile->time_properties.current_utc_offset_valid = ptp_tai_epoch_seeded;
+#endif
+    // Never assert timeTraceable or frequencyTraceable for an internal oscillator.
+    profile->time_properties.time_traceable = false;
+    profile->time_properties.frequency_traceable = false;
     context.runtime.emplace(std::move(*profile));
     if (!context.runtime->start()) {
         ESP_LOGE(kTag,
@@ -561,6 +614,16 @@ void ptp_lab_task(void* argument) {
                      "Hardware RX timestamp path unavailable; Pdelay responder disabled: %s",
                      esp_err_to_name(input_result));
         }
+    }
+
+    // A Power Profile slave needs peer-delay replies to qualify network
+    // propagation time. Do not advertise a usable timing source when the
+    // requested hardware RX/Pdelay path could not be established.
+    if (options.respond_to_peer_delay && !pdelay_enabled) {
+        ESP_LOGE(kTag, "PTP SOURCE rejected: required hardware Pdelay response path unavailable");
+        finish_runtime(context);
+        vTaskDelete(nullptr);
+        return;
     }
 
     const auto clock_identity = format_ptp_clock_identity(options.clock_identity);
@@ -606,6 +669,7 @@ void ptp_lab_task(void* argument) {
                 const bool emitted_core_timing = g_announce_sent.load(std::memory_order_relaxed) > 0U && g_sync_sent.load(std::memory_order_relaxed) > 0U && g_follow_up_sent.load(std::memory_order_relaxed) > 0U;
                 if (emitted_core_timing) g_ptp_ready.store(true, std::memory_order_release);
             } else {
+                g_ptp_ready.store(false, std::memory_order_release);
                 context.runtime->record_error("Ethernet transmit or hardware timestamp failure");
                 g_tx_failure_count.fetch_add(1U, std::memory_order_relaxed);
                 ++consecutive_failures;

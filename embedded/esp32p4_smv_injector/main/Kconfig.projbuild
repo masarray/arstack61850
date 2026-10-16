@@ -120,7 +120,7 @@ config AR_PTP_ANNOUNCE_INTERVAL_MS
 config AR_PTP_SYNC_INTERVAL_MS
     int "PTP Sync interval (ms)"
     range 20 5000
-    default 250
+    default 1000
     depends on AR_PTP_LAB_TX
     help
         LAB_SOURCE uses two-step Sync/Follow_Up so Follow_Up can carry the exact
@@ -190,6 +190,17 @@ config AR_PTP_CURRENT_UTC_OFFSET
     default 37
     depends on AR_PTP_LAB_TX
 
+config AR_PTP_MANUAL_UTC_OFFSET_VALID
+    bool "UTC offset manually verified (Announce currentUtcOffsetValid)"
+    default n
+    depends on AR_PTP_LAB_TX
+    help
+        Enable only after the operator checks the configured TAI-UTC offset
+        against a current authoritative leap-second record. This flag does
+        NOT imply UTC traceability, frequency lock, or high clock accuracy.
+        The runtime also requires a plausible system UTC epoch before it
+        advertises currentUtcOffsetValid.
+
 config AR_PTP_MAX_PATH_DELAY_NS
     int "TIME_RECEIVER maximum accepted peer path delay (ns)"
     range 1000 100000000
@@ -229,7 +240,7 @@ config AR_PTP_LOCK_REQUIRED_SAMPLES
 config AR_PTP_SYNC_TIMEOUT_MS
     int "TIME_RECEIVER Sync timeout before HOLDOVER/UNLOCKED (ms)"
     range 100 10000
-    default 1000
+    default 3000
     depends on AR_PTP_LAB_TX
 
 config AR_PTP_HOLDOVER_TIMEOUT_MS

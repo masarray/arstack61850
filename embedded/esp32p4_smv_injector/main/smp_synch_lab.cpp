@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "smp_synch_lab.hpp"
+#include "ariec61850/time_sync/sv_ptp_epoch.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -15,6 +16,8 @@ std::atomic<std::uint8_t> g_mode{
     static_cast<std::uint8_t>(SvSyncPolicyMode::external_ptp_auto)};
 // -1 means PTP-P2 has not supplied measured lock evidence yet.
 std::atomic<int> g_measured_value{-1};
+// Fail-closed until an independent SV timeline/phase acceptance gate exists.
+std::atomic_bool g_sv_timeline_phase_qualified{false};
 
 [[nodiscard]] std::optional<SmpSynchValue> measured_value() noexcept {
     const int raw = g_measured_value.load(std::memory_order_acquire);
@@ -46,11 +49,14 @@ SvSyncPolicyMode smp_synch_lab_mode() noexcept {
 }
 
 SmpSynchDecision smp_synch_lab_decision() noexcept {
-    return resolve_sv_sync_policy(current_mode(), measured_value());
+    return resolve_sv_sync_policy(current_mode(),
+        ar::iec61850::time_sync::qualified_sv_sync_value(measured_value(),
+            g_sv_timeline_phase_qualified.load(std::memory_order_acquire)));
 }
 
 SmpSynchLabStatus smp_synch_lab_status() noexcept {
-    const auto measured = measured_value();
+    const auto measured = ar::iec61850::time_sync::qualified_sv_sync_value(
+        measured_value(), g_sv_timeline_phase_qualified.load(std::memory_order_acquire));
     return {
         resolve_sv_sync_policy(current_mode(), measured),
         measured.has_value(),

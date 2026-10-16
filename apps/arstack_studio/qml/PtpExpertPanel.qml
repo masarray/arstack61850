@@ -172,7 +172,7 @@ SurfacePanel {
                             text: modeCombo.currentIndex === 0
                                 ? "PTP TX does not by itself change SV smpSynch."
                                 : modeCombo.currentIndex === 1
-                                    ? "AUTO smpSynch follows measured receiver evidence only."
+                                    ? "AUTO requires qualified PTP clock and independently verified SV sample phase."
                                     : "Useful for observing timing traffic without changing the network."
                             wrapMode: Text.WordWrap
                             color: panel.theme.muted
@@ -333,7 +333,7 @@ SurfacePanel {
                     Layout.fillWidth: true
                     ComboBox {
                         Layout.fillWidth: true
-                        model: ["AUTO — measured PTP only", "0 — Not synchronized", "1 — Local synchronized (simulation)", "2 — Global synchronized (simulation)"]
+                        model: ["AUTO — qualified PTP + SV timing", "0 — Not synchronized", "1 — Local synchronized (simulation)", "2 — Global synchronized (simulation)"]
                         currentIndex: panel.syncIndex(panel.device.smpSynchMode)
                         enabled: panel.session && panel.device.deviceVerified && !panel.session.updatingFirmware
                         font.family: panel.uiFont
@@ -350,7 +350,7 @@ SurfacePanel {
                 }
                 Label {
                     Layout.fillWidth: true
-                    text: "PTP Source transmission is not proof that the SV clock is externally synchronized. AUTO stays fail-closed unless receiver discipline is measured."
+                    text: "PTP traffic or clock lock alone does not prove SV sample synchronization. AUTO remains fail-closed until the SV timeline is independently qualified."
                     wrapMode: Text.WordWrap
                     color: panel.theme.textSoft
                     font.family: panel.uiFont
