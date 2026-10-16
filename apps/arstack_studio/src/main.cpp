@@ -610,7 +610,7 @@ int main(int argc, char* argv[]) {
         // desktop window.
         const bool nativeCapture = !qEnvironmentVariableIsEmpty("ARSTACK_STUDIO_QA_NATIVE_ONLY");
         const int caseCount = nativeCapture ? 1 : static_cast<int>(sizes.size());
-        const auto caseSize = [&](const int step) {
+        const auto caseSize = [sizes, nativeCapture](const int step) {
             return nativeCapture ? sizes[1] : sizes.at(static_cast<std::size_t>(step));
         };
         const QString screenshots = qEnvironmentVariable("ARSTACK_STUDIO_QA_DIR");
@@ -624,7 +624,7 @@ int main(int argc, char* argv[]) {
         uiTimer->setInterval(400);
         mainWindow->resize(caseSize(0));
         QObject::connect(uiTimer, &QTimer::timeout, &app,
-                         [&, step, resizeRetries, uiTimer] {
+                         [&, step, resizeRetries, uiTimer, caseSize, caseCount, screenshots] {
             const QSize target = caseSize(*step);
             if (mainWindow->size() != target) {
                 // CI's virtual Windows desktop can clamp large native
