@@ -62,6 +62,10 @@ def main() -> None:
     for component in ("StudioActionMenu", "StudioMenuDivider", "StudioPtpSwitch", "StudioTimingTray"):
         require(f"qml/{component}.qml" in cmake,
                 f"{component} must be registered in the Qt QML module")
+
+    require("--check-operator-ui" in (STUDIO / "src/main.cpp").read_text(encoding="utf-8")
+            and "studio-ui-evidence" in (STUDIO.parent.parent / ".github/workflows/arstack-studio-windows-lifecycle.yml").read_text(encoding="utf-8"),
+            "Windows geometry/evidence gate must run from existing lifecycle build")
     print("Studio operator workspace contract: PASS")
 
 

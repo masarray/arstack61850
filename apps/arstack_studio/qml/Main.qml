@@ -672,6 +672,7 @@ ApplicationWindow {
 
         WorkflowBar {
             id: workflowBar
+            objectName: "studioWorkflowBar"
             Layout.fillWidth: true
             Layout.preferredHeight: 54
             Layout.minimumHeight: 54
@@ -722,6 +723,7 @@ ApplicationWindow {
                 }
 
                 SurfacePanel {
+                    objectName: "studioInjectionSurface"
                     SplitView.fillWidth: true
                     SplitView.fillHeight: true
                     SplitView.minimumWidth: root.compactLayout ? 500 : 550
@@ -751,6 +753,7 @@ ApplicationWindow {
 
                             StudioActionMenu {
                                 id: frequencyMenu
+                                objectName: "studioFrequencyMenu"
                                 theme: studioTheme
                                 uiFont: root.uiFont
                                 x: 80
@@ -843,6 +846,7 @@ ApplicationWindow {
                             spacing: 9
                             SignalMatrix {
                                 id: voltageMatrix
+                                objectName: "studioVoltageMatrix"
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 theme: studioTheme
@@ -857,8 +861,10 @@ ApplicationWindow {
                                 symbolText: "U"
                                 unitText: root.signalFrequency === 0 ? "V DC" : "V RMS"
                                 compact: root.compactLayout
-                            }                            SignalMatrix {
+                            }
+                            SignalMatrix {
                                 id: currentMatrix
+                                objectName: "studioCurrentMatrix"
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 theme: studioTheme
@@ -878,6 +884,7 @@ ApplicationWindow {
                         }
 
                         StudioTimingTray {
+                            objectName: "studioTimingTray"
                             Layout.fillWidth: true
                             Layout.preferredHeight: root.height < 700 ? 112 : 132
                             Layout.minimumHeight: root.height < 700 ? 112 : 132
@@ -891,6 +898,7 @@ ApplicationWindow {
                         }
                         Rectangle { Layout.fillWidth: true; height: 1; color: studioTheme.lineSoft }
                         RowLayout {
+                            objectName: "studioQualityRow"
                             Layout.fillWidth: true
                             spacing: 8
                             Rectangle { width: 6; height: 6; radius: 3; color: studioTheme.accent }

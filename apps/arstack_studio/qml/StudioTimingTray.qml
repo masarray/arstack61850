@@ -76,6 +76,7 @@ Rectangle {
             spacing: tray.compact ? 7 : 10
             StudioPtpSwitch {
                 id: powerSwitch
+                objectName: "studioPtpSwitch"
                 theme: tray.theme
                 uiFont: tray.uiFont
                 checked: Boolean(tray.device && tray.device.ptpRunning)
@@ -96,6 +97,7 @@ Rectangle {
             }
             StudioDarkComboBox {
                 id: roleCombo
+                objectName: "studioPtpRole"
                 theme: tray.theme
                 uiFont: tray.uiFont
                 Layout.fillWidth: true
@@ -116,6 +118,7 @@ Rectangle {
             }
             StudioDarkComboBox {
                 id: syncCombo
+                objectName: "studioSmpSynchMode"
                 theme: tray.theme
                 uiFont: tray.uiFont
                 Layout.fillWidth: true
@@ -139,6 +142,7 @@ Rectangle {
                 theme: tray.theme
                 uiFont: tray.uiFont
                 text: "Details"
+                objectName: "studioTimingDetails"
                 implicitWidth: 66
                 toolTipText: "PTP settings, timing evidence and diagnostics"
                 onClicked: if (tray.controller) tray.controller.openTimingSettings()

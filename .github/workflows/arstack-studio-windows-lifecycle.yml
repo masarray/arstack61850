@@ -85,3 +85,35 @@ jobs:
           Start-Sleep -Milliseconds 250
           Invoke-LifecycleCycle 2
           Write-Host 'Windows lifecycle gate: PASS · normal close -> process exit -> lock release -> immediate reopen -> clean exit'
+
+      - name: Studio UI geometry acceptance and Windows screenshots
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Exercise real Windows Qt platform rendering, not offscreen lifecycle.
+          Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
+          Remove-Item Env:QT_QUICK_BACKEND -ErrorAction SilentlyContinue
+          $candidate = Get-ChildItem -Path (Join-Path $PWD 'build-arstack-studio') -Recurse -File |
+            Where-Object { $_.Name -ieq 'arstack_studio.exe' -or $_.Name -ieq 'ARStackStudio.exe' } |
+            Select-Object -First 1
+          if ($null -eq $candidate) { throw 'Studio GUI executable not found' }
+          $env:ARSTACK_STUDIO_QA_DIR = Join-Path $PWD 'studio-ui-evidence'
+          New-Item -ItemType Directory -Path $env:ARSTACK_STUDIO_QA_DIR -Force | Out-Null
+          $exe = $candidate.FullName
+          $probe = Start-Process -FilePath $exe -ArgumentList '--check-operator-ui' -Wait -PassThru
+          if ($probe.ExitCode -ne 0) { throw "Studio UI geometry and screenshot check failed: $($probe.ExitCode)" }
+          foreach ($dimensions in @('1240x760', '960x620', '1440x900')) {
+            $png = Join-Path $env:ARSTACK_STUDIO_QA_DIR "studio-$dimensions.png"
+            if (-not (Test-Path $png) -or (Get-Item $png).Length -lt 10000) {
+              throw "Missing/empty Windows screenshot at $dimensions"
+            }
+          }
+          Write-Host 'Native Windows GUI screenshot evidence: PASS'
+      - name: Upload desktop layout evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arstack-studio-windows-layout-evidence
+          path: studio-ui-evidence/
+          if-no-files-found: ignore
+          retention-days: 7
