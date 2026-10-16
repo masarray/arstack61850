@@ -657,6 +657,22 @@ std::string MmsReportFrameBindingValidator::rejection_reason(
             value.data_set_index != index || !value.member ||
             value.member->object_name != directory.members[index].object_name)
             return "Report inclusion order or DataSet member identity differs.";
+        // Wire DataRef is an independent assertion of member identity.
+        // In particular, the mapper's member field is projected from the
+        // directory and is not proof that a *reported* DataRef agreed.
+        if (frame.header.optional_fields.has("data-reference")) {
+            if (value.data_reference.empty())
+                return "InformationReport has empty mandatory DataRef.";
+            const auto& expected = directory.members[index];
+            const auto canonical = expected.user_reference.empty()
+                ? normalize_member(expected.object_name).user_reference
+                : expected.user_reference;
+            if (value.data_reference != canonical &&
+                value.data_reference != expected.mms_reference &&
+                value.data_reference != expected.object_name.reference() &&
+                value.data_reference != normalize_member(expected.object_name).user_reference)
+                return "InformationReport wire DataRef contradicts selected DataSet member.";
+        }
         previous = index;
     }
     return {};
