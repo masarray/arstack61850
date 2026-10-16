@@ -99,7 +99,9 @@ RowLayout {
         }
     }
 
-    ComboBox {
+    StudioDarkComboBox {
+        theme: editor.theme
+        uiFont: editor.uiFont
         id: presetBox
         implicitWidth: editor.compact ? 98 : 108
         model: ["Good", "Invalid", "Questionable", "Test"]
