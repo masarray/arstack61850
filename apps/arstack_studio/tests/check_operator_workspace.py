@@ -51,7 +51,8 @@ def main() -> None:
             "main PTP must reuse the existing verified Advanced profile")
     require("checked = Qt.binding(function()" in tray
             and "tray.session.requestStopPtp()" in tray
-            and "tray.session.requestSmpSynch(choice)" in tray,
+            and "tray.session.requestSmpSynch([\"AUTO\", \"0\", \"1\", \"2\"][requested])" in tray
+            and "if (!tray.boardOnline)" in tray,
             "main PTP/smpSynch must restore device-owned state after user intent")
     require("SIMULATED metadata" in tray and "sample phase needs independent verification" in tray,
             "SV simulation must never masquerade as independently proven lock")

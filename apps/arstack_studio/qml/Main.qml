@@ -68,7 +68,9 @@ ApplicationWindow {
                 for (var i = 0; i < 4; ++i) {
                     const row = rows[i]
                     if (!Array.isArray(row) || row.length !== 4
-                            || !validMagnitude(group, row[0]) || !validPhase(row[1])
+                            || !isFinite(row[0])
+                            || (data.hz === 0 ? Math.abs(row[0]) : row[0]) > maximumMagnitude(group)
+                            || (data.hz !== 0 && row[0] < 0) || !validPhase(row[1])
                             || typeof row[2] !== "boolean" || !Number.isInteger(row[3])
                             || row[3] < 0 || row[3] > 4294967295)
                         throw new Error("Invalid channel value")

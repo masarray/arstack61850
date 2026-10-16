@@ -130,6 +130,10 @@ Rectangle {
                 onActivated: {
                     tray.selectedRoleIndex = currentIndex
                     offlineSettings.lastRole = currentIndex
+                    currentIndex = Qt.binding(function() {
+                        return tray.device && tray.device.ptpRunning
+                            ? tray.roleIndex(tray.device.ptpRole) : tray.selectedRoleIndex
+                    })
                 }
                 ToolTip.visible: hovered
                 ToolTip.text: "Source transmits PTP; Follower discovers an external GM; Monitor receives without disciplining."
@@ -157,6 +161,10 @@ Rectangle {
                     const requested = currentIndex
                     offlineSettings.lastSynch = requested
                     if (!tray.boardOnline) {
+                        currentIndex = Qt.binding(function() {
+                            return tray.boardOnline ? tray.syncIndex(tray.device.smpSynchMode)
+                                                    : offlineSettings.lastSynch
+                        })
                         if (tray.controller)
                             tray.controller.showMessage("Offline smpSynch plan saved; no SV flag or clock changed.", false)
                         return
