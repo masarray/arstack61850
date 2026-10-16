@@ -262,6 +262,11 @@ std::string MmsLiveDiscoveryResult::summary() const {
            << data_set_directories.size()
            << ", rcbReads=" << successful_controls << '/'
            << report_controls.size()
+           << ", wireRequests=" << wire_budget.total()
+           << " [NameList=" << wire_budget.get_name_list
+           << ", GVA=" << wire_budget.get_variable_access_attributes
+           << ", DataSetDirectory=" << wire_budget.get_named_variable_list_attributes
+           << ", RCBRead=" << wire_budget.read_report_controls << ']'
            << ", diagnostics=" << diagnostics.size() << '.';
     return stream.str();
 }
