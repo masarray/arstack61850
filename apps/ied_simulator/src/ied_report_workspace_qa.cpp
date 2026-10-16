@@ -164,6 +164,7 @@ bool reportProjectionPresent(const MmsReportController& reports) {
     if (frames.isEmpty()) return false;
     const auto frame = frames.first().toMap();
     return !frame.value(QStringLiteral("reportId")).toString().isEmpty() &&
+        !frame.value(QStringLiteral("rcbReference")).toString().isEmpty() &&
         !frame.value(QStringLiteral("dataSet")).toString().isEmpty() &&
         !frame.value(QStringLiteral("values")).toStringList().isEmpty() &&
         frame.contains(QStringLiteral("entryId")) &&

@@ -51,13 +51,18 @@ Rectangle {
     function newestMatchingReport() {
         // A DataSet can be shared by multiple RCBs. Never attribute a received
         // frame to an RCB using only its DataSet or its list position.
-        if (!hasSelection || !rcb.reportId || !reports.receivedReports)
+        if (!hasSelection || !rcb.reference || !reports.receivedReports)
             return ({})
-        const wanted = String(rcb.reportId)
+        const expectedRcb = String(rcb.reference)
+        const expectedRptId = rcb.reportId ? String(rcb.reportId) : ""
         for (let index = 0; index < reports.receivedReports.length; ++index) {
             const frame = reports.receivedReports[index]
-            if (frame.reportId && String(frame.reportId) === wanted)
-                return frame
+            // Do not attribute a frame by RptID alone: indexed RCBs can share it.
+            if (!frame.rcbReference || String(frame.rcbReference) !== expectedRcb)
+                continue
+            if (expectedRptId.length > 0 && String(frame.reportId) !== expectedRptId)
+                continue
+            return frame
         }
         return ({})
     }

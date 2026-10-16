@@ -442,6 +442,9 @@ ReportUi buildSubscriptionUi(
     ui.active = active;
     ui.receivedCount = subscription.received_reports;
     ui.cleanupRequired = subscription.cleanup_required;
+    if (subscription.rejected_reports != 0U)
+        ui.events.push_back(QStringLiteral("%1 foreign/stale InformationReport(s) withheld from values.")
+                                .arg(subscription.rejected_reports));
     for (const auto& event : subscription.events) {
         ui.events.push_back(QString::fromStdString(event.message));
     }
@@ -456,6 +459,8 @@ ReportUi buildSubscriptionUi(
             const auto& frame = *frameIt;
             QVariantMap map;
             map.insert(QStringLiteral("reportId"), QString::fromStdString(frame.header.report_id));
+            map.insert(QStringLiteral("rcbReference"),
+                       QString::fromStdString(subscription.active_rcb_reference));
             map.insert(QStringLiteral("dataSet"), QString::fromStdString(frame.header.data_set_reference));
             map.insert(QStringLiteral("sequence"), numberText(frame.header.sequence_number));
             map.insert(QStringLiteral("subSequence"), numberText(frame.header.sub_sequence_number));

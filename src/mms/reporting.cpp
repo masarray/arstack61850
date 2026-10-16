@@ -622,6 +622,46 @@ MmsReportFrame MmsReportFrameMapper::map(
     return frame;
 }
 
+std::string MmsReportFrameBindingValidator::rejection_reason(
+    const MmsReportFrame& frame,
+    const MmsReportControlState& verified_rcb,
+    const MmsDataSetDirectoryResponse& directory) {
+    if (verified_rcb.report_id.empty())
+        return "Selected RCB has no verified report ID.";
+    if (frame.header.report_id != verified_rcb.report_id)
+        return "InformationReport RptID does not belong to selected live RCB.";
+    if (verified_rcb.data_set_reference.empty() || directory.members.empty())
+        return "Selected RCB has no verified nonempty DataSet directory.";
+    if (!frame.header.data_set_reference.empty()) {
+        try {
+            if (MmsDataSetDirectoryCodec::parse_data_set_reference(
+                    frame.header.data_set_reference) !=
+                MmsDataSetDirectoryCodec::parse_data_set_reference(
+                    verified_rcb.data_set_reference))
+                return "InformationReport DatSet differs from selected live RCB.";
+        } catch (const std::exception&) {
+            return "Malformed report or selected-RCB DataSet identity.";
+        }
+    }
+    if (frame.header.configuration_revision && verified_rcb.configuration_revision &&
+        *frame.header.configuration_revision != *verified_rcb.configuration_revision)
+        return "InformationReport ConfRev differs from selected live RCB.";
+    if (frame.included_data_set_indexes.size() != frame.values.size())
+        return "Inclusion and report value counts differ.";
+    std::optional<std::size_t> previous;
+    for (std::size_t row = 0U; row < frame.values.size(); ++row) {
+        const auto index = frame.included_data_set_indexes[row];
+        const auto& value = frame.values[row];
+        if (index >= directory.members.size() ||
+            (previous && index <= *previous) ||
+            value.data_set_index != index || !value.member ||
+            value.member->object_name != directory.members[index].object_name)
+            return "Report inclusion order or DataSet member identity differs.";
+        previous = index;
+    }
+    return {};
+}
+
 std::string MmsReportFrame::routing_key() const {
     return header.report_id;
 }

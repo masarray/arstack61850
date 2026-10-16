@@ -250,6 +250,16 @@ struct MmsReportControlState final {
     std::string availability_reason;
 };
 
+// Secondary RCB authority validation. BER validity alone cannot assign
+// process values to the selected DataSet/RCB.
+class MmsReportFrameBindingValidator final {
+public:
+    [[nodiscard]] static std::string rejection_reason(
+        const MmsReportFrame& frame,
+        const MmsReportControlState& verified_rcb,
+        const MmsDataSetDirectoryResponse& directory);
+};
+
 class MmsReportControlStateMapper final {
 public:
     [[nodiscard]] static MmsReadRequest build_read_request(
