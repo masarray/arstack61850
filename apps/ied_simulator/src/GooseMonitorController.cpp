@@ -202,6 +202,19 @@ QVariantMap GooseMonitorController::observedForStream(
     const QString& dataSet,
     const QString& appId,
     const QString& destinationMac) const {
+    return observedForStreamFiltered(
+        goCbRef, dataSet, appId, destinationMac,
+        {}, std::nullopt, std::nullopt);
+}
+
+QVariantMap GooseMonitorController::observedForStreamFiltered(
+    const QString& goCbRef,
+    const QString& dataSet,
+    const QString& appId,
+    const QString& destinationMac,
+    const QString& goId,
+    const std::optional<int> vlanId,
+    const std::optional<int> vlanPriority) const {
     QVariantMap result;
     result.insert(QStringLiteral("matched"), false);
     result.insert(QStringLiteral("reason"), QStringLiteral("Awaiting an exact GOOSE frame"));
@@ -259,7 +272,11 @@ QVariantMap GooseMonitorController::observedForStream(
              QString::fromStdString(frame.pdu.data_set_reference) != requestedDataSet) ||
             (!appIdText.isEmpty() && frame.app_id != requestedAppId) ||
             (!requestedMac.isEmpty() &&
-             normalizeMac(QString::fromStdString(frame.destination.to_string())) != requestedMac)) {
+             normalizeMac(QString::fromStdString(frame.destination.to_string())) != requestedMac) ||
+            (!goId.isEmpty() && QString::fromStdString(frame.pdu.go_id) != goId) ||
+            (vlanId && (!frame.vlan || frame.vlan->vlan_id != *vlanId)) ||
+            (vlanPriority &&
+             (!frame.vlan || frame.vlan->priority_code_point != *vlanPriority))) {
             continue;
         }
         if (found != nullptr) {
@@ -289,37 +306,29 @@ QVariantMap GooseMonitorController::observedForConfiguredStream(
     const auto str = [&](const char* key) {
         return configured.value(QString::fromLatin1(key)).toString();
     };
-    auto evidence = observedForStream(
-        str("reference"), str("dataSet"), str("appId"), str("destinationMac"));
-    if (!evidence.value(QStringLiteral("matched")).toBool()) return evidence;
-
-    const auto fail = [&](const QString& reason) {
-        QVariantMap rejected;
-        rejected.insert(QStringLiteral("matched"), false);
-        rejected.insert(QStringLiteral("reason"), reason);
-        return rejected;
-    };
-    const auto goId = str("goId");
-    if (!goId.isEmpty() && goId != evidence.value(QStringLiteral("goId")).toString()) {
-        return fail(QStringLiteral("Configured goID differs from observed GOOSE stream"));
-    }
+    // Validate optional SCL VLAN selectors once, then use them together
+    // with goID, APPID, goCBRef, DataSet and destination MAC in ONE bounded
+    // lookup. Previous two-stage matching could falsely reject a unique
+    // configured publisher as ambiguous before its VLAN/goID was checked.
+    std::optional<int> vlanId;
+    std::optional<int> vlanPriority;
     for (const auto& binding : {
-             std::pair{"vlanId", "vlanId"},
-             std::pair{"vlanPriority", "vlanPriority"}}) {
+             std::pair{"vlanId", &vlanId},
+             std::pair{"vlanPriority", &vlanPriority}}) {
         const auto expected = configured.value(QString::fromLatin1(binding.first));
         if (!expected.isValid() || expected.isNull()) continue;
         bool ok = false;
-        const auto numeric = expected.toInt(&ok);
+        const int numeric = expected.toInt(&ok);
         if (!ok || numeric < 0 ||
             numeric > (std::string_view{binding.first} == "vlanId" ? 4094 : 7)) {
-            return fail(QStringLiteral("Invalid configured GOOSE VLAN field"));
+            return {{QStringLiteral("matched"), false},
+                    {QStringLiteral("reason"), QStringLiteral("Invalid configured GOOSE VLAN field")}};
         }
-        const auto observed = evidence.value(QString::fromLatin1(binding.second));
-        if (!observed.isValid() || observed.isNull() || observed.toInt() != numeric) {
-            return fail(QStringLiteral("Configured GOOSE VLAN field differs from observed frame"));
-        }
+        *binding.second = numeric;
     }
-    return evidence;
+    return observedForStreamFiltered(
+        str("reference"), str("dataSet"), str("appId"),
+        str("destinationMac"), str("goId"), vlanId, vlanPriority);
 }
 
 bool GooseMonitorController::startCapture() {
@@ -498,8 +507,30 @@ QString GooseMonitorController::formatValue(const MmsDataValue& value, const int
 }
 
 QString GooseMonitorController::streamKey(const ar::iec61850::goose::GooseFrame& frame) {
-    return QString::fromStdString(frame.source.to_string()) + QLatin1Char('|') +
-        QString::number(frame.app_id) + QLatin1Char('|') + QString::fromStdString(frame.pdu.go_cb_ref);
+    // One physical source may publish multiple independent streams with the
+    // same APPID/goCBRef on different VLANs/multicast MACs or with distinct
+    // goIDs. Keep the FULL on-wire publisher identity in separate slots so
+    // their sequence/TTL supervisors and ordered values never overwrite.
+    //
+    // Length prefix each field: goID/DataSet are untrusted wire strings,
+    // so '|' concatenation alone would permit composite-key collisions.
+    QString result;
+    result.reserve(256);
+    const auto part = [&result](const QString& value) {
+        result += QString::number(value.size());
+        result += QLatin1Char(':');
+        result += value;
+    };
+    part(QString::fromStdString(frame.source.to_string()));
+    part(QString::fromStdString(frame.destination.to_string()));
+    part(QString::number(frame.app_id));
+    part(QString::fromStdString(frame.pdu.go_cb_ref));
+    part(QString::fromStdString(frame.pdu.data_set_reference));
+    part(QString::fromStdString(frame.pdu.go_id));
+    part(frame.vlan ? QString::number(frame.vlan->vlan_id) : QStringLiteral("untagged"));
+    part(frame.vlan ? QString::number(frame.vlan->priority_code_point)
+                    : QStringLiteral("untagged"));
+    return result;
 }
 
 int GooseMonitorController::indexForKey(const QString& key) const noexcept {
