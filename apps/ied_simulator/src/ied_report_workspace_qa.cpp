@@ -393,6 +393,30 @@ int main(int argc, char* argv[]) {
         return 12;
     }
     const auto reportCountAfterGi = reports.receivedReportCount();
+    const auto runningRcb = reports.selectedRcb().value(QStringLiteral("reference")).toString();
+    if (runningRcb.isEmpty() || reports.subscriptionRcbReference() != runningRcb) {
+        qCritical() << "REPORTS_WORKBENCH_FAIL active_rcb_provenance"
+                    << runningRcb << reports.subscriptionRcbReference();
+        return 35;
+    }
+    // Selecting another RCB during a subscription must never redirect the
+    // already-running report receiver or the Stop action to that selection.
+    int anotherRcb = -1;
+    const auto visibleControls = reports.reportControls();
+    for (int index = 0; index < visibleControls.size(); ++index) {
+        if (visibleControls[index].toMap().value(QStringLiteral("reference")).toString()
+                != runningRcb) {
+            anotherRcb = index;
+            break;
+        }
+    }
+    if (anotherRcb < 0 || !reports.selectRcb(anotherRcb) ||
+        reports.subscriptionRcbReference() != runningRcb || !reports.active() ||
+        !reports.selectRcb(selected) ||
+        reports.selectedRcb().value(QStringLiteral("reference")).toString() != runningRcb) {
+        qCritical() << "REPORTS_WORKBENCH_FAIL switched_rcb_during_subscription";
+        return 36;
+    }
     if (reports.rejectedReportCount() != 0U ||
         reports.reportDecodeFailureCount() != 0U) {
         qCritical() << "REPORTS_WORKBENCH_FAIL accepted_gi_report_authority"

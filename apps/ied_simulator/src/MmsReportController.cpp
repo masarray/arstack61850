@@ -482,6 +482,7 @@ struct ReportUi final {
     QVariantList reports;
     QStringList events;
     qulonglong receivedCount{};
+    QString subscriptionRcbReference;
     qulonglong rejectedCount{};
     qulonglong decodeFailureCount{};
     bool active{};
@@ -494,6 +495,8 @@ ReportUi buildSubscriptionUi(
     ReportUi ui;
     ui.active = active;
     ui.receivedCount = subscription.received_reports;
+    ui.subscriptionRcbReference = QString::fromStdString(
+        subscription.active_rcb_reference);
     ui.rejectedCount = subscription.rejected_reports;
     ui.decodeFailureCount = subscription.decode_failures;
     ui.cleanupRequired = subscription.cleanup_required;
@@ -677,6 +680,7 @@ void MmsReportController::clearInventory() {
     receivedReports_.clear();
     events_.clear();
     receivedReportCount_ = 0;
+    subscriptionRcbReference_.clear();
     rejectedReportCount_ = 0;
     reportDecodeFailureCount_ = 0;
     emit inventoryChanged();
@@ -726,6 +730,7 @@ void MmsReportController::adoptEngineeringInventory() {
     receivedReports_.clear();
     events_.clear();
     receivedReportCount_ = 0;
+    subscriptionRcbReference_.clear();
     rejectedReportCount_ = 0;
     reportDecodeFailureCount_ = 0;
     refreshSelection();
@@ -1574,6 +1579,7 @@ bool MmsReportController::enableSelectedAuthored(
                         self->receivedReports_ = ui.reports;
                         self->events_ = ui.events;
                         self->receivedReportCount_ = ui.receivedCount;
+                    self->subscriptionRcbReference_ = ui.subscriptionRcbReference;
                     self->rejectedReportCount_ = ui.rejectedCount;
                     self->reportDecodeFailureCount_ = ui.decodeFailureCount;
                         if (selectedRow >= 0 &&
@@ -1707,6 +1713,7 @@ bool MmsReportController::enableSelected(const bool requestGeneralInterrogation)
                     self->receivedReports_ = ui.reports;
                     self->events_ = ui.events;
                     self->receivedReportCount_ = ui.receivedCount;
+                    self->subscriptionRcbReference_ = ui.subscriptionRcbReference;
                     self->rejectedReportCount_ = ui.rejectedCount;
                     self->reportDecodeFailureCount_ = ui.decodeFailureCount;
                     self->state_ = ui.cleanupRequired ? State::cleanup_required : State::active;
@@ -1771,6 +1778,7 @@ bool MmsReportController::disableSelected() {
                     self->receivedReports_ = ui.reports;
                     self->events_ = ui.events;
                     self->receivedReportCount_ = ui.receivedCount;
+                    self->subscriptionRcbReference_ = ui.subscriptionRcbReference;
                     self->rejectedReportCount_ = ui.rejectedCount;
                     self->reportDecodeFailureCount_ = ui.decodeFailureCount;
                     self->state_ = ui.cleanupRequired ? State::cleanup_required : State::ready;
@@ -1839,6 +1847,7 @@ bool MmsReportController::retryCleanup() {
                     self->receivedReports_ = ui.reports;
                     self->events_ = ui.events;
                     self->receivedReportCount_ = ui.receivedCount;
+                    self->subscriptionRcbReference_ = ui.subscriptionRcbReference;
                     self->rejectedReportCount_ = ui.rejectedCount;
                     self->reportDecodeFailureCount_ = ui.decodeFailureCount;
                     self->state_ = ui.cleanupRequired ? State::cleanup_required : State::ready;
@@ -1908,6 +1917,7 @@ void MmsReportController::schedulePoll() {
                     self->receivedReports_ = ui.reports;
                     self->events_ = ui.events;
                     self->receivedReportCount_ = ui.receivedCount;
+                    self->subscriptionRcbReference_ = ui.subscriptionRcbReference;
                     self->rejectedReportCount_ = ui.rejectedCount;
                     self->reportDecodeFailureCount_ = ui.decodeFailureCount;
                     emit self->reportsChanged();
@@ -1940,6 +1950,7 @@ void MmsReportController::schedulePoll() {
                     self->receivedReports_ = ui.reports;
                     self->events_ = ui.events;
                     self->receivedReportCount_ = ui.receivedCount;
+                    self->subscriptionRcbReference_ = ui.subscriptionRcbReference;
                     self->rejectedReportCount_ = ui.rejectedCount;
                     self->reportDecodeFailureCount_ = ui.decodeFailureCount;
                     self->lastError_ = message;

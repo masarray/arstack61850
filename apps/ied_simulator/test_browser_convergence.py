@@ -256,6 +256,11 @@ report_required = [
     'String(frame.reportId) !== expectedRptId',
     'Offline values are not fabricated.',
     'heading: "Trigger Options (TrgOps)"',
+    'selectedIsSubscribed: hasSelection && reports.active',
+    'reports.subscriptionRcbReference === rcb.reference',
+    'root.selectedIsSubscribed ? "SUBSCRIBED" : "OTHER RCB ACTIVE"',
+    'The selected RCB is inspection-only; Stop active RCB acts on',
+
     'heading: "Optional Fields (OptFlds)"',
     'root.rcb.triggerOptionsReadStatus === "verified"',
     'root.rcb.optionalFieldsReadStatus === "verified"',
