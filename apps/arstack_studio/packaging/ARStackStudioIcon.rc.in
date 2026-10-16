@@ -1,2 +1,2 @@
-// Studio-only PE icon. CMake expands the absolute path.
-IDI_ICON1 ICON "@ARSTACK_STUDIO_ICON_ICO@"
+// Studio-only Windows PE icon. CMake expands the absolute ICO path.
+1 ICON "@ARSTACK_STUDIO_ICON_ICO@"
