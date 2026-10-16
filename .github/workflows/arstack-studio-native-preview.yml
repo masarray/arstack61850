@@ -147,6 +147,9 @@ jobs:
           if (-not (Test-Path $gui)) { throw 'Fresh preview GUI executable missing' }
           $exe = Join-Path $stage 'ARStackStudio.exe'
           Copy-Item $gui $exe
+          $productIcon = Join-Path $PWD 'build-studio-preview\\ARStackStudio.ico'
+          if (-not (Test-Path $productIcon)) { throw 'Native Studio application icon missing' }
+          Copy-Item $productIcon (Join-Path $stage 'ARStackStudio.ico')
           windeployqt --release --qmldir "$PWD\apps\arstack_studio\qml" --compiler-runtime $exe
           if ($LASTEXITCODE -ne 0) { throw 'Qt runtime deployment failed' }
           # Copy directory CONTENTS to a pre-created destination, not directory

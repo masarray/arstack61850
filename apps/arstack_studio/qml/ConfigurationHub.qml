@@ -55,7 +55,7 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        spacing: 12
+        spacing: 16
 
         RowLayout {
             Layout.fillWidth: true
@@ -75,7 +75,7 @@ Item {
                     font.weight: Font.DemiBold
                 }
                 Label {
-                    text: "Firmware recovery, engineering profile, waveform and timing tools"
+                    text: "Lab simulation controls · configure one task at a time"
                     color: hub.theme.muted
                     font.family: hub.uiFont
                     font.pixelSize: 11
@@ -121,10 +121,10 @@ Item {
                 border.width: 1
                 border.color: hub.theme.lineSoft
             }
-            ExpertTab { text: "Injection" }
+            ExpertTab { text: "Signals" }
             ExpertTab { text: "Firmware" }
             ExpertTab { text: "Waveform" }
-            ExpertTab { text: "Timing" }
+            ExpertTab { text: "Time Sync" }
             ExpertTab { text: "Device" }
         }
 

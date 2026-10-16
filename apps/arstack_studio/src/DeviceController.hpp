@@ -289,6 +289,11 @@ signals:
 protected:
     bool sendQuietCommand(const QString& command);
     bool sendCommandBatch(const QStringList& commands, bool quiet = false);
+    // One canonical SET encoder reused by single edits and the coalesced
+    // multi-channel flush. Empty result = invalid; never send partial batch.
+    static QString formatSignalCommand(const QString& signalId, double magnitude,
+        double phaseDegrees, quint32 quality, double currentCountsPerAmp,
+        double voltageCountsPerVolt, double frequencyHz);
     void setSessionHeartbeatEnabled(bool enabled);
 
 private:

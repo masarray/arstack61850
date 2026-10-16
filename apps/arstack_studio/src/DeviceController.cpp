@@ -642,6 +642,39 @@ bool DeviceController::setFrequency(const double hz) {
     return true;
 }
 
+QString DeviceController::formatSignalCommand(
+    const QString& signalId,
+    const double magnitude,
+    const double phaseDegrees,
+    const quint32 quality,
+    const double currentCountsPerAmp,
+    const double voltageCountsPerVolt,
+    const double frequencyHz) {
+    const QString id = signalId.trimmed().toUpper();
+    static const QStringList validIds{
+        QStringLiteral("IA"), QStringLiteral("IB"), QStringLiteral("IC"), QStringLiteral("IN"),
+        QStringLiteral("UA"), QStringLiteral("UB"), QStringLiteral("UC"), QStringLiteral("UN")};
+    if (!validIds.contains(id) || !std::isfinite(magnitude) ||
+        (frequencyHz > 0.0 && magnitude < 0.0) || !std::isfinite(phaseDegrees) ||
+        !finitePositive(currentCountsPerAmp) || !finitePositive(voltageCountsPerVolt)) return {};
+
+    const double scale = id.startsWith(QLatin1Char('I')) ? currentCountsPerAmp : voltageCountsPerVolt;
+    const double scaled = magnitude * scale;
+    const double angleMdeg = phaseDegrees * 1000.0;
+    if (!std::isfinite(scaled) || !std::isfinite(angleMdeg) ||
+        scaled < static_cast<double>(std::numeric_limits<qint32>::min()) ||
+        scaled > static_cast<double>(std::numeric_limits<qint32>::max()) ||
+        angleMdeg < static_cast<double>(std::numeric_limits<qint32>::min()) ||
+        angleMdeg > static_cast<double>(std::numeric_limits<qint32>::max())) return {};
+    const auto counts = std::llround(scaled);
+    const auto phaseMdeg = std::llround(angleMdeg);
+    return QStringLiteral("SET %1 %2 %3 %4")
+        .arg(id)
+        .arg(counts)
+        .arg(phaseMdeg)
+        .arg(static_cast<qulonglong>(quality));
+}
+
 bool DeviceController::setSignal(
     const QString& signalId,
     const double magnitude,
@@ -649,34 +682,14 @@ bool DeviceController::setSignal(
     const quint32 quality,
     const double currentCountsPerAmp,
     const double voltageCountsPerVolt) {
-    const QString id = signalId.trimmed().toUpper();
-    static const QStringList validIds{
-        QStringLiteral("IA"), QStringLiteral("IB"), QStringLiteral("IC"), QStringLiteral("IN"),
-        QStringLiteral("UA"), QStringLiteral("UB"), QStringLiteral("UC"), QStringLiteral("UN")};
-    if (!validIds.contains(id) || !std::isfinite(magnitude) ||
-        (signalFrequencyHz_ > 0.0 && magnitude < 0.0) || !std::isfinite(phaseDegrees)) {
-        setError(QStringLiteral("Invalid signal setpoint."));
+    const QString wire = formatSignalCommand(
+        signalId, magnitude, phaseDegrees, quality,
+        currentCountsPerAmp, voltageCountsPerVolt, signalFrequencyHz_);
+    if (wire.isEmpty()) {
+        setError(QStringLiteral("Invalid signal or engineering scale; SET not queued."));
         return false;
     }
-    if (!finitePositive(currentCountsPerAmp) || !finitePositive(voltageCountsPerVolt)) {
-        setError(QStringLiteral("Engineering scaling must be positive."));
-        return false;
-    }
-
-    const double scale = id.startsWith(QLatin1Char('I')) ? currentCountsPerAmp : voltageCountsPerVolt;
-    const auto counts = std::llround(magnitude * scale);
-    const auto phaseMdeg = std::llround(phaseDegrees * 1000.0);
-    if (counts < std::numeric_limits<qint32>::min() || counts > std::numeric_limits<qint32>::max() ||
-        phaseMdeg < std::numeric_limits<qint32>::min() || phaseMdeg > std::numeric_limits<qint32>::max()) {
-        setError(QStringLiteral("Setpoint exceeds firmware wire range."));
-        return false;
-    }
-
-    return sendCommand(QStringLiteral("SET %1 %2 %3 %4")
-        .arg(id)
-        .arg(counts)
-        .arg(phaseMdeg)
-        .arg(static_cast<qulonglong>(quality)));
+    return sendCommand(wire);
 }
 
 bool DeviceController::setEnabled(const QString& signalId, const bool enabled) {

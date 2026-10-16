@@ -124,6 +124,36 @@ Rectangle {
                 property real pendingMagnitude: mag
                 property real pendingPhase: angle
 
+                Menu {
+                    id: magnitudeMenu
+                    background: Rectangle { color: matrix.theme.raised; radius: 8; border.color: matrix.theme.line }
+                    MenuItem {
+                        text: "Equal ABC values to " + signalRow.sid
+                        enabled: signalRow.rowIndex < 3
+                        onTriggered: matrix.controller.equalGroupMagnitudes(matrix.groupIndex, signalRow.rowIndex)
+                        contentItem: Label { text: parent.text; color: matrix.theme.text; font.family: matrix.uiFont; font.pixelSize: 12 }
+                        background: Rectangle { color: parent.highlighted ? matrix.theme.accentSoft : "transparent" }
+                    }
+                }
+                Menu {
+                    id: phaseMenu
+                    background: Rectangle { color: matrix.theme.raised; radius: 8; border.color: matrix.theme.line }
+                    MenuItem {
+                        text: "Equal ABC angles to " + signalRow.sid
+                        enabled: signalRow.rowIndex < 3
+                        onTriggered: matrix.controller.equalGroupAngles(matrix.groupIndex, signalRow.rowIndex)
+                        contentItem: Label { text: parent.text; color: matrix.theme.text; font.family: matrix.uiFont; font.pixelSize: 12 }
+                        background: Rectangle { color: parent.highlighted ? matrix.theme.accentSoft : "transparent" }
+                    }
+                    MenuItem {
+                        text: "Balance ABC angles (120 degrees)"
+                        enabled: signalRow.rowIndex < 3
+                        onTriggered: matrix.controller.balanceGroupAngles(matrix.groupIndex, signalRow.rowIndex)
+                        contentItem: Label { text: parent.text; color: matrix.theme.text; font.family: matrix.uiFont; font.pixelSize: 12 }
+                        background: Rectangle { color: parent.highlighted ? matrix.theme.accentSoft : "transparent" }
+                    }
+                }
+
                 Layout.fillWidth: true
                 Layout.preferredHeight: matrix.compact ? 40 : 42
                 color: signalRow.selected ? "#101c27"
@@ -197,6 +227,12 @@ Rectangle {
 
                     NumericField {
                         id: magnitudeField
+                        MouseArea {
+                            anchors.fill: parent
+                            z: 5
+                            acceptedButtons: Qt.RightButton
+                            onClicked: magnitudeMenu.popup()
+                        }
                         Layout.fillWidth: true
                         theme: matrix.theme
                         monoFont: matrix.monoFont
@@ -246,6 +282,12 @@ Rectangle {
 
                     NumericField {
                         id: phaseField
+                        MouseArea {
+                            anchors.fill: parent
+                            z: 5
+                            acceptedButtons: Qt.RightButton
+                            onClicked: phaseMenu.popup()
+                        }
                         enabled: matrix.controller.signalFrequency > 0
                         Layout.preferredWidth: matrix.compact ? 84 : 100
                         theme: matrix.theme
