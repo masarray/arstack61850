@@ -255,6 +255,16 @@ report_required = [
     'String(frame.rcbReference) !== expectedRcb',
     'String(frame.reportId) !== expectedRptId',
     'Offline values are not fabricated.',
+    'heading: "Trigger Options (TrgOps)"',
+    'heading: "Optional Fields (OptFlds)"',
+    'root.rcb.triggerOptionsReadStatus === "verified"',
+    'root.rcb.optionalFieldsReadStatus === "verified"',
+    'root.rcb.triggerOptionNames.indexOf(modelData.name)',
+    'root.rcb.optionalFieldNames.indexOf(modelData.name)',
+    'enabled: false // inspected bit, never an MMS Write',
+    'no on/off bit state is inferred.',
+    'RCB in use: enabled, reservation or Owner evidence is present.',
+
 ]
 missing_report = [term for term in report_required if term not in report_inspector]
 if missing_report:

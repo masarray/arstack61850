@@ -292,6 +292,42 @@ int main(int argc, char* argv[]) {
         return 21;
     }
 
+    // The Browser inspector must distinguish a successful zero-bit Read
+    // from an unexposed or failed RCB field; native schema carries typed
+    // names only when the MMS bit field was actually read.
+    for (const auto& value : reportControls) {
+        const auto map = value.toMap();
+        const auto attributes = map.value(QStringLiteral("attributes")).toStringList();
+        for (const auto& field : std::array{
+                std::pair{QStringLiteral("TrgOps"),
+                          QStringLiteral("triggerOptionsReadStatus")},
+                std::pair{QStringLiteral("OptFlds"),
+                          QStringLiteral("optionalFieldsReadStatus")}}) {
+            const auto exposed = attributes.contains(field.first);
+            const auto status = map.value(field.second).toString();
+            if (!exposed && status != QStringLiteral("not-exposed")) {
+                qCritical() << "REPORTS_WORKBENCH_FAIL unexposed_bit_status" << field.first << status;
+                return 32;
+            }
+            if (exposed && map.value(QStringLiteral("probeOk")).toBool()
+                && status != QStringLiteral("verified")
+                && status != QStringLiteral("read-failed")
+                && status != QStringLiteral("not-read")) {
+                qCritical() << "REPORTS_WORKBENCH_FAIL invalid_bit_read_status" << field.first << status;
+                return 33;
+            }
+            if (status == QStringLiteral("verified")) {
+                const auto membersKey = field.first == QStringLiteral("TrgOps")
+                    ? QStringLiteral("triggerOptionNames")
+                    : QStringLiteral("optionalFieldNames");
+                if (!map.value(membersKey).canConvert<QStringList>()) {
+                    qCritical() << "REPORTS_WORKBENCH_FAIL missing_typed_bit_names" << field.first;
+                    return 34;
+                }
+            }
+        }
+    }
+
     bool sawUrcb = false;
     bool sawBrcb = false;
     bool sawBrcbEntryId = false;
