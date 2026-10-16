@@ -208,12 +208,16 @@ SurfacePanel {
                         ToolTip.text: "This affects the emitted SV smpSynch flag; it does not discipline the sample timer."
                         onActivated: {
                             const requested = ["AUTO", "0", "1", "2"][currentIndex]
-                            if (!panel.session || !panel.session.requestSmpSynch(requested)) {
-                                // Do not leave a rejected simulation choice displayed as active.
-                                currentIndex = panel.syncIndex(panel.device.smpSynchMode)
-                                if (panel.controller)
-                                    panel.controller.showMessage("SV sync choice was not accepted. Copy diagnostics for details.", true)
-                            }
+                            const accepted = panel.session && panel.session.requestSmpSynch(requested)
+                            // Show the device-confirmed state until the board actually
+                            // accepts/readbacks the new flag, then update reactively.
+                            // Qt.binding preserves the declaration over reconnects,
+                            // rejected commands and external serial changes.
+                            currentIndex = Qt.binding(function() {
+                                return panel.syncIndex(panel.device.smpSynchMode)
+                            })
+                            if (!accepted && panel.controller)
+                                panel.controller.showMessage("SV sync choice was not accepted. Copy diagnostics for details.", true)
                         }
                     }
                     StateBadge {
