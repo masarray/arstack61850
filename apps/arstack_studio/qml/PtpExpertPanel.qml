@@ -192,6 +192,45 @@ SurfacePanel {
                 }
             }
 
+            // Simulation is intentionally simple: auto or explicit SV flag.
+            // The firmware already marks overrides as simulated, independently
+            // of PTP clock discipline and without pretending sample phase lock.
+                Rectangle { Layout.fillWidth: true; height: 1; color: panel.theme.lineSoft }
+                Label { text: "SV Sample Synchronization · lab simulation"; color: panel.theme.text; font.family: panel.uiFont; font.pixelSize: 12; font.weight: Font.DemiBold }
+                RowLayout {
+                    Layout.fillWidth: true
+                    ComboBox {
+                        id: svSyncCombo
+                        Layout.fillWidth: true
+                        palette.text: panel.theme.text
+                        palette.buttonText: panel.theme.text
+                        palette.base: panel.theme.surface2
+                        palette.windowText: panel.theme.text
+                        background: Rectangle { radius: 6; color: panel.theme.surface2; border.color: panel.theme.line }
+                        model: ["AUTO — measured PTP only", "0 — Not synchronized", "1 — Local synchronized (simulation)", "2 — Global synchronized (simulation)"]
+                        currentIndex: panel.syncIndex(panel.device.smpSynchMode)
+                        enabled: panel.session && panel.device.deviceVerified && !panel.session.updatingFirmware
+                        font.family: panel.uiFont
+                        font.pixelSize: 9
+                        onActivated: panel.session.requestSmpSynch(["AUTO", "0", "1", "2"][currentIndex])
+                    }
+                    StateBadge {
+                        theme: panel.theme
+                        monoFont: panel.uiFont
+                        state: "smpSynch=" + panel.device.smpSynchValue
+                            + (panel.device.smpSynchSimulated ? " SIMULATED" : panel.device.smpSynchMeasured ? " MEASURED" : " SAFE")
+                        stateColor: panel.device.smpSynchSimulated ? panel.theme.amber : panel.device.smpSynchMeasured ? panel.theme.green : panel.theme.muted
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: "AUTO uses measured timing evidence. Select 0 / 1 / 2 to simulate subscriber behavior (the emitted SV flag will be marked SIMULATED)."
+                    wrapMode: Text.WordWrap
+                    color: panel.theme.textSoft
+                    font.family: panel.uiFont
+                    font.pixelSize: 8
+                }
+
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 8
@@ -229,7 +268,9 @@ SurfacePanel {
                     checked: panel.advancedVisible
                     onToggled: panel.advancedVisible = checked
                     font.family: panel.uiFont
-                    font.pixelSize: 9
+                    font.pixelSize: 10
+                    palette.windowText: panel.theme.text
+                    palette.text: panel.theme.text
                 }
             }
 
@@ -319,11 +360,11 @@ SurfacePanel {
                     NumericField { id: announceField; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 100; top: 10000 } }
                     Label { text: "Sync interval (ms)"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: syncField; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 20; top: 5000 } }
-                    CheckBox { id: vlanCheck; text: "VLAN"; font.family: panel.uiFont; font.pixelSize: 9 }
+                    CheckBox { id: vlanCheck; text: "VLAN"; font.family: panel.uiFont; font.pixelSize: 10; palette.windowText: panel.theme.text }
                     NumericField { id: vlanField; enabled: vlanCheck.checked; theme: panel.theme; monoFont: panel.uiFont; text: "100"; validator: IntValidator { bottom: 1; top: 4094 } }
                     Label { text: "VLAN PCP"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: pcpField; enabled: vlanCheck.checked; theme: panel.theme; monoFont: panel.uiFont; text: "4"; validator: IntValidator { bottom: 0; top: 7 } }
-                    CheckBox { id: pdelayCheck; text: "Peer-delay response"; checked: true; font.family: panel.uiFont; font.pixelSize: 9 }
+                    CheckBox { id: pdelayCheck; text: "Peer-delay response"; checked: true; font.family: panel.uiFont; font.pixelSize: 10; palette.windowText: panel.theme.text }
                     CalmButton {
                         theme: panel.theme
                         uiFont: panel.uiFont
@@ -336,35 +377,7 @@ SurfacePanel {
                     }
                 }
 
-                Rectangle { Layout.fillWidth: true; height: 1; color: panel.theme.lineSoft }
-                Label { text: "SV synchronization flag · lab / interoperability"; color: panel.theme.text; font.family: panel.uiFont; font.pixelSize: 12; font.weight: Font.DemiBold }
-                RowLayout {
-                    Layout.fillWidth: true
-                    ComboBox {
-                        Layout.fillWidth: true
-                        model: ["AUTO — measured PTP only", "0 — Not synchronized", "1 — Local synchronized (simulation)", "2 — Global synchronized (simulation)"]
-                        currentIndex: panel.syncIndex(panel.device.smpSynchMode)
-                        enabled: panel.session && panel.device.deviceVerified && !panel.session.updatingFirmware
-                        font.family: panel.uiFont
-                        font.pixelSize: 9
-                        onActivated: panel.session.requestSmpSynch(["AUTO", "0", "1", "2"][currentIndex])
-                    }
-                    StateBadge {
-                        theme: panel.theme
-                        monoFont: panel.uiFont
-                        state: "smpSynch=" + panel.device.smpSynchValue
-                            + (panel.device.smpSynchSimulated ? " SIMULATED" : panel.device.smpSynchMeasured ? " MEASURED" : " SAFE")
-                        stateColor: panel.device.smpSynchSimulated ? panel.theme.amber : panel.device.smpSynchMeasured ? panel.theme.green : panel.theme.muted
-                    }
-                }
-                Label {
-                    Layout.fillWidth: true
-                    text: "PTP Source transmission is not proof that the SV clock is externally synchronized. AUTO stays fail-closed unless receiver discipline is measured."
-                    wrapMode: Text.WordWrap
-                    color: panel.theme.textSoft
-                    font.family: panel.uiFont
-                    font.pixelSize: 8
-                }
+
             }
 
             Item { Layout.minimumHeight: 8 }
