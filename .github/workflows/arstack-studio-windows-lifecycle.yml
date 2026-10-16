@@ -101,28 +101,46 @@ jobs:
             Select-Object -First 1
           if ($null -eq $candidate) { throw 'Studio GUI executable not found' }
           $exe = $candidate.FullName
+          New-Item -ItemType Directory -Path 'studio-ui-evidence' -Force | Out-Null
+          Remove-Item Env:ARSTACK_STUDIO_QA_DIR -ErrorAction SilentlyContinue
+          Remove-Item Env:ARSTACK_STUDIO_QA_NATIVE_ONLY -ErrorAction SilentlyContinue
           foreach ($scale in @('1', '1.5')) {
             $env:QT_SCALE_FACTOR = $scale
             $suffix = if ($scale -eq '1') { 'dpi-100' } else { 'dpi-150' }
-            $env:ARSTACK_STUDIO_QA_DIR = Join-Path (Join-Path $PWD 'studio-ui-evidence') $suffix
-            New-Item -ItemType Directory -Path $env:ARSTACK_STUDIO_QA_DIR -Force | Out-Null
-            $stdout = Join-Path $env:ARSTACK_STUDIO_QA_DIR 'ui-test-stdout.txt'
-            $stderr = Join-Path $env:ARSTACK_STUDIO_QA_DIR 'ui-test-stderr.txt'
+            $logdir = Join-Path (Join-Path $PWD 'studio-ui-evidence') $suffix
+            New-Item -ItemType Directory -Path $logdir -Force | Out-Null
+            $stdout = Join-Path $logdir 'geometry-stdout.txt'
+            $stderr = Join-Path $logdir 'geometry-stderr.txt'
             $probe = Start-Process -FilePath $exe -ArgumentList '--check-operator-ui' -Wait -PassThru `
               -RedirectStandardOutput $stdout -RedirectStandardError $stderr
             Get-Content $stdout -ErrorAction SilentlyContinue
             Get-Content $stderr -ErrorAction SilentlyContinue
             if ($probe.ExitCode -ne 0) {
-              throw "Qt Quick viewport geometry or screenshot failed at DPI=$scale, exit=$($probe.ExitCode); see logs in evidence."
-            }
-            foreach ($dimensions in @('1240x760', '960x620', '1440x900')) {
-              $png = Join-Path $env:ARSTACK_STUDIO_QA_DIR "studio-$dimensions.png"
-              if (-not (Test-Path $png) -or (Get-Item $png).Length -lt 10000) {
-                throw "Missing/empty Windows-built Qt screenshot DPI=$scale at $dimensions"
-              }
+              throw "Deterministic Qt Quick viewport geometry failed at DPI=$scale, exit=$($probe.ExitCode)"
             }
           }
-          Write-Host 'Windows-built Qt Quick deterministic viewport and High-DPI evidence: PASS'
+          # Offscreen grabWindow() is not a reliable image source. Capture
+          # one supported native Windows viewport separately at 100% DPI.
+          Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
+          Remove-Item Env:QT_QUICK_BACKEND -ErrorAction SilentlyContinue
+          $env:QT_SCALE_FACTOR = '1'
+          $env:ARSTACK_STUDIO_QA_NATIVE_ONLY = '1'
+          $env:ARSTACK_STUDIO_QA_DIR = Join-Path $PWD 'studio-ui-evidence\native-windows'
+          New-Item -ItemType Directory -Path $env:ARSTACK_STUDIO_QA_DIR -Force | Out-Null
+          $stdout = Join-Path $env:ARSTACK_STUDIO_QA_DIR 'native-stdout.txt'
+          $stderr = Join-Path $env:ARSTACK_STUDIO_QA_DIR 'native-stderr.txt'
+          $probe = Start-Process -FilePath $exe -ArgumentList '--check-operator-ui' -Wait -PassThru `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          Get-Content $stdout -ErrorAction SilentlyContinue
+          Get-Content $stderr -ErrorAction SilentlyContinue
+          if ($probe.ExitCode -ne 0) {
+            throw "Native Windows screenshot acceptance failed, exit=$($probe.ExitCode)"
+          }
+          $png = Join-Path $env:ARSTACK_STUDIO_QA_DIR 'studio-960x620.png'
+          if (-not (Test-Path $png) -or (Get-Item $png).Length -lt 10000) {
+            throw 'Native Windows 960x620 screenshot was missing or empty'
+          }
+          Write-Host 'Windows Qt deterministic 3-viewports x 2-DPI geometry + native 960x620 screenshot: PASS'
       - name: Upload desktop layout evidence
         if: always()
         uses: actions/upload-artifact@v4

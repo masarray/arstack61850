@@ -604,6 +604,15 @@ int main(int argc, char* argv[]) {
         // the real rendering engine. This branch never touches a serial port.
         constexpr std::array<QSize, 3> sizes{{QSize{1240, 760}, QSize{960, 620},
                                                QSize{1440, 900}}};
+        // Virtual Qt platforms can resize to arbitrary logical viewports,
+        // but cannot support grabWindow. One native 960x620 pass captures
+        // actual Windows pixels separately without requesting an oversized
+        // desktop window.
+        const bool nativeCapture = !qEnvironmentVariableIsEmpty("ARSTACK_STUDIO_QA_NATIVE_ONLY");
+        const int caseCount = nativeCapture ? 1 : static_cast<int>(sizes.size());
+        const auto caseSize = [&](const int step) {
+            return nativeCapture ? sizes[1] : sizes.at(static_cast<std::size_t>(step));
+        };
         const QString screenshots = qEnvironmentVariable("ARSTACK_STUDIO_QA_DIR");
         if (!screenshots.isEmpty() && !QDir{}.mkpath(screenshots)) {
             qCritical().noquote() << "Cannot create GUI evidence directory" << screenshots;
@@ -613,10 +622,10 @@ int main(int argc, char* argv[]) {
         auto resizeRetries = std::make_shared<int>(0);
         auto* uiTimer = new QTimer(&app);
         uiTimer->setInterval(400);
-        mainWindow->resize(sizes.front());
+        mainWindow->resize(caseSize(0));
         QObject::connect(uiTimer, &QTimer::timeout, &app,
                          [&, step, resizeRetries, uiTimer] {
-            const QSize target = sizes.at(static_cast<std::size_t>(*step));
+            const QSize target = caseSize(*step);
             if (mainWindow->size() != target) {
                 // CI's virtual Windows desktop can clamp large native
                 // windows. Diagnose that instead of spinning 15 seconds.
@@ -649,13 +658,13 @@ int main(int argc, char* argv[]) {
                 }
             }
             ++*step;
-            if (*step == static_cast<int>(sizes.size())) {
+            if (*step == caseCount) {
                 uiTimer->stop();
                 qInfo().noquote() << "Studio operator layout acceptance: PASS";
                 QCoreApplication::exit(0);
                 return;
             }
-            mainWindow->resize(sizes.at(static_cast<std::size_t>(*step)));
+            mainWindow->resize(caseSize(*step));
         });
         uiTimer->start();
         QTimer::singleShot(15000, &app, [&app, uiTimer] {
