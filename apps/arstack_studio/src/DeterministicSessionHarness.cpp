@@ -42,6 +42,7 @@ public:
             {"manual recovery intent survives IDENTIFY -> firmware required", manualRecoveryIntentArmsFirmwareOffer()},
             {"stale generation release -> ignored", staleReleaseGenerationIsIgnored()},
             {"firmware probe before serial release -> blocked", firmwareProbeRequiresReleasedPort()},
+            {"ABC preparation rejects partial or out-of-range batches", abcSetBatchIsAllOrNothing()},
             {"PTP staged START requires role/config/runtime ACKs", ptpGuidedStartNeedsAcks()},
             {"PTP stale role readback cannot bypass ACK", ptpStaleRoleReadbackBlocked()},
             {"PTP runtime requires matching PTP2 role", ptpRuntimeRoleEvidenceRequired()},
@@ -341,6 +342,37 @@ private:
             evidence.contains(QStringLiteral("0123456789abcdef")) &&
             evidence.contains(QStringLiteral("Copy diagnostics")) &&
             session.diagnosticsText().contains(evidence);
+    }
+
+    static bool abcSetBatchIsAllOrNothing() {
+        const auto sample = [](const QString& id, const double magnitude,
+                               const double phase, const qulonglong quality) {
+            return QVariantMap{
+                {QStringLiteral("signalId"), id},
+                {QStringLiteral("magnitude"), magnitude},
+                {QStringLiteral("phase"), phase},
+                {QStringLiteral("quality"), quality}};
+        };
+        QVariantList values{
+            sample(QStringLiteral("Ia"), 1.0, 0.0, 0),
+            sample(QStringLiteral("Ib"), 1.0, -120.0, 0),
+            sample(QStringLiteral("Ic"), 1.0, 120.0, 0)};
+        const QStringList commands =
+            DeviceController::buildThreePhaseSetBatch(values, 1000, 100, 50.0);
+        if (commands.size() != 3 ||
+            commands[0] != QStringLiteral("SET IA 1000 0 0") ||
+            commands[1] != QStringLiteral("SET IB 1000 -120000 0") ||
+            commands[2] != QStringLiteral("SET IC 1000 120000 0")) return false;
+
+        values[1] = sample(QStringLiteral("Ia"), 1.0, -120.0, 0);
+        if (!DeviceController::buildThreePhaseSetBatch(values, 1000, 100, 50.0).isEmpty())
+            return false;
+        values[1] = sample(QStringLiteral("Ib"), 1.0e12, -120.0, 0);
+        if (!DeviceController::buildThreePhaseSetBatch(values, 1000, 100, 50.0).isEmpty())
+            return false;
+        values[1] = sample(QStringLiteral("Ib"), 1.0, -120.0, 0);
+        values.removeLast();
+        return DeviceController::buildThreePhaseSetBatch(values, 1000, 100, 50.0).isEmpty();
     }
 
     static bool optionalBootloaderWaitCanCancel() {

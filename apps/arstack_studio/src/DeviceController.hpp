@@ -7,6 +7,7 @@
 #include <QThread>
 #include <QTimer>
 #include <QVariantMap>
+#include <QVariant>
 
 class DeterministicSessionHarness;
 class DeviceIoWorker;
@@ -221,6 +222,8 @@ public:
         quint32 quality,
         double currentCountsPerAmp,
         double voltageCountsPerVolt);
+    // One all-or-none worker queue submission for fast ABC operator actions.
+    bool setSignalsBatch(const QVariantList& signals, double currentCountsPerAmp, double voltageCountsPerVolt);
     bool setEnabled(const QString& signalId, bool enabled);
     bool setQuality(const QString& signalId, quint32 quality);
     bool setCtSaturation(bool enabled, double dcOffsetPercent, double harmonicPercent, int harmonicOrder, double clipPercent);
@@ -351,6 +354,9 @@ private:
     bool beginPtpStopVerification();
     void markPtpStopUnconfirmed(const QString& reason);
     void resetPtpStartup() noexcept;
+    [[nodiscard]] static QStringList buildThreePhaseSetBatch(
+        const QVariantList& signals, double currentCountsPerAmp,
+        double voltageCountsPerVolt, double frequencyHz);
     [[nodiscard]] static QString ptpConfigCommand(const QVariantMap& profile);
     static QString cleanLine(const QString& rawLine);
     static QString utf8Hex(const QString& text);

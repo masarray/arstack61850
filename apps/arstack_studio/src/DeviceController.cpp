@@ -679,6 +679,73 @@ bool DeviceController::setSignal(
         .arg(static_cast<qulonglong>(quality)));
 }
 
+QStringList DeviceController::buildThreePhaseSetBatch(
+    const QVariantList& signals,
+    const double currentCountsPerAmp,
+    const double voltageCountsPerVolt,
+    const double frequencyHz) {
+    if (signals.size() != 3 || !finitePositive(currentCountsPerAmp) ||
+        !finitePositive(voltageCountsPerVolt)) return {};
+
+    const QString first = signals[0].toMap().value(QStringLiteral("signalId"))
+                              .toString().trimmed().toUpper();
+    const bool currents = first == QStringLiteral("IA");
+    if (!currents && first != QStringLiteral("UA")) return {};
+    const QStringList expected = currents
+        ? QStringList{QStringLiteral("IA"), QStringLiteral("IB"), QStringLiteral("IC")}
+        : QStringList{QStringLiteral("UA"), QStringLiteral("UB"), QStringLiteral("UC")};
+    const double scale = currents ? currentCountsPerAmp : voltageCountsPerVolt;
+
+    QStringList commands;
+    commands.reserve(3);
+    for (int i = 0; i < 3; ++i) {
+        const QVariantMap item = signals[i].toMap();
+        if (item.value(QStringLiteral("signalId")).toString().trimmed().toUpper() != expected[i])
+            return {};
+        bool magnitudeValid = false;
+        bool phaseValid = false;
+        bool qualityValid = false;
+        const double magnitude = item.value(QStringLiteral("magnitude")).toDouble(&magnitudeValid);
+        const double phase = item.value(QStringLiteral("phase")).toDouble(&phaseValid);
+        const quint64 quality = item.value(QStringLiteral("quality")).toULongLong(&qualityValid);
+        if (!magnitudeValid || !phaseValid || !qualityValid ||
+            quality > std::numeric_limits<quint32>::max() ||
+            !std::isfinite(magnitude) || !std::isfinite(phase) ||
+            (frequencyHz > 0.0 && magnitude < 0.0)) return {};
+
+        const double scaled = magnitude * scale;
+        const double angleMilli = phase * 1000.0;
+        if (!std::isfinite(scaled) || !std::isfinite(angleMilli) ||
+            scaled < std::numeric_limits<qint32>::min() ||
+            scaled > std::numeric_limits<qint32>::max() ||
+            angleMilli < std::numeric_limits<qint32>::min() ||
+            angleMilli > std::numeric_limits<qint32>::max()) return {};
+        const auto counts = std::llround(scaled);
+        const auto phaseMdeg = std::llround(angleMilli);
+        commands.append(QStringLiteral("SET %1 %2 %3 %4")
+            .arg(expected[i])
+            .arg(counts)
+            .arg(phaseMdeg)
+            .arg(quality));
+    }
+    return commands;
+}
+
+bool DeviceController::setSignalsBatch(
+    const QVariantList& signals,
+    const double currentCountsPerAmp,
+    const double voltageCountsPerVolt) {
+    const QStringList commands = buildThreePhaseSetBatch(
+        signals, currentCountsPerAmp, voltageCountsPerVolt, signalFrequencyHz_);
+    if (commands.size() != 3) {
+        setError(QStringLiteral("ABC batch is invalid; no phase was queued."));
+        return false;
+    }
+    // Exactly one queued worker call. DeviceIoWorker checks ALL THREE slots
+    // before enqueueing ANY; a full queue cannot accept an ABC prefix.
+    return sendCommandBatch(commands, false);
+}
+
 bool DeviceController::setEnabled(const QString& signalId, const bool enabled) {
     return sendCommand(QStringLiteral("ENABLE %1 %2")
         .arg(signalId.trimmed().toUpper())
