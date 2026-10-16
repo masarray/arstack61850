@@ -18,6 +18,7 @@ Rectangle {
     property bool attributesExpanded: true
     property bool informationExpanded: true
     property bool dataExpanded: true
+    property bool eventsExpanded: true
     property int selectedReportMemberIndex: -1
     // Preserve selection through repeat snapshots of the same report frame;
     // reset only when the actual ReportID/sequence/entry identity changes.
@@ -482,12 +483,14 @@ Rectangle {
                 SectionHeading {
                     heading: "RCB lifecycle & InformationReport events"
                     evidence: reports.events.length + " bounded event(s)"
-                    opened: reports.events.length > 0
+                    opened: root.eventsExpanded
                     visible: reports.events.length > 0
-                    onToggleRequested: {}
+                    onToggleRequested: root.eventsExpanded = !root.eventsExpanded
                 }
                 Repeater {
-                    model: reports.events.slice(Math.max(0, reports.events.length - 6))
+                    model: root.eventsExpanded
+                           ? reports.events.slice(Math.max(0, reports.events.length - 6))
+                           : []
                     delegate: Label {
                         required property string modelData
                         Layout.fillWidth: true
