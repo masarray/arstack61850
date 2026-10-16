@@ -461,6 +461,13 @@ int main(int argc, char* argv[]) {
         return 17;
     }
 
+    // Stop must act on the original active RCB, even while another row is
+    // selected for read-only inspection. The UI label names this explicitly.
+    if (!reports.selectRcb(anotherRcb) ||
+        reports.subscriptionRcbReference() != runningRcb) {
+        qCritical() << "REPORTS_WORKBENCH_FAIL pre_stop_ownership";
+        return 37;
+    }
     if (!reports.disableSelected() ||
         !waitUntil([&reports] { return !reports.active() && !reports.busy(); }, 6'000) ||
         reports.cleanupRequired()) {
