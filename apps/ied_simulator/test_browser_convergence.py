@@ -252,12 +252,15 @@ report_required = [
     'BrowserEngineeringEvidence {',
     'root.latestReport.valuesTruncated === true',
     'root.latestReport.valueTextTruncated === true',
-    'String(frame.reportId) === wanted',
+    'String(frame.rcbReference) !== expectedRcb',
+    'String(frame.reportId) !== expectedRptId',
     'Offline values are not fabricated.',
 ]
 missing_report = [term for term in report_required if term not in report_inspector]
 if missing_report:
     raise SystemExit("BROWSER_REPORT_INSPECTOR_FAIL missing=" + ",".join(missing_report))
+if 'String(frame.reportId) === wanted' in report_inspector:
+    raise SystemExit("BROWSER_REPORT_INSPECTOR_FAIL report ID alone is not exact RCB provenance")
 if 'title: modelData[0]' in report_inspector or 'rawValue: modelData[1]' in report_inspector:
     raise SystemExit("BROWSER_REPORT_INSPECTOR_FAIL nested-array attribute labels")
 if "ReportsWorkspace {" in workspace:
