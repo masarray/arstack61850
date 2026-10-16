@@ -53,7 +53,9 @@ SurfacePanel {
 
         RowLayout {
             Layout.fillWidth: true
-            ComboBox {
+            DarkComboBox {
+                theme: panel.theme
+                uiFont: panel.uiFont
                 id: recoveryPort
                 Layout.preferredWidth: 170
                 model: panel.device.ports

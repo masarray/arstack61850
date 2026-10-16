@@ -75,7 +75,7 @@ Item {
                     font.weight: Font.DemiBold
                 }
                 Label {
-                    text: "Firmware recovery, engineering profile, waveform and timing tools"
+                    text: "SIMULATION LAB  /  4I+4V · PTP · Firmware · Diagnostics"
                     color: hub.theme.muted
                     font.family: hub.uiFont
                     font.pixelSize: 11
@@ -121,10 +121,10 @@ Item {
                 border.width: 1
                 border.color: hub.theme.lineSoft
             }
-            ExpertTab { text: "Injection" }
+            ExpertTab { text: "Signal profile" }
             ExpertTab { text: "Firmware" }
-            ExpertTab { text: "Waveform" }
-            ExpertTab { text: "Timing" }
+            ExpertTab { text: "Wave shaping" }
+            ExpertTab { text: "PTP / Sync" }
             ExpertTab { text: "Device" }
         }
 
