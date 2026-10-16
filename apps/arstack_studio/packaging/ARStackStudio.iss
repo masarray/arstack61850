@@ -23,6 +23,9 @@
   #define ProductRegistry "Software\ARStack61850\ARStack Studio"
 #endif
 
+; Resolve relative to this .iss file, independent of the compiler working dir.
+#define StudioIconFile AddBackslash(SourcePath) + "..\..\..\assets\studio_icon\ARStackStudio.ico"
+
 [Setup]
 AppId={#ProductId}
 AppName={#ProductName}
@@ -33,6 +36,8 @@ AppPublisherURL=https://github.com/masarray/arstack61850
 AppSupportURL=https://github.com/masarray/arstack61850/issues
 AppUpdatesURL=https://github.com/masarray/arstack61850/releases
 UninstallDisplayName={#ProductName}
+UninstallDisplayIcon={app}\ARStackStudio.exe
+SetupIconFile={#StudioIconFile}
 DefaultDirName={localappdata}\Programs\{#ProductFolder}
 DefaultGroupName={#ProductName}
 OutputBaseFilename={#ProductOutput}

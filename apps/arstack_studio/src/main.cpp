@@ -17,6 +17,7 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QGuiApplication>
+#include <QIcon>
 #include <QPointer>
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
@@ -446,6 +447,10 @@ int main(int argc, char* argv[]) {
     QCoreApplication::setApplicationName(QStringLiteral("ARStack Studio"));
     QCoreApplication::setApplicationVersion(QStringLiteral(ARSTACK_STUDIO_VERSION));
 #endif
+    QIcon studioIcon;
+    studioIcon.addFile(QStringLiteral(":/studio-brand/android-chrome-192x192.png"));
+    studioIcon.addFile(QStringLiteral(":/studio-brand/android-chrome-512x512.png"));
+    app.setWindowIcon(studioIcon);
 
     // S6 ownership starts before any firmware process, QML object, or serial
     // worker exists. A second Studio process therefore cannot race for the

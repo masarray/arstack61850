@@ -41,6 +41,16 @@ qt_add_executable(arstack_studio
     ${ARSTACK_STUDIO_CORE_SOURCES}
 )
 
+# Studio-only branding: never use the root assets/ (Workbench) icons.
+set(ARSTACK_STUDIO_BRAND_DIR "${CMAKE_CURRENT_LIST_DIR}/../../assets/studio_icon")
+qt_add_resources(arstack_studio "studio_brand_icon"
+    PREFIX "/studio-brand"
+    BASE "${ARSTACK_STUDIO_BRAND_DIR}"
+    FILES
+        "${ARSTACK_STUDIO_BRAND_DIR}/android-chrome-192x192.png"
+        "${ARSTACK_STUDIO_BRAND_DIR}/android-chrome-512x512.png"
+)
+
 # S8 is intentionally a separate, headless executable. It links the same
 # production controller/worker sources as Studio but exposes no test command in
 # the release application. Friend-only seams let the harness inject deterministic
@@ -171,5 +181,14 @@ target_compile_definitions(arstack_session_harness PRIVATE
 )
 
 if(WIN32)
+    # PE resource gives ARStackStudio.exe its Explorer, shortcut and taskbar icon.
+    enable_language(RC)
+    set(ARSTACK_STUDIO_ICON_ICO "${ARSTACK_STUDIO_BRAND_DIR}/ARStackStudio.ico")
+    configure_file(
+        "${CMAKE_CURRENT_LIST_DIR}/packaging/ARStackStudioIcon.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/ARStackStudioIcon.rc"
+        @ONLY
+    )
+    target_sources(arstack_studio PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/ARStackStudioIcon.rc")
     set_target_properties(arstack_studio PROPERTIES WIN32_EXECUTABLE TRUE)
 endif()
