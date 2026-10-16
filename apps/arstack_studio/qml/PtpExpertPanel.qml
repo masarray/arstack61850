@@ -12,6 +12,9 @@ SurfacePanel {
     property string monoFont: "Inter"
     property var roleValues: ["SOURCE", "RECEIVER", "MONITOR"]
     property bool advancedVisible: false
+    // Keep PTP role changes in the existing verified serial transaction.
+    readonly property bool controlReady: panel.session && panel.device.ptpAvailable &&
+        !panel.session.updatingFirmware
     readonly property bool startPending: panel.device && panel.device.ptpStarting
 
     function roleIndex(role) {
@@ -45,7 +48,7 @@ SurfacePanel {
     }
 
     function startSelectedMode() {
-        if (!panel.session || !panel.device.ptpAvailable) return
+        if (!panel.controlReady || panel.startPending || panel.device.ptpRunning) return
         var role = panel.roleValues[modeCombo.currentIndex]
         if (!panel.session.requestStartPtpConfigured(role, panel.ptpProfile())) {
             if (panel.controller) panel.controller.showMessage("PTP start blocked. See the Timing status for details.", true)
@@ -109,6 +112,44 @@ SurfacePanel {
                     }
                 }
                 Item { Layout.fillWidth: true }
+                Switch {
+                    id: ptpToggle
+                    text: "PTP"
+                    checked: panel.device.ptpRunning
+                    enabled: panel.controlReady && !panel.startPending
+                    onClicked: {
+                        if (checked) panel.startSelectedMode()
+                        else panel.session.requestStopPtp()
+                    }
+                    font.family: panel.uiFont
+                    font.pixelSize: 11
+                    indicator: Rectangle {
+                        implicitWidth: 42
+                        implicitHeight: 24
+                        x: 0
+                        y: (ptpToggle.height - height) / 2
+                        radius: 12
+                        color: ptpToggle.checked ? panel.theme.greenSoft : panel.theme.raised
+                        border.width: 1
+                        border.color: ptpToggle.checked ? panel.theme.green : panel.theme.line
+                        Rectangle {
+                            width: 16
+                            height: 16
+                            radius: 8
+                            x: ptpToggle.checked ? 22 : 3
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: ptpToggle.checked ? panel.theme.green : panel.theme.textSoft
+                            Behavior on x { NumberAnimation { duration: 110 } }
+                        }
+                    }
+                    contentItem: Text {
+                        text: "PTP"
+                        font: ptpToggle.font
+                        color: panel.theme.textSoft
+                        leftPadding: ptpToggle.indicator.width + 9
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
                 StateBadge {
                     theme: panel.theme
                     monoFont: panel.uiFont
@@ -143,10 +184,12 @@ SurfacePanel {
                             font.pixelSize: 9
                             font.weight: Font.DemiBold
                         }
-                        ComboBox {
+                        DarkComboBox {
+                            theme: panel.theme
+                            uiFont: panel.uiFont
                             id: modeCombo
                             Layout.fillWidth: true
-                            model: ["Provide PTP timing", "Follow external PTP", "Monitor PTP only"]
+                            model: ["Source · provide lab time", "Follower · auto-discover GM", "Monitor · listen only"]
                             currentIndex: panel.roleIndex(panel.activeRole)
                             enabled: panel.session && panel.device.ptpAvailable && !panel.device.ptpRunning && !panel.startPending && !panel.session.updatingFirmware
                             font.family: panel.uiFont
@@ -161,7 +204,7 @@ SurfacePanel {
                             text: modeCombo.currentIndex === 0
                                 ? "Board sends Announce + hardware-timestamped two-step Sync/Follow_Up."
                                 : modeCombo.currentIndex === 1
-                                    ? "Board follows an external PTP source and reports measured clock lock."
+                                    ? "Automatically discovers a grandmaster; a server IP is not required for L2 PTP."
                                     : "Board listens to PTP without transmitting or disciplining its clock."
                             wrapMode: Text.WordWrap
                             color: panel.theme.textSoft
@@ -170,14 +213,14 @@ SurfacePanel {
                         }
                         Label {
                             text: modeCombo.currentIndex === 0
-                                ? "PTP TX does not by itself change SV smpSynch."
+                                ? "PTP transmit does not automatically phase-lock SMV."
                                 : modeCombo.currentIndex === 1
                                     ? "AUTO smpSynch follows measured receiver evidence only."
                                     : "Useful for observing timing traffic without changing the network."
                             wrapMode: Text.WordWrap
                             color: panel.theme.muted
                             font.family: panel.uiFont
-                            font.pixelSize: 8
+                            font.pixelSize: 10
                         }
                     }
                 }
@@ -215,8 +258,9 @@ SurfacePanel {
                     onClicked: panel.session.requestPtpRefresh()
                 }
                 Item { Layout.fillWidth: true }
-                CheckBox {
-                    text: "Advanced settings"
+                DarkCheckBox {
+                    theme: panel.theme
+                    text: "Protocol settings"
                     checked: panel.advancedVisible
                     onToggled: panel.advancedVisible = checked
                     font.family: panel.uiFont
@@ -239,11 +283,11 @@ SurfacePanel {
                     columnSpacing: 14
                     rowSpacing: 6
 
-                    Label { text: panel.sourceRole ? "Announce TX" : "Announce RX"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-                    Label { text: panel.sourceRole ? "Sync TX" : "Sync RX"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-                    Label { text: panel.sourceRole ? "Follow_Up TX" : "Follow_Up RX"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-                    Label { text: panel.sourceRole ? "Pdelay TX" : "Pdelay RX / Req"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-                    Label { text: panel.sourceRole ? "TX failures" : "Accepted / rejected"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
+                    Label { text: panel.sourceRole ? "Announce TX" : "Announce RX"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 10 }
+                    Label { text: panel.sourceRole ? "Sync TX" : "Sync RX"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 10 }
+                    Label { text: panel.sourceRole ? "Follow_Up TX" : "Follow_Up RX"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 10 }
+                    Label { text: panel.sourceRole ? "Pdelay TX" : "Pdelay RX / Req"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 10 }
+                    Label { text: panel.sourceRole ? "TX failures" : "Accepted / rejected"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 10 }
 
                     Label { text: panel.sourceRole ? panel.device.ptpAnnounceSent : panel.device.ptpRxAnnounce; color: panel.theme.text; font.family: panel.monoFont; font.pixelSize: 15; font.weight: Font.DemiBold }
                     Label { text: panel.sourceRole ? panel.device.ptpSyncSent : panel.device.ptpRxSync; color: panel.theme.text; font.family: panel.monoFont; font.pixelSize: 15; font.weight: Font.DemiBold }
@@ -278,14 +322,59 @@ SurfacePanel {
                     anchors.fill: parent
                     anchors.margins: 10
                     columns: 4
-                    Label { text: "Discipline"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
+                    Label { text: "Discipline"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 10 }
                     Label { text: panel.device.ptpDiscipline === "LOCKED" ? "LOCKED (board)" : panel.device.ptpDiscipline; color: panel.theme.amber; font.family: panel.monoFont; font.pixelSize: 10; font.weight: Font.DemiBold }
-                    Label { text: "Selected source"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
+                    Label { text: "Selected source"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 10 }
                     Label { text: panel.device.ptpSource === "NONE" ? "—" : panel.device.ptpSource; color: panel.theme.text; font.family: panel.monoFont; font.pixelSize: 9 }
-                    Label { text: "Offset"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
+                    Label { text: "Offset"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 10 }
                     Label { text: panel.device.ptpOffsetNs === "NA" ? "—" : panel.device.ptpOffsetNs + " ns"; color: panel.theme.text; font.family: panel.monoFont; font.pixelSize: 10 }
-                    Label { text: "Path delay"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
+                    Label { text: "Path delay"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 10 }
                     Label { text: panel.device.ptpPathDelayNs === "NA" ? "—" : panel.device.ptpPathDelayNs + " ns"; color: panel.theme.text; font.family: panel.monoFont; font.pixelSize: 10 }
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: 134
+                radius: 8
+                color: panel.theme.panelAlt
+                border.width: 1
+                border.color: panel.theme.lineSoft
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    spacing: 6
+Rectangle { Layout.fillWidth: true; height: 1; color: panel.theme.lineSoft }
+                Label { text: "SV output flag · lab simulation"; color: panel.theme.text; font.family: panel.uiFont; font.pixelSize: 12; font.weight: Font.DemiBold }
+                RowLayout {
+                    Layout.fillWidth: true
+                    DarkComboBox {
+                        theme: panel.theme
+                        uiFont: panel.uiFont
+                        Layout.fillWidth: true
+                        model: ["AUTO · measured only", "0 · Unsynchronized", "1 · Local (simulated)", "2 · Global (simulated)"]
+                        currentIndex: panel.syncIndex(panel.device.smpSynchMode)
+                        enabled: panel.session && panel.device.deviceVerified && !panel.session.updatingFirmware
+                        font.family: panel.uiFont
+                        font.pixelSize: 9
+                        onActivated: panel.session.requestSmpSynch(["AUTO", "0", "1", "2"][currentIndex])
+                    }
+                    StateBadge {
+                        theme: panel.theme
+                        monoFont: panel.uiFont
+                        state: "smpSynch=" + panel.device.smpSynchValue
+                            + (panel.device.smpSynchSimulated ? " SIMULATED" : panel.device.smpSynchMeasured ? " MEASURED" : " SAFE")
+                        stateColor: panel.device.smpSynchSimulated ? panel.theme.amber : panel.device.smpSynchMeasured ? panel.theme.green : panel.theme.muted
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: "PTP observed does not imply the SV sample clock is phase-locked. Lab override sets advertised metadata only."
+                    wrapMode: Text.WordWrap
+                    color: panel.theme.textSoft
+                    font.family: panel.uiFont
+                    font.pixelSize: 10
+                }
                 }
             }
 
@@ -310,11 +399,13 @@ SurfacePanel {
                     NumericField { id: announceField; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 100; top: 10000 } }
                     Label { text: "Sync interval (ms)"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: syncField; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 20; top: 5000 } }
-                    CheckBox { id: vlanCheck; text: "VLAN"; font.family: panel.uiFont; font.pixelSize: 9 }
+                    DarkCheckBox {
+                        theme: panel.theme id: vlanCheck; text: "VLAN"; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: vlanField; enabled: vlanCheck.checked; theme: panel.theme; monoFont: panel.uiFont; text: "100"; validator: IntValidator { bottom: 1; top: 4094 } }
                     Label { text: "VLAN PCP"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: pcpField; enabled: vlanCheck.checked; theme: panel.theme; monoFont: panel.uiFont; text: "4"; validator: IntValidator { bottom: 0; top: 7 } }
-                    CheckBox { id: pdelayCheck; text: "Peer-delay response"; checked: true; font.family: panel.uiFont; font.pixelSize: 9 }
+                    DarkCheckBox {
+                        theme: panel.theme id: pdelayCheck; text: "Peer-delay response"; checked: true; font.family: panel.uiFont; font.pixelSize: 9 }
                     CalmButton {
                         theme: panel.theme
                         uiFont: panel.uiFont
@@ -327,35 +418,6 @@ SurfacePanel {
                     }
                 }
 
-                Rectangle { Layout.fillWidth: true; height: 1; color: panel.theme.lineSoft }
-                Label { text: "SV synchronization flag · lab / interoperability"; color: panel.theme.text; font.family: panel.uiFont; font.pixelSize: 12; font.weight: Font.DemiBold }
-                RowLayout {
-                    Layout.fillWidth: true
-                    ComboBox {
-                        Layout.fillWidth: true
-                        model: ["AUTO — measured PTP only", "0 — Not synchronized", "1 — Local synchronized (simulation)", "2 — Global synchronized (simulation)"]
-                        currentIndex: panel.syncIndex(panel.device.smpSynchMode)
-                        enabled: panel.session && panel.device.deviceVerified && !panel.session.updatingFirmware
-                        font.family: panel.uiFont
-                        font.pixelSize: 9
-                        onActivated: panel.session.requestSmpSynch(["AUTO", "0", "1", "2"][currentIndex])
-                    }
-                    StateBadge {
-                        theme: panel.theme
-                        monoFont: panel.uiFont
-                        state: "smpSynch=" + panel.device.smpSynchValue
-                            + (panel.device.smpSynchSimulated ? " SIMULATED" : panel.device.smpSynchMeasured ? " MEASURED" : " SAFE")
-                        stateColor: panel.device.smpSynchSimulated ? panel.theme.amber : panel.device.smpSynchMeasured ? panel.theme.green : panel.theme.muted
-                    }
-                }
-                Label {
-                    Layout.fillWidth: true
-                    text: "PTP Source transmission is not proof that the SV clock is externally synchronized. AUTO stays fail-closed unless receiver discipline is measured."
-                    wrapMode: Text.WordWrap
-                    color: panel.theme.textSoft
-                    font.family: panel.uiFont
-                    font.pixelSize: 8
-                }
             }
 
             Item { Layout.minimumHeight: 8 }
