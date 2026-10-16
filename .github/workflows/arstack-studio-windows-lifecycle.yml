@@ -104,9 +104,9 @@ jobs:
           New-Item -ItemType Directory -Path 'studio-ui-evidence' -Force | Out-Null
           Remove-Item Env:ARSTACK_STUDIO_QA_DIR -ErrorAction SilentlyContinue
           Remove-Item Env:ARSTACK_STUDIO_QA_NATIVE_ONLY -ErrorAction SilentlyContinue
-          foreach ($scale in @('1', '1.5')) {
+          foreach ($scale in @('1', '1.5', '1.75')) {
             $env:QT_SCALE_FACTOR = $scale
-            $suffix = if ($scale -eq '1') { 'dpi-100' } else { 'dpi-150' }
+            $suffix = 'dpi-' + [string][int]([double]::Parse($scale, [System.Globalization.CultureInfo]::InvariantCulture) * 100)
             $logdir = Join-Path (Join-Path $PWD 'studio-ui-evidence') $suffix
             New-Item -ItemType Directory -Path $logdir -Force | Out-Null
             $stdout = Join-Path $logdir 'geometry-stdout.txt'
@@ -140,7 +140,7 @@ jobs:
           if (-not (Test-Path $png) -or (Get-Item $png).Length -lt 10000) {
             throw 'Native Windows 960x620 screenshot was missing or empty'
           }
-          Write-Host 'Windows Qt deterministic 3-viewports x 2-DPI geometry + native 960x620 screenshot: PASS'
+          Write-Host 'Windows Qt deterministic 3-viewports x 3-DPI geometry + native 960x620 screenshot: PASS'
       - name: Upload desktop layout evidence
         if: always()
         uses: actions/upload-artifact@v4

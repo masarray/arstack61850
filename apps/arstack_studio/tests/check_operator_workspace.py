@@ -55,6 +55,11 @@ def main() -> None:
             "main PTP/smpSynch must restore device-owned state after user intent")
     require("SIMULATED metadata" in tray and "sample phase needs independent verification" in tray,
             "SV simulation must never masquerade as independently proven lock")
+    require(matrix.count("Qt.Key_Menu") == 2 and matrix.count("Qt.Key_F10") == 2
+            and matrix.count("signalRow.openFieldMenu(") == 4,
+            "both magnitude and angle menus must support mouse and keyboard")
+    require("1.75" in (STUDIO.parent.parent / ".github/workflows/arstack-studio-windows-lifecycle.yml").read_text(encoding="utf-8"),
+            "reuse Windows executable for 100%, 150% and 175% DPI acceptance")
     require(matrix.count("StudioActionMenu {") == 2
             and "id: magnitudeMenu" in matrix and "id: phaseMenu" in matrix
             and "popupType: Popup.Item" in menu,
