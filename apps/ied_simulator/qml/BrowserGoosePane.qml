@@ -228,6 +228,11 @@ Rectangle {
                                 onActivated: root.monitor.interfaceName = currentText
                             }
                             Button {
+                                text: "Refresh NICs"
+                                enabled: !root.monitor.capturing
+                                onClicked: root.monitor.refreshInterfaces()
+                            }
+                            Button {
                                 text: root.monitor.capturing ? "Stop" : "GOOSE Subscribe"
                                 enabled: root.monitor.capturing || root.monitor.interfaceName.length > 0
                                 onClicked: root.monitor.capturing

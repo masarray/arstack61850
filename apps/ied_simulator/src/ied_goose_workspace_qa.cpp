@@ -133,6 +133,33 @@ int main(int argc, char** argv) {
         REQUIRE(monitor.observedForConfiguredStream(configured)
                     .value(QStringLiteral("matched")).toBool(),
                 "canonical SCL identity did not bind to observed GOOSE");
+
+        const auto wireToCanonicalGo = [](QString ref) {
+            const auto first = ref.indexOf(QLatin1Char('$'));
+            const auto second = ref.indexOf(QLatin1Char('$'), first + 1);
+            REQUIRE(first >= 0 && second >= 0, "fixture requires typed wire GO reference");
+            ref[first] = QLatin1Char('.');
+            ref[second] = QLatin1Char('.');
+            return ref;
+        };
+        const auto wireToCanonicalSet = [](QString ref) {
+            const auto slash = ref.indexOf(QLatin1Char('/'));
+            const auto dollar = ref.indexOf(QLatin1Char('$'), slash + 1);
+            REQUIRE(dollar >= 0, "fixture requires canonical DataSet translation");
+            ref[dollar] = QLatin1Char('.');
+            return ref;
+        };
+        auto discovered = configured;
+        discovered.insert(QStringLiteral("reference"), wireToCanonicalGo(goRef));
+        discovered.insert(QStringLiteral("dataSet"), wireToCanonicalSet(dataSet));
+        REQUIRE(monitor.observedForConfiguredStream(discovered)
+                     .value(QStringLiteral("matched")).toBool(),
+                "typed live-model GO/DataSet identifiers failed wire normalization");
+        discovered.insert(QStringLiteral("reference"),
+                          QStringLiteral("OtherIED/LLN0.GO.gcb01"));
+        REQUIRE(!monitor.observedForConfiguredStream(discovered)
+                     .value(QStringLiteral("matched")).toBool(),
+                "normalization crossed IED model identity");
         auto conflicting = configured;
         conflicting.insert(QStringLiteral("goId"), QStringLiteral("wrong-publisher"));
         REQUIRE(!monitor.observedForConfiguredStream(conflicting)

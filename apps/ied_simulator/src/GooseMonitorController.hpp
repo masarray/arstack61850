@@ -26,7 +26,7 @@ class GooseMonitorController : public QAbstractListModel {
     Q_OBJECT
     QML_ELEMENT
 
-    Q_PROPERTY(QStringList interfaces READ interfaces NOTIFY monitorChanged)
+    Q_PROPERTY(QStringList interfaces READ interfaces NOTIFY interfacesChanged)
     Q_PROPERTY(QString interfaceName READ interfaceName WRITE setInterfaceName NOTIFY monitorChanged)
     Q_PROPERTY(bool capturing READ capturing NOTIFY monitorChanged)
     Q_PROPERTY(QString statusText READ statusText NOTIFY monitorChanged)
@@ -82,7 +82,8 @@ public:
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
 
-    [[nodiscard]] QStringList interfaces() const;
+    [[nodiscard]] QStringList interfaces() const { return interfaces_; }
+    Q_INVOKABLE void refreshInterfaces();
     [[nodiscard]] QString interfaceName() const { return interfaceName_; }
     void setInterfaceName(const QString& value);
     [[nodiscard]] bool capturing() const noexcept { return capturing_; }
@@ -137,6 +138,7 @@ public:
     void checkTimeoutsAt(clock::time_point now);
 
 signals:
+    void interfacesChanged();
     void monitorChanged();
     void selectionChanged();
 
@@ -182,6 +184,7 @@ private:
     std::vector<StreamSlot> streams_;
     std::deque<ar::iec61850::capture::PcapPacket> retainedPackets_;
     QStringList recentEvents_;
+    QStringList interfaces_;
     QString interfaceName_;
     QString statusText_{QStringLiteral("Stopped")};
     ar::iec61850::goose::RawEthernetSubscriber transport_;

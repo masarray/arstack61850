@@ -52,11 +52,44 @@ bool sequenceIssue(const GooseSequenceStatus status) noexcept {
         status == GooseSequenceStatus::state_jump ||
         status == GooseSequenceStatus::state_regression;
 }
+
+[[nodiscard]] QString wireGoCbRef(const QString& reference) {
+    // Live MMS control inventory uses LD/LN.GO.control; on-wire GOOSE
+    // uses LD/LN$GO$control. Rewriting arbitrary '.' globally would corrupt
+    // user-defined names or DataSet member paths. Only convert typed GO.
+    if (reference.contains(QLatin1Char('$'))) return reference;
+    QString converted = reference;
+    const auto slash = converted.indexOf(QLatin1Char('/'));
+    if (slash < 0) return converted;
+    const auto first = converted.indexOf(QLatin1Char('.'), slash + 1);
+    if (first <= slash + 1) return converted;
+    const auto second = converted.indexOf(QLatin1Char('.'), first + 1);
+    if (second < 0 || converted.mid(first + 1, second - first - 1) != QStringLiteral("GO") ||
+        second + 1 >= converted.size()) return converted;
+    converted[first] = QLatin1Char('$');
+    converted[second] = QLatin1Char('$');
+    return converted;
+}
+
+[[nodiscard]] QString wireDataSetRef(const QString& reference) {
+    // Live MMS canonical DataSet LD/LN.dataSet -> wire LD/LN$dataSet.
+    // The suffix must be one typed leaf; do not normalize arbitrary DO/DA.
+    if (reference.contains(QLatin1Char('$'))) return reference;
+    QString converted = reference;
+    const auto slash = converted.indexOf(QLatin1Char('/'));
+    if (slash < 0) return converted;
+    const auto dot = converted.indexOf(QLatin1Char('.'), slash + 1);
+    if (dot <= slash + 1 || dot + 1 >= converted.size() ||
+        converted.indexOf(QLatin1Char('.'), dot + 1) >= 0) return converted;
+    converted[dot] = QLatin1Char('$');
+    return converted;
+}
 } // namespace
 
 GooseMonitorController::GooseMonitorController(QObject* parent)
     : QAbstractListModel(parent) {
     monitorClock_.start();
+    refreshInterfaces();
     captureTimer_ = new QTimer(this);
     captureTimer_->setInterval(kPollIntervalMilliseconds);
     captureTimer_->setTimerType(Qt::PreciseTimer);
@@ -129,7 +162,9 @@ QHash<int, QByteArray> GooseMonitorController::roleNames() const {
     };
 }
 
-QStringList GooseMonitorController::interfaces() const {
+void GooseMonitorController::refreshInterfaces() {
+    if (capturing_) return;
+
     QStringList result;
     for (const auto& networkInterface : QNetworkInterface::allInterfaces()) {
         const auto flags = networkInterface.flags();
@@ -142,7 +177,9 @@ QStringList GooseMonitorController::interfaces() const {
         if (!name.isEmpty() && !result.contains(name)) result.push_back(name);
     }
     std::sort(result.begin(), result.end());
-    return result;
+    if (interfaces_ == result) return;
+    interfaces_ = std::move(result);
+    emit interfacesChanged();
 }
 
 void GooseMonitorController::setInterfaceName(const QString& value) {
@@ -168,7 +205,7 @@ QVariantMap GooseMonitorController::observedForStream(
     QVariantMap result;
     result.insert(QStringLiteral("matched"), false);
     result.insert(QStringLiteral("reason"), QStringLiteral("Awaiting an exact GOOSE frame"));
-    const auto reference = goCbRef.trimmed();
+    const auto reference = wireGoCbRef(goCbRef.trimmed());
     if (reference.isEmpty()) {
         result.insert(QStringLiteral("reason"),
                       QStringLiteral("Configured goCBRef unavailable; no identity binding"));
@@ -211,7 +248,7 @@ QVariantMap GooseMonitorController::observedForStream(
         }
     }
 
-    const auto requestedDataSet = dataSet.trimmed();
+    const auto requestedDataSet = wireDataSetRef(dataSet.trimmed());
     const StreamSlot* found = nullptr;
     for (const auto& slot : streams_) {
         const auto& frame = slot.frame;

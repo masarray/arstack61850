@@ -96,6 +96,13 @@ Item {
 
                 ActionButton {
                     theme: root.theme
+                    text: "Refresh NICs"
+                    enabled: !root.monitor.capturing
+                    onClicked: root.monitor.refreshInterfaces()
+                }
+
+                ActionButton {
+                    theme: root.theme
                     text: root.monitor.capturing ? "Stop Capture" : "Start Capture"
                     primary: !root.monitor.capturing
                     danger: root.monitor.capturing
