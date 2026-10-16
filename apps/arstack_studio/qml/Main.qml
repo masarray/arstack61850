@@ -365,8 +365,11 @@ ApplicationWindow {
         if (!validMagnitude(group, value)) return
         for (var i = 0; i < 3; ++i) model.setProperty(i, "magnitude", value)
         selectSignal(group, row)
-        if (workflowBar.session && workflowBar.session.liveControlReady) sendLinkedGroup(group)
-        showMessage("ABC magnitude copied from " + model.get(row).signalId, false)
+        if (workflowBar.session && workflowBar.session.liveControlReady && !sendLinkedGroup(group)) {
+            showMessage("ABC update was not accepted; inspect device diagnostics.", true)
+            return
+        }
+        showMessage("ABC magnitude queued from " + model.get(row).signalId, false)
     }
 
     function equalGroupAngles(group, row) {
@@ -376,21 +379,28 @@ ApplicationWindow {
         if (!validPhase(value)) return
         for (var i = 0; i < 3; ++i) model.setProperty(i, "phase", value)
         selectSignal(group, row)
-        if (workflowBar.session && workflowBar.session.liveControlReady) sendLinkedGroup(group)
-        showMessage("ABC angles copied from " + model.get(row).signalId, false)
+        if (workflowBar.session && workflowBar.session.liveControlReady && !sendLinkedGroup(group)) {
+            showMessage("ABC update was not accepted; inspect device diagnostics.", true)
+            return
+        }
+        showMessage("ABC angles queued from " + model.get(row).signalId, false)
     }
 
     function balanceGroupAngles(group, row) {
         if (row < 0 || row > 2) return
         var model = groupModel(group)
         var base = model.get(row).phase + (row === 1 ? 120 : row === 2 ? -120 : 0)
-        if (!validPhase(base)) return
-        model.setProperty(0, "phase", normalizedAngle(base))
+        if (!validPhase(model.get(row).phase)) return
+        base = normalizedAngle(base)
+        model.setProperty(0, "phase", base)
         model.setProperty(1, "phase", normalizedAngle(base - 120))
         model.setProperty(2, "phase", normalizedAngle(base + 120))
         selectSignal(group, row)
-        if (workflowBar.session && workflowBar.session.liveControlReady) sendLinkedGroup(group)
-        showMessage("ABC angles balanced relative to " + model.get(row).signalId, false)
+        if (workflowBar.session && workflowBar.session.liveControlReady && !sendLinkedGroup(group)) {
+            showMessage("ABC update was not accepted; inspect device diagnostics.", true)
+            return
+        }
+        showMessage("Balanced ABC angles queued from " + model.get(row).signalId, false)
     }
 
     function balanced() {

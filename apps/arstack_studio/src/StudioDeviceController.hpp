@@ -297,18 +297,29 @@ private:
         static const QStringList order{
             QStringLiteral("IA"), QStringLiteral("IB"), QStringLiteral("IC"), QStringLiteral("IN"),
             QStringLiteral("UA"), QStringLiteral("UB"), QStringLiteral("UC"), QStringLiteral("UN")};
+        QStringList batch;
+        batch.reserve(pendingSignals_.size());
         for (const QString& id : order) {
-            const auto it = pendingSignals_.find(id);
-            if (it == pendingSignals_.end()) continue;
-            const PendingSignal value = it.value();
-            pendingSignals_.erase(it);
-            ok = DeviceController::setSignal(
-                id,
-                value.magnitude,
-                value.phaseDegrees,
-                value.quality,
-                value.currentCountsPerAmp,
-                value.voltageCountsPerVolt) && ok;
+            const auto it = pendingSignals_.constFind(id);
+            if (it == pendingSignals_.cend()) continue;
+            const PendingSignal& value = it.value();
+            const QString command = formatSignalCommand(
+                id, value.magnitude, value.phaseDegrees, value.quality,
+                value.currentCountsPerAmp, value.voltageCountsPerVolt,
+                requestedFrequencyHz_);
+            if (command.isEmpty()) {
+                emit deviceMessage(QStringLiteral("Invalid ABC setpoint: no partial group transmitted."));
+                pendingSignals_.clear();
+                return false;
+            }
+            batch.push_back(command);
+        }
+        // The serial worker admits the entire 1..8 SET batch or rejects ALL
+        // under its bounded 64-command queue capacity. This also coalesces
+        // rapid operator edits without interleaving other queued control calls.
+        if (!batch.isEmpty()) {
+            if (!sendCommandBatch(batch)) return false;
+            pendingSignals_.clear();
         }
         return ok;
     }
