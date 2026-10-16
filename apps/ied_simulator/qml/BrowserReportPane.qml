@@ -12,6 +12,10 @@ Rectangle {
 
     readonly property var rcb: reports.selectedRcb
     readonly property bool hasSelection: reports.selectedRcbIndex >= 0
+    readonly property bool selectedIsSubscribed: hasSelection && reports.active
+        && reports.subscriptionRcbReference === rcb.reference
+    readonly property bool selectedNeedsCleanup: hasSelection && reports.cleanupRequired
+        && reports.subscriptionRcbReference === rcb.reference
     readonly property var latestReport: newestMatchingReport()
     readonly property bool hasLastReport: latestReport.reportId !== undefined
     readonly property var configuredMembers: membersForSelectedRcb()
@@ -359,11 +363,13 @@ Rectangle {
                 }
                 Label {
                     text: !root.hasSelection ? reports.reportControls.length + " RCB(s)"
-                          : reports.cleanupRequired ? "CLEANUP REQUIRED"
-                          : reports.active ? "SUBSCRIBED"
+                          : reports.cleanupRequired
+                            ? (root.selectedNeedsCleanup ? "CLEANUP REQUIRED" : "CLEANUP OTHER RCB")
+                          : reports.active
+                            ? (root.selectedIsSubscribed ? "SUBSCRIBED" : "OTHER RCB ACTIVE")
                           : root.rcb.probeOk === true ? "VERIFIED" : "ENGINEERING"
                     color: reports.cleanupRequired ? theme.red
-                           : reports.active ? theme.green : theme.muted
+                           : root.selectedIsSubscribed ? theme.green : theme.muted
                     font.pixelSize: 9
                 }
             }
@@ -410,6 +416,22 @@ Rectangle {
             ColumnLayout {
                 width: Math.max(0, detailScroll.availableWidth)
                 spacing: 0
+
+                Label {
+                    visible: root.hasSelection && reports.active && !root.selectedIsSubscribed
+                    Layout.fillWidth: true
+                    leftPadding: 9
+                    rightPadding: 9
+                    topPadding: 5
+                    bottomPadding: 5
+                    color: theme.muted
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: 10
+                    text: "Another RCB is actively subscribed on this MMS association: "
+                          + reports.subscriptionRcbReference
+                          + ". The selected RCB is inspection-only; Stop active RCB acts on "
+                          + "the recorded subscription, not this selection."
+                }
 
                 SectionHeading {
                     heading: "Control Block Attributes"

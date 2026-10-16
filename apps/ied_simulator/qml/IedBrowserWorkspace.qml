@@ -397,9 +397,13 @@ Item {
                             }
                             RibbonAction {
                                 badge: "OFF"
-                                text: "Disable"
+                                text: "Stop active RCB"
                                 enabled: reports.connected && reports.active && !reports.busy
                                 onClicked: reports.disableSelected()
+                ToolTip.visible: hovered
+                ToolTip.text: "Stop the MMS report subscription for "
+                                  + (reports.subscriptionRcbReference || "the active RCB")
+                                  + ", regardless of inspector selection."
                             }
                             RibbonAction {
                                 badge: "DS"
@@ -705,9 +709,13 @@ Item {
 
                         Button {
                             visible: root.activeSection === 2
-                            text: "Disable"
+                            text: "Stop active RCB"
                             enabled: reports.connected && reports.active && !reports.busy
                             onClicked: reports.disableSelected()
+                ToolTip.visible: hovered
+                ToolTip.text: "Stop the MMS report subscription for "
+                                  + (reports.subscriptionRcbReference || "the active RCB")
+                                  + ", regardless of inspector selection."
                         }
 
                         Button {
