@@ -47,6 +47,7 @@ public:
             {"PTP runtime requires matching PTP2 role", ptpRuntimeRoleEvidenceRequired()},
             {"PTP rejected config never starts", ptpGuidedRejectedConfigStops()},
             {"PTP STOP cancels pending start after verified readback", ptpGuidedStopCancelsStart()},
+            {"ABC live SET encoder remains consistent and bounded", abcSetpointBatchContract()},
             {"PTP STOP full queue uses bounded priority slot", ptpSafetyStopBypassesFullQueue()},
             {"PTP STOP requires firmware ACK and stopped readback", ptpStopConfirmationCannotBeGuessed()},
             {"PTP STOP timeout blocks restart pending manual recovery", ptpUnverifiedStopBlocksRestart()},
@@ -634,6 +635,26 @@ private:
         return !d.ptpStarting() &&
             d.ptpStartStage_ == DeviceController::PtpStartStage::idle &&
             d.ptpStatus_.contains(QStringLiteral("confirmed by board"));
+    }
+
+    static bool abcSetpointBatchContract() {
+        const QString ia = DeviceController::formatSignalCommand(
+            QStringLiteral("Ia"), 1.0, 0.0, 0U, 1000.0, 100.0, 50.0);
+        const QString ib = DeviceController::formatSignalCommand(
+            QStringLiteral("Ib"), 1.0, -120.0, 0U, 1000.0, 100.0, 50.0);
+        const QString ic = DeviceController::formatSignalCommand(
+            QStringLiteral("Ic"), 1.0, 120.0, 0U, 1000.0, 100.0, 50.0);
+        const QString badId = DeviceController::formatSignalCommand(
+            QStringLiteral("IX"), 1.0, 0.0, 0U, 1000.0, 100.0, 50.0);
+        const QString overflow = DeviceController::formatSignalCommand(
+            QStringLiteral("Ia"), 1.0e12, 0.0, 0U, 1000.0, 100.0, 50.0);
+        const QString dcNegative = DeviceController::formatSignalCommand(
+            QStringLiteral("Ia"), -1.0, 0.0, 0U, 1000.0, 100.0, 0.0);
+        return ia == QStringLiteral("SET IA 1000 0 0") &&
+               ib == QStringLiteral("SET IB 1000 -120000 0") &&
+               ic == QStringLiteral("SET IC 1000 120000 0") &&
+               badId.isEmpty() && overflow.isEmpty() &&
+               dcNegative == QStringLiteral("SET IA -1000 0 0");
     }
 
     static bool ptpSafetyStopBypassesFullQueue() {
