@@ -124,33 +124,55 @@ Rectangle {
                 property real pendingMagnitude: mag
                 property real pendingPhase: angle
 
-                Menu {
+                // Action-backed menu uses a single globally styled delegate.
+                // Rows/callbacks stay local so keyboard navigation and model
+                // ownership remain unchanged.
+                StudioActionMenu {
                     id: magnitudeMenu
-                    background: Rectangle { color: matrix.theme.raised; radius: 8; border.color: matrix.theme.line }
-                    MenuItem {
-                        text: "Equal Value · A/B/C = " + signalRow.sid
+                    theme: matrix.theme
+                    uiFont: matrix.uiFont
+                    Action { text: "MAGNITUDE  ·  " + signalRow.sid; enabled: false }
+                    Action {
+                        text: "Zero magnitude"
+                        onTriggered: matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "magnitude", 0)
+                    }
+                    Action {
+                        text: "Demo level  ·  50%"
+                        onTriggered: matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex,
+                            "magnitude", matrix.groupIndex === 0 ? 0.5 : 28.87)
+                    }
+                    Action {
+                        text: "Demo level  ·  100%"
+                        onTriggered: matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex,
+                            "magnitude", matrix.groupIndex === 0 ? 1.0 : 57.74)
+                    }
+                    MenuSeparator {}
+                    Action {
+                        text: "Equal ABC magnitudes"
                         enabled: signalRow.rowIndex < 3
                         onTriggered: matrix.controller.equalGroupMagnitudes(matrix.groupIndex, signalRow.rowIndex)
-                        contentItem: Label { text: parent.text; color: matrix.theme.text; font.family: matrix.uiFont; font.pixelSize: 12 }
-                        background: Rectangle { color: parent.highlighted ? matrix.theme.accentSoft : "transparent" }
                     }
                 }
-                Menu {
+                StudioActionMenu {
                     id: phaseMenu
-                    background: Rectangle { color: matrix.theme.raised; radius: 8; border.color: matrix.theme.line }
-                    MenuItem {
-                        text: "Equal Angle · A/B/C = " + signalRow.sid
+                    theme: matrix.theme
+                    uiFont: matrix.uiFont
+                    Action { text: "ANGLE  ·  " + signalRow.sid; enabled: false }
+                    Action {
+                        text: "Zero angle  ·  0°"
+                        enabled: matrix.controller.signalFrequency > 0
+                        onTriggered: matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "phase", 0)
+                    }
+                    MenuSeparator {}
+                    Action {
+                        text: "Equal ABC angles"
                         enabled: signalRow.rowIndex < 3
                         onTriggered: matrix.controller.equalGroupAngles(matrix.groupIndex, signalRow.rowIndex)
-                        contentItem: Label { text: parent.text; color: matrix.theme.text; font.family: matrix.uiFont; font.pixelSize: 12 }
-                        background: Rectangle { color: parent.highlighted ? matrix.theme.accentSoft : "transparent" }
                     }
-                    MenuItem {
-                        text: "Balance Angle · 120° from " + signalRow.sid
+                    Action {
+                        text: "Balance ABC  ·  120°"
                         enabled: signalRow.rowIndex < 3
                         onTriggered: matrix.controller.balanceGroupAngles(matrix.groupIndex, signalRow.rowIndex)
-                        contentItem: Label { text: parent.text; color: matrix.theme.text; font.family: matrix.uiFont; font.pixelSize: 12 }
-                        background: Rectangle { color: parent.highlighted ? matrix.theme.accentSoft : "transparent" }
                     }
                 }
 

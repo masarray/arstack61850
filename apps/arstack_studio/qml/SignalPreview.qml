@@ -176,8 +176,9 @@ SurfacePanel {
         var plotHeight = canvas.height - top - bottom
         var gap = preview.compact ? 15 : 18
         var laneHeight = (plotHeight - gap) / 2
-        var currentY = top + laneHeight / 2
-        var voltageY = top + laneHeight + gap + laneHeight / 2
+        // One physical order across table, phasor and waveform: U then I.
+        var voltageY = top + laneHeight / 2
+        var currentY = top + laneHeight + gap + laneHeight / 2
         var gridColor = preview.theme ? preview.theme.plotGrid : "#22303d"
         var strongGridColor = preview.theme ? preview.theme.plotGridStrong : "#334353"
 
@@ -199,7 +200,7 @@ SurfacePanel {
 
         ctx.strokeStyle = strongGridColor
         for (var lane = 0; lane < 2; ++lane) {
-            var baseline = lane === 0 ? currentY : voltageY
+            var baseline = lane === 0 ? voltageY : currentY
             ctx.beginPath()
             ctx.moveTo(left, baseline)
             ctx.lineTo(left + plotWidth, baseline)
@@ -210,10 +211,10 @@ SurfacePanel {
         ctx.font = "600 8px '" + preview.uiFont + "'"
         ctx.textAlign = "right"
         ctx.textBaseline = "middle"
-        ctx.fillText("CURRENT", left - 7, top + 11)
-        ctx.fillText("A", left - 7, top + 23)
-        ctx.fillText("VOLTAGE", left - 7, top + laneHeight + gap + 11)
-        ctx.fillText("V", left - 7, top + laneHeight + gap + 23)
+        ctx.fillText("VOLTAGE", left - 7, top + 11)
+        ctx.fillText("V", left - 7, top + 23)
+        ctx.fillText("CURRENT", left - 7, top + laneHeight + gap + 11)
+        ctx.fillText("A", left - 7, top + laneHeight + gap + 23)
 
         ctx.font = "500 8px '" + preview.uiFont + "'"
         ctx.textAlign = "center"
@@ -281,8 +282,8 @@ SurfacePanel {
             }
         }
 
-        drawWaveGroup(preview.currentModel, currentY, true)
         drawWaveGroup(preview.voltageModel, voltageY, false)
+        drawWaveGroup(preview.currentModel, currentY, true)
     }
 
     ColumnLayout {
@@ -336,6 +337,54 @@ SurfacePanel {
                 radius: 7
                 color: preview.theme.plotSurface
                 border.width: 1
+                border.color: voltagePhasorHover.hovered ? "#35506b" : preview.theme.lineSoft
+                Behavior on border.color { ColorAnimation { duration: 100 } }
+
+                HoverHandler { id: voltagePhasorHover }
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    spacing: 3
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+                        Rectangle { width: 3; height: 13; radius: 2; color: preview.theme.accent }
+                        Label {
+                            text: "VOLTAGE PHASOR"
+                            color: preview.theme.textSoft
+                            font.family: preview.uiFont
+                            font.pixelSize: 9
+                            font.weight: Font.DemiBold
+                            font.letterSpacing: 0.5
+                        }
+                        Item { Layout.fillWidth: true }
+                        Label {
+                            text: preview.signalFrequency === 0 ? "V DC" : "V RMS"
+                            color: preview.theme.muted
+                            font.family: preview.uiFont
+                            font.pixelSize: 8
+                        }
+                    }
+
+                    Canvas {
+                        id: voltagePhasorCanvas
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        Layout.minimumHeight: 100
+                        onWidthChanged: requestPaint()
+                        onHeightChanged: requestPaint()
+                        onPaint: preview.paintPhasor(voltagePhasorCanvas, preview.voltageModel)
+                    }
+                }
+            }            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.minimumWidth: 150
+                radius: 7
+                color: preview.theme.plotSurface
+                border.width: 1
                 border.color: currentPhasorHover.hovered ? "#35506b" : preview.theme.lineSoft
                 Behavior on border.color { ColorAnimation { duration: 100 } }
 
@@ -379,55 +428,7 @@ SurfacePanel {
                 }
             }
 
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.minimumWidth: 150
-                radius: 7
-                color: preview.theme.plotSurface
-                border.width: 1
-                border.color: voltagePhasorHover.hovered ? "#35506b" : preview.theme.lineSoft
-                Behavior on border.color { ColorAnimation { duration: 100 } }
 
-                HoverHandler { id: voltagePhasorHover }
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 8
-                    spacing: 3
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 6
-                        Rectangle { width: 3; height: 13; radius: 2; color: preview.theme.accent }
-                        Label {
-                            text: "VOLTAGE PHASOR"
-                            color: preview.theme.textSoft
-                            font.family: preview.uiFont
-                            font.pixelSize: 9
-                            font.weight: Font.DemiBold
-                            font.letterSpacing: 0.5
-                        }
-                        Item { Layout.fillWidth: true }
-                        Label {
-                            text: preview.signalFrequency === 0 ? "V DC" : "V RMS"
-                            color: preview.theme.muted
-                            font.family: preview.uiFont
-                            font.pixelSize: 8
-                        }
-                    }
-
-                    Canvas {
-                        id: voltagePhasorCanvas
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.minimumHeight: 100
-                        onWidthChanged: requestPaint()
-                        onHeightChanged: requestPaint()
-                        onPaint: preview.paintPhasor(voltagePhasorCanvas, preview.voltageModel)
-                    }
-                }
-            }
         }
 
         Rectangle {

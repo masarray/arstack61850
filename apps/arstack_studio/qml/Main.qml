@@ -808,6 +808,22 @@ ApplicationWindow {
                             Layout.fillHeight: true
                             spacing: 9
                             SignalMatrix {
+                                id: voltageMatrix
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                theme: studioTheme
+                                controller: root
+                                device: device
+                                session: workflowBar.session
+                                sourceModel: voltageModel
+                                uiFont: root.uiFont
+                                monoFont: root.monoFont
+                                groupIndex: 1
+                                titleText: "Voltage"
+                                symbolText: "U"
+                                unitText: root.signalFrequency === 0 ? "V DC" : "V RMS"
+                                compact: root.compactLayout
+                            }                            SignalMatrix {
                                 id: currentMatrix
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
@@ -824,25 +840,21 @@ ApplicationWindow {
                                 unitText: root.signalFrequency === 0 ? "A DC" : "A RMS"
                                 compact: root.compactLayout
                             }
-                            SignalMatrix {
-                                id: voltageMatrix
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                theme: studioTheme
-                                controller: root
-                                device: device
-                                session: workflowBar.session
-                                sourceModel: voltageModel
-                                uiFont: root.uiFont
-                                monoFont: root.monoFont
-                                groupIndex: 1
-                                titleText: "Voltage"
-                                symbolText: "U"
-                                unitText: root.signalFrequency === 0 ? "V DC" : "V RMS"
-                                compact: root.compactLayout
-                            }
+
                         }
 
+                        StudioTimingTray {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: root.height < 700 ? 112 : 132
+                            Layout.minimumHeight: root.height < 700 ? 112 : 132
+                            theme: studioTheme
+                            controller: root
+                            device: device
+                            session: workflowBar.session
+                            uiFont: root.uiFont
+                            monoFont: root.monoFont
+                            compact: root.compactLayout
+                        }
                         Rectangle { Layout.fillWidth: true; height: 1; color: studioTheme.lineSoft }
                         RowLayout {
                             Layout.fillWidth: true

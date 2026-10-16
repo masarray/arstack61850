@@ -16,6 +16,10 @@ Item {
 
     function openEngineeringFile() { profileInspector.openEngineeringFile() }
     function showRecovery() { expertTabs.currentIndex = 1 }
+    function showTiming() { expertTabs.currentIndex = 3 }
+    // The Main tray always shares the Advanced PTP profile and verified
+    // guided START state machine; never create an independent START sequence.
+    function startPtpRole(role) { return timingPanel.startRole(role) }
 
     Component.onCompleted: {
         // Recovery is the only advanced page an unconfigured board should need.
@@ -159,6 +163,7 @@ Item {
                 monoFont: hub.monoFont
             }
             PtpExpertPanel {
+                id: timingPanel
                 theme: hub.theme
                 controller: hub.controller
                 device: hub.device
