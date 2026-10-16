@@ -42,7 +42,7 @@ def make_png(size):
                 col = (242, 249, 255)
             rows.extend((*col, alpha))
     ihdr = struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)
-    return (b"\\x89PNG\\r\\n\\x1a\\n" + chunk(b"IHDR", ihdr)
+    return (bytes((137, 80, 78, 71, 13, 10, 26, 10)) + chunk(b"IHDR", ihdr)
             + chunk(b"IDAT", zlib.compress(bytes(rows), 9))
             + chunk(b"IEND", b""))
 

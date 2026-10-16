@@ -186,7 +186,7 @@ if(WIN32)
         message(FATAL_ERROR "Could not generate native ARStack Studio icon")
     endif()
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ARStackStudio.rc"
-         "IDI_ARSTACK ICON \\" "${ARSTACK_STUDIO_ICON}" "\\"\\n")
+         "IDI_ARSTACK ICON \"${ARSTACK_STUDIO_ICON}\"\n")
     target_sources(arstack_studio PRIVATE
         "${CMAKE_CURRENT_BINARY_DIR}/ARStackStudio.rc")
     set_target_properties(arstack_studio PROPERTIES WIN32_EXECUTABLE TRUE)
