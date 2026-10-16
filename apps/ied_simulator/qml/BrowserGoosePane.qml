@@ -28,6 +28,21 @@ Rectangle {
             root.selectedStream.destinationMac || "")
     }
 
+    // A matching frame is not evidence that the configured FCDA order is
+    // unchanged. Only align member names when ConfRev and counts agree.
+    property bool modelAligned: {
+        if (!root.observation.matched || !root.selectedStream.members ||
+                root.selectedStream.members.length === 0 ||
+                root.selectedStream.members.length !== root.observation.valueCount)
+            return false
+        const configured = root.selectedStream.confRev
+        if (configured === undefined || configured === null || String(configured).length === 0)
+            return false
+        const expected = Number(configured)
+        return Number.isSafeInteger(expected) && expected >= 0
+                && expected === Number(root.observation.confRev)
+    }
+
     property var visibleStreams: context.gooseStreams
     property int selectedIndex: -1
     property var selectedStream: selectedIndex >= 0 && selectedIndex < visibleStreams.length
@@ -256,6 +271,17 @@ Rectangle {
                         }
                         Label {
                             Layout.fillWidth: true
+                            visible: root.observation.matched && !root.modelAligned
+                            text: "Raw values are not assigned to configured signals until "
+                                  + "ConfRev and DataSet member count agree. "
+                                  + "Configured ConfRev=" + root.text(root.selectedStream.confRev)
+                                  + " · observed=" + root.observation.confRev
+                            color: theme.amber
+                            font.pixelSize: 9
+                            wrapMode: Text.WordWrap
+                        }
+                        Label {
+                            Layout.fillWidth: true
                             text: root.monitor.statusText
                             color: theme.muted
                             font.pixelSize: 8
@@ -393,8 +419,7 @@ Rectangle {
                             Label {
                                 Layout.preferredWidth: 175
                                 visible: root.observation.matched
-                                text: root.observation.valueCount === (root.selectedStream.members || []).length
-                                      && index < root.observation.values.length
+                                text: root.modelAligned && index < root.observation.values.length
                                       ? root.observation.values[index]
                                       : "Unresolved · count mismatch"
                                 color: root.observation.timedOut || !root.monitor.capturing
@@ -408,15 +433,13 @@ Rectangle {
 
                 Label {
                     Layout.fillWidth: true
-                    visible: root.observation.matched
-                             && (!root.selectedStream.members || root.selectedStream.members.length === 0)
+                    visible: root.observation.matched && !root.modelAligned
                     text: "Unbound wire allData (ordered, no guessed signal names)"
                     color: theme.textSoft
                     font.pixelSize: 9
                 }
                 Repeater {
-                    model: root.observation.matched
-                           && (!root.selectedStream.members || root.selectedStream.members.length === 0)
+                    model: root.observation.matched && !root.modelAligned
                            ? root.observation.values : []
                     delegate: Label {
                         required property string modelData
