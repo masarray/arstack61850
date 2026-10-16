@@ -174,7 +174,7 @@ Rectangle {
                     color: theme.surface
                     border.width: 1
                     border.color: root.observation.matched
-                                  ? (root.observation.timedOut ? theme.amber : theme.green)
+                                  ? (root.observation.timedOut || !root.monitor.capturing ? theme.amber : theme.green)
                                   : theme.line
 
                     ColumnLayout {
@@ -237,7 +237,7 @@ Rectangle {
                                       ? "Waiting for matching Ethernet GOOSE · " + root.observation.reason
                                       : "No live capture · select NIC and press GOOSE Subscribe")
                             color: root.observation.matched && !root.observation.timedOut
-                                   ? theme.green : theme.textSoft
+                                  && root.monitor.capturing ? theme.green : theme.textSoft
                             font.pixelSize: 9
                             wrapMode: Text.WordWrap
                         }
@@ -397,7 +397,8 @@ Rectangle {
                                       && index < root.observation.values.length
                                       ? root.observation.values[index]
                                       : "Unresolved · count mismatch"
-                                color: root.observation.timedOut ? theme.amber : theme.green
+                                color: root.observation.timedOut || !root.monitor.capturing
+                                       ? theme.amber : theme.green
                                 font.pixelSize: 9
                                 elide: Text.ElideRight
                             }

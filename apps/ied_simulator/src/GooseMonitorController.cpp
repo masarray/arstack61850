@@ -236,10 +236,13 @@ QVariantMap GooseMonitorController::observedForStream(
     result = streamMap(*found);
     result.insert(QStringLiteral("matched"), true);
     result.insert(QStringLiteral("values"), found->values);
+    result.insert(QStringLiteral("captureActive"), capturing_);
     result.insert(QStringLiteral("reason"),
                   found->timedOut
                       ? QStringLiteral("Observed frame expired (TimeAllowedToLive)")
-                      : QStringLiteral("Exact wire-identity match (read-only)"));
+                      : (!capturing_
+                          ? QStringLiteral("Last observed frame retained; capture not active")
+                          : QStringLiteral("Exact wire-identity match (read-only)")));
     return result;
 }
 
