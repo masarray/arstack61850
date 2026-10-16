@@ -70,7 +70,7 @@ Rectangle {
 
                 DarkToolButton {
                     visible: frame.detachable
-                    iconSource: Qt.resolvedUrl("../assets/lucide/external-link.svg")
+                    iconSource: Qt.resolvedUrl("../assets/material/open_in_new.svg")
                     iconSize: 15
                     theme: frame.theme
                     uiFont: frame.uiFont
@@ -80,7 +80,7 @@ Rectangle {
                 }
                 DarkToolButton {
                     visible: frame.closable
-                    iconSource: Qt.resolvedUrl("../assets/lucide/x.svg")
+                    iconSource: Qt.resolvedUrl("../assets/material/close.svg")
                     iconSize: 16
                     theme: frame.theme
                     uiFont: frame.uiFont

@@ -60,6 +60,26 @@ def main() -> None:
             "both magnitude and angle menus must support mouse and keyboard")
     require("1.75" in (STUDIO.parent.parent / ".github/workflows/arstack-studio-windows-lifecycle.yml").read_text(encoding="utf-8"),
             "reuse Windows executable for 100%, 150% and 175% DPI acceptance")
+    workflow = source("WorkflowBar.qml")
+    ribbon = source("ModernRibbon.qml")
+    cmake_icons = (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8")
+    require("scenarioSnapshot()" in main_qml and "restoreLocalScenario()" in main_qml
+            and "requestApplyDraft()" in main_qml and "offlinePreviewRunning" in main_qml,
+            "offline-first scenario needs persistence, explicit Apply and non-wire preview")
+    require("controller.pendingApply = true" in workflow
+            and "Apply the local scenario before starting" in workflow
+            and "controller.applyAllSignals()" not in workflow,
+            "reconnect must not silently transmit an offline draft")
+    require("offline-ptp-lab" in tray and "no PTP/SV packets sent" in tray,
+            "PTP/smpSynch offline controls must be plans only")
+    require("assets/material/smv_injector.svg" in cmake_icons
+            and "assets/MATERIAL_ICONS_LICENSE.txt" in cmake_icons
+            and "../assets/material/smv_injector.svg" in ribbon,
+            "user-provided injector mark and licensed Material icon resources required")
+    require("MAGNITUDE  ·" not in matrix and "ANGLE  ·" not in matrix
+            and "Equal magnitudes A/B/C" in matrix
+            and "Balance angles · 120°" in matrix,
+            "context actions must stay compact, descriptive and grouped")
     require(matrix.count("StudioActionMenu {") == 2
             and "id: magnitudeMenu" in matrix and "id: phaseMenu" in matrix
             and "popupType: Popup.Item" in menu,

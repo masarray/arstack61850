@@ -139,24 +139,28 @@ Rectangle {
                     id: magnitudeMenu
                     theme: matrix.theme
                     uiFont: matrix.uiFont
-                    Action { text: "MAGNITUDE  ·  " + signalRow.sid; enabled: false }
+                    title: "Magnitude · " + signalRow.sid
                     Action {
-                        text: "Zero magnitude"
+                        text: "Zero · 0"
+                        icon.source: Qt.resolvedUrl("../assets/material/block.svg")
                         onTriggered: matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "magnitude", 0)
                     }
                     Action {
-                        text: "Demo level  ·  50%"
+                        text: "50% nominal (demo)"
+                        icon.source: Qt.resolvedUrl("../assets/material/tune.svg")
                         onTriggered: matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex,
                             "magnitude", matrix.groupIndex === 0 ? 0.5 : 28.87)
                     }
                     Action {
-                        text: "Demo level  ·  100%"
+                        text: "100% nominal (demo)"
+                        icon.source: Qt.resolvedUrl("../assets/material/check_circle.svg")
                         onTriggered: matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex,
                             "magnitude", matrix.groupIndex === 0 ? 1.0 : 57.74)
                     }
                     StudioMenuDivider { theme: matrix.theme }
                     Action {
-                        text: "Equal ABC magnitudes"
+                        text: "Equal magnitudes A/B/C"
+                        icon.source: Qt.resolvedUrl("../assets/material/done_all.svg")
                         enabled: signalRow.rowIndex < 3
                         onTriggered: matrix.controller.equalGroupMagnitudes(matrix.groupIndex, signalRow.rowIndex)
                     }
@@ -165,20 +169,23 @@ Rectangle {
                     id: phaseMenu
                     theme: matrix.theme
                     uiFont: matrix.uiFont
-                    Action { text: "ANGLE  ·  " + signalRow.sid; enabled: false }
+                    title: "Angle · " + signalRow.sid
                     Action {
-                        text: "Zero angle  ·  0°"
+                        text: "Zero angle · 0°"
+                        icon.source: Qt.resolvedUrl("../assets/material/block.svg")
                         enabled: matrix.controller.signalFrequency > 0
                         onTriggered: matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "phase", 0)
                     }
                     StudioMenuDivider { theme: matrix.theme }
                     Action {
-                        text: "Equal ABC angles"
+                        text: "Equal angles A/B/C"
+                        icon.source: Qt.resolvedUrl("../assets/material/done_all.svg")
                         enabled: signalRow.rowIndex < 3
                         onTriggered: matrix.controller.equalGroupAngles(matrix.groupIndex, signalRow.rowIndex)
                     }
                     Action {
-                        text: "Balance ABC  ·  120°"
+                        text: "Balance angles · 120°"
+                        icon.source: Qt.resolvedUrl("../assets/material/balance.svg")
                         enabled: signalRow.rowIndex < 3
                         onTriggered: matrix.controller.balanceGroupAngles(matrix.groupIndex, signalRow.rowIndex)
                     }
@@ -237,7 +244,8 @@ Rectangle {
                             matrix.sourceModel.setProperty(signalRow.rowIndex, "enabled", checked)
                             matrix.controller.selectSignal(matrix.groupIndex, signalRow.rowIndex)
                             matrix.controller.refreshPreview()
-                            if (matrix.session && matrix.session.liveControlReady)
+                            matrix.controller.markScenarioDirty()
+                            if (matrix.session && matrix.session.liveControlReady && !matrix.controller.pendingApply)
                                 matrix.session.requestSetEnabled(signalRow.sid, checked)
                         }
                     }

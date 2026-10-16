@@ -49,7 +49,7 @@ QtObject {
     readonly property color menuSurface: "#18222e"
     readonly property color menuHover: "#253b51"
     readonly property int menuRadius: 11
-    readonly property int menuItemHeight: 38
+    readonly property int menuItemHeight: 33
     readonly property int spaceXs: 4
     readonly property int spaceSm: 8
     readonly property int spaceMd: 12

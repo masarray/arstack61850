@@ -22,6 +22,8 @@ SurfacePanel {
     property real ctClipPercent: 60
     property bool showHeader: true
     property string viewMode: "both" // both, phasor, waveform
+    property bool previewRunning: false
+    property real previewCursorMs: 0
 
     color: preview.showHeader ? preview.theme.surface : "transparent"
     border.width: preview.showHeader ? 1 : 0
@@ -164,6 +166,17 @@ SurfacePanel {
         }
     }
 
+    // Only an animated local cursor: never mistaken for live SV capture.
+    Timer {
+        interval: 80
+        repeat: true
+        running: preview.previewRunning && preview.viewMode !== "phasor"
+        onTriggered: {
+            preview.previewCursorMs = (preview.previewCursorMs + 2) % 40
+            waveformCanvas.requestPaint()
+        }
+    }
+
     function paintWaveform(canvas) {
         var ctx = canvas.getContext("2d")
         ctx.reset()
@@ -284,6 +297,17 @@ SurfacePanel {
 
         drawWaveGroup(preview.voltageModel, voltageY, false)
         drawWaveGroup(preview.currentModel, currentY, true)
+        if (preview.previewRunning) {
+            const cursorX = left + (preview.previewCursorMs / 40) * plotWidth
+            ctx.strokeStyle = preview.theme ? preview.theme.accent : "#67a5ee"
+            ctx.lineWidth = 1.1
+            ctx.globalAlpha = 0.78
+            ctx.beginPath()
+            ctx.moveTo(cursorX, top)
+            ctx.lineTo(cursorX, top + plotHeight)
+            ctx.stroke()
+            ctx.globalAlpha = 1
+        }
     }
 
     ColumnLayout {

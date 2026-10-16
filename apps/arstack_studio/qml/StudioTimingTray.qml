@@ -4,6 +4,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtCore
 
 Rectangle {
     id: tray
@@ -14,17 +15,30 @@ Rectangle {
     property string uiFont: "Inter"
     property string monoFont: "Inter"
     property bool compact: false
-    property int selectedRoleIndex: 0
+    property int selectedRoleIndex: offlineSettings.lastRole
+    // Offline controls edit only a lab plan, never the real PTP subsystem.
+    Settings {
+        id: offlineSettings
+        category: "offline-ptp-lab"
+        property int lastRole: 0
+        property int lastSynch: 0
+        property bool previewPtp: false
+    }
+    readonly property bool boardOnline: Boolean(device && device.deviceVerified)
+    readonly property bool offlinePtpPreview: !boardOnline && offlineSettings.previewPtp
+
     readonly property var roleValues: ["SOURCE", "RECEIVER", "MONITOR"]
     readonly property bool busy: Boolean(device && device.ptpStarting)
     readonly property bool ptpReady: Boolean(session && device && device.deviceVerified
                                                && device.ptpAvailable && !session.updatingFirmware)
-    readonly property string stateText: !device || !device.deviceVerified ? "NO DEVICE"
+    readonly property string stateText: !boardOnline
+        ? (offlinePtpPreview ? "PTP PLAN · OFFLINE" : "OFFLINE LAB")
         : !device.ptpAvailable ? "PTP UNAVAILABLE"
         : busy ? (device.ptpStatus.indexOf("unverified") !== -1 ? "UNVERIFIED" : "PENDING")
         : !device.ptpRunning ? "PTP OFF"
         : device.ptpRole + " RUNNING"
-    readonly property color stateColor: busy ? theme.amber
+    readonly property color stateColor: !boardOnline ? theme.amber
+        : busy ? theme.amber
         : device && device.ptpRunning ? theme.green : theme.muted
 
     function roleIndex(role) {
@@ -79,16 +93,22 @@ Rectangle {
                 objectName: "studioPtpSwitch"
                 theme: tray.theme
                 uiFont: tray.uiFont
-                checked: Boolean(tray.device && tray.device.ptpRunning)
-                enabled: tray.ptpReady && !tray.busy
+                checked: tray.boardOnline ? Boolean(tray.device.ptpRunning) : offlineSettings.previewPtp
+                enabled: !tray.busy && (!tray.boardOnline || tray.ptpReady)
                 ToolTip.visible: hovered
                 ToolTip.text: "Start/stop PTP with verified board feedback. Does not establish SV sample-phase lock."
                 onClicked: {
                     // Switch flips locally before asynchronous firmware evidence.
                     // Restore binding immediately, including on rejected requests.
                     const wantsRunning = checked
-                    checked = Qt.binding(function() { return Boolean(tray.device && tray.device.ptpRunning) })
-                    if (wantsRunning) {
+                    checked = Qt.binding(function() {
+                        return tray.boardOnline ? Boolean(tray.device.ptpRunning) : offlineSettings.previewPtp
+                    })
+                    if (!tray.boardOnline) {
+                        offlineSettings.previewPtp = wantsRunning
+                        if (tray.controller)
+                            tray.controller.showMessage("Offline PTP plan only — no network packets or clock discipline.", false)
+                    } else if (wantsRunning) {
                         if (tray.controller) tray.controller.startPtpRole(tray.roleValues[tray.selectedRoleIndex])
                     } else if (tray.session && !tray.session.requestStopPtp() && tray.controller) {
                         tray.controller.showMessage("PTP stop was not accepted; inspect diagnostics.", true)
@@ -105,8 +125,12 @@ Rectangle {
                 model: ["Source", "Follower", "Monitor"]
                 currentIndex: tray.device && tray.device.ptpRunning
                     ? tray.roleIndex(tray.device.ptpRole) : tray.selectedRoleIndex
-                enabled: tray.ptpReady && !tray.busy && !tray.device.ptpRunning
-                onActivated: tray.selectedRoleIndex = currentIndex
+                enabled: !tray.busy && (!tray.boardOnline
+                    || (tray.ptpReady && !tray.device.ptpRunning))
+                onActivated: {
+                    tray.selectedRoleIndex = currentIndex
+                    offlineSettings.lastRole = currentIndex
+                }
                 ToolTip.visible: hovered
                 ToolTip.text: "Source transmits PTP; Follower discovers an external GM; Monitor receives without disciplining."
             }
@@ -124,15 +148,22 @@ Rectangle {
                 Layout.fillWidth: true
                 Layout.minimumWidth: 100
                 model: ["AUTO", "0 · No sync", "1 · Local (sim)", "2 · Global (sim)"]
-                currentIndex: tray.syncIndex(tray.device ? tray.device.smpSynchMode : "AUTO")
-                enabled: tray.session && tray.device && tray.device.deviceVerified && !tray.session.updatingFirmware
+                currentIndex: tray.boardOnline
+                    ? tray.syncIndex(tray.device.smpSynchMode) : offlineSettings.lastSynch
+                enabled: !tray.boardOnline || (tray.session && !tray.session.updatingFirmware)
                 ToolTip.visible: hovered
                 ToolTip.text: "1/2 change SV metadata only; they do not synchronize the sample clock."
                 onActivated: {
-                    const choice = ["AUTO", "0", "1", "2"][currentIndex]
-                    const accepted = tray.session && tray.session.requestSmpSynch(choice)
+                    const requested = currentIndex
+                    offlineSettings.lastSynch = requested
+                    if (!tray.boardOnline) {
+                        if (tray.controller)
+                            tray.controller.showMessage("Offline smpSynch plan saved; no SV flag or clock changed.", false)
+                        return
+                    }
+                    const accepted = tray.session && tray.session.requestSmpSynch(["AUTO", "0", "1", "2"][requested])
                     currentIndex = Qt.binding(function() {
-                        return tray.syncIndex(tray.device ? tray.device.smpSynchMode : "AUTO")
+                        return tray.boardOnline ? tray.syncIndex(tray.device.smpSynchMode) : offlineSettings.lastSynch
                     })
                     if (!accepted && tray.controller)
                         tray.controller.showMessage("SV smpSynch override rejected; inspect diagnostics.", true)
@@ -142,6 +173,7 @@ Rectangle {
                 theme: tray.theme
                 uiFont: tray.uiFont
                 text: "Details"
+                iconSource: Qt.resolvedUrl("../assets/material/settings.svg")
                 objectName: "studioTimingDetails"
                 implicitWidth: 66
                 toolTipText: "PTP settings, timing evidence and diagnostics"
@@ -150,8 +182,8 @@ Rectangle {
         }
         Label {
             Layout.fillWidth: true
-            text: !tray.device || !tray.device.deviceVerified
-                ? "Connect an ESP32-P4 to enable PTP. Generated waveform is a setpoint preview."
+            text: !tray.boardOnline
+                ? "OFFLINE PLAN ONLY · PTP and smpSynch selections are local; no PTP/SV packets sent. Board state wins at reconnect."
                 : tray.device.smpSynchSimulated
                     ? "SV smpSynch=" + tray.device.smpSynchValue + " · SIMULATED metadata — sample clock not proven locked."
                     : tray.device.smpSynchMeasured

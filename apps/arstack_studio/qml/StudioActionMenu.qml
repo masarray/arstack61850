@@ -1,38 +1,50 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Shared action-based Qt Quick desktop menu; no duplicated native popup styling.
+// Compact Material-action popup shared by magnitude, angle and frequency.
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 
 Menu {
     id: actionMenu
     property var theme
     property string uiFont: "Inter"
-    // Qt 6.8+ can prefer native Windows menus, which ignore custom QML
-    // delegates and render in OS colors. Force our portable styled overlay.
     popupType: Popup.Item
-    implicitWidth: 250
-    topPadding: 7
-    bottomPadding: 7
-    leftPadding: 6
-    rightPadding: 6
-    spacing: 2
+    implicitWidth: 232
+    topPadding: 5
+    bottomPadding: 5
+    leftPadding: 5
+    rightPadding: 5
+    spacing: 0
     font.family: uiFont
     font.pixelSize: 11
-    // Use model Actions so menu handles activation, Escape and keyboard focus.
     delegate: MenuItem {
         id: actionItem
         width: actionMenu.width - actionMenu.leftPadding - actionMenu.rightPadding
         implicitHeight: actionMenu.theme.menuItemHeight
-        leftPadding: 12
-        rightPadding: 12
+        leftPadding: 9
+        rightPadding: 10
         font.family: actionMenu.uiFont
         font.pixelSize: 11
-        contentItem: Text {
-            text: actionItem.text
-            font: actionItem.font
-            color: actionItem.enabled ? actionMenu.theme.text : actionMenu.theme.muted
-            verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
+        contentItem: RowLayout {
+            spacing: 9
+            Image {
+                visible: actionItem.icon.source.toString().length > 0
+                source: actionItem.icon.source
+                sourceSize.width: 28
+                sourceSize.height: 28
+                Layout.preferredWidth: visible ? 17 : 0
+                Layout.preferredHeight: 17
+                opacity: actionItem.enabled ? 0.95 : 0.35
+            }
+            Text {
+                text: actionItem.text
+                font: actionItem.font
+                color: !actionItem.enabled ? actionMenu.theme.muted2
+                     : actionItem.highlighted ? actionMenu.theme.text : actionMenu.theme.textSoft
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+            }
         }
         background: Rectangle {
             radius: actionMenu.theme.controlRadius
@@ -41,8 +53,6 @@ Menu {
             border.color: actionMenu.theme.accent
         }
     }
-    // Render the same separators on Windows rather than native light lines.
-    // All commands are Qt Actions so disabled/keyboard behavior remains native.
     background: Rectangle {
         color: actionMenu.theme.menuSurface
         radius: actionMenu.theme.menuRadius
