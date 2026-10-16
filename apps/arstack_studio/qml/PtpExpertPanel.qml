@@ -156,10 +156,46 @@ SurfacePanel {
                             palette.windowText: panel.theme.text
                             palette.base: panel.theme.surface2
                             palette.button: panel.theme.raised
-                            background: Rectangle { radius: 6; color: panel.theme.surface2; border.color: panel.theme.line }
-                            contentItem: Text { text: modeCombo.displayText; color: panel.theme.text; font: modeCombo.font; verticalAlignment: Text.AlignVCenter; leftPadding: 10; rightPadding: 18; elide: Text.ElideRight }
-                            delegate: ItemDelegate { width: modeCombo.width; text: modelData; highlighted: modeCombo.highlightedIndex === index; palette.text: panel.theme.text; background: Rectangle { color: parent.highlighted ? panel.theme.accentSoft : panel.theme.raised } }
-                            popup: Popup { y: modeCombo.height; width: modeCombo.width; padding: 3; implicitHeight: contentItem.implicitHeight + 6; contentItem: ListView { clip: true; implicitHeight: contentHeight; model: modeCombo.popup.visible ? modeCombo.delegateModel : null; currentIndex: modeCombo.highlightedIndex }; background: Rectangle { radius: 7; color: panel.theme.raised; border.color: panel.theme.line } }
+                            background: Rectangle {
+                                radius: 6
+                                color: panel.theme.surface2
+                                border.color: panel.theme.line
+                            }
+                            contentItem: Text {
+                                text: modeCombo.displayText
+                                color: panel.theme.text
+                                font: modeCombo.font
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: 10
+                                rightPadding: 18
+                                elide: Text.ElideRight
+                            }
+                            delegate: ItemDelegate {
+                                width: modeCombo.width
+                                text: modelData
+                                highlighted: modeCombo.highlightedIndex === index
+                                palette.text: panel.theme.text
+                                background: Rectangle {
+                                    color: parent.highlighted ? panel.theme.accentSoft : panel.theme.raised
+                                }
+                            }
+                            popup: Popup {
+                                y: modeCombo.height
+                                width: modeCombo.width
+                                padding: 3
+                                implicitHeight: contentItem.implicitHeight + 6
+                                contentItem: ListView {
+                                    clip: true
+                                    implicitHeight: contentHeight
+                                    model: modeCombo.popup.visible ? modeCombo.delegateModel : null
+                                    currentIndex: modeCombo.highlightedIndex
+                                }
+                                background: Rectangle {
+                                    radius: 7
+                                    color: panel.theme.raised
+                                    border.color: panel.theme.line
+                                }
+                            }
                         }
                     }
 
