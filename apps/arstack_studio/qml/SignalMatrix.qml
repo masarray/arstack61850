@@ -128,7 +128,7 @@ Rectangle {
                     id: magnitudeMenu
                     background: Rectangle { color: matrix.theme.raised; radius: 8; border.color: matrix.theme.line }
                     MenuItem {
-                        text: "Equal ABC values to " + signalRow.sid
+                        text: "Equal Value · A/B/C = " + signalRow.sid
                         enabled: signalRow.rowIndex < 3
                         onTriggered: matrix.controller.equalGroupMagnitudes(matrix.groupIndex, signalRow.rowIndex)
                         contentItem: Label { text: parent.text; color: matrix.theme.text; font.family: matrix.uiFont; font.pixelSize: 12 }
@@ -139,14 +139,14 @@ Rectangle {
                     id: phaseMenu
                     background: Rectangle { color: matrix.theme.raised; radius: 8; border.color: matrix.theme.line }
                     MenuItem {
-                        text: "Equal ABC angles to " + signalRow.sid
+                        text: "Equal Angle · A/B/C = " + signalRow.sid
                         enabled: signalRow.rowIndex < 3
                         onTriggered: matrix.controller.equalGroupAngles(matrix.groupIndex, signalRow.rowIndex)
                         contentItem: Label { text: parent.text; color: matrix.theme.text; font.family: matrix.uiFont; font.pixelSize: 12 }
                         background: Rectangle { color: parent.highlighted ? matrix.theme.accentSoft : "transparent" }
                     }
                     MenuItem {
-                        text: "Balance ABC angles (120 degrees)"
+                        text: "Balance Angle · 120° from " + signalRow.sid
                         enabled: signalRow.rowIndex < 3
                         onTriggered: matrix.controller.balanceGroupAngles(matrix.groupIndex, signalRow.rowIndex)
                         contentItem: Label { text: parent.text; color: matrix.theme.text; font.family: matrix.uiFont; font.pixelSize: 12 }
@@ -195,7 +195,9 @@ Rectangle {
                     anchors.rightMargin: 9
                     spacing: 6
 
-                    CheckBox {
+                    StudioDarkCheckBox {
+                        theme: matrix.theme
+                        uiFont: matrix.uiFont
                         Layout.preferredWidth: 25
                         Layout.alignment: Qt.AlignVCenter
                         checked: signalRow.channelEnabled
@@ -227,6 +229,9 @@ Rectangle {
 
                     NumericField {
                         id: magnitudeField
+                        ToolTip.visible: hovered && !activeFocus
+                        ToolTip.delay: 650
+                        ToolTip.text: "Right-click: Equal Value (set phases A/B/C to this magnitude)"
                         MouseArea {
                             anchors.fill: parent
                             z: 5
@@ -282,6 +287,9 @@ Rectangle {
 
                     NumericField {
                         id: phaseField
+                        ToolTip.visible: hovered && !activeFocus
+                        ToolTip.delay: 650
+                        ToolTip.text: "Right-click: Equal Angle or Balance phases A/B/C by 120°"
                         MouseArea {
                             anchors.fill: parent
                             z: 5

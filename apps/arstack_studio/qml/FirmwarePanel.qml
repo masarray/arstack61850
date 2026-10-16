@@ -41,38 +41,6 @@ SurfacePanel {
         }
     }
 
-    component DarkComboBox: ComboBox {
-        id: combo
-        implicitHeight: 40
-        font.family: panel.uiFont
-        font.pixelSize: 11
-        leftPadding: 12
-        rightPadding: 34
-        contentItem: Text {
-            leftPadding: 2
-            rightPadding: 2
-            text: combo.displayText
-            color: combo.enabled ? panel.theme.text : panel.theme.muted2
-            font: combo.font
-            verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
-        }
-        indicator: Label {
-            x: combo.width - width - 12
-            y: (combo.height - height) / 2
-            text: "⌄"
-            color: combo.enabled ? panel.theme.textSoft : panel.theme.muted2
-            font.family: panel.uiFont
-            font.pixelSize: 13
-        }
-        background: Rectangle {
-            radius: 7
-            color: combo.hovered ? panel.theme.raisedHover : panel.theme.surface2
-            border.width: 1
-            border.color: combo.activeFocus ? panel.theme.accent : panel.theme.line
-        }
-    }
-
     Component.onCompleted: if (panel.session) panel.session.requestRefreshPorts()
 
     ColumnLayout {
@@ -219,7 +187,9 @@ SurfacePanel {
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 8
-                        DarkComboBox {
+                        StudioDarkComboBox {
+                            theme: panel.theme
+                            uiFont: panel.uiFont
                             id: firmwarePort
                             Layout.preferredWidth: 205
                             model: panel.device.ports

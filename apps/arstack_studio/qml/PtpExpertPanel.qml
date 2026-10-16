@@ -54,6 +54,11 @@ SurfacePanel {
 
     readonly property string activeRole: panel.device.ptpRole
     readonly property bool sourceRole: activeRole === "SOURCE"
+    readonly property string svTimingEvidence: panel.device.smpSynchSimulated
+        ? "SIMULATED FLAG · sample clock not necessarily synchronized"
+        : panel.device.smpSynchMeasured
+            ? "MEASURED SYNC FLAG · verify sample-phase evidence independently"
+            : "FREE-RUN / UNQUALIFIED · PTP packets do not prove SV sample lock"
     readonly property bool receiverRole: activeRole === "RECEIVER"
     readonly property bool sourceEvidence: Number(panel.device.ptpAnnounceSent) > 0
         && Number(panel.device.ptpSyncSent) > 0
@@ -277,7 +282,7 @@ SurfacePanel {
                 }
                 Label {
                     Layout.fillWidth: true
-                    text: "AUTO = measured evidence; 0 / 1 / 2 = on-wire simulation flag only. PTP packets and sampling clock are separate."
+                    text: panel.svTimingEvidence + "\nAUTO uses measured evidence; 0 / 1 / 2 only simulates the on-wire flag."
                     wrapMode: Text.WordWrap
                     color: panel.theme.textSoft
                     font.family: panel.uiFont
