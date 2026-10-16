@@ -388,7 +388,10 @@ void MmsLiveDiscoveryClient::get_name_lists_pipelined(
         for (const auto cls : {MmsGetNameListObjectClass::named_variable,
                                MmsGetNameListObjectClass::named_variable_list}) {
             ready.push_back(chains.size());
-            chains.push_back(Chain{i, cls});
+            Chain chain;
+            chain.domain_index = i;
+            chain.object_class = cls;
+            chains.push_back(std::move(chain));
         }
     }
 
