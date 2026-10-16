@@ -17,6 +17,7 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QGuiApplication>
+#include <QIcon>
 #include <QPointer>
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
@@ -438,6 +439,10 @@ int main(int argc, char* argv[]) {
 
     QGuiApplication app(argc, argv);
     app.setQuitOnLastWindowClosed(true);
+    QIcon studioIcon;
+    studioIcon.addFile(QStringLiteral(":/studio/android-chrome-192x192.png"));
+    studioIcon.addFile(QStringLiteral(":/studio/android-chrome-512x512.png"));
+    app.setWindowIcon(studioIcon);
     QCoreApplication::setOrganizationName(QStringLiteral("ARStack61850"));
 #ifdef ARSTACK_STUDIO_ENGINEERING_PREVIEW
     QCoreApplication::setApplicationName(QStringLiteral("ARStack Studio Preview"));

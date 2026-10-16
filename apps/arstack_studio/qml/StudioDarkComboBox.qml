@@ -47,11 +47,13 @@ ComboBox {
     }
 
     delegate: ItemDelegate {
+        id: choice
+        required property int index
         width: combo.width - 8
         implicitHeight: 36
         highlighted: combo.highlightedIndex === index
         contentItem: Text {
-            text: modelData
+            text: combo.textAt(choice.index)
             color: combo.theme.text
             font: combo.font
             verticalAlignment: Text.AlignVCenter

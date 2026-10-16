@@ -98,6 +98,7 @@ qt_add_qml_module(arstack_studio
         qml/ConfigurationHub.qml
         qml/PtpExpertPanel.qml
         qml/StudioDarkComboBox.qml
+        qml/StudioDarkCheckBox.qml
         qml/DeviceExpertPanel.qml
         qml/FirmwarePanel.qml
         qml/WaveformExpertPanel.qml
@@ -171,23 +172,25 @@ target_compile_definitions(arstack_session_harness PRIVATE
     ARSTACK_STUDIO_VERSION="${PROJECT_VERSION}"
 )
 
+# Use the existing Studio-specific artwork for every branding surface.
+# This is intentionally separate from root assets/ used by Workbench.
+set(ARSTACK_STUDIO_BRAND_DIR "${CMAKE_CURRENT_LIST_DIR}/../../assets/studio_icon")
+qt_add_resources(arstack_studio "studio_branding"
+    PREFIX "/studio"
+    BASE "${ARSTACK_STUDIO_BRAND_DIR}"
+    FILES
+        "${ARSTACK_STUDIO_BRAND_DIR}/android-chrome-192x192.png"
+        "${ARSTACK_STUDIO_BRAND_DIR}/android-chrome-512x512.png"
+)
+
 if(WIN32)
-    # One deterministic icon shared by executable, installer and shortcuts.
-    # Python is already available on supported Windows CI hosts. The icon is
-    # generated at configure time so RC.exe sees its file before compilation.
-    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    # The exact same embedded icon is copied to stage/ for Inno Setup.
+    # No Python icon generation or alternative branding paths.
     set(ARSTACK_STUDIO_ICON "${CMAKE_CURRENT_BINARY_DIR}/ARStackStudio.ico")
-    execute_process(
-        COMMAND "${Python3_EXECUTABLE}"
-                "${CMAKE_CURRENT_LIST_DIR}/assets/make_studio_icon.py"
-                "${ARSTACK_STUDIO_ICON}"
-        RESULT_VARIABLE icon_result
-    )
-    if(NOT icon_result EQUAL 0)
-        message(FATAL_ERROR "Could not generate native ARStack Studio icon")
-    endif()
+    configure_file("${ARSTACK_STUDIO_BRAND_DIR}/ARStackStudio.ico"
+                   "${ARSTACK_STUDIO_ICON}" COPYONLY)
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ARStackStudio.rc"
-         "IDI_ARSTACK ICON \"${ARSTACK_STUDIO_ICON}\"\n")
+         "IDI_ARSTACK ICON \\"${ARSTACK_STUDIO_ICON}\\"\\n")
     target_sources(arstack_studio PRIVATE
         "${CMAKE_CURRENT_BINARY_DIR}/ARStackStudio.rc")
     set_target_properties(arstack_studio PROPERTIES WIN32_EXECUTABLE TRUE)
