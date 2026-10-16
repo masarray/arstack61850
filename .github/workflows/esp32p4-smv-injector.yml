@@ -152,9 +152,7 @@ jobs:
           test -s "build/${image}"
 
       - name: Create release manifest and SHA-256 contract
-        env:
-          # Container git may lack safe.directory or even be unavailable.
-          # The checkout explicitly selected this verified PR-head SHA.
+        # Job-scoped ARSTACK_SOURCE_COMMIT is the exact checkout identity.
         run: |
           set -euo pipefail
           image="arstack-esp32p4-smv-${ARSTACK_FIRMWARE_VERSION}.bin"
