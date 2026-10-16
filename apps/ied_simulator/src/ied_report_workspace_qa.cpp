@@ -357,6 +357,13 @@ int main(int argc, char* argv[]) {
         return 12;
     }
     const auto reportCountAfterGi = reports.receivedReportCount();
+    if (reports.rejectedReportCount() != 0U ||
+        reports.reportDecodeFailureCount() != 0U) {
+        qCritical() << "REPORTS_WORKBENCH_FAIL accepted_gi_report_authority"
+                    << reports.rejectedReportCount()
+                    << reports.reportDecodeFailureCount();
+        return 31;
+    }
     if (!reportProjectionPresent(reports)) {
         qCritical() << "REPORTS_WORKBENCH_FAIL report_projection";
         return 13;

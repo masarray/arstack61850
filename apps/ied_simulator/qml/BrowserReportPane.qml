@@ -480,6 +480,28 @@ Rectangle {
                 }
 
                 Rectangle {
+                    visible: reports.rejectedReportCount > 0 || reports.reportDecodeFailureCount > 0
+                    Layout.fillWidth: true
+                    implicitHeight: reportRejections.implicitHeight + 16
+                    color: theme.surface
+                    border.width: 1
+                    border.color: theme.amber
+                    Label {
+                        id: reportRejections
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.margins: 8
+                        font.pixelSize: 10
+                        wrapMode: Text.WordWrap
+                        color: theme.amber
+                        text: reports.rejectedReportCount + " foreign/stale report(s) withheld from process values · "
+                              + reports.reportDecodeFailureCount + " report decode failure(s). "
+                              + "Inspect report events for exact diagnostics."
+                    }
+                }
+
+                Rectangle {
                     visible: reports.cleanupRequired || (reports.lastError && reports.lastError.length > 0)
                     Layout.fillWidth: true
                     implicitHeight: issueLabel.implicitHeight + 16
