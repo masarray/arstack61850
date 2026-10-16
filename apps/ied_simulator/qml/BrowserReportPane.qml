@@ -18,6 +18,7 @@ Rectangle {
     property bool attributesExpanded: true
     property bool informationExpanded: true
     property bool dataExpanded: true
+    property bool eventsExpanded: true
     property int selectedReportMemberIndex: -1
     // Preserve selection through repeat snapshots of the same report frame;
     // reset only when the actual ReportID/sequence/entry identity changes.
@@ -51,13 +52,18 @@ Rectangle {
     function newestMatchingReport() {
         // A DataSet can be shared by multiple RCBs. Never attribute a received
         // frame to an RCB using only its DataSet or its list position.
-        if (!hasSelection || !rcb.reportId || !reports.receivedReports)
+        if (!hasSelection || !rcb.reference || !reports.receivedReports)
             return ({})
-        const wanted = String(rcb.reportId)
+        const expectedRcb = String(rcb.reference)
+        const expectedRptId = rcb.reportId ? String(rcb.reportId) : ""
         for (let index = 0; index < reports.receivedReports.length; ++index) {
             const frame = reports.receivedReports[index]
-            if (frame.reportId && String(frame.reportId) === wanted)
-                return frame
+            // Do not attribute a frame by RptID alone: indexed RCBs can share it.
+            if (!frame.rcbReference || String(frame.rcbReference) !== expectedRcb)
+                continue
+            if (expectedRptId.length > 0 && String(frame.reportId) !== expectedRptId)
+                continue
+            return frame
         }
         return ({})
     }
@@ -471,6 +477,53 @@ Rectangle {
                         text: "Showing first 256 members. Narrow the context for more."
                         color: theme.muted
                         font.pixelSize: 9
+                    }
+                }
+
+                SectionHeading {
+                    heading: "RCB lifecycle & InformationReport events"
+                    evidence: reports.events.length + " bounded event(s)"
+                    opened: root.eventsExpanded
+                    visible: reports.events.length > 0
+                    onToggleRequested: root.eventsExpanded = !root.eventsExpanded
+                }
+                Repeater {
+                    model: root.eventsExpanded
+                           ? reports.events.slice(Math.max(0, reports.events.length - 6))
+                           : []
+                    delegate: Label {
+                        required property string modelData
+                        Layout.fillWidth: true
+                        leftPadding: 9
+                        rightPadding: 9
+                        topPadding: 3
+                        bottomPadding: 3
+                        text: modelData
+                        color: theme.textSoft
+                        font.pixelSize: 9
+                        wrapMode: Text.WordWrap
+                    }
+                }
+
+                Rectangle {
+                    visible: reports.rejectedReportCount > 0 || reports.reportDecodeFailureCount > 0
+                    Layout.fillWidth: true
+                    implicitHeight: reportRejections.implicitHeight + 16
+                    color: theme.surface
+                    border.width: 1
+                    border.color: theme.amber
+                    Label {
+                        id: reportRejections
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.margins: 8
+                        font.pixelSize: 10
+                        wrapMode: Text.WordWrap
+                        color: theme.amber
+                        text: reports.rejectedReportCount + " foreign/stale report(s) withheld from process values · "
+                              + reports.reportDecodeFailureCount + " report decode failure(s). "
+                              + "Inspect report events for exact diagnostics."
                     }
                 }
 

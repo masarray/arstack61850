@@ -147,9 +147,11 @@ void MmsStaticReportSessionRuntime::start(
         throw MmsStaticReportSessionError(
             "Static report subscription has already been started.");
     }
+    auto pinnedOptions = options_.subscription;
+    pinnedOptions.expected_data_set_reference = selected_data_set_reference_;
     subscription_ = std::make_unique<MmsReportSubscriptionRuntime>(
         association_, *selected_candidate_, *selected_directory_,
-        options_.subscription);
+        std::move(pinnedOptions));
     subscription_->start(stop_token);
 }
 

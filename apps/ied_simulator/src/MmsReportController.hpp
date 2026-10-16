@@ -40,6 +40,8 @@ class MmsReportController : public QObject {
     Q_PROPERTY(QVariantList receivedReports READ receivedReports NOTIFY reportsChanged)
     Q_PROPERTY(QStringList events READ events NOTIFY reportsChanged)
     Q_PROPERTY(qulonglong receivedReportCount READ receivedReportCount NOTIFY reportsChanged)
+    Q_PROPERTY(qulonglong rejectedReportCount READ rejectedReportCount NOTIFY reportsChanged)
+    Q_PROPERTY(qulonglong reportDecodeFailureCount READ reportDecodeFailureCount NOTIFY reportsChanged)
     Q_PROPERTY(qulonglong generation READ generation NOTIFY stateChanged)
 
 public:
@@ -73,6 +75,8 @@ public:
     [[nodiscard]] QVariantList receivedReports() const { return receivedReports_; }
     [[nodiscard]] QStringList events() const { return events_; }
     [[nodiscard]] qulonglong receivedReportCount() const noexcept { return receivedReportCount_; }
+    [[nodiscard]] qulonglong rejectedReportCount() const noexcept { return rejectedReportCount_; }
+    [[nodiscard]] qulonglong reportDecodeFailureCount() const noexcept { return reportDecodeFailureCount_; }
     [[nodiscard]] qulonglong generation() const noexcept { return generation_; }
 
     Q_INVOKABLE bool connectToIed();
@@ -149,6 +153,8 @@ private:
     QStringList events_;
     QStringList diagnostics_;
     qulonglong receivedReportCount_{};
+    qulonglong rejectedReportCount_{};
+    qulonglong reportDecodeFailureCount_{};
     qulonglong generation_{};
     QThreadPool ioPool_;
     QTimer pollTimer_;

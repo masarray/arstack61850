@@ -622,6 +622,62 @@ MmsReportFrame MmsReportFrameMapper::map(
     return frame;
 }
 
+std::string MmsReportFrameBindingValidator::rejection_reason(
+    const MmsReportFrame& frame,
+    const MmsReportControlState& verified_rcb,
+    const MmsDataSetDirectoryResponse& directory) {
+    if (verified_rcb.report_id.empty())
+        return "Selected RCB has no verified report ID.";
+    if (frame.header.report_id != verified_rcb.report_id)
+        return "InformationReport RptID does not belong to selected live RCB.";
+    if (verified_rcb.data_set_reference.empty() || directory.members.empty())
+        return "Selected RCB has no verified nonempty DataSet directory.";
+    if (!frame.header.data_set_reference.empty()) {
+        try {
+            if (MmsDataSetDirectoryCodec::parse_data_set_reference(
+                    frame.header.data_set_reference) !=
+                MmsDataSetDirectoryCodec::parse_data_set_reference(
+                    verified_rcb.data_set_reference))
+                return "InformationReport DatSet differs from selected live RCB.";
+        } catch (const std::exception&) {
+            return "Malformed report or selected-RCB DataSet identity.";
+        }
+    }
+    if (frame.header.configuration_revision && verified_rcb.configuration_revision &&
+        *frame.header.configuration_revision != *verified_rcb.configuration_revision)
+        return "InformationReport ConfRev differs from selected live RCB.";
+    if (frame.included_data_set_indexes.size() != frame.values.size())
+        return "Inclusion and report value counts differ.";
+    std::optional<std::size_t> previous;
+    for (std::size_t row = 0U; row < frame.values.size(); ++row) {
+        const auto index = frame.included_data_set_indexes[row];
+        const auto& value = frame.values[row];
+        if (index >= directory.members.size() ||
+            (previous && index <= *previous) ||
+            value.data_set_index != index || !value.member ||
+            value.member->object_name != directory.members[index].object_name)
+            return "Report inclusion order or DataSet member identity differs.";
+        // Wire DataRef is an independent assertion of member identity.
+        // In particular, the mapper's member field is projected from the
+        // directory and is not proof that a *reported* DataRef agreed.
+        if (frame.header.optional_fields.has("data-reference")) {
+            if (value.data_reference.empty())
+                return "InformationReport has empty mandatory DataRef.";
+            const auto& expected = directory.members[index];
+            const auto canonical = expected.user_reference.empty()
+                ? normalize_member(expected.object_name).user_reference
+                : expected.user_reference;
+            if (value.data_reference != canonical &&
+                value.data_reference != expected.mms_reference &&
+                value.data_reference != expected.object_name.reference() &&
+                value.data_reference != normalize_member(expected.object_name).user_reference)
+                return "InformationReport wire DataRef contradicts selected DataSet member.";
+        }
+        previous = index;
+    }
+    return {};
+}
+
 std::string MmsReportFrame::routing_key() const {
     return header.report_id;
 }

@@ -164,6 +164,7 @@ bool reportProjectionPresent(const MmsReportController& reports) {
     if (frames.isEmpty()) return false;
     const auto frame = frames.first().toMap();
     return !frame.value(QStringLiteral("reportId")).toString().isEmpty() &&
+        !frame.value(QStringLiteral("rcbReference")).toString().isEmpty() &&
         !frame.value(QStringLiteral("dataSet")).toString().isEmpty() &&
         !frame.value(QStringLiteral("values")).toStringList().isEmpty() &&
         frame.contains(QStringLiteral("entryId")) &&
@@ -356,6 +357,13 @@ int main(int argc, char* argv[]) {
         return 12;
     }
     const auto reportCountAfterGi = reports.receivedReportCount();
+    if (reports.rejectedReportCount() != 0U ||
+        reports.reportDecodeFailureCount() != 0U) {
+        qCritical() << "REPORTS_WORKBENCH_FAIL accepted_gi_report_authority"
+                    << reports.rejectedReportCount()
+                    << reports.reportDecodeFailureCount();
+        return 31;
+    }
     if (!reportProjectionPresent(reports)) {
         qCritical() << "REPORTS_WORKBENCH_FAIL report_projection";
         return 13;

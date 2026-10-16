@@ -102,9 +102,11 @@ MmsReportSubscriptionRuntime::MmsReportSubscriptionRuntime(
 }
 
 std::vector<std::string> MmsReportSubscriptionRuntime::probe_attributes() const {
-    static const std::array<const char*, 15> preferred{
+    // GI is a trigger command, not required as a readable state field.
+    // Some IEDs reject a Read(GI) even when Write(GI=true) is valid.
+    static const std::array<const char*, 14> preferred{
         "RptID", "RptEna", "DatSet", "ConfRev", "OptFlds",
-        "BufTm", "SqNum", "TrgOps", "IntgPd", "GI",
+        "BufTm", "SqNum", "TrgOps", "IntgPd",
         "Resv", "ResvTms", "Owner", "EntryID", "TimeOfEntry"};
     std::vector<std::string> attributes;
     for (const auto* name : preferred) {
@@ -214,12 +216,23 @@ void MmsReportSubscriptionRuntime::start(
     cleanup_required_ = false;
     monitor_.clear();
     received_reports_ = 0U;
+    rejected_reports_ = 0U;
     decode_failures_ = 0U;
 
     try {
         set_state(MmsReportSubscriptionState::probing,
                   "Probing RCB state before any write.");
         const auto current = probe(stop_token);
+        if (!options_.expected_data_set_reference.empty()) {
+            const auto expected = MmsDataSetDirectoryCodec::parse_data_set_reference(
+                options_.expected_data_set_reference);
+            const auto observed = MmsDataSetDirectoryCodec::parse_data_set_reference(
+                current.data_set_reference);
+            if (expected != observed) {
+                throw MmsReportSubscriptionError(
+                    "RCB DataSet changed after discovery; refusing stale directory.");
+            }
+        }
         const auto was_enabled = current.report_enabled.value_or(false);
         const auto caller_owned_enabled =
             was_enabled && options_.allow_reenable_caller_owned;
@@ -367,16 +380,20 @@ void MmsReportSubscriptionRuntime::start(
                       "Caller-owned RCB was already enabled; redundant RptEna write skipped.");
         }
 
-        if (options_.trigger_general_interrogation &&
-            contains_attribute(candidate_, "GI")) {
-            try {
-                write_attribute("GI", MmsDataValue::boolean(true), stop_token);
-                add_event(MmsReportSubscriptionEventKind::general_interrogation_sent,
-                          "General interrogation requested after verified RCB enable.");
-            } catch (const std::exception& exception) {
-                add_event(MmsReportSubscriptionEventKind::cleanup_deferred,
-                          "RCB remains enabled, but GI write failed: " +
-                              std::string{exception.what()});
+        if (options_.trigger_general_interrogation) {
+            if (!contains_attribute(candidate_, "GI")) {
+                add_event(MmsReportSubscriptionEventKind::general_interrogation_not_sent,
+                          "GI not sent: selected RCB has no exposed GI write attribute.");
+            } else {
+                try {
+                    write_attribute("GI", MmsDataValue::boolean(true), stop_token);
+                    add_event(MmsReportSubscriptionEventKind::general_interrogation_sent,
+                              "GI Write confirmed after verified RCB enable; awaiting report evidence.");
+                } catch (const std::exception& exception) {
+                    add_event(MmsReportSubscriptionEventKind::general_interrogation_not_sent,
+                              "GI Write failed; RCB remains enabled, GI report not guaranteed: " +
+                                  std::string{exception.what()});
+                }
             }
         }
 
@@ -524,7 +541,25 @@ void MmsReportSubscriptionRuntime::ingest_report(
     const std::span<const std::uint8_t> payload) {
     try {
         const auto report = MmsInformationReportCodec::decode(payload);
+        // Check publisher identity before using the selected RCB's directory
+        // to assign semantic member names to untrusted report values.
+        const auto header = MmsReportFrameMapper::decode_header(report);
+        if (!last_rcb_state_ || last_rcb_state_->report_id.empty() ||
+            header.report_id != last_rcb_state_->report_id) {
+            ++rejected_reports_;
+            add_event(MmsReportSubscriptionEventKind::report_rejected,
+                      "InformationReport RptID not verified for selected RCB.");
+            return;
+        }
         const auto frame = MmsReportFrameMapper::map(report, directory_.members);
+        const auto reason = MmsReportFrameBindingValidator::rejection_reason(
+            frame, *last_rcb_state_, directory_);
+        if (!reason.empty()) {
+            ++rejected_reports_;
+            add_event(MmsReportSubscriptionEventKind::report_rejected,
+                      "InformationReport values withheld: " + reason);
+            return;
+        }
         static_cast<void>(monitor_.ingest(frame));
         ++received_reports_;
         add_event(MmsReportSubscriptionEventKind::report_received,
@@ -565,7 +600,9 @@ MmsReportSubscriptionSnapshot MmsReportSubscriptionRuntime::snapshot() const {
     result.reservation_touched = reservation_touched_;
     result.cleanup_required = cleanup_required_;
     result.received_reports = received_reports_;
+    result.rejected_reports = rejected_reports_;
     result.decode_failures = decode_failures_;
+    result.active_rcb_reference = candidate_.reference;
     result.last_rcb_state = last_rcb_state_;
     result.streams = monitor_.snapshots();
     result.events = events_;

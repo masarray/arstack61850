@@ -373,7 +373,7 @@ mms::MmsLiveDiscoveryResult buildContextDiscoverySeed(
     static const std::vector<std::string> reportAttributes{
         "DatSet", "RptID", "ConfRev", "IntgPd", "BufTm", "SqNum",
         "RptEna", "Resv", "ResvTms", "Owner", "EntryID", "TimeOfEntry",
-        "TrgOps", "OptFlds"};
+        "TrgOps", "OptFlds", "GI"};
 
     for (const auto& control : model.report_controls) {
         mms::MmsReportControlCandidate candidate;
@@ -405,7 +405,14 @@ void probeContextReportControls(
         }
         mms::MmsReportControlEvidence evidence;
         evidence.candidate = candidate;
-        evidence.requested_attributes = candidate.attributes;
+        // The canonical inventory lists readable fields AND supported
+        // trigger/write surfaces. GI is a command, not a mandatory Read.
+        // Do not fail live attach on IEDs that expose GI as write-only.
+        evidence.requested_attributes.reserve(candidate.attributes.size());
+        for (const auto& attribute : candidate.attributes) {
+            if (attribute != "GI")
+                evidence.requested_attributes.push_back(attribute);
+        }
         try {
             const auto invokeId = association.next_invoke_id();
             const auto request = mms::MmsReportControlStateMapper::build_read_request(
@@ -431,6 +438,8 @@ struct ReportUi final {
     QVariantList reports;
     QStringList events;
     qulonglong receivedCount{};
+    qulonglong rejectedCount{};
+    qulonglong decodeFailureCount{};
     bool active{};
     bool cleanupRequired{};
 };
@@ -441,7 +450,12 @@ ReportUi buildSubscriptionUi(
     ReportUi ui;
     ui.active = active;
     ui.receivedCount = subscription.received_reports;
+    ui.rejectedCount = subscription.rejected_reports;
+    ui.decodeFailureCount = subscription.decode_failures;
     ui.cleanupRequired = subscription.cleanup_required;
+    if (subscription.rejected_reports != 0U)
+        ui.events.push_back(QStringLiteral("%1 foreign/stale InformationReport(s) withheld from values.")
+                                .arg(subscription.rejected_reports));
     for (const auto& event : subscription.events) {
         ui.events.push_back(QString::fromStdString(event.message));
     }
@@ -456,6 +470,8 @@ ReportUi buildSubscriptionUi(
             const auto& frame = *frameIt;
             QVariantMap map;
             map.insert(QStringLiteral("reportId"), QString::fromStdString(frame.header.report_id));
+            map.insert(QStringLiteral("rcbReference"),
+                       QString::fromStdString(subscription.active_rcb_reference));
             map.insert(QStringLiteral("dataSet"), QString::fromStdString(frame.header.data_set_reference));
             map.insert(QStringLiteral("sequence"), numberText(frame.header.sequence_number));
             map.insert(QStringLiteral("subSequence"), numberText(frame.header.sub_sequence_number));
@@ -617,6 +633,8 @@ void MmsReportController::clearInventory() {
     receivedReports_.clear();
     events_.clear();
     receivedReportCount_ = 0;
+    rejectedReportCount_ = 0;
+    reportDecodeFailureCount_ = 0;
     emit inventoryChanged();
     emit selectionChanged();
     emit reportsChanged();
@@ -664,6 +682,8 @@ void MmsReportController::adoptEngineeringInventory() {
     receivedReports_.clear();
     events_.clear();
     receivedReportCount_ = 0;
+    rejectedReportCount_ = 0;
+    reportDecodeFailureCount_ = 0;
     refreshSelection();
     emit inventoryChanged();
     emit reportsChanged();
@@ -1510,6 +1530,8 @@ bool MmsReportController::enableSelectedAuthored(
                         self->receivedReports_ = ui.reports;
                         self->events_ = ui.events;
                         self->receivedReportCount_ = ui.receivedCount;
+                    self->rejectedReportCount_ = ui.rejectedCount;
+                    self->reportDecodeFailureCount_ = ui.decodeFailureCount;
                         if (selectedRow >= 0 &&
                             selectedRow < self->reportControls_.size()) {
                             auto map =
@@ -1641,6 +1663,8 @@ bool MmsReportController::enableSelected(const bool requestGeneralInterrogation)
                     self->receivedReports_ = ui.reports;
                     self->events_ = ui.events;
                     self->receivedReportCount_ = ui.receivedCount;
+                    self->rejectedReportCount_ = ui.rejectedCount;
+                    self->reportDecodeFailureCount_ = ui.decodeFailureCount;
                     self->state_ = ui.cleanupRequired ? State::cleanup_required : State::active;
                     self->appendDiagnostic(requestGeneralInterrogation
                         ? QStringLiteral("RCB enabled; GI requested explicitly.")
@@ -1703,6 +1727,8 @@ bool MmsReportController::disableSelected() {
                     self->receivedReports_ = ui.reports;
                     self->events_ = ui.events;
                     self->receivedReportCount_ = ui.receivedCount;
+                    self->rejectedReportCount_ = ui.rejectedCount;
+                    self->reportDecodeFailureCount_ = ui.decodeFailureCount;
                     self->state_ = ui.cleanupRequired ? State::cleanup_required : State::ready;
                     self->appendDiagnostic(ui.cleanupRequired
                         ? QStringLiteral("RCB release incomplete; explicit cleanup retry required.")
@@ -1769,6 +1795,8 @@ bool MmsReportController::retryCleanup() {
                     self->receivedReports_ = ui.reports;
                     self->events_ = ui.events;
                     self->receivedReportCount_ = ui.receivedCount;
+                    self->rejectedReportCount_ = ui.rejectedCount;
+                    self->reportDecodeFailureCount_ = ui.decodeFailureCount;
                     self->state_ = ui.cleanupRequired ? State::cleanup_required : State::ready;
                     self->lastError_.clear();
                     self->appendDiagnostic(ui.cleanupRequired
@@ -1836,6 +1864,8 @@ void MmsReportController::schedulePoll() {
                     self->receivedReports_ = ui.reports;
                     self->events_ = ui.events;
                     self->receivedReportCount_ = ui.receivedCount;
+                    self->rejectedReportCount_ = ui.rejectedCount;
+                    self->reportDecodeFailureCount_ = ui.decodeFailureCount;
                     emit self->reportsChanged();
                 }, Qt::QueuedConnection);
             }
@@ -1866,6 +1896,8 @@ void MmsReportController::schedulePoll() {
                     self->receivedReports_ = ui.reports;
                     self->events_ = ui.events;
                     self->receivedReportCount_ = ui.receivedCount;
+                    self->rejectedReportCount_ = ui.rejectedCount;
+                    self->reportDecodeFailureCount_ = ui.decodeFailureCount;
                     self->lastError_ = message;
                     self->state_ = ui.cleanupRequired ? State::cleanup_required : State::faulted;
                     self->appendDiagnostic(QStringLiteral("Report association/poll failed · %1").arg(message));

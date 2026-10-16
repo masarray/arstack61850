@@ -421,6 +421,70 @@ void offline_monitor_enforces_frame_and_stream_limits() {
     }), "Monitor frame limit was not enforced.");
 }
 
+
+void binding_validator_rejects_cross_rcb_and_stale_reports() {
+    auto directory = MmsDataSetDirectoryCodec::decode_response(
+        MmsDataSetDirectoryCodec::encode_response_pdu(directory_fixture()), 9U);
+    const auto frame = MmsReportFrameMapper::map(realistic_report(17U), directory.members);
+    MmsReportControlState selected;
+    selected.report_id = "LD0/LLN0.RP.urcb01";
+    selected.data_set_reference = "LD0/LLN0$Events";
+    selected.configuration_revision = 1U;
+    const auto reject = [&](const MmsReportFrame& observed) {
+        return MmsReportFrameBindingValidator::rejection_reason(observed, selected, directory);
+    };
+    require(reject(frame).empty(), "Verified RCB report rejected.");
+    auto changed = frame;
+    changed.header.report_id = "LD0/LLN0.RP.other";
+    require(!reject(changed).empty(), "Foreign RptID accepted.");
+    changed = frame;
+    changed.header.data_set_reference = "LD0/LLN0.Other";
+    require(!reject(changed).empty(), "Foreign DataSet accepted.");
+    changed = frame;
+    changed.header.configuration_revision = 2U;
+    require(!reject(changed).empty(), "Stale ConfRev accepted.");
+    changed = frame;
+    changed.included_data_set_indexes = {1U, 0U};
+    require(!reject(changed).empty(), "Descending indexes accepted.");
+    changed = frame;
+    changed.included_data_set_indexes = {0U, 0U};
+    require(!reject(changed).empty(), "Duplicate index accepted.");
+    changed = frame;
+    changed.values[0].data_reference = "LD0/GGIO1.Ind2.stVal";
+    changed.values[1].data_reference = "LD0/GGIO1.Ind1.stVal";
+    require(!reject(changed).empty(), "Swapped wire DataRefs accepted.");
+    changed = frame;
+    changed.values[0].data_reference = "LD0/OTHER.Ind1.stVal";
+    require(!reject(changed).empty(), "Foreign wire DataRef accepted.");
+    changed = frame;
+    changed.values[0].data_reference.clear();
+    require(!reject(changed).empty(), "Missing enabled DataRef accepted.");
+    changed = frame;
+    changed.values[0].data_reference = "LD0/GGIO1$ST$Ind1$stVal";
+    require(reject(changed).empty(), "Exact MMS typed DataRef was rejected.");
+    changed = frame;
+    changed.values[1].data_set_index = 0U;
+    require(!reject(changed).empty(), "Inconsistent member index accepted.");
+    changed = frame;
+    changed.values[1].member = directory.members[0];
+    require(!reject(changed).empty(), "Wrong DataSet member accepted.");
+    changed = frame;
+    changed.values.pop_back();
+    require(!reject(changed).empty(), "Incorrect value count accepted.");
+    selected.report_id.clear();
+    require(!reject(frame).empty(), "Unverified RptID accepted.");
+    selected.report_id = "LD0/LLN0.RP.urcb01";
+    selected.data_set_reference.clear();
+    require(!reject(frame).empty(), "Unverified RCB DataSet accepted.");
+    selected.data_set_reference = "LD0/LLN0.Events";
+    changed = frame;
+    changed.header.data_set_reference.clear();
+    changed.header.configuration_revision.reset();
+    require(reject(changed).empty(), "Permitted missing optional fields rejected.");
+    directory.members.clear();
+    require(!reject(frame).empty(), "Missing DataSet directory accepted.");
+}
+
 void malformed_and_bound_paths_are_rejected() {
     require_throws([] {
         static_cast<void>(MmsInformationReportCodec::decode(std::array<std::uint8_t, 2>{0xA3U, 0x00U}));
@@ -453,6 +517,7 @@ int main() {
         {"sequence continuity", sequence_tracker_detects_gap_duplicate_and_changes},
         {"segmentation continuity", segmentation_continuity_is_tracked},
         {"bounded monitor", offline_monitor_enforces_frame_and_stream_limits},
+        {"RCB binding and stale report guard", binding_validator_rejects_cross_rcb_and_stale_reports},
         {"malformed and bounds", malformed_and_bound_paths_are_rejected},
     };
     std::size_t passed = 0U;

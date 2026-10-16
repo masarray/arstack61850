@@ -39,7 +39,9 @@ enum class MmsReportSubscriptionEventKind : std::uint8_t {
     attribute_written,
     enabled,
     general_interrogation_sent,
+    general_interrogation_not_sent,
     report_received,
+    report_rejected,
     report_decode_failed,
     disabled,
     reservation_released,
@@ -63,6 +65,10 @@ struct MmsReportSubscriptionOptions final {
     std::vector<std::uint8_t> trigger_options;
     std::vector<std::uint8_t> optional_fields;
     std::string data_set_reference;
+    // Pin the DataSet whose directory labels the values. Used by static
+    // subscriptions so another client cannot silently rebind between
+    // discovery and the first RCB enable.
+    std::string expected_data_set_reference;
     std::size_t maximum_events{1'024U};
     MmsOfflineReportMonitorOptions monitor_options{};
 };
@@ -73,7 +79,9 @@ struct MmsReportSubscriptionSnapshot final {
     bool reservation_touched{};
     bool cleanup_required{};
     std::uint64_t received_reports{};
+    std::uint64_t rejected_reports{};
     std::uint64_t decode_failures{};
+    std::string active_rcb_reference;
     std::optional<MmsReportControlState> last_rcb_state;
     std::vector<MmsOfflineReportStreamSnapshot> streams;
     std::vector<MmsReportSubscriptionEvent> events;
@@ -129,6 +137,7 @@ private:
     bool restore_enabled_required_{};
     bool cleanup_required_{};
     std::uint64_t received_reports_{};
+    std::uint64_t rejected_reports_{};
     std::uint64_t decode_failures_{};
 };
 
