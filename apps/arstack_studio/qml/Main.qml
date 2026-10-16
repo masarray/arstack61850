@@ -346,6 +346,42 @@ ApplicationWindow {
         return true
     }
 
+    // One-click simulation shortcuts affect ABC only, never neutral or quality.
+    function equalGroupMagnitudes(group, row) {
+        if (row < 0 || row > 2) return
+        var model = groupModel(group)
+        var value = model.get(row).magnitude
+        if (!validMagnitude(group, value)) return
+        for (var i = 0; i < 3; ++i) model.setProperty(i, "magnitude", value)
+        selectSignal(group, row)
+        if (workflowBar.session && workflowBar.session.liveControlReady) sendLinkedGroup(group)
+        showMessage("ABC magnitude copied from " + model.get(row).signalId, false)
+    }
+
+    function equalGroupAngles(group, row) {
+        if (row < 0 || row > 2) return
+        var model = groupModel(group)
+        var value = model.get(row).phase
+        if (!validPhase(value)) return
+        for (var i = 0; i < 3; ++i) model.setProperty(i, "phase", value)
+        selectSignal(group, row)
+        if (workflowBar.session && workflowBar.session.liveControlReady) sendLinkedGroup(group)
+        showMessage("ABC angles copied from " + model.get(row).signalId, false)
+    }
+
+    function balanceGroupAngles(group, row) {
+        if (row < 0 || row > 2) return
+        var model = groupModel(group)
+        var base = model.get(row).phase + (row === 1 ? 120 : row === 2 ? -120 : 0)
+        if (!validPhase(base)) return
+        model.setProperty(0, "phase", normalizedAngle(base))
+        model.setProperty(1, "phase", normalizedAngle(base - 120))
+        model.setProperty(2, "phase", normalizedAngle(base + 120))
+        selectSignal(group, row)
+        if (workflowBar.session && workflowBar.session.liveControlReady) sendLinkedGroup(group)
+        showMessage("ABC angles balanced relative to " + model.get(row).signalId, false)
+    }
+
     function balanced() {
         var angles = [0, -120, 120, 0]
         for (var i = 0; i < 4; ++i) {
@@ -472,10 +508,10 @@ ApplicationWindow {
 
     Window {
         id: configurationWindow
-        width: 760
-        height: 780
-        minimumWidth: 640
-        minimumHeight: 660
+        width: 910
+        height: 740
+        minimumWidth: 760
+        minimumHeight: 610
         visible: false
         title: "ARStack Studio · Advanced"
         color: studioTheme.bg

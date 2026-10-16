@@ -146,16 +146,25 @@ SurfacePanel {
                         ComboBox {
                             id: modeCombo
                             Layout.fillWidth: true
-                            model: ["Provide PTP timing", "Follow external PTP", "Monitor PTP only"]
+                            model: ["Source - provide lab PTP", "Follower - external GM discovery", "Monitor - observe only"]
                             currentIndex: panel.roleIndex(panel.activeRole)
                             enabled: panel.session && panel.device.ptpAvailable && !panel.device.ptpRunning && !panel.startPending && !panel.session.updatingFirmware
                             font.family: panel.uiFont
-                            font.pixelSize: 10
+                            font.pixelSize: 11
+                            palette.text: panel.theme.text
+                            palette.buttonText: panel.theme.text
+                            palette.windowText: panel.theme.text
+                            palette.base: panel.theme.surface2
+                            palette.button: panel.theme.raised
+                            background: Rectangle { radius: 6; color: panel.theme.surface2; border.color: panel.theme.line }
+                            contentItem: Text { text: modeCombo.displayText; color: panel.theme.text; font: modeCombo.font; verticalAlignment: Text.AlignVCenter; leftPadding: 10; rightPadding: 18; elide: Text.ElideRight }
+                            delegate: ItemDelegate { width: modeCombo.width; text: modelData; highlighted: modeCombo.highlightedIndex === index; palette.text: panel.theme.text; background: Rectangle { color: parent.highlighted ? panel.theme.accentSoft : panel.theme.raised } }
+                            popup: Popup { y: modeCombo.height; width: modeCombo.width; padding: 3; implicitHeight: contentItem.implicitHeight + 6; contentItem: ListView { clip: true; implicitHeight: contentHeight; model: modeCombo.popup.visible ? modeCombo.delegateModel : null; currentIndex: modeCombo.highlightedIndex }; background: Rectangle { radius: 7; color: panel.theme.raised; border.color: panel.theme.line } }
                         }
                     }
 
                     ColumnLayout {
-                        Layout.preferredWidth: 310
+                        Layout.preferredWidth: 270
                         spacing: 3
                         Label {
                             text: modeCombo.currentIndex === 0
