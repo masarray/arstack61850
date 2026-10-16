@@ -99,6 +99,10 @@ qt_add_qml_module(arstack_studio
         qml/PtpExpertPanel.qml
         qml/StudioDarkComboBox.qml
         qml/StudioDarkCheckBox.qml
+        qml/StudioActionMenu.qml
+        qml/StudioMenuDivider.qml
+        qml/StudioPtpSwitch.qml
+        qml/StudioTimingTray.qml
         qml/DeviceExpertPanel.qml
         qml/FirmwarePanel.qml
         qml/WaveformExpertPanel.qml
