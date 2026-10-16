@@ -195,7 +195,9 @@ Rectangle {
                     anchors.rightMargin: 9
                     spacing: 6
 
-                    CheckBox {
+                    StudioDarkCheckBox {
+                        theme: matrix.theme
+                        uiFont: matrix.uiFont
                         Layout.preferredWidth: 25
                         Layout.alignment: Qt.AlignVCenter
                         checked: signalRow.channelEnabled

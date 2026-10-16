@@ -789,7 +789,9 @@ ApplicationWindow {
                                 CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "50"; implicitWidth: 44; onClicked: root.setFrequencyValue(50) }
                                 CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "60"; implicitWidth: 44; onClicked: root.setFrequencyValue(60) }
                                 Rectangle { width: 1; height: 24; color: studioTheme.lineSoft }
-                                CheckBox {
+                                StudioDarkCheckBox {
+                                    theme: studioTheme
+                                    uiFont: root.uiFont
                                     enabled: root.signalFrequency > 0
                                     checked: root.phaseLink
                                     text: "3-phase link"
