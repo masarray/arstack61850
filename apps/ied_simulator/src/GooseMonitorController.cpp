@@ -159,6 +159,90 @@ void GooseMonitorController::setInterfaceName(const QString& value) {
     emit monitorChanged();
 }
 
+QVariantMap GooseMonitorController::observedForStream(
+    const QString& goCbRef,
+    const QString& dataSet,
+    const QString& appId,
+    const QString& destinationMac) const {
+    QVariantMap result;
+    result.insert(QStringLiteral("matched"), false);
+    result.insert(QStringLiteral("reason"), QStringLiteral("Awaiting an exact GOOSE frame"));
+    const auto reference = goCbRef.trimmed();
+    if (reference.isEmpty()) {
+        result.insert(QStringLiteral("reason"),
+                      QStringLiteral("Configured goCBRef unavailable; no identity binding"));
+        return result;
+    }
+
+    // IEC 61850 SCL APPID is a hexadecimal octet-string representation,
+    // even when it contains digits only (e.g. '1001' = 0x1001).
+    const auto appIdText = appId.trimmed();
+    bool appIdValid = true;
+    unsigned int requestedAppId = 0U;
+    if (!appIdText.isEmpty()) {
+        requestedAppId = appIdText.toUInt(&appIdValid, 16);
+        if (!appIdValid || requestedAppId > 0xFFFFU) {
+            result.insert(QStringLiteral("reason"),
+                          QStringLiteral("Invalid configured hexadecimal GOOSE APPID"));
+            return result;
+        }
+    }
+
+    const auto normalizeMac = [](QString mac) {
+        mac.remove(QLatin1Char(':'));
+        mac.remove(QLatin1Char('-'));
+        mac.remove(QLatin1Char('.'));
+        return mac.trimmed().toUpper();
+    };
+    const auto requestedMac = normalizeMac(destinationMac);
+    if (!requestedMac.isEmpty()) {
+        if (requestedMac.size() != 12) {
+            result.insert(QStringLiteral("reason"),
+                          QStringLiteral("Invalid configured destination MAC"));
+            return result;
+        }
+        for (const QChar ch : requestedMac) {
+            if (!ch.isDigit() && (ch < QLatin1Char('A') || ch > QLatin1Char('F'))) {
+                result.insert(QStringLiteral("reason"),
+                              QStringLiteral("Invalid configured destination MAC"));
+                return result;
+            }
+        }
+    }
+
+    const auto requestedDataSet = dataSet.trimmed();
+    const StreamSlot* found = nullptr;
+    for (const auto& slot : streams_) {
+        const auto& frame = slot.frame;
+        // Never infer the publisher from APPID alone. Use exact goCBRef
+        // plus all available binding constraints; retain original case.
+        if (QString::fromStdString(frame.pdu.go_cb_ref) != reference ||
+            (!requestedDataSet.isEmpty() &&
+             QString::fromStdString(frame.pdu.data_set_reference) != requestedDataSet) ||
+            (!appIdText.isEmpty() && frame.app_id != requestedAppId) ||
+            (!requestedMac.isEmpty() &&
+             normalizeMac(QString::fromStdString(frame.destination.to_string())) != requestedMac)) {
+            continue;
+        }
+        if (found != nullptr) {
+            result.insert(QStringLiteral("reason"),
+                          QStringLiteral("Ambiguous GOOSE publisher identity; multiple sources match"));
+            return result;
+        }
+        found = &slot;
+    }
+    if (found == nullptr) return result;
+
+    result = streamMap(*found);
+    result.insert(QStringLiteral("matched"), true);
+    result.insert(QStringLiteral("values"), found->values);
+    result.insert(QStringLiteral("reason"),
+                  found->timedOut
+                      ? QStringLiteral("Observed frame expired (TimeAllowedToLive)")
+                      : QStringLiteral("Exact wire-identity match (read-only)"));
+    return result;
+}
+
 bool GooseMonitorController::startCapture() {
     if (capturing_) return true;
     if (interfaceName_.isEmpty()) {

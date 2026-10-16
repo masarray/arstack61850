@@ -2,11 +2,31 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import ARStack.IedSimulator 1.0
 
 Rectangle {
     id: root
     required property var theme
     required property var context
+    required property GooseMonitorController monitor
+
+    // One shared monitor is owned by Main.qml/Sniffer. This pane never
+    // starts an independent raw socket, MMS Read, or background poller.
+    property int evidenceGeneration: 0
+    Connections {
+        target: root.monitor
+        function onMonitorChanged() { root.evidenceGeneration++ }
+    }
+    property var observation: {
+        const generation = root.evidenceGeneration
+        if (root.selectedIndex < 0 || !root.selectedStream.reference)
+            return ({matched: false, reason: "Select a configured GOOSE stream"})
+        return root.monitor.observedForStream(
+            root.selectedStream.reference || "",
+            root.selectedStream.dataSet || "",
+            root.selectedStream.appId || "",
+            root.selectedStream.destinationMac || "")
+    }
 
     property var visibleStreams: context.gooseStreams
     property int selectedIndex: -1
@@ -150,6 +170,104 @@ Rectangle {
 
                 Rectangle {
                     Layout.fillWidth: true
+                    implicitHeight: subscriptionPanel.implicitHeight + 16
+                    color: theme.surface
+                    border.width: 1
+                    border.color: root.observation.matched
+                                  ? (root.observation.timedOut ? theme.amber : theme.green)
+                                  : theme.line
+
+                    ColumnLayout {
+                        id: subscriptionPanel
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.margins: 8
+                        spacing: 6
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Label {
+                                text: "GOOSE Subscribe · read-only observation"
+                                color: theme.text
+                                font.pixelSize: 10
+                                font.weight: Font.DemiBold
+                            }
+                            Item { Layout.fillWidth: true }
+                            Label {
+                                text: root.monitor.capturing ? "CAPTURING" : "STOPPED"
+                                color: root.monitor.capturing ? theme.green : theme.muted
+                                font.pixelSize: 8
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Label {
+                                text: "NIC"
+                                color: theme.muted
+                                font.pixelSize: 9
+                            }
+                            ComboBox {
+                                id: gooseNicSelector
+                                Layout.fillWidth: true
+                                model: root.monitor.interfaces
+                                enabled: !root.monitor.capturing
+                                currentIndex: root.monitor.interfaces.indexOf(root.monitor.interfaceName)
+                                displayText: currentIndex < 0 ? "Select capture interface" : currentText
+                                onActivated: root.monitor.interfaceName = currentText
+                            }
+                            Button {
+                                text: root.monitor.capturing ? "Stop" : "GOOSE Subscribe"
+                                enabled: root.monitor.capturing || root.monitor.interfaceName.length > 0
+                                onClicked: root.monitor.capturing
+                                           ? root.monitor.stopCapture()
+                                           : root.monitor.startCapture()
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Starts/stops the shared passive Ethernet capture; does not send GOOSE or MMS commands."
+                            }
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: root.observation.matched
+                                  ? (root.observation.reason + " · " + root.observation.appIdText
+                                     + " · st/sq " + root.observation.stNum + "/" + root.observation.sqNum
+                                     + " · frames " + root.observation.packets)
+                                  : (root.monitor.capturing
+                                      ? "Waiting for matching Ethernet GOOSE · " + root.observation.reason
+                                      : "No live capture · select NIC and press GOOSE Subscribe")
+                            color: root.observation.matched && !root.observation.timedOut
+                                   ? theme.green : theme.textSoft
+                            font.pixelSize: 9
+                            wrapMode: Text.WordWrap
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            visible: root.observation.matched &&
+                                     root.selectedStream.members &&
+                                     root.selectedStream.members.length !== root.observation.valueCount
+                            text: "DataSet count mismatch · configured "
+                                  + root.selectedStream.members.length
+                                  + " · observed " + root.observation.valueCount
+                                  + " (do not assume aligned signals)"
+                            color: theme.amber
+                            font.pixelSize: 9
+                            wrapMode: Text.WordWrap
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: root.monitor.statusText
+                            color: theme.muted
+                            font.pixelSize: 8
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+                }
+
+                Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: theme.lineSoft }
+
+                Rectangle {
+                    Layout.fillWidth: true
                     implicitHeight: gooseAttributes.implicitHeight
                     color: theme.surface
                     border.width: 1
@@ -272,13 +390,46 @@ Rectangle {
                                 font.pixelSize: 9
                                 elide: Text.ElideMiddle
                             }
+                            Label {
+                                Layout.preferredWidth: 175
+                                visible: root.observation.matched
+                                text: root.observation.valueCount === (root.selectedStream.members || []).length
+                                      && index < root.observation.values.length
+                                      ? root.observation.values[index]
+                                      : "Unresolved · count mismatch"
+                                color: root.observation.timedOut ? theme.amber : theme.green
+                                font.pixelSize: 9
+                                elide: Text.ElideRight
+                            }
                         }
                     }
                 }
 
                 Label {
                     Layout.fillWidth: true
-                    text: "Engineering-model evidence only. Live Ethernet capture remains in Sniffer; publication remains in IED Simulator."
+                    visible: root.observation.matched
+                             && (!root.selectedStream.members || root.selectedStream.members.length === 0)
+                    text: "Unbound wire allData (ordered, no guessed signal names)"
+                    color: theme.textSoft
+                    font.pixelSize: 9
+                }
+                Repeater {
+                    model: root.observation.matched
+                           && (!root.selectedStream.members || root.selectedStream.members.length === 0)
+                           ? root.observation.values : []
+                    delegate: Label {
+                        required property string modelData
+                        Layout.fillWidth: true
+                        text: modelData
+                        color: theme.text
+                        font.pixelSize: 9
+                        elide: Text.ElideRight
+                    }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Observed values come from the shared passive Sniffer, bound only by exact GOOSE identity. No GOOSE publish, MMS writes or implicit reads."
                     color: theme.muted
                     font.pixelSize: 8
                     wrapMode: Text.WordWrap

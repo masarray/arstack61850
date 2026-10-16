@@ -113,6 +113,16 @@ public:
     Q_INVOKABLE void select(int row);
     Q_INVOKABLE bool exportPcap(const QUrl& fileUrl);
 
+    // Passive engineering binding, not a new subscriber or MMS operation.
+    // A frame is exposed only if its case-sensitive goCBRef and every
+    // configured address/identity constraint match exactly and uniquely.
+    // Never substitutes APPID-only guesses for a verified IED source.
+    Q_INVOKABLE QVariantMap observedForStream(
+        const QString& goCbRef,
+        const QString& dataSet,
+        const QString& appId,
+        const QString& destinationMac) const;
+
     // Deterministic QA/offline evidence path. This uses the same decoder,
     // supervisor, bounded model and retention path as live raw-Ethernet capture.
     [[nodiscard]] bool ingestFrameBytes(

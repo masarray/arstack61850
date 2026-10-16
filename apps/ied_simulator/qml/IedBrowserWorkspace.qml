@@ -12,6 +12,7 @@ Item {
     required property var session
     required property var client
     required property var context
+    required property var gooseMonitor
     required property var reports
     required property var utilities
     required property var controls
@@ -732,7 +733,7 @@ Item {
 
                         Label {
                             visible: root.activeSection === 5
-                            text: "Configured model view"
+                            text: gooseMonitor.capturing ? "Read-only GOOSE capture active" : "GOOSE capture idle"
                             color: root.theme.muted
                             font.pixelSize: 8
                         }
@@ -797,6 +798,7 @@ Item {
                         id: goosePane
                         theme: root.theme
                         context: root.context
+                        monitor: root.gooseMonitor
                         selectedIndex: root.selectedGooseIndex
                     }
 

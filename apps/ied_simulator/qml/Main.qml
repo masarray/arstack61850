@@ -478,6 +478,7 @@ ApplicationWindow {
                                     session: root.browserFleet.sessionAt(index)
                                     client: root.browserFleet.clientAt(index)
                                     context: root.browserFleet.contextAt(index)
+                                    gooseMonitor: gooseMonitor
                                     reports: root.browserFleet.reportsAt(index)
                                     utilities: root.browserFleet.utilitiesAt(index)
                                     controls: root.browserFleet.controlsAt(index)
