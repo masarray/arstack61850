@@ -1,12 +1,12 @@
 # Native Qt IEC 61850 Workbench — current cross-thread handoff
 
-> **Updated:** 2026-10-16 (WIB), snapshot only; always refresh GitHub refs and PR state before editing.
+> **Updated:** 2026-10-17 (WIB), snapshot only; always refresh GitHub refs and PR state before editing.
 > **Primary strategy and ownership contract:** [WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md](WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md).
 > **Scope:** installed native ARStack Workbench in apps/ied_simulator. Not a web app, WPF clone, or the separate ESP32-P4/SMV Studio track.
 
 ## P0 exact RCB InformationReport authority — 2026-10-17 (WIB)
 
-- **Implementation PR:** [#203](https://github.com/masarray/arstack61850/pull/203), native Qt Workbench + reusable C++ MMS engine; source changes present on PR, **merge and field acceptance pending CI** at this checkpoint. Refresh its exact head, 13 workflow results, review threads, and main before treating this as accepted.
+- **Integrated main:** `a33271e90fea369abad551e7601b446752e10d54` ([PR #203](https://github.com/masarray/arstack61850/pull/203) MERGED). Exact source head `723ad3f46728b864c91e553820e410ab4171ad9a` passed **13/13 workflows**, including native IED Simulator Qt 55/55 steps, C++ GCC/Clang/Windows MSVC, Security ASan/UBSan/libFuzzer, SCL-assisted, dynamic RCB, BRCB, interoperability and naming guard. All code-review threads resolved. This is automated replay/protocol gate evidence, **not** physical relay interoperability acceptance.
 - **Critical issue closed in source:** original subscription mapped every incoming InformationReport against the selected RCB DataSet before proving source ownership; Inspector filtered only by RptID. New authority boundary checks exact RptID *before* mapping and then validates optional DatSet/ConfRev (when present), ordered unique inclusion indexes and wire DataRef against exact directory identity before exposing process values. Foreign/stale reports are rejected, counted separately from decode failures, and never enter continuity stream.
 - **Browser output:** each accepted frame carries its association's active RCB reference, and Inspector requires both exact RCB reference and RptID where known. Bounded lifecycle events include explicit GI sent/not sent/failure and a warning on rejected frames/decoder errors, not an invented successful subscription.
 - **Static RCB safety:** discovery-chosen DataSet reference is pinned across the live activation probe and compared with the fresh RCB readback before any write; mismatch fails closed. GI is a Write trigger, removed from both targeted SCL attach Read set and subscription Read set. URCB reservation / BRCB separation, guarded TrgOps/OptFlds, RptEna-last and cleanup ownership remain one existing C++ runtime authority (no second decoder or polling association).
