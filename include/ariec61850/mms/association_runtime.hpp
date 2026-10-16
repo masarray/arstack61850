@@ -169,6 +169,10 @@ public:
         std::stop_token stop_token = {});
     void disconnect(std::stop_token stop_token = {}) noexcept;
 
+    // Single-flight, association-owner-only API. Concurrent callers or a
+    // parallel poll/receive thread are unsupported until a dedicated
+    // association-owned dispatcher correlates outstanding invoke IDs.
+    // Unexpected confirmed results fail closed instead of being replayed.
     [[nodiscard]] MmsConfirmedExchangeResult exchange_confirmed(
         std::span<const std::uint8_t> presentation_payload,
         std::uint32_t expected_invoke_id,
