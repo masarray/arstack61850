@@ -164,6 +164,15 @@ ApplicationWindow {
         configurationWindow.requestActivate()
     }
 
+    function openTimingSettings() {
+        profilePanel.showTiming()
+        openConfiguration()
+    }
+
+    function startPtpRole(role) {
+        return profilePanel.startPtpRole(role)
+    }
+
     function openDiagnostics() {
         diagnosticsDialog.open()
     }
