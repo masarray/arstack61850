@@ -206,7 +206,7 @@ SurfacePanel {
                     Label {
                         Layout.fillWidth: true
                         text: panel.device.deviceVerified
-                            ? panel.device.deviceProduct + " · " + panel.device.deviceTarget + " · firmware v" + panel.device.firmwareVersion
+                            ? panel.device.deviceProduct + " · " + panel.device.deviceTarget + " · firmware v" + panel.device.firmwareVersion + " · build " + (panel.device.firmwareBuildId.length > 0 ? panel.device.firmwareBuildId : "unknown")
                             : (panel.hasPort
                                 ? firmwarePort.currentText + " is visible. Device identity and recovery decisions remain owned by the guided session."
                                 : "Connect the ESP32-P4 programming USB cable, then refresh the port list.")
@@ -274,7 +274,7 @@ SurfacePanel {
                         text: panel.firmware.busy
                             ? "The session supervisor currently owns the firmware tool. Keep USB connected until Studio reports a terminal result."
                             : (panel.session && panel.session.firmwareUpdateAvailable
-                                ? "The board firmware is compatible and remains usable. A newer build is available as an optional guided update."
+                                ? "Device firmware is compatible, but its build ID differs from this package. Keep using it or install the bundled build when convenient. Copy diagnostics if verification fails."
                                 : "When Studio reports Firmware required, use the guided action. It will stop output, obtain an acknowledged serial release, verify the ESP32-P4, then write.")
                         color: panel.theme.textSoft
                         font.family: panel.uiFont
@@ -289,7 +289,7 @@ SurfacePanel {
                     uiFont: panel.uiFont
                     implicitWidth: 172
                     text: panel.session && (panel.session.firmwareUpdateRequired || panel.session.firmwareUpdateAvailable)
-                        ? (panel.session.firmwareUpdateRequired ? "Update firmware" : "Update available")
+                        ? (panel.session.firmwareUpdateRequired ? "Update firmware" : "Install bundled build")
                         : "Reinstall current"
                     visible: panel.session &&
                              (panel.session.firmwareUpdateRequired || panel.session.firmwareUpdateAvailable || panel.session.firmwareReinstallAvailable)

@@ -34,6 +34,7 @@ public:
             {"optional bootloader wait -> cancel restores supervisor", optionalBootloaderWaitCanCancel()},
             {"firmware stage projection -> supervisor-owned", firmwareStageProjectionIsExplicit()},
             {"firmware verification failure remains copyable after READY", firmwareFailureRemainsDiagnosable()},
+            {"firmware build mismatch explains expected and observed IDs", reconnectBuildMismatchPreservesEvidence()},
             {"fragmented espflash progress -> monotonic", fragmentedEspflashProgressIsMonotonic()},
             {"trusted ESP32-P4 identity timeout -> firmware required", automaticIdentityTimeoutOffersFirmwareRecovery()},
             {"single visible COM without metadata -> firmware required", singleVisibleTimeoutWithoutRecommendationOffersFirmwareRecovery()},
@@ -318,6 +319,28 @@ private:
             fixture.session.firmwareUpdateAvailable() &&
             !fixture.session.firmwareReinstallAvailable() &&
             fixture.session.startReady();
+    }
+
+    static bool reconnectBuildMismatchPreservesEvidence() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        auto stale = identity();
+        stale.buildId = QStringLiteral("fedcba9876543210");
+        seedVerified(fixture, stale, QStringLiteral("COM7"), false);
+        auto& session = fixture.session;
+        session.started_ = false;
+        session.updateRequested_ = true;
+        session.updateWasOptional_ = true;
+        session.updateStage_ = SmartSessionController::UpdateStage::reconnecting;
+        session.reconcile();
+        const QString evidence = session.firmwareUpdateResult();
+        return !session.updateRequested_ &&
+            session.state() == QStringLiteral("READY") &&
+            session.firmwareUpdateAvailable() &&
+            evidence.contains(QStringLiteral("fedcba9876543210")) &&
+            evidence.contains(QStringLiteral("0123456789abcdef")) &&
+            evidence.contains(QStringLiteral("Copy diagnostics")) &&
+            session.diagnosticsText().contains(evidence);
     }
 
     static bool optionalBootloaderWaitCanCancel() {
