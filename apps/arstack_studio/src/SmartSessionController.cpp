@@ -890,6 +890,14 @@ QString SmartSessionController::diagnosticsText() const {
         add(QStringLiteral("Firmware target"), firmware_->targetChip());
         add(QStringLiteral("Firmware operation busy"), firmware_->busy() ? QStringLiteral("yes") : QStringLiteral("no"));
     }
+    if (profiles_ != nullptr && profiles_->hasProfiles()) {
+        const QVariantMap profile = profiles_->selectedProfile();
+        add(QStringLiteral("Configured SV ID"), profile.value(QStringLiteral("svId")).toString());
+        add(QStringLiteral("Configured APPID"), profile.value(QStringLiteral("appId")).toString());
+        add(QStringLiteral("Configured publisher fps"), profile.value(QStringLiteral("publisherRate")).toString());
+        add(QStringLiteral("Configured counter wrap"), profile.value(QStringLiteral("counterModulus")).toString());
+        add(QStringLiteral("Configured payload bytes"), profile.value(QStringLiteral("payloadBytes")).toString());
+    }
     if (device_ != nullptr) {
         add(QStringLiteral("Device verified"), device_->deviceVerified() ? QStringLiteral("yes") : QStringLiteral("no"));
         add(QStringLiteral("COM port"), device_->portName());

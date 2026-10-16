@@ -956,6 +956,8 @@ private:
             session.firmwareUpdateResult().contains(QStringLiteral("different build")) &&
             report.contains(QStringLiteral("Last firmware update result: Firmware was written")) &&
             report.contains(QStringLiteral("Bundled build ID: 0123456789abcdef")) &&
+            report.contains(QStringLiteral("Configured SV ID: ARSTACK_SV01")) &&
+            report.contains(QStringLiteral("Configured publisher fps: 4000")) &&
             report.contains(QStringLiteral("Exact bundled build match: NOT VERIFIED")) &&
             report.contains(QStringLiteral("Firmware protocol compatible: UNKNOWN"));
     }
