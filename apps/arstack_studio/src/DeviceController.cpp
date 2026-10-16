@@ -680,14 +680,14 @@ bool DeviceController::setSignal(
 }
 
 QStringList DeviceController::buildThreePhaseSetBatch(
-    const QVariantList& signals,
+    const QVariantList& setpoints,
     const double currentCountsPerAmp,
     const double voltageCountsPerVolt,
     const double frequencyHz) {
-    if (signals.size() != 3 || !finitePositive(currentCountsPerAmp) ||
+    if (setpoints.size() != 3 || !finitePositive(currentCountsPerAmp) ||
         !finitePositive(voltageCountsPerVolt)) return {};
 
-    const QString first = signals[0].toMap().value(QStringLiteral("signalId"))
+    const QString first = setpoints[0].toMap().value(QStringLiteral("signalId"))
                               .toString().trimmed().toUpper();
     const bool currents = first == QStringLiteral("IA");
     if (!currents && first != QStringLiteral("UA")) return {};
@@ -699,7 +699,7 @@ QStringList DeviceController::buildThreePhaseSetBatch(
     QStringList commands;
     commands.reserve(3);
     for (int i = 0; i < 3; ++i) {
-        const QVariantMap item = signals[i].toMap();
+        const QVariantMap item = setpoints[i].toMap();
         if (item.value(QStringLiteral("signalId")).toString().trimmed().toUpper() != expected[i])
             return {};
         bool magnitudeValid = false;
@@ -732,11 +732,11 @@ QStringList DeviceController::buildThreePhaseSetBatch(
 }
 
 bool DeviceController::setSignalsBatch(
-    const QVariantList& signals,
+    const QVariantList& setpoints,
     const double currentCountsPerAmp,
     const double voltageCountsPerVolt) {
     const QStringList commands = buildThreePhaseSetBatch(
-        signals, currentCountsPerAmp, voltageCountsPerVolt, signalFrequencyHz_);
+        setpoints, currentCountsPerAmp, voltageCountsPerVolt, signalFrequencyHz_);
     if (commands.size() != 3) {
         setError(QStringLiteral("ABC batch is invalid; no phase was queued."));
         return false;
