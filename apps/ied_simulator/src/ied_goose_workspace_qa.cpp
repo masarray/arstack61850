@@ -231,9 +231,66 @@ int main(int argc, char** argv) {
                         .value(QStringLiteral("matched")).toBool(),
                     "VLAN ID must disambiguate publisher before ambiguity rejection");
         }
+        // Same physical source / APPID / goCBRef can still expose
+        // independent publisher streams on distinct goID/VLAN interfaces.
+        // A coarse (source, APPID, goCBRef) key incorrectly overwrote them.
         goose::GooseFrame baseFrame;
         REQUIRE(goose::GooseFrameCodec::try_decode(packets.back().frame, baseFrame),
                 "could not decode Stage M evidence for sequence QA");
+        GooseMonitorController sameSourceMonitor;
+        REQUIRE(sameSourceMonitor.ingestFrameBytes(
+                    goose::GooseFrameCodec::encode(baseFrame), base),
+                "same-source fixture did not ingest primary frame");
+        auto otherGoId = baseFrame;
+        otherGoId.pdu.go_id = "alternate-publisher";
+        REQUIRE(sameSourceMonitor.ingestFrameBytes(
+                    goose::GooseFrameCodec::encode(otherGoId),
+                    base + std::chrono::milliseconds{1}),
+                "same-source alternate goID failed ingest");
+        REQUIRE(sameSourceMonitor.rowCount() == 2,
+                "same-source alternate goID overwrote a distinct publisher stream");
+        REQUIRE(!sameSourceMonitor.observedForStream(goRef, dataSet, "1001", dst)
+                     .value(QStringLiteral("matched")).toBool(),
+                "same-source distinct goID should be ambiguous without goID selector");
+        auto keyedGoId = configured;
+        keyedGoId.remove(QStringLiteral("vlanId"));
+        keyedGoId.remove(QStringLiteral("vlanPriority"));
+        REQUIRE(sameSourceMonitor.observedForConfiguredStream(keyedGoId)
+                    .value(QStringLiteral("matched")).toBool(),
+                "primary same-source goID not uniquely bound");
+        keyedGoId.insert(QStringLiteral("goId"), QStringLiteral("alternate-publisher"));
+        REQUIRE(sameSourceMonitor.observedForConfiguredStream(keyedGoId)
+                    .value(QStringLiteral("matched")).toBool(),
+                "alternate same-source goID not uniquely bound");
+
+        if (baseFrame.vlan) {
+            GooseMonitorController sameSourceVlanMonitor;
+            REQUIRE(sameSourceVlanMonitor.ingestFrameBytes(
+                        goose::GooseFrameCodec::encode(baseFrame), base),
+                    "tagged publisher first frame not retained");
+            auto differentVlan = baseFrame;
+            differentVlan.vlan->vlan_id = static_cast<std::uint16_t>(
+                (differentVlan.vlan->vlan_id + 1U) % 4095U);
+            REQUIRE(sameSourceVlanMonitor.ingestFrameBytes(
+                        goose::GooseFrameCodec::encode(differentVlan),
+                        base + std::chrono::milliseconds{1}),
+                    "alternate VLAN GOOSE frame rejected");
+            REQUIRE(sameSourceVlanMonitor.rowCount() == 2,
+                    "same-source tagged publishers collapsed across VLAN ID");
+            auto vlanSelector = configured;
+            REQUIRE(sameSourceVlanMonitor.observedForConfiguredStream(vlanSelector)
+                        .value(QStringLiteral("matched")).toBool(),
+                    "configured VLAN ID did not select the original publisher");
+            vlanSelector.insert(QStringLiteral("vlanId"),
+                                static_cast<int>(differentVlan.vlan->vlan_id));
+            REQUIRE(sameSourceVlanMonitor.observedForConfiguredStream(vlanSelector)
+                        .value(QStringLiteral("matched")).toBool(),
+                    "configured VLAN ID did not select alternate publisher");
+            vlanSelector.remove(QStringLiteral("vlanId"));
+            REQUIRE(!sameSourceVlanMonitor.observedForConfiguredStream(vlanSelector)
+                         .value(QStringLiteral("matched")).toBool(),
+                    "underspecified same-source VLAN identity must fail closed");
+        }
         const auto lastRelative = std::chrono::duration_cast<std::chrono::milliseconds>(
             packets.back().timestamp - firstTimestamp);
         auto arrival = base + lastRelative + std::chrono::milliseconds{1};

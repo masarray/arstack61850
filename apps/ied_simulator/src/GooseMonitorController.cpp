@@ -507,8 +507,30 @@ QString GooseMonitorController::formatValue(const MmsDataValue& value, const int
 }
 
 QString GooseMonitorController::streamKey(const ar::iec61850::goose::GooseFrame& frame) {
-    return QString::fromStdString(frame.source.to_string()) + QLatin1Char('|') +
-        QString::number(frame.app_id) + QLatin1Char('|') + QString::fromStdString(frame.pdu.go_cb_ref);
+    // One physical source may publish multiple independent streams with the
+    // same APPID/goCBRef on different VLANs/multicast MACs or with distinct
+    // goIDs. Keep the FULL on-wire publisher identity in separate slots so
+    // their sequence/TTL supervisors and ordered values never overwrite.
+    //
+    // Length prefix each field: goID/DataSet are untrusted wire strings,
+    // so '|' concatenation alone would permit composite-key collisions.
+    QString result;
+    result.reserve(256);
+    const auto part = [&result](const QString& value) {
+        result += QString::number(value.size());
+        result += QLatin1Char(':');
+        result += value;
+    };
+    part(QString::fromStdString(frame.source.to_string()));
+    part(QString::fromStdString(frame.destination.to_string()));
+    part(QString::number(frame.app_id));
+    part(QString::fromStdString(frame.pdu.go_cb_ref));
+    part(QString::fromStdString(frame.pdu.data_set_reference));
+    part(QString::fromStdString(frame.pdu.go_id));
+    part(frame.vlan ? QString::number(frame.vlan->vlan_id) : QStringLiteral("untagged"));
+    part(frame.vlan ? QString::number(frame.vlan->priority_code_point)
+                    : QStringLiteral("untagged"));
+    return result;
 }
 
 int GooseMonitorController::indexForKey(const QString& key) const noexcept {
