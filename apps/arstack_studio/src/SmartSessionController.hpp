@@ -181,7 +181,7 @@ public:
         double voltageCountsPerVolt);
     // One all-or-none worker FIFO admission for fast ABC operator actions.
     Q_INVOKABLE bool requestSetSignalsBatch(
-        const QVariantList& signals,
+        const QVariantList& setpoints,
         double currentCountsPerAmp,
         double voltageCountsPerVolt);
     Q_INVOKABLE bool requestSetEnabled(const QString& signalId, const bool enabled) {

@@ -386,11 +386,11 @@ bool SmartSessionController::requestSetSignal(
 }
 
 bool SmartSessionController::requestSetSignalsBatch(
-    const QVariantList& signals,
+    const QVariantList& setpoints,
     const double currentCountsPerAmp,
     const double voltageCountsPerVolt) {
     return liveControlReady() && device_ != nullptr &&
-           device_->setSignalsBatch(signals, currentCountsPerAmp, voltageCountsPerVolt);
+           device_->setSignalsBatch(setpoints, currentCountsPerAmp, voltageCountsPerVolt);
 }
 
 bool SmartSessionController::requestSetQuality(const QString& signalId, const quint32 quality) {
