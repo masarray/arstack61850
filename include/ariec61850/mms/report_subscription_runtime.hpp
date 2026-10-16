@@ -39,6 +39,7 @@ enum class MmsReportSubscriptionEventKind : std::uint8_t {
     attribute_written,
     enabled,
     general_interrogation_sent,
+    general_interrogation_not_sent,
     report_received,
     report_rejected,
     report_decode_failed,
@@ -64,6 +65,10 @@ struct MmsReportSubscriptionOptions final {
     std::vector<std::uint8_t> trigger_options;
     std::vector<std::uint8_t> optional_fields;
     std::string data_set_reference;
+    // Pin the DataSet whose directory labels the values. Used by static
+    // subscriptions so another client cannot silently rebind between
+    // discovery and the first RCB enable.
+    std::string expected_data_set_reference;
     std::size_t maximum_events{1'024U};
     MmsOfflineReportMonitorOptions monitor_options{};
 };

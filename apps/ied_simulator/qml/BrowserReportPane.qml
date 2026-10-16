@@ -479,6 +479,29 @@ Rectangle {
                     }
                 }
 
+                SectionHeading {
+                    heading: "RCB lifecycle & InformationReport events"
+                    evidence: reports.events.length + " bounded event(s)"
+                    opened: reports.events.length > 0
+                    visible: reports.events.length > 0
+                    onToggleRequested: {}
+                }
+                Repeater {
+                    model: reports.events.slice(Math.max(0, reports.events.length - 6))
+                    delegate: Label {
+                        required property string modelData
+                        Layout.fillWidth: true
+                        leftPadding: 9
+                        rightPadding: 9
+                        topPadding: 3
+                        bottomPadding: 3
+                        text: modelData
+                        color: theme.textSoft
+                        font.pixelSize: 9
+                        wrapMode: Text.WordWrap
+                    }
+                }
+
                 Rectangle {
                     visible: reports.rejectedReportCount > 0 || reports.reportDecodeFailureCount > 0
                     Layout.fillWidth: true

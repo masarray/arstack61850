@@ -373,7 +373,7 @@ mms::MmsLiveDiscoveryResult buildContextDiscoverySeed(
     static const std::vector<std::string> reportAttributes{
         "DatSet", "RptID", "ConfRev", "IntgPd", "BufTm", "SqNum",
         "RptEna", "Resv", "ResvTms", "Owner", "EntryID", "TimeOfEntry",
-        "TrgOps", "OptFlds"};
+        "TrgOps", "OptFlds", "GI"};
 
     for (const auto& control : model.report_controls) {
         mms::MmsReportControlCandidate candidate;
