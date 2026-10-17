@@ -19,6 +19,10 @@ jobs:
   # rather than taking an older public firmware that lacks PROFILE-BINARY-V1.
   firmware:
     uses: ./.github/workflows/esp32p4-smv-injector.yml
+    with:
+      # Only the GUI Preview installer opts into measured local phase sync.
+      # Stable release workflow keeps ordinary firmware until board validation.
+      phase_sync_preview: true
 
   windows-preview:
     needs: firmware
@@ -95,6 +99,12 @@ jobs:
             throw 'Matching firmware job did not provide its manifest'
           }
           $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+          if ($manifest.phaseSyncPreview -ne $true -or
+              $manifest.phaseServoEnabled -ne $true -or
+              $manifest.canonicalMacTxEvidenceEnabled -ne $true -or
+              $manifest.broadcastMirrorEnabled -ne $false) {
+            throw 'Studio preview refuses old/default SMV firmware without measured PTP-SV phase and MAC TX evidence'
+          }
           $expectedCapabilities = @('SMV-4I4V', 'PROFILE', 'PROFILE-BINARY-V1', 'LIVE-SETPOINTS', 'SESSION-LEASE', 'PTP-P2', 'SMPSYNCH-AUTO')
           foreach ($capability in $expectedCapabilities) {
             if ($manifest.capabilities -notcontains $capability) { throw "PR firmware lacks capability: $capability" }

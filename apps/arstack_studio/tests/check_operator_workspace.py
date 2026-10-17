@@ -30,6 +30,24 @@ def main() -> None:
     tray = source("StudioTimingTray.qml")
     expert = source("PtpExpertPanel.qml")
     config = source("ConfigurationHub.qml")
+    require("Lab simulation controls" not in config
+            and "Signals, firmware, PTP and device settings" in config,
+            "Advanced must not imply this is only a simulated lab tool")
+    require("Changes sent on Start" in main_qml
+            and "root.pendingApply && !workflowBar.injectionRunning" in main_qml,
+            "STOPPED waveform edits must distinguish draft from sent setpoints")
+    controller = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
+    require("logUpdateTimer_.setInterval(100)" in controller
+            and "if (!logUpdateTimer_.isActive()) logUpdateTimer_.start();" in controller,
+            "serial log QML notification must be coalesced to avoid GUI stutter")
+    role = controller.split("match = kPtpRoleExpression.match(line);")[1].split(
+        "match = kPtpMeasuredStateExpression.match(line);")[0]
+    require("ptpRunning_ =" not in role and "ptpDiscipline_ =" not in role,
+            "stale PROFILE PTPROLE must not override verified PTP runtime")
+    require("ptpRestoreAfterFirmware" in main_qml
+            and "root.ptpRestoreChecks > 120" in main_qml
+            and "root.ptpDesiredForSession = false" in main_qml,
+            "PTP user intent restoration must be bounded, explicit and cancellable")
     matrix = source("SignalMatrix.qml")
     menu = source("StudioActionMenu.qml")
     cmake = (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8")
@@ -46,11 +64,11 @@ def main() -> None:
     require("StudioTimingTray {" in main_qml and "id: frequencyMenu" in main_qml,
             "main window must expose timing and frequency context controls")
     require("function startPtpRole(role) { return timingPanel.startRole(role) }" in config
-            and "return profilePanel.startPtpRole(role)" in main_qml
+            and "const accepted = profilePanel.startPtpRole(role)" in main_qml
             and "requestStartPtpConfigured(role, panel.ptpProfile())" in expert,
             "main PTP must reuse the existing verified Advanced profile")
     require("checked = Qt.binding(function()" in tray
-            and "tray.session.requestStopPtp()" in tray
+            and "tray.controller.requestStopPtp()" in tray
             and "tray.session.requestSmpSynch([\"AUTO\", \"0\", \"1\", \"2\"][requested])" in tray
             and "if (!tray.boardOnline)" in tray,
             "main PTP/smpSynch must restore device-owned state after user intent")

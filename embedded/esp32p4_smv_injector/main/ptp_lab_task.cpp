@@ -3,7 +3,9 @@
 #include "ptp_lab_task.hpp"
 
 #include "ariec61850/time_sync/ptp.hpp"
+#include "ariec61850/time_sync/ptp_power_profile.hpp"
 #include "ariec61850/time_sync/ptp_runtime.hpp"
+#include "ariec61850/time_sync/ptp_tai_source.hpp"
 
 #include "esp_err.h"
 #include "esp_eth.h"
@@ -11,6 +13,7 @@
 #include "esp_eth_mac.h"
 #include "esp_idf_version.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -45,6 +48,10 @@ using ar::iec61850::time_sync::PtpMessageType;
 using ar::iec61850::time_sync::PtpPortIdentity;
 using ar::iec61850::time_sync::PtpPublisherOptions;
 using ar::iec61850::time_sync::PtpPublisherRuntime;
+using ar::iec61850::time_sync::PtpSourceReadinessGate;
+using ar::iec61850::time_sync::PtpSourceEvidenceFreshness;
+using ar::iec61850::time_sync::conservative_lab_time_properties;
+using ar::iec61850::time_sync::inspect_ptp_power_profile_cadence;
 using ar::iec61850::time_sync::PtpTimeSource;
 using ar::iec61850::time_sync::PtpTimestamp;
 using ar::iec61850::time_sync::format_ptp_clock_identity;
@@ -78,6 +85,10 @@ struct PtpLabContext final {
 PtpLabContext g_ptp_context{};
 std::atomic_bool g_ptp_started{false};
 std::atomic_bool g_ptp_ready{false};
+std::atomic<std::int64_t> g_ptp_last_announce_us{0LL};
+std::atomic<std::int64_t> g_ptp_last_sync_pair_us{0LL};
+std::atomic<std::int64_t> g_ptp_freshness_timeout_us{3000000LL};
+std::atomic<std::uint32_t> g_ptp_source_generation{0U};
 std::atomic_bool g_stop_requested{false};
 std::atomic_bool g_ptp_accept_rx{false};
 std::atomic<std::uint64_t> g_announce_sent{0U};
@@ -85,6 +96,15 @@ std::atomic<std::uint64_t> g_sync_sent{0U};
 std::atomic<std::uint64_t> g_follow_up_sent{0U};
 std::atomic<std::uint64_t> g_pdelay_frames_sent{0U};
 std::atomic<std::uint64_t> g_tx_failure_count{0U};
+
+[[nodiscard]] bool source_has_fresh_evidence() noexcept {
+    if (!g_ptp_ready.load(std::memory_order_acquire)) return false;
+    return PtpSourceEvidenceFreshness::fresh(
+        esp_timer_get_time(),
+        g_ptp_last_announce_us.load(std::memory_order_acquire),
+        g_ptp_last_sync_pair_us.load(std::memory_order_acquire),
+        g_ptp_freshness_timeout_us.load(std::memory_order_acquire));
+}
 
 portMUX_TYPE g_control_mux = portMUX_INITIALIZER_UNLOCKED;
 ar_ptp_lab_config_t g_runtime_config_override{};
@@ -201,11 +221,33 @@ void fill_kconfig_defaults(ar_ptp_lab_config_t& config) noexcept {
 [[nodiscard]] bool validate_runtime_config(
     const ar_ptp_lab_config_t& config,
     std::string& error) {
+    // LAB_SOURCE has no external clock input or traceability evidence.
+    // Reject source-quality advertising that would mislead an IED BMCA.
+    if (config.role == AR_PTP_ROLE_LAB_SOURCE &&
+        (config.clock_class != 248U ||
+         config.clock_accuracy !=
+             static_cast<std::uint8_t>(PtpClockAccuracy::unknown) ||
+         config.time_source !=
+             static_cast<std::uint8_t>(PtpTimeSource::internal_oscillator))) {
+        error = "LAB_SOURCE requires clockClass=248, clockAccuracy=UNKNOWN "
+                "and timeSource=INTERNAL_OSCILLATOR (no external reference)";
+        return false;
+    }
     if (config.clock_identity_override && all_zero_identity(config.clock_identity)) {
         error = "clockIdentity override must be non-zero";
         return false;
     }
-    return options_from_config(config, kValidationMac, &error).has_value();
+    auto options = options_from_config(config, kValidationMac, &error);
+    if (!options.has_value()) return false;
+#if !defined(CONFIG_AR_PTP_ALLOW_NONSTANDARD_LAB_CADENCE) || !CONFIG_AR_PTP_ALLOW_NONSTANDARD_LAB_CADENCE
+    if (config.role == AR_PTP_ROLE_LAB_SOURCE &&
+        !inspect_ptp_power_profile_cadence(*options).compatible()) {
+        error = "IEC/IEEE 61850-9-3 lab SOURCE requires 1s Announce, 1s Sync "
+                "and hardware Pdelay responder; nonstandard bench mode is opt-in";
+        return false;
+    }
+#endif
+    return true;
 }
 
 [[nodiscard]] std::optional<PtpPublisherOptions> make_runtime_options(
@@ -288,20 +330,49 @@ void disable_hardware_ptp(const esp_eth_handle_t eth_handle) noexcept {
     }
 }
 
-void seed_hardware_clock(const esp_eth_handle_t eth_handle) noexcept {
+// Returns true only when the EMAC was seeded with an epoch expressed in
+// PTP/TAI seconds. A plausible RTC is not an accuracy/traceability guarantee.
+[[nodiscard]] bool seed_hardware_clock(
+    const esp_eth_handle_t eth_handle,
+    const std::int16_t configured_tai_utc_offset) noexcept {
     eth_mac_time_t initial_time{};
     const std::time_t system_time = std::time(nullptr);
-    if (system_time > 0 &&
-        static_cast<std::uint64_t>(system_time) <= std::numeric_limits<std::uint32_t>::max()) {
-        initial_time.seconds = static_cast<std::uint32_t>(system_time);
-    }
+    const auto tai_seconds = ar::iec61850::time_sync::try_seed_ptp_tai_seconds(
+        static_cast<std::int64_t>(system_time), configured_tai_utc_offset);
+    if (tai_seconds.has_value()) initial_time.seconds = *tai_seconds;
     const auto result = esp_eth_ioctl(
-        eth_handle,
-        static_cast<esp_eth_io_cmd_t>(ETH_MAC_ESP_CMD_S_PTP_TIME),
+        eth_handle, static_cast<esp_eth_io_cmd_t>(ETH_MAC_ESP_CMD_S_PTP_TIME),
         &initial_time);
     if (result != ESP_OK) {
-        ESP_LOGW(kTag, "Unable to seed hardware PTP time: %s", esp_err_to_name(result));
+        ESP_LOGE(kTag, "Hardware PTP clock seed failed: %s", esp_err_to_name(result));
+        return false;
     }
+    if (!tai_seconds.has_value()) {
+        ESP_LOGW(kTag,
+            "No plausible UTC epoch: EMAC PTP free-runs without PTP-timescale validity; "
+            "clock quality remains UNKNOWN (not IED traceable)");
+        return false;
+    }
+    // A successful write ioctl alone does not prove that the MAC is operating
+    // on the intended timebase. Verify once at control-plane START, never
+    // during each SV sample or PTP packet.
+    eth_mac_time_t readback{};
+    const auto read_result = esp_eth_ioctl(
+        eth_handle, static_cast<esp_eth_io_cmd_t>(ETH_MAC_ESP_CMD_G_PTP_TIME),
+        &readback);
+    if (read_result != ESP_OK || readback.nanoseconds >= 1'000'000'000U ||
+        static_cast<std::uint64_t>(readback.seconds) <
+            static_cast<std::uint64_t>(*tai_seconds) ||
+        static_cast<std::uint64_t>(readback.seconds) >
+            static_cast<std::uint64_t>(*tai_seconds) + 1ULL) {
+        ESP_LOGE(kTag,
+            "Hardware PTP TAI seed read-back invalid; withholding PTP-timescale claim");
+        return false;
+    }
+    ESP_LOGI(kTag,
+        "PTP/TAI seed applied from local RTC and configured UTC offset; "
+        "absolute time accuracy/traceability NOT established");
+    return true;
 }
 
 [[nodiscard]] PtpTimestamp hardware_time(const esp_eth_handle_t eth_handle) noexcept {
@@ -483,6 +554,9 @@ esp_err_t ptp_input_info(
 
 void finish_runtime(PtpLabContext& context) {
     g_ptp_accept_rx.store(false, std::memory_order_release);
+    g_ptp_ready.store(false, std::memory_order_release);
+    g_ptp_last_announce_us.store(0LL, std::memory_order_release);
+    g_ptp_last_sync_pair_us.store(0LL, std::memory_order_release);
     if (context.runtime.has_value()) {
         context.runtime->stop();
         const auto status = context.runtime->status();
@@ -511,7 +585,9 @@ void ptp_lab_task(void* argument) {
         vTaskDelete(nullptr);
         return;
     }
-    seed_hardware_clock(context.eth_handle);
+    const auto selected_ptp_config = selected_config();
+    const bool ptp_tai_epoch_seeded = seed_hardware_clock(
+        context.eth_handle, selected_ptp_config.current_utc_offset);
 
     const auto mac_result = esp_eth_ioctl(
         context.eth_handle,
@@ -532,6 +608,19 @@ void ptp_lab_task(void* argument) {
         return;
     }
 
+    // IEEE 1588-2008 timeProperties must match the actual EMAC timescale.
+    // Flagging PTP/TAI does not imply traceability to UTC/GNSS.
+#if defined(CONFIG_AR_PTP_MANUAL_UTC_OFFSET_VALID) && CONFIG_AR_PTP_MANUAL_UTC_OFFSET_VALID
+    constexpr bool kOperatorVerifiedTaiUtcOffset = true;
+#else
+    constexpr bool kOperatorVerifiedTaiUtcOffset = false;
+#endif
+    profile->time_properties = conservative_lab_time_properties(
+        ptp_tai_epoch_seeded, kOperatorVerifiedTaiUtcOffset);
+    if (!profile->time_properties.ptp_timescale) {
+        ESP_LOGW(kTag, "PTP timescale/UTC offset UNKNOWN: local RTC or "
+                 "TAI-UTC offset not independently verified; no traceability claim");
+    }
     context.runtime.emplace(std::move(*profile));
     if (!context.runtime->start()) {
         ESP_LOGE(kTag,
@@ -543,6 +632,13 @@ void ptp_lab_task(void* argument) {
     }
 
     const auto options = context.runtime->options();
+    // Nonstandard bench cadences are explicitly opt-in, so expiry tracks the
+    // larger validated interval. Default power-profile TTL = 3 seconds.
+    const auto interval_ms = std::max(
+        options.announce_interval.count(), options.sync_interval.count());
+    g_ptp_freshness_timeout_us.store(
+        static_cast<std::int64_t>(interval_ms) * 3000LL,
+        std::memory_order_release);
     context.rx_domain = options.domain_number;
     context.rx_transport_specific = options.transport_specific;
     context.rx_respond_to_peer_delay = options.respond_to_peer_delay;
@@ -563,6 +659,16 @@ void ptp_lab_task(void* argument) {
         }
     }
 
+    // A Power Profile slave needs peer-delay replies to qualify network
+    // propagation time. Do not advertise a usable timing source when the
+    // requested hardware RX/Pdelay path could not be established.
+    if (options.respond_to_peer_delay && !pdelay_enabled) {
+        ESP_LOGE(kTag, "PTP SOURCE rejected: required hardware Pdelay response path unavailable");
+        finish_runtime(context);
+        vTaskDelete(nullptr);
+        return;
+    }
+
     const auto clock_identity = format_ptp_clock_identity(options.clock_identity);
     ESP_LOGW(kTag,
              "PTP LAB TX enabled: troubleshooting/interoperability helper only; not a GPS-backed or certified grandmaster");
@@ -578,7 +684,17 @@ void ptp_lab_task(void* argument) {
              pdelay_enabled ? "enabled" : "disabled");
 
     std::uint32_t consecutive_failures = 0U;
+    PtpSourceReadinessGate source_readiness;
     while (!g_stop_requested.load(std::memory_order_acquire)) {
+        // A stalled/suspended SOURCE task must not carry yesterday's READY
+        // into a fresh Announce+Sync. Accessors also perform this live check.
+        if (g_ptp_ready.load(std::memory_order_acquire) &&
+            !source_has_fresh_evidence()) {
+            source_readiness.invalidate();
+            g_ptp_ready.store(false, std::memory_order_release);
+            g_ptp_last_announce_us.store(0LL, std::memory_order_release);
+            g_ptp_last_sync_pair_us.store(0LL, std::memory_order_release);
+        }
         bool attempted = false;
         bool success = true;
 
@@ -586,25 +702,59 @@ void ptp_lab_task(void* argument) {
         while (context.pdelay_queue != nullptr &&
                xQueueReceive(context.pdelay_queue, &pdelay_request, 0U) == pdTRUE) {
             attempted = true;
-            success = send_pdelay_response(context, pdelay_request) && success;
+            const bool response_delivered = send_pdelay_response(context, pdelay_request);
+            source_readiness.observe_peer_delay(response_delivered);
+            success = response_delivered && success;
         }
 
         const auto due = context.runtime->poll_due();
         if (due.announce) {
             attempted = true;
-            success = send_announce(context) && success;
+            const bool announce_delivered = send_announce(context);
+            source_readiness.observe_announce(announce_delivered);
+            if (announce_delivered) {
+                g_ptp_last_announce_us.store(
+                    esp_timer_get_time(), std::memory_order_release);
+            }
+            success = announce_delivered && success;
         }
         if (due.sync) {
             attempted = true;
-            success = send_sync_follow_up(context) && success;
+            // True only if the actual Sync TX timestamp AND matching Follow_Up
+            // TX succeeded; Sync alone never qualifies the source.
+            const bool pair_delivered = send_sync_follow_up(context);
+            source_readiness.observe_sync_pair(pair_delivered);
+            if (pair_delivered) {
+                g_ptp_last_sync_pair_us.store(
+                    esp_timer_get_time(), std::memory_order_release);
+            }
+            success = pair_delivered && success;
+        }
+        // A failed peer-delay response in the same batch must also revoke
+        // any freshly sent core messages; no readiness resurrection by Pdelay.
+        if (!success) {
+            source_readiness.invalidate();
+            g_ptp_last_announce_us.store(0LL, std::memory_order_release);
+            g_ptp_last_sync_pair_us.store(0LL, std::memory_order_release);
+        }
+        const bool qualified_ready = source_readiness.ready() &&
+            PtpSourceEvidenceFreshness::fresh(
+                esp_timer_get_time(),
+                g_ptp_last_announce_us.load(std::memory_order_acquire),
+                g_ptp_last_sync_pair_us.load(std::memory_order_acquire),
+                g_ptp_freshness_timeout_us.load(std::memory_order_acquire));
+        const bool was_ready = g_ptp_ready.load(std::memory_order_acquire);
+        if (!qualified_ready) {
+            g_ptp_ready.store(false, std::memory_order_release);
+        } else if (!was_ready) {
+            g_ptp_source_generation.fetch_add(1U, std::memory_order_release);
+            g_ptp_ready.store(true, std::memory_order_release);
         }
 
         if (attempted) {
             if (success) {
                 consecutive_failures = 0U;
-                context.runtime->clear_error();
-                const bool emitted_core_timing = g_announce_sent.load(std::memory_order_relaxed) > 0U && g_sync_sent.load(std::memory_order_relaxed) > 0U && g_follow_up_sent.load(std::memory_order_relaxed) > 0U;
-                if (emitted_core_timing) g_ptp_ready.store(true, std::memory_order_release);
+                if (qualified_ready) context.runtime->clear_error();
             } else {
                 context.runtime->record_error("Ethernet transmit or hardware timestamp failure");
                 g_tx_failure_count.fetch_add(1U, std::memory_order_relaxed);
@@ -655,6 +805,8 @@ void start_ptp_lab(const esp_eth_handle_t eth_handle) {
 
     reset_live_status();
     g_ptp_ready.store(false, std::memory_order_release);
+    g_ptp_last_announce_us.store(0LL, std::memory_order_release);
+    g_ptp_last_sync_pair_us.store(0LL, std::memory_order_release);
     g_ptp_accept_rx.store(false, std::memory_order_release);
     g_stop_requested.store(false, std::memory_order_release);
     g_ptp_context.eth_handle = eth_handle;
@@ -689,7 +841,7 @@ void start_ptp_lab(const esp_eth_handle_t eth_handle) {
 
     constexpr unsigned kStartReadyPolls = 160U;
     for (unsigned attempt = 0U; attempt < kStartReadyPolls; ++attempt) {
-        if (g_ptp_ready.load(std::memory_order_acquire) || !g_ptp_started.load(std::memory_order_acquire)) return;
+        if (source_has_fresh_evidence() || !g_ptp_started.load(std::memory_order_acquire)) return;
         vTaskDelay(pdMS_TO_TICKS(10));
     }
     ESP_LOGE(kTag, "PTP source readiness timeout: no verified Announce/Sync/Follow_Up TX");
@@ -711,7 +863,7 @@ void stop_ptp_lab() noexcept {
 }
 
 [[nodiscard]] bool ptp_lab_is_running() noexcept {
-    return g_ptp_ready.load(std::memory_order_acquire);
+    return source_has_fresh_evidence();
 }
 
 [[nodiscard]] bool configure_ptp_lab(const ar_ptp_lab_config_t& config) {
@@ -765,9 +917,21 @@ extern "C" bool ar_ptp_lab_is_running(void) {
     return ar::esp32p4::smv::ptp_lab_is_running();
 }
 
+// Lifetime/ownership is deliberately independent of measured PTP READY.
+// Used only by the facade to prevent simultaneous EMAC timebase owners.
+extern "C" bool ar_ptp_source_runtime_active(void) {
+    return ar::esp32p4::smv::g_ptp_started.load(std::memory_order_acquire);
+}
+
+extern "C" std::uint32_t ar_ptp_source_generation(void) {
+    if (!ar::esp32p4::smv::ptp_lab_is_running()) return 0U;
+    return ar::esp32p4::smv::g_ptp_source_generation.load(
+        std::memory_order_acquire);
+}
+
 extern "C" bool ar_ptp_lab_get_status(ar_ptp_lab_status_t* status) {
     if (status == nullptr) return false;
-    status->is_running = ar::esp32p4::smv::g_ptp_ready.load(std::memory_order_acquire);
+    status->is_running = ar::esp32p4::smv::ptp_lab_is_running();
     status->announce_sent = ar::esp32p4::smv::g_announce_sent.load(std::memory_order_relaxed);
     status->sync_sent = ar::esp32p4::smv::g_sync_sent.load(std::memory_order_relaxed);
     status->follow_up_sent = ar::esp32p4::smv::g_follow_up_sent.load(std::memory_order_relaxed);
