@@ -62,18 +62,17 @@ SurfacePanel {
     readonly property bool injectionRunning: smartSession.state === "RUNNING"
     readonly property int firmwareStageIndex: {
         switch (smartSession.firmwareUpdateStage) {
-        case "prepare": return 0
-        case "verify": return 1
-        case "write": return 2
-        case "reconnect": return 3
+        case "prepare":
+        case "verify": return 0
+        case "write": return 1
+        case "reconnect": return 2
         default: return -1
         }
     }
     readonly property var firmwareStages: [
-        { title: "Prepare session", detail: "Stop output and release the serial port" },
-        { title: "Verify board", detail: "Confirm ESP32-P4 ROM identity" },
-        { title: "Write & restart", detail: "Program the verified image and reset the board" },
-        { title: "Reconnect & verify", detail: "Confirm the new ARStack semantic identity" }
+        { title: "Prepare device" },
+        { title: "Install firmware" },
+        { title: "Verify restart" }
     ]
 
     function firmwareStageState(index) {
@@ -181,10 +180,10 @@ SurfacePanel {
                 ribbon.updatePromptDeferred = false
                 ribbon.installPromptDeferred = false
                 ribbon.firmwareResultTitle = "Firmware installed successfully"
-                ribbon.firmwareResultMessage = "ESP32-P4 restarted, reconnected, and ARStack firmware was verified. Studio is preparing the 4I+4V injector."
+                ribbon.firmwareResultMessage = "ESP32-P4 reconnected and verified."
                 controller.showMessage("Firmware installed and verified successfully.", false)
             } else {
-                ribbon.firmwareResultTitle = "Firmware installation not completed"
+                ribbon.firmwareResultTitle = "Firmware not verified"
                 ribbon.firmwareResultMessage = smartSession.firmwareUpdateResult.length > 0
                     ? smartSession.firmwareUpdateResult
                     : "Studio could not verify the firmware installation. Open Advanced > Firmware > Copy diagnostics."
@@ -379,7 +378,8 @@ SurfacePanel {
         id: installDialog
         modal: true
         anchors.centerIn: Overlay.overlay
-        width: 420
+        width: 408
+        padding: 16
         title: "Set up ESP32-P4"
         closePolicy: Popup.NoAutoClose
         background: Rectangle { color: ribbon.theme.surface; radius: 10; border.width: 1; border.color: ribbon.theme.line }
@@ -387,15 +387,7 @@ SurfacePanel {
             spacing: 12
             Label {
                 Layout.fillWidth: true
-                text: "ESP32-P4 detected"
-                color: ribbon.theme.text
-                font.family: ribbon.uiFont
-                font.pixelSize: 15
-                font.weight: Font.DemiBold
-            }
-            Label {
-                Layout.fillWidth: true
-                text: "ARStack firmware is not installed or is not responding. Studio can install the correct firmware automatically."
+                text: "ESP32-P4 detected. Install ARStack firmware to inject SV."
                 color: ribbon.theme.textSoft
                 font.family: ribbon.uiFont
                 font.pixelSize: 11
@@ -403,11 +395,10 @@ SurfacePanel {
             }
             Label {
                 Layout.fillWidth: true
-                text: "No firmware file, ESP-IDF, Python, or command line is required. Keep USB connected until Studio confirms success."
+                text: "Keep USB connected until verification finishes."
                 color: ribbon.theme.muted
                 font.family: ribbon.uiFont
                 font.pixelSize: 10
-                wrapMode: Text.WordWrap
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -433,7 +424,8 @@ SurfacePanel {
         id: updateDialog
         modal: true
         anchors.centerIn: Overlay.overlay
-        width: 410
+        width: 408
+        padding: 16
         title: smartSession.firmwareUpdateRequired ? "Firmware update required" : "Firmware update available"
         closePolicy: Popup.NoAutoClose
         background: Rectangle { color: ribbon.theme.surface; radius: 10; border.width: 1; border.color: ribbon.theme.line }
@@ -441,22 +433,19 @@ SurfacePanel {
             spacing: 12
             Label {
                 Layout.fillWidth: true
-                text: smartSession.firmwareUpdateRequired ? "Update firmware to start injection" : "A newer firmware build is available"
-                color: ribbon.theme.text
-                font.family: ribbon.uiFont
-                font.pixelSize: 14
-                font.weight: Font.DemiBold
-                wrapMode: Text.WordWrap
-            }
-            Label {
-                Layout.fillWidth: true
                 text: smartSession.firmwareUpdateRequired
-                    ? "This ESP32-P4 does not satisfy the current runtime contract. Update is required before injection."
-                    : "The connected firmware is compatible and can be used now. A newer bundled build is available; update only when convenient. Studio will flash, restart, reconnect, and verify it automatically."
+                    ? "Update is required before SV injection."
+                    : "Current firmware works. Updating is optional."
                 color: ribbon.theme.textSoft
                 font.family: ribbon.uiFont
                 font.pixelSize: 11
-                wrapMode: Text.WordWrap
+            }
+            Label {
+                Layout.fillWidth: true
+                text: "Keep USB connected during installation."
+                color: ribbon.theme.muted
+                font.family: ribbon.uiFont
+                font.pixelSize: 10
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -482,11 +471,11 @@ SurfacePanel {
         id: progressDialog
         modal: true
         anchors.centerIn: Overlay.overlay
-        width: 500
+        width: 448
         closePolicy: Popup.NoAutoClose
-        padding: 18
+        padding: 16
         header: Rectangle {
-            implicitHeight: 46
+            implicitHeight: 42
             color: ribbon.theme.surface2
             border.width: 1
             border.color: smartSession.updateNeedsBootloaderHelp ? ribbon.theme.amber : ribbon.theme.line
@@ -494,7 +483,7 @@ SurfacePanel {
                 anchors.fill: parent
                 anchors.leftMargin: 18
                 anchors.rightMargin: 18
-                text: smartSession.updateNeedsBootloaderHelp ? "Device needs Download mode" : "Firmware update"
+                text: smartSession.updateNeedsBootloaderHelp ? "Download mode required" : "Installing firmware"
                 color: smartSession.updateNeedsBootloaderHelp ? ribbon.theme.amber : ribbon.theme.text
                 font.family: ribbon.uiFont
                 font.pixelSize: 13
@@ -509,23 +498,22 @@ SurfacePanel {
             border.color: smartSession.updateNeedsBootloaderHelp ? ribbon.theme.amber : ribbon.theme.line
         }
         contentItem: ColumnLayout {
-            spacing: 13
+            spacing: 10
 
             Label {
                 Layout.fillWidth: true
                 text: smartSession.updateNeedsBootloaderHelp
-                    ? "Studio cannot reach the ESP32-P4 ROM bootloader yet."
-                    : "Keep USB connected. Studio reports success only after the board restarts and reconnects with the expected ARStack identity."
-                color: smartSession.updateNeedsBootloaderHelp ? ribbon.theme.amber : ribbon.theme.text
+                    ? "Enter ESP32-P4 Download mode, then choose Retry."
+                    : "Keep USB connected until verification completes."
+                color: smartSession.updateNeedsBootloaderHelp ? ribbon.theme.amber : ribbon.theme.textSoft
                 font.family: ribbon.uiFont
-                font.pixelSize: 12
-                font.weight: Font.DemiBold
+                font.pixelSize: 11
                 wrapMode: Text.WordWrap
             }
 
             Rectangle {
                 Layout.fillWidth: true
-                implicitHeight: stageColumn.implicitHeight + 18
+                implicitHeight: stageColumn.implicitHeight + 12
                 radius: 8
                 color: ribbon.theme.panelAlt
                 border.width: 1
@@ -536,8 +524,8 @@ SurfacePanel {
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.top: parent.top
-                    anchors.margins: 9
-                    spacing: 2
+                    anchors.margins: 6
+                    spacing: 0
 
                     Repeater {
                         model: ribbon.firmwareStages
@@ -545,14 +533,14 @@ SurfacePanel {
                             required property int index
                             required property var modelData
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 38
-                            spacing: 10
+                            Layout.preferredHeight: 32
+                            spacing: 9
                             readonly property string stageState: ribbon.firmwareStageState(index)
 
                             Rectangle {
-                                width: 20
-                                height: 20
-                                radius: 10
+                                width: 18
+                                height: 18
+                                radius: 9
                                 color: parent.stageState === "done" ? ribbon.theme.greenSoft
                                      : parent.stageState === "active" ? ribbon.theme.accentSoft
                                      : "transparent"
@@ -570,34 +558,13 @@ SurfacePanel {
                                 }
                             }
 
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: 0
-                                Label {
-                                    Layout.fillWidth: true
-                                    text: modelData.title
-                                    color: stageState === "pending" ? ribbon.theme.muted : ribbon.theme.text
-                                    font.family: ribbon.uiFont
-                                    font.pixelSize: 10
-                                    font.weight: stageState === "active" ? Font.DemiBold : Font.Medium
-                                }
-                                Label {
-                                    Layout.fillWidth: true
-                                    text: modelData.detail
-                                    color: ribbon.theme.muted
-                                    font.family: ribbon.uiFont
-                                    font.pixelSize: 9
-                                    elide: Text.ElideRight
-                                }
-                            }
-
                             Label {
-                                visible: index === 2 && stageState === "active" && smartSession.firmwareProgress >= 0
-                                text: smartSession.firmwareProgress + "%"
-                                color: ribbon.theme.accent
-                                font.family: ribbon.monoFont
+                                Layout.fillWidth: true
+                                text: modelData.title
+                                color: stageState === "pending" ? ribbon.theme.muted : ribbon.theme.text
+                                font.family: ribbon.uiFont
                                 font.pixelSize: 11
-                                font.weight: Font.DemiBold
+                                font.weight: stageState === "active" ? Font.DemiBold : Font.Medium
                             }
                         }
                     }
@@ -606,15 +573,17 @@ SurfacePanel {
 
             Label {
                 Layout.fillWidth: true
-                text: smartSession.updateStatus.length > 0 ? smartSession.updateStatus : "Preparing firmware installation…"
+                text: smartSession.updateStatus.length > 0 ? smartSession.updateStatus : "Preparing…"
                 color: ribbon.theme.textSoft
                 font.family: ribbon.uiFont
                 font.pixelSize: 10
-                wrapMode: Text.WordWrap
+                wrapMode: smartSession.updateNeedsBootloaderHelp ? Text.WordWrap : Text.NoWrap
+                maximumLineCount: smartSession.updateNeedsBootloaderHelp ? 3 : 1
+                elide: Text.ElideRight
             }
 
             ColumnLayout {
-                visible: !smartSession.updateNeedsBootloaderHelp && ribbon.firmwareStageIndex === 2
+                visible: !smartSession.updateNeedsBootloaderHelp && ribbon.firmwareStageIndex === 1
                 Layout.fillWidth: true
                 spacing: 6
 
@@ -694,9 +663,9 @@ SurfacePanel {
         id: resultDialog
         modal: true
         anchors.centerIn: Overlay.overlay
-        width: 430
+        width: 408
         closePolicy: Popup.NoAutoClose
-        padding: 18
+        padding: 16
         header: Rectangle {
             implicitHeight: 44
             color: ribbon.theme.surface2
@@ -706,7 +675,7 @@ SurfacePanel {
                 anchors.fill: parent
                 anchors.leftMargin: 18
                 anchors.rightMargin: 18
-                text: ribbon.firmwareResultSuccess ? "Firmware verified" : "Firmware result"
+                text: "ESP32-P4 firmware"
                 color: ribbon.firmwareResultSuccess ? ribbon.theme.green : ribbon.theme.text
                 font.family: ribbon.uiFont
                 font.pixelSize: 13
@@ -721,7 +690,7 @@ SurfacePanel {
             border.color: ribbon.firmwareResultSuccess ? ribbon.theme.green : ribbon.theme.red
         }
         contentItem: ColumnLayout {
-            spacing: 12
+            spacing: 10
             Label {
                 Layout.fillWidth: true
                 text: ribbon.firmwareResultSuccess ? "✓" : "!"

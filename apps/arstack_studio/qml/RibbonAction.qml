@@ -71,5 +71,5 @@ Button {
     }
     ToolTip.visible: hovered && toolTipText.length > 0
     ToolTip.text: toolTipText
-    ToolTip.delay: 600
+    ToolTip.delay: theme.tooltipDelay
 }

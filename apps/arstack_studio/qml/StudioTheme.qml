@@ -54,4 +54,5 @@ QtObject {
     readonly property int spaceSm: 8
     readonly property int spaceMd: 12
     readonly property int spaceLg: 16
+    readonly property int tooltipDelay: 900
 }
