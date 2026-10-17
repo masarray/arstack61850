@@ -75,12 +75,206 @@ inline std::optional<std::vector<VerifiedReportLeaf>> bindFlatSclReportStructure
         return std::nullopt;
     const auto& raw = member.data_reference;
     const auto& dir = member.member;
-    // Any supplied wire source must agree; do not let a directory alias
-    // override a contradictory explicit Report DataRef.
-    if (!raw.empty() && raw != binding->reference) return std::nullopt;
+    // Respect the aliases accepted by the native frame validator. DataRef
+    // may use IEC notation (LD/LN.DO) or MMS notation (LD/LN$FC$DO).
+    // It must still resolve to the exact SCL ordinal/reference/FC.
+    const auto matchesExactMember = [&](const std::string_view value) {
+        if (value.empty()) return false;
+        if (value == binding->reference || value == binding->mms_reference)
+            return true;
+        const auto slash = value.find('/');
+        if (slash == std::string_view::npos || slash == 0U) return false;
+        const auto fcStart = value.find('
+    if (dir && !dir->functional_constraint.empty() &&
+        dir->functional_constraint != binding->functional_constraint)
+        return std::nullopt;
+    // Flat ST/CF/SG structures only. Nested, array, repeated or vendor
+    // layouts have no proven ordered schema here and remain positional.
+    const MmsLiveDataObject* object = nullptr;
+    for (const auto& ld : model.logical_devices)
+        for (const auto& ln : ld.logical_nodes)
+            for (const auto& candidate : ln.data_objects)
+                if (binding->reference == candidate.reference) {
+                    if (object) return std::nullopt;
+                    object = &candidate;
+                }
+    if (!object || object->confidence != MmsLiveModelConfidence::exact)
+        return std::nullopt;
+    std::vector<const MmsLiveDataAttribute*> attributes;
+    for (const auto& attribute : object->attributes) {
+        if (attribute.functional_constraint != binding->functional_constraint ||
+            !semanticInside(attribute.object_reference, binding->reference))
+            continue;
+        if (attribute.source != "TrustedSCL" ||
+            attribute.type_confidence != MmsLiveModelConfidence::exact ||
+            attribute.functional_constraint_confidence != MmsLiveModelConfidence::exact)
+            return std::nullopt;
+        // Only one direct segment is admissible; nested structures demand
+        // matching a hierarchical SCL schema, not guesswork.
+        const auto suffix = std::string_view{attribute.object_reference}
+            .substr(binding->reference.size() + 1);
+        if (suffix.empty() || suffix.find('.') != std::string_view::npos)
+            return std::nullopt;
+        attributes.push_back(&attribute);
+    }
+    const auto& children = member.value->children();
+    if (attributes.empty() || attributes.size() != children.size() ||
+        children.size() > 16U) return std::nullopt;
+    // Positional order is not independently proven by matching count alone.
+    // Reject repeated scalar types, where a vendor permutation would look
+    // valid and produce deceptively named engineering values.
+    for (std::size_t i = 0; i < attributes.size(); ++i)
+        for (std::size_t j = i + 1; j < attributes.size(); ++j)
+            if (semanticExpectedKind(attributes[i]->scl_basic_type) ==
+                semanticExpectedKind(attributes[j]->scl_basic_type))
+                return std::nullopt;
+    std::vector<VerifiedReportLeaf> result;
+    result.reserve(children.size());
+    for (std::size_t i = 0; i < children.size(); ++i) {
+        if (!semanticKindCompatible(children[i], attributes[i]->scl_basic_type))
+            return std::nullopt;
+        if (std::any_of(result.begin(), result.end(), [&](const auto& leaf){
+                return leaf.reference == attributes[i]->object_reference; }))
+            return std::nullopt;
+        result.push_back({attributes[i]->object_reference, &children[i]});
+    }
+    return result;
+}
+} // namespace arstack::iedsim
+, slash + 1U);
+        if (fcStart == std::string_view::npos) return false;
+        const auto pathStart = value.find('
+    if (dir && !dir->functional_constraint.empty() &&
+        dir->functional_constraint != binding->functional_constraint)
+        return std::nullopt;
+    // Flat ST/CF/SG structures only. Nested, array, repeated or vendor
+    // layouts have no proven ordered schema here and remain positional.
+    const MmsLiveDataObject* object = nullptr;
+    for (const auto& ld : model.logical_devices)
+        for (const auto& ln : ld.logical_nodes)
+            for (const auto& candidate : ln.data_objects)
+                if (binding->reference == candidate.reference) {
+                    if (object) return std::nullopt;
+                    object = &candidate;
+                }
+    if (!object || object->confidence != MmsLiveModelConfidence::exact)
+        return std::nullopt;
+    std::vector<const MmsLiveDataAttribute*> attributes;
+    for (const auto& attribute : object->attributes) {
+        if (attribute.functional_constraint != binding->functional_constraint ||
+            !semanticInside(attribute.object_reference, binding->reference))
+            continue;
+        if (attribute.source != "TrustedSCL" ||
+            attribute.type_confidence != MmsLiveModelConfidence::exact ||
+            attribute.functional_constraint_confidence != MmsLiveModelConfidence::exact)
+            return std::nullopt;
+        // Only one direct segment is admissible; nested structures demand
+        // matching a hierarchical SCL schema, not guesswork.
+        const auto suffix = std::string_view{attribute.object_reference}
+            .substr(binding->reference.size() + 1);
+        if (suffix.empty() || suffix.find('.') != std::string_view::npos)
+            return std::nullopt;
+        attributes.push_back(&attribute);
+    }
+    const auto& children = member.value->children();
+    if (attributes.empty() || attributes.size() != children.size() ||
+        children.size() > 16U) return std::nullopt;
+    // Positional order is not independently proven by matching count alone.
+    // Reject repeated scalar types, where a vendor permutation would look
+    // valid and produce deceptively named engineering values.
+    for (std::size_t i = 0; i < attributes.size(); ++i)
+        for (std::size_t j = i + 1; j < attributes.size(); ++j)
+            if (semanticExpectedKind(attributes[i]->scl_basic_type) ==
+                semanticExpectedKind(attributes[j]->scl_basic_type))
+                return std::nullopt;
+    std::vector<VerifiedReportLeaf> result;
+    result.reserve(children.size());
+    for (std::size_t i = 0; i < children.size(); ++i) {
+        if (!semanticKindCompatible(children[i], attributes[i]->scl_basic_type))
+            return std::nullopt;
+        if (std::any_of(result.begin(), result.end(), [&](const auto& leaf){
+                return leaf.reference == attributes[i]->object_reference; }))
+            return std::nullopt;
+        result.push_back({attributes[i]->object_reference, &children[i]});
+    }
+    return result;
+}
+} // namespace arstack::iedsim
+, fcStart + 1U);
+        if (pathStart == std::string_view::npos ||
+            value.substr(fcStart + 1U, pathStart - fcStart - 1U) !=
+                binding->functional_constraint)
+            return false;
+        std::string canonical{value.substr(0, fcStart)};
+        canonical.push_back('.');
+        for (std::size_t i = pathStart + 1U; i < value.size(); ++i)
+            canonical.push_back(value[i] == '
+    if (dir && !dir->functional_constraint.empty() &&
+        dir->functional_constraint != binding->functional_constraint)
+        return std::nullopt;
+    // Flat ST/CF/SG structures only. Nested, array, repeated or vendor
+    // layouts have no proven ordered schema here and remain positional.
+    const MmsLiveDataObject* object = nullptr;
+    for (const auto& ld : model.logical_devices)
+        for (const auto& ln : ld.logical_nodes)
+            for (const auto& candidate : ln.data_objects)
+                if (binding->reference == candidate.reference) {
+                    if (object) return std::nullopt;
+                    object = &candidate;
+                }
+    if (!object || object->confidence != MmsLiveModelConfidence::exact)
+        return std::nullopt;
+    std::vector<const MmsLiveDataAttribute*> attributes;
+    for (const auto& attribute : object->attributes) {
+        if (attribute.functional_constraint != binding->functional_constraint ||
+            !semanticInside(attribute.object_reference, binding->reference))
+            continue;
+        if (attribute.source != "TrustedSCL" ||
+            attribute.type_confidence != MmsLiveModelConfidence::exact ||
+            attribute.functional_constraint_confidence != MmsLiveModelConfidence::exact)
+            return std::nullopt;
+        // Only one direct segment is admissible; nested structures demand
+        // matching a hierarchical SCL schema, not guesswork.
+        const auto suffix = std::string_view{attribute.object_reference}
+            .substr(binding->reference.size() + 1);
+        if (suffix.empty() || suffix.find('.') != std::string_view::npos)
+            return std::nullopt;
+        attributes.push_back(&attribute);
+    }
+    const auto& children = member.value->children();
+    if (attributes.empty() || attributes.size() != children.size() ||
+        children.size() > 16U) return std::nullopt;
+    // Positional order is not independently proven by matching count alone.
+    // Reject repeated scalar types, where a vendor permutation would look
+    // valid and produce deceptively named engineering values.
+    for (std::size_t i = 0; i < attributes.size(); ++i)
+        for (std::size_t j = i + 1; j < attributes.size(); ++j)
+            if (semanticExpectedKind(attributes[i]->scl_basic_type) ==
+                semanticExpectedKind(attributes[j]->scl_basic_type))
+                return std::nullopt;
+    std::vector<VerifiedReportLeaf> result;
+    result.reserve(children.size());
+    for (std::size_t i = 0; i < children.size(); ++i) {
+        if (!semanticKindCompatible(children[i], attributes[i]->scl_basic_type))
+            return std::nullopt;
+        if (std::any_of(result.begin(), result.end(), [&](const auto& leaf){
+                return leaf.reference == attributes[i]->object_reference; }))
+            return std::nullopt;
+        result.push_back({attributes[i]->object_reference, &children[i]});
+    }
+    return result;
+}
+} // namespace arstack::iedsim
+ ? '.' : value[i]);
+        return canonical == binding->reference;
+    };
+    if (!raw.empty() && !matchesExactMember(raw)) return std::nullopt;
     if (dir && !dir->user_reference.empty() &&
-        dir->user_reference != binding->reference) return std::nullopt;
-    if (raw.empty() && (!dir || dir->user_reference.empty()))
+        !matchesExactMember(dir->user_reference)) return std::nullopt;
+    if (dir && !dir->mms_reference.empty() &&
+        !matchesExactMember(dir->mms_reference)) return std::nullopt;
+    if (raw.empty() && (!dir || (dir->user_reference.empty() &&
+                                dir->mms_reference.empty())))
         return std::nullopt;
     if (dir && !dir->functional_constraint.empty() &&
         dir->functional_constraint != binding->functional_constraint)
