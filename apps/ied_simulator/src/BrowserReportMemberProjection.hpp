@@ -126,10 +126,15 @@ inline constexpr int kBrowserReportDetailChildren = 16;
                         const auto preview = previewMmsValue(*leaf.value, kBrowserReportTextLimit);
                         const auto full = QString::fromStdString(leaf.reference);
                         const auto dot = full.lastIndexOf(QLatin1Char('.'));
+                        const auto engineering = decodeEngineeringEvidence(full, *leaf.value);
+                        const QString displayed = engineering.isEmpty()
+                            ? QString::fromStdString(preview.text)
+                            : engineering.value(QStringLiteral("summary")).toString();
                         detailRows.push_back(QVariantMap{
                             {QStringLiteral("label"), dot >= 0 ? full.mid(dot + 1) : full},
-                            {QStringLiteral("value"), QString::fromStdString(preview.text)
+                            {QStringLiteral("value"), displayed
                                 + (preview.truncated ? QStringLiteral(" … [truncated]") : QString{})},
+                            {QStringLiteral("engineeringEvidence"), engineering},
                             {QStringLiteral("authority"), QStringLiteral("SCL exact / MMS type checked")},
                             {QStringLiteral("reference"), full}});
                         if (preview.truncated) projection.textTruncated = true;
