@@ -185,12 +185,14 @@ inline constexpr int kBrowserReportTreeScalarTextLimit = 160;
     // labels are explicitly positional unless canonical identity is present.
     const auto appendValue = [&](const auto& visit, const mms::MmsDataValue& value,
                                  const int ordinal, const unsigned depth,
-                                 const QString& title, const QString& fullReference) -> void {
+                                 const QString& title, const QString& fullReference,
+                                 const bool fullReferenceShortened) -> void {
         const bool isContainer = value.kind() == mms::MmsDataKind::structure ||
                                  value.kind() == mms::MmsDataKind::array;
         QString displayed;
         if (isContainer) {
-            displayed = QStringLiteral("%1 %2").arg(value.children().size()).arg(
+            displayed = QStringLiteral("%1 %2").arg(
+                static_cast<qulonglong>(value.children().size())).arg(
                 value.kind() == mms::MmsDataKind::array
                     ? QStringLiteral("item(s)") : QStringLiteral("field(s)"));
         } else {
@@ -201,7 +203,7 @@ inline constexpr int kBrowserReportTreeScalarTextLimit = 160;
         }
         // Only a direct, uniquely identified q/t attribute can carry typed
         // Quality/TimeQuality meaning. Unknown positional children are raw MMS.
-        if (depth == 0U && !isContainer) {
+        if (depth == 0U && !isContainer && !fullReferenceShortened) {
             const auto evidence = decodeEngineeringEvidence(fullReference, value);
             if (!evidence.isEmpty())
                 displayed = evidence.value(QStringLiteral("summary")).toString();
@@ -223,7 +225,8 @@ inline constexpr int kBrowserReportTreeScalarTextLimit = 160;
             if (remainingChildren <= 0) break;
             --remainingChildren;
             visit(visit, child, ordinal, depth + 1U,
-                  QStringLiteral("Field %1").arg(++index), fullReference);
+                  QStringLiteral("Field %1").arg(++index), fullReference,
+                  fullReferenceShortened);
         }
     };
 
@@ -240,11 +243,12 @@ inline constexpr int kBrowserReportTreeScalarTextLimit = 160;
         // the per-row tooltip and never forging a functional constraint.
         const int slash = name.indexOf(QLatin1Char('/'));
         if (slash >= 0) name = name.mid(slash + 1);
-        if (name.isEmpty()) name = QStringLiteral("Member %1").arg(member.data_set_index + 1U);
+        if (name.isEmpty()) name = QStringLiteral("Member %1").arg(
+            static_cast<qulonglong>(member.data_set_index + 1U));
 
         if (member.value) {
             appendValue(appendValue, *member.value, static_cast<int>(i),
-                        0U, name, fullReference);
+                        0U, name, fullReference, shortened);
         } else {
             rows.push_back(QVariantMap{
                 {QStringLiteral("memberIndex"), static_cast<int>(i)},
