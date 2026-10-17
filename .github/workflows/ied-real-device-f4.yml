@@ -47,6 +47,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Parse field-collector PowerShell before expensive Windows build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $scripts = @(
+            'apps/ied_simulator/field_acceptance/collect-f4-evidence.ps1',
+            'apps/ied_simulator/packaging/windows/verify-release.ps1'
+          )
+          foreach ($script in $scripts) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path -LiteralPath $script).Path,
+              [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              throw "Invalid PowerShell syntax in ${script}: $($errors | Out-String)"
+            }
+          }
+          Write-Host 'F4_POWERSHELL_PARSE_PASS'
+
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
