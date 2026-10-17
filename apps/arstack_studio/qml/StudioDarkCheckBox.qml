@@ -8,6 +8,10 @@ CheckBox {
     property var theme
     property string uiFont: "Inter"
     implicitHeight: 30
+    hoverEnabled: true
+    // The indicator is a single custom rectangle in all pointer states.
+    // Disable the native style focus overlay which looks like a second box.
+    activeFocusOnTab: true
     spacing: 9
     font.family: uiFont
     font.pixelSize: 11
@@ -20,7 +24,7 @@ CheckBox {
         color: control.checked ? control.theme.accent : control.theme.surface2
         border.width: 1
         border.color: control.checked ? control.theme.accent
-                                      : control.activeFocus ? control.theme.textSoft : control.theme.line
+                                      : control.hovered || control.activeFocus ? control.theme.textSoft : control.theme.line
         Text {
             anchors.centerIn: parent
             visible: control.checked
