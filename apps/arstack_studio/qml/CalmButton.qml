@@ -54,6 +54,8 @@ Button {
             color: control.activeText
             font: control.font
             anchors.verticalCenter: parent.verticalCenter
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
             Behavior on color { ColorAnimation { duration: 90 } }
         }
     }
