@@ -233,7 +233,7 @@ if 'const bool includeWireDetails = ui.reports.isEmpty();' not in report_control
         'kBrowserReportVisibleMemberLimit,\n                includeWireDetails' not in report_controller):
     raise SystemExit("BROWSER_REPORT_PERF_FAIL details projected for old frames")
 if 'const bool includeWireDetails = false' not in projection_header or (
-        'if (includeWireDetails && ordinal < kBrowserReportDetailMembers)' not in projection_header):
+        'if (!exactType && includeWireDetails &&' not in projection_header):
     raise SystemExit("BROWSER_REPORT_PERF_FAIL detail projection not opt-in")
 if 'map.insert(QStringLiteral("valueDetails"), projected.details)' not in report_controller:
     raise SystemExit("BROWSER_REPORT_READABLE_FAIL lost structured detail presentation")
