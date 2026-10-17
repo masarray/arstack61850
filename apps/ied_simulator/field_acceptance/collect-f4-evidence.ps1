@@ -107,7 +107,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'dumpcap interface enumeration failed.' }
     $interfaces | Set-Content -LiteralPath $interfacesPath -Encoding UTF8
     $interfaces | Out-Host
-    if (-not ($interfaces | Where-Object { $_ -match "^\\s*$InterfaceId\\." })) {
+    if (-not ($interfaces | Where-Object { $_ -match "^\s*$InterfaceId\." })) {
         throw "Capture interface id $InterfaceId is not present in dumpcap -D."
     }
     $buildHead | Set-Content -LiteralPath (Join-Path $evidenceDir 'workbench_build_sha.txt') -Encoding ascii
