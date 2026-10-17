@@ -30,6 +30,12 @@ def main() -> None:
     tray = source("StudioTimingTray.qml")
     expert = source("PtpExpertPanel.qml")
     config = source("ConfigurationHub.qml")
+    require("Lab simulation controls" not in config
+            and "Signals, firmware, PTP and device settings" in config,
+            "Advanced must not imply this is only a simulated lab tool")
+    require("Changes sent on Start" in main_qml
+            and "root.pendingApply && !workflowBar.injectionRunning" in main_qml,
+            "STOPPED waveform edits must distinguish draft from sent setpoints")
     matrix = source("SignalMatrix.qml")
     menu = source("StudioActionMenu.qml")
     cmake = (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8")
