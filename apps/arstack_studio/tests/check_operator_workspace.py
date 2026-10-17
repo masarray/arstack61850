@@ -34,8 +34,9 @@ def main() -> None:
             and "Signals, firmware, PTP and device settings" in config,
             "Advanced must not imply this is only a simulated lab tool")
     require("Changes sent on Start" in main_qml
-            and "root.pendingApply && !workflowBar.injectionRunning" in main_qml,
-            "STOPPED waveform edits must distinguish draft from sent setpoints")
+            and "Changes pending · restart to apply" in main_qml
+            and "root.pendingApply ? studioTheme.amber" in main_qml,
+            "show draft edits distinctly from sent setpoints, even while injecting")
     controller = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
     require("logUpdateTimer_.setInterval(100)" in controller
             and "if (!logUpdateTimer_.isActive()) logUpdateTimer_.start();" in controller,
@@ -194,6 +195,11 @@ def main() -> None:
             and "property bool waveformDockVisible: true" in main_qml
             and "tray.session.requestSmpSynch(" in tray,
             "phasor and waveform must default visible and keep AUTO sync selection")
+    require("!workflowBar.session.liveControlReady" in main_qml
+            and "!workflowBar.session.requestSetFrequency(value)" in main_qml
+            and "!workflowBar.session.requestZero()" in main_qml
+            and "!workflowBar.session.requestSetQuality(activeSignal, unsignedValue)" in main_qml,
+            "unavailable or rejected live updates must be marked pending")
     require("const sent = phaseLink && row < 3" in main_qml
             and "if (!sent) {" in main_qml
             and "pendingApply = true" in main_qml,
