@@ -103,7 +103,8 @@ def main() -> None:
             and "startWatchdog" in workflow and "onRunningChanged()" in workflow,
             "reconnect must not auto-transmit, but one-click Start must stage a bounded scenario")
     require("offline-ptp-lab" in tray and "if (!tray.boardOnline)" in tray
-            and "no network packets or clock discipline" in tray,
+            and "PTP preview only. Connect ESP32-P4 to transmit." in tray
+            and "offlineSettings.previewPtp = wantsRunning" in tray,
             "PTP/smpSynch offline controls must be plans only, not device writes")
     require('case "verify": return 0' in workflow
             and 'case "write": return 1' in workflow
