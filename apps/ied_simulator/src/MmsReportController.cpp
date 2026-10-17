@@ -1573,6 +1573,8 @@ bool MmsReportController::enableSelectedAuthored(
                 worker->report = std::move(report);
             }
 
+            // Authored RCB activation also starts a new report generation.
+            worker->lastPublishedReportUi.reset();
             if (self) {
                 QMetaObject::invokeMethod(
                     self,
@@ -1712,6 +1714,9 @@ bool MmsReportController::enableSelected(const bool requestGeneralInterrogation)
             const auto ui = buildReportUi(report->snapshot());
             worker->report = std::move(report);
 
+            // A new active subscription invalidates the previous idle
+            // projection baseline even before the first wire report arrives.
+            worker->lastPublishedReportUi.reset();
             if (self) {
                 QMetaObject::invokeMethod(self, [self, generation, ui, requestGeneralInterrogation] {
                     if (!self || self->generation_ != generation) return;
@@ -1908,14 +1913,27 @@ void MmsReportController::schedulePoll() {
             mms::MmsPduEnvelope envelope;
             static_cast<void>(worker->session->association().try_poll_once_for(
                 std::chrono::milliseconds{40}, envelope, stop->get_token()));
-            ReportUi ui;
-            if (staticActive) {
-                static_cast<void>(worker->report->drain_queued_reports());
-                ui = buildReportUi(worker->report->snapshot());
-            } else {
-                static_cast<void>(worker->authoredReport->drain_queued_reports());
-                ui = buildReportUi(worker->authoredReport->snapshot());
+            // The native receive pump runs on every tick. Only the report
+            // runtime's bounded queue drain mutates active report observations.
+            // With no queued frame and a published baseline, do not deep-copy
+            // retained MMS frames or rebuild QML strings on an idle IED.
+            // Foreign, rejected and malformed frames still count as drained:
+            // their diagnostics/counters must reach the operator.
+            const auto drained = staticActive
+                ? worker->report->drain_queued_reports()
+                : worker->authoredReport->drain_queued_reports();
+            if (drained == 0U && worker->lastPublishedReportUi) {
+                if (self) {
+                    QMetaObject::invokeMethod(self, [self, generation] {
+                        if (!self || self->generation_ != generation) return;
+                        self->pollPending_ = false;
+                    }, Qt::QueuedConnection);
+                }
+                return;
             }
+            const ReportUi ui = staticActive
+                ? buildReportUi(worker->report->snapshot())
+                : buildReportUi(worker->authoredReport->snapshot());
             // Compare complete bounded report presentation on the existing
             // serial I/O worker, never on the GUI thread. Counter-only checks
             // would lose event-only and retained-frame evidence changes.
