@@ -196,7 +196,9 @@ Rectangle {
                 }
 
                 Layout.fillWidth: true
-                Layout.preferredHeight: matrix.compact ? 40 : 42
+                Layout.fillHeight: true
+                Layout.minimumHeight: 36
+                Layout.preferredHeight: matrix.compact ? 39 : 40
                 color: signalRow.selected ? "#101c27"
                     : (magnitudeField.activeFocus || phaseField.activeFocus) ? "#0f1922"
                     : rowHover.hovered ? "#0d161e" : "transparent"
@@ -407,6 +409,5 @@ Rectangle {
             }
         }
 
-        Item { Layout.fillHeight: true }
     }
 }
