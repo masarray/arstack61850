@@ -181,9 +181,9 @@ jobs:
           start_begin = source.index('if (take_start_request())')
           start_end = source.index('if (!live_tx_running())', start_begin)
           start_block = source[start_begin:start_end]
-          clock_start = start_block.rindex(
-              'sample_clock = start_sample_clock(task_handle, active_profile.publisher_rate_hz);'
-          )
+          # M3 passes the ETH/PTP epoch context as additional arguments.
+          # Assert that the timer is still armed after the final console log.
+          clock_start = start_block.rindex('sample_clock = start_sample_clock(')
           assert start_block.rindex('ESP_LOGI') < clock_start
           assert 'ESP_LOG' not in start_block[clock_start:]
           assert 'static_assert(std::atomic<std::uint32_t>::is_always_lock_free);' in source
