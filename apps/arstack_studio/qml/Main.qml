@@ -1145,7 +1145,6 @@ ApplicationWindow {
                     DockFrame {
                         visible: root.waveformDockVisible && !root.waveformDetached
                         SplitView.fillWidth: true
-                        SplitView.fillHeight: true
                         SplitView.minimumHeight: 170
                         SplitView.preferredHeight: 328
                         SplitView.fillHeight: true
