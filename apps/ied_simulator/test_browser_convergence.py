@@ -311,7 +311,9 @@ report_required = [
     'root.rcb.optionalFieldsReadStatus === "verified"',
     'root.rcb.triggerOptionNames.indexOf(modelData.name)',
     'root.rcb.optionalFieldNames.indexOf(modelData.name)',
-    'enabled: false // inspected bit, never an MMS Write',
+    'Passive bit observation: no CheckBox/MouseArea',
+    'readonly property bool bitSet:',
+    'visible: bitRow.bitSet',
     'no on/off bit state is inferred.',
     'RCB in use: enabled, reservation or Owner evidence is present.',
 
@@ -319,6 +321,10 @@ report_required = [
 missing_report = [term for term in report_required if term not in report_inspector]
 if missing_report:
     raise SystemExit("BROWSER_REPORT_INSPECTOR_FAIL missing=" + ",".join(missing_report))
+if 'delegate: CheckBox {' in report_inspector:
+    raise SystemExit("BROWSER_REPORT_LEGIBILITY_FAIL disabled native checkbox leaked")
+if report_inspector.count('id: bitRow') != 2:
+    raise SystemExit("BROWSER_REPORT_LEGIBILITY_FAIL typed read-only bit indicators missing")
 if 'String(frame.reportId) === wanted' in report_inspector:
     raise SystemExit("BROWSER_REPORT_INSPECTOR_FAIL report ID alone is not exact RCB provenance")
 if 'title: modelData[0]' in report_inspector or 'rawValue: modelData[1]' in report_inspector:
