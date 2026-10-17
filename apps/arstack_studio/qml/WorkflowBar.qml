@@ -281,9 +281,12 @@ SurfacePanel {
             controller.showMessage(ribbon.startReason(), false)
             return
         }
-        const accepted = controller.pendingApply
-            ? smartSession.requestStartWithScenario(controller.startScenarioSnapshot())
-            : smartSession.requestStart()
+        // Always send the live table as one bounded FIFO scenario before
+        // START. Dirty flags and persisted draft state are not wire readback.
+        // This prevents previous board phases (e.g. Ia=0) surviving when
+        // the table visibly specifies Ia=-30 degrees.
+        const accepted = smartSession.requestStartWithScenario(
+            controller.startScenarioSnapshot())
         if (!accepted) {
             controller.pendingApply = true
             controller.showMessage("Start rejected. Check device status.", true)
