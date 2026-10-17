@@ -106,7 +106,7 @@ inline constexpr int kBrowserReportDetailChildren = 16;
                 displayValue = QStringLiteral("%1 · %2 field(s) — select for details")
                     .arg(kind == mms::MmsDataKind::structure
                              ? QStringLiteral("Structure") : QStringLiteral("Array"))
-                    .arg(children.size());
+                    .arg(static_cast<qulonglong>(children.size()));
                 if (ordinal < kBrowserReportDetailMembers) {
                     const auto count = std::min(children.size(),
                         static_cast<std::size_t>(kBrowserReportDetailChildren));
