@@ -535,10 +535,19 @@ ReportUi buildSubscriptionUi(
             // Historical frames retain bounded scalar summaries and typed q/t
             // evidence; never allocate 32 x 16 child previews per old frame.
             const bool includeWireDetails = ui.reports.isEmpty();
+            // DatSet is optional in OptFlds. Native report binding has already
+            // verified the subscribed RCB/DataSet directory; when absent use
+            // only that exact observed RCB state, never a guessed RptID.
+            const std::string_view verifiedDataSet =
+                !frame.header.data_set_reference.empty()
+                    ? std::string_view{frame.header.data_set_reference}
+                    : subscription.last_rcb_state
+                        ? std::string_view{subscription.last_rcb_state->data_set_reference}
+                        : std::string_view{};
             const auto projected = arstack::iedsim::projectBrowserReportMembers(
                 frame.values, typedEvidenceBudget,
                 arstack::iedsim::kBrowserReportVisibleMemberLimit,
-                includeWireDetails, semanticModel, frame.header.data_set_reference);
+                includeWireDetails, semanticModel, verifiedDataSet);
             map.insert(QStringLiteral("values"), projected.values);
             map.insert(QStringLiteral("valueEvidence"), projected.evidence);
             map.insert(QStringLiteral("valueDetails"), projected.details);
