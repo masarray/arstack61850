@@ -177,7 +177,7 @@ SurfacePanel {
                             Layout.fillWidth: true
                             theme: panel.theme
                             uiFont: panel.uiFont
-                            model: ["Source — provide lab PTP", "Follower — auto-discover external GM", "Monitor — observe only"]
+                            model: ["Source — transmit PTP", "Follower — follow PTP source", "Monitor — receive only"]
                             currentIndex: panel.roleIndex(panel.activeRole)
                             enabled: panel.session && panel.device.ptpAvailable
                                 && !panel.device.ptpRunning && !panel.startPending
@@ -220,7 +220,7 @@ SurfacePanel {
             // The firmware already marks overrides as simulated, independently
             // of PTP clock discipline and without pretending sample phase lock.
                 Rectangle { Layout.fillWidth: true; height: 1; color: panel.theme.lineSoft }
-                Label { text: "SV Sample Synchronization · lab simulation"; color: panel.theme.text; font.family: panel.uiFont; font.pixelSize: 12; font.weight: Font.DemiBold }
+                Label { text: "SV sample synchronization"; color: panel.theme.text; font.family: panel.uiFont; font.pixelSize: 12; font.weight: Font.DemiBold }
                 RowLayout {
                     Layout.fillWidth: true
                     StudioDarkComboBox {
@@ -228,13 +228,13 @@ SurfacePanel {
                         Layout.fillWidth: true
                         theme: panel.theme
                         uiFont: panel.uiFont
-                        model: ["AUTO — measured PTP only", "0 — Not synchronized",
-                                "1 — Local sync (simulation)", "2 — Global sync (simulation)"]
+                        model: ["AUTO — follow measured timing", "0 — Not synchronized",
+                                "1 — Local flag (manual)", "2 — Global flag (manual)"]
                         currentIndex: panel.syncIndex(panel.device.smpSynchMode)
                         enabled: panel.session && panel.device.deviceVerified
                             && !panel.session.updatingFirmware
                         ToolTip.visible: hovered
-                        ToolTip.text: "SV flag simulation only · not sample-clock lock"
+                        ToolTip.text: "Manual 0/1/2 changes the transmitted SV flag, not the sample clock"
                         onActivated: {
                             const requested = ["AUTO", "0", "1", "2"][currentIndex]
                             const accepted = panel.session && panel.session.requestSmpSynch(requested)
@@ -259,7 +259,7 @@ SurfacePanel {
                 }
                 Label {
                     Layout.fillWidth: true
-                    text: panel.svTimingEvidence + "\nAUTO uses measured evidence; 0 / 1 / 2 only simulates the on-wire flag."
+                    text: panel.svTimingEvidence + "\nManual 0/1/2 sets only the transmitted flag."
                     wrapMode: Text.WordWrap
                     color: panel.theme.textSoft
                     font.family: panel.uiFont
