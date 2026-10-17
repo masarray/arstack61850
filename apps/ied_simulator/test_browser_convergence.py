@@ -232,6 +232,10 @@ for token in (
     'decodeEngineeringEvidence(fullReference, value)',
     'depth == 0U && !isContainer && !fullReferenceShortened',
     'if (remainingChildren <= 0) {',
+    'depth >= kBrowserReportTreeDepthLimit',
+    '*nestedFieldsTruncated = true',
+    'QStringLiteral("reason")',
+    'QStringLiteral("typedEvidence")',
 ):
     if token not in projection_header:
         raise SystemExit("BROWSER_REPORT_TYPED_TREE_FAIL missing=" + token)
@@ -249,6 +253,8 @@ for token in (
     'root.latestReport.valueTree',
     'treeRow.modelData.memberIndex',
     'treeRow.modelData.value',
+    'treeRow.modelData.typedEvidence',
+    'Reason for inclusion:',
     'visible: topLevel || expanded',
     'property bool triggerExpanded: false',
     'property bool optionalExpanded: false',
