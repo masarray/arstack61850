@@ -253,6 +253,34 @@ for token in (
     if token not in report_inspector:
         raise SystemExit("BROWSER_REPORT_READABLE_FAIL missing operator drilldown=" + token)
 
+# Quality, timestamp and positional details must expand below the selected
+# report member, never far below all 256 process-value rows.
+data_start = report_inspector.index('heading: "Data"')
+received_delegate = report_inspector.index('id: receivedMember', data_start)
+offline_delegate = report_inspector.index('model: !root.hasLastReport', received_delegate)
+member_tree = report_inspector[received_delegate:offline_delegate]
+for token in (
+    "DataRow {",
+    "index: receivedMember.index",
+    "modelData: receivedMember.modelData",
+    "BrowserEngineeringEvidence {",
+    "root.selectedReportMemberIndex === receivedMember.index",
+    "root.selectedReportMemberDetails()",
+    "Selected member · wire fields",
+):
+    if token not in member_tree:
+        raise SystemExit("BROWSER_REPORT_INLINE_TREE_FAIL missing=" + token)
+for token in (
+    "function compactMemberReference(reference)",
+    'text: root.compactMemberReference(dataRow.reference)',
+    'ToolTip.text: dataRow.reference',
+    "root.selectedReportMemberIndex === dataRow.index ? -1 : dataRow.index",
+):
+    if token not in report_inspector:
+        raise SystemExit("BROWSER_REPORT_INLINE_TREE_FAIL compact selection=" + token)
+if report_inspector.count("BrowserEngineeringEvidence {") != 1:
+    raise SystemExit("BROWSER_REPORT_INLINE_TREE_FAIL duplicate or detached q/t inspector")
+
 value_preview = (workspace_path.parent.parent / "src" / "BrowserBoundedMmsPreview.hpp").read_text(encoding="utf-8")
 for token in [
     'BoundedMmsPreview',
