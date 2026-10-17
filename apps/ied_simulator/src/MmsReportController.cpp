@@ -916,6 +916,9 @@ void MmsReportController::disconnectFromIed() {
         worker->dynamicDataSets.reset();
         worker->discovery.reset();
         worker->session.reset();
+        // The GUI has already discarded its report history on disconnect;
+        // do not retain a second bounded history in the idle worker.
+        worker->lastPublishedReportUi.reset();
         if (cleanupRequired && self) {
             QMetaObject::invokeMethod(self, [self, generation] {
                 if (!self || self->generation_ != generation) return;
