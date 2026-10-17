@@ -38,28 +38,33 @@ Button {
         : tone === "warning" ? "#f5daaa"
         : tone === "danger" ? "#ffe3e6"
         : tone === "accent" || checked ? "#e1f1ff" : theme.textSoft
-    contentItem: ColumnLayout {
-        spacing: 3
-        Image {
-            visible: control.iconSource.toString().length > 0
-            source: control.hovered && control.enabled ? control.hoverPath : control.iconSource
-            Layout.alignment: Qt.AlignHCenter
-            Layout.preferredWidth: 24
-            Layout.preferredHeight: 24
-            sourceSize.width: 48
-            sourceSize.height: 48
-            opacity: control.enabled ? 1 : 0.3
-        }
-        Text {
-            id: caption
-            visible: !control.iconOnly
-            text: control.text
-            color: control.textColor
-            font: control.font
-            Layout.alignment: Qt.AlignHCenter
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
+    // The content box owns full button geometry; its visual group is
+    // centered in both axes (Windows / 100–175% DPI).
+    contentItem: Item {
+        Column {
+            anchors.centerIn: parent
+            spacing: 4
+            Image {
+                visible: control.iconSource.toString().length > 0
+                source: control.hovered && control.enabled ? control.hoverPath : control.iconSource
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 24
+                height: 24
+                sourceSize.width: 48
+                sourceSize.height: 48
+                opacity: control.enabled ? 1 : 0.3
+            }
+            Text {
+                id: caption
+                visible: !control.iconOnly
+                text: control.text
+                color: control.textColor
+                font: control.font
+                anchors.horizontalCenter: parent.horizontalCenter
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+            }
         }
     }
     background: Rectangle {
