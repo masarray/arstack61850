@@ -785,9 +785,11 @@ void publisher_task(void* argument) {
                 // Legacy first alarm already consumes the first rational tick;
                 // a PTP-armed first alarm is an independent epoch delay.
                 static_cast<void>(expected_schedule.next_ticks());
-            } else {
-                ESP_LOGI(kTag, "PTP epoch START armed; SV sync remains unqualified (smpSynch AUTO=0)");
             }
+            // Do not log after the timer is enabled: even a single slow
+            // console write can accumulate ISR notifications before the
+            // publisher consumes its first slot (false START misses).
+            // This does not change fail-closed smpSynch AUTO=0.
             continue;
         }
 
