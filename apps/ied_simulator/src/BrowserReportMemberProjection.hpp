@@ -203,14 +203,16 @@ inline constexpr int kBrowserReportTreeScalarTextLimit = 160;
             displayed = QString::fromStdString(preview.text);
             if (preview.truncated) displayed += QStringLiteral(" …");
         }
-        // Only a direct, uniquely identified q/t attribute can carry typed
-        // Quality/TimeQuality meaning. Unknown positional children are raw MMS.
+        // Keep the complete shared decoder evidence with the exact direct
+        // q/t leaf so operator flags remain inspectable on row expansion.
+        QVariantMap typedEvidence;
         if (depth == 0U && !isContainer && !fullReferenceShortened) {
-            const auto evidence = decodeEngineeringEvidence(fullReference, value);
-            if (!evidence.isEmpty())
-                displayed = evidence.value(QStringLiteral("summary")).toString();
+            typedEvidence = decodeEngineeringEvidence(fullReference, value);
+            if (!typedEvidence.isEmpty())
+                displayed = typedEvidence.value(QStringLiteral("summary")).toString();
         }
         rows.push_back(QVariantMap{
+            {QStringLiteral("typedEvidence"), typedEvidence},
             {QStringLiteral("memberIndex"), ordinal},
             {QStringLiteral("depth"), static_cast<int>(depth)},
             {QStringLiteral("name"), title},
@@ -220,8 +222,12 @@ inline constexpr int kBrowserReportTreeScalarTextLimit = 160;
             {QStringLiteral("container"), isContainer},
             {QStringLiteral("received"), true}
         });
-        if (!isContainer || depth >= kBrowserReportTreeDepthLimit)
+        if (!isContainer) return;
+        if (depth >= kBrowserReportTreeDepthLimit) {
+            if (!value.children().empty() && nestedFieldsTruncated)
+                *nestedFieldsTruncated = true;
             return;
+        }
         int index = 0;
         for (const auto& child : value.children()) {
             if (remainingChildren <= 0) {
@@ -252,8 +258,25 @@ inline constexpr int kBrowserReportTreeScalarTextLimit = 160;
             static_cast<qulonglong>(member.data_set_index + 1U));
 
         if (member.value) {
+            const auto rowIndex = rows.size();
             appendValue(appendValue, *member.value, static_cast<int>(i),
                         0U, name, fullReference, shortened);
+            // ReasonForInclusion is optional wire evidence. Keep the exact
+            // bounded reason names only for the verified top-level member.
+            QString reasons;
+            bool ignoredTruncation = false;
+            for (const auto& reason : member.reason_for_inclusion.names) {
+                if (reasons.size() >= kBrowserReportTreeScalarTextLimit) break;
+                if (!reasons.isEmpty()) reasons += QStringLiteral(", ");
+                reasons += boundedReportMetadata(reason,
+                    static_cast<std::size_t>(std::max(0,
+                        kBrowserReportTreeScalarTextLimit - int(reasons.size()))),
+                    ignoredTruncation);
+                if (ignoredTruncation) break;
+            }
+            auto row = rows.at(rowIndex).toMap();
+            row.insert(QStringLiteral("reason"), reasons);
+            rows[rowIndex] = row;
         } else {
             rows.push_back(QVariantMap{
                 {QStringLiteral("memberIndex"), static_cast<int>(i)},
