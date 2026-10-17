@@ -52,6 +52,18 @@ Assert-File (Join-Path $stage 'platforms\qwindows.dll') 'Qt Windows platform plu
 
 Invoke-Checked $app @('--smoke-test') 'Staged package smoke test'
 
+# Check the ZIP contents, not just its shared pre-package staging directory.
+$portableDir = Join-Path $env:RUNNER_TEMP 'arstack-iec61850-portable'
+if (Test-Path -LiteralPath $portableDir) {
+    Remove-Item -LiteralPath $portableDir -Recurse -Force
+}
+Expand-Archive -LiteralPath $portable -DestinationPath $portableDir -Force
+Assert-BuildHead $portableDir 'Portable ZIP' $expectedHead
+$portableApp = Join-Path $portableDir 'arstack_ied_simulator.exe'
+Assert-File $portableApp 'Portable workbench executable'
+Assert-File (Join-Path $portableDir 'Qt6Core.dll') 'Portable Qt Core runtime'
+Invoke-Checked $portableApp @('--smoke-test') 'Portable ZIP smoke test'
+
 $hardeningQa = Join-Path $build 'ied_product_hardening_qa.exe'
 $mmsQa = Join-Path $build 'ied_mms_client_workbench_qa.exe'
 Assert-File $hardeningQa 'Product hardening QA executable'
@@ -87,6 +99,7 @@ Invoke-Checked $installer @('/S', "/D=$installDir") 'Silent NSIS install'
 $installedApp = Join-Path $installDir 'arstack_ied_simulator.exe'
 $installedServer = Join-Path $installDir 'ariec61850_ied_simulator_server.exe'
 Assert-File $installedApp 'Installed workbench executable'
+Assert-BuildHead $installDir 'Installed workbench' $expectedHead
 Assert-File $installedServer 'Installed MMS simulator helper'
 Assert-File (Join-Path $installDir 'Qt6Core.dll') 'Installed Qt Core runtime'
 Assert-File (Join-Path $installDir 'platforms\qwindows.dll') 'Installed Qt Windows platform plugin'
@@ -151,4 +164,4 @@ Assert-File (Join-Path $installDir 'Qt6Core.dll') 'Installed Qt Core runtime'
 Assert-File (Join-Path $installDir 'platforms\qwindows.dll') 'Installed Qt Windows platform plugin'
 Invoke-Checked $installedApp @('--smoke-test') 'Installed package smoke test'
 
-Write-Host 'WINDOWS_RELEASE_PACKAGE_PASS staged_smoke=pass installed_smoke=pass qt_runtime=pass helper_server=pass npcap_guidance=pass installer=nsis portable=zip reconnect_cycles=24'
+Write-Host "WINDOWS_RELEASE_PACKAGE_PASS staged_smoke=pass installed_smoke=pass portable_smoke=pass source_sha=$expectedHead qt_runtime=pass helper_server=pass npcap_guidance=pass installer=nsis portable=zip reconnect_cycles=24"
