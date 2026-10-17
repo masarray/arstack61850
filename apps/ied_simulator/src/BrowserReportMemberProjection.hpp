@@ -174,7 +174,9 @@ inline constexpr int kBrowserReportTreeScalarTextLimit = 160;
 }
 
 [[nodiscard]] inline QVariantList projectBrowserReportTree(
-    const std::vector<mms::MmsReportValue>& members) {
+    const std::vector<mms::MmsReportValue>& members,
+    bool* nestedFieldsTruncated = nullptr) {
+    if (nestedFieldsTruncated) *nestedFieldsTruncated = false;
     QVariantList rows;
     const auto visibleCount = std::min(
         members.size(), static_cast<std::size_t>(kBrowserReportVisibleMemberLimit));
@@ -222,7 +224,10 @@ inline constexpr int kBrowserReportTreeScalarTextLimit = 160;
             return;
         int index = 0;
         for (const auto& child : value.children()) {
-            if (remainingChildren <= 0) break;
+            if (remainingChildren <= 0) {
+                if (nestedFieldsTruncated) *nestedFieldsTruncated = true;
+                break;
+            }
             --remainingChildren;
             visit(visit, child, ordinal, depth + 1U,
                   QStringLiteral("Field %1").arg(++index), fullReference,
