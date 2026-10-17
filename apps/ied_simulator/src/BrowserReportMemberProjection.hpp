@@ -107,6 +107,14 @@ inline constexpr int kBrowserReportDetailChildren = 16;
             ordinal < kBrowserReportDetailMembers) {
             detailRows = verified_report_detail::project(member, *verifiedTypes);
             exactType = !detailRows.isEmpty();
+            if (exactType) {
+                for (const auto& child : detailRows) {
+                    if (child.toMap().value(QStringLiteral("truncated")).toBool()) {
+                        projection.textTruncated = true;
+                        break;
+                    }
+                }
+            }
         }
         if (member.value) {
             const auto kind = member.value->kind();
