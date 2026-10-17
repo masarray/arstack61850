@@ -1073,7 +1073,7 @@ ApplicationWindow {
 
                         ColumnLayout {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 418
+                            Layout.fillHeight: true
                             Layout.minimumHeight: 418
                             spacing: 8
                             SignalMatrix {
@@ -1081,9 +1081,9 @@ ApplicationWindow {
                                 enabled: !workflowBar.startQueued
                                 objectName: "studioVoltageMatrix"
                                 Layout.fillWidth: true
+                                Layout.fillHeight: true
                                 Layout.preferredHeight: 205
                                 Layout.minimumHeight: 205
-                                Layout.maximumHeight: 205
                                 theme: studioTheme
                                 controller: root
                                 device: device
@@ -1102,9 +1102,9 @@ ApplicationWindow {
                                 enabled: !workflowBar.startQueued
                                 objectName: "studioCurrentMatrix"
                                 Layout.fillWidth: true
+                                Layout.fillHeight: true
                                 Layout.preferredHeight: 205
                                 Layout.minimumHeight: 205
-                                Layout.maximumHeight: 205
                                 theme: studioTheme
                                 controller: root
                                 device: device
