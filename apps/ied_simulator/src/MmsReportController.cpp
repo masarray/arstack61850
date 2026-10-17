@@ -534,6 +534,7 @@ ReportUi buildSubscriptionUi(
                 frame.values, typedEvidenceBudget);
             map.insert(QStringLiteral("values"), projected.values);
             map.insert(QStringLiteral("valueEvidence"), projected.evidence);
+            map.insert(QStringLiteral("valueDetails"), projected.details);
             map.insert(QStringLiteral("valueEvidenceTruncated"), projected.evidenceTruncated);
             map.insert(QStringLiteral("valuesTruncated"), projected.rowsTruncated);
             map.insert(QStringLiteral("valueTextTruncated"), projected.textTruncated);
