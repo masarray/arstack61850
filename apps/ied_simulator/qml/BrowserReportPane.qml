@@ -346,7 +346,7 @@ Rectangle {
                 color: root.theme.text
                 font.pixelSize: 11
                 elide: Text.ElideMiddle
-                ToolTip.visible: dataNameMouse.containsMouse && dataRow.received
+                ToolTip.visible: dataNameMouse.containsMouse
                 ToolTip.text: dataRow.reference
                 MouseArea { id: dataNameMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
             }
