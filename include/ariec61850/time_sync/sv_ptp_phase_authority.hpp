@@ -182,7 +182,14 @@ public:
         const bool first_observation = !have_previous_;
         have_previous_ = true;
 
-        if (sv_phase_detail::magnitude(phase) <=
+        // A small nominal phase residual is NOT sufficiently qualified
+        // when the GPTimer/PTP read bracket is wider than the tracking
+        // tolerance. Include the full bracket uncertainty before advancing
+        // consecutive software-tracking samples (never wire smpSynch).
+        const std::int64_t worst_case_phase_us =
+            sv_phase_detail::magnitude(phase) +
+            static_cast<std::int64_t>(uncertainty);
+        if (worst_case_phase_us <=
             policy_.software_tracking_threshold_us) {
             if (tracking_samples_ < policy_.consecutive_tracking_samples) {
                 ++tracking_samples_;

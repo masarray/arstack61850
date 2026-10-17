@@ -281,8 +281,8 @@ void check_tai_seed_and_truthful_time_properties() {
 
 void check_vlan_encoding_remains_configurable() {
     auto options = make_source();
-    options.vlan_id = 100U;
-    options.vlan_priority = 4U;
+    options.vlan_id = std::uint16_t{100U};
+    options.vlan_priority = std::uint8_t{4U};
     PtpPublisherRuntime source{options};
     REQUIRE(source.start());
     const auto announce = source.prepare_announce(PtpTimestamp{1000U, 0U});
