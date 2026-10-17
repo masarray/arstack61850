@@ -186,7 +186,14 @@ private:
 // uncertainty. Keep this gate independent of ESP-IDF/Qt for fault regression.
 class SvLocalSyncEvidenceGate final {
 public:
-    static constexpr std::int64_t kMaxEgressPhaseNs = 4000LL;
+    // MAC TX occurs AFTER the sampling instant: message serialization,
+    // descriptor submission and Ethernet queuing take nonzero time.
+    // SV SmpCnt=0 is aligned by the software/hardware SAMPLE observer,
+    // not by demanding that an outgoing Ethernet frame hit that instant.
+    // Bound the measured canonical TX delay to one nominal 4kHz slot.
+    // A small negative tolerance accommodates sub-4us sample-phase error.
+    static constexpr std::int64_t kMinCanonicalTxOffsetNs = -4000LL;
+    static constexpr std::int64_t kMaxCanonicalTxOffsetNs = 250000LL;
     static constexpr std::uint32_t kMaxSoftwarePhaseBoundUs = 4U;
     static constexpr std::uint32_t kEvidenceStride = 16U;
     static constexpr std::uint32_t kMaxEvidenceAgeEpochs = 17U;
@@ -201,8 +208,11 @@ public:
     }
 
     // Call only for the actual canonical SV descriptor timestamp.
-    // The lower-level tracker already verifies that consecutive timestamps
-    // belong to adjacent 16-second PTP epochs and the same source/session.
+    // The phase here is the packet's TX offset from the nearest whole PTP
+    // second, i.e. a bound on *publication latency*, NOT sampling phase.
+    // A separate GPTimer/EMAC observer qualifies the sampling instant.
+    // The lower-level tracker verifies consecutive 16-second PTP epochs
+    // and the same source/session.
     constexpr void observe(const SvTxEgressObservation& o,
                            const SvTxEvidenceResult result,
                            const std::int32_t phase_ns) noexcept {
@@ -210,7 +220,8 @@ public:
         if (result != SvTxEvidenceResult::measured ||
             !o.canonical_tx_success || !o.no_missed_slots ||
             !o.same_sample_epoch ||
-            phase > kMaxEgressPhaseNs || phase < -kMaxEgressPhaseNs) {
+            phase > kMaxCanonicalTxOffsetNs ||
+            phase < kMinCanonicalTxOffsetNs) {
             reset();
             return;
         }
