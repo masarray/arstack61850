@@ -35,7 +35,7 @@ if 'text: "MODEL"' in section:
 for item in (
     "onClicked: reports.enableSelected(true)",
     "onClicked: reports.disableSelected()",
-    "onClicked: session.discoverAndConnect()",
+    "session.discoverAndConnect()",
     "onClicked: session.disconnectFromIed()",
     "onClicked: client.readEngineeringSelected()",
 ):
