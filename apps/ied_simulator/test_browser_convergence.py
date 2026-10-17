@@ -284,6 +284,55 @@ if "ReportsWorkspace {" in workspace:
 if 'implicitHeight: 25' not in navigation or "readonly property bool newGroup:" not in navigation:
     raise SystemExit("BROWSER_REPORT_INSPECTOR_FAIL navigation is not grouped and compact")
 
+# A 100 ms native receive/drain tick must not force QML to rebuild identical
+# report inspectors or compare large QVariant histories on the GUI thread.
+# The serial I/O worker owns the last published presentation (not a protocol
+# model) and observes event-only and retained-frame changes as well as counts.
+poll_start = report_controller.find("void MmsReportController::schedulePoll()")
+poll_end = report_controller.find("} catch (const mms::MmsTransportCancelledError&)", poll_start)
+if poll_start < 0 or poll_end < 0:
+    raise SystemExit("BROWSER_REPORT_COALESCE_FAIL native poll lifecycle missing")
+report_poll = report_controller[poll_start:poll_end]
+for required in (
+    "worker->lastPublishedReportUi",
+    "const bool presentationChanged =",
+    "previous->active != ui.active",
+    "previous->cleanupRequired != ui.cleanupRequired",
+    "previous->receivedCount != ui.receivedCount",
+    "previous->subscriptionRcbReference != ui.subscriptionRcbReference",
+    "previous->rejectedCount != ui.rejectedCount",
+    "previous->decodeFailureCount != ui.decodeFailureCount",
+    "previous->events != ui.events",
+    "previous->reports != ui.reports",
+    "if (!presentationChanged) {",
+    "worker->lastPublishedReportUi = ui;",
+):
+    if required not in report_poll:
+        raise SystemExit("BROWSER_REPORT_COALESCE_FAIL missing=" + required)
+changed_dispatch = "QMetaObject::invokeMethod(self, [self, generation, ui] {"
+if not (report_poll.index("const bool presentationChanged =")
+        < report_poll.index("if (!presentationChanged) {")
+        < report_poll.index("worker->lastPublishedReportUi = ui;")
+        < report_poll.index(changed_dispatch)):
+    raise SystemExit("BROWSER_REPORT_COALESCE_FAIL deep comparison leaked onto GUI thread")
+unchanged_branch = report_poll.split("if (!presentationChanged) {", 1)[1].split(
+    "worker->lastPublishedReportUi = ui;", 1)[0]
+if "self->pollPending_ = false;" not in unchanged_branch or "return;" not in unchanged_branch:
+    raise SystemExit("BROWSER_REPORT_COALESCE_FAIL idle tick did not retire pending poll")
+changed_branch = report_poll.split(changed_dispatch, 1)[1]
+if "self->pollPending_ = false;" not in changed_branch or changed_branch.count(
+        "emit self->reportsChanged();") != 1:
+    raise SystemExit("BROWSER_REPORT_COALESCE_FAIL changed snapshot did not notify GUI exactly once")
+if "self->receivedReports_ != ui.reports" in report_poll:
+    raise SystemExit("BROWSER_REPORT_COALESCE_FAIL O(n) GUI snapshot comparison restored")
+if "worker->lastPublishedReportUi.reset();" not in report_controller:
+    raise SystemExit("BROWSER_REPORT_COALESCE_FAIL old association presentation cache retained")
+disconnect_section = report_controller.split(
+    "void MmsReportController::disconnectFromIed()", 1)[-1].split(
+    "bool MmsReportController::reconnect()", 1)[0]
+if "worker->lastPublishedReportUi.reset();" not in disconnect_section:
+    raise SystemExit("BROWSER_REPORT_COALESCE_FAIL disconnect retained report history")
+
 if "client.treeModel" in navigation:
     raise SystemExit("BROWSER_CONVERGENCE_FAIL navigation regressed to session-owned model")
 if "Timer {" in status:

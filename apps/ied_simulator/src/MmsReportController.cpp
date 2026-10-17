@@ -573,6 +573,10 @@ struct MmsReportController::WorkerState final {
     std::unique_ptr<mms::MmsStaticReportSessionRuntime> report;
     std::unique_ptr<mms::MmsReportSubscriptionRuntime> authoredReport;
     std::unique_ptr<mms::MmsDynamicDataSetRuntime> dynamicDataSets;
+    // Worker-thread-owned copy of the last GUI report projection. Qt's
+    // implicitly shared containers keep this cheap to retain; deep compare
+    // must never run on the QML/controller thread.
+    std::optional<ReportUi> lastPublishedReportUi;
 };
 
 MmsReportController::MmsReportController(QObject* parent)
@@ -774,6 +778,7 @@ bool MmsReportController::connectToIed() {
     const auto worker = workerState_;
     ioPool_.start([self, worker, stop, generation, requestedHost, requestedPort, contextModel] {
         try {
+            worker->lastPublishedReportUi.reset();
             if (worker->report) worker->report->stop();
             if (worker->authoredReport) worker->authoredReport->stop();
             worker->report.reset();
@@ -911,6 +916,9 @@ void MmsReportController::disconnectFromIed() {
         worker->dynamicDataSets.reset();
         worker->discovery.reset();
         worker->session.reset();
+        // The GUI has already discarded its report history on disconnect;
+        // do not retain a second bounded history in the idle worker.
+        worker->lastPublishedReportUi.reset();
         if (cleanupRequired && self) {
             QMetaObject::invokeMethod(self, [self, generation] {
                 if (!self || self->generation_ != generation) return;
@@ -1908,6 +1916,30 @@ void MmsReportController::schedulePoll() {
                 static_cast<void>(worker->authoredReport->drain_queued_reports());
                 ui = buildReportUi(worker->authoredReport->snapshot());
             }
+            // Compare complete bounded report presentation on the existing
+            // serial I/O worker, never on the GUI thread. Counter-only checks
+            // would lose event-only and retained-frame evidence changes.
+            const auto& previous = worker->lastPublishedReportUi;
+            const bool presentationChanged =
+                !previous ||
+                previous->active != ui.active ||
+                previous->cleanupRequired != ui.cleanupRequired ||
+                previous->receivedCount != ui.receivedCount ||
+                previous->subscriptionRcbReference != ui.subscriptionRcbReference ||
+                previous->rejectedCount != ui.rejectedCount ||
+                previous->decodeFailureCount != ui.decodeFailureCount ||
+                previous->events != ui.events ||
+                previous->reports != ui.reports;
+            if (!presentationChanged) {
+                if (self) {
+                    QMetaObject::invokeMethod(self, [self, generation] {
+                        if (!self || self->generation_ != generation) return;
+                        self->pollPending_ = false;
+                    }, Qt::QueuedConnection);
+                }
+                return;
+            }
+            worker->lastPublishedReportUi = ui;
             if (self) {
                 QMetaObject::invokeMethod(self, [self, generation, ui] {
                     if (!self || self->generation_ != generation) return;
