@@ -22,6 +22,16 @@ inline bool semanticInside(const std::string_view leaf,
     return leaf.size() > root.size() && leaf.substr(0,root.size()) == root &&
            leaf[root.size()] == '.';
 }
+inline semantic_mms::MmsDataKind semanticExpectedKind(const std::string_view basic) {
+    using K = semantic_mms::MmsDataKind;
+    if (basic == "BOOLEAN") return K::boolean;
+    if (basic == "Quality" || basic == "QUALITY") return K::bit_string;
+    if (basic == "Timestamp" || basic == "TIMESTAMP") return K::utc_time;
+    if (basic == "Enum" || basic == "ENUM" || basic == "INT32" ||
+        basic == "INT8" || basic == "INT16") return K::integer;
+    if (basic == "FLOAT32" || basic == "FLOAT64") return K::floating_point;
+    return K::unknown;
+}
 inline bool semanticKindCompatible(const semantic_mms::MmsDataValue& value,
                                     const std::string_view basic) {
     using K = semantic_mms::MmsDataKind;
@@ -112,7 +122,8 @@ inline std::optional<std::vector<VerifiedReportLeaf>> bindFlatSclReportStructure
     // valid and produce deceptively named engineering values.
     for (std::size_t i = 0; i < attributes.size(); ++i)
         for (std::size_t j = i + 1; j < attributes.size(); ++j)
-            if (attributes[i]->scl_basic_type == attributes[j]->scl_basic_type)
+            if (semanticExpectedKind(attributes[i]->scl_basic_type) ==
+                semanticExpectedKind(attributes[j]->scl_basic_type))
                 return std::nullopt;
     std::vector<VerifiedReportLeaf> result;
     result.reserve(children.size());
