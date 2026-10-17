@@ -67,27 +67,50 @@ struct UiBounds {
     const auto current = findUiBounds(window, "studioCurrentMatrix");
     const auto tray = findUiBounds(window, "studioTimingTray");
     const auto quality = findUiBounds(window, "studioQualityRow");
-    const std::array<std::pair<const char*, UiBounds>, 6> areas{{
+    const auto scroll = findUiBounds(window, "studioInjectionScroll");
+    const auto* scrollItem = window->findChild<QQuickItem*>(
+        QStringLiteral("studioInjectionScroll"));
+    const qreal scrollContentHeight = scrollItem != nullptr
+        ? scrollItem->property("contentHeight").toDouble() : 0.0;
+    const bool needsScroll = scrollContentHeight > scroll.area.height() + tolerance;
+    const std::array<std::pair<const char*, UiBounds>, 7> areas{{
         {"toolbar", bar}, {"injection workspace", surface},
-        {"voltage matrix", voltage}, {"current matrix", current},
-        {"PTP timing tray", tray}, {"quality editor", quality}
+        {"injection scroller", scroll}, {"voltage matrix", voltage},
+        {"current matrix", current}, {"PTP timing tray", tray},
+        {"quality editor", quality}
     }};
     for (const auto& [label, item] : areas) {
+        const bool mustFitViewport = !needsScroll ||
+            (item.area == bar.area || item.area == surface.area ||
+             item.area == scroll.area);
+        const bool withinViewport = viewport.adjusted(
+            -tolerance, -tolerance, tolerance, tolerance)
+                .contains(item.area.adjusted(tolerance, tolerance,
+                                             -tolerance, -tolerance));
+        // On minimum-height Windows screens the lower controls are reachable
+        // by vertical scrolling, not clipped or silently removed.
+        const bool insideScrollableContent =
+            item.area.left() >= scroll.area.left() - tolerance &&
+            item.area.right() <= scroll.area.right() + tolerance &&
+            item.area.top() >= scroll.area.top() - tolerance &&
+            item.area.bottom() <= scroll.area.top() +
+                scrollContentHeight + tolerance;
         if (!item.visible || item.area.width() < 25 || item.area.height() < 15 ||
-            !viewport.adjusted(-tolerance, -tolerance, tolerance, tolerance)
-                 .contains(item.area.adjusted(tolerance, tolerance,
-                                              -tolerance, -tolerance))) {
-            qCritical().noquote() << "Studio UI viewport violation" << size << label
-                                  << "bounds=" << item.area << "viewport=" << viewport;
+            (mustFitViewport ? !withinViewport : !insideScrollableContent)) {
+            qCritical().noquote() << "Studio UI viewport/scroll violation"
+                                  << size << label << "bounds=" << item.area
+                                  << "viewport=" << viewport
+                                  << "scroll content height=" << scrollContentHeight;
             return false;
         }
     }
-    if (!(voltage.area.right() <= current.area.left() + tolerance
-          && tray.area.top() >= voltage.area.bottom() - tolerance
+    if (!(voltage.area.bottom() <= current.area.top() + tolerance
+          && tray.area.top() >= current.area.bottom() - tolerance
           && quality.area.top() >= tray.area.bottom() - tolerance
-          && quality.area.bottom() <= surface.area.bottom() + tolerance)) {
-        qCritical().noquote() << "Studio UI panel order/overlap violation" << size
-                              << voltage.area << current.area << tray.area << quality.area;
+          && quality.area.bottom() <= scroll.area.top() + scrollContentHeight + tolerance)) {
+        qCritical().noquote() << "Studio stacked panel order/overlap violation"
+                              << size << voltage.area << current.area
+                              << tray.area << quality.area;
         return false;
     }
     const std::array<const char*, 4> controls{{
