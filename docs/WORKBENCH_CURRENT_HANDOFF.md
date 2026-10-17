@@ -1,5 +1,7 @@
 # Native Qt IEC 61850 Workbench — current cross-thread handoff
 
+> **2026-10-17 P0 OVERRIDE:** Read [WHOLE-WORKBENCH SSOT Live Data Model master handoff](WORKBENCH_SSOT_LIVE_DATA_MODEL_MASTER_HANDOFF.md) **first**. This document preserves earlier accepted checkpoints but **does not certify app-wide convergence of live values**. Open PR #230 has a failing exact-head Browser convergence gate and must not be blindly merged. Next priority: accepted MMS Report → existing canonical live sample/provenance owner → every Workbench consumer, with source-generation guards and actual selected-state visual evidence. Do not keep polishing Reports alone.
+
 > **Updated:** 2026-10-17 (WIB), snapshot only; always refresh GitHub refs and PR state before editing.
 > **Primary strategy and ownership contract:** [WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md](WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md).
 > **Scope:** installed native ARStack Workbench in apps/ied_simulator. Not a web app, WPF clone, or the separate ESP32-P4/SMV Studio track.
