@@ -284,6 +284,36 @@ if "ReportsWorkspace {" in workspace:
 if 'implicitHeight: 25' not in navigation or "readonly property bool newGroup:" not in navigation:
     raise SystemExit("BROWSER_REPORT_INSPECTOR_FAIL navigation is not grouped and compact")
 
+# A 100 ms native receive/drain tick must not force QML to rebuild identical
+# report inspectors. The full presentation snapshot (not counters alone)
+# remains authoritative, including event-only and retained-frame changes.
+poll_start = report_controller.find("void MmsReportController::schedulePoll()")
+poll_end = report_controller.find("} catch (const mms::MmsTransportCancelledError&)", poll_start)
+if poll_start < 0 or poll_end < 0:
+    raise SystemExit("BROWSER_REPORT_COALESCE_FAIL native poll lifecycle missing")
+report_poll = report_controller[poll_start:poll_end]
+for required in (
+    "self->pollPending_ = false;",
+    "const bool presentationChanged =",
+    "self->active_ != ui.active",
+    "self->cleanupRequired_ != ui.cleanupRequired",
+    "self->receivedReportCount_ != ui.receivedCount",
+    "self->subscriptionRcbReference_ != ui.subscriptionRcbReference",
+    "self->rejectedReportCount_ != ui.rejectedCount",
+    "self->reportDecodeFailureCount_ != ui.decodeFailureCount",
+    "self->events_ != ui.events",
+    "self->receivedReports_ != ui.reports",
+    "if (!presentationChanged) return;",
+):
+    if required not in report_poll:
+        raise SystemExit("BROWSER_REPORT_COALESCE_FAIL missing=" + required)
+if not (report_poll.index("self->pollPending_ = false;")
+        < report_poll.index("if (!presentationChanged) return;")
+        < report_poll.index("emit self->reportsChanged();")):
+    raise SystemExit("BROWSER_REPORT_COALESCE_FAIL lost pending reset or QML notify guard")
+if report_poll.count("emit self->reportsChanged();") != 1:
+    raise SystemExit("BROWSER_REPORT_COALESCE_FAIL duplicate idle QML notifications")
+
 if "client.treeModel" in navigation:
     raise SystemExit("BROWSER_CONVERGENCE_FAIL navigation regressed to session-owned model")
 if "Timer {" in status:
