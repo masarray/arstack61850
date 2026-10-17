@@ -70,3 +70,5 @@ still needs measurement. Host Npcap receive timestamps do NOT establish MAC
 egress timing; firmware and CI success do NOT authorize smpSynch=1/2 or a
 public PTP-locked release. Test on the isolated ESP32-P4 bench with an
 independent GM/PPS before claiming physical lock.
+
+Bench checkpoint: PR #229 guarded SOURCE/RECEIVER artifacts are experimental images only and require board P0 revision validation, independently measured SV TX phase, and a separate stable release review.
