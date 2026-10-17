@@ -377,9 +377,11 @@ for method, next_method in (
     end = report_controller.find(next_method, begin + len(method))
     if begin < 0 or end < 0 or "worker->lastPublishedReportUi.reset();" not in report_controller[begin:end]:
         raise SystemExit("BROWSER_REPORT_IDLE_FAIL stale RCB lifecycle cache: " + method)
-if report_poll.count("emit self->reportsChanged();") != 2:
-    # One changed-state notification, one explicit failure notification.
-    raise SystemExit("BROWSER_REPORT_IDLE_FAIL dropped report change/failure diagnostics")
+if report_poll.count("emit self->reportsChanged();") != 1:
+    raise SystemExit("BROWSER_REPORT_IDLE_FAIL dropped changed-state GUI notification")
+poll_failure = report_controller[poll_end:]
+if "Report association/poll failed" not in poll_failure or "emit self->reportsChanged();" not in poll_failure:
+    raise SystemExit("BROWSER_REPORT_IDLE_FAIL dropped failure diagnostics")
 
 if "client.treeModel" in navigation:
     raise SystemExit("BROWSER_CONVERGENCE_FAIL navigation regressed to session-owned model")
