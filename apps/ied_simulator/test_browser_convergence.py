@@ -281,8 +281,11 @@ for token in (
 ):
     if token not in report_inspector:
         raise SystemExit("BROWSER_REPORT_INLINE_TREE_FAIL compact selection=" + token)
-if report_inspector.count("BrowserEngineeringEvidence {") != 1:
-    raise SystemExit("BROWSER_REPORT_INLINE_TREE_FAIL duplicate or detached q/t inspector")
+# The first is member-level q/t; the second is verified leaf q/t and
+# must remain beneath the selected-only Loader, not at table root.
+if report_inspector.count("BrowserEngineeringEvidence {") != 2 or (
+        member_tree.count("BrowserEngineeringEvidence {") != 2):
+    raise SystemExit("BROWSER_REPORT_INLINE_TREE_FAIL missing/duplicate typed leaf inspector")
 
 # P0 exact wire-schema semantics: names may only come from successful
 # GetVariableAccessAttributes TypeSpecification on the same MMS association.
@@ -307,6 +310,7 @@ for token in (
     "primeSelectedReportTypes(",
     "attemptedTypeRoots",
     "attempts >= 8U",
+    "attemptedRoots.size() >= 16U",
     "MmsVariableAccessAttributesRequest request",
     "indexTypes(",
     "buildSubscriptionUi(",
