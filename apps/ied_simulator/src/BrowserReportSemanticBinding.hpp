@@ -68,10 +68,20 @@ inline std::optional<std::vector<VerifiedReportLeaf>> bindFlatSclReportStructure
         (!openedScl && !trustedSnapshot) || dataSet.empty())
         return std::nullopt;
     const MmsLiveDataSet* chosen = nullptr;
-    for (const auto& ds : model.data_sets) {
-        if (ds.reference != dataSet) continue;
-        if (chosen) return std::nullopt;
-        chosen = &ds;
+    // Reuse the ObjectName normalization accepted by the native frame
+    // validator: dot and dollar forms must resolve to one DataSet identity.
+    try {
+        const auto requested =
+            MmsDataSetDirectoryCodec::parse_data_set_reference(std::string{dataSet});
+        for (const auto& ds : model.data_sets) {
+            if (MmsDataSetDirectoryCodec::parse_data_set_reference(ds.reference)
+                != requested)
+                continue;
+            if (chosen) return std::nullopt;
+            chosen = &ds;
+        }
+    } catch (const std::exception&) {
+        return std::nullopt;
     }
     if (!chosen) return std::nullopt;
     const MmsLiveDataSetMember* binding = nullptr;
