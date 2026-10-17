@@ -538,10 +538,12 @@ ReportUi buildSubscriptionUi(
             // No second decoder, protocol store or UI-owned report mutation.
             if (ui.reports.isEmpty()) {
                 bool nestedTruncated = false;
+                bool typedEvidenceOmitted = false;
                 map.insert(QStringLiteral("valueTree"),
                            arstack::iedsim::projectBrowserReportTree(
-                               frame.values, &nestedTruncated));
+                               frame.values, &nestedTruncated, &typedEvidenceOmitted));
                 map.insert(QStringLiteral("treeNestedTruncated"), nestedTruncated);
+                map.insert(QStringLiteral("treeTypedEvidenceOmitted"), typedEvidenceOmitted);
             }
             map.insert(QStringLiteral("valueEvidence"), projected.evidence);
             map.insert(QStringLiteral("valueEvidenceTruncated"), projected.evidenceTruncated);
