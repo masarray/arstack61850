@@ -88,9 +88,11 @@ inline constexpr int kBrowserReportDetailChildren = 16;
                 static_cast<qulonglong>(member.data_set_index));
         QString displayValue = QStringLiteral("<failed>");
         bool valueTruncated = false;
-        if (member.value) {
-            // Never allocate a full string/hex/array representation and then
-            // truncate it. Serialize directly into a 1024-character budget.
+        if (member.value &&
+            member.value->kind() != mms::MmsDataKind::structure &&
+            member.value->kind() != mms::MmsDataKind::array) {
+            // Scalar values use the shared bounded formatter. Never construct
+            // an expensive flattened aggregate just to discard that preview.
             const auto preview = previewMmsValue(*member.value,
                                                   kBrowserReportTextLimit);
             displayValue = QString::fromStdString(preview.text);
@@ -103,10 +105,13 @@ inline constexpr int kBrowserReportDetailChildren = 16;
                 const auto& children = member.value->children();
                 // Wire structure members are positional; without an SCL/type
                 // binding never invent ST/q/t names or IEC enum meanings.
-                displayValue = QStringLiteral("%1 · %2 field(s) — select for details")
+                displayValue = QStringLiteral("%1 · %2 field(s)%3")
                     .arg(kind == mms::MmsDataKind::structure
                              ? QStringLiteral("Structure") : QStringLiteral("Array"))
-                    .arg(static_cast<qulonglong>(children.size()));
+                    .arg(static_cast<qulonglong>(children.size()))
+                    .arg(ordinal < kBrowserReportDetailMembers
+                             ? QStringLiteral(" — select for details")
+                             : QStringLiteral(" — details outside preview limit"));
                 if (ordinal < kBrowserReportDetailMembers) {
                     const auto count = std::min(children.size(),
                         static_cast<std::size_t>(kBrowserReportDetailChildren));
