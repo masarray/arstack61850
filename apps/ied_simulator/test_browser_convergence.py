@@ -233,7 +233,7 @@ if 'const bool includeWireDetails = ui.reports.isEmpty();' not in report_control
         'kBrowserReportVisibleMemberLimit,\n                includeWireDetails' not in report_controller):
     raise SystemExit("BROWSER_REPORT_PERF_FAIL details projected for old frames")
 if 'const bool includeWireDetails = false' not in projection_header or (
-        'if (includeWireDetails && ordinal < kBrowserReportDetailMembers)' not in projection_header):
+        'if (!exactType && includeWireDetails &&' not in projection_header):
     raise SystemExit("BROWSER_REPORT_PERF_FAIL detail projection not opt-in")
 if 'map.insert(QStringLiteral("valueDetails"), projected.details)' not in report_controller:
     raise SystemExit("BROWSER_REPORT_READABLE_FAIL lost structured detail presentation")
@@ -281,8 +281,51 @@ for token in (
 ):
     if token not in report_inspector:
         raise SystemExit("BROWSER_REPORT_INLINE_TREE_FAIL compact selection=" + token)
-if report_inspector.count("BrowserEngineeringEvidence {") != 1:
-    raise SystemExit("BROWSER_REPORT_INLINE_TREE_FAIL duplicate or detached q/t inspector")
+# The first is member-level q/t; the second is verified leaf q/t and
+# must remain beneath the selected-only Loader, not at table root.
+if report_inspector.count("BrowserEngineeringEvidence {") != 2 or (
+        member_tree.count("BrowserEngineeringEvidence {") != 2):
+    raise SystemExit("BROWSER_REPORT_INLINE_TREE_FAIL missing/duplicate typed leaf inspector")
+
+# P0 exact wire-schema semantics: names may only come from successful
+# GetVariableAccessAttributes TypeSpecification on the same MMS association.
+verified_types = (
+    workspace_path.parent.parent / "src" / "BrowserVerifiedReportTypes.hpp"
+).read_text(encoding="utf-8")
+for token in (
+    "indexTypes(",
+    "MmsObjectNameKind::domain_specific",
+    "findSchema(",
+    "if (!validate(*type, *member.value, leaves)",
+    "type.children.size() != value.children().size()",
+    "child.name.empty()",
+    "matchingKind(",
+    "decodeEngineeringEvidence(relative, value)",
+    "kMaximumTypedLeaves = 64U",
+    "kMaximumTypeDepth = 6U",
+):
+    if token not in verified_types:
+        raise SystemExit("BROWSER_REPORT_P0_SCHEMA_FAIL missing=" + token)
+for token in (
+    "primeSelectedReportTypes(",
+    "attemptedTypeRoots",
+    "attempts >= 8U",
+    "attemptedRoots.size() >= 16U",
+    "MmsVariableAccessAttributesRequest request",
+    "indexTypes(",
+    "buildSubscriptionUi(",
+    "includeWireDetails, verifiedTypes",
+):
+    if token not in report_controller:
+        raise SystemExit("BROWSER_REPORT_P0_BINDING_FAIL missing=" + token)
+for token in (
+    "function selectedReportMemberTypeVerified()",
+    "Verified MMS type · exact field order",
+    "modelData.engineeringEvidence || ({})",
+    "Positional · not SCL-labelled",
+):
+    if token not in report_inspector:
+        raise SystemExit("BROWSER_REPORT_P0_INLINE_FAIL missing=" + token)
 
 value_preview = (workspace_path.parent.parent / "src" / "BrowserBoundedMmsPreview.hpp").read_text(encoding="utf-8")
 for token in [
@@ -414,8 +457,8 @@ for token in (
     "worker->authoredReport->drain_queued_reports()",
     "if (drained == 0U && worker->lastPublishedReportUi) {",
     "self->pollPending_ = false;",
-    "buildReportUi(worker->report->snapshot())",
-    "buildReportUi(worker->authoredReport->snapshot())",
+    "buildReportUi(worker->report->snapshot(), &worker->verifiedTypes)",
+    "buildReportUi(worker->authoredReport->snapshot(), &worker->verifiedTypes)",
     "previous->events != ui.events",
     "previous->reports != ui.reports",
 ):
@@ -424,7 +467,7 @@ for token in (
 if not (report_poll.index("try_poll_once_for(")
         < report_poll.index("const auto drained = staticActive")
         < report_poll.index("if (drained == 0U && worker->lastPublishedReportUi)")
-        < report_poll.index("buildReportUi(worker->report->snapshot())")):
+        < report_poll.index("buildReportUi(worker->report->snapshot(), &worker->verifiedTypes)")):
     raise SystemExit("BROWSER_REPORT_IDLE_FAIL snapshot built on unchanged receive tick")
 unchanged = report_poll.split(
     "if (drained == 0U && worker->lastPublishedReportUi) {", 1)[1].split(

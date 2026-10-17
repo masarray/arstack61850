@@ -3,6 +3,7 @@
 
 #include "MmsEngineeringEvidence.hpp"
 #include "BrowserBoundedMmsPreview.hpp"
+#include "BrowserVerifiedReportTypes.hpp"
 #include "ariec61850/mms/reporting.hpp"
 
 #include <QString>
@@ -64,7 +65,8 @@ inline constexpr int kBrowserReportDetailChildren = 16;
     const std::vector<mms::MmsReportValue>& members,
     int& remainingTypedEvidence,
     const int requestedVisibleMembers = kBrowserReportVisibleMemberLimit,
-    const bool includeWireDetails = false) {
+    const bool includeWireDetails = false,
+    const verified_report_detail::WireTypeIndex* verifiedTypes = nullptr) {
     BrowserReportMemberProjection projection;
     const int visibleLimit = std::clamp(requestedVisibleMembers, 0, kBrowserReportVisibleMemberLimit);
     const auto visibleCount = std::min(members.size(), static_cast<std::size_t>(visibleLimit));
@@ -100,20 +102,37 @@ inline constexpr int kBrowserReportDetailChildren = 16;
             valueTruncated = preview.truncated;
         }
         QVariantList detailRows;
+        bool exactType = false;
+        if (includeWireDetails && verifiedTypes &&
+            ordinal < kBrowserReportDetailMembers) {
+            detailRows = verified_report_detail::project(member, *verifiedTypes);
+            exactType = !detailRows.isEmpty();
+            if (exactType) {
+                for (const auto& child : detailRows) {
+                    if (child.toMap().value(QStringLiteral("truncated")).toBool()) {
+                        projection.textTruncated = true;
+                        break;
+                    }
+                }
+            }
+        }
         if (member.value) {
             const auto kind = member.value->kind();
             if (kind == mms::MmsDataKind::structure || kind == mms::MmsDataKind::array) {
                 const auto& children = member.value->children();
                 // Wire structure members are positional; without an SCL/type
                 // binding never invent ST/q/t names or IEC enum meanings.
-                displayValue = QStringLiteral("%1 · %2 field(s)%3")
-                    .arg(kind == mms::MmsDataKind::structure
-                             ? QStringLiteral("Structure") : QStringLiteral("Array"))
-                    .arg(static_cast<qulonglong>(children.size()))
-                    .arg(includeWireDetails && ordinal < kBrowserReportDetailMembers
-                             ? QStringLiteral(" — select for details")
-                             : QString{});
-                if (includeWireDetails && ordinal < kBrowserReportDetailMembers) {
+                displayValue = exactType
+                    ? QStringLiteral("%1 verified IEC leaf(s) — expand")
+                          .arg(detailRows.size())
+                    : QStringLiteral("%1 · %2 field(s)%3")
+                          .arg(kind == mms::MmsDataKind::structure
+                                   ? QStringLiteral("Structure") : QStringLiteral("Array"))
+                          .arg(static_cast<qulonglong>(children.size()))
+                          .arg(includeWireDetails && ordinal < kBrowserReportDetailMembers
+                                   ? QStringLiteral(" — select for details") : QString{});
+                if (!exactType && includeWireDetails &&
+                    ordinal < kBrowserReportDetailMembers) {
                     const auto count = std::min(children.size(),
                         static_cast<std::size_t>(kBrowserReportDetailChildren));
                     for (std::size_t child = 0; child < count; ++child) {
@@ -137,6 +156,7 @@ inline constexpr int kBrowserReportDetailChildren = 16;
         if (!detailRows.isEmpty())
             projection.details.push_back(QVariantMap{
                 {QStringLiteral("index"), static_cast<int>(ordinal)},
+                {QStringLiteral("typed"), exactType},
                 {QStringLiteral("rows"), detailRows}});
         QString reasons;
         bool reasonsTruncated = false;

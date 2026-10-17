@@ -482,6 +482,105 @@ int main(int argc, char** argv) {
         return 28;
     }
 
+    // P0: transport order becomes IEC attribute identity only after an exact
+    // LN-root GVAA TypeSpecification matches every nested kind/cardinality.
+    // No ARIEC61850 renderer child-count guessing and no fake q/t.
+    {
+        namespace mms = ar::iec61850::mms;
+        const auto typed = [](mms::MmsTypeKind kind, std::string name,
+                              std::vector<mms::MmsTypeSpecification> children = {}) {
+            mms::MmsTypeSpecification node;
+            node.kind = kind;
+            node.name = std::move(name);
+            node.children = std::move(children);
+            return node;
+        };
+        mms::MmsVariableTypeEvidence evidence;
+        evidence.variable = mms::MmsObjectName::domain_specific("LD4", "XCBR1");
+        evidence.attributes.emplace();
+        evidence.attributes->type = typed(mms::MmsTypeKind::structure, "XCBR1", {
+            typed(mms::MmsTypeKind::structure, "ST", {
+                typed(mms::MmsTypeKind::structure, "Pos", {
+                    typed(mms::MmsTypeKind::bit_string, "stVal"),
+                    typed(mms::MmsTypeKind::bit_string, "q"),
+                    typed(mms::MmsTypeKind::utc_time, "t")
+                })
+            })
+        });
+        // Index pointers borrow the discovery evidence: keep the owner alive.
+        const std::vector<mms::MmsVariableTypeEvidence> verifiedEvidence{evidence};
+        const auto typeIndex =
+            arstack::iedsim::verified_report_detail::indexTypes(verifiedEvidence);
+        mms::MmsReportValue reportMember;
+        reportMember.member.emplace();
+        reportMember.member->object_name =
+            mms::MmsObjectName::domain_specific("LD4", "XCBR1$ST$Pos");
+        reportMember.member->functional_constraint = "ST";
+        reportMember.data_reference = "LD4/XCBR1.Pos";
+        const std::array<std::uint8_t, 1U> dbposBytes{0x80U};
+        reportMember.value = mms::MmsDataValue::structure({
+            mms::MmsDataValue::bit_string(6U, dbposBytes),
+            mms::MmsDataValue::bit_string(3U, bits),
+            mms::MmsDataValue::utc_time(utc)
+        });
+        auto reportTypes = arstack::iedsim::verified_report_detail::project(
+            reportMember, typeIndex);
+        int semanticBudget = 4;
+        const auto semantic = arstack::iedsim::projectBrowserReportMembers(
+            {reportMember}, semanticBudget, 8, true, &typeIndex);
+        if (reportTypes.size() != 3 || semantic.details.size() != 1 ||
+            semantic.values.isEmpty()) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL verified_semantic_report_empty\n";
+            return 91;
+        }
+        const auto details = semantic.details.constFirst().toMap();
+        if (
+            !details.value(QStringLiteral("typed")).toBool() ||
+            !semantic.values.constFirst().contains(QStringLiteral("verified IEC")) ||
+            reportTypes.at(0).toMap().value(QStringLiteral("label")).toString() !=
+                QStringLiteral("stVal") ||
+            reportTypes.at(1).toMap().value(QStringLiteral("label")).toString() !=
+                QStringLiteral("q") ||
+            reportTypes.at(1).toMap().value(QStringLiteral("engineeringEvidence"))
+                .toMap().value(QStringLiteral("kind")).toString() != QStringLiteral("quality") ||
+            reportTypes.at(2).toMap().value(QStringLiteral("engineeringEvidence"))
+                .toMap().value(QStringLiteral("kind")).toString() != QStringLiteral("timestamp")) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL verified_semantic_report_type\n";
+            return 91;
+        }
+        // Wrong cardinality, data kind, device/domain and duplicate GVAA
+        // authority all fail closed without promoting Field N to semantic DA.
+        auto mismatch = reportMember;
+        mismatch.value = mms::MmsDataValue::structure({
+            mms::MmsDataValue::boolean(true),
+            mms::MmsDataValue::bit_string(3U, bits)
+        });
+        auto stale = reportMember;
+        stale.member->object_name =
+            mms::MmsObjectName::domain_specific("LD_WRONG", "XCBR1$ST$Pos");
+        const std::vector<mms::MmsVariableTypeEvidence> duplicatedEvidence{
+            evidence, evidence};
+        const auto ambiguous =
+            arstack::iedsim::verified_report_detail::indexTypes(duplicatedEvidence);
+        if (!arstack::iedsim::verified_report_detail::project(mismatch, typeIndex).isEmpty() ||
+            !arstack::iedsim::verified_report_detail::project(stale, typeIndex).isEmpty() ||
+            !arstack::iedsim::verified_report_detail::project(reportMember, ambiguous).isEmpty() ||
+            !arstack::iedsim::verified_report_detail::project(
+                reportMember, arstack::iedsim::verified_report_detail::WireTypeIndex{}).isEmpty()) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL semantic_report_fallback\n";
+            return 92;
+        }
+        int fallbackBudget = 4;
+        const auto fallback = arstack::iedsim::projectBrowserReportMembers(
+            {mismatch}, fallbackBudget, 8, true, &typeIndex);
+        if (fallback.details.size() != 1 ||
+            fallback.details.constFirst().toMap().value(QStringLiteral("typed")).toBool() ||
+            fallback.values.constFirst().contains(QStringLiteral("verified IEC"))) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL semantic_mismatch_claim\n";
+            return 93;
+        }
+    }
+
     using ar::iec61850::mms::MmsDataCodec;
     using ar::iec61850::mms::MmsDataValue;
     // M2F: the GUI must not allocate multi-megabyte intermediary strings

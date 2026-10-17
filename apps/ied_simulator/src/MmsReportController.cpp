@@ -478,6 +478,66 @@ void probeContextReportControls(
     }
 }
 
+// Only read-only GVAA metadata for at most eight distinct LN roots from
+// the selected DataSet, once per association. Failure preserves the MMS
+// subscription and positional fallback; no second association or point polls.
+void primeSelectedReportTypes(
+    mms::MmsAssociationRuntime& association,
+    mms::MmsLiveDiscoveryResult& discovery,
+    const QString& selectedDataSet,
+    std::set<std::string>& attemptedRoots,
+    std::stop_token token) {
+    const mms::MmsDataSetDirectoryResponse* directory{};
+    for (const auto& candidate : discovery.data_set_directories) {
+        if (candidate.directory && sameDataSetReference(
+                QString::fromStdString(candidate.candidate.reference), selectedDataSet)) {
+            directory = &*candidate.directory;
+            break;
+        }
+    }
+    if (!directory) return;
+    std::size_t attempts{};
+    for (const auto& member : directory->members) {
+        // Total authority expansion is bounded for the entire MMS association,
+        // even if an operator switches between thousands of RCB/DataSets.
+        if (attempts >= 8U || attemptedRoots.size() >= 16U ||
+            token.stop_requested()) break;
+        const auto& name = member.object_name;
+        if (name.kind != mms::MmsObjectNameKind::domain_specific || name.domain.empty())
+            continue;
+        const auto end = name.item.find('$');
+        if (end == std::string::npos || end == 0U) continue;
+        const std::string root = name.item.substr(0U, end);
+        const auto identifier =
+            arstack::iedsim::verified_report_detail::key(name.domain, root);
+        if (!attemptedRoots.insert(identifier).second) continue;
+        const bool known = std::any_of(
+            discovery.variable_types.begin(), discovery.variable_types.end(),
+            [&](const auto& existing) {
+                return existing.success() && existing.variable.domain == name.domain &&
+                       existing.variable.item == root;
+            });
+        if (known) continue;
+        ++attempts;
+        try {
+            mms::MmsVariableTypeEvidence evidence;
+            evidence.variable = mms::MmsObjectName::domain_specific(name.domain, root);
+            const auto invoke = association.next_invoke_id();
+            const mms::MmsVariableAccessAttributesRequest request{invoke, evidence.variable};
+            const auto encoded =
+                mms::MmsServiceCodec::encode_variable_access_attributes_request_p_data(
+                    request, association.negotiated().presentation_context_id);
+            const auto exchange = association.exchange_confirmed(encoded, invoke, token);
+            evidence.attributes =
+                mms::MmsServiceCodec::decode_variable_access_attributes_response(
+                    confirmedPayload(exchange), invoke);
+            discovery.variable_types.push_back(std::move(evidence));
+        } catch (const std::exception&) {
+            break; // Unsupported GVAA must not fail RCB activation.
+        }
+    }
+}
+
 struct ReportUi final {
     QVariantList reports;
     QStringList events;
@@ -491,7 +551,8 @@ struct ReportUi final {
 
 ReportUi buildSubscriptionUi(
     const mms::MmsReportSubscriptionSnapshot& subscription,
-    const bool active) {
+    const bool active,
+    const arstack::iedsim::verified_report_detail::WireTypeIndex* verifiedTypes) {
     ReportUi ui;
     ui.active = active;
     ui.receivedCount = subscription.received_reports;
@@ -537,7 +598,7 @@ ReportUi buildSubscriptionUi(
             const auto projected = arstack::iedsim::projectBrowserReportMembers(
                 frame.values, typedEvidenceBudget,
                 arstack::iedsim::kBrowserReportVisibleMemberLimit,
-                includeWireDetails);
+                includeWireDetails, verifiedTypes);
             map.insert(QStringLiteral("values"), projected.values);
             map.insert(QStringLiteral("valueEvidence"), projected.evidence);
             map.insert(QStringLiteral("valueDetails"), projected.details);
@@ -557,19 +618,24 @@ ReportUi buildSubscriptionUi(
     return ui;
 }
 
-ReportUi buildReportUi(const mms::MmsStaticReportSessionSnapshot& snapshot) {
+ReportUi buildReportUi(
+    const mms::MmsStaticReportSessionSnapshot& snapshot,
+    const arstack::iedsim::verified_report_detail::WireTypeIndex* verifiedTypes = nullptr) {
     if (!snapshot.subscription) {
         ReportUi ui;
         ui.active = snapshot.active;
         return ui;
     }
-    return buildSubscriptionUi(*snapshot.subscription, snapshot.active);
+    return buildSubscriptionUi(*snapshot.subscription, snapshot.active, verifiedTypes);
 }
 
-ReportUi buildReportUi(const mms::MmsReportSubscriptionSnapshot& snapshot) {
+ReportUi buildReportUi(
+    const mms::MmsReportSubscriptionSnapshot& snapshot,
+    const arstack::iedsim::verified_report_detail::WireTypeIndex* verifiedTypes = nullptr) {
     return buildSubscriptionUi(
         snapshot,
-        snapshot.state == mms::MmsReportSubscriptionState::active);
+        snapshot.state == mms::MmsReportSubscriptionState::active,
+        verifiedTypes);
 }
 
 } // namespace
@@ -577,6 +643,8 @@ ReportUi buildReportUi(const mms::MmsReportSubscriptionSnapshot& snapshot) {
 struct MmsReportController::WorkerState final {
     std::unique_ptr<mms::MmsTcpLiveDiscoverySession> session;
     std::shared_ptr<mms::MmsLiveDiscoveryResult> discovery;
+    arstack::iedsim::verified_report_detail::WireTypeIndex verifiedTypes;
+    std::set<std::string> attemptedTypeRoots;
     std::unique_ptr<mms::MmsStaticReportSessionRuntime> report;
     std::unique_ptr<mms::MmsReportSubscriptionRuntime> authoredReport;
     std::unique_ptr<mms::MmsDynamicDataSetRuntime> dynamicDataSets;
@@ -794,6 +862,8 @@ bool MmsReportController::connectToIed() {
             if (worker->session) worker->session->disconnect();
             worker->session.reset();
             worker->discovery.reset();
+            worker->verifiedTypes.clear();
+            worker->attemptedTypeRoots.clear();
 
             mms::MmsAssociationOptions associationOptions;
             associationOptions.connect_timeout = std::chrono::milliseconds{5'000};
@@ -838,6 +908,9 @@ bool MmsReportController::connectToIed() {
             worker->dynamicDataSets = std::make_unique<mms::MmsDynamicDataSetRuntime>(
                 session->association(), dynamicOptions);
             worker->discovery = discovery;
+            worker->verifiedTypes =
+                arstack::iedsim::verified_report_detail::indexTypes(
+                    discovery->variable_types);
             worker->session = std::move(session);
 
             if (self) {
@@ -867,6 +940,8 @@ bool MmsReportController::connectToIed() {
             worker->dynamicDataSets.reset();
             worker->session.reset();
             worker->discovery.reset();
+            worker->verifiedTypes.clear();
+            worker->attemptedTypeRoots.clear();
             if (self) {
                 const auto message = QString::fromUtf8(exception.what());
                 QMetaObject::invokeMethod(self, [self, generation, message] {
@@ -922,6 +997,8 @@ void MmsReportController::disconnectFromIed() {
         worker->authoredReport.reset();
         worker->dynamicDataSets.reset();
         worker->discovery.reset();
+            worker->verifiedTypes.clear();
+            worker->attemptedTypeRoots.clear();
         worker->session.reset();
         // The GUI has already discarded its report history on disconnect;
         // do not retain a second bounded history in the idle worker.
@@ -1484,6 +1561,14 @@ bool MmsReportController::enableSelectedAuthored(
                 worker->authoredReport.reset();
             }
 
+            // Common authoring entry: static and owned-dynamic selected
+            // DataSets must use the same bounded metadata enrichment.
+            primeSelectedReportTypes(
+                worker->session->association(), *worker->discovery,
+                targetDataSet, worker->attemptedTypeRoots, stop->get_token());
+            worker->verifiedTypes =
+                arstack::iedsim::verified_report_detail::indexTypes(
+                    worker->discovery->variable_types);
             ReportUi ui;
             if (bindingChanged || targetOwnedDynamic) {
                 if (targetOwnedDynamic &&
@@ -1547,7 +1632,7 @@ bool MmsReportController::enableSelectedAuthored(
                         *directory,
                         options);
                 report->start(stop->get_token());
-                ui = buildReportUi(report->snapshot());
+                ui = buildReportUi(report->snapshot(), &worker->verifiedTypes);
                 worker->authoredReport = std::move(report);
             } else {
                 mms::MmsStaticReportSessionOptions options;
@@ -1576,7 +1661,7 @@ bool MmsReportController::enableSelectedAuthored(
                         options);
                 report->prepare(stop->get_token());
                 report->start(stop->get_token());
-                ui = buildReportUi(report->snapshot());
+                ui = buildReportUi(report->snapshot(), &worker->verifiedTypes);
                 worker->report = std::move(report);
             }
 
@@ -1717,8 +1802,25 @@ bool MmsReportController::enableSelected(const bool requestGeneralInterrogation)
             auto report = std::make_unique<mms::MmsStaticReportSessionRuntime>(
                 worker->session->association(), *worker->discovery, options);
             report->prepare(stop->get_token());
+            QString boundDataSet;
+            for (const auto& candidate : worker->discovery->report_controls) {
+                if (candidate.candidate.reference == reference.toStdString() &&
+                    candidate.state) {
+                    boundDataSet = QString::fromStdString(
+                        candidate.state->data_set_reference);
+                    break;
+                }
+            }
+            if (!boundDataSet.isEmpty()) {
+                primeSelectedReportTypes(
+                    worker->session->association(), *worker->discovery,
+                    boundDataSet, worker->attemptedTypeRoots, stop->get_token());
+                worker->verifiedTypes =
+                    arstack::iedsim::verified_report_detail::indexTypes(
+                        worker->discovery->variable_types);
+            }
             report->start(stop->get_token());
-            const auto ui = buildReportUi(report->snapshot());
+            const auto ui = buildReportUi(report->snapshot(), &worker->verifiedTypes);
             worker->report = std::move(report);
 
             // A new active subscription invalidates the previous idle
@@ -1779,11 +1881,11 @@ bool MmsReportController::disableSelected() {
             ReportUi ui;
             if (worker->report) {
                 worker->report->stop(stop->get_token());
-                ui = buildReportUi(worker->report->snapshot());
+                ui = buildReportUi(worker->report->snapshot(), &worker->verifiedTypes);
                 if (!ui.cleanupRequired) worker->report.reset();
             } else if (worker->authoredReport) {
                 worker->authoredReport->stop(stop->get_token());
-                ui = buildReportUi(worker->authoredReport->snapshot());
+                ui = buildReportUi(worker->authoredReport->snapshot(), &worker->verifiedTypes);
                 if (!ui.cleanupRequired) worker->authoredReport.reset();
             } else {
                 throw std::runtime_error("No report subscription is active.");
@@ -1850,12 +1952,12 @@ bool MmsReportController::retryCleanup() {
             ReportUi ui;
             if (worker->report) {
                 worker->report->stop(stop->get_token());
-                ui = buildReportUi(worker->report->snapshot());
+                ui = buildReportUi(worker->report->snapshot(), &worker->verifiedTypes);
                 if (!ui.cleanupRequired) worker->report.reset();
             } else if (worker->authoredReport) {
                 static_cast<void>(worker->authoredReport->retry_cleanup(
                     stop->get_token()));
-                ui = buildReportUi(worker->authoredReport->snapshot());
+                ui = buildReportUi(worker->authoredReport->snapshot(), &worker->verifiedTypes);
                 if (!ui.cleanupRequired) worker->authoredReport.reset();
             } else {
                 throw std::runtime_error(
@@ -1945,8 +2047,8 @@ void MmsReportController::schedulePoll() {
                 return;
             }
             const ReportUi ui = staticActive
-                ? buildReportUi(worker->report->snapshot())
-                : buildReportUi(worker->authoredReport->snapshot());
+                ? buildReportUi(worker->report->snapshot(), &worker->verifiedTypes)
+                : buildReportUi(worker->authoredReport->snapshot(), &worker->verifiedTypes);
             // Compare complete bounded report presentation on the existing
             // serial I/O worker, never on the GUI thread. Counter-only checks
             // would lose event-only and retained-frame evidence changes.
@@ -1997,10 +2099,10 @@ void MmsReportController::schedulePoll() {
             ReportUi ui;
             if (worker->report) {
                 worker->report->stop();
-                ui = buildReportUi(worker->report->snapshot());
+                ui = buildReportUi(worker->report->snapshot(), &worker->verifiedTypes);
             } else if (worker->authoredReport) {
                 worker->authoredReport->stop();
-                ui = buildReportUi(worker->authoredReport->snapshot());
+                ui = buildReportUi(worker->authoredReport->snapshot(), &worker->verifiedTypes);
             }
             if (self) {
                 const auto message = QString::fromUtf8(exception.what());

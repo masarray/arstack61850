@@ -57,6 +57,15 @@ Rectangle {
         }
         return []
     }
+    function selectedReportMemberTypeVerified() {
+        if (!hasLastReport || selectedReportMemberIndex < 0 ||
+            !latestReport.valueDetails) return false
+        const entries = latestReport.valueDetails
+        for (let i = 0; i < entries.length; ++i)
+            if (entries[i].index === selectedReportMemberIndex)
+                return entries[i].typed === true
+        return false
+    }
     function selectedReportMemberEvidence() {
         if (!hasLastReport || selectedReportMemberIndex < 0 ||
             !latestReport.valueEvidence) return ({})
@@ -682,7 +691,9 @@ Rectangle {
                                                         Layout.fillWidth: true
                                                     }
                                                     Label {
-                                                        text: "Positional · not SCL-labelled"
+                                                        text: root.selectedReportMemberTypeVerified()
+                                                              ? "Verified MMS type · exact field order"
+                                                              : "Positional · not SCL-labelled"
                                                         font.pixelSize: 10
                                                         color: theme.muted
                                                     }
@@ -691,39 +702,57 @@ Rectangle {
                                             Repeater {
                                                 model: root.selectedReportMemberIndex === receivedMember.index
                                                        ? root.selectedReportMemberDetails() : []
-                                                delegate: Rectangle {
+                                                delegate: ColumnLayout {
                                                     required property var modelData
                                                     required property int index
                                                     Layout.fillWidth: true
-                                                    implicitHeight: 27
-                                                    color: index % 2 ? theme.surfaceSoft : theme.surface
-                                                    RowLayout {
-                                                        anchors.fill: parent
-                                                        anchors.leftMargin: 18
-                                                        anchors.rightMargin: 9
-                                                        spacing: 10
-                                                        Label {
-                                                            text: modelData.label
-                                                            Layout.preferredWidth: 180
-                                                            elide: Text.ElideRight
-                                                            font.pixelSize: 11
-                                                            color: theme.textSoft
-                                                        }
-                                                        Label {
-                                                            text: modelData.value
-                                                            Layout.fillWidth: true
-                                                            elide: Text.ElideMiddle
-                                                            font.pixelSize: 11
-                                                            color: theme.text
-                                                            ToolTip.visible: detailMouse.containsMouse && truncated
-                                                            ToolTip.text: text
-                                                            MouseArea {
-                                                                id: detailMouse
-                                                                anchors.fill: parent
-                                                                hoverEnabled: true
-                                                                acceptedButtons: Qt.NoButton
+                                                    spacing: 0
+                                                    Rectangle {
+                                                        Layout.fillWidth: true
+                                                        implicitHeight: 29
+                                                        color: index % 2 ? theme.surfaceSoft : theme.surface
+                                                        RowLayout {
+                                                            anchors.fill: parent
+                                                            anchors.leftMargin: 18
+                                                            anchors.rightMargin: 9
+                                                            spacing: 10
+                                                            Label {
+                                                                text: modelData.label
+                                                                Layout.preferredWidth: 180
+                                                                elide: Text.ElideRight
+                                                                font.pixelSize: 11
+                                                                color: theme.textSoft
+                                                                ToolTip.visible: labelHover.containsMouse && truncated
+                                                                ToolTip.text: text
+                                                                MouseArea {
+                                                                    id: labelHover
+                                                                    anchors.fill: parent
+                                                                    hoverEnabled: true
+                                                                    acceptedButtons: Qt.NoButton
+                                                                }
+                                                            }
+                                                            Label {
+                                                                text: modelData.value
+                                                                      + (modelData.truncated === true
+                                                                         ? " … [truncated]" : "")
+                                                                Layout.fillWidth: true
+                                                                elide: Text.ElideMiddle
+                                                                font.pixelSize: 11
+                                                                color: theme.text
+                                                                ToolTip.visible: detailMouse.containsMouse && truncated
+                                                                ToolTip.text: text
+                                                                MouseArea {
+                                                                    id: detailMouse
+                                                                    anchors.fill: parent
+                                                                    hoverEnabled: true
+                                                                    acceptedButtons: Qt.NoButton
+                                                                }
                                                             }
                                                         }
+                                                    }
+                                                    BrowserEngineeringEvidence {
+                                                        theme: root.theme
+                                                        engineeringEvidence: modelData.engineeringEvidence || ({})
                                                     }
                                                 }
                                             }
