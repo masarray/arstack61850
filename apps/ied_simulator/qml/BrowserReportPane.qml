@@ -581,14 +581,38 @@ Rectangle {
                         columnSpacing: 8
                         Repeater {
                             model: root.triggerFields
-                            delegate: CheckBox {
+                            delegate: RowLayout {
                                 required property var modelData
-                                text: modelData.label
-                                checked: root.rcb.triggerOptionNames
-                                         && root.rcb.triggerOptionNames.indexOf(modelData.name) >= 0
-                                enabled: false // inspected bit, never an MMS Write
-                                font.pixelSize: 12
+                                readonly property bool bitSet: root.rcb.triggerOptionNames
+                                    && root.rcb.triggerOptionNames.indexOf(modelData.name) >= 0
                                 Layout.fillWidth: true
+                                Layout.minimumHeight: 30
+                                spacing: 6
+                                // Passive bit observation: no CheckBox/MouseArea and
+                                // no disabled-text styling or MMS Write affordance.
+                                Rectangle {
+                                    Layout.preferredWidth: 16
+                                    Layout.preferredHeight: 16
+                                    radius: 3
+                                    color: bitSet ? theme.accentSoft : theme.surface
+                                    border.width: 1
+                                    border.color: bitSet ? theme.accent : theme.line
+                                    Label {
+                                        anchors.centerIn: parent
+                                        text: "✓"
+                                        visible: bitSet
+                                        color: theme.accent
+                                        font.pixelSize: 12
+                                        font.weight: Font.Bold
+                                    }
+                                }
+                                Label {
+                                    text: modelData.label
+                                    color: theme.text
+                                    font.pixelSize: 12
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
                             }
                         }
                     }
@@ -623,14 +647,38 @@ Rectangle {
                         columnSpacing: 8
                         Repeater {
                             model: root.optionalFields
-                            delegate: CheckBox {
+                            delegate: RowLayout {
                                 required property var modelData
-                                text: modelData.label
-                                checked: root.rcb.optionalFieldNames
-                                         && root.rcb.optionalFieldNames.indexOf(modelData.name) >= 0
-                                enabled: false // inspected bit, never an MMS Write
-                                font.pixelSize: 12
+                                readonly property bool bitSet: root.rcb.optionalFieldNames
+                                    && root.rcb.optionalFieldNames.indexOf(modelData.name) >= 0
                                 Layout.fillWidth: true
+                                Layout.minimumHeight: 30
+                                spacing: 6
+                                // Passive bit observation: no CheckBox/MouseArea and
+                                // no disabled-text styling or MMS Write affordance.
+                                Rectangle {
+                                    Layout.preferredWidth: 16
+                                    Layout.preferredHeight: 16
+                                    radius: 3
+                                    color: bitSet ? theme.accentSoft : theme.surface
+                                    border.width: 1
+                                    border.color: bitSet ? theme.accent : theme.line
+                                    Label {
+                                        anchors.centerIn: parent
+                                        text: "✓"
+                                        visible: bitSet
+                                        color: theme.accent
+                                        font.pixelSize: 12
+                                        font.weight: Font.Bold
+                                    }
+                                }
+                                Label {
+                                    text: modelData.label
+                                    color: theme.text
+                                    font.pixelSize: 12
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
                             }
                         }
                     }
