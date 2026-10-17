@@ -8,7 +8,11 @@ CheckBox {
     property var theme
     property string uiFont: "Inter"
     implicitHeight: 30
+    hoverEnabled: true
     spacing: 9
+    padding: 0
+    // Disable native Windows hover glyph: one consistent 18px indicator.
+    background: Item {}
     font.family: uiFont
     font.pixelSize: 11
     indicator: Rectangle {
@@ -20,7 +24,8 @@ CheckBox {
         color: control.checked ? control.theme.accent : control.theme.surface2
         border.width: 1
         border.color: control.checked ? control.theme.accent
-                                      : control.activeFocus ? control.theme.textSoft : control.theme.line
+                                      : control.hovered || control.activeFocus
+                                        ? control.theme.textSoft : control.theme.line
         Text {
             anchors.centerIn: parent
             visible: control.checked
