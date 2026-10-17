@@ -795,6 +795,8 @@ Rectangle {
                     }
                     Label {
                         visible: root.hasLastReport &&
+                                 (!root.latestReport.valueTree ||
+                                  root.latestReport.valueTree.length === 0) &&
                                  root.latestReport.valueEvidenceTruncated === true
                         Layout.fillWidth: true
                         leftPadding: 9
