@@ -46,8 +46,11 @@ def main() -> None:
             "stale PROFILE PTPROLE must not override verified PTP runtime")
     require("ptpRestoreAfterFirmware" in main_qml
             and "root.ptpRestoreChecks > 120" in main_qml
-            and "root.ptpDesiredForSession = false" in main_qml,
-            "PTP user intent restoration must be bounded, explicit and cancellable")
+            and "root.ptpDesiredForSession = false" in main_qml
+            and "property bool ptpDesiredForSession: true" in main_qml
+            and "controller.ptpRestoreAfterFirmware = true" in workflow
+            and "panel.controller.requestStopPtp()" in expert,
+            "default PTP SOURCE must be verified-only and OFF must cancel it in Main and Advanced")
     matrix = source("SignalMatrix.qml")
     menu = source("StudioActionMenu.qml")
     cmake = (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8")
