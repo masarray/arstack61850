@@ -491,7 +491,8 @@ struct ReportUi final {
 
 ReportUi buildSubscriptionUi(
     const mms::MmsReportSubscriptionSnapshot& subscription,
-    const bool active) {
+    const bool active,
+    const arstack::iedsim::verified_report_detail::WireTypeIndex* verifiedTypes) {
     ReportUi ui;
     ui.active = active;
     ui.receivedCount = subscription.received_reports;
@@ -537,7 +538,7 @@ ReportUi buildSubscriptionUi(
             const auto projected = arstack::iedsim::projectBrowserReportMembers(
                 frame.values, typedEvidenceBudget,
                 arstack::iedsim::kBrowserReportVisibleMemberLimit,
-                includeWireDetails);
+                includeWireDetails, verifiedTypes);
             map.insert(QStringLiteral("values"), projected.values);
             map.insert(QStringLiteral("valueEvidence"), projected.evidence);
             map.insert(QStringLiteral("valueDetails"), projected.details);
@@ -557,19 +558,24 @@ ReportUi buildSubscriptionUi(
     return ui;
 }
 
-ReportUi buildReportUi(const mms::MmsStaticReportSessionSnapshot& snapshot) {
+ReportUi buildReportUi(
+    const mms::MmsStaticReportSessionSnapshot& snapshot,
+    const arstack::iedsim::verified_report_detail::WireTypeIndex* verifiedTypes = nullptr) {
     if (!snapshot.subscription) {
         ReportUi ui;
         ui.active = snapshot.active;
         return ui;
     }
-    return buildSubscriptionUi(*snapshot.subscription, snapshot.active);
+    return buildSubscriptionUi(*snapshot.subscription, snapshot.active, verifiedTypes);
 }
 
-ReportUi buildReportUi(const mms::MmsReportSubscriptionSnapshot& snapshot) {
+ReportUi buildReportUi(
+    const mms::MmsReportSubscriptionSnapshot& snapshot,
+    const arstack::iedsim::verified_report_detail::WireTypeIndex* verifiedTypes = nullptr) {
     return buildSubscriptionUi(
         snapshot,
-        snapshot.state == mms::MmsReportSubscriptionState::active);
+        snapshot.state == mms::MmsReportSubscriptionState::active,
+        verifiedTypes);
 }
 
 } // namespace
@@ -577,6 +583,7 @@ ReportUi buildReportUi(const mms::MmsReportSubscriptionSnapshot& snapshot) {
 struct MmsReportController::WorkerState final {
     std::unique_ptr<mms::MmsTcpLiveDiscoverySession> session;
     std::shared_ptr<mms::MmsLiveDiscoveryResult> discovery;
+    arstack::iedsim::verified_report_detail::WireTypeIndex verifiedTypes;
     std::unique_ptr<mms::MmsStaticReportSessionRuntime> report;
     std::unique_ptr<mms::MmsReportSubscriptionRuntime> authoredReport;
     std::unique_ptr<mms::MmsDynamicDataSetRuntime> dynamicDataSets;
@@ -794,6 +801,7 @@ bool MmsReportController::connectToIed() {
             if (worker->session) worker->session->disconnect();
             worker->session.reset();
             worker->discovery.reset();
+            worker->verifiedTypes.clear();
 
             mms::MmsAssociationOptions associationOptions;
             associationOptions.connect_timeout = std::chrono::milliseconds{5'000};
@@ -838,6 +846,9 @@ bool MmsReportController::connectToIed() {
             worker->dynamicDataSets = std::make_unique<mms::MmsDynamicDataSetRuntime>(
                 session->association(), dynamicOptions);
             worker->discovery = discovery;
+            worker->verifiedTypes =
+                arstack::iedsim::verified_report_detail::indexTypes(
+                    discovery->variable_types);
             worker->session = std::move(session);
 
             if (self) {
@@ -867,6 +878,7 @@ bool MmsReportController::connectToIed() {
             worker->dynamicDataSets.reset();
             worker->session.reset();
             worker->discovery.reset();
+            worker->verifiedTypes.clear();
             if (self) {
                 const auto message = QString::fromUtf8(exception.what());
                 QMetaObject::invokeMethod(self, [self, generation, message] {
@@ -922,6 +934,7 @@ void MmsReportController::disconnectFromIed() {
         worker->authoredReport.reset();
         worker->dynamicDataSets.reset();
         worker->discovery.reset();
+            worker->verifiedTypes.clear();
         worker->session.reset();
         // The GUI has already discarded its report history on disconnect;
         // do not retain a second bounded history in the idle worker.
@@ -1547,7 +1560,7 @@ bool MmsReportController::enableSelectedAuthored(
                         *directory,
                         options);
                 report->start(stop->get_token());
-                ui = buildReportUi(report->snapshot());
+                ui = buildReportUi(report->snapshot(), &worker->verifiedTypes);
                 worker->authoredReport = std::move(report);
             } else {
                 mms::MmsStaticReportSessionOptions options;
@@ -1576,7 +1589,7 @@ bool MmsReportController::enableSelectedAuthored(
                         options);
                 report->prepare(stop->get_token());
                 report->start(stop->get_token());
-                ui = buildReportUi(report->snapshot());
+                ui = buildReportUi(report->snapshot(), &worker->verifiedTypes);
                 worker->report = std::move(report);
             }
 
@@ -1718,7 +1731,7 @@ bool MmsReportController::enableSelected(const bool requestGeneralInterrogation)
                 worker->session->association(), *worker->discovery, options);
             report->prepare(stop->get_token());
             report->start(stop->get_token());
-            const auto ui = buildReportUi(report->snapshot());
+            const auto ui = buildReportUi(report->snapshot(), &worker->verifiedTypes);
             worker->report = std::move(report);
 
             // A new active subscription invalidates the previous idle
@@ -1779,11 +1792,11 @@ bool MmsReportController::disableSelected() {
             ReportUi ui;
             if (worker->report) {
                 worker->report->stop(stop->get_token());
-                ui = buildReportUi(worker->report->snapshot());
+                ui = buildReportUi(worker->report->snapshot(), &worker->verifiedTypes);
                 if (!ui.cleanupRequired) worker->report.reset();
             } else if (worker->authoredReport) {
                 worker->authoredReport->stop(stop->get_token());
-                ui = buildReportUi(worker->authoredReport->snapshot());
+                ui = buildReportUi(worker->authoredReport->snapshot(), &worker->verifiedTypes);
                 if (!ui.cleanupRequired) worker->authoredReport.reset();
             } else {
                 throw std::runtime_error("No report subscription is active.");
@@ -1850,12 +1863,12 @@ bool MmsReportController::retryCleanup() {
             ReportUi ui;
             if (worker->report) {
                 worker->report->stop(stop->get_token());
-                ui = buildReportUi(worker->report->snapshot());
+                ui = buildReportUi(worker->report->snapshot(), &worker->verifiedTypes);
                 if (!ui.cleanupRequired) worker->report.reset();
             } else if (worker->authoredReport) {
                 static_cast<void>(worker->authoredReport->retry_cleanup(
                     stop->get_token()));
-                ui = buildReportUi(worker->authoredReport->snapshot());
+                ui = buildReportUi(worker->authoredReport->snapshot(), &worker->verifiedTypes);
                 if (!ui.cleanupRequired) worker->authoredReport.reset();
             } else {
                 throw std::runtime_error(
@@ -1945,8 +1958,8 @@ void MmsReportController::schedulePoll() {
                 return;
             }
             const ReportUi ui = staticActive
-                ? buildReportUi(worker->report->snapshot())
-                : buildReportUi(worker->authoredReport->snapshot());
+                ? buildReportUi(worker->report->snapshot(), &worker->verifiedTypes)
+                : buildReportUi(worker->authoredReport->snapshot(), &worker->verifiedTypes);
             // Compare complete bounded report presentation on the existing
             // serial I/O worker, never on the GUI thread. Counter-only checks
             // would lose event-only and retained-frame evidence changes.
@@ -1997,10 +2010,10 @@ void MmsReportController::schedulePoll() {
             ReportUi ui;
             if (worker->report) {
                 worker->report->stop();
-                ui = buildReportUi(worker->report->snapshot());
+                ui = buildReportUi(worker->report->snapshot(), &worker->verifiedTypes);
             } else if (worker->authoredReport) {
                 worker->authoredReport->stop();
-                ui = buildReportUi(worker->authoredReport->snapshot());
+                ui = buildReportUi(worker->authoredReport->snapshot(), &worker->verifiedTypes);
             }
             if (self) {
                 const auto message = QString::fromUtf8(exception.what());
