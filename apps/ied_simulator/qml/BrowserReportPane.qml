@@ -647,79 +647,90 @@ Rectangle {
                                 modelData: receivedMember.modelData
                                 received: true
                             }
-                            BrowserEngineeringEvidence {
-                                theme: root.theme
-                                engineeringEvidence: root.selectedReportMemberIndex === receivedMember.index
-                                                     ? root.selectedReportMemberEvidence() : ({})
-                            }
-                            ColumnLayout {
+                            // Instantiate expensive child content only for one
+                            // expanded row (up to 256 report members).
+                            Loader {
                                 Layout.fillWidth: true
-                                spacing: 0
-                                visible: root.selectedReportMemberIndex === receivedMember.index
-                                         && root.selectedReportMemberDetails().length > 0
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    implicitHeight: 29
-                                    color: theme.surfaceRaised
-                                    RowLayout {
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 11
-                                        anchors.rightMargin: 9
-                                        Label {
-                                            text: "Selected member · wire fields"
-                                            font.pixelSize: 11
-                                            font.weight: Font.DemiBold
-                                            color: theme.text
+                                active: root.selectedReportMemberIndex === receivedMember.index
+                                sourceComponent: Component {
+                                    ColumnLayout {
+                                        width: receivedMember.width
+                                        spacing: 0
+                                        BrowserEngineeringEvidence {
+                                            theme: root.theme
+                                            engineeringEvidence: root.selectedReportMemberIndex === receivedMember.index
+                                                                 ? root.selectedReportMemberEvidence() : ({})
+                                        }
+                                        ColumnLayout {
                                             Layout.fillWidth: true
-                                        }
-                                        Label {
-                                            text: "Positional · not SCL-labelled"
-                                            font.pixelSize: 10
-                                            color: theme.muted
-                                        }
-                                    }
-                                }
-                                Repeater {
-                                    model: root.selectedReportMemberIndex === receivedMember.index
-                                           ? root.selectedReportMemberDetails() : []
-                                    delegate: Rectangle {
-                                        required property var modelData
-                                        required property int index
-                                        Layout.fillWidth: true
-                                        implicitHeight: 27
-                                        color: index % 2 ? theme.surfaceSoft : theme.surface
-                                        RowLayout {
-                                            anchors.fill: parent
-                                            anchors.leftMargin: 18
-                                            anchors.rightMargin: 9
-                                            spacing: 10
-                                            Label {
-                                                text: modelData.label
-                                                Layout.preferredWidth: 180
-                                                elide: Text.ElideRight
-                                                font.pixelSize: 11
-                                                color: theme.textSoft
-                                            }
-                                            Label {
-                                                text: modelData.value
+                                            spacing: 0
+                                            visible: root.selectedReportMemberIndex === receivedMember.index
+                                                     && root.selectedReportMemberDetails().length > 0
+                                            Rectangle {
                                                 Layout.fillWidth: true
-                                                elide: Text.ElideMiddle
-                                                font.pixelSize: 11
-                                                color: theme.text
-                                                ToolTip.visible: detailMouse.containsMouse && truncated
-                                                ToolTip.text: text
-                                                MouseArea {
-                                                    id: detailMouse
+                                                implicitHeight: 29
+                                                color: theme.surfaceRaised
+                                                RowLayout {
                                                     anchors.fill: parent
-                                                    hoverEnabled: true
-                                                    acceptedButtons: Qt.NoButton
+                                                    anchors.leftMargin: 11
+                                                    anchors.rightMargin: 9
+                                                    Label {
+                                                        text: "Selected member · wire fields"
+                                                        font.pixelSize: 11
+                                                        font.weight: Font.DemiBold
+                                                        color: theme.text
+                                                        Layout.fillWidth: true
+                                                    }
+                                                    Label {
+                                                        text: "Positional · not SCL-labelled"
+                                                        font.pixelSize: 10
+                                                        color: theme.muted
+                                                    }
+                                                }
+                                            }
+                                            Repeater {
+                                                model: root.selectedReportMemberIndex === receivedMember.index
+                                                       ? root.selectedReportMemberDetails() : []
+                                                delegate: Rectangle {
+                                                    required property var modelData
+                                                    required property int index
+                                                    Layout.fillWidth: true
+                                                    implicitHeight: 27
+                                                    color: index % 2 ? theme.surfaceSoft : theme.surface
+                                                    RowLayout {
+                                                        anchors.fill: parent
+                                                        anchors.leftMargin: 18
+                                                        anchors.rightMargin: 9
+                                                        spacing: 10
+                                                        Label {
+                                                            text: modelData.label
+                                                            Layout.preferredWidth: 180
+                                                            elide: Text.ElideRight
+                                                            font.pixelSize: 11
+                                                            color: theme.textSoft
+                                                        }
+                                                        Label {
+                                                            text: modelData.value
+                                                            Layout.fillWidth: true
+                                                            elide: Text.ElideMiddle
+                                                            font.pixelSize: 11
+                                                            color: theme.text
+                                                            ToolTip.visible: detailMouse.containsMouse && truncated
+                                                            ToolTip.text: text
+                                                            MouseArea {
+                                                                id: detailMouse
+                                                                anchors.fill: parent
+                                                                hoverEnabled: true
+                                                                acceptedButtons: Qt.NoButton
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
                                     }
                                 }
                             }
-                            
                         }
                     }
                     Repeater {
