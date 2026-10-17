@@ -49,3 +49,26 @@ M1 improves interoperability defaults and synchronization safety; it does **not*
 - Uninitialized RTC: run as a plainly non-timescale-validated laboratory source; **do not** market as a fully conformant IEC/IEEE 61850-9-3 grandmaster.
 
 Still missing: independent reference proving actual UTC time and leap-second offset, continuous phase/frequency coupling between EMAC PTP and SV GPTimer, mandatory clock-state/BMCA behaviors, and physical accuracy/IED acceptance.
+
+## M3C.4 — First alarm latency hardening (17 October 2026)
+
+The experimental epoch-arm code originally computed time to the next EMAC
+PTP second **before** configuring GPTimer, then armed the later timer using
+the unchanged interval. This converts driver/interrupt setup time into a
+systematic SV sample-zero offset. The M3C.4 planner now retains the monotonic
+end of the PTP read, subtracts measured pre-arm setup age, and rechecks the
+same role/source-scoped clock lease. If too close to the intended second,
+the first alarm defers by one whole second. Stale or backwards observations
+do not arm a PTP-aligned timer: the publisher falls back to unqualified free
+running. ISR cadence, stream counter and AUTO smpSynch fail-closed policy
+are unchanged.
+
+Regression covers a 200-us startup delay, near-epoch rollover, stale clock
+evidence, reversed monotonic time and invalid alarm fields. The remaining
+gap between this last pre-arm monotonic sample and actual GPTimer clock start
+still needs measurement. Host Npcap receive timestamps do NOT establish MAC
+egress timing; firmware and CI success do NOT authorize smpSynch=1/2 or a
+public PTP-locked release. Test on the isolated ESP32-P4 bench with an
+independent GM/PPS before claiming physical lock.
+
+Bench checkpoint: PR #229 guarded SOURCE/RECEIVER artifacts are experimental images only and require board P0 revision validation, independently measured SV TX phase, and a separate stable release review.

@@ -84,6 +84,7 @@ using ar::iec61850::sampled_values::SvLiveSignalState;
 using ar::iec61850::time_sync::SvSecondBoundaryArm;
 using ar::iec61850::time_sync::SvPtpClockObservation;
 using ar::iec61850::time_sync::plan_sv_ptp_second_arm;
+using ar::iec61850::time_sync::rebase_sv_ptp_second_arm;
 using ar::iec61850::time_sync::SvPtpClockLease;
 using ar::iec61850::time_sync::PtpAuthorityRole;
 using ar::iec61850::time_sync::same_sv_ptp_clock_lease;
@@ -530,6 +531,7 @@ bool sample_alarm_callback(
 struct SvPtpEpochArm final {
     SvSecondBoundaryArm timer{};
     SvPtpClockLease lease{};
+    std::uint64_t clock_read_after_us{};
 };
 
 // Align the initial sample with EMAC PTP and retain EXACT authority identity.
@@ -557,7 +559,7 @@ plan_ptp_epoch_arm(const esp_eth_handle_t eth_handle) noexcept {
         ptp_time.nanoseconds, static_cast<std::uint64_t>(before_us),
         static_cast<std::uint64_t>(after_us)});
     if (!arm.has_value()) return std::nullopt;
-    return SvPtpEpochArm{*arm, lease};
+    return SvPtpEpochArm{*arm, lease, static_cast<std::uint64_t>(after_us)};
 #else
     (void)eth_handle;
     return std::nullopt;
@@ -611,9 +613,19 @@ gptimer_handle_t start_sample_clock(
     // The timer is configured before reading EMAC PTP time, minimizing
     // cross-clock arm latency without touching the high-frequency callback.
     const auto epoch_arm = plan_ptp_epoch_arm(eth_handle);
-    epoch_armed = epoch_arm.has_value();
+    // Time spent configuring GPTimer after the EMAC PTP read must not
+    // shift the first smpCnt=0 deadline. Recheck the same lease before arm.
+    const std::int64_t pre_arm_us = esp_timer_get_time();
+    const auto corrected_arm = epoch_arm.has_value() && pre_arm_us >= 0
+        ? rebase_sv_ptp_second_arm(
+              epoch_arm->timer, epoch_arm->clock_read_after_us,
+              static_cast<std::uint64_t>(pre_arm_us))
+        : std::nullopt;
+    epoch_armed = corrected_arm.has_value() &&
+        same_sv_ptp_clock_lease(
+            epoch_arm->lease, read_ptp_epoch_clock_lease());
 #if AR_SV_PTP_PHASE_SUPPORTED
-    if (epoch_arm.has_value()) {
+    if (epoch_armed) {
         g_sample_clock_context.armed_ptp_clock = epoch_arm->lease;
     }
     g_sample_clock_context.phase_enabled =
@@ -621,8 +633,8 @@ gptimer_handle_t start_sample_clock(
         g_phase_observer_task != nullptr && g_phase_timer_mutex != nullptr;
 #endif
     g_sample_clock_context.next_alarm = {};
-    g_sample_clock_context.next_alarm.alarm_count = epoch_arm.has_value()
-        ? epoch_arm->timer.first_alarm_us
+    g_sample_clock_context.next_alarm.alarm_count = epoch_armed
+        ? corrected_arm->first_alarm_us
         : g_sample_clock_context.schedule.next_ticks();
     g_sample_clock_context.next_alarm.flags.auto_reload_on_alarm = false;
     ESP_ERROR_CHECK(gptimer_set_alarm_action(timer, &g_sample_clock_context.next_alarm));
