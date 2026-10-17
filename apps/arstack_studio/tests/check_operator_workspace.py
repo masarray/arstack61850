@@ -48,6 +48,7 @@ def main() -> None:
             and "root.ptpRestoreChecks > 120" in main_qml
             and "root.ptpDesiredForSession = false" in main_qml,
             "PTP user intent restoration must be bounded, explicit and cancellable")
+    workflow = source("WorkflowBar.qml")
     # P0: software timing, SV egress/smpCnt and phase-angle staging must
     # stay untouched by a UI-only reflow. Every START sends the actual
     # eight visible channel phases, not a stale pre-existing board state.
