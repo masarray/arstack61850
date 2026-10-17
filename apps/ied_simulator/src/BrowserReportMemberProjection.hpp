@@ -63,7 +63,8 @@ inline constexpr int kBrowserReportDetailChildren = 16;
 [[nodiscard]] inline BrowserReportMemberProjection projectBrowserReportMembers(
     const std::vector<mms::MmsReportValue>& members,
     int& remainingTypedEvidence,
-    const int requestedVisibleMembers = kBrowserReportVisibleMemberLimit) {
+    const int requestedVisibleMembers = kBrowserReportVisibleMemberLimit,
+    const bool includeWireDetails = false) {
     BrowserReportMemberProjection projection;
     const int visibleLimit = std::clamp(requestedVisibleMembers, 0, kBrowserReportVisibleMemberLimit);
     const auto visibleCount = std::min(members.size(), static_cast<std::size_t>(visibleLimit));
@@ -109,10 +110,10 @@ inline constexpr int kBrowserReportDetailChildren = 16;
                     .arg(kind == mms::MmsDataKind::structure
                              ? QStringLiteral("Structure") : QStringLiteral("Array"))
                     .arg(static_cast<qulonglong>(children.size()))
-                    .arg(ordinal < kBrowserReportDetailMembers
+                    .arg(includeWireDetails && ordinal < kBrowserReportDetailMembers
                              ? QStringLiteral(" — select for details")
-                             : QStringLiteral(" — details outside preview limit"));
-                if (ordinal < kBrowserReportDetailMembers) {
+                             : QString{});
+                if (includeWireDetails && ordinal < kBrowserReportDetailMembers) {
                     const auto count = std::min(children.size(),
                         static_cast<std::size_t>(kBrowserReportDetailChildren));
                     for (std::size_t child = 0; child < count; ++child) {
