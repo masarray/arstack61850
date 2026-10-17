@@ -712,6 +712,17 @@ Rectangle {
                         model: !root.hasLastReport ? root.configuredMembers.slice(0, 256) : []
                         delegate: DataRow { received: false }
                     }
+                    Label {
+                        visible: root.hasLastReport &&
+                                 root.latestReport.treeNestedTruncated === true
+                        Layout.fillWidth: true
+                        leftPadding: 9
+                        topPadding: 3
+                        bottomPadding: 3
+                        text: "Nested values exceed the bounded preview. Native MMS frame retained."
+                        color: theme.muted
+                        font.pixelSize: 11
+                    }
                     BrowserEngineeringEvidence {
                         theme: root.theme
                         engineeringEvidence: root.hasLastReport &&
