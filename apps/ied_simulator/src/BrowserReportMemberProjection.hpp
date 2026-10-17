@@ -175,8 +175,10 @@ inline constexpr int kBrowserReportTreeScalarTextLimit = 160;
 
 [[nodiscard]] inline QVariantList projectBrowserReportTree(
     const std::vector<mms::MmsReportValue>& members,
-    bool* nestedFieldsTruncated = nullptr) {
+    bool* nestedFieldsTruncated = nullptr,
+    bool* typedEvidenceOmitted = nullptr) {
     if (nestedFieldsTruncated) *nestedFieldsTruncated = false;
+    if (typedEvidenceOmitted) *typedEvidenceOmitted = false;
     QVariantList rows;
     const auto visibleCount = std::min(
         members.size(), static_cast<std::size_t>(kBrowserReportVisibleMemberLimit));
@@ -249,6 +251,12 @@ inline constexpr int kBrowserReportTreeScalarTextLimit = 160;
         bool shortened = false;
         const QString fullReference = boundedReportMetadata(
             *source, kBrowserReportTextLimit, shortened);
+        // A truncated q/t identity cannot be safely fed to the shared typed
+        // decoder; retain a specific omission indicator instead of showing a
+        // misleading good/unknown interpretation or suppressing all warnings.
+        if (shortened && typedEvidenceOmitted && member.value &&
+            hasReportTypedLeaf(*source, member.value->kind()))
+            *typedEvidenceOmitted = true;
         QString name = fullReference;
         // Prefer compact canonical IEC paths while keeping full reference in
         // the per-row tooltip and never forging a functional constraint.
