@@ -118,7 +118,8 @@ ApplicationWindow {
     // Session-only operator intent. Never persist across application launches:
     // an explicit PTP ON can be restored after a firmware reflash/reconnect
     // without introducing an uncontrolled power-on publisher.
-    property bool ptpDesiredForSession: false
+    property bool ptpDesiredForSession: true
+    property bool defaultPtpStartAttempted: false
     property string ptpDesiredRole: "SOURCE"
     property bool ptpRestoreAfterFirmware: false
     property int ptpRestoreChecks: 0
@@ -239,6 +240,26 @@ ApplicationWindow {
         }
     }
 
+    // Operator default: PTP SOURCE ON once a verified board is ready.
+    // Keep the toggle tied to actual board telemetry, not this intent.
+    // Manual OFF cancels default ON for the rest of this application session.
+    Timer {
+        interval: 400
+        repeat: true
+        running: !root.defaultPtpStartAttempted
+        onTriggered: {
+            const session = workflowBar.session
+            if (!session || !device.deviceVerified || !device.ptpAvailable ||
+                    !session.startReady || session.updatingFirmware ||
+                    device.ptpStarting)
+                return
+            root.defaultPtpStartAttempted = true
+            if (root.ptpDesiredForSession && !device.ptpRunning &&
+                    !root.startPtpRole("SOURCE"))
+                root.showMessage("PTP SOURCE could not start automatically. Use PTP On to retry.", true)
+        }
+    }
+
     Timer {
         id: messageTimer
         interval: 2600
@@ -323,6 +344,7 @@ ApplicationWindow {
     }
 
     function requestStopPtp() {
+        root.defaultPtpStartAttempted = true
         root.ptpDesiredForSession = false
         root.ptpRestoreAfterFirmware = false
         return workflowBar.session && workflowBar.session.requestStopPtp()
