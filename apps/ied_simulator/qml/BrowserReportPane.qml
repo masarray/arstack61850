@@ -429,10 +429,23 @@ Rectangle {
                 color: root.theme.lineSoft
             }
         }
+        Label {
+            visible: treeRow.topLevel && treeRow.expanded &&
+                     Boolean(treeRow.modelData.reason)
+            Layout.fillWidth: true
+            leftPadding: 32
+            topPadding: 4
+            bottomPadding: 4
+            color: root.theme.textSoft
+            font.pixelSize: 11
+            text: "Reason for inclusion: " + (treeRow.modelData.reason || "")
+        }
         BrowserEngineeringEvidence {
             theme: root.theme
+            // Native tree row carries exactly this member's typed decoder
+            // evidence, so quality flags/time-quality stay visible on click.
             engineeringEvidence: treeRow.topLevel && treeRow.expanded
-                                 ? root.selectedReportMemberEvidence() : ({})
+                                 ? treeRow.modelData.typedEvidence || ({}) : ({})
         }
     }
 
