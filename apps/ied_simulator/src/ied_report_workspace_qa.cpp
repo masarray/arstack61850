@@ -212,11 +212,26 @@ bool verifySemanticReportBinding() {
     value.data_reference = binding.reference;
     value.value = mms::MmsDataValue::structure({
         mms::MmsDataValue::integer(2),
-        mms::MmsDataValue::bit_string(0U, quality)});
+        mms::MmsDataValue::bit_string(3U, quality)});
     auto check = [&](const bool expected) {
         const auto result = bindFlatSclReportStructure(model, dataset.reference, value);
         return result.has_value() == expected;
     };
+    if (!check(true)) return false;
+    value.data_reference = "IEDLD/XCBR1$ST$Pos";
+    if (!check(true)) return false; // valid native MMS DataRef alias
+    value.data_reference = "IEDLD/XCBR1$MX$Pos";
+    if (!check(false)) return false; // conflicting FC
+    value.data_reference = "IEDLD/XCBR1$ST$Other";
+    if (!check(false)) return false; // conflicting member
+    value.data_reference = binding.reference;
+    value.value = mms::MmsDataValue::structure({
+        mms::MmsDataValue::integer(2),
+        mms::MmsDataValue::bit_string(0U, quality)});
+    if (!check(false)) return false; // invalid 16-bit q, not 13-bit
+    value.value = mms::MmsDataValue::structure({
+        mms::MmsDataValue::integer(2),
+        mms::MmsDataValue::bit_string(3U, quality)});
     if (!check(true)) return false;
     value.data_reference = "OtherIED/XCBR1.Pos";
     if (!check(false)) return false;
@@ -233,7 +248,7 @@ bool verifySemanticReportBinding() {
         mms::MmsDataValue::integer(2), mms::MmsDataValue::integer(3)});
     if (!check(false)) return false;
     value.value = mms::MmsDataValue::structure({
-        mms::MmsDataValue::integer(2), mms::MmsDataValue::bit_string(0U, quality)});
+        mms::MmsDataValue::integer(2), mms::MmsDataValue::bit_string(3U, quality)});
     model.logical_devices[0].logical_nodes[0].data_objects[0].attributes[1].scl_basic_type = "Enum";
     if (!check(false)) return false;
     return true;
@@ -248,7 +263,7 @@ int main(int argc, char* argv[]) {
         qCritical() << "REPORTS_SEMANTIC_BINDING_FAIL";
         return 42;
     }
-    qInfo() << "REPORTS_SEMANTIC_BINDING_PASS exact=1 mismatch=6";
+    qInfo() << "REPORTS_SEMANTIC_BINDING_PASS canonical=pass mms_alias=pass quality=pass negative=pass";
     if (argc != 2) {
         qCritical() << "usage: ied_report_workspace_qa <scl>";
         return 2;
