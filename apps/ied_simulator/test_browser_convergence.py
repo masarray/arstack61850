@@ -304,6 +304,10 @@ for token in (
 ):
     if token not in report_controller:
         raise SystemExit("BROWSER_SEMANTIC_FAIL missing generation-owned runtime wiring=" + token)
+if 'const auto engineering = decodeEngineeringEvidence(full, *leaf.value);' not in projection_header:
+    raise SystemExit("BROWSER_SEMANTIC_FAIL missing shared q/t native typed decoder")
+if 'engineeringEvidence: semanticLeafRow.modelData.engineeringEvidence' not in report_inspector:
+    raise SystemExit("BROWSER_SEMANTIC_FAIL missing expandable child Quality/TimeQuality")
 if "SCL verified · MMS type checked" not in report_inspector:
     raise SystemExit("BROWSER_SEMANTIC_FAIL missing semantic/fallback provenance badge")
 
