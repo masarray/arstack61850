@@ -1105,7 +1105,6 @@ ApplicationWindow {
                     DockFrame {
                         visible: root.phasorDockVisible && !root.phasorDetached
                         SplitView.fillWidth: true
-                        SplitView.fillHeight: true
                         SplitView.minimumHeight: 170
                         SplitView.preferredHeight: 225
                         SplitView.maximumHeight: 265
