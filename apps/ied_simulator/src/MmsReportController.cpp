@@ -573,6 +573,10 @@ struct MmsReportController::WorkerState final {
     std::unique_ptr<mms::MmsStaticReportSessionRuntime> report;
     std::unique_ptr<mms::MmsReportSubscriptionRuntime> authoredReport;
     std::unique_ptr<mms::MmsDynamicDataSetRuntime> dynamicDataSets;
+    // Worker-thread-owned copy of the last GUI report projection. Qt's
+    // implicitly shared containers keep this cheap to retain; deep compare
+    // must never run on the QML/controller thread.
+    std::optional<ReportUi> lastPublishedReportUi;
 };
 
 MmsReportController::MmsReportController(QObject* parent)
@@ -774,6 +778,7 @@ bool MmsReportController::connectToIed() {
     const auto worker = workerState_;
     ioPool_.start([self, worker, stop, generation, requestedHost, requestedPort, contextModel] {
         try {
+            worker->lastPublishedReportUi.reset();
             if (worker->report) worker->report->stop();
             if (worker->authoredReport) worker->authoredReport->stop();
             worker->report.reset();
@@ -1908,25 +1913,34 @@ void MmsReportController::schedulePoll() {
                 static_cast<void>(worker->authoredReport->drain_queued_reports());
                 ui = buildReportUi(worker->authoredReport->snapshot());
             }
+            // Compare complete bounded report presentation on the existing
+            // serial I/O worker, never on the GUI thread. Counter-only checks
+            // would lose event-only and retained-frame evidence changes.
+            const auto& previous = worker->lastPublishedReportUi;
+            const bool presentationChanged =
+                !previous ||
+                previous->active != ui.active ||
+                previous->cleanupRequired != ui.cleanupRequired ||
+                previous->receivedCount != ui.receivedCount ||
+                previous->subscriptionRcbReference != ui.subscriptionRcbReference ||
+                previous->rejectedCount != ui.rejectedCount ||
+                previous->decodeFailureCount != ui.decodeFailureCount ||
+                previous->events != ui.events ||
+                previous->reports != ui.reports;
+            if (!presentationChanged) {
+                if (self) {
+                    QMetaObject::invokeMethod(self, [self, generation] {
+                        if (!self || self->generation_ != generation) return;
+                        self->pollPending_ = false;
+                    }, Qt::QueuedConnection);
+                }
+                return;
+            }
+            worker->lastPublishedReportUi = ui;
             if (self) {
                 QMetaObject::invokeMethod(self, [self, generation, ui] {
                     if (!self || self->generation_ != generation) return;
                     self->pollPending_ = false;
-                    // A live RCB still needs its bounded receive/drain cadence,
-                    // but an identical snapshot must not invalidate every QML
-                    // report binding and inspector delegate at 10 Hz.
-                    // Compare complete presentation evidence: counters alone
-                    // cannot detect event-only or retained-frame changes.
-                    const bool presentationChanged =
-                        self->active_ != ui.active ||
-                        self->cleanupRequired_ != ui.cleanupRequired ||
-                        self->receivedReportCount_ != ui.receivedCount ||
-                        self->subscriptionRcbReference_ != ui.subscriptionRcbReference ||
-                        self->rejectedReportCount_ != ui.rejectedCount ||
-                        self->reportDecodeFailureCount_ != ui.decodeFailureCount ||
-                        self->events_ != ui.events ||
-                        self->receivedReports_ != ui.reports;
-                    if (!presentationChanged) return;
                     self->active_ = ui.active;
                     self->cleanupRequired_ = ui.cleanupRequired;
                     self->receivedReports_ = ui.reports;
