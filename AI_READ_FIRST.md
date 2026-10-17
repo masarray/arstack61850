@@ -4,6 +4,8 @@ This repository contains protocol behavior that has been reconstructed from stan
 
 Read the topic contract before changing the corresponding code:
 
+- **P0 — whole native Workbench SSOT Live Data Model (current mandatory master handoff, status and blocking PR):** [`docs/WORKBENCH_SSOT_LIVE_DATA_MODEL_MASTER_HANDOFF.md`](docs/WORKBENCH_SSOT_LIVE_DATA_MODEL_MASTER_HANDOFF.md). **This takes precedence over isolated Browser/Reports GUI polish and older checkpoint descriptions.** Read before any `apps/ied_simulator` live-value, Reporting, DataSet, Global Data, q/t or SCL/online-model change.
+
 - **Native Qt Workbench / IED Browser cross-thread strategy, ARSAS design reference, SSOT, milestones, ownership and merge gates:** [`docs/WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md`](docs/WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md). **Current checkpoint and active PRs:** [`docs/WORKBENCH_CURRENT_HANDOFF.md`](docs/WORKBENCH_CURRENT_HANDOFF.md). Read **both** before editing `apps/ied_simulator` Browser/Reports/DataSets/Global Data/SG/q/t.
 - **Live IP discovery vs trusted-SCL online connect:** [`docs/ONLINE_MODEL_CONNECT_DECISION.md`](docs/ONLINE_MODEL_CONNECT_DECISION.md), then [`LIVE_DISCOVERY_PROFILE.md`](LIVE_DISCOVERY_PROFILE.md).
 - **RCB reporting, URCB/BRCB activation, report bit semantics, replay/recovery:** [`RCB_REPORTING.md`](RCB_REPORTING.md).
