@@ -292,7 +292,9 @@ if (member_tree.count("BrowserEngineeringEvidence {") != 2 or
 semantic = (workspace_path.parent.parent / "src" / "BrowserReportSemanticBinding.hpp").read_text(encoding="utf-8")
 for token in (
     "model.identity.confidence != MmsLiveModelConfidence::exact",
-    'model.source != "TrustedSclInitialSnapshot"',
+    'model.source == "OpenedSCL"',
+    'model.source == "TrustedSclInitialSnapshot"',
+    '(openedScl ? "OpenedSCL" : "TrustedSCL")',
     "fcda.index != member.data_set_index",
     "matchesExactMember(dir->user_reference)",
     "matchesExactMember(dir->mms_reference)",
