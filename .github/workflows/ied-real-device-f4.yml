@@ -1,25 +1,23 @@
 name: F4 Real IED Acceptance RC
 
+# The field kit is intentionally generated for explicitly requested source
+# revisions and packaging changes. Any protocol commit can use workflow_dispatch.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feat/ied-sim-ux-performance-foundation
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - 'apps/ied_simulator/**'
-      - 'embedded/**'
-      - 'tests/fixtures/scl/**'
-      - 'tools/static_ied_server.cpp'
-      - 'tools/static_file_service_backend.hpp'
-      - 'tools/static_file_service_backend_test.cpp'
-      - 'tools/file_transfer.cpp'
-      - 'tools/mms_*probe.cpp'
-      - 'tools/control_block_read_probe.cpp'
-      - 'tools/live_discover.cpp'
-      - 'tools/static_ied_server_iedsim/**'
-      - 'src/mms/**'
-      - 'include/ariec61850/mms/**'
       - '.github/workflows/ied-real-device-f4.yml'
+      - 'apps/ied_simulator/field_acceptance/**'
+      - 'apps/ied_simulator/packaging/windows/**'
+      - 'apps/ied_simulator/test_f4_release_contract.py'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ied-real-device-f4.yml'
+      - 'apps/ied_simulator/field_acceptance/**'
+      - 'apps/ied_simulator/packaging/windows/**'
+      - 'apps/ied_simulator/test_f4_release_contract.py'
 
 permissions:
   contents: read
@@ -30,6 +28,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify F4 Windows packaging contract
+        run: python3 apps/ied_simulator/test_f4_release_contract.py
 
       - name: Configure current IEC 61850 interoperability server
         run: cmake -S tools/static_ied_server_iedsim -B build-f4-protocol -DCMAKE_BUILD_TYPE=Release
@@ -53,9 +54,30 @@ jobs:
           arch: 'win64_msvc2022_64'
           cache: true
 
-      - name: Install NSIS
+      - name: Install and verify NSIS
         shell: pwsh
-        run: choco install nsis --yes --no-progress
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $candidates = @(
+            (Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'),
+            (Join-Path ${env:ProgramFiles} 'NSIS\makensis.exe'),
+            'C:\ProgramData\chocolatey\bin\makensis.exe'
+          )
+          $compiler = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+          if (-not $compiler) {
+            for ($attempt = 1; $attempt -le 2; $attempt++) {
+              choco install nsis --yes --no-progress
+              $exitStatus = $LASTEXITCODE
+              $compiler = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+              if ($compiler) { break }
+              Write-Warning "NSIS installation failed (attempt $attempt/2, Chocolatey exit $exitStatus)"
+              if ($attempt -lt 2) { Start-Sleep -Seconds 12 }
+            }
+          }
+          if (-not $compiler) { throw 'NSIS unavailable; abort field-kit build before compilation.' }
+          "MAKENSIS_PATH=$compiler" >> $env:GITHUB_ENV
+          & $compiler /VERSION
+          if ($LASTEXITCODE -ne 0) { throw 'makensis version preflight failed.' }
 
       - name: Configure Workbench release build
         shell: pwsh
@@ -125,6 +147,15 @@ jobs:
           Copy-Item 'build-f4-windows\Release\arstack_ied_simulator.exe' $stage
           Copy-Item 'build-f4-windows\Release\ariec61850_ied_simulator_server.exe' $stage
           windeployqt --release --qmldir apps/ied_simulator/qml --dir $stage (Join-Path $stage 'arstack_ied_simulator.exe')
+          $sourceSha = (& git rev-parse --verify HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $sourceSha -notmatch '^[0-9a-f]{40}$' -or
+              $sourceSha -cne $env:GITHUB_SHA) {
+            throw "F4 source mismatch: checkout=$sourceSha action=$env:GITHUB_SHA"
+          }
+          [System.IO.File]::WriteAllText(
+            (Join-Path $stage 'BUILD_HEAD.txt'),
+            ($sourceSha + [System.Environment]::NewLine),
+            [System.Text.Encoding]::ASCII)
 
       - name: Build latest portable ZIP and NSIS installer
         shell: pwsh
@@ -136,9 +167,12 @@ jobs:
           $zip = Join-Path $release 'ARStack-IEC61850-Workbench-portable-win64.zip'
           Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -Force
           $installer = Join-Path $release 'ARStack-IEC61850-Workbench-Setup-win64.exe'
-          $makensis = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
-          if (-not (Test-Path -LiteralPath $makensis -PathType Leaf)) { throw "makensis not found: $makensis" }
-          & $makensis "/DSTAGE_DIR=$stage" "/DOUT_FILE=$installer" 'apps\ied_simulator\packaging\windows\ARStackIEC61850Workbench.nsi'
+          $makensis = $env:MAKENSIS_PATH
+          $icon = (Resolve-Path 'assets\favicon.ico').Path
+          if (-not $makensis -or -not (Test-Path -LiteralPath $makensis -PathType Leaf)) {
+            throw 'NSIS preflight did not supply a usable makensis.exe'
+          }
+          & $makensis "/DSTAGE_DIR=$stage" "/DOUT_FILE=$installer" "/DAPP_ICON=$icon" 'apps\ied_simulator\packaging\windows\ARStackIEC61850Workbench.nsi'
           if ($LASTEXITCODE -ne 0) { throw "makensis failed with exit code $LASTEXITCODE" }
 
       - name: Verify staged and installed release
@@ -148,6 +182,8 @@ jobs:
           -StageDir ./release-stage/ARStack-IEC61850-Workbench
           -BuildDir ./build-f4-windows/Release
           -InstallerPath ./release-artifacts/ARStack-IEC61850-Workbench-Setup-win64.exe
+          -PortablePath ./release-artifacts/ARStack-IEC61850-Workbench-portable-win64.zip
+          -ExpectedSourceSha ${{ github.sha }}
           -FixturePath ./tests/fixtures/scl/client-workbench.scd
 
       - name: Assemble F4 external-acceptance kit
@@ -166,7 +202,12 @@ jobs:
           Copy-Item 'apps\ied_simulator\field_acceptance\ACCEPTANCE_RESULT_TEMPLATE.md' $kit
           Copy-Item 'apps\ied_simulator\field_acceptance\collect-f4-evidence.ps1' $kit
           Copy-Item 'tests\fixtures\scl\interop-golden-synthetic.cid' $fixtures
-          Set-Content -LiteralPath (Join-Path $kit 'BUILD_HEAD.txt') -Value $env:GITHUB_SHA -Encoding ascii
+          $headPath = Join-Path $PWD 'release-stage\ARStack-IEC61850-Workbench\BUILD_HEAD.txt'
+          $stageHead = (Get-Content -LiteralPath $headPath -Raw).Trim()
+          if ($stageHead -cne $env:GITHUB_SHA) {
+            throw "F4 kit source mismatch: staged=$stageHead expected=$env:GITHUB_SHA"
+          }
+          Copy-Item -LiteralPath $headPath -Destination (Join-Path $kit 'BUILD_HEAD.txt')
 
           $server = Get-ChildItem -Path 'build-f4-windows' -Recurse -File -Filter 'ariec61850_ied_simulator_server.exe' |
             Where-Object { $_.FullName -match '[\\/]Release[\\/]' } |
