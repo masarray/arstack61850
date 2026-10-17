@@ -134,7 +134,7 @@ SurfacePanel {
                         const wantsRunning = checked
                         checked = Qt.binding(function() { return Boolean(panel.device.ptpRunning) })
                         if (wantsRunning) panel.startSelectedMode()
-                        else if (panel.session && !panel.session.requestStopPtp() && panel.controller)
+                        else if (panel.controller && !panel.controller.requestStopPtp())
                             panel.controller.showMessage("PTP stop was not accepted. Copy diagnostics.", true)
                     }
                 }
