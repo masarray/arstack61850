@@ -12,6 +12,15 @@ Rectangle {
 
     readonly property var rcb: reports.selectedRcb
     readonly property bool hasSelection: reports.selectedRcbIndex >= 0
+    readonly property string selectedRcbReference: hasSelection
+                                                 ? String(rcb.reference || "") : ""
+    // Selection changes must reveal the RCB's identity and attributes first;
+    // retaining the prior RCB's scroll offset can hide the primary evidence.
+    onSelectedRcbReferenceChanged: {
+        selectedReportMemberIndex = -1
+        if (detailScroll.contentItem)
+            detailScroll.contentItem.contentY = 0
+    }
     readonly property bool selectedIsSubscribed: hasSelection && reports.active
         && reports.subscriptionRcbReference === rcb.reference
     readonly property bool selectedNeedsCleanup: hasSelection && reports.cleanupRequired
@@ -20,11 +29,13 @@ Rectangle {
     readonly property bool hasLastReport: latestReport.reportId !== undefined
     readonly property var configuredMembers: membersForSelectedRcb()
     property bool attributesExpanded: true
-    property bool triggerExpanded: true
-    property bool optionalExpanded: true
-    property bool informationExpanded: true
+    // Show the useful RCB attributes and received values first. Bit-grid
+    // diagnostics stay one click away, without dominating the initial viewport.
+    property bool triggerExpanded: false
+    property bool optionalExpanded: false
+    property bool informationExpanded: false
     property bool dataExpanded: true
-    property bool eventsExpanded: true
+    property bool eventsExpanded: false
     property int selectedReportMemberIndex: -1
     // Preserve selection through repeat snapshots of the same report frame;
     // reset only when the actual ReportID/sequence/entry identity changes.
@@ -35,6 +46,17 @@ Rectangle {
     // A different indexed RCB can legitimately emit the same RptID/SqNum.
     // Reset member selection when provenance changes, not only wire sequence.
     onLatestReportIdentityChanged: selectedReportMemberIndex = -1
+    function selectedReportMemberDetails() {
+        if (!hasLastReport || selectedReportMemberIndex < 0 ||
+            !latestReport.valueDetails) return []
+        const entries = latestReport.valueDetails
+        for (let index = 0; index < entries.length; ++index) {
+            const entry = entries[index]
+            if (entry.index === selectedReportMemberIndex)
+                return entry.rows || []
+        }
+        return []
+    }
     function selectedReportMemberEvidence() {
         if (!hasLastReport || selectedReportMemberIndex < 0 ||
             !latestReport.valueEvidence) return ({})
@@ -190,7 +212,7 @@ Rectangle {
         readonly property var rawValue: lastReportSection
                                         ? root.informationValue(index) : root.attributeValue(index)
         readonly property int stripe: index
-        implicitHeight: 25
+        implicitHeight: 30
         Layout.fillWidth: true
         color: stripe % 2 ? root.theme.surfaceSoft : root.theme.surface
         Rectangle {
@@ -214,7 +236,7 @@ Rectangle {
             verticalAlignment: Text.AlignVCenter
             text: propertyRow.title
             color: root.theme.textSoft
-            font.pixelSize: 10
+            font.pixelSize: 11
             elide: Text.ElideRight
             ToolTip.visible: titleMouse.containsMouse && truncated
             ToolTip.text: title
@@ -227,7 +249,7 @@ Rectangle {
             verticalAlignment: Text.AlignVCenter
             text: root.asText(rawValue)
             color: root.theme.text
-            font.pixelSize: 10
+            font.pixelSize: 11
             elide: Text.ElideMiddle
             ToolTip.visible: valueMouse.containsMouse && truncated
             ToolTip.text: text
@@ -242,7 +264,7 @@ Rectangle {
         property bool opened: true
         signal toggleRequested()
         Layout.fillWidth: true
-        implicitHeight: 26
+        implicitHeight: 30
         color: root.theme.surfaceRaised
         Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: root.theme.line }
         RowLayout {
@@ -252,12 +274,12 @@ Rectangle {
             spacing: 7
             Label {
                 text: opened ? "▾" : "▸"
-                font.pixelSize: 10
+                font.pixelSize: 11
                 color: root.theme.textSoft
             }
             Label {
                 text: heading
-                font.pixelSize: 10
+                font.pixelSize: 11
                 color: root.theme.text
                 font.weight: Font.DemiBold
                 Layout.fillWidth: true
@@ -287,7 +309,7 @@ Rectangle {
                                                ? root.memberValue(modelData) : "—"
         readonly property int stripe: index
         Layout.fillWidth: true
-        implicitHeight: 25
+        implicitHeight: 29
         color: received && root.selectedReportMemberIndex === index
                ? root.theme.accentSoft
                : stripe % 2 ? root.theme.surfaceSoft : root.theme.surface
@@ -307,7 +329,7 @@ Rectangle {
                 text: dataRow.reference
                 Layout.preferredWidth: Math.max(100, parent.width * 0.55 - 28)
                 color: root.theme.text
-                font.pixelSize: 10
+                font.pixelSize: 11
                 elide: Text.ElideMiddle
                 ToolTip.visible: dataNameMouse.containsMouse && truncated
                 ToolTip.text: text
@@ -319,7 +341,7 @@ Rectangle {
                 leftPadding: 8
                 text: dataRow.displayValue
                 color: root.theme.text
-                font.pixelSize: 10
+                font.pixelSize: 11
                 elide: Text.ElideMiddle
                 ToolTip.visible: dataValueMouse.containsMouse && truncated
                 ToolTip.text: text
@@ -607,6 +629,71 @@ Rectangle {
                     BrowserEngineeringEvidence {
                         theme: root.theme
                         engineeringEvidence: root.selectedReportMemberEvidence()
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+                        visible: root.selectedReportMemberDetails().length > 0
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: 29
+                            color: theme.surfaceRaised
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 11
+                                anchors.rightMargin: 9
+                                Label {
+                                    text: "Selected member · wire fields"
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                    color: theme.text
+                                    Layout.fillWidth: true
+                                }
+                                Label {
+                                    text: "Positional · not SCL-labelled"
+                                    font.pixelSize: 10
+                                    color: theme.muted
+                                }
+                            }
+                        }
+                        Repeater {
+                            model: root.selectedReportMemberDetails()
+                            delegate: Rectangle {
+                                required property var modelData
+                                required property int index
+                                Layout.fillWidth: true
+                                implicitHeight: 27
+                                color: index % 2 ? theme.surfaceSoft : theme.surface
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 18
+                                    anchors.rightMargin: 9
+                                    spacing: 10
+                                    Label {
+                                        text: modelData.label
+                                        Layout.preferredWidth: 180
+                                        elide: Text.ElideRight
+                                        font.pixelSize: 11
+                                        color: theme.textSoft
+                                    }
+                                    Label {
+                                        text: modelData.value
+                                        Layout.fillWidth: true
+                                        elide: Text.ElideMiddle
+                                        font.pixelSize: 11
+                                        color: theme.text
+                                        ToolTip.visible: detailMouse.containsMouse && truncated
+                                        ToolTip.text: text
+                                        MouseArea {
+                                            id: detailMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            acceptedButtons: Qt.NoButton
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     Label {
                         visible: root.hasLastReport &&

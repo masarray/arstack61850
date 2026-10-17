@@ -530,10 +530,17 @@ ReportUi buildSubscriptionUi(
             // A frame can include far more DataSet members than the 256 GUI
             // rows. Project only retained rows, preserving actual total count
             // and a shared typed-evidence budget across recent frames.
+            // BrowserReportPane inspects only the newest matching frame.
+            // Historical frames retain bounded scalar summaries and typed q/t
+            // evidence; never allocate 32 x 16 child previews per old frame.
+            const bool includeWireDetails = ui.reports.isEmpty();
             const auto projected = arstack::iedsim::projectBrowserReportMembers(
-                frame.values, typedEvidenceBudget);
+                frame.values, typedEvidenceBudget,
+                arstack::iedsim::kBrowserReportVisibleMemberLimit,
+                includeWireDetails);
             map.insert(QStringLiteral("values"), projected.values);
             map.insert(QStringLiteral("valueEvidence"), projected.evidence);
+            map.insert(QStringLiteral("valueDetails"), projected.details);
             map.insert(QStringLiteral("valueEvidenceTruncated"), projected.evidenceTruncated);
             map.insert(QStringLiteral("valuesTruncated"), projected.rowsTruncated);
             map.insert(QStringLiteral("valueTextTruncated"), projected.textTruncated);

@@ -219,6 +219,40 @@ if ('QString::fromStdString(member.data_reference)' in projection_header or
         'QString::fromStdString(reason)' in projection_header):
     raise SystemExit("BROWSER_REPORT_METADATA_BOUNDED_FAIL eager untrusted metadata conversion")
 
+# Operator-facing report values must not degrade into opaque aggregate dumps.
+for token in (
+    "kBrowserReportDetailMembers = 32",
+    "kBrowserReportDetailChildren = 16",
+    "projection.details.push_back(",
+    "Field %1 (wire order)",
+    "select for details",
+):
+    if token not in projection_header:
+        raise SystemExit("BROWSER_REPORT_READABLE_FAIL missing bounded structure detail=" + token)
+if 'const bool includeWireDetails = ui.reports.isEmpty();' not in report_controller or (
+        'kBrowserReportVisibleMemberLimit,\n                includeWireDetails' not in report_controller):
+    raise SystemExit("BROWSER_REPORT_PERF_FAIL details projected for old frames")
+if 'const bool includeWireDetails = false' not in projection_header or (
+        'if (includeWireDetails && ordinal < kBrowserReportDetailMembers)' not in projection_header):
+    raise SystemExit("BROWSER_REPORT_PERF_FAIL detail projection not opt-in")
+if 'map.insert(QStringLiteral("valueDetails"), projected.details)' not in report_controller:
+    raise SystemExit("BROWSER_REPORT_READABLE_FAIL lost structured detail presentation")
+for token in (
+    "readonly property string selectedRcbReference:",
+    "onSelectedRcbReferenceChanged:",
+    "detailScroll.contentItem.contentY = 0",
+    "property bool triggerExpanded: false",
+    "property bool optionalExpanded: false",
+    "property bool informationExpanded: false",
+    "property bool eventsExpanded: false",
+    "function selectedReportMemberDetails()",
+    "Selected member · wire fields",
+    "Positional · not SCL-labelled",
+    "root.selectedReportMemberDetails()",
+):
+    if token not in report_inspector:
+        raise SystemExit("BROWSER_REPORT_READABLE_FAIL missing operator drilldown=" + token)
+
 value_preview = (workspace_path.parent.parent / "src" / "BrowserBoundedMmsPreview.hpp").read_text(encoding="utf-8")
 for token in [
     'BoundedMmsPreview',
