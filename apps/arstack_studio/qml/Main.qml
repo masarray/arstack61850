@@ -115,10 +115,10 @@ ApplicationWindow {
     property bool phaseLink: false
     property bool profileDirty: false
     property bool pendingApply: true
-    // Session-only operator intent. Never persist across application launches:
-    // an explicit PTP ON can be restored after a firmware reflash/reconnect
-    // without introducing an uncontrolled power-on publisher.
-    property bool ptpDesiredForSession: false
+    // The default operator workflow enables PTP SOURCE once a verified board
+    // becomes READY. Nothing transmits while disconnected. Explicit PTP OFF
+    // cancels auto-restart for this Studio session; no setting is persisted.
+    property bool ptpDesiredForSession: true
     property string ptpDesiredRole: "SOURCE"
     property bool ptpRestoreAfterFirmware: false
     property int ptpRestoreChecks: 0
