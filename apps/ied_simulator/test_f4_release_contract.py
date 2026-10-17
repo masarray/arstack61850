@@ -12,9 +12,10 @@ ROOT = Path(__file__).resolve().parents[2]
 F4 = ROOT / ".github/workflows/ied-real-device-f4.yml"
 VERIFY = ROOT / "apps/ied_simulator/packaging/windows/verify-release.ps1"
 NSI = ROOT / "apps/ied_simulator/packaging/windows/ARStackIEC61850Workbench.nsi"
+COLLECTOR = ROOT / "apps/ied_simulator/field_acceptance/collect-f4-evidence.ps1"
 
 
-def check(workflow: str, verifier: str, installer: str) -> None:
+def check(workflow: str, verifier: str, installer: str, collector: str) -> None:
     failures: list[str] = []
 
     def require(haystack: str, needle: str, label: str) -> None:
@@ -47,6 +48,14 @@ def check(workflow: str, verifier: str, installer: str) -> None:
     require(verifier, "Portable ZIP smoke test", "actual ZIP binary smoke-launched")
     require(verifier, "Installed package smoke test", "NSIS-installed binary smoke-launched")
     require(installer, "!ifndef APP_ICON", "NSIS rejects omitted icon")
+    require(collector, "[string]$WorkbenchDirectory", "installed Workbench path provided")
+    require(collector, "$workbenchBuildHead -cne $buildHead", "installed source SHA mismatch fails")
+    require(collector, "if ($buildHead -cnotmatch", "invalid kit source SHA fails")
+    require(collector, 'throw \'F4 kit BUILD_HEAD.txt is missing', "unknown kit SHA fails")
+    require(collector, '$filter = "host $TargetIp and tcp port $Port"', "on-wire capture is target bound")
+    require(collector, "$displayFilter = \"ip.addr==$TargetIp && tcp.port==$Port\"", "verified packets belong to target")
+    require(collector, "if ($packetCount -eq 0)", "empty target trace fails")
+    require(collector, "tshark.exe required", "tshark evidence is mandatory")
 
     if failures:
         raise RuntimeError("F4_RELEASE_CONTRACT_FAIL " + ", ".join(failures))
@@ -56,7 +65,8 @@ def main() -> None:
     f4 = F4.read_text(encoding="utf-8")
     verify = VERIFY.read_text(encoding="utf-8")
     nsi = NSI.read_text(encoding="utf-8")
-    check(f4, verify, nsi)
+    collector = COLLECTOR.read_text(encoding="utf-8")
+    check(f4, verify, nsi, collector)
 
     # Mutation controls prove that omissions in either source are rejected.
     for source, needle in (
@@ -66,17 +76,19 @@ def main() -> None:
         ("verify", "Assert-BuildHead $installDir"),
         ("verify", "Portable ZIP smoke test"),
         ("nsi", "!ifndef APP_ICON"),
+        ("collector", "$workbenchBuildHead -cne $buildHead"),
+        ("collector", 'if ($packetCount -eq 0)'),
     ):
-        original = {"f4": f4, "verify": verify, "nsi": nsi}
+        original = {"f4": f4, "verify": verify, "nsi": nsi, "collector": collector}
         original[source] = original[source].replace(needle, "BROKEN_CONTRACT", 1)
         try:
-            check(original["f4"], original["verify"], original["nsi"])
+            check(original["f4"], original["verify"], original["nsi"], original["collector"])
         except RuntimeError as exc:
             if "F4_RELEASE_CONTRACT_FAIL" not in str(exc):
                 raise
         else:
             raise AssertionError("Contract regression failed to detect " + needle)
-    print("F4_RELEASE_CONTRACT_PASS source=verified zip=verified installed=verified")
+    print("F4_RELEASE_CONTRACT_PASS source=verified zip=verified installed=verified target_pcap=guarded")
 
 
 if __name__ == "__main__":
