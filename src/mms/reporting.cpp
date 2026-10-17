@@ -136,7 +136,13 @@ MmsReportBitField decode_bit_field(
     result.raw = value.raw_value();
     const auto unused = result.raw.front();
     if (unused > 7U) throw MmsReportingFormatError("MMS BIT STRING unused-bit count is invalid.");
-    const auto bit_count = (result.raw.size() - 1U) * 8U - unused;
+    const auto payload_bits = (result.raw.size() - 1U) * 8U;
+    // A header-only BIT STRING has zero payload bits. Subtracting a
+    // nonzero unused count would underflow size_t and read past raw.
+    if (unused > payload_bits) {
+        throw MmsReportingFormatError("MMS BIT STRING unused bits exceed its payload.");
+    }
+    const auto bit_count = payload_bits - unused;
     for (std::size_t bit = 0U; bit < bit_count; ++bit) {
         const auto byte = result.raw[1U + bit / 8U];
         if ((byte & static_cast<std::uint8_t>(0x80U >> (bit % 8U))) == 0U) continue;
