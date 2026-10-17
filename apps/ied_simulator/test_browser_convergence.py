@@ -229,13 +229,19 @@ for token in (
 ):
     if token not in projection_header:
         raise SystemExit("BROWSER_REPORT_READABLE_FAIL missing bounded structure detail=" + token)
+if 'const bool includeWireDetails = ui.reports.isEmpty();' not in report_controller or (
+        'kBrowserReportVisibleMemberLimit,\n                includeWireDetails' not in report_controller):
+    raise SystemExit("BROWSER_REPORT_PERF_FAIL details projected for old frames")
+if 'const bool includeWireDetails = false' not in projection_header or (
+        'if (includeWireDetails && ordinal < kBrowserReportDetailMembers)' not in projection_header):
+    raise SystemExit("BROWSER_REPORT_PERF_FAIL detail projection not opt-in")
 if 'map.insert(QStringLiteral("valueDetails"), projected.details)' not in report_controller:
     raise SystemExit("BROWSER_REPORT_READABLE_FAIL lost structured detail presentation")
 for token in (
     "property bool triggerExpanded: false",
     "property bool optionalExpanded: false",
     "function selectedReportMemberDetails()",
-    "Selected member · decoded wire fields",
+    "Selected member · wire fields",
     "Positional · not SCL-labelled",
     "root.selectedReportMemberDetails()",
 ):
