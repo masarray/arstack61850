@@ -157,7 +157,7 @@ jobs:
           grep -qx 'CONFIG_AR_PTP_DOMAIN=0' sdkconfig
           grep -qx 'CONFIG_AR_PTP_TRANSPORT_SPECIFIC=0' sdkconfig
           grep -qx 'CONFIG_AR_PTP_RESPOND_PDELAY=y' sdkconfig
-          grep -qx 'CONFIG_AR_PTP_SYNC_INTERVAL_MS=250' sdkconfig
+          grep -qx 'CONFIG_AR_PTP_SYNC_INTERVAL_MS=1000' sdkconfig
           grep -qx 'CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS=1000' sdkconfig
           echo 'Production timing profile: PASS · serialized shared EMAC TX · PTP-P2 LAB_SOURCE · HW timestamp adapter compiled'
 
