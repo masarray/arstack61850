@@ -1558,6 +1558,14 @@ bool MmsReportController::enableSelectedAuthored(
                 worker->authoredReport.reset();
             }
 
+            // Common authoring entry: static and owned-dynamic selected
+            // DataSets must use the same bounded metadata enrichment.
+            primeSelectedReportTypes(
+                worker->session->association(), *worker->discovery,
+                targetDataSet, worker->attemptedTypeRoots, stop->get_token());
+            worker->verifiedTypes =
+                arstack::iedsim::verified_report_detail::indexTypes(
+                    worker->discovery->variable_types);
             ReportUi ui;
             if (bindingChanged || targetOwnedDynamic) {
                 if (targetOwnedDynamic &&
@@ -1599,13 +1607,6 @@ bool MmsReportController::enableSelectedAuthored(
                     throw std::runtime_error(
                         "Owned dynamic DataSet directory is unavailable or empty.");
                 }
-
-                primeSelectedReportTypes(
-                    worker->session->association(), *worker->discovery,
-                    targetDataSet, worker->attemptedTypeRoots, stop->get_token());
-                worker->verifiedTypes =
-                    arstack::iedsim::verified_report_detail::indexTypes(
-                        worker->discovery->variable_types);
 
                 mms::MmsReportSubscriptionOptions options;
                 options.trigger_general_interrogation =
