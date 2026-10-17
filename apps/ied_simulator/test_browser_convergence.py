@@ -457,8 +457,8 @@ for token in (
     "worker->authoredReport->drain_queued_reports()",
     "if (drained == 0U && worker->lastPublishedReportUi) {",
     "self->pollPending_ = false;",
-    "buildReportUi(worker->report->snapshot())",
-    "buildReportUi(worker->authoredReport->snapshot())",
+    "buildReportUi(worker->report->snapshot(), &worker->verifiedTypes)",
+    "buildReportUi(worker->authoredReport->snapshot(), &worker->verifiedTypes)",
     "previous->events != ui.events",
     "previous->reports != ui.reports",
 ):
@@ -467,7 +467,7 @@ for token in (
 if not (report_poll.index("try_poll_once_for(")
         < report_poll.index("const auto drained = staticActive")
         < report_poll.index("if (drained == 0U && worker->lastPublishedReportUi)")
-        < report_poll.index("buildReportUi(worker->report->snapshot())")):
+        < report_poll.index("buildReportUi(worker->report->snapshot(), &worker->verifiedTypes)")):
     raise SystemExit("BROWSER_REPORT_IDLE_FAIL snapshot built on unchanged receive tick")
 unchanged = report_poll.split(
     "if (drained == 0U && worker->lastPublishedReportUi) {", 1)[1].split(
