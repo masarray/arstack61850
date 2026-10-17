@@ -52,7 +52,9 @@ ApplicationWindow {
     function markScenarioDirty() {
         if (restoringScenario) return
         saveScenarioTimer.restart()
-        if (!workflowBar.session || !workflowBar.session.liveControlReady)
+        // While STOPPED, a new edit belongs to the next supervised Start batch.
+        // Only a genuinely RUNNING board receives incremental live SETs.
+        if (!workflowBar.injectionRunning)
             pendingApply = true
     }
     function restoreLocalScenario() {
