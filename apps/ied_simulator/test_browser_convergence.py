@@ -301,6 +301,8 @@ for token in (
         raise SystemExit("BROWSER_SEMANTIC_FAIL missing fail-closed binding=" + token)
 for token in (
     "worker->semanticModel = contextModel;",
+    "candidate->endpoint.host == requestedHost.toStdString()",
+    "candidate->endpoint.port == static_cast<std::uint16_t>(requestedPort)",
     "semanticModel, verifiedDataSet",
     "subscription.last_rcb_state->data_set_reference",
 ):
