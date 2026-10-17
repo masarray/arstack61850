@@ -36,7 +36,14 @@ inline bool semanticKindCompatible(const semantic_mms::MmsDataValue& value,
                                     const std::string_view basic) {
     using K = semantic_mms::MmsDataKind;
     if (basic == "BOOLEAN") return value.kind() == K::boolean;
-    if (basic == "Quality" || basic == "QUALITY") return value.kind() == K::bit_string;
+    if (basic == "Quality" || basic == "QUALITY") {
+        if (value.kind() != K::bit_string) return false;
+        const auto& bits = value.raw_value();
+        // IEC 61850 q has precisely 13 defined bits; a short/overlong or
+        // nonzero padding value cannot authorize a semantic quality label.
+        return bits.size() == 3U && bits[0] == 3U &&
+               (bits[2] & 0x07U) == 0U;
+    }
     if (basic == "Timestamp" || basic == "TIMESTAMP") return value.kind() == K::utc_time;
     if (basic == "Enum" || basic == "ENUM" || basic == "INT32" ||
         basic == "INT8" || basic == "INT16") return value.kind() == K::integer;
@@ -80,8 +87,9 @@ inline std::optional<std::vector<VerifiedReportLeaf>> bindFlatSclReportStructure
     // It must still resolve to the exact SCL ordinal/reference/FC.
     const auto matchesExactMember = [&](const std::string_view value) {
         if (value.empty()) return false;
-        if (value == binding->reference || value == binding->mms_reference)
-            return true;
+        if (value == binding->reference) return true;
+        // Even the SCL's MMS alias must reduce to this exact FCDA identity.
+        // A stale/incorrect alias must never certify a foreign member.
         const auto slash = value.find('/');
         if (slash == std::string_view::npos || slash == 0U) return false;
         const auto fcStart = value.find('
