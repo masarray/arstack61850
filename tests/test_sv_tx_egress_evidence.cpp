@@ -31,6 +31,46 @@ SvTxEgressObservation make_good(
     o.same_sample_epoch = true;
     return o;
 }
+void check_auto_local_sync_gate_requires_both_clocks_and_fresh_mac() {
+    SvLocalSyncEvidenceGate gate;
+    auto o = make_good(32U, 1700000016U, 2000U);
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 32U, true, 0U));
+    gate.observe(o, SvTxEvidenceResult::baseline_established, 2000);
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 32U, true, 0U));
+    gate.observe(o, SvTxEvidenceResult::measured, 2000);
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 32U, true, 0U));
+    o.sample_epoch_generation = 48U;
+    gate.observe(o, SvTxEvidenceResult::measured, -3000);
+    REQUIRE(gate.qualified(7U, 0U, 3U, 48U, true, 4U));
+    REQUIRE(gate.qualified(7U, 0U, 3U, 65U, true, 4U));
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 66U, true, 4U));
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 48U, true, 5U));
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 48U, false, 0U));
+    REQUIRE(!gate.qualified(7U, 1U, 3U, 48U, true, 0U));
+    REQUIRE(!gate.qualified(7U, 0U, 4U, 48U, true, 0U));
+    REQUIRE(!gate.qualified(8U, 0U, 3U, 48U, true, 0U));
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 47U, true, 0U));
+    // A new source, bad SV timestamp, skipped frame or TX failure
+    // immediately revokes the old promotion and requires fresh pairs.
+    o.sample_epoch_generation = 64U;
+    gate.observe(o, SvTxEvidenceResult::measured, 5000);
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 64U, true, 0U));
+    gate.observe(o, SvTxEvidenceResult::measured, 1000);
+    o.sample_epoch_generation = 80U;
+    gate.observe(o, SvTxEvidenceResult::measured, 1000);
+    REQUIRE(gate.qualified(7U, 0U, 3U, 80U, true, 0U));
+    gate.observe(o, SvTxEvidenceResult::transmit_failed, 1000);
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 80U, true, 0U));
+    o.sample_epoch_generation = 96U;
+    gate.observe(o, SvTxEvidenceResult::measured, 1000);
+    o.sample_epoch_generation = 112U;
+    o.publisher_fault_generation = 1U;
+    gate.observe(o, SvTxEvidenceResult::measured, 1000);
+    REQUIRE(!gate.qualified(7U, 1U, 3U, 112U, true, 0U));
+    gate.reset();
+    REQUIRE(!gate.qualified(7U, 1U, 3U, 112U, true, 0U));
+}
+
 void check_baseline_and_contiguous_ptp() {
     SvTxEgressEvidence e{16U};
     auto o = make_good(16U, 1700000000U, 125000U);
@@ -146,6 +186,7 @@ void check_counter_wrap_and_signed_negative_phase() {
 
 int main() {
     try {
+        check_auto_local_sync_gate_requires_both_clocks_and_fresh_mac();
         check_baseline_and_contiguous_ptp();
         check_clock_steps_recovery_and_session();
         check_invalid_evidence_requires_rebaseline();
