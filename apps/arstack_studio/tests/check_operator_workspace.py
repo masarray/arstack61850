@@ -73,7 +73,7 @@ def main() -> None:
             and "lab simulation" not in expert
             and "Local flag (manual)" in expert
             and 'SV sample synchronization' in expert
-            and '"OFFLINE LAB"' not in timing_ui,
+            and '"OFFLINE LAB"' not in tray,
             "PTP operator controls must use direct understandable language")
     firmware_ui = source("FirmwarePanel.qml")
     timing_ui = source("StudioTimingTray.qml")
