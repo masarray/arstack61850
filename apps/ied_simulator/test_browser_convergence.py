@@ -284,6 +284,29 @@ for token in (
 if report_inspector.count("BrowserEngineeringEvidence {") != 1:
     raise SystemExit("BROWSER_REPORT_INLINE_TREE_FAIL duplicate or detached q/t inspector")
 
+# P0 semantic projection borrows ARIEC61850 exact DataSet/FCDA/type gates.
+semantic = (workspace_path.parent.parent / "src" / "BrowserReportSemanticBinding.hpp").read_text(encoding="utf-8")
+for token in (
+    "model.identity.confidence != MmsLiveModelConfidence::exact",
+    'model.source != "TrustedSclInitialSnapshot"',
+    "fcda.index != member.data_set_index",
+    "dir->user_reference != binding->reference",
+    "attribute.functional_constraint != binding->functional_constraint",
+    "attributes.size() != children.size()",
+    "semanticKindCompatible(children[i], attributes[i]->scl_basic_type)",
+    "attributes[i]->scl_basic_type == attributes[j]->scl_basic_type",
+):
+    if token not in semantic:
+        raise SystemExit("BROWSER_SEMANTIC_FAIL missing fail-closed binding=" + token)
+for token in (
+    "worker->semanticModel = contextModel;",
+    "semanticModel, frame.header.data_set_reference",
+):
+    if token not in report_controller:
+        raise SystemExit("BROWSER_SEMANTIC_FAIL missing generation-owned runtime wiring=" + token)
+if "SCL verified · MMS type checked" not in report_inspector:
+    raise SystemExit("BROWSER_SEMANTIC_FAIL missing semantic/fallback provenance badge")
+
 value_preview = (workspace_path.parent.parent / "src" / "BrowserBoundedMmsPreview.hpp").read_text(encoding="utf-8")
 for token in [
     'BoundedMmsPreview',
