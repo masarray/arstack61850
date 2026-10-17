@@ -121,6 +121,7 @@ ApplicationWindow {
     property bool ptpDesiredForSession: false
     property string ptpDesiredRole: "SOURCE"
     property bool ptpRestoreAfterFirmware: false
+    property int ptpRestoreChecks: 0
     property bool restoringScenario: false
     property bool offlinePreviewRunning: false
     property real currentScale: 1000.0
@@ -207,8 +208,10 @@ ApplicationWindow {
             // If the operator explicitly enabled it in this live Studio
             // session, restore once after the verified board is ready.
             // Do not preserve intent after a fresh Studio launch.
-            if (success && root.ptpDesiredForSession)
+            if (success && root.ptpDesiredForSession) {
+                root.ptpRestoreChecks = 0
                 root.ptpRestoreAfterFirmware = true
+            }
         }
     }
 
@@ -217,6 +220,13 @@ ApplicationWindow {
         repeat: true
         running: root.ptpRestoreAfterFirmware
         onTriggered: {
+            // Time-bounded one-shot restoration: never retry indefinitely.
+            root.ptpRestoreChecks += 1
+            if (root.ptpRestoreChecks > 120) {
+                root.ptpRestoreAfterFirmware = false
+                root.showMessage("PTP restart was not confirmed after reconnect. Use PTP On to retry.", true)
+                return
+            }
             const session = workflowBar.session
             if (!session || session.updatingFirmware || !session.startReady ||
                     !device.deviceVerified || !device.ptpAvailable ||
