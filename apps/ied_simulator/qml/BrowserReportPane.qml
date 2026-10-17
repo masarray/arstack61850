@@ -33,9 +33,9 @@ Rectangle {
     // diagnostics stay one click away, without dominating the initial viewport.
     property bool triggerExpanded: false
     property bool optionalExpanded: false
-    property bool informationExpanded: true
+    property bool informationExpanded: false
     property bool dataExpanded: true
-    property bool eventsExpanded: true
+    property bool eventsExpanded: false
     property int selectedReportMemberIndex: -1
     // Preserve selection through repeat snapshots of the same report frame;
     // reset only when the actual ReportID/sequence/entry identity changes.
