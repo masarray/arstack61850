@@ -952,10 +952,27 @@ ApplicationWindow {
                     SplitView.preferredWidth: root.compactLayout ? 700 : 860
                     theme: studioTheme
 
-                    ColumnLayout {
+                    Flickable {
+                        id: injectionScroll
+                        objectName: "studioInjectionScroll"
                         anchors.fill: parent
-                        anchors.margins: root.compactLayout ? 11 : 13
-                        spacing: root.compactLayout ? 6 : 8
+                        property real innerMargin: root.compactLayout ? 11 : 13
+                        clip: true
+                        contentWidth: width
+                        contentHeight: injectionContent.height + 2 * innerMargin
+                        flickableDirection: Flickable.VerticalFlick
+                        boundsBehavior: Flickable.StopAtBounds
+                        interactive: contentHeight > height
+                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                        ColumnLayout {
+                            id: injectionContent
+                            x: injectionScroll.innerMargin
+                            y: injectionScroll.innerMargin
+                            width: Math.max(0, injectionScroll.width - 2 * injectionScroll.innerMargin)
+                            height: Math.max(injectionScroll.height - 2 * injectionScroll.innerMargin,
+                                             implicitHeight)
+                            spacing: root.compactLayout ? 6 : 8
 
                         RowLayout {
                             Layout.fillWidth: true
@@ -1162,8 +1179,10 @@ ApplicationWindow {
                                 compact: root.compactLayout
                             }
                         }
-                        // Stacked voltage/current matrices now own any spare
-                        // vertical space instead of an empty bottom spacer.
+                        // Stacked voltage/current matrices fill the full
+                        // desktop panel; Flickable preserves all controls
+                        // on smaller Windows viewports without clipping.
+                        }
                     }
                 }
 
