@@ -294,13 +294,15 @@ for token in (
     "attribute.functional_constraint != binding->functional_constraint",
     "attributes.size() != children.size()",
     "semanticKindCompatible(children[i], attributes[i]->scl_basic_type)",
-    "attributes[i]->scl_basic_type == attributes[j]->scl_basic_type",
+    "semanticExpectedKind(attributes[i]->scl_basic_type) ==",
+    "semanticExpectedKind(attributes[j]->scl_basic_type)",
 ):
     if token not in semantic:
         raise SystemExit("BROWSER_SEMANTIC_FAIL missing fail-closed binding=" + token)
 for token in (
     "worker->semanticModel = contextModel;",
-    "semanticModel, frame.header.data_set_reference",
+    "semanticModel, verifiedDataSet",
+    "subscription.last_rcb_state->data_set_reference",
 ):
     if token not in report_controller:
         raise SystemExit("BROWSER_SEMANTIC_FAIL missing generation-owned runtime wiring=" + token)
