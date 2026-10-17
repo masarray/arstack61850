@@ -625,11 +625,27 @@ Rectangle {
                         Layout.fillWidth: true
                         spacing: 0
                         visible: root.selectedReportMemberDetails().length > 0
-                        SectionHeading {
-                            heading: "Selected member · decoded wire fields"
-                            evidence: "Positional · not SCL-labelled"
-                            opened: true
-                            onToggleRequested: {}
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: 29
+                            color: theme.surfaceRaised
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 11
+                                anchors.rightMargin: 9
+                                Label {
+                                    text: "Selected member · wire fields"
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                    color: theme.text
+                                    Layout.fillWidth: true
+                                }
+                                Label {
+                                    text: "Positional · not SCL-labelled"
+                                    font.pixelSize: 10
+                                    color: theme.muted
+                                }
+                            }
                         }
                         Repeater {
                             model: root.selectedReportMemberDetails()
