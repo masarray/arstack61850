@@ -122,7 +122,7 @@ Rectangle {
             uiFont: bar.uiFont
             text: bar.compact ? "SCL" : "Open SCL"
             iconSource: Qt.resolvedUrl("../assets/material/folder_open.svg")
-            enabled: bar.session.engineeringEditable
+            enabled: bar.session.engineeringEditable && !bar.workflow.startQueued
             toolTipText: "Open IEC 61850 engineering configuration"
             onClicked: bar.workflow.openEngineeringDialog()
         }
@@ -133,7 +133,7 @@ Rectangle {
             uiFont: bar.uiFont
             text: "4I+4V"
             iconSource: Qt.resolvedUrl("../assets/material/dashboard.svg")
-            enabled: bar.session.engineeringEditable
+            enabled: bar.session.engineeringEditable && !bar.workflow.startQueued
             toolTipText: "Use the built-in 4I + 4V / 4000 samples/s profile"
             onClicked: bar.workflow.useBuiltInProfile()
         }

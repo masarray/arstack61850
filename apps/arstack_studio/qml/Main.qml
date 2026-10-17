@@ -567,8 +567,8 @@ ApplicationWindow {
             workflowBar.session.requestSetQuality(activeSignal, unsignedValue)
     }
 
-    Shortcut { sequence: "Ctrl+B"; onActivated: root.balanced() }
-    Shortcut { sequence: "Ctrl+0"; onActivated: root.zeroAll() }
+    Shortcut { sequence: "Ctrl+B"; enabled: !workflowBar.startQueued; onActivated: root.balanced() }
+    Shortcut { sequence: "Ctrl+0"; enabled: !workflowBar.startQueued; onActivated: root.zeroAll() }
     Shortcut { sequence: "F5"; enabled: workflowBar.session && workflowBar.session.state !== "RUNNING"; onActivated: workflowBar.requestStart() }
     Shortcut { sequence: "F6"; enabled: workflowBar.session && workflowBar.session.state === "RUNNING"; onActivated: workflowBar.requestStop() }
 
@@ -890,6 +890,7 @@ ApplicationWindow {
                         Rectangle {
                             Layout.fillWidth: true
                             height: 48
+                            enabled: !workflowBar.startQueued
                             radius: 8
                             color: "#0b1219"
                             border.width: 0
@@ -996,6 +997,7 @@ ApplicationWindow {
                             spacing: 9
                             SignalMatrix {
                                 id: voltageMatrix
+                                enabled: !workflowBar.startQueued
                                 objectName: "studioVoltageMatrix"
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
@@ -1014,6 +1016,7 @@ ApplicationWindow {
                             }
                             SignalMatrix {
                                 id: currentMatrix
+                                enabled: !workflowBar.startQueued
                                 objectName: "studioCurrentMatrix"
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
@@ -1063,6 +1066,7 @@ ApplicationWindow {
                             }
                             Rectangle { width: 1; height: 20; color: studioTheme.lineSoft }
                             QualityEditor {
+                                enabled: !workflowBar.startQueued
                                 Layout.fillWidth: true
                                 theme: studioTheme
                                 controller: root

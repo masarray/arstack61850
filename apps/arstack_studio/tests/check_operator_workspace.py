@@ -78,6 +78,11 @@ def main() -> None:
             and 'typeof row[1] !== "number"' in main_qml
             and 'typeof row[3] !== "number"' in main_qml,
             "saved scenario restoration must reject JSON null/string coercion and nonfinite values")
+    require('id: voltageMatrix\n                                enabled: !workflowBar.startQueued' in main_qml
+            and 'id: currentMatrix\n                                enabled: !workflowBar.startQueued' in main_qml
+            and 'enabled: !workflowBar.startQueued; onActivated: root.balanced()' in main_qml
+            and 'enabled: !workflowBar.startQueued; onActivated: root.zeroAll()' in main_qml,
+            "scenario editors and shortcuts must be frozen during a pending START snapshot")
     require("controller.pendingApply = true" in workflow
             and "requestStartWithScenario(controller.startScenarioSnapshot())" in workflow
             and "controller.applyAllSignals()" not in workflow
