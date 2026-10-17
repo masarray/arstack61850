@@ -305,6 +305,7 @@ for token in (
     "semanticKindCompatible(children[i], attributes[i]->scl_basic_type)",
     "semanticExpectedKind(attributes[i]->scl_basic_type) ==",
     "semanticExpectedKind(attributes[j]->scl_basic_type)",
+    "MmsDataSetDirectoryCodec::parse_data_set_reference",
 ):
     if token not in semantic:
         raise SystemExit("BROWSER_SEMANTIC_FAIL missing fail-closed binding=" + token)
@@ -317,6 +318,8 @@ for token in (
 ):
     if token not in report_controller:
         raise SystemExit("BROWSER_SEMANTIC_FAIL missing generation-owned runtime wiring=" + token)
+if 'ordinal < kBrowserReportDetailMembers' not in projection_header:
+    raise SystemExit("BROWSER_SEMANTIC_FAIL uncapped verified details")
 if 'const auto engineering = decodeEngineeringEvidence(full, *leaf.value);' not in projection_header:
     raise SystemExit("BROWSER_SEMANTIC_FAIL missing shared q/t native typed decoder")
 if 'engineeringEvidence: semanticLeafRow.modelData.engineeringEvidence' not in report_inspector:
