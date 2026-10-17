@@ -528,8 +528,13 @@ int main(int argc, char** argv) {
         int semanticBudget = 4;
         const auto semantic = arstack::iedsim::projectBrowserReportMembers(
             {reportMember}, semanticBudget, 8, true, &typeIndex);
-        const auto details = semantic.details.constFirst().toMap();
         if (reportTypes.size() != 3 || semantic.details.size() != 1 ||
+            semantic.values.isEmpty()) {
+            std::cerr << "IED_BROWSER_LARGE_MODEL_FAIL verified_semantic_report_empty\n";
+            return 91;
+        }
+        const auto details = semantic.details.constFirst().toMap();
+        if (
             !details.value(QStringLiteral("typed")).toBool() ||
             !semantic.values.constFirst().contains(QStringLiteral("verified IEC")) ||
             reportTypes.at(0).toMap().value(QStringLiteral("label")).toString() !=
