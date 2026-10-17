@@ -642,8 +642,11 @@ ApplicationWindow {
             }
             Rectangle { width: 1; height: 12; color: studioTheme.lineSoft }
             Label {
-                text: "4I + 4V · 4000 samples/s"
-                color: studioTheme.muted
+                text: root.pendingApply && !workflowBar.injectionRunning
+                    ? "4I + 4V · Changes sent on Start"
+                    : "4I + 4V · 4000 samples/s"
+                color: root.pendingApply && !workflowBar.injectionRunning
+                    ? studioTheme.amber : studioTheme.muted
                 font.family: root.uiFont
                 font.pixelSize: 9
             }
