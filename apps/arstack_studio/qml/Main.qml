@@ -115,6 +115,13 @@ ApplicationWindow {
     property bool phaseLink: false
     property bool profileDirty: false
     property bool pendingApply: true
+    // Session-only operator intent. Never persist across application launches:
+    // an explicit PTP ON can be restored after a firmware reflash/reconnect
+    // without introducing an uncontrolled power-on publisher.
+    property bool ptpDesiredForSession: false
+    property string ptpDesiredRole: "SOURCE"
+    property bool ptpRestoreAfterFirmware: false
+    property int ptpRestoreChecks: 0
     property bool restoringScenario: false
     property bool offlinePreviewRunning: false
     property real currentScale: 1000.0
@@ -194,6 +201,44 @@ ApplicationWindow {
         }
     }
 
+    Connections {
+        target: workflowBar.session
+        function onFirmwareUpdateFinished(success) {
+            // Reset during firmware install stops the board's PTP SOURCE.
+            // If the operator explicitly enabled it in this live Studio
+            // session, restore once after the verified board is ready.
+            // Do not preserve intent after a fresh Studio launch.
+            if (success && root.ptpDesiredForSession) {
+                root.ptpRestoreChecks = 0
+                root.ptpRestoreAfterFirmware = true
+            }
+        }
+    }
+
+    Timer {
+        interval: 300
+        repeat: true
+        running: root.ptpRestoreAfterFirmware
+        onTriggered: {
+            // Time-bounded one-shot restoration: never retry indefinitely.
+            root.ptpRestoreChecks += 1
+            if (root.ptpRestoreChecks > 120) {
+                root.ptpRestoreAfterFirmware = false
+                root.showMessage("PTP restart was not confirmed after reconnect. Use PTP On to retry.", true)
+                return
+            }
+            const session = workflowBar.session
+            if (!session || session.updatingFirmware || !session.startReady ||
+                    !device.deviceVerified || !device.ptpAvailable ||
+                    device.ptpStarting)
+                return
+            root.ptpRestoreAfterFirmware = false
+            if (device.ptpRunning || !root.ptpDesiredForSession) return
+            if (!root.startPtpRole(root.ptpDesiredRole))
+                root.showMessage("PTP did not restart after firmware installation. Use PTP On to retry.", true)
+        }
+    }
+
     Timer {
         id: messageTimer
         interval: 2600
@@ -269,7 +314,18 @@ ApplicationWindow {
     }
 
     function startPtpRole(role) {
-        return profilePanel.startPtpRole(role)
+        const accepted = profilePanel.startPtpRole(role)
+        if (accepted) {
+            root.ptpDesiredForSession = true
+            root.ptpDesiredRole = role
+        }
+        return accepted
+    }
+
+    function requestStopPtp() {
+        root.ptpDesiredForSession = false
+        root.ptpRestoreAfterFirmware = false
+        return workflowBar.session && workflowBar.session.requestStopPtp()
     }
 
     function openDiagnostics() {

@@ -90,7 +90,7 @@ Rectangle {
                             tray.controller.showMessage("PTP preview only. Connect ESP32-P4 to transmit.", false)
                     } else if (wantsRunning) {
                         if (tray.controller) tray.controller.startPtpRole(tray.roleValues[tray.selectedRoleIndex])
-                    } else if (tray.session && !tray.session.requestStopPtp() && tray.controller) {
+                    } else if (tray.controller && !tray.controller.requestStopPtp()) {
                         tray.controller.showMessage("PTP stop was not accepted; inspect diagnostics.", true)
                     }
                 }

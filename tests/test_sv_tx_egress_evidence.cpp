@@ -37,10 +37,13 @@ void check_auto_local_sync_gate_requires_both_clocks_and_fresh_mac() {
     REQUIRE(!gate.qualified(7U, 0U, 3U, 32U, true, 0U));
     gate.observe(o, SvTxEvidenceResult::baseline_established, 2000);
     REQUIRE(!gate.qualified(7U, 0U, 3U, 32U, true, 0U));
-    gate.observe(o, SvTxEvidenceResult::measured, 2000);
+    // Hardware packet TX normally follows the top-of-second sampling
+    // instant by processing/queue delay. 110 us is valid publication delay,
+    // and MUST NOT be mistaken for 110 us sampling phase error.
+    gate.observe(o, SvTxEvidenceResult::measured, 110000);
     REQUIRE(!gate.qualified(7U, 0U, 3U, 32U, true, 0U));
     o.sample_epoch_generation = 48U;
-    gate.observe(o, SvTxEvidenceResult::measured, -3000);
+    gate.observe(o, SvTxEvidenceResult::measured, 175000);
     REQUIRE(gate.qualified(7U, 0U, 3U, 48U, true, 4U));
     REQUIRE(gate.qualified(7U, 0U, 3U, 65U, true, 4U));
     REQUIRE(!gate.qualified(7U, 0U, 3U, 66U, true, 4U));
@@ -53,11 +56,15 @@ void check_auto_local_sync_gate_requires_both_clocks_and_fresh_mac() {
     // A new source, bad SV timestamp, skipped frame or TX failure
     // immediately revokes the old promotion and requires fresh pairs.
     o.sample_epoch_generation = 64U;
-    gate.observe(o, SvTxEvidenceResult::measured, 5000);
+    gate.observe(o, SvTxEvidenceResult::measured, 300000);
     REQUIRE(!gate.qualified(7U, 0U, 3U, 64U, true, 0U));
-    gate.observe(o, SvTxEvidenceResult::measured, 1000);
+    // A TX timestamp unexpectedly before the sample epoch is invalid,
+    // even if a symmetric +/− phase comparison would have accepted it.
+    gate.observe(o, SvTxEvidenceResult::measured, -9000);
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 64U, true, 0U));
+    gate.observe(o, SvTxEvidenceResult::measured, 110000);
     o.sample_epoch_generation = 80U;
-    gate.observe(o, SvTxEvidenceResult::measured, 1000);
+    gate.observe(o, SvTxEvidenceResult::measured, 180000);
     REQUIRE(gate.qualified(7U, 0U, 3U, 80U, true, 0U));
     gate.observe(o, SvTxEvidenceResult::transmit_failed, 1000);
     REQUIRE(!gate.qualified(7U, 0U, 3U, 80U, true, 0U));

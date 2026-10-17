@@ -70,3 +70,50 @@ phase accuracy or guarantee zero relay sync alarms.
 External specifications:
 - https://standards.ieee.org/ieee/61850-9-3/6167/
 - https://cache.industry.siemens.com/dl/files/460/109742460/att_1135746/v1/SIP5_Processbus_V09.50_Manual_C054-D_en.pdf?download=true
+
+## M3C.6 — Correct the AUTO local-sync measurement boundary (2026-10-17)
+
+**Root-cause correction:** A previous M3C.5 gate incorrectly demanded
+the actual Ethernet MAC SV **transmission** timestamp be within +/-4 us
+of the integer PTP second to allow local `smpSynch=1`. That is not the
+IEC 61850 sampling synchronization definition: `smpCnt=0` encodes the
+**sampling instant** of the beginning of the PTP second; frame assembly
+and transmission follow with positive, variable publisher delay. SEL,
+*Performance of IEC 61850 Sampled Values Relays for a Real-World Fault*,
+explicitly separates sampled instant from MU processing delay:
+https://selinc.com/api/download/137357/?lang=en .
+IEC 61850-9-2:2011/AMD1:2020 makes `smpSynch` the publisher's
+synchronization-to-device declaration, not a packet-egress coincidence.
+
+The authoritative `SvPtpPhaseAuthority` second-bound GPTimer sample
+observer remains strict: its observed sample phase **plus clock-read
+uncertainty** must be <=4 us, with continuous epoch tracking and the
+same PTP clock/source lease. Hardware canonical TX descriptor
+timestamps now independently require a **plausible publish delay**
+from -4 us to +250 us relative to that boundary (one nominal 4000 fps
+slot, allowing the bounded ±4 us sample phase). This is *not* a
+universal normative network-delay bound; 250 us is this 4kHz
+publisher's bounded application admission policy. TX evidence must
+still be fresh, uninterrupted, same session and SOURCE generation,
+with successful canonical transmissions and no missed slots.
+
+`smpSynch=AUTO` remains 0 until both independent sample-phase and
+publication-evidence gates pass. A manual 1 only tests subscriber
+response to the flag; it does not establish clock lock. On failure
+AUTO returns 0 and SOURCE never claims global 2. Actual target
+latency/timing must be measured on the ESP32-P4 before release.
+
+The Studio side also treats `PTP STATUS` as authoritative for
+RUNNING/STOPPED: a delayed `PROFILE PTPROLE` line can update the role
+but must not flip the PTP switch or erase PTP2 discipline telemetry.
+The operator's explicit in-session PTP ON can be restored **once after
+a successful firmware reflash**, only after the verified device is
+ready; OFF cancels intent and no intent persists across Studio restart.
+Serial log notifications to QML are coalesced at <=10Hz to avoid
+repainting large log documents on every received line.
+
+Reference: Siemens SIPROTEC 5 Process Bus Manual V09.90, client
+`Accepted SmpSynch=1` accepts correctly locally synchronized SV when
+the relay and MU share a known reference. This is a **relay setting**,
+not a vendor-specific SV wire variant.
+https://support.industry.siemens.com/cs/attachments/109742460/SIP5_Processbus_V09.90_Manual_C054-H_en.pdf

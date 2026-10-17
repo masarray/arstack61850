@@ -397,6 +397,7 @@ private:
     PtpStartStage ptpStartStage_{PtpStartStage::idle};
     QTimer ptpStartTimer_;
     QTimer ptpStopPollTimer_;
+    QTimer logUpdateTimer_;
     QString pendingPtpRole_;
     QString pendingPtpConfig_;
     bool ptpRuntimeRoleSeen_{false};
