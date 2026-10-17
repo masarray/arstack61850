@@ -31,4 +31,10 @@ void smp_synch_lab_set_mode(SvSyncPolicyMode mode) noexcept;
  */
 void smp_synch_lab_set_measured(std::optional<SmpSynchValue> value) noexcept;
 
+/** SOURCE AUTO only: assert local sync after independent scheduled-phase AND
+ * canonical MAC TX evidence have been qualified. Must revoke on STOP, source
+ * change, missed slot, TX failure or stale phase; never claims global sync. */
+void smp_synch_set_source_local_qualified(bool qualified) noexcept;
+[[nodiscard]] bool smp_synch_source_local_qualified() noexcept;
+
 } // namespace ar::esp32p4::smv
