@@ -119,6 +119,8 @@ ApplicationWindow {
     // an explicit PTP ON can be restored after a firmware reflash/reconnect
     // without introducing an uncontrolled power-on publisher.
     property bool ptpDesiredForSession: false
+    property bool ptpDefaultStartPending: true
+    property bool ptpExplicitOff: false
     property string ptpDesiredRole: "SOURCE"
     property bool ptpRestoreAfterFirmware: false
     property int ptpRestoreChecks: 0
@@ -198,6 +200,8 @@ ApplicationWindow {
         function onDeviceVerifiedChanged() {
             root.pendingApply = true
             root.offlinePreviewRunning = false
+            if (device.deviceVerified && !root.ptpExplicitOff)
+                root.ptpDefaultStartPending = true
         }
     }
 
@@ -212,6 +216,28 @@ ApplicationWindow {
                 root.ptpRestoreChecks = 0
                 root.ptpRestoreAfterFirmware = true
             }
+        }
+    }
+
+    // One automatic SOURCE start on verified connection. An explicit OFF
+    // cancels this for the remainder of the Studio session; never send PTP
+    // commands without a verified board or while firmware is updating.
+    Timer {
+        interval: 400
+        repeat: true
+        running: root.ptpDefaultStartPending && !root.ptpExplicitOff && device.deviceVerified
+        onTriggered: {
+            if (device.ptpRunning) {
+                root.ptpDefaultStartPending = false
+                return
+            }
+            const session = workflowBar.session
+            if (!session || !session.startReady || session.updatingFirmware ||
+                    device.ptpStarting || !device.ptpAvailable)
+                return
+            root.ptpDefaultStartPending = false
+            if (!root.startPtpRole("SOURCE"))
+                root.showMessage("PTP auto-start was not accepted. Use PTP On to retry.", true)
         }
     }
 
@@ -317,6 +343,8 @@ ApplicationWindow {
         const accepted = profilePanel.startPtpRole(role)
         if (accepted) {
             root.ptpDesiredForSession = true
+            root.ptpExplicitOff = false
+            root.ptpDefaultStartPending = false
             root.ptpDesiredRole = role
         }
         return accepted
@@ -324,6 +352,8 @@ ApplicationWindow {
 
     function requestStopPtp() {
         root.ptpDesiredForSession = false
+        root.ptpDefaultStartPending = false
+        root.ptpExplicitOff = true
         root.ptpRestoreAfterFirmware = false
         return workflowBar.session && workflowBar.session.requestStopPtp()
     }
@@ -468,8 +498,11 @@ ApplicationWindow {
         selectSignal(group, row)
         markScenarioDirty()
         if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply) {
-            if (phaseLink && row < 3) sendLinkedGroup(group)
-            else sendSignal(group, row)
+            const sent = phaseLink && row < 3 ? sendLinkedGroup(group) : sendSignal(group, row)
+            if (!sent) {
+                pendingApply = true
+                showMessage("Setpoint not queued. STOP and START to apply all displayed 4I+4V values.", true)
+            }
         }
         return true
     }
@@ -932,8 +965,8 @@ ApplicationWindow {
 
                     ColumnLayout {
                         anchors.fill: parent
-                        anchors.margins: root.compactLayout ? 11 : 13
-                        spacing: root.compactLayout ? 6 : 8
+                        anchors.margins: root.compactLayout ? 8 : 9
+                        spacing: root.compactLayout ? 4 : 5
 
                         RowLayout {
                             Layout.fillWidth: true
@@ -1049,11 +1082,15 @@ ApplicationWindow {
                             }
                         }
 
-                        RowLayout {
+                        // Stack voltage above current. Both tables share the
+                        // available height instead of leaving an empty lower
+                        // half; the inner rows stretch with the desktop.
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: root.compactLayout ? 214 : 224
-                            Layout.maximumHeight: root.compactLayout ? 214 : 224
-                            spacing: 9
+                            Layout.fillHeight: true
+                            Layout.minimumHeight: 408
+                            Layout.preferredHeight: 422
+                            spacing: 7
                             SignalMatrix {
                                 id: voltageMatrix
                                 enabled: !workflowBar.startQueued
@@ -1136,7 +1173,6 @@ ApplicationWindow {
                                 compact: root.compactLayout
                             }
                         }
-                        Item { Layout.fillHeight: true }
                     }
                 }
 
