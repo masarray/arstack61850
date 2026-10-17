@@ -342,6 +342,100 @@ Rectangle {
         Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: root.theme.lineSoft }
     }
 
+    // Presentation-only tree over authoritative MMS-decoded child values.
+    // Unknown child types retain positional names; SCL labels are never guessed.
+    component TreeDataRow: ColumnLayout {
+        id: treeRow
+        required property int index
+        required property var modelData
+        readonly property bool topLevel: modelData.depth === 0
+        readonly property bool expanded: root.selectedReportMemberIndex === modelData.memberIndex
+        visible: topLevel || expanded
+        Layout.fillWidth: true
+        spacing: 0
+
+        Rectangle {
+            Layout.fillWidth: true
+            implicitHeight: 32
+            color: treeRow.topLevel && treeRow.expanded
+                   ? root.theme.accentSoft
+                   : treeRow.index % 2 ? root.theme.surfaceSoft : root.theme.surface
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 9 + Math.min(treeRow.modelData.depth, 4) * 16
+                anchors.rightMargin: 8
+                spacing: 6
+                Label {
+                    Layout.preferredWidth: 21
+                    text: treeRow.topLevel
+                          ? (treeRow.modelData.container
+                             ? (treeRow.expanded ? "▾" : "▸") : "DA")
+                          : "·"
+                    color: root.theme.accent
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
+                }
+                Label {
+                    Layout.preferredWidth: Math.max(100, parent.width * 0.49 - 35)
+                    text: treeRow.modelData.name || "—"
+                    color: root.theme.text
+                    font.pixelSize: 12
+                    font.weight: treeRow.topLevel ? Font.DemiBold : Font.Normal
+                    elide: Text.ElideMiddle
+                    ToolTip.visible: treeNameHover.containsMouse && truncated
+                    ToolTip.text: treeRow.modelData.reference || text
+                    MouseArea {
+                        id: treeNameHover
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        acceptedButtons: Qt.NoButton
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: treeRow.modelData.value || "—"
+                    color: treeRow.modelData.received ? root.theme.text : root.theme.muted
+                    font.pixelSize: 12
+                    elide: Text.ElideRight
+                    ToolTip.visible: treeValueHover.containsMouse && truncated
+                    ToolTip.text: text
+                    MouseArea {
+                        id: treeValueHover
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        acceptedButtons: Qt.NoButton
+                    }
+                }
+                Label {
+                    visible: !treeRow.topLevel
+                    Layout.preferredWidth: 66
+                    text: treeRow.modelData.kind || ""
+                    color: root.theme.muted
+                    font.pixelSize: 11
+                    horizontalAlignment: Text.AlignRight
+                }
+            }
+            MouseArea {
+                anchors.fill: parent
+                enabled: treeRow.topLevel
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.selectedReportMemberIndex = treeRow.expanded
+                           ? -1 : treeRow.modelData.memberIndex
+            }
+            Rectangle {
+                anchors.bottom: parent.bottom
+                width: parent.width
+                height: 1
+                color: root.theme.lineSoft
+            }
+        }
+        BrowserEngineeringEvidence {
+            theme: root.theme
+            engineeringEvidence: treeRow.topLevel && treeRow.expanded
+                                 ? root.selectedReportMemberEvidence() : ({})
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
