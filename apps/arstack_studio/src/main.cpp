@@ -109,7 +109,8 @@ struct UiBounds {
           && std::abs(voltage.area.right() - current.area.right()) <= tolerance
           && tray.area.top() >= current.area.bottom() - tolerance
           && quality.area.top() >= tray.area.bottom() - tolerance
-          && quality.area.bottom() <= surface.area.bottom() + tolerance)) {
+          && (compactScroll ||
+              quality.area.bottom() <= surface.area.bottom() + tolerance))) {
         qCritical().noquote() << "Studio UI panel order/overlap violation" << size
                               << voltage.area << current.area << tray.area << quality.area;
         return false;
