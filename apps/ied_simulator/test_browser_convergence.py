@@ -297,6 +297,7 @@ for token in (
     "matchesExactMember(dir->user_reference)",
     "matchesExactMember(dir->mms_reference)",
     "canonical == binding->reference",
+    "bits.size() == 3U && bits[0] == 3U",
     "attribute.functional_constraint != binding->functional_constraint",
     "attributes.size() != children.size()",
     "semanticKindCompatible(children[i], attributes[i]->scl_basic_type)",
