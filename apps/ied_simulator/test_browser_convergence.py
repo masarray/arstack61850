@@ -238,6 +238,9 @@ if 'const bool includeWireDetails = false' not in projection_header or (
 if 'map.insert(QStringLiteral("valueDetails"), projected.details)' not in report_controller:
     raise SystemExit("BROWSER_REPORT_READABLE_FAIL lost structured detail presentation")
 for token in (
+    "readonly property string selectedRcbReference:",
+    "onSelectedRcbReferenceChanged:",
+    "detailScroll.contentItem.contentY = 0",
     "property bool triggerExpanded: false",
     "property bool optionalExpanded: false",
     "function selectedReportMemberDetails()",
