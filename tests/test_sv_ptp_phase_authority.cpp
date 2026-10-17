@@ -141,6 +141,42 @@ void check_software_servo_tracks_80ppm_drift_without_counter_reset() {
     }
 }
 
+
+void check_uncertain_brackets_never_claim_software_tracking() {
+    SvPtpPhaseAuthority tracker;
+    // Valid control-plane reads may be too uncertain to support a 60 us
+    // tracking claim. A 400 us PTP read bracket has >=201 us uncertainty;
+    // the nominal phase is deliberately zero to catch false positives.
+    for (std::uint32_t epoch = 1U; epoch <= 6U; ++epoch) {
+        const auto decision = tracker.observe(snapshot(epoch, 20, 400U));
+        CHECK(decision.accepted);
+        CHECK(decision.epoch_second_continuous == (epoch != 1U));
+        CHECK(decision.phase_error_us == 0);
+        CHECK(decision.observation_uncertainty_us >= 201U);
+        CHECK(decision.state == SvPtpPhaseState::acquiring);
+        CHECK(!decision.software_tracking);
+    }
+
+    // Qualification requires four fresh, narrow observations; old
+    // uncertain observations cannot contribute toward this threshold.
+    for (std::uint32_t epoch = 7U; epoch <= 9U; ++epoch) {
+        const auto decision = tracker.observe(snapshot(epoch, 20, 8U));
+        CHECK(decision.accepted);
+        CHECK(!decision.software_tracking);
+    }
+    const auto qualified = tracker.observe(snapshot(10U, 20, 8U));
+    CHECK(qualified.accepted);
+    CHECK(qualified.software_tracking);
+    CHECK(qualified.state == SvPtpPhaseState::tracking);
+
+    // One uncertain sample revokes tracking, even with perfect measured
+    // phase. The PI/slew remains bounded separately from qualification.
+    const auto degraded = tracker.observe(snapshot(11U, 20, 400U));
+    CHECK(degraded.accepted);
+    CHECK(!degraded.software_tracking);
+    CHECK(degraded.state == SvPtpPhaseState::acquiring);
+}
+
 void check_publisher_continuity_gate_reacquisition() {
     SvPtpPublisherContinuityGate gate;
     SvPtpPhaseAuthority phase;
@@ -319,6 +355,7 @@ void check_continuous_ptp_second_binding() {
 int main() {
     try {
         check_phase_sign_and_bounded_corrections();
+        check_uncertain_brackets_never_claim_software_tracking();
         check_per_second_slew_distribution();
         check_software_servo_tracks_80ppm_drift_without_counter_reset();
         check_clock_step_stale_brackets_and_timer_wrap();

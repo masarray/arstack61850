@@ -15,3 +15,23 @@ The existing ESP32-P4 SOURCE control-plane observer now publishes ISR phase-stee
 
 ## Scope and next gating
 This is M3C **foundation**, NOT completion of the M3A canonical dual-mode runtime authority. It currently guards the opt-in SOURCE servo; RECEIVER phase correlation, clock-authority selection/switching, absolute PPS/smpCnt physical accuracy, MAC egress, non-default SV profile epoch semantics, full M3 recovery and legitimate AUTO smpSynch remain separate engineering gates. The firmware experiment stays default OFF and native ARStack Studio is unchanged. A successful build/test establishes software verification only; hardware/IED acceptance remains unverified.
+
+## M3C.3 — Bounded confidence on software phase tracking (2026-10-17)
+
+The previous software-tracking decision checked only the nominal GPTimer/PTP
+phase residual against the configured threshold. It could report
+`software_tracking=true` after consecutive 400-µs clock-read brackets even
+though the corresponding measurement uncertainty was at least 201 µs,
+larger than the default 60-µs tracking threshold.
+
+The qualification counter now advances only when
+`abs(measured_phase_error_us) + observation_uncertainty_us` is within the
+configured software-tracking threshold. One low-confidence observation revokes
+tracking. Integer-second continuity, the separate phase-observation acceptance
+limit, bounded PI steering, ISR work and firmware feature gates are unchanged.
+This is a software confidence bound, not a hardware egress measurement or
+authorization to assert `smpSynch=1/2`.
+
+Portable regression includes six accurate-phase/uncertain-clock observations,
+four fresh narrowly bracketed reacquisition observations, and confidence
+demotion after one degraded bracket. Hardware bench acceptance is still absent.
