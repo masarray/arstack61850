@@ -40,6 +40,7 @@ bool verifyReadableReportTreeProjection() {
     mms::MmsReportValue quality;
     quality.data_set_index = 1U;
     quality.data_reference = "IED/LLN0.Pos.q";
+    quality.reason_for_inclusion.names.push_back("general-interrogation");
     quality.value = mms::MmsDataValue::bit_string(3U,
         std::span<const std::uint8_t>{goodQuality});
     mms::MmsReportValue notRead;
@@ -62,6 +63,9 @@ bool verifyReadableReportTreeProjection() {
         nested.value("depth").toInt() != 2 ||
         q.value("name").toString() != QStringLiteral("LLN0.Pos.q") ||
         q.value("value").toString() != QStringLiteral("good") ||
+        q.value("reason").toString() != QStringLiteral("general-interrogation") ||
+        q.value("typedEvidence").toMap().value("kind").toString() != QStringLiteral("quality") ||
+        q.value("typedEvidence").toMap().value("rows").toList().size() < 10 ||
         unread.value("received").toBool() ||
         unread.value("value").toString() != QStringLiteral("Read failed"))
         return false;
@@ -77,6 +81,16 @@ bool verifyReadableReportTreeProjection() {
     if (!truncated ||
         limited.size() != arstack::iedsim::kBrowserReportTreeChildLimit + 1)
         return false;
+    // Recursion must not imply completeness at the configured depth cap.
+    auto deep = mms::MmsDataValue::boolean(true);
+    for (unsigned i = 0; i <= arstack::iedsim::kBrowserReportTreeDepthLimit; ++i)
+        deep = mms::MmsDataValue::structure({std::move(deep)});
+    mms::MmsReportValue nested;
+    nested.data_reference = "IED/LLN0.Nested";
+    nested.value = std::move(deep);
+    truncated = false;
+    const auto deepRows = projectBrowserReportTree({nested}, &truncated);
+    if (!truncated || deepRows.isEmpty()) return false;
     // Shortened references must not be used to infer q/t semantic identity.
     mms::MmsReportValue ambiguous;
     ambiguous.data_reference = std::string(1500U, 'X') + ".q";
