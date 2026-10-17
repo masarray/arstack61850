@@ -281,9 +281,12 @@ SurfacePanel {
             controller.showMessage(ribbon.startReason(), false)
             return
         }
-        const accepted = controller.pendingApply
-            ? smartSession.requestStartWithScenario(controller.startScenarioSnapshot())
-            : smartSession.requestStart()
+        // Every START uploads the current visible 4I+4V model. The board may
+        // still hold an older scenario after STOP, reconnect, PTP role change,
+        // or another session. Never take a bare START shortcut from a GUI
+        // that displays different phasor angles.
+        const accepted = smartSession.requestStartWithScenario(
+            controller.startScenarioSnapshot())
         if (!accepted) {
             controller.pendingApply = true
             controller.showMessage("Start rejected. Check device status.", true)
