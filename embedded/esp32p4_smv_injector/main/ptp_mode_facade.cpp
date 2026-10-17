@@ -2,6 +2,7 @@
 
 #include "ptp_lab_task.hpp"
 #include "ptp_receiver_task.hpp"
+#include "smp_synch_lab.hpp"
 
 #include "ariec61850/time_sync/ptp_discipline.hpp"
 #include "ariec61850/time_sync/ptp_canonical_authority.hpp"
@@ -122,6 +123,9 @@ void fill_p2_defaults(ar_ptp_lab_config_t& config) noexcept {
 
 // Ownership is derived from live workers, never from a stale selected role.
 void stop_active_ptp_roles() noexcept {
+    // Operator STOP or role handoff revokes the transmitted AUTO local-sync
+    // claim immediately, independent of the slower phase observer cadence.
+    smp_synch_set_source_local_qualified(false);
     if (ar_ptp_source_runtime_active()) {
         ar_ptp_source_stop();
     }
