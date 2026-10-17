@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "BrowserReportMemberProjection.hpp"
 #include "IedFleetController.hpp"
 #include "IedReportControlManifest.hpp"
 #include "MmsReportController.hpp"
@@ -17,9 +18,77 @@
 #include <QThread>
 #include <QUrl>
 
+#include <array>
 #include <functional>
+#include <span>
+#include <vector>
 
 namespace {
+bool verifyReadableReportTreeProjection() {
+    namespace mms = ar::iec61850::mms;
+    using arstack::iedsim::projectBrowserReportTree;
+    // Positional MMS child identity must NEVER be invented as stVal/q/t.
+    mms::MmsReportValue structured;
+    structured.data_set_index = 0U;
+    structured.data_reference = "IED/LLN0.Pos";
+    structured.value = mms::MmsDataValue::structure({
+        mms::MmsDataValue::boolean(false),
+        mms::MmsDataValue::integer(42),
+        mms::MmsDataValue::array({mms::MmsDataValue::boolean(true)})
+    });
+    const std::array<std::uint8_t, 2> goodQuality{0x00U, 0x00U};
+    mms::MmsReportValue quality;
+    quality.data_set_index = 1U;
+    quality.data_reference = "IED/LLN0.Pos.q";
+    quality.value = mms::MmsDataValue::bit_string(3U,
+        std::span<const std::uint8_t>{goodQuality});
+    mms::MmsReportValue notRead;
+    notRead.data_set_index = 2U;
+    notRead.data_reference = "IED/LLN0.NotRead";
+
+    const auto rows = projectBrowserReportTree({structured, quality, notRead});
+    if (rows.size() != 7) return false; // struct, 3 children + 1 array item, q, unread
+    const auto parent = rows.at(0).toMap();
+    const auto child = rows.at(1).toMap();
+    const auto nested = rows.at(4).toMap();
+    const auto q = rows.at(5).toMap();
+    const auto unread = rows.at(6).toMap();
+    if (parent.value("name").toString() != QStringLiteral("LLN0.Pos") ||
+        parent.value("depth").toInt() != 0 ||
+        parent.value("value").toString() != QStringLiteral("3 field(s)") ||
+        child.value("name").toString() != QStringLiteral("Field 1") ||
+        child.value("value").toString() != QStringLiteral("false") ||
+        child.value("depth").toInt() != 1 ||
+        nested.value("depth").toInt() != 2 ||
+        q.value("name").toString() != QStringLiteral("LLN0.Pos.q") ||
+        q.value("value").toString() != QStringLiteral("good") ||
+        unread.value("received").toBool() ||
+        unread.value("value").toString() != QStringLiteral("Read failed"))
+        return false;
+
+    // The shared projection is bounded even for hostile deep/long MMS values.
+    mms::MmsReportValue oversized;
+    oversized.data_reference = "IED/LLN0.Large";
+    oversized.value = mms::MmsDataValue::structure(
+        std::vector<mms::MmsDataValue>(
+            500U, mms::MmsDataValue::boolean(false)));
+    bool truncated = false;
+    const auto limited = projectBrowserReportTree({oversized}, &truncated);
+    if (!truncated ||
+        limited.size() != arstack::iedsim::kBrowserReportTreeChildLimit + 1)
+        return false;
+    // Shortened references must not be used to infer q/t semantic identity.
+    mms::MmsReportValue ambiguous;
+    ambiguous.data_reference = std::string(1500U, 'X') + ".q";
+    ambiguous.value = mms::MmsDataValue::bit_string(3U,
+        std::span<const std::uint8_t>{goodQuality});
+    const auto raw = projectBrowserReportTree({ambiguous});
+    if (raw.isEmpty() || raw.first().toMap().value("value").toString()
+                             == QStringLiteral("good"))
+        return false;
+    return true;
+}
+
 bool isIndexedReportFixture(const QString& sclPath) {
     return QFileInfo(sclPath).fileName().endsWith(QStringLiteral("indexed-reports.scd"), Qt::CaseInsensitive);
 }
@@ -167,6 +236,7 @@ bool reportProjectionPresent(const MmsReportController& reports) {
         !frame.value(QStringLiteral("rcbReference")).toString().isEmpty() &&
         !frame.value(QStringLiteral("dataSet")).toString().isEmpty() &&
         !frame.value(QStringLiteral("values")).toStringList().isEmpty() &&
+        !frame.value(QStringLiteral("valueTree")).toList().isEmpty() &&
         frame.contains(QStringLiteral("entryId")) &&
         frame.contains(QStringLiteral("overflow"));
 }
@@ -179,6 +249,11 @@ int main(int argc, char* argv[]) {
     if (argc != 2) {
         qCritical() << "usage: ied_report_workspace_qa <scl>";
         return 2;
+    }
+
+    if (!verifyReadableReportTreeProjection()) {
+        qCritical() << "REPORTS_WORKBENCH_FAIL typed_tree_and_bounds";
+        return 38;
     }
 
     if (!verifyIndexedRcbManifestExpansion()) {
