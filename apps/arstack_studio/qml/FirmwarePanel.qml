@@ -64,43 +64,20 @@ SurfacePanel {
                     font.letterSpacing: 0.9
                 }
                 Label {
-                    text: "Session-controlled firmware service"
+                    text: "Firmware & recovery"
                     color: panel.theme.text
                     font.family: panel.uiFont
                     font.pixelSize: 18
                     font.weight: Font.DemiBold
                 }
-                Label {
-                    Layout.fillWidth: true
-                    text: "Firmware probing, writing and reset are owned by the guided device session. Advanced view is diagnostic only, preventing a second path from competing for the serial port."
-                    color: panel.theme.textSoft
-                    font.family: panel.uiFont
-                    font.pixelSize: 10
-                    wrapMode: Text.WordWrap
-                }
             }
 
-            Rectangle {
-                implicitWidth: 126
-                implicitHeight: 30
-                radius: 7
-                color: panel.firmware.bundleReady ? "#112a20" : "#2a2112"
-                border.width: 1
-                border.color: panel.firmware.bundleReady ? "#2c674e" : "#705827"
-                Label {
-                    anchors.centerIn: parent
-                    text: panel.firmware.bundleReady ? "PACKAGE READY" : "PACKAGE BLOCKED"
-                    color: panel.firmware.bundleReady ? panel.theme.green : panel.theme.amber
-                    font.family: panel.uiFont
-                    font.pixelSize: 8
-                    font.weight: Font.Bold
-                }
-            }
+
         }
 
         Rectangle {
             Layout.fillWidth: true
-            implicitHeight: 62
+            implicitHeight: 46
             radius: 8
             color: panel.theme.surface2
             border.width: 1
@@ -120,23 +97,15 @@ SurfacePanel {
                     Layout.fillWidth: true
                     spacing: 1
                     Label {
+                        Layout.fillWidth: true
                         text: panel.firmware.bundleReady
-                            ? "ARStack firmware v" + panel.firmware.firmwareVersion + " · build " + panel.firmware.firmwareBuildId + " is verified in this Studio package"
-                            : "Firmware package is not ready"
+                            ? "Bundled firmware v" + panel.firmware.firmwareVersion + " · ready"
+                            : "Firmware package unavailable"
+                        elide: Text.ElideRight
                         color: panel.theme.text
                         font.family: panel.uiFont
                         font.pixelSize: 11
                         font.weight: Font.DemiBold
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        text: panel.firmware.bundleReady
-                            ? "Manifest target, revision policy and SHA-256 are checked before the guided session can write."
-                            : panel.firmware.bundleStatus
-                        color: panel.theme.muted
-                        font.family: panel.uiFont
-                        font.pixelSize: 9
-                        wrapMode: Text.WordWrap
                     }
                 }
             }
@@ -144,7 +113,7 @@ SurfacePanel {
 
         Rectangle {
             Layout.fillWidth: true
-            implicitHeight: 126
+            implicitHeight: 112
             radius: 9
             color: panel.theme.surface2
             border.width: 1
@@ -165,7 +134,7 @@ SurfacePanel {
                     Layout.fillWidth: true
                     spacing: 7
                     Label {
-                        text: "Observe the connected device"
+                        text: "Device"
                         color: panel.theme.text
                         font.family: panel.uiFont
                         font.pixelSize: 12
@@ -174,10 +143,9 @@ SurfacePanel {
                     Label {
                         Layout.fillWidth: true
                         text: panel.device.deviceVerified
-                            ? panel.device.deviceProduct + " · " + panel.device.deviceTarget + " · firmware v" + panel.device.firmwareVersion + " · build " + (panel.device.firmwareBuildId.length > 0 ? panel.device.firmwareBuildId : "unknown")
-                            : (panel.hasPort
-                                ? firmwarePort.currentText + " is visible. Device identity and recovery decisions remain owned by the guided session."
-                                : "Connect the ESP32-P4 programming USB cable, then refresh the port list.")
+                            ? panel.device.deviceProduct + " · firmware v" + panel.device.firmwareVersion
+                            : (panel.hasPort ? firmwarePort.currentText + " · not verified"
+                                             : "Connect ESP32-P4 via USB.")
                         color: panel.device.deviceVerified ? panel.theme.green : panel.theme.muted
                         font.family: panel.uiFont
                         font.pixelSize: 10
@@ -211,7 +179,7 @@ SurfacePanel {
 
         Rectangle {
             Layout.fillWidth: true
-            implicitHeight: 118
+            implicitHeight: 99
             radius: 9
             color: panel.theme.surface2
             border.width: 1
@@ -233,7 +201,7 @@ SurfacePanel {
                     Layout.fillWidth: true
                     spacing: 5
                     Label {
-                        text: panel.firmware.busy ? "Guided firmware operation in progress" : "Use the guided firmware action"
+                        text: panel.firmware.busy ? "Installing firmware" : "Firmware action"
                         color: panel.theme.text
                         font.family: panel.uiFont
                         font.pixelSize: 12
@@ -242,10 +210,10 @@ SurfacePanel {
                     Label {
                         Layout.fillWidth: true
                         text: panel.firmware.busy
-                            ? "The session supervisor currently owns the firmware tool. Keep USB connected until Studio reports a terminal result."
+                            ? "Keep USB connected until verification completes."
                             : (panel.session && panel.session.firmwareUpdateAvailable
-                                ? "Device firmware is compatible, but its build ID differs from this package. Keep using it or install the bundled build when convenient. Copy diagnostics if verification fails."
-                                : "When Studio reports Firmware required, use the guided action. It will stop output, obtain an acknowledged serial release, verify the ESP32-P4, then write.")
+                                ? "Current firmware works; update is optional."
+                                : "Installation and recovery are supervised automatically.")
                         color: panel.theme.textSoft
                         font.family: panel.uiFont
                         font.pixelSize: 10
@@ -273,23 +241,7 @@ SurfacePanel {
                     }
                 }
 
-                Rectangle {
-                    visible: !firmwareAction.visible
-                    implicitWidth: 150
-                    implicitHeight: 34
-                    radius: 7
-                    color: panel.firmware.busy ? panel.theme.accentSoft : panel.theme.raised
-                    border.width: 1
-                    border.color: panel.firmware.busy ? panel.theme.accent : panel.theme.line
-                    Label {
-                        anchors.centerIn: parent
-                        text: panel.firmware.busy ? "SESSION OWNED" : "GUIDED ONLY"
-                        color: panel.firmware.busy ? panel.theme.accent : panel.theme.textSoft
-                        font.family: panel.uiFont
-                        font.pixelSize: 9
-                        font.weight: Font.Bold
-                    }
-                }
+
             }
         }
 
@@ -326,16 +278,11 @@ SurfacePanel {
                 theme: panel.theme
                 uiFont: panel.uiFont
                 text: "Copy diagnostics"
+                toolTipText: "Logs may include device identifiers; review before sharing."
                 enabled: panel.session !== null
                 onClicked: StudioClipboard.copyText(panel.session.diagnosticsText())
             }
-            Label {
-                Layout.fillWidth: true
-                text: "Review/redact device identifiers and logs before sharing"
-                color: panel.theme.muted
-                font.family: panel.uiFont
-                font.pixelSize: 9
-            }
+            Item { Layout.fillWidth: true }
         }
 
         Rectangle {

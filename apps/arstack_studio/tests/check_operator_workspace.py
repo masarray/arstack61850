@@ -63,6 +63,8 @@ def main() -> None:
     require("1.75" in (STUDIO.parent.parent / ".github/workflows/arstack-studio-windows-lifecycle.yml").read_text(encoding="utf-8"),
             "reuse Windows executable for 100%, 150% and 175% DPI acceptance")
     workflow = source("WorkflowBar.qml")
+    firmware_ui = source("FirmwarePanel.qml")
+    timing_ui = source("StudioTimingTray.qml")
     ribbon = source("ModernRibbon.qml")
     cmake_icons = (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8")
     require("scenarioSnapshot()" in main_qml and "restoreLocalScenario()" in main_qml
@@ -91,6 +93,30 @@ def main() -> None:
     require("offline-ptp-lab" in tray and "if (!tray.boardOnline)" in tray
             and "no network packets or clock discipline" in tray,
             "PTP/smpSynch offline controls must be plans only, not device writes")
+    require('case "verify": return 0' in workflow
+            and 'case "write": return 1' in workflow
+            and 'case "reconnect": return 2' in workflow
+            and workflow.count('{ title: "Prepare device" }') == 1
+            and workflow.count('{ title: "Install firmware" }') == 1
+            and workflow.count('{ title: "Verify restart" }') == 1,
+            "firmware wizard must map real firmware states onto exactly three steps")
+    require('smartSession.updateNeedsBootloaderHelp' in workflow
+            and "smartSession.retryFirmwareUpdate()" in workflow
+            and "smartSession.firmwareUpdateCanCancel" in workflow
+            and "smartSession.diagnosticsText()" in workflow,
+            "short wizard must retain bootloader recovery, cancel, retry, failure diagnostics")
+    require("GUIDED ONLY" not in firmware_ui
+            and "SESSION OWNED" not in firmware_ui
+            and "PACKAGE READY" not in firmware_ui
+            and "No firmware file, ESP-IDF" not in workflow,
+            "firmware dialog must remove duplicate badges and instructional noise")
+    require('toolTipText: "Stop"' not in ribbon
+            and 'toolTipText: "Advanced"' not in ribbon
+            and 'ToolTip.text: "smpSynch mode"' not in timing_ui,
+            "captioned operator controls must not duplicate labels as tooltips")
+    require('requestStartWithScenario(controller.startScenarioSnapshot())' in workflow
+            and "Apply to board" not in main_qml,
+            "Edit-to-Start must not regress to a manual Apply-to-board action")
     require("assets/material/smv_injector.svg" in cmake_icons
             and "assets/MATERIAL_ICONS_LICENSE.txt" in cmake_icons
             and "../assets/material/smv_injector.svg" in ribbon,

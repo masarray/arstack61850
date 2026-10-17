@@ -60,7 +60,7 @@ Button {
 
     ToolTip.visible: hovered && toolTipText.length > 0
     ToolTip.text: toolTipText
-    ToolTip.delay: 450
+    ToolTip.delay: theme.tooltipDelay
 
     background: Rectangle {
         radius: control.theme ? control.theme.controlRadius : 7

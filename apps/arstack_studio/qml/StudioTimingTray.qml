@@ -76,8 +76,7 @@ Rectangle {
                 uiFont: tray.uiFont
                 checked: tray.boardOnline ? Boolean(tray.device.ptpRunning) : offlineSettings.previewPtp
                 enabled: !tray.busy && (!tray.boardOnline || tray.ptpReady)
-                ToolTip.visible: hovered
-                ToolTip.text: "PTP"
+
                 onClicked: {
                     // Switch flips locally before asynchronous firmware evidence.
                     // Restore binding immediately, including on rejected requests.
@@ -116,8 +115,7 @@ Rectangle {
                             ? tray.roleIndex(tray.device.ptpRole) : tray.selectedRoleIndex
                     })
                 }
-                ToolTip.visible: hovered
-                ToolTip.text: "PTP role"
+
             }
             Label {
                 text: "smpSynch"
@@ -136,8 +134,7 @@ Rectangle {
                 currentIndex: tray.boardOnline
                     ? tray.syncIndex(tray.device.smpSynchMode) : offlineSettings.lastSynch
                 enabled: !tray.boardOnline || (tray.session && !tray.session.updatingFirmware)
-                ToolTip.visible: hovered
-                ToolTip.text: "smpSynch mode"
+
                 onActivated: {
                     const requested = currentIndex
                     offlineSettings.lastSynch = requested
@@ -165,7 +162,7 @@ Rectangle {
                 iconSource: Qt.resolvedUrl("../assets/material/settings.svg")
                 objectName: "studioTimingDetails"
                 implicitWidth: 66
-                toolTipText: "Timing settings"
+
                 onClicked: if (tray.controller) tray.controller.openTimingSettings()
             }
         }

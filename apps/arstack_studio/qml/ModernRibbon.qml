@@ -91,7 +91,7 @@ Rectangle {
             iconSource: Qt.resolvedUrl("../assets/material/play_arrow.svg")
             enabled: !bar.workflow.injectionRunning && !bar.workflow.startQueued && !bar.controller.offlinePreviewRunning
                 && !bar.session.updatingFirmware && !bar.session.updateNeedsBootloaderHelp
-            toolTipText: "Start"
+            toolTipText: !enabled && bar.device.deviceVerified ? bar.workflow.startReason() : ""
             onClicked: {
                 if (!bar.device.deviceVerified) {
                     // The footer already identifies preview-only operation.
@@ -108,7 +108,7 @@ Rectangle {
             iconSource: Qt.resolvedUrl("../assets/material/stop.svg")
             enabled: (bar.workflow.injectionRunning || bar.controller.offlinePreviewRunning)
                 && !bar.session.updatingFirmware
-            toolTipText: "Stop"
+            toolTipText: ""
             onClicked: {
                 if (!bar.device.deviceVerified) bar.controller.offlinePreviewRunning = false
                 else bar.workflow.requestStop()
@@ -123,7 +123,7 @@ Rectangle {
             text: bar.compact ? "SCL" : "Open SCL"
             iconSource: Qt.resolvedUrl("../assets/material/folder_open.svg")
             enabled: bar.session.engineeringEditable && !bar.workflow.startQueued
-            toolTipText: "Open IEC 61850 engineering configuration"
+            toolTipText: ""
             onClicked: bar.workflow.openEngineeringDialog()
         }
 
@@ -134,7 +134,7 @@ Rectangle {
             text: "4I+4V"
             iconSource: Qt.resolvedUrl("../assets/material/dashboard.svg")
             enabled: bar.session.engineeringEditable && !bar.workflow.startQueued
-            toolTipText: "Use the built-in 4I + 4V / 4000 samples/s profile"
+            toolTipText: ""
             onClicked: bar.workflow.useBuiltInProfile()
         }
 
@@ -166,7 +166,7 @@ Rectangle {
             checkable: true
             checked: bar.controller.phasorDockVisible || bar.controller.phasorDetached
             tone: checked ? "accent" : "neutral"
-            toolTipText: "Show or hide phasor preview"
+            toolTipText: ""
             onClicked: {
                 if (bar.controller.phasorDetached) bar.controller.phasorDetached = false
                 bar.controller.phasorDockVisible = checked
@@ -182,7 +182,7 @@ Rectangle {
             checkable: true
             checked: bar.controller.waveformDockVisible || bar.controller.waveformDetached
             tone: checked ? "accent" : "neutral"
-            toolTipText: "Show or hide waveform preview"
+            toolTipText: ""
             onClicked: {
                 if (bar.controller.waveformDetached) bar.controller.waveformDetached = false
                 bar.controller.waveformDockVisible = checked
@@ -196,7 +196,7 @@ Rectangle {
             iconOnly: false
             iconSource: Qt.resolvedUrl("../assets/material/settings.svg")
             tone: "neutral"
-            toolTipText: "Advanced"
+            toolTipText: ""
             onClicked: bar.controller.openConfiguration()
         }
 
@@ -245,10 +245,8 @@ Rectangle {
                 onClicked: bar.reconnectOrOpenDevice()
             }
             ToolTip.visible: stateMouse.containsMouse
-            ToolTip.text: bar.device.deviceVerified
-                ? bar.device.portName + " · ESP32-P4\n" + bar.session.statusText
-                : bar.session.statusText
-            ToolTip.delay: 420
+            ToolTip.text: bar.device.deviceVerified ? "Device details" : "Reconnect"
+            ToolTip.delay: 900
         }
     }
 }

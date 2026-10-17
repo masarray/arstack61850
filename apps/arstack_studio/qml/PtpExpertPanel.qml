@@ -129,7 +129,7 @@ SurfacePanel {
                     enabled: panel.session && panel.device.ptpAvailable
                         && !panel.startPending && !panel.session.updatingFirmware
                     ToolTip.visible: hovered
-                    ToolTip.text: "Start the selected lab PTP role or stop it. State follows verified board telemetry."
+                    ToolTip.text: "PTP on/off · board verified"
                     onClicked: {
                         const wantsRunning = checked
                         checked = Qt.binding(function() { return Boolean(panel.device.ptpRunning) })
@@ -183,7 +183,7 @@ SurfacePanel {
                                 && !panel.device.ptpRunning && !panel.startPending
                                 && !panel.session.updatingFirmware
                             ToolTip.visible: hovered
-                            ToolTip.text: "Choose one exclusive PTP role. Source transmits, Follower receives, Monitor listens."
+                            ToolTip.text: "Source sends · Follower receives · Monitor observes"
                         }
                     }
 
@@ -234,7 +234,7 @@ SurfacePanel {
                         enabled: panel.session && panel.device.deviceVerified
                             && !panel.session.updatingFirmware
                         ToolTip.visible: hovered
-                        ToolTip.text: "This affects the emitted SV smpSynch flag; it does not discipline the sample timer."
+                        ToolTip.text: "SV flag simulation only · not sample-clock lock"
                         onActivated: {
                             const requested = ["AUTO", "0", "1", "2"][currentIndex]
                             const accepted = panel.session && panel.session.requestSmpSynch(requested)
