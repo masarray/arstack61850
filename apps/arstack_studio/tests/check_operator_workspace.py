@@ -88,8 +88,9 @@ def main() -> None:
             and "controller.applyAllSignals()" not in workflow
             and "startWatchdog" in workflow and "onRunningChanged()" in workflow,
             "reconnect must not auto-transmit, but one-click Start must stage a bounded scenario")
-    require("offline-ptp-lab" in tray and "no PTP/SV packets sent" in tray,
-            "PTP/smpSynch offline controls must be plans only")
+    require("offline-ptp-lab" in tray and "if (!tray.boardOnline)" in tray
+            and "no network packets or clock discipline" in tray,
+            "PTP/smpSynch offline controls must be plans only, not device writes")
     require("assets/material/smv_injector.svg" in cmake_icons
             and "assets/MATERIAL_ICONS_LICENSE.txt" in cmake_icons
             and "../assets/material/smv_injector.svg" in ribbon,
