@@ -117,6 +117,14 @@ Rectangle {
         return at >= 0 ? text.slice(at + 3) : "—"
     }
 
+    // Show compact FCDA context in the table, retain full wire reference
+    // in the hover tooltip; never change matching, ownership or identity.
+    function compactMemberReference(reference) {
+        const text = String(reference)
+        const slash = text.indexOf("/")
+        return slash >= 0 ? text.slice(slash + 1) : text
+    }
+
     readonly property var attributeLabels: [
         "Enabled", "Reserved", "Control Block Reference", "Report ID",
         "DataSet Reference", "Trigger Options", "Buffer Time (ms)",
@@ -319,20 +327,27 @@ Rectangle {
             anchors.rightMargin: 7
             spacing: 0
             Label {
+                visible: dataRow.received
+                text: root.selectedReportMemberIndex === dataRow.index ? "▾" : "▸"
+                Layout.preferredWidth: 17
+                color: root.theme.textSoft
+                font.pixelSize: 12
+            }
+            Label {
                 text: "DA"
                 Layout.preferredWidth: 25
                 color: root.theme.accent
-                font.pixelSize: 9
+                font.pixelSize: 10
                 font.weight: Font.DemiBold
             }
             Label {
-                text: dataRow.reference
-                Layout.preferredWidth: Math.max(100, parent.width * 0.55 - 28)
+                text: root.compactMemberReference(dataRow.reference)
+                Layout.preferredWidth: Math.max(100, parent.width * 0.55 - 45)
                 color: root.theme.text
                 font.pixelSize: 11
                 elide: Text.ElideMiddle
-                ToolTip.visible: dataNameMouse.containsMouse && truncated
-                ToolTip.text: text
+                ToolTip.visible: dataNameMouse.containsMouse
+                ToolTip.text: dataRow.reference
                 MouseArea { id: dataNameMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
             }
             Rectangle { Layout.preferredWidth: 1; Layout.fillHeight: true; color: root.theme.lineSoft }
@@ -352,7 +367,8 @@ Rectangle {
             anchors.fill: parent
             enabled: dataRow.received
             cursorShape: Qt.PointingHandCursor
-            onClicked: root.selectedReportMemberIndex = dataRow.index
+            onClicked: root.selectedReportMemberIndex =
+                root.selectedReportMemberIndex === dataRow.index ? -1 : dataRow.index
         }
         Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: root.theme.lineSoft }
     }
@@ -620,80 +636,106 @@ Rectangle {
                     Repeater {
                         model: root.hasLastReport && root.latestReport.values
                                ? root.latestReport.values : []
-                        delegate: DataRow { received: true }
-                    }
-                    Repeater {
-                        model: !root.hasLastReport ? root.configuredMembers.slice(0, 256) : []
-                        delegate: DataRow { received: false }
-                    }
-                    BrowserEngineeringEvidence {
-                        theme: root.theme
-                        engineeringEvidence: root.selectedReportMemberEvidence()
-                    }
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 0
-                        visible: root.selectedReportMemberDetails().length > 0
-                        Rectangle {
+                        delegate: ColumnLayout {
+                            id: receivedMember
+                            required property int index
+                            required property var modelData
                             Layout.fillWidth: true
-                            implicitHeight: 29
-                            color: theme.surfaceRaised
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 11
-                                anchors.rightMargin: 9
-                                Label {
-                                    text: "Selected member · wire fields"
-                                    font.pixelSize: 11
-                                    font.weight: Font.DemiBold
-                                    color: theme.text
-                                    Layout.fillWidth: true
-                                }
-                                Label {
-                                    text: "Positional · not SCL-labelled"
-                                    font.pixelSize: 10
-                                    color: theme.muted
-                                }
+                            spacing: 0
+                            DataRow {
+                                index: receivedMember.index
+                                modelData: receivedMember.modelData
+                                received: true
                             }
-                        }
-                        Repeater {
-                            model: root.selectedReportMemberDetails()
-                            delegate: Rectangle {
-                                required property var modelData
-                                required property int index
+                            // Instantiate expensive child content only for one
+                            // expanded row (up to 256 report members).
+                            Loader {
                                 Layout.fillWidth: true
-                                implicitHeight: 27
-                                color: index % 2 ? theme.surfaceSoft : theme.surface
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 18
-                                    anchors.rightMargin: 9
-                                    spacing: 10
-                                    Label {
-                                        text: modelData.label
-                                        Layout.preferredWidth: 180
-                                        elide: Text.ElideRight
-                                        font.pixelSize: 11
-                                        color: theme.textSoft
-                                    }
-                                    Label {
-                                        text: modelData.value
-                                        Layout.fillWidth: true
-                                        elide: Text.ElideMiddle
-                                        font.pixelSize: 11
-                                        color: theme.text
-                                        ToolTip.visible: detailMouse.containsMouse && truncated
-                                        ToolTip.text: text
-                                        MouseArea {
-                                            id: detailMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            acceptedButtons: Qt.NoButton
+                                active: root.selectedReportMemberIndex === receivedMember.index
+                                sourceComponent: Component {
+                                    ColumnLayout {
+                                        width: receivedMember.width
+                                        spacing: 0
+                                        BrowserEngineeringEvidence {
+                                            theme: root.theme
+                                            engineeringEvidence: root.selectedReportMemberIndex === receivedMember.index
+                                                                 ? root.selectedReportMemberEvidence() : ({})
+                                        }
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 0
+                                            visible: root.selectedReportMemberIndex === receivedMember.index
+                                                     && root.selectedReportMemberDetails().length > 0
+                                            Rectangle {
+                                                Layout.fillWidth: true
+                                                implicitHeight: 29
+                                                color: theme.surfaceRaised
+                                                RowLayout {
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: 11
+                                                    anchors.rightMargin: 9
+                                                    Label {
+                                                        text: "Selected member · wire fields"
+                                                        font.pixelSize: 11
+                                                        font.weight: Font.DemiBold
+                                                        color: theme.text
+                                                        Layout.fillWidth: true
+                                                    }
+                                                    Label {
+                                                        text: "Positional · not SCL-labelled"
+                                                        font.pixelSize: 10
+                                                        color: theme.muted
+                                                    }
+                                                }
+                                            }
+                                            Repeater {
+                                                model: root.selectedReportMemberIndex === receivedMember.index
+                                                       ? root.selectedReportMemberDetails() : []
+                                                delegate: Rectangle {
+                                                    required property var modelData
+                                                    required property int index
+                                                    Layout.fillWidth: true
+                                                    implicitHeight: 27
+                                                    color: index % 2 ? theme.surfaceSoft : theme.surface
+                                                    RowLayout {
+                                                        anchors.fill: parent
+                                                        anchors.leftMargin: 18
+                                                        anchors.rightMargin: 9
+                                                        spacing: 10
+                                                        Label {
+                                                            text: modelData.label
+                                                            Layout.preferredWidth: 180
+                                                            elide: Text.ElideRight
+                                                            font.pixelSize: 11
+                                                            color: theme.textSoft
+                                                        }
+                                                        Label {
+                                                            text: modelData.value
+                                                            Layout.fillWidth: true
+                                                            elide: Text.ElideMiddle
+                                                            font.pixelSize: 11
+                                                            color: theme.text
+                                                            ToolTip.visible: detailMouse.containsMouse && truncated
+                                                            ToolTip.text: text
+                                                            MouseArea {
+                                                                id: detailMouse
+                                                                anchors.fill: parent
+                                                                hoverEnabled: true
+                                                                acceptedButtons: Qt.NoButton
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
+                    }
+                    Repeater {
+                        model: !root.hasLastReport ? root.configuredMembers.slice(0, 256) : []
+                        delegate: DataRow { received: false }
                     }
                     Label {
                         visible: root.hasLastReport &&
