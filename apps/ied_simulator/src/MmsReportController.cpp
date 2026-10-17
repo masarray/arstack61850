@@ -498,7 +498,10 @@ void primeSelectedReportTypes(
     if (!directory) return;
     std::size_t attempts{};
     for (const auto& member : directory->members) {
-        if (attempts >= 8U || token.stop_requested()) break;
+        // Total authority expansion is bounded for the entire MMS association,
+        // even if an operator switches between thousands of RCB/DataSets.
+        if (attempts >= 8U || attemptedRoots.size() >= 16U ||
+            token.stop_requested()) break;
         const auto& name = member.object_name;
         if (name.kind != mms::MmsObjectNameKind::domain_specific || name.domain.empty())
             continue;
