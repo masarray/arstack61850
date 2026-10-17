@@ -168,10 +168,12 @@ def main() -> None:
     check_box = source("StudioDarkCheckBox.qml")
     combo = source("StudioDarkComboBox.qml")
     require("Layout.minimumHeight: 408" in main_qml
-            and "ColumnLayout {\n                            Layout.fillWidth: true\n                            Layout.fillHeight: true" in main_qml
+            and 'objectName: "studioInjectionScroll"' in main_qml
+            and "id: injectionEditor" in main_qml
+            and "contentHeight: injectionEditor.y + injectionEditor.height" in main_qml
             and "Layout.fillHeight: true" in matrix
             and "Item { Layout.fillHeight: true }" not in matrix,
-            "4I and 4V must stack and expand, not leave unused lower area")
+            "4I and 4V must stack, expand, and scroll rather than clip at minimum size")
     require("width: 40" in ribbon and "height: 40" in ribbon
             and 'font.pixelSize: bar.compact ? 14 : 15' in ribbon
             and "anchors.centerIn: parent" in ribbon_action,
