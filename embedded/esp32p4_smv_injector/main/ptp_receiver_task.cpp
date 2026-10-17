@@ -7,6 +7,7 @@
 #include "ariec61850/time_sync/ptp.hpp"
 #include "ariec61850/time_sync/ptp_discipline.hpp"
 #include "ariec61850/time_sync/ptp_runtime.hpp"
+#include "ariec61850/time_sync/ptp_receiver_clock_authority.hpp"
 
 #include "esp_err.h"
 #include "esp_eth.h"
@@ -103,6 +104,9 @@ struct ReceiverContext final {
     std::optional<PtpClockDiscipline> discipline;
     std::int32_t applied_frequency_ppb{};
     std::uint16_t pdelay_sequence{1U};
+    // Only receiver worker advances this; retain sequence across restart.
+    ar::iec61850::time_sync::PtpReceiverClockAuthority clock_authority{};
+    bool clock_discontinuity_pending{};
 };
 
 ReceiverContext g_receiver_context{};
@@ -118,6 +122,7 @@ ar_ptp_lab_status_t g_receiver_status{};
 
 [[nodiscard]] bool receiver_runtime_ready() noexcept {
     return g_receiver_running.load(std::memory_order_acquire) &&
+           !g_receiver_stop_requested.load(std::memory_order_acquire) &&
            g_receiver_startup_state.load(std::memory_order_acquire) ==
                ReceiverStartupState::ready;
 }
@@ -281,6 +286,7 @@ void seed_hardware_clock(const esp_eth_handle_t handle) noexcept {
     switch (command.kind) {
     case PtpClockCommandKind::none: return true;
     case PtpClockCommandKind::step_phase:
+        context.clock_discontinuity_pending = true;
         return apply_phase_step(context.eth_handle, command.phase_step_ns);
     case PtpClockCommandKind::set_frequency:
         return apply_frequency_adjustment(
@@ -590,12 +596,29 @@ void update_status(ReceiverContext& context) noexcept {
         snapshot.discipline_state = AR_PTP_DISCIPLINE_UNLOCKED;
     }
 
+    ar::iec61850::time_sync::PtpReceiverClockObservation evidence{};
+    evidence.runtime_ready = snapshot.is_running &&
+        context.config.role == AR_PTP_ROLE_TIME_RECEIVER;
+    evidence.source_selected = snapshot.source_selected;
+    std::copy_n(snapshot.selected_source_clock_identity, 8U,
+                evidence.source_clock_identity.begin());
+    evidence.source_port_number = snapshot.selected_source_port_number;
+    evidence.discipline_locked =
+        snapshot.discipline_state == AR_PTP_DISCIPLINE_LOCKED;
+    evidence.clock_discontinuity = context.clock_discontinuity_pending;
+    const auto lease = context.clock_authority.observe(evidence);
+    snapshot.timing_authority_generation =
+        context.config.role == AR_PTP_ROLE_TIME_RECEIVER ? lease.generation : 0U;
+    snapshot.timing_authority_clock_usable = lease.clock_usable;
+    context.clock_discontinuity_pending = false;
+
     portENTER_CRITICAL(&g_receiver_status_mux);
     g_receiver_status = snapshot;
     portEXIT_CRITICAL(&g_receiver_status_mux);
 }
 
 void reset_discipline_for_new_source(ReceiverContext& context) noexcept {
+    context.clock_discontinuity_pending = true;
     if (!context.discipline.has_value()) return;
     if (!apply_frequency_adjustment(
             context.eth_handle, 0, context.applied_frequency_ppb)) {
@@ -655,6 +678,7 @@ void process_rx_event(ReceiverContext& context, const PtpRxEvent& event) {
             if (measurement.has_value() && context.discipline.has_value()) {
                 const auto command = context.discipline->observe(*measurement, now);
                 if (!apply_clock_command(context, command)) {
+                    context.clock_discontinuity_pending = true;
                     context.discipline->record_actuation_failure();
                 }
             }
@@ -666,6 +690,7 @@ void process_rx_event(ReceiverContext& context, const PtpRxEvent& event) {
             const auto previous_state = context.discipline->status().state;
             const auto command = context.discipline->observe(*measurement, now);
             if (!apply_clock_command(context, command)) {
+                context.clock_discontinuity_pending = true;
                 context.discipline->record_actuation_failure();
             }
             const auto state = context.discipline->status().state;
@@ -815,6 +840,7 @@ void receiver_task(void* argument) {
         const auto now = std::chrono::steady_clock::now();
         const bool source_dropped = context.receiver->tick(now);
         if (source_dropped) {
+            context.clock_discontinuity_pending = true;
             ESP_LOGW(kTag, "Selected PTP source timed out");
             if (context.discipline.has_value()) {
                 context.discipline->revoke_global_traceability();
@@ -888,6 +914,7 @@ bool ptp_receiver_start(
     g_receiver_context.discipline.reset();
     g_receiver_context.applied_frequency_ppb = 0;
     g_receiver_context.pdelay_sequence = 1U;
+    g_receiver_context.clock_discontinuity_pending = false;
 
     if (g_receiver_context.rx_queue == nullptr) {
         g_receiver_context.rx_queue = xQueueCreate(kRxQueueDepth, sizeof(PtpRxEvent));
@@ -915,7 +942,12 @@ bool ptp_receiver_start(
         g_receiver_running.store(false, std::memory_order_release);
         return false;
     }
-    update_status(g_receiver_context);
+    // Do not mutate worker-owned clock lease from the START caller.
+    ar_ptp_lab_status_t pending_status{};
+    pending_status.role = config.role;
+    portENTER_CRITICAL(&g_receiver_status_mux);
+    g_receiver_status = pending_status;
+    portEXIT_CRITICAL(&g_receiver_status_mux);
 
     const TickType_t started_at = xTaskGetTickCount();
     while (true) {
@@ -960,11 +992,22 @@ bool ptp_receiver_is_running() noexcept {
     return receiver_runtime_ready();
 }
 
+bool ptp_receiver_runtime_active() noexcept {
+    return g_receiver_running.load(std::memory_order_acquire);
+}
+
 bool ptp_receiver_get_status(ar_ptp_lab_status_t& status) noexcept {
     portENTER_CRITICAL(&g_receiver_status_mux);
     status = g_receiver_status;
     portEXIT_CRITICAL(&g_receiver_status_mux);
-    status.is_running = receiver_runtime_ready();
+    // Never reuse worker's last LOCKED snapshot across STOP/cleanup.
+    status.is_running = status.is_running && receiver_runtime_ready();
+    if (!status.is_running) {
+        status.timing_authority_clock_usable = false;
+        status.measured_smp_synch_valid = false;
+        status.globally_traceable = false;
+        status.offset_valid = false;
+    }
     return true;
 }
 

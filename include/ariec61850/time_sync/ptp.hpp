@@ -131,6 +131,24 @@ struct PtpFrame final {
     bool peer_delay_multicast{};
 };
 
+// IEEE 1588-2008 flagField[1] (low octet of the wire flagField).
+// These are time-properties statements, distinct from the twoStep flag.
+// Unknown time provenance is represented by all flags false.
+struct PtpTimeProperties final {
+    bool current_utc_offset_valid{};
+    bool ptp_timescale{};
+    bool time_traceable{};
+    bool frequency_traceable{};
+
+    [[nodiscard]] constexpr std::uint16_t flags() const noexcept {
+        return static_cast<std::uint16_t>(
+            (current_utc_offset_valid ? 0x0004U : 0U) |
+            (ptp_timescale ? 0x0008U : 0U) |
+            (time_traceable ? 0x0010U : 0U) |
+            (frequency_traceable ? 0x0020U : 0U));
+    }
+};
+
 struct PtpBuildOptions final {
     std::uint8_t transport_specific{};
     std::uint8_t domain_number{};
@@ -139,6 +157,7 @@ struct PtpBuildOptions final {
     std::int64_t correction_field{};
     std::int8_t log_message_interval{};
     bool two_step{true};
+    PtpTimeProperties time_properties{};
     std::uint8_t priority1{128U};
     std::uint8_t priority2{128U};
     std::uint8_t clock_class{248U};
