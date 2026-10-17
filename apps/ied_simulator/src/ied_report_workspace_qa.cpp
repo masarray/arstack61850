@@ -46,6 +46,7 @@ bool verifyReadableReportTreeProjection() {
     mms::MmsReportValue notRead;
     notRead.data_set_index = 2U;
     notRead.data_reference = "IED/LLN0.NotRead";
+    notRead.reason_for_inclusion.names.push_back("data-change");
 
     const auto rows = projectBrowserReportTree({structured, quality, notRead});
     if (rows.size() != 7) return false; // struct, 3 children + 1 array item, q, unread
@@ -67,6 +68,7 @@ bool verifyReadableReportTreeProjection() {
         q.value("typedEvidence").toMap().value("kind").toString() != QStringLiteral("quality") ||
         q.value("typedEvidence").toMap().value("rows").toList().size() < 10 ||
         unread.value("received").toBool() ||
+        unread.value("reason").toString() != QStringLiteral("data-change") ||
         unread.value("value").toString() != QStringLiteral("Read failed"))
         return false;
 
