@@ -333,6 +333,54 @@ disconnect_section = report_controller.split(
 if "worker->lastPublishedReportUi.reset();" not in disconnect_section:
     raise SystemExit("BROWSER_REPORT_COALESCE_FAIL disconnect retained report history")
 
+# Keep idle MMS receive polling cheap without hiding foreign/malformed reports.
+# The fast path must run after the bounded queue drain, before building or
+# copying the expensive stream history; never skip the first active snapshot.
+if "void MmsReportController::schedulePoll()" not in report_controller:
+    raise SystemExit("BROWSER_REPORT_IDLE_FAIL schedulePoll missing")
+poll_start = report_controller.index("void MmsReportController::schedulePoll()")
+poll_end = report_controller.index(
+    "} catch (const mms::MmsTransportCancelledError&)", poll_start)
+report_poll = report_controller[poll_start:poll_end]
+for token in (
+    "worker->session->association().try_poll_once_for(",
+    "const auto drained = staticActive",
+    "worker->report->drain_queued_reports()",
+    "worker->authoredReport->drain_queued_reports()",
+    "if (drained == 0U && worker->lastPublishedReportUi) {",
+    "self->pollPending_ = false;",
+    "buildReportUi(worker->report->snapshot())",
+    "buildReportUi(worker->authoredReport->snapshot())",
+    "previous->events != ui.events",
+    "previous->reports != ui.reports",
+):
+    if token not in report_poll:
+        raise SystemExit("BROWSER_REPORT_IDLE_FAIL missing=" + token)
+if not (report_poll.index("try_poll_once_for(")
+        < report_poll.index("const auto drained = staticActive")
+        < report_poll.index("if (drained == 0U && worker->lastPublishedReportUi)")
+        < report_poll.index("buildReportUi(worker->report->snapshot())")):
+    raise SystemExit("BROWSER_REPORT_IDLE_FAIL snapshot built on unchanged receive tick")
+unchanged = report_poll.split(
+    "if (drained == 0U && worker->lastPublishedReportUi) {", 1)[1].split(
+    "const ReportUi ui = staticActive", 1)[0]
+if ("self->pollPending_ = false;" not in unchanged or
+        "return;" not in unchanged or "emit self->reportsChanged();" in unchanged):
+    raise SystemExit("BROWSER_REPORT_IDLE_FAIL idle tick leaked QML update or pending flag")
+for method, next_method in (
+    ("enableSelectedAuthored(", "bool MmsReportController::enableSelected("),
+    ("bool MmsReportController::enableSelected(", "bool MmsReportController::disableSelected("),
+    ("bool MmsReportController::disableSelected(", "bool MmsReportController::retryCleanup("),
+    ("bool MmsReportController::retryCleanup(", "void MmsReportController::schedulePoll()"),
+):
+    begin = report_controller.find(method)
+    end = report_controller.find(next_method, begin + len(method))
+    if begin < 0 or end < 0 or "worker->lastPublishedReportUi.reset();" not in report_controller[begin:end]:
+        raise SystemExit("BROWSER_REPORT_IDLE_FAIL stale RCB lifecycle cache: " + method)
+if report_poll.count("emit self->reportsChanged();") != 2:
+    # One changed-state notification, one explicit failure notification.
+    raise SystemExit("BROWSER_REPORT_IDLE_FAIL dropped report change/failure diagnostics")
+
 if "client.treeModel" in navigation:
     raise SystemExit("BROWSER_CONVERGENCE_FAIL navigation regressed to session-owned model")
 if "Timer {" in status:
