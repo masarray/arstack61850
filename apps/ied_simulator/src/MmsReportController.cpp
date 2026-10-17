@@ -491,7 +491,8 @@ struct ReportUi final {
 
 ReportUi buildSubscriptionUi(
     const mms::MmsReportSubscriptionSnapshot& subscription,
-    const bool active) {
+    const bool active,
+    const mms::MmsLiveModelDocument* semanticModel = nullptr) {
     ReportUi ui;
     ui.active = active;
     ui.receivedCount = subscription.received_reports;
@@ -537,7 +538,7 @@ ReportUi buildSubscriptionUi(
             const auto projected = arstack::iedsim::projectBrowserReportMembers(
                 frame.values, typedEvidenceBudget,
                 arstack::iedsim::kBrowserReportVisibleMemberLimit,
-                includeWireDetails);
+                includeWireDetails, semanticModel, frame.header.data_set_reference);
             map.insert(QStringLiteral("values"), projected.values);
             map.insert(QStringLiteral("valueEvidence"), projected.evidence);
             map.insert(QStringLiteral("valueDetails"), projected.details);
@@ -557,19 +558,21 @@ ReportUi buildSubscriptionUi(
     return ui;
 }
 
-ReportUi buildReportUi(const mms::MmsStaticReportSessionSnapshot& snapshot) {
+ReportUi buildReportUi(const mms::MmsStaticReportSessionSnapshot& snapshot,
+                       const mms::MmsLiveModelDocument* semanticModel = nullptr) {
     if (!snapshot.subscription) {
         ReportUi ui;
         ui.active = snapshot.active;
         return ui;
     }
-    return buildSubscriptionUi(*snapshot.subscription, snapshot.active);
+    return buildSubscriptionUi(*snapshot.subscription, snapshot.active, semanticModel);
 }
 
-ReportUi buildReportUi(const mms::MmsReportSubscriptionSnapshot& snapshot) {
+ReportUi buildReportUi(const mms::MmsReportSubscriptionSnapshot& snapshot,
+                       const mms::MmsLiveModelDocument* semanticModel = nullptr) {
     return buildSubscriptionUi(
         snapshot,
-        snapshot.state == mms::MmsReportSubscriptionState::active);
+        snapshot.state == mms::MmsReportSubscriptionState::active, semanticModel);
 }
 
 } // namespace
@@ -584,6 +587,9 @@ struct MmsReportController::WorkerState final {
     // implicitly shared containers keep this cheap to retain; deep compare
     // must never run on the QML/controller thread.
     std::optional<ReportUi> lastPublishedReportUi;
+    // Association-generation-owned canonical SCL model, captured on GUI thread
+    // before worker launch; no QObject or model is accessed cross-thread.
+    std::shared_ptr<const mms::MmsLiveModelDocument> semanticModel;
 };
 
 MmsReportController::MmsReportController(QObject* parent)
@@ -786,6 +792,7 @@ bool MmsReportController::connectToIed() {
     ioPool_.start([self, worker, stop, generation, requestedHost, requestedPort, contextModel] {
         try {
             worker->lastPublishedReportUi.reset();
+            worker->semanticModel = contextModel;
             if (worker->report) worker->report->stop();
             if (worker->authoredReport) worker->authoredReport->stop();
             worker->report.reset();
@@ -1779,11 +1786,11 @@ bool MmsReportController::disableSelected() {
             ReportUi ui;
             if (worker->report) {
                 worker->report->stop(stop->get_token());
-                ui = buildReportUi(worker->report->snapshot());
+                ui = buildReportUi(worker->report->snapshot(), worker->semanticModel.get());
                 if (!ui.cleanupRequired) worker->report.reset();
             } else if (worker->authoredReport) {
                 worker->authoredReport->stop(stop->get_token());
-                ui = buildReportUi(worker->authoredReport->snapshot());
+                ui = buildReportUi(worker->authoredReport->snapshot(), worker->semanticModel.get());
                 if (!ui.cleanupRequired) worker->authoredReport.reset();
             } else {
                 throw std::runtime_error("No report subscription is active.");
@@ -1850,12 +1857,12 @@ bool MmsReportController::retryCleanup() {
             ReportUi ui;
             if (worker->report) {
                 worker->report->stop(stop->get_token());
-                ui = buildReportUi(worker->report->snapshot());
+                ui = buildReportUi(worker->report->snapshot(), worker->semanticModel.get());
                 if (!ui.cleanupRequired) worker->report.reset();
             } else if (worker->authoredReport) {
                 static_cast<void>(worker->authoredReport->retry_cleanup(
                     stop->get_token()));
-                ui = buildReportUi(worker->authoredReport->snapshot());
+                ui = buildReportUi(worker->authoredReport->snapshot(), worker->semanticModel.get());
                 if (!ui.cleanupRequired) worker->authoredReport.reset();
             } else {
                 throw std::runtime_error(
@@ -1945,8 +1952,8 @@ void MmsReportController::schedulePoll() {
                 return;
             }
             const ReportUi ui = staticActive
-                ? buildReportUi(worker->report->snapshot())
-                : buildReportUi(worker->authoredReport->snapshot());
+                ? buildReportUi(worker->report->snapshot(), worker->semanticModel.get())
+                : buildReportUi(worker->authoredReport->snapshot(), worker->semanticModel.get());
             // Compare complete bounded report presentation on the existing
             // serial I/O worker, never on the GUI thread. Counter-only checks
             // would lose event-only and retained-frame evidence changes.
@@ -1997,10 +2004,10 @@ void MmsReportController::schedulePoll() {
             ReportUi ui;
             if (worker->report) {
                 worker->report->stop();
-                ui = buildReportUi(worker->report->snapshot());
+                ui = buildReportUi(worker->report->snapshot(), worker->semanticModel.get());
             } else if (worker->authoredReport) {
                 worker->authoredReport->stop();
-                ui = buildReportUi(worker->authoredReport->snapshot());
+                ui = buildReportUi(worker->authoredReport->snapshot(), worker->semanticModel.get());
             }
             if (self) {
                 const auto message = QString::fromUtf8(exception.what());
