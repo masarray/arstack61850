@@ -73,11 +73,21 @@ struct UiBounds {
         {"voltage matrix", voltage}, {"current matrix", current},
         {"PTP timing tray", tray}, {"quality editor", quality}
     }};
+    // At the supported 960x620 minimum viewport the editor uses a
+    // vertical ScrollView; offscreen lower controls must remain laid out
+    // correctly and reachable by scrolling, not be smashed to <30px rows.
+    // Full desktop views MUST still show all controls without clipping.
+    const bool compactScroll = size.height() < 700;
     for (const auto& [label, item] : areas) {
+        const bool mustBeInViewport = !compactScroll ||
+            std::string_view{label} == "toolbar" ||
+            std::string_view{label} == "injection workspace" ||
+            std::string_view{label} == "voltage matrix";
         if (!item.visible || item.area.width() < 25 || item.area.height() < 15 ||
-            !viewport.adjusted(-tolerance, -tolerance, tolerance, tolerance)
-                 .contains(item.area.adjusted(tolerance, tolerance,
-                                              -tolerance, -tolerance))) {
+            (mustBeInViewport &&
+             !viewport.adjusted(-tolerance, -tolerance, tolerance, tolerance)
+                  .contains(item.area.adjusted(tolerance, tolerance,
+                                               -tolerance, -tolerance)))) {
             qCritical().noquote() << "Studio UI viewport violation" << size << label
                                   << "bounds=" << item.area << "viewport=" << viewport;
             return false;
@@ -86,6 +96,14 @@ struct UiBounds {
     // Voltage and Current intentionally stack vertically. The native
     // geometry test must detect clipping/overlap in the NEW layout, rather
     // than assert the obsolete side-by-side relationship.
+    const auto scroll = findUiBounds(window, "studioInjectionScroll");
+    if (!scroll.visible ||
+        !surface.area.adjusted(-tolerance, -tolerance, tolerance, tolerance)
+             .contains(scroll.area.adjusted(tolerance, tolerance, -tolerance, -tolerance))) {
+        qCritical().noquote() << "Studio operator scrolling surface missing" << size
+                              << scroll.area << surface.area;
+        return false;
+    }
     if (!(voltage.area.bottom() <= current.area.top() + tolerance
           && std::abs(voltage.area.left() - current.area.left()) <= tolerance
           && std::abs(voltage.area.right() - current.area.right()) <= tolerance
