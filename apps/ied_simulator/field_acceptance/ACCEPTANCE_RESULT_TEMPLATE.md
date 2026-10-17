@@ -1,6 +1,15 @@
 # F4 External Acceptance Result
 
-Build head: `______________________________`
+Build head (kit `BUILD_HEAD.txt`): `______________________________`
+
+Installed/portable Workbench `BUILD_HEAD.txt` (must match for ARStack -> IED): `______________________________`
+
+Package provenance: [ ] verified same 40-char SHA  [ ] blocked/missing evidence
+
+Target-bound TCP frames (from `evidence.json`): `__________`
+
+GOOSE PCAP and visual side-by-side evidence are separate requirements; this MMS
+collector alone cannot mark complete physical IED or GUI acceptance.
 
 Date/time: `______________________________`
 
