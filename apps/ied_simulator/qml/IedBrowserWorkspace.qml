@@ -31,20 +31,20 @@ Item {
         required property string badge
         property bool emphasized: false
 
-        implicitWidth: 66
-        implicitHeight: 64
+        implicitWidth: 80
+        implicitHeight: 86
         hoverEnabled: true
-        leftPadding: 4
-        rightPadding: 4
+        leftPadding: 3
+        rightPadding: 3
 
         contentItem: Column {
-            spacing: 3
+            spacing: 5
             anchors.centerIn: parent
             Rectangle {
                 anchors.horizontalCenter: parent.horizontalCenter
-                width: 27
-                height: 25
-                radius: 4
+                width: 37
+                height: 35
+                radius: 6
                 color: action.enabled
                        ? (action.emphasized ? root.theme.accent : root.theme.surfaceSoft)
                        : root.theme.surfaceRaised
@@ -58,18 +58,22 @@ Item {
                     color: action.enabled
                            ? (action.emphasized ? "#ffffff" : root.theme.textSoft)
                            : root.theme.muted
-                    font.pixelSize: action.badge.length > 2 ? 7 : 9
+                    font.pixelSize: action.badge.length > 2 ? 12 : 16
                     font.weight: Font.DemiBold
                 }
             }
             Label {
                 anchors.horizontalCenter: parent.horizontalCenter
-                width: 62
+                width: 77
+                height: 33
                 text: action.text
                 color: action.enabled ? root.theme.text : root.theme.muted
-                font.pixelSize: 8
-                font.weight: Font.Medium
+                font.pixelSize: 11
+                font.weight: Font.DemiBold
                 horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignTop
+                wrapMode: Text.WordWrap
+                maximumLineCount: 2
                 elide: Text.ElideRight
             }
         }
@@ -190,7 +194,7 @@ Item {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 94
+            Layout.preferredHeight: 112
             color: root.theme.chrome
             border.width: 1
             border.color: root.theme.lineSoft
@@ -210,7 +214,7 @@ Item {
                     spacing: 7
 
                     Column {
-                        width: 136
+                        width: 168
                         height: parent.height
                         Row {
                             RibbonAction {
@@ -234,15 +238,15 @@ Item {
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: "APPLICATION"
                             color: root.theme.muted
-                            font.pixelSize: 7
+                            font.pixelSize: 10
                             font.weight: Font.DemiBold
                         }
                     }
 
-                    Rectangle { width: 1; height: 78; y: 5; color: root.theme.lineSoft }
+                    Rectangle { width: 1; height: 96; y: 8; color: root.theme.lineSoft }
 
                     Column {
-                        width: 262
+                        width: 282
                         height: parent.height
                         spacing: 4
                         Row {
@@ -255,7 +259,7 @@ Item {
                                 placeholderText: "IED IP / hostname"
                                 selectByMouse: true
                                 enabled: !session.configurationLocked
-                                font.pixelSize: 9
+                                font.pixelSize: 12
                                 onEditingFinished: session.host = text
                             }
                             SpinBox {
@@ -284,7 +288,7 @@ Item {
                                 width: 244
                                 text: session.stateText + " · " + session.endpoint
                                 color: session.lastError.length ? root.theme.red : root.theme.textSoft
-                                font.pixelSize: 8
+                                font.pixelSize: 11
                                 font.weight: Font.Medium
                                 elide: Text.ElideRight
                             }
@@ -293,15 +297,15 @@ Item {
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: "ENDPOINT"
                             color: root.theme.muted
-                            font.pixelSize: 7
+                            font.pixelSize: 10
                             font.weight: Font.DemiBold
                         }
                     }
 
-                    Rectangle { width: 1; height: 78; y: 5; color: root.theme.lineSoft }
+                    Rectangle { width: 1; height: 96; y: 8; color: root.theme.lineSoft }
 
                     Column {
-                        width: 200
+                        width: 246
                         height: parent.height
                         Row {
                             RibbonAction {
@@ -336,15 +340,15 @@ Item {
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: "IED SESSION"
                             color: root.theme.muted
-                            font.pixelSize: 7
+                            font.pixelSize: 10
                             font.weight: Font.DemiBold
                         }
                     }
 
-                    Rectangle { width: 1; height: 78; y: 5; color: root.theme.lineSoft }
+                    Rectangle { width: 1; height: 96; y: 8; color: root.theme.lineSoft }
 
                     Column {
-                        width: 200
+                        width: 246
                         height: parent.height
                         Row {
                             RibbonAction {
@@ -375,15 +379,15 @@ Item {
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: "DATA"
                             color: root.theme.muted
-                            font.pixelSize: 7
+                            font.pixelSize: 10
                             font.weight: Font.DemiBold
                         }
                     }
 
-                    Rectangle { width: 1; height: 78; y: 5; color: root.theme.lineSoft }
+                    Rectangle { width: 1; height: 96; y: 8; color: root.theme.lineSoft }
 
                     Column {
-                        width: 266
+                        width: 332
                         height: parent.height
                         Row {
                             RibbonAction {
@@ -425,52 +429,12 @@ Item {
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: "SERVICES"
                             color: root.theme.muted
-                            font.pixelSize: 7
-                            font.weight: Font.DemiBold
-                        }
-                    }
-
-                    Rectangle { width: 1; height: 78; y: 5; color: root.theme.lineSoft }
-
-                    Column {
-                        width: 176
-                        height: parent.height
-                        y: 6
-                        spacing: 2
-                        Label {
-                            width: parent.width
-                            text: "MODEL"
-                            color: root.theme.muted
-                            font.pixelSize: 7
-                            font.weight: Font.DemiBold
-                        }
-                        Label {
-                            width: parent.width
-                            text: context.iedName.length ? context.iedName
-                                  : context.selectionRequired ? "Select active IED" : "IED model"
-                            color: root.theme.text
                             font.pixelSize: 10
                             font.weight: Font.DemiBold
-                            elide: Text.ElideRight
-                        }
-                        Label {
-                            width: parent.width
-                            text: context.loaded
-                                  ? context.logicalDeviceCount + " LD · " + context.logicalNodeCount + " LN · "
-                                    + context.dataAttributeCount + " DA"
-                                  : "Open SCL or discover one endpoint"
-                            color: root.theme.muted
-                            font.pixelSize: 8
-                            elide: Text.ElideRight
-                        }
-                        Label {
-                            width: parent.width
-                            text: context.online ? "ONLINE" : "OFFLINE"
-                            color: context.online ? root.theme.green : root.theme.muted
-                            font.pixelSize: 8
-                            font.weight: Font.DemiBold
                         }
                     }
+
+
                 }
             }
         }
