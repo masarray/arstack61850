@@ -733,6 +733,8 @@ Rectangle {
                                                             }
                                                             Label {
                                                                 text: modelData.value
+                                                                      + (modelData.truncated === true
+                                                                         ? " … [truncated]" : "")
                                                                 Layout.fillWidth: true
                                                                 elide: Text.ElideMiddle
                                                                 font.pixelSize: 11
