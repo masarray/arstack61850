@@ -65,9 +65,13 @@ inline std::optional<std::vector<VerifiedReportLeaf>> bindFlatSclReportStructure
         return std::nullopt;
     const auto& raw = member.data_reference;
     const auto& dir = member.member;
-    const bool exactWireRef = raw == binding->reference ||
-        (dir && dir->user_reference == binding->reference);
-    if (!exactWireRef) return std::nullopt;
+    // Any supplied wire source must agree; do not let a directory alias
+    // override a contradictory explicit Report DataRef.
+    if (!raw.empty() && raw != binding->reference) return std::nullopt;
+    if (dir && !dir->user_reference.empty() &&
+        dir->user_reference != binding->reference) return std::nullopt;
+    if (raw.empty() && (!dir || dir->user_reference.empty()))
+        return std::nullopt;
     if (dir && !dir->functional_constraint.empty() &&
         dir->functional_constraint != binding->functional_constraint)
         return std::nullopt;
@@ -103,6 +107,13 @@ inline std::optional<std::vector<VerifiedReportLeaf>> bindFlatSclReportStructure
     const auto& children = member.value->children();
     if (attributes.empty() || attributes.size() != children.size() ||
         children.size() > 16U) return std::nullopt;
+    // Positional order is not independently proven by matching count alone.
+    // Reject repeated scalar types, where a vendor permutation would look
+    // valid and produce deceptively named engineering values.
+    for (std::size_t i = 0; i < attributes.size(); ++i)
+        for (std::size_t j = i + 1; j < attributes.size(); ++j)
+            if (attributes[i]->scl_basic_type == attributes[j]->scl_basic_type)
+                return std::nullopt;
     std::vector<VerifiedReportLeaf> result;
     result.reserve(children.size());
     for (std::size_t i = 0; i < children.size(); ++i) {
