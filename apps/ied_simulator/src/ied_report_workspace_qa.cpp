@@ -98,9 +98,17 @@ bool verifyReadableReportTreeProjection() {
     ambiguous.data_reference = std::string(1500U, 'X') + ".q";
     ambiguous.value = mms::MmsDataValue::bit_string(3U,
         std::span<const std::uint8_t>{goodQuality});
-    const auto raw = projectBrowserReportTree({ambiguous});
-    if (raw.isEmpty() || raw.first().toMap().value("value").toString()
-                             == QStringLiteral("good"))
+    bool qOmitted = false;
+    const auto raw = projectBrowserReportTree({ambiguous}, nullptr, &qOmitted);
+    if (raw.isEmpty() || !qOmitted ||
+        raw.first().toMap().value("value").toString()
+            == QStringLiteral("good"))
+        return false;
+    qOmitted = false;
+    const auto directQuality = projectBrowserReportTree({quality}, nullptr, &qOmitted);
+    if (directQuality.isEmpty() || qOmitted ||
+        directQuality.first().toMap().value("value").toString()
+            != QStringLiteral("good"))
         return false;
     return true;
 }
