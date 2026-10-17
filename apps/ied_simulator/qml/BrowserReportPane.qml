@@ -682,7 +682,10 @@ Rectangle {
                                                         Layout.fillWidth: true
                                                     }
                                                     Label {
-                                                        text: "Positional · not SCL-labelled"
+                                                        text: root.selectedReportMemberDetails().length > 0
+                                                      && root.selectedReportMemberDetails()[0].authority
+                                                      ? "SCL verified · MMS type checked"
+                                                      : "Positional · not SCL-labelled"
                                                         font.pixelSize: 10
                                                         color: theme.muted
                                                     }
