@@ -281,8 +281,12 @@ for token in (
 ):
     if token not in report_inspector:
         raise SystemExit("BROWSER_REPORT_INLINE_TREE_FAIL compact selection=" + token)
-if report_inspector.count("BrowserEngineeringEvidence {") != 1:
-    raise SystemExit("BROWSER_REPORT_INLINE_TREE_FAIL duplicate or detached q/t inspector")
+# One member-level inspector and one nested semantic-leaf inspector. Both
+# must live inside the selected member's lazy Loader, not after the DataSet.
+if (member_tree.count("BrowserEngineeringEvidence {") != 2 or
+        report_inspector.count("BrowserEngineeringEvidence {") != 2 or
+        "engineeringEvidence: semanticLeafRow.modelData.engineeringEvidence" not in member_tree):
+    raise SystemExit("BROWSER_REPORT_INLINE_TREE_FAIL incorrect inline q/t inspectors")
 
 # P0 semantic projection borrows ARIEC61850 exact DataSet/FCDA/type gates.
 semantic = (workspace_path.parent.parent / "src" / "BrowserReportSemanticBinding.hpp").read_text(encoding="utf-8")
@@ -290,7 +294,9 @@ for token in (
     "model.identity.confidence != MmsLiveModelConfidence::exact",
     'model.source != "TrustedSclInitialSnapshot"',
     "fcda.index != member.data_set_index",
-    "dir->user_reference != binding->reference",
+    "matchesExactMember(dir->user_reference)",
+    "matchesExactMember(dir->mms_reference)",
+    "canonical == binding->reference",
     "attribute.functional_constraint != binding->functional_constraint",
     "attributes.size() != children.size()",
     "semanticKindCompatible(children[i], attributes[i]->scl_basic_type)",
