@@ -49,6 +49,13 @@ SurfacePanel {
                 || panel.device.ptpRunning || panel.startPending || panel.session.updatingFirmware)
             return false
         const accepted = panel.session.requestStartPtpConfigured(role, panel.ptpProfile())
+        if (accepted && panel.controller) {
+            // A start from Advanced has exactly the same owner as Main.
+            panel.controller.ptpDesiredForSession = true
+            panel.controller.ptpExplicitOff = false
+            panel.controller.ptpDefaultStartPending = false
+            panel.controller.ptpDesiredRole = role
+        }
         if (!accepted && panel.controller)
             panel.controller.showMessage("PTP start blocked. Check timing diagnostics.", true)
         return Boolean(accepted)
@@ -134,7 +141,7 @@ SurfacePanel {
                         const wantsRunning = checked
                         checked = Qt.binding(function() { return Boolean(panel.device.ptpRunning) })
                         if (wantsRunning) panel.startSelectedMode()
-                        else if (panel.session && !panel.session.requestStopPtp() && panel.controller)
+                        else if (panel.controller && !panel.controller.requestStopPtp())
                             panel.controller.showMessage("PTP stop was not accepted. Copy diagnostics.", true)
                     }
                 }
@@ -287,7 +294,7 @@ SurfacePanel {
                     text: panel.device.ptpStatus.indexOf("PTP STOP unverified") === 0 ? "Retry Stop PTP" : "Stop PTP"
                     enabled: panel.session && (panel.device.ptpRunning || panel.startPending) && !panel.session.updatingFirmware
                     onClicked: {
-                        panel.session.requestStopPtp()
+                        if (panel.controller) panel.controller.requestStopPtp()
                     }
                 }
                 CalmButton {
