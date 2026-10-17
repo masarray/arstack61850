@@ -2,6 +2,12 @@ name: ESP32-P4 SMV Injector
 
 on:
   workflow_call:
+    inputs:
+      phase_sync_preview:
+        description: "Build PTP-to-SV measured-local AUTO candidate only for Studio preview"
+        type: boolean
+        default: false
+        required: false
   workflow_dispatch:
   push:
     branches: [main]
@@ -106,8 +112,35 @@ jobs:
           echo "ARSTACK_FIRMWARE_BUILD_ID=${ARSTACK_SOURCE_COMMIT:0:16}" >> "$GITHUB_ENV"
           echo "Exact firmware build identity pinned to ${ARSTACK_SOURCE_COMMIT:0:16}"
 
+      - name: Enable PTP-SV measured AUTO preview profile
+        if: ${{ inputs.phase_sync_preview == true }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          cfg = Path('sdkconfig.defaults')
+          content = cfg.read_text(encoding='utf-8')
+          original = 'CONFIG_AR_SMV_BROADCAST_MIRROR=y'
+          assert content.count(original) == 1, 'expected controlled mirror policy'
+          content = content.replace(original, '# CONFIG_AR_SMV_BROADCAST_MIRROR is not set')
+          content += ('\n# SOURCE PTP-SV AUTO phase qualification - preview only\n'
+                      'CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y\n'
+                      'CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL=y\n')
+          cfg.write_text(content, encoding='utf-8')
+          PY
+
       - name: Select ESP32-P4 target
         run: source /opt/esp/idf/export.sh && idf.py set-target esp32p4
+
+      - name: Verify phase-qualified Studio preview is the actual compiled profile
+        if: ${{ inputs.phase_sync_preview == true }}
+        run: |
+          set -euo pipefail
+          grep -qx 'CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y' sdkconfig
+          grep -qx 'CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL=y' sdkconfig
+          grep -qx '# CONFIG_AR_SMV_BROADCAST_MIRROR is not set' sdkconfig
+          grep -qx 'CONFIG_AR_PTP_OPERATING_ROLE=0' sdkconfig
+          echo 'SOURCE local AUTO preview: servo ON; canonical MAC TX evidence ON; mirror OFF'
 
       - name: Verify P0 pre-v3 silicon policy
         run: |
@@ -194,7 +227,13 @@ jobs:
           import os
           import re
           import sys
+          from pathlib import Path
           image, sha256, source_commit = sys.argv[1:]
+          cfg = Path('sdkconfig').read_text(encoding='utf-8')
+          servo = 'CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y' in cfg
+          mac_evidence = 'CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL=y' in cfg
+          no_mirror = '# CONFIG_AR_SMV_BROADCAST_MIRROR is not set' in cfg
+          candidate = servo and mac_evidence and no_mirror
           if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
               raise SystemExit("Firmware source SHA unavailable/invalid; refusing a zero-provenance package")
           manifest = {
@@ -211,6 +250,11 @@ jobs:
               "espIdf": "5.5.4",
               "sourceCommit": source_commit,
               "buildId": source_commit[:16],
+              "phaseSyncPreview": candidate,
+              "phaseServoEnabled": servo,
+              "canonicalMacTxEvidenceEnabled": mac_evidence,
+              "broadcastMirrorEnabled": not no_mirror,
+              "smpSynchQualifiedAtBuild": False,
           }
           with open("build/firmware-manifest.json", "w", encoding="utf-8", newline="\n") as handle:
               json.dump(manifest, handle, indent=2, sort_keys=True)
