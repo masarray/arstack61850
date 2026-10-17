@@ -20,6 +20,23 @@ int main() {
     const auto near_second = plan_sv_ptp_second_arm({999995000U, 0U, 2U});
     if (!require(near_second.has_value() && near_second->first_alarm_us == 1000004U,
                  "near-boundary must roll forward safely")) return 1;
+    // Earlier PTP reads must not translate into late timer alarms.
+    const auto rebased = rebase_sv_ptp_second_arm(*at_quarter, 108U, 308U);
+    if (!require(rebased.has_value() &&
+                 rebased->first_alarm_us == 749796U &&
+                 rebased->clock_read_uncertainty_us ==
+                     at_quarter->clock_read_uncertainty_us,
+                 "GPTimer START setup latency was not compensated")) return 1;
+    const auto late = rebase_sv_ptp_second_arm(
+        {200000U, 5U}, 1000U, 191000U, 20000U, 200000U);
+    if (!require(late.has_value() && late->first_alarm_us == 1010000U,
+                 "late first alarm must defer one full PTP second")) return 1;
+    if (!require(!rebase_sv_ptp_second_arm(*at_quarter, 108U, 100109U),
+                 "stale PTP clock read accepted")) return 1;
+    if (!require(!rebase_sv_ptp_second_arm(*at_quarter, 108U, 107U),
+                 "backwards monotonic arm time accepted")) return 1;
+    if (!require(!rebase_sv_ptp_second_arm({0U, 0U}, 108U, 110U),
+                 "invalid zero alarm accepted")) return 1;
     const auto start = plan_sv_ptp_second_arm({0U, 100U, 100U});
     if (!require(start.has_value() && start->first_alarm_us == 1000000U,
                  "exact second must target next second")) return 1;
