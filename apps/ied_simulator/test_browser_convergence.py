@@ -219,6 +219,68 @@ if ('QString::fromStdString(member.data_reference)' in projection_header or
         'QString::fromStdString(reason)' in projection_header):
     raise SystemExit("BROWSER_REPORT_METADATA_BOUNDED_FAIL eager untrusted metadata conversion")
 
+# A live InformationReport may carry deeply nested MMS structures. The
+# inspector must consume bounded native typed rows, never split "{...}" in QML
+# or allocate a full hierarchy for every retained historical frame.
+for token in (
+    'kBrowserReportTreeChildLimit = 192',
+    'kBrowserReportTreeDepthLimit = 4U',
+    'kBrowserReportTreeScalarTextLimit = 160',
+    'projectBrowserReportTree(',
+    'bool* nestedFieldsTruncated = nullptr',
+    'bool* typedEvidenceOmitted = nullptr',
+    'if (shortened && typedEvidenceOmitted && member.value',
+    'QStringLiteral("Field %1")',
+    'decodeEngineeringEvidence(fullReference, value)',
+    'depth == 0U && !isContainer && !fullReferenceShortened',
+    'if (remainingChildren <= 0) {',
+    'depth >= kBrowserReportTreeDepthLimit',
+    '*nestedFieldsTruncated = true',
+    'QStringLiteral("reason")',
+    'QStringLiteral("typedEvidence")',
+):
+    if token not in projection_header:
+        raise SystemExit("BROWSER_REPORT_TYPED_TREE_FAIL missing=" + token)
+for token in (
+    'if (ui.reports.isEmpty()) {',
+    'QStringLiteral("valueTree")',
+    'QStringLiteral("treeNestedTruncated")',
+    'QStringLiteral("treeTypedEvidenceOmitted")',
+    'projectBrowserReportTree(',
+):
+    if token not in report_controller:
+        raise SystemExit("BROWSER_REPORT_TYPED_TREE_FAIL controller missing=" + token)
+for token in (
+    'component TreeDataRow: ColumnLayout {',
+    'delegate: TreeDataRow {}',
+    'root.latestReport.valueTree',
+    'treeRow.modelData.memberIndex',
+    'treeRow.modelData.value',
+    'treeRow.modelData.typedEvidence',
+    'Reason for inclusion:',
+    'visible: topLevel || expanded',
+    'property bool triggerExpanded: false',
+    'property bool optionalExpanded: false',
+    'property bool informationExpanded: false',
+    'onSelectedRcbRowChanged:',
+    'root.latestReport.treeNestedTruncated === true',
+    'root.latestReport.treeTypedEvidenceOmitted === true',
+    'root.latestReport.valueEvidenceTruncated === true',
+):
+    if token not in report_inspector:
+        raise SystemExit("BROWSER_REPORT_TYPED_TREE_FAIL QML missing=" + token)
+# Do not tell operators q/t flags are missing merely because the old 96
+# row evidence budget was exhausted; the new native tree retains direct q/t.
+evidence_warning = report_inspector.split(
+    'root.latestReport.valueEvidenceTruncated === true', 1)[0]
+if ('(!root.latestReport.valueTree ||' not in evidence_warning[-220:] or
+        'root.latestReport.valueTree.length === 0) &&' not in evidence_warning[-220:]):
+    raise SystemExit("BROWSER_REPORT_TYPED_TREE_FAIL legacy q/t warning leaks into typed tree")
+if 'text: root.memberValue(modelData)' in report_inspector:
+    raise SystemExit("BROWSER_REPORT_TYPED_TREE_FAIL concatenated-string value in active inspector")
+if report_controller.count('projectBrowserReportTree(') != 1:
+    raise SystemExit("BROWSER_REPORT_TYPED_TREE_FAIL per-frame structure expansion")
+
 value_preview = (workspace_path.parent.parent / "src" / "BrowserBoundedMmsPreview.hpp").read_text(encoding="utf-8")
 for token in [
     'BoundedMmsPreview',
@@ -267,7 +329,9 @@ report_required = [
     'root.rcb.optionalFieldsReadStatus === "verified"',
     'root.rcb.triggerOptionNames.indexOf(modelData.name)',
     'root.rcb.optionalFieldNames.indexOf(modelData.name)',
-    'enabled: false // inspected bit, never an MMS Write',
+    'Passive bit observation: no CheckBox/MouseArea',
+    'readonly property bool bitSet:',
+    'visible: bitRow.bitSet',
     'no on/off bit state is inferred.',
     'RCB in use: enabled, reservation or Owner evidence is present.',
 
@@ -275,6 +339,10 @@ report_required = [
 missing_report = [term for term in report_required if term not in report_inspector]
 if missing_report:
     raise SystemExit("BROWSER_REPORT_INSPECTOR_FAIL missing=" + ",".join(missing_report))
+if 'delegate: CheckBox {' in report_inspector:
+    raise SystemExit("BROWSER_REPORT_LEGIBILITY_FAIL disabled native checkbox leaked")
+if report_inspector.count('id: bitRow') != 2:
+    raise SystemExit("BROWSER_REPORT_LEGIBILITY_FAIL typed read-only bit indicators missing")
 if 'String(frame.reportId) === wanted' in report_inspector:
     raise SystemExit("BROWSER_REPORT_INSPECTOR_FAIL report ID alone is not exact RCB provenance")
 if 'title: modelData[0]' in report_inspector or 'rawValue: modelData[1]' in report_inspector:

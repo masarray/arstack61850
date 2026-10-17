@@ -20,12 +20,19 @@ Rectangle {
     readonly property bool hasLastReport: latestReport.reportId !== undefined
     readonly property var configuredMembers: membersForSelectedRcb()
     property bool attributesExpanded: true
-    property bool triggerExpanded: true
-    property bool optionalExpanded: true
-    property bool informationExpanded: true
+    // Readable process values first; secondary bit tables and diagnostics
+    // remain one click away, rather than consuming the opening viewport.
+    property bool triggerExpanded: false
+    property bool optionalExpanded: false
+    property bool informationExpanded: false
     property bool dataExpanded: true
-    property bool eventsExpanded: true
+    property bool eventsExpanded: false
     property int selectedReportMemberIndex: -1
+    readonly property int selectedRcbRow: reports.selectedRcbIndex
+    onSelectedRcbRowChanged: {
+        if (detailScroll.contentItem) detailScroll.contentItem.contentY = 0
+        selectedReportMemberIndex = -1
+    }
     // Preserve selection through repeat snapshots of the same report frame;
     // reset only when the actual ReportID/sequence/entry identity changes.
     readonly property string latestReportIdentity: !hasLastReport ? "" : [
@@ -190,7 +197,7 @@ Rectangle {
         readonly property var rawValue: lastReportSection
                                         ? root.informationValue(index) : root.attributeValue(index)
         readonly property int stripe: index
-        implicitHeight: 25
+        implicitHeight: 30
         Layout.fillWidth: true
         color: stripe % 2 ? root.theme.surfaceSoft : root.theme.surface
         Rectangle {
@@ -214,7 +221,7 @@ Rectangle {
             verticalAlignment: Text.AlignVCenter
             text: propertyRow.title
             color: root.theme.textSoft
-            font.pixelSize: 10
+            font.pixelSize: 12
             elide: Text.ElideRight
             ToolTip.visible: titleMouse.containsMouse && truncated
             ToolTip.text: title
@@ -227,7 +234,7 @@ Rectangle {
             verticalAlignment: Text.AlignVCenter
             text: root.asText(rawValue)
             color: root.theme.text
-            font.pixelSize: 10
+            font.pixelSize: 12
             elide: Text.ElideMiddle
             ToolTip.visible: valueMouse.containsMouse && truncated
             ToolTip.text: text
@@ -242,7 +249,7 @@ Rectangle {
         property bool opened: true
         signal toggleRequested()
         Layout.fillWidth: true
-        implicitHeight: 26
+        implicitHeight: 30
         color: root.theme.surfaceRaised
         Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: root.theme.line }
         RowLayout {
@@ -252,12 +259,12 @@ Rectangle {
             spacing: 7
             Label {
                 text: opened ? "▾" : "▸"
-                font.pixelSize: 10
+                font.pixelSize: 12
                 color: root.theme.textSoft
             }
             Label {
                 text: heading
-                font.pixelSize: 10
+                font.pixelSize: 12
                 color: root.theme.text
                 font.weight: Font.DemiBold
                 Layout.fillWidth: true
@@ -265,7 +272,7 @@ Rectangle {
             Label {
                 visible: evidence.length > 0
                 text: evidence
-                font.pixelSize: 9
+                font.pixelSize: 11
                 color: root.theme.muted
             }
         }
@@ -287,7 +294,7 @@ Rectangle {
                                                ? root.memberValue(modelData) : "—"
         readonly property int stripe: index
         Layout.fillWidth: true
-        implicitHeight: 25
+        implicitHeight: 30
         color: received && root.selectedReportMemberIndex === index
                ? root.theme.accentSoft
                : stripe % 2 ? root.theme.surfaceSoft : root.theme.surface
@@ -300,14 +307,14 @@ Rectangle {
                 text: "DA"
                 Layout.preferredWidth: 25
                 color: root.theme.accent
-                font.pixelSize: 9
+                font.pixelSize: 11
                 font.weight: Font.DemiBold
             }
             Label {
                 text: dataRow.reference
                 Layout.preferredWidth: Math.max(100, parent.width * 0.55 - 28)
                 color: root.theme.text
-                font.pixelSize: 10
+                font.pixelSize: 12
                 elide: Text.ElideMiddle
                 ToolTip.visible: dataNameMouse.containsMouse && truncated
                 ToolTip.text: text
@@ -319,7 +326,7 @@ Rectangle {
                 leftPadding: 8
                 text: dataRow.displayValue
                 color: root.theme.text
-                font.pixelSize: 10
+                font.pixelSize: 12
                 elide: Text.ElideMiddle
                 ToolTip.visible: dataValueMouse.containsMouse && truncated
                 ToolTip.text: text
@@ -333,6 +340,113 @@ Rectangle {
             onClicked: root.selectedReportMemberIndex = dataRow.index
         }
         Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: root.theme.lineSoft }
+    }
+
+    // Presentation-only tree over authoritative MMS-decoded child values.
+    // Unknown child types retain positional names; SCL labels are never guessed.
+    component TreeDataRow: ColumnLayout {
+        id: treeRow
+        required property int index
+        required property var modelData
+        readonly property bool topLevel: modelData.depth === 0
+        readonly property bool expanded: root.selectedReportMemberIndex === modelData.memberIndex
+        visible: topLevel || expanded
+        Layout.fillWidth: true
+        spacing: 0
+
+        Rectangle {
+            Layout.fillWidth: true
+            implicitHeight: 32
+            color: treeRow.topLevel && treeRow.expanded
+                   ? root.theme.accentSoft
+                   : treeRow.index % 2 ? root.theme.surfaceSoft : root.theme.surface
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 9 + Math.min(treeRow.modelData.depth, 4) * 16
+                anchors.rightMargin: 8
+                spacing: 6
+                Label {
+                    Layout.preferredWidth: 21
+                    text: treeRow.topLevel
+                          ? (treeRow.modelData.container
+                             ? (treeRow.expanded ? "▾" : "▸") : "DA")
+                          : "·"
+                    color: root.theme.accent
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
+                }
+                Label {
+                    Layout.preferredWidth: Math.max(100, parent.width * 0.49 - 35)
+                    text: treeRow.modelData.name || "—"
+                    color: root.theme.text
+                    font.pixelSize: 12
+                    font.weight: treeRow.topLevel ? Font.DemiBold : Font.Normal
+                    elide: Text.ElideMiddle
+                    ToolTip.visible: treeNameHover.containsMouse && truncated
+                    ToolTip.text: treeRow.modelData.reference || text
+                    MouseArea {
+                        id: treeNameHover
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        acceptedButtons: Qt.NoButton
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: treeRow.modelData.value || "—"
+                    color: treeRow.modelData.received ? root.theme.text : root.theme.muted
+                    font.pixelSize: 12
+                    elide: Text.ElideRight
+                    ToolTip.visible: treeValueHover.containsMouse && truncated
+                    ToolTip.text: text
+                    MouseArea {
+                        id: treeValueHover
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        acceptedButtons: Qt.NoButton
+                    }
+                }
+                Label {
+                    visible: !treeRow.topLevel
+                    Layout.preferredWidth: 66
+                    text: treeRow.modelData.kind || ""
+                    color: root.theme.muted
+                    font.pixelSize: 11
+                    horizontalAlignment: Text.AlignRight
+                }
+            }
+            MouseArea {
+                anchors.fill: parent
+                enabled: treeRow.topLevel
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.selectedReportMemberIndex = treeRow.expanded
+                           ? -1 : treeRow.modelData.memberIndex
+            }
+            Rectangle {
+                anchors.bottom: parent.bottom
+                width: parent.width
+                height: 1
+                color: root.theme.lineSoft
+            }
+        }
+        Label {
+            visible: treeRow.topLevel && treeRow.expanded &&
+                     Boolean(treeRow.modelData.reason)
+            Layout.fillWidth: true
+            leftPadding: 32
+            topPadding: 4
+            bottomPadding: 4
+            color: root.theme.textSoft
+            font.pixelSize: 11
+            text: "Reason for inclusion: " + (treeRow.modelData.reason || "")
+        }
+        BrowserEngineeringEvidence {
+            theme: root.theme
+            // Native tree row carries exactly this member's typed decoder
+            // evidence, so quality flags/time-quality stay visible on click.
+            engineeringEvidence: treeRow.topLevel && treeRow.expanded
+                                 ? treeRow.modelData.typedEvidence || ({}) : ({})
+        }
     }
 
     ColumnLayout {
@@ -353,7 +467,7 @@ Rectangle {
                 Rectangle {
                     implicitWidth: 20; implicitHeight: 17; radius: 2
                     color: theme.accent
-                    Label { anchors.centerIn: parent; text: "R"; color: "#ffffff"; font.pixelSize: 10; font.weight: Font.DemiBold }
+                    Label { anchors.centerIn: parent; text: "R"; color: "#ffffff"; font.pixelSize: 12; font.weight: Font.DemiBold }
                 }
                 Label {
                     Layout.fillWidth: true
@@ -372,7 +486,7 @@ Rectangle {
                           : root.rcb.probeOk === true ? "VERIFIED" : "ENGINEERING"
                     color: reports.cleanupRequired ? theme.red
                            : root.selectedIsSubscribed ? theme.green : theme.muted
-                    font.pixelSize: 9
+                    font.pixelSize: 11
                 }
             }
         }
@@ -398,9 +512,9 @@ Rectangle {
                     anchors.leftMargin: 8
                     anchors.rightMargin: 8
                     spacing: 8
-                    Label { text: modelData.buffered ? "BR" : "UR"; color: theme.accent; font.pixelSize: 9; Layout.preferredWidth: 22 }
-                    Label { text: modelData.name || modelData.reference || "RCB"; Layout.fillWidth: true; font.pixelSize: 10; color: theme.text; elide: Text.ElideMiddle }
-                    Label { text: modelData.logicalNode || "LLN0"; font.pixelSize: 9; color: theme.muted }
+                    Label { text: modelData.buffered ? "BR" : "UR"; color: theme.accent; font.pixelSize: 11; Layout.preferredWidth: 22 }
+                    Label { text: modelData.name || modelData.reference || "RCB"; Layout.fillWidth: true; font.pixelSize: 12; color: theme.text; elide: Text.ElideMiddle }
+                    Label { text: modelData.logicalNode || "LLN0"; font.pixelSize: 11; color: theme.muted }
                 }
                 MouseArea { id: reportMouse; anchors.fill: parent; hoverEnabled: true; onClicked: reports.selectRcb(index) }
             }
@@ -428,7 +542,7 @@ Rectangle {
                     bottomPadding: 5
                     color: theme.muted
                     wrapMode: Text.WordWrap
-                    font.pixelSize: 10
+                    font.pixelSize: 12
                     text: "Another RCB is actively subscribed on this MMS association: "
                           + reports.subscriptionRcbReference
                           + ". The selected RCB is inspection-only; Stop active RCB acts on "
@@ -468,7 +582,7 @@ Rectangle {
                         topPadding: 6
                         bottomPadding: 6
                         color: theme.muted
-                        font.pixelSize: 10
+                        font.pixelSize: 12
                         text: "TrgOps " + root.readStatusLabel(root.rcb.triggerOptionsReadStatus)
                               + " · no on/off bit state is inferred."
                     }
@@ -480,14 +594,39 @@ Rectangle {
                         columnSpacing: 8
                         Repeater {
                             model: root.triggerFields
-                            delegate: CheckBox {
+                            delegate: RowLayout {
+                                id: bitRow
                                 required property var modelData
-                                text: modelData.label
-                                checked: root.rcb.triggerOptionNames
-                                         && root.rcb.triggerOptionNames.indexOf(modelData.name) >= 0
-                                enabled: false // inspected bit, never an MMS Write
-                                font.pixelSize: 10
+                                readonly property bool bitSet: root.rcb.triggerOptionNames
+                                    && root.rcb.triggerOptionNames.indexOf(modelData.name) >= 0
                                 Layout.fillWidth: true
+                                Layout.minimumHeight: 30
+                                spacing: 6
+                                // Passive bit observation: no CheckBox/MouseArea and
+                                // no disabled-text styling or MMS Write affordance.
+                                Rectangle {
+                                    Layout.preferredWidth: 16
+                                    Layout.preferredHeight: 16
+                                    radius: 3
+                                    color: bitRow.bitSet ? theme.accentSoft : theme.surface
+                                    border.width: 1
+                                    border.color: bitRow.bitSet ? theme.accent : theme.line
+                                    Label {
+                                        anchors.centerIn: parent
+                                        text: "✓"
+                                        visible: bitRow.bitSet
+                                        color: theme.accent
+                                        font.pixelSize: 12
+                                        font.weight: Font.Bold
+                                    }
+                                }
+                                Label {
+                                    text: modelData.label
+                                    color: theme.text
+                                    font.pixelSize: 12
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
                             }
                         }
                     }
@@ -510,7 +649,7 @@ Rectangle {
                         topPadding: 6
                         bottomPadding: 6
                         color: theme.muted
-                        font.pixelSize: 10
+                        font.pixelSize: 12
                         text: "OptFlds " + root.readStatusLabel(root.rcb.optionalFieldsReadStatus)
                               + " · no on/off bit state is inferred."
                     }
@@ -522,14 +661,39 @@ Rectangle {
                         columnSpacing: 8
                         Repeater {
                             model: root.optionalFields
-                            delegate: CheckBox {
+                            delegate: RowLayout {
+                                id: bitRow
                                 required property var modelData
-                                text: modelData.label
-                                checked: root.rcb.optionalFieldNames
-                                         && root.rcb.optionalFieldNames.indexOf(modelData.name) >= 0
-                                enabled: false // inspected bit, never an MMS Write
-                                font.pixelSize: 10
+                                readonly property bool bitSet: root.rcb.optionalFieldNames
+                                    && root.rcb.optionalFieldNames.indexOf(modelData.name) >= 0
                                 Layout.fillWidth: true
+                                Layout.minimumHeight: 30
+                                spacing: 6
+                                // Passive bit observation: no CheckBox/MouseArea and
+                                // no disabled-text styling or MMS Write affordance.
+                                Rectangle {
+                                    Layout.preferredWidth: 16
+                                    Layout.preferredHeight: 16
+                                    radius: 3
+                                    color: bitRow.bitSet ? theme.accentSoft : theme.surface
+                                    border.width: 1
+                                    border.color: bitRow.bitSet ? theme.accent : theme.line
+                                    Label {
+                                        anchors.centerIn: parent
+                                        text: "✓"
+                                        visible: bitRow.bitSet
+                                        color: theme.accent
+                                        font.pixelSize: 12
+                                        font.weight: Font.Bold
+                                    }
+                                }
+                                Label {
+                                    text: modelData.label
+                                    color: theme.text
+                                    font.pixelSize: 12
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
                             }
                         }
                     }
@@ -543,7 +707,7 @@ Rectangle {
                         anchors.fill: parent
                         anchors.margins: 7
                         wrapMode: Text.WordWrap
-                        font.pixelSize: 10
+                        font.pixelSize: 12
                         color: root.observedRcbInUse() ? theme.red : theme.muted
                         text: root.rcb.probeOk !== true
                               ? "RCB live state not verified · never infer an unused reservation."
@@ -585,37 +749,71 @@ Rectangle {
                     spacing: 0
                     Rectangle {
                         Layout.fillWidth: true
-                        implicitHeight: 25
+                        implicitHeight: 30
                         color: theme.chrome
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: 8
                             anchors.rightMargin: 8
-                            Label { text: "Name"; Layout.preferredWidth: Math.max(100, parent.width * 0.55 - 1); color: theme.textSoft; font.pixelSize: 10; font.weight: Font.DemiBold }
-                            Label { text: "Value"; Layout.fillWidth: true; color: theme.textSoft; font.pixelSize: 10; font.weight: Font.DemiBold }
+                            Label { text: "Name"; Layout.preferredWidth: Math.max(100, parent.width * 0.55 - 1); color: theme.textSoft; font.pixelSize: 12; font.weight: Font.DemiBold }
+                            Label { text: "Value"; Layout.fillWidth: true; color: theme.textSoft; font.pixelSize: 12; font.weight: Font.DemiBold }
                         }
                     }
                     Repeater {
-                        model: root.hasLastReport && root.latestReport.values
-                               ? root.latestReport.values : []
+                        model: root.hasLastReport && root.latestReport.valueTree
+                               ? root.latestReport.valueTree : []
+                        delegate: TreeDataRow {}
+                    }
+                    Repeater {
+                        model: root.hasLastReport &&
+                               (!root.latestReport.valueTree ||
+                                root.latestReport.valueTree.length === 0)
+                               && root.latestReport.values ? root.latestReport.values : []
                         delegate: DataRow { received: true }
                     }
                     Repeater {
                         model: !root.hasLastReport ? root.configuredMembers.slice(0, 256) : []
                         delegate: DataRow { received: false }
                     }
+                    Label {
+                        visible: root.hasLastReport &&
+                                 root.latestReport.treeNestedTruncated === true
+                        Layout.fillWidth: true
+                        leftPadding: 9
+                        topPadding: 3
+                        bottomPadding: 3
+                        text: "Nested values exceed the bounded preview. Native MMS frame retained."
+                        color: theme.muted
+                        font.pixelSize: 11
+                    }
                     BrowserEngineeringEvidence {
                         theme: root.theme
-                        engineeringEvidence: root.selectedReportMemberEvidence()
+                        engineeringEvidence: root.hasLastReport &&
+                                             (!root.latestReport.valueTree ||
+                                              root.latestReport.valueTree.length === 0)
+                                             ? root.selectedReportMemberEvidence() : ({})
                     }
                     Label {
                         visible: root.hasLastReport &&
+                                 root.latestReport.treeTypedEvidenceOmitted === true
+                        Layout.fillWidth: true
+                        leftPadding: 9
+                        topPadding: 3
+                        bottomPadding: 3
+                        text: "Quality/TimeQuality details withheld: member identity was truncated."
+                        color: theme.muted
+                        font.pixelSize: 11
+                    }
+                    Label {
+                        visible: root.hasLastReport &&
+                                 (!root.latestReport.valueTree ||
+                                  root.latestReport.valueTree.length === 0) &&
                                  root.latestReport.valueEvidenceTruncated === true
                         Layout.fillWidth: true
                         leftPadding: 9
                         text: "Some report q/t details were omitted by the bounded projection."
                         color: theme.muted
-                        font.pixelSize: 9
+                        font.pixelSize: 11
                     }
                     Label {
                         visible: root.hasLastReport &&
@@ -624,7 +822,7 @@ Rectangle {
                         leftPadding: 9
                         text: "Some values are preview-truncated; the report payload is preserved by MMS runtime."
                         color: theme.muted
-                        font.pixelSize: 9
+                        font.pixelSize: 11
                     }
                     Label {
                         visible: root.hasLastReport ? !root.latestReport.values || root.latestReport.values.length === 0
@@ -639,7 +837,7 @@ Rectangle {
                                 ? "No bound DataSet reference is available for this RCB."
                                 : "The configured DataSet has no exposed members. Offline values are not fabricated."
                         color: theme.muted
-                        font.pixelSize: 10
+                        font.pixelSize: 12
                     }
                     Label {
                         visible: root.hasLastReport ? root.latestReport.valuesTruncated === true
@@ -648,7 +846,7 @@ Rectangle {
                         leftPadding: 10
                         text: "Showing first 256 members. Narrow the context for more."
                         color: theme.muted
-                        font.pixelSize: 9
+                        font.pixelSize: 11
                     }
                 }
 
@@ -672,7 +870,7 @@ Rectangle {
                         bottomPadding: 3
                         text: modelData
                         color: theme.textSoft
-                        font.pixelSize: 9
+                        font.pixelSize: 11
                         wrapMode: Text.WordWrap
                     }
                 }
@@ -690,7 +888,7 @@ Rectangle {
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.margins: 8
-                        font.pixelSize: 10
+                        font.pixelSize: 12
                         wrapMode: Text.WordWrap
                         color: theme.amber
                         text: reports.rejectedReportCount + " foreign/stale report(s) withheld from process values · "
@@ -708,7 +906,7 @@ Rectangle {
                         id: issueLabel
                         anchors.fill: parent
                         anchors.margins: 8
-                        font.pixelSize: 10
+                        font.pixelSize: 12
                         wrapMode: Text.WordWrap
                         color: theme.red
                         text: reports.cleanupRequired
