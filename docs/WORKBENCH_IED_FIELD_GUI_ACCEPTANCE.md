@@ -8,6 +8,10 @@ Record **before** editing controls: Workbench `main` or installer commit SHA, in
 
 Official installer evidence: GitHub Actions **IED Simulator Release Hardening** on the *target commit*, artifact `arstack-iec61850-workbench-windows-rc` with setup `.exe` and portable `.zip`. The earlier proven baseline [run #38977806520](https://github.com/masarray/arstack61850/actions/runs/38977806520) was built from `a33271e90fea369abad551e7601b446752e10d54`, **before** the later GUI/GOOSE fixes. Never mistake an older green installer for a new source artifact. For current code, check workflow completion, artifact contents, provenance SHA, and actual installation/launch independently.
 
+### Source-matching installed/portable evidence
+
+For release packages produced **after** the source-provenance hardening milestone, inspect `BUILD_HEAD.txt` in either the extracted portable ZIP or the installed Workbench directory. This must contain the exact 40-character commit SHA of the GitHub Actions release run. The Windows release workflow fails closed if the staged, unzipped portable, or NSIS-installed markers differ from the build SHA; all three packaged applications are smoke-launched in release CI. On a lab workstation, record the same SHA from the actual installed or extracted directory alongside `workbench_build_sha.txt`, screenshots and device trace. If the marker is absent or differs, mark package provenance **FAIL**; do not attribute logs or field measurements to the intended source. Old packages without this marker are historical evidence, not proof of the new gate.
+
 ## 2. Safe prerequisites and network
 
 - Use a **permitted lab relay**, explicitly approved URCB/BRCB or isolated demo endpoint; obtain operations approval before any `RptEna`, `Resv`, `GI`, DataSet, SG, file write or Control operation. For production/protection relays, default to read-only inspection and passive GOOSE observation.
