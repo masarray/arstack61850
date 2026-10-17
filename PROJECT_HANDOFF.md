@@ -1,5 +1,7 @@
 # ARStack61850 Project Handoff
 
+> **Native Workbench P0, 2026-10-17:** [Whole-application SSOT Live Data Model master handoff](docs/WORKBENCH_SSOT_LIVE_DATA_MODEL_MASTER_HANDOFF.md) is the up-to-date mandatory entry point. It records unresolved canonical data convergence, PR #230's failing exact-head gate, ownership, and a concrete implementation/acceptance sequence. Older Browser GUI progress below is **not** proof of completed Workbench SSOT or field UX acceptance.
+
 This file is the **current-state handoff** for a new engineer or AI thread. Read [`NORTH_STAR.md`](NORTH_STAR.md) first for the long-term direction, then use this file to continue active development without reconstructing the bench history from chat.
 
 > **Current native IEC 61850 Workbench / Browser engineering track (M2A–M2J merged; M2K PR #176 active as of 2026-10-15):** read [docs/WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md](docs/WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md) for the shared ARSAS-inspired GUI/SSOT execution plan, cross-thread ownership and CI/merge gates; then read [docs/WORKBENCH_CURRENT_HANDOFF.md](docs/WORKBENCH_CURRENT_HANDOFF.md) for the latest checkpoint and active blockers. **Always refresh GitHub refs**. The SMV/ESP32-P4 release history below is a separate product track.
