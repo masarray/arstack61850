@@ -261,9 +261,17 @@ for token in (
     'property bool informationExpanded: false',
     'onSelectedRcbRowChanged:',
     'root.latestReport.treeNestedTruncated === true',
+    'root.latestReport.valueEvidenceTruncated === true',
 ):
     if token not in report_inspector:
         raise SystemExit("BROWSER_REPORT_TYPED_TREE_FAIL QML missing=" + token)
+# Do not tell operators q/t flags are missing merely because the old 96
+# row evidence budget was exhausted; the new native tree retains direct q/t.
+evidence_warning = report_inspector.split(
+    'root.latestReport.valueEvidenceTruncated === true', 1)[0]
+if not evidence_warning.endswith(
+    'root.latestReport.valueTree.length === 0) &&\\n                                 '):
+    raise SystemExit("BROWSER_REPORT_TYPED_TREE_FAIL legacy q/t warning leaks into typed tree")
 if 'text: root.memberValue(modelData)' in report_inspector:
     raise SystemExit("BROWSER_REPORT_TYPED_TREE_FAIL concatenated-string value in active inspector")
 if report_controller.count('projectBrowserReportTree(') != 1:
