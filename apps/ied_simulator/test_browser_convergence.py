@@ -249,7 +249,7 @@ for token in (
     'root.latestReport.valueTree',
     'treeRow.modelData.memberIndex',
     'treeRow.modelData.value',
-    'treeRow.topLevel || expanded',
+    'visible: topLevel || expanded',
     'property bool triggerExpanded: false',
     'property bool optionalExpanded: false',
     'property bool informationExpanded: false',
