@@ -60,7 +60,8 @@ ApplicationWindow {
         if (!saved || saved.length > 8192) return
         try {
             const data = JSON.parse(saved)
-            if (data.version !== 1 || !validFrequency(data.hz)
+            if (data.version !== 1 || typeof data.hz !== "number"
+                    || !Number.isFinite(data.hz) || !validFrequency(data.hz)
                     || !Array.isArray(data.current) || !Array.isArray(data.voltage)
                     || data.current.length !== 4 || data.voltage.length !== 4)
                 throw new Error("Invalid scenario format")
@@ -68,10 +69,12 @@ ApplicationWindow {
                 for (var i = 0; i < 4; ++i) {
                     const row = rows[i]
                     if (!Array.isArray(row) || row.length !== 4
-                            || !isFinite(row[0])
+                            || typeof row[0] !== "number" || !Number.isFinite(row[0])
                             || (data.hz === 0 ? Math.abs(row[0]) : row[0]) > maximumMagnitude(group)
-                            || (data.hz !== 0 && row[0] < 0) || !validPhase(row[1])
-                            || typeof row[2] !== "boolean" || !Number.isInteger(row[3])
+                            || (data.hz !== 0 && row[0] < 0)
+                            || typeof row[1] !== "number" || !Number.isFinite(row[1])
+                            || !validPhase(row[1]) || typeof row[2] !== "boolean"
+                            || typeof row[3] !== "number" || !Number.isInteger(row[3])
                             || row[3] < 0 || row[3] > 4294967295)
                         throw new Error("Invalid channel value")
                 }
@@ -149,6 +152,12 @@ ApplicationWindow {
         configurationWindow.hide()
         detachedPhasorWindow.hide()
         detachedWaveformWindow.hide()
+        // The debounced persistence timer can still be pending when the user
+        // closes immediately after editing. Flush the local draft once, while
+        // ListModels and Settings remain alive; no device command is sent.
+        saveScenarioTimer.stop()
+        if (!root.restoringScenario)
+            scenarioSettings.lastScenario = JSON.stringify(root.scenarioSnapshot())
         // C++ owns process termination and bounded worker retirement. Do not
         // race it with a second QML quit path.
     }

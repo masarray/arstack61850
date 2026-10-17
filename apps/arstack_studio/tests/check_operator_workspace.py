@@ -67,6 +67,14 @@ def main() -> None:
     require("scenarioSnapshot()" in main_qml and "restoreLocalScenario()" in main_qml
             and "requestApplyDraft()" in main_qml and "offlinePreviewRunning" in main_qml,
             "offline-first scenario needs persistence, explicit Apply and non-wire preview")
+    require('saveScenarioTimer.stop()' in main_qml
+            and 'scenarioSettings.lastScenario = JSON.stringify(root.scenarioSnapshot())' in main_qml,
+            "closing immediately after an edit must flush the local draft before teardown")
+    require('typeof data.hz !== "number"' in main_qml
+            and 'typeof row[0] !== "number"' in main_qml
+            and 'typeof row[1] !== "number"' in main_qml
+            and 'typeof row[3] !== "number"' in main_qml,
+            "saved scenario restoration must reject JSON null/string coercion and nonfinite values")
     require("controller.pendingApply = true" in workflow
             and "Apply the local scenario before starting" in workflow
             and "controller.applyAllSignals()" not in workflow,
