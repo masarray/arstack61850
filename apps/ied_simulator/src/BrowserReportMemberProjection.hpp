@@ -114,7 +114,7 @@ inline constexpr int kBrowserReportDetailChildren = 16;
                         const auto preview = previewMmsValue(
                             children[child], kBrowserReportTextLimit);
                         const auto label = QStringLiteral("Field %1 (wire order)")
-                            .arg(child + 1U);
+                            .arg(static_cast<qulonglong>(child + 1U));
                         detailRows.push_back(QVariantMap{
                             {QStringLiteral("label"), label},
                             {QStringLiteral("value"), QString::fromStdString(preview.text)
