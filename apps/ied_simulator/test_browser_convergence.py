@@ -219,6 +219,50 @@ if ('QString::fromStdString(member.data_reference)' in projection_header or
         'QString::fromStdString(reason)' in projection_header):
     raise SystemExit("BROWSER_REPORT_METADATA_BOUNDED_FAIL eager untrusted metadata conversion")
 
+# A live InformationReport may carry deeply nested MMS structures. The
+# inspector must consume bounded native typed rows, never split "{...}" in QML
+# or allocate a full hierarchy for every retained historical frame.
+for token in (
+    'kBrowserReportTreeChildLimit = 192',
+    'kBrowserReportTreeDepthLimit = 4U',
+    'kBrowserReportTreeScalarTextLimit = 160',
+    'projectBrowserReportTree(',
+    'bool* nestedFieldsTruncated = nullptr',
+    'QStringLiteral("Field %1")',
+    'decodeEngineeringEvidence(fullReference, value)',
+    'depth == 0U && !isContainer && !fullReferenceShortened',
+    'if (remainingChildren <= 0) {',
+):
+    if token not in projection_header:
+        raise SystemExit("BROWSER_REPORT_TYPED_TREE_FAIL missing=" + token)
+for token in (
+    'if (ui.reports.isEmpty()) {',
+    'QStringLiteral("valueTree")',
+    'QStringLiteral("treeNestedTruncated")',
+    'projectBrowserReportTree(',
+):
+    if token not in report_controller:
+        raise SystemExit("BROWSER_REPORT_TYPED_TREE_FAIL controller missing=" + token)
+for token in (
+    'component TreeDataRow: ColumnLayout {',
+    'delegate: TreeDataRow {}',
+    'root.latestReport.valueTree',
+    'treeRow.modelData.memberIndex',
+    'treeRow.modelData.value',
+    'treeRow.topLevel || expanded',
+    'property bool triggerExpanded: false',
+    'property bool optionalExpanded: false',
+    'property bool informationExpanded: false',
+    'onSelectedRcbRowChanged:',
+    'root.latestReport.treeNestedTruncated === true',
+):
+    if token not in report_inspector:
+        raise SystemExit("BROWSER_REPORT_TYPED_TREE_FAIL QML missing=" + token)
+if 'text: root.memberValue(modelData)' in report_inspector:
+    raise SystemExit("BROWSER_REPORT_TYPED_TREE_FAIL concatenated-string value in active inspector")
+if report_controller.count('projectBrowserReportTree(') != 1:
+    raise SystemExit("BROWSER_REPORT_TYPED_TREE_FAIL per-frame structure expansion")
+
 value_preview = (workspace_path.parent.parent / "src" / "BrowserBoundedMmsPreview.hpp").read_text(encoding="utf-8")
 for token in [
     'BoundedMmsPreview',
