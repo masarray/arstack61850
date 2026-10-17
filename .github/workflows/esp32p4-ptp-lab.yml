@@ -34,6 +34,10 @@ jobs:
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft && contains(github.event.pull_request.body, '[run-phase-guard]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # github.sha on pull_request denotes an auto-generated merge commit.
+      # Firmware build ID and provenance must use the actual PR HEAD.
+      ARSTACK_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
     container:
       image: espressif/idf:v5.5.4
     steps:
@@ -43,13 +47,14 @@ jobs:
         run: |
           source /opt/esp/idf/export.sh
           cmake -S tests/ptp_profile -B build-phase-guard -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-phase-guard --target sv_ptp_phase_authority_tests sv_tx_egress_evidence_tests ptp_power_profile_tests ptp_runtime_tests --parallel 2
-          ctest --test-dir build-phase-guard --output-on-failure -R 'sv_ptp_phase_authority_tests|sv_tx_egress_evidence_tests|ptp_power_profile_tests|ptp_runtime_tests'
+          cmake --build build-phase-guard --target ptp_control_cancellation_tests ptp_emac_role_ownership_tests ptp_canonical_authority_tests ptp_receiver_clock_authority_tests sv_ptp_clock_lease_tests sv_ptp_phase_authority_tests sv_tx_egress_evidence_tests ptp_power_profile_tests ptp_runtime_tests --parallel 2
+          ctest --test-dir build-phase-guard --output-on-failure -R 'ptp_control_cancellation_tests|ptp_emac_role_ownership_tests|ptp_canonical_authority_tests|ptp_receiver_clock_authority_tests|sv_ptp_clock_lease_tests|sv_ptp_phase_authority_tests|sv_tx_egress_evidence_tests|ptp_power_profile_tests|ptp_runtime_tests'
       - name: Compile guarded ESP32-P4 SOURCE firmware
         shell: bash
         working-directory: embedded/esp32p4_smv_injector
         run: |
           source /opt/esp/idf/export.sh
+          export ARSTACK_FIRMWARE_BUILD_ID="${ARSTACK_SOURCE_COMMIT:0:16}"
           idf.py set-target esp32p4
           python3 - <<'PY'
           from pathlib import Path
@@ -72,6 +77,46 @@ jobs:
           grep -qx 'CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL=y' sdkconfig
           grep -qx '# CONFIG_AR_PTP_ALLOW_NONSTANDARD_LAB_CADENCE is not set' sdkconfig
           idf.py build
+
+      - name: Stage guarded SOURCE bench artifact
+        shell: bash
+        working-directory: embedded/esp32p4_smv_injector
+        run: |
+          python3 tools/stage_ptp_experimental.py source "${GITHUB_WORKSPACE}/ptp-checkpoint"
+
+      - name: Compile guarded ESP32-P4 RECEIVER firmware
+        shell: bash
+        working-directory: embedded/esp32p4_smv_injector
+        run: |
+          source /opt/esp/idf/export.sh
+          export ARSTACK_FIRMWARE_BUILD_ID="${ARSTACK_SOURCE_COMMIT:0:16}"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("sdkconfig")
+          lines = [line for line in p.read_text(encoding="utf-8").splitlines()
+                   if not line.startswith("CONFIG_AR_PTP_OPERATING_ROLE=")]
+          p.write_text("\n".join(lines) + "\nCONFIG_AR_PTP_OPERATING_ROLE=1\n",
+                       encoding="utf-8")
+          PY
+          idf.py reconfigure
+          grep -qx 'CONFIG_AR_PTP_OPERATING_ROLE=1' sdkconfig
+          grep -qx 'CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y' sdkconfig
+          idf.py build
+
+      - name: Stage guarded RECEIVER bench artifact
+        shell: bash
+        working-directory: embedded/esp32p4_smv_injector
+        run: |
+          python3 tools/stage_ptp_experimental.py receiver "${GITHUB_WORKSPACE}/ptp-checkpoint"
+
+      - name: Upload M3D opt-in bench firmware (not a release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32p4-m3d-ptp-bench-${{ github.event.pull_request.head.sha }}
+          path: ptp-checkpoint/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
 
   build-esp32p4-ptp:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
@@ -137,7 +182,9 @@ jobs:
               'g_announce_sent.load',
               'g_sync_sent.load',
               'g_follow_up_sent.load',
-              'return g_ptp_ready.load',
+              '[[nodiscard]] bool source_has_fresh_evidence() noexcept',
+              'PtpSourceEvidenceFreshness::fresh(',
+              'return source_has_fresh_evidence();',
           ]
           combined = eth + '\n' + ptp
           missing = [token for token in required if token not in combined]

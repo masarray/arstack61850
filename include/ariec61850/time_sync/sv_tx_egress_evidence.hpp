@@ -180,4 +180,77 @@ private:
     SvTxEgressSummary summary_{};
 };
 
+// Sparse MAC egress is a corroborating measurement, NOT sufficient by itself
+// to declare synchronized samples. The independent software phase observer
+// must ALSO verify smpCnt-zero PTP epoch continuity with a bounded clock-read
+// uncertainty. Keep this gate independent of ESP-IDF/Qt for fault regression.
+class SvLocalSyncEvidenceGate final {
+public:
+    static constexpr std::int64_t kMaxEgressPhaseNs = 4000LL;
+    static constexpr std::uint32_t kMaxSoftwarePhaseBoundUs = 4U;
+    static constexpr std::uint32_t kEvidenceStride = 16U;
+    static constexpr std::uint32_t kMaxEvidenceAgeEpochs = 17U;
+    static constexpr std::uint32_t kRequiredMeasuredPairs = 2U;
+
+    constexpr void reset() noexcept {
+        matched_pairs_ = 0U;
+        session_ = 0U;
+        fault_generation_ = 0U;
+        source_generation_ = 0U;
+        last_epoch_ = 0U;
+    }
+
+    // Call only for the actual canonical SV descriptor timestamp.
+    // The lower-level tracker already verifies that consecutive timestamps
+    // belong to adjacent 16-second PTP epochs and the same source/session.
+    constexpr void observe(const SvTxEgressObservation& o,
+                           const SvTxEvidenceResult result,
+                           const std::int32_t phase_ns) noexcept {
+        const std::int64_t phase = static_cast<std::int64_t>(phase_ns);
+        if (result != SvTxEvidenceResult::measured ||
+            !o.canonical_tx_success || !o.no_missed_slots ||
+            !o.same_sample_epoch ||
+            phase > kMaxEgressPhaseNs || phase < -kMaxEgressPhaseNs) {
+            reset();
+            return;
+        }
+        if (matched_pairs_ != 0U &&
+            (session_ != o.publisher_session_generation ||
+             fault_generation_ != o.publisher_fault_generation ||
+             source_generation_ != o.ptp_source_generation ||
+             o.sample_epoch_generation - last_epoch_ != kEvidenceStride)) {
+            reset();
+        }
+        session_ = o.publisher_session_generation;
+        fault_generation_ = o.publisher_fault_generation;
+        source_generation_ = o.ptp_source_generation;
+        last_epoch_ = o.sample_epoch_generation;
+        if (matched_pairs_ < kRequiredMeasuredPairs) ++matched_pairs_;
+    }
+
+    [[nodiscard]] constexpr bool qualified(
+        const std::uint32_t session,
+        const std::uint32_t fault_generation,
+        const std::uint32_t source_generation,
+        const std::uint32_t current_epoch,
+        const bool software_tracking,
+        const std::uint32_t software_phase_bound_us) const noexcept {
+        return matched_pairs_ >= kRequiredMeasuredPairs &&
+            software_tracking &&
+            software_phase_bound_us <= kMaxSoftwarePhaseBoundUs &&
+            session != 0U && source_generation != 0U &&
+            session == session_ &&
+            fault_generation == fault_generation_ &&
+            source_generation == source_generation_ &&
+            current_epoch >= last_epoch_ &&
+            current_epoch - last_epoch_ <= kMaxEvidenceAgeEpochs;
+    }
+private:
+    std::uint32_t matched_pairs_{};
+    std::uint32_t session_{};
+    std::uint32_t fault_generation_{};
+    std::uint32_t source_generation_{};
+    std::uint32_t last_epoch_{};
+};
+
 } // namespace ar::iec61850::time_sync
