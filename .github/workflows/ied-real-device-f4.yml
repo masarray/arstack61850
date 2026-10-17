@@ -22,12 +22,20 @@ on:
 permissions:
   contents: read
 
+# Never label a synthetic pull_request merge SHA as the shipped build head.
+# Pull-request CI checks out the actual requested source commit. Push/dispatch
+# events use their own exact triggering commit.
+env:
+  F4_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
 jobs:
   protocol-gate:
     name: Linux protocol gate
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.F4_SOURCE_SHA }}
 
       - name: Verify F4 Windows packaging contract
         run: python3 apps/ied_simulator/test_f4_release_contract.py
@@ -46,6 +54,8 @@ jobs:
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.F4_SOURCE_SHA }}
 
       - name: Parse field-collector PowerShell before expensive Windows build
         shell: pwsh
@@ -169,8 +179,8 @@ jobs:
           windeployqt --release --qmldir apps/ied_simulator/qml --dir $stage (Join-Path $stage 'arstack_ied_simulator.exe')
           $sourceSha = (& git rev-parse --verify HEAD).Trim()
           if ($LASTEXITCODE -ne 0 -or $sourceSha -notmatch '^[0-9a-f]{40}$' -or
-              $sourceSha -cne $env:GITHUB_SHA) {
-            throw "F4 source mismatch: checkout=$sourceSha action=$env:GITHUB_SHA"
+              $sourceSha -cne $env:F4_SOURCE_SHA) {
+            throw "F4 source mismatch: checkout=$sourceSha action=$env:F4_SOURCE_SHA"
           }
           [System.IO.File]::WriteAllText(
             (Join-Path $stage 'BUILD_HEAD.txt'),
@@ -203,7 +213,7 @@ jobs:
           -BuildDir ./build-f4-windows/Release
           -InstallerPath ./release-artifacts/ARStack-IEC61850-Workbench-Setup-win64.exe
           -PortablePath ./release-artifacts/ARStack-IEC61850-Workbench-portable-win64.zip
-          -ExpectedSourceSha ${{ github.sha }}
+          -ExpectedSourceSha ${{ env.F4_SOURCE_SHA }}
           -FixturePath ./tests/fixtures/scl/client-workbench.scd
 
       - name: Assemble F4 external-acceptance kit
@@ -224,8 +234,8 @@ jobs:
           Copy-Item 'tests\fixtures\scl\interop-golden-synthetic.cid' $fixtures
           $headPath = Join-Path $PWD 'release-stage\ARStack-IEC61850-Workbench\BUILD_HEAD.txt'
           $stageHead = (Get-Content -LiteralPath $headPath -Raw).Trim()
-          if ($stageHead -cne $env:GITHUB_SHA) {
-            throw "F4 kit source mismatch: staged=$stageHead expected=$env:GITHUB_SHA"
+          if ($stageHead -cne $env:F4_SOURCE_SHA) {
+            throw "F4 kit source mismatch: staged=$stageHead expected=$env:F4_SOURCE_SHA"
           }
           Copy-Item -LiteralPath $headPath -Destination (Join-Path $kit 'BUILD_HEAD.txt')
 
@@ -254,7 +264,7 @@ jobs:
 
           $manifest = [ordered]@{
             schemaVersion = 'arstack-f4-field-kit-v2-interop-golden'
-            headSha = $env:GITHUB_SHA
+            headSha = $env:F4_SOURCE_SHA
             generatedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
             syntheticGolden = 'passed_in_windows_preflight'
             externalAcceptance = 'pending_external_client'
