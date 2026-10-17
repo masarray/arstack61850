@@ -320,28 +320,28 @@ class LifecycleScenarioTests(unittest.TestCase):
         self.assertEqual(complete["status"], "OBSERVED")
 
     def test_source_readiness_is_latest_not_any_historical_running(self):
-        prefix = (f"ARSTACK identity build={HEAD[:16]} boot_id={BOOT}\\n"
-                  "PTP2 role=SOURCE discipline=UNLOCKED source=NONE offset=NA\\n")
-        running = "PTP status=RUNNING Announce=4 Sync=4 FollowUp=4 PdelayFrames=0 TXfail=0\\n"
-        for suffix in ("PTP stop requested\\n",
-                       "PTP status=STOPPED Announce=4 Sync=4 FollowUp=4 PdelayFrames=0 TXfail=0\\n",
-                       "PTP status unavailable\\n",
-                       "PTP start rejected: link down\\n",
-                       "PTP status=RUNNING Announce=4 Sync=4 FollowUp=4 PdelayFrames=0\\n"):
+        prefix = (f"ARSTACK identity build={HEAD[:16]} boot_id={BOOT}\n"
+                  "PTP2 role=SOURCE discipline=UNLOCKED source=NONE offset=NA\n")
+        running = "PTP status=RUNNING Announce=4 Sync=4 FollowUp=4 PdelayFrames=0 TXfail=0\n"
+        for suffix in ("PTP stop requested\n",
+                       "PTP status=STOPPED Announce=4 Sync=4 FollowUp=4 PdelayFrames=0 TXfail=0\n",
+                       "PTP status unavailable\n",
+                       "PTP start rejected: link down\n",
+                       "PTP status=RUNNING Announce=4 Sync=4 FollowUp=4 PdelayFrames=0\n"):
             with self.subTest(suffix=suffix):
                 actual = self.run_gate((prefix + running + suffix).encode(),
                                        "source-ready", "source")
                 self.assertEqual(actual["status"], "INCOMPLETE")
         # A later clean RUNNING status is evidence of a newly reported state.
-        clean_restart = prefix + running + "PTP stop requested\\n" + running
+        clean_restart = prefix + running + "PTP stop requested\n" + running
         self.assertEqual(self.run_gate(clean_restart.encode(), "source-ready",
                                        "source")["status"], "OBSERVED")
 
     def test_source_any_reported_tx_failure_vetoes_same_boot(self):
-        prefix = (f"ARSTACK identity build={HEAD[:16]} boot_id={BOOT}\\n"
-                  "PTP2 role=SOURCE discipline=UNLOCKED source=NONE offset=NA\\n")
-        bad = "PTP status=RUNNING Announce=4 Sync=4 FollowUp=4 PdelayFrames=0 TXfail=1\\n"
-        good = "PTP status=RUNNING Announce=8 Sync=8 FollowUp=8 PdelayFrames=0 TXfail=0\\n"
+        prefix = (f"ARSTACK identity build={HEAD[:16]} boot_id={BOOT}\n"
+                  "PTP2 role=SOURCE discipline=UNLOCKED source=NONE offset=NA\n")
+        bad = "PTP status=RUNNING Announce=4 Sync=4 FollowUp=4 PdelayFrames=0 TXfail=1\n"
+        good = "PTP status=RUNNING Announce=8 Sync=8 FollowUp=8 PdelayFrames=0 TXfail=0\n"
         actual = self.run_gate((prefix + bad + good).encode(), "source-ready", "source")
         self.assertEqual(actual["status"], "INCOMPLETE")
         self.assertTrue(actual["sourceTxFaultObserved"])
@@ -349,10 +349,10 @@ class LifecycleScenarioTests(unittest.TestCase):
                                        "source")["status"], "INCOMPLETE")
 
     def test_missing_boot_id_on_later_identity_fails_closed(self):
-        data = (f"ARSTACK identity build={HEAD[:16]} boot_id={BOOT}\\n"
-                "PTP2 role=SOURCE discipline=UNLOCKED source=NONE offset=NA\\n"
-                f"ARSTACK identity build={HEAD[:16]}\\n"
-                "PTP status=RUNNING Announce=4 Sync=4 FollowUp=4 PdelayFrames=0 TXfail=0\\n")
+        data = (f"ARSTACK identity build={HEAD[:16]} boot_id={BOOT}\n"
+                "PTP2 role=SOURCE discipline=UNLOCKED source=NONE offset=NA\n"
+                f"ARSTACK identity build={HEAD[:16]}\n"
+                "PTP status=RUNNING Announce=4 Sync=4 FollowUp=4 PdelayFrames=0 TXfail=0\n")
         self.assertEqual(self.run_gate(data.encode(), "source-ready",
                                        "source")["status"], "INCOMPLETE")
 
