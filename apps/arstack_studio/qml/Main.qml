@@ -1049,17 +1049,20 @@ ApplicationWindow {
                             }
                         }
 
-                        RowLayout {
+                        // Stack voltage/current to use the injection workspace
+                        // vertically instead of leaving half the panel empty.
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: root.compactLayout ? 214 : 224
-                            Layout.maximumHeight: root.compactLayout ? 214 : 224
-                            spacing: 9
+                            Layout.fillHeight: true
+                            Layout.minimumHeight: 398
+                            spacing: 8
                             SignalMatrix {
                                 id: voltageMatrix
                                 enabled: !workflowBar.startQueued
                                 objectName: "studioVoltageMatrix"
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
+                                Layout.minimumHeight: 193
                                 theme: studioTheme
                                 controller: root
                                 device: device
@@ -1079,6 +1082,7 @@ ApplicationWindow {
                                 objectName: "studioCurrentMatrix"
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
+                                Layout.minimumHeight: 193
                                 theme: studioTheme
                                 controller: root
                                 device: device
