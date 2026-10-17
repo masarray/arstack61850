@@ -1039,8 +1039,8 @@ ApplicationWindow {
                         StudioTimingTray {
                             objectName: "studioTimingTray"
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 84
-                            Layout.minimumHeight: 84
+                            Layout.preferredHeight: 57
+                            Layout.minimumHeight: 57
                             theme: studioTheme
                             controller: root
                             device: device
@@ -1107,7 +1107,9 @@ ApplicationWindow {
                         SplitView.fillWidth: true
                         SplitView.fillHeight: true
                         SplitView.minimumHeight: 170
-                        SplitView.preferredHeight: 238
+                        SplitView.preferredHeight: 225
+                        SplitView.maximumHeight: 265
+                        SplitView.fillHeight: false
                         theme: studioTheme
                         titleText: "Phasor"
                         statusText: ""
@@ -1147,6 +1149,7 @@ ApplicationWindow {
                         SplitView.fillHeight: true
                         SplitView.minimumHeight: 170
                         SplitView.preferredHeight: 328
+                        SplitView.fillHeight: true
                         theme: studioTheme
                         titleText: "Waveform"
                         statusText: root.signalFrequency.toFixed(3) + " Hz"

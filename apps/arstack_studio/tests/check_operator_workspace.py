@@ -104,6 +104,15 @@ def main() -> None:
     assert "width: 212" in menu and "commandRows * 29" in menu
     assert "text: \"Generated setpoint · not independent on-wire proof\"" not in preview
     assert "No ESP32 board detected · Preview mode only" in main_qml
+    require("Layout.preferredHeight: 57" in main_qml
+            and "SplitView.maximumHeight: 265" in main_qml
+            and "SplitView.fillHeight: false" in main_qml,
+            "compact timing strip and bounded phasor panel must avoid dead space")
+    require("TIME SYNC  /  SV SIMULATION" not in tray
+            and "StateBadge {" not in tray,
+            "device/PTP status must not be duplicated in the control tray")
+    require("Offline waveform preview · no network SV output." not in ribbon,
+            "offline Start should not duplicate preview status with a toast")
     assert "Layout.preferredHeight: 78" in main_qml
     device_src = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
     session_src = (STUDIO / "src/SmartSessionController.cpp").read_text(encoding="utf-8")

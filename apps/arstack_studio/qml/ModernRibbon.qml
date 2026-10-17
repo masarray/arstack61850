@@ -94,8 +94,8 @@ Rectangle {
             toolTipText: "Start"
             onClicked: {
                 if (!bar.device.deviceVerified) {
+                    // The footer already identifies preview-only operation.
                     bar.controller.offlinePreviewRunning = true
-                    bar.controller.showMessage("Offline waveform preview · no network SV output.", false)
                 } else bar.workflow.requestStart()
             }
         }

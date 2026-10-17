@@ -61,30 +61,11 @@ Rectangle {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: tray.compact ? 9 : 11
-        spacing: tray.compact ? 5 : 7
+        anchors.margins: tray.compact ? 7 : 9
+        spacing: 0
 
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 8
-            Rectangle { width: 3; height: 14; radius: 2; color: tray.theme.accent }
-            Label {
-                text: "TIME SYNC  /  SV SIMULATION"
-                color: tray.theme.textSoft
-                font.family: tray.uiFont
-                font.pixelSize: 10
-                font.weight: Font.DemiBold
-                font.letterSpacing: 0.45
-            }
-            Item { Layout.fillWidth: true }
-            StateBadge {
-                theme: tray.theme
-                monoFont: tray.monoFont
-                state: tray.stateText
-                stateColor: tray.stateColor
-            }
-        }
-
+        // The only global PTP/device status lives in the footer.
+        // This is an action strip, not a second diagnostic/status card.
         RowLayout {
             Layout.fillWidth: true
             spacing: tray.compact ? 7 : 10
