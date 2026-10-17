@@ -121,6 +121,15 @@ jobs:
           Build-Target 'smp_synch_wire_offset_tests'
           Build-Target 'ptp_discipline_tests'
           Build-Target 'ptp_p2_hardening_tests'
+          Build-Target 'ptp_power_profile_tests'
+          Build-Target 'sv_ptp_epoch_tests'
+          Build-Target 'ptp_control_cancellation_tests'
+          Build-Target 'ptp_emac_role_ownership_tests'
+          Build-Target 'ptp_canonical_authority_tests'
+          Build-Target 'ptp_receiver_clock_authority_tests'
+          Build-Target 'sv_ptp_clock_lease_tests'
+          Build-Target 'sv_ptp_phase_authority_tests'
+          Build-Target 'sv_tx_egress_evidence_tests'
           Build-Target 'ptp_profile_analyze'
 
       - name: Run PTP regression and analyzer smoke tests on MSVC
