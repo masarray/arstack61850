@@ -116,7 +116,8 @@ inline constexpr int kBrowserReportDetailChildren = 16;
                     .arg(includeWireDetails && ordinal < kBrowserReportDetailMembers
                              ? QStringLiteral(" — select for details")
                              : QString{});
-                const auto verified = includeWireDetails && trustedModel
+                const auto verified = includeWireDetails && trustedModel &&
+                                      ordinal < kBrowserReportDetailMembers
                     ? bindFlatSclReportStructure(*trustedModel, dataSetReference, member)
                     : std::nullopt;
                 if (verified) {
