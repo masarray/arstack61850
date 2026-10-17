@@ -57,11 +57,17 @@ def main() -> None:
             and "smartSession.requestStart()" not in workflow.split(
                 "function requestStart() {")[1].split("function requestStop() {")[0],
             "SV START must always stage the full displayed 4I+4V scenario")
-    require("Layout.fillHeight: true" in main_qml
+    ui_geometry = (STUDIO / "src/main.cpp").read_text(encoding="utf-8")
+    require("Flickable {" in main_qml
+            and 'objectName: "studioInjectionScroll"' in main_qml
+            and "contentHeight: injectionContent.height" in main_qml
+            and "Layout.fillHeight: true" in main_qml
             and "id: voltageMatrix" in main_qml
             and "id: currentMatrix" in main_qml
-            and "Layout.minimumHeight: 418" in main_qml,
-            "current/voltage matrices must use vertically stacked full-width layout")
+            and "Layout.minimumHeight: 418" in main_qml
+            and "voltage.area.bottom() <= current.area.top()" in ui_geometry
+            and "insideScrollableContent" in ui_geometry,
+            "stacked 4V/4I tables must remain fully reachable at minimum Windows height")
     require('property bool ptpDesiredForSession: true' in main_qml
             and "defaultPtpStartAttempted" in main_qml
             and "root.ptpDesiredForSession = false" in main_qml,
