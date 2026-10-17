@@ -58,6 +58,37 @@ plan_sv_ptp_second_arm(const SvPtpClockObservation& o,
         static_cast<std::uint32_t>(uncertainty_us)};
 }
 
+// Re-anchor first GPTimer alarm to the actual timer START window.
+// The PTP IOCTL precedes timer setup: using its original delay unchanged
+// introduces setup latency as a systematic phase offset. Reject stale reads.
+[[nodiscard]] constexpr std::optional<SvSecondBoundaryArm>
+rebase_sv_ptp_second_arm(
+    const SvSecondBoundaryArm& planned,
+    const std::uint64_t clock_read_after_us,
+    const std::uint64_t timer_start_preparation_us,
+    const std::uint32_t minimum_start_lead_us = 20000U,
+    const std::uint32_t maximum_rebase_age_us = 100000U) noexcept {
+    constexpr std::uint64_t epoch_us = 1000000ULL;
+    if (timer_start_preparation_us < clock_read_after_us ||
+        minimum_start_lead_us == 0U ||
+        minimum_start_lead_us > epoch_us ||
+        planned.first_alarm_us == 0U ||
+        planned.first_alarm_us > 2ULL * epoch_us) return std::nullopt;
+    const std::uint64_t age = timer_start_preparation_us -
+        clock_read_after_us;
+    if (age > maximum_rebase_age_us) return std::nullopt;
+    std::uint64_t until_epoch = planned.first_alarm_us;
+    // Skip to the next whole PTP second rather than start too late.
+    if (until_epoch <= age + minimum_start_lead_us) until_epoch += epoch_us;
+    if (until_epoch <= age) return std::nullopt;
+    const std::uint64_t remaining = until_epoch - age;
+    if (remaining < minimum_start_lead_us ||
+        remaining > 2ULL * epoch_us) return std::nullopt;
+    return SvSecondBoundaryArm{
+        static_cast<std::uint32_t>(remaining),
+        planned.clock_read_uncertainty_us};
+}
+
 // The clock receiver can prove PTP lock, but it cannot independently prove
 // the SV publisher's sample phase. AUTO must remain 0 until BOTH domains
 // have been qualified. Laboratory overrides remain deliberately separate.
