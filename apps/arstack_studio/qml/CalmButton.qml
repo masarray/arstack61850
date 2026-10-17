@@ -21,17 +21,18 @@ Button {
     scale: down ? 0.988 : 1.0
     Behavior on scale { NumberAnimation { duration: 70; easing.type: Easing.OutCubic } }
 
-    readonly property color activeFill: !enabled ? "#10161d" :
-                                        tone === "success" ? (hovered ? "#1e5c43" : "#194d38") :
-                                        tone === "danger" ? (hovered ? "#523039" : theme.redSoft) :
-                                        tone === "accent" ? (hovered ? "#1d3c5e" : theme.accentSoft) :
-                                        (down ? "#1a2530" : hovered ? theme.raisedHover : "#141c25")
+    readonly property color activeFill: !enabled ? "#10161d" : hovered ? "#e9f2fd" :
+                                        tone === "success" ? "#194d38" :
+                                        tone === "danger" ? theme.redSoft :
+                                        tone === "accent" ? theme.accentSoft : "#141c25"
     readonly property color activeEdge: !enabled ? theme.lineSoft :
+                                        hovered ? "#a6c9f2" :
                                         tone === "success" ? "#347a59" :
                                         tone === "danger" ? "#86434b" :
                                         tone === "accent" ? "#315f8d" :
                                         (activeFocus ? theme.accent : hovered ? "#3a4a5b" : theme.line)
     readonly property color activeText: !enabled ? theme.muted2 :
+                                        hovered ? "#142334" :
                                         tone === "success" ? "#d6f4e6" :
                                         tone === "danger" ? "#ffdce0" :
                                         tone === "accent" ? "#dcebff" : theme.textSoft
