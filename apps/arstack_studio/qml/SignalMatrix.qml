@@ -196,7 +196,7 @@ Rectangle {
                 }
 
                 Layout.fillWidth: true
-                Layout.preferredHeight: matrix.compact ? 40 : 42
+                Layout.preferredHeight: matrix.compact ? 34 : 36
                 color: signalRow.selected ? "#101c27"
                     : (magnitudeField.activeFocus || phaseField.activeFocus) ? "#0f1922"
                     : rowHover.hovered ? "#0d161e" : "transparent"
