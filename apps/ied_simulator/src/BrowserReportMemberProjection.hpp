@@ -257,26 +257,10 @@ inline constexpr int kBrowserReportTreeScalarTextLimit = 160;
         if (name.isEmpty()) name = QStringLiteral("Member %1").arg(
             static_cast<qulonglong>(member.data_set_index + 1U));
 
+        const auto rowIndex = rows.size();
         if (member.value) {
-            const auto rowIndex = rows.size();
             appendValue(appendValue, *member.value, static_cast<int>(i),
                         0U, name, fullReference, shortened);
-            // ReasonForInclusion is optional wire evidence. Keep the exact
-            // bounded reason names only for the verified top-level member.
-            QString reasons;
-            bool ignoredTruncation = false;
-            for (const auto& reason : member.reason_for_inclusion.names) {
-                if (reasons.size() >= kBrowserReportTreeScalarTextLimit) break;
-                if (!reasons.isEmpty()) reasons += QStringLiteral(", ");
-                reasons += boundedReportMetadata(reason,
-                    static_cast<std::size_t>(std::max(0,
-                        kBrowserReportTreeScalarTextLimit - int(reasons.size()))),
-                    ignoredTruncation);
-                if (ignoredTruncation) break;
-            }
-            auto row = rows.at(rowIndex).toMap();
-            row.insert(QStringLiteral("reason"), reasons);
-            rows[rowIndex] = row;
         } else {
             rows.push_back(QVariantMap{
                 {QStringLiteral("memberIndex"), static_cast<int>(i)},
@@ -289,6 +273,24 @@ inline constexpr int kBrowserReportTreeScalarTextLimit = 160;
                 {QStringLiteral("received"), false}
             });
         }
+        // Preserve ReasonForInclusion even for a failed MMS AccessResult.
+        // ReasonForInclusion is optional wire evidence. Keep the exact
+        // bounded reason names only for the verified top-level member.
+        QString reasons;
+        bool ignoredTruncation = false;
+        for (const auto& reason : member.reason_for_inclusion.names) {
+            if (reasons.size() >= kBrowserReportTreeScalarTextLimit) break;
+            if (!reasons.isEmpty()) reasons += QStringLiteral(", ");
+            reasons += boundedReportMetadata(reason,
+                static_cast<std::size_t>(std::max(0,
+                    kBrowserReportTreeScalarTextLimit - int(reasons.size()))),
+                ignoredTruncation);
+            if (ignoredTruncation) break;
+        }
+        auto row = rows.at(rowIndex).toMap();
+        row.insert(QStringLiteral("reason"), reasons);
+        rows[rowIndex] = row;
+
     }
     return rows;
 }
