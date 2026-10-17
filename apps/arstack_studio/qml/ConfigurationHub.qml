@@ -79,7 +79,7 @@ Item {
                     font.weight: Font.DemiBold
                 }
                 Label {
-                    text: "Lab simulation controls · configure one task at a time"
+                    text: "Signals, firmware, PTP and device settings"
                     color: hub.theme.muted
                     font.family: hub.uiFont
                     font.pixelSize: 11
