@@ -137,6 +137,16 @@ jobs:
           Copy-Item 'build-ied-simulator-windows\Release\arstack_ied_simulator.exe' $stage
           Copy-Item 'build-ied-simulator-windows\Release\ariec61850_ied_simulator_server.exe' $stage
           windeployqt --release --qmldir apps/ied_simulator/qml --dir $stage (Join-Path $stage 'arstack_ied_simulator.exe')
+          # Both formats must carry the exact checkout (never infer from version).
+          $sourceSha = (& git rev-parse --verify HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $sourceSha -notmatch '^[0-9a-f]{40}$' -or
+              $sourceSha -cne $env:GITHUB_SHA) {
+            throw "Release source mismatch: checkout=$sourceSha action=$env:GITHUB_SHA"
+          }
+          [System.IO.File]::WriteAllText(
+            (Join-Path $stage 'BUILD_HEAD.txt'),
+            ($sourceSha + [System.Environment]::NewLine),
+            [System.Text.Encoding]::ASCII)
 
       - name: Build portable ZIP and NSIS installer
         shell: pwsh
@@ -163,6 +173,8 @@ jobs:
           -StageDir ./release-stage/ARStack-IEC61850-Workbench
           -BuildDir ./build-ied-simulator-windows/Release
           -InstallerPath ./release-artifacts/ARStack-IEC61850-Workbench-Setup-win64.exe
+          -PortablePath ./release-artifacts/ARStack-IEC61850-Workbench-portable-win64.zip
+          -ExpectedSourceSha ${{ github.sha }}
           -FixturePath ./tests/fixtures/scl/client-workbench.scd
 
       - name: Upload Windows release artifacts

@@ -2,6 +2,8 @@ param(
     [Parameter(Mandatory = $true)][string]$StageDir,
     [Parameter(Mandatory = $true)][string]$BuildDir,
     [Parameter(Mandatory = $true)][string]$InstallerPath,
+    [Parameter(Mandatory = $true)][string]$PortablePath,
+    [Parameter(Mandatory = $true)][string]$ExpectedSourceSha,
     [Parameter(Mandatory = $true)][string]$FixturePath
 )
 
@@ -10,6 +12,15 @@ $ErrorActionPreference = 'Stop'
 function Assert-File([string]$Path, [string]$Label) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw "$Label missing: $Path"
+    }
+}
+
+function Assert-BuildHead([string]$Directory, [string]$Label, [string]$Expected) {
+    $headPath = Join-Path $Directory 'BUILD_HEAD.txt'
+    Assert-File $headPath "$Label source revision marker"
+    $observed = (Get-Content -LiteralPath $headPath -Raw).Trim()
+    if ($observed -cne $Expected) {
+        throw "$Label source mismatch: packaged=$observed expected=$Expected"
     }
 }
 
@@ -23,7 +34,13 @@ function Invoke-Checked([string]$FilePath, [string[]]$ArgumentList, [string]$Lab
 $stage = (Resolve-Path -LiteralPath $StageDir).Path
 $build = (Resolve-Path -LiteralPath $BuildDir).Path
 $installer = (Resolve-Path -LiteralPath $InstallerPath).Path
+$portable = (Resolve-Path -LiteralPath $PortablePath).Path
 $fixture = (Resolve-Path -LiteralPath $FixturePath).Path
+$expectedHead = $ExpectedSourceSha.Trim().ToLowerInvariant()
+if ($expectedHead -notmatch '^[0-9a-f]{40}$') {
+    throw 'Expected source SHA must be a full 40-character git commit hash.'
+}
+Assert-BuildHead $stage 'Staged workbench' $expectedHead
 
 $app = Join-Path $stage 'arstack_ied_simulator.exe'
 $server = Join-Path $stage 'ariec61850_ied_simulator_server.exe'
@@ -37,6 +54,18 @@ Assert-File (Join-Path $stage 'Qt6Quick.dll') 'Qt Quick runtime'
 Assert-File (Join-Path $stage 'platforms\qwindows.dll') 'Qt Windows platform plugin'
 
 Invoke-Checked $app @('--smoke-test') 'Staged package smoke test'
+
+# Verify and launch the actual portable ZIP, not only the pre-package stage.
+$portableDir = Join-Path $env:RUNNER_TEMP 'arstack-iec61850-portable'
+if (Test-Path -LiteralPath $portableDir) {
+    Remove-Item -LiteralPath $portableDir -Recurse -Force
+}
+Expand-Archive -LiteralPath $portable -DestinationPath $portableDir -Force
+Assert-BuildHead $portableDir 'Portable ZIP' $expectedHead
+$portableApp = Join-Path $portableDir 'arstack_ied_simulator.exe'
+Assert-File $portableApp 'Portable workbench executable'
+Assert-File (Join-Path $portableDir 'Qt6Core.dll') 'Portable Qt Core runtime'
+Invoke-Checked $portableApp @('--smoke-test') 'Portable ZIP smoke test'
 
 $hardeningQa = Join-Path $build 'ied_product_hardening_qa.exe'
 $mmsQa = Join-Path $build 'ied_mms_client_workbench_qa.exe'
@@ -73,9 +102,10 @@ Invoke-Checked $installer @('/S', "/D=$installDir") 'Silent NSIS install'
 $installedApp = Join-Path $installDir 'arstack_ied_simulator.exe'
 $installedServer = Join-Path $installDir 'ariec61850_ied_simulator_server.exe'
 Assert-File $installedApp 'Installed workbench executable'
+Assert-BuildHead $installDir 'Installed workbench' $expectedHead
 Assert-File $installedServer 'Installed MMS simulator helper'
 Assert-File (Join-Path $installDir 'Qt6Core.dll') 'Installed Qt Core runtime'
 Assert-File (Join-Path $installDir 'platforms\qwindows.dll') 'Installed Qt Windows platform plugin'
 Invoke-Checked $installedApp @('--smoke-test') 'Installed package smoke test'
 
-Write-Host 'WINDOWS_RELEASE_PACKAGE_PASS staged_smoke=pass installed_smoke=pass qt_runtime=pass helper_server=pass npcap_guidance=pass installer=nsis portable=zip reconnect_cycles=24'
+Write-Host "WINDOWS_RELEASE_PACKAGE_PASS staged_smoke=pass installed_smoke=pass portable_smoke=pass source_sha=$expectedHead qt_runtime=pass helper_server=pass npcap_guidance=pass installer=nsis portable=zip reconnect_cycles=24"
