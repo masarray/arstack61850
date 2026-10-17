@@ -29,9 +29,11 @@ Rectangle {
     // Preserve selection through repeat snapshots of the same report frame;
     // reset only when the actual ReportID/sequence/entry identity changes.
     readonly property string latestReportIdentity: !hasLastReport ? "" : [
-        latestReport.reportId || "", latestReport.sequence || "",
+        latestReport.rcbReference || "", latestReport.reportId || "", latestReport.sequence || "",
         latestReport.subSequence || "", latestReport.entryId || ""
     ].join("|")
+    // A different indexed RCB can legitimately emit the same RptID/SqNum.
+    // Reset member selection when provenance changes, not only wire sequence.
     onLatestReportIdentityChanged: selectedReportMemberIndex = -1
     function selectedReportMemberEvidence() {
         if (!hasLastReport || selectedReportMemberIndex < 0 ||
