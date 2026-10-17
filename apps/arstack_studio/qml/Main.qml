@@ -968,10 +968,31 @@ ApplicationWindow {
                     SplitView.preferredWidth: root.compactLayout ? 700 : 860
                     theme: studioTheme
 
-                    ColumnLayout {
+                    // A narrow Windows viewport cannot display two full
+                    // engineering tables plus timing/quality at once. Scroll
+                    // the injection editor as ONE surface at small heights;
+                    // normal desktop sizes fully expand the two matrices.
+                    ScrollView {
+                        id: injectionScroll
+                        objectName: "studioInjectionScroll"
                         anchors.fill: parent
-                        anchors.margins: root.compactLayout ? 8 : 9
-                        spacing: root.compactLayout ? 4 : 5
+                        clip: true
+                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                        ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                        contentWidth: availableWidth
+                        contentHeight: injectionEditor.y + injectionEditor.height
+                            + (root.compactLayout ? 8 : 9)
+
+                        ColumnLayout {
+                            id: injectionEditor
+                            x: root.compactLayout ? 8 : 9
+                            y: root.compactLayout ? 8 : 9
+                            width: Math.max(1, injectionScroll.availableWidth -
+                                2 * (root.compactLayout ? 8 : 9))
+                            height: Math.max(implicitHeight,
+                                injectionScroll.availableHeight -
+                                2 * (root.compactLayout ? 8 : 9))
+                            spacing: root.compactLayout ? 4 : 5
 
                         RowLayout {
                             Layout.fillWidth: true
@@ -1177,6 +1198,7 @@ ApplicationWindow {
                                 qualityValue: root.activeQuality
                                 compact: root.compactLayout
                             }
+                        }
                         }
                     }
                 }
