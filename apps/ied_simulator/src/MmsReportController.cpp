@@ -533,6 +533,12 @@ ReportUi buildSubscriptionUi(
             const auto projected = arstack::iedsim::projectBrowserReportMembers(
                 frame.values, typedEvidenceBudget);
             map.insert(QStringLiteral("values"), projected.values);
+            // Only the newest retained frame gets a deep, bounded hierarchy.
+            // Older snapshots keep their existing light string previews.
+            // No second decoder, protocol store or UI-owned report mutation.
+            if (ui.reports.isEmpty())
+                map.insert(QStringLiteral("valueTree"),
+                           arstack::iedsim::projectBrowserReportTree(frame.values));
             map.insert(QStringLiteral("valueEvidence"), projected.evidence);
             map.insert(QStringLiteral("valueEvidenceTruncated"), projected.evidenceTruncated);
             map.insert(QStringLiteral("valuesTruncated"), projected.rowsTruncated);
