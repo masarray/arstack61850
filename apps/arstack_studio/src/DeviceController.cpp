@@ -86,6 +86,12 @@ const QRegularExpression kSmpSynchExpression{
 } // namespace
 
 DeviceController::DeviceController(QObject* parent) : QObject(parent) {
+    // Serial status/log bursts must not force QML to rebind a growing text
+    // document for every row. Flush at <=10 Hz; parsing/ACKs are immediate.
+    logUpdateTimer_.setSingleShot(true);
+    logUpdateTimer_.setInterval(100);
+    connect(&logUpdateTimer_, &QTimer::timeout, this,
+            &DeviceController::logTextChanged);
     ptpStartTimer_.setSingleShot(true);
     connect(&ptpStartTimer_, &QTimer::timeout, this, [this] {
         if (!ptpStarting()) return;
@@ -1342,6 +1348,7 @@ bool DeviceController::configurePtp(const QVariantMap& profile) {
 }
 
 void DeviceController::clearLog() {
+    logUpdateTimer_.stop();
     if (logText_.isEmpty()) return;
     logText_.clear();
     emit logTextChanged();
@@ -1450,7 +1457,7 @@ void DeviceController::appendLog(const QString& direction, const QString& line) 
     constexpr qsizetype kMaxChars = 60000;
     constexpr qsizetype kKeepChars = 48000;
     if (logText_.size() > kMaxChars) logText_ = logText_.right(kKeepChars);
-    emit logTextChanged();
+    if (!logUpdateTimer_.isActive()) logUpdateTimer_.start();
 }
 
 void DeviceController::processLine(const QString& rawLine) {
@@ -1535,23 +1542,10 @@ void DeviceController::processLine(const QString& rawLine) {
     if (match.hasMatch()) {
         ptpAvailable_ = true;
         ptpRole_ = match.captured(1).toUpper();
-        ptpRunning_ = match.captured(3) == QStringLiteral("1");
-        ptpDiscipline_ = QStringLiteral("UNLOCKED");
-        ptpSource_ = QStringLiteral("NONE");
-        ptpOffsetNs_ = QStringLiteral("NA");
-        ptpPathDelayNs_ = QStringLiteral("NA");
-        ptpJitterNs_ = QStringLiteral("NA");
-        ptpFrequencyPpb_ = QStringLiteral("0");
-        ptpGlobalTraceable_ = false;
-        ptpMeasuredSmpSynch_ = QStringLiteral("NA");
-        ptpRxAnnounce_ = QStringLiteral("0");
-        ptpRxSync_ = QStringLiteral("0");
-        ptpRxFollowUp_ = QStringLiteral("0");
-        ptpRxPdelay_ = QStringLiteral("0");
-        ptpPdelayRequests_ = QStringLiteral("0");
-        ptpAccepted_ = QStringLiteral("0");
-        ptpRejected_ = QStringLiteral("0");
-        ptpStatus_ = ptpRunning_ ? QStringLiteral("Timing active") : QStringLiteral("Timing stopped");
+        // PROFILE SHOW/role ACK can be an earlier queued readback. It must
+        // never overwrite verified PTP STATUS running state nor clear the
+        // independent PTP2 discipline/clock observations. Startup still
+        // validates this role readback in advancePtpStartup().
         emit ptpStateChanged();
     }
 
