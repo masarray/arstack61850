@@ -1781,6 +1781,9 @@ bool MmsReportController::disableSelected() {
             } else {
                 throw std::runtime_error("No report subscription is active.");
             }
+            // The subscription is no longer actively polled; do not retain
+            // its previous GUI projection as an extra history copy.
+            worker->lastPublishedReportUi.reset();
             if (self) {
                 QMetaObject::invokeMethod(self, [self, generation, ui] {
                     if (!self || self->generation_ != generation) return;
@@ -1851,6 +1854,9 @@ bool MmsReportController::retryCleanup() {
                 throw std::runtime_error(
                     "Cleanup retry has no retained report runtime.");
             }
+            // The subscription is no longer actively polled; do not retain
+            // its previous GUI projection as an extra history copy.
+            worker->lastPublishedReportUi.reset();
             if (self) {
                 QMetaObject::invokeMethod(self, [self, generation, ui] {
                     if (!self || self->generation_ != generation) return;
