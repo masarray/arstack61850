@@ -644,6 +644,14 @@ private:
             QStringLiteral("Ib"), 1.0, -120.0, 0U, 1000.0, 100.0, 50.0);
         const QString ic = DeviceController::formatSignalCommand(
             QStringLiteral("Ic"), 1.0, 120.0, 0U, 1000.0, 100.0, 50.0);
+        // The operator's non-zero phasor settings must survive milli-degree
+        // wire encoding; never substitute the balanced 0/-120/+120 preset.
+        const QString iaShifted = DeviceController::formatSignalCommand(
+            QStringLiteral("Ia"), 1.0, -30.0, 0U, 1000.0, 100.0, 50.0);
+        const QString ibShifted = DeviceController::formatSignalCommand(
+            QStringLiteral("Ib"), 1.0, -150.0, 0U, 1000.0, 100.0, 50.0);
+        const QString icShifted = DeviceController::formatSignalCommand(
+            QStringLiteral("Ic"), 1.0, 90.0, 0U, 1000.0, 100.0, 50.0);
         const QString badId = DeviceController::formatSignalCommand(
             QStringLiteral("IX"), 1.0, 0.0, 0U, 1000.0, 100.0, 50.0);
         const QString overflow = DeviceController::formatSignalCommand(
@@ -653,6 +661,9 @@ private:
         return ia == QStringLiteral("SET IA 1000 0 0") &&
                ib == QStringLiteral("SET IB 1000 -120000 0") &&
                ic == QStringLiteral("SET IC 1000 120000 0") &&
+               iaShifted == QStringLiteral("SET IA 1000 -30000 0") &&
+               ibShifted == QStringLiteral("SET IB 1000 -150000 0") &&
+               icShifted == QStringLiteral("SET IC 1000 90000 0") &&
                badId.isEmpty() && overflow.isEmpty() &&
                dcNegative == QStringLiteral("SET IA -1000 0 0");
     }
