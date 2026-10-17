@@ -54,8 +54,9 @@ def main() -> None:
             and "tray.session.requestSmpSynch([\"AUTO\", \"0\", \"1\", \"2\"][requested])" in tray
             and "if (!tray.boardOnline)" in tray,
             "main PTP/smpSynch must restore device-owned state after user intent")
-    require("SIMULATED metadata" in tray and "sample phase needs independent verification" in tray,
-            "SV simulation must never masquerade as independently proven lock")
+    require("SIMULATED FLAG" in expert and "MEASURED SYNC FLAG" in expert
+            and "sample-phase evidence independently" in expert,
+            "Advanced must retain truthful SV timing evidence without noisy Main disclaimers")
     require(matrix.count("Qt.Key_Menu") == 2 and matrix.count("Qt.Key_F10") == 2
             and matrix.count("signalRow.openFieldMenu(") == 4,
             "both magnitude and angle menus must support mouse and keyboard")
