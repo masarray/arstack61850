@@ -243,6 +243,8 @@ for token in (
     "detailScroll.contentItem.contentY = 0",
     "property bool triggerExpanded: false",
     "property bool optionalExpanded: false",
+    "property bool informationExpanded: false",
+    "property bool eventsExpanded: false",
     "function selectedReportMemberDetails()",
     "Selected member · wire fields",
     "Positional · not SCL-labelled",
