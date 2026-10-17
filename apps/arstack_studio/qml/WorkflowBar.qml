@@ -163,15 +163,11 @@ SurfacePanel {
                 if (!progressDialog.opened) Qt.callLater(progressDialog.open)
                 return
             }
-            if (smartSession.firmwareInstallRequired && !ribbon.installPromptDeferred &&
-                    !installDialog.opened && !progressDialog.opened) {
-                Qt.callLater(installDialog.open)
-                return
-            }
-            if (smartSession.firmwareUpdateRequired && !ribbon.updatePromptDeferred &&
-                    !updateDialog.opened && !progressDialog.opened) {
-                Qt.callLater(updateDialog.open)
-            }
+            // Firmware readiness is shown in the ribbon. Do not interrupt
+            // connection/discovery with unsolicited setup dialogs. If the
+            // operator presses Start with an incompatible/unprovisioned board,
+            // requestStart() offers the necessary action exactly then.
+            // Explicit firmware installation still owns its progress UI.
         }
         function onFirmwareUpdateFinished(success) {
             if (progressDialog.opened) progressDialog.close()
@@ -189,7 +185,10 @@ SurfacePanel {
                     : "Studio could not verify the firmware installation. Open Advanced > Firmware > Copy diagnostics."
                 controller.showMessage("Firmware installation was not verified.", true)
             }
-            Qt.callLater(resultDialog.open)
+            // Installation completion is a normal successful transition,
+            // not another mandatory acknowledgment dialog. Retain full
+            // diagnostics and a modal only when verification failed.
+            if (!success) Qt.callLater(resultDialog.open)
         }
     }
 

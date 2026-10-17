@@ -32,7 +32,7 @@ Rectangle {
     readonly property bool ptpReady: Boolean(session && device && device.deviceVerified
                                                && device.ptpAvailable && !session.updatingFirmware)
     readonly property string stateText: !boardOnline
-        ? (offlinePtpPreview ? "PTP PLAN · OFFLINE" : "OFFLINE LAB")
+        ? (offlinePtpPreview ? "PTP PREVIEW" : "NO DEVICE")
         : !device.ptpAvailable ? "PTP UNAVAILABLE"
         : busy ? (device.ptpStatus.indexOf("unverified") !== -1 ? "UNVERIFIED" : "PENDING")
         : !device.ptpRunning ? "PTP OFF"
@@ -87,7 +87,7 @@ Rectangle {
                     if (!tray.boardOnline) {
                         offlineSettings.previewPtp = wantsRunning
                         if (tray.controller)
-                            tray.controller.showMessage("Offline PTP plan only — no network packets or clock discipline.", false)
+                            tray.controller.showMessage("PTP preview only. Connect ESP32-P4 to transmit.", false)
                     } else if (wantsRunning) {
                         if (tray.controller) tray.controller.startPtpRole(tray.roleValues[tray.selectedRoleIndex])
                     } else if (tray.session && !tray.session.requestStopPtp() && tray.controller) {

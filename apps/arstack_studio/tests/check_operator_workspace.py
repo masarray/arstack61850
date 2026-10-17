@@ -63,6 +63,18 @@ def main() -> None:
     require("1.75" in (STUDIO.parent.parent / ".github/workflows/arstack-studio-windows-lifecycle.yml").read_text(encoding="utf-8"),
             "reuse Windows executable for 100%, 150% and 175% DPI acceptance")
     workflow = source("WorkflowBar.qml")
+    require("Qt.callLater(installDialog.open)" not in workflow
+            and "Qt.callLater(updateDialog.open)" not in workflow
+            and "if (!success) Qt.callLater(resultDialog.open)" in workflow
+            and "installDialog.open()" in workflow
+            and "updateDialog.open()" in workflow,
+            "connection must not pop setup/update dialogs; Start may offer firmware repair")
+    require("provide lab PTP" not in expert
+            and "lab simulation" not in expert
+            and "Local flag (manual)" in expert
+            and 'SV sample synchronization' in expert
+            and '"OFFLINE LAB"' not in timing_ui,
+            "PTP operator controls must use direct understandable language")
     firmware_ui = source("FirmwarePanel.qml")
     timing_ui = source("StudioTimingTray.qml")
     ribbon = source("ModernRibbon.qml")
