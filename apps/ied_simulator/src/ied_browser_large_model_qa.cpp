@@ -507,8 +507,10 @@ int main(int argc, char** argv) {
                 })
             })
         });
-        const auto typeIndex = arstack::iedsim::verified_report_detail::indexTypes(
-            {evidence});
+        // Index pointers borrow the discovery evidence: keep the owner alive.
+        const std::vector<mms::MmsVariableTypeEvidence> verifiedEvidence{evidence};
+        const auto typeIndex =
+            arstack::iedsim::verified_report_detail::indexTypes(verifiedEvidence);
         mms::MmsReportValue reportMember;
         reportMember.member.emplace();
         reportMember.member->object_name =
@@ -551,8 +553,10 @@ int main(int argc, char** argv) {
         auto stale = reportMember;
         stale.member->object_name =
             mms::MmsObjectName::domain_specific("LD_WRONG", "XCBR1$ST$Pos");
-        const auto ambiguous = arstack::iedsim::verified_report_detail::indexTypes(
-            {evidence, evidence});
+        const std::vector<mms::MmsVariableTypeEvidence> duplicatedEvidence{
+            evidence, evidence};
+        const auto ambiguous =
+            arstack::iedsim::verified_report_detail::indexTypes(duplicatedEvidence);
         if (!arstack::iedsim::verified_report_detail::project(mismatch, typeIndex).isEmpty() ||
             !arstack::iedsim::verified_report_detail::project(stale, typeIndex).isEmpty() ||
             !arstack::iedsim::verified_report_detail::project(reportMember, ambiguous).isEmpty() ||
