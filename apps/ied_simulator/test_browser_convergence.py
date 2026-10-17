@@ -261,6 +261,9 @@ offline_delegate = report_inspector.index('model: !root.hasLastReport', received
 member_tree = report_inspector[received_delegate:offline_delegate]
 for token in (
     "DataRow {",
+    "Loader {",
+    "active: root.selectedReportMemberIndex === receivedMember.index",
+    "sourceComponent: Component {",
     "index: receivedMember.index",
     "modelData: receivedMember.modelData",
     "BrowserEngineeringEvidence {",
