@@ -28,11 +28,16 @@ def check(workflow: str, verifier: str, installer: str, collector: str) -> None:
     require(workflow, "test_f4_release_contract.py", "static contract gate")
     require(workflow, "-PortablePath ./release-artifacts/ARStack-IEC61850-Workbench-portable-win64.zip",
             "real portable ZIP verified")
-    require(workflow, "-ExpectedSourceSha ${{ github.sha }}", "exact GitHub SHA bound")
+    require(workflow, "F4_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}",
+            "PR event must select true head SHA")
+    if workflow.count("ref: ${{ env.F4_SOURCE_SHA }}") != 2:
+        failures.append("both Linux and Windows checkouts must use real PR head")
+    require(workflow, "-ExpectedSourceSha ${{ env.F4_SOURCE_SHA }}", "exact source SHA passed to verifier")
     require(workflow, "'BUILD_HEAD.txt'", "source SHA staged and copied into kit")
     require(workflow, "git rev-parse --verify HEAD", "git checkout SHA checked")
-    require(workflow, "$sourceSha -cne $env:GITHUB_SHA", "fail closed on wrong checkout")
-    require(workflow, "$stageHead -cne $env:GITHUB_SHA", "fail closed on stale kit SHA")
+    require(workflow, "$sourceSha -cne $env:F4_SOURCE_SHA", "fail closed on wrong checkout")
+    require(workflow, "$stageHead -cne $env:F4_SOURCE_SHA", "fail closed on stale kit SHA")
+    require(workflow, "headSha = $env:F4_SOURCE_SHA", "manifest uses source SHA")
     require(workflow, "/DAPP_ICON=$icon", "mandatory NSIS icon supplied")
     require(workflow, "MAKENSIS_PATH", "NSIS preflight result reused")
     require(workflow, "F4_BUILD_MANIFEST.json", "kit manifest retained")
@@ -56,6 +61,7 @@ def check(workflow: str, verifier: str, installer: str, collector: str) -> None:
     require(collector, "$displayFilter = \"ip.addr==$TargetIp && tcp.port==$Port\"", "verified packets belong to target")
     require(collector, "if ($packetCount -eq 0)", "empty target trace fails")
     require(collector, "tshark.exe required", "tshark evidence is mandatory")
+    require(collector, '$_ -match "^\\s*$InterfaceId\\."', "valid numbered dumpcap interface regex")
 
     if failures:
         raise RuntimeError("F4_RELEASE_CONTRACT_FAIL " + ", ".join(failures))
@@ -70,9 +76,11 @@ def main() -> None:
 
     # Mutation controls prove that omissions in either source are rejected.
     for source, needle in (
-        ("f4", "-ExpectedSourceSha ${{ github.sha }}"),
+        ("f4", "-ExpectedSourceSha ${{ env.F4_SOURCE_SHA }}"),
+        ("f4", "F4_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}"),
+        ("f4", "ref: ${{ env.F4_SOURCE_SHA }}"),
         ("f4", "/DAPP_ICON=$icon"),
-        ("f4", "$stageHead -cne $env:GITHUB_SHA"),
+        ("f4", "$stageHead -cne $env:F4_SOURCE_SHA"),
         ("verify", "Assert-BuildHead $installDir"),
         ("verify", "Portable ZIP smoke test"),
         ("nsi", "!ifndef APP_ICON"),
