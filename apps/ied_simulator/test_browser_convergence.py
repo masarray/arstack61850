@@ -284,6 +284,45 @@ for token in (
 if report_inspector.count("BrowserEngineeringEvidence {") != 1:
     raise SystemExit("BROWSER_REPORT_INLINE_TREE_FAIL duplicate or detached q/t inspector")
 
+# P0 exact wire-schema semantics: names may only come from successful
+# GetVariableAccessAttributes TypeSpecification on the same MMS association.
+verified_types = (
+    workspace_path.parent.parent / "src" / "BrowserVerifiedReportTypes.hpp"
+).read_text(encoding="utf-8")
+for token in (
+    "indexTypes(",
+    "MmsObjectNameKind::domain_specific",
+    "findSchema(",
+    "if (!validate(*type, *member.value, leaves)",
+    "type.children.size() != value.children().size()",
+    "child.name.empty()",
+    "matchingKind(",
+    "decodeEngineeringEvidence(relative, value)",
+    "kMaximumTypedLeaves = 64U",
+    "kMaximumTypeDepth = 6U",
+):
+    if token not in verified_types:
+        raise SystemExit("BROWSER_REPORT_P0_SCHEMA_FAIL missing=" + token)
+for token in (
+    "primeSelectedReportTypes(",
+    "attemptedTypeRoots",
+    "attempts >= 8U",
+    "MmsVariableAccessAttributesRequest request",
+    "indexTypes(",
+    "buildSubscriptionUi(",
+    "includeWireDetails, verifiedTypes",
+):
+    if token not in report_controller:
+        raise SystemExit("BROWSER_REPORT_P0_BINDING_FAIL missing=" + token)
+for token in (
+    "function selectedReportMemberTypeVerified()",
+    "Verified MMS type · exact field order",
+    "modelData.engineeringEvidence || ({})",
+    "Positional · not SCL-labelled",
+):
+    if token not in report_inspector:
+        raise SystemExit("BROWSER_REPORT_P0_INLINE_FAIL missing=" + token)
+
 value_preview = (workspace_path.parent.parent / "src" / "BrowserBoundedMmsPreview.hpp").read_text(encoding="utf-8")
 for token in [
     'BoundedMmsPreview',
