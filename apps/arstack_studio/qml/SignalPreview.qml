@@ -532,13 +532,6 @@ SurfacePanel {
             }
         }
 
-        Label {
-            Layout.fillWidth: true
-            text: "Generated setpoint · not independent on-wire proof"
-            horizontalAlignment: Text.AlignRight
-            color: preview.theme.muted
-            font.family: preview.uiFont
-            font.pixelSize: 8
-        }
+
     }
 }

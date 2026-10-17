@@ -47,8 +47,8 @@ QtObject {
     readonly property int controlRadius: 7
     // Shared Material-inspired desktop surface/interaction tokens.
     readonly property color menuSurface: "#18222e"
-    readonly property color menuHover: "#253b51"
-    readonly property int menuRadius: 11
+    readonly property color menuHover: "#314a63"
+    readonly property int menuRadius: 7
     readonly property int menuItemHeight: 33
     readonly property int spaceXs: 4
     readonly property int spaceSm: 8

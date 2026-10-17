@@ -5,8 +5,8 @@ import QtQuick.Controls
 MenuSeparator {
     id: separator
     property var theme
-    topPadding: 3
-    bottomPadding: 3
+    topPadding: 2
+    bottomPadding: 2
     leftPadding: 10
     rightPadding: 10
     contentItem: Rectangle {

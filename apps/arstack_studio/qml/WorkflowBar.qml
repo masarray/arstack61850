@@ -15,6 +15,40 @@ SurfacePanel {
     property string uiFont: "Inter"
     property string monoFont: "Inter"
     property bool compact: false
+    property bool startQueued: false
+    Timer {
+        id: startWatchdog
+        interval: 8000
+        repeat: false
+        onTriggered: {
+            if (!ribbon.startQueued) return
+            ribbon.startQueued = false
+            controller.pendingApply = true
+            controller.showMessage("START not confirmed by ESP32-P4. Check board status.", true)
+        }
+    }
+    Connections {
+        target: ribbon.device
+        function onRunningChanged() {
+            if (ribbon.device.running) {
+                ribbon.startQueued = false
+                startWatchdog.stop()
+                controller.pendingApply = false
+            }
+        }
+        function onLastErrorChanged() {
+            if (!ribbon.startQueued) return
+            ribbon.startQueued = false
+            startWatchdog.stop()
+            controller.pendingApply = true
+        }
+        function onDeviceVerifiedChanged() {
+            if (ribbon.device.deviceVerified) return
+            ribbon.startQueued = false
+            startWatchdog.stop()
+            controller.pendingApply = true
+        }
+    }
     property bool updatePromptDeferred: false
     property bool installPromptDeferred: false
     property bool firmwareResultSuccess: false
@@ -117,7 +151,8 @@ SurfacePanel {
             // overwrite a board with a restored/offline local draft.
             controller.profileDirty = false
             controller.pendingApply = true
-            controller.showMessage("Board ready. Review your local values, then Apply to board.", false)
+            // Fast path: the next START uploads the local setpoints first.
+            // No auto-transmit on device discovery/reconnection.
         }
         function onStateChanged() {
             if (ribbon.firmwareGateActive)
@@ -222,7 +257,7 @@ SurfacePanel {
     }
 
     function requestStart() {
-        if (ribbon.injectionRunning) return
+        if (ribbon.injectionRunning || ribbon.startQueued) return
         if (smartSession.firmwareInstallRequired) {
             ribbon.installPromptDeferred = false
             installDialog.open()
@@ -248,12 +283,18 @@ SurfacePanel {
             controller.showMessage(ribbon.startReason(), false)
             return
         }
-        if (controller.pendingApply) {
-            controller.showMessage("Apply the local scenario before starting physical SMV output.", true)
-            return
+        const accepted = controller.pendingApply
+            ? smartSession.requestStartWithScenario(controller.startScenarioSnapshot())
+            : smartSession.requestStart()
+        if (!accepted) {
+            controller.pendingApply = true
+            controller.showMessage("Start rejected. Check device status.", true)
+        } else {
+            // A successful queue call is NOT the board START ACK.
+            // Keep the draft dirty until RUNNING evidence arrives.
+            ribbon.startQueued = true
+            startWatchdog.restart()
         }
-        if (!smartSession.requestStart())
-            controller.showMessage(smartSession.statusText, true)
     }
 
     function requestStop() {

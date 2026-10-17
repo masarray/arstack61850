@@ -302,6 +302,11 @@ bool SmartSessionController::requestStart() {
     return device_->start();
 }
 
+bool SmartSessionController::requestStartWithScenario(const QVariantMap& scenario) {
+    if (!startReady_ || !deviceControlAvailable() || device_ == nullptr || device_->running()) return false;
+    return device_->startWithScenario(scenario);
+}
+
 bool SmartSessionController::requestStop() {
     if (device_ == nullptr) return false;
     if (!device_->running()) return true;

@@ -54,8 +54,9 @@ def main() -> None:
             and "tray.session.requestSmpSynch([\"AUTO\", \"0\", \"1\", \"2\"][requested])" in tray
             and "if (!tray.boardOnline)" in tray,
             "main PTP/smpSynch must restore device-owned state after user intent")
-    require("SIMULATED metadata" in tray and "sample phase needs independent verification" in tray,
-            "SV simulation must never masquerade as independently proven lock")
+    require("SIMULATED FLAG" in expert and "MEASURED SYNC FLAG" in expert
+            and "sample-phase evidence independently" in expert,
+            "Advanced must retain truthful SV timing evidence without noisy Main disclaimers")
     require(matrix.count("Qt.Key_Menu") == 2 and matrix.count("Qt.Key_F10") == 2
             and matrix.count("signalRow.openFieldMenu(") == 4,
             "both magnitude and angle menus must support mouse and keyboard")
@@ -65,8 +66,10 @@ def main() -> None:
     ribbon = source("ModernRibbon.qml")
     cmake_icons = (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8")
     require("scenarioSnapshot()" in main_qml and "restoreLocalScenario()" in main_qml
-            and "requestApplyDraft()" in main_qml and "offlinePreviewRunning" in main_qml,
-            "offline-first scenario needs persistence, explicit Apply and non-wire preview")
+            and "startScenarioSnapshot()" in main_qml and "offlinePreviewRunning" in main_qml,
+            "offline-first scenario must persist and support one-click Start")
+    require("Apply to board" not in main_qml and "requestApplyDraft()" not in main_qml,
+            "operator UI must not expose a redundant Apply-to-board action")
     require('saveScenarioTimer.stop()' in main_qml
             and 'scenarioSettings.lastScenario = JSON.stringify(root.scenarioSnapshot())' in main_qml,
             "closing immediately after an edit must flush the local draft before teardown")
@@ -75,12 +78,19 @@ def main() -> None:
             and 'typeof row[1] !== "number"' in main_qml
             and 'typeof row[3] !== "number"' in main_qml,
             "saved scenario restoration must reject JSON null/string coercion and nonfinite values")
+    require('id: voltageMatrix\n                                enabled: !workflowBar.startQueued' in main_qml
+            and 'id: currentMatrix\n                                enabled: !workflowBar.startQueued' in main_qml
+            and 'enabled: !workflowBar.startQueued; onActivated: root.balanced()' in main_qml
+            and 'enabled: !workflowBar.startQueued; onActivated: root.zeroAll()' in main_qml,
+            "scenario editors and shortcuts must be frozen during a pending START snapshot")
     require("controller.pendingApply = true" in workflow
-            and "Apply the local scenario before starting" in workflow
-            and "controller.applyAllSignals()" not in workflow,
-            "reconnect must not silently transmit an offline draft")
-    require("offline-ptp-lab" in tray and "no PTP/SV packets sent" in tray,
-            "PTP/smpSynch offline controls must be plans only")
+            and "requestStartWithScenario(controller.startScenarioSnapshot())" in workflow
+            and "controller.applyAllSignals()" not in workflow
+            and "startWatchdog" in workflow and "onRunningChanged()" in workflow,
+            "reconnect must not auto-transmit, but one-click Start must stage a bounded scenario")
+    require("offline-ptp-lab" in tray and "if (!tray.boardOnline)" in tray
+            and "no network packets or clock discipline" in tray,
+            "PTP/smpSynch offline controls must be plans only, not device writes")
     require("assets/material/smv_injector.svg" in cmake_icons
             and "assets/MATERIAL_ICONS_LICENSE.txt" in cmake_icons
             and "../assets/material/smv_injector.svg" in ribbon,
@@ -89,6 +99,21 @@ def main() -> None:
             and "Equal magnitudes A/B/C" in matrix
             and "Balance angles · 120°" in matrix,
             "context actions must stay compact, descriptive and grouped")
+    assert "implicitHeight: 65" in source("RibbonAction.qml")
+    assert 'hovered ? "#142334"' in source("RibbonAction.qml")
+    assert "width: 212" in menu and "commandRows * 29" in menu
+    assert "text: \"Generated setpoint · not independent on-wire proof\"" not in preview
+    assert "No ESP32 board detected · Preview mode only" in main_qml
+    assert "Layout.preferredHeight: 78" in main_qml
+    device_src = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
+    session_src = (STUDIO / "src/SmartSessionController.cpp").read_text(encoding="utf-8")
+    require('commands << QStringLiteral("START")' in device_src
+            and "sendCommandBatch(commands, false, true)" in device_src
+            and "formatSignalCommand(ids.at(i)" in device_src
+            and "requestStartWithScenario(const QVariantMap& scenario)" in session_src,
+            "one-click physical Start must validate and exclusively enqueue all SETs before START")
+    require("assets/material_dark/play_arrow.svg" in cmake,
+            "light-hover Material icons must have bundled dark variants")
     require(matrix.count("StudioActionMenu {") == 2
             and "id: magnitudeMenu" in matrix and "id: phaseMenu" in matrix
             and "popupType: Popup.Item" in menu,
