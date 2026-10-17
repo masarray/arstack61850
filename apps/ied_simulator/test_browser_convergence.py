@@ -228,6 +228,8 @@ for token in (
     'kBrowserReportTreeScalarTextLimit = 160',
     'projectBrowserReportTree(',
     'bool* nestedFieldsTruncated = nullptr',
+    'bool* typedEvidenceOmitted = nullptr',
+    'if (shortened && typedEvidenceOmitted && member.value',
     'QStringLiteral("Field %1")',
     'decodeEngineeringEvidence(fullReference, value)',
     'depth == 0U && !isContainer && !fullReferenceShortened',
@@ -243,6 +245,7 @@ for token in (
     'if (ui.reports.isEmpty()) {',
     'QStringLiteral("valueTree")',
     'QStringLiteral("treeNestedTruncated")',
+    'QStringLiteral("treeTypedEvidenceOmitted")',
     'projectBrowserReportTree(',
 ):
     if token not in report_controller:
@@ -261,6 +264,7 @@ for token in (
     'property bool informationExpanded: false',
     'onSelectedRcbRowChanged:',
     'root.latestReport.treeNestedTruncated === true',
+    'root.latestReport.treeTypedEvidenceOmitted === true',
     'root.latestReport.valueEvidenceTruncated === true',
 ):
     if token not in report_inspector:
