@@ -140,6 +140,7 @@ Rectangle {
                     theme: matrix.theme
                     uiFont: matrix.uiFont
                     title: "Magnitude · " + signalRow.sid
+                    commandRows: 4
                     Action {
                         text: "Zero · 0"
                         icon.source: Qt.resolvedUrl("../assets/material/block.svg")
@@ -170,6 +171,7 @@ Rectangle {
                     theme: matrix.theme
                     uiFont: matrix.uiFont
                     title: "Angle · " + signalRow.sid
+                    commandRows: 3
                     Action {
                         text: "Zero angle · 0°"
                         icon.source: Qt.resolvedUrl("../assets/material/block.svg")
@@ -238,8 +240,7 @@ Rectangle {
                         Layout.preferredWidth: 25
                         Layout.alignment: Qt.AlignVCenter
                         checked: signalRow.channelEnabled
-                        ToolTip.visible: hovered
-                        ToolTip.text: checked ? "Channel enabled" : "Channel disabled"
+                        ToolTip.visible: false
                         onToggled: {
                             matrix.sourceModel.setProperty(signalRow.rowIndex, "enabled", checked)
                             matrix.controller.selectSignal(matrix.groupIndex, signalRow.rowIndex)
@@ -267,9 +268,9 @@ Rectangle {
 
                     NumericField {
                         id: magnitudeField
-                        ToolTip.visible: hovered && !activeFocus
+                        ToolTip.visible: hovered && !activeFocus && !magnitudeMenu.visible && !phaseMenu.visible
                         ToolTip.delay: 650
-                        ToolTip.text: "Right-click or Shift+F10: magnitude presets and Equal ABC"
+                        ToolTip.text: "Right-click · Shift+F10"
                         MouseArea {
                             anchors.fill: parent
                             z: 5
@@ -329,9 +330,9 @@ Rectangle {
 
                     NumericField {
                         id: phaseField
-                        ToolTip.visible: hovered && !activeFocus
+                        ToolTip.visible: hovered && !activeFocus && !magnitudeMenu.visible && !phaseMenu.visible
                         ToolTip.delay: 650
-                        ToolTip.text: "Right-click or Shift+F10: Equal/Balance ABC angles"
+                        ToolTip.text: "Right-click · Shift+F10"
                         MouseArea {
                             anchors.fill: parent
                             z: 5

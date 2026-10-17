@@ -165,6 +165,7 @@ public:
     // S7: QML submits operator intent only. The supervisor owns every gate that
     // can mutate device connection, output, live values, profile state or PTP.
     Q_INVOKABLE bool requestStart();
+    Q_INVOKABLE bool requestStartWithScenario(const QVariantMap& scenario);
     Q_INVOKABLE bool requestStop();
     Q_INVOKABLE bool requestConnect();
     Q_INVOKABLE void requestRefreshPorts();

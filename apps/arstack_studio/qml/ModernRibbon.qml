@@ -14,7 +14,7 @@ Rectangle {
     property string uiFont: "Inter"
     property bool compact: false
 
-    implicitHeight: 52
+    implicitHeight: 76
     radius: 0
     color: "transparent"
     border.width: 0
@@ -47,7 +47,7 @@ Rectangle {
         spacing: 6
 
         RowLayout {
-            Layout.preferredWidth: bar.compact ? 112 : 132
+            Layout.preferredWidth: bar.compact ? 105 : 124
             Layout.alignment: Qt.AlignVCenter
             spacing: 8
 
@@ -80,20 +80,18 @@ Rectangle {
             }
         }
 
-        Rectangle { width: 1; height: 24; color: bar.theme.lineSoft }
+        Rectangle { width: 1; height: 42; color: bar.theme.lineSoft }
 
         RibbonAction {
             theme: bar.theme
             uiFont: bar.uiFont
-            text: !bar.device.deviceVerified ? "Preview" : "Start"
+            text: bar.workflow.startQueued ? "Starting" : "Start"
             tone: !bar.device.deviceVerified ? "accent"
                 : bar.session.startReady ? "success" : "neutral"
             iconSource: Qt.resolvedUrl("../assets/material/play_arrow.svg")
-            enabled: !bar.workflow.injectionRunning && !bar.controller.offlinePreviewRunning
+            enabled: !bar.workflow.injectionRunning && !bar.workflow.startQueued && !bar.controller.offlinePreviewRunning
                 && !bar.session.updatingFirmware && !bar.session.updateNeedsBootloaderHelp
-            toolTipText: !bar.device.deviceVerified
-                ? "Animate local setpoint preview only; no SV frames are transmitted."
-                : bar.workflow.startReason()
+            toolTipText: "Start"
             onClicked: {
                 if (!bar.device.deviceVerified) {
                     bar.controller.offlinePreviewRunning = true
@@ -110,14 +108,14 @@ Rectangle {
             iconSource: Qt.resolvedUrl("../assets/material/stop.svg")
             enabled: (bar.workflow.injectionRunning || bar.controller.offlinePreviewRunning)
                 && !bar.session.updatingFirmware
-            toolTipText: bar.device.deviceVerified ? "Stop Sampled Values output" : "Stop local preview only"
+            toolTipText: "Stop"
             onClicked: {
                 if (!bar.device.deviceVerified) bar.controller.offlinePreviewRunning = false
                 else bar.workflow.requestStop()
             }
         }
 
-        Rectangle { width: 1; height: 24; color: bar.theme.lineSoft }
+        Rectangle { width: 1; height: 42; color: bar.theme.lineSoft }
 
         RibbonAction {
             theme: bar.theme
@@ -194,19 +192,17 @@ Rectangle {
         RibbonAction {
             theme: bar.theme
             uiFont: bar.uiFont
-            text: bar.compact ? "" : "Advanced"
-            iconOnly: bar.compact
+            text: "Advanced"
+            iconOnly: false
             iconSource: Qt.resolvedUrl("../assets/material/settings.svg")
             tone: "neutral"
-            toolTipText: bar.session.firmwareUpdateAvailable
-                ? "Advanced controls · optional firmware update available"
-                : "Advanced device, firmware, waveform and timing controls"
+            toolTipText: "Advanced"
             onClicked: bar.controller.openConfiguration()
         }
 
         Rectangle {
-            Layout.preferredWidth: bar.compact ? 92 : 112
-            Layout.preferredHeight: 30
+            Layout.preferredWidth: bar.compact ? 84 : 108
+            Layout.preferredHeight: 36
             Layout.alignment: Qt.AlignVCenter
             radius: 15
             color: "#0a1016"

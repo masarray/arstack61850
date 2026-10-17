@@ -211,6 +211,8 @@ public:
     void disconnectPort();
     bool sendShow();
     virtual bool start();
+    // Single validated, bounded FIFO transaction. START is always last.
+    bool startWithScenario(const QVariantMap& scenario);
     bool stop();
     virtual bool zero();
     virtual bool setFrequency(double hz);
@@ -288,7 +290,7 @@ signals:
 
 protected:
     bool sendQuietCommand(const QString& command);
-    bool sendCommandBatch(const QStringList& commands, bool quiet = false);
+    bool sendCommandBatch(const QStringList& commands, bool quiet = false, bool exclusive = false);
     // One canonical SET encoder reused by single edits and the coalesced
     // multi-channel flush. Empty result = invalid; never send partial batch.
     static QString formatSignalCommand(const QString& signalId, double magnitude,

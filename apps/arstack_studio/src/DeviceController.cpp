@@ -627,6 +627,79 @@ void DeviceController::handlePortClosed(const QString& portName) {
 
 bool DeviceController::sendShow() { return sendCommand(QStringLiteral("SHOW")); }
 bool DeviceController::start() { return sendCommand(QStringLiteral("START")); }
+
+bool DeviceController::startWithScenario(const QVariantMap& scenario) {
+    if (!deviceVerified_ || running_) return false;
+    bool hzOk = false, currentScaleOk = false, voltageScaleOk = false;
+    const double hz = scenario.value(QStringLiteral("hz")).toDouble(&hzOk);
+    const double currentScale = scenario.value(QStringLiteral("currentScale")).toDouble(&currentScaleOk);
+    const double voltageScale = scenario.value(QStringLiteral("voltageScale")).toDouble(&voltageScaleOk);
+    if (!hzOk || !std::isfinite(hz) || hz < 0.0 || hz > 1000.0 ||
+        !currentScaleOk || !voltageScaleOk || !finitePositive(currentScale) ||
+        !finitePositive(voltageScale)) {
+        setError(QStringLiteral("Invalid frequency or engineering scale; START refused."));
+        return false;
+    }
+    const auto current = scenario.value(QStringLiteral("current")).toList();
+    const auto voltage = scenario.value(QStringLiteral("voltage")).toList();
+    if (current.size() != 4 || voltage.size() != 4) {
+        setError(QStringLiteral("START requires exactly four current and four voltage channels."));
+        return false;
+    }
+    QStringList commands;
+    commands.reserve(20);
+    commands << QStringLiteral("FREQ %1").arg(std::llround(hz * 1000.0));
+    static const QStringList ids{QStringLiteral("IA"), QStringLiteral("IB"),
+        QStringLiteral("IC"), QStringLiteral("IN"), QStringLiteral("UA"),
+        QStringLiteral("UB"), QStringLiteral("UC"), QStringLiteral("UN")};
+    for (int i = 0; i < 8; ++i) {
+        const QVariantList row = (i < 4 ? current.at(i) : voltage.at(i - 4)).toList();
+        if (row.size() != 4 || row.at(2).metaType().id() != QMetaType::Bool) {
+            setError(QStringLiteral("Invalid channel state; START refused."));
+            return false;
+        }
+        bool magOk = false, phaseOk = false, qualityOk = false;
+        const double magnitude = row.at(0).toDouble(&magOk);
+        const double phase = row.at(1).toDouble(&phaseOk);
+        const qulonglong quality = row.at(3).toULongLong(&qualityOk);
+        if (!magOk || !phaseOk || !qualityOk || quality > std::numeric_limits<quint32>::max()) {
+            setError(QStringLiteral("Invalid channel data; START refused."));
+            return false;
+        }
+        const QString command = formatSignalCommand(ids.at(i), magnitude, phase,
+            static_cast<quint32>(quality), currentScale, voltageScale, hz);
+        if (command.isEmpty()) {
+            setError(QStringLiteral("Out-of-range setpoint; START refused."));
+            return false;
+        }
+        commands << command;
+        commands << QStringLiteral("ENABLE %1 %2").arg(ids.at(i)).arg(row.at(2).toBool() ? 1 : 0);
+    }
+    const QVariantMap shape = scenario.value(QStringLiteral("ct")).toMap();
+    bool dcOk = false, harmonicOk = false, clipOk = false, orderOk = false;
+    const double dc = shape.value(QStringLiteral("dc")).toDouble(&dcOk);
+    const double harmonic = shape.value(QStringLiteral("harmonic")).toDouble(&harmonicOk);
+    const double clip = shape.value(QStringLiteral("clip")).toDouble(&clipOk);
+    const int order = shape.value(QStringLiteral("order")).toInt(&orderOk);
+    const bool shaping = shape.value(QStringLiteral("enabled")).toBool();
+    if (!dcOk || !harmonicOk || !clipOk || !orderOk ||
+        (shaping && hz == 0.0) || !std::isfinite(dc) || dc < -300.0 || dc > 300.0 ||
+        !std::isfinite(harmonic) || harmonic < 0.0 || harmonic > 300.0 ||
+        !std::isfinite(clip) || clip < 1.0 || clip > 1000.0 || order < 2 || order > 63) {
+        setError(QStringLiteral("Invalid CT shaping; START refused."));
+        return false;
+    }
+    commands << QStringLiteral("SHAPE CT %1 %2 %3 %4 %5")
+        .arg(shaping ? 1 : 0).arg(std::llround(dc * 10.0))
+        .arg(std::llround(harmonic * 10.0)).arg(order).arg(std::llround(clip * 10.0));
+    commands << QStringLiteral("START");
+    // Worker admission is all-or-none (bounded queue), and exclusive FIFO
+    // prevents concurrent UI edits interleaving with this START transaction.
+    // Acceptance is not firmware ACK; RUNNING still requires board telemetry.
+    if (!sendCommandBatch(commands, false, true)) return false;
+    signalFrequencyHz_ = hz;
+    return true;
+}
 bool DeviceController::stop() { return sendCommand(QStringLiteral("STOP")); }
 bool DeviceController::zero() { return sendCommand(QStringLiteral("ZERO")); }
 
@@ -1282,20 +1355,21 @@ bool DeviceController::sendQuietCommand(const QString& command) {
     return sendCommandBatch({command}, true);
 }
 
-bool DeviceController::sendCommandBatch(const QStringList& commands, const bool quiet) {
+bool DeviceController::sendCommandBatch(const QStringList& commands, const bool quiet, const bool exclusive) {
     if (!connected_ || !ioWorkerReady_ || ioWorker_ == nullptr || sessionGeneration_ == 0) {
         setError(QStringLiteral("Device is not connected."));
         return false;
     }
     const QStringList copy = commands;
     const quint64 generation = sessionGeneration_;
-    QMetaObject::invokeMethod(
+    const bool queued = QMetaObject::invokeMethod(
         ioWorker_,
-        [worker = ioWorker_, copy, quiet, generation] {
-            worker->enqueueCommands(copy, quiet, generation);
+        [worker = ioWorker_, copy, quiet, exclusive, generation] {
+            worker->enqueueCommands(copy, quiet, exclusive, generation);
         },
         Qt::QueuedConnection);
-    return true;
+    if (!queued) setError(QStringLiteral("Device queue dispatcher unavailable."));
+    return queued;
 }
 
 void DeviceController::setSessionHeartbeatEnabled(const bool enabled) {

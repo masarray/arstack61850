@@ -96,7 +96,7 @@ Rectangle {
                 checked: tray.boardOnline ? Boolean(tray.device.ptpRunning) : offlineSettings.previewPtp
                 enabled: !tray.busy && (!tray.boardOnline || tray.ptpReady)
                 ToolTip.visible: hovered
-                ToolTip.text: "Start/stop PTP with verified board feedback. Does not establish SV sample-phase lock."
+                ToolTip.text: "PTP"
                 onClicked: {
                     // Switch flips locally before asynchronous firmware evidence.
                     // Restore binding immediately, including on rejected requests.
@@ -136,7 +136,7 @@ Rectangle {
                     })
                 }
                 ToolTip.visible: hovered
-                ToolTip.text: "Source transmits PTP; Follower discovers an external GM; Monitor receives without disciplining."
+                ToolTip.text: "PTP role"
             }
             Label {
                 text: "smpSynch"
@@ -156,7 +156,7 @@ Rectangle {
                     ? tray.syncIndex(tray.device.smpSynchMode) : offlineSettings.lastSynch
                 enabled: !tray.boardOnline || (tray.session && !tray.session.updatingFirmware)
                 ToolTip.visible: hovered
-                ToolTip.text: "1/2 change SV metadata only; they do not synchronize the sample clock."
+                ToolTip.text: "smpSynch mode"
                 onActivated: {
                     const requested = currentIndex
                     offlineSettings.lastSynch = requested
@@ -184,26 +184,10 @@ Rectangle {
                 iconSource: Qt.resolvedUrl("../assets/material/settings.svg")
                 objectName: "studioTimingDetails"
                 implicitWidth: 66
-                toolTipText: "PTP settings, timing evidence and diagnostics"
+                toolTipText: "Timing settings"
                 onClicked: if (tray.controller) tray.controller.openTimingSettings()
             }
         }
-        Label {
-            Layout.fillWidth: true
-            text: !tray.boardOnline
-                ? "OFFLINE PLAN ONLY · PTP and smpSynch selections are local; no PTP/SV packets sent. Board state wins at reconnect."
-                : tray.device.smpSynchSimulated
-                    ? "SV smpSynch=" + tray.device.smpSynchValue + " · SIMULATED metadata — sample clock not proven locked."
-                    : tray.device.smpSynchMeasured
-                        ? "SV smpSynch=" + tray.device.smpSynchValue + " · board-reported evidence; sample phase needs independent verification."
-                        : "SV smpSynch=" + tray.device.smpSynchValue + " · unqualified. PTP traffic alone does not prove SV synchronization."
-            color: tray.device && tray.device.smpSynchSimulated ? tray.theme.amber : tray.theme.muted
-            font.family: tray.uiFont
-            font.pixelSize: tray.compact ? 9 : 10
-            elide: Text.ElideRight
-            ToolTip.visible: evidenceHover.hovered
-            ToolTip.text: text
-            HoverHandler { id: evidenceHover }
-        }
+
     }
 }

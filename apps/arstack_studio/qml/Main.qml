@@ -132,6 +132,7 @@ ApplicationWindow {
     property real activePhase: 0.0
     property real activeQuality: 0
     property string transientMessage: ""
+    property string statusMessage: ""
     property bool transientError: false
     property bool phasorDockVisible: true
     property bool phasorDetached: false
@@ -197,6 +198,7 @@ ApplicationWindow {
         onTriggered: {
             root.transientMessage = ""
             root.transientError = false
+            root.statusMessage = ""
         }
     }
 
@@ -222,7 +224,8 @@ ApplicationWindow {
     }
 
     function showMessage(message, error) {
-        transientMessage = message
+        statusMessage = message
+        transientMessage = error === true ? message : ""
         transientError = error === true
         statusHistoryModel.append({
             timeText: new Date().toLocaleTimeString(Qt.locale(), "HH:mm:ss"),
@@ -425,16 +428,13 @@ ApplicationWindow {
                        : "One or more draft commands could not be queued; retry after checking the board.", !ok)
         return ok
     }
-    function requestApplyDraft() {
-        if (!workflowBar.session || !workflowBar.session.liveControlReady) {
-            showMessage("Local draft saved; connect a verified ESP32-P4 to apply it.", false)
-            return false
-        }
-        if (workflowBar.injectionRunning) {
-            showMessage("Stop the publisher before applying an offline draft.", true)
-            return false
-        }
-        return applyAllSignals()
+    function startScenarioSnapshot() {
+        var draft = scenarioSnapshot()
+        draft.currentScale = currentScale
+        draft.voltageScale = voltageScale
+        draft.ct = { enabled: ctSaturationEnabled, dc: ctDcOffsetPercent,
+                     harmonic: ctHarmonicPercent, order: ctHarmonicOrder, clip: ctClipPercent }
+        return draft
     }
 
     function setFrequencyValue(value) {
@@ -630,7 +630,9 @@ ApplicationWindow {
             spacing: 8
 
             Label {
-                text: device.deviceVerified ? device.portName + " · ESP32-P4" : "No device"
+                text: !device.deviceVerified
+                    ? "No ESP32 board detected · Preview mode only"
+                    : device.portName + " · ESP32-P4" + (workflowBar.injectionRunning ? " · Injecting" : " · Ready")
                 color: device.deviceVerified ? studioTheme.textSoft : studioTheme.muted
                 font.family: root.uiFont
                 font.pixelSize: 9
@@ -644,6 +646,22 @@ ApplicationWindow {
                 font.pixelSize: 9
             }
             Item { Layout.fillWidth: true }
+            Label {
+                visible: root.statusMessage.length > 0
+                Layout.maximumWidth: root.compactLayout ? 165 : 300
+                text: root.statusMessage
+                elide: Text.ElideRight
+                color: root.transientError ? studioTheme.amber : studioTheme.textSoft
+                font.family: root.uiFont
+                font.pixelSize: 9
+            }
+            Label {
+                visible: device.deviceVerified
+                text: "PTP " + (device.ptpRunning ? device.ptpRole : "OFF") + " · smpSynch " + device.smpSynchValue
+                color: device.ptpRunning ? studioTheme.green : studioTheme.muted
+                font.family: root.uiFont
+                font.pixelSize: 9
+            }
             Label {
                 visible: device.deviceVerified
                 text: "FPS " + device.fps + "   MISSED " + device.missed + "   TX FAIL " + device.txFailures
@@ -795,8 +813,8 @@ ApplicationWindow {
             id: workflowBar
             objectName: "studioWorkflowBar"
             Layout.fillWidth: true
-            Layout.preferredHeight: 54
-            Layout.minimumHeight: 54
+            Layout.preferredHeight: 78
+            Layout.minimumHeight: 78
             theme: studioTheme
             controller: root
             device: device
@@ -854,7 +872,7 @@ ApplicationWindow {
                     ColumnLayout {
                         anchors.fill: parent
                         anchors.margins: root.compactLayout ? 11 : 13
-                        spacing: 8
+                        spacing: root.compactLayout ? 6 : 8
 
                         RowLayout {
                             Layout.fillWidth: true
@@ -863,17 +881,8 @@ ApplicationWindow {
                                 Label { text: "4I + 4V Injection"; color: studioTheme.text; font.family: root.uiFont; font.pixelSize: root.compactLayout ? 17 : 18; font.weight: Font.DemiBold }
                             }
                             Item { Layout.fillWidth: true }
-                            CalmButton {
-                                theme: studioTheme
-                                uiFont: root.uiFont
-                                iconSource: Qt.resolvedUrl("../assets/material/file_upload.svg")
-                                text: !device.deviceVerified ? "Local draft"
-                                    : root.pendingApply ? "Apply to board" : "SET queued"
-                                implicitWidth: 106
-                                tone: device.deviceVerified && root.pendingApply ? "accent" : "normal"
-                                toolTipText: "Local setpoints are separate from physical output. Board last values are not read back."
-                                onClicked: root.requestApplyDraft()
-                            }
+                            // START owns the single ordered scenario transaction.
+                            // No redundant Apply button in the operator workflow.
                         }
 
                         Rectangle {
@@ -891,6 +900,7 @@ ApplicationWindow {
                                 x: 80
                                 y: 45
                                 title: "Frequency · shared across all channels"
+                                commandRows: 4
                                 Action { text: "DC · 0 Hz"; icon.source: Qt.resolvedUrl("../assets/material/block.svg"); onTriggered: root.setWaveformMode("DC") }
                                 Action { text: "50 Hz · nominal"; icon.source: Qt.resolvedUrl("../assets/material/schedule.svg"); onTriggered: root.setFrequencyValue(50) }
                                 Action { text: "60 Hz · nominal"; icon.source: Qt.resolvedUrl("../assets/material/schedule.svg"); onTriggered: root.setFrequencyValue(60) }
@@ -920,7 +930,7 @@ ApplicationWindow {
                                     id: frequencyField
                                     ToolTip.visible: hovered && !activeFocus
                                     ToolTip.delay: 650
-                                    ToolTip.text: "Right-click for DC / 50 Hz / 60 Hz and AC restoration"
+                                    ToolTip.text: "Right-click · Shift+F10"
                                     MouseArea {
                                         anchors.fill: parent
                                         acceptedButtons: Qt.RightButton
@@ -979,7 +989,8 @@ ApplicationWindow {
 
                         RowLayout {
                             Layout.fillWidth: true
-                            Layout.fillHeight: true
+                            Layout.preferredHeight: root.compactLayout ? 214 : 224
+                            Layout.maximumHeight: root.compactLayout ? 214 : 224
                             spacing: 9
                             SignalMatrix {
                                 id: voltageMatrix
@@ -1023,8 +1034,8 @@ ApplicationWindow {
                         StudioTimingTray {
                             objectName: "studioTimingTray"
                             Layout.fillWidth: true
-                            Layout.preferredHeight: root.height < 700 ? 112 : 132
-                            Layout.minimumHeight: root.height < 700 ? 112 : 132
+                            Layout.preferredHeight: 84
+                            Layout.minimumHeight: 84
                             theme: studioTheme
                             controller: root
                             device: device
@@ -1060,6 +1071,7 @@ ApplicationWindow {
                                 compact: root.compactLayout
                             }
                         }
+                        Item { Layout.fillHeight: true }
                     }
                 }
 
@@ -1089,7 +1101,7 @@ ApplicationWindow {
                         SplitView.fillWidth: true
                         SplitView.fillHeight: true
                         SplitView.minimumHeight: 170
-                        SplitView.preferredHeight: 300
+                        SplitView.preferredHeight: 238
                         theme: studioTheme
                         titleText: "Phasor"
                         statusText: ""
@@ -1128,7 +1140,7 @@ ApplicationWindow {
                         SplitView.fillWidth: true
                         SplitView.fillHeight: true
                         SplitView.minimumHeight: 170
-                        SplitView.preferredHeight: 300
+                        SplitView.preferredHeight: 328
                         theme: studioTheme
                         titleText: "Waveform"
                         statusText: root.signalFrequency.toFixed(3) + " Hz"

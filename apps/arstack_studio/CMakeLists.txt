@@ -113,6 +113,13 @@ qt_add_qml_module(arstack_studio
     RESOURCES
         assets/InterVariable.ttf
         assets/INTER_LICENSE.txt
+        assets/material_dark/play_arrow.svg
+        assets/material_dark/stop.svg
+        assets/material_dark/folder_open.svg
+        assets/material_dark/dashboard.svg
+        assets/material_dark/tune.svg
+        assets/material_dark/monitor_heart.svg
+        assets/material_dark/settings.svg
         assets/MATERIAL_ICONS_LICENSE.txt
         assets/material/close.svg
         assets/material/open_in_new.svg
