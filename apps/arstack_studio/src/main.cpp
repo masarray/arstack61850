@@ -82,8 +82,13 @@ struct UiBounds {
             return false;
         }
     }
-    if (!(voltage.area.right() <= current.area.left() + tolerance
-          && tray.area.top() >= voltage.area.bottom() - tolerance
+    // Voltage and Current intentionally stack vertically. The native
+    // geometry test must detect clipping/overlap in the NEW layout, rather
+    // than assert the obsolete side-by-side relationship.
+    if (!(voltage.area.bottom() <= current.area.top() + tolerance
+          && std::abs(voltage.area.left() - current.area.left()) <= tolerance
+          && std::abs(voltage.area.right() - current.area.right()) <= tolerance
+          && tray.area.top() >= current.area.bottom() - tolerance
           && quality.area.top() >= tray.area.bottom() - tolerance
           && quality.area.bottom() <= surface.area.bottom() + tolerance)) {
         qCritical().noquote() << "Studio UI panel order/overlap violation" << size
