@@ -536,9 +536,13 @@ ReportUi buildSubscriptionUi(
             // Only the newest retained frame gets a deep, bounded hierarchy.
             // Older snapshots keep their existing light string previews.
             // No second decoder, protocol store or UI-owned report mutation.
-            if (ui.reports.isEmpty())
+            if (ui.reports.isEmpty()) {
+                bool nestedTruncated = false;
                 map.insert(QStringLiteral("valueTree"),
-                           arstack::iedsim::projectBrowserReportTree(frame.values));
+                           arstack::iedsim::projectBrowserReportTree(
+                               frame.values, &nestedTruncated));
+                map.insert(QStringLiteral("treeNestedTruncated"), nestedTruncated);
+            }
             map.insert(QStringLiteral("valueEvidence"), projected.evidence);
             map.insert(QStringLiteral("valueEvidenceTruncated"), projected.evidenceTruncated);
             map.insert(QStringLiteral("valuesTruncated"), projected.rowsTruncated);
