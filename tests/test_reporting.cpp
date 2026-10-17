@@ -422,6 +422,32 @@ void offline_monitor_enforces_frame_and_stream_limits() {
 }
 
 
+void empty_payload_bit_string_unused_bits_fail_closed() {
+    // A BIT STRING containing only the unused-bit count has no payload.
+    // Previously, 1..7 unused bits underflowed size_t and indexed raw[1].
+    for (const auto unused : {1U, 7U}) {
+        auto optional = realistic_report();
+        optional.items[1U].value = MmsDataValue::bit_string(
+            static_cast<std::uint8_t>(unused), {});
+        require_throws([&optional] {
+            static_cast<void>(MmsReportFrameMapper::map(optional, {}));
+        }, "Empty OptFlds with unused bits was not rejected.");
+
+        auto inclusion = realistic_report();
+        inclusion.items[8U].value = MmsDataValue::bit_string(
+            static_cast<std::uint8_t>(unused), {});
+        require_throws([&inclusion] {
+            static_cast<void>(MmsReportFrameMapper::map(inclusion, {}));
+        }, "Empty inclusion BIT STRING with unused bits was not rejected.");
+    }
+
+    // Healthy one-byte BIT STRING remains valid: the boundary check must
+    // not reject ordinary unused padding bits from real IED reports.
+    const auto normal = MmsReportFrameMapper::map(realistic_report(), {});
+    require(normal.values.size() == 2U,
+            "Valid padded report BIT STRING was rejected.");
+}
+
 void binding_validator_rejects_cross_rcb_and_stale_reports() {
     auto directory = MmsDataSetDirectoryCodec::decode_response(
         MmsDataSetDirectoryCodec::encode_response_pdu(directory_fixture()), 9U);
@@ -517,6 +543,7 @@ int main() {
         {"sequence continuity", sequence_tracker_detects_gap_duplicate_and_changes},
         {"segmentation continuity", segmentation_continuity_is_tracked},
         {"bounded monitor", offline_monitor_enforces_frame_and_stream_limits},
+        {"empty payload BIT STRING unused bits", empty_payload_bit_string_unused_bits_fail_closed},
         {"RCB binding and stale report guard", binding_validator_rejects_cross_rcb_and_stale_reports},
         {"malformed and bounds", malformed_and_bound_paths_are_rejected},
     };
