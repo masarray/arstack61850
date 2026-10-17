@@ -48,6 +48,37 @@ def main() -> None:
             and "root.ptpRestoreChecks > 120" in main_qml
             and "root.ptpDesiredForSession = false" in main_qml,
             "PTP user intent restoration must be bounded, explicit and cancellable")
+    # P0: software timing, SV egress/smpCnt and phase-angle staging must
+    # stay untouched by a UI-only reflow. Every START sends the actual
+    # eight visible channel phases, not a stale pre-existing board state.
+    require("const accepted = smartSession.requestStartWithScenario(" in workflow
+            and "controller.startScenarioSnapshot()" in workflow
+            and "smartSession.requestStart()" not in workflow.split(
+                "function requestStart() {")[1].split("function requestStop() {")[0],
+            "SV START must always stage the full displayed 4I+4V scenario")
+    require("Layout.fillHeight: true" in main_qml
+            and "id: voltageMatrix" in main_qml
+            and "id: currentMatrix" in main_qml
+            and "Layout.minimumHeight: 418" in main_qml,
+            "current/voltage matrices must use vertically stacked full-width layout")
+    require('property bool ptpDesiredForSession: true' in main_qml
+            and "defaultPtpStartAttempted" in main_qml
+            and "root.ptpDesiredForSession = false" in main_qml,
+            "PTP SOURCE default ON must preserve immediate user OFF")
+    ribbon = source("ModernRibbon.qml")
+    ribbon_action = source("RibbonAction.qml")
+    calm = source("CalmButton.qml")
+    checks = source("StudioDarkCheckBox.qml")
+    combo = source("StudioDarkComboBox.qml")
+    require("width: 38" in ribbon and "width: 25" in ribbon
+            and "font.pixelSize: bar.compact ? 12 : 14" in ribbon,
+            "SMV Injector logo/branding must remain readable at desktop scale")
+    require('hovered ? "#142334"' in calm
+            and 'hovered ? "#142334"' in ribbon_action
+            and '"#142334"' in combo
+            and "hoverEnabled: true" in checks
+            and "width: 19" in checks and "height: 19" in checks,
+            "Advanced hover captions must remain dark on white, checkbox size stable")
     matrix = source("SignalMatrix.qml")
     menu = source("StudioActionMenu.qml")
     cmake = (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8")
