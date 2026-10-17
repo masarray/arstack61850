@@ -51,7 +51,7 @@ bool verifyReadableReportTreeProjection() {
     if (rows.size() != 7) return false; // struct, 3 children + 1 array item, q, unread
     const auto parent = rows.at(0).toMap();
     const auto child = rows.at(1).toMap();
-    const auto nested = rows.at(4).toMap();
+    const auto nestedChild = rows.at(4).toMap();
     const auto q = rows.at(5).toMap();
     const auto unread = rows.at(6).toMap();
     if (parent.value("name").toString() != QStringLiteral("LLN0.Pos") ||
@@ -60,7 +60,7 @@ bool verifyReadableReportTreeProjection() {
         child.value("name").toString() != QStringLiteral("Field 1") ||
         child.value("value").toString() != QStringLiteral("false") ||
         child.value("depth").toInt() != 1 ||
-        nested.value("depth").toInt() != 2 ||
+        nestedChild.value("depth").toInt() != 2 ||
         q.value("name").toString() != QStringLiteral("LLN0.Pos.q") ||
         q.value("value").toString() != QStringLiteral("good") ||
         q.value("reason").toString() != QStringLiteral("general-interrogation") ||
