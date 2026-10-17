@@ -99,6 +99,10 @@ qt_add_qml_module(arstack_studio
         qml/PtpExpertPanel.qml
         qml/StudioDarkComboBox.qml
         qml/StudioDarkCheckBox.qml
+        qml/StudioActionMenu.qml
+        qml/StudioMenuDivider.qml
+        qml/StudioPtpSwitch.qml
+        qml/StudioTimingTray.qml
         qml/DeviceExpertPanel.qml
         qml/FirmwarePanel.qml
         qml/WaveformExpertPanel.qml
@@ -109,24 +113,31 @@ qt_add_qml_module(arstack_studio
     RESOURCES
         assets/InterVariable.ttf
         assets/INTER_LICENSE.txt
-        assets/LUCIDE_LICENSE.txt
-        assets/lucide/x.svg
-        assets/lucide/external-link.svg
-        assets/lucide/chevron-up.svg
-        assets/lucide/chevron-down.svg
-        assets/lucide/radio-tower.svg
-        assets/lucide/scale.svg
-        assets/lucide/circle-off.svg
-        assets/lucide/activity.svg
-        assets/lucide/circle-check.svg
-        assets/lucide/settings-2.svg
-        assets/lucide/upload.svg
-        assets/lucide/square.svg
-        assets/lucide/play.svg
-        assets/lucide/panels-top-left.svg
-        assets/lucide/folder-open.svg
-        assets/lucide/scan-search.svg
-        assets/lucide/clock-3.svg
+        assets/MATERIAL_ICONS_LICENSE.txt
+        assets/material/close.svg
+        assets/material/open_in_new.svg
+        assets/material/keyboard_arrow_up.svg
+        assets/material/keyboard_arrow_down.svg
+        assets/material/tune.svg
+        assets/material/block.svg
+        assets/material/monitor_heart.svg
+        assets/material/check_circle.svg
+        assets/material/settings.svg
+        assets/material/file_upload.svg
+        assets/material/stop.svg
+        assets/material/play_arrow.svg
+        assets/material/dashboard.svg
+        assets/material/folder_open.svg
+        assets/material/search.svg
+        assets/material/schedule.svg
+        assets/material/content_copy.svg
+        assets/material/sync.svg
+        assets/material/done_all.svg
+        assets/material/balance.svg
+        assets/material/refresh.svg
+        assets/material/device_hub.svg
+        assets/material/help_outline.svg
+        assets/material/smv_injector.svg
 )
 
 qt_add_resources(arstack_studio "reference_templates"

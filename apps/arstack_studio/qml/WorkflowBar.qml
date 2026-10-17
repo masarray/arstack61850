@@ -112,8 +112,12 @@ SurfacePanel {
     Connections {
         target: smartSession
         function onReadyForLiveApply() {
+            // The current board SHOW response does not contain per-channel
+            // amplitude/phase/quality. Never silently claim readback or
+            // overwrite a board with a restored/offline local draft.
             controller.profileDirty = false
-            controller.applyAllSignals()
+            controller.pendingApply = true
+            controller.showMessage("Board ready. Review your local values, then Apply to board.", false)
         }
         function onStateChanged() {
             if (ribbon.firmwareGateActive)
@@ -242,6 +246,10 @@ SurfacePanel {
         }
         if (!smartSession.startReady) {
             controller.showMessage(ribbon.startReason(), false)
+            return
+        }
+        if (controller.pendingApply) {
+            controller.showMessage("Apply the local scenario before starting physical SMV output.", true)
             return
         }
         if (!smartSession.requestStart())

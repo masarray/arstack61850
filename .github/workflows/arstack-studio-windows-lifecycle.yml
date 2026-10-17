@@ -85,3 +85,67 @@ jobs:
           Start-Sleep -Milliseconds 250
           Invoke-LifecycleCycle 2
           Write-Host 'Windows lifecycle gate: PASS · normal close -> process exit -> lock release -> immediate reopen -> clean exit'
+
+      - name: Studio UI geometry acceptance and Windows screenshots
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # The GitHub runner's virtual desktop clamps physical window sizes.
+          # Exercise *exact* logical viewports using Windows-built Qt Quick
+          # offscreen software rendering. These PNGs are layout evidence,
+          # NOT an assertion of real on-monitor Windows color/hover fidelity.
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          $env:QT_QUICK_BACKEND = 'software'
+          $candidate = Get-ChildItem -Path (Join-Path $PWD 'build-arstack-studio') -Recurse -File |
+            Where-Object { $_.Name -ieq 'arstack_studio.exe' -or $_.Name -ieq 'ARStackStudio.exe' } |
+            Select-Object -First 1
+          if ($null -eq $candidate) { throw 'Studio GUI executable not found' }
+          $exe = $candidate.FullName
+          New-Item -ItemType Directory -Path 'studio-ui-evidence' -Force | Out-Null
+          Remove-Item Env:ARSTACK_STUDIO_QA_DIR -ErrorAction SilentlyContinue
+          Remove-Item Env:ARSTACK_STUDIO_QA_NATIVE_ONLY -ErrorAction SilentlyContinue
+          foreach ($scale in @('1', '1.5', '1.75')) {
+            $env:QT_SCALE_FACTOR = $scale
+            $suffix = 'dpi-' + [string][int]([double]::Parse($scale, [System.Globalization.CultureInfo]::InvariantCulture) * 100)
+            $logdir = Join-Path (Join-Path $PWD 'studio-ui-evidence') $suffix
+            New-Item -ItemType Directory -Path $logdir -Force | Out-Null
+            $stdout = Join-Path $logdir 'geometry-stdout.txt'
+            $stderr = Join-Path $logdir 'geometry-stderr.txt'
+            $probe = Start-Process -FilePath $exe -ArgumentList '--check-operator-ui' -Wait -PassThru `
+              -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+            Get-Content $stdout -ErrorAction SilentlyContinue
+            Get-Content $stderr -ErrorAction SilentlyContinue
+            if ($probe.ExitCode -ne 0) {
+              throw "Deterministic Qt Quick viewport geometry failed at DPI=$scale, exit=$($probe.ExitCode)"
+            }
+          }
+          # Offscreen grabWindow() is not a reliable image source. Capture
+          # one supported native Windows viewport separately at 100% DPI.
+          Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
+          Remove-Item Env:QT_QUICK_BACKEND -ErrorAction SilentlyContinue
+          $env:QT_SCALE_FACTOR = '1'
+          $env:ARSTACK_STUDIO_QA_NATIVE_ONLY = '1'
+          $env:ARSTACK_STUDIO_QA_DIR = Join-Path $PWD 'studio-ui-evidence\native-windows'
+          New-Item -ItemType Directory -Path $env:ARSTACK_STUDIO_QA_DIR -Force | Out-Null
+          $stdout = Join-Path $env:ARSTACK_STUDIO_QA_DIR 'native-stdout.txt'
+          $stderr = Join-Path $env:ARSTACK_STUDIO_QA_DIR 'native-stderr.txt'
+          $probe = Start-Process -FilePath $exe -ArgumentList '--check-operator-ui' -Wait -PassThru `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          Get-Content $stdout -ErrorAction SilentlyContinue
+          Get-Content $stderr -ErrorAction SilentlyContinue
+          if ($probe.ExitCode -ne 0) {
+            throw "Native Windows screenshot acceptance failed, exit=$($probe.ExitCode)"
+          }
+          $png = Join-Path $env:ARSTACK_STUDIO_QA_DIR 'studio-960x620.png'
+          if (-not (Test-Path $png) -or (Get-Item $png).Length -lt 10000) {
+            throw 'Native Windows 960x620 screenshot was missing or empty'
+          }
+          Write-Host 'Windows Qt deterministic 3-viewports x 3-DPI geometry + native 960x620 screenshot: PASS'
+      - name: Upload desktop layout evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arstack-studio-windows-layout-evidence
+          path: studio-ui-evidence/
+          if-no-files-found: ignore
+          retention-days: 7

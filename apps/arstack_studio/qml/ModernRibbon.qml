@@ -27,6 +27,7 @@ Rectangle {
     }
 
     function conciseState() {
+        if (!device.deviceVerified && controller.offlinePreviewRunning) return "Offline preview"
         if (session.state === "RUNNING") return "Running"
         if (session.state === "READY") return "Ready"
         if (session.state === "WAITING FOR DEVICE") return "Offline"
@@ -61,7 +62,7 @@ Rectangle {
                     anchors.centerIn: parent
                     width: 15
                     height: 15
-                    source: Qt.resolvedUrl("../assets/lucide/radio-tower.svg")
+                    source: Qt.resolvedUrl("../assets/material/smv_injector.svg")
                     sourceSize.width: 30
                     sourceSize.height: 30
                 }
@@ -84,12 +85,21 @@ Rectangle {
         RibbonAction {
             theme: bar.theme
             uiFont: bar.uiFont
-            text: "Start"
-            tone: bar.session.startReady ? "success" : "neutral"
-            iconSource: Qt.resolvedUrl("../assets/lucide/play.svg")
-            enabled: !bar.workflow.injectionRunning && !bar.session.updatingFirmware && !bar.session.updateNeedsBootloaderHelp
-            toolTipText: bar.workflow.startReason()
-            onClicked: bar.workflow.requestStart()
+            text: !bar.device.deviceVerified ? "Preview" : "Start"
+            tone: !bar.device.deviceVerified ? "accent"
+                : bar.session.startReady ? "success" : "neutral"
+            iconSource: Qt.resolvedUrl("../assets/material/play_arrow.svg")
+            enabled: !bar.workflow.injectionRunning && !bar.controller.offlinePreviewRunning
+                && !bar.session.updatingFirmware && !bar.session.updateNeedsBootloaderHelp
+            toolTipText: !bar.device.deviceVerified
+                ? "Animate local setpoint preview only; no SV frames are transmitted."
+                : bar.workflow.startReason()
+            onClicked: {
+                if (!bar.device.deviceVerified) {
+                    bar.controller.offlinePreviewRunning = true
+                    bar.controller.showMessage("Offline waveform preview · no network SV output.", false)
+                } else bar.workflow.requestStart()
+            }
         }
 
         RibbonAction {
@@ -97,10 +107,14 @@ Rectangle {
             uiFont: bar.uiFont
             text: "Stop"
             tone: bar.workflow.injectionRunning ? "danger" : "neutral"
-            iconSource: Qt.resolvedUrl("../assets/lucide/square.svg")
-            enabled: bar.workflow.injectionRunning && !bar.session.updatingFirmware
-            toolTipText: "Stop Sampled Values output"
-            onClicked: bar.workflow.requestStop()
+            iconSource: Qt.resolvedUrl("../assets/material/stop.svg")
+            enabled: (bar.workflow.injectionRunning || bar.controller.offlinePreviewRunning)
+                && !bar.session.updatingFirmware
+            toolTipText: bar.device.deviceVerified ? "Stop Sampled Values output" : "Stop local preview only"
+            onClicked: {
+                if (!bar.device.deviceVerified) bar.controller.offlinePreviewRunning = false
+                else bar.workflow.requestStop()
+            }
         }
 
         Rectangle { width: 1; height: 24; color: bar.theme.lineSoft }
@@ -109,7 +123,7 @@ Rectangle {
             theme: bar.theme
             uiFont: bar.uiFont
             text: bar.compact ? "SCL" : "Open SCL"
-            iconSource: Qt.resolvedUrl("../assets/lucide/folder-open.svg")
+            iconSource: Qt.resolvedUrl("../assets/material/folder_open.svg")
             enabled: bar.session.engineeringEditable
             toolTipText: "Open IEC 61850 engineering configuration"
             onClicked: bar.workflow.openEngineeringDialog()
@@ -120,7 +134,7 @@ Rectangle {
             theme: bar.theme
             uiFont: bar.uiFont
             text: "4I+4V"
-            iconSource: Qt.resolvedUrl("../assets/lucide/panels-top-left.svg")
+            iconSource: Qt.resolvedUrl("../assets/material/dashboard.svg")
             enabled: bar.session.engineeringEditable
             toolTipText: "Use the built-in 4I + 4V / 4000 samples/s profile"
             onClicked: bar.workflow.useBuiltInProfile()
@@ -150,6 +164,7 @@ Rectangle {
             theme: bar.theme
             uiFont: bar.uiFont
             text: "Phasor"
+            iconSource: Qt.resolvedUrl("../assets/material/tune.svg")
             checkable: true
             checked: bar.controller.phasorDockVisible || bar.controller.phasorDetached
             tone: checked ? "accent" : "neutral"
@@ -164,6 +179,7 @@ Rectangle {
             theme: bar.theme
             uiFont: bar.uiFont
             text: "Wave"
+            iconSource: Qt.resolvedUrl("../assets/material/monitor_heart.svg")
             visible: !bar.compact
             checkable: true
             checked: bar.controller.waveformDockVisible || bar.controller.waveformDetached
@@ -180,7 +196,7 @@ Rectangle {
             uiFont: bar.uiFont
             text: bar.compact ? "" : "Advanced"
             iconOnly: bar.compact
-            iconSource: Qt.resolvedUrl("../assets/lucide/settings-2.svg")
+            iconSource: Qt.resolvedUrl("../assets/material/settings.svg")
             tone: "neutral"
             toolTipText: bar.session.firmwareUpdateAvailable
                 ? "Advanced controls · optional firmware update available"

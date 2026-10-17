@@ -84,8 +84,8 @@ Rectangle {
                     theme: telemetry.theme
                     uiFont: telemetry.uiFont
                     iconSource: telemetry.expanded
-                        ? Qt.resolvedUrl("../assets/lucide/chevron-down.svg")
-                        : Qt.resolvedUrl("../assets/lucide/chevron-up.svg")
+                        ? Qt.resolvedUrl("../assets/material/keyboard_arrow_down.svg")
+                        : Qt.resolvedUrl("../assets/material/keyboard_arrow_up.svg")
                     onClicked: telemetry.expanded = !telemetry.expanded
                     ToolTip.visible: hovered
                     ToolTip.text: telemetry.expanded ? "Hide monitor details" : "Show monitor details"

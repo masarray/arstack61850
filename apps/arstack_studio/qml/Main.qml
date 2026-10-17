@@ -2,6 +2,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtCore
 import ARStack.Studio 1.0
 
 ApplicationWindow {
@@ -26,11 +27,94 @@ ApplicationWindow {
     palette.highlightedText: studioTheme.text
 
     StudioTheme { id: studioTheme }
+    Settings {
+        id: scenarioSettings
+        category: "offline-injection-lab"
+        property string lastScenario: ""
+    }
+    Timer {
+        id: saveScenarioTimer
+        interval: 400
+        onTriggered: scenarioSettings.lastScenario = JSON.stringify(root.scenarioSnapshot())
+    }
+    function scenarioSnapshot() {
+        function values(model) {
+            var rows = []
+            for (var i = 0; i < 4; ++i) {
+                const r = model.get(i)
+                rows.push([r.magnitude, r.phase, r.enabled, Number(r.quality)])
+            }
+            return rows
+        }
+        return { version: 1, hz: signalFrequency, current: values(currentModel),
+                 voltage: values(voltageModel), linked: phaseLink }
+    }
+    function markScenarioDirty() {
+        if (restoringScenario) return
+        saveScenarioTimer.restart()
+        if (!workflowBar.session || !workflowBar.session.liveControlReady)
+            pendingApply = true
+    }
+    function restoreLocalScenario() {
+        const saved = scenarioSettings.lastScenario
+        if (!saved || saved.length > 8192) return
+        try {
+            const data = JSON.parse(saved)
+            if (data.version !== 1 || typeof data.hz !== "number"
+                    || !Number.isFinite(data.hz) || !validFrequency(data.hz)
+                    || !Array.isArray(data.current) || !Array.isArray(data.voltage)
+                    || data.current.length !== 4 || data.voltage.length !== 4)
+                throw new Error("Invalid scenario format")
+            function validate(rows, group) {
+                for (var i = 0; i < 4; ++i) {
+                    const row = rows[i]
+                    if (!Array.isArray(row) || row.length !== 4
+                            || typeof row[0] !== "number" || !Number.isFinite(row[0])
+                            || (data.hz === 0 ? Math.abs(row[0]) : row[0]) > maximumMagnitude(group)
+                            || (data.hz !== 0 && row[0] < 0)
+                            || typeof row[1] !== "number" || !Number.isFinite(row[1])
+                            || !validPhase(row[1]) || typeof row[2] !== "boolean"
+                            || typeof row[3] !== "number" || !Number.isInteger(row[3])
+                            || row[3] < 0 || row[3] > 4294967295)
+                        throw new Error("Invalid channel value")
+                }
+            }
+            validate(data.current, 0)
+            validate(data.voltage, 1)
+            restoringScenario = true
+            function assign(model, rows) {
+                for (var i = 0; i < 4; ++i) {
+                    model.setProperty(i, "magnitude", rows[i][0])
+                    model.setProperty(i, "phase", rows[i][1])
+                    model.setProperty(i, "enabled", rows[i][2])
+                    model.setProperty(i, "quality", rows[i][3])
+                }
+            }
+            assign(currentModel, data.current)
+            assign(voltageModel, data.voltage)
+            signalFrequency = data.hz
+            previousAcFrequency = data.hz > 0 ? data.hz : 50
+            frequencyField.text = data.hz.toFixed(3)
+            phaseLink = data.linked === true
+            selectSignal(activeGroup, activeRow)
+            refreshPreview()
+            restoringScenario = false
+            pendingApply = true
+        } catch (e) {
+            restoringScenario = false
+            scenarioSettings.lastScenario = ""
+            showMessage("Invalid local experiment; safe 4I+4V defaults restored.", true)
+        }
+    }
+    Component.onCompleted: restoreLocalScenario()
 
     property string uiFont: interFont.status === FontLoader.Ready ? interFont.name : "Inter"
     property string monoFont: uiFont
     property bool phaseLink: false
     property bool profileDirty: false
+    property bool pendingApply: true
+    property bool restoringScenario: false
+    property bool offlinePreviewRunning: false
     property real currentScale: 1000.0
     property real voltageScale: 100.0
     property real signalFrequency: 50.0
@@ -68,6 +152,12 @@ ApplicationWindow {
         configurationWindow.hide()
         detachedPhasorWindow.hide()
         detachedWaveformWindow.hide()
+        // The debounced persistence timer can still be pending when the user
+        // closes immediately after editing. Flush the local draft once, while
+        // ListModels and Settings remain alive; no device command is sent.
+        saveScenarioTimer.stop()
+        if (!root.restoringScenario)
+            scenarioSettings.lastScenario = JSON.stringify(root.scenarioSnapshot())
         // C++ owns process termination and bounded worker retirement. Do not
         // race it with a second QML quit path.
     }
@@ -94,6 +184,10 @@ ApplicationWindow {
         }
         function onDeviceMessage(message) {
             root.showMessage(message, false)
+        }
+        function onDeviceVerifiedChanged() {
+            root.pendingApply = true
+            root.offlinePreviewRunning = false
         }
     }
 
@@ -162,6 +256,15 @@ ApplicationWindow {
         configurationWindow.show()
         configurationWindow.raise()
         configurationWindow.requestActivate()
+    }
+
+    function openTimingSettings() {
+        profilePanel.showTiming()
+        openConfiguration()
+    }
+
+    function startPtpRole(role) {
+        return profilePanel.startPtpRole(role)
     }
 
     function openDiagnostics() {
@@ -302,7 +405,8 @@ ApplicationWindow {
         }
 
         selectSignal(group, row)
-        if (workflowBar.session && workflowBar.session.liveControlReady) {
+        markScenarioDirty()
+        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply) {
             if (phaseLink && row < 3) sendLinkedGroup(group)
             else sendSignal(group, row)
         }
@@ -310,11 +414,27 @@ ApplicationWindow {
     }
 
     function applyAllSignals() {
-        if (!workflowBar.session || !workflowBar.session.liveControlReady) return
-        workflowBar.session.requestSetFrequency(signalFrequency)
-        for (var group = 0; group < 2; ++group) applyGroupSignals(group)
-        workflowBar.session.requestSetCtSaturation(ctSaturationEnabled, ctDcOffsetPercent,
-                                                   ctHarmonicPercent, ctHarmonicOrder, ctClipPercent)
+        if (!workflowBar.session || !workflowBar.session.liveControlReady) return false
+        var ok = workflowBar.session.requestSetFrequency(signalFrequency)
+        for (var group = 0; group < 2; ++group)
+            for (var row = 0; row < 4; ++row) ok = sendSignal(group, row) && ok
+        ok = workflowBar.session.requestSetCtSaturation(ctSaturationEnabled, ctDcOffsetPercent,
+                 ctHarmonicPercent, ctHarmonicOrder, ctClipPercent) && ok
+        pendingApply = !ok
+        showMessage(ok ? "Local draft commands queued. Verify physical SV on wire; SETs are not atomic."
+                       : "One or more draft commands could not be queued; retry after checking the board.", !ok)
+        return ok
+    }
+    function requestApplyDraft() {
+        if (!workflowBar.session || !workflowBar.session.liveControlReady) {
+            showMessage("Local draft saved; connect a verified ESP32-P4 to apply it.", false)
+            return false
+        }
+        if (workflowBar.injectionRunning) {
+            showMessage("Stop the publisher before applying an offline draft.", true)
+            return false
+        }
+        return applyAllSignals()
     }
 
     function setFrequencyValue(value) {
@@ -324,7 +444,8 @@ ApplicationWindow {
         frequencyField.text = value.toFixed(3)
         frequencyField.invalidInput = false
         refreshPreview()
-        if (workflowBar.session && workflowBar.session.liveControlReady)
+        markScenarioDirty()
+        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
             workflowBar.session.requestSetFrequency(value)
         return true
     }
@@ -348,7 +469,8 @@ ApplicationWindow {
         }
         ctSaturationEnabled = enabled
         refreshPreview()
-        if (workflowBar.session && workflowBar.session.liveControlReady)
+        markScenarioDirty()
+        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
             workflowBar.session.requestSetCtSaturation(enabled, ctDcOffsetPercent,
                                                        ctHarmonicPercent, ctHarmonicOrder, ctClipPercent)
         showMessage(enabled
@@ -365,11 +487,12 @@ ApplicationWindow {
         if (!validMagnitude(group, value)) return
         for (var i = 0; i < 3; ++i) model.setProperty(i, "magnitude", value)
         selectSignal(group, row)
-        if (workflowBar.session && workflowBar.session.liveControlReady && !sendLinkedGroup(group)) {
+        markScenarioDirty()
+        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply && !sendLinkedGroup(group)) {
             showMessage("ABC update was not accepted; inspect device diagnostics.", true)
             return
         }
-        showMessage("ABC magnitude queued from " + model.get(row).signalId, false)
+        showMessage((pendingApply ? "Local experiment: " : "Device queue: ") + "ABC magnitude queued from " + model.get(row).signalId, false)
     }
 
     function equalGroupAngles(group, row) {
@@ -379,11 +502,12 @@ ApplicationWindow {
         if (!validPhase(value)) return
         for (var i = 0; i < 3; ++i) model.setProperty(i, "phase", value)
         selectSignal(group, row)
-        if (workflowBar.session && workflowBar.session.liveControlReady && !sendLinkedGroup(group)) {
+        markScenarioDirty()
+        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply && !sendLinkedGroup(group)) {
             showMessage("ABC update was not accepted; inspect device diagnostics.", true)
             return
         }
-        showMessage("ABC angles queued from " + model.get(row).signalId, false)
+        showMessage((pendingApply ? "Local experiment: " : "Device queue: ") + "ABC angles queued from " + model.get(row).signalId, false)
     }
 
     function balanceGroupAngles(group, row) {
@@ -396,11 +520,12 @@ ApplicationWindow {
         model.setProperty(1, "phase", normalizedAngle(base - 120))
         model.setProperty(2, "phase", normalizedAngle(base + 120))
         selectSignal(group, row)
-        if (workflowBar.session && workflowBar.session.liveControlReady && !sendLinkedGroup(group)) {
+        markScenarioDirty()
+        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply && !sendLinkedGroup(group)) {
             showMessage("ABC update was not accepted; inspect device diagnostics.", true)
             return
         }
-        showMessage("Balanced ABC angles queued from " + model.get(row).signalId, false)
+        showMessage((pendingApply ? "Local experiment: " : "Device queue: ") + "Balanced ABC angles queued from " + model.get(row).signalId, false)
     }
 
     function balanced() {
@@ -415,7 +540,8 @@ ApplicationWindow {
         }
         selectSignal(activeGroup, activeRow)
         refreshPreview()
-        if (workflowBar.session && workflowBar.session.liveControlReady) applyAllSignals()
+        markScenarioDirty()
+        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply) applyAllSignals()
     }
 
     function zeroAll() {
@@ -425,7 +551,8 @@ ApplicationWindow {
         }
         selectSignal(activeGroup, activeRow)
         refreshPreview()
-        if (workflowBar.session && workflowBar.session.liveControlReady)
+        markScenarioDirty()
+        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
             workflowBar.session.requestZero()
     }
 
@@ -433,7 +560,8 @@ ApplicationWindow {
         var unsignedValue = Number(value) >>> 0
         groupModel(activeGroup).setProperty(activeRow, "quality", unsignedValue)
         activeQuality = unsignedValue
-        if (workflowBar.session && workflowBar.session.liveControlReady)
+        markScenarioDirty()
+        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
             workflowBar.session.requestSetQuality(activeSignal, unsignedValue)
     }
 
@@ -605,6 +733,7 @@ ApplicationWindow {
                 activeMagnitude: root.activeMagnitude
                 activePhase: root.activePhase
                 signalFrequency: root.signalFrequency
+                            previewRunning: root.offlinePreviewRunning && !device.deviceVerified
                 ctSaturationEnabled: root.ctSaturationEnabled
                 ctDcOffsetPercent: root.ctDcOffsetPercent
                 ctHarmonicPercent: root.ctHarmonicPercent
@@ -647,6 +776,7 @@ ApplicationWindow {
                 activeMagnitude: root.activeMagnitude
                 activePhase: root.activePhase
                 signalFrequency: root.signalFrequency
+                            previewRunning: root.offlinePreviewRunning && !device.deviceVerified
                 ctSaturationEnabled: root.ctSaturationEnabled
                 ctDcOffsetPercent: root.ctDcOffsetPercent
                 ctHarmonicPercent: root.ctHarmonicPercent
@@ -663,6 +793,7 @@ ApplicationWindow {
 
         WorkflowBar {
             id: workflowBar
+            objectName: "studioWorkflowBar"
             Layout.fillWidth: true
             Layout.preferredHeight: 54
             Layout.minimumHeight: 54
@@ -713,6 +844,7 @@ ApplicationWindow {
                 }
 
                 SurfacePanel {
+                    objectName: "studioInjectionSurface"
                     SplitView.fillWidth: true
                     SplitView.fillHeight: true
                     SplitView.minimumWidth: root.compactLayout ? 500 : 550
@@ -731,6 +863,17 @@ ApplicationWindow {
                                 Label { text: "4I + 4V Injection"; color: studioTheme.text; font.family: root.uiFont; font.pixelSize: root.compactLayout ? 17 : 18; font.weight: Font.DemiBold }
                             }
                             Item { Layout.fillWidth: true }
+                            CalmButton {
+                                theme: studioTheme
+                                uiFont: root.uiFont
+                                iconSource: Qt.resolvedUrl("../assets/material/file_upload.svg")
+                                text: !device.deviceVerified ? "Local draft"
+                                    : root.pendingApply ? "Apply to board" : "SET queued"
+                                implicitWidth: 106
+                                tone: device.deviceVerified && root.pendingApply ? "accent" : "normal"
+                                toolTipText: "Local setpoints are separate from physical output. Board last values are not read back."
+                                onClicked: root.requestApplyDraft()
+                            }
                         }
 
                         Rectangle {
@@ -740,6 +883,25 @@ ApplicationWindow {
                             color: "#0b1219"
                             border.width: 0
 
+                            StudioActionMenu {
+                                id: frequencyMenu
+                                objectName: "studioFrequencyMenu"
+                                theme: studioTheme
+                                uiFont: root.uiFont
+                                x: 80
+                                y: 45
+                                title: "Frequency · shared across all channels"
+                                Action { text: "DC · 0 Hz"; icon.source: Qt.resolvedUrl("../assets/material/block.svg"); onTriggered: root.setWaveformMode("DC") }
+                                Action { text: "50 Hz · nominal"; icon.source: Qt.resolvedUrl("../assets/material/schedule.svg"); onTriggered: root.setFrequencyValue(50) }
+                                Action { text: "60 Hz · nominal"; icon.source: Qt.resolvedUrl("../assets/material/schedule.svg"); onTriggered: root.setFrequencyValue(60) }
+                                StudioMenuDivider { theme: studioTheme }
+                                Action {
+                                    text: "Restore previous AC"
+                                    icon.source: Qt.resolvedUrl("../assets/material/refresh.svg")
+                                    enabled: root.previousAcFrequency > 0
+                                    onTriggered: root.setWaveformMode("AC")
+                                }
+                            }
                             RowLayout {
                                 anchors.fill: parent
                                 anchors.leftMargin: 11
@@ -756,6 +918,14 @@ ApplicationWindow {
                                 }
                                 NumericField {
                                     id: frequencyField
+                                    ToolTip.visible: hovered && !activeFocus
+                                    ToolTip.delay: 650
+                                    ToolTip.text: "Right-click for DC / 50 Hz / 60 Hz and AC restoration"
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        acceptedButtons: Qt.RightButton
+                                        onClicked: frequencyMenu.popup()
+                                    }
                                     theme: studioTheme
                                     monoFont: root.monoFont
                                     compact: root.compactLayout
@@ -771,7 +941,8 @@ ApplicationWindow {
                                             root.signalFrequency = value
                                             if (value > 0) root.previousAcFrequency = value
                                             root.refreshPreview()
-                                            if (workflowBar.session && workflowBar.session.liveControlReady)
+                                            root.markScenarioDirty()
+                                            if (workflowBar.session && workflowBar.session.liveControlReady && !root.pendingApply)
                                                 workflowBar.session.requestSetFrequency(value)
                                         } else invalidInput = true
                                     }
@@ -795,7 +966,10 @@ ApplicationWindow {
                                     enabled: root.signalFrequency > 0
                                     checked: root.phaseLink
                                     text: "3-phase link"
-                                    onToggled: root.phaseLink = checked
+                                    onToggled: {
+                                        root.phaseLink = checked
+                                        root.markScenarioDirty()
+                                    }
                                     font.family: root.uiFont
                                     font.pixelSize: 9
                                 }
@@ -808,24 +982,8 @@ ApplicationWindow {
                             Layout.fillHeight: true
                             spacing: 9
                             SignalMatrix {
-                                id: currentMatrix
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                theme: studioTheme
-                                controller: root
-                                device: device
-                                session: workflowBar.session
-                                sourceModel: currentModel
-                                uiFont: root.uiFont
-                                monoFont: root.monoFont
-                                groupIndex: 0
-                                titleText: "Current"
-                                symbolText: "I"
-                                unitText: root.signalFrequency === 0 ? "A DC" : "A RMS"
-                                compact: root.compactLayout
-                            }
-                            SignalMatrix {
                                 id: voltageMatrix
+                                objectName: "studioVoltageMatrix"
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 theme: studioTheme
@@ -841,10 +999,43 @@ ApplicationWindow {
                                 unitText: root.signalFrequency === 0 ? "V DC" : "V RMS"
                                 compact: root.compactLayout
                             }
+                            SignalMatrix {
+                                id: currentMatrix
+                                objectName: "studioCurrentMatrix"
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                theme: studioTheme
+                                controller: root
+                                device: device
+                                session: workflowBar.session
+                                sourceModel: currentModel
+                                uiFont: root.uiFont
+                                monoFont: root.monoFont
+                                groupIndex: 0
+                                titleText: "Current"
+                                symbolText: "I"
+                                unitText: root.signalFrequency === 0 ? "A DC" : "A RMS"
+                                compact: root.compactLayout
+                            }
+
                         }
 
+                        StudioTimingTray {
+                            objectName: "studioTimingTray"
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: root.height < 700 ? 112 : 132
+                            Layout.minimumHeight: root.height < 700 ? 112 : 132
+                            theme: studioTheme
+                            controller: root
+                            device: device
+                            session: workflowBar.session
+                            uiFont: root.uiFont
+                            monoFont: root.monoFont
+                            compact: root.compactLayout
+                        }
                         Rectangle { Layout.fillWidth: true; height: 1; color: studioTheme.lineSoft }
                         RowLayout {
+                            objectName: "studioQualityRow"
                             Layout.fillWidth: true
                             spacing: 8
                             Rectangle { width: 6; height: 6; radius: 3; color: studioTheme.accent }
@@ -923,6 +1114,7 @@ ApplicationWindow {
                             activeMagnitude: root.activeMagnitude
                             activePhase: root.activePhase
                             signalFrequency: root.signalFrequency
+                            previewRunning: root.offlinePreviewRunning && !device.deviceVerified
                             ctSaturationEnabled: root.ctSaturationEnabled
                             ctDcOffsetPercent: root.ctDcOffsetPercent
                             ctHarmonicPercent: root.ctHarmonicPercent
@@ -961,6 +1153,7 @@ ApplicationWindow {
                             activeMagnitude: root.activeMagnitude
                             activePhase: root.activePhase
                             signalFrequency: root.signalFrequency
+                            previewRunning: root.offlinePreviewRunning && !device.deviceVerified
                             ctSaturationEnabled: root.ctSaturationEnabled
                             ctDcOffsetPercent: root.ctDcOffsetPercent
                             ctHarmonicPercent: root.ctHarmonicPercent

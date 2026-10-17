@@ -44,12 +44,18 @@ SurfacePanel {
         return panel.session && panel.session.requestConfigurePtp(panel.ptpProfile())
     }
 
+    function startRole(role) {
+        if (!panel.session || !panel.device.ptpAvailable || !panel.device.deviceVerified
+                || panel.device.ptpRunning || panel.startPending || panel.session.updatingFirmware)
+            return false
+        const accepted = panel.session.requestStartPtpConfigured(role, panel.ptpProfile())
+        if (!accepted && panel.controller)
+            panel.controller.showMessage("PTP start blocked. Check timing diagnostics.", true)
+        return Boolean(accepted)
+    }
+
     function startSelectedMode() {
-        if (!panel.session || !panel.device.ptpAvailable) return
-        var role = panel.roleValues[modeCombo.currentIndex]
-        if (!panel.session.requestStartPtpConfigured(role, panel.ptpProfile())) {
-            if (panel.controller) panel.controller.showMessage("PTP start blocked. See the Timing status for details.", true)
-        }
+        return panel.startRole(panel.roleValues[modeCombo.currentIndex])
     }
 
     readonly property string activeRole: panel.device.ptpRole
@@ -114,51 +120,22 @@ SurfacePanel {
                     }
                 }
                 Item { Layout.fillWidth: true }
-                Switch {
+                StudioPtpSwitch {
                     id: ptpPower
+                    theme: panel.theme
+                    uiFont: panel.uiFont
                     text: "PTP"
                     checked: Boolean(panel.device.ptpRunning)
                     enabled: panel.session && panel.device.ptpAvailable
                         && !panel.startPending && !panel.session.updatingFirmware
-                    font.family: panel.uiFont
-                    font.pixelSize: 11
                     ToolTip.visible: hovered
-                    ToolTip.text: "Start the selected lab PTP role, or stop PTP. State follows verified board telemetry."
+                    ToolTip.text: "Start the selected lab PTP role or stop it. State follows verified board telemetry."
                     onClicked: {
-                        // A Switch flips locally before asynchronous firmware ACK.
-                        // Restore its binding to the sole device-owned state first;
-                        // rejected START/STOP must never advertise the wrong status.
                         const wantsRunning = checked
                         checked = Qt.binding(function() { return Boolean(panel.device.ptpRunning) })
                         if (wantsRunning) panel.startSelectedMode()
                         else if (panel.session && !panel.session.requestStopPtp() && panel.controller)
                             panel.controller.showMessage("PTP stop was not accepted. Copy diagnostics.", true)
-                    }
-                    indicator: Rectangle {
-                        implicitWidth: 46
-                        implicitHeight: 24
-                        x: ptpPower.leftPadding
-                        y: (ptpPower.height - height) / 2
-                        radius: 12
-                        color: ptpPower.checked ? "#195b44" : panel.theme.surface2
-                        border.width: 1
-                        border.color: ptpPower.checked ? panel.theme.green : panel.theme.line
-                        Rectangle {
-                            width: 16
-                            height: 16
-                            y: 4
-                            x: ptpPower.checked ? parent.width - width - 4 : 4
-                            radius: 8
-                            color: ptpPower.checked ? panel.theme.green : panel.theme.textSoft
-                            Behavior on x { NumberAnimation { duration: 120 } }
-                        }
-                    }
-                    contentItem: Text {
-                        text: ptpPower.text
-                        color: ptpPower.enabled ? panel.theme.text : panel.theme.muted
-                        font: ptpPower.font
-                        leftPadding: ptpPower.indicator.width + ptpPower.spacing
-                        verticalAlignment: Text.AlignVCenter
                     }
                 }
                 StateBadge {

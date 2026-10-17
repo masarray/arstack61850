@@ -170,6 +170,10 @@ jobs:
           fi
           echo 'S7 QML authority boundary: PASS · presentation submits intents through SmartSessionController and device mutators are not QML-invokable'
 
+      - name: Studio operator workspace layout and PTP authority contract
+        shell: bash
+        run: python3 apps/arstack_studio/tests/check_operator_workspace.py
+
       - name: Native binary profile authority regression
         shell: bash
         run: |
@@ -308,6 +312,13 @@ jobs:
           status=$?
           set -e
           cat /tmp/arstack-studio-launch.log
+          # A process that stays alive can still have broken QML bindings.
+          # Headless Linux lacks Qt SVG decode support (non-fatal presentation
+          # warnings), but JavaScript/QML binding failures are release blockers.
+          if grep -Eq 'TypeError:|ReferenceError:|Cannot assign to non-existent property|is not a type' /tmp/arstack-studio-launch.log; then
+            echo 'ARStack Studio has QML runtime binding/type failures.'
+            exit 1
+          fi
           if [ "$status" -ne 124 ]; then
             echo "ARStack Studio exited before smoke timeout (status=$status)."
             exit "$status"
@@ -322,6 +333,13 @@ jobs:
           status=$?
           set -e
           cat /tmp/arstack-studio-hidpi.log
+          # A process that stays alive can still have broken QML bindings.
+          # Headless Linux lacks Qt SVG decode support (non-fatal presentation
+          # warnings), but JavaScript/QML binding failures are release blockers.
+          if grep -Eq 'TypeError:|ReferenceError:|Cannot assign to non-existent property|is not a type' /tmp/arstack-studio-hidpi.log; then
+            echo 'ARStack Studio has QML runtime binding/type failures.'
+            exit 1
+          fi
           if [ "$status" -ne 124 ]; then
             echo "ARStack Studio high-DPI launch exited early (status=$status)."
             exit "$status"

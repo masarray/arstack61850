@@ -20,12 +20,17 @@
 #include <QIcon>
 #include <QPointer>
 #include <QQmlApplicationEngine>
+#include <QQuickItem>
 #include <QQuickWindow>
+#include <QRectF>
+#include <QSize>
 #include <QThread>
 #include <QTimer>
 #include <QtQml/qqml.h>
 
 #include <algorithm>
+#include <array>
+#include <memory>
 #include <string_view>
 
 #ifndef ARSTACK_STUDIO_VERSION
@@ -38,6 +43,73 @@ bool hasArgument(const int argc, char* argv[], const std::string_view wanted) {
         if (argv[i] != nullptr && std::string_view{argv[i]} == wanted) return true;
     }
     return false;
+}
+
+
+struct UiBounds {
+    QRectF area;
+    bool visible{false};
+};
+
+[[nodiscard]] UiBounds findUiBounds(QQuickWindow* window, const char* name) {
+    auto* item = window->findChild<QQuickItem*>(QString::fromLatin1(name));
+    if (item == nullptr || item->width() < 1 || item->height() < 1) return {};
+    return {QRectF{item->mapToScene(QPointF{0, 0}), QSizeF{item->width(), item->height()}},
+            item->isVisible()};
+}
+
+[[nodiscard]] bool checkOperatorViewport(QQuickWindow* window, const QSize size) {
+    constexpr qreal tolerance = 2.0;
+    const QRectF viewport{QPointF{0, 0}, QSizeF{size}};
+    const auto bar = findUiBounds(window, "studioWorkflowBar");
+    const auto surface = findUiBounds(window, "studioInjectionSurface");
+    const auto voltage = findUiBounds(window, "studioVoltageMatrix");
+    const auto current = findUiBounds(window, "studioCurrentMatrix");
+    const auto tray = findUiBounds(window, "studioTimingTray");
+    const auto quality = findUiBounds(window, "studioQualityRow");
+    const std::array<std::pair<const char*, UiBounds>, 6> areas{{
+        {"toolbar", bar}, {"injection workspace", surface},
+        {"voltage matrix", voltage}, {"current matrix", current},
+        {"PTP timing tray", tray}, {"quality editor", quality}
+    }};
+    for (const auto& [label, item] : areas) {
+        if (!item.visible || item.area.width() < 25 || item.area.height() < 15 ||
+            !viewport.adjusted(-tolerance, -tolerance, tolerance, tolerance)
+                 .contains(item.area.adjusted(tolerance, tolerance,
+                                              -tolerance, -tolerance))) {
+            qCritical().noquote() << "Studio UI viewport violation" << size << label
+                                  << "bounds=" << item.area << "viewport=" << viewport;
+            return false;
+        }
+    }
+    if (!(voltage.area.right() <= current.area.left() + tolerance
+          && tray.area.top() >= voltage.area.bottom() - tolerance
+          && quality.area.top() >= tray.area.bottom() - tolerance
+          && quality.area.bottom() <= surface.area.bottom() + tolerance)) {
+        qCritical().noquote() << "Studio UI panel order/overlap violation" << size
+                              << voltage.area << current.area << tray.area << quality.area;
+        return false;
+    }
+    const std::array<const char*, 4> controls{{
+        "studioPtpSwitch", "studioPtpRole", "studioSmpSynchMode", "studioTimingDetails"
+    }};
+    qreal previousRight = tray.area.left();
+    for (const char* name : controls) {
+        const auto control = findUiBounds(window, name);
+        if (!control.visible || control.area.width() < 35 ||
+            control.area.left() + tolerance < previousRight ||
+            !tray.area.adjusted(-tolerance, -tolerance, tolerance, tolerance)
+                 .contains(control.area.adjusted(tolerance, tolerance,
+                                                 -tolerance, -tolerance))) {
+            qCritical().noquote() << "Studio timing controls clipped or overlapped"
+                                  << size << name << control.area << tray.area;
+            return false;
+        }
+        previousRight = control.area.right();
+    }
+    qInfo().noquote() << "Studio viewport geometry: PASS" << size
+                      << "toolbar=" << bar.area << "PTP=" << tray.area;
+    return true;
 }
 
 class PrimaryWindowCloseFilter final : public QObject {
@@ -436,6 +508,7 @@ int main(int argc, char* argv[]) {
     }
 
     const bool lifecycleCheck = hasArgument(argc, argv, "--check-app-lifecycle");
+    const bool operatorUiCheck = hasArgument(argc, argv, "--check-operator-ui");
 
     QGuiApplication app(argc, argv);
     app.setQuitOnLastWindowClosed(true);
@@ -520,6 +593,87 @@ int main(int argc, char* argv[]) {
             }
         },
         Qt::DirectConnection);
+
+
+    if (operatorUiCheck) {
+        if (mainWindow == nullptr) {
+            qCritical().noquote() << "Studio UI geometry test: no main window";
+            return 19;
+        }
+        // Exercise desktop, supported minimum, and extended desktop layout on
+        // the real rendering engine. This branch never touches a serial port.
+        constexpr std::array<QSize, 3> sizes{{QSize{1240, 760}, QSize{960, 620},
+                                               QSize{1440, 900}}};
+        // Virtual Qt platforms can resize to arbitrary logical viewports,
+        // but cannot support grabWindow. One native 960x620 pass captures
+        // actual Windows pixels separately without requesting an oversized
+        // desktop window.
+        const bool nativeCapture = !qEnvironmentVariableIsEmpty("ARSTACK_STUDIO_QA_NATIVE_ONLY");
+        const int caseCount = nativeCapture ? 1 : static_cast<int>(sizes.size());
+        const auto caseSize = [sizes, nativeCapture](const int step) {
+            return nativeCapture ? sizes[1] : sizes.at(static_cast<std::size_t>(step));
+        };
+        const QString screenshots = qEnvironmentVariable("ARSTACK_STUDIO_QA_DIR");
+        if (!screenshots.isEmpty() && !QDir{}.mkpath(screenshots)) {
+            qCritical().noquote() << "Cannot create GUI evidence directory" << screenshots;
+            return 20;
+        }
+        auto step = std::make_shared<int>(0);
+        auto resizeRetries = std::make_shared<int>(0);
+        auto* uiTimer = new QTimer(&app);
+        uiTimer->setInterval(400);
+        mainWindow->resize(caseSize(0));
+        QObject::connect(uiTimer, &QTimer::timeout, &app,
+                         [&, step, resizeRetries, uiTimer, caseSize, caseCount, screenshots] {
+            const QSize target = caseSize(*step);
+            if (mainWindow->size() != target) {
+                // CI's virtual Windows desktop can clamp large native
+                // windows. Diagnose that instead of spinning 15 seconds.
+                if (++*resizeRetries > 5) {
+                    qCritical().noquote() << "Studio UI cannot reach target viewport:"
+                        << "requested=" << target << "actual=" << mainWindow->size()
+                        << "platform=" << QGuiApplication::platformName();
+                    uiTimer->stop();
+                    QCoreApplication::exit(24);
+                    return;
+                }
+                mainWindow->resize(target);
+                return;
+            }
+            *resizeRetries = 0;
+            if (!checkOperatorViewport(mainWindow, target)) {
+                uiTimer->stop();
+                QCoreApplication::exit(21);
+                return;
+            }
+            if (!screenshots.isEmpty()) {
+                const QString path = QDir{screenshots}.filePath(
+                    QStringLiteral("studio-%1x%2.png").arg(target.width()).arg(target.height()));
+                const QImage frame = mainWindow->grabWindow();
+                if (frame.isNull() || !frame.save(path)) {
+                    qCritical().noquote() << "GUI evidence capture failed:" << path;
+                    uiTimer->stop();
+                    QCoreApplication::exit(22);
+                    return;
+                }
+            }
+            ++*step;
+            if (*step == caseCount) {
+                uiTimer->stop();
+                qInfo().noquote() << "Studio operator layout acceptance: PASS";
+                QCoreApplication::exit(0);
+                return;
+            }
+            mainWindow->resize(caseSize(*step));
+        });
+        uiTimer->start();
+        QTimer::singleShot(15000, &app, [&app, uiTimer] {
+            if (uiTimer->isActive()) {
+                qCritical().noquote() << "Studio UI geometry test timed out";
+                QCoreApplication::exit(23);
+            }
+        });
+    }
 
     if (lifecycleCheck) {
         if (mainWindow == nullptr) {

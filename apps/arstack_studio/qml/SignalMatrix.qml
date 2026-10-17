@@ -124,33 +124,70 @@ Rectangle {
                 property real pendingMagnitude: mag
                 property real pendingPhase: angle
 
-                Menu {
+                // The same placement/visibility semantics for mouse and keyboard.
+                // Clamp horizontally to the row rather than allowing a 250px
+                // popup to extend underneath the adjacent matrix.
+                function openFieldMenu(field, actionMenu) {
+                    const at = signalRow.mapFromItem(field, 0, field.height)
+                    actionMenu.popup(Math.max(6, Math.min(at.x, signalRow.width - actionMenu.width)), at.y)
+                }
+
+                // Action-backed menu uses a single globally styled delegate.
+                // Rows/callbacks stay local so keyboard navigation and model
+                // ownership remain unchanged.
+                StudioActionMenu {
                     id: magnitudeMenu
-                    background: Rectangle { color: matrix.theme.raised; radius: 8; border.color: matrix.theme.line }
-                    MenuItem {
-                        text: "Equal Value · A/B/C = " + signalRow.sid
+                    theme: matrix.theme
+                    uiFont: matrix.uiFont
+                    title: "Magnitude · " + signalRow.sid
+                    Action {
+                        text: "Zero · 0"
+                        icon.source: Qt.resolvedUrl("../assets/material/block.svg")
+                        onTriggered: matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "magnitude", 0)
+                    }
+                    Action {
+                        text: "50% nominal (demo)"
+                        icon.source: Qt.resolvedUrl("../assets/material/tune.svg")
+                        onTriggered: matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex,
+                            "magnitude", matrix.groupIndex === 0 ? 0.5 : 28.87)
+                    }
+                    Action {
+                        text: "100% nominal (demo)"
+                        icon.source: Qt.resolvedUrl("../assets/material/check_circle.svg")
+                        onTriggered: matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex,
+                            "magnitude", matrix.groupIndex === 0 ? 1.0 : 57.74)
+                    }
+                    StudioMenuDivider { theme: matrix.theme }
+                    Action {
+                        text: "Equal magnitudes A/B/C"
+                        icon.source: Qt.resolvedUrl("../assets/material/done_all.svg")
                         enabled: signalRow.rowIndex < 3
                         onTriggered: matrix.controller.equalGroupMagnitudes(matrix.groupIndex, signalRow.rowIndex)
-                        contentItem: Label { text: parent.text; color: matrix.theme.text; font.family: matrix.uiFont; font.pixelSize: 12 }
-                        background: Rectangle { color: parent.highlighted ? matrix.theme.accentSoft : "transparent" }
                     }
                 }
-                Menu {
+                StudioActionMenu {
                     id: phaseMenu
-                    background: Rectangle { color: matrix.theme.raised; radius: 8; border.color: matrix.theme.line }
-                    MenuItem {
-                        text: "Equal Angle · A/B/C = " + signalRow.sid
+                    theme: matrix.theme
+                    uiFont: matrix.uiFont
+                    title: "Angle · " + signalRow.sid
+                    Action {
+                        text: "Zero angle · 0°"
+                        icon.source: Qt.resolvedUrl("../assets/material/block.svg")
+                        enabled: matrix.controller.signalFrequency > 0
+                        onTriggered: matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "phase", 0)
+                    }
+                    StudioMenuDivider { theme: matrix.theme }
+                    Action {
+                        text: "Equal angles A/B/C"
+                        icon.source: Qt.resolvedUrl("../assets/material/done_all.svg")
                         enabled: signalRow.rowIndex < 3
                         onTriggered: matrix.controller.equalGroupAngles(matrix.groupIndex, signalRow.rowIndex)
-                        contentItem: Label { text: parent.text; color: matrix.theme.text; font.family: matrix.uiFont; font.pixelSize: 12 }
-                        background: Rectangle { color: parent.highlighted ? matrix.theme.accentSoft : "transparent" }
                     }
-                    MenuItem {
-                        text: "Balance Angle · 120° from " + signalRow.sid
+                    Action {
+                        text: "Balance angles · 120°"
+                        icon.source: Qt.resolvedUrl("../assets/material/balance.svg")
                         enabled: signalRow.rowIndex < 3
                         onTriggered: matrix.controller.balanceGroupAngles(matrix.groupIndex, signalRow.rowIndex)
-                        contentItem: Label { text: parent.text; color: matrix.theme.text; font.family: matrix.uiFont; font.pixelSize: 12 }
-                        background: Rectangle { color: parent.highlighted ? matrix.theme.accentSoft : "transparent" }
                     }
                 }
 
@@ -207,7 +244,8 @@ Rectangle {
                             matrix.sourceModel.setProperty(signalRow.rowIndex, "enabled", checked)
                             matrix.controller.selectSignal(matrix.groupIndex, signalRow.rowIndex)
                             matrix.controller.refreshPreview()
-                            if (matrix.session && matrix.session.liveControlReady)
+                            matrix.controller.markScenarioDirty()
+                            if (matrix.session && matrix.session.liveControlReady && !matrix.controller.pendingApply)
                                 matrix.session.requestSetEnabled(signalRow.sid, checked)
                         }
                     }
@@ -231,12 +269,12 @@ Rectangle {
                         id: magnitudeField
                         ToolTip.visible: hovered && !activeFocus
                         ToolTip.delay: 650
-                        ToolTip.text: "Right-click: Equal Value (set phases A/B/C to this magnitude)"
+                        ToolTip.text: "Right-click or Shift+F10: magnitude presets and Equal ABC"
                         MouseArea {
                             anchors.fill: parent
                             z: 5
                             acceptedButtons: Qt.RightButton
-                            onClicked: magnitudeMenu.popup()
+                            onClicked: signalRow.openFieldMenu(magnitudeField, magnitudeMenu)
                         }
                         Layout.fillWidth: true
                         theme: matrix.theme
@@ -275,7 +313,11 @@ Rectangle {
                             }
                         }
                         Keys.onPressed: function(event) {
-                            if ([Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right].indexOf(event.key) >= 0) {
+                            if (event.key === Qt.Key_Menu ||
+                                    (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
+                                signalRow.openFieldMenu(magnitudeField, magnitudeMenu)
+                                event.accepted = true
+                            } else if ([Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right].indexOf(event.key) >= 0) {
                                 matrix.controller.navigate(matrix.groupIndex, signalRow.rowIndex, 0, event.key)
                                 event.accepted = true
                             } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
@@ -289,12 +331,12 @@ Rectangle {
                         id: phaseField
                         ToolTip.visible: hovered && !activeFocus
                         ToolTip.delay: 650
-                        ToolTip.text: "Right-click: Equal Angle or Balance phases A/B/C by 120°"
+                        ToolTip.text: "Right-click or Shift+F10: Equal/Balance ABC angles"
                         MouseArea {
                             anchors.fill: parent
                             z: 5
                             acceptedButtons: Qt.RightButton
-                            onClicked: phaseMenu.popup()
+                            onClicked: signalRow.openFieldMenu(phaseField, phaseMenu)
                         }
                         enabled: matrix.controller.signalFrequency > 0
                         Layout.preferredWidth: matrix.compact ? 84 : 100
@@ -334,7 +376,11 @@ Rectangle {
                             }
                         }
                         Keys.onPressed: function(event) {
-                            if ([Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right].indexOf(event.key) >= 0) {
+                            if (event.key === Qt.Key_Menu ||
+                                    (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
+                                signalRow.openFieldMenu(phaseField, phaseMenu)
+                                event.accepted = true
+                            } else if ([Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right].indexOf(event.key) >= 0) {
                                 matrix.controller.navigate(matrix.groupIndex, signalRow.rowIndex, 1, event.key)
                                 event.accepted = true
                             } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
