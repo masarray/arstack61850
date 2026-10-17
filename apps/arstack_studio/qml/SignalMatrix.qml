@@ -124,12 +124,14 @@ Rectangle {
                 property real pendingMagnitude: mag
                 property real pendingPhase: angle
 
-                // The same placement/visibility semantics for mouse and keyboard.
-                // Clamp horizontally to the row rather than allowing a 250px
-                // popup to extend underneath the adjacent matrix.
+                // Align with the field edge, not the left side of the table.
+                // Clamp inside the owning matrix and open below the editor;
+                // keyboard Menu/Shift+F10 uses exactly the same placement.
                 function openFieldMenu(field, actionMenu) {
-                    const at = signalRow.mapFromItem(field, 0, field.height)
-                    actionMenu.popup(Math.max(6, Math.min(at.x, signalRow.width - actionMenu.width)), at.y)
+                    const edge = signalRow.mapFromItem(field, field.width, field.height)
+                    const x = Math.max(6, Math.min(edge.x - actionMenu.width,
+                                                   signalRow.width - actionMenu.width - 6))
+                    actionMenu.popup(x, edge.y + 3)
                 }
 
                 // Action-backed menu uses a single globally styled delegate.
@@ -139,7 +141,7 @@ Rectangle {
                     id: magnitudeMenu
                     theme: matrix.theme
                     uiFont: matrix.uiFont
-                    title: "Magnitude · " + signalRow.sid
+                    contextLabel: "Magnitude · " + signalRow.sid
                     commandRows: 4
                     Action {
                         text: "Zero · 0"
@@ -170,7 +172,7 @@ Rectangle {
                     id: phaseMenu
                     theme: matrix.theme
                     uiFont: matrix.uiFont
-                    title: "Angle · " + signalRow.sid
+                    contextLabel: "Angle · " + signalRow.sid
                     commandRows: 3
                     Action {
                         text: "Zero angle · 0°"

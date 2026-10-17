@@ -127,7 +127,15 @@ def main() -> None:
             "context actions must stay compact, descriptive and grouped")
     assert "implicitHeight: 65" in source("RibbonAction.qml")
     assert 'hovered ? "#142334"' in source("RibbonAction.qml")
-    assert "width: 212" in menu and "commandRows * 29" in menu
+    require('title: ""' in menu and 'property string contextLabel: ""' in menu
+            and 'contextLabel: "Magnitude · "' in matrix
+            and 'contextLabel: "Angle · "' in matrix
+            and 'title: "Magnitude · "' not in matrix and 'title: "Angle · "' not in matrix,
+            "context menu must have no phantom native title/header blank space")
+    require("width: 204" in menu and "commandRows * 30" in menu
+            and "actionMenu.popup(x, edge.y + 3)" in matrix
+            and "signalRow.mapFromItem(field, field.width, field.height)" in matrix,
+            "context menu must align to the editor with compact deterministic geometry")
     assert "text: \"Generated setpoint · not independent on-wire proof\"" not in preview
     assert "No ESP32 board detected · Preview mode only" in main_qml
     require("Layout.preferredHeight: 57" in main_qml
