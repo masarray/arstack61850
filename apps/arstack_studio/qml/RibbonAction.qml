@@ -39,6 +39,7 @@ Button {
         : tone === "danger" ? "#ffe3e6"
         : tone === "accent" || checked ? "#e1f1ff" : theme.textSoft
     contentItem: ColumnLayout {
+        anchors.centerIn: parent
         spacing: 3
         Image {
             visible: control.iconSource.toString().length > 0
