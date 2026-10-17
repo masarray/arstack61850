@@ -12,6 +12,15 @@ Rectangle {
 
     readonly property var rcb: reports.selectedRcb
     readonly property bool hasSelection: reports.selectedRcbIndex >= 0
+    readonly property string selectedRcbReference: hasSelection
+                                                 ? String(rcb.reference || "") : ""
+    // Selection changes must reveal the RCB's identity and attributes first;
+    // retaining the prior RCB's scroll offset can hide the primary evidence.
+    onSelectedRcbReferenceChanged: {
+        selectedReportMemberIndex = -1
+        if (detailScroll.contentItem)
+            detailScroll.contentItem.contentY = 0
+    }
     readonly property bool selectedIsSubscribed: hasSelection && reports.active
         && reports.subscriptionRcbReference === rcb.reference
     readonly property bool selectedNeedsCleanup: hasSelection && reports.cleanupRequired
