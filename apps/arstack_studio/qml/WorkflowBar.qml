@@ -150,8 +150,13 @@ SurfacePanel {
             // overwrite a board with a restored/offline local draft.
             controller.profileDirty = false
             controller.pendingApply = true
-            // Fast path: the next START uploads the local setpoints first.
-            // No auto-transmit on device discovery/reconnection.
+            // SV never starts automatically: the next START uploads the
+            // latest table snapshot. PTP is a separate operator-default
+            // timing SOURCE, armed only after verified board readiness.
+            if (controller.ptpDesiredForSession && !ribbon.device.ptpRunning) {
+                controller.ptpRestoreChecks = 0
+                controller.ptpRestoreAfterFirmware = true
+            }
         }
         function onStateChanged() {
             if (ribbon.firmwareGateActive)
