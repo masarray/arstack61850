@@ -789,8 +789,13 @@ bool MmsReportController::connectToIed() {
     if (engineeringContext_ && engineeringContext_->loaded() &&
         !engineeringContext_->selectionRequired() &&
         engineeringContext_->modelSnapshot() != nullptr) {
-        contextModel = std::make_shared<mms::MmsLiveModelDocument>(
-            *engineeringContext_->modelSnapshot());
+        // The Browser may be pointed at a different endpoint from the
+        // opened SCL context. Never attach foreign schema to that MMS session.
+        const auto* candidate = engineeringContext_->modelSnapshot();
+        if (candidate->endpoint.host == requestedHost.toStdString() &&
+            candidate->endpoint.port == static_cast<std::uint16_t>(requestedPort)) {
+            contextModel = std::make_shared<mms::MmsLiveModelDocument>(*candidate);
+        }
     }
     appendDiagnostic(QStringLiteral("Reports connect %1:%2 · generation %3")
         .arg(requestedHost).arg(requestedPort).arg(generation));
