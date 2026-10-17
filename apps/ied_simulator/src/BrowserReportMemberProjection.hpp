@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -145,5 +146,118 @@ inline constexpr int kBrowserReportTextLimit = 1024;
         }
     }
     return projection;
+}
+
+// A bounded, ready-to-render hierarchy. The native report frame remains the
+// source of truth; QML must never parse an MMS structure's preview string.
+// Positional MMS children deliberately say "Field N": without a verified SCL
+// type they must NOT be misidentified as stVal, q, t, origin, etc.
+inline constexpr int kBrowserReportTreeChildLimit = 192;
+inline constexpr unsigned kBrowserReportTreeDepthLimit = 4U;
+inline constexpr int kBrowserReportTreeScalarTextLimit = 160;
+
+[[nodiscard]] inline QString browserReportTreeKind(const mms::MmsDataKind kind) {
+    using K = mms::MmsDataKind;
+    switch (kind) {
+    case K::structure: return QStringLiteral("STRUCT");
+    case K::array: return QStringLiteral("ARRAY");
+    case K::bit_string: return QStringLiteral("BIT STRING");
+    case K::utc_time: return QStringLiteral("UTC");
+    case K::boolean: return QStringLiteral("BOOL");
+    case K::integer: return QStringLiteral("INT");
+    case K::unsigned_integer: return QStringLiteral("UINT");
+    case K::floating_point: return QStringLiteral("FLOAT");
+    case K::visible_string: return QStringLiteral("STRING");
+    case K::octet_string: return QStringLiteral("OCTETS");
+    default: return QStringLiteral("MMS");
+    }
+}
+
+[[nodiscard]] inline QVariantList projectBrowserReportTree(
+    const std::vector<mms::MmsReportValue>& members) {
+    QVariantList rows;
+    const auto visibleCount = std::min(
+        members.size(), static_cast<std::size_t>(kBrowserReportVisibleMemberLimit));
+    rows.reserve(static_cast<qsizetype>(visibleCount) + kBrowserReportTreeChildLimit);
+    int remainingChildren = kBrowserReportTreeChildLimit;
+
+    // Each nested child is serialized once, with bounded depth and text; all
+    // labels are explicitly positional unless canonical identity is present.
+    const auto appendValue = [&](const auto& visit, const mms::MmsDataValue& value,
+                                 const int ordinal, const unsigned depth,
+                                 const QString& title, const QString& fullReference) -> void {
+        const bool isContainer = value.kind() == mms::MmsDataKind::structure ||
+                                 value.kind() == mms::MmsDataKind::array;
+        QString displayed;
+        if (isContainer) {
+            displayed = QStringLiteral("%1 %2").arg(value.children().size()).arg(
+                value.kind() == mms::MmsDataKind::array
+                    ? QStringLiteral("item(s)") : QStringLiteral("field(s)"));
+        } else {
+            const auto preview = previewMmsValue(
+                value, kBrowserReportTreeScalarTextLimit);
+            displayed = QString::fromStdString(preview.text);
+            if (preview.truncated) displayed += QStringLiteral(" …");
+        }
+        // Only a direct, uniquely identified q/t attribute can carry typed
+        // Quality/TimeQuality meaning. Unknown positional children are raw MMS.
+        if (depth == 0U && !isContainer) {
+            const auto evidence = decodeEngineeringEvidence(fullReference, value);
+            if (!evidence.isEmpty())
+                displayed = evidence.value(QStringLiteral("summary")).toString();
+        }
+        rows.push_back(QVariantMap{
+            {QStringLiteral("memberIndex"), ordinal},
+            {QStringLiteral("depth"), static_cast<int>(depth)},
+            {QStringLiteral("name"), title},
+            {QStringLiteral("reference"), fullReference},
+            {QStringLiteral("value"), displayed},
+            {QStringLiteral("kind"), browserReportTreeKind(value.kind())},
+            {QStringLiteral("container"), isContainer},
+            {QStringLiteral("received"), true}
+        });
+        if (!isContainer || depth >= kBrowserReportTreeDepthLimit)
+            return;
+        int index = 0;
+        for (const auto& child : value.children()) {
+            if (remainingChildren <= 0) break;
+            --remainingChildren;
+            visit(visit, child, ordinal, depth + 1U,
+                  QStringLiteral("Field %1").arg(++index), fullReference);
+        }
+    };
+
+    for (std::size_t i = 0U; i < visibleCount; ++i) {
+        const auto& member = members[i];
+        const std::string* source = &member.data_reference;
+        if (source->empty() && member.member) source = &member.member->user_reference;
+        if (source->empty() && member.member) source = &member.member->mms_reference;
+        bool shortened = false;
+        const QString fullReference = boundedReportMetadata(
+            *source, kBrowserReportTextLimit, shortened);
+        QString name = fullReference;
+        // Prefer compact canonical IEC paths while keeping full reference in
+        // the per-row tooltip and never forging a functional constraint.
+        const int slash = name.indexOf(QLatin1Char('/'));
+        if (slash >= 0) name = name.mid(slash + 1);
+        if (name.isEmpty()) name = QStringLiteral("Member %1").arg(member.data_set_index + 1U);
+
+        if (member.value) {
+            appendValue(appendValue, *member.value, static_cast<int>(i),
+                        0U, name, fullReference);
+        } else {
+            rows.push_back(QVariantMap{
+                {QStringLiteral("memberIndex"), static_cast<int>(i)},
+                {QStringLiteral("depth"), 0},
+                {QStringLiteral("name"), name},
+                {QStringLiteral("reference"), fullReference},
+                {QStringLiteral("value"), QStringLiteral("Read failed")},
+                {QStringLiteral("kind"), QStringLiteral("MMS")},
+                {QStringLiteral("container"), false},
+                {QStringLiteral("received"), false}
+            });
+        }
+    }
+    return rows;
 }
 } // namespace arstack::iedsim
