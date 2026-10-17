@@ -112,3 +112,21 @@ and canonical PCAP continuity. All hardware qualification fields remain
 All M3E.2 changes are Python host-tool regression/doc additions. The proven
 M3D.2 SOURCE/RECEIVER firmware binaries and native ARStack Studio are not
 rebuilt or modified by this checkpoint.
+## M3E.3 — SOURCE readiness freshness / boot provenance regression (2026-10-17)
+
+A previous host gate accepted **any** historical `PTP status=RUNNING`
+sample with positive Announce/Sync/FollowUp as SOURCE readiness. This could
+return `operationalLifecycle.status=OBSERVED` even when a later STOP, rejected
+START, unavailable status, or TX fault was already present in the same raw log.
+
+The M3E.3 host-only gate now requires the **latest** SOURCE status to be
+RUNNING with complete native firmware counters and `TXfail=0`. It revokes
+readiness on `PTP stop requested`, `PTP start rejected`, STOPPED, truncated
+SHOW, or unavailable status. Any nonzero reported PTP TX failure in the same
+boot is conservatively latched as a veto. Every IDENTIFY line must also carry
+the same 16-hex-digit boot ID; an identity without a boot ID cannot inherit
+a preceding measurement. Receiver logic and wire decoding are unchanged.
+
+This is regression protection for **firmware-reported** software evidence,
+not proof of wire transmission, EMAC phase alignment, IED lock, or public
+release readiness. No firmware images or Studio workflow have changed.

@@ -27,9 +27,11 @@ MAX_SERIAL_LOG_BYTES = 16 * 1024 * 1024
 SCENARIOS = ("auto", "receiver-acquisition", "receiver-recovery",
              "receiver-gm-handoff", "source-ready")
 BOOT_ID = re.compile(r"\bboot_id=([a-fA-F0-9]{16})\b")
-SOURCE_READY = re.compile(
-    r"\bPTP status=RUNNING Announce=([0-9]+) Sync=([0-9]+) "
-    r"FollowUp=([0-9]+)\b")
+SOURCE_STATUS = re.compile(
+    r"\bPTP status=(RUNNING|STOPPED) Announce=([0-9]+) Sync=([0-9]+) "
+    r"FollowUp=([0-9]+) PdelayFrames=([0-9]+) TXfail=([0-9]+)\b")
+SOURCE_INVALIDATION = re.compile(
+    r"\bPTP (?:stop requested|start rejected|status unavailable)\b")
 STATUS_FIELD = re.compile(r"\b([A-Za-z][A-Za-z0-9]*)=([^\s]+)")
 
 class EvidenceError(ValueError):
@@ -203,24 +205,49 @@ def operational_evidence(data: bytes, role: str, scenario: str) -> dict:
     require((role == "source") == (scenario == "source-ready"),
             "scenario incompatible with firmware role")
     lines = data.decode("utf-8", errors="replace").splitlines()
-    boot_ids = [m.group(1).lower() for line in lines
-                if IDENTITY.search(line) and (m := BOOT_ID.search(line))]
-    if len(set(boot_ids)) != 1 or not boot_ids:
+    identity_lines = [line for line in lines if IDENTITY.search(line)]
+    boot_ids = [m.group(1).lower() for line in identity_lines
+                if (m := BOOT_ID.search(line))]
+    # Every board identity must belong to the same observed boot. A later
+    # identity missing boot_id must not silently inherit the previous lease.
+    if (not boot_ids or len(boot_ids) != len(identity_lines) or
+            len(set(boot_ids)) != 1):
         return {"status": "INCOMPLETE", "scenario": scenario,
                 "reason": "one unambiguous 16-digit boot_id required",
                 "reportedLockSamples": 0, "reportedRecovery": False,
                 "reportedGmHandoff": False}
 
     if role == "source":
-        ready = [tuple(int(x) for x in m.groups())
-                 for line in lines if (m := SOURCE_READY.search(line))]
-        usable = any(all(x > 0 for x in values) for values in ready)
+        # A historical RUNNING line is not current readiness. The actual
+        # firmware SHOW includes TXfail and PdelayFrames; partial output is
+        # never acceptable. STOP, rejected START and unavailable status
+        # invalidate all prior ready observations.
+        last_ready = False
+        tx_fault_observed = False
+        ready_samples = 0
+        for line in lines:
+            if SOURCE_INVALIDATION.search(line):
+                last_ready = False
+            if "PTP status=" not in line:
+                continue
+            match = SOURCE_STATUS.search(line)
+            if match is None:
+                last_ready = False
+                continue
+            state, *reported = match.groups()
+            announce, sync, followup, _pdelay, txfail = map(int, reported)
+            tx_fault_observed = tx_fault_observed or txfail != 0
+            last_ready = (state == "RUNNING" and
+                          announce > 0 and sync > 0 and followup > 0 and
+                          txfail == 0)
+            ready_samples += int(last_ready)
+        usable = last_ready and not tx_fault_observed
         return {"status": "OBSERVED" if usable else "INCOMPLETE",
                 "scenario": scenario,
-                "reason": "source Announce+Sync+FollowUp TX readiness reported"
-                          if usable else "verified source TX readiness evidence missing",
-                "reportedSourceReadySamples": sum(all(x > 0 for x in v)
-                                                   for v in ready),
+                "reason": "latest SOURCE status RUNNING with successful PTP TX"
+                          if usable else "latest SOURCE readiness absent, stopped or TX faulted",
+                "reportedSourceReadySamples": ready_samples,
+                "sourceTxFaultObserved": tx_fault_observed,
                 "reportedLockSamples": 0,
                 "reportedRecovery": False, "reportedGmHandoff": False}
 
