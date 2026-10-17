@@ -582,6 +582,7 @@ Rectangle {
                         Repeater {
                             model: root.triggerFields
                             delegate: RowLayout {
+                                id: bitRow
                                 required property var modelData
                                 readonly property bool bitSet: root.rcb.triggerOptionNames
                                     && root.rcb.triggerOptionNames.indexOf(modelData.name) >= 0
@@ -594,13 +595,13 @@ Rectangle {
                                     Layout.preferredWidth: 16
                                     Layout.preferredHeight: 16
                                     radius: 3
-                                    color: bitSet ? theme.accentSoft : theme.surface
+                                    color: bitRow.bitSet ? theme.accentSoft : theme.surface
                                     border.width: 1
-                                    border.color: bitSet ? theme.accent : theme.line
+                                    border.color: bitRow.bitSet ? theme.accent : theme.line
                                     Label {
                                         anchors.centerIn: parent
                                         text: "✓"
-                                        visible: bitSet
+                                        visible: bitRow.bitSet
                                         color: theme.accent
                                         font.pixelSize: 12
                                         font.weight: Font.Bold
@@ -648,6 +649,7 @@ Rectangle {
                         Repeater {
                             model: root.optionalFields
                             delegate: RowLayout {
+                                id: bitRow
                                 required property var modelData
                                 readonly property bool bitSet: root.rcb.optionalFieldNames
                                     && root.rcb.optionalFieldNames.indexOf(modelData.name) >= 0
@@ -660,13 +662,13 @@ Rectangle {
                                     Layout.preferredWidth: 16
                                     Layout.preferredHeight: 16
                                     radius: 3
-                                    color: bitSet ? theme.accentSoft : theme.surface
+                                    color: bitRow.bitSet ? theme.accentSoft : theme.surface
                                     border.width: 1
-                                    border.color: bitSet ? theme.accent : theme.line
+                                    border.color: bitRow.bitSet ? theme.accent : theme.line
                                     Label {
                                         anchors.centerIn: parent
                                         text: "✓"
-                                        visible: bitSet
+                                        visible: bitRow.bitSet
                                         color: theme.accent
                                         font.pixelSize: 12
                                         font.weight: Font.Bold
