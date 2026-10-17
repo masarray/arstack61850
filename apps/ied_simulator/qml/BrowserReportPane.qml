@@ -795,6 +795,17 @@ Rectangle {
                     }
                     Label {
                         visible: root.hasLastReport &&
+                                 root.latestReport.treeTypedEvidenceOmitted === true
+                        Layout.fillWidth: true
+                        leftPadding: 9
+                        topPadding: 3
+                        bottomPadding: 3
+                        text: "Quality/TimeQuality details withheld: member identity was truncated."
+                        color: theme.muted
+                        font.pixelSize: 11
+                    }
+                    Label {
+                        visible: root.hasLastReport &&
                                  (!root.latestReport.valueTree ||
                                   root.latestReport.valueTree.length === 0) &&
                                  root.latestReport.valueEvidenceTruncated === true
