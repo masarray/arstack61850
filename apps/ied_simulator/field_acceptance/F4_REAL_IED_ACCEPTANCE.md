@@ -36,6 +36,8 @@ Required evidence:
 
 ## Windows field kit
 
+The **F4 Real IED Acceptance RC** workflow can be dispatched for any chosen source revision. Changes to this F4 workflow, its field kit, or the Windows packaging contract also run exact-PR-head CI and post-merge main packaging. Do not use a field kit whose embedded `BUILD_HEAD.txt` differs from the exact source revision being accepted.
+
 The F4 workflow produces a Windows artifact containing:
 
 - current Workbench installer and portable ZIP;
@@ -47,7 +49,9 @@ The F4 workflow produces a Windows artifact containing:
 
 ### Capture preparation
 
-Install Wireshark/Npcap so `dumpcap.exe` is available. List capture interfaces:
+Install Wireshark/Npcap with both `dumpcap.exe` and `tshark.exe`. The capture is intentionally **bound to the exact target IPv4 address and MMS port**; unrelated traffic on TCP/102 does not qualify as acceptance. The collector refuses a missing/invalid kit SHA, missing tshark, invalid NIC index, zero observed target packets, or an installed/extracted Workbench whose SHA differs from the kit.
+
+List capture interfaces:
 
 ```powershell
 & "C:\Program Files\Wireshark\dumpcap.exe" -D
@@ -72,10 +76,13 @@ Example, ARStack testing a real IED:
   -Mode ARStackToIED `
   -TargetIp 192.168.1.10 `
   -InterfaceId 4 `
+  -WorkbenchDirectory 'C:\Program Files\ARStack IEC 61850 Workbench' `
   -DurationSeconds 180
 ```
 
-During the capture, execute the acceptance steps above. The collector writes a timestamped folder containing the PCAPNG, environment/preflight information, SHA-256, optional tshark packet/reset counts, and a manual-result template.
+For the real-IED lane, `-WorkbenchDirectory` is **mandatory** and may reference either the installed app or the extracted portable ZIP root (both contain `BUILD_HEAD.txt` from the same release). The directory must contain `arstack_ied_simulator.exe`. The external-client-to-ARStack lane may optionally supply it, but the collector cannot independently prove which server process is active: attach server diagnostics to close that gap.
+
+During capture, perform the authorized steps above. The collector writes a timestamped folder containing `evidence.json`, a target-specific PCAPNG, exact source SHA, TCP preflight, SHA-256 and tshark-verified target packet/reset counts, and a **manual** result template. Capturing one TCP packet is not proof of MMS association, report reception, or hardware interoperability; inspect service-level frames and screenshots separately. Missing network visibility is **INCOMPLETE**, never PASS.
 
 ## Pass / close rule
 
