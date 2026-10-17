@@ -327,6 +327,11 @@ if "self->receivedReports_ != ui.reports" in report_poll:
     raise SystemExit("BROWSER_REPORT_COALESCE_FAIL O(n) GUI snapshot comparison restored")
 if "worker->lastPublishedReportUi.reset();" not in report_controller:
     raise SystemExit("BROWSER_REPORT_COALESCE_FAIL old association presentation cache retained")
+disconnect_section = report_controller.split(
+    "void MmsReportController::disconnectFromIed()", 1)[-1].split(
+    "bool MmsReportController::reconnect()", 1)[0]
+if "worker->lastPublishedReportUi.reset();" not in disconnect_section:
+    raise SystemExit("BROWSER_REPORT_COALESCE_FAIL disconnect retained report history")
 
 if "client.treeModel" in navigation:
     raise SystemExit("BROWSER_CONVERGENCE_FAIL navigation regressed to session-owned model")
