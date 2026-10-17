@@ -1162,7 +1162,8 @@ ApplicationWindow {
                                 compact: root.compactLayout
                             }
                         }
-                        Item { Layout.fillHeight: true }
+                        // Stacked voltage/current matrices now own any spare
+                        // vertical space instead of an empty bottom spacer.
                     }
                 }
 
