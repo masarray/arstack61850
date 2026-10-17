@@ -203,7 +203,7 @@ Rectangle {
         readonly property var rawValue: lastReportSection
                                         ? root.informationValue(index) : root.attributeValue(index)
         readonly property int stripe: index
-        implicitHeight: 25
+        implicitHeight: 30
         Layout.fillWidth: true
         color: stripe % 2 ? root.theme.surfaceSoft : root.theme.surface
         Rectangle {
@@ -227,7 +227,7 @@ Rectangle {
             verticalAlignment: Text.AlignVCenter
             text: propertyRow.title
             color: root.theme.textSoft
-            font.pixelSize: 10
+            font.pixelSize: 11
             elide: Text.ElideRight
             ToolTip.visible: titleMouse.containsMouse && truncated
             ToolTip.text: title
@@ -240,7 +240,7 @@ Rectangle {
             verticalAlignment: Text.AlignVCenter
             text: root.asText(rawValue)
             color: root.theme.text
-            font.pixelSize: 10
+            font.pixelSize: 11
             elide: Text.ElideMiddle
             ToolTip.visible: valueMouse.containsMouse && truncated
             ToolTip.text: text
@@ -255,7 +255,7 @@ Rectangle {
         property bool opened: true
         signal toggleRequested()
         Layout.fillWidth: true
-        implicitHeight: 26
+        implicitHeight: 30
         color: root.theme.surfaceRaised
         Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: root.theme.line }
         RowLayout {
@@ -265,12 +265,12 @@ Rectangle {
             spacing: 7
             Label {
                 text: opened ? "▾" : "▸"
-                font.pixelSize: 10
+                font.pixelSize: 11
                 color: root.theme.textSoft
             }
             Label {
                 text: heading
-                font.pixelSize: 10
+                font.pixelSize: 11
                 color: root.theme.text
                 font.weight: Font.DemiBold
                 Layout.fillWidth: true
@@ -320,7 +320,7 @@ Rectangle {
                 text: dataRow.reference
                 Layout.preferredWidth: Math.max(100, parent.width * 0.55 - 28)
                 color: root.theme.text
-                font.pixelSize: 10
+                font.pixelSize: 11
                 elide: Text.ElideMiddle
                 ToolTip.visible: dataNameMouse.containsMouse && truncated
                 ToolTip.text: text
@@ -332,7 +332,7 @@ Rectangle {
                 leftPadding: 8
                 text: dataRow.displayValue
                 color: root.theme.text
-                font.pixelSize: 10
+                font.pixelSize: 11
                 elide: Text.ElideMiddle
                 ToolTip.visible: dataValueMouse.containsMouse && truncated
                 ToolTip.text: text
