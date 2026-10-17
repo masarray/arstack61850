@@ -54,6 +54,23 @@ def main() -> None:
 
     ordered(main_qml, "id: voltageMatrix", "id: currentMatrix",
             "voltage must precede current in the injection table")
+    require("ColumnLayout {\n                            Layout.fillWidth: true\n                            Layout.fillHeight: true\n                            Layout.minimumHeight: 398" in main_qml,
+            "voltage/current engineering tables must be vertically stacked")
+    workflow = source("WorkflowBar.qml")
+    require("smartSession.requestStartWithScenario(\n            controller.startScenarioSnapshot())" in workflow
+            and "smartSession.requestStart()" not in workflow,
+            "every Start must send the current eight table rows, never stale board setpoints")
+    brand = source("ModernRibbon.qml")
+    require("font.pixelSize: 15" in brand and "width: 38" in brand,
+            "SMV Injector icon and title must be legible")
+    require('parent.hovered ? "#e9f2fd"' in config
+            and 'parent.hovered ? "#142334"' in config,
+            "Advanced tabs must retain dark text over light hover background")
+    require("horizontalAlignment: Text.AlignHCenter" in source("CalmButton.qml")
+            and "verticalAlignment: Text.AlignVCenter" in source("CalmButton.qml"),
+            "button captions must be centered")
+    require("control.hovered || control.activeFocus" in source("StudioDarkCheckBox.qml"),
+            "checkbox should keep a single indicator through hover")
     ordered(preview, "id: voltagePhasorCanvas", "id: currentPhasorCanvas",
             "voltage must precede current in the phasor view")
     ordered(preview, "drawWaveGroup(preview.voltageModel, voltageY, false)",
