@@ -54,7 +54,8 @@ ApplicationWindow {
         saveScenarioTimer.restart()
         // While STOPPED, a new edit belongs to the next supervised Start batch.
         // Only a genuinely RUNNING board receives incremental live SETs.
-        if (!workflowBar.injectionRunning)
+        if (!workflowBar.injectionRunning ||
+                !workflowBar.session || !workflowBar.session.liveControlReady)
             pendingApply = true
     }
     function restoreLocalScenario() {
@@ -536,8 +537,9 @@ ApplicationWindow {
         frequencyField.invalidInput = false
         refreshPreview()
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
-            workflowBar.session.requestSetFrequency(value)
+        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply &&
+                !workflowBar.session.requestSetFrequency(value))
+            pendingApply = true
         return true
     }
 
@@ -643,8 +645,9 @@ ApplicationWindow {
         selectSignal(activeGroup, activeRow)
         refreshPreview()
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
-            workflowBar.session.requestZero()
+        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply &&
+                !workflowBar.session.requestZero())
+            pendingApply = true
     }
 
     function setActiveQuality(value) {
@@ -652,8 +655,9 @@ ApplicationWindow {
         groupModel(activeGroup).setProperty(activeRow, "quality", unsignedValue)
         activeQuality = unsignedValue
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
-            workflowBar.session.requestSetQuality(activeSignal, unsignedValue)
+        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply &&
+                !workflowBar.session.requestSetQuality(activeSignal, unsignedValue))
+            pendingApply = true
     }
 
     Shortcut { sequence: "Ctrl+B"; enabled: !workflowBar.startQueued; onActivated: root.balanced() }
@@ -731,11 +735,12 @@ ApplicationWindow {
             }
             Rectangle { width: 1; height: 12; color: studioTheme.lineSoft }
             Label {
-                text: root.pendingApply && !workflowBar.injectionRunning
-                    ? "4I + 4V · Changes sent on Start"
+                text: root.pendingApply
+                    ? (workflowBar.injectionRunning
+                        ? "4I + 4V · Changes pending · restart to apply"
+                        : "4I + 4V · Changes sent on Start")
                     : "4I + 4V · 4000 samples/s"
-                color: root.pendingApply && !workflowBar.injectionRunning
-                    ? studioTheme.amber : studioTheme.muted
+                color: root.pendingApply ? studioTheme.amber : studioTheme.muted
                 font.family: root.uiFont
                 font.pixelSize: 9
             }
