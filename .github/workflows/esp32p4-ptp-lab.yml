@@ -183,8 +183,8 @@ jobs:
               'g_sync_sent.load',
               'g_follow_up_sent.load',
               '[[nodiscard]] bool source_has_fresh_evidence() noexcept',
-    'PtpSourceEvidenceFreshness::fresh(',
-    'return source_has_fresh_evidence();',
+              'PtpSourceEvidenceFreshness::fresh(',
+              'return source_has_fresh_evidence();',
           ]
           combined = eth + '\n' + ptp
           missing = [token for token in required if token not in combined]
