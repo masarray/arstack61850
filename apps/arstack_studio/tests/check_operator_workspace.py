@@ -115,8 +115,12 @@ def main() -> None:
             and 'enabled: !workflowBar.startQueued; onActivated: root.balanced()' in main_qml
             and 'enabled: !workflowBar.startQueued; onActivated: root.zeroAll()' in main_qml,
             "scenario editors and shortcuts must be frozen during a pending START snapshot")
+    start_path = workflow.split("function requestStart() {", 1)[1].split(
+        "function requestStop()", 1)[0]
     require("controller.pendingApply = true" in workflow
-            and "requestStartWithScenario(controller.startScenarioSnapshot())" in workflow
+            and "smartSession.requestStartWithScenario(" in start_path
+            and "controller.startScenarioSnapshot()" in start_path
+            and "smartSession.requestStart()" not in start_path
             and "controller.applyAllSignals()" not in workflow
             and "startWatchdog" in workflow and "onRunningChanged()" in workflow,
             "reconnect must not auto-transmit, but one-click Start must stage a bounded scenario")
@@ -145,7 +149,8 @@ def main() -> None:
             and 'toolTipText: "Advanced"' not in ribbon
             and 'ToolTip.text: "smpSynch mode"' not in timing_ui,
             "captioned operator controls must not duplicate labels as tooltips")
-    require('requestStartWithScenario(controller.startScenarioSnapshot())' in workflow
+    require("smartSession.requestStartWithScenario(" in start_path
+            and "controller.startScenarioSnapshot()" in start_path
             and "Apply to board" not in main_qml,
             "Edit-to-Start must not regress to a manual Apply-to-board action")
     require("assets/material/smv_injector.svg" in cmake_icons
@@ -156,6 +161,43 @@ def main() -> None:
             and "Equal magnitudes A/B/C" in matrix
             and "Balance angles · 120°" in matrix,
             "context actions must stay compact, descriptive and grouped")
+    # Freeze operator control geometry, hover contrast and table layout.
+    ribbon_action = source("RibbonAction.qml")
+    calm = source("CalmButton.qml")
+    check_box = source("StudioDarkCheckBox.qml")
+    combo = source("StudioDarkComboBox.qml")
+    require("Layout.minimumHeight: 408" in main_qml
+            and "ColumnLayout {\n                            Layout.fillWidth: true\n                            Layout.fillHeight: true" in main_qml
+            and "Layout.fillHeight: true" in matrix
+            and "Item { Layout.fillHeight: true }" not in matrix,
+            "4I and 4V must stack and expand, not leave unused lower area")
+    require("width: 40" in ribbon and "height: 40" in ribbon
+            and 'font.pixelSize: bar.compact ? 14 : 15' in ribbon
+            and "anchors.centerIn: parent" in ribbon_action,
+            "Studio identity and ribbon content must be legible and centered")
+    require('hovered ? "#e9f2fd"' in calm
+            and 'hovered ? "#142334"' in calm
+            and 'hovered && !parent.checked ? "#142334"' in config
+            and 'choice.highlighted ? "#142334"' in combo,
+            "Advanced hover must use light background with dark text")
+    require("background: Item {}" in check_box
+            and "implicitWidth: 18" in check_box
+            and "implicitHeight: 18" in check_box,
+            "checkbox must not draw a second native hover glyph")
+    require("property bool ptpDefaultStartPending: true" in main_qml
+            and 'root.startPtpRole("SOURCE")' in main_qml
+            and "root.ptpExplicitOff = true" in main_qml
+            and "root.ptpDefaultStartPending = false" in main_qml
+            and "panel.controller.requestStopPtp()" in expert,
+            "PTP defaults ON after verified connection while explicit OFF cancels restarts")
+    require("property bool phasorDockVisible: true" in main_qml
+            and "property bool waveformDockVisible: true" in main_qml
+            and "tray.session.requestSmpSynch(" in tray,
+            "phasor and waveform must default visible and keep AUTO sync selection")
+    require("const sent = phaseLink && row < 3" in main_qml
+            and "if (!sent) {" in main_qml
+            and "pendingApply = true" in main_qml,
+            "live SET rejection must never silently claim displayed setpoints were sent")
     assert "implicitHeight: 65" in source("RibbonAction.qml")
     assert 'hovered ? "#142334"' in source("RibbonAction.qml")
     require('title: ""' in menu and 'property string contextLabel: ""' in menu
