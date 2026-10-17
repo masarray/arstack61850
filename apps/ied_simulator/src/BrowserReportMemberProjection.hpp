@@ -26,6 +26,7 @@ namespace mms = ar::iec61850::mms;
 struct BrowserReportMemberProjection final {
     QStringList values;
     QVariantList evidence;
+    QVariantList details;
     bool rowsTruncated{};
     bool textTruncated{};
     bool evidenceTruncated{};
@@ -33,6 +34,8 @@ struct BrowserReportMemberProjection final {
 
 inline constexpr int kBrowserReportVisibleMemberLimit = 256;
 inline constexpr int kBrowserReportTextLimit = 1024;
+inline constexpr int kBrowserReportDetailMembers = 32;
+inline constexpr int kBrowserReportDetailChildren = 16;
 
 // Bound untrusted IEC member reference and reason strings BEFORE conversion to
 // QString. No full-sized temporary allocation for oversized MMS metadata.
@@ -93,6 +96,42 @@ inline constexpr int kBrowserReportTextLimit = 1024;
             displayValue = QString::fromStdString(preview.text);
             valueTruncated = preview.truncated;
         }
+        QVariantList detailRows;
+        if (member.value) {
+            const auto kind = member.value->kind();
+            if (kind == mms::MmsDataKind::structure || kind == mms::MmsDataKind::array) {
+                const auto& children = member.value->children();
+                // Wire structure members are positional; without an SCL/type
+                // binding never invent ST/q/t names or IEC enum meanings.
+                displayValue = QStringLiteral("%1 · %2 field(s) — select for details")
+                    .arg(kind == mms::MmsDataKind::structure
+                             ? QStringLiteral("Structure") : QStringLiteral("Array"))
+                    .arg(children.size());
+                if (ordinal < kBrowserReportDetailMembers) {
+                    const auto count = std::min(children.size(),
+                        static_cast<std::size_t>(kBrowserReportDetailChildren));
+                    for (std::size_t child = 0; child < count; ++child) {
+                        const auto preview = previewMmsValue(
+                            children[child], kBrowserReportTextLimit);
+                        const auto label = QStringLiteral("Field %1 (wire order)")
+                            .arg(child + 1U);
+                        detailRows.push_back(QVariantMap{
+                            {QStringLiteral("label"), label},
+                            {QStringLiteral("value"), QString::fromStdString(preview.text)
+                                + (preview.truncated ? QStringLiteral(" … [truncated]") : QString{})}});
+                        if (preview.truncated) projection.textTruncated = true;
+                    }
+                    if (children.size() > count)
+                        detailRows.push_back(QVariantMap{
+                            {QStringLiteral("label"), QStringLiteral("Further fields")},
+                            {QStringLiteral("value"), QStringLiteral("Not shown · bounded preview")}});
+                }
+            }
+        }
+        if (!detailRows.isEmpty())
+            projection.details.push_back(QVariantMap{
+                {QStringLiteral("index"), static_cast<int>(ordinal)},
+                {QStringLiteral("rows"), detailRows}});
         QString reasons;
         bool reasonsTruncated = false;
         for (const auto& reason : member.reason_for_inclusion.names) {
