@@ -218,6 +218,8 @@ bool verifySemanticReportBinding() {
         return result.has_value() == expected;
     };
     if (!check(true)) return false;
+    if (!bindFlatSclReportStructure(model, "IEDLD/LLN0$ds", value))
+        return false; // Same DataSet via MMS native ObjectName alias
     // The real Browser Open SCL owner uses a distinct source marker from
     // the SCL-assisted initial snapshot. Both must work with exact evidence.
     model.source = "OpenedSCL";
