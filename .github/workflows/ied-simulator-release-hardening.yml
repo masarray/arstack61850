@@ -137,6 +137,55 @@ jobs:
           Copy-Item 'build-ied-simulator-windows\Release\arstack_ied_simulator.exe' $stage
           Copy-Item 'build-ied-simulator-windows\Release\ariec61850_ied_simulator_server.exe' $stage
           windeployqt --release --qmldir apps/ied_simulator/qml --dir $stage (Join-Path $stage 'arstack_ied_simulator.exe')
+          # Both package formats must carry the exact build checkout SHA.
+          $sourceSha = (& git rev-parse --verify HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $sourceSha -notmatch '^[0-9a-f]{40}
+
+      - name: Build portable ZIP and NSIS installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = (Resolve-Path 'release-stage\ARStack-IEC61850-Workbench').Path
+          $release = Join-Path $PWD 'release-artifacts'
+          New-Item -ItemType Directory -Force -Path $release | Out-Null
+          $zip = Join-Path $release 'ARStack-IEC61850-Workbench-portable-win64.zip'
+          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -Force
+          $installer = Join-Path $release 'ARStack-IEC61850-Workbench-Setup-win64.exe'
+          $icon = (Resolve-Path 'assets\favicon.ico').Path
+          $makensis = $env:MAKENSIS_PATH
+          if (-not $makensis -or -not (Test-Path -LiteralPath $makensis -PathType Leaf)) {
+            throw 'NSIS preflight did not provide a usable makensis.exe'
+          }
+          & $makensis "/DSTAGE_DIR=$stage" "/DOUT_FILE=$installer" "/DAPP_ICON=$icon" 'apps\ied_simulator\packaging\windows\ARStackIEC61850Workbench.nsi'
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed with exit code $LASTEXITCODE" }
+
+      - name: Verify staged and installed release
+        shell: pwsh
+        run: >-
+          ./apps/ied_simulator/packaging/windows/verify-release.ps1
+          -StageDir ./release-stage/ARStack-IEC61850-Workbench
+          -BuildDir ./build-ied-simulator-windows/Release
+          -InstallerPath ./release-artifacts/ARStack-IEC61850-Workbench-Setup-win64.exe
+          -PortablePath ./release-artifacts/ARStack-IEC61850-Workbench-portable-win64.zip
+          -ExpectedSourceSha ${{ github.sha }}
+          -FixturePath ./tests/fixtures/scl/client-workbench.scd
+
+      - name: Upload Windows release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: arstack-iec61850-workbench-windows-rc
+          path: |
+            release-artifacts/ARStack-IEC61850-Workbench-Setup-win64.exe
+            release-artifacts/ARStack-IEC61850-Workbench-portable-win64.zip
+          if-no-files-found: error
+          retention-days: 14 -or
+              $sourceSha -cne $env:GITHUB_SHA) {
+            throw "Release source mismatch: checkout=$sourceSha action=$env:GITHUB_SHA"
+          }
+          [System.IO.File]::WriteAllText(
+            (Join-Path $stage 'BUILD_HEAD.txt'),
+            ($sourceSha + "`n"),
+            [System.Text.Encoding]::ASCII)
 
       - name: Build portable ZIP and NSIS installer
         shell: pwsh
