@@ -218,6 +218,16 @@ bool verifySemanticReportBinding() {
         return result.has_value() == expected;
     };
     if (!check(true)) return false;
+    // The real Browser Open SCL owner uses a distinct source marker from
+    // the SCL-assisted initial snapshot. Both must work with exact evidence.
+    model.source = "OpenedSCL";
+    for (auto& attribute : model.logical_devices[0].logical_nodes[0]
+                               .data_objects[0].attributes)
+        attribute.source = "OpenedSCL";
+    if (!check(true)) return false;
+    model.source = "UnverifiedSCL";
+    if (!check(false)) return false;
+    model.source = "OpenedSCL";
     value.data_reference = "IEDLD/XCBR1$ST$Pos";
     if (!check(true)) return false; // valid native MMS DataRef alias
     value.data_reference = "IEDLD/XCBR1$MX$Pos";
