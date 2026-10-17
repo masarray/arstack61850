@@ -20,8 +20,10 @@ Rectangle {
     readonly property bool hasLastReport: latestReport.reportId !== undefined
     readonly property var configuredMembers: membersForSelectedRcb()
     property bool attributesExpanded: true
-    property bool triggerExpanded: true
-    property bool optionalExpanded: true
+    // Show the useful RCB attributes and received values first. Bit-grid
+    // diagnostics stay one click away, without dominating the initial viewport.
+    property bool triggerExpanded: false
+    property bool optionalExpanded: false
     property bool informationExpanded: true
     property bool dataExpanded: true
     property bool eventsExpanded: true
@@ -35,6 +37,17 @@ Rectangle {
     // A different indexed RCB can legitimately emit the same RptID/SqNum.
     // Reset member selection when provenance changes, not only wire sequence.
     onLatestReportIdentityChanged: selectedReportMemberIndex = -1
+    function selectedReportMemberDetails() {
+        if (!hasLastReport || selectedReportMemberIndex < 0 ||
+            !latestReport.valueDetails) return []
+        const entries = latestReport.valueDetails
+        for (let index = 0; index < entries.length; ++index) {
+            const entry = entries[index]
+            if (entry.index === selectedReportMemberIndex)
+                return entry.rows || []
+        }
+        return []
+    }
     function selectedReportMemberEvidence() {
         if (!hasLastReport || selectedReportMemberIndex < 0 ||
             !latestReport.valueEvidence) return ({})
@@ -287,7 +300,7 @@ Rectangle {
                                                ? root.memberValue(modelData) : "—"
         readonly property int stripe: index
         Layout.fillWidth: true
-        implicitHeight: 25
+        implicitHeight: 29
         color: received && root.selectedReportMemberIndex === index
                ? root.theme.accentSoft
                : stripe % 2 ? root.theme.surfaceSoft : root.theme.surface
@@ -607,6 +620,55 @@ Rectangle {
                     BrowserEngineeringEvidence {
                         theme: root.theme
                         engineeringEvidence: root.selectedReportMemberEvidence()
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+                        visible: root.selectedReportMemberDetails().length > 0
+                        SectionHeading {
+                            heading: "Selected member · decoded wire fields"
+                            evidence: "Positional · not SCL-labelled"
+                            opened: true
+                            onToggleRequested: {}
+                        }
+                        Repeater {
+                            model: root.selectedReportMemberDetails()
+                            delegate: Rectangle {
+                                required property var modelData
+                                required property int index
+                                Layout.fillWidth: true
+                                implicitHeight: 27
+                                color: index % 2 ? theme.surfaceSoft : theme.surface
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 18
+                                    anchors.rightMargin: 9
+                                    spacing: 10
+                                    Label {
+                                        text: modelData.label
+                                        Layout.preferredWidth: 180
+                                        elide: Text.ElideRight
+                                        font.pixelSize: 11
+                                        color: theme.textSoft
+                                    }
+                                    Label {
+                                        text: modelData.value
+                                        Layout.fillWidth: true
+                                        elide: Text.ElideMiddle
+                                        font.pixelSize: 11
+                                        color: theme.text
+                                        ToolTip.visible: detailMouse.containsMouse && truncated
+                                        ToolTip.text: text
+                                        MouseArea {
+                                            id: detailMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            acceptedButtons: Qt.NoButton
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     Label {
                         visible: root.hasLastReport &&
