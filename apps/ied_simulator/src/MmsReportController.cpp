@@ -1912,6 +1912,21 @@ void MmsReportController::schedulePoll() {
                 QMetaObject::invokeMethod(self, [self, generation, ui] {
                     if (!self || self->generation_ != generation) return;
                     self->pollPending_ = false;
+                    // A live RCB still needs its bounded receive/drain cadence,
+                    // but an identical snapshot must not invalidate every QML
+                    // report binding and inspector delegate at 10 Hz.
+                    // Compare complete presentation evidence: counters alone
+                    // cannot detect event-only or retained-frame changes.
+                    const bool presentationChanged =
+                        self->active_ != ui.active ||
+                        self->cleanupRequired_ != ui.cleanupRequired ||
+                        self->receivedReportCount_ != ui.receivedCount ||
+                        self->subscriptionRcbReference_ != ui.subscriptionRcbReference ||
+                        self->rejectedReportCount_ != ui.rejectedCount ||
+                        self->reportDecodeFailureCount_ != ui.decodeFailureCount ||
+                        self->events_ != ui.events ||
+                        self->receivedReports_ != ui.reports;
+                    if (!presentationChanged) return;
                     self->active_ = ui.active;
                     self->cleanupRequired_ = ui.cleanupRequired;
                     self->receivedReports_ = ui.reports;
