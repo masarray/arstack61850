@@ -71,6 +71,8 @@ using ar::esp32p4::smv::runtime_profile_initialize;
 using ar::esp32p4::smv::runtime_profile_snapshot;
 using ar::esp32p4::smv::runtime_profile_validate;
 using ar::esp32p4::smv::smp_synch_lab_decision;
+using ar::esp32p4::smv::smp_synch_set_source_local_qualified;
+using ar::esp32p4::smv::smp_synch_source_local_qualified;
 using ar::esp32p4::smv::take_start_request;
 using ar::iec61850::ethernet::MacAddress;
 using ar::iec61850::ethernet::VlanTag;
@@ -97,6 +99,7 @@ using ar::iec61850::time_sync::SvPtpPublisherContinuityGate;
 #endif
 #if AR_SV_TX_EGRESS_SUPPORTED
 using ar::iec61850::time_sync::SvTxEgressEvidence;
+using ar::iec61850::time_sync::SvLocalSyncEvidenceGate;
 using ar::iec61850::time_sync::SvTxEgressObservation;
 using ar::iec61850::time_sync::SvTxEgressSummary;
 #endif
@@ -139,6 +142,7 @@ std::atomic<std::uint32_t> g_sample_tick_total{0U};
 constexpr std::uint32_t kEgressEvidenceEveryZeroEpochs = 16U;
 portMUX_TYPE g_tx_egress_mux = portMUX_INITIALIZER_UNLOCKED;
 SvTxEgressEvidence g_tx_egress_evidence{};
+SvLocalSyncEvidenceGate g_local_sync_evidence{}; // same critical section as egress tracker
 #endif
 #if AR_SV_PTP_PHASE_SUPPORTED
 SemaphoreHandle_t g_phase_timer_mutex = nullptr;
@@ -651,6 +655,9 @@ gptimer_handle_t start_sample_clock(
 }
 
 void stop_sample_clock(gptimer_handle_t& timer) noexcept {
+    // Release the wire claim before teardown; old MAC evidence never
+    // survives STOP/START, even when the same SOURCE later restarts.
+    smp_synch_set_source_local_qualified(false);
     if (timer == nullptr) return;
 #if AR_SV_PTP_PHASE_SUPPORTED
     // Serialize teardown with the non-ISR phase observer, so a GPTimer
@@ -762,6 +769,7 @@ void publisher_task(void* argument) {
 #if AR_SV_TX_EGRESS_SUPPORTED
             zero_epoch_frames_seen = 0U;
             portENTER_CRITICAL(&g_tx_egress_mux);
+            g_local_sync_evidence.reset();
             g_tx_egress_evidence.reset();
             portEXIT_CRITICAL(&g_tx_egress_mux);
 #endif
@@ -848,6 +856,7 @@ void publisher_task(void* argument) {
                 1U, std::memory_order_release);
             g_sample_clock_context.phase_authority_valid.store(
                 false, std::memory_order_release);
+            smp_synch_set_source_local_qualified(false);
 #endif
             missed_slots = static_cast<std::uint64_t>(pending_ticks - 1U);
             canonical_sample_count = static_cast<std::uint16_t>(
@@ -874,11 +883,24 @@ void publisher_task(void* argument) {
                 1U, std::memory_order_release);
             g_sample_clock_context.phase_authority_valid.store(
                 false, std::memory_order_release);
+            smp_synch_set_source_local_qualified(false);
 #endif
 #if CONFIG_AR_SMV_BROADCAST_MIRROR
             ++local.mirror_fail;
 #endif
         } else {
+#if AR_SV_PTP_PHASE_SUPPORTED
+            // After qualification, consult the lightweight SOURCE freshness
+            // authority on each frame; a stopped/faulted PTP source must not
+            // continue advertising previously measured local synchronization.
+            if (smp_synch_source_local_qualified() &&
+                (!g_sample_clock_context.phase_authority_valid.load(
+                     std::memory_order_acquire) ||
+                 ar_ptp_lab_source_generation() !=
+                     g_sample_clock_context.armed_ptp_clock.generation)) {
+                smp_synch_set_source_local_qualified(false);
+            }
+#endif
             const auto sync_decision = smp_synch_lab_decision();
             const auto sample_synchronization =
                 static_cast<std::uint8_t>(sync_decision.value);
@@ -955,8 +977,12 @@ void publisher_task(void* argument) {
                     g_sample_clock_context.publisher_fault_generation.load(
                         std::memory_order_acquire) == fault_generation_before;
                 portENTER_CRITICAL(&g_tx_egress_mux);
-                static_cast<void>(g_tx_egress_evidence.record(egress));
+                const auto result = g_tx_egress_evidence.record(egress);
+                const auto phase_ns = g_tx_egress_evidence.summary().last_phase_ns;
+                g_local_sync_evidence.observe(egress, result, phase_ns);
                 portEXIT_CRITICAL(&g_tx_egress_mux);
+                if (result != ar::iec61850::time_sync::SvTxEvidenceResult::measured)
+                    smp_synch_set_source_local_qualified(false);
             }
 #else
             const esp_err_t canonical_result =
@@ -975,6 +1001,7 @@ void publisher_task(void* argument) {
                     1U, std::memory_order_release);
                 g_sample_clock_context.phase_authority_valid.store(
                     false, std::memory_order_release);
+                smp_synch_set_source_local_qualified(false);
 #endif
             }
 
@@ -1036,6 +1063,7 @@ void revoke_sv_phase_session(const std::uint32_t expected_session) noexcept {
             false, std::memory_order_release);
         g_sample_clock_context.requested_slew_ticks.store(
             0, std::memory_order_relaxed);
+        smp_synch_set_source_local_qualified(false);
     }
     xSemaphoreGive(g_phase_timer_mutex);
 }
@@ -1131,6 +1159,30 @@ void sv_ptp_phase_observer_task(void* argument) {
         }
 
         const auto decision = controller.observe(observation);
+        // Snapshot the independently stamped canonical SV evidence outside
+        // the GPTimer mutex. Source identity and fault/session generations
+        // must match the exact phase observation before any AUTO promotion.
+        bool source_local_qualified = false;
+#if AR_SV_TX_EGRESS_SUPPORTED
+        if (lease.role == PtpAuthorityRole::source &&
+            decision.accepted && decision.epoch_second_continuous) {
+            const std::int64_t abs_phase_us = decision.phase_error_us < 0
+                ? -static_cast<std::int64_t>(decision.phase_error_us)
+                : static_cast<std::int64_t>(decision.phase_error_us);
+            const std::uint64_t worst_case_phase_us =
+                static_cast<std::uint64_t>(abs_phase_us) +
+                decision.observation_uncertainty_us;
+            portENTER_CRITICAL(&g_tx_egress_mux);
+            source_local_qualified = g_local_sync_evidence.qualified(
+                notified_session, current_faults, lease.generation,
+                observation.last_sv_epoch_generation,
+                decision.software_tracking,
+                worst_case_phase_us <= UINT32_MAX
+                    ? static_cast<std::uint32_t>(worst_case_phase_us)
+                    : UINT32_MAX);
+            portEXIT_CRITICAL(&g_tx_egress_mux);
+        }
+#endif
         // Handoff and GPTimer deletion share a control-plane mutex:
         // neither a stale sample nor a recycled timer can receive a command.
         bool committed = false;
@@ -1161,12 +1213,15 @@ void sv_ptp_phase_observer_task(void* argument) {
                 decision.epoch_second_continuous
                     ? decision.slew_ticks_next_epoch : 0,
                 std::memory_order_release);
+            smp_synch_set_source_local_qualified(
+                source_local_qualified && decision.epoch_second_continuous);
             committed = true;
         } else if (session_matches) {
             g_sample_clock_context.phase_authority_valid.store(
                 false, std::memory_order_release);
             g_sample_clock_context.requested_slew_ticks.store(
                 0, std::memory_order_relaxed);
+            smp_synch_set_source_local_qualified(false);
         }
         xSemaphoreGive(g_phase_timer_mutex);
         if (!committed) {
@@ -1177,13 +1232,14 @@ void sv_ptp_phase_observer_task(void* argument) {
         if ((accepted_epochs % 60U) == 0U) {
             ESP_LOGI(kTag,
                 "SV/PTP phase SW evidence: phase=%ld us uncertainty=%lu us "
-                "slew=%ld ticks/epoch tracking=%u PTPepoch=%llu bound=%u; smpSynch AUTO remains 0",
+                "slew=%ld ticks/epoch tracking=%u PTPepoch=%llu bound=%u AUTOlocal=%u",
                 static_cast<long>(decision.phase_error_us),
                 static_cast<unsigned long>(decision.observation_uncertainty_us),
                 static_cast<long>(decision.slew_ticks_next_epoch),
                 decision.software_tracking ? 1U : 0U,
                 static_cast<unsigned long long>(decision.sv_epoch_ptp_second),
-                decision.epoch_second_continuous ? 1U : 0U);
+                decision.epoch_second_continuous ? 1U : 0U,
+                smp_synch_source_local_qualified() ? 1U : 0U);
         }
     }
 }

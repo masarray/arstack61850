@@ -35,3 +35,38 @@ authorization to assert `smpSynch=1/2`.
 Portable regression includes six accurate-phase/uncertain-clock observations,
 four fresh narrowly bracketed reacquisition observations, and confidence
 demotion after one degraded bracket. Hardware bench acceptance is still absent.
+
+## M3C.5 — Vendor-neutral AUTO local-sync qualification (2026-10-17)
+
+No new operator prompts; source PTP On → SMV Start still operates directly.
+The IEC 61850-9-2 local sync declaration (`smpSynch=1`) is not the same
+as merely sending PTP frames. IEC/IEEE 61850-9-3 defines the applicable
+power-utility PTP profile. The SIPROTEC 5 process-bus manual confirms
+`Accepted SmpSynch=1` is an intentional local-source interoperability mode
+when merging unit and relay share a time reference; ARStack contains no
+Siemens-specific wire quirk.
+
+A **SOURCE-only, explicit hardware-evidence build** can now promote AUTO to
+local `1` only when ALL gates pass: stable PTP SOURCE generation, coherent
+second-bound GPTimer sample-zero observations, software tracking with the
+measured absolute phase plus read uncertainty <=4us, two adjacent coherent
+16-second comparisons of genuine canonical SV MAC TX descriptor timestamps
+both within +/-4us, no publish faults/missed slots/descriptor stalls, and
+current hardware evidence age <=17 sample epochs. These 4us values are a
+conservative project admission policy, not a universal IEC profile claim.
+When disabled or insufficient, AUTO stays `0`; global `2` is never implied.
+
+The gate revokes on STOP, role change, missed sample, failed transmission,
+wrong generation, discontinuous PTP epoch, stale evidence or unqualified
+software phase. No heap, blocking IO, or additional work in the GPTimer ISR.
+The sparse actual-frame descriptor poll remains a possible publisher timing
+disturbance; evaluate actual board and relay traces before release.
+
+SOURCE and RECEIVER remain distinct: this milestone qualifies SOURCE local
+evidence only; receiver `LOCKED` without equivalent measured SV egress
+does not promote AUTO. Successful firmware CI does not establish physical
+phase accuracy or guarantee zero relay sync alarms.
+
+External specifications:
+- https://standards.ieee.org/ieee/61850-9-3/6167/
+- https://cache.industry.siemens.com/dl/files/460/109742460/att_1135746/v1/SIP5_Processbus_V09.50_Manual_C054-D_en.pdf?download=true
