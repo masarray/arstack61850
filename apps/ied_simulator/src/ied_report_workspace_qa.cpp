@@ -2,6 +2,7 @@
 
 #include "IedFleetController.hpp"
 #include "IedReportControlManifest.hpp"
+#include "BrowserReportSemanticBinding.hpp"
 #include "MmsReportController.hpp"
 
 #include <QCoreApplication>
@@ -170,12 +171,111 @@ bool reportProjectionPresent(const MmsReportController& reports) {
         frame.contains(QStringLiteral("entryId")) &&
         frame.contains(QStringLiteral("overflow"));
 }
+bool verifySemanticReportBinding() {
+    namespace mms = ar::iec61850::mms;
+    using arstack::iedsim::bindFlatSclReportStructure;
+    mms::MmsLiveModelDocument model;
+    model.source = "TrustedSclInitialSnapshot";
+    model.identity.confidence = mms::MmsLiveModelConfidence::exact;
+    mms::MmsLiveDataSet dataset;
+    dataset.reference = "IEDLD/LLN0.ds";
+    mms::MmsLiveDataSetMember binding;
+    binding.index = 0U;
+    binding.reference = "IEDLD/XCBR1.Pos";
+    binding.functional_constraint = "ST";
+    dataset.members.push_back(binding);
+    model.data_sets.push_back(dataset);
+    mms::MmsLiveLogicalDevice ld;
+    mms::MmsLiveLogicalNode ln;
+    mms::MmsLiveDataObject object;
+    object.reference = binding.reference;
+    object.confidence = mms::MmsLiveModelConfidence::exact;
+    for (const auto& [name, type] : {
+         std::pair{"stVal", "Enum"},
+         std::pair{"q", "Quality"}}) {
+        mms::MmsLiveDataAttribute attr;
+        attr.object_reference = binding.reference + "." + name;
+        attr.attribute_path = name;
+        attr.functional_constraint = "ST";
+        attr.source = "TrustedSCL";
+        attr.type_confidence = mms::MmsLiveModelConfidence::exact;
+        attr.functional_constraint_confidence = mms::MmsLiveModelConfidence::exact;
+        attr.scl_basic_type = type;
+        object.attributes.push_back(std::move(attr));
+    }
+    ln.data_objects.push_back(std::move(object));
+    ld.logical_nodes.push_back(std::move(ln));
+    model.logical_devices.push_back(std::move(ld));
+    const std::array<std::uint8_t, 2> quality{0x00U, 0x00U};
+    mms::MmsReportValue value;
+    value.data_set_index = 0U;
+    value.data_reference = binding.reference;
+    value.value = mms::MmsDataValue::structure({
+        mms::MmsDataValue::integer(2),
+        mms::MmsDataValue::bit_string(3U, quality)});
+    auto check = [&](const bool expected) {
+        const auto result = bindFlatSclReportStructure(model, dataset.reference, value);
+        return result.has_value() == expected;
+    };
+    if (!check(true)) return false;
+    if (!bindFlatSclReportStructure(model, "IEDLD/LLN0$ds", value))
+        return false; // Same DataSet via MMS native ObjectName alias
+    // The real Browser Open SCL owner uses a distinct source marker from
+    // the SCL-assisted initial snapshot. Both must work with exact evidence.
+    model.source = "OpenedSCL";
+    for (auto& attribute : model.logical_devices[0].logical_nodes[0]
+                               .data_objects[0].attributes)
+        attribute.source = "OpenedSCL";
+    if (!check(true)) return false;
+    model.source = "UnverifiedSCL";
+    if (!check(false)) return false;
+    model.source = "OpenedSCL";
+    value.data_reference = "IEDLD/XCBR1$ST$Pos";
+    if (!check(true)) return false; // valid native MMS DataRef alias
+    value.data_reference = "IEDLD/XCBR1$MX$Pos";
+    if (!check(false)) return false; // conflicting FC
+    value.data_reference = "IEDLD/XCBR1$ST$Other";
+    if (!check(false)) return false; // conflicting member
+    value.data_reference = binding.reference;
+    value.value = mms::MmsDataValue::structure({
+        mms::MmsDataValue::integer(2),
+        mms::MmsDataValue::bit_string(0U, quality)});
+    if (!check(false)) return false; // invalid 16-bit q, not 13-bit
+    value.value = mms::MmsDataValue::structure({
+        mms::MmsDataValue::integer(2),
+        mms::MmsDataValue::bit_string(3U, quality)});
+    if (!check(true)) return false;
+    value.data_reference = "OtherIED/XCBR1.Pos";
+    if (!check(false)) return false;
+    value.data_reference = binding.reference;
+    value.data_set_index = 3U;
+    if (!check(false)) return false;
+    value.data_set_index = 0U;
+    model.identity.confidence = mms::MmsLiveModelConfidence::high;
+    if (!check(false)) return false;
+    model.identity.confidence = mms::MmsLiveModelConfidence::exact;
+    value.value = mms::MmsDataValue::structure({mms::MmsDataValue::integer(2)});
+    if (!check(false)) return false;
+    value.value = mms::MmsDataValue::structure({
+        mms::MmsDataValue::integer(2), mms::MmsDataValue::integer(3)});
+    if (!check(false)) return false;
+    value.value = mms::MmsDataValue::structure({
+        mms::MmsDataValue::integer(2), mms::MmsDataValue::bit_string(3U, quality)});
+    model.logical_devices[0].logical_nodes[0].data_objects[0].attributes[1].scl_basic_type = "Enum";
+    if (!check(false)) return false;
+    return true;
+}
 } // namespace
 
 int main(int argc, char* argv[]) {
     qputenv("QT_QPA_PLATFORM", "offscreen");
     qputenv("ARSTACK_IEDSIM_QA", "1");
     QGuiApplication app(argc, argv);
+    if (!verifySemanticReportBinding()) {
+        qCritical() << "REPORTS_SEMANTIC_BINDING_FAIL";
+        return 42;
+    }
+    qInfo() << "REPORTS_SEMANTIC_BINDING_PASS canonical=pass mms_alias=pass quality=pass negative=pass";
     if (argc != 2) {
         qCritical() << "usage: ied_report_workspace_qa <scl>";
         return 2;

@@ -3,6 +3,7 @@
 
 #include "MmsEngineeringEvidence.hpp"
 #include "BrowserBoundedMmsPreview.hpp"
+#include "BrowserReportSemanticBinding.hpp"
 #include "ariec61850/mms/reporting.hpp"
 
 #include <QString>
@@ -64,7 +65,9 @@ inline constexpr int kBrowserReportDetailChildren = 16;
     const std::vector<mms::MmsReportValue>& members,
     int& remainingTypedEvidence,
     const int requestedVisibleMembers = kBrowserReportVisibleMemberLimit,
-    const bool includeWireDetails = false) {
+    const bool includeWireDetails = false,
+    const mms::MmsLiveModelDocument* trustedModel = nullptr,
+    const std::string_view dataSetReference = {}) {
     BrowserReportMemberProjection projection;
     const int visibleLimit = std::clamp(requestedVisibleMembers, 0, kBrowserReportVisibleMemberLimit);
     const auto visibleCount = std::min(members.size(), static_cast<std::size_t>(visibleLimit));
@@ -113,7 +116,31 @@ inline constexpr int kBrowserReportDetailChildren = 16;
                     .arg(includeWireDetails && ordinal < kBrowserReportDetailMembers
                              ? QStringLiteral(" — select for details")
                              : QString{});
-                if (includeWireDetails && ordinal < kBrowserReportDetailMembers) {
+                const auto verified = includeWireDetails && trustedModel &&
+                                      ordinal < kBrowserReportDetailMembers
+                    ? bindFlatSclReportStructure(*trustedModel, dataSetReference, member)
+                    : std::nullopt;
+                if (verified) {
+                    displayValue = QStringLiteral("SCL-verified structure · %1 field(s)")
+                        .arg(static_cast<qulonglong>(verified->size()));
+                    for (const auto& leaf : *verified) {
+                        const auto preview = previewMmsValue(*leaf.value, kBrowserReportTextLimit);
+                        const auto full = QString::fromStdString(leaf.reference);
+                        const auto dot = full.lastIndexOf(QLatin1Char('.'));
+                        const auto engineering = decodeEngineeringEvidence(full, *leaf.value);
+                        const QString displayed = engineering.isEmpty()
+                            ? QString::fromStdString(preview.text)
+                            : engineering.value(QStringLiteral("summary")).toString();
+                        detailRows.push_back(QVariantMap{
+                            {QStringLiteral("label"), dot >= 0 ? full.mid(dot + 1) : full},
+                            {QStringLiteral("value"), displayed
+                                + (preview.truncated ? QStringLiteral(" … [truncated]") : QString{})},
+                            {QStringLiteral("engineeringEvidence"), engineering},
+                            {QStringLiteral("authority"), QStringLiteral("SCL exact / MMS type checked")},
+                            {QStringLiteral("reference"), full}});
+                        if (preview.truncated) projection.textTruncated = true;
+                    }
+                } else if (includeWireDetails && ordinal < kBrowserReportDetailMembers) {
                     const auto count = std::min(children.size(),
                         static_cast<std::size_t>(kBrowserReportDetailChildren));
                     for (std::size_t child = 0; child < count; ++child) {

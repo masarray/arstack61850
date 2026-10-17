@@ -682,7 +682,10 @@ Rectangle {
                                                         Layout.fillWidth: true
                                                     }
                                                     Label {
-                                                        text: "Positional · not SCL-labelled"
+                                                        text: root.selectedReportMemberDetails().length > 0
+                                                      && root.selectedReportMemberDetails()[0].authority
+                                                      ? "SCL verified · MMS type checked"
+                                                      : "Positional · not SCL-labelled"
                                                         font.pixelSize: 10
                                                         color: theme.muted
                                                     }
@@ -691,39 +694,51 @@ Rectangle {
                                             Repeater {
                                                 model: root.selectedReportMemberIndex === receivedMember.index
                                                        ? root.selectedReportMemberDetails() : []
-                                                delegate: Rectangle {
+                                                delegate: ColumnLayout {
+                                                    id: semanticLeafRow
                                                     required property var modelData
                                                     required property int index
                                                     Layout.fillWidth: true
-                                                    implicitHeight: 27
-                                                    color: index % 2 ? theme.surfaceSoft : theme.surface
-                                                    RowLayout {
-                                                        anchors.fill: parent
-                                                        anchors.leftMargin: 18
-                                                        anchors.rightMargin: 9
-                                                        spacing: 10
-                                                        Label {
-                                                            text: modelData.label
-                                                            Layout.preferredWidth: 180
-                                                            elide: Text.ElideRight
-                                                            font.pixelSize: 11
-                                                            color: theme.textSoft
-                                                        }
-                                                        Label {
-                                                            text: modelData.value
-                                                            Layout.fillWidth: true
-                                                            elide: Text.ElideMiddle
-                                                            font.pixelSize: 11
-                                                            color: theme.text
-                                                            ToolTip.visible: detailMouse.containsMouse && truncated
-                                                            ToolTip.text: text
-                                                            MouseArea {
-                                                                id: detailMouse
-                                                                anchors.fill: parent
-                                                                hoverEnabled: true
-                                                                acceptedButtons: Qt.NoButton
+                                                    spacing: 0
+                                                    Rectangle {
+                                                        Layout.fillWidth: true
+                                                        implicitHeight: 29
+                                                        color: semanticLeafRow.index % 2
+                                                               ? theme.surfaceSoft : theme.surface
+                                                        RowLayout {
+                                                            anchors.fill: parent
+                                                            anchors.leftMargin: 18
+                                                            anchors.rightMargin: 9
+                                                            spacing: 10
+                                                            Label {
+                                                                text: semanticLeafRow.modelData.label
+                                                                Layout.preferredWidth: 180
+                                                                elide: Text.ElideRight
+                                                                font.pixelSize: 11
+                                                                color: theme.textSoft
+                                                            }
+                                                            Label {
+                                                                text: semanticLeafRow.modelData.value
+                                                                Layout.fillWidth: true
+                                                                elide: Text.ElideMiddle
+                                                                font.pixelSize: 11
+                                                                color: theme.text
+                                                                ToolTip.visible: detailMouse.containsMouse
+                                                                ToolTip.text: semanticLeafRow.modelData.reference
+                                                                              || semanticLeafRow.modelData.value
+                                                                MouseArea {
+                                                                    id: detailMouse
+                                                                    anchors.fill: parent
+                                                                    hoverEnabled: true
+                                                                    acceptedButtons: Qt.NoButton
+                                                                }
                                                             }
                                                         }
+                                                    }
+                                                    BrowserEngineeringEvidence {
+                                                        theme: root.theme
+                                                        engineeringEvidence: semanticLeafRow.modelData.engineeringEvidence
+                                                                             || ({})
                                                     }
                                                 }
                                             }

@@ -281,8 +281,51 @@ for token in (
 ):
     if token not in report_inspector:
         raise SystemExit("BROWSER_REPORT_INLINE_TREE_FAIL compact selection=" + token)
-if report_inspector.count("BrowserEngineeringEvidence {") != 1:
-    raise SystemExit("BROWSER_REPORT_INLINE_TREE_FAIL duplicate or detached q/t inspector")
+# One member-level inspector and one nested semantic-leaf inspector. Both
+# must live inside the selected member's lazy Loader, not after the DataSet.
+if (member_tree.count("BrowserEngineeringEvidence {") != 2 or
+        report_inspector.count("BrowserEngineeringEvidence {") != 2 or
+        "engineeringEvidence: semanticLeafRow.modelData.engineeringEvidence" not in member_tree):
+    raise SystemExit("BROWSER_REPORT_INLINE_TREE_FAIL incorrect inline q/t inspectors")
+
+# P0 semantic projection borrows ARIEC61850 exact DataSet/FCDA/type gates.
+semantic = (workspace_path.parent.parent / "src" / "BrowserReportSemanticBinding.hpp").read_text(encoding="utf-8")
+for token in (
+    "model.identity.confidence != MmsLiveModelConfidence::exact",
+    'model.source == "OpenedSCL"',
+    'model.source == "TrustedSclInitialSnapshot"',
+    '(openedScl ? "OpenedSCL" : "TrustedSCL")',
+    "fcda.index != member.data_set_index",
+    "matchesExactMember(dir->user_reference)",
+    "matchesExactMember(dir->mms_reference)",
+    "canonical == binding->reference",
+    "bits.size() == 3U && bits[0] == 3U",
+    "attribute.functional_constraint != binding->functional_constraint",
+    "attributes.size() != children.size()",
+    "semanticKindCompatible(children[i], attributes[i]->scl_basic_type)",
+    "semanticExpectedKind(attributes[i]->scl_basic_type) ==",
+    "semanticExpectedKind(attributes[j]->scl_basic_type)",
+    "MmsDataSetDirectoryCodec::parse_data_set_reference",
+):
+    if token not in semantic:
+        raise SystemExit("BROWSER_SEMANTIC_FAIL missing fail-closed binding=" + token)
+for token in (
+    "worker->semanticModel = contextModel;",
+    "candidate->endpoint.host == requestedHost.toStdString()",
+    "candidate->endpoint.port == static_cast<std::uint16_t>(requestedPort)",
+    "semanticModel, verifiedDataSet",
+    "subscription.last_rcb_state->data_set_reference",
+):
+    if token not in report_controller:
+        raise SystemExit("BROWSER_SEMANTIC_FAIL missing generation-owned runtime wiring=" + token)
+if 'ordinal < kBrowserReportDetailMembers' not in projection_header:
+    raise SystemExit("BROWSER_SEMANTIC_FAIL uncapped verified details")
+if 'const auto engineering = decodeEngineeringEvidence(full, *leaf.value);' not in projection_header:
+    raise SystemExit("BROWSER_SEMANTIC_FAIL missing shared q/t native typed decoder")
+if 'engineeringEvidence: semanticLeafRow.modelData.engineeringEvidence' not in report_inspector:
+    raise SystemExit("BROWSER_SEMANTIC_FAIL missing expandable child Quality/TimeQuality")
+if "SCL verified · MMS type checked" not in report_inspector:
+    raise SystemExit("BROWSER_SEMANTIC_FAIL missing semantic/fallback provenance badge")
 
 value_preview = (workspace_path.parent.parent / "src" / "BrowserBoundedMmsPreview.hpp").read_text(encoding="utf-8")
 for token in [
