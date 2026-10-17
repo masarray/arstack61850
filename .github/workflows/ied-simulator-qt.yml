@@ -145,6 +145,9 @@ jobs:
           apps/ied_simulator/qml/FileWorkspace.qml
           apps/ied_simulator/qml/Main.qml
 
+      - name: Browser ribbon legibility contract
+        run: python3 apps/ied_simulator/test_browser_ribbon_legibility.py
+
       - name: Browser convergence contract
         run: >-
           python3 apps/ied_simulator/test_browser_convergence.py

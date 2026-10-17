@@ -20,8 +20,8 @@ large_model_qa = (workspace_path.parent.parent / "src" / "ied_browser_large_mode
 
 workspace_required = [
     'component RibbonAction: Button',
-    'Layout.preferredHeight: 94',
-    'text: "MODEL"',
+    'Layout.preferredHeight: 112',
+    'width: 332',
     'text: "COMMANDS"',
     'text: "Online"',
     '"Discover IED"',
