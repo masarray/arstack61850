@@ -249,6 +249,7 @@ report_required = [
     'selectedReportMemberEvidence()',
     'root.selectedReportMemberIndex = dataRow.index',
     'onLatestReportIdentityChanged: selectedReportMemberIndex = -1',
+    'latestReport.rcbReference || ""',
     'BrowserEngineeringEvidence {',
     'root.latestReport.valuesTruncated === true',
     'root.latestReport.valueTextTruncated === true',

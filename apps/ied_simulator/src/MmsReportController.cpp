@@ -1615,7 +1615,7 @@ bool MmsReportController::enableSelectedAuthored(
                                       "Authored RCB restored to canonical static DataSet; configuration verified and enabled.")
                                 : (requestGeneralInterrogation
                                        ? QStringLiteral(
-                                             "Authored RCB configuration verified; enabled; GI requested.")
+                                             "Authored RCB enabled; GI requested (inspect GI write outcome and received reports).")
                                        : QStringLiteral(
                                              "Authored RCB configuration verified and enabled.")));
                         emit self->inventoryChanged();
@@ -1718,7 +1718,7 @@ bool MmsReportController::enableSelected(const bool requestGeneralInterrogation)
                     self->reportDecodeFailureCount_ = ui.decodeFailureCount;
                     self->state_ = ui.cleanupRequired ? State::cleanup_required : State::active;
                     self->appendDiagnostic(requestGeneralInterrogation
-                        ? QStringLiteral("RCB enabled; GI requested explicitly.")
+                        ? QStringLiteral("RCB enabled; GI requested (inspect GI write outcome; report not yet proven).")
                         : QStringLiteral("RCB enabled without GI."));
                     emit self->reportsChanged();
                     emit self->stateChanged();
