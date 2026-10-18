@@ -1083,7 +1083,11 @@ ApplicationWindow {
                             // Use all available vertical workspace rather than
                             // a fixed 384px island with empty space below.
                             Layout.fillHeight: true
-                            Layout.minimumHeight: root.compactLayout ? 335 : 355
+                            Layout.preferredHeight: root.compactLayout ? 350 : 380
+                            // Allow 960x620 minimum viewport to shrink without
+                            // clipping timing and quality rows; on larger
+                            // viewports this column expands into spare space.
+                            Layout.minimumHeight: root.compactLayout ? 180 : 210
                             spacing: 8
                             SignalMatrix {
                                 id: voltageMatrix
