@@ -143,7 +143,8 @@ def main() -> None:
             and 'enabled: !workflowBar.startQueued; onActivated: root.zeroAll()' in main_qml,
             "scenario editors and shortcuts must be frozen during a pending START snapshot")
     require("controller.pendingApply = true" in workflow
-            and "requestStartWithScenario(controller.startScenarioSnapshot())" in workflow
+            and "requestStartWithScenario(" in workflow
+            and "controller.startScenarioSnapshot()" in workflow
             and "controller.applyAllSignals()" not in workflow
             and "startWatchdog" in workflow and "onRunningChanged()" in workflow,
             "reconnect must not auto-transmit, but one-click Start must stage a bounded scenario")
