@@ -92,6 +92,10 @@ def main() -> None:
     require("1.75" in (STUDIO.parent.parent / ".github/workflows/arstack-studio-windows-lifecycle.yml").read_text(encoding="utf-8"),
             "reuse Windows executable for 100%, 150% and 175% DPI acceptance")
     workflow = source("WorkflowBar.qml")
+    require('const accepted = smartSession.requestStartWithScenario(' in workflow
+            and 'controller.startScenarioSnapshot()' in workflow
+            and 'smartSession.requestStart()' not in workflow,
+            "every Start must send the visible 4I+4V table, never reuse stale device angles")
     require("Qt.callLater(installDialog.open)" not in workflow
             and "Qt.callLater(updateDialog.open)" not in workflow
             and "if (!success) Qt.callLater(resultDialog.open)" in workflow
