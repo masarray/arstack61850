@@ -100,6 +100,24 @@ def main() -> None:
     require("scenarioSnapshot()" in main_qml and "restoreLocalScenario()" in main_qml
             and "startScenarioSnapshot()" in main_qml and "offlinePreviewRunning" in main_qml,
             "offline-first scenario must persist and support one-click Start")
+    require('property bool ptpDesiredForSession: true' in main_qml
+            and 'property bool ptpRestoreAfterFirmware: true' in main_qml
+            and 'property bool phasorDockVisible: true' in main_qml
+            and 'property bool waveformDockVisible: true' in main_qml,
+            "operator defaults must keep PTP, phasor and waveform enabled")
+    require('ColumnLayout {\n                            Layout.fillWidth: true\n                            Layout.fillHeight: true\n                            Layout.minimumHeight: 350' in main_qml
+            and main_qml.index('id: voltageMatrix') < main_qml.index('id: currentMatrix'),
+            "full-width voltage/current table should stack vertically")
+    require('const accepted = smartSession.requestStartWithScenario(' in workflow
+            and 'smartSession.requestStart()' not in workflow.split('function requestStart() {')[1].split('function requestStop() {')[0],
+            "START must always transmit the exact 4I+4V model snapshot")
+    brand = source("ModernRibbon.qml")
+    require("font.pixelSize: 15" in brand and "width: 40" in brand,
+            "SMV Injector brand should be readable at desktop scale")
+    button = source("CalmButton.qml")
+    require('hovered ? "#f0f5fa"' in button
+            and 'hovered ? "#142334"' in button,
+            "white hover must use a dark readable caption")
     require("Apply to board" not in main_qml and "requestApplyDraft()" not in main_qml,
             "operator UI must not expose a redundant Apply-to-board action")
     require('saveScenarioTimer.stop()' in main_qml
