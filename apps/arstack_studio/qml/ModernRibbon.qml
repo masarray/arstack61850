@@ -145,10 +145,10 @@ Rectangle {
             theme: bar.theme
             uiFont: bar.uiFont
             tone: "warning"
-            text: bar.session.firmwareInstallRequired ? "Install firmware"
+            text: bar.session.firmwareInstallRequired ? "Firmware recovery"
                 : bar.session.firmwareUpdateRequired ? "Firmware required"
                 : "Retry profile"
-            toolTipText: bar.session.firmwareInstallRequired ? "Install the bundled ARStack firmware"
+            toolTipText: bar.session.firmwareInstallRequired ? "Firmware not verified · retry identification before optional ROM-verified recovery"
                 : bar.session.firmwareUpdateRequired ? "Firmware update is required before injection"
                 : "Retry the 4I + 4V profile synchronization"
             onClicked: {
