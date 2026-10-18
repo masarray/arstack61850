@@ -74,6 +74,8 @@ using ar::esp32p4::smv::runtime_profile_initialize;
 using ar::esp32p4::smv::runtime_profile_snapshot;
 using ar::esp32p4::smv::runtime_profile_validate;
 using ar::esp32p4::smv::smp_synch_lab_decision;
+using ar::esp32p4::smv::smp_synch_lab_mode;
+using ar::esp32p4::smv::SvSyncPolicyMode;
 using ar::esp32p4::smv::smp_synch_set_source_local_qualified;
 using ar::esp32p4::smv::smp_synch_source_local_qualified;
 using ar::esp32p4::smv::take_start_request;
@@ -154,6 +156,9 @@ SemaphoreHandle_t g_phase_timer_mutex = nullptr;
 gptimer_handle_t g_monitored_sample_clock = nullptr; // under mutex, never in ISR
 TaskHandle_t g_phase_observer_task = nullptr;
 std::atomic<std::uint32_t> g_phase_session_serial{0U};
+// SOURCE AUTO preflight disciplines the sample clock while SV TX is OFF.
+// Only the realtime publisher task creates/stops this dry-run GPTimer.
+std::atomic<bool> g_preflight_phase_clock_active{false};
 #endif
 
 struct PacketTemplate final {
@@ -209,6 +214,10 @@ struct SampleClockContext final {
     std::uint32_t phase_index{};
     bool previous_phase_healthy{};
     bool phase_enabled{}; // set before timer START; only ISR reads it
+    // START transfers a warmed clock at the NEXT canonical second boundary.
+    // Never wake the high-priority publisher for the 4kHz dry-run ticks.
+    std::atomic<bool> publisher_notifications_enabled{true};
+    std::atomic<bool> launch_on_next_epoch{false};
 #endif
 };
 
@@ -453,6 +462,11 @@ bool sample_alarm_callback(
     if (context->phase_enabled) {
         if (index == 0U) {
             epoch_boundary = true;
+            if (context->launch_on_next_epoch.exchange(
+                    false, std::memory_order_acq_rel)) {
+                context->publisher_notifications_enabled.store(
+                    true, std::memory_order_release);
+            }
             context->last_epoch_alarm.store(
                 static_cast<std::uint32_t>(event->alarm_value),
                 std::memory_order_relaxed);
@@ -509,7 +523,14 @@ bool sample_alarm_callback(
     static_cast<void>(gptimer_set_alarm_action(timer, &context->next_alarm));
 
     BaseType_t high_priority_task_woken = pdFALSE;
+#if AR_SV_PTP_PHASE_SUPPORTED
+    if (context->publisher_notifications_enabled.load(
+            std::memory_order_acquire)) {
+        vTaskNotifyGiveFromISR(context->publisher_task, &high_priority_task_woken);
+    }
+#else
     vTaskNotifyGiveFromISR(context->publisher_task, &high_priority_task_woken);
+#endif
 #if AR_SV_PTP_PHASE_SUPPORTED
     if (epoch_boundary && g_phase_observer_task != nullptr) {
         vTaskNotifyGiveFromISR(g_phase_observer_task, &high_priority_task_woken);
@@ -580,7 +601,8 @@ gptimer_handle_t start_sample_clock(
     const std::uint32_t publisher_rate_hz,
     const esp_eth_handle_t eth_handle,
     bool& epoch_armed,
-    const bool profile_has_second_aligned_counter) {
+    const bool profile_has_second_aligned_counter,
+    const bool preflight_only = false) {
     epoch_armed = false;
 #if AR_SV_PTP_PHASE_SUPPORTED
     g_sample_clock_context.publisher_task = publisher_task_handle;
@@ -644,6 +666,10 @@ gptimer_handle_t start_sample_clock(
     g_sample_clock_context.phase_enabled =
         epoch_armed && profile_has_second_aligned_counter &&
         g_phase_observer_task != nullptr && g_phase_timer_mutex != nullptr;
+    g_sample_clock_context.publisher_notifications_enabled.store(
+        !preflight_only, std::memory_order_relaxed);
+    g_sample_clock_context.launch_on_next_epoch.store(
+        false, std::memory_order_relaxed);
 #endif
     g_sample_clock_context.next_alarm = {};
     g_sample_clock_context.next_alarm.alarm_count = epoch_armed
@@ -663,6 +689,9 @@ gptimer_handle_t start_sample_clock(
 }
 
 void stop_sample_clock(gptimer_handle_t& timer) noexcept {
+#if AR_SV_PTP_PHASE_SUPPORTED
+    g_preflight_phase_clock_active.store(false, std::memory_order_release);
+#endif
     // Release the wire claim before teardown; old MAC evidence never
     // survives STOP/START, even when the same SOURCE later restarts.
     smp_synch_set_source_local_qualified(false);
@@ -740,12 +769,35 @@ void publisher_task(void* argument) {
     std::array<std::uint8_t, 60> probe_multicast{};
 #endif
 
+    bool preflight_clock = false;
+    std::uint32_t preflight_rate_hz = 0U;
     while (true) {
-        const std::uint32_t pending_ticks = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        if (pending_ticks == 0U) continue;
+        // With SV OFF, inspect verified SOURCE/AUTO readiness at 5Hz. The
+        // dry clock runs autonomously on the existing ISR; zero SV Ethernet
+        // packets are transmitted until the operator's explicit START.
+        const std::uint32_t pending_ticks = ulTaskNotifyTake(
+            pdTRUE, live_tx_running() ? portMAX_DELAY : pdMS_TO_TICKS(200));
+        if (pending_ticks == 0U && live_tx_running()) continue;
 
         if (take_start_request()) {
+#if AR_SV_PTP_PHASE_SUPPORTED
+            const auto now_lease = read_ptp_epoch_clock_lease();
+            const auto requested_profile = runtime_profile_snapshot();
+            const bool reuse_preflight = preflight_clock && sample_clock != nullptr &&
+                epoch_armed && g_sample_clock_context.phase_enabled &&
+                g_sample_clock_context.publisher_notifications_enabled.load(
+                    std::memory_order_acquire) == false &&
+                preflight_rate_hz == requested_profile.publisher_rate_hz &&
+                requested_profile.sample_counter_modulus == requested_profile.publisher_rate_hz &&
+                smp_synch_lab_mode() == SvSyncPolicyMode::external_ptp_auto &&
+                same_sv_ptp_clock_lease(
+                    g_sample_clock_context.armed_ptp_clock, now_lease);
+            if (!reuse_preflight) stop_sample_clock(sample_clock);
+#else
+            constexpr bool reuse_preflight = false;
             stop_sample_clock(sample_clock);
+#endif
+            preflight_clock = false;
             active_profile = runtime_profile_snapshot();
             if (!runtime_profile_validate(active_profile)) {
                 ESP_LOGE(kTag, "START rejected: active runtime profile is invalid");
@@ -797,22 +849,29 @@ void publisher_task(void* argument) {
                      static_cast<unsigned>(active_profile.vlan_priority),
                      static_cast<unsigned>(canonical.bytes.size()));
 
-            // Starting the 250 us clock is the final operation in this branch.
+            // Timer commit is the final operation in this branch.
             // Formatting the profile log after timer enable previously queued
             // dozens of ISR notifications before the publisher could consume
             // its first tick, so every START falsely began with missed slots.
-            sample_clock = start_sample_clock(
-                task_handle, active_profile.publisher_rate_hz, eth_handle,
-                epoch_armed,
-                // The 1-ASDU-per-frame 80-SPC profile has exactly one
-                // sample-counter epoch per publisher second. Other SCL
-                // profiles need an explicit standard-derived epoch policy.
-                active_profile.sample_counter_modulus ==
-                    active_profile.publisher_rate_hz);
-            if (!epoch_armed) {
-                // Legacy first alarm already consumes the first rational tick;
-                // a PTP-armed first alarm is an independent epoch delay.
-                static_cast<void>(expected_schedule.next_ticks());
+            if (reuse_preflight) {
+#if AR_SV_PTP_PHASE_SUPPORTED
+                // Keep the already disciplined sample clock, phase authority,
+                // and SOURCE generation. First SV packet is released exactly
+                // at the next smpCnt=0 epoch, never mid-second.
+                g_preflight_phase_clock_active.store(false, std::memory_order_release);
+                g_sample_clock_context.launch_on_next_epoch.store(
+                    true, std::memory_order_release);
+#endif
+            } else {
+                sample_clock = start_sample_clock(
+                    task_handle, active_profile.publisher_rate_hz, eth_handle,
+                    epoch_armed,
+                    // Only rate==modulus has one exact sample epoch per second.
+                    active_profile.sample_counter_modulus ==
+                        active_profile.publisher_rate_hz);
+                if (!epoch_armed) {
+                    static_cast<void>(expected_schedule.next_ticks());
+                }
             }
             // Do not log after the timer is enabled: even a single slow
             // console write can accumulate ISR notifications before the
@@ -822,7 +881,41 @@ void publisher_task(void* argument) {
         }
 
         if (!live_tx_running()) {
+#if AR_SV_PTP_PHASE_SUPPORTED
+            const auto profile = runtime_profile_snapshot();
+            const auto lease = read_ptp_epoch_clock_lease();
+            const bool auto_source_ready =
+                smp_synch_lab_mode() == SvSyncPolicyMode::external_ptp_auto &&
+                lease.role == PtpAuthorityRole::source &&
+                valid_sv_ptp_clock_lease(lease) &&
+                (xEventGroupGetBits(g_link_events) & kLinkUpBit) != 0U &&
+                runtime_profile_validate(profile) &&
+                profile.publisher_rate_hz == profile.sample_counter_modulus;
+            if (preflight_clock && (!auto_source_ready ||
+                preflight_rate_hz != profile.publisher_rate_hz ||
+                !same_sv_ptp_clock_lease(
+                    g_sample_clock_context.armed_ptp_clock, lease))) {
+                stop_sample_clock(sample_clock);
+                preflight_clock = false;
+            }
+            if (sample_clock == nullptr && auto_source_ready) {
+                bool aligned = false;
+                sample_clock = start_sample_clock(
+                    task_handle, profile.publisher_rate_hz, eth_handle,
+                    aligned, true, true);
+                if (aligned && g_sample_clock_context.phase_enabled) {
+                    epoch_armed = true;
+                    preflight_clock = true;
+                    preflight_rate_hz = profile.publisher_rate_hz;
+                    g_preflight_phase_clock_active.store(true, std::memory_order_release);
+                    ESP_LOGI(kTag, "SV/PTP AUTO preflight sample clock armed (SV TX OFF)");
+                } else {
+                    stop_sample_clock(sample_clock);
+                }
+            }
+#else
             stop_sample_clock(sample_clock);
+#endif
             schedule_anchored = false;
             continue;
         }
@@ -1117,7 +1210,9 @@ void sv_ptp_phase_observer_task(void* argument) {
             continue;
         }
 
-        if (events != 1U || !live_tx_running() ||
+        if (events != 1U ||
+            (!live_tx_running() &&
+             !g_preflight_phase_clock_active.load(std::memory_order_acquire)) ||
             (xEventGroupGetBits(g_link_events) & kLinkUpBit) == 0U ||
             !same_sv_ptp_clock_lease(lease, read_ptp_epoch_clock_lease())) {
             static_cast<void>(controller.invalidate());
