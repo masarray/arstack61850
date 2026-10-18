@@ -193,8 +193,8 @@ public:
         const QString& expectedFirmwareVersion,
         const QString& expectedBuildId = {});
 
-    [[nodiscard]] static constexpr int identityMaxAttempts() noexcept { return 3; }
-    [[nodiscard]] static constexpr int identityRetryIntervalMs() noexcept { return 650; }
+    [[nodiscard]] static constexpr int identityMaxAttempts() noexcept { return 5; }
+    [[nodiscard]] static constexpr int identityRetryIntervalMs() noexcept { return 1100; }
     [[nodiscard]] static constexpr bool identityRetryAllowed(const int attemptsSent) noexcept {
         return attemptsSent >= 0 && attemptsSent < identityMaxAttempts();
     }
