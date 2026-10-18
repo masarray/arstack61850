@@ -82,10 +82,14 @@ struct UiBounds {
             return false;
         }
     }
-    // Voltage/current now form a vertical engineering stack. Preserve the
-    // strict order/overlap check at all supported Windows DPI scales.
-    if (!(voltage.area.bottom() <= current.area.top() + tolerance
-          && tray.area.top() >= current.area.bottom() - tolerance
+    // At full desktop height matrices are stacked; at the minimum viewport
+    // they share a row. Enforce the actual responsive geometry in both modes.
+    const bool matricesOrdered = size.height() >= 735
+        ? voltage.area.bottom() <= current.area.top() + tolerance
+        : voltage.area.right() <= current.area.left() + tolerance;
+    const qreal matricesBottom = std::max(voltage.area.bottom(), current.area.bottom());
+    if (!(matricesOrdered
+          && tray.area.top() >= matricesBottom - tolerance
           && quality.area.top() >= tray.area.bottom() - tolerance
           && quality.area.bottom() <= surface.area.bottom() + tolerance)) {
         qCritical().noquote() << "Studio UI panel order/overlap violation" << size
