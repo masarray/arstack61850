@@ -63,13 +63,17 @@ struct UiBounds {
     const QRectF viewport{QPointF{0, 0}, QSizeF{size}};
     const auto bar = findUiBounds(window, "studioWorkflowBar");
     const auto surface = findUiBounds(window, "studioInjectionSurface");
+    const auto matrixViewport = findUiBounds(window, "studioMatrixViewport");
     const auto voltage = findUiBounds(window, "studioVoltageMatrix");
     const auto current = findUiBounds(window, "studioCurrentMatrix");
     const auto tray = findUiBounds(window, "studioTimingTray");
     const auto quality = findUiBounds(window, "studioQualityRow");
-    const std::array<std::pair<const char*, UiBounds>, 6> areas{{
+    // At minimum-height desktop viewports the stacked matrix content scrolls.
+    // Assert containment of the scroll viewport, not offscreen scrollable
+    // rows. Offscreen tables remain real, ordered QML items.
+    const std::array<std::pair<const char*, UiBounds>, 5> areas{{
         {"toolbar", bar}, {"injection workspace", surface},
-        {"voltage matrix", voltage}, {"current matrix", current},
+        {"matrix scroll viewport", matrixViewport},
         {"PTP timing tray", tray}, {"quality editor", quality}
     }};
     for (const auto& [label, item] : areas) {
@@ -82,15 +86,21 @@ struct UiBounds {
             return false;
         }
     }
-    // Matrices are intentionally stacked, not side-by-side. Check the
-    // real on-screen order and containment at 960x620, 1240x760 and
-    // 1440x900 instead of applying the old horizontal contract.
-    if (!(voltage.area.bottom() <= current.area.top() + tolerance
-          && tray.area.top() >= current.area.bottom() - tolerance
-          && quality.area.top() >= tray.area.bottom() - tolerance
-          && quality.area.bottom() <= surface.area.bottom() + tolerance)) {
+    // Matrices must remain stacked with no overlap in scroll content,
+    // while PTP/quality remain visible OUTSIDE the scroll area. This
+    // accepts scrollable rows at 960x620 without tolerating a clipped
+    // operational PTP switch or status row.
+    if (!(voltage.visible && current.visible &&
+          voltage.area.width() >= 25 && current.area.width() >= 25 &&
+          voltage.area.height() >= 100 && current.area.height() >= 100 &&
+          voltage.area.bottom() <= current.area.top() + tolerance &&
+          matrixViewport.area.top() >= surface.area.top() - tolerance &&
+          tray.area.top() >= matrixViewport.area.bottom() - tolerance &&
+          quality.area.top() >= tray.area.bottom() - tolerance &&
+          quality.area.bottom() <= surface.area.bottom() + tolerance)) {
         qCritical().noquote() << "Studio UI panel order/overlap violation" << size
-                              << voltage.area << current.area << tray.area << quality.area;
+                              << matrixViewport.area << voltage.area
+                              << current.area << tray.area << quality.area;
         return false;
     }
     const std::array<const char*, 4> controls{{
