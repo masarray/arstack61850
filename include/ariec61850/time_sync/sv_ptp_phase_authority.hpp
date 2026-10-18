@@ -281,6 +281,19 @@ struct SvAutoPreflightPolicy final {
         return auto_mode && usable_source && profile_valid && rate > 0U &&
             rate == sample_counter_modulus;
     }
+    [[nodiscard]] static constexpr bool can_steer(
+        const bool session_valid, const bool phase_accepted,
+        const bool lease_valid, const bool faults_unchanged,
+        const bool injecting, const bool preflight) noexcept {
+        return session_valid && phase_accepted && lease_valid &&
+            faults_unchanged && (injecting || preflight);
+    }
+
+    [[nodiscard]] static constexpr bool can_advertise_local(
+        const bool injecting, const bool descriptor_qualified) noexcept {
+        return injecting && descriptor_qualified;
+    }
+
     [[nodiscard]] static constexpr bool can_reuse(
         const bool preflight_running, const bool phase_enabled,
         const bool source_lease_unchanged, const bool rate_unchanged,
