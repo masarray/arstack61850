@@ -99,6 +99,12 @@ def main() -> None:
     require("hovered ? \"#edf5ff\"" in source("CalmButton.qml")
             and "hovered ? \"#142334\"" in source("CalmButton.qml"),
             "light hover background must always pair with dark caption")
+    dark_tool = source("DarkToolButton.qml")
+    require('control.hovered ? "#142334"' in dark_tool
+            and 'control.hovered ? "#edf5ff"' in dark_tool,
+            "Advanced text/icon tool buttons must use dark captions on white hover")
+    require("background: Item { implicitWidth: 1; implicitHeight: 1 }" in checkbox_qml,
+            "checkbox hover must not render a second platform-native indicator")
 
     menu = source("StudioActionMenu.qml")
     cmake = (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8")
