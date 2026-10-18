@@ -58,6 +58,13 @@ def main() -> None:
             and "MACpairs=%lu" in firmware_source
             and "measured_pairs() const noexcept" in sv_gate,
             "PTP startup must compensate GPTimer enable delay and expose early acquisition measurements")
+    require("SvLocalRefAcquisition local_acquisition;" in firmware_source
+            and "local_acquisition.observe(" in firmware_source
+            and "local_acquisition.reset();" in firmware_source
+            and "clean=%lu/%lu" in firmware_source
+            and "kRequiredCleanEpochs = 3U" in sv_gate
+            and "check_no_intermitttent_local_at_start()" in sv_tests,
+            "LOCAL REF startup must require three clean real epochs and immediately revoke on faults")
     main_qml = source("Main.qml")
     preview = source("SignalPreview.qml")
     tray = source("StudioTimingTray.qml")
