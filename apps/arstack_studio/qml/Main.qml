@@ -119,6 +119,7 @@ ApplicationWindow {
     // an explicit PTP ON can be restored after a firmware reflash/reconnect
     // without introducing an uncontrolled power-on publisher.
     property bool ptpDesiredForSession: false
+    property bool defaultPtpAttempted: false
     property string ptpDesiredRole: "SOURCE"
     property bool ptpRestoreAfterFirmware: false
     property int ptpRestoreChecks: 0
@@ -212,6 +213,25 @@ ApplicationWindow {
                 root.ptpRestoreChecks = 0
                 root.ptpRestoreAfterFirmware = true
             }
+        }
+    }
+
+    // Operator default: start PTP SOURCE automatically once the connected
+    // board has been verified, without starting SV or claiming clock lock.
+    // Never retry rejected commands indefinitely. Explicit PTP OFF wins.
+    Timer {
+        interval: 400
+        repeat: true
+        running: !root.defaultPtpAttempted
+        onTriggered: {
+            const session = workflowBar.session
+            if (!session || !session.startReady || session.updatingFirmware ||
+                    !device.deviceVerified || !device.ptpAvailable ||
+                    device.ptpStarting)
+                return
+            root.defaultPtpAttempted = true
+            if (!device.ptpRunning)
+                root.startPtpRole("SOURCE")
         }
     }
 
@@ -314,6 +334,7 @@ ApplicationWindow {
     }
 
     function startPtpRole(role) {
+        root.defaultPtpAttempted = true
         const accepted = profilePanel.startPtpRole(role)
         if (accepted) {
             root.ptpDesiredForSession = true
@@ -323,6 +344,7 @@ ApplicationWindow {
     }
 
     function requestStopPtp() {
+        root.defaultPtpAttempted = true
         root.ptpDesiredForSession = false
         root.ptpRestoreAfterFirmware = false
         return workflowBar.session && workflowBar.session.requestStopPtp()
