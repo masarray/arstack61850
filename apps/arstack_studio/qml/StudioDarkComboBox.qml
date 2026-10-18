@@ -52,9 +52,10 @@ ComboBox {
         width: combo.width - 8
         implicitHeight: 36
         highlighted: combo.highlightedIndex === index
+        hoverEnabled: true
         contentItem: Text {
             text: combo.textAt(choice.index)
-            color: combo.theme.text
+            color: choice.highlighted || choice.hovered ? "#142334" : combo.theme.text
             font: combo.font
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
@@ -63,7 +64,7 @@ ComboBox {
         }
         background: Rectangle {
             radius: 5
-            color: parent.highlighted ? combo.theme.accentSoft : combo.theme.raised
+            color: choice.highlighted || choice.hovered ? "#edf5ff" : combo.theme.raised
         }
     }
 
