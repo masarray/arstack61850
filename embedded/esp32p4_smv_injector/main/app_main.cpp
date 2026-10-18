@@ -1314,31 +1314,42 @@ void sv_ptp_phase_observer_task(void* argument) {
             g_monitored_sample_clock != nullptr &&
             g_sample_clock_context.session_generation.load(
                 std::memory_order_acquire) == notified_session;
-        if (session_matches &&
-            g_sample_clock_context.epoch_generation.load(
+        const bool injecting = live_tx_running();
+        const bool preflight_active = g_preflight_phase_clock_active.load(
+            std::memory_order_acquire);
+        if (g_sample_clock_context.epoch_generation.load(
                 std::memory_order_acquire) == observation.last_sv_epoch_generation &&
-            decision.accepted && live_tx_running() &&
-            same_sv_ptp_clock_lease(
-                armed_lease, g_sample_clock_context.armed_ptp_clock) &&
-            same_sv_ptp_clock_lease(lease, read_ptp_epoch_clock_lease()) &&
-            no_new_publisher_fault) {
-            // A single near-boundary observation is only a baseline. Do
-            // not arm ISR steering until adjacent smpCnt=0 deadlines map
-            // to adjacent *integer PTP seconds* in the same generation.
+            SvAutoPreflightPolicy::can_steer(
+                session_matches, decision.accepted,
+                same_sv_ptp_clock_lease(
+                    armed_lease, g_sample_clock_context.armed_ptp_clock) &&
+                same_sv_ptp_clock_lease(lease, read_ptp_epoch_clock_lease()),
+                no_new_publisher_fault, injecting, preflight_active)) {
+            // The PRE-START clock must truly steer while SV TX is OFF.
+            // The old live_tx_running() gate invalidated its servo on every
+            // 1Hz observation; capture verified 120s of smpSynch=0.
             g_sample_clock_context.phase_authority_valid.store(
                 decision.epoch_second_continuous, std::memory_order_release);
             g_sample_clock_context.requested_slew_ticks.store(
                 decision.epoch_second_continuous
                     ? decision.slew_ticks_next_epoch : 0,
                 std::memory_order_release);
-            // Require three full 1Hz software/PTP/MAC-qualified epochs;
-            // invalid or stale evidence still revokes LOCAL immediately.
-            const bool stable_local = local_acquisition.observe(
-                lease.role == PtpAuthorityRole::source &&
-                    source_local_qualified && decision.epoch_second_continuous,
-                notified_session, current_faults, lease.generation,
-                observation.last_sv_epoch_generation);
-            smp_synch_set_source_local_qualified(stable_local);
+            if (injecting) {
+                // A warm GPTimer is NEVER canonical MAC TX evidence.
+                // Require the actual descriptor pairs and three clean live
+                // epochs before advertising LOCAL REF to an IED.
+                const bool stable_local = local_acquisition.observe(
+                    lease.role == PtpAuthorityRole::source &&
+                        SvAutoPreflightPolicy::can_advertise_local(
+                            injecting, source_local_qualified) &&
+                        decision.epoch_second_continuous,
+                    notified_session, current_faults, lease.generation,
+                    observation.last_sv_epoch_generation);
+                smp_synch_set_source_local_qualified(stable_local);
+            } else {
+                local_acquisition.reset();
+                smp_synch_set_source_local_qualified(false);
+            }
             committed = true;
         } else if (session_matches) {
             g_sample_clock_context.phase_authority_valid.store(
@@ -1363,9 +1374,11 @@ void sv_ptp_phase_observer_task(void* argument) {
             (accepted_epochs % 2U) == 0U;
         const bool still_acquiring = !auto_local &&
             (accepted_epochs % 5U) == 0U;
+        const bool preflight_telemetry = !live_tx_running() &&
+            (accepted_epochs % 2U) == 0U;
         if (lease.role == PtpAuthorityRole::source &&
             (early_observation || still_acquiring ||
-             auto_local != previous_auto_local ||
+             preflight_telemetry || auto_local != previous_auto_local ||
              (accepted_epochs % 60U) == 0U)) {
             ESP_LOGI(kTag,
                 "SV/PTP AUTO phase=%ldus uncertainty=%luus "
