@@ -56,8 +56,16 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
     connect(&discoveryTimer_, &QTimer::timeout, this, [this] {
         if (!started_ || device_ == nullptr || updateRequested_ || blankBoardDetected_ || setupError_) return;
         if (firmware_ != nullptr && firmware_->busy()) return;
-        if (device_->identificationState() == DeviceController::IdentificationState::Unidentified) return;
+        // A slow serial reply is NOT evidence that firmware is absent.
+        // Retry semantic discovery after a bounded 5s cool-down; do not
+        // endlessly hold the single COM port or auto-flash a live board.
+        if (device_->identificationState() == DeviceController::IdentificationState::Unidentified) {
+            if (manualRecoveryArmed_ || recoveryPending_) return;
+            ++unidentifiedDiscoveryTicks_;
+            if (unidentifiedDiscoveryTicks_ < 2) return;
+        }
         if (!device_->deviceVerified() && !device_->discovering() && !device_->connected()) {
+            unidentifiedDiscoveryTicks_ = 0;
             static_cast<void>(startDeviceDiscovery());
         }
     });
@@ -841,7 +849,10 @@ void SmartSessionController::refreshRecoveryOfferFromIdentity() {
         return;
     }
 
-    if (recoveryPending_) {
+    // Semantic timeout on an auto-detected port proves *nothing* about
+    // flash contents. Present firmware recovery only after the operator
+    // explicitly selected this port. ROM chip checks still precede flash.
+    if (recoveryPending_ || !manualRecoveryArmed_) {
         blankBoardDetected_ = false;
         blankBoardPort_.clear();
         return;
@@ -865,6 +876,7 @@ void SmartSessionController::clearBlankBoardContext() {
     blankBoardDetected_ = false;
     blankBoardPort_.clear();
     manualRecoveryArmed_ = false;
+    unidentifiedDiscoveryTicks_ = 0;
     setupError_ = false;
     setupErrorStatus_.clear();
 }
@@ -1177,8 +1189,8 @@ void SmartSessionController::reconcile() {
 
         if (blankBoardDetected_) {
             setPresentation(
-                QStringLiteral("FIRMWARE REQUIRED"),
-                QStringLiteral("ESP32-P4 candidate %1 did not answer the current semantic identity after bounded attempts. Studio can install the bundled firmware after ROM chip/revision verification.")
+                QStringLiteral("FIRMWARE RECOVERY"),
+                QStringLiteral("Manually selected port %1 did not answer ARStack IDENTIFY. Firmware status is UNKNOWN. Retry connection first; optional recovery requires ROM chip/revision verification.")
                     .arg(blankBoardPort_),
                 false,
                 false);
