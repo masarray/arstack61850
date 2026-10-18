@@ -48,6 +48,16 @@ def main() -> None:
             and "kEgressEvidenceEveryZeroEpochs =\n    SvLocalSyncEvidenceGate::kEvidenceStride" in firmware_source
             and "check_fast_source_auto_qualification_with_fresh_evidence()" in sv_tests,
             "SOURCE AUTO must qualify from two coherent descriptor pairs at 2/4/6s, not 48s")
+    # Eliminate long initial phase slew caused by GPTimer driver enable
+    # AFTER the EMAC/PTP epoch snapshot. All this work is outside the ISR.
+    enable_clock = firmware_source.index("ESP_ERROR_CHECK(gptimer_enable(timer));")
+    sample_ptp = firmware_source.index("const auto epoch_arm = plan_ptp_epoch_arm(eth_handle);")
+    start_clock = firmware_source.index("ESP_ERROR_CHECK(gptimer_start(timer));")
+    require(enable_clock < sample_ptp < start_clock
+            and "SV/PTP AUTO phase=" in firmware_source
+            and "MACpairs=%lu" in firmware_source
+            and "measured_pairs() const noexcept" in sv_gate,
+            "PTP startup must compensate GPTimer enable delay and expose early acquisition measurements")
     main_qml = source("Main.qml")
     preview = source("SignalPreview.qml")
     tray = source("StudioTimingTray.qml")
