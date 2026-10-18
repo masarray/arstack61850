@@ -115,6 +115,10 @@ def main() -> None:
     require("hovered ? \"#edf5ff\"" in source("CalmButton.qml")
             and "hovered ? \"#142334\"" in source("CalmButton.qml"),
             "light hover background must always pair with dark caption")
+    combo = source("StudioDarkComboBox.qml")
+    require('choice.highlighted || choice.hovered ? "#142334"' in combo
+            and 'choice.highlighted || choice.hovered ? "#edf5ff"' in combo,
+            "Advanced dropdown options must be readable on white hover")
     dark_tool = source("DarkToolButton.qml")
     require('control.hovered ? "#142334"' in dark_tool
             and 'control.hovered ? "#edf5ff"' in dark_tool,
