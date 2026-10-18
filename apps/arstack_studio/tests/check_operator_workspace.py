@@ -65,6 +65,16 @@ def main() -> None:
             and "kRequiredCleanEpochs = 3U" in sv_gate
             and "check_no_intermitttent_local_at_start()" in sv_tests,
             "LOCAL REF startup must require three clean real epochs and immediately revoke on faults")
+    phase_header = (project_root / "include/ariec61850/time_sync/sv_ptp_phase_authority.hpp").read_text(encoding="utf-8")
+    phase_tests = (project_root / "tests/test_sv_ptp_phase_authority.cpp").read_text(encoding="utf-8")
+    require("g_preflight_phase_clock_active" in firmware_source
+            and "publisher_notifications_enabled" in firmware_source
+            and "launch_on_next_epoch" in firmware_source
+            and "preflight_only = false" in firmware_source
+            and "SV/PTP AUTO preflight sample clock armed (SV TX OFF)" in firmware_source
+            and "check_auto_preflight_does_not_invent_sync_or_start()" in phase_tests
+            and "SvAutoPreflightPolicy" in phase_header,
+            "AUTO SOURCE preflight must discipline the sample clock before START without transmitting SV")
     main_qml = source("Main.qml")
     preview = source("SignalPreview.qml")
     tray = source("StudioTimingTray.qml")
