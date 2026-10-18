@@ -82,8 +82,10 @@ struct UiBounds {
             return false;
         }
     }
-    if (!(voltage.area.right() <= current.area.left() + tolerance
-          && tray.area.top() >= voltage.area.bottom() - tolerance
+    // Stacked full-width 4I+4V layout: Voltage above Current; both
+    // must remain within the injection surface and above the PTP tray.
+    if (!(voltage.area.bottom() <= current.area.top() + tolerance
+          && current.area.bottom() <= tray.area.top() + tolerance
           && quality.area.top() >= tray.area.bottom() - tolerance
           && quality.area.bottom() <= surface.area.bottom() + tolerance)) {
         qCritical().noquote() << "Studio UI panel order/overlap violation" << size
