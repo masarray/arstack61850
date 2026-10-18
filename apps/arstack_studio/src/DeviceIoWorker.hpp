@@ -25,8 +25,21 @@ public:
 
     [[nodiscard]] static constexpr int commandQueueCapacity() noexcept { return 64; }
     [[nodiscard]] static constexpr int presencePollIntervalMs() noexcept { return 750; }
-    [[nodiscard]] static constexpr int identityMaxAttempts() noexcept { return 3; }
-    [[nodiscard]] static constexpr int identityRetryIntervalMs() noexcept { return 650; }
+    [[nodiscard]] static constexpr int identityMaxAttempts() noexcept { return 5; }
+    [[nodiscard]] static constexpr int identityRetryIntervalMs() noexcept { return 1100; }
+
+    // USB candidate ordering never certifies firmware; only semantic
+    // IDENTIFY verifies the device. A prior verified port is only a hint.
+    [[nodiscard]] static QStringList orderedDiscoveryPorts(
+        QStringList visible, const QString& verifiedPort, const QString& recommended) {
+        const auto prioritize = [&visible](const QString& candidate) {
+            const int index = visible.indexOf(candidate.trimmed());
+            if (index > 0) visible.move(index, 0);
+        };
+        prioritize(recommended);
+        prioritize(verifiedPort);
+        return visible;
+    }
     [[nodiscard]] static constexpr int heartbeatIntervalMs() noexcept { return 700; }
 
     // Fast discovery policy: USB bridge metadata may prioritize a port, but it
