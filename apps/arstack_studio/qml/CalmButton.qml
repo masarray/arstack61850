@@ -40,13 +40,13 @@ Button {
                                         tone === "danger" ? "#ffdce0" :
                                         tone === "accent" ? "#dcebff" : theme.textSoft
 
-    contentItem: Row {
-        // Controls own content geometry; use its assigned rect instead of
-        // anchoring inside a managed contentItem (invalid on some Qt styles).
-        anchors.fill: parent
-        spacing: control.iconSource.toString().length > 0 ? 7 : 0
-        // Row is sized to the center, children remain vertically centered.
-        leftPadding: Math.max(0, (width - implicitWidth) / 2)
+    contentItem: Item {
+        implicitWidth: centeredContent.implicitWidth
+        implicitHeight: centeredContent.implicitHeight
+        Row {
+            id: centeredContent
+            anchors.centerIn: parent
+            spacing: control.iconSource.toString().length > 0 ? 7 : 0
         Image {
             visible: control.iconSource.toString().length > 0
             width: control.iconSize
@@ -63,6 +63,7 @@ Button {
             font: control.font
             anchors.verticalCenter: parent.verticalCenter
             Behavior on color { ColorAnimation { duration: 90 } }
+        }
         }
     }
 
