@@ -1049,13 +1049,18 @@ ApplicationWindow {
                             }
                         }
 
-                        // Stack voltage/current to use the injection workspace
-                        // vertically instead of leaving half the panel empty.
-                        ColumnLayout {
+                        // At normal desktop heights fill the workspace
+                        // vertically. At the minimum 960x620 viewport keep
+                        // the previous two-column arrangement: 8 full signal
+                        // rows cannot physically fit above the PTP tray.
+                        GridLayout {
                             Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            Layout.minimumHeight: 398
-                            spacing: 8
+                            Layout.fillHeight: root.height >= 735
+                            Layout.preferredHeight: root.height < 735 ? 214 : -1
+                            Layout.minimumHeight: root.height < 735 ? 193 : 398
+                            columns: root.height < 735 ? 2 : 1
+                            columnSpacing: 9
+                            rowSpacing: 8
                             SignalMatrix {
                                 id: voltageMatrix
                                 enabled: !workflowBar.startQueued
