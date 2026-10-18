@@ -277,4 +277,39 @@ private:
     std::uint32_t last_epoch_{};
 };
 
+// Fail-closed entry filter: requires consecutive, independently qualified
+// real SV epochs before asserting LOCAL, but never delays loss of LOCAL.
+class SvLocalRefAcquisition final {
+public:
+    static constexpr std::uint32_t kRequiredCleanEpochs = 3U;
+    constexpr void reset() noexcept {
+        count_ = 0U; session_ = 0U; faults_ = 0U;
+        source_ = 0U; epoch_ = 0U;
+    }
+    [[nodiscard]] constexpr bool observe(
+        const bool qualified, const std::uint32_t session,
+        const std::uint32_t faults, const std::uint32_t source,
+        const std::uint32_t epoch) noexcept {
+        if (!qualified || session == 0U || source == 0U || epoch == 0U) {
+            reset();
+            return false;
+        }
+        if (count_ != 0U &&
+            (session_ != session || faults_ != faults || source_ != source ||
+             epoch - epoch_ != 1U)) reset();
+        session_ = session; faults_ = faults; source_ = source; epoch_ = epoch;
+        if (count_ < kRequiredCleanEpochs) ++count_;
+        return count_ == kRequiredCleanEpochs;
+    }
+    [[nodiscard]] constexpr std::uint32_t clean_epochs() const noexcept {
+        return count_;
+    }
+private:
+    std::uint32_t count_{};
+    std::uint32_t session_{};
+    std::uint32_t faults_{};
+    std::uint32_t source_{};
+    std::uint32_t epoch_{};
+};
+
 } // namespace ar::iec61850::time_sync
