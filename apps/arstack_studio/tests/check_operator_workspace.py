@@ -48,6 +48,33 @@ def main() -> None:
             and "root.ptpRestoreChecks > 120" in main_qml
             and "root.ptpDesiredForSession = false" in main_qml,
             "PTP user intent restoration must be bounded, explicit and cancellable")
+    workflow_start = source("WorkflowBar.qml")
+    before_stop = workflow_start.split("function requestStart() {", 1)[1].split(
+        "function requestStop()", 1)[0]
+    require("requestStartWithScenario(" in before_stop
+            and "requestStart()" not in before_stop,
+            "each physical START must use the current GUI 4I+4V table, not stale persisted firmware setpoints")
+    require("Layout.preferredHeight: root.compactLayout ? 398 : 426" in main_qml
+            and "ColumnLayout {\n                            Layout.fillWidth: true" in main_qml
+            and main_qml.index("id: voltageMatrix") < main_qml.index("id: currentMatrix"),
+            "Voltage and Current must be full-width, vertical and ordered")
+    require('root.startPtpRole("SOURCE")' in main_qml
+            and 'root.defaultPtpAttempted = true' in main_qml
+            and 'property bool phasorDockVisible: true' in main_qml
+            and 'property bool waveformDockVisible: true' in main_qml,
+            "default verified PTP SOURCE/AUTO and visible Phasor/Wave must preserve operator OFF authority")
+    ribbon_component = source("ModernRibbon.qml")
+    ribbon_action = source("RibbonAction.qml")
+    calm_button = source("CalmButton.qml")
+    checkbox = source("StudioDarkCheckBox.qml")
+    require('font.pixelSize: 14' in ribbon_component
+            and 'width: 40' in ribbon_component
+            and 'anchors.centerIn: parent' in ribbon_action,
+            "primary brand size and action captions/icons must stay centered")
+    require('hovered ? "#132233"' in calm_button
+            and 'hovered ? "#f0f6ff"' in calm_button
+            and 'background: Item {}' in checkbox,
+            "shared buttons and checkbox must have legible, consistent hover states")
     matrix = source("SignalMatrix.qml")
     menu = source("StudioActionMenu.qml")
     cmake = (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8")
