@@ -10,6 +10,7 @@ Button {
     property url iconSource
     property real iconSize: 16
     property string toolTipText: ""
+    readonly property string hoverPath: iconSource.toString().replace("/assets/material/", "/assets/material_dark/")
 
     implicitHeight: theme ? theme.controlHeight : 36
     implicitWidth: Math.max(64, contentItem.implicitWidth + 20)
@@ -28,6 +29,7 @@ Button {
                                         tone === "accent" ? (hovered ? "#1d3c5e" : theme.accentSoft) :
                                         (down ? "#1a2530" : hovered ? theme.raisedHover : "#141c25")
     readonly property color activeEdge: !enabled ? theme.lineSoft :
+                                         hovered ? "#aac9e9" :
                                         tone === "success" ? "#347a59" :
                                         tone === "danger" ? "#86434b" :
                                         tone === "accent" ? "#315f8d" :
@@ -39,15 +41,15 @@ Button {
                                         tone === "accent" ? "#dcebff" : theme.textSoft
 
     contentItem: Row {
-        // Both caption and icon belong to the same centered Control item.
-        spacing: control.iconSource.toString().length > 0 ? 7 : 0
+        // Center the complete icon+caption pair in both axes in Qt Controls.
         anchors.centerIn: parent
+        spacing: control.iconSource.toString().length > 0 ? 7 : 0
         Image {
             visible: control.iconSource.toString().length > 0
             width: control.iconSize
             height: control.iconSize
             anchors.verticalCenter: parent.verticalCenter
-            source: control.iconSource
+            source: control.hovered && control.enabled ? control.hoverPath : control.iconSource
             sourceSize.width: control.iconSize * 2
             sourceSize.height: control.iconSize * 2
             opacity: control.enabled ? 0.94 : 0.30

@@ -25,6 +25,22 @@ def ordered(data: str, first: str, second: str, reason: str) -> None:
 
 
 def main() -> None:
+    # Lock the successful 120-second PTP/SV baseline in the operator CI.
+    # A GUI-only change must not silently restore the old free-running bundle.
+    project_root = STUDIO.parent.parent
+    firmware_profile = (project_root / ".github/workflows/esp32p4-smv-injector.yml").read_text(encoding="utf-8")
+    preview_profile = (project_root / ".github/workflows/arstack-studio-native-preview.yml").read_text(encoding="utf-8")
+    require("CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y" in firmware_profile
+            and "CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL=y" in firmware_profile
+            and "# CONFIG_AR_SMV_BROADCAST_MIRROR is not set" in firmware_profile
+            and "phase_sync_preview: true" in preview_profile,
+            "Studio native preview must ship measured PTP-SV AUTO firmware with no diagnostic mirror")
+    sv_gate = (project_root / "include/ariec61850/time_sync/sv_tx_egress_evidence.hpp").read_text(encoding="utf-8")
+    sv_tests = (project_root / "tests/test_sv_tx_egress_evidence.cpp").read_text(encoding="utf-8")
+    require("kMaxSoftwarePhaseBoundUs = 4U" in sv_gate
+            and "kMaxCanonicalTxOffsetNs = 250000LL" in sv_gate
+            and "check_auto_local_sync_gate_requires_both_clocks_and_fresh_mac" in sv_tests,
+            "retain independently bounded PTP sample-phase and nonzero MAC publication latency")
     main_qml = source("Main.qml")
     preview = source("SignalPreview.qml")
     tray = source("StudioTimingTray.qml")
@@ -61,6 +77,10 @@ def main() -> None:
             and "root.ptpDesiredForSession = false" in main_qml,
             "PTP user intent restoration must be bounded, explicit and cancellable")
     matrix = source("SignalMatrix.qml")
+    require("Layout.fillHeight: true" in matrix
+            and "Layout.minimumHeight: 34" in matrix
+            and "Item { Layout.fillHeight: true }" not in matrix,
+            "editable channel rows must consume vertical space without a blank filler")
     require("function flushPendingEdits()" in matrix
             and "magnitudeApplyTimer.stop()" in matrix
             and "phaseApplyTimer.stop()" in matrix
@@ -73,15 +93,43 @@ def main() -> None:
             and main_qml.index("id: voltageMatrix") < main_qml.index("id: currentMatrix"),
             "Voltage and Current need a vertical, flexible-height editor workspace")
     ribbon_qml = source("ModernRibbon.qml")
-    require("Layout.preferredWidth: bar.compact ? 190 : 224" in ribbon_qml
-            and "font.pixelSize: bar.compact ? 17 : 19" in ribbon_qml,
-            "SMV Injector logo/caption must be instrument-sized, not micro branding")
+    require("Layout.preferredWidth: bar.compact ? 220 : 270" in ribbon_qml
+            and "font.pixelSize: bar.compact ? 20 : 22" in ribbon_qml
+            and "width: 44" in ribbon_qml,
+            "SMV Injector branding must be readable at compact and normal widths")
+    device_controller = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
+    workflow = source("WorkflowBar.qml")
+    require("const scenario = controller.startScenarioSnapshot()" in workflow
+            and "smartSession.requestStartWithScenario(scenario)" in workflow
+            and "smartSession.requestStart()" not in workflow,
+            "every START must transmit all 8 visible setpoints, never reuse stale board angles")
+    require('QStringLiteral("IA"), QStringLiteral("IB")' in device_controller
+            and 'QStringLiteral("IC"), QStringLiteral("IN")' in device_controller
+            and 'QStringLiteral("UA"), QStringLiteral("UB")' in device_controller
+            and 'QStringLiteral("UC"), QStringLiteral("UN")' in device_controller
+            and 'commands << QStringLiteral("START");' in device_controller
+            and 'const auto phaseMdeg = std::llround(angleMdeg);' in device_controller,
+            "START transaction must retain every channel and signed millidegree")
+    require("anchors.centerIn: parent" in source("CalmButton.qml")
+            and "Text.AlignHCenter" in source("RibbonAction.qml"),
+            "control captions must center on both axes")
     checkbox_qml = source("StudioDarkCheckBox.qml")
     require("width: 20" in checkbox_qml and "height: 20" in checkbox_qml,
             "checkbox geometry must remain unchanged by hover")
     require("hovered ? \"#edf5ff\"" in source("CalmButton.qml")
-            and "hovered ? \"#142334\"" in source("CalmButton.qml"),
-            "light hover background must always pair with dark caption")
+            and "hovered ? \"#142334\"" in source("CalmButton.qml")
+            and "/assets/material_dark/" in source("CalmButton.qml"),
+            "light hover background must pair with dark caption and icon")
+    combo = source("StudioDarkComboBox.qml")
+    require('choice.highlighted || choice.hovered ? "#142334"' in combo
+            and 'choice.highlighted || choice.hovered ? "#edf5ff"' in combo,
+            "Advanced dropdown options must be readable on white hover")
+    dark_tool = source("DarkToolButton.qml")
+    require('control.hovered ? "#142334"' in dark_tool
+            and 'control.hovered ? "#edf5ff"' in dark_tool,
+            "Advanced text/icon tool buttons must use dark captions on white hover")
+    require("background: Item { implicitWidth: 1; implicitHeight: 1 }" in checkbox_qml,
+            "checkbox hover must not render a second platform-native indicator")
 
     menu = source("StudioActionMenu.qml")
     cmake = (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8")

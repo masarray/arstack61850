@@ -1080,10 +1080,10 @@ ApplicationWindow {
 
                         ColumnLayout {
                             Layout.fillWidth: true
-                            // Use all available vertical workspace rather than
-                            // a fixed 384px island with empty space below.
+                            // Stack Voltage and Current vertically; allocate
+                            // the available height between the two matrices.
                             Layout.fillHeight: true
-                            Layout.preferredHeight: root.compactLayout ? 350 : 380
+                            Layout.preferredHeight: root.compactLayout ? 350 : 450
                             // Allow 960x620 minimum viewport to shrink without
                             // clipping timing and quality rows; on larger
                             // viewports this column expands into spare space.
@@ -1171,7 +1171,8 @@ ApplicationWindow {
                                 compact: root.compactLayout
                             }
                         }
-                        Item { Layout.fillHeight: true }
+                        // No trailing filler: vertically stacked matrices
+                        // expand to use the otherwise blank injection space.
                     }
                 }
 
