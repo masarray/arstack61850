@@ -117,9 +117,9 @@ def main() -> None:
             and main_qml.index("id: voltageMatrix") < main_qml.index("id: currentMatrix"),
             "Voltage and Current need a vertical, flexible-height editor workspace")
     ribbon_qml = source("ModernRibbon.qml")
-    require("Layout.preferredWidth: bar.compact ? 220 : 270" in ribbon_qml
-            and "font.pixelSize: bar.compact ? 20 : 22" in ribbon_qml
-            and "width: 44" in ribbon_qml,
+    require("Layout.preferredWidth: bar.compact ? 232 : 286" in ribbon_qml
+            and "font.pixelSize: bar.compact ? 21 : 25" in ribbon_qml
+            and "width: 53" in ribbon_qml,
             "SMV Injector branding must be readable at compact and normal widths")
     device_controller = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
     workflow = source("WorkflowBar.qml")
