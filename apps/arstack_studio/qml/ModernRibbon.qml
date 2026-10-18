@@ -32,7 +32,7 @@ Rectangle {
         if (session.state === "READY") return "Ready"
         if (session.state === "WAITING FOR DEVICE") return "Offline"
         if (session.state === "DEVICE FOUND" || session.state === "CONNECTING" || session.state === "CHECKING DEVICE") return "Connecting"
-        if (session.state === "FIRMWARE REQUIRED") return "Firmware required"
+        if (session.state === "FIRMWARE RECOVERY") return "Firmware status unknown"
         if (session.state === "UPDATING FIRMWARE") return "Updating"
         if (session.state === "UPDATE NEEDS BOOT") return "Bootloader"
         if (session.state === "PREPARING 4I+4V") return "Preparing"
