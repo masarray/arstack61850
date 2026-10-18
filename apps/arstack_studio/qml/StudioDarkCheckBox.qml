@@ -7,20 +7,26 @@ CheckBox {
     id: control
     property var theme
     property string uiFont: "Inter"
-    implicitHeight: 30
+    implicitHeight: 32
+    hoverEnabled: true
     spacing: 9
     font.family: uiFont
     font.pixelSize: 11
     indicator: Rectangle {
-        implicitWidth: 18
-        implicitHeight: 18
+        implicitWidth: 20
+        implicitHeight: 20
+        width: 20
+        height: 20
         x: control.leftPadding
         y: (control.height - height) / 2
         radius: 5
         color: control.checked ? control.theme.accent : control.theme.surface2
         border.width: 1
+        // Hover changes only the border colour, never checkbox size or
+        // creates a second overlay/nested platform-native indicator.
         border.color: control.checked ? control.theme.accent
-                                      : control.activeFocus ? control.theme.textSoft : control.theme.line
+                                      : (control.hovered || control.activeFocus)
+                                        ? control.theme.textSoft : control.theme.line
         Text {
             anchors.centerIn: parent
             visible: control.checked
@@ -35,6 +41,7 @@ CheckBox {
         text: control.text
         font: control.font
         color: control.enabled ? control.theme.textSoft : control.theme.muted
+        horizontalAlignment: Text.AlignLeft
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight
     }
