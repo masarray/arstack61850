@@ -58,8 +58,10 @@ def main() -> None:
 
     ordered(main_qml, "id: voltageMatrix", "id: currentMatrix",
             "voltage must precede current in the injection table")
-    require("ColumnLayout {\n                            Layout.fillWidth: true\n                            Layout.fillHeight: true\n                            Layout.minimumHeight: 398" in main_qml,
-            "voltage/current engineering tables must be vertically stacked")
+    require("GridLayout {\n                            Layout.fillWidth: true" in main_qml
+            and "columns: root.height < 735 ? 2 : 1" in main_qml
+            and "Layout.minimumHeight: root.height < 735 ? 193 : 398" in main_qml,
+            "matrix layout must stack at normal height and fit 960x620 compact viewport")
     workflow = source("WorkflowBar.qml")
     require("smartSession.requestStartWithScenario(\n            controller.startScenarioSnapshot())" in workflow
             and "smartSession.requestStart()" not in workflow,
