@@ -10,7 +10,7 @@ CheckBox {
     implicitHeight: 32
     // The same single indicator is painted for normal, hover and focus.
     // Do not overlay a native checkbox glyph on hover.
-    display: AbstractButton.IconOnly
+    // Only the custom Rectangle paints the indicator; native style stays hidden.
     // Keep one fixed indicator geometry at rest, during hover and focus.
     // Native style decorations must not replace this explicit indicator.
     background: Item { implicitWidth: 1; implicitHeight: 1 }
