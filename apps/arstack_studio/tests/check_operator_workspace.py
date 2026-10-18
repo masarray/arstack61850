@@ -37,9 +37,10 @@ def main() -> None:
             and "root.pendingApply" in main_qml
             and "pendingApply = true" in main_qml,
             "table edits must expose unsent setpoints without claiming wire readback")
-    require("Layout.preferredHeight: root.compactLayout ? 352 : 384" in main_qml
+    require("Layout.minimumHeight: root.compactLayout ? 335 : 355" in main_qml
+            and "Layout.fillHeight: true" in main_qml
             and "ColumnLayout {" in main_qml,
-            "voltage and current must stack vertically to use the workspace")
+            "voltage and current must stack vertically and fill the workspace")
     require('property bool ptpDefaultStartAttempted: false' in main_qml
             and 'root.ptpDefaultStartAttempted = true' in main_qml
             and '!root.startPtpRole("SOURCE")' in main_qml,
