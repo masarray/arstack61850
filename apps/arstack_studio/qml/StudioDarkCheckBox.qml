@@ -7,7 +7,10 @@ CheckBox {
     id: control
     property var theme
     property string uiFont: "Inter"
-    implicitHeight: 30
+    implicitHeight: 32
+    // Keep one fixed indicator geometry at rest, during hover and focus.
+    // Native style decorations must not replace this explicit indicator.
+    background: Item { implicitWidth: 1; implicitHeight: 1 }
     implicitWidth: Math.max(28, contentItem.implicitWidth + 30)
     leftPadding: 1
     rightPadding: 2
@@ -25,8 +28,8 @@ CheckBox {
         radius: 5
         color: control.checked ? control.theme.accent : control.theme.surface2
         border.width: 1
-        border.color: control.checked || control.hovered ? control.theme.accent
-                                      : control.activeFocus ? control.theme.textSoft : control.theme.line
+        border.color: control.checked || control.hovered || control.activeFocus
+            ? control.theme.accent : control.theme.line
         Text {
             anchors.centerIn: parent
             visible: control.checked
