@@ -25,6 +25,22 @@ def ordered(data: str, first: str, second: str, reason: str) -> None:
 
 
 def main() -> None:
+    # Lock the successful 120-second PTP/SV baseline in the operator CI.
+    # A GUI-only change must not silently restore the old free-running bundle.
+    project_root = STUDIO.parent.parent
+    firmware_profile = (project_root / ".github/workflows/esp32p4-smv-injector.yml").read_text(encoding="utf-8")
+    preview_profile = (project_root / ".github/workflows/arstack-studio-native-preview.yml").read_text(encoding="utf-8")
+    require("CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y" in firmware_profile
+            and "CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL=y" in firmware_profile
+            and "# CONFIG_AR_SMV_BROADCAST_MIRROR is not set" in firmware_profile
+            and "phase_sync_preview: true" in preview_profile,
+            "Studio native preview must ship measured PTP-SV AUTO firmware with no diagnostic mirror")
+    sv_gate = (project_root / "include/ariec61850/time_sync/sv_tx_egress_evidence.hpp").read_text(encoding="utf-8")
+    sv_tests = (project_root / "tests/test_sv_tx_egress_evidence.cpp").read_text(encoding="utf-8")
+    require("kMaxSoftwarePhaseBoundUs = 4U" in sv_gate
+            and "kMaxCanonicalTxOffsetNs = 250000LL" in sv_gate
+            and "check_auto_local_sync_gate_requires_both_clocks_and_fresh_mac" in sv_tests,
+            "retain independently bounded PTP sample-phase and nonzero MAC publication latency")
     main_qml = source("Main.qml")
     preview = source("SignalPreview.qml")
     tray = source("StudioTimingTray.qml")
