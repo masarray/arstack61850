@@ -9,6 +9,7 @@ CheckBox {
     property string uiFont: "Inter"
     implicitHeight: 30
     spacing: 9
+    hoverEnabled: true
     font.family: uiFont
     font.pixelSize: 11
     indicator: Rectangle {
@@ -19,7 +20,7 @@ CheckBox {
         radius: 5
         color: control.checked ? control.theme.accent : control.theme.surface2
         border.width: 1
-        border.color: control.checked ? control.theme.accent
+        border.color: control.checked || control.hovered ? control.theme.accent
                                       : control.activeFocus ? control.theme.textSoft : control.theme.line
         Text {
             anchors.centerIn: parent
@@ -31,6 +32,7 @@ CheckBox {
         }
     }
     contentItem: Text {
+        horizontalAlignment: Text.AlignLeft
         leftPadding: control.indicator.width + control.spacing
         text: control.text
         font: control.font
