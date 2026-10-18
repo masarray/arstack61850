@@ -216,7 +216,7 @@ SurfacePanel {
         if (smartSession.state === "WAITING FOR DEVICE") return "Connect device"
         if (smartSession.state === "DEVICE FOUND" || smartSession.state === "CONNECTING") return "Connecting"
         if (smartSession.state === "CHECKING DEVICE") return "Checking device"
-        if (smartSession.state === "FIRMWARE REQUIRED") return "Firmware required"
+        if (smartSession.state === "FIRMWARE RECOVERY") return "Firmware status unknown"
         if (smartSession.state === "FIRMWARE UPDATE") return "Firmware update available"
         if (smartSession.state === "UPDATING FIRMWARE") return "Installing firmware"
         if (smartSession.state === "UPDATE NEEDS BOOT") return "Download mode required"
@@ -232,7 +232,7 @@ SurfacePanel {
     readonly property color smartStateColor: {
         if (smartSession.state === "RUNNING" || smartSession.state === "READY") return theme.green
         if (smartSession.state === "CONNECTING" || smartSession.state === "CHECKING DEVICE" ||
-            smartSession.state === "FIRMWARE REQUIRED" || smartSession.state === "PREPARING 4I+4V" ||
+            smartSession.state === "FIRMWARE RECOVERY" || smartSession.state === "PREPARING 4I+4V" ||
             smartSession.state === "FIRMWARE UPDATE" || smartSession.state === "UPDATING FIRMWARE" ||
             smartSession.state === "UPDATE NEEDS BOOT") return theme.amber
         if (smartSession.state === "DEVICE FOUND") return theme.accent
@@ -243,7 +243,7 @@ SurfacePanel {
 
     function startReason() {
         if (ribbon.injectionRunning) return "SMV output is already running."
-        if (smartSession.firmwareInstallRequired) return "Install ARStack firmware before starting injection."
+        if (smartSession.firmwareInstallRequired) return "ARStack identity not verified. Retry connection or use optional firmware recovery."
         if (smartSession.firmwareUpdateRequired) return "Update firmware before starting injection."
         if (smartSession.updatingFirmware) return "Firmware installation is in progress."
         if (smartSession.updateNeedsBootloaderHelp) return "Complete Download mode recovery before starting injection."
@@ -391,7 +391,7 @@ SurfacePanel {
             spacing: 12
             Label {
                 Layout.fillWidth: true
-                text: "ESP32-P4 detected. Install ARStack firmware to inject SV."
+                text: "No ARStack identity was verified on the manually selected port. This does NOT prove firmware is missing. Retry connection first; optional installation requires a ROM chip check."
                 color: ribbon.theme.textSoft
                 font.family: ribbon.uiFont
                 font.pixelSize: 11
