@@ -39,9 +39,10 @@ Button {
                                         tone === "accent" ? "#dcebff" : theme.textSoft
 
     contentItem: Row {
-        // The same item owns both the icon and text; no native Button
-        // hover glyph can appear independently.
+        // Both caption and icon belong to the same centered Control item.
         spacing: control.iconSource.toString().length > 0 ? 7 : 0
+        implicitWidth: childrenRect.width
+        implicitHeight: Math.max(18, childrenRect.height)
         anchors.centerIn: parent
         Image {
             visible: control.iconSource.toString().length > 0
