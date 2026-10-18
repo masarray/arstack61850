@@ -8,6 +8,7 @@
 #include <QElapsedTimer>
 #include <QSerialPort>
 #include <QSerialPortInfo>
+#include <QSettings>
 #include <QThread>
 #include <QTimer>
 
@@ -199,18 +200,17 @@ void DeviceIoWorker::autoDetectAndConnect(const quint64 generation) {
     probeQueue_.clear();
     genericProbeActive_ = false;
 
-    if (!recommendedPort_.isEmpty()) {
-        if (!openPortInternal(recommendedPort_, true)) emit automaticProbeExhausted(activeGeneration_);
-        return;
-    }
-    if (ports_.isEmpty()) {
-        emit automaticProbeExhausted(activeGeneration_);
-        return;
-    }
-
-    probeQueue_ = ports_;
-    genericProbeActive_ = true;
-    tryNextProbe();
+    // Prefer the port which previously returned a genuine ARStack identity,
+    // but never treat its COM number or USB metadata as proof of identity.
+    // A stale hint MUST fall through to other currently visible candidates.
+    const QSettings settings;
+    const QString verifiedPort = settings.value(
+        QStringLiteral("device-discovery/lastVerifiedPort")).toString().trimmed();
+    probeQueue_ = orderedDiscoveryPorts(
+        ports_, verifiedPort, recommendedPort_);
+    genericProbeActive_ = !probeQueue_.isEmpty();
+    if (genericProbeActive_) tryNextProbe();
+    else emit automaticProbeExhausted(activeGeneration_);
 }
 
 void DeviceIoWorker::connectPort(const QString& portName, const quint64 generation) {
@@ -346,6 +346,12 @@ void DeviceIoWorker::confirmIdentity(const quint64 generation) {
     genericProbeActive_ = false;
     probeQueue_.clear();
     if (verificationTimer_ != nullptr) verificationTimer_->stop();
+    // Remember a port only AFTER its ARStack identity has been parsed.
+    // It is just a priority hint for the next Studio start, never a bypass.
+    QSettings settings;
+    settings.setValue(
+        QStringLiteral("device-discovery/lastVerifiedPort"),
+        serial_->portName());
 }
 
 void DeviceIoWorker::enqueueCommands(
