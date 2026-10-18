@@ -1049,11 +1049,14 @@ ApplicationWindow {
                             }
                         }
 
-                        RowLayout {
+                        // Two full-width channel tables read top to bottom.
+                        // This keeps numeric columns usable and uses the space
+                        // previously wasted below two cramped half-width panels.
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: root.compactLayout ? 214 : 224
-                            Layout.maximumHeight: root.compactLayout ? 214 : 224
-                            spacing: 9
+                            Layout.preferredHeight: root.compactLayout ? 398 : 426
+                            Layout.maximumHeight: root.compactLayout ? 398 : 426
+                            spacing: 8
                             SignalMatrix {
                                 id: voltageMatrix
                                 enabled: !workflowBar.startQueued
