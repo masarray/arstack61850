@@ -41,6 +41,13 @@ def main() -> None:
             and "kMaxCanonicalTxOffsetNs = 250000LL" in sv_gate
             and "check_auto_local_sync_gate_requires_both_clocks_and_fresh_mac" in sv_tests,
             "retain independently bounded PTP sample-phase and nonzero MAC publication latency")
+    firmware_source = (project_root / "embedded/esp32p4_smv_injector/main/app_main.cpp").read_text(encoding="utf-8")
+    require("kSvTxEvidenceEpochStride = 2U" in sv_gate
+            and "expected_epoch_stride = kSvTxEvidenceEpochStride" in sv_gate
+            and "kEvidenceStride = kSvTxEvidenceEpochStride" in sv_gate
+            and "kEgressEvidenceEveryZeroEpochs =\\n    SvLocalSyncEvidenceGate::kEvidenceStride" in firmware_source
+            and "check_fast_source_auto_qualification_with_fresh_evidence()" in sv_tests,
+            "SOURCE AUTO must qualify from two coherent descriptor pairs at 2/4/6s, not 48s")
     main_qml = source("Main.qml")
     preview = source("SignalPreview.qml")
     tray = source("StudioTimingTray.qml")

@@ -7,6 +7,12 @@
 
 namespace ar::iec61850::time_sync {
 
+// One actual canonical descriptor timestamp every two smpCnt=0 epochs.
+// Baseline at ~2s, two coherent pairs at ~4s and ~6s permit AUTO to
+// qualify within the 10s operator target IF independent software phase,
+// PTP source and publisher continuity have also qualified. Never force 1.
+inline constexpr std::uint32_t kSvTxEvidenceEpochStride = 2U;
+
 // Sparse, read-only MAC descriptor TX evidence. No result authorizes
 // smpSynch=1/2, grandmaster quality or IED synchronization.
 struct SvTxEgressObservation final {
@@ -54,13 +60,13 @@ struct SvTxEgressSummary final {
     std::int32_t last_phase_ns{};
 };
 
-// Explicit stride corresponds to every 16th sample-counter-zero epoch in
-// ESP32-P4 M2C. Readings are NOT inferred from packet rate or PCAP timestamps.
+// Evidence cadence follows the shared firmware stride. Readings are NOT
+// inferred from packet rate or PCAP timestamps.
 // No heap, locks, I/O or clocks; suitable for strict portable unit testing.
 class SvTxEgressEvidence final {
 public:
     explicit constexpr SvTxEgressEvidence(
-        const std::uint32_t expected_epoch_stride = 16U) noexcept
+        const std::uint32_t expected_epoch_stride = kSvTxEvidenceEpochStride) noexcept
         : expected_stride_(expected_epoch_stride) {}
 
     constexpr void reset() noexcept {
@@ -195,8 +201,8 @@ public:
     static constexpr std::int64_t kMinCanonicalTxOffsetNs = -4000LL;
     static constexpr std::int64_t kMaxCanonicalTxOffsetNs = 250000LL;
     static constexpr std::uint32_t kMaxSoftwarePhaseBoundUs = 4U;
-    static constexpr std::uint32_t kEvidenceStride = 16U;
-    static constexpr std::uint32_t kMaxEvidenceAgeEpochs = 17U;
+    static constexpr std::uint32_t kEvidenceStride = kSvTxEvidenceEpochStride;
+    static constexpr std::uint32_t kMaxEvidenceAgeEpochs = kEvidenceStride + 1U;
     static constexpr std::uint32_t kRequiredMeasuredPairs = 2U;
 
     constexpr void reset() noexcept {
@@ -211,7 +217,7 @@ public:
     // The phase here is the packet's TX offset from the nearest whole PTP
     // second, i.e. a bound on *publication latency*, NOT sampling phase.
     // A separate GPTimer/EMAC observer qualifies the sampling instant.
-    // The lower-level tracker verifies consecutive 16-second PTP epochs
+    // The lower-level tracker verifies consecutive evidenced PTP epochs
     // and the same source/session.
     constexpr void observe(const SvTxEgressObservation& o,
                            const SvTxEvidenceResult result,

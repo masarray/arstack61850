@@ -2,6 +2,7 @@
 #include "ariec61850/time_sync/sv_tx_egress_evidence.hpp"
 
 #include <cstdint>
+#include <initializer_list>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -33,49 +34,87 @@ SvTxEgressObservation make_good(
 }
 void check_auto_local_sync_gate_requires_both_clocks_and_fresh_mac() {
     SvLocalSyncEvidenceGate gate;
-    auto o = make_good(32U, 1700000016U, 2000U);
-    REQUIRE(!gate.qualified(7U, 0U, 3U, 32U, true, 0U));
+    auto o = make_good(4U, 1700000016U, 2000U);
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 4U, true, 0U));
     gate.observe(o, SvTxEvidenceResult::baseline_established, 2000);
-    REQUIRE(!gate.qualified(7U, 0U, 3U, 32U, true, 0U));
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 4U, true, 0U));
     // Hardware packet TX normally follows the top-of-second sampling
     // instant by processing/queue delay. 110 us is valid publication delay,
     // and MUST NOT be mistaken for 110 us sampling phase error.
     gate.observe(o, SvTxEvidenceResult::measured, 110000);
-    REQUIRE(!gate.qualified(7U, 0U, 3U, 32U, true, 0U));
-    o.sample_epoch_generation = 48U;
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 4U, true, 0U));
+    o.sample_epoch_generation = 6U;
     gate.observe(o, SvTxEvidenceResult::measured, 175000);
-    REQUIRE(gate.qualified(7U, 0U, 3U, 48U, true, 4U));
-    REQUIRE(gate.qualified(7U, 0U, 3U, 65U, true, 4U));
-    REQUIRE(!gate.qualified(7U, 0U, 3U, 66U, true, 4U));
-    REQUIRE(!gate.qualified(7U, 0U, 3U, 48U, true, 5U));
-    REQUIRE(!gate.qualified(7U, 0U, 3U, 48U, false, 0U));
-    REQUIRE(!gate.qualified(7U, 1U, 3U, 48U, true, 0U));
-    REQUIRE(!gate.qualified(7U, 0U, 4U, 48U, true, 0U));
-    REQUIRE(!gate.qualified(8U, 0U, 3U, 48U, true, 0U));
-    REQUIRE(!gate.qualified(7U, 0U, 3U, 47U, true, 0U));
+    REQUIRE(gate.qualified(7U, 0U, 3U, 6U, true, 4U));
+    REQUIRE(gate.qualified(7U, 0U, 3U, 9U, true, 4U));
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 10U, true, 4U));
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 6U, true, 5U));
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 6U, false, 0U));
+    REQUIRE(!gate.qualified(7U, 1U, 3U, 6U, true, 0U));
+    REQUIRE(!gate.qualified(7U, 0U, 4U, 6U, true, 0U));
+    REQUIRE(!gate.qualified(8U, 0U, 3U, 6U, true, 0U));
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 5U, true, 0U));
     // A new source, bad SV timestamp, skipped frame or TX failure
     // immediately revokes the old promotion and requires fresh pairs.
-    o.sample_epoch_generation = 64U;
+    o.sample_epoch_generation = 8U;
     gate.observe(o, SvTxEvidenceResult::measured, 300000);
-    REQUIRE(!gate.qualified(7U, 0U, 3U, 64U, true, 0U));
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 8U, true, 0U));
     // A TX timestamp unexpectedly before the sample epoch is invalid,
     // even if a symmetric +/− phase comparison would have accepted it.
     gate.observe(o, SvTxEvidenceResult::measured, -9000);
-    REQUIRE(!gate.qualified(7U, 0U, 3U, 64U, true, 0U));
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 8U, true, 0U));
     gate.observe(o, SvTxEvidenceResult::measured, 110000);
-    o.sample_epoch_generation = 80U;
+    o.sample_epoch_generation = 10U;
     gate.observe(o, SvTxEvidenceResult::measured, 180000);
-    REQUIRE(gate.qualified(7U, 0U, 3U, 80U, true, 0U));
+    REQUIRE(gate.qualified(7U, 0U, 3U, 10U, true, 0U));
     gate.observe(o, SvTxEvidenceResult::transmit_failed, 1000);
-    REQUIRE(!gate.qualified(7U, 0U, 3U, 80U, true, 0U));
-    o.sample_epoch_generation = 96U;
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 10U, true, 0U));
+    o.sample_epoch_generation = 12U;
     gate.observe(o, SvTxEvidenceResult::measured, 1000);
-    o.sample_epoch_generation = 112U;
+    o.sample_epoch_generation = 14U;
     o.publisher_fault_generation = 1U;
     gate.observe(o, SvTxEvidenceResult::measured, 1000);
-    REQUIRE(!gate.qualified(7U, 1U, 3U, 112U, true, 0U));
+    REQUIRE(!gate.qualified(7U, 1U, 3U, 14U, true, 0U));
     gate.reset();
-    REQUIRE(!gate.qualified(7U, 1U, 3U, 112U, true, 0U));
+    REQUIRE(!gate.qualified(7U, 1U, 3U, 14U, true, 0U));
+}
+
+// Full target-cadence path: a real descriptor timestamp is sampled only at
+// the 2s, 4s and 6s canonical sample epochs; software/PTP phase remains
+// independent, so MAC presence alone can never authorize AUTO local.
+void check_fast_source_auto_qualification_with_fresh_evidence() {
+    static_assert(kSvTxEvidenceEpochStride == 2U);
+    static_assert(SvLocalSyncEvidenceGate::kEvidenceStride ==
+                  kSvTxEvidenceEpochStride);
+    static_assert(SvLocalSyncEvidenceGate::kMaxEvidenceAgeEpochs == 3U);
+    SvTxEgressEvidence tx;
+    SvLocalSyncEvidenceGate gate;
+    constexpr std::uint32_t base_seconds = 1700000000U;
+    for (const std::uint32_t elapsed : {2U, 4U, 6U}) {
+        const auto o = make_good(elapsed, base_seconds + elapsed, 90000U);
+        const auto result = tx.record(o);
+        REQUIRE(result == (elapsed == 2U
+            ? SvTxEvidenceResult::baseline_established
+            : SvTxEvidenceResult::measured));
+        gate.observe(o, result, tx.summary().last_phase_ns);
+        REQUIRE(gate.qualified(7U, 0U, 3U, elapsed, true, 4U) ==
+                (elapsed == 6U));
+        // No fake sync claim from the MAC descriptor alone.
+        REQUIRE(!gate.qualified(7U, 0U, 3U, elapsed, false, 0U));
+    }
+    REQUIRE(tx.summary().measured == 2U);
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 6U, true, 5U));
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 10U, true, 4U));
+    REQUIRE(!gate.qualified(7U, 1U, 3U, 6U, true, 4U));
+    REQUIRE(!gate.qualified(7U, 0U, 4U, 6U, true, 4U));
+    // A publisher fault immediately revokes qualification, regardless of
+    // good-looking timestamps and the original six-second acquisition.
+    auto fault = make_good(8U, base_seconds + 8U, 90000U);
+    fault.publisher_fault_generation = 1U;
+    const auto changed = tx.record(fault);
+    REQUIRE(changed == SvTxEvidenceResult::publisher_discontinuity);
+    gate.observe(fault, changed, tx.summary().last_phase_ns);
+    REQUIRE(!gate.qualified(7U, 0U, 3U, 8U, true, 4U));
 }
 
 void check_baseline_and_contiguous_ptp() {
@@ -100,7 +139,7 @@ void check_baseline_and_contiguous_ptp() {
     REQUIRE(e.summary().measured == 3U);
 }
 void check_clock_steps_recovery_and_session() {
-    SvTxEgressEvidence e;
+    SvTxEgressEvidence e{16U};
     REQUIRE(e.record(make_good(16U, 1700000000U)) ==
             SvTxEvidenceResult::baseline_established);
     // +1 sec PTP clock step despite perfect-looking within-second phase.
@@ -140,7 +179,7 @@ void check_clock_steps_recovery_and_session() {
     REQUIRE(e.record(restarted) == SvTxEvidenceResult::measured);
 }
 void check_invalid_evidence_requires_rebaseline() {
-    SvTxEgressEvidence e;
+    SvTxEgressEvidence e{16U};
     auto o = make_good(16U, 1700000000U);
     REQUIRE(e.record(o) == SvTxEvidenceResult::baseline_established);
     o = make_good(32U, 1700000016U);
@@ -176,7 +215,7 @@ void check_invalid_evidence_requires_rebaseline() {
     REQUIRE(e.summary().measured == 0U);
 }
 void check_counter_wrap_and_signed_negative_phase() {
-    SvTxEgressEvidence e;
+    SvTxEgressEvidence e{16U};
     auto o = make_good(0xfffffff8U, 1700000099U, 999999900U);
     REQUIRE(e.record(o) == SvTxEvidenceResult::baseline_established);
     o = make_good(8U, 1700000115U, 999999900U);
@@ -194,6 +233,7 @@ void check_counter_wrap_and_signed_negative_phase() {
 int main() {
     try {
         check_auto_local_sync_gate_requires_both_clocks_and_fresh_mac();
+        check_fast_source_auto_qualification_with_fresh_evidence();
         check_baseline_and_contiguous_ptp();
         check_clock_steps_recovery_and_session();
         check_invalid_evidence_requires_rebaseline();

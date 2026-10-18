@@ -139,7 +139,8 @@ static_assert(std::atomic<bool>::is_always_lock_free);
 #endif
 std::atomic<std::uint32_t> g_sample_tick_total{0U};
 #if AR_SV_TX_EGRESS_SUPPORTED
-constexpr std::uint32_t kEgressEvidenceEveryZeroEpochs = 16U;
+constexpr std::uint32_t kEgressEvidenceEveryZeroEpochs =
+    SvLocalSyncEvidenceGate::kEvidenceStride;
 portMUX_TYPE g_tx_egress_mux = portMUX_INITIALIZER_UNLOCKED;
 SvTxEgressEvidence g_tx_egress_evidence{};
 SvLocalSyncEvidenceGate g_local_sync_evidence{}; // same critical section as egress tracker
@@ -907,9 +908,11 @@ void publisher_task(void* argument) {
             patch_packet(
                 canonical, canonical_sample_count, sample_synchronization, row, signal_state);
 #if AR_SV_TX_EGRESS_SUPPORTED
-            // ONCE / 16 seconds, replace normal SV TX for the real canonical
-            // frame with descriptor-stamped TX. ESP-IDF 5.5.4 polls the DMA
-            // descriptor for its timestamp: never run this on every frame.
+            // Every 2 seconds, replace normal SV TX for the real canonical
+            // frame with descriptor-stamped TX. This reaches two valid
+            // measured pairs after ~6 seconds when all independent clocks
+            // qualify. ESP-IDF polls the DMA descriptor: NEVER do this on
+            // every frame; a slow TX must fail closed via no_missed_slots.
             // This is diagnostic evidence, not validated IED synchronization.
             bool take_egress_timestamp = false;
             SvTxEgressObservation egress{};
