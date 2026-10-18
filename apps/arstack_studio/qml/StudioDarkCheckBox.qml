@@ -7,8 +7,13 @@ CheckBox {
     id: control
     property var theme
     property string uiFont: "Inter"
-    implicitHeight: 30
+    implicitHeight: 32
+    implicitWidth: contentItem.implicitWidth + indicator.implicitWidth + spacing + leftPadding + rightPadding
     spacing: 9
+    hoverEnabled: true
+    // Use one fixed-size custom indicator for all states. No native style
+    // hover/focus sub-checkbox may appear alongside the engineering control.
+    background: Item {}
     font.family: uiFont
     font.pixelSize: 11
     indicator: Rectangle {
@@ -20,7 +25,8 @@ CheckBox {
         color: control.checked ? control.theme.accent : control.theme.surface2
         border.width: 1
         border.color: control.checked ? control.theme.accent
-                                      : control.activeFocus ? control.theme.textSoft : control.theme.line
+            : (control.hovered || control.activeFocus) ? control.theme.textSoft
+            : control.theme.line
         Text {
             anchors.centerIn: parent
             visible: control.checked
