@@ -82,8 +82,11 @@ struct UiBounds {
             return false;
         }
     }
-    if (!(voltage.area.right() <= current.area.left() + tolerance
-          && tray.area.top() >= voltage.area.bottom() - tolerance
+    // Matrices are intentionally stacked, not side-by-side. Check the
+    // real on-screen order and containment at 960x620, 1240x760 and
+    // 1440x900 instead of applying the old horizontal contract.
+    if (!(voltage.area.bottom() <= current.area.top() + tolerance
+          && tray.area.top() >= current.area.bottom() - tolerance
           && quality.area.top() >= tray.area.bottom() - tolerance
           && quality.area.bottom() <= surface.area.bottom() + tolerance)) {
         qCritical().noquote() << "Studio UI panel order/overlap violation" << size
