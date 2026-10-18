@@ -121,6 +121,7 @@ ApplicationWindow {
     property string ptpDesiredRole: "SOURCE"
     property bool ptpRestoreAfterFirmware: false
     property int ptpRestoreChecks: 0
+    property bool ptpDefaultStartAttempted: false
     property bool restoringScenario: false
     property bool offlinePreviewRunning: false
     property real currentScale: 1000.0
@@ -211,6 +212,23 @@ ApplicationWindow {
                 root.ptpRestoreChecks = 0
                 root.ptpRestoreAfterFirmware = true
             }
+        }
+    }
+
+    // Operator-friendly default: start SOURCE with the verified profile
+    // once the connected board is READY, never in a blind reconnect loop.
+    // A deliberate OFF cancels this default for the rest of the session.
+    Timer {
+        interval: 500
+        repeat: true
+        running: !root.ptpDefaultStartAttempted
+        onTriggered: {
+            const session = workflowBar.session
+            if (!session || !device.deviceVerified || !session.startReady ||
+                    session.updatingFirmware || device.ptpStarting) return
+            root.ptpDefaultStartAttempted = true
+            if (!device.ptpRunning && !root.startPtpRole("SOURCE"))
+                root.showMessage("PTP could not start automatically; use PTP On to retry.", true)
         }
     }
 
@@ -322,6 +340,7 @@ ApplicationWindow {
     }
 
     function requestStopPtp() {
+        root.ptpDefaultStartAttempted = true
         root.ptpDesiredForSession = false
         root.ptpRestoreAfterFirmware = false
         return workflowBar.session && workflowBar.session.requestStopPtp()
