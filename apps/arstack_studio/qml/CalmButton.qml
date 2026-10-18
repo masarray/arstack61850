@@ -41,8 +41,6 @@ Button {
     contentItem: Row {
         // Both caption and icon belong to the same centered Control item.
         spacing: control.iconSource.toString().length > 0 ? 7 : 0
-        implicitWidth: childrenRect.width
-        implicitHeight: Math.max(18, childrenRect.height)
         anchors.centerIn: parent
         Image {
             visible: control.iconSource.toString().length > 0
