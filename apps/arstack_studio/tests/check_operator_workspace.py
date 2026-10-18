@@ -54,6 +54,34 @@ def main() -> None:
 
     ordered(main_qml, "id: voltageMatrix", "id: currentMatrix",
             "voltage must precede current in the injection table")
+    require("ColumnLayout {\n                            Layout.fillWidth: true\n                            Layout.fillHeight: true\n                            spacing: 10\n                            SignalMatrix {" in main_qml,
+            "voltage and current must stack vertically and use available height")
+    require('property bool ptpDesiredForSession: true' in main_qml
+            and 'ptpRestoreAfterFirmware = true' in main_qml
+            and 'ptpDesiredForSession = false' in main_qml
+            and 'property bool phaseLink: true' in main_qml,
+            "PTP SOURCE/AUTO and three-phase link start enabled, while OFF remains authoritative")
+    require('var draft = scenarioSnapshot()' in main_qml
+            and 'const accepted = smartSession.requestStartWithScenario(' in workflow
+            and ': smartSession.requestStart()' not in workflow,
+            "every START must send the latest 4I+4V table, not stale firmware setpoints")
+    require('function applyPhaseLink()' in main_qml
+            and 'if (checked) root.applyPhaseLink()' in main_qml
+            and 'sendLinkedGroup(1) && sendLinkedGroup(0)' in main_qml,
+            "3-phase link must update the model and send coherent live values")
+    require('font.pixelSize: 15' in ribbon
+            and 'width: 38' in ribbon and 'height: 38' in ribbon,
+            "SMV Injector logo and title must remain legible")
+    require('hovered ? "#edf4fc"' in source("CalmButton.qml")
+            and 'hovered ? "#142334"' in source("CalmButton.qml")
+            and 'parent.hovered ? "#edf4fc"' in config
+            and 'parent.hovered ? "#142334"' in config,
+            "Advanced light hover must use dark caption text")
+    require('width: 20' in source("StudioDarkCheckBox.qml")
+            and 'height: 20' in source("StudioDarkCheckBox.qml")
+            and 'control.hovered || control.activeFocus' in source("StudioDarkCheckBox.qml"),
+            "checkbox may change its colour, never its size on hover")
+
     ordered(preview, "id: voltagePhasorCanvas", "id: currentPhasorCanvas",
             "voltage must precede current in the phasor view")
     ordered(preview, "drawWaveGroup(preview.voltageModel, voltageY, false)",
