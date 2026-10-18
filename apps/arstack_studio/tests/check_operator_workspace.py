@@ -73,9 +73,26 @@ def main() -> None:
             and main_qml.index("id: voltageMatrix") < main_qml.index("id: currentMatrix"),
             "Voltage and Current need a vertical, flexible-height editor workspace")
     ribbon_qml = source("ModernRibbon.qml")
-    require("Layout.preferredWidth: bar.compact ? 190 : 224" in ribbon_qml
-            and "font.pixelSize: bar.compact ? 17 : 19" in ribbon_qml,
-            "SMV Injector logo/caption must be instrument-sized, not micro branding")
+    require("Layout.preferredWidth: bar.compact ? 220 : 270" in ribbon_qml
+            and "font.pixelSize: bar.compact ? 20 : 22" in ribbon_qml
+            and "width: 44" in ribbon_qml,
+            "SMV Injector branding must be readable at compact and normal widths")
+    device_controller = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
+    workflow = source("WorkflowBar.qml")
+    require("const scenario = controller.startScenarioSnapshot()" in workflow
+            and "smartSession.requestStartWithScenario(scenario)" in workflow
+            and "smartSession.requestStart()" not in workflow,
+            "every START must transmit all 8 visible setpoints, never reuse stale board angles")
+    require('QStringLiteral("IA"), QStringLiteral("IB")' in device_controller
+            and 'QStringLiteral("IC"), QStringLiteral("IN")' in device_controller
+            and 'QStringLiteral("UA"), QStringLiteral("UB")' in device_controller
+            and 'QStringLiteral("UC"), QStringLiteral("UN")' in device_controller
+            and 'commands << QStringLiteral("START");' in device_controller
+            and 'const auto phaseMdeg = std::llround(angleMdeg);' in device_controller,
+            "START transaction must retain every channel and signed millidegree")
+    require("anchors.centerIn: parent" in source("CalmButton.qml")
+            and "Text.AlignHCenter" in source("RibbonAction.qml"),
+            "control captions must center on both axes")
     checkbox_qml = source("StudioDarkCheckBox.qml")
     require("width: 20" in checkbox_qml and "height: 20" in checkbox_qml,
             "checkbox geometry must remain unchanged by hover")
