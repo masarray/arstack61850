@@ -1081,6 +1081,7 @@ void sv_ptp_phase_observer_task(void* argument) {
     const auto eth_handle = static_cast<esp_eth_handle_t>(argument);
     SvPtpPhaseAuthority controller;
     SvPtpPublisherContinuityGate continuity;
+    SvLocalRefAcquisition local_acquisition;
     std::uint32_t accepted_epochs = 0U;
     std::uint32_t controller_session = 0U;
     bool previous_auto_local = false;
@@ -1092,6 +1093,7 @@ void sv_ptp_phase_observer_task(void* argument) {
         if (controller_session != notified_session) {
             controller.reset();
             continuity.reset();
+            local_acquisition.reset();
             accepted_epochs = 0U;
             previous_auto_local = false;
             controller_session = notified_session;
@@ -1106,6 +1108,7 @@ void sv_ptp_phase_observer_task(void* argument) {
             !continuity.unchanged(notified_session, current_faults,
                                   lease.generation)) {
             static_cast<void>(controller.invalidate());
+            local_acquisition.reset();
             revoke_sv_phase_session(notified_session);
             continue;
         }
@@ -1114,6 +1117,7 @@ void sv_ptp_phase_observer_task(void* argument) {
             (xEventGroupGetBits(g_link_events) & kLinkUpBit) == 0U ||
             !same_sv_ptp_clock_lease(lease, read_ptp_epoch_clock_lease())) {
             static_cast<void>(controller.invalidate());
+            local_acquisition.reset();
             revoke_sv_phase_session(notified_session);
             continue;
         }
@@ -1163,6 +1167,7 @@ void sv_ptp_phase_observer_task(void* argument) {
             !same_sv_ptp_clock_lease(armed_lease, lease) ||
             !same_sv_ptp_clock_lease(lease, read_ptp_epoch_clock_lease())) {
             static_cast<void>(controller.invalidate());
+            local_acquisition.reset();
             revoke_sv_phase_session(notified_session);
             continue;
         }
@@ -1224,19 +1229,27 @@ void sv_ptp_phase_observer_task(void* argument) {
                 decision.epoch_second_continuous
                     ? decision.slew_ticks_next_epoch : 0,
                 std::memory_order_release);
-            smp_synch_set_source_local_qualified(
-                source_local_qualified && decision.epoch_second_continuous);
+            // Require three full 1Hz software/PTP/MAC-qualified epochs;
+            // invalid or stale evidence still revokes LOCAL immediately.
+            const bool stable_local = local_acquisition.observe(
+                lease.role == PtpAuthorityRole::source &&
+                    source_local_qualified && decision.epoch_second_continuous,
+                notified_session, current_faults, lease.generation,
+                observation.last_sv_epoch_generation);
+            smp_synch_set_source_local_qualified(stable_local);
             committed = true;
         } else if (session_matches) {
             g_sample_clock_context.phase_authority_valid.store(
                 false, std::memory_order_release);
             g_sample_clock_context.requested_slew_ticks.store(
                 0, std::memory_order_relaxed);
+            local_acquisition.reset();
             smp_synch_set_source_local_qualified(false);
         }
         xSemaphoreGive(g_phase_timer_mutex);
         if (!committed) {
             static_cast<void>(controller.invalidate());
+            local_acquisition.reset();
             continue;
         }
         ++accepted_epochs;
@@ -1254,12 +1267,14 @@ void sv_ptp_phase_observer_task(void* argument) {
              (accepted_epochs % 60U) == 0U)) {
             ESP_LOGI(kTag,
                 "SV/PTP AUTO phase=%ldus uncertainty=%luus "
-                "slew=%ldus/s tracking=%u MACpairs=%lu epoch=%llu LOCAL=%u",
+                "slew=%ldus/s tracking=%u MACpairs=%lu clean=%lu/%lu epoch=%llu LOCAL=%u",
                 static_cast<long>(decision.phase_error_us),
                 static_cast<unsigned long>(decision.observation_uncertainty_us),
                 static_cast<long>(decision.slew_ticks_next_epoch),
                 decision.software_tracking ? 1U : 0U,
                 static_cast<unsigned long>(mac_pairs),
+                static_cast<unsigned long>(local_acquisition.clean_epochs()),
+                static_cast<unsigned long>(SvLocalRefAcquisition::kRequiredCleanEpochs),
                 static_cast<unsigned long long>(decision.sv_epoch_ptp_second),
                 auto_local ? 1U : 0U);
         }
