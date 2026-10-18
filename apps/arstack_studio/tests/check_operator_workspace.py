@@ -77,6 +77,10 @@ def main() -> None:
             and "root.ptpDesiredForSession = false" in main_qml,
             "PTP user intent restoration must be bounded, explicit and cancellable")
     matrix = source("SignalMatrix.qml")
+    require("Layout.fillHeight: true" in matrix
+            and "Layout.minimumHeight: 34" in matrix
+            and "Item { Layout.fillHeight: true }" not in matrix,
+            "editable channel rows must consume vertical space without a blank filler")
     require("function flushPendingEdits()" in matrix
             and "magnitudeApplyTimer.stop()" in matrix
             and "phaseApplyTimer.stop()" in matrix
