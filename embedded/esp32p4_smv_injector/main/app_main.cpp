@@ -27,6 +27,9 @@
     SOC_EMAC_IEEE1588V2_SUPPORTED && ESP_IDF_VERSION_MAJOR < 6
 #define AR_SV_PTP_PHASE_SUPPORTED 1
 #include "ariec61850/time_sync/sv_ptp_phase_authority.hpp"
+// The fail-closed SOURCE entry filter remains available even when descriptor
+// evidence is disabled by firmware config (AUTO then stays NOT SYNC).
+#include "ariec61850/time_sync/sv_tx_egress_evidence.hpp"
 #include "freertos/semphr.h"
 #else
 #define AR_SV_PTP_PHASE_SUPPORTED 0
@@ -94,6 +97,7 @@ using ar::iec61850::time_sync::valid_sv_ptp_clock_lease;
 #if AR_SV_PTP_PHASE_SUPPORTED
 using ar::iec61850::time_sync::SvBoundedSlewCursor;
 using ar::iec61850::time_sync::SvPtpPhaseAuthority;
+using ar::iec61850::time_sync::SvLocalRefAcquisition;
 using ar::iec61850::time_sync::SvPtpPhaseObservation;
 using ar::iec61850::time_sync::SvPtpPublisherContinuityGate;
 #endif
