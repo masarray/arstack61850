@@ -508,6 +508,12 @@ ApplicationWindow {
         return ok
     }
     function startScenarioSnapshot() {
+        // The table editors debounce keyboard edits for live preview. Flush
+        // them synchronously before creating the ordered board START payload.
+        if (!currentMatrix.flushPendingEdits() || !voltageMatrix.flushPendingEdits()) {
+            showMessage("Invalid signal input: correct highlighted field before Start.", true)
+            return null
+        }
         // START always serializes the same ListModels that draw the table,
         // including all eight current phase angles and enabled flags.
         var draft = scenarioSnapshot()
@@ -1074,9 +1080,15 @@ ApplicationWindow {
 
                         ColumnLayout {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: root.compactLayout ? 352 : 384
-                            Layout.maximumHeight: root.compactLayout ? 352 : 384
-                            spacing: 7
+                            // Use all available vertical workspace rather than
+                            // a fixed 384px island with empty space below.
+                            Layout.fillHeight: true
+                            Layout.preferredHeight: root.compactLayout ? 350 : 380
+                            // Allow 960x620 minimum viewport to shrink without
+                            // clipping timing and quality rows; on larger
+                            // viewports this column expands into spare space.
+                            Layout.minimumHeight: root.compactLayout ? 180 : 210
+                            spacing: 8
                             SignalMatrix {
                                 id: voltageMatrix
                                 enabled: !workflowBar.startQueued

@@ -27,6 +27,17 @@ Rectangle {
         return [theme.phaseA, theme.phaseB, theme.phaseC, theme.phaseN][index]
     }
 
+    // Commit any last keystroke synchronously before constructing an ordered
+    // START scenario. The 90ms edit debounce must never make the board
+    // receive old angles while the table already displays new ones.
+    function flushPendingEdits() {
+        for (var i = 0; i < rowRepeater.count; ++i) {
+            const row = rowRepeater.itemAt(i)
+            if (row && !row.flushPendingEdits()) return false
+        }
+        return true
+    }
+
     function focusCell(row, column) {
         var rowItem = rowRepeater.itemAt(row)
         if (!rowItem)
@@ -123,6 +134,26 @@ Rectangle {
                 property alias phaseEditor: phaseField
                 property real pendingMagnitude: mag
                 property real pendingPhase: angle
+
+                function flushPendingEdits() {
+                    if (magnitudeApplyTimer.running || magnitudeField.activeFocus) {
+                        const magValue = matrix.controller.parseOperatorNumber(magnitudeField.text)
+                        if (!matrix.controller.validMagnitude(matrix.groupIndex, magValue))
+                            return false
+                        magnitudeApplyTimer.stop()
+                        if (!matrix.controller.editSignal(matrix.groupIndex, rowIndex, "magnitude", magValue))
+                            return false
+                    }
+                    if (phaseApplyTimer.running || phaseField.activeFocus) {
+                        const phaseValue = matrix.controller.parseOperatorNumber(phaseField.text)
+                        if (!matrix.controller.validPhase(phaseValue))
+                            return false
+                        phaseApplyTimer.stop()
+                        if (!matrix.controller.editSignal(matrix.groupIndex, rowIndex, "phase", phaseValue))
+                            return false
+                    }
+                    return true
+                }
 
                 // Align with the field edge, not the left side of the table.
                 // Clamp inside the owning matrix and open below the editor;

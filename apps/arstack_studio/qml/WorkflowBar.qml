@@ -284,8 +284,11 @@ SurfacePanel {
         // A START always transmits the current 4I+4V table snapshot.
         // A previous run may have cleared pendingApply; a bare START could
         // then repeat old board angles while Studio displays edited values.
-        const accepted = smartSession.requestStartWithScenario(
-            controller.startScenarioSnapshot())
+        // Validate/flush the visible 4I+4V table before entering the
+        // exclusive device START transaction; no stale debounced angle.
+        const scenario = controller.startScenarioSnapshot()
+        if (!scenario) return
+        const accepted = smartSession.requestStartWithScenario(scenario)
         if (!accepted) {
             controller.pendingApply = true
             controller.showMessage("Start rejected. Check device status.", true)

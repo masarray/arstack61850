@@ -8,13 +8,18 @@ CheckBox {
     property var theme
     property string uiFont: "Inter"
     implicitHeight: 30
+    implicitWidth: Math.max(28, contentItem.implicitWidth + 30)
+    leftPadding: 1
+    rightPadding: 2
     spacing: 9
     hoverEnabled: true
     font.family: uiFont
     font.pixelSize: 11
     indicator: Rectangle {
-        implicitWidth: 18
-        implicitHeight: 18
+        implicitWidth: 20
+        implicitHeight: 20
+        width: 20
+        height: 20
         x: control.leftPadding
         y: (control.height - height) / 2
         radius: 5
@@ -27,7 +32,7 @@ CheckBox {
             visible: control.checked
             text: "\u2713"
             color: control.theme.bg
-            font.pixelSize: 13
+            font.pixelSize: 14
             font.weight: Font.Bold
         }
     }

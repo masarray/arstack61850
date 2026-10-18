@@ -644,6 +644,13 @@ private:
             QStringLiteral("Ib"), 1.0, -120.0, 0U, 1000.0, 100.0, 50.0);
         const QString ic = DeviceController::formatSignalCommand(
             QStringLiteral("Ic"), 1.0, 120.0, 0U, 1000.0, 100.0, 50.0);
+        // Operator table −30/−150/+90 must NEVER be serialized as 0/−120/+120.
+        const QString iaOperator = DeviceController::formatSignalCommand(
+            QStringLiteral("Ia"), 1.0, -30.0, 0U, 1000.0, 100.0, 50.0);
+        const QString ibOperator = DeviceController::formatSignalCommand(
+            QStringLiteral("Ib"), 1.0, -150.0, 0U, 1000.0, 100.0, 50.0);
+        const QString icOperator = DeviceController::formatSignalCommand(
+            QStringLiteral("Ic"), 1.0, 90.0, 0U, 1000.0, 100.0, 50.0);
         const QString badId = DeviceController::formatSignalCommand(
             QStringLiteral("IX"), 1.0, 0.0, 0U, 1000.0, 100.0, 50.0);
         const QString overflow = DeviceController::formatSignalCommand(
@@ -653,6 +660,9 @@ private:
         return ia == QStringLiteral("SET IA 1000 0 0") &&
                ib == QStringLiteral("SET IB 1000 -120000 0") &&
                ic == QStringLiteral("SET IC 1000 120000 0") &&
+               iaOperator == QStringLiteral("SET IA 1000 -30000 0") &&
+               ibOperator == QStringLiteral("SET IB 1000 -150000 0") &&
+               icOperator == QStringLiteral("SET IC 1000 90000 0") &&
                badId.isEmpty() && overflow.isEmpty() &&
                dcNegative == QStringLiteral("SET IA -1000 0 0");
     }

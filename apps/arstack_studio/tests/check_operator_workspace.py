@@ -37,9 +37,10 @@ def main() -> None:
             and "root.pendingApply" in main_qml
             and "pendingApply = true" in main_qml,
             "table edits must expose unsent setpoints without claiming wire readback")
-    require("Layout.preferredHeight: root.compactLayout ? 352 : 384" in main_qml
+    require("Layout.minimumHeight: root.compactLayout ? 180 : 210" in main_qml
+            and "Layout.fillHeight: true" in main_qml
             and "ColumnLayout {" in main_qml,
-            "voltage and current must stack vertically to use the workspace")
+            "voltage and current must stack vertically and fill the workspace")
     require('property bool ptpDefaultStartAttempted: false' in main_qml
             and 'root.ptpDefaultStartAttempted = true' in main_qml
             and '!root.startPtpRole("SOURCE")' in main_qml,
@@ -60,6 +61,28 @@ def main() -> None:
             and "root.ptpDesiredForSession = false" in main_qml,
             "PTP user intent restoration must be bounded, explicit and cancellable")
     matrix = source("SignalMatrix.qml")
+    require("function flushPendingEdits()" in matrix
+            and "magnitudeApplyTimer.stop()" in matrix
+            and "phaseApplyTimer.stop()" in matrix
+            and "currentMatrix.flushPendingEdits()" in main_qml
+            and "voltageMatrix.flushPendingEdits()" in main_qml
+            and "if (!scenario) return" in source("WorkflowBar.qml"),
+            "START must commit last visible I/V angle before ordered scenario serialization")
+    require("Layout.fillHeight: true" in main_qml
+            and "Layout.maximumHeight: root.compactLayout ? 352 : 384" not in main_qml
+            and main_qml.index("id: voltageMatrix") < main_qml.index("id: currentMatrix"),
+            "Voltage and Current need a vertical, flexible-height editor workspace")
+    ribbon_qml = source("ModernRibbon.qml")
+    require("Layout.preferredWidth: bar.compact ? 190 : 224" in ribbon_qml
+            and "font.pixelSize: bar.compact ? 17 : 19" in ribbon_qml,
+            "SMV Injector logo/caption must be instrument-sized, not micro branding")
+    checkbox_qml = source("StudioDarkCheckBox.qml")
+    require("width: 20" in checkbox_qml and "height: 20" in checkbox_qml,
+            "checkbox geometry must remain unchanged by hover")
+    require("hovered ? \"#edf5ff\"" in source("CalmButton.qml")
+            and "hovered ? \"#142334\"" in source("CalmButton.qml"),
+            "light hover background must always pair with dark caption")
+
     menu = source("StudioActionMenu.qml")
     cmake = (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8")
 
@@ -132,7 +155,8 @@ def main() -> None:
             "scenario editors and shortcuts must be frozen during a pending START snapshot")
     require("controller.pendingApply = true" in workflow
             and "smartSession.requestStartWithScenario(" in workflow
-            and "controller.startScenarioSnapshot())" in workflow
+            and "const scenario = controller.startScenarioSnapshot()" in workflow
+            and "if (!scenario) return" in workflow
             and "controller.applyAllSignals()" not in workflow
             and "startWatchdog" in workflow and "onRunningChanged()" in workflow,
             "reconnect must not auto-transmit, but one-click Start must stage a bounded scenario")
@@ -162,7 +186,8 @@ def main() -> None:
             and 'ToolTip.text: "smpSynch mode"' not in timing_ui,
             "captioned operator controls must not duplicate labels as tooltips")
     require('smartSession.requestStartWithScenario(' in workflow
-            and 'controller.startScenarioSnapshot())' in workflow
+            and 'const scenario = controller.startScenarioSnapshot()' in workflow
+            and 'if (!scenario) return' in workflow
             and "Apply to board" not in main_qml,
             "Edit-to-Start must not regress to a manual Apply-to-board action")
     require("assets/material/smv_injector.svg" in cmake_icons
