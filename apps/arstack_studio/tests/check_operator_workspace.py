@@ -26,6 +26,7 @@ def ordered(data: str, first: str, second: str, reason: str) -> None:
 
 def main() -> None:
     main_qml = source("Main.qml")
+    workflow = source("WorkflowBar.qml")
     preview = source("SignalPreview.qml")
     tray = source("StudioTimingTray.qml")
     expert = source("PtpExpertPanel.qml")
