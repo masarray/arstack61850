@@ -82,8 +82,17 @@ struct UiBounds {
             return false;
         }
     }
-    if (!(voltage.area.right() <= current.area.left() + tolerance
-          && tray.area.top() >= voltage.area.bottom() - tolerance
+    // The full-size operator view deliberately stacks Voltage ABOVE Current.
+    // At the supported 960x620 minimum a two-column fallback retains all
+    // controls inside the viewport instead of hiding the PTP/quality rows.
+    const bool stacked = size.height() >= 720;
+    const bool matricesOrdered = stacked
+        ? (voltage.area.bottom() <= current.area.top() + tolerance &&
+           std::abs(voltage.area.left() - current.area.left()) <= tolerance)
+        : (voltage.area.right() <= current.area.left() + tolerance);
+    const qreal matrixBottom = std::max(voltage.area.bottom(), current.area.bottom());
+    if (!(matricesOrdered
+          && tray.area.top() >= matrixBottom - tolerance
           && quality.area.top() >= tray.area.bottom() - tolerance
           && quality.area.bottom() <= surface.area.bottom() + tolerance)) {
         qCritical().noquote() << "Studio UI panel order/overlap violation" << size
