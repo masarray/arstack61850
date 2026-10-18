@@ -36,10 +36,10 @@ public:
             {"firmware verification failure remains copyable after READY", firmwareFailureRemainsDiagnosable()},
             {"firmware build mismatch explains expected and observed IDs", reconnectBuildMismatchPreservesEvidence()},
             {"fragmented espflash progress -> monotonic", fragmentedEspflashProgressIsMonotonic()},
-            {"trusted ESP32-P4 identity timeout -> firmware required", automaticIdentityTimeoutOffersFirmwareRecovery()},
-            {"single visible COM without metadata -> firmware required", singleVisibleTimeoutWithoutRecommendationOffersFirmwareRecovery()},
+            {"automatic IDENTIFY timeout never implies missing firmware", automaticIdentityTimeoutOffersFirmwareRecovery()},
+            {"single COM semantic timeout stays unverified", singleVisibleTimeoutWithoutRecommendationOffersFirmwareRecovery()},
             {"ambiguous identity timeout -> UNIDENTIFIED", ambiguousIdentityTimeoutStaysUnidentified()},
-            {"manual recovery intent survives IDENTIFY -> firmware required", manualRecoveryIntentArmsFirmwareOffer()},
+            {"manual recovery intent stays optional and visible", manualRecoveryIntentArmsFirmwareOffer()},
             {"stale generation release -> ignored", staleReleaseGenerationIsIgnored()},
             {"firmware probe before serial release -> blocked", firmwareProbeRequiresReleasedPort()},
             {"PTP staged START requires role/config/runtime ACKs", ptpGuidedStartNeedsAcks()},
@@ -413,10 +413,9 @@ private:
     static bool automaticIdentityTimeoutOffersFirmwareRecovery() {
         Fixture fixture;
         if (!fixture.profileReady || !seedIdentityTimeout(fixture, false)) return false;
-        return fixture.session.state() == QStringLiteral("FIRMWARE REQUIRED") &&
-            fixture.session.firmwareInstallVisible() &&
-            fixture.session.blankBoardDetected_ &&
-            fixture.session.blankBoardPort_ == QStringLiteral("COM7") &&
+        return fixture.session.state() == QStringLiteral("UNIDENTIFIED") &&
+            !fixture.session.firmwareInstallVisible() &&
+            !fixture.session.blankBoardDetected_ &&
             !fixture.session.startReady();
     }
 
@@ -444,10 +443,9 @@ private:
         emit device.identificationStateChanged();
         session.reconcile();
 
-        return session.state() == QStringLiteral("FIRMWARE REQUIRED") &&
-            session.firmwareInstallVisible() &&
-            session.blankBoardDetected_ &&
-            session.blankBoardPort_ == QStringLiteral("COM7") &&
+        return session.state() == QStringLiteral("UNIDENTIFIED") &&
+            !session.firmwareInstallVisible() &&
+            !session.blankBoardDetected_ &&
             !session.startReady();
     }
 
@@ -483,7 +481,7 @@ private:
     static bool manualRecoveryIntentArmsFirmwareOffer() {
         Fixture fixture;
         if (!fixture.profileReady || !seedIdentityTimeout(fixture, true)) return false;
-        return fixture.session.state() == QStringLiteral("FIRMWARE REQUIRED") &&
+        return fixture.session.state() == QStringLiteral("FIRMWARE RECOVERY") &&
             fixture.session.firmwareInstallVisible() &&
             fixture.session.blankBoardPort_ == QStringLiteral("COM7") &&
             !fixture.session.startReady();
