@@ -281,9 +281,11 @@ SurfacePanel {
             controller.showMessage(ribbon.startReason(), false)
             return
         }
-        const accepted = controller.pendingApply
-            ? smartSession.requestStartWithScenario(controller.startScenarioSnapshot())
-            : smartSession.requestStart()
+        // Always apply the *visible* 4I+4V table as one ordered START
+        // transaction. Device settings may retain the previous session;
+        // pendingApply is a UI hint, never an authority to omit setpoints.
+        const accepted = smartSession.requestStartWithScenario(
+            controller.startScenarioSnapshot())
         if (!accepted) {
             controller.pendingApply = true
             controller.showMessage("Start rejected. Check device status.", true)
