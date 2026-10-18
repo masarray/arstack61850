@@ -32,15 +32,18 @@ Item {
         font.family: hub.uiFont
         font.pixelSize: 11
         font.weight: checked ? Font.DemiBold : Font.Medium
+        hoverEnabled: true
         contentItem: Label {
             text: parent.text
-            color: parent.checked ? hub.theme.text : hub.theme.muted
+            color: parent.hovered && parent.enabled ? "#132233"
+                : parent.checked ? hub.theme.text : hub.theme.muted
             font: parent.font
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
         }
         background: Rectangle {
-            color: parent.checked ? hub.theme.raised : "transparent"
+            color: parent.hovered && parent.enabled ? "#f0f6ff"
+                : parent.checked ? hub.theme.raised : "transparent"
             radius: 6
             border.width: parent.checked ? 1 : 0
             border.color: hub.theme.line
@@ -59,7 +62,7 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        spacing: 16
+        spacing: 11
 
         RowLayout {
             Layout.fillWidth: true
