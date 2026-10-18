@@ -113,8 +113,9 @@ def main() -> None:
     require("width: 20" in checkbox_qml and "height: 20" in checkbox_qml,
             "checkbox geometry must remain unchanged by hover")
     require("hovered ? \"#edf5ff\"" in source("CalmButton.qml")
-            and "hovered ? \"#142334\"" in source("CalmButton.qml"),
-            "light hover background must always pair with dark caption")
+            and "hovered ? \"#142334\"" in source("CalmButton.qml")
+            and "/assets/material_dark/" in source("CalmButton.qml"),
+            "light hover background must pair with dark caption and icon")
     combo = source("StudioDarkComboBox.qml")
     require('choice.highlighted || choice.hovered ? "#142334"' in combo
             and 'choice.highlighted || choice.hovered ? "#edf5ff"' in combo,
