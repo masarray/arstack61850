@@ -1083,19 +1083,34 @@ ApplicationWindow {
                             }
                         }
 
-                        ColumnLayout {
+                        // At the supported 960x620 viewport two full tables cannot
+                        // occupy 400+ px without clipping the PTP controls.
+                        // Keep both tables stacked, with bounded scrolling only
+                        // when the viewport is shorter than their natural height.
+                        ScrollView {
+                            id: matrixScroll
+                            objectName: "studioMatrixViewport"
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            spacing: 10
-                            SignalMatrix {
+                            clip: true
+                            contentWidth: availableWidth
+                            contentHeight: matrixStack.implicitHeight
+                            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                            ScrollBar.vertical.policy: ScrollBar.AsNeeded
+
+                            ColumnLayout {
+                                id: matrixStack
+                                width: matrixScroll.availableWidth
+                                spacing: 8
+                                SignalMatrix {
                                 id: voltageMatrix
                                 enabled: !workflowBar.startQueued
                                 objectName: "studioVoltageMatrix"
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
-                                Layout.minimumHeight: 175
-                                Layout.preferredHeight: root.compactLayout ? 180 : 205
-                                Layout.maximumHeight: 242
+                                Layout.minimumHeight: 201
+                                    Layout.preferredHeight: 201
+                                    Layout.maximumHeight: 201
                                 theme: studioTheme
                                 controller: root
                                 device: device
@@ -1115,9 +1130,9 @@ ApplicationWindow {
                                 objectName: "studioCurrentMatrix"
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
-                                Layout.minimumHeight: 175
-                                Layout.preferredHeight: root.compactLayout ? 180 : 205
-                                Layout.maximumHeight: 242
+                                Layout.minimumHeight: 201
+                                    Layout.preferredHeight: 201
+                                    Layout.maximumHeight: 201
                                 theme: studioTheme
                                 controller: root
                                 device: device
@@ -1130,8 +1145,8 @@ ApplicationWindow {
                                 symbolText: "I"
                                 unitText: root.signalFrequency === 0 ? "A DC" : "A RMS"
                                 compact: root.compactLayout
+                                }
                             }
-
                         }
 
                         StudioTimingTray {
