@@ -227,6 +227,10 @@ Rectangle {
                 }
 
                 Layout.fillWidth: true
+                // Distribute spare workspace across editable channel rows;
+                // never leave a large dead zone under four fixed-height rows.
+                Layout.fillHeight: true
+                Layout.minimumHeight: 34
                 Layout.preferredHeight: matrix.compact ? 40 : 42
                 color: signalRow.selected ? "#101c27"
                     : (magnitudeField.activeFocus || phaseField.activeFocus) ? "#0f1922"
@@ -438,6 +442,6 @@ Rectangle {
             }
         }
 
-        Item { Layout.fillHeight: true }
+        // Channel delegates stretch into available height.
     }
 }
