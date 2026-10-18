@@ -112,13 +112,15 @@ ApplicationWindow {
 
     property string uiFont: interFont.status === FontLoader.Ready ? interFont.name : "Inter"
     property string monoFont: uiFont
-    property bool phaseLink: false
+    property bool phaseLink: true
     property bool profileDirty: false
     property bool pendingApply: true
     // Session-only operator intent. Never persist across application launches:
     // an explicit PTP ON can be restored after a firmware reflash/reconnect
     // without introducing an uncontrolled power-on publisher.
-    property bool ptpDesiredForSession: false
+    // Operator default: PTP SOURCE ON after verified connection; OFF overrides
+    // this for the remainder of this Studio session.
+    property bool ptpDesiredForSession: true
     property string ptpDesiredRole: "SOURCE"
     property bool ptpRestoreAfterFirmware: false
     property int ptpRestoreChecks: 0
@@ -198,6 +200,11 @@ ApplicationWindow {
         function onDeviceVerifiedChanged() {
             root.pendingApply = true
             root.offlinePreviewRunning = false
+            if (device.deviceVerified && root.ptpDesiredForSession &&
+                    !device.ptpRunning) {
+                root.ptpRestoreChecks = 0
+                root.ptpRestoreAfterFirmware = true
+            }
         }
     }
 
@@ -251,9 +258,9 @@ ApplicationWindow {
 
     ListModel {
         id: currentModel
-        ListElement { signalId: "Ia"; magnitude: 1.000; phase: 0.0; enabled: true; quality: 0; traceColor: "#ff6673" }
-        ListElement { signalId: "Ib"; magnitude: 1.000; phase: -120.0; enabled: true; quality: 0; traceColor: "#e6b552" }
-        ListElement { signalId: "Ic"; magnitude: 1.000; phase: 120.0; enabled: true; quality: 0; traceColor: "#59a7ff" }
+        ListElement { signalId: "Ia"; magnitude: 1.000; phase: -30.0; enabled: true; quality: 0; traceColor: "#ff6673" }
+        ListElement { signalId: "Ib"; magnitude: 1.000; phase: -150.0; enabled: true; quality: 0; traceColor: "#e6b552" }
+        ListElement { signalId: "Ic"; magnitude: 1.000; phase: 90.0; enabled: true; quality: 0; traceColor: "#59a7ff" }
         ListElement { signalId: "In"; magnitude: 0.000; phase: 0.0; enabled: true; quality: 0; traceColor: "#9a88df" }
     }
 
@@ -1086,6 +1093,9 @@ ApplicationWindow {
                                 objectName: "studioVoltageMatrix"
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
+                                Layout.minimumHeight: 175
+                                Layout.preferredHeight: root.compactLayout ? 180 : 205
+                                Layout.maximumHeight: 242
                                 theme: studioTheme
                                 controller: root
                                 device: device
@@ -1105,6 +1115,9 @@ ApplicationWindow {
                                 objectName: "studioCurrentMatrix"
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
+                                Layout.minimumHeight: 175
+                                Layout.preferredHeight: root.compactLayout ? 180 : 205
+                                Layout.maximumHeight: 242
                                 theme: studioTheme
                                 controller: root
                                 device: device
