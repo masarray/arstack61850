@@ -53,10 +53,10 @@ def main() -> None:
             and "root.pendingApply" in main_qml
             and "pendingApply = true" in main_qml,
             "table edits must expose unsent setpoints without claiming wire readback")
-    require("Layout.minimumHeight: root.compactLayout ? 180 : 210" in main_qml
-            and "Layout.fillHeight: true" in main_qml
+    require("Layout.preferredHeight: root.compactLayout ? 378 : 410" in main_qml
+            and "Layout.maximumHeight: 420" in main_qml
             and "ColumnLayout {" in main_qml,
-            "voltage and current must stack vertically and fill the workspace")
+            "voltage and current must stack vertically with bounded content height")
     require('property bool ptpDefaultStartAttempted: false' in main_qml
             and 'root.ptpDefaultStartAttempted = true' in main_qml
             and '!root.startPtpRole("SOURCE")' in main_qml,
@@ -90,7 +90,7 @@ def main() -> None:
             and "Layout.fillHeight: false" in main_qml
             and "Layout.preferredHeight: root.compactLayout ? 181 : 196" in main_qml,
             "tables and live sent phases must use explicit bounded layout")
-    require('property bool ptpDefaultPending: true' in main_qml
+    require('property bool ptpDefaultStartAttempted: false' in main_qml
             and 'root.startPtpRole("SOURCE")' in main_qml
             and "device.deviceVerified" in main_qml,
             "default PTP must reuse verified session ownership")
