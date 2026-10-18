@@ -40,6 +40,7 @@ Button {
         : tone === "accent" || checked ? "#e1f1ff" : theme.textSoft
     contentItem: ColumnLayout {
         spacing: 3
+        anchors.centerIn: parent
         Image {
             visible: control.iconSource.toString().length > 0
             source: control.hovered && control.enabled ? control.hoverPath : control.iconSource
@@ -56,7 +57,8 @@ Button {
             text: control.text
             color: control.textColor
             font: control.font
-            Layout.alignment: Qt.AlignHCenter
+            Layout.alignment: Qt.AlignHCenter | Qt.AlignVCenter
+            Layout.fillWidth: true
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
