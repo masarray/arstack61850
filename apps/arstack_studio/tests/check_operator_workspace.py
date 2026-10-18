@@ -53,8 +53,8 @@ def main() -> None:
             and "root.pendingApply" in main_qml
             and "pendingApply = true" in main_qml,
             "table edits must expose unsent setpoints without claiming wire readback")
-    require("Layout.preferredHeight: root.compactLayout ? 378 : 410" in main_qml
-            and "Layout.maximumHeight: 420" in main_qml
+    require("Layout.preferredHeight: Math.min(410, Math.max(215, root.height - 365))" in main_qml
+            and "Layout.maximumHeight: 410" in main_qml
             and "ColumnLayout {" in main_qml,
             "voltage and current must stack vertically with bounded content height")
     require('property bool ptpDefaultStartAttempted: false' in main_qml
@@ -88,7 +88,7 @@ def main() -> None:
             "button caption needs horizontal centering")
     require("root.sendSignal(group, row)" in main_qml
             and "Layout.fillHeight: false" in main_qml
-            and "Layout.preferredHeight: root.compactLayout ? 181 : 196" in main_qml,
+            and "Layout.preferredHeight: 196" in main_qml,
             "tables and live sent phases must use explicit bounded layout")
     require('property bool ptpDefaultStartAttempted: false' in main_qml
             and 'root.startPtpRole("SOURCE")' in main_qml
