@@ -119,6 +119,36 @@ void check_fast_source_auto_qualification_with_fresh_evidence() {
     REQUIRE(!gate.qualified(7U, 0U, 3U, 8U, true, 4U));
 }
 
+void check_no_intermitttent_local_at_start() {
+    SvLocalRefAcquisition gate;
+    static_assert(SvLocalRefAcquisition::kRequiredCleanEpochs == 3U);
+    REQUIRE(!gate.observe(false, 7U, 0U, 3U, 5U));
+    REQUIRE(!gate.observe(true, 7U, 0U, 3U, 6U));
+    REQUIRE(!gate.observe(false, 7U, 0U, 3U, 7U));
+    REQUIRE(gate.clean_epochs() == 0U);
+    REQUIRE(!gate.observe(true, 7U, 0U, 3U, 8U));
+    REQUIRE(!gate.observe(true, 7U, 0U, 3U, 9U));
+    REQUIRE(gate.observe(true, 7U, 0U, 3U, 10U));
+    REQUIRE(!gate.observe(false, 7U, 0U, 3U, 11U));
+    REQUIRE(!gate.observe(true, 7U, 0U, 3U, 12U));
+    REQUIRE(!gate.observe(true, 7U, 0U, 3U, 14U)); // gap
+    REQUIRE(!gate.observe(true, 7U, 0U, 3U, 15U));
+    REQUIRE(gate.observe(true, 7U, 0U, 3U, 16U));
+    REQUIRE(!gate.observe(true, 7U, 1U, 3U, 17U)); // TX fault
+    REQUIRE(!gate.observe(true, 7U, 1U, 4U, 18U)); // source restart
+    REQUIRE(!gate.observe(true, 8U, 1U, 4U, 19U)); // publisher restart
+    REQUIRE(!gate.observe(true, 8U, 1U, 4U, 20U));
+    REQUIRE(gate.observe(true, 8U, 1U, 4U, 21U));
+    REQUIRE(!gate.observe(true, 8U, 1U, 4U, 21U)); // duplicate
+    REQUIRE(!gate.observe(true, 0U, 1U, 4U, 22U));
+    REQUIRE(!gate.observe(true, 8U, 1U, 0U, 23U));
+}
+void check_clean_local_by_eight_seconds() {
+    SvLocalRefAcquisition gate;
+    for (std::uint32_t t = 1U; t <= 8U; ++t)
+        REQUIRE(gate.observe(t >= 6U, 7U, 0U, 3U, t) == (t == 8U));
+}
+
 void check_baseline_and_contiguous_ptp() {
     SvTxEgressEvidence e{16U};
     auto o = make_good(16U, 1700000000U, 125000U);
@@ -236,6 +266,8 @@ int main() {
     try {
         check_auto_local_sync_gate_requires_both_clocks_and_fresh_mac();
         check_fast_source_auto_qualification_with_fresh_evidence();
+        check_no_intermitttent_local_at_start();
+        check_clean_local_by_eight_seconds();
         check_baseline_and_contiguous_ptp();
         check_clock_steps_recovery_and_session();
         check_invalid_evidence_requires_rebaseline();
