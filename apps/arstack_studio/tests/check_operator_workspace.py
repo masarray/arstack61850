@@ -33,9 +33,20 @@ def main() -> None:
     require("Lab simulation controls" not in config
             and "Signals, firmware, PTP and device settings" in config,
             "Advanced must not imply this is only a simulated lab tool")
-    require("Changes sent on Start" in main_qml
-            and "root.pendingApply && !workflowBar.injectionRunning" in main_qml,
-            "STOPPED waveform edits must distinguish draft from sent setpoints")
+    require("Setpoints pending · Start to apply" in main_qml
+            and "root.pendingApply" in main_qml
+            and "pendingApply = true" in main_qml,
+            "table edits must expose unsent setpoints without claiming wire readback")
+    require("Layout.preferredHeight: root.compactLayout ? 352 : 384" in main_qml
+            and "ColumnLayout {" in main_qml,
+            "voltage and current must stack vertically to use the workspace")
+    require('property bool ptpDefaultStartAttempted: false' in main_qml
+            and 'root.ptpDefaultStartAttempted = true' in main_qml
+            and '!root.startPtpRole("SOURCE")' in main_qml,
+            "default PTP start must be one-shot and deliberate OFF must cancel it")
+    require("phaseLink && row < 3" in main_qml
+            and "sendLinkedGroup(group) : sendSignal(group, row)" in main_qml,
+            "edited 3-phase angles must be transmitted from the same table model")
     controller = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
     require("logUpdateTimer_.setInterval(100)" in controller
             and "if (!logUpdateTimer_.isActive()) logUpdateTimer_.start();" in controller,
@@ -81,6 +92,10 @@ def main() -> None:
     require("1.75" in (STUDIO.parent.parent / ".github/workflows/arstack-studio-windows-lifecycle.yml").read_text(encoding="utf-8"),
             "reuse Windows executable for 100%, 150% and 175% DPI acceptance")
     workflow = source("WorkflowBar.qml")
+    require('const accepted = smartSession.requestStartWithScenario(' in workflow
+            and 'controller.startScenarioSnapshot()' in workflow
+            and 'smartSession.requestStart()' not in workflow,
+            "every Start must send the visible 4I+4V table, never reuse stale device angles")
     require("Qt.callLater(installDialog.open)" not in workflow
             and "Qt.callLater(updateDialog.open)" not in workflow
             and "if (!success) Qt.callLater(resultDialog.open)" in workflow
@@ -116,7 +131,8 @@ def main() -> None:
             and 'enabled: !workflowBar.startQueued; onActivated: root.zeroAll()' in main_qml,
             "scenario editors and shortcuts must be frozen during a pending START snapshot")
     require("controller.pendingApply = true" in workflow
-            and "requestStartWithScenario(controller.startScenarioSnapshot())" in workflow
+            and "smartSession.requestStartWithScenario(" in workflow
+            and "controller.startScenarioSnapshot())" in workflow
             and "controller.applyAllSignals()" not in workflow
             and "startWatchdog" in workflow and "onRunningChanged()" in workflow,
             "reconnect must not auto-transmit, but one-click Start must stage a bounded scenario")
@@ -145,7 +161,8 @@ def main() -> None:
             and 'toolTipText: "Advanced"' not in ribbon
             and 'ToolTip.text: "smpSynch mode"' not in timing_ui,
             "captioned operator controls must not duplicate labels as tooltips")
-    require('requestStartWithScenario(controller.startScenarioSnapshot())' in workflow
+    require('smartSession.requestStartWithScenario(' in workflow
+            and 'controller.startScenarioSnapshot())' in workflow
             and "Apply to board" not in main_qml,
             "Edit-to-Start must not regress to a manual Apply-to-board action")
     require("assets/material/smv_injector.svg" in cmake_icons

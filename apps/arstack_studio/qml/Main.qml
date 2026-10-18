@@ -52,10 +52,9 @@ ApplicationWindow {
     function markScenarioDirty() {
         if (restoringScenario) return
         saveScenarioTimer.restart()
-        // While STOPPED, a new edit belongs to the next supervised Start batch.
-        // Only a genuinely RUNNING board receives incremental live SETs.
-        if (!workflowBar.injectionRunning)
-            pendingApply = true
+        // All edits are a draft until the matching command is queued.
+        // Never label a visible draft as proven transmitted waveform data.
+        pendingApply = true
     }
     function restoreLocalScenario() {
         const saved = scenarioSettings.lastScenario
@@ -122,6 +121,7 @@ ApplicationWindow {
     property string ptpDesiredRole: "SOURCE"
     property bool ptpRestoreAfterFirmware: false
     property int ptpRestoreChecks: 0
+    property bool ptpDefaultStartAttempted: false
     property bool restoringScenario: false
     property bool offlinePreviewRunning: false
     property real currentScale: 1000.0
@@ -212,6 +212,23 @@ ApplicationWindow {
                 root.ptpRestoreChecks = 0
                 root.ptpRestoreAfterFirmware = true
             }
+        }
+    }
+
+    // Operator-friendly default: start SOURCE with the verified profile
+    // once the connected board is READY, never in a blind reconnect loop.
+    // A deliberate OFF cancels this default for the rest of the session.
+    Timer {
+        interval: 500
+        repeat: true
+        running: !root.ptpDefaultStartAttempted
+        onTriggered: {
+            const session = workflowBar.session
+            if (!session || !device.deviceVerified || !session.startReady ||
+                    session.updatingFirmware || device.ptpStarting) return
+            root.ptpDefaultStartAttempted = true
+            if (!device.ptpRunning && !root.startPtpRole("SOURCE"))
+                root.showMessage("PTP could not start automatically; use PTP On to retry.", true)
         }
     }
 
@@ -323,6 +340,7 @@ ApplicationWindow {
     }
 
     function requestStopPtp() {
+        root.ptpDefaultStartAttempted = true
         root.ptpDesiredForSession = false
         root.ptpRestoreAfterFirmware = false
         return workflowBar.session && workflowBar.session.requestStopPtp()
@@ -467,9 +485,12 @@ ApplicationWindow {
 
         selectSignal(group, row)
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply) {
-            if (phaseLink && row < 3) sendLinkedGroup(group)
-            else sendSignal(group, row)
+        if (workflowBar.injectionRunning && workflowBar.session &&
+                workflowBar.session.liveControlReady) {
+            const queued = phaseLink && row < 3
+                ? sendLinkedGroup(group) : sendSignal(group, row)
+            if (!queued) showMessage("Signal update not queued; retry or Stop/Start.", true)
+            else pendingApply = false
         }
         return true
     }
@@ -487,6 +508,8 @@ ApplicationWindow {
         return ok
     }
     function startScenarioSnapshot() {
+        // START always serializes the same ListModels that draw the table,
+        // including all eight current phase angles and enabled flags.
         var draft = scenarioSnapshot()
         draft.currentScale = currentScale
         draft.voltageScale = voltageScale
@@ -698,10 +721,10 @@ ApplicationWindow {
             }
             Rectangle { width: 1; height: 12; color: studioTheme.lineSoft }
             Label {
-                text: root.pendingApply && !workflowBar.injectionRunning
-                    ? "4I + 4V · Changes sent on Start"
+                text: root.pendingApply
+                    ? "4I + 4V · Setpoints pending · Start to apply"
                     : "4I + 4V · 4000 samples/s"
-                color: root.pendingApply && !workflowBar.injectionRunning
+                color: root.pendingApply
                     ? studioTheme.amber : studioTheme.muted
                 font.family: root.uiFont
                 font.pixelSize: 9
@@ -1049,11 +1072,11 @@ ApplicationWindow {
                             }
                         }
 
-                        RowLayout {
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: root.compactLayout ? 214 : 224
-                            Layout.maximumHeight: root.compactLayout ? 214 : 224
-                            spacing: 9
+                            Layout.preferredHeight: root.compactLayout ? 352 : 384
+                            Layout.maximumHeight: root.compactLayout ? 352 : 384
+                            spacing: 7
                             SignalMatrix {
                                 id: voltageMatrix
                                 enabled: !workflowBar.startQueued
