@@ -331,10 +331,11 @@ private:
         void handleIdentificationChange() {
             if (owner_ == nullptr || device_ == nullptr || !owner_->recoveryPending_ ||
                 device_->identificationState() != DeviceController::IdentificationState::Unidentified) return;
+            // A delayed reply from the previously verified injector is not
+            // evidence of absent firmware. Keep identity pinning armed and
+            // let the bounded discovery loop try the port again.
             owner_->blankBoardDetected_ = false;
             owner_->blankBoardPort_.clear();
-            owner_->setupError_ = true;
-            owner_->setupErrorStatus_ = QStringLiteral("The previously verified injector did not answer semantic identity after bounded retries. Firmware absence was not inferred; retry identification after USB settles.");
             owner_->reconcile();
         }
         SmartSessionController* owner_{nullptr};
