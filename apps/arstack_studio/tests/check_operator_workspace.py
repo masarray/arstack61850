@@ -54,10 +54,11 @@ def main() -> None:
     require("requestStartWithScenario(" in before_stop
             and "requestStart()" not in before_stop,
             "each physical START must use the current GUI 4I+4V table, not stale persisted firmware setpoints")
-    require("Layout.preferredHeight: root.compactLayout ? 438 : 460" in main_qml
-            and "ColumnLayout {\n                            Layout.fillWidth: true" in main_qml
+    require("readonly property bool stacked: root.height >= 720" in main_qml
+            and "columns: stacked ? 1 : 2" in main_qml
+            and "Layout.preferredHeight: stacked" in main_qml
             and main_qml.index("id: voltageMatrix") < main_qml.index("id: currentMatrix"),
-            "Voltage and Current must be full-width, vertical and ordered")
+            "Voltage must stack above Current at normal height, and keep a non-clipping short-window fallback")
     require('root.startPtpRole("SOURCE")' in main_qml
             and 'root.defaultPtpAttempted = true' in main_qml
             and 'property bool phasorDockVisible: true' in main_qml
