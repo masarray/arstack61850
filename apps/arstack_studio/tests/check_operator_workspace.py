@@ -76,6 +76,19 @@ def main() -> None:
             and "root.ptpRestoreChecks > 120" in main_qml
             and "root.ptpDesiredForSession = false" in main_qml,
             "PTP user intent restoration must be bounded, explicit and cancellable")
+    ribbon = source("ModernRibbon.qml")
+    checkbox = source("StudioDarkCheckBox.qml")
+    calm = source("CalmButton.qml")
+    require("Layout.preferredWidth: bar.compact ? 232 : 286" in ribbon
+            and "font.pixelSize: bar.compact ? 21 : 25" in ribbon,
+            "operator brand/logo must stay legible")
+    require("display: AbstractButton.IconOnly" in checkbox,
+            "checkbox must keep one stable custom indicator on hover")
+    require("leftPadding: Math.max(0, (width - implicitWidth) / 2)" in calm,
+            "button caption needs horizontal centering")
+    require("root.sendSignal(group, row)" in main_qml
+            and "Layout.fillHeight: false" in main_qml,
+            "table and sent phases must remain consistent")
     matrix = source("SignalMatrix.qml")
     require("Layout.fillHeight: true" in matrix
             and "Layout.minimumHeight: 34" in matrix
