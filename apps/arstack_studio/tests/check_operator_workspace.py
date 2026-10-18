@@ -186,7 +186,8 @@ def main() -> None:
             and 'ToolTip.text: "smpSynch mode"' not in timing_ui,
             "captioned operator controls must not duplicate labels as tooltips")
     require('smartSession.requestStartWithScenario(' in workflow
-            and 'controller.startScenarioSnapshot())' in workflow
+            and 'const scenario = controller.startScenarioSnapshot()' in workflow
+            and 'if (!scenario) return' in workflow
             and "Apply to board" not in main_qml,
             "Edit-to-Start must not regress to a manual Apply-to-board action")
     require("assets/material/smv_injector.svg" in cmake_icons
