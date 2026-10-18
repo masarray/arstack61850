@@ -34,6 +34,37 @@ SvPtpPhaseObservation snapshot(
             epoch, kEpochZero + epoch, kPtpfractionNs};
 }
 
+void check_auto_preflight_does_not_invent_sync_or_start() {
+    static_assert(SvAutoPreflightPolicy::can_prepare(
+        true, true, true, 4000U, 4000U));
+    CHECK(!SvAutoPreflightPolicy::can_prepare(
+        false, true, true, 4000U, 4000U)); // operator FORCE_0
+    CHECK(!SvAutoPreflightPolicy::can_prepare(
+        true, false, true, 4000U, 4000U)); // PTP source OFF
+    CHECK(!SvAutoPreflightPolicy::can_prepare(
+        true, true, false, 4000U, 4000U)); // unverified profile
+    CHECK(!SvAutoPreflightPolicy::can_prepare(
+        true, true, true, 4000U, 4800U)); // no 1-second wrap
+    CHECK(!SvAutoPreflightPolicy::can_prepare(
+        true, true, true, 0U, 0U));
+    CHECK(SvAutoPreflightPolicy::can_reuse(true, true, true, true, true));
+    CHECK(!SvAutoPreflightPolicy::can_reuse(false, true, true, true, true));
+    CHECK(!SvAutoPreflightPolicy::can_reuse(true, false, true, true, true));
+    CHECK(!SvAutoPreflightPolicy::can_reuse(true, true, false, true, true));
+    CHECK(!SvAutoPreflightPolicy::can_reuse(true, true, true, false, true));
+    CHECK(!SvAutoPreflightPolicy::can_reuse(true, true, true, true, false));
+
+    // A warm phase servo can track but must never be interpreted as an
+    // independently measured canonical SV publication. The packet evidence
+    // gate is reset at START, so even prequalified phase is NOT smpSynch=1.
+    SvPtpPhaseAuthority phase;
+    for (std::uint32_t epoch = 1U; epoch <= 5U; ++epoch) {
+        const auto d = phase.observe(snapshot(epoch, 0U, 0U));
+        CHECK(d.accepted);
+        CHECK(d.software_tracking == (epoch >= 4U));
+    }
+}
+
 void check_phase_sign_and_bounded_corrections() {
     SvPtpPhaseAuthority controller;
     const auto warm = controller.observe(snapshot(1U, 220));
@@ -354,6 +385,7 @@ void check_continuous_ptp_second_binding() {
 
 int main() {
     try {
+        check_auto_preflight_does_not_invent_sync_or_start();
         check_phase_sign_and_bounded_corrections();
         check_uncertain_brackets_never_claim_software_tracking();
         check_per_second_slew_distribution();
