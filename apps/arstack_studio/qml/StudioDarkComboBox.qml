@@ -21,7 +21,7 @@ ComboBox {
 
     background: Rectangle {
         radius: 7
-        color: combo.enabled ? (combo.hovered ? combo.theme.raisedHover : combo.theme.surface2)
+        color: combo.enabled ? (combo.hovered ? "#f0f6ff" : combo.theme.surface2)
                              : combo.theme.surface2
         border.width: 1
         border.color: combo.activeFocus ? combo.theme.accent : combo.theme.line
@@ -29,7 +29,8 @@ ComboBox {
 
     contentItem: Text {
         text: combo.displayText
-        color: combo.enabled ? combo.theme.text : combo.theme.muted
+        color: !combo.enabled ? combo.theme.muted
+            : combo.hovered ? "#132233" : combo.theme.text
         font: combo.font
         verticalAlignment: Text.AlignVCenter
         leftPadding: 12
@@ -39,7 +40,8 @@ ComboBox {
 
     indicator: Text {
         text: "\u25be"
-        color: combo.enabled ? combo.theme.textSoft : combo.theme.muted
+        color: !combo.enabled ? combo.theme.muted
+            : combo.hovered ? "#132233" : combo.theme.textSoft
         font.pixelSize: 14
         anchors.right: parent.right
         anchors.rightMargin: 11
@@ -54,7 +56,7 @@ ComboBox {
         highlighted: combo.highlightedIndex === index
         contentItem: Text {
             text: combo.textAt(choice.index)
-            color: combo.theme.text
+            color: choice.highlighted ? "#132233" : combo.theme.text
             font: combo.font
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
@@ -63,7 +65,7 @@ ComboBox {
         }
         background: Rectangle {
             radius: 5
-            color: parent.highlighted ? combo.theme.accentSoft : combo.theme.raised
+            color: parent.highlighted ? "#f0f6ff" : combo.theme.raised
         }
     }
 
