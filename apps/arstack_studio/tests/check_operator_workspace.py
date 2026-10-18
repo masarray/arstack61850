@@ -73,6 +73,10 @@ def main() -> None:
             and "preflight_only = false" in firmware_source
             and "SV/PTP AUTO preflight sample clock armed (SV TX OFF)" in firmware_source
             and "check_auto_preflight_does_not_invent_sync_or_start()" in phase_tests
+            and "SvAutoPreflightPolicy::can_steer(" in firmware_source
+            and "SvAutoPreflightPolicy::can_advertise_local(" in firmware_source
+            and "if (injecting)" in firmware_source
+            and "preflight_telemetry" in firmware_source
             and "SvAutoPreflightPolicy" in phase_header,
             "AUTO SOURCE preflight must discipline the sample clock before START without transmitting SV")
     main_qml = source("Main.qml")
