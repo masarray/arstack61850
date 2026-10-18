@@ -1076,8 +1076,8 @@ ApplicationWindow {
                         // previously wasted below two cramped half-width panels.
                         ColumnLayout {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: root.compactLayout ? 398 : 426
-                            Layout.maximumHeight: root.compactLayout ? 398 : 426
+                            Layout.preferredHeight: root.compactLayout ? 438 : 460
+                            Layout.maximumHeight: root.compactLayout ? 438 : 460
                             spacing: 8
                             SignalMatrix {
                                 id: voltageMatrix
