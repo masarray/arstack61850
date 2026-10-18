@@ -9,6 +9,9 @@ CheckBox {
     property string uiFont: "Inter"
     implicitHeight: 30
     hoverEnabled: true
+    // Suppress native Windows hover background/second checkbox glyph.
+    // The single custom indicator below owns both normal and hovered states.
+    background: Item {}
     spacing: 9
     font.family: uiFont
     font.pixelSize: 11
