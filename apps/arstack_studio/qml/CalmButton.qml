@@ -10,6 +10,7 @@ Button {
     property url iconSource
     property real iconSize: 16
     property string toolTipText: ""
+    readonly property string hoverPath: iconSource.toString().replace("/assets/material/", "/assets/material_dark/")
 
     implicitHeight: theme ? theme.controlHeight : 36
     implicitWidth: Math.max(64, contentItem.implicitWidth + 20)
@@ -48,7 +49,7 @@ Button {
             width: control.iconSize
             height: control.iconSize
             anchors.verticalCenter: parent.verticalCenter
-            source: control.iconSource
+            source: control.hovered && control.enabled ? control.hoverPath : control.iconSource
             sourceSize.width: control.iconSize * 2
             sourceSize.height: control.iconSize * 2
             opacity: control.enabled ? 0.94 : 0.30
