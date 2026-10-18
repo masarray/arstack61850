@@ -330,12 +330,14 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         rejectedIdentity);
 
     const bool boundedIdentifyPolicy =
-        DeviceController::identityMaxAttempts() == 3 &&
-        DeviceController::identityRetryIntervalMs() == 650 &&
+        DeviceController::identityMaxAttempts() == 5 &&
+        DeviceController::identityRetryIntervalMs() == 1100 &&
         DeviceController::identityRetryAllowed(0) &&
         DeviceController::identityRetryAllowed(1) &&
         DeviceController::identityRetryAllowed(2) &&
-        !DeviceController::identityRetryAllowed(3) &&
+        DeviceController::identityRetryAllowed(3) &&
+        DeviceController::identityRetryAllowed(4) &&
+        !DeviceController::identityRetryAllowed(5) &&
         !DeviceController::identityRetryAllowed(-1);
 
     const bool boundedProfileSyncPolicy =
