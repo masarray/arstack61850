@@ -21,7 +21,10 @@ Button {
     scale: down ? 0.988 : 1.0
     Behavior on scale { NumberAnimation { duration: 70; easing.type: Easing.OutCubic } }
 
+    // Consistent desktop hover affordance: light fill always pairs with dark
+    // caption. Applies to Advanced panels because they share CalmButton.
     readonly property color activeFill: !enabled ? "#10161d" :
+                                        hovered ? "#edf4fc" :
                                         tone === "success" ? (hovered ? "#1e5c43" : "#194d38") :
                                         tone === "danger" ? (hovered ? "#523039" : theme.redSoft) :
                                         tone === "accent" ? (hovered ? "#1d3c5e" : theme.accentSoft) :
@@ -32,6 +35,7 @@ Button {
                                         tone === "accent" ? "#315f8d" :
                                         (activeFocus ? theme.accent : hovered ? "#3a4a5b" : theme.line)
     readonly property color activeText: !enabled ? theme.muted2 :
+                                        hovered ? "#142334" :
                                         tone === "success" ? "#d6f4e6" :
                                         tone === "danger" ? "#ffdce0" :
                                         tone === "accent" ? "#dcebff" : theme.textSoft
@@ -53,6 +57,8 @@ Button {
             text: control.text
             color: control.activeText
             font: control.font
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
             anchors.verticalCenter: parent.verticalCenter
             Behavior on color { ColorAnimation { duration: 90 } }
         }
