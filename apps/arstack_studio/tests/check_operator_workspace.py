@@ -146,7 +146,8 @@ def main() -> None:
             and 'enabled: !workflowBar.startQueued; onActivated: root.zeroAll()' in main_qml,
             "scenario editors and shortcuts must be frozen during a pending START snapshot")
     require("controller.pendingApply = true" in workflow
-            and "requestStartWithScenario(controller.startScenarioSnapshot())" in workflow
+            and "smartSession.requestStartWithScenario(" in workflow
+            and "controller.startScenarioSnapshot())" in workflow
             and "controller.applyAllSignals()" not in workflow
             and "startWatchdog" in workflow and "onRunningChanged()" in workflow,
             "reconnect must not auto-transmit, but one-click Start must stage a bounded scenario")
@@ -175,7 +176,8 @@ def main() -> None:
             and 'toolTipText: "Advanced"' not in ribbon
             and 'ToolTip.text: "smpSynch mode"' not in timing_ui,
             "captioned operator controls must not duplicate labels as tooltips")
-    require('requestStartWithScenario(controller.startScenarioSnapshot())' in workflow
+    require('smartSession.requestStartWithScenario(' in workflow
+            and 'controller.startScenarioSnapshot())' in workflow
             and "Apply to board" not in main_qml,
             "Edit-to-Start must not regress to a manual Apply-to-board action")
     require("assets/material/smv_injector.svg" in cmake_icons
