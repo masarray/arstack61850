@@ -402,6 +402,7 @@ private:
     bool setupError_{false};
     bool recoveryPending_{false};
     bool shuttingDown_{false};
+    int unidentifiedDiscoveryTicks_{0};
     int updateReconnectAttempts_{0};
     int profileSyncAttempts_{0};
     PortOwner portOwner_{PortOwner::none};
