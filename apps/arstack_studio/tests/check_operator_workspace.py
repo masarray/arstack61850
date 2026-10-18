@@ -53,10 +53,10 @@ def main() -> None:
             and "root.pendingApply" in main_qml
             and "pendingApply = true" in main_qml,
             "table edits must expose unsent setpoints without claiming wire readback")
-    require("Layout.minimumHeight: root.compactLayout ? 180 : 210" in main_qml
-            and "Layout.fillHeight: true" in main_qml
+    require("Layout.preferredHeight: Math.min(410, Math.max(215, root.height - 365))" in main_qml
+            and "Layout.maximumHeight: 410" in main_qml
             and "ColumnLayout {" in main_qml,
-            "voltage and current must stack vertically and fill the workspace")
+            "voltage and current must stack vertically with bounded content height")
     require('property bool ptpDefaultStartAttempted: false' in main_qml
             and 'root.ptpDefaultStartAttempted = true' in main_qml
             and '!root.startPtpRole("SOURCE")' in main_qml,
@@ -76,6 +76,30 @@ def main() -> None:
             and "root.ptpRestoreChecks > 120" in main_qml
             and "root.ptpDesiredForSession = false" in main_qml,
             "PTP user intent restoration must be bounded, explicit and cancellable")
+    ribbon = source("ModernRibbon.qml")
+    checkbox = source("StudioDarkCheckBox.qml")
+    calm = source("CalmButton.qml")
+    require("Layout.preferredWidth: bar.compact ? 232 : 286" in ribbon
+            and "font.pixelSize: bar.compact ? 21 : 25" in ribbon,
+            "operator brand/logo must stay legible")
+    require("indicator: Rectangle {" in checkbox,
+            "checkbox must keep one stable custom indicator on hover")
+    require("anchors.centerIn: parent" in calm,
+            "button caption needs horizontal centering")
+    require("root.sendSignal(group, row)" in main_qml
+            and "Layout.fillHeight: false" in main_qml
+            and "Layout.preferredHeight: 196" in main_qml,
+            "tables and live sent phases must use explicit bounded layout")
+    require('property bool ptpDefaultStartAttempted: false' in main_qml
+            and 'root.startPtpRole("SOURCE")' in main_qml
+            and "device.deviceVerified" in main_qml,
+            "default PTP must reuse verified session ownership")
+    device_cpp = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
+    require('commands << QStringLiteral("FREQ %1")' in device_cpp
+            and "const double phase = row.at(1).toDouble(&phaseOk);" in device_cpp
+            and "const double angleMdeg = phaseDegrees * 1000.0;" in device_cpp
+            and "commands << QStringLiteral(\"START\");" in device_cpp,
+            "START must send actual eight model phases as millidegree SET commands before START")
     matrix = source("SignalMatrix.qml")
     require("Layout.fillHeight: true" in matrix
             and "Layout.minimumHeight: 34" in matrix
@@ -93,9 +117,9 @@ def main() -> None:
             and main_qml.index("id: voltageMatrix") < main_qml.index("id: currentMatrix"),
             "Voltage and Current need a vertical, flexible-height editor workspace")
     ribbon_qml = source("ModernRibbon.qml")
-    require("Layout.preferredWidth: bar.compact ? 220 : 270" in ribbon_qml
-            and "font.pixelSize: bar.compact ? 20 : 22" in ribbon_qml
-            and "width: 44" in ribbon_qml,
+    require("Layout.preferredWidth: bar.compact ? 232 : 286" in ribbon_qml
+            and "font.pixelSize: bar.compact ? 21 : 25" in ribbon_qml
+            and "width: 53" in ribbon_qml,
             "SMV Injector branding must be readable at compact and normal widths")
     device_controller = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
     workflow = source("WorkflowBar.qml")

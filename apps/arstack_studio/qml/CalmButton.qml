@@ -40,10 +40,13 @@ Button {
                                         tone === "danger" ? "#ffdce0" :
                                         tone === "accent" ? "#dcebff" : theme.textSoft
 
-    contentItem: Row {
-        // Center the complete icon+caption pair in both axes in Qt Controls.
-        anchors.centerIn: parent
-        spacing: control.iconSource.toString().length > 0 ? 7 : 0
+    contentItem: Item {
+        implicitWidth: centeredContent.implicitWidth
+        implicitHeight: centeredContent.implicitHeight
+        Row {
+            id: centeredContent
+            anchors.centerIn: parent
+            spacing: control.iconSource.toString().length > 0 ? 7 : 0
         Image {
             visible: control.iconSource.toString().length > 0
             width: control.iconSize
@@ -60,6 +63,7 @@ Button {
             font: control.font
             anchors.verticalCenter: parent.verticalCenter
             Behavior on color { ColorAnimation { duration: 90 } }
+        }
         }
     }
 
