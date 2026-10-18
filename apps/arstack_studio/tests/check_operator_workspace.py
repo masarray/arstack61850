@@ -60,6 +60,28 @@ def main() -> None:
             and "root.ptpDesiredForSession = false" in main_qml,
             "PTP user intent restoration must be bounded, explicit and cancellable")
     matrix = source("SignalMatrix.qml")
+    require("function flushPendingEdits()" in matrix
+            and "magnitudeApplyTimer.stop()" in matrix
+            and "phaseApplyTimer.stop()" in matrix
+            and "currentMatrix.flushPendingEdits()" in main_qml
+            and "voltageMatrix.flushPendingEdits()" in main_qml
+            and "if (!scenario) return" in source("WorkflowBar.qml"),
+            "START must commit last visible I/V angle before ordered scenario serialization")
+    require("Layout.fillHeight: true" in main_qml
+            and "Layout.maximumHeight: root.compactLayout ? 352 : 384" not in main_qml
+            and main_qml.index("id: voltageMatrix") < main_qml.index("id: currentMatrix"),
+            "Voltage and Current need a vertical, flexible-height editor workspace")
+    ribbon_qml = source("ModernRibbon.qml")
+    require("Layout.preferredWidth: bar.compact ? 190 : 224" in ribbon_qml
+            and "font.pixelSize: bar.compact ? 17 : 19" in ribbon_qml,
+            "SMV Injector logo/caption must be instrument-sized, not micro branding")
+    checkbox_qml = source("StudioDarkCheckBox.qml")
+    require("width: 20" in checkbox_qml and "height: 20" in checkbox_qml,
+            "checkbox geometry must remain unchanged by hover")
+    require("hovered ? \"#edf5ff\"" in source("CalmButton.qml")
+            and "hovered ? \"#142334\"" in source("CalmButton.qml"),
+            "light hover background must always pair with dark caption")
+
     menu = source("StudioActionMenu.qml")
     cmake = (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8")
 
