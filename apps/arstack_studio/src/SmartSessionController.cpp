@@ -60,7 +60,7 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
         // Retry semantic discovery after a bounded 5s cool-down; do not
         // endlessly hold the single COM port or auto-flash a live board.
         if (device_->identificationState() == DeviceController::IdentificationState::Unidentified) {
-            if (manualRecoveryArmed_ || recoveryPending_) return;
+            if (manualRecoveryArmed_) return;
             ++unidentifiedDiscoveryTicks_;
             if (unidentifiedDiscoveryTicks_ < 2) return;
         }
