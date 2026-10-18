@@ -245,6 +245,13 @@ public:
         if (matched_pairs_ < kRequiredMeasuredPairs) ++matched_pairs_;
     }
 
+    // Diagnostic read under the same ownership/critical section as observe().
+    // This is a count of consecutive measured, coherent descriptor pairs,
+    // not a hardware-phase certificate or proof of IED subscription.
+    [[nodiscard]] constexpr std::uint32_t measured_pairs() const noexcept {
+        return matched_pairs_;
+    }
+
     [[nodiscard]] constexpr bool qualified(
         const std::uint32_t session,
         const std::uint32_t fault_generation,
