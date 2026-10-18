@@ -45,7 +45,7 @@ def main() -> None:
     require("kSvTxEvidenceEpochStride = 2U" in sv_gate
             and "expected_epoch_stride = kSvTxEvidenceEpochStride" in sv_gate
             and "kEvidenceStride = kSvTxEvidenceEpochStride" in sv_gate
-            and "kEgressEvidenceEveryZeroEpochs =\\n    SvLocalSyncEvidenceGate::kEvidenceStride" in firmware_source
+            and "kEgressEvidenceEveryZeroEpochs =\n    SvLocalSyncEvidenceGate::kEvidenceStride" in firmware_source
             and "check_fast_source_auto_qualification_with_fresh_evidence()" in sv_tests,
             "SOURCE AUTO must qualify from two coherent descriptor pairs at 2/4/6s, not 48s")
     main_qml = source("Main.qml")
