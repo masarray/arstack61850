@@ -40,6 +40,7 @@ Button {
         : tone === "accent" || checked ? "#e1f1ff" : theme.textSoft
     contentItem: ColumnLayout {
         spacing: 4
+        anchors.centerIn: parent
         // Controls own the content rectangle; centering is declarative
         // on the layout itself, rather than anchoring Qt Controls content.
         Item { Layout.fillHeight: true }
