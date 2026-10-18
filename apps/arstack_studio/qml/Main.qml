@@ -1053,18 +1053,24 @@ ApplicationWindow {
                             }
                         }
 
-                        ColumnLayout {
+                        ScrollView {
+                            id: signalMatrixScroll
+                            objectName: "studioSignalMatricesScroll"
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            Layout.minimumHeight: 350
-                            spacing: 9
+                            Layout.minimumHeight: 120
+                            clip: true
+                            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                            ColumnLayout {
+                                width: signalMatrixScroll.availableWidth
+                                spacing: 9
                             SignalMatrix {
                                 id: voltageMatrix
                                 enabled: !workflowBar.startQueued
                                 objectName: "studioVoltageMatrix"
                                 Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                Layout.minimumHeight: 164
+                                Layout.preferredHeight: root.compactLayout ? 200 : 215
+                                Layout.minimumHeight: 190
                                 theme: studioTheme
                                 controller: root
                                 device: device
@@ -1083,8 +1089,8 @@ ApplicationWindow {
                                 enabled: !workflowBar.startQueued
                                 objectName: "studioCurrentMatrix"
                                 Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                Layout.minimumHeight: 164
+                                Layout.preferredHeight: root.compactLayout ? 200 : 215
+                                Layout.minimumHeight: 190
                                 theme: studioTheme
                                 controller: root
                                 device: device
@@ -1099,6 +1105,7 @@ ApplicationWindow {
                                 compact: root.compactLayout
                             }
 
+                            }
                         }
 
                         StudioTimingTray {
