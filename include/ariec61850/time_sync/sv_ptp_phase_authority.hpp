@@ -270,6 +270,26 @@ private:
     std::uint32_t source_generation_{};
 };
 
+// Pure preflight reuse policy. This does NOT grant smpSynch or allow any
+// Ethernet SV transmission. Production uses the same checks before reusing
+// an idle SOURCE/AUTO GPTimer when the operator explicitly presses START.
+struct SvAutoPreflightPolicy final {
+    [[nodiscard]] static constexpr bool can_prepare(
+        const bool auto_mode, const bool usable_source,
+        const bool profile_valid, const std::uint32_t rate,
+        const std::uint32_t sample_counter_modulus) noexcept {
+        return auto_mode && usable_source && profile_valid && rate > 0U &&
+            rate == sample_counter_modulus;
+    }
+    [[nodiscard]] static constexpr bool can_reuse(
+        const bool preflight_running, const bool phase_enabled,
+        const bool source_lease_unchanged, const bool rate_unchanged,
+        const bool auto_mode) noexcept {
+        return preflight_running && phase_enabled &&
+            source_lease_unchanged && rate_unchanged && auto_mode;
+    }
+};
+
 // ISR-safe, O(1), no allocation/locks/IOCTL. Each interval differs from the
 // existing rational scheduler by at most ONE 1-MHz timer tick. The complete
 // correction is distributed across one explicitly armed second (4000/4800
