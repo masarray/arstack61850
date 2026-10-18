@@ -47,6 +47,17 @@ void check_auto_preflight_does_not_invent_sync_or_start() {
         true, true, true, 4000U, 4800U)); // no 1-second wrap
     CHECK(!SvAutoPreflightPolicy::can_prepare(
         true, true, true, 0U, 0U));
+    // Field capture: 120 seconds of AUTO=0 after a preflight phase
+    // observer was improperly gated on actual SV injection.
+    CHECK(SvAutoPreflightPolicy::can_steer(true, true, true, true, false, true));
+    CHECK(SvAutoPreflightPolicy::can_steer(true, true, true, true, true, false));
+    CHECK(!SvAutoPreflightPolicy::can_steer(true, true, true, true, false, false));
+    CHECK(!SvAutoPreflightPolicy::can_steer(true, true, false, true, false, true));
+    CHECK(!SvAutoPreflightPolicy::can_steer(true, true, true, false, false, true));
+    CHECK(!SvAutoPreflightPolicy::can_steer(true, false, true, true, false, true));
+    CHECK(!SvAutoPreflightPolicy::can_advertise_local(false, true));
+    CHECK(!SvAutoPreflightPolicy::can_advertise_local(true, false));
+    CHECK(SvAutoPreflightPolicy::can_advertise_local(true, true));
     CHECK(SvAutoPreflightPolicy::can_reuse(true, true, true, true, true));
     CHECK(!SvAutoPreflightPolicy::can_reuse(false, true, true, true, true));
     CHECK(!SvAutoPreflightPolicy::can_reuse(true, false, true, true, true));
