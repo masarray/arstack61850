@@ -79,6 +79,20 @@ def main() -> None:
             and "preflight_telemetry" in firmware_source
             and "SvAutoPreflightPolicy" in phase_header,
             "AUTO SOURCE preflight must discipline the sample clock before START without transmitting SV")
+    # Field regression: no firmware-reinstall mandate after a slow serial
+    # response, and previously verified COM gets priority without bypassing
+    # semantic identification.
+    io_worker = (STUDIO / "src/DeviceIoWorker.cpp").read_text(encoding="utf-8")
+    io_header = (STUDIO / "src/DeviceIoWorker.hpp").read_text(encoding="utf-8")
+    session_cpp = (STUDIO / "src/SmartSessionController.cpp").read_text(encoding="utf-8")
+    ribbon_qml = source("ModernRibbon.qml")
+    require('device-discovery/lastVerifiedPort' in io_worker
+            and "orderedDiscoveryPorts(" in io_worker
+            and "identityMaxAttempts() noexcept { return 5; }" in io_header
+            and "manualRecoveryArmed_" in session_cpp
+            and "FIRMWARE RECOVERY" in session_cpp
+            and "Firmware recovery" in ribbon_qml,
+            "never infer missing firmware from USB timeout; retry identification and prioritize semantic-verified ports")
     main_qml = source("Main.qml")
     preview = source("SignalPreview.qml")
     tray = source("StudioTimingTray.qml")
