@@ -118,9 +118,9 @@ ApplicationWindow {
     // Session-only operator intent. Never persist across application launches:
     // an explicit PTP ON can be restored after a firmware reflash/reconnect
     // without introducing an uncontrolled power-on publisher.
-    property bool ptpDesiredForSession: false
+    property bool ptpDesiredForSession: true
     property string ptpDesiredRole: "SOURCE"
-    property bool ptpRestoreAfterFirmware: false
+    property bool ptpRestoreAfterFirmware: true
     property int ptpRestoreChecks: 0
     property bool restoringScenario: false
     property bool offlinePreviewRunning: false
@@ -198,6 +198,10 @@ ApplicationWindow {
         function onDeviceVerifiedChanged() {
             root.pendingApply = true
             root.offlinePreviewRunning = false
+            if (root.ptpDesiredForSession && !device.ptpRunning) {
+                root.ptpRestoreChecks = 0
+                root.ptpRestoreAfterFirmware = true
+            }
         }
     }
 
@@ -218,7 +222,7 @@ ApplicationWindow {
     Timer {
         interval: 300
         repeat: true
-        running: root.ptpRestoreAfterFirmware
+        running: root.ptpRestoreAfterFirmware && device.deviceVerified
         onTriggered: {
             // Time-bounded one-shot restoration: never retry indefinitely.
             root.ptpRestoreChecks += 1
