@@ -444,6 +444,30 @@ ApplicationWindow {
         for (var row = 0; row < 4; ++row) sendSignal(group, row)
     }
 
+    function applyPhaseLink() {
+        if (!phaseLink || signalFrequency === 0) return
+        // Preserve each group's selected phase-A setpoint, and derive B/C
+        // from it consistently in BOTH the model and the next wire batch.
+        for (var group = 0; group < 2; ++group) {
+            var model = groupModel(group)
+            var base = model.get(0).phase
+            model.setProperty(1, "phase", normalizedAngle(base - 120))
+            model.setProperty(2, "phase", normalizedAngle(base + 120))
+        }
+        refreshPreview()
+        markScenarioDirty()
+        if (workflowBar.injectionRunning && workflowBar.session &&
+                workflowBar.session.liveControlReady && !pendingApply) {
+            // Explicit link changes during RUNNING are real setpoint edits.
+            // Don't silently leave the publisher at its previous angles.
+            var ok = sendLinkedGroup(1) && sendLinkedGroup(0)
+            if (!ok) {
+                pendingApply = true
+                showMessage("Phase values not sent; Stop then Start to apply.", true)
+            }
+        }
+    }
+
     function editSignal(group, row, field, value) {
         if ((field === "magnitude" && !validMagnitude(group, value)) ||
             (field === "phase" && !validPhase(value)))
@@ -487,6 +511,8 @@ ApplicationWindow {
         return ok
     }
     function startScenarioSnapshot() {
+        // The visible 4I+4V table is the only START setpoint authority.
+        // Capture it immediately before the worker queues its FIFO batch.
         var draft = scenarioSnapshot()
         draft.currentScale = currentScale
         draft.voltageScale = voltageScale
@@ -1040,7 +1066,8 @@ ApplicationWindow {
                                     text: "3-phase link"
                                     onToggled: {
                                         root.phaseLink = checked
-                                        root.markScenarioDirty()
+                                        if (checked) root.applyPhaseLink()
+                                        else root.markScenarioDirty()
                                     }
                                     font.family: root.uiFont
                                     font.pixelSize: 9
@@ -1049,11 +1076,10 @@ ApplicationWindow {
                             }
                         }
 
-                        RowLayout {
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: root.compactLayout ? 214 : 224
-                            Layout.maximumHeight: root.compactLayout ? 214 : 224
-                            spacing: 9
+                            Layout.fillHeight: true
+                            spacing: 10
                             SignalMatrix {
                                 id: voltageMatrix
                                 enabled: !workflowBar.startQueued
