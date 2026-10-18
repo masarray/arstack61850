@@ -99,6 +99,7 @@ using ar::iec61850::time_sync::valid_sv_ptp_clock_lease;
 #if AR_SV_PTP_PHASE_SUPPORTED
 using ar::iec61850::time_sync::SvBoundedSlewCursor;
 using ar::iec61850::time_sync::SvPtpPhaseAuthority;
+using ar::iec61850::time_sync::SvAutoPreflightPolicy;
 using ar::iec61850::time_sync::SvLocalRefAcquisition;
 using ar::iec61850::time_sync::SvPtpPhaseObservation;
 using ar::iec61850::time_sync::SvPtpPublisherContinuityGate;
@@ -783,15 +784,17 @@ void publisher_task(void* argument) {
 #if AR_SV_PTP_PHASE_SUPPORTED
             const auto now_lease = read_ptp_epoch_clock_lease();
             const auto requested_profile = runtime_profile_snapshot();
-            const bool reuse_preflight = preflight_clock && sample_clock != nullptr &&
-                epoch_armed && g_sample_clock_context.phase_enabled &&
-                g_sample_clock_context.publisher_notifications_enabled.load(
-                    std::memory_order_acquire) == false &&
-                preflight_rate_hz == requested_profile.publisher_rate_hz &&
-                requested_profile.sample_counter_modulus == requested_profile.publisher_rate_hz &&
-                smp_synch_lab_mode() == SvSyncPolicyMode::external_ptp_auto &&
-                same_sv_ptp_clock_lease(
-                    g_sample_clock_context.armed_ptp_clock, now_lease);
+            const bool reuse_preflight = sample_clock != nullptr && epoch_armed &&
+                !g_sample_clock_context.publisher_notifications_enabled.load(
+                    std::memory_order_acquire) &&
+                requested_profile.sample_counter_modulus ==
+                    requested_profile.publisher_rate_hz &&
+                SvAutoPreflightPolicy::can_reuse(
+                    preflight_clock, g_sample_clock_context.phase_enabled,
+                    same_sv_ptp_clock_lease(
+                        g_sample_clock_context.armed_ptp_clock, now_lease),
+                    preflight_rate_hz == requested_profile.publisher_rate_hz,
+                    smp_synch_lab_mode() == SvSyncPolicyMode::external_ptp_auto);
             if (!reuse_preflight) stop_sample_clock(sample_clock);
 #else
             constexpr bool reuse_preflight = false;
@@ -884,13 +887,13 @@ void publisher_task(void* argument) {
 #if AR_SV_PTP_PHASE_SUPPORTED
             const auto profile = runtime_profile_snapshot();
             const auto lease = read_ptp_epoch_clock_lease();
-            const bool auto_source_ready =
-                smp_synch_lab_mode() == SvSyncPolicyMode::external_ptp_auto &&
+            const bool auto_source_ready = SvAutoPreflightPolicy::can_prepare(
+                smp_synch_lab_mode() == SvSyncPolicyMode::external_ptp_auto,
                 lease.role == PtpAuthorityRole::source &&
-                valid_sv_ptp_clock_lease(lease) &&
-                (xEventGroupGetBits(g_link_events) & kLinkUpBit) != 0U &&
-                runtime_profile_validate(profile) &&
-                profile.publisher_rate_hz == profile.sample_counter_modulus;
+                    valid_sv_ptp_clock_lease(lease) &&
+                    (xEventGroupGetBits(g_link_events) & kLinkUpBit) != 0U,
+                runtime_profile_validate(profile), profile.publisher_rate_hz,
+                profile.sample_counter_modulus);
             if (preflight_clock && (!auto_source_ready ||
                 preflight_rate_hz != profile.publisher_rate_hz ||
                 !same_sv_ptp_clock_lease(
