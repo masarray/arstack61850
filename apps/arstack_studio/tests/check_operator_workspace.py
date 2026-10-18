@@ -105,9 +105,10 @@ def main() -> None:
             and 'property bool phasorDockVisible: true' in main_qml
             and 'property bool waveformDockVisible: true' in main_qml,
             "operator defaults must keep PTP, phasor and waveform enabled")
-    require('ColumnLayout {\n                            Layout.fillWidth: true\n                            Layout.fillHeight: true\n                            Layout.minimumHeight: 350' in main_qml
+    require('objectName: "studioSignalMatricesScroll"' in main_qml
+            and 'ScrollBar.horizontal.policy: ScrollBar.AlwaysOff' in main_qml
             and main_qml.index('id: voltageMatrix') < main_qml.index('id: currentMatrix'),
-            "full-width voltage/current table should stack vertically")
+            "full-width voltage/current tables should scroll vertically when compact")
     require('const accepted = smartSession.requestStartWithScenario(' in workflow
             and 'smartSession.requestStart()' not in workflow.split('function requestStart() {')[1].split('function requestStop() {')[0],
             "START must always transmit the exact 4I+4V model snapshot")
