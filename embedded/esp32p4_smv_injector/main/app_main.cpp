@@ -615,8 +615,12 @@ gptimer_handle_t start_sample_clock(
     ESP_ERROR_CHECK(gptimer_register_event_callbacks(
         timer, &callbacks, &g_sample_clock_context));
 
-    // The timer is configured before reading EMAC PTP time, minimizing
-    // cross-clock arm latency without touching the high-frequency callback.
+    // GPTimer enable may require driver/PM setup. Perform it BEFORE sampling
+    // the PTP clock; otherwise that unpredictable setup delay moves the
+    // first smpCnt=0 deadline by milliseconds and the deliberately bounded
+    // 400us/second phase servo takes tens of seconds to converge.
+    // The timer still does not count until gptimer_start() below.
+    ESP_ERROR_CHECK(gptimer_enable(timer));
     const auto epoch_arm = plan_ptp_epoch_arm(eth_handle);
     // Time spent configuring GPTimer after the EMAC PTP read must not
     // shift the first smpCnt=0 deadline. Recheck the same lease before arm.
@@ -643,7 +647,6 @@ gptimer_handle_t start_sample_clock(
         : g_sample_clock_context.schedule.next_ticks();
     g_sample_clock_context.next_alarm.flags.auto_reload_on_alarm = false;
     ESP_ERROR_CHECK(gptimer_set_alarm_action(timer, &g_sample_clock_context.next_alarm));
-    ESP_ERROR_CHECK(gptimer_enable(timer));
     ESP_ERROR_CHECK(gptimer_start(timer));
 #if AR_SV_PTP_PHASE_SUPPORTED
     if (g_sample_clock_context.phase_enabled) {
@@ -1080,6 +1083,7 @@ void sv_ptp_phase_observer_task(void* argument) {
     SvPtpPublisherContinuityGate continuity;
     std::uint32_t accepted_epochs = 0U;
     std::uint32_t controller_session = 0U;
+    bool previous_auto_local = false;
     while (true) {
         const std::uint32_t events = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         const std::uint32_t notified_session =
@@ -1088,6 +1092,8 @@ void sv_ptp_phase_observer_task(void* argument) {
         if (controller_session != notified_session) {
             controller.reset();
             continuity.reset();
+            accepted_epochs = 0U;
+            previous_auto_local = false;
             controller_session = notified_session;
         }
         vTaskDelay(pdMS_TO_TICKS(250));
@@ -1166,6 +1172,7 @@ void sv_ptp_phase_observer_task(void* argument) {
         // the GPTimer mutex. Source identity and fault/session generations
         // must match the exact phase observation before any AUTO promotion.
         bool source_local_qualified = false;
+        std::uint32_t mac_pairs = 0U;
 #if AR_SV_TX_EGRESS_SUPPORTED
         if (lease.role == PtpAuthorityRole::source &&
             decision.accepted && decision.epoch_second_continuous) {
@@ -1183,6 +1190,7 @@ void sv_ptp_phase_observer_task(void* argument) {
                 worst_case_phase_us <= UINT32_MAX
                     ? static_cast<std::uint32_t>(worst_case_phase_us)
                     : UINT32_MAX);
+            mac_pairs = g_local_sync_evidence.measured_pairs();
             portEXIT_CRITICAL(&g_tx_egress_mux);
         }
 #endif
@@ -1232,18 +1240,30 @@ void sv_ptp_phase_observer_task(void* argument) {
             continue;
         }
         ++accepted_epochs;
-        if ((accepted_epochs % 60U) == 0U) {
+        const bool auto_local = smp_synch_source_local_qualified();
+        // Emit bounded ACQUISITION diagnostics at 2s intervals initially,
+        // then every 5s until qualified; retain sparse 60s tracking telemetry.
+        // Only this 1Hz control-plane task logs, never the 4kHz SV ISR/TX path.
+        const bool early_observation = accepted_epochs <= 10U &&
+            (accepted_epochs % 2U) == 0U;
+        const bool still_acquiring = !auto_local &&
+            (accepted_epochs % 5U) == 0U;
+        if (lease.role == PtpAuthorityRole::source &&
+            (early_observation || still_acquiring ||
+             auto_local != previous_auto_local ||
+             (accepted_epochs % 60U) == 0U)) {
             ESP_LOGI(kTag,
-                "SV/PTP phase SW evidence: phase=%ld us uncertainty=%lu us "
-                "slew=%ld ticks/epoch tracking=%u PTPepoch=%llu bound=%u AUTOlocal=%u",
+                "SV/PTP AUTO phase=%ldus uncertainty=%luus "
+                "slew=%ldus/s tracking=%u MACpairs=%lu epoch=%llu LOCAL=%u",
                 static_cast<long>(decision.phase_error_us),
                 static_cast<unsigned long>(decision.observation_uncertainty_us),
                 static_cast<long>(decision.slew_ticks_next_epoch),
                 decision.software_tracking ? 1U : 0U,
+                static_cast<unsigned long>(mac_pairs),
                 static_cast<unsigned long long>(decision.sv_epoch_ptp_second),
-                decision.epoch_second_continuous ? 1U : 0U,
-                smp_synch_source_local_qualified() ? 1U : 0U);
+                auto_local ? 1U : 0U);
         }
+        previous_auto_local = auto_local;
     }
 }
 #endif
