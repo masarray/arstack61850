@@ -36,6 +36,7 @@ public:
             {"firmware verification failure remains copyable after READY", firmwareFailureRemainsDiagnosable()},
             {"firmware build mismatch explains expected and observed IDs", reconnectBuildMismatchPreservesEvidence()},
             {"fragmented espflash progress -> monotonic", fragmentedEspflashProgressIsMonotonic()},
+            {"verified COM hint falls back without bypassing identity", verifiedComOrderingPreservesFallback()},
             {"automatic IDENTIFY timeout never implies missing firmware", automaticIdentityTimeoutOffersFirmwareRecovery()},
             {"single COM semantic timeout stays unverified", singleVisibleTimeoutWithoutRecommendationOffersFirmwareRecovery()},
             {"ambiguous identity timeout -> UNIDENTIFIED", ambiguousIdentityTimeoutStaysUnidentified()},
@@ -408,6 +409,23 @@ private:
             FirmwareManager::parseFlashProgress(QStringLiteral("Writing 64%\r")) == 64 &&
             FirmwareManager::parseFlashProgress(QStringLiteral("[00:00:02] [================] 17/20 segment 0x10000")) == 85 &&
             FirmwareManager::parseFlashProgress(QStringLiteral("21/0 segment 0x0")) == -1;
+    }
+
+    static bool verifiedComOrderingPreservesFallback() {
+        const QStringList visible{QStringLiteral("COM3"), QStringLiteral("COM15"),
+                                  QStringLiteral("COM7")};
+        const QStringList expected{QStringLiteral("COM15"), QStringLiteral("COM7"),
+                                   QStringLiteral("COM3")};
+        const QStringList staleExpected{QStringLiteral("COM7"), QStringLiteral("COM3"),
+                                        QStringLiteral("COM15")};
+        return DeviceIoWorker::orderedDiscoveryPorts(
+                   visible, QStringLiteral("COM15"), QStringLiteral("COM7")) == expected &&
+               DeviceIoWorker::orderedDiscoveryPorts(
+                   visible, QStringLiteral("COM99"), QStringLiteral("COM7")) == staleExpected &&
+               DeviceIoWorker::orderedDiscoveryPorts(
+                   visible, QString{}, QString{}) == visible &&
+               DeviceIoWorker::identityMaxAttempts() >= 5 &&
+               DeviceIoWorker::identityRetryIntervalMs() >= 1000;
     }
 
     static bool automaticIdentityTimeoutOffersFirmwareRecovery() {
