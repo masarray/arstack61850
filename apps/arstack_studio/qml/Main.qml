@@ -118,10 +118,6 @@ ApplicationWindow {
     // an explicit PTP ON can be restored after a firmware reflash/reconnect
     // without introducing an uncontrolled power-on publisher.
     property bool ptpDesiredForSession: false
-    // Default PTP SOURCE is a one-shot session convenience: only after
-    // verified firmware + a ready profile, never during recovery/flashing.
-    // An explicit PTP OFF cancels automatic rearming.
-    property bool ptpDefaultPending: true
     property string ptpDesiredRole: "SOURCE"
     property bool ptpRestoreAfterFirmware: false
     property int ptpRestoreChecks: 0
@@ -257,24 +253,6 @@ ApplicationWindow {
             if (device.ptpRunning || !root.ptpDesiredForSession) return
             if (!root.startPtpRole(root.ptpDesiredRole))
                 root.showMessage("PTP did not restart after firmware installation. Use PTP On to retry.", true)
-        }
-    }
-
-    Timer {
-        interval: 350
-        repeat: true
-        running: root.ptpDefaultPending
-        onTriggered: {
-            const session = workflowBar.session
-            if (!session || !device.deviceVerified || !session.startReady ||
-                    session.updatingFirmware || device.ptpStarting)
-                return
-            root.ptpDefaultPending = false
-            if (!device.ptpRunning) {
-                // Use the same configured, verified PTP START as the switch.
-                if (!root.startPtpRole("SOURCE"))
-                    root.showMessage("PTP is ready. Select PTP On to start timing.", false)
-            }
         }
     }
 
