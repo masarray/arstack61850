@@ -1071,14 +1071,20 @@ ApplicationWindow {
                             }
                         }
 
-                        // Two full-width channel tables read top to bottom.
-                        // This keeps numeric columns usable and uses the space
-                        // previously wasted below two cramped half-width panels.
-                        ColumnLayout {
+                        // Use stacked full-width Voltage/Current in the
+                        // normal operator window; keep a two-column fallback
+                        // only in short viewports so all controls remain
+                        // accessible at the supported 960x620 minimum.
+                        GridLayout {
+                            readonly property bool stacked: root.height >= 720
+                            columns: stacked ? 1 : 2
                             Layout.fillWidth: true
-                            Layout.preferredHeight: root.compactLayout ? 438 : 460
-                            Layout.maximumHeight: root.compactLayout ? 438 : 460
-                            spacing: 8
+                            Layout.preferredHeight: stacked
+                                ? (root.compactLayout ? 438 : 460)
+                                : (root.compactLayout ? 214 : 224)
+                            Layout.maximumHeight: Layout.preferredHeight
+                            rowSpacing: 8
+                            columnSpacing: 9
                             SignalMatrix {
                                 id: voltageMatrix
                                 enabled: !workflowBar.startQueued
