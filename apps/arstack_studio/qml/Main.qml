@@ -1098,17 +1098,21 @@ ApplicationWindow {
                             // heights, never stretch four tiny rows into an
                             // oversized empty card at tall window sizes.
                             Layout.fillHeight: false
-                            Layout.preferredHeight: root.compactLayout ? 378 : 410
-                            Layout.maximumHeight: 420
-                            Layout.minimumHeight: root.compactLayout ? 340 : 370
+                            // Reserve vertical room for frequency, timing,
+                            // and quality controls even at 960x620. Larger
+                            // windows can use full natural matrix height.
+                            Layout.preferredHeight: Math.min(410, Math.max(215, root.height - 365))
+                            Layout.maximumHeight: 410
+                            Layout.minimumHeight: 195
                             spacing: 8
                             SignalMatrix {
                                 id: voltageMatrix
                                 enabled: !workflowBar.startQueued
                                 objectName: "studioVoltageMatrix"
                                 Layout.fillWidth: true
-                                Layout.fillHeight: false
-                                Layout.preferredHeight: root.compactLayout ? 181 : 196
+                                Layout.fillHeight: true
+                                Layout.preferredHeight: 196
+                                Layout.minimumHeight: 92
                                 theme: studioTheme
                                 controller: root
                                 device: device
@@ -1127,8 +1131,9 @@ ApplicationWindow {
                                 enabled: !workflowBar.startQueued
                                 objectName: "studioCurrentMatrix"
                                 Layout.fillWidth: true
-                                Layout.fillHeight: false
-                                Layout.preferredHeight: root.compactLayout ? 181 : 196
+                                Layout.fillHeight: true
+                                Layout.preferredHeight: 196
+                                Layout.minimumHeight: 92
                                 theme: studioTheme
                                 controller: root
                                 device: device
