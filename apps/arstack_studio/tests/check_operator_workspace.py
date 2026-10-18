@@ -56,8 +56,16 @@ def main() -> None:
 
     ordered(main_qml, "id: voltageMatrix", "id: currentMatrix",
             "voltage must precede current in the injection table")
-    require("ColumnLayout {\n                            Layout.fillWidth: true\n                            Layout.fillHeight: true\n                            spacing: 10\n                            SignalMatrix {" in main_qml,
-            "voltage and current must stack vertically and use available height")
+    require('objectName: "studioMatrixViewport"' in main_qml
+            and 'contentHeight: matrixStack.implicitHeight' in main_qml
+            and 'ScrollBar.vertical.policy: ScrollBar.AsNeeded' in main_qml
+            and 'id: matrixStack' in main_qml,
+            "stacked voltage/current matrices must be scrollable at 960x620 without clipping PTP")
+    geometry = (STUDIO / "src/main.cpp").read_text(encoding="utf-8")
+    require('findUiBounds(window, "studioMatrixViewport")' in geometry
+            and 'voltage.area.bottom() <= current.area.top() + tolerance' in geometry
+            and 'tray.area.top() >= matrixViewport.area.bottom() - tolerance' in geometry,
+            "native UI viewport regression must validate stacked order and visible PTP controls")
     require('property bool ptpDesiredForSession: true' in main_qml
             and 'ptpRestoreAfterFirmware = true' in main_qml
             and 'ptpDesiredForSession = false' in main_qml
