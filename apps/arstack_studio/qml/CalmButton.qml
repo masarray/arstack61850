@@ -25,7 +25,7 @@ Button {
                                         tone === "success" ? (hovered ? "#1e5c43" : "#194d38") :
                                         tone === "danger" ? (hovered ? "#523039" : theme.redSoft) :
                                         tone === "accent" ? (hovered ? "#1d3c5e" : theme.accentSoft) :
-                                        (down ? "#1a2530" : hovered ? theme.raisedHover : "#141c25")
+                                        (down ? "#d6e3f1" : hovered ? "#f0f5fa" : "#141c25")
     readonly property color activeEdge: !enabled ? theme.lineSoft :
                                         tone === "success" ? "#347a59" :
                                         tone === "danger" ? "#86434b" :
@@ -34,11 +34,13 @@ Button {
     readonly property color activeText: !enabled ? theme.muted2 :
                                         tone === "success" ? "#d6f4e6" :
                                         tone === "danger" ? "#ffdce0" :
-                                        tone === "accent" ? "#dcebff" : theme.textSoft
+                                        tone === "accent" ? "#dcebff" : hovered ? "#142334" : theme.textSoft
 
     contentItem: Row {
         spacing: control.iconSource.toString().length > 0 ? 7 : 0
         anchors.centerIn: parent
+        width: implicitWidth
+        height: implicitHeight
         Image {
             visible: control.iconSource.toString().length > 0
             width: control.iconSize
