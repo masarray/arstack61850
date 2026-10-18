@@ -33,9 +33,20 @@ def main() -> None:
     require("Lab simulation controls" not in config
             and "Signals, firmware, PTP and device settings" in config,
             "Advanced must not imply this is only a simulated lab tool")
-    require("Changes sent on Start" in main_qml
-            and "root.pendingApply && !workflowBar.injectionRunning" in main_qml,
-            "STOPPED waveform edits must distinguish draft from sent setpoints")
+    require("Setpoints pending · Start to apply" in main_qml
+            and "root.pendingApply" in main_qml
+            and "pendingApply = true" in main_qml,
+            "table edits must expose unsent setpoints without claiming wire readback")
+    require("Layout.preferredHeight: root.compactLayout ? 352 : 384" in main_qml
+            and "ColumnLayout {" in main_qml,
+            "voltage and current must stack vertically to use the workspace")
+    require('property bool ptpDefaultStartAttempted: false' in main_qml
+            and 'root.ptpDefaultStartAttempted = true' in main_qml
+            and '!root.startPtpRole("SOURCE")' in main_qml,
+            "default PTP start must be one-shot and deliberate OFF must cancel it")
+    require("phaseLink && row < 3" in main_qml
+            and "sendLinkedGroup(group) : sendSignal(group, row)" in main_qml,
+            "edited 3-phase angles must be transmitted from the same table model")
     controller = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
     require("logUpdateTimer_.setInterval(100)" in controller
             and "if (!logUpdateTimer_.isActive()) logUpdateTimer_.start();" in controller,
