@@ -82,8 +82,10 @@ struct UiBounds {
             return false;
         }
     }
-    if (!(voltage.area.right() <= current.area.left() + tolerance
-          && tray.area.top() >= voltage.area.bottom() - tolerance
+    // Voltage/current now form a vertical engineering stack. Preserve the
+    // strict order/overlap check at all supported Windows DPI scales.
+    if (!(voltage.area.bottom() <= current.area.top() + tolerance
+          && tray.area.top() >= current.area.bottom() - tolerance
           && quality.area.top() >= tray.area.bottom() - tolerance
           && quality.area.bottom() <= surface.area.bottom() + tolerance)) {
         qCritical().noquote() << "Studio UI panel order/overlap violation" << size
