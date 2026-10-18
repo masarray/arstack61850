@@ -22,6 +22,7 @@ Button {
     Behavior on scale { NumberAnimation { duration: 70; easing.type: Easing.OutCubic } }
 
     readonly property color activeFill: !enabled ? "#10161d" :
+                                        hovered ? "#edf5ff" :
                                         tone === "success" ? (hovered ? "#1e5c43" : "#194d38") :
                                         tone === "danger" ? (hovered ? "#523039" : theme.redSoft) :
                                         tone === "accent" ? (hovered ? "#1d3c5e" : theme.accentSoft) :
@@ -32,11 +33,14 @@ Button {
                                         tone === "accent" ? "#315f8d" :
                                         (activeFocus ? theme.accent : hovered ? "#3a4a5b" : theme.line)
     readonly property color activeText: !enabled ? theme.muted2 :
+                                        hovered ? "#142334" :
                                         tone === "success" ? "#d6f4e6" :
                                         tone === "danger" ? "#ffdce0" :
                                         tone === "accent" ? "#dcebff" : theme.textSoft
 
     contentItem: Row {
+        // The same item owns both the icon and text; no native Button
+        // hover glyph can appear independently.
         spacing: control.iconSource.toString().length > 0 ? 7 : 0
         anchors.centerIn: parent
         Image {
