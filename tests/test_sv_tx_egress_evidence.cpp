@@ -97,6 +97,7 @@ void check_fast_source_auto_qualification_with_fresh_evidence() {
             ? SvTxEvidenceResult::baseline_established
             : SvTxEvidenceResult::measured));
         gate.observe(o, result, tx.summary().last_phase_ns);
+        REQUIRE(gate.measured_pairs() == (elapsed / 2U) - 1U);
         REQUIRE(gate.qualified(7U, 0U, 3U, elapsed, true, 4U) ==
                 (elapsed == 6U));
         // No fake sync claim from the MAC descriptor alone.
@@ -114,6 +115,7 @@ void check_fast_source_auto_qualification_with_fresh_evidence() {
     const auto changed = tx.record(fault);
     REQUIRE(changed == SvTxEvidenceResult::publisher_discontinuity);
     gate.observe(fault, changed, tx.summary().last_phase_ns);
+    REQUIRE(gate.measured_pairs() == 0U);
     REQUIRE(!gate.qualified(7U, 0U, 3U, 8U, true, 4U));
 }
 
