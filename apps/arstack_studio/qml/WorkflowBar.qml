@@ -281,9 +281,11 @@ SurfacePanel {
             controller.showMessage(ribbon.startReason(), false)
             return
         }
-        const accepted = controller.pendingApply
-            ? smartSession.requestStartWithScenario(controller.startScenarioSnapshot())
-            : smartSession.requestStart()
+        // Always bind START to the current table snapshot. A previous live
+        // session may have cleared pendingApply, but STOP/START must never
+        // recycle stale waveform values from the device.
+        const accepted = smartSession.requestStartWithScenario(
+            controller.startScenarioSnapshot())
         if (!accepted) {
             controller.pendingApply = true
             controller.showMessage("Start rejected. Check device status.", true)
