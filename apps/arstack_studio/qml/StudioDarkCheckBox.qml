@@ -39,7 +39,6 @@ CheckBox {
     contentItem: Text {
         horizontalAlignment: Text.AlignLeft
         leftPadding: control.indicator.width + control.spacing
-        implicitHeight: control.height
         text: control.text
         font: control.font
         color: control.enabled ? control.theme.textSoft : control.theme.muted
