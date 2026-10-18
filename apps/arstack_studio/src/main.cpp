@@ -30,6 +30,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <memory>
 #include <string_view>
 
