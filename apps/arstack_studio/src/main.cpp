@@ -65,11 +65,15 @@ struct UiBounds {
     const auto surface = findUiBounds(window, "studioInjectionSurface");
     const auto voltage = findUiBounds(window, "studioVoltageMatrix");
     const auto current = findUiBounds(window, "studioCurrentMatrix");
+    const auto matrixScroll = findUiBounds(window, "studioSignalMatricesScroll");
     const auto tray = findUiBounds(window, "studioTimingTray");
     const auto quality = findUiBounds(window, "studioQualityRow");
-    const std::array<std::pair<const char*, UiBounds>, 6> areas{{
+    // The stacked matrices live in a vertical ScrollView. On 960x620
+    // windows/DPI, their unscrolled content can legitimately extend below
+    // the viewport; only the CLIPPED scroll viewport itself must be inside.
+    const std::array<std::pair<const char*, UiBounds>, 5> areas{{
         {"toolbar", bar}, {"injection workspace", surface},
-        {"voltage matrix", voltage}, {"current matrix", current},
+        {"matrix scroll viewport", matrixScroll},
         {"PTP timing tray", tray}, {"quality editor", quality}
     }};
     for (const auto& [label, item] : areas) {
@@ -84,10 +88,15 @@ struct UiBounds {
     }
     // Stacked full-width 4I+4V layout: Voltage above Current; both
     // must remain within the injection surface and above the PTP tray.
-    if (!(voltage.area.bottom() <= current.area.top() + tolerance
-          && current.area.bottom() <= tray.area.top() + tolerance
-          && quality.area.top() >= tray.area.bottom() - tolerance
-          && quality.area.bottom() <= surface.area.bottom() + tolerance)) {
+    if (!(voltage.visible && current.visible &&
+          voltage.area.width() > 100 && current.area.width() > 100 &&
+          voltage.area.top() >= matrixScroll.area.top() - tolerance &&
+          voltage.area.bottom() <= current.area.top() + tolerance &&
+          current.area.left() >= matrixScroll.area.left() - tolerance &&
+          current.area.right() <= matrixScroll.area.right() + tolerance &&
+          matrixScroll.area.bottom() <= tray.area.top() + tolerance &&
+          quality.area.top() >= tray.area.bottom() - tolerance &&
+          quality.area.bottom() <= surface.area.bottom() + tolerance)) {
         qCritical().noquote() << "Studio UI panel order/overlap violation" << size
                               << voltage.area << current.area << tray.area << quality.area;
         return false;
