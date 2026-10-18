@@ -47,23 +47,23 @@ Rectangle {
         spacing: 6
 
         RowLayout {
-            Layout.preferredWidth: bar.compact ? 220 : 270
+            Layout.preferredWidth: bar.compact ? 232 : 286
             Layout.alignment: Qt.AlignVCenter
             spacing: 8
 
             Rectangle {
-                Layout.preferredWidth: 56
-                Layout.preferredHeight: 56
-                width: 56
-                height: 56
+                Layout.preferredWidth: 64
+                Layout.preferredHeight: 64
+                width: 64
+                height: 64
                 radius: 10
                 color: "#0d151d"
                 border.width: 1
                 border.color: bar.theme.lineSoft
                 Image {
                     anchors.centerIn: parent
-                    width: 44
-                    height: 44
+                    width: 53
+                    height: 53
                     source: Qt.resolvedUrl("../assets/material/smv_injector.svg")
                     sourceSize.width: 68
                     sourceSize.height: 68
@@ -75,7 +75,7 @@ Rectangle {
                 text: "SMV Injector"
                 color: bar.theme.text
                 font.family: bar.uiFont
-                font.pixelSize: bar.compact ? 20 : 22
+                font.pixelSize: bar.compact ? 21 : 25
                 font.weight: Font.Bold
                 elide: Text.ElideRight
                 verticalAlignment: Text.AlignVCenter
