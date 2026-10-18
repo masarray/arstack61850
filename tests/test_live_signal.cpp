@@ -3,6 +3,8 @@
 #include "ariec61850/sampled_values/live_signal_state.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <iostream>
@@ -138,6 +140,55 @@ void fixed_point_engine_preserves_frequency_and_phase() {
     CHECK(phase_120 != phase_minus_120);
 }
 
+// Independent waveform regression for the operator's non-balanced 4I+4V
+// table. The firmware MUST NOT reset current phases to the voltage defaults.
+// A full 80-sample/50Hz fundamental projection checks each channel's RMS
+// and signed phase in the actual fixed-point generator, not a GUI mock.
+void custom_four_current_four_voltage_table_reaches_sine_samples() {
+    using namespace ar::iec61850::sampled_values;
+
+    SvFixedPointSineEngine engine;
+    auto state = SvLiveSignalBank::default_state();
+    state.frequency_millihz = 50000U;
+    const std::array<std::int32_t, 8> rms_counts{
+        1000, 800, 1200, 0, 5774, 5774, 5774, 0};
+    const std::array<std::int32_t, 8> phases_mdeg{
+        -30000, -145000, 87000, 0, 0, -120000, 120000, 0};
+    for (std::size_t ch = 0; ch < state.channels.size(); ++ch) {
+        state.channels[ch].rms_counts = rms_counts[ch];
+        state.channels[ch].phase_millidegrees = phases_mdeg[ch];
+        state.channels[ch].enabled = true;
+    }
+
+    constexpr double pi = 3.14159265358979323846;
+    constexpr int points = 80;
+    std::array<double, 8> sin_projection{};
+    std::array<double, 8> cos_projection{};
+    for (int n = 0; n < points; ++n) {
+        const auto values = engine.next(state, 4000U);
+        const double angle = (2.0 * pi * n) / points;
+        for (std::size_t ch = 0; ch < values.size(); ++ch) {
+            sin_projection[ch] += values[ch] * std::sin(angle);
+            cos_projection[ch] += values[ch] * std::cos(angle);
+        }
+    }
+    for (std::size_t ch = 0; ch < rms_counts.size(); ++ch) {
+        const double estimated_rms = std::hypot(sin_projection[ch], cos_projection[ch])
+            * std::sqrt(2.0) / points;
+        if (rms_counts[ch] == 0) {
+            CHECK(estimated_rms < 1.0);
+            continue;
+        }
+        const double estimated_phase_deg = std::atan2(
+            cos_projection[ch], sin_projection[ch]) * 180.0 / pi;
+        const double phase_error_deg = std::remainder(
+            estimated_phase_deg - phases_mdeg[ch] / 1000.0, 360.0);
+        CHECK(std::abs(phase_error_deg) < 1.0);
+        CHECK(std::abs(estimated_rms - rms_counts[ch]) <
+              std::max(4.0, rms_counts[ch] * 0.012));
+    }
+}
+
 void independent_channels_change_without_stream_restart() {
     using namespace ar::iec61850::sampled_values;
 
@@ -174,6 +225,7 @@ int main() {
         dc_engine_outputs_constant_engineering_values();
         ct_saturation_shape_is_bounded_and_asymmetric();
         independent_channels_change_without_stream_restart();
+        custom_four_current_four_voltage_table_reaches_sine_samples();
         std::cout << "[PASS] live Sampled Values signal state\n";
         return 0;
     } catch (const std::exception& error) {
