@@ -1049,10 +1049,10 @@ ApplicationWindow {
                             }
                         }
 
-                        RowLayout {
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: root.compactLayout ? 214 : 224
-                            Layout.maximumHeight: root.compactLayout ? 214 : 224
+                            Layout.fillHeight: true
+                            Layout.minimumHeight: 350
                             spacing: 9
                             SignalMatrix {
                                 id: voltageMatrix
@@ -1060,6 +1060,7 @@ ApplicationWindow {
                                 objectName: "studioVoltageMatrix"
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
+                                Layout.minimumHeight: 164
                                 theme: studioTheme
                                 controller: root
                                 device: device
@@ -1079,6 +1080,7 @@ ApplicationWindow {
                                 objectName: "studioCurrentMatrix"
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
+                                Layout.minimumHeight: 164
                                 theme: studioTheme
                                 controller: root
                                 device: device
@@ -1136,7 +1138,6 @@ ApplicationWindow {
                                 compact: root.compactLayout
                             }
                         }
-                        Item { Layout.fillHeight: true }
                     }
                 }
 
