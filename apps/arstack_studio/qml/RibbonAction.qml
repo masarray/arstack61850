@@ -42,9 +42,7 @@ Button {
         spacing: 4
         // Controls own the content rectangle; centering is declarative
         // on the layout itself, rather than anchoring Qt Controls content.
-        anchors.fill: parent
-        anchors.margins: 5
-        Layout.alignment: Qt.AlignHCenter | Qt.AlignVCenter
+        Item { Layout.fillHeight: true }
         Image {
             visible: control.iconSource.toString().length > 0
             source: control.hovered && control.enabled ? control.hoverPath : control.iconSource
@@ -68,6 +66,7 @@ Button {
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
         }
+        Item { Layout.fillHeight: true }
     }
     background: Rectangle {
         radius: 9
