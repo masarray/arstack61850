@@ -1069,7 +1069,21 @@ ApplicationWindow {
                                     text: "3-phase link"
                                     onToggled: {
                                         root.phaseLink = checked
+                                        // Linking phases changes future edit behavior only;
+                                        // never silently rewrite existing setpoints.
                                         root.markScenarioDirty()
+                                        if (workflowBar.injectionRunning && workflowBar.session
+                                                && workflowBar.session.liveControlReady) {
+                                            // Persist *all eight current table values* on
+                                            // live link changes; the displayed draft
+                                            // must never silently diverge from TX.
+                                            var ok = true
+                                            for (var group = 0; group < 2; ++group)
+                                                for (var row = 0; row < 4; ++row)
+                                                    ok = root.sendSignal(group, row) && ok
+                                            if (ok) root.pendingApply = false
+                                            else root.showMessage("Not all live phases were sent. Stop/Start to apply the table.", true)
+                                        }
                                     }
                                     font.family: root.uiFont
                                     font.pixelSize: 9
@@ -1080,21 +1094,21 @@ ApplicationWindow {
 
                         ColumnLayout {
                             Layout.fillWidth: true
-                            // Stack Voltage and Current vertically; allocate
-                            // the available height between the two matrices.
-                            Layout.fillHeight: true
-                            Layout.preferredHeight: root.compactLayout ? 350 : 450
-                            // Allow 960x620 minimum viewport to shrink without
-                            // clipping timing and quality rows; on larger
-                            // viewports this column expands into spare space.
-                            Layout.minimumHeight: root.compactLayout ? 180 : 210
+                            // Two stacked tables consume their actual content
+                            // heights, never stretch four tiny rows into an
+                            // oversized empty card at tall window sizes.
+                            Layout.fillHeight: false
+                            Layout.preferredHeight: root.compactLayout ? 378 : 410
+                            Layout.maximumHeight: 420
+                            Layout.minimumHeight: root.compactLayout ? 340 : 370
                             spacing: 8
                             SignalMatrix {
                                 id: voltageMatrix
                                 enabled: !workflowBar.startQueued
                                 objectName: "studioVoltageMatrix"
                                 Layout.fillWidth: true
-                                Layout.fillHeight: true
+                                Layout.fillHeight: false
+                                Layout.preferredHeight: root.compactLayout ? 181 : 196
                                 theme: studioTheme
                                 controller: root
                                 device: device
@@ -1113,7 +1127,8 @@ ApplicationWindow {
                                 enabled: !workflowBar.startQueued
                                 objectName: "studioCurrentMatrix"
                                 Layout.fillWidth: true
-                                Layout.fillHeight: true
+                                Layout.fillHeight: false
+                                Layout.preferredHeight: root.compactLayout ? 181 : 196
                                 theme: studioTheme
                                 controller: root
                                 device: device
