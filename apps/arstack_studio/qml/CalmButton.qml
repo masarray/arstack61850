@@ -41,9 +41,12 @@ Button {
                                         tone === "accent" ? "#dcebff" : theme.textSoft
 
     contentItem: Row {
-        // Center the complete icon+caption pair in both axes in Qt Controls.
-        anchors.centerIn: parent
+        // Controls own content geometry; use its assigned rect instead of
+        // anchoring inside a managed contentItem (invalid on some Qt styles).
+        anchors.fill: parent
         spacing: control.iconSource.toString().length > 0 ? 7 : 0
+        // Row is sized to the center, children remain vertically centered.
+        leftPadding: Math.max(0, (width - implicitWidth) / 2)
         Image {
             visible: control.iconSource.toString().length > 0
             width: control.iconSize
