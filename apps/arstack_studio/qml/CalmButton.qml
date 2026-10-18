@@ -22,6 +22,7 @@ Button {
     Behavior on scale { NumberAnimation { duration: 70; easing.type: Easing.OutCubic } }
 
     readonly property color activeFill: !enabled ? "#10161d" :
+                                        hovered ? "#f0f6ff" :
                                         tone === "success" ? (hovered ? "#1e5c43" : "#194d38") :
                                         tone === "danger" ? (hovered ? "#523039" : theme.redSoft) :
                                         tone === "accent" ? (hovered ? "#1d3c5e" : theme.accentSoft) :
@@ -32,6 +33,7 @@ Button {
                                         tone === "accent" ? "#315f8d" :
                                         (activeFocus ? theme.accent : hovered ? "#3a4a5b" : theme.line)
     readonly property color activeText: !enabled ? theme.muted2 :
+                                        hovered ? "#132233" :
                                         tone === "success" ? "#d6f4e6" :
                                         tone === "danger" ? "#ffdce0" :
                                         tone === "accent" ? "#dcebff" : theme.textSoft
@@ -44,7 +46,9 @@ Button {
             width: control.iconSize
             height: control.iconSize
             anchors.verticalCenter: parent.verticalCenter
-            source: control.iconSource
+            source: control.hovered && control.enabled
+                ? control.iconSource.toString().replace("/assets/material/", "/assets/material_dark/")
+                : control.iconSource
             sourceSize.width: control.iconSize * 2
             sourceSize.height: control.iconSize * 2
             opacity: control.enabled ? 0.94 : 0.30
