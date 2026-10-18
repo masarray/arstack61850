@@ -38,14 +38,15 @@ Button {
         : tone === "warning" ? "#f5daaa"
         : tone === "danger" ? "#ffe3e6"
         : tone === "accent" || checked ? "#e1f1ff" : theme.textSoft
-    contentItem: ColumnLayout {
-        spacing: 3
+    contentItem: Column {
+        spacing: 4
+        anchors.centerIn: parent
         Image {
             visible: control.iconSource.toString().length > 0
             source: control.hovered && control.enabled ? control.hoverPath : control.iconSource
-            Layout.alignment: Qt.AlignHCenter
-            Layout.preferredWidth: 24
-            Layout.preferredHeight: 24
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: 24
+            height: 24
             sourceSize.width: 48
             sourceSize.height: 48
             opacity: control.enabled ? 1 : 0.3
@@ -56,7 +57,7 @@ Button {
             text: control.text
             color: control.textColor
             font: control.font
-            Layout.alignment: Qt.AlignHCenter
+            anchors.horizontalCenter: parent.horizontalCenter
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
