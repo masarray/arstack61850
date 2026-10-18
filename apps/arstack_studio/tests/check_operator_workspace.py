@@ -87,8 +87,19 @@ def main() -> None:
     require("anchors.centerIn: parent" in calm,
             "button caption needs horizontal centering")
     require("root.sendSignal(group, row)" in main_qml
-            and "Layout.fillHeight: false" in main_qml,
-            "table and sent phases must remain consistent")
+            and "Layout.fillHeight: false" in main_qml
+            and "Layout.preferredHeight: root.compactLayout ? 181 : 196" in main_qml,
+            "tables and live sent phases must use explicit bounded layout")
+    require('property bool ptpDefaultPending: true' in main_qml
+            and 'root.startPtpRole("SOURCE")' in main_qml
+            and "device.deviceVerified" in main_qml,
+            "default PTP must reuse verified session ownership")
+    device_cpp = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
+    require('commands << QStringLiteral("FREQ %1")' in device_cpp
+            and "const double phase = row.at(1).toDouble(&phaseOk);" in device_cpp
+            and "const double angleMdeg = phaseDegrees * 1000.0;" in device_cpp
+            and "commands << QStringLiteral(\"START\");" in device_cpp,
+            "START must send actual eight model phases as millidegree SET commands before START")
     matrix = source("SignalMatrix.qml")
     require("Layout.fillHeight: true" in matrix
             and "Layout.minimumHeight: 34" in matrix
