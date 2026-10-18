@@ -36,6 +36,9 @@ CheckBox {
             font.weight: Font.Bold
         }
     }
+    // Disable native platform hover/ripple background: the custom indicator
+    // is the ONLY checkbox affordance in hover and non-hover states.
+    background: Item {}
     contentItem: Text {
         leftPadding: control.indicator.width + control.spacing
         text: control.text
