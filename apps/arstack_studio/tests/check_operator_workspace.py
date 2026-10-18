@@ -82,9 +82,9 @@ def main() -> None:
     require("Layout.preferredWidth: bar.compact ? 232 : 286" in ribbon
             and "font.pixelSize: bar.compact ? 21 : 25" in ribbon,
             "operator brand/logo must stay legible")
-    require("display: AbstractButton.IconOnly" in checkbox,
+    require("indicator: Rectangle {" in checkbox,
             "checkbox must keep one stable custom indicator on hover")
-    require("leftPadding: Math.max(0, (width - implicitWidth) / 2)" in calm,
+    require("anchors.centerIn: parent" in calm,
             "button caption needs horizontal centering")
     require("root.sendSignal(group, row)" in main_qml
             and "Layout.fillHeight: false" in main_qml,
