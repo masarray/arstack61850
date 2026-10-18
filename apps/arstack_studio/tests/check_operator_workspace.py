@@ -155,7 +155,8 @@ def main() -> None:
             "scenario editors and shortcuts must be frozen during a pending START snapshot")
     require("controller.pendingApply = true" in workflow
             and "smartSession.requestStartWithScenario(" in workflow
-            and "controller.startScenarioSnapshot())" in workflow
+            and "const scenario = controller.startScenarioSnapshot()" in workflow
+            and "if (!scenario) return" in workflow
             and "controller.applyAllSignals()" not in workflow
             and "startWatchdog" in workflow and "onRunningChanged()" in workflow,
             "reconnect must not auto-transmit, but one-click Start must stage a bounded scenario")
