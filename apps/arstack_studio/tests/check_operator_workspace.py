@@ -104,6 +104,14 @@ def main() -> None:
             and "Firmware recovery" in ribbon_qml,
             "never infer missing firmware from USB timeout; retry identification and prioritize semantic-verified ports")
     main_qml = source("Main.qml")
+    host_controller = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
+    host_header = (STUDIO / "src/DeviceController.hpp").read_text(encoding="utf-8")
+    studio_controller = (STUDIO / "src/StudioDeviceController.hpp").read_text(encoding="utf-8")
+    require("frequencyWithinFirmwareContract" in host_header
+            and "hz == 0.0 || (hz >= 1.0 && hz <= 1000.0)" in host_controller
+            and "frequencyWithinFirmwareContract(hz)" in studio_controller
+            and "value === 0 || (value >= 1.0 && value <= 1000.0)" in main_qml,
+            "frequency validation must never send 0<Hz<1 that the firmware rejects")
     preview = source("SignalPreview.qml")
     tray = source("StudioTimingTray.qml")
     expert = source("PtpExpertPanel.qml")
