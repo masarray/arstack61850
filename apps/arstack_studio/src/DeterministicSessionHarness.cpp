@@ -769,6 +769,22 @@ private:
                dcNegative == QStringLiteral("SET IA -1000 0 0");
     }
 
+    static bool svPriorityStopBypassesFullQueue() {
+        DeviceIoWorker worker;
+        for (int i = 0; i < DeviceIoWorker::commandQueueCapacity(); ++i) {
+            worker.commandQueue_.enqueue(DeviceIoWorker::PendingCommand{
+                QStringLiteral("CFG SET IA 1000 0 0"),
+                QByteArrayLiteral("CFG SET IA 1000 0 0\\n"), false, true});
+        }
+        worker.exclusiveCommandsRemaining_ = DeviceIoWorker::commandQueueCapacity();
+        worker.queuePrioritySvStop();
+        const bool cancelled = worker.commandQueue_.isEmpty() &&
+                               worker.exclusiveCommandsRemaining_ == 0 &&
+                               worker.svStopPending_;
+        worker.queuePrioritySvStop();
+        return cancelled && worker.svStopPending_ && worker.commandQueue_.isEmpty();
+    }
+
     static bool ptpSafetyStopBypassesFullQueue() {
         DeviceIoWorker worker;
         for (int i = 0; i < DeviceIoWorker::commandQueueCapacity(); ++i) {
