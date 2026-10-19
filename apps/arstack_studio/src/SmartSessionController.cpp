@@ -47,7 +47,9 @@ bool SmartSessionController::profileGenerationAdvanced(
     bool baselineOk = false;
     const qulonglong baselineGeneration = baseline.trimmed().toULongLong(&baselineOk);
     if (!baselineOk) return true;
-    return observedGeneration != baselineGeneration;
+    // Within one verified boot epoch, a committed profile generation must
+    // strictly advance. Rollback is stale evidence, not a successful sync.
+    return observedGeneration > baselineGeneration;
 }
 
 SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent) {
