@@ -463,7 +463,7 @@ void handle_line(char* line) noexcept {
             std::uint64_t token{};
             if (!parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), token, 10) ||
                 has_extra_token(&save) ||
-                !g_scenario_txn.readback_matches(g_signal_bank, token, monotonic_ms())) {
+                !g_scenario_txn.confirm_readback(g_signal_bank, token, monotonic_ms())) {
                 ESP_LOGE(kTag, "CFG READBACK rejected"); return;
             }
             ESP_LOGI(kTag, "CFG READBACK token=%llu hash=%016llX generation=%llu boot=%016llX",
