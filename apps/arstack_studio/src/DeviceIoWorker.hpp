@@ -165,6 +165,7 @@ private:
         bool exclusive,
         bool reportRejection);
     void queuePriorityPtpStop();
+    void queuePrioritySvStop();
     void pumpWriteQueue();
     void completeActiveWrite();
     void processReadyRead();
