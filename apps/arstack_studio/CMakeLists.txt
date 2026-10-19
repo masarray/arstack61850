@@ -54,6 +54,17 @@ qt_add_executable(arstack_session_harness
     ${ARSTACK_STUDIO_CORE_SOURCES}
 )
 
+# Offline production wire decoder regression (no Npcap or hardware required).
+qt_add_executable(arstack_capture_harness
+    src/SvCaptureHarness.cpp
+    src/SvCaptureController.cpp
+    src/SvCaptureController.hpp
+)
+target_link_libraries(arstack_capture_harness PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Concurrent
+)
+target_compile_features(arstack_capture_harness PRIVATE cxx_std_20)
+
 # RC2 is a fail-closed evidence evaluator, not a hardware simulator. CI self-tests
 # its acceptance policy; a physical run feeds the same executable a machine-readable
 # evidence JSON collected from Studio telemetry and an independent SV capture.
