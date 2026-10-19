@@ -781,6 +781,12 @@ void publisher_task(void* argument) {
         if (pending_ticks == 0U && live_tx_running()) continue;
 
         if (take_start_request()) {
+            // STOP/expired lease may have canceled START after it was queued.
+            // Never resurrect an output session from a stale notification.
+            if (!live_tx_running()) {
+                stop_sample_clock(sample_clock);
+                continue;
+            }
 #if AR_SV_PTP_PHASE_SUPPORTED
             const auto now_lease = read_ptp_epoch_clock_lease();
             const auto requested_profile = runtime_profile_snapshot();
@@ -804,15 +810,21 @@ void publisher_task(void* argument) {
             active_profile = runtime_profile_snapshot();
             if (!runtime_profile_validate(active_profile)) {
                 ESP_LOGE(kTag, "START rejected: active runtime profile is invalid");
+                stop_sample_clock(sample_clock);
+                live_control_force_stop();
                 continue;
             }
             if (!build_packet_template(source_mac, active_profile, false, false, canonical)) {
                 ESP_LOGE(kTag, "START rejected: canonical template build failed");
+                stop_sample_clock(sample_clock);
+                live_control_force_stop();
                 continue;
             }
 #if CONFIG_AR_SMV_BROADCAST_MIRROR
             if (!build_packet_template(source_mac, active_profile, true, true, mirror)) {
                 ESP_LOGE(kTag, "START rejected: diagnostic mirror template build failed");
+                stop_sample_clock(sample_clock);
+                live_control_force_stop();
                 continue;
             }
 #endif
@@ -852,6 +864,11 @@ void publisher_task(void* argument) {
                      static_cast<unsigned>(active_profile.vlan_priority),
                      static_cast<unsigned>(canonical.bytes.size()));
 
+            // An operator STOP during template preparation wins over START.
+            if (!live_tx_running()) {
+                stop_sample_clock(sample_clock);
+                continue;
+            }
             // Timer commit is the final operation in this branch.
             // Formatting the profile log after timer enable previously queued
             // dozens of ISR notifications before the publisher could consume
