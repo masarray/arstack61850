@@ -329,6 +329,14 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
             "capabilities=SMV-4I4V,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO"),
         rejectedIdentity);
 
+    const bool frequencyMatchesFirmware =
+        DeviceController::frequencyWithinFirmwareContract(0.0) &&
+        !DeviceController::frequencyWithinFirmwareContract(0.5) &&
+        !DeviceController::frequencyWithinFirmwareContract(-1.0) &&
+        DeviceController::frequencyWithinFirmwareContract(1.0) &&
+        DeviceController::frequencyWithinFirmwareContract(50.0) &&
+        DeviceController::frequencyWithinFirmwareContract(1000.0) &&
+        !DeviceController::frequencyWithinFirmwareContract(1000.001);
     const bool boundedIdentifyPolicy =
         DeviceController::identityMaxAttempts() == 5 &&
         DeviceController::identityRetryIntervalMs() == 1100 &&
@@ -438,7 +446,7 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
     if (!currentAccepted || !legacyRejectedAsCurrent || !protocolLegacyParsed ||
         !capabilityFailClosed || !rejectsWrongTarget || !rejectsMissingFirmware ||
         !rejectsMalformedBoot || !boundedIdentifyPolicy || !boundedProfileSyncPolicy ||
-        !workerPolicyAligned || !generationPolicy || !portOwnershipPolicy ||
+        !workerPolicyAligned || !frequencyMatchesFirmware || !generationPolicy || !portOwnershipPolicy ||
         !s6RecoveryPolicy || !singleInstancePolicy || !s7IntentPolicy) {
         qCritical().noquote()
             << "S1/S2/S3/S4/S5/S6/S7 control-plane contract: FAIL"
@@ -452,6 +460,7 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
             << "bounded-identify=" << boundedIdentifyPolicy
             << "bounded-profile-sync=" << boundedProfileSyncPolicy
             << "worker-policy-aligned=" << workerPolicyAligned
+            << "firmware-frequency-contract=" << frequencyMatchesFirmware
             << "generation-policy=" << generationPolicy
             << "port-owner-policy=" << portOwnershipPolicy
             << "s6-recovery-health=" << s6RecoveryPolicy
