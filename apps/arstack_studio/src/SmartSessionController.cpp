@@ -78,8 +78,10 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
     profileSyncTimer_.setSingleShot(true);
     connect(&profileSyncTimer_, &QTimer::timeout, this, [this] {
         if (profileSyncStage_ != ProfileSyncStage::deploying) return;
+        const QString progress = device_ == nullptr ? QStringLiteral("device unavailable")
+            : device_->profileDeploymentProgressSummary();
         handleProfileSyncAttemptFailure(QStringLiteral(
-            "Timed out waiting for the ESP32-P4 to arm a new profile generation."));
+            "Firmware profile acknowledgement timed out (%1).").arg(progress));
         reconcile();
     });
 
