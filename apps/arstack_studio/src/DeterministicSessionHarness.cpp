@@ -50,6 +50,9 @@ public:
             {"PTP STOP cancels pending start after verified readback", ptpGuidedStopCancelsStart()},
             {"ABC live SET encoder remains consistent and bounded", abcSetpointBatchContract()},
             {"bare SV START cannot bypass full 4I+4V scenario", bareSvStartIsRejected()},
+            {"SV scenario ACK chain ignores stale token and accepts matched proof", scenarioAckChainRequiresExactProof()},
+            {"SV scenario bad ACK and boot mismatch fail closed", scenarioAckFailureIsTerminal()},
+            {"SV scenario capability is mandatory", scenarioCapabilityIsRequired()},
             {"SV STOP cancels queued START despite full queue", svSafetyStopBypassesFullQueue()},
             {"PTP STOP full queue uses bounded priority slot", ptpSafetyStopBypassesFullQueue()},
             {"PTP STOP requires firmware ACK and stopped readback", ptpStopConfirmationCannotBeGuessed()},
@@ -694,6 +697,94 @@ private:
             f.device.lastError().contains(QStringLiteral("Bare START refused")) &&
             !f.session.requestStart() &&
             !f.device.running();
+    }
+
+
+    static bool scenarioCapabilityIsRequired() {
+        Fixture f;
+        if (!f.profileReady) return false;
+        auto current = identity();
+        current.capabilities.removeAll(QStringLiteral("SCENARIO-TX-V1"));
+        seedVerified(f, current, QStringLiteral("COM15"), false);
+        return !f.device.startWithScenario({}) &&
+            f.device.lastError().contains(QStringLiteral("SCENARIO-TX-V1")) &&
+            !f.device.running();
+    }
+
+    static bool scenarioAckChainRequiresExactProof() {
+        Fixture f;
+        if (!f.profileReady) return false;
+        seedVerified(f, identity(), QStringLiteral("COM15"), false);
+        auto& d = f.device;
+        // Only the exact same typed device/boot/profile generation can make
+        // the transport requests. No real COM is needed to parse fake ACKs.
+        d.ioWorkerReady_ = true;
+        constexpr quint32 token = 731U;
+        constexpr quint64 hash = 0x123456789ABCDEF0ULL;
+        d.scenarioPending_ = {token, hash, QString{},
+                              d.identity_.bootId, d.profileGeneration_, d.sessionGeneration_};
+        d.scenarioStartStage_ = DeviceController::ScenarioStartStage::awaiting_commit;
+        d.advanceScenarioStartup(QStringLiteral(
+            "SCENARIO COMMIT transaction=732 applied generation=9 hash=123456789ABCDEF0"));
+        if (d.scenarioStartStage_ != DeviceController::ScenarioStartStage::awaiting_commit ||
+            d.running()) return false;
+        d.advanceScenarioStartup(QStringLiteral(
+            "SCENARIO COMMIT transaction=731 applied generation=9 hash=123456789ABCDEF0"));
+        if (d.scenarioStartStage_ != DeviceController::ScenarioStartStage::awaiting_readback ||
+            d.running()) return false;
+        d.advanceScenarioStartup(QStringLiteral(
+            "SCENARIO READBACK transaction=730 generation=9 hash=123456789ABCDEF0"));
+        if (d.scenarioStartStage_ != DeviceController::ScenarioStartStage::awaiting_readback)
+            return false;
+        d.advanceScenarioStartup(QStringLiteral(
+            "SCENARIO READBACK transaction=731 generation=9 hash=123456789ABCDEF0"));
+        if (d.scenarioStartStage_ != DeviceController::ScenarioStartStage::awaiting_start ||
+            d.running()) return false;
+        d.advanceScenarioStartup(QStringLiteral(
+            "SCENARIO START transaction=732 accepted generation=9 hash=123456789ABCDEF0"));
+        if (d.scenarioStartStage_ != DeviceController::ScenarioStartStage::awaiting_start ||
+            d.running()) return false;
+        d.advanceScenarioStartup(QStringLiteral(
+            "SCENARIO START transaction=731 accepted generation=9 hash=123456789ABCDEF0"));
+        return d.scenarioStartStage_ == DeviceController::ScenarioStartStage::idle &&
+            d.running();
+    }
+
+    static bool scenarioAckFailureIsTerminal() {
+        Fixture f;
+        if (!f.profileReady) return false;
+        seedVerified(f, identity(), QStringLiteral("COM15"), false);
+        auto& d = f.device;
+        d.ioWorkerReady_ = true;
+        constexpr quint32 token = 731U;
+        constexpr quint64 hash = 0x123456789ABCDEF0ULL;
+        d.scenarioPending_ = {token, hash, QString{},
+                              d.identity_.bootId, d.profileGeneration_, d.sessionGeneration_};
+        d.scenarioStartStage_ = DeviceController::ScenarioStartStage::awaiting_commit;
+        d.advanceScenarioStartup(QStringLiteral(
+            "SCENARIO COMMIT transaction=731 applied generation=9 hash=FFFFFFFFFFFFFFFF"));
+        if (d.scenarioStartStage_ != DeviceController::ScenarioStartStage::idle ||
+            d.running() || !d.lastError_.contains(QStringLiteral("hash"))) return false;
+
+        d.scenarioPending_ = {token, hash, QString{},
+                              d.identity_.bootId, d.profileGeneration_, d.sessionGeneration_};
+        d.scenarioStartStage_ = DeviceController::ScenarioStartStage::awaiting_commit;
+        d.identity_.bootId = QStringLiteral("FFFFFFFFFFFFFFFF");
+        d.advanceScenarioStartup(QStringLiteral(
+            "SCENARIO COMMIT transaction=731 applied generation=9 hash=123456789ABCDEF0"));
+        if (d.scenarioStartStage_ != DeviceController::ScenarioStartStage::idle ||
+            d.running() || !d.lastError_.contains(QStringLiteral("identity"))) return false;
+
+        d.identity_.bootId = d.scenarioPending_.bootId; // reset cleared pending!
+        d.scenarioPending_ = {token, hash, QString{},
+                              QStringLiteral("0123456789ABCDEF"),
+                              d.profileGeneration_, d.sessionGeneration_};
+        d.identity_.bootId = QStringLiteral("0123456789ABCDEF");
+        d.scenarioStartStage_ = DeviceController::ScenarioStartStage::awaiting_commit;
+        d.advanceScenarioStartup(QStringLiteral("SCENARIO transaction=731 rejected COMMIT reason=4"));
+        return d.scenarioStartStage_ == DeviceController::ScenarioStartStage::idle &&
+            !d.running() &&
+            d.lastError_.contains(QStringLiteral("rejected"));
     }
 
     static bool svSafetyStopBypassesFullQueue() {
