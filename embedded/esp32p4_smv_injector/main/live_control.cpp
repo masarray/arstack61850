@@ -3,6 +3,7 @@
 #include "live_control.hpp"
 #include "ethernet_port.h"
 #include "profile_control.hpp"
+#include "ariec61850/sampled_values/live_scenario_transaction.hpp"
 
 #include "esp_app_desc.h"
 #include "esp_log.h"
@@ -32,6 +33,7 @@ namespace {
 
 using ar::iec61850::sampled_values::SvLiveSignalBank;
 using ar::iec61850::sampled_values::SvLiveSignalState;
+using ar::iec61850::sampled_values::SvLiveScenarioTransaction;
 using ar::iec61850::sampled_values::live_channel_index;
 
 constexpr char kTag[] = "ar_smv_ctrl";
@@ -43,6 +45,7 @@ constexpr std::uint64_t kControlLeaseTimeoutUs =
     static_cast<std::uint64_t>(kControlLeaseTimeoutMs) * 1000ULL;
 
 SvLiveSignalBank g_signal_bank;
+SvLiveScenarioTransaction g_scenario; // control task only; publisher reads g_signal_bank
 std::atomic<bool> g_running{false};
 std::atomic<bool> g_start_request{false};
 std::atomic<TaskHandle_t> g_publisher_task{nullptr};
@@ -219,6 +222,7 @@ void print_help() noexcept {
     ESP_LOGI(kTag, "Live control commands (bench serial transport):");
     ESP_LOGI(kTag, "  IDENTIFY | START | STOP | SHOW | ZERO | HELP");
     ESP_LOGI(kTag, "  FREQ <millihertz>");
+    ESP_LOGI(kTag, "  SCENARIO BEGIN <token> | COMMIT <token> <hash64> | SHOW <token> | START <token> <hash64> | ABORT <token>");
     ESP_LOGI(kTag, "  SET <IA|IB|IC|IN|UA|UB|UC|UN> <rms_wire_counts> <phase_mdeg> [quality]");
     ESP_LOGI(kTag, "  ENABLE <channel> <0|1>");
     ESP_LOGI(kTag, "  QUALITY <channel> <uint32/0xhex>");
@@ -238,12 +242,12 @@ void print_identity() noexcept {
     const char* version = app != nullptr ? app->version : "unknown";
 #if CONFIG_AR_PTP_LAB_TX
     const char* capabilities = g_control_lease_timer != nullptr
-        ? "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO,PROFILE-BINARY-V1"
-        : "SMV-4I4V,PROFILE,LIVE-SETPOINTS,PTP-P2,SMPSYNCH-AUTO,PROFILE-BINARY-V1";
+        ? "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SCENARIO-TX-V1,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO,PROFILE-BINARY-V1"
+        : "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SCENARIO-TX-V1,PTP-P2,SMPSYNCH-AUTO,PROFILE-BINARY-V1";
 #else
     const char* capabilities = g_control_lease_timer != nullptr
-        ? "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE,PROFILE-BINARY-V1"
-        : "SMV-4I4V,PROFILE,LIVE-SETPOINTS,PROFILE-BINARY-V1";
+        ? "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SCENARIO-TX-V1,SESSION-LEASE,PROFILE-BINARY-V1"
+        : "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SCENARIO-TX-V1,PROFILE-BINARY-V1";
 #endif
     ESP_LOGI(kTag,
              "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 device_id=%02X%02X%02X%02X%02X%02X firmware=%s build=%s boot_id=%016llX capabilities=%s",
@@ -371,6 +375,112 @@ void handle_ptp_command(char* save) noexcept {
     ESP_LOGE(kTag, "Unknown or unavailable PTP subcommand '%s'", subcommand);
 }
 
+
+bool parse_hash64(const char* text, std::uint64_t& value) noexcept {
+    if (text == nullptr || *text == '\0' || *text == '-') return false;
+    errno = 0;
+    char* end{};
+    const unsigned long long parsed = std::strtoull(text, &end, 16);
+    if (errno != 0 || end == text || *end != '\0') return false;
+    value = static_cast<std::uint64_t>(parsed);
+    return true;
+}
+
+void handle_scenario_command(char* save) noexcept {
+    char* sub = strtok_r(nullptr, kTokenDelimiters.data(), &save);
+    if (sub == nullptr) {
+        ESP_LOGE(kTag, "SCENARIO rejected: missing subcommand");
+        g_scenario.poison();
+        return;
+    }
+    uppercase_ascii(sub);
+    char* token_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
+    std::uint32_t token{};
+    if (!parse_u32(token_text, token) || token == 0U) {
+        ESP_LOGE(kTag, "SCENARIO rejected: invalid token");
+        g_scenario.poison();
+        return;
+    }
+    if (std::strcmp(sub, "BEGIN") == 0) {
+        if (has_extra_token(&save) || g_running.load(std::memory_order_acquire) ||
+            !g_scenario.begin(token, g_signal_bank)) {
+            ESP_LOGE(kTag, "SCENARIO transaction=%lu rejected BEGIN", static_cast<unsigned long>(token));
+            return;
+        }
+        ESP_LOGI(kTag, "SCENARIO BEGIN transaction=%lu accepted", static_cast<unsigned long>(token));
+        return;
+    }
+    if (std::strcmp(sub, "ABORT") == 0) {
+        if (has_extra_token(&save) || (g_scenario.active() && g_scenario.token() != token) ||
+            (!g_scenario.active() && g_scenario.applied_token() != token)) {
+            ESP_LOGE(kTag, "SCENARIO transaction=%lu rejected ABORT", static_cast<unsigned long>(token));
+            return;
+        }
+        g_scenario.invalidate();
+        ESP_LOGI(kTag, "SCENARIO ABORT transaction=%lu accepted", static_cast<unsigned long>(token));
+        return;
+    }
+    if (std::strcmp(sub, "SHOW") == 0) {
+        if (has_extra_token(&save) || g_scenario.applied_token() != token ||
+            !g_scenario.matches_applied(token, g_scenario.applied_hash(), g_signal_bank)) {
+            ESP_LOGE(kTag, "SCENARIO transaction=%lu rejected READBACK", static_cast<unsigned long>(token));
+            return;
+        }
+        ESP_LOGI(kTag, "SCENARIO READBACK transaction=%lu generation=%llu hash=%016llX",
+            static_cast<unsigned long>(token),
+            static_cast<unsigned long long>(g_scenario.applied_generation()),
+            static_cast<unsigned long long>(g_scenario.applied_hash()));
+        return;
+    }
+    char* hash_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
+    std::uint64_t hash{};
+    if (!parse_hash64(hash_text, hash) || has_extra_token(&save)) {
+        ESP_LOGE(kTag, "SCENARIO transaction=%lu rejected: malformed hash", static_cast<unsigned long>(token));
+        g_scenario.poison();
+        return;
+    }
+    if (std::strcmp(sub, "COMMIT") == 0) {
+        const auto result = g_scenario.commit(token, hash, g_signal_bank);
+        if (result != SvLiveScenarioTransaction::CommitResult::applied) {
+            ESP_LOGE(kTag, "SCENARIO transaction=%lu rejected COMMIT reason=%u",
+                static_cast<unsigned long>(token), static_cast<unsigned>(result));
+            return;
+        }
+        ESP_LOGI(kTag, "SCENARIO COMMIT transaction=%lu applied generation=%llu hash=%016llX",
+            static_cast<unsigned long>(token),
+            static_cast<unsigned long long>(g_scenario.applied_generation()),
+            static_cast<unsigned long long>(g_scenario.applied_hash()));
+        return;
+    }
+    if (std::strcmp(sub, "START") == 0) {
+        if (g_running.load(std::memory_order_acquire) ||
+            !g_scenario.matches_applied(token, hash, g_signal_bank) ||
+            !arm_control_lease_if_fresh()) {
+            ESP_LOGE(kTag, "SCENARIO transaction=%lu rejected START", static_cast<unsigned long>(token));
+            return;
+        }
+        profile_control_abort_staging();
+        g_start_request.store(true, std::memory_order_release);
+        g_running.store(true, std::memory_order_release);
+        wake_publisher();
+        ESP_LOGI(kTag, "SCENARIO START transaction=%lu accepted generation=%llu hash=%016llX",
+            static_cast<unsigned long>(token),
+            static_cast<unsigned long long>(g_scenario.applied_generation()),
+            static_cast<unsigned long long>(hash));
+        return;
+    }
+    ESP_LOGE(kTag, "SCENARIO transaction=%lu rejected unknown subcommand", static_cast<unsigned long>(token));
+    g_scenario.poison();
+}
+
+struct ScenarioMutationGuard final {
+    bool staged{};
+    bool succeeded{};
+    ~ScenarioMutationGuard() noexcept {
+        if (staged && !succeeded) g_scenario.poison();
+    }
+};
+
 void print_state() noexcept {
     const auto state = g_signal_bank.snapshot();
     ESP_LOGI(kTag,
@@ -396,6 +506,7 @@ bool publish_state(const SvLiveSignalState& state) noexcept {
         ESP_LOGE(kTag, "Rejected live signal update: value validation failed");
         return false;
     }
+    g_scenario.invalidate(); // legacy edits revoke any prior commit/readback token
     const auto active = g_signal_bank.snapshot();
     ESP_LOGI(kTag, "Live signal generation %llu committed",
              static_cast<unsigned long long>(active.generation));
@@ -407,6 +518,13 @@ void handle_line(char* line) noexcept {
     char* command = strtok_r(line, kTokenDelimiters.data(), &save);
     if (command == nullptr) return;
     uppercase_ascii(command);
+    const bool staged_mutation = g_scenario.active() &&
+        (std::strcmp(command, "FREQ") == 0 ||
+         std::strcmp(command, "SET") == 0 ||
+         std::strcmp(command, "ENABLE") == 0 ||
+         std::strcmp(command, "QUALITY") == 0 ||
+         std::strcmp(command, "SHAPE") == 0);
+    ScenarioMutationGuard guard{staged_mutation, false};
 
     if (std::strcmp(command, "HEARTBEAT") == 0) {
         if (has_extra_token(&save)) {
@@ -423,7 +541,16 @@ void handle_line(char* line) noexcept {
         return;
     }
 
+    if (std::strcmp(command, "SCENARIO") == 0) {
+        handle_scenario_command(save);
+        return;
+    }
     if (std::strcmp(command, "START") == 0) {
+        if (g_scenario.active()) {
+            g_scenario.poison();
+            ESP_LOGE(kTag, "START rejected: incomplete SCENARIO transaction");
+            return;
+        }
         if (has_extra_token(&save)) {
             ESP_LOGE(kTag, "Usage: START");
             return;
@@ -446,6 +573,7 @@ void handle_line(char* line) noexcept {
         }
         g_running.store(false, std::memory_order_release);
         disarm_control_lease();
+        g_scenario.invalidate();
         wake_publisher();
         ESP_LOGI(kTag, "STOP accepted: SV transmission suppressed");
         return;
@@ -467,14 +595,29 @@ void handle_line(char* line) noexcept {
         return;
     }
     if (std::strcmp(command, "PROFILE") == 0) {
+        if (g_scenario.active()) {
+            g_scenario.poison();
+            ESP_LOGE(kTag, "PROFILE rejected while SCENARIO staging is active");
+            return;
+        }
         handle_profile_command(save);
         return;
     }
     if (std::strcmp(command, "PTP") == 0) {
+        if (g_scenario.active()) {
+            g_scenario.poison();
+            ESP_LOGE(kTag, "PTP rejected while SCENARIO staging is active");
+            return;
+        }
         handle_ptp_command(save);
         return;
     }
     if (std::strcmp(command, "ZERO") == 0) {
+        if (g_scenario.active()) {
+            g_scenario.poison();
+            ESP_LOGE(kTag, "ZERO rejected while SCENARIO staging is active");
+            return;
+        }
         if (has_extra_token(&save)) {
             ESP_LOGE(kTag, "Usage: ZERO");
             return;
@@ -491,9 +634,17 @@ void handle_line(char* line) noexcept {
             ESP_LOGE(kTag, "Usage: FREQ <millihertz>");
             return;
         }
-        auto state = g_signal_bank.snapshot();
-        state.frequency_millihz = frequency;
-        static_cast<void>(publish_state(state));
+        if (g_scenario.active()) {
+            if (!g_scenario.set_frequency(frequency)) {
+                ESP_LOGE(kTag, "SCENARIO staged frequency rejected");
+                return;
+            }
+            guard.succeeded = true;
+        } else {
+            auto state = g_signal_bank.snapshot();
+            state.frequency_millihz = frequency;
+            static_cast<void>(publish_state(state));
+        }
         return;
     }
 
@@ -522,13 +673,21 @@ void handle_line(char* line) noexcept {
             ESP_LOGE(kTag, "Usage: SHAPE CT <0|1> <dc_permille> <harmonic_permille> <order> <clip_permille>");
             return;
         }
-        auto state = g_signal_bank.snapshot();
+        auto state = g_scenario.active() ? g_scenario.staged() : g_signal_bank.snapshot();
         state.current_shape.enabled = enabled != 0U;
         state.current_shape.dc_offset_permille = dc_offset;
         state.current_shape.harmonic_permille = harmonic;
         state.current_shape.harmonic_order = static_cast<std::uint8_t>(order);
         state.current_shape.clip_permille = clip;
-        static_cast<void>(publish_state(state));
+        if (g_scenario.active()) {
+            if (!g_scenario.set_shape(state.current_shape)) {
+                ESP_LOGE(kTag, "SCENARIO staged CT shape rejected");
+                return;
+            }
+            guard.succeeded = true;
+        } else {
+            static_cast<void>(publish_state(state));
+        }
         ESP_LOGI(kTag, "CT saturation shape %s: DC=%ld.%u%% H%u=%lu.%u%% clip=%lu.%u%%",
                  enabled ? "enabled" : "disabled",
                  static_cast<long>(dc_offset / 10), static_cast<unsigned>(std::abs(dc_offset % 10)),
@@ -553,7 +712,7 @@ void handle_line(char* line) noexcept {
             return;
         }
 
-        auto state = g_signal_bank.snapshot();
+        auto state = g_scenario.active() ? g_scenario.staged() : g_signal_bank.snapshot();
         auto& channel = state.channels[*channel_index];
         if (std::strcmp(command, "SET") == 0) {
             char* rms_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
@@ -577,7 +736,15 @@ void handle_line(char* line) noexcept {
             channel.rms_counts = rms;
             channel.phase_millidegrees = phase;
             if (quality_text != nullptr) channel.quality = quality;
-            static_cast<void>(publish_state(state));
+            if (g_scenario.active()) {
+                if (!g_scenario.set_channel(*channel_index, rms, phase, channel.quality)) {
+                    ESP_LOGE(kTag, "SCENARIO staged SET rejected");
+                    return;
+                }
+                guard.succeeded = true;
+            } else {
+                static_cast<void>(publish_state(state));
+            }
             return;
         }
 
@@ -589,7 +756,15 @@ void handle_line(char* line) noexcept {
                 return;
             }
             channel.enabled = enabled != 0U;
-            static_cast<void>(publish_state(state));
+            if (g_scenario.active()) {
+                if (!g_scenario.set_enabled(*channel_index, channel.enabled)) {
+                    ESP_LOGE(kTag, "SCENARIO staged ENABLE rejected");
+                    return;
+                }
+                guard.succeeded = true;
+            } else {
+                static_cast<void>(publish_state(state));
+            }
             return;
         }
 
@@ -599,11 +774,16 @@ void handle_line(char* line) noexcept {
             ESP_LOGE(kTag, "Usage: QUALITY <channel> <uint32/0xhex>");
             return;
         }
+        if (g_scenario.active()) {
+            ESP_LOGE(kTag, "SCENARIO QUALITY rejected: quality must be included in SET");
+            return; // guard poisons the transaction
+        }
         channel.quality = quality;
         static_cast<void>(publish_state(state));
         return;
     }
 
+    if (g_scenario.active()) g_scenario.poison();
     ESP_LOGW(kTag, "Unknown command '%s'; type HELP", command);
 }
 
@@ -618,6 +798,7 @@ void live_control_initialize(
     for (std::size_t index = 4U; index < 7U; ++index) initial.channels[index].rms_counts = voltage_rms_counts;
     initial.channels[7].rms_counts = 0;
     static_cast<void>(g_signal_bank.publish(initial));
+    g_scenario.invalidate();
     g_running.store(false, std::memory_order_release);
     g_start_request.store(false, std::memory_order_release);
     clear_control_session();
