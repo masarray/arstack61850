@@ -85,6 +85,24 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
         reconcile();
     });
 
+    // Retry timer never grants START; it only re-enters the verified
+    // profile handshake with bounded exponential-like backoff.
+    profileRetryTimer_.setSingleShot(true);
+    connect(&profileRetryTimer_, &QTimer::timeout, this, &SmartSessionController::reconcile);
+
+    // ACK progress alone must never keep PREPARING forever.
+    profileSyncTotalTimer_.setInterval(profileSyncHardDeadlineMs());
+    profileSyncTotalTimer_.setSingleShot(true);
+    connect(&profileSyncTotalTimer_, &QTimer::timeout, this, [this] {
+        if (profileSyncStage_ != ProfileSyncStage::deploying) return;
+        handleProfileSyncAttemptFailure(QStringLiteral(
+            "Profile preparation exceeded the absolute %1 ms safety deadline (%2).")
+            .arg(profileSyncHardDeadlineMs())
+            .arg(device_ == nullptr ? QStringLiteral("device missing")
+                                  : device_->profileDeploymentProgressSummary()));
+        reconcile();
+    });
+
     reconnectTimer_.setInterval(3000);
     reconnectTimer_.setSingleShot(true);
     connect(&reconnectTimer_, &QTimer::timeout, this, [this] {
@@ -123,6 +141,8 @@ void SmartSessionController::shutdown() {
     prepareTimer_.stop();
     reconnectTimer_.stop();
     profileSyncTimer_.stop();
+    profileRetryTimer_.stop();
+    profileSyncTotalTimer_.stop();
     firmwareHandoffWatchdog_.shutdown();
     deviceRecoveryMonitor_.shutdown();
     updateRequested_ = false;
@@ -987,6 +1007,8 @@ void SmartSessionController::latchFirmwareFailure(QString message) {
 
 void SmartSessionController::resetProfileSync(const bool requireSync) {
     profileSyncTimer_.stop();
+    profileRetryTimer_.stop();
+    profileSyncTotalTimer_.stop();
     profileSyncStage_ = ProfileSyncStage::idle;
     profileSyncAttempts_ = 0;
     profileSyncBaselineGeneration_.clear();
@@ -1013,6 +1035,8 @@ bool SmartSessionController::beginProfileSync(const QVariantMap& profile) {
     ++profileSyncAttempts_;
     profileSyncStage_ = ProfileSyncStage::deploying;
     profileSyncError_.clear();
+    profileRetryTimer_.stop();
+    profileSyncTotalTimer_.start();
 
     const bool accepted = device_->deployProfile(profile);
     if (!accepted) {
@@ -1042,6 +1066,8 @@ void SmartSessionController::handleProfileStateChanged() {
             !profileGenerationAdvanced(profileSyncBaselineGeneration_, observedGeneration)) return;
 
         profileSyncTimer_.stop();
+        profileSyncTotalTimer_.stop();
+        profileRetryTimer_.stop();
         profileSyncStage_ = ProfileSyncStage::idle;
         profileSyncAttempts_ = 0;
         profileSyncBaselineGeneration_ = observedGeneration;
@@ -1059,6 +1085,7 @@ void SmartSessionController::handleProfileStateChanged() {
 
 void SmartSessionController::handleProfileSyncAttemptFailure(QString reason) {
     profileSyncTimer_.stop();
+    profileSyncTotalTimer_.stop();
     if (profileSyncStage_ == ProfileSyncStage::failed) return;
 
     reason = reason.trimmed();
@@ -1067,8 +1094,11 @@ void SmartSessionController::handleProfileSyncAttemptFailure(QString reason) {
     if (profileSyncRetryAllowed(profileSyncAttempts_)) {
         profileSyncStage_ = ProfileSyncStage::idle;
         profileSyncError_ = reason;
+        // Start cool-down BEFORE notifying the device: profileStateChanged is
+        // synchronous and could otherwise immediately launch another attempt.
+        profileRetryTimer_.start(profileSyncBackoffMs(profileSyncAttempts_));
         if (device_ != nullptr && device_->profileDeploying()) device_->abandonProfileDeployment();
-        QTimer::singleShot(0, this, &SmartSessionController::reconcile);
+        reconcile();
         return;
     }
 
@@ -1078,6 +1108,8 @@ void SmartSessionController::handleProfileSyncAttemptFailure(QString reason) {
 
 void SmartSessionController::latchProfileSyncFailure(QString reason) {
     profileSyncTimer_.stop();
+    profileSyncTotalTimer_.stop();
+    profileRetryTimer_.stop();
     profileSyncStage_ = ProfileSyncStage::failed;
     needsProfileSync_ = true;
     reason = reason.trimmed();
@@ -1305,6 +1337,18 @@ void SmartSessionController::reconcile() {
                 : profileSyncError_,
             false,
             false);
+        return;
+    }
+
+    if (profileRetryTimer_.isActive()) {
+        setPresentation(
+            QStringLiteral("RECOVERING PROFILE"),
+            QStringLiteral("Profile attempt %1/%2 did not complete: %3. "
+                           "Checking session and retrying in %4 ms (no auto-START).")
+                .arg(profileSyncAttempts_).arg(profileSyncMaxAttempts())
+                .arg(profileSyncError_.left(160))
+                .arg(profileRetryTimer_.remainingTime()),
+            false, false);
         return;
     }
 
