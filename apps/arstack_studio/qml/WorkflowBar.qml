@@ -301,8 +301,15 @@ SurfacePanel {
     }
 
     function requestStop() {
-        if (ribbon.injectionRunning && !smartSession.requestStop())
-            controller.showMessage("Studio could not stop the current device session.", true)
+        // A pending CFG transaction can progress to START: Stop must remain
+        // actionable before RUNNING telemetry, not only after it.
+        if (!ribbon.injectionRunning && !ribbon.startQueued) return
+        if (!smartSession.requestStop()) {
+            controller.showMessage("Studio could not cancel the current device session.", true)
+            return
+        }
+        ribbon.startQueued = false
+        startWatchdog.stop()
     }
 
     function openEngineeringDialog() {
