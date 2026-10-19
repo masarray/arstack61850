@@ -36,7 +36,10 @@ Rectangle {
         if (session.state === "UPDATING FIRMWARE") return "Updating"
         if (session.state === "UPDATE NEEDS BOOT") return "Bootloader"
         if (session.state === "PREPARING 4I+4V") return "Preparing"
-        if (session.state === "PROFILE BLOCKED" || session.state === "PROFILE SYNC ERROR" || session.state === "SETUP ERROR") return "Attention"
+        if (session.state === "RECOVERING PROFILE") return "Retrying"
+        if (session.state === "PROFILE SYNC ERROR") return "Profile failed"
+        if (session.state === "PROFILE BLOCKED") return "Bad profile"
+        if (session.state === "SETUP ERROR") return "Setup failed"
         return workflow.displayState
     }
 
