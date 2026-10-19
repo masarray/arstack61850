@@ -1035,7 +1035,11 @@ void SmartSessionController::handleProfileStateChanged() {
 
     if (device_->profileArmed()) {
         const QString observedGeneration = device_->profileGeneration().trimmed();
-        if (!profileGenerationAdvanced(profileSyncBaselineGeneration_, observedGeneration)) return;
+        // For a fresh BINCOMMIT require generation advance. For a read-only
+        // canonical-content reuse the generation intentionally stays identical:
+        // the device already had exactly the requested profile.
+        if (!device_->profileWasReused() &&
+            !profileGenerationAdvanced(profileSyncBaselineGeneration_, observedGeneration)) return;
 
         profileSyncTimer_.stop();
         profileSyncStage_ = ProfileSyncStage::idle;
