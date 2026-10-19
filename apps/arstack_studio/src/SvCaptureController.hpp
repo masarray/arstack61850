@@ -29,7 +29,7 @@ public:
     [[nodiscard]] QString lastReport() const { return lastReport_; }
 
     Q_INVOKABLE void refreshInterfaces();
-    Q_INVOKABLE bool startCapture(int index, int seconds);
+    Q_INVOKABLE bool startCapture(int index, int seconds, const QVariantMap& studioTelemetry);
     Q_INVOKABLE void abortCapture();
     Q_INVOKABLE void openOutputFolder();
 
@@ -44,7 +44,8 @@ private:
     void decodeCapturedFile();
     static QVariantMap decodePcap(const QString& pcapFile, const QString& csvFile,
                                  const QString& secondsFile, const QString& jsonFile,
-                                 int requestedSeconds, const QString& adapter);
+                                 int requestedSeconds, const QString& adapter,
+                                 const QVariantMap& studioTelemetry);
     QProcess discovery_;
     QProcess capture_;
     QFutureWatcher<QVariantMap> decoder_;
@@ -59,6 +60,7 @@ private:
     QString activeSeconds_;
     QString activeJson_;
     QString activeAdapter_;
+    QVariantMap activeStudioTelemetry_;
     QString dumpcap_;
     int activeSecondsRequested_{0};
     bool abortRequested_{false};
