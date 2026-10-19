@@ -126,6 +126,7 @@ void DeviceIoWorker::shutdown(const bool requestSvStop, const bool requestPtpSto
     // during grandmaster shutdown. This runs once during teardown only.
     commandQueue_.clear();
     ptpStopPending_ = false;
+    svStopPending_ = false;
     if ((requestSvStop || requestPtpStop) && serial_ != nullptr && serial_->isOpen()) {
         const auto sendBoundedStop = [this](const QByteArray& command) {
             const qint64 queued = serial_->write(command);
@@ -378,6 +379,12 @@ bool DeviceIoWorker::enqueueCommandsInternal(
     if (commands.isEmpty()) return true;
 
     if (!exclusive && commands.size() == 1 &&
+        commands.constFirst().trimmed() == QStringLiteral("STOP")) {
+        // A STOP must not wait behind a saturated configuration queue.
+        queuePrioritySvStop();
+        return true;
+    }
+    if (!exclusive && commands.size() == 1 &&
         commands.constFirst().trimmed() == QStringLiteral("PTP STOP")) {
         // One reserved safety slot cannot be rejected by normal queue saturation.
         queuePriorityPtpStop();
@@ -424,6 +431,17 @@ bool DeviceIoWorker::enqueueCommandsInternal(
     return true;
 }
 
+void DeviceIoWorker::queuePrioritySvStop() {
+    // The emergency STOP slot is outside the 64-entry normal queue.
+    // Discard remaining batch commands, including an unsent START, so
+    // cancellation cannot accidentally complete a stale configuration.
+    commandQueue_.clear();
+    exclusiveCommandsRemaining_ = (writeActive_ && activeCommand_.exclusive) ? 1 : 0;
+    if (!(writeActive_ && activeCommand_.text == QStringLiteral("STOP")))
+        svStopPending_ = true;
+    pumpWriteQueue();
+}
+
 void DeviceIoWorker::queuePriorityPtpStop() {
     // Bounded (64 entries) and infrequent: revoke every unsent PTP START.
     // Preserve all other queued commands; STOP runs after the active write.
@@ -447,9 +465,13 @@ void DeviceIoWorker::queuePriorityPtpStop() {
 
 void DeviceIoWorker::pumpWriteQueue() {
     if (serial_ == nullptr || !serial_->isOpen() || writeActive_ ||
-        (!ptpStopPending_ && commandQueue_.isEmpty())) return;
+        (!svStopPending_ && !ptpStopPending_ && commandQueue_.isEmpty())) return;
 
-    if (ptpStopPending_) {
+    if (svStopPending_) {
+        svStopPending_ = false;
+        activeCommand_ = PendingCommand{
+            QStringLiteral("STOP"), QByteArrayLiteral("STOP\\n"), false, false};
+    } else if (ptpStopPending_) {
         ptpStopPending_ = false;
         activeCommand_ = PendingCommand{
             QStringLiteral("PTP STOP"), QByteArrayLiteral("PTP STOP\n"), false, false};
