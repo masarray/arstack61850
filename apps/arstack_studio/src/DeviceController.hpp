@@ -59,6 +59,7 @@ class DeviceController : public QObject {
     Q_PROPERTY(QString signalGeneration READ signalGeneration NOTIFY telemetryChanged)
     Q_PROPERTY(QString profileGeneration READ profileGeneration NOTIFY profileStateChanged)
     Q_PROPERTY(bool profileArmed READ profileArmed NOTIFY profileStateChanged)
+    Q_PROPERTY(bool profileWasReused READ profileWasReused NOTIFY profileStateChanged)
     Q_PROPERTY(bool profileDeploying READ profileDeploying NOTIFY profileStateChanged)
     Q_PROPERTY(bool ptpAvailable READ ptpAvailable NOTIFY ptpStateChanged)
     Q_PROPERTY(bool ptpRunning READ ptpRunning NOTIFY ptpStateChanged)
@@ -143,6 +144,7 @@ public:
     [[nodiscard]] QString signalGeneration() const;
     [[nodiscard]] QString profileGeneration() const;
     [[nodiscard]] bool profileArmed() const noexcept;
+    [[nodiscard]] bool profileWasReused() const noexcept { return profileWasReused_; }
     [[nodiscard]] bool profileDeploying() const noexcept;
     [[nodiscard]] QString profileDeploymentProgressSummary() const;
     [[nodiscard]] bool ptpAvailable() const noexcept;
@@ -317,6 +319,7 @@ private:
     enum class BinaryProfileStage {
         idle,
         waiting_status,
+        waiting_reuse,
         waiting_abort,
         waiting_begin,
         waiting_chunk,
@@ -328,6 +331,9 @@ private:
         QByteArray bytes;
         QString svId;
         QString committedGeneration;
+        QString reusedReadbackGeneration;
+        std::uint64_t recordHash{};
+        bool reusedReadbackMatched{false};
         quint32 appId{};
         quint32 rate{};
         quint32 modulus{};
@@ -398,6 +404,7 @@ private:
     bool discovering_{false};
     bool deviceVerified_{false};
     bool profileArmed_{false};
+    bool profileWasReused_{false};
     bool profileDeploying_{false};
     BinaryProfileStage binaryProfileStage_{BinaryProfileStage::idle};
     BinaryProfileTransfer binaryProfile_{};
