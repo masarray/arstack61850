@@ -1797,7 +1797,46 @@ void DeviceController::processLine(const QString& rawLine) {
 
     DeviceIdentity parsedIdentity;
     if (parseIdentityLine(line, parsedIdentity)) {
+        // CH343/USB serial can stay open across a soft firmware reset. A new
+        // boot epoch invalidates every previously committed START, waveform
+        // and PTP authority, even when the COM number remains unchanged.
+        const bool sameDevice = deviceVerified_ &&
+            !identity_.deviceId.isEmpty() &&
+            identity_.deviceId == parsedIdentity.deviceId;
+        const bool unexpectedDevice = deviceVerified_ &&
+            !identity_.deviceId.isEmpty() && !sameDevice;
+        if (unexpectedDevice) {
+            resetScenarioStart();
+            resetBinaryProfileTransfer();
+            profileArmed_ = false;
+            profileWasReused_ = false;
+            profileDeploying_ = false;
+            setRunning(false);
+            emit profileStateChanged();
+            setError(QStringLiteral(
+                "Different ESP32-P4 identity appeared on the active serial session; "
+                "closing the port instead of accepting a foreign board."));
+            disconnectPort();
+            return;
+        }
+        const bool newBoot = sameDevice && !identity_.bootId.isEmpty() &&
+            identity_.bootId != parsedIdentity.bootId;
+        if (newBoot) {
+            resetScenarioStart();
+            resetBinaryProfileTransfer();
+            profileArmed_ = false;
+            profileWasReused_ = false;
+            profileDeploying_ = false;
+            setRunning(false);
+            resetPtpState();
+            appendLog(QStringLiteral("!"), QStringLiteral(
+                "Firmware reboot detected on the same COM port; old profile and START revoked."));
+        }
         applyIdentity(std::move(parsedIdentity));
+        if (newBoot) {
+            emit profileStateChanged();
+            emit ptpStateChanged();
+        }
         markDeviceVerified();
     }
 
