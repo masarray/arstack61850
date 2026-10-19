@@ -432,8 +432,8 @@ void handle_line(char* line) noexcept {
             const bool valid = parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), token, 10) &&
                 parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), boot, 16) &&
                 !has_extra_token(&save) && boot == g_boot_id &&
-                !g_running.load(std::memory_order_acquire) &&
-                g_scenario_txn.begin(token, g_signal_bank.snapshot(), monotonic_ms());
+                g_scenario_txn.begin(token, g_signal_bank.snapshot(), monotonic_ms(),
+                                     g_running.load(std::memory_order_acquire));
             if (!valid) { g_scenario_txn.reset(); ESP_LOGE(kTag, "CFG BEGIN rejected"); return; }
             ESP_LOGI(kTag, "CFG BEGIN token=%llu accepted boot=%016llX",
                      static_cast<unsigned long long>(token), static_cast<unsigned long long>(g_boot_id));
@@ -443,7 +443,8 @@ void handle_line(char* line) noexcept {
             std::uint64_t token{}, hash{};
             if (!parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), token, 10) ||
                 !parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), hash, 16) ||
-                has_extra_token(&save) || g_running.load(std::memory_order_acquire)) {
+                has_extra_token(&save) ||
+                g_scenario_txn.began_running() != g_running.load(std::memory_order_acquire)) {
                 g_scenario_txn.reject();
                 ESP_LOGE(kTag, "CFG COMMIT rejected: malformed or running"); return;
             }
@@ -482,11 +483,24 @@ void handle_line(char* line) noexcept {
                  std::strcmp(command, "ENABLE") == 0 || std::strcmp(command, "QUALITY") == 0 ||
                  std::strcmp(command, "SHAPE") == 0;
         if (!staged || !g_scenario_txn.staging() ||
-            g_running.load(std::memory_order_acquire)) {
+            g_scenario_txn.began_running() != g_running.load(std::memory_order_acquire)) {
             g_scenario_txn.reject();
             ESP_LOGE(kTag, "CFG rejected: no staging or invalid command");
             return;
         }
+    }
+
+    // Legacy per-channel edits are explicitly refused while publishing:
+    // each such command otherwise creates a visible intermediate 4I+4V frame.
+    // Full CFG draft/commit is the only RUNNING setpoint mutation path.
+    if (!staged && g_running.load(std::memory_order_acquire) &&
+        (std::strcmp(command, "FREQ") == 0 ||
+         std::strcmp(command, "SET") == 0 ||
+         std::strcmp(command, "ENABLE") == 0 ||
+         std::strcmp(command, "QUALITY") == 0 ||
+         std::strcmp(command, "SHAPE") == 0)) {
+        ESP_LOGE(kTag, "Live edit rejected: use atomic CFG transaction");
+        return;
     }
 
     if (std::strcmp(command, "HEARTBEAT") == 0) {
