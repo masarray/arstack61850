@@ -42,6 +42,16 @@ def main() -> None:
             and "check_auto_local_sync_gate_requires_both_clocks_and_fresh_mac" in sv_tests,
             "retain independently bounded PTP sample-phase and nonzero MAC publication latency")
     firmware_source = (project_root / "embedded/esp32p4_smv_injector/main/app_main.cpp").read_text(encoding="utf-8")
+    live_firmware = (project_root / "embedded/esp32p4_smv_injector/main/live_control.cpp").read_text(encoding="utf-8")
+    bank_header = (project_root / "include/ariec61850/sampled_values/live_signal_state.hpp").read_text(encoding="utf-8")
+    bank_test = (project_root / "tests/test_live_signal.cpp").read_text(encoding="utf-8")
+    require("reader_counts_[index].fetch_add(1U)" in bank_header
+            and "reader_counts_[candidate].load()" in bank_header
+            and "concurrent_publisher_and_diagnostics_snapshots_are_coherent()" in bank_test
+            and "g_start_request.store(false, std::memory_order_release);" in live_firmware
+            and "START rejected: active runtime profile is invalid" in firmware_source
+            and "live_control_force_stop();" in firmware_source,
+            "SMV SSOT must protect concurrent publisher/diagnostic snapshots and fail closed on START errors")
     require("kSvTxEvidenceEpochStride = 2U" in sv_gate
             and "expected_epoch_stride = kSvTxEvidenceEpochStride" in sv_gate
             and "kEvidenceStride = kSvTxEvidenceEpochStride" in sv_gate
