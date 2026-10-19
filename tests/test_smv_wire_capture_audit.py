@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Synthetic decoder tests: never presented as hardware acceptance evidence."""
 import importlib.util
+import math
 import struct
 import tempfile
 import unittest
@@ -16,8 +17,9 @@ def tlv(tag, value):
     size = bytes([n]) if n < 128 else bytes([0x82]) + n.to_bytes(2, "big")
     return bytes([tag]) + size + value
 
-def packet(seq=0, change=0, quality=0):
-    payload = b"".join(struct.pack(">iI", 1000 * i + change, quality) for i in range(8))
+def packet(seq=0, change=0, quality=0, samples=None):
+    values = samples if samples is not None else [1000 * i + change for i in range(8)]
+    payload = b"".join(struct.pack(">iI", value, quality) for value in values)
     asdu = tlv(0x30,
                tlv(0x80, b"ARSTACK_SV01") +
                tlv(0x82, seq.to_bytes(2, "big")) +
@@ -66,6 +68,30 @@ class WireAuditTests(unittest.TestCase):
             self.assertEqual(report["status"], "FAIL")
             self.assertGreater(report["missing_samples"], 0)
             self.assertGreater(report["duplicate_samples"], 0)
+
+    def test_signed_phase_and_rms_independent_equivalence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            name = Path(directory) / "wave.pcap"
+            records = []
+            for i in range(400):
+                theta = 2 * math.pi * 50 * i / 4000
+                a = round(1000 * math.sqrt(2) * math.sin(theta - math.pi / 6))
+                b = round(2000 * math.sqrt(2) * math.sin(theta - 5 * math.pi / 6))
+                records.append((10 + i / 4000, packet(i, samples=[a, b, 0, 0, 0, 0, 0, 0])))
+            write_pcap(name, records)
+            intended = {name: {"rms_counts": 0, "phase_degrees": 0}
+                        for name in module.NAMES}
+            intended["IA"] = {"rms_counts": 1000, "phase_degrees": -30}
+            intended["IB"] = {"rms_counts": 2000, "phase_degrees": -150}
+            report = module.analyze(name, 0x4000, "ARSTACK_SV01", 4000,
+                                    .09, 4000, 50.0, intended)
+            self.assertEqual(report["status"], "PASS_PCAPPARSER_ONLY", report["blocking_findings"])
+            intended["IB"]["phase_degrees"] = 120
+            mismatch = module.analyze(name, 0x4000, "ARSTACK_SV01", 4000,
+                                      .09, 4000, 50.0, intended)
+            self.assertEqual(mismatch["status"], "FAIL")
+            self.assertTrue(any("IB: fundamental phase" in err
+                                for err in mismatch["blocking_findings"]))
 
     def test_truncated_frame_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:
