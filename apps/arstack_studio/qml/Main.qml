@@ -1042,9 +1042,12 @@ ApplicationWindow {
                                             root.signalFrequency = value
                                             if (value > 0) root.previousAcFrequency = value
                                             root.refreshPreview()
+                                            const liveNow = workflowBar.injectionRunning &&
+                                                    workflowBar.session && workflowBar.session.liveControlReady &&
+                                                    !root.pendingApply
                                             root.markScenarioDirty()
-                                            if (workflowBar.session && workflowBar.session.liveControlReady && !root.pendingApply)
-                                                workflowBar.session.requestSetFrequency(value)
+                                            if (liveNow && workflowBar.session.requestSetFrequency(value))
+                                                root.pendingApply = false
                                         } else invalidInput = true
                                     }
                                     onEditingFinished: {
