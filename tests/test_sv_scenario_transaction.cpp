@@ -41,6 +41,8 @@ int main() {
               "complete 4I4V atomic commit");
         check(bank.snapshot().generation == before.generation + 1,
               "one generation for entire scenario");
+        check(!tx.can_start(bank, 101, hash, 105), "no START before explicit readback");
+        check(tx.confirm_readback(bank, 101, 105), "firmware applied-state readback");
         check(tx.readback_matches(bank, 101, 105) && tx.can_start(bank, 101, hash, 106),
               "ACK/readback and token/hash match");
         check(!tx.can_start(bank, 102, hash, 106) && !tx.can_start(bank, 101, hash ^ 1, 106),
@@ -97,6 +99,7 @@ int main() {
         const auto hash = sv_scenario_hash(tx.draft());
         check(tx.commit(bank, 601, hash, 105) == SvScenarioTransaction::Result::accepted,
               "generation fixture commit");
+        check(tx.confirm_readback(bank, 601, 105), "readback ticket before external edit");
         auto unsolicited = bank.snapshot();
         unsolicited.channels[2].phase_millidegrees += 1;
         check(bank.publish(unsolicited), "external live edit");
