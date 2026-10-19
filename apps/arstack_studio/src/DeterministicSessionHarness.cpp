@@ -62,6 +62,9 @@ public:
             {"profile timeout -> bounded terminal error", profileTimeoutIsTerminal()},
             {"profile rejection -> bounded terminal error", profileRejectionIsTerminal()},
             {"binary stale ACK identity -> fail closed", binaryProfileStaleAckFailsClosed()},
+            {"corrupt console PROFILE command reports cause and blocks START", malformedProfileLineFailsClosed()},
+            {"PTP polling suspended while binary PROFILE stage owns serial", ptpRefreshBlockedDuringProfileSync()},
+            {"UART paced but STOP remains reserved queue preemption", serialPacingDoesNotRemoveSafetySlot()},
             {"binary progress -> per-step deadline rearmed", binaryProfileProgressRearmsDeadline()},
             {"READY unplug/replug COM renumber -> READY stopped", readyReplugRecoversWithoutStart()},
             {"RUNNING unplug/replug -> never auto-restarts", runningReplugNeverAutoStarts()},
@@ -1013,6 +1016,48 @@ private:
                 QStringLiteral("BINCOMMIT"), Qt::CaseInsensitive);
 
         return abortClosed && commitClosed;
+    }
+
+    static bool malformedProfileLineFailsClosed() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
+        fixture.session.profileSyncStage_ =
+            SmartSessionController::ProfileSyncStage::failed;
+        auto& d = fixture.device;
+        d.profileDeploying_ = true;
+        d.profileArmed_ = false;
+        d.binaryProfileStage_ = DeviceController::BinaryProfileStage::waiting_chunk;
+        d.binaryProfile_.transaction = 7;
+        d.binaryProfile_.offset = 48;
+        d.binaryProfile_.bytes = QByteArray(96, char(0x42));
+        const auto stage = d.profileDeploymentProgressSummary();
+        d.processLine(QStringLiteral("W (12345) ar_smv_ctrl: Unknown command 'PROFW'; type HELP"));
+        return stage.contains(QStringLiteral("BINCHUNK")) &&
+            stage.contains(QStringLiteral("48/96")) &&
+            !d.profileDeploying_ && !d.profileArmed_ &&
+            d.lastError_.contains(QStringLiteral("PROFW")) &&
+            d.binaryProfileStage_ == DeviceController::BinaryProfileStage::idle &&
+            !fixture.session.startReady();
+    }
+
+    static bool ptpRefreshBlockedDuringProfileSync() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
+        fixture.session.profileSyncStage_ =
+            SmartSessionController::ProfileSyncStage::deploying;
+        fixture.device.profileDeploying_ = true;
+        const bool blocked = !fixture.session.requestPtpRefresh();
+        fixture.session.profileSyncStage_ = SmartSessionController::ProfileSyncStage::failed;
+        fixture.device.profileDeploying_ = false;
+        return blocked;
+    }
+
+    static bool serialPacingDoesNotRemoveSafetySlot() {
+        return DeviceIoWorker::serialCommandGapMs() >= 10 &&
+            DeviceIoWorker::serialCommandGapMs() <= 50 &&
+            svPriorityStopBypassesFullQueue() && ptpSafetyStopBypassesFullQueue();
     }
 
     static bool binaryProfileProgressRearmsDeadline() {
