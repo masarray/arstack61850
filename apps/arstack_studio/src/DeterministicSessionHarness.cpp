@@ -66,6 +66,7 @@ public:
             {"binary stale ACK identity -> fail closed", binaryProfileStaleAckFailsClosed()},
             {"identical canonical PROFILE digest + readback reuses active", canonicalProfileReuseRequiresMatchingReadback()},
             {"supervisor accepts same generation only with verified reuse", matchingProfileReuseTransitionsToReady()},
+            {"same COM firmware reboot invalidates old START and profile authority", samePortFirmwareRebootResetsAuthority()},
             {"corrupt console PROFILE command reports cause and blocks START", malformedProfileLineFailsClosed()},
             {"PTP polling suspended while binary PROFILE stage owns serial", ptpRefreshBlockedDuringProfileSync()},
             {"binary PROFILE excludes PTP/SHOW/SET and buffers live setpoints", binaryProfileReservesSerialConsole()},
@@ -1147,6 +1148,31 @@ private:
         return ready &&
             session.needsProfileSync_ &&
             session.profileSyncStage_ == SmartSessionController::ProfileSyncStage::deploying;
+    }
+
+    static bool samePortFirmwareRebootResetsAuthority() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        const auto oldIdentity = identity();
+        seedVerified(fixture, oldIdentity, QStringLiteral("COM7"), true);
+        auto& device = fixture.device;
+        auto& session = fixture.session;
+        device.profileWasReused_ = true;
+        session.profileSyncBootId_ = oldIdentity.bootId;
+        const QString replacement = QStringLiteral(
+            "I (311) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR "
+            "target=ESP32-P4 protocol=1 device_id=A1B2C3D4E5F6 "
+            "firmware=0.1.1 build=0123456789abcdef "
+            "boot_id=FEDCBA9876543210 "
+            "capabilities=SMV-4I4V,PROFILE,PROFILE-BINARY-V1,"
+            "PROFILE-REUSE-V1,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO");
+        device.processLine(replacement);
+        return device.bootId() == QStringLiteral("FEDCBA9876543210") &&
+            device.deviceVerified() &&
+            !device.running() && !device.profileArmed() &&
+            !device.profileWasReused() &&
+            session.profileSyncBootId_ != oldIdentity.bootId &&
+            !session.startReady();
     }
 
     static bool malformedProfileLineFailsClosed() {
