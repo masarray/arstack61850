@@ -39,7 +39,15 @@ public:
         });
 
         connect(this, &DeviceController::scenarioApplicationFinished, this, [this] {
-            if (frequencyPending_ || !pendingSignals_.isEmpty()) scheduleLiveFlush();
+            if (profileArmed() && (frequencyPending_ || !pendingSignals_.isEmpty()))
+                scheduleLiveFlush();
+        });
+        connect(this, &DeviceController::profileStateChanged, this, [this] {
+            // An initial 4I+4V edit must not compete with BINSTATUS/BINCHUNK.
+            // Replay only after a fully verified and armed profile.
+            if (profileArmed() && !profileDeploying() &&
+                (frequencyPending_ || !pendingSignals_.isEmpty()))
+                scheduleLiveFlush();
         });
         connect(this, &DeviceController::connectedChanged, this, [this] {
             if (!connected()) {
@@ -287,7 +295,7 @@ private:
         liveFlushTimer_.stop();
         // Preserve last-value-wins edits while firmware applies the immutable START snapshot.
         // Retry once at terminal transaction notification; never silently drop newer edits.
-        if (scenarioApplying()) return true;
+        if (scenarioApplying() || profileDeploying() || !profileArmed()) return true;
         if (!deviceVerified()) {
             clearPendingLiveCommands();
             return false;
