@@ -93,6 +93,13 @@ SurfacePanel {
             font.pixelSize: 9
             wrapMode: Text.WordWrap
         }
+        SvCapturePanel {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 268
+            theme: panel.theme
+            uiFont: panel.uiFont
+            monoFont: panel.monoFont
+        }
         Item { Layout.fillHeight: true }
     }
 }
