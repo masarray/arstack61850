@@ -529,7 +529,7 @@ private:
         f.session.startReady_ = true;
         if (f.session.requestStart()) return false;
         if (f.device.start()) return false;
-        return f.device.errorString().contains(QStringLiteral("Bare START refused"));
+        return f.device.lastError().contains(QStringLiteral("Bare START refused"));
     }
 
     static QVariantMap ptpValidProfile() {
