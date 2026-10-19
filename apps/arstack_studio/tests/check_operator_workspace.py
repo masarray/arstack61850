@@ -349,11 +349,13 @@ def main() -> None:
     assert "Layout.preferredHeight: 78" in main_qml
     device_src = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
     session_src = (STUDIO / "src/SmartSessionController.cpp").read_text(encoding="utf-8")
-    require('commands << QStringLiteral("START")' in device_src
+    require('commands << QStringLiteral("SCENARIO COMMIT %1 %2")' in device_src
             and "sendCommandBatch(commands, false, true)" in device_src
             and "formatSignalCommand(ids.at(i)" in device_src
+            and 'sendCommand(QStringLiteral("SCENARIO START %1 %2")' in device_src
+            and "advanceScenarioStartup(line)" in device_src
             and "requestStartWithScenario(const QVariantMap& scenario)" in session_src,
-            "one-click physical Start must validate and exclusively enqueue all SETs before START")
+            "one-click physical Start must ACK/readback canonical 8-channel COMMIT before START")
     require("assets/material_dark/play_arrow.svg" in cmake,
             "light-hover Material icons must have bundled dark variants")
     require(matrix.count("StudioActionMenu {") == 2

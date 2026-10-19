@@ -775,8 +775,7 @@ private:
         if (d.scenarioStartStage_ != DeviceController::ScenarioStartStage::idle ||
             d.running() || !d.lastError_.contains(QStringLiteral("identity"))) return false;
 
-        d.identity_.bootId = d.scenarioPending_.bootId; // reset cleared pending!
-        d.scenarioPending_ = {token, hash, QString{},
+         d.scenarioPending_ = {token, hash, QString{},
                               QStringLiteral("0123456789ABCDEF"),
                               d.profileGeneration_, d.sessionGeneration_};
         d.identity_.bootId = QStringLiteral("0123456789ABCDEF");
